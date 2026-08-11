@@ -3,6 +3,9 @@
 // ── Editable trade-good specs (mirror sim/goods_spec.rs) ──
 export type GoodDomain = "marine" | "coastal" | "continental" | "island";
 export type GoodDistribution = "global" | "local" | "deposits" | "manufactured";
+/** GOODS_LOCALITIES_PLAN.md Slice 2 — which part of the shelf a marine good may
+ *  occupy. "either" reproduces the old undifferentiated `sea_coastal` gate. */
+export type MarineBand = "either" | "inshore" | "bank";
 
 /** One recipe input of a Manufactured good: `qty` units of `good` per 1 output. */
 export interface RecipeInput {
@@ -18,6 +21,12 @@ export interface GoodEnvelope {
   abs_lat?: [number, number, number] | null;    // band lo, hi, edge (deg)
   fertility: number;
   coast_bonus: number;
+  /** GOODS_LOCALITIES_PLAN.md Slice 1 (F6) — river placement factors, 0..1 weight
+   *  each (0 = no effect, the default for every pre-existing custom good). */
+  floodplain?: number;
+  irrigation?: number;
+  riverbank?: number;
+  float_out?: number;
 }
 
 export interface GoodDepositSpec {
@@ -42,6 +51,8 @@ export interface GoodSpec {
   builtin: boolean;
   deposit?: GoodDepositSpec | null;
   scoring?: GoodEnvelope | null;
+  /** GOODS_LOCALITIES_PLAN.md Slice 2 — defaults to "either" (unrestricted). */
+  marine_band?: MarineBand;
   /** Need category — alternatives within a category substitute for each other. */
   category: string;
   /** Needs ladder tier: 0 basic, 1 comfort, 2 luxury. */

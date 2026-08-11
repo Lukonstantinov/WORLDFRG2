@@ -163,6 +163,13 @@ export function ProvinceInspector() {
   const shownBeltGoods = useMemo(() =>
     goodFilter ? beltGoods.filter((g) => goodFilter.has(g.name)) : beltGoods,
     [beltGoods, goodFilter]);
+  // GOODS_LOCALITIES_PLAN.md Slice 6 · the REAL terroir localities, filtered by the
+  // same goods legend as the symbols they replace. Only what the query actually
+  // returned for this province is drawn — a good with no locality here gets no
+  // square, and nothing is invented to fill the gap.
+  const shownLocalities = useMemo(() =>
+    (potential?.localities ?? []).filter((l) => !goodFilter || goodFilter.has(l.good)),
+    [potential, goodFilter]);
 
   if (!open || !p) return null;
 
@@ -239,13 +246,14 @@ export function ProvinceInspector() {
           rivers={worldRivers}
           deposits={potential?.deposits ?? []}
           beltGoods={shownBeltGoods}
+          localities={shownLocalities}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
             disabled={[
               ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
-              ...(beltGoods.length > 0 ? [] : (["goods"] as PlateKey[])),
+              ...(beltGoods.length > 0 || (potential?.localities.length ?? 0) > 0 ? [] : (["goods"] as PlateKey[])),
               ...((potential?.deposits.length ?? 0) > 0 ? [] : (["deposits"] as PlateKey[])),
             ]} />
         </div>

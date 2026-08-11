@@ -29,6 +29,24 @@ pub enum Domain {
     Island,
 }
 
+/// GOODS_LOCALITIES_PLAN.md Slice 2 — which part of the shelf a marine good may
+/// occupy. `Either` (the default, and what every pre-existing save carries via
+/// serde) reproduces the old undifferentiated `sea_coastal` gate exactly: F5 found
+/// that gate served pearls and stockfish alike, so a fishing bank sat on the beach
+/// and a pearl bed sat on the open shelf. `Inshore`/`Bank` narrow that gate for the
+/// specific goods that need it (§2.1's default table); every other marine good is
+/// unaffected.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum MarineBand {
+    #[default]
+    Either,
+    /// A shelf cell adjacent to land — the beach/lagoon fringe.
+    Inshore,
+    /// A shelf cell away from land — the open bank.
+    Bank,
+}
+
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "lowercase")]
 pub enum Distribution {
@@ -115,6 +133,28 @@ pub struct Envelope {
     /// Bonus for being near a coast (land) / on the shelf (marine).
     #[serde(default)]
     pub coast_bonus: f32,
+    // ── GOODS_LOCALITIES_PLAN.md Slice 1 (F6) — river placement factors. Each is a
+    // 0..1 weight; 0 (the serde default, so every pre-existing custom good is
+    // untouched) means the factor contributes nothing. Every factor is a
+    // MULTIPLIER on the score above, never a replacement (§5.4) — a floodplain
+    // bonus can make a marginal cell better but never pulls a good outside its
+    // climate gate, since the gate already zeroed cells the climate rejects.
+    /// Delta / low flat ground near a MAJOR river (rice, cotton, indigo, sugar,
+    /// wheat paddies and floodplain fields).
+    #[serde(default)]
+    pub floodplain: f32,
+    /// River water reaching an arid (Köppen B) cell — the oasis/canal signature
+    /// (cotton, dates, sugar, rice grown by irrigation rather than rainfall).
+    #[serde(default)]
+    pub irrigation: f32,
+    /// Within a few cells of ANY river (papyrus/bamboo paper, honey, hides — a
+    /// watering place, not necessarily a floodplain).
+    #[serde(default)]
+    pub riverbank: f32,
+    /// Near a NAVIGABLE river — the good can reach market by water (timber,
+    /// hardwoods, furs: the historical Baltic/Canadian river timber trades).
+    #[serde(default)]
+    pub float_out: f32,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -136,6 +176,11 @@ pub struct GoodSpec {
     pub deposit: Option<DepositSpec>,
     #[serde(default)]
     pub scoring: Option<Envelope>,
+    /// GOODS_LOCALITIES_PLAN.md Slice 2 (F5) — which part of the shelf this marine
+    /// good may occupy. `Either` (serde default) reproduces the old undifferentiated
+    /// gate exactly, so every save predating this field is unaffected.
+    #[serde(default)]
+    pub marine_band: MarineBand,
     // ── Market fields (serde defaults keep pre-market spec JSON loading) ──
     /// Need category; alternatives within a category substitute for each other
     /// in the market's needs ladder ("" = no substitution group).
@@ -301,6 +346,7 @@ pub fn default_list() -> Vec<GoodSpec> {
                     parent: None,
                 }),
                 scoring: None,
+                marine_band: default_marine_band_for(GOOD_NAMES[g]),
                 category: GOOD_CATEGORY[g].to_string(),
                 need_tier: GOOD_NEED_TIER[g],
                 base_value: GOOD_BASE_VALUE[g],
@@ -359,6 +405,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
             enabled: true, domain, distribution: dist, rarity, desire, network_luxury: luxury,
             builtin: false, deposit, scoring: Some(env),
+            marine_band: default_marine_band_for(id),
             category: String::new(), need_tier: 0, base_value: 1.0,
             bulk: 1.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
             consumption_interval: 45.0,
@@ -374,6 +421,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
             enabled: true, domain: Domain::Continental, distribution: Distribution::Manufactured,
             rarity: 0.5, desire: 0.55, network_luxury: luxury, builtin: false, deposit: None,
+            marine_band: MarineBand::Either,
             scoring: None, category: String::new(), need_tier: 0, base_value,
             bulk, perishable: perish, labor,
             inputs: inputs.into_iter().map(|(g, q)| RecipeInput { good: g.into(), qty: q }).collect(),
@@ -387,6 +435,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
     let env = |climate: Vec<(u8, f32)>, temp: Option<[f32; 2]>, precip: Option<[f32; 3]>,
                elevation: Option<[f32; 3]>, abs_lat: Option<[f32; 3]>, fertility: f32, coast_bonus: f32| Envelope {
         climate, temp, precip, elevation, abs_lat, fertility, coast_bonus,
+        ..Default::default()
     };
     // A DEPOSIT good with its OWN base_value/category/bulk (DEPOSITS_AND_MINING_PLAN
     // slice 3). `cg()` hardcodes base_value to 1.0 for every good that goes through
@@ -406,6 +455,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             id: id.into(), name: name.into(), icon: icon.into(), color: color.into(),
             enabled: true, domain, distribution: Distribution::Deposits, rarity, desire,
             network_luxury: luxury, builtin: false,
+            marine_band: MarineBand::Either,
             deposit: Some(DepositSpec {
                 min_elev: 0.0, count_num: num, count_den: den,
                 province_scale: default_province_scale(),
@@ -545,6 +595,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             id: "clay".into(), name: "Clay".into(), icon: "\u{1F9F1}".into(), color: "#b07a52".into(),
             enabled: true, domain: Domain::Continental, distribution: Distribution::Global,
             rarity: 0.40, desire: 0.35, network_luxury: false, builtin: false, deposit: None,
+            marine_band: MarineBand::Either,
             scoring: Some(env(vec![], None, None, Some([0.0, 0.30, 0.20]), None, 0.5, 0.0)),
             category: "construction".into(), need_tier: 1, base_value: 0.5,
             bulk: 2.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
@@ -601,6 +652,16 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         mg("statuary", "Statuary", "\u{1F5FF}", "#e8e6e0", 8.0, 3.0, 0.0, false, 1.0,
             vec![("marble", 1.0)]),
     ]
+}
+
+/// GOODS_LOCALITIES_PLAN.md §2.1's default table. Every other marine/coastal good
+/// stays `Either` — the pre-existing, undifferentiated `sea_coastal` gate.
+pub fn default_marine_band_for(id: &str) -> MarineBand {
+    match id {
+        "pearls" | "coral" | "bay_salt" | "tyrian_purple" | "amber" => MarineBand::Inshore,
+        "stockfish" | "herring" | "whaling" => MarineBand::Bank,
+        _ => MarineBand::Either,
+    }
 }
 
 /// A deterministic per-good salt for placement (seeded RNG), derived from the id

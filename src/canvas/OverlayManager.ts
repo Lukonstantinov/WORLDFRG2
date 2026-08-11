@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion } from "@types";
 import type { ClimateBands } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
@@ -517,6 +517,29 @@ export class OverlayManager {
   private monsoonZones: SharkZone[] = [];
   private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
+  // ── GOODS_LOCALITIES_PLAN.md Slice 5 · the full-resolution belt masks (D3/D9/D10).
+  //    `goodRegions` above still supplies each belt's LABEL — the medallion, the
+  //    centroid, the gemstone sublabel — and, for a good whose mask hasn't arrived,
+  //    the old coarse fill as a fallback. The masks supply the FILL, which is the
+  //    half F4 was about: a coarse block containing one land cell painted all 64 of
+  //    its cells, so a belt's edge was a staircase that spilled into the sea. ──
+  private goodMasks: GoodBeltMask[] = [];
+  /** Prebuilt fill canvas + border path per good, exactly as `stateCanvas` /
+   *  `stateBorderPath` do for a state's writ. Rebuilt only when the masks, the two
+   *  layer switches or the quality scale change — never per frame. */
+  private goodMaskRender = new Map<string, {
+    canvas: HTMLCanvasElement; border: Path2D | null;
+    x0: number; y0: number; w: number; h: number;
+  }>();
+  private goodMasksDirty = false;
+  /** The layer/scale state the cached renders were built under, so a change to
+   *  either invalidates them (quality is baked into the pixels). */
+  private goodRenderKey = "";
+  /** D10 · the ONE absolute belt-quality scale, SERVED by `get_render_palettes`
+   *  (§8.18) — never a copy kept here. Empty until the palette fetch lands, and the
+   *  quality layer simply doesn't draw until then rather than inventing a ramp. */
+  private goodQualityStops: QualityStop[] = [];
+  private goodQualityPale: [number, number, number] = [236, 230, 224];
   private cultureRegions: CultureRegion[] = [];
   private stateRegions: StateRegion[] = [];
   /** States are rendered EXACTLY like provinces: a prebuilt raster-resolution fill
@@ -1318,6 +1341,194 @@ export class OverlayManager {
     this.goodRegions = regions;
   }
 
+  /** Slice 5 · the full-resolution belt masks for the goods currently toggled on.
+   *  Replaces the coarse-block FILL; `drawGoodRegions` still carries the labels. */
+  drawGoodBeltMasks(masks: GoodBeltMask[]) {
+    this.goodMasks = masks;
+    this.goodMasksDirty = true;
+  }
+
+  /** D10 · the one absolute quality scale, served by `get_render_palettes`. Pushed
+   *  in from `usePaletteStore` so there is exactly one copy of it, in Rust (§8.18). */
+  setGoodQualityScale(stops: QualityStop[], pale: string) {
+    this.goodQualityStops = stops;
+    const rgb = parseColor(pale);
+    if (rgb) this.goodQualityPale = rgb;
+    this.goodMasksDirty = true;
+  }
+
+  /** Sample the served quality scale at an ABSOLUTE belt value (D10 — the value
+   *  itself, never rescaled against this good's own maximum). */
+  private sampleGoodQuality(t: number): { alpha: number; mix: number } | null {
+    const s = this.goodQualityStops;
+    if (s.length === 0) return null; // not served yet — draw coverage only, invent nothing
+    if (t <= s[0].at) return { alpha: s[0].alpha, mix: s[0].mix };
+    const last = s[s.length - 1];
+    if (t >= last.at) return { alpha: last.alpha, mix: last.mix };
+    for (let i = 0; i < s.length - 1; i++) {
+      const a = s[i], b = s[i + 1];
+      if (t <= b.at) {
+        const k = b.at === a.at ? 0 : (t - a.at) / (b.at - a.at);
+        return { alpha: a.alpha + (b.alpha - a.alpha) * k, mix: a.mix + (b.mix - a.mix) * k };
+      }
+    }
+    return { alpha: last.alpha, mix: last.mix };
+  }
+
+  /** Build (or rebuild) every visible good's fill canvas + border path from its
+   *  full-resolution mask.
+   *
+   *  Three things worth knowing before changing this:
+   *
+   *  * **Full resolution IS the coastline clip.** A land good's belt byte is exactly
+   *    zero on every sea cell and a marine good's is zero on land, so a mask drawn at
+   *    its own resolution ends on the coast by construction — no land mask is
+   *    consulted and nothing is snapped to a province polygon (D3).
+   *  * **A very large belt is DOWNSAMPLED BY MAJORITY, never by "any".** A staple
+   *    region can span most of a world (D6's chernozem case), and a canvas per good
+   *    at 6.5 M px is 26 MB. Above `MASK_MAX_PX` the mask is reduced, and the reduce
+   *    takes a block only when at least half its cells are covered: taking "any"
+   *    would put the belt back over the water one block at a time, which is exactly
+   *    F4 in miniature.
+   *  * **The border is traced at a bounded step, the fill is not.** The fill is what
+   *    carries the coastline and stays at (or near) full resolution; the outline is a
+   *    stroke a pixel or two wide, so tracing it on every one of millions of cells
+   *    buys nothing and costs a Path2D with a hundred thousand segments. */
+  private buildGoodMaskRender() {
+    this.goodMasksDirty = false;
+    this.goodMaskRender.clear();
+    const showCoverage = !!this.visibility.goodCoverage;
+    const showQuality = !!this.visibility.goodQuality && this.goodQualityStops.length > 0;
+    this.goodRenderKey = `${showCoverage}|${showQuality}|${this.goodQualityStops.length}`;
+    if (!showCoverage && !showQuality) return;
+
+    /** Cap on a single good's fill canvas, in pixels (≈16 MB of RGBA). */
+    const MASK_MAX_PX = 4_000_000;
+    /** Longest side of the grid the BORDER is traced on. */
+    const BORDER_GRID = 900;
+    /** The flat wash a coverage-only belt draws at — the "can it grow here" answer
+     *  with the quality layer switched off. Not a colour table: one constant. */
+    const COVERAGE_ALPHA = 0.22;
+
+    for (const m of this.goodMasks) {
+      if (!this.visibility[goodOverlayKey(m.good)]) continue;
+      if (m.w === 0 || m.h === 0) continue;
+
+      // ── Decode the coverage RLE into the mask's own full-resolution grid. ──
+      const full = new Uint8Array(m.w * m.h);
+      let pos = 0;
+      for (let i = 0; i + 1 < m.coverage_rle.length; i += 2) {
+        const v = m.coverage_rle[i], cnt = m.coverage_rle[i + 1];
+        if (v) full.fill(1, pos, Math.min(full.length, pos + cnt));
+        pos += cnt;
+      }
+
+      // ── Reduce only if the belt is genuinely huge (see the doc comment). ──
+      let step = 1;
+      while ((Math.ceil(m.w / step) * Math.ceil(m.h / step)) > MASK_MAX_PX) step++;
+      const cw = Math.ceil(m.w / step);
+      const ch = Math.ceil(m.h / step);
+      let cov: Uint8Array;
+      if (step === 1) {
+        cov = full;
+      } else {
+        cov = new Uint8Array(cw * ch);
+        const need = Math.ceil((step * step) / 2); // MAJORITY, never "any"
+        for (let cy = 0; cy < ch; cy++) {
+          for (let cx = 0; cx < cw; cx++) {
+            let hits = 0;
+            for (let sy = 0; sy < step; sy++) {
+              const y = cy * step + sy;
+              if (y >= m.h) break;
+              const row = y * m.w;
+              for (let sx = 0; sx < step; sx++) {
+                const x = cx * step + sx;
+                if (x >= m.w) break;
+                hits += full[row + x];
+              }
+            }
+            if (hits >= need) cov[cy * cw + cx] = 1;
+          }
+        }
+      }
+
+      // ── Paint. Colour is the good's own (or its subtype's); how strongly it is
+      //    drawn comes from the served absolute scale (D10). ──
+      const meta = this.goodMeta?.get(m.good);
+      const def = GOOD_BY_NAME.get(m.good);
+      const baseHex = meta?.color ?? def?.color ?? "#cccccc";
+      const base = parseColor(baseHex) ?? [204, 204, 204];
+      const subPalette = goodSubtypes(m.good);
+      const hasSub = !!(subPalette && m.subtypes.length === m.quality.length);
+      const subRGB: ([number, number, number] | null)[] = hasSub
+        ? subPalette!.map((s) => parseColor(s.color))
+        : [];
+      const [pr, pg, pb] = this.goodQualityPale;
+
+      const canvas = document.createElement("canvas");
+      canvas.width = cw; canvas.height = ch;
+      const ictx = canvas.getContext("2d");
+      if (!ictx) continue;
+      const img = ictx.createImageData(cw, ch);
+      const px = img.data;
+      for (let cy = 0; cy < ch; cy++) {
+        // The quality/subtype grid is indexed in the mask's OWN cells, so map back
+        // through `step` before dividing by the block size.
+        const qy = Math.min(m.qh - 1, Math.floor((cy * step) / m.coarse));
+        for (let cx = 0; cx < cw; cx++) {
+          const ci = cy * cw + cx;
+          if (!cov[ci]) continue;
+          const qi = qy * m.qw + Math.min(m.qw - 1, Math.floor((cx * step) / m.coarse));
+          const col = hasSub ? (subRGB[m.subtypes[qi]] ?? base) : base;
+          let r = col[0], g = col[1], b = col[2], a = COVERAGE_ALPHA;
+          if (showQuality) {
+            const q = this.sampleGoodQuality((m.quality[qi] ?? 0) / 255);
+            if (q) {
+              a = showCoverage ? q.alpha : q.alpha * 0.9;
+              const k = q.mix;
+              r = Math.round(pr + (col[0] - pr) * k);
+              g = Math.round(pg + (col[1] - pg) * k);
+              b = Math.round(pb + (col[2] - pb) * k);
+            }
+          }
+          const o = ci * 4;
+          px[o] = r; px[o + 1] = g; px[o + 2] = b; px[o + 3] = Math.round(a * 255);
+        }
+      }
+      ictx.putImageData(img, 0, 0);
+
+      // ── Border, traced along mask cell EDGES on a bounded grid (the technique
+      //    `buildStateRender` uses over the province raster). Coverage-only, since
+      //    the outline is the "where" answer; a pure quality wash draws none. ──
+      let border: Path2D | null = null;
+      if (showCoverage) {
+        const bstep = Math.max(step, Math.ceil(Math.max(m.w, m.h) / BORDER_GRID));
+        const bw = Math.ceil(m.w / bstep), bh = Math.ceil(m.h / bstep);
+        const at = (bx: number, by: number): number => {
+          if (bx < 0 || by < 0 || bx >= bw || by >= bh) return 0;
+          const x = Math.min(cw - 1, Math.floor((bx * bstep) / step));
+          const y = Math.min(ch - 1, Math.floor((by * bstep) / step));
+          return cov[y * cw + x];
+        };
+        const path = new Path2D();
+        for (let by = 0; by < bh; by++) {
+          for (let bx = 0; bx < bw; bx++) {
+            if (!at(bx, by)) continue;
+            const x0 = m.x0 + bx * bstep, x1 = x0 + bstep;
+            const y0 = m.y0 + by * bstep, y1 = y0 + bstep;
+            if (!at(bx - 1, by)) { path.moveTo(x0, y0); path.lineTo(x0, y1); }
+            if (!at(bx + 1, by)) { path.moveTo(x1, y0); path.lineTo(x1, y1); }
+            if (!at(bx, by - 1)) { path.moveTo(x0, y0); path.lineTo(x1, y0); }
+            if (!at(bx, by + 1)) { path.moveTo(x0, y1); path.lineTo(x1, y1); }
+          }
+        }
+        border = path;
+      }
+
+      this.goodMaskRender.set(m.good, { canvas, border, x0: m.x0, y0: m.y0, w: m.w, h: m.h });
+    }
+  }
+
   drawCultureRegions(regions: CultureRegion[]) {
     this.cultureRegions = regions;
   }
@@ -1558,7 +1769,13 @@ export class OverlayManager {
   }
 
   setVisible(type: string, visible: boolean) {
+    if (this.visibility[type] === visible) return;
     this.visibility[type] = visible;
+    // A good's belt mask is prebuilt only for the goods that are ON (a canvas per
+    // good is real memory), and the quality wash is baked into those pixels — so any
+    // change to WHICH goods are shown, or to either Slice 5 layer switch, has to
+    // invalidate the cache.
+    if (type.startsWith("good")) this.goodMasksDirty = true;
   }
 
   updateScale(scale: number) {
@@ -2179,8 +2396,34 @@ export class OverlayManager {
       ctx.textBaseline = "alphabetic";
     }
 
-    // Trade-good belts: the actual physics-driven cells, filled + outlined, with
-    // the good's emoji at the centroid (per-good toggle).
+    // Trade-good belts. Slice 5 (D3/D9/D10): the FILL comes from each good's
+    // full-resolution mask, so a belt meeting the sea ends on the coastline instead
+    // of spilling into it in ~8-cell blocks (F4). A good whose mask hasn't arrived —
+    // an older world, or the fetch still in flight — falls back to the old coarse
+    // path rather than showing nothing.
+    const maskedGoods = new Set<string>();
+    if (this.goodMasks.length > 0) {
+      const key = `${!!this.visibility.goodCoverage}|${!!this.visibility.goodQuality && this.goodQualityStops.length > 0}|${this.goodQualityStops.length}`;
+      if (this.goodMasksDirty || key !== this.goodRenderKey) this.buildGoodMaskRender();
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = 1;
+      for (const m of this.goodMasks) {
+        if (!this.visibility[goodOverlayKey(m.good)]) continue;
+        const r = this.goodMaskRender.get(m.good);
+        if (!r) continue;
+        maskedGoods.add(m.good);
+        // Per-pixel alpha carries the quality wash, so the blit itself is opaque.
+        ctx.drawImage(r.canvas, 0, 0, r.canvas.width, r.canvas.height, r.x0, r.y0, r.w, r.h);
+        if (r.border) {
+          const meta = this.goodMeta?.get(m.good);
+          ctx.strokeStyle = meta?.color ?? GOOD_BY_NAME.get(m.good)?.color ?? "#cccccc";
+          ctx.globalAlpha = 0.7;
+          ctx.lineWidth = Math.max(0.4, 1.0 / Math.sqrt(this.currentScale));
+          ctx.stroke(r.border);
+          ctx.globalAlpha = 1;
+        }
+      }
+    }
     if (this.goodRegions.length > 0) {
       for (const r of this.goodRegions) {
         if (!this.visibility[goodOverlayKey(r.good)]) continue;
@@ -2188,6 +2431,12 @@ export class OverlayManager {
         const m = this.goodMeta?.get(r.good);
         const color = m?.color ?? def?.color ?? "#cccccc";
         const emoji = m?.icon ?? def?.emoji ?? "";
+        // The mask already drew this good's area — the region contributes only its
+        // LABEL (medallion + gemstone sublabel + per-subtype icons).
+        if (maskedGoods.has(r.good)) {
+          this.renderGoodLabel(ctx, r, color);
+          continue;
+        }
         // Multi-type goods (grain / paper) tint by per-cell subtype.
         const sub = goodSubtypes(r.good);
         const subtypes = sub && r.subtypes.length === r.cells.length ? r.subtypes : undefined;
@@ -3213,6 +3462,51 @@ export class OverlayManager {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(emoji, lx, ly);
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+  }
+
+  /** The LABEL half of a good region, for a good whose area was already drawn from
+   *  its Slice 5 mask: the trade-good medallion at the region's centroid, the
+   *  gemstone sublabel, and — for a multi-type good — one icon per subtype at that
+   *  subtype's own centroid. Deliberately a separate method rather than a flag on
+   *  `renderRegionMask`, whose whole body is the fill the mask replaces. */
+  private renderGoodLabel(ctx: CanvasRenderingContext2D, r: GoodRegion, color: string) {
+    const sub = goodSubtypes(r.good);
+    if (sub && r.subtypes.length === r.cells.length && sub.some((s) => s.icon)) {
+      const fs = Math.max(6, 14 / this.currentScale);
+      ctx.font = `${fs}px sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const sums = new Map<number, { x: number; y: number; n: number }>();
+      for (let i = 0; i < r.cells.length; i++) {
+        const s = r.subtypes[i];
+        const e = sums.get(s) ?? { x: 0, y: 0, n: 0 };
+        e.x += r.cells[i][0]; e.y += r.cells[i][1]; e.n++;
+        sums.set(s, e);
+      }
+      for (const [s, e] of sums) {
+        const ic = sub[s]?.icon;
+        if (!ic || e.n < 2) continue;
+        ctx.fillText(ic, e.x / e.n + r.cell_size / 2, e.y / e.n + r.cell_size / 2);
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+      return;
+    }
+    const rad = Math.max(4, 12 / this.currentScale);
+    drawGoodIcon(ctx, r.good, r.x, r.y, rad, color, { sublabel: r.sublabel });
+    if (r.sublabel) {
+      const ss = Math.max(5, 9 / this.currentScale);
+      ctx.font = `${ss}px serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.lineWidth = Math.max(0.6, 2 / this.currentScale);
+      ctx.strokeStyle = "rgba(0,0,0,0.7)";
+      ctx.strokeText(r.sublabel, r.x, r.y + rad * 1.5);
+      ctx.fillStyle = "#f0e8d0";
+      ctx.fillText(r.sublabel, r.x, r.y + rad * 1.5);
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
     }
@@ -4908,6 +5202,9 @@ export class OverlayManager {
     this.monsoonZones = [];
     this.reefZones = [];
     this.goodRegions = [];
+    this.goodMasks = [];
+    this.goodMaskRender.clear();
+    this.goodMasksDirty = false;
     this.tradeTrunks = [];
     this.dynamicTrunks = [];
     this.tradeCorridorList = [];

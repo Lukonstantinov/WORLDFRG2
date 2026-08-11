@@ -427,6 +427,16 @@ pub struct ProvinceGoodPotential {
     pub workings: u32,
     /// For a deposit good: the deepest/least-workable depth present (0 surface … 3 flooded).
     pub best_depth: u8,
+    /// GOODS_LOCALITIES_PLAN.md Slice 7 — this good has at least one locality
+    /// (terroir patch) inside the province.
+    #[serde(default)]
+    pub has_locality: bool,
+    /// Mean locality grade (0..1) in this province, when `has_locality`.
+    #[serde(default)]
+    pub mean_locality_grade: f32,
+    /// Count of localities of this good inside the province.
+    #[serde(default)]
+    pub locality_count: u32,
 }
 
 /// #9 · One ore working located in a province, for the survey-plate goods layer.
@@ -440,6 +450,36 @@ pub struct ProvinceDepositDot {
     pub depth: u8,
 }
 
+/// GOODS_LOCALITIES_PLAN.md Slice 6 — one terroir locality located in a province,
+/// for the survey-plate goods layer. Deliberately the same shape as
+/// `ProvinceDepositDot` (Slice 3's own design note: `GoodLocality` mirrors
+/// `deposits::Deposit` for exactly this reuse).
+#[derive(Serialize)]
+pub struct ProvinceLocalityDot {
+    pub good: String,
+    pub x: u32,
+    pub y: u32,
+    pub grade: f32,
+    pub extent: u8,
+    pub radius_km: f32,
+    pub name: String,
+    pub river_fed: bool,
+    /// D4 · this locality sits in the SEA off this province's coast, not on its
+    /// land. It is listed here so the survey plate can draw it as an annotation in
+    /// the adjacent water — **the province gains no maritime territory**. Nothing
+    /// downstream counts a `sea` locality toward land use, tenure, the harvest or
+    /// the revenue pass, and the aggregates below deliberately skip it too.
+    pub sea: bool,
+}
+
+/// D4 · how far offshore a MARINE locality may sit and still be drawn beside a
+/// province, in province-raster cells. Marine belts are placed on shelf water, where
+/// the province raster is `NO_PROVINCE` (it is land-only) — so without this every
+/// marine locality would be silently dropped and a fishing province would show a
+/// blank goods plate. Small on purpose: this is "the water off THIS coast", not a
+/// claim, and a bigger reach would start attaching one bank to three provinces.
+const MARINE_ATTACH_CELLS: i32 = 8;
+
 #[derive(Serialize)]
 pub struct ProvincePotential {
     /// Every good the land here can yield (belt > 0), richest potential first.
@@ -447,6 +487,10 @@ pub struct ProvincePotential {
     /// The individual ore workings inside this province (real cell coords), so the
     /// minimap can plot where the deposits are.
     pub deposits: Vec<ProvinceDepositDot>,
+    /// The individual goods localities inside this province (real cell coords) —
+    /// the non-mineral counterpart of `deposits` (Slice 6).
+    #[serde(default)]
+    pub localities: Vec<ProvinceLocalityDot>,
 }
 
 /// #9 · The full goods PICTURE for one province: what the land could yield (with
@@ -458,12 +502,12 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? {
         Some(s) => s,
-        None => return Ok(ProvincePotential { goods: vec![], deposits: vec![] }),
+        None => return Ok(ProvincePotential { goods: vec![], deposits: vec![], localities: vec![] }),
     };
     let ng = sim.goods.len();
     let np = if ng > 0 { sim.prov_good_belt.len() / ng } else { 0 };
     let p = id as usize;
-    if p >= np { return Ok(ProvincePotential { goods: vec![], deposits: vec![] }); }
+    if p >= np { return Ok(ProvincePotential { goods: vec![], deposits: vec![], localities: vec![] }); }
     let actual_all = sim.province_good_actual();
 
     // Which goods are ore/mineral deposits (richness = deposit grade, not a belt).
@@ -505,6 +549,56 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         e.0 += d.grade; e.1 += 1; e.2 = e.2.max(d.depth);
     }
 
+    // GOODS_LOCALITIES_PLAN.md Slice 6 — the non-mineral counterpart of the
+    // deposit aggregation above, same province-attribution helper (`prov_at`).
+    let localities: Vec<crate::sim::localities::GoodLocality> = metadata::get_meta(&conn, "good_localities")
+        .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let mut loc_dots: Vec<ProvinceLocalityDot> = Vec::new();
+    let mut loc_agg: std::collections::HashMap<String, (f32, u32)> = std::collections::HashMap::new(); // (grade_sum, n)
+    // D4 · the province NEAREST a sea cell, searched outward in the raster to
+    // `MARINE_ATTACH_CELLS` rings (X wraps, Y clamps — rule 6). Returns -1 when the
+    // water belongs to no coast within reach, which is the open-ocean case and
+    // correctly attaches a bank to nobody.
+    let nearest_prov = |x: u32, y: u32| -> i32 {
+        if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return -1; }
+        let cx = ((x as u64 * rw as u64) / gw as u64).min(rw as u64 - 1) as i32;
+        let cy = ((y as u64 * rh as u64) / gh as u64).min(rh as u64 - 1) as i32;
+        for r in 1..=MARINE_ATTACH_CELLS {
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    if dx.abs() != r && dy.abs() != r { continue; } // ring only
+                    let ny = cy + dy;
+                    if ny < 0 || ny >= rh as i32 { continue; }
+                    let nx = ((cx + dx) % rw as i32 + rw as i32) % rw as i32;
+                    match raster.get(ny as usize * rw as usize + nx as usize).copied() {
+                        Some(v) if v != crate::sim::provinces::NO_PROVINCE => return v as i32,
+                        _ => {}
+                    }
+                }
+            }
+        }
+        -1
+    };
+    for l in &localities {
+        // A land locality belongs to whichever province holds its own cell; a MARINE
+        // one has no province cell at all (the raster is land-only), so it is offered
+        // to the nearest coast within reach as a drawn annotation only.
+        let here = prov_at(l.x, l.y);
+        let sea = here < 0;
+        let owner = if sea { nearest_prov(l.x, l.y) } else { here };
+        if owner != id as i32 { continue; }
+        loc_dots.push(ProvinceLocalityDot {
+            good: l.good.clone(), x: l.x, y: l.y, grade: l.grade, extent: l.extent,
+            radius_km: l.radius_km, name: l.name.clone(), river_fed: l.river_fed, sea,
+        });
+        // Only LAND localities feed the per-good aggregate — `has_locality` reads as
+        // "the province's own ground carries a patch of this", and a bank offshore is
+        // not the province's ground (D4).
+        if sea { continue; }
+        let e = loc_agg.entry(l.good.clone()).or_insert((0.0, 0));
+        e.0 += l.grade; e.1 += 1;
+    }
+
     let mut goods: Vec<ProvinceGoodPotential> = Vec::new();
     for g in 0..ng {
         let idx = p * ng + g;
@@ -516,6 +610,9 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         let (mean_grade, workings, best_depth) = agg.get(&name)
             .map(|&(s, n, bd)| (if n > 0 { s / n as f32 } else { 0.0 }, n, bd))
             .unwrap_or((0.0, 0, 0));
+        let (has_locality, mean_locality_grade, locality_count) = loc_agg.get(&name)
+            .map(|&(s, n)| (n > 0, if n > 0 { s / n as f32 } else { 0.0 }, n))
+            .unwrap_or((false, 0.0, 0));
         goods.push(ProvinceGoodPotential {
             good: g as u8,
             name,
@@ -525,12 +622,13 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
             is_deposit: dep,
             is_marine: mar,
             mean_grade, workings, best_depth,
+            has_locality, mean_locality_grade, locality_count,
         });
     }
     // Richest potential first (a deposit good's richness is reflected in its belt).
     goods.sort_by(|a, b| b.potential.partial_cmp(&a.potential).unwrap_or(std::cmp::Ordering::Equal)
         .then(b.belt.partial_cmp(&a.belt).unwrap_or(std::cmp::Ordering::Equal)));
-    Ok(ProvincePotential { goods, deposits: dots })
+    Ok(ProvincePotential { goods, deposits: dots, localities: loc_dots })
 }
 
 // ═════════════════════════════════════════════════════════════════════════════════

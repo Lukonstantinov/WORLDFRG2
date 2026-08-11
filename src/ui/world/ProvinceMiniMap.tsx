@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { PBuilding, PSettlement, Province, ProvinceLand, ProvinceLandSample, ProvinceTerrainCrop, RiverData } from "@types";
+import type { PBuilding, PSettlement, Province, ProvinceLand, ProvinceLandSample, ProvinceLocalityDot, ProvinceTerrainCrop, RiverData } from "@types";
 import type { ProvinceRaster } from "@state/worldStore";
 import { GOOD_DEFS } from "@goods";
 
@@ -139,10 +139,20 @@ function ditherClass(shares: number[], t: number): number {
 
 interface Hover { x: number; y: number; title: string; rows: [string, string][] }
 
+/** The equatorial circumference the whole grid spans — the same figure the province
+ *  partition and the biome layer use to turn km into cells. Lets a locality's
+ *  `radius_km` become plate units without needing the world's cell size passed in:
+ *  `local = radius_km · raster.w / KM_EQUATOR`. */
+const KM_EQUATOR = 40075;
+/** D4 · how far outside the province footprint the viewBox may widen to show an
+ *  offshore locality, in raster cells. Bounded so a locality that landed across the
+ *  X seam (this component has never unwrapped X) cannot blow the plate open. */
+const MAX_SEA_PAD = 14;
+
 export function ProvinceMiniMap({
   province, raster, settlements, buildings,
   land, sample, plates = DEFAULT_PLATES, width = 240, riverCells,
-  terrain, rivers, deposits = [], beltGoods = [],
+  terrain, rivers, deposits = [], beltGoods = [], localities = [],
 }: {
   province: Province;
   raster: ProvinceRaster | null;
@@ -164,9 +174,19 @@ export function ProvinceMiniMap({
   riverCells?: number;
   /** #9 · ore workings in this province (world cell coords) for the deposits plate. */
   deposits?: { good: string; x: number; y: number; grade: number; depth: number }[];
-  /** #9 · untapped surface/belt goods (no single cell) — drawn as quality-weighted
-   *  squares dithered across the province footprint on the deposits plate. */
+  /** #9 · the province's surface/belt goods. Before Slice 3 these carried no
+   *  sub-province position at all, so the goods plate could only place SYMBOLS; they
+   *  are still what it falls back to for a world generated before localities existed
+   *  (D7 — an old world must re-run Biological to gain them). */
   beltGoods?: { name: string; quality: number; marine?: boolean }[];
+  /** GOODS_LOCALITIES_PLAN.md Slice 6 (F3 · D4) · the REAL terroir localities inside
+   *  (or, for a marine good, in the water off) this province, at their own cell
+   *  coordinates. This is the data F3 said the "squares of goods" feature was blocked
+   *  on: unlike land use and tenure — which are SHARES with no spatial extent and so
+   *  must dither (rule 17) — a locality genuinely has a position, so it is drawn at
+   *  it. A `sea` locality is an annotation in the adjacent water and confers NO
+   *  maritime territory (D4). */
+  localities?: ProvinceLocalityDot[];
 }) {
   const [hover, setHover] = useState<Hover | null>(null);
 
@@ -175,6 +195,14 @@ export function ProvinceMiniMap({
   // the sample stride is sized to THIS province's bounding box, not the whole map:
   // pass 1 finds the bbox coarsely, pass 2 re-samples it at a per-province stride so
   // every province renders at a similar ~130-cell fidelity instead of a coarse blob.
+  // The offshore (marine) localities' world positions, as a memo with a stable
+  // identity, so the frame below widens for them without recomputing every render.
+  const seaAnchors = useMemo(
+    () => localities.filter((l) => l.sea).map((l) => [l.x, l.y] as [number, number]),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [localities.filter((l) => l.sea).map((l) => `${l.x},${l.y}`).join("|")],
+  );
+
   const geo = useMemo(() => {
     if (!raster) return null;
     const { data, w, h, gridW, gridH } = raster;
@@ -210,14 +238,29 @@ export function ProvinceMiniMap({
       !member.has(y * w + (x - stride)) || !member.has(y * w + (x + stride))
       || !member.has((y - stride) * w + x) || !member.has((y + stride) * w + x));
     const pad = stride;
-    const ox = minx - pad, oy = miny - pad;
-    const vw = bw + stride + 2 * pad, vh = bh + stride + 2 * pad;
+    let ox = minx - pad, oy = miny - pad;
+    let vw = bw + stride + 2 * pad, vh = bh + stride + 2 * pad;
+    // D4 · widen the FRAME (never the footprint) so an offshore locality attached to
+    // this coast is actually on the plate. `cells`/`edge`/`stride` are untouched, so
+    // the province's own shape, mosaic fidelity and border line are unaffected — this
+    // only decides how much water is visible around it.
+    let sx0 = ox, sy0 = oy, sx1 = ox + vw, sy1 = oy + vh;
+    for (const l of seaAnchors) {
+      const rx = (l[0] * w) / gridW, ry = (l[1] * h) / gridH;
+      sx0 = Math.min(sx0, rx - 1); sx1 = Math.max(sx1, rx + 1);
+      sy0 = Math.min(sy0, ry - 1); sy1 = Math.max(sy1, ry + 1);
+    }
+    sx0 = Math.max(sx0, ox - MAX_SEA_PAD); sx1 = Math.min(sx1, ox + vw + MAX_SEA_PAD);
+    sy0 = Math.max(sy0, oy - MAX_SEA_PAD); sy1 = Math.min(sy1, oy + vh + MAX_SEA_PAD);
+    ox = sx0; oy = sy0; vw = sx1 - sx0; vh = sy1 - sy0;
     // world-cell → raster-cell → local viewBox coords
     const toLocal = (x: number, y: number): [number, number] => [
       (x * w) / gridW - ox, (y * h) / gridH - oy,
     ];
     return { cells, edge, ox, oy, vw, vh, toLocal, stride };
-  }, [raster, province.id]);
+    // `seaAnchors` is a stable string key of the offshore positions, so the frame is
+    // recomputed only when they actually move (not on every parent render).
+  }, [raster, province.id, seaAnchors]);
 
   // Dither patch size, in raster units: a few SAMPLED cells across (cells are
   // `stride` apart), so the land-use/tenure mosaic reads as fields regardless of
@@ -454,14 +497,87 @@ export function ProvinceMiniMap({
             </g>
           );
         })}
-        {/* 6a · belt/surface goods (#9) — the GOODS plate. IMPORTANT: the model holds ONE
-            quality for the WHOLE province (a belt good has no sub-province location), so we
-            must NOT paint an area — that would invent a spatial layout the model doesn't
-            hold (rule 17), and isolating a good would fill the entire province. Instead we
-            place a few SYMBOLIC markers reading "produced here", quality-faded. Isolating a
-            good shows a spread of just that good; showing all lays one marker per good like
-            a legend on the map. Real per-cell locations only exist for DEPOSITS (plate 6b). */}
-        {on("goods") && beltGoods.length > 0 && cells.length > 0 && raster && (() => {
+        {/* 6a · the GOODS plate, Slice 6 (F3 · D4). REAL locality squares, at the
+            cells the generator actually placed them on.
+
+            This is what F3 said the feature was blocked on. Land use and tenure are
+            SHARES with no spatial extent, so they must dither (rule 17) — but a
+            locality is not a share: `GoodLocality.x/y` is a real cell and
+            `radius_km` a real span, so both are drawn as they are. The square is
+            CLIPPED to the province footprint, which is also what keeps a 900 km
+            staple region (D6's chernozem case) honest: it tints as much of the
+            province as it genuinely covers and no more.
+
+            A MARINE locality is drawn in the adjacent water instead, dashed and
+            outside the clip — an annotation, never territory. The province gains no
+            maritime extent from it (D4): nothing here or downstream counts it toward
+            land use, tenure, the harvest or revenue.
+
+            Opacity carries `grade`; hue is the good's own from GOOD_DEFS, the same
+            colour language the rest of the app already uses for a good. */}
+        {on("goods") && localities.length > 0 && raster && (() => {
+          const clipId = `pmm-prov-${province.id}`;
+          // A land square's true span is safe to draw whole — the footprint clip
+          // bounds it. A SEA one has no clip (it is outside the province by
+          // definition, D4), and a 400 km bank drawn true-to-scale would wash over
+          // the whole plate, so the offshore mark is capped to read as an annotation.
+          // The real span is never hidden: the tooltip states it in km.
+          const half = (l: ProvinceLocalityDot) => {
+            const s = Math.max(stride * 0.7, (l.radius_km * raster.w) / KM_EQUATOR);
+            return l.sea ? Math.min(s, stride * 4) : s;
+          };
+          const colorOf = (good: string) =>
+            GOOD_DEFS.find((d) => d.name === good)?.color ?? "#56c8d8";
+          const land = localities.filter((l) => !l.sea);
+          const sea = localities.filter((l) => l.sea);
+          const square = (l: ProvinceLocalityDot, key: string, dashed: boolean) => {
+            const [lx, ly] = toLocal(l.x, l.y);
+            const s = half(l);
+            const g = Math.max(0, Math.min(1, l.grade));
+            return (
+              <rect key={key} x={lx - s} y={ly - s} width={s * 2} height={s * 2}
+                fill={colorOf(l.good)} opacity={0.22 + 0.5 * g}
+                stroke={colorOf(l.good)} strokeWidth={stride * 0.25}
+                strokeDasharray={dashed ? `${stride * 0.8} ${stride * 0.6}` : undefined}
+                strokeOpacity={0.85} style={{ cursor: "pointer" }}
+                onMouseEnter={(e) => setHover({
+                  x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY,
+                  title: `${l.name ? `${l.name} — ` : ""}${l.good}`,
+                  rows: [
+                    ["grade", `${Math.round(l.grade * 100)}%`],
+                    ["span", `${Math.round(l.radius_km)} km`],
+                    ["extent", ["a pocket", "small", "broad", "a great homeland"][Math.max(0, Math.min(3, l.extent))]],
+                    ...(l.river_fed ? [["watered", "river-fed"] as [string, string]] : []),
+                    ...(l.sea ? [["note", "offshore — not province territory"] as [string, string]] : []),
+                  ],
+                })}
+                onMouseLeave={() => setHover(null)} />
+            );
+          };
+          return (
+            <g key="loc">
+              {/* The footprint itself, as the clip for every LAND locality. */}
+              <clipPath id={clipId}>
+                {cells.map(([rx, ry], i) => (
+                  <rect key={`c${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05} />
+                ))}
+              </clipPath>
+              <g clipPath={`url(#${clipId})`}>
+                {land.map((l, i) => square(l, `ll${i}`, false))}
+              </g>
+              {/* Unclipped, dashed: the water off this coast (D4). */}
+              {sea.map((l, i) => square(l, `ls${i}`, true))}
+            </g>
+          );
+        })()}
+        {/* 6a (fallback) · a world generated before Slice 3 carries NO localities, so
+            the model still holds only ONE quality for the WHOLE province and there is
+            no sub-province position to draw. Painting an area from that would invent a
+            spatial layout the model doesn't hold (rule 17), so these stay SYMBOLIC
+            markers reading "produced here", quality-faded — one per good like a legend
+            on the map, or a spread when a good is isolated. D7 is explicit that such a
+            world must re-run Biological (8) to gain real localities. */}
+        {on("goods") && localities.length === 0 && beltGoods.length > 0 && cells.length > 0 && raster && (() => {
           const isolated = beltGoods.length === 1;
           const shown = beltGoods.slice(0, isolated ? 1 : 12);
           const fs = Math.max(6, Math.min(14, stride * 2.6));

@@ -785,6 +785,8 @@ commands/
                                   so external paths query_commands::* are unchanged):
       cell.rs · routing.rs        cell_info; trade routes/matrix/trunks + compute_itinerary
       overlays.rs · political.rs  shark/shipworm/reef/storm/monsoon + good/culture regions;
+                                  overlays.rs also carries `compute_good_belt_masks`
+                                  (§8.19) — the FULL-RESOLUTION two-layer belt mask;
       economy.rs · flow.rs        political ranking; market economy; dynamic trade flow
   campaign_commands/            ← finalize/unfreeze, campaign lifecycle + ALL campaign read
                                   queries. Split into a folder (mod.rs re-exports children;
@@ -837,7 +839,10 @@ commands/
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
   palette_commands.rs           ← get_render_palettes (§8.18) — serves the renderer's
                                   OWN colour tables to the legend, so the key cannot
-                                  drift from the map. Read-only, touches no tile
+                                  drift from the map. Read-only, touches no tile.
+                                  Also carries `GOOD_QUALITY_STOPS` — the ONE
+                                  absolute 0–1 belt-quality scale every good's
+                                  quality layer shades on (§8.19, D10)
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
   file_commands.rs              ← Save/open world (.worldforge), export heightmap/layers
 
@@ -897,7 +902,14 @@ sim/                            ← organised into per-phase step folders; mod.r
                                     models scored from plate boundaries/volcanism,
                                     belt→district→working hierarchy, per-working
                                     grade/extent/depth — see §8.16)
-                                  · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured)
+                                  · localities.rs (THE AGRICULTURAL/BIOLOGICAL
+                                    counterpart of deposits.rs — belt→locality
+                                    hierarchy + full modulation for every
+                                    Global/Local good, see §8.19)
+                                  · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured;
+                                    `marine_band` — Inshore/Bank/Either, §8.19)
+                                  · goods_validation.rs (test-only — Slice 0's coverage
+                                    diagnostic, §8.19)
   shared/                       ← cultures.rs (organic peoples map + 14 traits + per-kit
                                     male AND female given names) · inheritance.rs (the LAW
                                     OF INHERITANCE — line rule + division rule per culture,
@@ -978,7 +990,14 @@ canvas/
                                   trunks, routes, dynamic flow, regions). visibility[type] gates
                                   each. Also holds the two live appearance registries the
                                   Settings store drives: `lineColors` (overlay lines) and
-                                  `labelStyles` (map label typography — see §8.11)
+                                  `labelStyles` (map label typography — see §8.11).
+                                  GOODS_LOCALITIES_PLAN.md Slice 5 · a trade-good belt's
+                                  FILL now comes from a FULL-RESOLUTION mask
+                                  (`drawGoodBeltMasks`/`buildGoodMaskRender`), not the
+                                  coarse ~8-cell blocks `GoodRegion` carries — see §8.19.
+                                  `GoodRegion` still supplies each belt's LABEL, and its
+                                  old coarse fill remains the fallback for a good whose
+                                  mask hasn't arrived
   PaintOverlay.ts               ← Brush preview, paint stamps
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
   goodIcons.ts                  ← good → emoji/texture for overlays
@@ -1044,7 +1063,19 @@ ui/world/  — map & world
                                   keeps its class between years, so the slider shows
                                   land CONVERTING rather than reshuffling), and it reads
                                   as a hatch rather than as false precision. Never
-                                  invent a spatial layout the model does not hold
+                                  invent a spatial layout the model does not hold.
+                                  The GOODS plate is the exception that proves it
+                                  (GOODS_LOCALITIES_PLAN.md Slice 6): a `GoodLocality`
+                                  is NOT a share — it has a real cell and a real
+                                  `radius_km` — so it draws as a real SQUARE at its
+                                  real position, clipped to the province footprint,
+                                  opacity carrying `grade` and hue from `GOOD_DEFS`. A
+                                  MARINE locality draws dashed in the ADJACENT SEA and
+                                  confers NO maritime territory (D4). A world with no
+                                  localities (generated before Slice 3; D7 requires a
+                                  re-run of Biological) falls back to the old symbolic
+                                  markers, which is the honest reading of "one quality
+                                  for the whole province, no position"
   provinceStory.ts              ← Shared province prose/format helpers (stars, border
                                   kinds, history) — used by BOTH province views
   ImportWorldDialog.tsx         ← Layered world import dialog
@@ -1179,8 +1210,13 @@ ui/workflow/
 - `compute_shark_zones` / `compute_shipworm_zones` → highest-risk hazard cell-masks
   (Toolbar → Biological: 🦈 / 🪱). Also `compute_reef_zones`, `compute_storm_zones`,
   `compute_monsoon_zones`.
-- `compute_good_regions` → per-good belt cell-masks (fill + outline + emoji; gems
-  carry a `sublabel` naming the stone; one toggle per good under Trade Goods).
+- `compute_good_regions` → per-good belt cell-masks. **The FILL it returns is no
+  longer drawn** (§8.19) — it now supplies only the LABEL: the medallion centroid,
+  the gemstone `sublabel`, and the coarse fallback for a good whose mask hasn't
+  arrived. One toggle per good under Trade Goods.
+- `compute_good_belt_masks(goods)` → the FULL-RESOLUTION two-layer belt mask per
+  named good (§8.19). Takes a list, not the whole world, because a mask is a real
+  payload and only the toggled goods are ever drawn.
 - `compute_trade_routes(settlements, rivers, reach, max_crossing)` → least-cost routes
   over the shared coarse cost grid (passes / rivers / coast-hugging); reach limits
   open-water crossings.
@@ -1880,6 +1916,145 @@ and `temperature_ramp_pivots_on_freezing`.
 
 ---
 
+### 8.19 Goods localities — the agricultural/biological hierarchy (`docs/GOODS_LOCALITIES_PLAN.md`)
+
+Trade goods get what minerals already had (§8.16): belt → LOCALITY → cell, the
+same two-level structure `deposits.rs` uses, for every enabled `Global`/`Local`
+good (`Deposits`/`Manufactured` goods are out of scope — F2's whole premise is
+that minerals already have their own, better hierarchy).
+
+- **Rivers as a placement factor** (Slice 1, F6). `biological::RiverContext`
+  (built ONCE per world — the same discipline `deposits::GeoContext` already
+  applies) carries distance-to-any-river, distance-to-NAVIGABLE-river and
+  delta/floodplain membership, multi-source BFS (§8.9 rule 1). `river_multiplier`
+  is a MULTIPLIER on an existing score, never a replacement (§5.4 of the plan) —
+  `floodplain`/`irrigation`/`riverbank`/`float_out` weights, wired into the
+  specific built-in goods the plan names (rice, cotton, wheat, sugar, indigo,
+  dates, paper's papyrus branch, honey, hides, timber, hardwoods, furs) and
+  exposed as four new `Envelope` fields (serde-defaulted to 0 — no effect) for
+  custom goods. `good_score`/`envelope_score` both take `rc: Option<&RiverContext>`;
+  `None` (the Goods Editor's live preview, which has no rivers to hand) is a true
+  no-op, not an approximation.
+- **Marine inshore/bank split** (Slice 2, F5). `GoodSpec.marine_band`
+  (`Either`/`Inshore`/`Bank`, serde-defaulted to `Either`) narrows the old
+  undifferentiated `sea_coastal` gate to a STRICT SUBSET of itself —
+  `marine_band_ok` — so an `Either` good's placement is byte-identical to before
+  this slice. Shipped defaults (`default_marine_band_for`): inshore = pearls,
+  coral, bay_salt, tyrian_purple, amber; bank = stockfish, herring, whaling.
+- **The locality generator + full modulation** (Slice 3, D1/D5/D6,
+  `localities.rs`). `GoodLocality { good, x, y, radius_km, grade, extent, name,
+  river_fed }` — deliberately the same shape as `deposits::Deposit`. The size
+  ladder (§2.1 of the plan): luxury locality 175 km (wine, silk, spices, cacao,
+  cloves, pepper) · pastoral/secondary 400 km (wool, hides, horses, timber,
+  tobacco) · staple region 900 km (grain, rice, furs, barley, millet) — every
+  other good falls back to a tier from its own `Distribution`/rarity, so nothing
+  is left without an answer. Full modulation: `belt[i] = max(FLOOR, belt[i] *
+  (FRINGE + (1-FRINGE)*influence[i]))` — `FLOOR` is the entire safety mechanism
+  (D5's own risk 5.1): a belt cell already producing never falls to literal zero,
+  however far it sits from every locality core. Runs BEFORE `dilate_belt` so the
+  trade-reach rings spread from the already-modulated belt.
+- **Notable naming** (Slice 4, D8). Localities at/above a quality threshold draw
+  a deterministic name from `names::gen_name` — the SAME per-cell hearth lookup
+  settlements already use, so a locality's name is in the local culture for free,
+  no new naming machinery.
+- **Persistence.** `metadata["good_localities"]` (JSON), exactly parallel to
+  `metadata["deposits"]` — no tile-column change (rule 7). Written by
+  `commands::sim_commands::persist_goods_placement`, the one helper all four
+  `compute_trade_goods` call sites now share.
+- **Production wiring** (Slice 7, D2). `compute_economy`
+  (`commands/query_commands/economy.rs`) reads `good_localities` exactly the way
+  it already reads `deposits` — a hub's quality for a good blends toward the mean
+  grade of any locality inside its catchment (50% weight; `share`-based quality
+  still carries the other half, since Slice 3's modulated belt VALUES already
+  partly reflect locality quality — a blend, not a replacement, per D2).
+  `campaign_province_potential` (`campaign_commands/province.rs`) exposes
+  `ProvincePotential.localities: Vec<ProvinceLocalityDot>` alongside the existing
+  `.deposits`, and `ProvinceGoodPotential` gained `has_locality`/
+  `mean_locality_grade`/`locality_count`, mirrored in `types/campaign.ts`.
+- **Slice 0's own gate**: `sim::step8_biological_goods::goods_validation`
+  (test-only) builds a real, moderate-sized procedural world end-to-end (plates
+  through biological — NOT the synthetic `CampaignSim` fixture `economy_
+  validation.rs` uses) and asserts no enabled `Global`/`Local` good places a belt
+  that reaches zero settlements' catchments. `Deposits`-distribution goods are
+  explicitly OUT of that hard floor (F2 — they have their own, different
+  coverage guarantee, `no_shipped_mineral_places_nothing`); a handful of the
+  rarest deposit goods missing every settlement's catchment at this diagnostic's
+  deliberately modest world size is printed as a FINDING, not asserted. One
+  pre-existing belt good, `dyes` (murex purple, untouched by any Slice 1-4
+  change — verified), is named as an explicit, documented exception rather than
+  either silently loosening the floor or leaving the gate permanently red.
+  **Do not add a process-global `cultures::set_active` call to a test** — `cargo
+  test --lib` runs the suite in parallel within one process, and this diagnostic
+  originally raced `econ_inheritance_rules_fragment_differently` /
+  `econ_scorecard_is_deterministic` by mutating that exact global; it now relies
+  on `names::gen_name`'s legacy-culture-grid fallback instead, which is
+  deterministic on its own.
+
+**The overlay (Slices 5-6) — two layers, at full resolution.** `compute_good_regions`
+rasterised a belt onto a COARSE grid — `f = grid_w / 450`, about 8×8 world cells at
+the default size — and the frontend filled each block. A block holding one land cell
+of belt painted all sixty-four of its cells, so a belt's edge was a staircase that
+ignored the coastline and spilled into the sea. No amount of shading could fix it: the
+information was not in the payload.
+
+Full resolution IS the coastline clip. `compute_good_belt_masks` copies the belt
+column verbatim above `COVERAGE_MIN_U8` and consults no land mask at all, because a
+`Global`/`Local` belt good's byte is already exactly zero on the wrong side of the
+coast — every one is placed through `envelope_score`, whose first act is the domain
+gate. `goods_validation::a_belt_never_crosses_the_coastline` asserts exactly that
+claim, against the shared constant rather than a copy of it, because the render path
+has no opinion about where the coast is and would silently start painting into the
+ocean again if it stopped holding. The same test PRINTS a finding it deliberately
+does not assert: `Distribution::Deposits` goods never touch `envelope_score` (§8.16
+places them from tectonic setting), so `CoastalMarine` can put a salt pan a cell into
+the tidal water — measured at 300×150 as bay_salt 115 cells, tyrian_purple 16,
+ambergris 1. That is a `deposits.rs` question, not a render bug, and clamping it here
+would hide it.
+
+Two layers, split because they compress differently. COVERAGE ("can it grow here")
+is boolean at full resolution and run-length encoded — a belt is contiguous, so a
+world-spanning staple region costs a few thousand runs, not one per cell. QUALITY
+("is it fine here") is the belt value on the OLD coarse grid, because a wash needs no
+per-cell precision; it is painted only where coverage says so, so the coarse wash
+still ends exactly on the coastline. Both are switched independently in the Toolbar's
+Trade Goods section.
+
+Four rules for anyone changing this:
+
+- **The quality scale is ABSOLUTE and shared by every good** (D10). The belt's own
+  0..1 value, never rescaled against that good's own maximum — otherwise a good whose
+  whole belt is mediocre gets promoted to full colour just for being its own best. The
+  stops live once, in `palette_commands.rs`, and are SERVED (§8.18). Until they
+  arrive the overlay draws coverage only rather than inventing a ramp.
+- **A very large belt is downsampled by MAJORITY, never by "any".** Above
+  `MASK_MAX_PX` a canvas per good becomes real memory, so the mask reduces — and a
+  reduce that takes a block when ANY sub-cell is covered puts the belt back over the
+  water one block at a time, which is the original bug in miniature.
+- **The FILL is exact; the BORDER is traced at a bounded step.** The fill is what
+  carries the coastline. The outline is a stroke a pixel or two wide, so tracing it on
+  millions of cells buys nothing and costs a Path2D with a hundred thousand segments.
+- **Never re-derive the belt's shape from province polygons** (D3). A wine belt
+  crossing three provinces is one belt; snapping it to political lines would make a
+  physical fact look administrative.
+
+`GOOD_MASK_DIR=/tmp/g cargo test --lib dump_good_belt_mask_sheet -- --ignored
+--nocapture` writes a PNG per sampled good over the world's land/sea, through the
+REAL `build_belt_mask` and the frontend's own decode — use it to answer "does the belt
+end on the coastline" instead of arguing it, the same way `dump_biome_swatch_sheet`
+serves the biome palette.
+
+**The province plate (Slice 6)** is the other half. Land use and tenure are SHARES
+and must dither (rule 17), but a `GoodLocality` is not a share — it carries a real
+cell and a real `radius_km` — so it draws as a real square at its real position,
+clipped to the province footprint, opacity from `grade` and hue from `GOOD_DEFS`. A
+MARINE locality sits on shelf water where the province raster is `NO_PROVINCE`, so
+`campaign_province_potential` attaches it to the nearest coast within
+`MARINE_ATTACH_CELLS` and flags it `sea`: it draws dashed in the adjacent water, is
+excluded from the province's own `has_locality` aggregate, and confers **no maritime
+territory** (D4).
+
+---
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -1913,25 +2088,27 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
-GOODS_LOCALITIES_PLAN.md          ← ⭐ APPROVED, NOT YET BUILT. Trade goods get what
-                                    minerals already have (§8.16): belt → LOCALITY →
+GOODS_LOCALITIES_PLAN.md          ← ⭐ ALL 8 SLICES BUILT. Trade goods got what
+                                    minerals already had (§8.16): belt → LOCALITY →
                                     cell, persisted to `metadata["good_localities"]`
                                     like `deposits`, with a size ladder in km (a
                                     staple region is 900 km — the chernozem case —
-                                    against a 45 km ore district). Plus the three
+                                    against a 45 km ore district). Fixed the three
                                     things the measured findings turned up: placement
-                                    NEVER reads rivers (only `fertility`'s single
-                                    proximity scalar), marine goods use ONE gate with
-                                    no inshore/offshore-bank split, and the overlay
-                                    draws coarse 8-cell blocks that spill past the
-                                    coast. Splits the map into TWO layers per good —
-                                    coverage ("can it grow here") and quality ("is it
-                                    fine here") — off one u8 column, on one absolute
-                                    ramp shared by every good. Slice 0 is the COVERAGE
-                                    DIAGNOSTIC, built first so every later slice is
-                                    measured; the economy wiring goes LAST. Carries
-                                    its own risks (§5 — full modulation vs "goods must
-                                    keep reaching settlements") and "deliberately not
+                                    now reads rivers (floodplain/irrigation/riverbank/
+                                    float_out, §8.19), marine goods split into
+                                    Inshore/Bank bands, and the overlay draws a
+                                    FULL-RESOLUTION mask instead of coarse 8-cell
+                                    blocks that spilled past the coast. Two layers per
+                                    good — coverage ("can it grow here") and quality
+                                    ("is it fine here") — off one u8 column, on one
+                                    absolute ramp shared by every good (§8.19). Slice 0
+                                    is the COVERAGE DIAGNOSTIC every later slice is
+                                    measured against; Slice 7 (economy wiring) went
+                                    last, gated on `econ_`/dynamics. See §8.19 for the
+                                    full account, including its own risks (§5 of the
+                                    plan — full modulation vs "goods must keep
+                                    reaching settlements") and "deliberately not
                                     built" list (§6)
 REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     COUNTRIES: a merchant house takes a city

@@ -369,7 +369,9 @@ pub struct GeoContext {
 }
 
 /// Multi-source BFS over land+sea with cylindrical X wrap and clamped Y (rule 6).
-fn bfs_dist(seeds: &[usize], w: u32, h: u32) -> Vec<u16> {
+/// `pub(crate)` so `localities.rs` (GOODS_LOCALITIES_PLAN.md) reuses the same
+/// linear-sweep primitive rather than a second per-cell outward scan (§8.9 rule 1).
+pub(crate) fn bfs_dist(seeds: &[usize], w: u32, h: u32) -> Vec<u16> {
     let n = (w as usize) * (h as usize);
     let mut d = vec![UNREACHED; n];
     if seeds.is_empty() {
@@ -415,7 +417,7 @@ fn bfs_dist(seeds: &[usize], w: u32, h: u32) -> Vec<u16> {
 
 /// A proximity ramp: 1.0 at the seed, falling to 0 at `reach` cells.
 #[inline]
-fn near(dist: u16, reach: f32) -> f32 {
+pub(crate) fn near(dist: u16, reach: f32) -> f32 {
     if dist == UNREACHED {
         return 0.0;
     }
@@ -795,7 +797,7 @@ const KM_EQUATOR: f32 = 40075.0;
 const WORKINGS_MIN: u32 = 2;
 const WORKINGS_MAX: u32 = 8;
 
-fn hash01(mut x: u64) -> f32 {
+pub(crate) fn hash01(mut x: u64) -> f32 {
     x ^= x >> 33;
     x = x.wrapping_mul(0xFF51AFD7ED558CCD);
     x ^= x >> 33;

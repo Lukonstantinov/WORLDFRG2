@@ -578,6 +578,32 @@ export function Toolbar() {
             borderRadius: 4, cursor: "pointer" }}>
           📖 Browse goods by origin
         </button>
+        {/* GOODS_LOCALITIES_PLAN.md D9 · the TWO layers a belt carries, switched
+            independently of each other and of WHICH goods are shown below. Coverage
+            = "can it grow here" (the belt's honest extent + its outline, so a belt
+            thinned by the locality pass is visible on the map rather than buried in
+            a diagnostic, §5.1); quality = "is it fine here", shaded on ONE absolute
+            0–1 scale shared by every good (D10) — never per-good normalised. Two
+            switches rather than two per good: ~90 checkboxes would be unusable. */}
+        <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
+          {([["goodCoverage", "coverage", "Where the belt reaches — its honest extent, outlined along the coastline"],
+             ["goodQuality", "quality", "How good the land is, on one absolute scale shared by every good"]] as const)
+            .map(([key, label, title]) => {
+              const active = !!overlayVisibility[key];
+              return (
+                <span key={key} onClick={() => toggleOverlay(key)} title={title}
+                  style={{
+                    fontSize: 10, padding: "1px 7px", borderRadius: 3, userSelect: "none",
+                    cursor: "pointer", flex: 1, textAlign: "center",
+                    color: active ? "#0a1620" : "#7d93ab",
+                    background: active ? "#7fa8c8" : "transparent",
+                    border: `1px solid ${active ? "#7fa8c8" : "#2a3e58"}`,
+                  }}>
+                  {active ? "☑" : "☐"} {label}
+                </span>
+              );
+            })}
+        </div>
         {/* One toggle per category (master checkbox shows all its goods, each in
             its own colour/icon); expand the caret to toggle a single good. */}
         {CATEGORY_ORDER.map((cat) => {
