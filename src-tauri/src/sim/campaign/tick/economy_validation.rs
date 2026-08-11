@@ -1147,6 +1147,81 @@ fn econ_measure_war_frequency() {
     assert!(!seats.is_empty(), "the run produced no war-eligible cities at all");
 }
 
+/// Player-reported: "no realms by year 60, there should be more." `maybe_proclaim_realms`
+/// is a conjunction (governs · tier 1-2 · holds a province writ · affords the cost · roll)
+/// and even after loosening chance+cost+dominance it can stay empty. Per §2.4, MEASURE
+/// which gate collapses the funnel before touching it again. Prints the funnel maxima over
+/// a reference run plus, for the seat cities, the tier of whichever house governs them —
+/// the maintainer's hypothesis is that powerful trade dynasties don't govern, and the
+/// houses that DO govern are too low-tier / too poor to found a crown.
+#[test]
+#[ignore]
+fn econ_measure_realm_formation() {
+    let mut s = reference_world();
+    let years = 120u32;
+    let (mut mx_govern, mut mx_tier, mut mx_prov, mut mx_afford) = (0usize, 0usize, 0usize, 0usize);
+    let mut realms_formed = 0usize;
+    let mut first_realm_year = 0u32;
+    // Tier of the governing house at each seat city, tallied over the last surveyed year.
+    let mut govern_tier_hist = [0usize; 5]; // index 0 = untiered, 1-4 = tiers
+    for _ in 0..years {
+        s.advance(TICKS_PER_YEAR);
+        let yr = s.tick / TICKS_PER_YEAR;
+        if yr < REALM_YEAR_FLOOR { continue; }
+        let cost = s.realm_founding_cost();
+        let (mut g, mut mt, mut pv, mut af) = (0usize, 0usize, 0usize, 0usize);
+        let last = yr == REALM_YEAR_FLOOR + years - 1 || yr + 1 == s.tick / TICKS_PER_YEAR + 1; // final surveyed year
+        if last { govern_tier_hist = [0usize; 5]; }
+        for h in 0..s.hubs.len() {
+            if s.hubs[h].is_estate || s.hubs[h].abandoned { continue; }
+            if s.hubs[h].realm >= 0 || s.hubs[h].tribute_to >= 0 { continue; }
+            let ruler = if s.hubs[h].captor_house >= 0 { s.hubs[h].captor_house } else { s.hubs[h].council_house };
+            if ruler < 0 { continue; }
+            g += 1;
+            let hi = ruler as usize;
+            if hi >= s.houses.len() { continue; }
+            if last && s.prov_holder.contains(&(h as i32)) {
+                govern_tier_hist[(s.houses[hi].tier as usize).min(4)] += 1;
+            }
+            if !s.houses[hi].is_merchant() || s.houses[hi].is_guild { continue; }
+            if s.houses[hi].tier == 0 || s.houses[hi].tier > REALM_PROCLAIM_TIER_MAX { continue; }
+            mt += 1;
+            if !s.prov_holder.contains(&(h as i32)) { continue; }
+            pv += 1;
+            if s.houses[hi].wealth >= cost { af += 1; }
+        }
+        mx_govern = mx_govern.max(g); mx_tier = mx_tier.max(mt);
+        mx_prov = mx_prov.max(pv); mx_afford = mx_afford.max(af);
+        if !s.realms.is_empty() && realms_formed == 0 { first_realm_year = yr; }
+        realms_formed = realms_formed.max(s.realms.len());
+    }
+    // Wealth context: the cost bar vs the richest merchant and vs the richest GOVERNING house.
+    let cost = s.realm_founding_cost();
+    let richest = s.houses.iter().filter(|h| h.is_merchant() && !h.is_guild)
+        .map(|h| h.wealth).fold(0.0f32, f32::max);
+    let richest_govern = (0..s.hubs.len())
+        .filter_map(|h| {
+            let r = if s.hubs[h].captor_house >= 0 { s.hubs[h].captor_house } else { s.hubs[h].council_house };
+            (r >= 0 && (r as usize) < s.houses.len()).then(|| s.houses[r as usize].wealth)
+        })
+        .fold(0.0f32, f32::max);
+    println!();
+    println!("═══ realm formation funnel (reference world, {years}y) ═══");
+    println!("  founding cost (end)                       {:>12.0}", cost);
+    println!("  richest merchant house                    {:>12.0}", richest);
+    println!("  richest GOVERNING house                   {:>12.0}", richest_govern);
+    println!("  peak governing hubs                       {:>12}", mx_govern);
+    println!("  ...ruler is a tier 1-2 merchant           {:>12}", mx_tier);
+    println!("  ...and holds a province writ              {:>12}", mx_prov);
+    println!("  ...and can afford the cost                {:>12}", mx_afford);
+    println!("  realms formed by year {:<3}                  {:>12}", REALM_YEAR_FLOOR + years, realms_formed);
+    if realms_formed > 0 { println!("  first realm at year                       {:>12}", first_realm_year); }
+    println!("  governing-house tiers at province seats (final year):");
+    println!("    untiered {}  ·  tier1 {}  ·  tier2 {}  ·  tier3 {}  ·  tier4 {}",
+        govern_tier_hist[0], govern_tier_hist[1], govern_tier_hist[2], govern_tier_hist[3], govern_tier_hist[4]);
+    println!("═══════════════════════════════════════════════════════════════════════");
+}
+
 /// Player-reported: "no outposts are created" over the course of ordinary play.
 /// `maybe_found_house_outpost` (`houses.rs`) is gated on THREE things at once — a
 /// non-empty `colonizable` site pool, a founder wealthy enough (`OUTPOST_FOUND_WEALTH`

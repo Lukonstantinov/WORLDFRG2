@@ -41,33 +41,68 @@ impl CampaignSim {
             if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
             if self.hubs[h].realm >= 0 { continue; } // already sovereign or a member
             if self.hubs[h].tribute_to >= 0 { continue; } // a tributary makes no claims of its own
-            // The founder must GOVERN the settlement — either as its `captor_house`
-            // (seized the government outright) OR as its `council_house` (dominates the
-            // council). The captor-only rule left realms far too rare (most cities are
-            // council-run, never captured), so per the maintainer a council-dominant
-            // house now qualifies too; the captor still takes precedence when both exist.
-            // Beyond governing, the house must be at least TIER 2, hold a province (rule
-            // 25), and be able to SPEND the founding cost — no continuous-tenure,
-            // city-tier, or prestige requirement.
-            let ruler = if self.hubs[h].captor_house >= 0 {
-                self.hubs[h].captor_house
-            } else {
-                self.hubs[h].council_house
-            };
-            if ruler < 0 { continue; } // nobody governs this city — no claim to make
-            let hi = ruler as usize;
-            if hi >= self.houses.len() { continue; }
-            if !self.houses[hi].is_merchant() { continue; } // dead, or already crowned elsewhere
-            if self.houses[hi].is_guild { continue; } // a civic office does not found a dynasty
-            if self.houses[hi].tier == 0 || self.houses[hi].tier > REALM_PROCLAIM_TIER_MAX { continue; }
+            // Control only becomes a REALM through a province's LARGEST city (its seat,
+            // `province_seat_hub` → `prov_holder`). This is the maintainer's model: the
+            // province is controlled iff its largest settlement is. Shared by every
+            // candidate below, so check it once.
             if !self.prov_holder.contains(&(h as i32)) { continue; }
-            if self.houses[hi].wealth < cost { continue; } // must afford the (adaptive) founding spend
-            let bold = self.head_axis(hi, 0) as f32;
-            let expansive = self.head_axis(hi, 3) as f32;
-            let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
-            if hash01(self.seed, tick as u64 ^ 0xC0_10A6, (h as u64) << 16 ^ yr as u64) > chance { continue; }
-            self.promote_house_to_realm(hi, h, yr);
+            // Who CONTROLS this settlement — three candidates, tried best-first:
+            //   1. `captor_house` — seized the government outright.
+            //   2. `council_house` — holds the council.
+            //   3. the DOMINANT TRADE DYNASTY here (`dominant_house_at`) — the strongest
+            //      merchant presence, which may OUTRANK a weaker formal holder. This is the
+            //      maintainer's rule ("a trade dynasty, if powerful enough, controls the
+            //      settlement, then the province") and it is what `econ_measure_realm_
+            //      formation` showed was missing: the houses formally holding the big seat
+            //      cities were too weak to found a crown, while the powerful trade dynasties
+            //      that actually dominated those cities' commerce held no office there and so
+            //      never qualified. A candidate that has since been crowned elsewhere or
+            //      isn't a tier 1-2 merchant able to afford the cost is simply skipped, so a
+            //      weak formal holder no longer BLOCKS a strong trade dynasty at the same seat.
+            let candidates = [
+                self.hubs[h].captor_house,
+                self.hubs[h].council_house,
+                self.dominant_house_at(h),
+            ];
+            for &c in candidates.iter() {
+                if c < 0 { continue; }
+                let hi = c as usize;
+                if hi >= self.houses.len() { continue; }
+                if !self.houses[hi].is_merchant() || self.houses[hi].is_guild { continue; }
+                if self.houses[hi].tier == 0 || self.houses[hi].tier > REALM_PROCLAIM_TIER_MAX { continue; }
+                if self.houses[hi].wealth < cost { continue; } // must afford the (adaptive) founding spend
+                let bold = self.head_axis(hi, 0) as f32;
+                let expansive = self.head_axis(hi, 3) as f32;
+                let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
+                // The roll folds in `hi`, so each candidate gets its own independent chance
+                // rather than all three sharing one seed.
+                let salt = ((h as u64) << 20 ^ (yr as u64) << 4).wrapping_add(hi as u64);
+                if hash01(self.seed, tick as u64 ^ 0xC0_10A6, salt) > chance { continue; }
+                self.promote_house_to_realm(hi, h, yr);
+                break; // one realm per seat per year
+            }
         }
+    }
+
+    /// The house with the strongest merchant presence at hub `h` — the trade dynasty
+    /// that effectively controls the city's commerce even without holding a formal
+    /// office (the maintainer's "a powerful enough trade dynasty controls the
+    /// settlement"). Only a SUBSTANTIAL presence counts: influence ≥ `GOVT_MIN_INFLUENCE`,
+    /// the same bar `update_government` uses to let a house court a seat, so an incidental
+    /// trader passing through is never read as the city's master. Weighted by wealth so
+    /// the RICHEST dominant house wins a tie. Returns −1 if no house dominates here.
+    pub(crate) fn dominant_house_at(&self, h: usize) -> i32 {
+        let mut best = (-1i32, 0.0f32);
+        for hi in 0..self.houses.len() {
+            let hh = &self.houses[hi];
+            if hh.is_guild || !hh.is_merchant() { continue; }
+            let inf = hh.influence.iter().find(|(c, _)| *c == h as u32)
+                .map(|(_, v)| *v).unwrap_or(0.0);
+            if inf < GOVT_MIN_INFLUENCE { continue; }
+            let score = inf * (hh.wealth.max(0.0) + 1.0).sqrt();
+            if score > best.1 { best = (hi as i32, score); }
+        }
+        best.0
     }
 
     /// The ADAPTIVE realm founding cost for THIS world: `REALM_PROCLAIM_COST_FRAC` of the

@@ -603,7 +603,12 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
     for g in 0..ng {
         let idx = p * ng + g;
         let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
-        if belt <= 0.001 { continue; } // the land genuinely can't yield this
+        // A good ABSENT from the whole province sits at the exact belt-histogram bin-0
+        // floor (`PROV_GOOD_ABSENT_BELT` ≈ 8/255); any real presence is strictly above
+        // it. The old `<= 0.001` gate let that floor through, so a cold-desert province
+        // listed pepper/cacao/tropical hardwoods it can't grow. Same gate the "currently
+        // worked" list already uses, so both readings agree on what is actually present.
+        if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
         let name = sim.goods[g].name.clone();
         let dep = is_deposit.get(&name).copied().unwrap_or(false);
         let mar = is_marine.get(&name).copied().unwrap_or(false);
