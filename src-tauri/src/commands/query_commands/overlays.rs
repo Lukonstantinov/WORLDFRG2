@@ -944,6 +944,294 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
 }
 
 
+// ═════════════════════════════════════════════════════════════════════════════════
+//  GOODS_LOCALITIES_PLAN.md Slice 5 — THE TWO-LAYER, FULL-RESOLUTION BELT MASK
+//  (D3 · D9 · D10)
+//
+//  `compute_good_regions` above rasterises a belt onto a COARSE grid (`f =
+//  grid_w / 450`, ~8×8 world cells at the default size) and the frontend fills each
+//  block. That is F4: a block containing one land cell of belt paints all 64 of its
+//  cells, so the belt's edge is a staircase that ignores the coastline and spills
+//  into the sea. It cannot be fixed by shading — the information simply is not in
+//  the payload.
+//
+//  So the mask below is FULL RESOLUTION, and that alone is the coastline clip: a
+//  land good's belt byte is already exactly zero on every sea cell (`envelope_score`
+//  gates `Domain::Continental`/`Coastal` on `terrain == 1`) and a marine good's is
+//  zero on land. Nothing has to know where the coast is; drawing the belt at its own
+//  resolution ends it on the coast by construction. D3's "never snapped to province
+//  polygons" is satisfied for the same reason — the belt is a physical fact and this
+//  draws the physical fact.
+//
+//  TWO LAYERS (D9), because they are two different questions and they compress
+//  differently:
+//
+//  * COVERAGE — "can it grow here". A boolean, at FULL resolution, run-length
+//    encoded. A belt is contiguous, so a row crosses its boundary a handful of times
+//    and the RLE is small even for a world-spanning staple region.
+//  * QUALITY — "is it fine here". The belt value itself, on a COARSE grid, because
+//    a wash does not need per-cell precision and the full-resolution field is noisy
+//    enough that RLE would not compress it. The frontend paints quality only where
+//    coverage says so, so the coarse wash still ends exactly on the coastline.
+//
+//  D10 lives on the frontend's side of this: the value emitted here is the belt's
+//  own absolute 0..255, never rescaled against the good's own maximum, and the scale
+//  it shades on is served once by `get_render_palettes`.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/// A belt cell counts as COVERED at a hair above zero, not at the 0.30 the region
+/// clusterer uses. The two thresholds answer different questions: the clusterer is
+/// picking where to put a label, while coverage is the honest extent of the land
+/// that can yield the good — which is exactly the reading §5.1 asks to be visible on
+/// the map rather than buried in a diagnostic, now that Slice 3 thins the fringe.
+pub(crate) const COVERAGE_MIN_U8: u8 = 5;
+
+/// Slice 5 · one good's belt as a full-resolution mask (see the block comment above).
+#[derive(Debug, Serialize)]
+pub struct GoodBeltMask {
+    pub good: String,
+    /// Bounding box of the belt, in world cells. The mask covers exactly this box.
+    pub x0: u32,
+    pub y0: u32,
+    pub w: u32,
+    pub h: u32,
+    /// COVERAGE — full-resolution 0/1 over the box, row-major, run-length encoded as
+    /// flat `(value, run)` pairs (the same shape `province_raster_rle` already uses).
+    pub coverage_rle: Vec<u32>,
+    /// QUALITY — the belt's own absolute value 0..255 on a coarse grid over the same
+    /// box (`qw × qh`, block size `coarse`). Never per-good normalised (D10).
+    pub quality: Vec<u8>,
+    pub qw: u32,
+    pub qh: u32,
+    /// World cells per quality block.
+    pub coarse: u32,
+    /// Per-quality-block subtype id (grain species / paper source); empty if the good
+    /// has no subtypes.
+    pub subtypes: Vec<u8>,
+    /// Covered cells, so the frontend can size a medallion / report an extent.
+    pub cells: u32,
+}
+
+/// Run-length encode a row-major boolean field into flat `(value, run)` pairs.
+fn rle_encode_mask(mask: &[u8]) -> Vec<u32> {
+    let mut out: Vec<u32> = Vec::new();
+    let mut i = 0usize;
+    while i < mask.len() {
+        let v = mask[i];
+        let start = i;
+        while i < mask.len() && mask[i] == v { i += 1; }
+        out.push(v as u32);
+        out.push((i - start) as u32);
+    }
+    out
+}
+
+/// Build one good's mask from its FULL-RESOLUTION belt column.
+///
+/// Kept as a plain function over a flat column — no `State`, no tiles — so the
+/// `dump_good_belt_mask_sheet` proof can drive the real code path rather than a
+/// re-implementation of it (the same reason `dump_biome_swatch_sheet` renders
+/// through the real `render_tile`, §8.12). Returns `None` for a good the world never
+/// placed. `subtype_at` maps a world cell to a subtype id and is only consulted for
+/// a multi-type good (grain species / paper source).
+pub(crate) fn build_belt_mask(
+    good: &str, belt: &[u8], grid_w: u32, grid_h: u32, coarse: u32,
+    subtype_at: Option<&dyn Fn(u32, u32) -> u8>,
+) -> Option<GoodBeltMask> {
+    let mut x0 = grid_w; let mut y0 = grid_h;
+    let mut x1 = 0u32;   let mut y1 = 0u32;
+    let mut covered = 0u32;
+    for (i, &v) in belt.iter().enumerate() {
+        if v < COVERAGE_MIN_U8 { continue; }
+        let wx = (i as u32) % grid_w;
+        let wy = (i as u32) / grid_w;
+        if wx < x0 { x0 = wx; }
+        if wx > x1 { x1 = wx; }
+        if wy < y0 { y0 = wy; }
+        if wy > y1 { y1 = wy; }
+        covered += 1;
+    }
+    if covered == 0 { return None; }
+
+    let bw = x1 - x0 + 1;
+    let bh = y1 - y0 + 1;
+    // Coverage: full-resolution 0/1 over the box.
+    let mut cov = vec![0u8; (bw as usize) * (bh as usize)];
+    for by in 0..bh {
+        let src = ((y0 + by) as usize) * (grid_w as usize) + x0 as usize;
+        let dst = (by as usize) * (bw as usize);
+        for bx in 0..bw as usize {
+            if belt[src + bx] >= COVERAGE_MIN_U8 { cov[dst + bx] = 1; }
+        }
+    }
+
+    // Quality: the block MAX, so a small but excellent patch is not averaged away
+    // (the same choice `compute_fishery_banks` makes for the same reason).
+    let qw = (bw + coarse - 1) / coarse;
+    let qh = (bh + coarse - 1) / coarse;
+    let mut quality = vec![0u8; (qw * qh) as usize];
+    // A representative land cell per block for the subtype classification, so a grain
+    // block is typed from real climate rather than from whatever cell the scan ended on.
+    let mut sub_src = vec![u32::MAX; (qw * qh) as usize];
+    for by in 0..bh {
+        let wy = y0 + by;
+        let qy = by / coarse;
+        for bx in 0..bw {
+            let v = belt[(wy as usize) * (grid_w as usize) + (x0 + bx) as usize];
+            if v == 0 { continue; }
+            let qi = (qy * qw + bx / coarse) as usize;
+            if v > quality[qi] {
+                quality[qi] = v;
+                if subtype_at.is_some() { sub_src[qi] = wy * grid_w + (x0 + bx); }
+            }
+        }
+    }
+    let subtypes: Vec<u8> = match subtype_at {
+        None => Vec::new(),
+        Some(f) => sub_src.iter()
+            .map(|&idx| if idx == u32::MAX { 0 } else { f(idx % grid_w, idx / grid_w) })
+            .collect(),
+    };
+
+    Some(GoodBeltMask {
+        good: good.to_string(),
+        x0, y0, w: bw, h: bh,
+        coverage_rle: rle_encode_mask(&cov),
+        quality, qw, qh, coarse,
+        subtypes,
+        cells: covered,
+    })
+}
+
+/// Slice 5 · the FULL-RESOLUTION belt mask for each named good — the payload that
+/// replaces the coarse blocks of `compute_good_regions` for the FILL. Regions are
+/// still computed there and still carry the label centroid / medallion / sublabel;
+/// this command only answers "which cells, and how good".
+///
+/// Takes an explicit good list rather than returning every good, because a mask is
+/// a real payload and only the toggled goods are ever drawn. `Manufactured` goods
+/// are skipped exactly as the region path skips them (they are made in cities and
+/// have no belt); `Deposits` goods are NOT skipped — a working's belt byte is a real
+/// cell and drawing it at full resolution is strictly better than a block.
+#[tauri::command]
+pub fn compute_good_belt_masks(
+    goods: Vec<String>,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<GoodBeltMask>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 || goods.is_empty() { return Ok(vec![]); }
+
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    use crate::sim::goods_spec::Distribution;
+
+    // The quality grid's block size — the SAME coarse factor the region path uses, so
+    // the wash carries exactly the detail it always did while the coverage layer
+    // beneath it supplies the edge.
+    let coarse = (grid_w / 450).max(1);
+
+    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
+    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
+    let n = (grid_w as usize) * (grid_h as usize);
+
+    let mut out: Vec<GoodBeltMask> = Vec::new();
+    // One full-resolution scratch buffer, reused across goods (a per-good allocation
+    // of the world grid is 6.5 MB at the default size and 26 MB on Large).
+    let mut belt = vec![0u8; n];
+
+    for name in &goods {
+        let Some((g, spec)) = specs.iter().enumerate().find(|(_, s)| &s.id == name) else { continue };
+        if !spec.enabled || matches!(spec.distribution, Distribution::Manufactured) { continue; }
+
+        belt.fill(0);
+        for ty in 0..tiles_y as i32 {
+            for tx in 0..tiles_x as i32 {
+                let tile = world.tile(tx, ty);
+                if g >= tile.goods.len() { continue; }
+                let base_x = tx as u32 * TILE_SIZE;
+                let base_y = ty as u32 * TILE_SIZE;
+                let max_lx = TILE_SIZE.min(grid_w - base_x);
+                let max_ly = TILE_SIZE.min(grid_h - base_y);
+                for ly in 0..max_ly {
+                    for lx in 0..max_lx {
+                        let v = tile.goods[g][(ly * TILE_SIZE + lx) as usize];
+                        if v < COVERAGE_MIN_U8 { continue; }
+                        belt[((base_y + ly) as usize) * (grid_w as usize) + (base_x + lx) as usize] = v;
+                    }
+                }
+            }
+        }
+
+        let subtype_kind = match spec.id.as_str() { "wheat" => 1u8, "paper" => 2u8, _ => 0u8 };
+        let classify = |wx: u32, wy: u32| -> u8 {
+            let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
+            let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
+            let (t, p, e, hb) = (
+                tile.temperature[ti], tile.precipitation[ti],
+                tile.elevation[ti], tile.habitability[ti],
+            );
+            if subtype_kind == 1 { grain_subtype(t, p, e) } else { paper_subtype(t, p, e, hb) }
+        };
+        let sub: Option<&dyn Fn(u32, u32) -> u8> = if subtype_kind == 0 { None } else { Some(&classify) };
+        if let Some(m) = build_belt_mask(&spec.id, &belt, grid_w, grid_h, coarse, sub) {
+            out.push(m);
+        }
+    }
+    Ok(out)
+}
+
+
+#[cfg(test)]
+mod belt_mask_tests {
+    use super::rle_encode_mask;
+
+    /// The RLE is the whole reason a FULL-RESOLUTION coverage layer is affordable,
+    /// so it has to round-trip exactly — a decoder disagreeing with the encoder would
+    /// draw a belt shifted by however many cells the first bad run was long.
+    #[test]
+    fn the_coverage_rle_round_trips_exactly() {
+        let cases: Vec<Vec<u8>> = vec![
+            vec![],
+            vec![0],
+            vec![1],
+            vec![0, 0, 0, 1, 1, 0, 1],
+            vec![1; 1000],
+            (0..500).map(|i| (i % 3 == 0) as u8).collect(),
+        ];
+        for src in cases {
+            let rle = rle_encode_mask(&src);
+            assert_eq!(rle.len() % 2, 0, "the RLE is flat (value, run) pairs");
+            let mut back: Vec<u8> = Vec::with_capacity(src.len());
+            for pair in rle.chunks(2) {
+                for _ in 0..pair[1] { back.push(pair[0] as u8); }
+            }
+            assert_eq!(back, src, "coverage RLE did not round-trip");
+        }
+    }
+
+    /// A contiguous belt is what makes the payload small; a run per cell would put a
+    /// world-spanning staple region past any sane IPC size. This is the property, not
+    /// a byte count: one solid block of coverage must cost a handful of runs, not one
+    /// per cell.
+    #[test]
+    fn a_contiguous_belt_costs_few_runs() {
+        let (w, h) = (200usize, 100usize);
+        let mut mask = vec![0u8; w * h];
+        for y in 20..80 {
+            for x in 40..160 { mask[y * w + x] = 1; }
+        }
+        let rle = rle_encode_mask(&mask);
+        // At most ~3 runs per row (lead-in zeros, the belt, trailing zeros), merged
+        // across rows where they abut — far below one run per cell.
+        assert!(rle.len() / 2 <= h * 3, "expected ≲3 runs/row, got {}", rle.len() / 2);
+    }
+}
+
+
 /// Persist the current overlay state (settlements / rivers / lakes) to metadata so it
 /// is included in the SQLite backup (save). The economy snapshot is already persisted
 /// by `compute_economy`. Called by the frontend right before saving a world.

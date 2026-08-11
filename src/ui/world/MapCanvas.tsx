@@ -10,7 +10,8 @@ import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo } from "@bridge";
+import { usePaletteStore } from "@state/paletteStore";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -73,6 +74,9 @@ export function MapCanvas() {
   const warHighlight = useViewportStore((s) => s.warHighlight);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
   const lineColors = useSettingsStore((s) => s.lineColors);
+  // D10 · the renderer's OWN belt-quality scale, served rather than copied (§8.18).
+  const palettes = usePaletteStore((s) => s.palettes);
+  const loadPalettes = usePaletteStore((s) => s.load);
   const houses = useCampaignStore((s) => s.houses);
   const selectedHouseIdx = useCampaignStore((s) => s.selectedHouseIdx);
   const campaignSnapshot = useCampaignStore((s) => s.snapshot);
@@ -1088,6 +1092,42 @@ export function MapCanvas() {
     }
     requestRender();
   }, [overlayVisibility, requestRender]);
+
+  // GOODS_LOCALITIES_PLAN.md Slice 5 · the FULL-RESOLUTION belt masks, fetched for
+  // the goods actually toggled on. They are a real payload (a full-resolution
+  // coverage mask per good), which is exactly why the command takes a list rather
+  // than returning every good the way `compute_overlays` does — and why this effect
+  // keys on the SET of enabled goods, not on `overlayVisibility` as a whole (which
+  // changes whenever any unrelated overlay is toggled).
+  const enabledGoodsKey = useMemo(() => {
+    const on: string[] = [];
+    for (const [k, v] of Object.entries(overlayVisibility)) {
+      if (v && k.startsWith("good_")) on.push(k.slice(5));
+    }
+    return on.sort().join(",");
+  }, [overlayVisibility]);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    if (!enabledGoodsKey) { om.drawGoodBeltMasks([]); requestRender(); return; }
+    let stale = false;
+    computeGoodBeltMasks(enabledGoodsKey.split(",")).then((masks) => {
+      if (stale) return;
+      om.drawGoodBeltMasks(masks);
+      requestRender();
+    }).catch(() => {});
+    return () => { stale = true; };
+  }, [enabledGoodsKey, worldKey, tileVersion, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // D10 · push the SERVED absolute quality scale into the overlay manager, so the
+  // belt wash reads from the same table Rust holds rather than a copy (§8.18).
+  useEffect(() => { void loadPalettes(); }, [loadPalettes]);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !palettes) return;
+    om.setGoodQualityScale(palettes.good_quality, palettes.good_quality_pale);
+    requestRender();
+  }, [palettes, requestRender]);
 
   // Merchant-family control overlay — which settlements each house holds. Driven
   // by the live campaign houses (updates dynamically as the campaign advances).

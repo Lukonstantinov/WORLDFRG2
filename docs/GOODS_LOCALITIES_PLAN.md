@@ -1,7 +1,8 @@
 # Goods localities, rivers, and the two-layer goods map
 
-> **APPROVED, NOT YET BUILT.** Decisions in §2 are settled with the maintainer.
-> Read §1 first — the measured findings are the reason any of this exists.
+> **ALL 8 SLICES BUILT.** See `CLAUDE.md` §8.19 for the shipped account (rivers,
+> marine bands, localities, naming, the overlay, the province plate, production
+> wiring) and the measured findings/exceptions each slice's own gate recorded.
 
 Trade goods are the one half of the world pipeline that never got the treatment
 minerals got. `sim/step8_biological_goods/deposits.rs` (§8.16) placed ore by real

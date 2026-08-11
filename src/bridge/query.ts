@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CultureRegion, EconomySnapshot, Itinerary, PoliticalCenter, Settlement, SharkZone, TradeMatrix } from "@types";
+import type { CultureRegion, EconomySnapshot, GoodBeltMask, Itinerary, PoliticalCenter, Settlement, SharkZone, TradeMatrix } from "@types";
 import type { FisheryBank, OverlaysResult, TradeRoute } from "./types";
 
 /** Compute trade routes between the current settlements (pass the store list).
@@ -81,6 +81,17 @@ export async function computeReefZones(): Promise<SharkZone[]> {
  *  (Natural Disasters overlay, alongside the hurricane/storm zones). */
 export async function computeMonsoonZones(): Promise<SharkZone[]> {
   return invoke("compute_monsoon_zones");
+}
+
+/** GOODS_LOCALITIES_PLAN.md Slice 5 · the FULL-RESOLUTION belt mask for each named
+ *  good — the payload that replaces `GoodRegion`'s coarse blocks for the FILL, so a
+ *  belt meeting the sea ends on the coastline instead of spilling into it (F4/D3).
+ *
+ *  Takes an explicit good list rather than returning every good, because a mask is a
+ *  real payload and only the toggled goods are ever drawn. `compute_good_regions`
+ *  still supplies the label centroid, medallion and sublabel for every good. */
+export async function computeGoodBeltMasks(goods: string[]): Promise<GoodBeltMask[]> {
+  return invoke("compute_good_belt_masks", { goods });
 }
 
 /** Latitude bands of the general circulation for the Climate Bands overlay: the

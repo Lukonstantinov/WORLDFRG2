@@ -1191,6 +1191,43 @@ export interface GoodRegion {
   sublabel: string;          // specific gemstone (Ruby/Sapphire/…); else ""
 }
 
+/** GOODS_LOCALITIES_PLAN.md Slice 5 (D3 · D9 · D10) · ONE good's belt as a
+ *  FULL-RESOLUTION mask, which is what lets the overlay stop drawing the coarse
+ *  blocks of `GoodRegion` that spill past the coastline (F4).
+ *
+ *  Full resolution IS the coastline clip: a land good's belt byte is already exactly
+ *  zero on every sea cell and a marine good's is zero on land, so drawing the belt at
+ *  its own resolution ends it on the coast by construction — never snapped to a
+ *  province polygon (D3).
+ *
+ *  Two layers (D9), split because they answer different questions and compress
+ *  differently: COVERAGE is boolean at full resolution and run-length encoded (a belt
+ *  is contiguous, so this is small); QUALITY is the belt value on a coarse grid,
+ *  because a wash needs no per-cell precision — it is painted only where coverage
+ *  says so, so the coarse wash still ends exactly on the coastline. */
+export interface GoodBeltMask {
+  good: string;
+  /** Bounding box of the belt in WORLD cells; the mask covers exactly this box. */
+  x0: number;
+  y0: number;
+  w: number;
+  h: number;
+  /** Full-resolution 0/1 over the box, row-major, as flat (value, run) pairs — the
+   *  same encoding `SimProvincesResult.raster_rle` already uses. */
+  coverage_rle: number[];
+  /** The belt's own ABSOLUTE value 0..255 on a `qw × qh` grid of `coarse`-cell
+   *  blocks over the same box. Never per-good normalised (D10). */
+  quality: number[];
+  qw: number;
+  qh: number;
+  /** World cells per quality block. */
+  coarse: number;
+  /** Per-quality-block subtype id (grain species / paper source); [] if none. */
+  subtypes: number[];
+  /** Covered world cells. */
+  cells: number;
+}
+
 export interface PoliticalCenter {
   x: number;
   y: number;
@@ -2297,6 +2334,11 @@ export interface ProvinceLocalityDot {
   /** Empty unless the locality cleared the "notable" quality threshold. */
   name: string;
   river_fed: boolean;
+  /** D4 · this patch sits in the SEA off the province's coast, not on its land. It
+   *  is listed so the survey plate can annotate the adjacent water — the province
+   *  gains NO maritime territory, and nothing counts a sea locality toward its land
+   *  use, tenure, harvest or revenue. */
+  sea: boolean;
 }
 
 /** #9 · A province's full goods picture: potential goods + ore workings + localities. */

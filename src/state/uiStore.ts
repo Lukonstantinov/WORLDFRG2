@@ -395,6 +395,14 @@ export const useUIStore = create<UIStore>((set) => ({
     toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
     toponymsDesert: true, toponymsForest: true, toponymsTundra: true,
     plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false, states: false,
+    // GOODS_LOCALITIES_PLAN.md D9 · the TWO layers a goods belt carries, toggled
+    // independently of each other and of WHICH goods are shown. Coverage answers
+    // "can it grow here" (the belt's honest extent, so a belt thinned by Slice 3's
+    // modulation is visible on the map rather than buried in a diagnostic, §5.1);
+    // quality answers "is it fine here". They are two switches rather than two per
+    // good because ~90 toggles would be unusable — the per-good checkboxes below
+    // still select which goods, and these say which of the two questions to draw.
+    goodCoverage: true, goodQuality: true,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,

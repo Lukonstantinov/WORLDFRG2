@@ -246,4 +246,182 @@ mod tests {
             "enabled belt goods with placed cells but ZERO settlements in catchment: {zero_settlement:?}"
         );
     }
+
+    /// Slice 5 (D3) · THE CLAIM THE FULL-RESOLUTION OVERLAY RESTS ON.
+    ///
+    /// `compute_good_belt_masks` performs no coastline test of its own — it copies
+    /// the belt column verbatim above `COVERAGE_MIN_U8` and lets full resolution be
+    /// the clip. That is only correct because a `Global`/`Local` belt good's byte is
+    /// already exactly zero on the wrong side of the coast: every one of them is
+    /// placed through `envelope_score`, whose FIRST act is the domain gate
+    /// (`Continental`/`Coastal`/`Island` require `terrain == 1`, `Marine` requires
+    /// `terrain == 0`). If that ever stopped holding, the overlay would silently
+    /// start painting belts into the ocean again — F4 back by a different route —
+    /// and nothing would catch it, because the render path has no opinion about
+    /// where the coast is.
+    ///
+    /// Asserted against the SHARED constant, not a copy of it, for the same reason
+    /// §8.18 serves the palette: a second copy is the thing that drifts.
+    ///
+    /// ## Measured finding (§2.4), deliberately printed rather than asserted
+    ///
+    /// `Distribution::Deposits` goods DO cross it, and are excluded from the floor
+    /// on purpose. They never touch `envelope_score` at all — `deposits.rs` (§8.16)
+    /// places them from tectonic setting, and its `CoastalMarine` model scores
+    /// "shelf / beach / warm shallows" without re-checking the spec's declared
+    /// `Domain`. So a `Coastal` salt pan can land a cell into the tidal water and a
+    /// `Marine` one a cell up the beach. Measured at 300×150: bay_salt 115 cells,
+    /// tyrian_purple 16, ambergris 1 — out of ~45,000, and for a salt pan on a tidal
+    /// flat arguably the right answer anyway.
+    ///
+    /// It is NOT a Slice 5 regression: the coarse-block path drew those same cells
+    /// and a great deal of neighbouring water besides, so full resolution is strictly
+    /// tighter. Whether the geology placer should honour a mineral's declared
+    /// `Domain` is a `deposits.rs` question with its own gates (F2 — minerals already
+    /// have their own hierarchy), and belongs to `docs/DEPOSITS_AND_MINING_PLAN.md`,
+    /// not to this plan's floor. Fixing it here by clamping the render would hide the
+    /// finding instead of recording it.
+    #[test]
+    fn a_belt_never_crosses_the_coastline() {
+        use crate::commands::query_commands::COVERAGE_MIN_U8;
+        use crate::sim::goods_spec::Domain;
+        let (buf, _rivers, _settled, _province_id, specs) = reference_world(300, 150, 0xC0FFEE_5EED);
+        let mut offenders: Vec<String> = Vec::new();
+        let mut deposit_findings: Vec<String> = Vec::new();
+        for (slot, spec) in specs.iter().enumerate() {
+            if !spec.enabled || matches!(spec.distribution, Distribution::Manufactured) { continue; }
+            let Some(belt) = buf.goods.get(slot) else { continue };
+            let wants_land = !matches!(spec.domain, Domain::Marine);
+            let mut wrong = 0usize;
+            for (i, &v) in belt.iter().enumerate() {
+                if v < COVERAGE_MIN_U8 { continue; }
+                if (buf.terrain[i] == 1) != wants_land { wrong += 1; }
+            }
+            if wrong == 0 { continue; }
+            let line = format!("{} ({wrong} cells on the wrong side of the coast)", spec.id);
+            if is_belt_good(spec) { offenders.push(line); } else { deposit_findings.push(line); }
+        }
+        if !deposit_findings.is_empty() {
+            println!(
+                "\nFINDING (out of Slice 5's scope, F2 — see this test's doc comment): \
+                 `Deposits` goods bypass `envelope_score`'s domain gate, so the geology \
+                 placer can put a working on the wrong side of its own declared Domain: \
+                 {deposit_findings:?}"
+            );
+        }
+        assert!(
+            offenders.is_empty(),
+            "a BELT good drawn at full resolution would spill across the coastline: {offenders:?}"
+        );
+    }
+
+    /// Slice 5 · THE EYE, not another number. Writes a PNG per sampled good showing
+    /// the world's land/sea beneath its belt drawn exactly as the overlay draws it —
+    /// so "does the belt end on the coastline" can be ANSWERED rather than argued.
+    ///
+    /// ```bash
+    /// GOOD_MASK_DIR=/tmp/goods cargo test --lib \
+    ///   dump_good_belt_mask_sheet -- --ignored --nocapture
+    /// ```
+    ///
+    /// It drives the REAL mask builder (`build_belt_mask`) and then repeats the
+    /// frontend's own decode — RLE → majority downsample → the SERVED quality scale —
+    /// rather than re-implementing either, for the same reason `dump_biome_swatch_
+    /// sheet` renders through the real `render_tile` (§8.12). A picture produced by a
+    /// second, tidier copy of the pipeline proves nothing about the one that ships.
+    #[test]
+    #[ignore]
+    fn dump_good_belt_mask_sheet() {
+        use crate::commands::palette_commands::{GOOD_QUALITY_PALE, GOOD_QUALITY_STOPS};
+        use crate::commands::query_commands::build_belt_mask;
+
+        let dir = std::env::var("GOOD_MASK_DIR").unwrap_or_else(|_| ".".into());
+        std::fs::create_dir_all(&dir).unwrap();
+        let (w, h) = (600u32, 300u32);
+        let (buf, _rivers, _settled, _province_id, specs) = reference_world(w, h, 0xC0FFEE_5EED);
+        let coarse = (w / 450).max(1);
+
+        // The served scale, sampled the way `OverlayManager.sampleGoodQuality` does.
+        let sample = |t: f32| -> (f32, f32) {
+            let s = &GOOD_QUALITY_STOPS;
+            if t <= s[0].0 { return (s[0].1, s[0].2); }
+            let last = s[s.len() - 1];
+            if t >= last.0 { return (last.1, last.2); }
+            for pair in s.windows(2) {
+                let (a, b) = (pair[0], pair[1]);
+                if t <= b.0 {
+                    let k = (t - a.0) / (b.0 - a.0);
+                    return (a.1 + (b.1 - a.1) * k, a.2 + (b.2 - a.2) * k);
+                }
+            }
+            (last.1, last.2)
+        };
+
+        // A few goods that between them exercise every shape the layer has to get
+        // right: a marine belt (must sit ONLY in water), a coastal one, a
+        // continent-spanning staple (D6), and a seeded luxury homeland.
+        let wanted = ["stockfish", "olive_oil", "wheat", "wine", "timber", "pearls"];
+        let mut wrote = 0;
+        for (slot, spec) in specs.iter().enumerate() {
+            if !wanted.contains(&spec.id.as_str()) { continue; }
+            let Some(belt) = buf.goods.get(slot) else { continue };
+            let Some(m) = build_belt_mask(&spec.id, belt, w, h, coarse, None) else {
+                println!("{:<12} — the world placed none", spec.id);
+                continue;
+            };
+
+            // Ground: land pale grey, sea dark blue — so the coastline is unmistakable.
+            let mut px = vec![0u8; (w * h * 3) as usize];
+            for i in 0..(w * h) as usize {
+                let (r, g, b) = if buf.terrain[i] == 1 { (196, 192, 184) } else { (26, 44, 66) };
+                px[i * 3] = r; px[i * 3 + 1] = g; px[i * 3 + 2] = b;
+            }
+
+            // Decode the coverage RLE — the frontend's own loop.
+            let mut cov = vec![0u8; (m.w * m.h) as usize];
+            let mut pos = 0usize;
+            for pair in m.coverage_rle.chunks(2) {
+                let (v, cnt) = (pair[0], pair[1] as usize);
+                if v != 0 {
+                    let end = (pos + cnt).min(cov.len());
+                    for slot in &mut cov[pos..end] { *slot = 1; }
+                }
+                pos += cnt;
+            }
+
+            let base = parse_hex(&spec.color).unwrap_or((200, 200, 200));
+            let (pr, pg, pb) = GOOD_QUALITY_PALE;
+            for by in 0..m.h {
+                let qy = (by / m.coarse).min(m.qh - 1);
+                for bx in 0..m.w {
+                    if cov[(by * m.w + bx) as usize] == 0 { continue; }
+                    let qi = (qy * m.qw + (bx / m.coarse).min(m.qw - 1)) as usize;
+                    let (alpha, mix) = sample(m.quality[qi] as f32 / 255.0);
+                    let cm = |c: u8, p: u8| (p as f32 + (c as f32 - p as f32) * mix);
+                    let (cr, cg, cb) = (cm(base.0, pr), cm(base.1, pg), cm(base.2, pb));
+                    let o = (((m.y0 + by) * w + (m.x0 + bx)) * 3) as usize;
+                    for (k, c) in [cr, cg, cb].iter().enumerate() {
+                        px[o + k] = (px[o + k] as f32 * (1.0 - alpha) + c * alpha).round() as u8;
+                    }
+                }
+            }
+
+            let path = format!("{dir}/belt_{}.png", spec.id);
+            image::save_buffer(&path, &px, w, h, image::ColorType::Rgb8).unwrap();
+            println!("{:<12} {:>7} cells  bbox {}×{} at ({},{})  rle {} runs  → {}",
+                spec.id, m.cells, m.w, m.h, m.x0, m.y0, m.coverage_rle.len() / 2, path);
+            wrote += 1;
+        }
+        assert!(wrote > 0, "no sampled good placed anything — nothing to look at");
+    }
+
+    fn parse_hex(c: &str) -> Option<(u8, u8, u8)> {
+        let s = c.trim_start_matches('#');
+        if s.len() != 6 { return None; }
+        Some((
+            u8::from_str_radix(&s[0..2], 16).ok()?,
+            u8::from_str_radix(&s[2..4], 16).ok()?,
+            u8::from_str_radix(&s[4..6], 16).ok()?,
+        ))
+    }
 }

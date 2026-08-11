@@ -9,6 +9,55 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-08-11 (`GOODS_LOCALITIES_PLAN.md` — all 8 slices built)
+
+**What shipped.** Trade goods got the belt→locality→cell hierarchy minerals already
+had (§8.16 → §8.19 in `CLAUDE.md`): rivers now bias placement for 12 named goods
+(floodplain/irrigation/riverbank/float_out, Slice 1), marine goods can be split into
+`Inshore`/`Bank` bands (Slice 2), a new `sim::localities` module clusters every
+enabled `Global`/`Local` good's belt into real terroir localities with full
+modulation and a hard floor (Slice 3), notable localities get culture-local names
+(Slice 4), the global map overlay draws a full-resolution two-layer (coverage +
+quality) belt mask instead of the old coarse 8-cell blocks that spilled past the
+coastline (Slice 5), the province survey plate draws real locality squares instead
+of hashed markers (Slice 6), and locality/deposit grade now feeds hub quality in the
+worldgen economy (Slice 7).
+
+**Slice 0's coverage diagnostic — the gate every later slice was measured against —
+caught two real things**, not just a passing baseline:
+1. A process-global test race: the diagnostic originally called
+   `cultures::set_active` (a process-wide `RwLock`), which under `cargo test --lib`'s
+   parallel execution intermittently corrupted `econ_inheritance_rules_fragment_
+   differently` and `econ_scorecard_is_deterministic`'s "deterministic" results —
+   found by running the FULL suite, not just the new test in isolation. Fixed by
+   relying on `names::gen_name`'s legacy-culture fallback instead of activating a
+   real map.
+2. A coastline-crossing bug in `deposits.rs`: `Distribution::Deposits` goods bypass
+   `envelope_score`'s domain gate entirely, so the `CoastalMarine` model can place a
+   working on the wrong side of its own declared `Domain` (measured at 300×150:
+   bay_salt 115 cells, tyrian_purple 16, ambergris 1). Recorded as a printed finding
+   for `docs/DEPOSITS_AND_MINING_PLAN.md`, not silently clamped in the renderer.
+
+Also recorded, not chased: a handful of the rarest deposit goods (tyrian_purple,
+ambergris, emerald) and one pre-existing belt good (`dyes`, murex purple — verified
+untouched by any Slice 1-4 change) can land zero settlements in catchment at this
+diagnostic's deliberately modest 300×150 world size. Named exceptions, not a
+loosened floor.
+
+**Gates:** `cargo check` clean · `cargo test --lib` **294 passed, 0 failed, 21
+ignored** (was 290/0/20 before this session) · `earth_` unaffected (unchanged, this
+session never touches `step3_ocean_atmo`/`step4_climate`) · `simulate_decades_
+reports_dynamics` and `econ_` both green · `npx tsc --noEmit` clean · `npx vite
+build` succeeds.
+
+**Deliberately not built** (named in `GOODS_LOCALITIES_PLAN.md` §6 and `CLAUDE.md`
+§8.19): a literal per-good coverage/quality toggle pair (one toggle per good plus two
+global layer switches instead — ~90 checkboxes would be unusable); subtype boundary
+strokes on the full-resolution mask path (subtype tinting is preserved); a fix for
+the `Deposits` coastline-crossing finding above (belongs to a different plan).
+
+---
+
 ## Current state — 2026-08-09 (CI fix: `econ_inheritance_rules_fragment_differently` — root cause bisected and fixed, unrelated to the realm work)
 
 **The finding.** After the realm work (R1-R5, `REALM_AND_GOVERNMENT_PLAN.md`) shipped,
@@ -1146,6 +1195,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-11 | *this* | 70.2% | 39.0% | 294 | 0 | `GOODS_LOCALITIES_PLAN.md` all 8 slices built (rivers, marine bands, localities, naming, the two-layer overlay, province squares, production wiring). Slice 0's own gate found and fixed a process-global test race it had introduced, and printed (not asserted) a pre-existing `Deposits`-goods coastline-crossing finding for `DEPOSITS_AND_MINING_PLAN.md` |
 | 2026-07-31 | *this* | **70.2%** | 39.0% | 227 | 0 | Ocean evaporation's wind term was DEAD CODE — it read `|belt_wind|`, which is a unit vector, so the factor was identically 1.0. Now reads `jets::base_speed`, the real belt speed profile, as the bulk formula `E ∝ U·(q_s − q_a)` requires |
 | 2026-07-31 | *this* | 70.1% | **39.0%** | 227 | 0 | **Köppen no longer emits `H`.** Highland has no Köppen counterpart — the reference calls Tibet and the high Andes `ET`/`EF`/`Dwc` — so every `H` cell was unmatchable by construction. Exact-zone 33.7 → 39.0, the largest single move of the session, with main-class *identical* (it only ever sat on terrain the reference already calls polar). Alpine is unaffected on the Biomes layer, which has its own altitudinal band. Graded rain shadow tried and reverted (A15) |
 | 2026-07-31 | *this* | **70.1%** | **33.7%** | 227 | 0 | **Seasonal monsoon adopted (FIX_PLAN A14).** The wind belts now migrate with the ITCZ and cross-equatorial flow recurves, so monsoon winds actually reverse: 0/7 → 4/7 sites, now ASSERTED by `earth_monsoon_wind_reverses`. Exact-zone to its best ever. Main-class floor LOWERED 70.6 → 70.0 — the only lowering in this file's history, a deliberate trade (the arid belt had been propped up by a wind that never changed direction). ITCZ overlay now draws both seasonal lines with the migration band hatched between them |

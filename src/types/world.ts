@@ -218,6 +218,18 @@ export interface ClassColor {
   code: number;
   color: string;
 }
+/** GOODS_LOCALITIES_PLAN.md D10 · one stop on the ONE absolute belt-quality scale
+ *  every good's quality layer shades on. The colour is the good's own; this carries
+ *  only how strongly it is drawn at a given belt value — so a thin wine fringe and a
+ *  thin wheat fringe read alike, and no good is ever renormalised against its own
+ *  best. Served from `palette_commands.rs`, never copied here (§8.18). */
+export interface QualityStop {
+  /** The belt value itself, 0..1 — absolute, never per-good normalised. */
+  at: number;
+  alpha: number;
+  /** How far the good's own hue is mixed in (0 = the pale ground tint, 1 = full). */
+  mix: number;
+}
 export interface RenderPalettes {
   elevation: RampStop[];
   bathymetry: RampStop[];
@@ -227,4 +239,6 @@ export interface RenderPalettes {
   biome: ClassColor[];
   soil: ClassColor[];
   elev_max_m: number;
+  good_quality: QualityStop[];
+  good_quality_pale: string;
 }
