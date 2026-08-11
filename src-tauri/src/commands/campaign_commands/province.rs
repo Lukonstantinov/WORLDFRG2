@@ -385,7 +385,10 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     for g in 0..ng {
         let idx = p * ng + g;
         let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
-        if belt <= 0.001 { continue; } // never producible here at all
+        // A good ABSENT from the whole province sits at the exact belt-histogram bin-0
+        // floor (`PROV_GOOD_ABSENT_BELT` ≈ 8/255); any real presence is strictly above it.
+        // The old `<= 0.001` gate let that floor through → pepper on arctic provinces.
+        if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
         let actual = actual_all.get(idx).copied().unwrap_or(0.0);
         let depletion = sim.prov_good_depletion.get(idx).copied().unwrap_or(0.0);
         // §5.5 (simplified — no separate "last produced" year is tracked): a good

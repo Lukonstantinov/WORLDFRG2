@@ -4664,6 +4664,16 @@ pub struct ProvEvent {
 }
 
 // ── Province land-state tuning ───────────────────────────────────────────────────
+/// The `Province.good_belt` value a good produces when it is ABSENT from the WHOLE
+/// province: every cell falls in the belt histogram's bin 0, whose centre is
+/// `(bin_w/2)/255` = 8/255 (`GOOD_BINS`=16, see `shared/provinces.rs`). It is an exact,
+/// single value, and any real belt in even one cell pushes the province mean strictly
+/// above it — so a good is "producible here" iff `good_belt > PROV_GOOD_ABSENT_BELT`.
+/// This is the gate that keeps a tropical good (pepper) off an arctic province while
+/// still surfacing every good that genuinely covers part of a province, and it works on
+/// EXISTING saves (the frozen belt already carries this floor). A tiny epsilon absorbs
+/// f32 rounding without admitting a truly-absent good.
+pub(crate) const PROV_GOOD_ABSENT_BELT: f32 = 8.0 / 255.0 + 1e-6;
 /// Woodland cleared per year at full population pressure (fraction of the province).
 const PROV_CLEAR_RATE: f32 = 0.0035;
 /// Woodland regrowing per year on land nobody is working.

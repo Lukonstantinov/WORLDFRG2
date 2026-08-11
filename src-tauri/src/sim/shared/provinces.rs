@@ -1549,24 +1549,25 @@ pub fn generate_provinces(
         // exploitation tracker scales by live land use. A good present on only part
         // of the province correctly reads as a diluted low mean, not a spot value:
         // `potential` is about the province's OWN average yield, not its best patch.
+        // Bin 0 holds genuinely-ABSENT cells (belt byte 0..15/255), scored by the bin
+        // CENTRE like every other bin. That gives a good ABSENT from the WHOLE province an
+        // EXACT, single value — `(bin_w/2)/255` = 8/255 ≈ 0.0314 (every cell in bin 0) —
+        // and any real belt in even one cell pushes the mean strictly above it. The
+        // campaign therefore reads "this land can't yield the good" as `good_belt <=
+        // PROV_GOOD_ABSENT_BELT` (= 8/255, `tick/mod.rs`), NOT as `<= 0.001`: the old
+        // `0.001` gate let that 0.0314 phantom floor through, so a tropical good like
+        // pepper showed on an arctic province (and every good on every province).
+        // Zeroing bin 0 here was tried and reverted — it also stripped the
+        // coverage-diluted belt of a good that genuinely covers only PART of a province,
+        // hiding real produce; and it would have needed every world regenerated.
         let bin_w = 256 / GOOD_BINS;
         let good_belt: Vec<f32> = (0..ng)
             .map(|gd| {
                 let hist = &a.goods_hist[gd * GOOD_BINS..(gd + 1) * GOOD_BINS];
                 let n: u64 = hist.iter().map(|&c| c as u64).sum();
                 if n == 0 { return 0.0; }
-                // Bin 0 holds genuinely-ABSENT cells (belt byte 0..15/255). Scoring it
-                // by the bin CENTRE (bin_w/2 = 8) gave EVERY good a phantom ~0.031 belt
-                // floor in EVERY province — so a tropical good like pepper read as
-                // "producible" on an arctic province and passed the consumers'
-                // `belt <= 0.001` "the land can't yield this" gate. Represent bin 0 by 0
-                // so a good with no real belt here reads exactly 0; the higher bins keep
-                // their centre so a good that IS present is unaffected.
                 let sum: f64 = hist.iter().enumerate()
-                    .map(|(b, &c)| {
-                        let rep = if b == 0 { 0.0 } else { (b * bin_w + bin_w / 2) as f64 };
-                        rep * c as f64
-                    })
+                    .map(|(b, &c)| (b * bin_w + bin_w / 2) as f64 * c as f64)
                     .sum();
                 ((sum / n as f64) as f32 / 255.0).clamp(0.0, 1.0)
             })
