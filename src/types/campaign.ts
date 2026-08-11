@@ -1246,6 +1246,30 @@ export interface ProvinceGoodMask {
   cells: number;
 }
 
+/** GOODS ATLAS (`campaign_good_atlas`) — everything about one good for the Atlas panel
+ *  (the remade Codex). All read from live campaign state. */
+export interface AtlasHub { hub: number; name: string; x: number; y: number; amount: number }
+export interface AtlasHouse { house: number; name: string; is_guild: boolean; share: number; total_volume: number }
+export interface AtlasFlow {
+  from: number; to: number;
+  from_x: number; from_y: number; to_x: number; to_y: number;
+  amount: number;
+}
+export interface GoodAtlas {
+  good: string;
+  manufactured: boolean;
+  total_produced: number;
+  total_traded: number;
+  avg_quality: number;
+  /** 10 bins over quality 0..1 (count of producing cities per band). */
+  quality_hist: number[];
+  top_quality: AtlasHub[];
+  producers: AtlasHub[];
+  consumers: AtlasHub[];
+  houses: AtlasHouse[];
+  flows: AtlasFlow[];
+}
+
 export interface PoliticalCenter {
   x: number;
   y: number;

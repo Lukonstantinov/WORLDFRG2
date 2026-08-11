@@ -3,9 +3,10 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetWorldEconomy } from "@bridge";
-import type { EconChain, WorldGoodPrice } from "@types";
+import { campaignGetWorldEconomy, campaignGoodAtlas } from "@bridge";
+import type { EconChain, WorldGoodPrice, GoodAtlas } from "@types";
 import { commodityHistory } from "@app/commodityHistory";
+import { goodOverlayKey } from "@goods";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** #35/#36/#37 · Goods Codex. For a chosen good:
@@ -30,7 +31,19 @@ export function GoodsCodexPanel() {
   const active = !!snapshot?.active;
   const year = snapshot?.clock?.year ?? 0;
 
-  const [tab, setTab] = useState<"prov" | "hist" | "scar">("prov");
+  const [tab, setTab] = useState<"qual" | "trade" | "ctrl" | "flow" | "prov" | "hist" | "scar">("qual");
+  const overlayVis = useUIStore((s) => s.overlayVisibility);
+  const flowOn = !!overlayVis.goodFlow;
+
+  // Goods Atlas · the live per-good facets (quality / trade / control / flow), refreshed
+  // once per campaign YEAR so the atlas tracks the living economy.
+  const [atlas, setAtlas] = useState<GoodAtlas | null>(null);
+  useEffect(() => {
+    if (!open || !active || !codexGood) { setAtlas(null); return; }
+    let alive = true;
+    campaignGoodAtlas(codexGood).then((a) => { if (alive) setAtlas(a); }).catch(() => { if (alive) setAtlas(null); });
+    return () => { alive = false; };
+  }, [open, active, codexGood, year]);
   // Live per-good world prices from the running campaign, refreshed once per YEAR so
   // the Codex reflects the living market, not just the frozen worldgen snapshot.
   const [liveGoods, setLiveGoods] = useState<WorldGoodPrice[]>([]);
@@ -56,6 +69,7 @@ export function GoodsCodexPanel() {
   if (!open) return null;
   const close = () => {
     setOverlayVisible("goodScarcity", false);
+    setOverlayVisible("goodFlow", false);
     useUIStore.getState().setHeatGood(null); // heat returns to all goods
     useUIStore.getState().setShowGoodsCodex(false);
   };
@@ -125,7 +139,7 @@ export function GoodsCodexPanel() {
 
       {/* Tabs */}
       <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
-        {([["prov", "🧭 Provenance"], ["hist", "📜 History"], ["scar", "⚖ Scarcity"]] as const).map(([id, lbl]) => (
+        {([["qual", "⭐ Quality"], ["trade", "📦 Trade"], ["ctrl", "🏛 Control"], ["flow", "🔀 Flow"], ["prov", "🧭 Provenance"], ["hist", "📜 History"], ["scar", "⚖ Scarcity"]] as const).map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
             style={{ padding: "4px 8px", cursor: "pointer", fontSize: 10.5, fontWeight: tab === id ? 700 : 400,
               color: tab === id ? "#cfe2f6" : "#6a86a6",
@@ -136,8 +150,84 @@ export function GoodsCodexPanel() {
       </div>
 
       <div style={{ overflowY: "auto", padding: "8px 10px 12px", maxHeight: "60vh" }}>
-        {!economy && tab !== "hist" && (
+        {!economy && (tab === "prov" || tab === "scar") && (
           <div style={empty}>Run the Economy step (10) so prices and trade routes are available.</div>
+        )}
+
+        {/* ── GOODS ATLAS — live per-good facets (need a running campaign) ── */}
+        {(tab === "qual" || tab === "trade" || tab === "ctrl" || tab === "flow") && (
+          !active ? (
+            <div style={empty}>Begin the campaign — the Atlas reads the living economy (quality, trade volume, control and flow).</div>
+          ) : !atlas ? (
+            <div style={empty}>Loading…</div>
+          ) : tab === "qual" ? (
+            <>
+              {codexGood && (() => {
+                const qkey = goodOverlayKey(codexGood);
+                const qOn = !!overlayVis[qkey];
+                return (
+                  <button onClick={() => setOverlayVisible(qkey, !qOn)} style={{ ...btn, background: qOn ? "#7a3a3a" : "#2060a0", marginBottom: 8 }}>
+                    {qOn ? "Hide quality on map" : "Show quality on map"}
+                  </button>
+                );
+              })()}
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <AtlasStat label="avg quality" value={`${Math.round(atlas.avg_quality * 100)}%`} />
+                <AtlasStat label="produced/yr" value={fmtn(atlas.total_produced)} />
+                <AtlasStat label="cities" value={String(atlas.quality_hist.reduce((a, b) => a + b, 0))} />
+              </div>
+              <div style={sectionHdr}>Quality distribution</div>
+              <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 46, margin: "4px 0 2px" }}>
+                {atlas.quality_hist.map((c, i) => {
+                  const mx = Math.max(1, ...atlas.quality_hist);
+                  return <div key={i} title={`${i * 10}–${i * 10 + 10}% · ${c} ${c === 1 ? "city" : "cities"}`}
+                    style={{ flex: 1, height: `${(c / mx) * 100}%`, minHeight: c > 0 ? 2 : 0, background: `hsl(${140 - i * 11} 55% 50%)`, borderRadius: 1 }} />;
+                })}
+              </div>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#5a6a80" }}><span>marginal</span><span>prime</span></div>
+              <div style={{ ...sectionHdr, marginTop: 8 }}>Finest sources</div>
+              {atlas.top_quality.slice(0, 8).map((h) => (
+                <div key={h.hub} style={rankRow}><span>{h.name}</span><span style={{ color: "#e3c14a" }}>{Math.round(h.amount * 100)}%</span></div>
+              ))}
+              {atlas.top_quality.length === 0 && <div style={empty}>Not produced anywhere yet.</div>}
+            </>
+          ) : tab === "trade" ? (
+            <>
+              <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
+                <AtlasStat label="traded/yr" value={fmtn(atlas.total_traded)} />
+                <AtlasStat label="produced/yr" value={fmtn(atlas.total_produced)} />
+              </div>
+              <div style={sectionHdr}>Top producers</div>
+              <AtlasBars rows={atlas.producers.map((p) => ({ label: p.name, value: p.amount }))} color="#7fd0a0" fmt={fmtn} />
+              <div style={{ ...sectionHdr, marginTop: 8 }}>Consumed most (hotspots)</div>
+              <AtlasBars rows={atlas.consumers.map((p) => ({ label: p.name, value: p.amount }))} color="#ff9a6a" fmt={fmtn} />
+            </>
+          ) : tab === "ctrl" ? (
+            <>
+              <div style={sectionHdr}>Control — share of this good</div>
+              <AtlasBars rows={atlas.houses.map((h) => ({ label: (h.is_guild ? "⚒ " : "🏛 ") + h.name, value: h.share }))} color="#6a9adf" fmt={(v) => `${Math.round(v * 100)}%`} norm={1} />
+              <div style={{ ...sectionHdr, marginTop: 10 }}>Who trades the most — total volume</div>
+              <AtlasBars rows={[...atlas.houses].sort((a, b) => b.total_volume - a.total_volume).map((h) => ({ label: (h.is_guild ? "⚒ " : "🏛 ") + h.name, value: h.total_volume }))} color="#d9a441" fmt={fmtn} />
+              {atlas.houses.length === 0 && <div style={empty}>No house or guild trades this good yet.</div>}
+            </>
+          ) : (
+            <>
+              <button onClick={() => setOverlayVisible("goodFlow", !flowOn)} style={{ ...btn, background: flowOn ? "#7a3a3a" : "#2060a0" }}>
+                {flowOn ? "Hide flow on map" : "Show flow on map"}
+              </button>
+              <div style={{ color: "#5a6a80", fontSize: 9, margin: "6px 0 8px" }}>
+                Arrows follow the EXISTING trade routes, exporter → importer, width ∝ volume — redrawn each year.
+              </div>
+              <div style={sectionHdr}>Busiest lanes ({atlas.flows.length})</div>
+              {atlas.flows.length === 0 ? <div style={empty}>No shipments of this good last year.</div> :
+                atlas.flows.slice(0, 12).map((f, i) => (
+                  <div key={i} style={rankRow}>
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hubName(f.from)} → {hubName(f.to)}</span>
+                    <span style={{ color: "#8aa8c8" }}>{fmtn(f.amount)}</span>
+                  </div>
+                ))}
+            </>
+          )
         )}
 
         {/* PROVENANCE */}
@@ -272,6 +362,40 @@ export function GoodsCodexPanel() {
 }
 
 const dot = (c: string): React.CSSProperties => ({ width: 9, height: 9, borderRadius: "50%", background: c, display: "inline-block" });
+
+const fmtn = (n: number) => Math.round(n).toLocaleString();
+
+/** A compact stat chip for the Atlas facet headers. */
+function AtlasStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ flex: 1, background: "#0c1622", border: "1px solid #16283c", borderRadius: 5, padding: "4px 6px" }}>
+      <div style={{ color: "#cfe2f6", fontWeight: 700, fontSize: 12 }}>{value}</div>
+      <div style={{ color: "#6a86a6", fontSize: 8.5 }}>{label}</div>
+    </div>
+  );
+}
+
+/** A ranked horizontal bar list (producers, consumers, control, volume). `norm` fixes
+ *  the full-scale value (e.g. 1 for a share); otherwise it's the largest row. */
+function AtlasBars({ rows, color, fmt, norm }: {
+  rows: { label: string; value: number }[]; color: string; fmt: (v: number) => string; norm?: number;
+}) {
+  if (rows.length === 0) return <div style={empty}>—</div>;
+  const mx = norm ?? Math.max(1e-6, ...rows.map((r) => r.value));
+  return (
+    <div>
+      {rows.slice(0, 10).map((r, i) => (
+        <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1.5px 0" }}>
+          <span style={{ width: 92, fontSize: 9.5, color: "#bcd0e4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
+          <div style={{ flex: 1, height: 8, background: "#0c1622", borderRadius: 3, overflow: "hidden" }}>
+            <div style={{ width: `${Math.min(100, (r.value / mx) * 100)}%`, height: "100%", background: color, borderRadius: 3 }} />
+          </div>
+          <span style={{ width: 46, textAlign: "right", fontSize: 9, color: "#8aa0b8" }}>{fmt(r.value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const panel: React.CSSProperties = {
   position: "absolute", top: 60, left: 70, width: 340, maxHeight: "80vh",

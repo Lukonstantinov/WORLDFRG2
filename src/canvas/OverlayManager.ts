@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow } from "@types";
 import type { ClimateBands } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
@@ -572,6 +572,12 @@ export class OverlayManager {
   /** Seat→city polylines for the focused house, snapped onto the EXISTING trade
    *  routes (`routeAlongTradeRoutes`). Empty inner paths are skipped. */
   private houseNetwork: [number, number][][] = [];
+  // Goods Atlas · one good's yearly trade flow, each lane SNAPPED onto the existing
+  // trade routes (`routeAlongTradeRoutes`) — never a straight slash. Off-network lanes
+  // are dropped. `amount` drives arrow width; `goodFlowMax` normalises it.
+  private goodFlows: { path: [number, number][]; amount: number }[] = [];
+  private goodFlowColor = "#e0b24a";
+  private goodFlowMax = 0;
   // ── Trade-route graph (lazily built from `this.tradeRoutes`) so house-network and
   //    futures lanes can ride the roads ALREADY drawn on the map instead of straight
   //    or independently-routed lines. Rebuilt only when the routes array changes. ──
@@ -1346,6 +1352,25 @@ export class OverlayManager {
   drawGoodBeltMasks(masks: GoodBeltMask[]) {
     this.goodMasks = masks;
     this.goodMasksDirty = true;
+  }
+
+  /** Goods Atlas · one good's yearly flow lanes, each SNAPPED onto the existing trade
+   *  routes (the maintainer's MUST). `routeAlongTradeRoutes` returns null off-network,
+   *  and we DROP that lane rather than bridge it with a straight line — exactly as the
+   *  merchant-route and futures-lane layers do. */
+  drawGoodFlows(flows: AtlasFlow[], gridW: number, color: string) {
+    if (gridW > 0) this.worldW = gridW;
+    this.goodFlowColor = color || "#e0b24a";
+    const out: { path: [number, number][]; amount: number }[] = [];
+    let max = 0;
+    for (const f of flows) {
+      const path = this.routeAlongTradeRoutes([f.from_x, f.from_y], [f.to_x, f.to_y]);
+      if (!path || path.length < 2) continue;
+      out.push({ path, amount: f.amount });
+      if (f.amount > max) max = f.amount;
+    }
+    this.goodFlows = out;
+    this.goodFlowMax = max;
   }
 
   /** D10 · the one absolute quality scale, served by `get_render_palettes`. Pushed
@@ -2532,6 +2557,11 @@ export class OverlayManager {
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
       this.renderMerchantRoutes(ctx);
+    }
+
+    // Goods Atlas: one good's yearly flow, snapped onto the existing trade routes.
+    if (this.visibility.goodFlow && this.goodFlows.length > 0) {
+      this.renderGoodFlows(ctx);
     }
 
     // Futures layer: contractual supply lanes (source → buyer), dashed + directed.
@@ -3930,6 +3960,52 @@ export class OverlayManager {
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);
+  }
+
+  /** Goods Atlas · the selected good's yearly flow, along the EXISTING trade routes,
+   *  width ∝ volume, with a directional arrowhead at the importer end. */
+  private renderGoodFlows(ctx: CanvasRenderingContext2D) {
+    if (this.goodFlows.length === 0 || this.goodFlowMax <= 0) return;
+    const W = this.worldW;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const col = this.goodFlowColor;
+    for (const fl of this.goodFlows) {
+      const pts = fl.path;
+      if (pts.length < 2) continue;
+      const norm = fl.amount / this.goodFlowMax;
+      ctx.globalAlpha = 0.45 + 0.45 * norm;
+      ctx.strokeStyle = col;
+      ctx.lineWidth = Math.max(0.6, (1.0 + norm * 5.0) * inv);
+      ctx.beginPath();
+      let started = false;
+      for (let i = 0; i < pts.length; i++) {
+        const px = pts[i][0] + 0.5, py = pts[i][1] + 0.5;
+        if (i > 0 && W > 0 && Math.abs(px - (pts[i - 1][0] + 0.5)) > W / 2) {
+          ctx.stroke(); ctx.beginPath(); started = false; // wrap seam
+        }
+        if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+      }
+      ctx.stroke();
+      // Arrowhead at the importer end, pointing along the last on-screen segment.
+      const b = pts[pts.length - 1], a = pts[pts.length - 2];
+      let dx = (b[0] - a[0]), dy = (b[1] - a[1]);
+      if (W > 0 && Math.abs(dx) > W / 2) dx -= Math.sign(dx) * W;
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      const s = Math.max(2.2, (3.0 + norm * 4.0) * inv);
+      const bx = b[0] + 0.5, by = b[1] + 0.5;
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = col;
+      ctx.beginPath();
+      ctx.moveTo(bx, by);
+      ctx.lineTo(bx - ux * s - uy * s * 0.5, by - uy * s + ux * s * 0.5);
+      ctx.lineTo(bx - ux * s + uy * s * 0.5, by - uy * s - ux * s * 0.5);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** Campaign trade CORRIDORS — each drawn as a dashed haul in its owner's colour,

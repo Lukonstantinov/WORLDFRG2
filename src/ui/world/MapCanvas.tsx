@@ -11,7 +11,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -1339,6 +1339,28 @@ export function MapCanvas() {
     om.drawGoodScarcity(cities);
     requestRender();
   }, [goodScarcityOn, codexGood, economy, requestRender]);
+
+  // Goods Atlas · the selected good's yearly flow, snapped onto the existing trade
+  // routes (OverlayManager routes each lane; off-network lanes are dropped, never a
+  // straight slash — the maintainer's MUST). Refreshes on good or campaign YEAR change.
+  const goodFlowOn = useUIStore((s) => s.overlayVisibility.goodFlow);
+  const campYear = campaignSnapshot?.clock?.year ?? 0;
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    const gw = meta.grid_width;
+    if (!goodFlowOn || !codexGood || !campaignSnapshot?.active) {
+      om.drawGoodFlows([], gw, "#e0b24a"); requestRender(); return;
+    }
+    let stale = false;
+    const color = GOOD_DEFS.find((d) => d.name === codexGood)?.color ?? "#e0b24a";
+    campaignGoodAtlas(codexGood).then((atlas) => {
+      if (stale) return;
+      om.drawGoodFlows(atlas.flows, gw, color);
+      requestRender();
+    }).catch(() => {});
+    return () => { stale = true; };
+  }, [goodFlowOn, codexGood, campYear, campaignSnapshot?.active, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bank icons: mark each live bank's seat on the map (toggle in the Toolbar).
   const showBankIcons = useUIStore((s) => s.showBankIcons);

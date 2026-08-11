@@ -182,6 +182,7 @@ pub fn run() {
             campaign_commands::campaign_get_landmarks,
             campaign_commands::campaign_get_dynasties,
             campaign_commands::campaign_get_goods,
+            campaign_commands::campaign_good_atlas,
             campaign_commands::campaign_get_schematics,
             campaign_commands::campaign_house_ledger,
             campaign_commands::campaign_get_house_history,

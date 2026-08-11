@@ -606,3 +606,132 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
 
     Ok(Some(TradeFlows { hub: id, hub_x, hub_y, goods, routes, partners }))
 }
+
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  GOODS ATLAS (`campaign_good_atlas`) — everything about ONE good, for the Goods
+//  Atlas panel (the remade Codex). Four facets, all read from live campaign state that
+//  already exists: quality (hub production×quality), trade volume + producers/consumers
+//  (last year's `trade_last`, dir 1 = export/producer, dir 0 = import/consumer), control
+//  (per-good house share `volume/good_vol` + each house's/guild's TOTAL trade volume),
+//  and the per-good directed flow lanes (exporter→importer) the map draws for one good.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/// A city on one of the atlas lists (a producer, consumer, or top-quality source).
+#[derive(Serialize, Clone)]
+pub struct AtlasHub { pub hub: u32, pub name: String, pub x: f32, pub y: f32, pub amount: f32 }
+/// A house or guild trading the good — its per-good SHARE and its overall trade VOLUME
+/// (so the panel can rank "who trades the most", houses and guilds alike).
+#[derive(Serialize, Clone)]
+pub struct AtlasHouse {
+    pub house: u32, pub name: String, pub is_guild: bool,
+    pub share: f32, pub total_volume: f32,
+}
+/// One directed trade lane for this good over the last full year (exporter → importer).
+#[derive(Serialize, Clone)]
+pub struct AtlasFlow { pub from: u32, pub to: u32, pub from_x: f32, pub from_y: f32, pub to_x: f32, pub to_y: f32, pub amount: f32 }
+
+#[derive(Serialize, Default)]
+pub struct GoodAtlas {
+    pub good: String,
+    pub manufactured: bool,
+    pub total_produced: f32,
+    pub total_traded: f32,
+    pub avg_quality: f32,
+    /// 10 bins over quality 0..1 (count of producing cities per band).
+    pub quality_hist: Vec<u32>,
+    pub top_quality: Vec<AtlasHub>,
+    pub producers: Vec<AtlasHub>,
+    pub consumers: Vec<AtlasHub>,
+    pub houses: Vec<AtlasHouse>,
+    pub flows: Vec<AtlasFlow>,
+}
+
+#[tauri::command]
+pub fn campaign_good_atlas(good: String, db: State<'_, WorldDb>) -> Result<GoodAtlas, String> {
+    use std::collections::HashMap;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(GoodAtlas::default()) };
+    // Resolve the good by NAME (robust to any index drift between frontend and sim).
+    let g = match sim.goods.iter().position(|x| x.name == good) { Some(i) => i, None => return Ok(GoodAtlas::default()) };
+    let good = g as u32;
+
+    // ── Quality: histogram of producing cities' grade + the finest sources. ──
+    let mut quality_hist = vec![0u32; 10];
+    let mut top_quality: Vec<AtlasHub> = Vec::new();
+    let (mut q_wsum, mut q_w, mut total_produced) = (0.0f32, 0.0f32, 0.0f32);
+    for h in &sim.hubs {
+        let p = h.production.get(g).copied().unwrap_or(0.0);
+        if p <= 0.0 { continue; }
+        let q = h.quality.get(g).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+        total_produced += p;
+        q_wsum += q * p; q_w += p;
+        quality_hist[((q * 10.0) as usize).min(9)] += 1;
+        top_quality.push(AtlasHub { hub: h.id, name: h.name.clone(), x: h.x, y: h.y, amount: q });
+    }
+    top_quality.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+    top_quality.truncate(12);
+    let avg_quality = if q_w > 0.0 { q_wsum / q_w } else { 0.0 };
+
+    // ── Trade: last full year's flows for this good. dir 1 = the hub EXPORTED to the
+    //    partner (a producer/supplier), dir 0 = the hub IMPORTED (a consumer). ──
+    let mut exp: HashMap<u32, f32> = HashMap::new();
+    let mut imp: HashMap<u32, f32> = HashMap::new();
+    let mut lanes: HashMap<(u32, u32), f32> = HashMap::new();
+    let mut total_traded = 0.0f32;
+    for f in &sim.trade_last {
+        if f.good != good { continue; }
+        if f.dir == 1 {
+            *exp.entry(f.hub).or_insert(0.0) += f.amount;
+            *lanes.entry((f.hub, f.partner)).or_insert(0.0) += f.amount;
+            total_traded += f.amount;
+        } else {
+            *imp.entry(f.hub).or_insert(0.0) += f.amount;
+        }
+    }
+    let hub_pos = |h: u32| sim.hubs.get(h as usize).map(|x| (x.x, x.y, x.name.clone()))
+        .unwrap_or((0.0, 0.0, String::new()));
+    let mut to_hubs = |m: &HashMap<u32, f32>| -> Vec<AtlasHub> {
+        let mut v: Vec<AtlasHub> = m.iter().map(|(&h, &amt)| {
+            let (x, y, name) = hub_pos(h);
+            AtlasHub { hub: h, name, x, y, amount: amt }
+        }).collect();
+        v.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+        v.truncate(15);
+        v
+    };
+    let producers = to_hubs(&exp);
+    let consumers = to_hubs(&imp);
+    let mut flows: Vec<AtlasFlow> = lanes.iter().map(|(&(from, to), &amt)| {
+        let (fx, fy, _) = hub_pos(from);
+        let (tx, ty, _) = hub_pos(to);
+        AtlasFlow { from, to, from_x: fx, from_y: fy, to_x: tx, to_y: ty, amount: amt }
+    }).collect();
+    flows.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+    flows.truncate(60);
+
+    // ── Control: per-good house share (volume ÷ world volume in this good) plus each
+    //    trading house's/guild's TOTAL volume, so the panel ranks who trades the most. ──
+    let mut good_vol = 0.0f32;
+    for h in &sim.houses {
+        if h.defunct { continue; }
+        if h.spec.contains(&g) { good_vol += h.volume.max(0.0); }
+    }
+    let mut houses: Vec<AtlasHouse> = sim.houses.iter().enumerate()
+        .filter(|(_, h)| !h.defunct && h.spec.contains(&g))
+        .map(|(hi, h)| AtlasHouse {
+            house: hi as u32, name: h.name.clone(), is_guild: h.is_guild,
+            share: if good_vol > 1e-3 { (h.volume.max(0.0) / good_vol).clamp(0.0, 1.0) } else { 0.0 },
+            total_volume: h.volume.max(0.0),
+        })
+        .collect();
+    houses.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
+    houses.truncate(15);
+
+    Ok(GoodAtlas {
+        good: sim.goods[g].name.clone(),
+        manufactured: !sim.goods[g].inputs.is_empty(),
+        total_produced, total_traded, avg_quality,
+        quality_hist, top_quality, producers, consumers, houses, flows,
+    })
+}

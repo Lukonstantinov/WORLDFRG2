@@ -391,6 +391,7 @@ export const useUIStore = create<UIStore>((set) => ({
     provinces: false, provinceBorders: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
     travelRoute: false, goodScarcity: false, toponyms: false, riverBreaks: true,
+    goodFlow: false, // Goods Atlas · selected good's yearly flow along trade routes
     // Per-feature-type toponym label toggles (gated under the master `toponyms`).
     toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
     toponymsDesert: true, toponymsForest: true, toponymsTundra: true,
