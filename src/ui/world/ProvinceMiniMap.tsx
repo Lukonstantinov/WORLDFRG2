@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import type { PBuilding, PSettlement, Province, ProvinceLand, ProvinceLandSample, ProvinceLocalityDot, ProvinceTerrainCrop, RiverData } from "@types";
+import type { PBuilding, PSettlement, Province, ProvinceGoodMask, ProvinceLand, ProvinceLandSample, ProvinceLocalityDot, ProvinceTerrainCrop, RiverData } from "@types";
 import type { ProvinceRaster } from "@state/worldStore";
 import { GOOD_DEFS } from "@goods";
 
@@ -75,13 +75,14 @@ function BuildingGlyph({ kind, s }: { kind: number; s: number }) {
 }
 
 /** The plates, bottom-up. `relief` is the ground everything else reads against. */
-export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods" | "deposits";
+export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods" | "quality" | "deposits";
 export const PLATE_LABEL: Record<PlateKey, string> = {
   relief: "relief", water: "water", landuse: "land use",
   tenure: "tenure", holdings: "holdings", borders: "borders",
-  // Two DISTINCT plates: "goods" = the surface/belt produce (best-quality areas),
-  // "deposits" = the ore/mineral workings where they actually sit.
-  goods: "goods", deposits: "deposits",
+  // Three DISTINCT goods plates, mirroring the main map (§8.19): "goods" = the belt
+  // COVERAGE as areas (where a good can grow), "quality" = the belt's absolute value
+  // shaded as a wash, "deposits" = the ore/mineral workings where they actually sit.
+  goods: "goods", quality: "quality", deposits: "deposits",
 };
 export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders"];
 
@@ -148,11 +149,15 @@ const KM_EQUATOR = 40075;
  *  offshore locality, in raster cells. Bounded so a locality that landed across the
  *  X seam (this component has never unwrapped X) cannot blow the plate open. */
 const MAX_SEA_PAD = 14;
+/** The belt byte at/above which a cell counts as covered — mirrors the renderer's own
+ *  `COVERAGE_MIN_U8` (`query_commands::overlays`) so the plate and the map agree on
+ *  where a belt begins. */
+const GOODS_COVERAGE_MIN = 5;
 
 export function ProvinceMiniMap({
   province, raster, settlements, buildings,
   land, sample, plates = DEFAULT_PLATES, width = 240, riverCells,
-  terrain, rivers, deposits = [], beltGoods = [], localities = [],
+  terrain, rivers, deposits = [], localities = [], goodMasks = [],
 }: {
   province: Province;
   raster: ProvinceRaster | null;
@@ -174,11 +179,15 @@ export function ProvinceMiniMap({
   riverCells?: number;
   /** #9 · ore workings in this province (world cell coords) for the deposits plate. */
   deposits?: { good: string; x: number; y: number; grade: number; depth: number }[];
-  /** #9 · the province's surface/belt goods. Before Slice 3 these carried no
-   *  sub-province position at all, so the goods plate could only place SYMBOLS; they
-   *  are still what it falls back to for a world generated before localities existed
-   *  (D7 — an old world must re-run Biological to gain them). */
+  /** #9 · the province's surface/belt goods (name + quality). Retained for the goods
+   *  LEGEND upstream; the plate itself now draws belt areas from `goodMasks`, not from
+   *  this per-province summary. */
   beltGoods?: { name: string; quality: number; marine?: boolean }[];
+  /** The belt COVERAGE + QUALITY for each shown good, sampled to this province's raster
+   *  (`province_good_belt_masks`). This is what lets the plate draw goods as AREAS +
+   *  a quality wash — the same reading the main map gives — on ANY world, since it
+   *  reads the goods tile column rather than needing per-locality positions. */
+  goodMasks?: ProvinceGoodMask[];
   /** GOODS_LOCALITIES_PLAN.md Slice 6 (F3 · D4) · the REAL terroir localities inside
    *  (or, for a marine good, in the water off) this province, at their own cell
    *  coordinates. This is the data F3 said the "squares of goods" feature was blocked
@@ -454,6 +463,49 @@ export function ProvinceMiniMap({
               fill="#4a90c4" opacity={0.8} />
           ) : null)}
 
+        {/* 6a · GOODS COVERAGE — the belt as AREAS, clipped to the province footprint,
+               sampled from the SAME goods tile column the main map draws (§8.19). One
+               filled cell per sampled footprint cell the good's belt reaches — so a
+               world with no localities still shows real areas, not emoji. Drawn UNDER
+               the borders/holdings so the survey marks stay legible on top. */}
+        {on("goods") && goodMasks.map((m) => {
+          const col = GOOD_DEFS.find((d) => d.name === m.good)?.color ?? "#56c8d8";
+          return (
+            <g key={`gc-${m.good}`}>
+              {cells.map(([rx, ry], i) => {
+                const bx = rx - m.rx0, by = ry - m.ry0;
+                if (bx < 0 || by < 0 || bx >= m.rw || by >= m.rh) return null;
+                if (m.q[by * m.rw + bx] < GOODS_COVERAGE_MIN) return null;
+                return (
+                  <rect key={`gc${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
+                    fill={col} opacity={0.42} />
+                );
+              })}
+            </g>
+          );
+        })}
+        {/* 6a-q · GOODS QUALITY — the same cells shaded by the belt's own ABSOLUTE value
+               (never per-good normalised, D10): the province-plate twin of the main map's
+               quality wash. A separate plate so "can it grow here" and "is it fine here"
+               read independently. */}
+        {on("quality") && goodMasks.map((m) => {
+          const col = GOOD_DEFS.find((d) => d.name === m.good)?.color ?? "#56c8d8";
+          return (
+            <g key={`gq-${m.good}`}>
+              {cells.map(([rx, ry], i) => {
+                const bx = rx - m.rx0, by = ry - m.ry0;
+                if (bx < 0 || by < 0 || bx >= m.rw || by >= m.rh) return null;
+                const v = m.q[by * m.rw + bx];
+                if (v < GOODS_COVERAGE_MIN) return null;
+                return (
+                  <rect key={`gq${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
+                    fill={col} opacity={0.15 + 0.55 * (v / 255)} />
+                );
+              })}
+            </g>
+          );
+        })}
+
         {/* 6 · borders — the frontier as a drawn line. */}
         {on("borders") && edge.map(([rx, ry], i) => (
           <rect key={`e${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
@@ -569,65 +621,6 @@ export function ProvinceMiniMap({
               {sea.map((l, i) => square(l, `ls${i}`, true))}
             </g>
           );
-        })()}
-        {/* 6a (fallback) · a world generated before Slice 3 carries NO localities, so
-            the model still holds only ONE quality for the WHOLE province and there is
-            no sub-province position to draw. Painting an area from that would invent a
-            spatial layout the model doesn't hold (rule 17), so these stay SYMBOLIC
-            markers reading "produced here", quality-faded — one per good like a legend
-            on the map, or a spread when a good is isolated. D7 is explicit that such a
-            world must re-run Biological (8) to gain real localities. */}
-        {on("goods") && localities.length === 0 && beltGoods.length > 0 && cells.length > 0 && raster && (() => {
-          const isolated = beltGoods.length === 1;
-          const shown = beltGoods.slice(0, isolated ? 1 : 12);
-          const fs = Math.max(6, Math.min(14, stride * 2.6));
-          const out: React.ReactNode[] = [];
-          const SEA = 4294967295; // NO_PROVINCE sentinel in the u32 raster
-          const rw = raster.w, rh = raster.h;
-          // COASTAL cells: a footprint cell with a SEA neighbour at stride distance — this
-          // is where a MARINE good (fisheries, whaling, pearls) belongs, never inland.
-          const coastCells = cells.filter(([rx, ry]) =>
-            raster.data[ry * rw + Math.max(0, rx - stride)] === SEA ||
-            raster.data[ry * rw + Math.min(rw - 1, rx + stride)] === SEA ||
-            raster.data[Math.max(0, ry - stride) * rw + rx] === SEA ||
-            raster.data[Math.min(rh - 1, ry + stride) * rw + rx] === SEA);
-          // Stable per-GOOD hash (FNV-1a) so different goods occupy DIFFERENT cells — the
-          // markers are symbols (the model holds one province-wide quality, not a layout),
-          // but keying position on the good makes each good read as its own scatter.
-          const goodSeed = (name: string) => {
-            let k = 2166136261;
-            for (let i = 0; i < name.length; i++) { k ^= name.charCodeAt(i); k = Math.imul(k, 16777619); }
-            return k >>> 0;
-          };
-          const marker = (g: { name: string; quality: number; marine?: boolean }, key: string, rx: number, ry: number) => {
-            const emoji = GOOD_DEFS.find((d) => d.name === g.name)?.emoji ?? "•";
-            return (
-              <text key={key} x={rx - ox} y={ry - oy} fontSize={fs} textAnchor="middle"
-                dominantBaseline="central" opacity={0.5 + 0.5 * Math.max(0, Math.min(1, g.quality))}
-                style={{ paintOrder: "stroke", stroke: "#0a1620", strokeWidth: 0.6 }}>
-                <title>{g.name} · quality {(g.quality * 100).toFixed(0)}%{g.marine ? " · sea/coast" : ""}</title>{emoji}
-              </text>
-            );
-          };
-          const placeFor = (g: { name: string; quality: number; marine?: boolean }, count: number, keyBase: string) => {
-            // Marine goods only ever sit on the coast; a landlocked province with no coast
-            // shows none (rather than an illogical inland fishery).
-            const pool = g.marine ? coastCells : cells;
-            if (pool.length === 0) return;
-            const seed = goodSeed(g.name);
-            for (let i = 0; i < count; i++) {
-              const idx = ((seed + i * 2654435761) >>> 0) % pool.length;
-              const [rx, ry] = pool[idx];
-              out.push(marker(g, `${keyBase}${i}`, rx, ry));
-            }
-          };
-          if (isolated) {
-            const g = shown[0];
-            placeFor(g, Math.max(3, Math.round(4 + 5 * g.quality)), "bg");
-          } else {
-            shown.forEach((g, i) => placeFor(g, 1, `bg${i}_`));
-          }
-          return out;
         })()}
         {/* 6b · deposits (#9) — the separate DEPOSITS plate: ore workings where they
             actually sit, coloured by good and sized by grade, richest reading loudest. */}
@@ -746,7 +739,7 @@ export function PlateToggles({ plates, setPlates, disabled = [] }: {
   /** Plates with no data behind them, shown greyed rather than hidden. */
   disabled?: PlateKey[];
 }) {
-  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods", "deposits"];
+  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods", "quality", "deposits"];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
       {keys.map((k) => {

@@ -310,7 +310,7 @@
         let mut s = sim(hubs, goods);
         s.found_house_at(0);
         let hi = 0usize;
-        s.houses[hi].wealth = 100_000.0; // single house → adaptive cost = 0.6 × this
+        s.houses[hi].wealth = 100_000.0; // single house → adaptive cost = REALM_PROCLAIM_COST_FRAC × this
         s.prov_holder = vec![0];       // this hub administers province 0
         s.prov_holder_house = vec![-1];
         s.prov_realm = vec![-1];
@@ -322,8 +322,11 @@
         assert_eq!(s.realms.len(), 1, "exactly one realm is created");
         let r = &s.realms[0];
         assert_eq!(r.id, id);
-        assert_eq!(r.treasury, 100_000.0 * (1.0 - REALM_PROCLAIM_COST_FRAC),
-            "the pot moves whole, MINUS the adaptive founding spend (0.6 × 100,000)");
+        // The pot moves whole, MINUS the adaptive founding spend
+        // (REALM_PROCLAIM_COST_FRAC × 100,000). A tolerance, not `assert_eq!`: the
+        // fraction need not be exactly representable in f32 (0.35 is not).
+        assert!((r.treasury - 100_000.0 * (1.0 - REALM_PROCLAIM_COST_FRAC)).abs() < 1.0,
+            "the pot moves whole, minus the adaptive founding spend (got {})", r.treasury);
         assert_eq!(r.capital_hub, 0);
         assert_eq!(r.ruling_house, hi as u32);
         assert_eq!(r.provinces, vec![0], "the seat's administered province becomes sovereign territory");
@@ -371,16 +374,34 @@
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR - 1);
         assert!(s.realms.is_empty(), "the hard floor is absolute");
 
-        // At/after the floor, but the house was never the CAPTOR (a mere council seat
-        // no longer qualifies): never.
+        // At/after the floor, but the house neither CAPTURED the seat nor DOMINATES its
+        // council — it governs the city in no capacity at all: never. (A council-dominant
+        // house DOES now qualify; see the reachability sweep below, which is exercised
+        // through the council path too.)
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
         s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
         eligible(&mut s);
-        s.hubs[0].captor_house = -1; // council-only, did not capture
-        s.hubs[0].council_house = 0;
+        s.hubs[0].captor_house = -1;
+        s.hubs[0].council_house = -1; // governs nothing here
         s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
-        assert!(s.realms.is_empty(), "a house that never captured the settlement never proclaims");
+        assert!(s.realms.is_empty(), "a house that neither captured nor leads the council never proclaims");
+
+        // A council-DOMINANT house (no capture) is now a valid founder — the widening
+        // that makes realms common. Rolled across a tick sweep so it doesn't hinge on one
+        // seed; the founding still spends the adaptive cost like the captor path.
+        let mut council_fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            s.found_house_at(0);
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            eligible(&mut s);
+            s.hubs[0].captor_house = -1; // never captured
+            s.hubs[0].council_house = 0; // but dominates the council
+            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            if !s.realms.is_empty() { council_fired = true; break; }
+        }
+        assert!(council_fired, "a council-dominant house must be able to proclaim a realm");
 
         // Captor, but too poor to SPEND the (adaptive) founding cost: never. A far richer
         // second house raises the bar (0.6 × the richest) above the captor's own wealth.

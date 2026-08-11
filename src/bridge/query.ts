@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CultureRegion, EconomySnapshot, GoodBeltMask, Itinerary, PoliticalCenter, Settlement, SharkZone, TradeMatrix } from "@types";
+import type { CultureRegion, EconomySnapshot, GoodBeltMask, Itinerary, PoliticalCenter, ProvinceGoodMask, Settlement, SharkZone, TradeMatrix } from "@types";
 import type { FisheryBank, OverlaysResult, TradeRoute } from "./types";
 
 /** Compute trade routes between the current settlements (pass the store list).
@@ -92,6 +92,17 @@ export async function computeMonsoonZones(): Promise<SharkZone[]> {
  *  still supplies the label centroid, medallion and sublabel for every good. */
 export async function computeGoodBeltMasks(goods: string[]): Promise<GoodBeltMask[]> {
   return invoke("compute_good_belt_masks", { goods });
+}
+
+/** One good's belt SAMPLED to a single province, at the province raster's resolution —
+ *  the province-plate counterpart of {@link computeGoodBeltMasks}. Reads the goods TILE
+ *  column directly, so it works on any world (no localities, no running campaign) and
+ *  lets the province survey plate draw belt AREAS + a QUALITY wash exactly as the main
+ *  map does, instead of falling back to emoji symbols. */
+export async function provinceGoodBeltMasks(
+  provinceId: number, goods: string[],
+): Promise<ProvinceGoodMask[]> {
+  return invoke("province_good_belt_masks", { provinceId, goods });
 }
 
 /** Latitude bands of the general circulation for the Climate Bands overlay: the

@@ -53,6 +53,7 @@ pub fn run() {
             query_commands::compute_reef_zones,
             query_commands::compute_good_regions,
             query_commands::compute_good_belt_masks,
+            query_commands::province_good_belt_masks,
             query_commands::compute_culture_regions,
             query_commands::compute_overlays,
             query_commands::compute_trade_matrix,

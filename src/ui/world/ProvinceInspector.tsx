@@ -4,7 +4,7 @@ import { useWorldStore } from "@state/worldStore";
 import {
   campaignCancelProvinceWork, campaignProvinceDetail, campaignProvinceGoods, campaignProvinceLand,
   campaignProvincePotential, campaignProvinceState, campaignSetProvinceTax, campaignStartProvinceWork,
-  getProvinceTerrainCrop,
+  getProvinceTerrainCrop, provinceGoodBeltMasks,
 } from "@bridge";
 import { koppenName } from "@ui/world/climate";
 import {
@@ -17,7 +17,7 @@ import {
 } from "@ui/world/provinceStory";
 import { GOOD_DEFS } from "@goods";
 import type {
-  Province, ProvinceDetail, ProvinceGoodExploit, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
+  Province, ProvinceDetail, ProvinceGoodExploit, ProvinceGoodMask, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
   ProvincePotential,
 } from "@types";
 
@@ -68,6 +68,10 @@ export function ProvinceInspector() {
   const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
   const [exploit, setExploit] = useState<ProvinceGoodExploit[]>([]);
   const [potential, setPotential] = useState<ProvincePotential | null>(null);
+  // Belt COVERAGE + QUALITY for each of the province's goods, sampled to its raster —
+  // what lets the plate draw goods as AREAS + a quality wash like the main map (reads
+  // the goods tile column, so it works on any world with no re-gen).
+  const [goodMasks, setGoodMasks] = useState<ProvinceGoodMask[]>([]);
   const [goodSort, setGoodSort] = useState<"potential" | "quality">("quality");
   const [depositsOnly, setDepositsOnly] = useState(false);
   // #9 · which belt goods are shown on the minimap "goods" plate (null = all).
@@ -171,6 +175,24 @@ export function ProvinceInspector() {
     (potential?.localities ?? []).filter((l) => !goodFilter || goodFilter.has(l.good)),
     [potential, goodFilter]);
 
+  // Belt AREAS + quality for this province's goods. Fetched once per province for the
+  // goods it is known to carry (`beltGoods`), then filtered client-side by the legend —
+  // toggling a single good re-filters without a round trip. A stable key of the good
+  // names keeps the effect from re-firing on every render of the memo.
+  const beltGoodNames = beltGoods.map((g) => g.name).join(",");
+  useEffect(() => {
+    if (!open || !p || beltGoodNames === "") { setGoodMasks([]); return; }
+    let stale = false;
+    provinceGoodBeltMasks(p.id, beltGoodNames.split(","))
+      .then((m) => { if (!stale) setGoodMasks(m); })
+      .catch(() => { if (!stale) setGoodMasks([]); });
+    return () => { stale = true; };
+  }, [open, p?.id, beltGoodNames]); // eslint-disable-line react-hooks/exhaustive-deps
+  // The subset drawn, after the legend filter (same rule as the localities/legend).
+  const shownMasks = useMemo(() =>
+    goodMasks.filter((m) => !goodFilter || goodFilter.has(m.good)),
+    [goodMasks, goodFilter]);
+
   if (!open || !p) return null;
 
   const fmt = (n: number) => Math.round(n).toLocaleString();
@@ -247,13 +269,19 @@ export function ProvinceInspector() {
           deposits={potential?.deposits ?? []}
           beltGoods={shownBeltGoods}
           localities={shownLocalities}
+          goodMasks={shownMasks}
         />
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
             disabled={[
               ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
-              ...(beltGoods.length > 0 || (potential?.localities.length ?? 0) > 0 ? [] : (["goods"] as PlateKey[])),
+              // "goods" (coverage areas) is live as soon as the belt masks have any
+              // covered cell; localities/beltGoods keep it live on worlds that carry them.
+              ...(goodMasks.length > 0 || beltGoods.length > 0 || (potential?.localities.length ?? 0) > 0
+                ? [] : (["goods"] as PlateKey[])),
+              // "quality" needs the belt values, i.e. the masks specifically.
+              ...(goodMasks.length > 0 ? [] : (["quality"] as PlateKey[])),
               ...((potential?.deposits.length ?? 0) > 0 ? [] : (["deposits"] as PlateKey[])),
             ]} />
         </div>
@@ -261,7 +289,7 @@ export function ProvinceInspector() {
         {/* #9 · goods legend + filter — the colour code of each surface good, click ONE
             to ISOLATE it (see only that good's best-quality area); click it again to show
             all. Only when the "goods" plate is on and there are belt goods. */}
-        {plates.includes("goods") && beltGoods.length > 0 && (
+        {(plates.includes("goods") || plates.includes("quality")) && beltGoods.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5, alignItems: "center" }}>
             <span style={{ fontSize: 10, opacity: 0.6, marginRight: 2 }}>Goods:</span>
             {beltGoods.map((g) => {

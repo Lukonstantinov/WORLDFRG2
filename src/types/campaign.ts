@@ -1228,6 +1228,24 @@ export interface GoodBeltMask {
   cells: number;
 }
 
+/** One good's belt SAMPLED to a single province, at the PROVINCE-RASTER resolution the
+ *  survey plate renders on — the province-plate counterpart of `GoodBeltMask`. Read from
+ *  the goods tile column (so it works on any world, no localities/campaign needed), it
+ *  lets `ProvinceMiniMap` draw belt AREAS + a QUALITY wash like the main map. */
+export interface ProvinceGoodMask {
+  good: string;
+  /** Bounding box in PROVINCE-RASTER cells. */
+  rx0: number;
+  ry0: number;
+  /** Box dims in raster cells; `q` is row-major over `rw × rh`. */
+  rw: number;
+  rh: number;
+  /** Belt value 0..255 at each raster cell (0 = not covered). Absolute scale (D10). */
+  q: number[];
+  /** Covered raster cells. */
+  cells: number;
+}
+
 export interface PoliticalCenter {
   x: number;
   y: number;

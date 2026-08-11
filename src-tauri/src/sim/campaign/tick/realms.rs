@@ -41,13 +41,21 @@ impl CampaignSim {
             if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
             if self.hubs[h].realm >= 0 { continue; } // already sovereign or a member
             if self.hubs[h].tribute_to >= 0 { continue; } // a tributary makes no claims of its own
-            // The founder must have CAPTURED the settlement (be its `captor_house`, not a
-            // mere council seat), be at least TIER 2, hold a province (rule 25), and be
-            // able to SPEND the founding cost. Per the maintainer's rule these three are
-            // the whole gate — no continuous-tenure, city-tier, or prestige requirement.
-            let captor = self.hubs[h].captor_house;
-            if captor < 0 { continue; } // must have captured the city's government
-            let hi = captor as usize;
+            // The founder must GOVERN the settlement — either as its `captor_house`
+            // (seized the government outright) OR as its `council_house` (dominates the
+            // council). The captor-only rule left realms far too rare (most cities are
+            // council-run, never captured), so per the maintainer a council-dominant
+            // house now qualifies too; the captor still takes precedence when both exist.
+            // Beyond governing, the house must be at least TIER 2, hold a province (rule
+            // 25), and be able to SPEND the founding cost — no continuous-tenure,
+            // city-tier, or prestige requirement.
+            let ruler = if self.hubs[h].captor_house >= 0 {
+                self.hubs[h].captor_house
+            } else {
+                self.hubs[h].council_house
+            };
+            if ruler < 0 { continue; } // nobody governs this city — no claim to make
+            let hi = ruler as usize;
             if hi >= self.houses.len() { continue; }
             if !self.houses[hi].is_merchant() { continue; } // dead, or already crowned elsewhere
             if self.houses[hi].is_guild { continue; } // a civic office does not found a dynasty

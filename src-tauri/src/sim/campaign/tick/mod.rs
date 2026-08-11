@@ -4399,14 +4399,25 @@ pub const REALM_PROCLAIM_TIER_MAX: u8 = 2;
 /// world's absolute wealth scale — a flat figure was either trivial or unreachable
 /// depending on the world. The richest house can always afford it (its own wealth sets
 /// the bar), so a realm CAN always eventually form; poorer houses cannot.
-pub const REALM_PROCLAIM_COST_FRAC: f32 = 0.6;
+///
+/// Lowered 0.6 → 0.35 (maintainer request: realms far more frequent). A house in the
+/// world's top stratum now clears the bar with a comfortable margin rather than needing
+/// to be near the very peak, so a proclamation waits on the yearly roll, not on one
+/// house saving for a decade. Paired with the `council_house`-counts-too widening of the
+/// governing gate in `maybe_proclaim_realms`.
+pub const REALM_PROCLAIM_COST_FRAC: f32 = 0.35;
 /// A floor so the founding cost is never degenerate in a very poor / empty world.
 pub const REALM_PROCLAIM_COST_FLOOR: f32 = 1_000.0;
 /// Base per-year chance once every other condition is met. Biased by the head's
 /// boldness (axis 0) and expansiveness (axis 3) — the same two axes `decide_fleets`
 /// and `update_guilds_and_offices` already read for a comparable "dare to commit"
 /// decision.
-pub const REALM_PROCLAIM_CHANCE: f32 = 0.14;
+///
+/// Raised 0.14 → 0.35 (maintainer request: realms far more frequent). At 0.14 a fully
+/// eligible house took ~7 years on average to proclaim; at 0.35 it is ~2-3, so a
+/// qualified capital crowns itself within a few years of clearing the gate instead of
+/// lingering eligible-but-quiet for most of a reign.
+pub const REALM_PROCLAIM_CHANCE: f32 = 0.35;
 /// Starting legitimacy/cohesion for a freshly proclaimed realm — high but not
 /// perfect: the founding generation's own claim is the strongest a dynasty will ever
 /// have, and both gauges are designed to be spent down by real events (plan §5), not

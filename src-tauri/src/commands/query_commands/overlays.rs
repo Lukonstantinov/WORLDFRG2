@@ -1184,6 +1184,114 @@ pub fn compute_good_belt_masks(
     Ok(out)
 }
 
+/// One good's belt SAMPLED to a province, at the province raster's own resolution —
+/// the province-plate counterpart of `compute_good_belt_masks`. The province survey
+/// plate (`ProvinceMiniMap`) draws its layers cell-by-cell over the province RASTER
+/// (not the full grid), so the mask is returned at that resolution: for each raster
+/// cell of this province, the belt value at that cell's world position. The plate then
+/// fills the cell for COVERAGE (value ≥ `COVERAGE_MIN_U8`) and shades it for QUALITY.
+///
+/// Unlike the localities/emoji path this reads the `goods` TILE COLUMN directly, so it
+/// works on EVERY world — including one generated before goods-localities existed — and
+/// needs no running campaign (it is a pure world query, like `get_province_terrain_crop`).
+/// That is the whole point: the belt is the same data the MAIN MAP draws as areas, so
+/// the province view can show the same areas rather than falling back to symbols.
+#[derive(Debug, Serialize)]
+pub struct ProvinceGoodMask {
+    pub good: String,
+    /// Bounding box in PROVINCE-RASTER cells (the `ProvinceRaster` the plate holds).
+    pub rx0: u32,
+    pub ry0: u32,
+    /// Box dimensions in raster cells; `q` is row-major over `rw × rh`.
+    pub rw: u32,
+    pub rh: u32,
+    /// Belt value 0..255 at each raster cell (0 = not covered / not in the province).
+    /// Never per-good normalised — the same absolute scale the main map's quality wash
+    /// uses (§8.19 D10), so a good's colour means the same here as there.
+    pub q: Vec<u8>,
+    /// Covered raster cells, so the caller can tell an empty mask from a present one.
+    pub cells: u32,
+}
+
+#[tauri::command]
+pub fn province_good_belt_masks(
+    province_id: u32,
+    goods: Vec<String>,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<ProvinceGoodMask>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 || goods.is_empty() { return Ok(vec![]); }
+
+    // The province raster — the same downsampled partition the plate renders on.
+    let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+        metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or((0, 0, 0, 0, Vec::new()));
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    if raster.is_empty() || rw == 0 || rh == 0 || gw == 0 || gh == 0 { return Ok(vec![]); }
+
+    // Province bounding box in raster cells.
+    let (mut rx0, mut ry0, mut rx1, mut ry1) = (rw, rh, 0u32, 0u32);
+    let mut any = false;
+    for ry in 0..rh {
+        let row = (ry * rw) as usize;
+        for rx in 0..rw {
+            if raster[row + rx as usize] == province_id {
+                any = true;
+                rx0 = rx0.min(rx); rx1 = rx1.max(rx);
+                ry0 = ry0.min(ry); ry1 = ry1.max(ry);
+            }
+        }
+    }
+    if !any { return Ok(vec![]); }
+    let box_w = rx1 - rx0 + 1;
+    let box_h = ry1 - ry0 + 1;
+
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    use crate::sim::goods_spec::Distribution;
+
+    // The world cell at the CENTRE of a raster cell's block — one belt read per member
+    // cell (the plate is a coarse survey sketch, so centre-sampling is adequate and
+    // matches how `prov_at` attributes a cell elsewhere).
+    let belt_at = |g: usize, rx: u32, ry: u32| -> u8 {
+        let wx = ((rx as u64 * gw as u64 + gw as u64 / 2) / rw as u64).min(grid_w as u64 - 1) as u32;
+        let wy = ((ry as u64 * gh as u64 + gh as u64 / 2) / rh as u64).min(grid_h as u64 - 1) as u32;
+        let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
+        if g >= tile.goods.len() { return 0; }
+        let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
+        tile.goods[g].get(ti).copied().unwrap_or(0)
+    };
+
+    let mut out: Vec<ProvinceGoodMask> = Vec::new();
+    for name in &goods {
+        let Some((g, spec)) = specs.iter().enumerate().find(|(_, s)| &s.id == name) else { continue };
+        if !spec.enabled || matches!(spec.distribution, Distribution::Manufactured) { continue; }
+        let mut q = vec![0u8; (box_w * box_h) as usize];
+        let mut covered = 0u32;
+        for by in 0..box_h {
+            let ry = ry0 + by;
+            for bx in 0..box_w {
+                let rx = rx0 + bx;
+                if raster[(ry * rw + rx) as usize] != province_id { continue; } // clip to footprint
+                let v = belt_at(g, rx, ry);
+                if v >= COVERAGE_MIN_U8 {
+                    q[(by * box_w + bx) as usize] = v;
+                    covered += 1;
+                }
+            }
+        }
+        if covered > 0 {
+            out.push(ProvinceGoodMask { good: spec.id.clone(), rx0, ry0, rw: box_w, rh: box_h, q, cells: covered });
+        }
+    }
+    Ok(out)
+}
+
 
 #[cfg(test)]
 mod belt_mask_tests {
