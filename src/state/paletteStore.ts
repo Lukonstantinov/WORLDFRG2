@@ -61,6 +61,22 @@ export function bandGradient(bands: { at: number; color: string }[]): string {
   return `linear-gradient(to right, ${parts.join(", ")})`;
 }
 
+/** Mix two hex colours at fraction `k` (0 = `a`, 1 = `b`). A small general-purpose
+ *  helper — the legend's own swatches need it wherever a served ramp gives colours
+ *  but a UI ladder wants an intermediate shade (e.g. the goods-quality hue-mode
+ *  legend, which mixes a neutral grey toward itself to stand in for "however strong
+ *  a good's own colour would show here"). */
+export function mixHex(a: string, b: string, k: number): string {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const mix = (sh: number) => {
+    const ca = (pa >> sh) & 255;
+    const cb = (pb >> sh) & 255;
+    return Math.round(ca + (cb - ca) * k);
+  };
+  return `#${[16, 8, 0].map((sh) => mix(sh).toString(16).padStart(2, "0")).join("")}`;
+}
+
 /** Sample a ramp at a position in its own units — used to colour the elevation
  *  distribution bars from the SAME table the map draws, instead of the fourth
  *  hand-copied palette the standalone histogram used to carry (it disagreed with

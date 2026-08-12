@@ -88,6 +88,12 @@ interface UIStore {
    *  change to the cache scheme. Cleared whenever the layer changes, since a code
    *  means a different thing on each layer. */
   isolateClass: number | null;
+  /** GOODS_LOCALITIES_PLAN.md D10 · how the "quality" belt layer paints a cell's
+   *  absolute 0..1 value. false (default) = mix toward the good's own hue; true =
+   *  a heat ramp (dark blue → red) shared by every good, added because the hue-mix
+   *  reading is subtle for a muted/dark good and the user could not see quality
+   *  differences at all. Same numbers either way, different paint. */
+  goodQualityHeatmap: boolean;
   /** SWIPE COMPARE: a second layer drawn to the right of a draggable divider.
    *  Every causal chain in this app is a two-layer question — precipitation against
    *  elevation for rain shadow, currents against temperature, biomes against Köppen
@@ -276,6 +282,8 @@ interface UIStore {
   setLayerOpacity: (opacity: number) => void;
   setHoverInfo: (c: CellInfo | null) => void;
   setIsolateClass: (c: number | null) => void;
+  setGoodQualityHeatmap: (on: boolean) => void;
+  toggleGoodQualityHeatmap: () => void;
   setCompareLayer: (l: ActiveLayer | null) => void;
   setComparePos: (p: number) => void;
   setLandmassSource: (source: LandmassSource) => void;
@@ -409,6 +417,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeMapTheme: null,
   hoverInfo: null,
   isolateClass: null,
+  goodQualityHeatmap: false,
   compareLayer: null,
   comparePos: 0.5,
   stretchToFit: true,
@@ -515,6 +524,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
   setHoverInfo: (c) => set({ hoverInfo: c }),
   setIsolateClass: (c) => set({ isolateClass: c }),
+  setGoodQualityHeatmap: (on) => set({ goodQualityHeatmap: on }),
+  toggleGoodQualityHeatmap: () => set((state) => ({ goodQualityHeatmap: !state.goodQualityHeatmap })),
   setCompareLayer: (l) => set({ compareLayer: l }),
   setComparePos: (p) => set({ comparePos: Math.max(0, Math.min(1, p)) }),
 

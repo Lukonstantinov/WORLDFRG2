@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { usePaletteStore, rampGradient, bandGradient, rampAt } from "@state/paletteStore";
+import { usePaletteStore, rampGradient, bandGradient, rampAt, mixHex } from "@state/paletteStore";
 import { koppenName } from "./climate";
 import { getBiomeStats, getElevationDistribution, type ElevationBand } from "@bridge";
 import type { BiomeStat } from "@types";
@@ -241,6 +241,61 @@ export function LayerLegend() {
       </div>
       <div style={{ fontSize: 9, color: "#5a7390", marginTop: 6, lineHeight: 1.4 }}>
         Click a class to isolate it; the rest of the map dims but stays visible.
+      </div>
+    </div>
+  );
+}
+
+const box2: React.CSSProperties = { ...box, left: "auto", right: 8 };
+
+/** GOODS_LOCALITIES_PLAN.md D10 · the trade-good QUALITY key. Independent of
+ *  `LayerLegend` above (it keys off the ACTIVE base layer; this keys off the
+ *  `goodQuality` OVERLAY, which can be switched on over any base layer at all), so
+ *  it is its own small component, docked to the opposite corner so the two never
+ *  overlap when both are showing at once.
+ *
+ *  Reads `good_quality_grades` for its swatches — the SAME breakpoints and, in
+ *  heatmap mode, the exact colours `get_render_palettes` computed for them — so the
+ *  key cannot show a colour the map itself would not paint at that grade (§8.18). */
+export function GoodQualityLegend() {
+  const on = useUIStore((s) => s.overlayVisibility.goodQuality);
+  const heatmap = useUIStore((s) => s.goodQualityHeatmap);
+  const palettes = usePaletteStore((s) => s.palettes);
+  const load = usePaletteStore((s) => s.load);
+  useEffect(() => { void load(); }, [load]);
+
+  if (!on || !palettes) return null;
+  const grades = palettes.good_quality_grades;
+  if (grades.length === 0) return null;
+
+  return (
+    <div style={box2}>
+      <div style={title}>Trade-good quality</div>
+      {heatmap ? (
+        <>
+          <div style={{ ...barBase, background: rampGradient(palettes.good_quality_heatmap) }} />
+          <div style={ticks}><span>poorest</span><span>finest</span></div>
+        </>
+      ) : (
+        <div style={{ ...barBase, background: `linear-gradient(to right, ${palettes.good_quality_pale}, #6a6a6a)` }} />
+      )}
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, gap: 2 }}>
+        {grades.map((g) => (
+          <div key={g.at} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1, minWidth: 0 }}>
+            <span style={{
+              width: 12, height: 12, borderRadius: 3, border: "1px solid rgba(0,0,0,0.4)",
+              background: heatmap ? g.color : mixHex(palettes.good_quality_pale, "#6a6a6a", g.at),
+            }} />
+            <span style={{ fontSize: 8.5, color: "#93a8bd", marginTop: 2, whiteSpace: "nowrap", textTransform: "capitalize" }}>
+              {g.label}
+            </span>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 9, color: "#5a7390", marginTop: 6, lineHeight: 1.4 }}>
+        {heatmap
+          ? "One absolute scale, shared by every good — a red patch of any good outgrades a blue patch of any other."
+          : <>Colour is the good itself; shading is how strongly it shows here. Toggle <b>🌡 heatmap</b> above the goods list for a colour-coded reading instead.</>}
       </div>
     </div>
   );

@@ -2026,6 +2026,18 @@ Four rules for anyone changing this:
   whole belt is mediocre gets promoted to full colour just for being its own best. The
   stops live once, in `palette_commands.rs`, and are SERVED (§8.18). Until they
   arrive the overlay draws coverage only rather than inventing a ramp.
+- **The scale has TWO paints, same numbers.** The default mixes toward the good's
+  own colour, which is unreadable for a good whose hue is already close to the pale
+  ground tint — a real user report. `GOOD_QUALITY_HEATMAP_STOPS` (dark blue → red)
+  is an alternate reading of the identical belt value, switched per-session via
+  `uiStore.goodQualityHeatmap` (Toolbar → Trade Goods → "🌡 heatmap", only shown
+  while the quality layer itself is on). `GradeStop`/`good_quality_grades` serves
+  the SAME `deposits::grade_label` vocabulary (coarse/ordinary/good/fine/exquisite)
+  ore workings already use, at heatmap-exact colours, so `GoodQualityLegend`
+  (`ui/world/LayerLegend.tsx`) can show swatches guaranteed to match the map. It
+  docks to the opposite corner from the main `LayerLegend`, since it keys off the
+  `goodQuality` OVERLAY rather than the active base layer and can be showing at the
+  same time as either.
 - **A very large belt is downsampled by MAJORITY, never by "any".** Above
   `MASK_MAX_PX` a canvas per good becomes real memory, so the mask reduces — and a
   reduce that takes a block when ANY sub-cell is covered puts the belt back over the

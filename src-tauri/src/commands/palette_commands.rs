@@ -4,6 +4,7 @@ use crate::render::tile_image::{
     biome_color, koppen_color, soil_color, BATHYMETRY_STOPS, ELEVATION_STOPS, ELEV_MAX_M,
     PRECIP_BANDS, TEMPERATURE_STOPS,
 };
+use crate::sim::deposits::grade_label;
 
 /// THE PALETTE, STRAIGHT OUT OF THE RENDERER.
 ///
@@ -70,6 +71,54 @@ pub(crate) const GOOD_QUALITY_STOPS: [(f32, f32, f32); 5] = [
 /// `rampToward` faded to, kept so a low-quality belt still reads as paper-and-wash.
 pub(crate) const GOOD_QUALITY_PALE: (u8, u8, u8) = (236, 230, 224);
 
+/// An ALTERNATE reading of the same D10 scale: a heat ramp (dark blue = poorest
+/// land, red = finest) that ignores the good's own hue entirely. Added because the
+/// hue-mix scale above is genuinely subtle for a muted or dark good — mixing toward
+/// a colour that is itself close to the pale ground tint reads as almost no change
+/// at all. A heat ramp has no such blind spot: every good's best land is red and
+/// worst is blue, however that good happens to be coloured on the map. Same
+/// absolute 0..1 belt value as `GOOD_QUALITY_STOPS`, so switching modes never
+/// changes what a cell's number MEANS, only how it is painted.
+pub(crate) const GOOD_QUALITY_HEATMAP_STOPS: [(f32, (u8, u8, u8)); 5] = [
+    (0.00, (32, 42, 122)),
+    (0.25, (44, 130, 216)),
+    (0.50, (240, 214, 64)),
+    (0.75, (232, 122, 40)),
+    (1.00, (196, 32, 32)),
+];
+
+/// Linear interpolation over `GOOD_QUALITY_HEATMAP_STOPS` at an arbitrary belt
+/// value — used both to build the served ramp and to colour the served grade
+/// swatches at their exact breakpoints, so the two can never disagree.
+fn heatmap_at(t: f32) -> (u8, u8, u8) {
+    let s = &GOOD_QUALITY_HEATMAP_STOPS;
+    let t = t.clamp(0.0, 1.0);
+    for w in s.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        if t <= b.0 {
+            let k = if b.0 > a.0 { (t - a.0) / (b.0 - a.0) } else { 0.0 };
+            let mix = |lo: u8, hi: u8| (lo as f32 + (hi as f32 - lo as f32) * k).round() as u8;
+            return (mix(a.1 .0, b.1 .0), mix(a.1 .1, b.1 .1), mix(a.1 .2, b.1 .2));
+        }
+    }
+    s[s.len() - 1].1
+}
+
+/// One grade breakpoint, labelled in the SAME vocabulary ore workings already use
+/// (`deposits::grade_label` — coarse/ordinary/good/fine/exquisite), so "how good is
+/// this land for wine" and "how rich is this silver working" read as one shared
+/// quality language rather than two invented scales.
+#[derive(Serialize)]
+pub struct GradeStop {
+    pub at: f32,
+    pub label: String,
+    pub color: String,
+}
+
+/// The breakpoints `grade_label` itself switches on (kept in sync by
+/// `grade_labels_match_the_served_breakpoints` below).
+const GRADE_BREAKS: [f32; 5] = [0.0, 0.34, 0.52, 0.70, 0.86];
+
 #[derive(Serialize)]
 pub struct RenderPalettes {
     /// Continuous, x in METRES above sea level.
@@ -89,6 +138,11 @@ pub struct RenderPalettes {
     pub good_quality: Vec<QualityStop>,
     /// The pale end that scale mixes away from, as a hex colour.
     pub good_quality_pale: String,
+    /// The alternate heat-ramp reading of the SAME scale (dark blue → red).
+    pub good_quality_heatmap: Vec<RampStop>,
+    /// The heatmap ramp's colour at each `grade_label` breakpoint, so the legend's
+    /// swatches are guaranteed to match what the map actually paints there.
+    pub good_quality_grades: Vec<GradeStop>,
 }
 
 fn hex(c: (u8, u8, u8)) -> String {
@@ -119,6 +173,16 @@ pub fn get_render_palettes() -> RenderPalettes {
             .map(|&(at, alpha, mix)| QualityStop { at, alpha, mix })
             .collect(),
         good_quality_pale: hex(GOOD_QUALITY_PALE),
+        good_quality_heatmap: GOOD_QUALITY_HEATMAP_STOPS.iter()
+            .map(|&(at, c)| RampStop { at, color: hex(c) })
+            .collect(),
+        good_quality_grades: GRADE_BREAKS.iter()
+            .map(|&at| GradeStop {
+                at,
+                label: grade_label(at).to_string(),
+                color: hex(heatmap_at(at)),
+            })
+            .collect(),
     }
 }
 
@@ -142,5 +206,41 @@ mod tests {
         // The faintest wash still has to be visible — Slice 3's FLOOR keeps a fringe
         // cell producing, so the map must keep it drawn (§5.1).
         assert!(s[0].1 >= 0.10, "the fringe must not fade to invisible");
+    }
+
+    /// `GRADE_BREAKS` must land each stop in its OWN `grade_label` word — otherwise
+    /// two adjacent legend swatches would carry the same label, which is the exact
+    /// misreport a served-not-copied table exists to prevent.
+    #[test]
+    fn grade_labels_match_the_served_breakpoints() {
+        let labels: Vec<&str> = GRADE_BREAKS.iter().map(|&t| grade_label(t)).collect();
+        let unique: std::collections::HashSet<&str> = labels.iter().copied().collect();
+        assert_eq!(unique.len(), labels.len(), "breakpoints must map to distinct words: {labels:?}");
+        assert_eq!(labels, vec!["coarse", "ordinary", "good", "fine", "exquisite"]);
+    }
+
+    /// The heat ramp must actually run from a distinct dark tone to a distinct
+    /// bright/warm tone — a heatmap that doesn't visibly change defeats the whole
+    /// point of adding it (the user-reported problem: the hue-mix scale was too
+    /// subtle to read).
+    #[test]
+    fn the_heatmap_ramp_spans_a_visible_range() {
+        let s = &GOOD_QUALITY_HEATMAP_STOPS;
+        assert_eq!(s[0].0, 0.0);
+        assert_eq!(s[s.len() - 1].0, 1.0);
+        for w in s.windows(2) {
+            assert!(w[1].0 > w[0].0, "positions must ascend");
+        }
+        let lo = s[0].1;
+        let hi = s[s.len() - 1].1;
+        let dist2 = (lo.0 as i32 - hi.0 as i32).pow(2)
+            + (lo.1 as i32 - hi.1 as i32).pow(2)
+            + (lo.2 as i32 - hi.2 as i32).pow(2);
+        assert!(dist2 > 100 * 100, "the low and high ends of the heatmap look too similar: {lo:?} vs {hi:?}");
+        // Interpolation must actually be monotone-ish in perceived warmth: sampling
+        // the midpoint should not silently equal an endpoint.
+        let mid = heatmap_at(0.5);
+        assert_ne!(mid, lo);
+        assert_ne!(mid, hi);
     }
 }

@@ -73,6 +73,7 @@ export function MapCanvas() {
   const searchPin = useViewportStore((s) => s.searchPin);
   const warHighlight = useViewportStore((s) => s.warHighlight);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
+  const goodQualityHeatmap = useUIStore((s) => s.goodQualityHeatmap);
   const lineColors = useSettingsStore((s) => s.lineColors);
   // D10 · the renderer's OWN belt-quality scale, served rather than copied (§8.18).
   const palettes = usePaletteStore((s) => s.palettes);
@@ -1125,9 +1126,16 @@ export function MapCanvas() {
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !palettes) return;
-    om.setGoodQualityScale(palettes.good_quality, palettes.good_quality_pale);
+    om.setGoodQualityScale(palettes.good_quality, palettes.good_quality_pale, palettes.good_quality_heatmap);
     requestRender();
   }, [palettes, requestRender]);
+  // Heat-ramp reading of the same scale (dark blue → red), toggled independently.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setGoodQualityHeatmap(goodQualityHeatmap);
+    requestRender();
+  }, [goodQualityHeatmap, requestRender]);
 
   // Merchant-family control overlay — which settlements each house holds. Driven
   // by the live campaign houses (updates dynamically as the campaign advances).
