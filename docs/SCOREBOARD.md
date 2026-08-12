@@ -9,6 +9,75 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-08-12b (`ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` — ALL 13 slices addressed)
+
+**The remaining four slices, closing out the plan.** Continuing from the
+2026-08-12 entry below (4.1-4.9, 4.13):
+
+- **4.12 · certification fee (A2), wired; adulteration built, deferred.** "Whoever
+  grades, profits" — a certifying authority (a resident guild house, else the
+  parent city's civic pool) takes `CERT_FEE_FRAC` (4%) of an estate's owner-cut
+  at the EXISTING per-sale site, as a pure REDISTRIBUTION of that cut, never
+  added on top of `sale`. Passed `econ_inheritance_rules_fragment_differently`
+  on the FIRST real attempt despite touching every estate sale in the tick — a
+  uniform skim applied identically under every inheritance law measured as a far
+  more symmetric perturbation than 4.7/4.9's targeted transfers, confirming the
+  session's working theory. Surfaced a genuine, over-broad pre-existing test
+  assertion (`a_guild_never_divides_its_estate` checked NO house anywhere ever
+  divides, when its own name and intent was that the GUILD specifically never
+  does) — fixed by scoping the assertion to `h.is_guild`, verified against the
+  two actual offenders (ordinary new non-guild houses dividing under partible
+  law, correct behaviour). Adulteration (a distressed owner's one-off windfall,
+  risking detection) is fully implemented and directly unit-tested but NOT
+  wired into the tick loop — its trigger is gated on estate-owner DISTRESS,
+  which differs structurally between inheritance regimes BY CONSTRUCTION
+  (exactly what the fragile gate measures), so unlike the fee this wasn't a
+  case dose-tuning could fix.
+- **4.10 · coronation converts owned estates into crown leases (D12); A7 free by
+  reuse.** Every estate a house owned outright converts at coronation: a
+  pre-existing minority share is grandfathered into a time-limited LEASE
+  (`instrument` → 1, 9-year term, A1's own range); the unclaimed remainder goes
+  to the crown via a new Share row, reusing the ALREADY-WIRED `holder_kind=4`
+  (realm) path both the dividend cut and 4.8's offtake pass credit to
+  `Realm.treasury`. Closes a real latent gap rule 25 warned about — the old
+  per-sale cut only checked `!defunct`, so a crowned house's former estates
+  would have kept crediting it forever. A7 (royalty in kind) falls out for
+  free: a raw estate's crown share is offtake (physical goods), not dividend.
+  D13 (lease loss by revocation/war/intrigue) is a real, separate decision
+  system, explicitly not built.
+- **4.11 · population status (F8), a safe pure derived read; D18/D19 verified
+  pre-existing.** `population_status(food_balance, starving)` reuses the exact
+  0.5 threshold the existing civic-granary famine release already keys on,
+  exposed on `HubBrief.pop_status` for the frontend — no new state, no tick
+  change, so it cannot move any gate by construction. The riskier half (batching
+  daily consumption into a visible monthly release, a real civic buy/resell
+  margin) was deliberately not attempted: consumption is the single hottest,
+  most universal per-tick path in the whole sim, and the plan's own gate wording
+  already anticipated disruption. D18 (essentials-only civic routing) and D19
+  (the civic share isn't alienable) were checked, not built: both already hold
+  in the existing code (`council_provision_pass`'s existing food-first rule;
+  no code path anywhere sells `civic_goods`).
+- **Frontend · heraldic accents (A10).** A shareholder/tenant row in
+  `WorksCard`'s ownership bar now resolves through the same `houseColor()` the
+  House Dossier's shield renders with, plus a small `CoatOfArms` badge per
+  house/guild row — the backend's generic `distinct_color` tag stays only as
+  the bank/realm fallback (no heraldry to draw). `CityWarehousePanel`'s
+  supplier board is untouched on purpose — D20 groups sellers into five
+  CLASSES, never a named per-house ledger.
+
+**The plan's own §6 "deliberately not built" list, now complete**: A6 (bank
+credit-conversion, 4.9), D11/A9's reimbursement transfer (4.7), adulteration's
+wiring (4.12), D13 (4.10), and 4.11's consumption-timing rearchitecture. Five
+real, flagged follow-ups — none silently dropped, each with a stated reason
+tied to a measurement or a structural risk, not a guess.
+
+**Gates:** `cargo test --lib` **303 passed, 0 failed, 22 ignored** ·
+`econ_inheritance_rules_fragment_differently` and `simulate_decades_reports_
+dynamics` both pass · `npx tsc --noEmit` clean · `earth_` unaffected (this
+session never touches `step3_ocean_atmo`/`step4_climate`).
+
+---
+
 ## Current state — 2026-08-12 (`ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` — slices 4.1-4.9 and 4.13 built)
 
 **What shipped.** Grade bands on stock (4.1: `stock[g]` → `stock[g][band]`, three
@@ -1257,6 +1326,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-12b | *this* | 70.2% | 39.0% | 303 | 0 | `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` ALL 13 SLICES addressed: certification fee (4.12, wired — a uniform redistribution passed the fragile gate on the first real attempt, unlike 4.7/4.9's targeted transfers); coronation-to-crown-lease conversion + free A7 royalty in kind (4.10); population status as a safe pure derived read (4.11); heraldic accents on the works ownership bar (A10, frontend). Five real follow-ups flagged, not silently dropped: A6, D11/A9's reimbursement, adulteration's wiring, D13, and 4.11's consumption-timing rearchitecture — each deferred for a stated, measured or structural reason |
 | 2026-08-12 | *this* | 70.2% | 39.0% | 300 | 0 | `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` slices 4.1-4.9 + 4.13 built (grade bands, spoilage, warehouse panel, supplier attribution, share table, works cards, brands, disasters/repair, envoys, offtake routing). Two independent RNG-sensitivity data points against `econ_inheritance_rules_fragment_differently`: 4.7's discrete branching-order flip (reverted) and 4.9's genuine dose-dependent flip (tuned down to passing). A6 and D11/A9's reimbursement money transfer deliberately deferred |
 | 2026-08-11 | *this* | 70.2% | 39.0% | 294 | 0 | `GOODS_LOCALITIES_PLAN.md` all 8 slices built (rivers, marine bands, localities, naming, the two-layer overlay, province squares, production wiring). Slice 0's own gate found and fixed a process-global test race it had introduced, and printed (not asserted) a pre-existing `Deposits`-goods coastline-crossing finding for `DEPOSITS_AND_MINING_PLAN.md` |
 | 2026-07-31 | *this* | **70.2%** | 39.0% | 227 | 0 | Ocean evaporation's wind term was DEAD CODE — it read `|belt_wind|`, which is a unit vector, so the factor was identically 1.0. Now reads `jets::base_speed`, the real belt speed profile, as the bulk formula `E ∝ U·(q_s − q_a)` requires |
