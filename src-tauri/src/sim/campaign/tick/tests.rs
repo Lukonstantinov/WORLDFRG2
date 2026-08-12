@@ -347,6 +347,56 @@
         assert_eq!(s.prov_realm, vec![id as i32], "sovereignty is recorded on the province");
     }
 
+    /// 4.10 (D12) · coronation converts every estate the crowned house owned
+    /// into crown title: a plain wholly-owned estate gets a full-fraction
+    /// realm Share row and loses its private owner; a pre-existing minority
+    /// SHARE (a bank stake) is grandfathered into a time-limited LEASE
+    /// (`instrument` → 1, `LEASE_TERM_YEARS`) rather than swept aside, and the
+    /// crown only claims what wasn't already held.
+    #[test]
+    fn coronation_converts_owned_estates_into_crown_leases() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let seat = hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0);
+        let mut plain = hub(1, 1.0, 0.0, 2000.0, vec![0.0], 0);
+        plain.is_estate = true; plain.estate_tier = 1; plain.estate_kind = 0;
+        plain.parent = 0; plain.owner_house = 0;
+        let mut leased = hub(2, 2.0, 0.0, 2000.0, vec![0.0], 0);
+        leased.is_estate = true; leased.estate_tier = 1; leased.estate_kind = 6; // manufactory
+        leased.parent = 0; leased.owner_house = 0;
+        leased.shares.push(Share {
+            holder_kind: 3, holder: 0, frac: 0.3, payout: 1,
+            acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
+        });
+        let mut s = sim(vec![seat, plain, leased], goods);
+        s.found_house_at(0);
+        let hi = 0usize;
+        s.houses[hi].wealth = 100_000.0;
+        s.prov_holder = vec![0];
+        s.prov_holder_house = vec![-1];
+        s.prov_realm = vec![-1];
+        s.hub_province = vec![0];
+        s.prov_culture = vec!["Aiora".into()];
+
+        let id = s.promote_house_to_realm(hi, 0, 60);
+
+        assert_eq!(s.hubs[1].owner_house, -1, "the plain estate loses its private owner");
+        let plain_realm = s.hubs[1].shares.iter().find(|sh| sh.holder_kind == 4)
+            .expect("the crown holds a share of the plain estate");
+        assert_eq!(plain_realm.holder, id);
+        assert!((plain_realm.frac - 1.0).abs() < 1e-4, "the crown takes the whole unclaimed fraction: {}", plain_realm.frac);
+        assert_eq!(plain_realm.payout, 0, "a raw estate's crown share is OFFTAKE — A7's royalty in kind, for free");
+
+        assert_eq!(s.hubs[2].owner_house, -1, "the manufactory loses its private owner too");
+        let bank_row = s.hubs[2].shares.iter().find(|sh| sh.holder_kind == 3).expect("the bank stake survives");
+        assert_eq!(bank_row.instrument, 1, "a pre-existing SHARE is grandfathered into a LEASE");
+        assert_eq!(bank_row.term_years, LEASE_TERM_YEARS);
+        assert!((bank_row.frac - 0.3).abs() < 1e-4, "the grandfathered holder keeps its own fraction");
+        let crown_row = s.hubs[2].shares.iter().find(|sh| sh.holder_kind == 4).expect("the crown holds the rest");
+        assert_eq!(crown_row.holder, id);
+        assert!((crown_row.frac - 0.7).abs() < 1e-4, "the crown claims only what the bank didn't already hold: {}", crown_row.frac);
+        assert_eq!(crown_row.payout, 1, "a manufactory's crown share stays DIVIDEND — D1 is unchanged by coronation");
+    }
+
     /// R1b · every precondition in §3.1 is load-bearing on its own: dropping any ONE
     /// of them must suppress the proclamation. Checked directly against
     /// `maybe_proclaim_realms` rather than by hunting for a seed that rolls the dice

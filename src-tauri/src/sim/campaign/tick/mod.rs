@@ -1853,6 +1853,11 @@ const HUMILIATE_PRESTIGE_GAIN: f32 = 0.05;
 /// over once it elapses — no special-case unwind needed, the SAME mechanism that
 /// would naturally replace any official on schedule.
 const ENTHRONE_TERM_YEARS: u32 = 15;
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.10 (D12) · a pre-existing minority
+/// share grandfathered into a lease at coronation runs this many years —
+/// A1's own 5-9 year mezzadria/métayage citation, at its upper end (the
+/// crown's own patience with an inherited arrangement runs long).
+const LEASE_TERM_YEARS: u32 = 9;
 /// §3.4c · a feud whose winner holds its city's council/captor seat may escalate
 /// its worst (vendetta) flare into a full state war instead of the ordinary
 /// property damage — "capturing a government is what lets a family spend a city's

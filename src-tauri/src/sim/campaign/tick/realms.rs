@@ -271,6 +271,44 @@ impl CampaignSim {
         self.journal.push(JournalEntry {
             tick, kind: "realm_founded".into(), hub: seat as i32, good: -1, value: 0.0, text,
         });
+
+        // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.10 (D12) · every estate this
+        // house directly owned converts to CROWN TITLE: any pre-existing
+        // minority share (a bank stake, an earlier envoy partial buy) is
+        // grandfathered as a time-limited operating LEASE rather than swept
+        // aside (`instrument` → 1, a `LEASE_TERM_YEARS` term); whatever
+        // fraction wasn't already claimed goes to the crown itself as a new
+        // Share row — reusing the fully-wired holder_kind=4 (realm) path both
+        // `production.rs`'s dividend cut and `offtake_delivery_pass` already
+        // credit to `Realm.treasury`. For an extraction estate this crown
+        // share is payout=0 (offtake), which — since it delivers PHYSICAL
+        // goods rather than cash — already satisfies A7's "royalty in kind"
+        // by construction, no separate mechanism needed. `owner_house` is
+        // cleared to −1 so the old private-owner cut path (which only checks
+        // `!defunct`, not `is_merchant()` — rule 25's own warning) never
+        // credits the now-crowned house again.
+        for ei in 0..self.hubs.len() {
+            if !self.hubs[ei].is_estate || self.hubs[ei].owner_house != hi as i32 { continue; }
+            let payout: u8 = if self.hubs[ei].estate_kind == 6 { 1 } else { 0 };
+            for sh in self.hubs[ei].shares.iter_mut() {
+                if sh.instrument == 0 { sh.instrument = 1; sh.term_years = LEASE_TERM_YEARS; }
+            }
+            let held: f32 = self.hubs[ei].shares.iter().map(|s| s.frac.max(0.0)).sum();
+            let crown_frac = (1.0 - held).max(0.0);
+            if crown_frac > EPS {
+                self.hubs[ei].shares.push(Share {
+                    holder_kind: 4, holder: id, frac: crown_frac, payout,
+                    acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
+                });
+            }
+            self.hubs[ei].owner_house = -1;
+        }
+        // D13 (revocation/war/intrigue lease loss) is deliberately NOT built
+        // here — it's a real, separate decision system (a stated, chronicled
+        // reason; war reusing `apply_war_goal`/`strip_holdings_at`; intrigue
+        // reusing `foreign_hand.rs`/the crisis engine), out of scope for this
+        // pass, flagged rather than silently skipped.
+
         let _ = yr;
         id
     }
