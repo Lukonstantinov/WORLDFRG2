@@ -2144,6 +2144,14 @@ pub struct TickHub {
     /// warehouse panel's "▲+340" month-delta reads against (ng-length; empty
     /// ⇒ every delta reads 0, never a spurious first-month spike).
     #[serde(default)] pub wh_last_month: Vec<f32>,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.4 (D20) · who delivered each
+    /// good, recently — flat `ng × SUPPLY_CLASSES`, decaying daily like
+    /// `in_by_sea`/`in_by_land` already do. Tagged at the highest-volume
+    /// delivery sites (own/estate production, incoming trade); a delivery
+    /// this doesn't reach (a civic grant, a disaster relief shipment) simply
+    /// isn't counted — the single pool and the price formula are unchanged
+    /// either way (D20's own scope).
+    #[serde(default)] pub supply_accum: Vec<f32>,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -3399,6 +3407,25 @@ pub(crate) fn stock_set_total(stock: &mut [f32], g: usize, total: f32) {
 pub(crate) fn production_band(is_estate: bool, quality: f32) -> usize {
     let band = if quality >= 0.7 { GRADE_FINE } else if quality >= 0.4 { GRADE_COMMON } else { GRADE_COARSE };
     if is_estate { band } else { band.min(GRADE_COMMON) }
+}
+
+// ── ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.4 (D20) · supplier attribution ──
+// Five seller classes; the panel groups on these, never a named per-house
+// ledger (D20 rejects "separate books per seller and a full order book").
+pub const SUPPLY_CITY: usize = 0;
+pub const SUPPLY_HOUSE: usize = 1;
+pub const SUPPLY_GUILD: usize = 2;
+pub const SUPPLY_LOCAL: usize = 3;
+pub const SUPPLY_FOREIGN: usize = 4;
+pub const SUPPLY_CLASSES: usize = 5;
+
+/// Tag `amt` of good `g` as delivered by seller `class`. Accumulates like
+/// `good_flow_accum` already does; decayed daily in `advance()`.
+#[inline]
+pub(crate) fn supply_add(acc: &mut [f32], g: usize, class: usize, amt: f32) {
+    if amt <= 0.0 { return; }
+    let idx = g * SUPPLY_CLASSES + class.min(SUPPLY_CLASSES - 1);
+    if let Some(v) = acc.get_mut(idx) { *v += amt; }
 }
 
 /// A merchant warehouse: a finite, OWNED store of goods sited in a city. Owner
@@ -5699,6 +5726,10 @@ impl CampaignSim {
                 // A works' condition (disaster damage / age / labor / unrest) scales its
                 // realized output; ordinary settlements are unaffected (1.0).
                 let eff = if self.hubs[h].is_estate { self.estate_effectiveness(h) } else { 1.0 };
+                let supply_class = self.hub_supply_class(h);
+                if self.hubs[h].supply_accum.len() != ng * SUPPLY_CLASSES {
+                    self.hubs[h].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
+                }
                 for g in 0..ng {
                     // Manufactured (recipe) goods aren't extracted per-capita — they're
                     // made from imported raws in the manufacturing pass below.
@@ -5713,6 +5744,7 @@ impl CampaignSim {
                     self.hubs[h].production[g] = realized;
                     let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                     stock_add(&mut self.hubs[h].stock, g, band, realized);
+                    supply_add(&mut self.hubs[h].supply_accum, g, supply_class, realized);
                 }
                 // SUBSISTENCE FARMING — a REMOTE land settlement whose trade component
                 // cannot supply food feeds itself from its own fields, so an isolated
@@ -5744,6 +5776,7 @@ impl CampaignSim {
                             self.hubs[h].production[g] += add;
                             let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                             stock_add(&mut self.hubs[h].stock, g, band, add);
+                            supply_add(&mut self.hubs[h].supply_accum, g, SUPPLY_CITY, add);
                         }
                     }
                 }
@@ -5895,9 +5928,11 @@ impl CampaignSim {
 
             // 5) Arrivals. Decay each hub's by-sea/by-land supply tally, then add
             //    today's landings tagged by how they travelled (ships vs caravans).
+            //    Supplier attribution (§4.4) decays the same way.
             for hb in &mut self.hubs {
                 hb.in_by_sea *= 0.98;
                 hb.in_by_land *= 0.98;
+                for v in hb.supply_accum.iter_mut() { *v *= 0.98; }
             }
             // (to, good, amount, sea, phase, home, owner) — phase/home/owner let an
             // arriving OUTBOUND house cargo spawn its return leg from the dest hub.
@@ -5913,6 +5948,10 @@ impl CampaignSim {
             for (to, g, amt, sea, phase, home, owner) in landed {
                 if to < self.hubs.len() {
                     stock_add_ungraded(&mut self.hubs[to].stock, g, amt);
+                    if self.hubs[to].supply_accum.len() != ng * SUPPLY_CLASSES {
+                        self.hubs[to].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
+                    }
+                    supply_add(&mut self.hubs[to].supply_accum, g, SUPPLY_FOREIGN, amt);
                     if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
                 }
                 // Round trip: an OUTBOUND (phase 0) house cargo that just sold at `to`

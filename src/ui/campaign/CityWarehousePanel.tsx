@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { useCampaignStore } from "@state/campaignStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { campaignCityWarehouse } from "@bridge";
 import type { CityWarehouseGood, CityWarehouseInfo } from "@types";
@@ -13,6 +12,9 @@ const BAND_TABS = [
 ] as const;
 
 const GRADE_COLOR = ["#6a5a3a", "#7fa0c0", "#d8b24a"]; // coarse · common · fine
+// D20's five seller classes, in supply_shares order.
+const SUPPLY_LABELS = ["🏛 City", "🏠 Houses", "⚒ Guilds", "🏪 Local", "🌍 Foreign"] as const;
+const SUPPLY_COLOR = ["#7fa0c0", "#d8b24a", "#8a6fb0", "#6a86a6", "#4cae7a"];
 
 function fmt(n: number): string {
   const a = Math.abs(n);
@@ -150,6 +152,18 @@ export function CityWarehousePanel({ hub, tick }: { hub: number; tick: number })
             <span>common {fmt(sel.common)}</span>
             <span>fine {fmt(sel.fine)}</span>
           </div>
+          {sel.supply_shares.some((s) => s > 0.01) && (
+            <div style={{ marginTop: 6 }}>
+              <div style={{ fontSize: FZ.small, color: T.inkDim, marginBottom: 2 }}>SUPPLIERS</div>
+              {sel.supply_shares.map((share, i) => share > 0.01 ? (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 9, marginTop: 1 }}>
+                  <span style={{ width: 64, color: T.inkMid }}>{SUPPLY_LABELS[i]}</span>
+                  <Meter value={share} max={1} color={SUPPLY_COLOR[i]} height={5} />
+                  <span style={{ width: 30, textAlign: "right", color: T.inkFaint }}>{Math.round(share * 100)}%</span>
+                </div>
+              ) : null)}
+            </div>
+          )}
         </div>
       )}
     </div>

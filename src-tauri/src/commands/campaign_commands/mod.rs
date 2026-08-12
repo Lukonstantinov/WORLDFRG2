@@ -1864,6 +1864,10 @@ pub struct CityWarehouseGood {
     pub spoiled_month: f32,
     pub need_tier: u8,
     pub cover_months: f32,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.4 (D20) · recent-delivery shares
+    /// by seller class (city/house/guild/local/foreign), each 0..1, summing to
+    /// ≤1 (0 all round when nothing tagged has arrived recently).
+    pub supply_shares: [f32; 5],
 }
 
 /// The city's own warehouse (D17/F6) — distinct from a house/guild `Warehouse`

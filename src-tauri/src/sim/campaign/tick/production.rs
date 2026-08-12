@@ -285,6 +285,19 @@ impl CampaignSim {
     }
 
 
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.4 (D20) · which of the 5 supplier
+    /// classes this hub's OWN production counts as: a plain settlement or a
+    /// city-owned estate reads CITY; a guild-owned estate reads GUILD; any
+    /// other (private-house-owned) estate reads HOUSE.
+    #[inline]
+    pub(crate) fn hub_supply_class(&self, h: usize) -> usize {
+        let hub = &self.hubs[h];
+        if !hub.is_estate || hub.owner_house < 0 { return SUPPLY_CITY; }
+        let oi = hub.owner_house as usize;
+        if oi < self.houses.len() && self.houses[oi].is_guild { SUPPLY_GUILD } else { SUPPLY_HOUSE }
+    }
+
+
     /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1 · one-time migration for a
     /// pre-4.1 save: `stock` used to be `ng` floats (one per good); it is now
     /// flat `ng × GRADE_BANDS`. A hub whose `stock.len()` still equals `ng` is
@@ -305,6 +318,7 @@ impl CampaignSim {
             } else if h.stock.len() != ng * GRADE_BANDS {
                 h.stock.resize(ng * GRADE_BANDS, 0.0);
             }
+            if h.supply_accum.len() != ng * SUPPLY_CLASSES { h.supply_accum.resize(ng * SUPPLY_CLASSES, 0.0); }
         }
     }
 
@@ -415,6 +429,11 @@ impl CampaignSim {
                 let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                 stock_add(&mut self.hubs[h].stock, g, band, made);
                 self.hubs[h].production[g] += made;
+                let supply_class = self.hub_supply_class(h);
+                if self.hubs[h].supply_accum.len() != ng * SUPPLY_CLASSES {
+                    self.hubs[h].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
+                }
+                supply_add(&mut self.hubs[h].supply_accum, g, supply_class, made);
             }
         }
     }

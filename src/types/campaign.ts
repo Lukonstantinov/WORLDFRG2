@@ -670,6 +670,8 @@ export interface CityWarehouseGood {
   spoiled_month: number;
   need_tier: number; // 0 Life · 1 Daily · 2 Luxury
   cover_months: number;
+  /** 4.4 (D20) · recent-delivery shares, 0..1: [city, house, guild, local, foreign]. */
+  supply_shares: [number, number, number, number, number];
 }
 /** The city's own warehouse (D17/F6) — distinct from a house/guild `WarehouseInfo` depot. */
 export interface CityWarehouseInfo {

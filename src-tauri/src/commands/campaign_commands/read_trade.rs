@@ -390,6 +390,10 @@ pub fn campaign_city_warehouse(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
             * crate::sim::tick::DEMAND_PRESSURE
             * 30.0;
         let cover_months = if monthly_need > 1e-3 { amount / monthly_need } else { f32::INFINITY };
+        let sbase = g * crate::sim::tick::SUPPLY_CLASSES;
+        let raw: [f32; 5] = std::array::from_fn(|c| hb.supply_accum.get(sbase + c).copied().unwrap_or(0.0).max(0.0));
+        let raw_total: f32 = raw.iter().sum();
+        let supply_shares = if raw_total > 1e-3 { raw.map(|v| v / raw_total) } else { [0.0; 5] };
         Some(CityWarehouseGood {
             good: g,
             name: tg.name.clone(),
@@ -401,6 +405,7 @@ pub fn campaign_city_warehouse(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
             spoiled_month: spoiled,
             need_tier: tg.need_tier.min(2),
             cover_months,
+            supply_shares,
         })
     }).collect();
     let used: f32 = goods.iter().map(|g| g.amount).sum();
