@@ -2399,6 +2399,12 @@ impl CampaignSim {
             // `estate_resale_pass` just left, so run right after it.
             self.envoy_dispatch_pass();
             self.envoy_travel_pass();
+            // 4.8 (D1, D5) · offtake-payout shares (extraction works only) draw
+            // their physical cut of accumulated stock into the holder's own
+            // depot, finest grade first — right after the two passes above,
+            // since an envoy's PARTIAL outcome is currently the only source of
+            // an offtake row.
+            self.offtake_delivery_pass();
             self.update_guilds_and_offices();
             // Offices (re)settled → update commercial influence, dominance & Bailos.
             self.update_influence_and_bailos();

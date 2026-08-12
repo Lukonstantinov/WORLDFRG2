@@ -255,15 +255,20 @@ impl CampaignSim {
             let seller = self.hubs[ei].owner_house;
             if seller >= 0 && (seller as usize) < self.houses.len() { self.houses[seller as usize].wealth += pcost; }
             else if parent >= 0 { self.hubs[parent as usize].treasury += pcost; }
+            // 4.8 (D1) · payout follows the WORKS kind, not the buyer: a
+            // manufactory's shares stay dividend (unchanged since 4.5); an
+            // extraction works (farm/mine/fishery/vineyard/plantation) pays
+            // offtake — physical goods, routed by `offtake_delivery_pass`.
+            let payout: u8 = if self.hubs[ei].estate_kind == 6 { 1 } else { 0 };
             if self.hubs[ei].shares.is_empty() && seller >= 0 {
                 self.hubs[ei].shares.push(Share {
-                    holder_kind: 1, holder: seller as u32, frac: 1.0, payout: 1,
+                    holder_kind: 1, holder: seller as u32, frac: 1.0, payout,
                     acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
                 });
             }
             for sh in self.hubs[ei].shares.iter_mut() { sh.frac *= 1.0 - frac; }
             self.hubs[ei].shares.push(Share {
-                holder_kind: 1, holder: hi as u32, frac, payout: 1,
+                holder_kind: 1, holder: hi as u32, frac, payout,
                 acquired_tick: tick, paid: pcost, instrument: 0, term_years: 0, neglect_years: 0,
             });
             self.envoys[idx].status = 3;

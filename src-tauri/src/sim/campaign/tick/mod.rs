@@ -3573,6 +3573,30 @@ pub(crate) fn stock_take(stock: &mut [f32], g: usize, amt: f32) -> f32 {
     taken
 }
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.8 (D5) · draw up to `amt` of good `g`
+/// off the FINEST bands first (fine → common → coarse) — the mirror image of
+/// `stock_take`'s cheapest-first draw, for the one reader that wants the
+/// opposite order: an offtake holder taking "the top of output" (D5) draws the
+/// best grade available before falling back to a coarser one, exactly as a
+/// controlling shareholder historically took first pressing. Returns the
+/// amount actually taken.
+#[inline]
+pub(crate) fn stock_take_finest_first(stock: &mut [f32], g: usize, amt: f32) -> f32 {
+    let base = g * GRADE_BANDS;
+    let mut remaining = amt.max(0.0);
+    let mut taken = 0.0f32;
+    for b in (0..GRADE_BANDS).rev() {
+        if remaining <= 0.0 { break; }
+        if let Some(v) = stock.get_mut(base + b) {
+            let take = v.min(remaining);
+            *v -= take;
+            taken += take;
+            remaining -= take;
+        }
+    }
+    taken
+}
+
 /// Multiply every band of good `g` by `mult` in place (a proportional loss/gain
 /// applied to the whole stock, e.g. rescaling a founding world's food supply).
 #[inline]
@@ -6966,6 +6990,7 @@ mod foreign_hand;
 mod production;
 mod realms;
 mod envoys;
+mod offtake;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the
 /// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"

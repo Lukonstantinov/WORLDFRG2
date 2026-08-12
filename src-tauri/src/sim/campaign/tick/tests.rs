@@ -4484,3 +4484,77 @@
         assert!(s.houses[0].wealth.is_finite() && s.houses[0].wealth >= 0.0,
             "house wealth left its bounds: {}", s.houses[0].wealth);
     }
+
+    /// 4.8 (D1, D5) · an offtake-payout share draws its fraction of an
+    /// extraction estate's stock into the holder's own warehouse, off the
+    /// FINEST band first — a controlling holder's cut should read as better
+    /// grade than what's left behind, not just a smaller number of the same mix.
+    #[test]
+    fn offtake_delivers_physical_goods_finest_band_first() {
+        let goods = vec![good("wine", 3, 2, 8.0, 0.4, false)];
+        let mut estate = hub(0, 0.0, 0.0, 2000.0, vec![0.0], 0);
+        estate.is_estate = true;
+        estate.estate_tier = 2;
+        estate.estate_kind = 2; // a vineyard, not a manufactory (6)
+        estate.parent = 1;
+        // 100 coarse, 100 common, 100 fine — 300 total.
+        estate.stock[GRADE_COARSE] = 100.0;
+        estate.stock[GRADE_COMMON] = 100.0;
+        estate.stock[GRADE_FINE] = 100.0;
+        let city = hub(1, 0.0, 0.0, 3000.0, vec![0.0], 0);
+        // House 0 holds the LARGER share (0.6) — D5 says it draws first.
+        estate.shares.push(Share {
+            holder_kind: 1, holder: 0, frac: 0.6, payout: 0,
+            acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
+        });
+        estate.shares.push(Share {
+            holder_kind: 1, holder: 1, frac: 0.4, payout: 0,
+            acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
+        });
+        let mut s = sim(vec![estate, city], goods);
+        s.houses = vec![house_at(1, vec![0], 0), house_at(1, vec![0], 0)];
+
+        s.offtake_delivery_pass();
+
+        // House 0 goes FIRST (largest share): 60% of 300 = 180, drawn finest
+        // first — all 100 fine, then 80 of the 100 common.
+        let wh0 = s.warehouses.iter().find(|w| w.owner == 0).expect("house 0 got a depot");
+        assert!((wh0.stock[0] - 180.0).abs() < 1e-3, "house 0's cut: {}", wh0.stock[0]);
+        assert_eq!(wh0.hub, 1, "the depot sits at the estate's PARENT city, not the estate itself");
+        // What's left after house 0: 100 coarse, 20 common, 0 fine = 120.
+        // House 1 draws 40% of THAT (48): the remaining 20 common, then 28 coarse.
+        let wh1 = s.warehouses.iter().find(|w| w.owner == 1).expect("house 1 got a depot");
+        assert!((wh1.stock[0] - 48.0).abs() < 1e-3, "house 1's cut: {}", wh1.stock[0]);
+
+        // Nothing manufactured out of thin air: total stock left in the estate
+        // plus both depots equals the original 300.
+        let remaining = stock_of(&s.hubs[0].stock, 0);
+        let total = remaining + wh0.stock[0] + wh1.stock[0];
+        assert!((total - 300.0).abs() < 1e-3, "offtake must move goods, not create them: {}", total);
+    }
+
+    /// A manufactory's shares must never be routed through offtake — D1 keeps
+    /// them on dividend (money out of sale proceeds), so `offtake_delivery_
+    /// pass` must be a no-op even if a `payout: 0` row somehow ends up on one.
+    #[test]
+    fn offtake_never_touches_a_manufactory() {
+        let goods = vec![good("cloth", 1, 2, 5.0, 0.4, false)];
+        let mut estate = hub(0, 0.0, 0.0, 2000.0, vec![0.0], 0);
+        estate.is_estate = true;
+        estate.estate_tier = 2;
+        estate.estate_kind = 6; // manufactory
+        estate.parent = 1;
+        estate.stock[GRADE_FINE] = 50.0;
+        estate.shares.push(Share {
+            holder_kind: 1, holder: 0, frac: 0.5, payout: 0,
+            acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
+        });
+        let city = hub(1, 0.0, 0.0, 3000.0, vec![0.0], 0);
+        let mut s = sim(vec![estate, city], goods);
+        s.houses = vec![house_at(1, vec![0], 0)];
+
+        s.offtake_delivery_pass();
+
+        assert!(s.warehouses.is_empty(), "a manufactory's shares must never route physical offtake");
+        assert!((stock_of(&s.hubs[0].stock, 0) - 50.0).abs() < 1e-3, "stock must stay untouched");
+    }
