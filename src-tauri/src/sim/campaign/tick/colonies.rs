@@ -786,6 +786,59 @@ impl CampaignSim {
     }
 
 
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.2 (D17/F6/D4) · monthly: size every
+    /// non-estate hub's OWN warehouse capacity from its population + Granary/
+    /// Warehouse structures (the two already exist for a production bonus — this
+    /// gives them a second, obvious job rather than inventing a new structure),
+    /// then spoil `stock` (all three grade bands alike — D4, one rate per good) and
+    /// `civic_goods` at a per-good rate derived from `GoodSpec.perishable`,
+    /// tallying what rotted into `wh_spoiled_month` for the warehouse panel (§4.3).
+    /// Stock held past capacity spoils faster (`SPOIL_OVERFLOW_MULT`) — an
+    /// overflowing store rots quicker than a well-kept one.
+    pub(crate) fn warehouse_and_spoilage_pass(&mut self) {
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let has_granary = self.hub_has_struct(h, STRUCT_GRANARY);
+            let has_wh = self.hub_has_struct(h, STRUCT_WAREHOUSE);
+            let struct_bonus = CITY_WH_STRUCT_BONUS
+                * (has_granary as u8 as f32 + has_wh as u8 as f32);
+            self.hubs[h].wh_capacity =
+                CITY_WH_CAP_BASE + self.hubs[h].population * CITY_WH_CAP_PER_POP + struct_bonus;
+
+            let cap = self.hubs[h].wh_capacity;
+            let total_held: f32 = (0..ng).map(|g| stock_of(&self.hubs[h].stock, g)).sum();
+            let over_frac = if cap > EPS { (total_held / cap - 1.0).max(0.0) } else { 0.0 };
+            let overflow_mult = 1.0 + over_frac.min(1.0) * (SPOIL_OVERFLOW_MULT - 1.0);
+
+            if self.hubs[h].wh_spoiled_month.len() != ng { self.hubs[h].wh_spoiled_month = vec![0.0; ng]; }
+            for g in 0..ng {
+                let mut rate = (self.goods[g].perishable.max(0.0) * SPOIL_PER_PERISHABLE).min(SPOIL_RATE_CAP);
+                if rate <= 0.0 { self.hubs[h].wh_spoiled_month[g] = 0.0; continue; }
+                if has_granary && self.goods[g].food { rate *= SPOIL_GRANARY_FOOD_MULT; }
+                if has_wh { rate *= SPOIL_WAREHOUSE_MULT; }
+                rate = (rate * overflow_mult).clamp(0.0, 0.95);
+                let mut spoiled = 0.0f32;
+                let before = stock_of(&self.hubs[h].stock, g);
+                if before > EPS {
+                    let s = stock_take(&mut self.hubs[h].stock, g, before * rate);
+                    spoiled += s;
+                }
+                if g < self.hubs[h].civic_goods.len() {
+                    let cbefore = self.hubs[h].civic_goods[g].max(0.0);
+                    if cbefore > EPS {
+                        let cs = cbefore * rate;
+                        self.hubs[h].civic_goods[g] -= cs;
+                        spoiled += cs;
+                    }
+                }
+                self.hubs[h].wh_spoiled_month[g] = spoiled;
+            }
+        }
+    }
+
+
     /// A mature, sizeable SATELLITE eventually outgrows its dependency and becomes a
     /// free city in its own right (colony_kind→0), keeping `founder_hub` so the map
     /// and panels can still show which metropolis raised it.
@@ -1412,6 +1465,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(),
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;

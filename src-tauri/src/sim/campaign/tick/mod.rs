@@ -1152,6 +1152,32 @@ const STRUCT_BUILD_WEALTH: f32 = 0.5;
 /// Production multipliers granted by structures.
 const WORKSHOP_PROD: f32 = 1.12;   // all goods
 const WAREHOUSE_PROD: f32 = 1.05;  // all goods (supply smoothing)
+
+// ── ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.2 · spoilage & city warehouse ───
+// Monthly spoilage rate per unit of `GoodSpec.perishable` — calibrated so
+// wheat's shipped 0.02 perishable reads ≈1%/month, the period anchor §9.1
+// cites (Allen/Persson-era granary loss). A very perishable good (fresh
+// herring, 0.55) would imply 27.5%/month uncapped; SPOIL_RATE_CAP holds the
+// worst case to something a stock column can still show meaningfully.
+const SPOIL_PER_PERISHABLE: f32 = 0.5;
+const SPOIL_RATE_CAP: f32 = 0.30;
+/// A Granary halves FOOD spoilage; a Warehouse halves spoilage generally —
+/// both structures already exist for a production bonus (`WORKSHOP_PROD`
+/// above); this gives them a second, thematically obvious job instead of a
+/// new one.
+const SPOIL_GRANARY_FOOD_MULT: f32 = 0.5;
+const SPOIL_WAREHOUSE_MULT: f32 = 0.6;
+/// Stock held past the city's own `wh_capacity` spoils at this extra
+/// multiplier (linearly ramped to it as the overflow fraction reaches 100%
+/// over capacity) — an overflowing store rots faster than a well-kept one.
+const SPOIL_OVERFLOW_MULT: f32 = 2.0;
+/// City warehouse capacity (D17/F6) — continuous in population rather than a
+/// house depot's discrete tier ladder (a city's stores grow WITH the city,
+/// not in steps bought one at a time), plus a flat bonus per Granary/
+/// Warehouse structure actually built.
+const CITY_WH_CAP_PER_POP: f32 = 0.08;
+const CITY_WH_CAP_BASE: f32 = 400.0;
+const CITY_WH_STRUCT_BONUS: f32 = 1_500.0;
 const GRANARY_FOOD_PROD: f32 = 1.12; // food goods only
 /// Guildhall lowers freight on trades leaving its hub.
 const GUILDHALL_FREIGHT: f32 = 0.85;
@@ -2103,6 +2129,17 @@ pub struct TickHub {
     /// `REALM_ROLE_*` — this city's standing inside `realm`. Meaningless when
     /// `realm < 0`.
     #[serde(default)] pub realm_role: u8,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.2 (D17/F6) · the city's OWN
+    /// warehouse capacity — population + Granary/Warehouse structures — kept
+    /// separate from the per-house `Warehouse.capacity`. 0 = not yet sized (a
+    /// fresh/old-save hub); `warehouse_and_spoilage_pass` (monthly) sizes it
+    /// for every non-estate hub, so a 0 reads as "uncapped" for at most one
+    /// month rather than forever.
+    #[serde(default)] pub wh_capacity: f32,
+    /// What rotted THIS MONTH, one entry per good (ng-length; empty ⇒ zeros)
+    /// — the warehouse panel's own headline figure (§4.3/§8.1). Reset and
+    /// refilled every monthly spoilage pass.
+    #[serde(default)] pub wh_spoiled_month: Vec<f32>,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -5904,6 +5941,7 @@ impl CampaignSim {
             //    (sparkline), and a rich world-summary chronicle row with numbers.
             if tick % 30 == 0 {
                 self.council_provision_pass(); // councils pre-empt needed goods into civic warehouses
+                self.warehouse_and_spoilage_pass(); // size city warehouses, spoil what rots (§4.2)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
                 self.sample_hub_history();
                 self.sample_journal();
