@@ -4,6 +4,18 @@ import type { WorksCardInfo } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
 import { T, FZ, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Meter } from "@ui/kit";
+import { CoatOfArms, houseColor } from "@ui/heraldry/CoatOfArms";
+
+/** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6/9.2 (A10) · a shareholder or
+ *  tenant row carries its holder's ACTUAL arms colour, not the generic
+ *  `distinct_color` golden-angle hash the backend still tags every row with
+ *  (kept there for banks/realms, which have no heraldry). A house or guild
+ *  (`holder_kind` 1 or 2) resolves through the SAME `houseColor` the House
+ *  Dossier's own shield renders with, so an ownership bar reads as heraldry
+ *  rather than as a chart legend — the whole point of A10. */
+function ownerColor(kind: number, name: string, fallback: string): string {
+  return kind === 1 || kind === 2 ? houseColor(name) : fallback;
+}
 
 function fmt(n: number): string {
   const a = Math.abs(n);
@@ -113,20 +125,28 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
         <div style={{ marginTop: 6 }}>
           <div style={{ fontSize: 8, color: T.inkFaint, marginBottom: 2 }}>OWNERSHIP</div>
           <div style={{ display: "flex", width: "100%", height: 8, borderRadius: 3, overflow: "hidden" }}>
-            {card.owners.map((o, i) => (
-              <div key={i} title={`${o.name} ${Math.round(o.frac * 100)}%`}
-                style={{
-                  width: `${o.frac * 100}%`,
-                  background: o.holder_kind === 0
-                    ? `repeating-linear-gradient(45deg, ${o.color}, ${o.color} 3px, transparent 3px, transparent 6px)`
-                    : o.color,
-                }} />
-            ))}
+            {card.owners.map((o, i) => {
+              const c = ownerColor(o.holder_kind, o.name, o.color);
+              return (
+                <div key={i} title={`${o.name} ${Math.round(o.frac * 100)}%`}
+                  style={{
+                    width: `${o.frac * 100}%`,
+                    background: o.holder_kind === 0
+                      ? `repeating-linear-gradient(45deg, ${c}, ${c} 3px, transparent 3px, transparent 6px)`
+                      : c,
+                  }} />
+              );
+            })}
           </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 3 }}>
             {card.owners.map((o, i) => (
-              <span key={i} style={{ fontSize: 8, color: T.inkMid }}>
-                <span style={{ color: o.color }}>■</span> {o.name} {Math.round(o.frac * 100)}%
+              <span key={i} style={{ fontSize: 8, color: T.inkMid, display: "inline-flex", alignItems: "center", gap: 2 }}>
+                {o.holder_kind === 1 || o.holder_kind === 2 ? (
+                  <CoatOfArms name={o.name} size={11} guild={o.holder_kind === 2} />
+                ) : (
+                  <span style={{ color: ownerColor(o.holder_kind, o.name, o.color) }}>■</span>
+                )}
+                {o.name} {Math.round(o.frac * 100)}%
                 {o.instrument === 1 && o.term_years > 0 && (
                   <span style={{ color: T.inkFaint }}> ({o.term_years}yr tenancy)</span>
                 )}
