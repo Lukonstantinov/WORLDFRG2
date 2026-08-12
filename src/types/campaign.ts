@@ -719,6 +719,9 @@ export interface WorksCardInfo {
   quality: number;
   owners: WorksOwnerShare[];
   monthly: WorksMonthPoint[];
+  /** 4.13 (A3) · "Kalos wine" — set once the works has been chronicled for
+   *  reaching GREAT or better; null otherwise. */
+  brand: string | null;
 }
 /** A foreign merchant's office hosted in a settlement (host-side view). */
 export interface OfficeHere {

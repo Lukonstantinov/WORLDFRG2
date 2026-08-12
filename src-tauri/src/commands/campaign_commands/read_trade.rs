@@ -480,6 +480,10 @@ pub fn campaign_works_card(hub: u32, db: State<'_, WorldDb>) -> Result<Option<Wo
         .map(|m| WorksMonthPoint { output: m.output, quality: m.quality, price: m.price }).collect();
     let monthly_output = hb.production.get(g).copied().unwrap_or(0.0);
     let prev_output = hb.monthly.iter().rev().nth(1).map(|m| m.output).unwrap_or(monthly_output);
+    let brand = if hb.brand_chronicled {
+        let place = crate::sim::tick::brand_place(&hb.name, crate::sim::tick::estate_kind_label(hb.estate_kind));
+        Some(crate::sim::tick::brand_name(&place, &good_name))
+    } else { None };
 
     Ok(Some(WorksCardInfo {
         hub,
@@ -500,6 +504,7 @@ pub fn campaign_works_card(hub: u32, db: State<'_, WorldDb>) -> Result<Option<Wo
         quality: hb.quality.get(g).copied().unwrap_or(0.0),
         owners,
         monthly,
+        brand,
     }))
 }
 

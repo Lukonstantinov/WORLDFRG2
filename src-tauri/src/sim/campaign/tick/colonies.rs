@@ -866,6 +866,25 @@ impl CampaignSim {
                 let excess = self.hubs[h].monthly.len() - WORKS_MONTHLY_CAP;
                 self.hubs[h].monthly.drain(0..excess);
             }
+            // 4.13 (A3) · a works reaching GREAT or better for the first time
+            // earns a toponymic brand and a chronicle line — pure flavour off
+            // works_rank's own statistic, no premium wired (A3's own "pure
+            // flavour off a statistic §4.6 already computes").
+            if !self.hubs[h].brand_chronicled {
+                if let Some((bg, yield_index, ..)) = self.works_rank(h) {
+                    if yield_index >= BRAND_YIELD_FLOOR {
+                        let place = brand_place(&self.hubs[h].name, estate_kind_label(self.hubs[h].estate_kind));
+                        let brand = brand_name(&place, &self.goods[bg].name);
+                        let (parent, tick) = (self.hubs[h].parent, self.tick);
+                        self.hubs[h].brand_chronicled = true;
+                        self.journal.push(JournalEntry {
+                            tick, kind: "works".into(), hub: parent, good: bg as i32, value: yield_index,
+                            text: format!("{} — {} now commands the name \"{}\" in distant markets",
+                                self.hubs[h].name, yield_label(yield_index), brand),
+                        });
+                    }
+                }
+            }
         }
     }
 
@@ -1496,7 +1515,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(),
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false,
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;

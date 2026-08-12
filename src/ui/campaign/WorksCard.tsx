@@ -66,6 +66,12 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
           <div style={{ color: T.inkDim, fontSize: FZ.small }}>
             {card.kind_label.toLowerCase()} · tier {card.tier} · {card.good_name}
           </div>
+          {card.brand && (
+            <div style={{ color: T.parchment, fontSize: FZ.small, fontStyle: "italic", marginTop: 1 }}
+              title="A toponymic brand — this works' name for its good, carried with the cargo and known in distant markets">
+              known abroad as "{card.brand}"
+            </div>
+          )}
         </div>
       </div>
 

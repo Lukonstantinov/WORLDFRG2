@@ -1154,6 +1154,27 @@ pub fn yield_label(yield_index: f32) -> &'static str {
     }
 }
 
+/// A3 · yield_label's own GREAT/world-class floor — the one threshold both the
+/// chronicle pass and the query layer must agree on, so a card never shows a
+/// brand the chronicle didn't (or won't) also announce.
+pub const BRAND_YIELD_FLOOR: f32 = 1.8;
+
+/// A3 · the PLACE half of a toponymic brand — the works' own name with its
+/// kind suffix stripped ("Vetrani Vineyard" ⇒ "Vetrani"), since `create_estate`
+/// already names every works "{owner} {kind}" and a real toponym generator is
+/// out of scope for what A3 calls "the cheapest thing in the document".
+pub fn brand_place(hub_name: &str, kind_label: &str) -> String {
+    let suffix = format!(" {kind_label}");
+    hub_name.strip_suffix(suffix.as_str()).unwrap_or(hub_name).trim().to_string()
+}
+
+/// A3 · "Kalos wine", "Upper Vein copper" — the place, then the good in lower
+/// case (a proper noun followed by a common one, matching every real example
+/// A3 itself cites).
+pub fn brand_name(place: &str, good_name: &str) -> String {
+    format!("{place} {}", good_name.to_lowercase())
+}
+
 // ── Structures (per-settlement buildings) ───────────────────────────────────
 const STRUCT_GRANARY: u8 = 1;
 const STRUCT_WAREHOUSE: u8 = 2;
@@ -2175,6 +2196,11 @@ pub struct TickHub {
     /// twelve-month output/quality/price ring (its DOMINANT good only).
     /// Empty for a non-estate hub — the works card is an estate-only view.
     #[serde(default)] pub monthly: Vec<MonthSample>,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.13 (A3) · this works has already
+    /// been chronicled for reaching GREAT or better — a rise is a milestone
+    /// (same discipline as `golden_age_chronicled`/`dynasty_chronicled`), a
+    /// later fall is not un-chronicled or re-announced.
+    #[serde(default)] pub brand_chronicled: bool,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by

@@ -1929,6 +1929,10 @@ pub struct WorksCardInfo {
     pub quality: f32,
     pub owners: Vec<WorksOwnerShare>,
     pub monthly: Vec<WorksMonthPoint>,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.13 (A3) · "Kalos wine" — set
+    /// only once the works has actually been chronicled for reaching GREAT or
+    /// better, so the card never claims a name the world hasn't heard yet.
+    pub brand: Option<String>,
 }
 
 /// One city in the live "richest cities" ranking.
