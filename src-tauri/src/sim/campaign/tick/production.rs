@@ -319,6 +319,28 @@ impl CampaignSim {
                 h.stock.resize(ng * GRADE_BANDS, 0.0);
             }
             if h.supply_accum.len() != ng * SUPPLY_CLASSES { h.supply_accum.resize(ng * SUPPLY_CLASSES, 0.0); }
+            // 4.5 (D1/F2) · migrate a pre-4.5 bank stake into the new share
+            // table. `shares` empty + `stake_bank >= 0` is exactly the shape a
+            // save from before this slice has (F2's single-holder pair) — two
+            // rows: the bank's dividend cut, and the owner's remaining cut
+            // made EXPLICIT (an empty table already implied 100% to the owner,
+            // but once the bank's row exists the table must sum to 1.0 for the
+            // fraction to read correctly at a glance).
+            if h.shares.is_empty() && h.stake_bank >= 0 {
+                // Same clamp the old dividend code applied to `stake_share`
+                // (0.9) — this migration must reproduce identical payouts.
+                let bank_frac = h.stake_share.clamp(0.0, 0.9);
+                h.shares.push(Share {
+                    holder_kind: 3, holder: h.stake_bank as u32, frac: bank_frac,
+                    payout: 1, acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0,
+                });
+                if h.owner_house >= 0 {
+                    h.shares.push(Share {
+                        holder_kind: 1, holder: h.owner_house as u32, frac: 1.0 - bank_frac,
+                        payout: 1, acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0,
+                    });
+                }
+            }
         }
     }
 
@@ -834,15 +856,47 @@ impl CampaignSim {
                     // city's prosperity if the estate is city-owned.
                     if self.hubs[a].is_estate {
                         let mut cut = sale * ESTATE_OWNER_CUT;
-                        // A bank holding an equity STAKE in this manufactory collects its
-                        // share of the owner-cut as a dividend (income to its reserves).
-                        let sb = self.hubs[a].stake_bank;
-                        if sb >= 0 && (sb as usize) < self.banks.len() && !self.banks[sb as usize].defunct {
-                            let div = cut * self.hubs[a].stake_share.clamp(0.0, 0.9);
-                            if div > 0.0 {
-                                cut -= div;
-                                self.banks[sb as usize].reserves += div;
-                                self.banks[sb as usize].dividends_earned += div;
+                        // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · every
+                        // DIVIDEND-payout row in the share table collects its
+                        // fraction of the owner-cut BEFORE the owner (below)
+                        // takes what's left — generalizes the old single-bank
+                        // carve-out to any number of holders. An OFFTAKE-payout
+                        // row (extraction works) is skipped here; §4.8 wires it.
+                        let shares = self.hubs[a].shares.clone();
+                        for sh in &shares {
+                            if sh.payout != 1 || cut <= 0.0 { continue; }
+                            let div = cut * sh.frac.clamp(0.0, 0.95);
+                            if div <= 0.0 { continue; }
+                            match sh.holder_kind {
+                                1 | 2 => { // house or guild — both live in `houses`
+                                    let hi = sh.holder as usize;
+                                    if hi < self.houses.len() && !self.houses[hi].defunct {
+                                        cut -= div;
+                                        self.houses[hi].wealth += div;
+                                    }
+                                }
+                                3 => { // bank
+                                    let bi = sh.holder as usize;
+                                    if bi < self.banks.len() && !self.banks[bi].defunct {
+                                        cut -= div;
+                                        self.banks[bi].reserves += div;
+                                        self.banks[bi].dividends_earned += div;
+                                    }
+                                }
+                                4 => { // realm
+                                    let ri = sh.holder as usize;
+                                    if ri < self.realms.len() {
+                                        cut -= div;
+                                        self.realms[ri].treasury += div;
+                                    }
+                                }
+                                _ => { // city — the parent's civic pool
+                                    let p = self.hubs[a].parent;
+                                    if p >= 0 && (p as usize) < self.hubs.len() {
+                                        cut -= div;
+                                        self.hubs[p as usize].civic_pool += div;
+                                    }
+                                }
                             }
                         }
                         let owner = self.hubs[a].owner_house;

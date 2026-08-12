@@ -554,7 +554,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(),
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(),
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -1262,6 +1262,21 @@ impl CampaignSim {
                 self.banks[bk].stakes.retain(|s| s.estate_hub != ei as u32);
                 self.banks[bk].stakes.push(BankStake {
                     estate_hub: ei as u32, share: RESALE_BANK_STAKE, basis: price, good });
+                // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · same split,
+                // recorded in the share table (the payout source of truth).
+                self.hubs[ei].shares.clear();
+                self.hubs[ei].shares.push(Share {
+                    holder_kind: 3, holder: bk as u32, frac: RESALE_BANK_STAKE, payout: 1,
+                    acquired_tick: tick, paid: price, instrument: 0, term_years: 0,
+                });
+                let resale_owner = self.hubs[ei].owner_house;
+                if resale_owner >= 0 {
+                    self.hubs[ei].shares.push(Share {
+                        holder_kind: 1, holder: resale_owner as u32,
+                        frac: 1.0 - RESALE_BANK_STAKE, payout: 1,
+                        acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0,
+                    });
+                }
                 let en = self.hubs[ei].name.clone();
                 self.banks[bk].events.push(HouseEvent { tick, kind: "acquire".into(),
                     text: format!("acquires a controlling {:.0}% stake in {} for {:.0}",

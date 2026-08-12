@@ -2152,6 +2152,12 @@ pub struct TickHub {
     /// isn't counted — the single pool and the price formula are unchanged
     /// either way (D20's own scope).
     #[serde(default)] pub supply_accum: Vec<f32>,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · this works' ownership
+    /// table — supersedes `stake_bank`/`stake_share` (F2) as the source of
+    /// truth for dividend payout; those two fields are kept only as a cheap
+    /// "does a bank have a finance interest here" marker (`development_tier`'s
+    /// `finance` check) and are written in lockstep by every acquisition site.
+    #[serde(default)] pub shares: Vec<Share>,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -2867,6 +2873,56 @@ pub struct BankStake {
     pub basis: f32,
     /// The good the works produces (for the panel's deals list).
     pub good: u32,
+}
+
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1/§3) · one row of a works'
+/// ownership table (`TickHub.shares`) — supersedes the old single-holder
+/// `stake_bank`/`stake_share` pair (F2), generalized from "a bank may hold a
+/// manufactory stake" to "anyone may hold a fraction of any works". An empty
+/// `shares` Vec means 100% to whoever `owner_house` names (today's behaviour,
+/// unchanged) — a row is only ever pushed when a SECOND party buys in.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Share {
+    /// 0 city · 1 house · 2 guild · 3 bank · 4 realm.
+    pub holder_kind: u8,
+    /// Index into the matching collection (houses/banks/realms) for kinds
+    /// 1-4; meaningless (0) for kind 0 (the parent city holds no separate index).
+    pub holder: u32,
+    /// Fraction of the works' owner-cut this row collects, 0..1. The table's
+    /// own rows need not sum to 1.0 — whatever fraction is UNCLAIMED still
+    /// belongs to `owner_house` (or the city), exactly as before any row existed.
+    pub frac: f32,
+    /// 0 offtake (extraction works, D1/D5 — waits for §4.8) · 1 dividend
+    /// (manufactory works, D1 — live from this slice).
+    pub payout: u8,
+    pub acquired_tick: u32,
+    /// What this fraction last traded at — the share-price anchor for a
+    /// future valuation line (§6: no live exchange is built on top of this).
+    pub paid: f32,
+    /// A1 amendment · 0 = perpetual SHARE (mine/quarry/fishery/manufactory —
+    /// freely divisible, bought and sold) · 1 = fixed-term TENANCY (farm/
+    /// vineyard/plantation/pasture — GRANTED for `term_years` and must be
+    /// RENEWED; a term expiring is a real political event a perpetual share
+    /// never generates). Renewal itself is not yet built (flagged, not built —
+    /// this slice only records the instrument and its term).
+    #[serde(default)] pub instrument: u8,
+    /// Only meaningful for a TENANCY (`instrument == 1`): the granted term in
+    /// years, 5-9 per A1's own mezzadria/métayage citation.
+    #[serde(default)] pub term_years: u32,
+}
+
+/// A1 · which works kinds carry a perpetual SHARE vs a fixed-term TENANCY.
+/// Mirrors `estate_kind`'s own numbering (1 farm · 2 mine · 3 plantation ·
+/// 4 fishery · 5 vineyard · 6 manufactory).
+// Not yet called: nothing grants a fresh share/tenancy row until the envoy
+// acquisition mechanism (§4.9) exists to call it. Kept typed and correct now
+// rather than written when 4.9 needs it, per this slice's own scope (D1/A1).
+#[allow(dead_code)]
+pub(crate) fn share_instrument_for_kind(kind: u8) -> u8 {
+    match kind {
+        2 | 4 | 6 => 0, // mine · fishery · manufactory ⇒ SHARE
+        _ => 1,          // farm · plantation · vineyard (and anything else) ⇒ TENANCY
+    }
 }
 
 /// DLC 3.5 · a BANK — a great merchant-banking house's chartered institution,

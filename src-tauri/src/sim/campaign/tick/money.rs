@@ -839,6 +839,17 @@ impl CampaignSim {
         self.hubs[ei].stake_share = BANK_STAKE_SHARE;
         self.banks[bi].stakes.push(BankStake {
             estate_hub: ei as u32, share: BANK_STAKE_SHARE, basis: price, good });
+        // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · the share table is now
+        // the payout source of truth; stake_bank/stake_share above stay as the
+        // cheap presence marker only.
+        self.hubs[ei].shares.push(Share {
+            holder_kind: 3, holder: bi as u32, frac: BANK_STAKE_SHARE, payout: 1,
+            acquired_tick: tick, paid: price, instrument: 0, term_years: 0,
+        });
+        self.hubs[ei].shares.push(Share {
+            holder_kind: 1, holder: oh as u32, frac: 1.0 - BANK_STAKE_SHARE, payout: 1,
+            acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0,
+        });
         let en = self.hubs[ei].name.clone();
         self.banks[bi].events.push(HouseEvent { tick, kind: "stake".into(),
             text: format!("takes a {:.0}% stake in {} for {:.0}", BANK_STAKE_SHARE * 100.0, en, price) });
@@ -856,6 +867,10 @@ impl CampaignSim {
             if (eh as usize) < self.hubs.len() && self.hubs[eh as usize].stake_bank == bi as i32 {
                 self.hubs[eh as usize].stake_bank = -1;
                 self.hubs[eh as usize].stake_share = 0.0;
+                // 4.5 · the works reverts fully to its owner — back to the
+                // "empty shares ⇒ 100% to owner_house" convention (D1's own
+                // default), not a zero-frac row left dangling in the table.
+                self.hubs[eh as usize].shares.clear();
             }
         }
         self.banks[bi].stakes.clear();

@@ -29,7 +29,7 @@
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(),
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(),
         }
     }
 
@@ -2682,6 +2682,47 @@
         s.advance(365 * 4);
         let owned = s.hubs.iter().filter(|h| h.is_estate && h.owner_house == 0).count();
         assert!(owned >= 1, "a profitable house builds at least one estate/manufactory (owned={owned})");
+    }
+
+    #[test]
+    fn a_pre_4_5_bank_stake_migrates_into_the_same_dividend_split() {
+        // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 · a save from before the share
+        // table (F2's single-holder stake_bank/stake_share pair, empty `shares`)
+        // must migrate into a table that pays the SAME split the old code did —
+        // including reproducing the old code's own 0.9 clamp on an over-large
+        // stake_share, not just the common case.
+        let goods = vec![good("cloth", i32::MAX, 2, 5.0, 0.4, false)];
+        let mut manu = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        manu.is_estate = true;
+        manu.estate_kind = 6; // manufactory
+        manu.owner_house = 0;
+        manu.stake_bank = 0;
+        manu.stake_share = 0.95; // above the old code's own 0.9 ceiling
+        let mut s = sim(vec![manu], goods);
+        s.houses = vec![house_at(0, vec![0], 0)];
+        s.banks.push(Bank {
+            name: "Banco".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
+            reserves: 80.0, loans: vec![], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
+            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![],
+            dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        });
+        assert!(s.hubs[0].shares.is_empty(), "pre-migration: no share rows yet");
+        s.migrate_stock_bands();
+        let rows = &s.hubs[0].shares;
+        assert_eq!(rows.len(), 2, "migration writes exactly a bank row + an owner row: {rows:?}");
+        let bank_row = rows.iter().find(|r| r.holder_kind == 3).expect("a bank row");
+        let owner_row = rows.iter().find(|r| r.holder_kind == 1).expect("an owner row");
+        assert!((bank_row.frac - 0.9).abs() < 1e-4,
+            "the bank's frac must reproduce the OLD 0.9 clamp, not the raw 0.95: {}", bank_row.frac);
+        assert!((owner_row.frac - 0.1).abs() < 1e-4,
+            "the owner keeps exactly what the bank didn't take: {}", owner_row.frac);
+        assert_eq!(bank_row.holder, 0);
+        assert_eq!(owner_row.holder, 0);
+        assert_eq!(bank_row.payout, 1, "dividend payout — behaviour unchanged until §4.8");
+        assert_eq!(owner_row.payout, 1);
+        // Idempotent: migrating an already-migrated hub must not duplicate rows.
+        s.migrate_stock_bands();
+        assert_eq!(s.hubs[0].shares.len(), 2, "migration must not re-run once shares exist");
     }
 
     #[test]
