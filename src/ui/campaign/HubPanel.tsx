@@ -17,6 +17,7 @@ import { SettlementScene } from "@ui/campaign/SettlementScene";
 import { CityView, BUILDING_INFO } from "@ui/campaign/CityView";
 import { FlowsView } from "@ui/campaign/FlowsView";
 import { CultureDonut } from "@ui/campaign/CultureDonut";
+import { CityWarehousePanel } from "@ui/campaign/CityWarehousePanel";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
@@ -44,7 +45,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "people" | "supply" | "provision";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "warehouse" | "people" | "supply" | "provision";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -336,6 +337,7 @@ export function HubPanel() {
     ...(colony ? [{ id: "supply" as Tab, label: "Supply" }] : []),
     { id: "trade", label: "Trade" },
     { id: "estates", label: "Estates" },
+    ...(campActive && detail && !detail.is_estate ? [{ id: "warehouse" as Tab, label: "Warehouse" }] : []),
     ...(campActive ? [{ id: "depots" as Tab, label: "Depots" }] : []),
     { id: "people", label: "People" },
   ];
@@ -1118,6 +1120,11 @@ export function HubPanel() {
              panel (which already reads `selectedHub` and filters to this city);
              the futures import/export summary + map-focus action stay, since
              neither exists anywhere else. ════════════ */}
+      {/* ════════════ WAREHOUSE (the city's OWN store — §4.3/D17) ════════════ */}
+      {tab === "warehouse" && selectedHub !== null && (
+        <CityWarehousePanel hub={selectedHub} tick={campTick} />
+      )}
+
       {tab === "depots" && (() => {
         const inbound = lanes.filter((l) => l.b_name === hub.name);
         const outbound = lanes.filter((l) => l.a_name === hub.name);

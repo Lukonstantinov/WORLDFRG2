@@ -362,6 +362,62 @@ pub fn campaign_warehouses(db: State<'_, WorldDb>) -> Result<Vec<WarehouseInfo>,
 }
 
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.3 (D17) · the CITY's own warehouse —
+/// distinct from a house/guild depot (`campaign_warehouses` above). One slot
+/// grid's worth of data per good: total + the three grade bands (D3), this
+/// month's movement, what rotted, and a cover-in-months reading. `None` for an
+/// estate or an unknown hub (a city warehouse is a settlement thing).
+#[tauri::command]
+pub fn campaign_city_warehouse(hub: u32, db: State<'_, WorldDb>) -> Result<Option<CityWarehouseInfo>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let Some(h) = sim.hubs.iter().position(|hb| hb.id == hub) else { return Ok(None) };
+    let hb = &sim.hubs[h];
+    if hb.is_estate { return Ok(None); }
+    let ng = sim.goods.len();
+    let tier_w = [1.0f32, 0.45, 0.22];
+    let goods: Vec<CityWarehouseGood> = (0..ng).filter_map(|g| {
+        let amount = crate::sim::tick::stock_of(&hb.stock, g);
+        let last = hb.wh_last_month.get(g).copied().unwrap_or(amount);
+        let spoiled = hb.wh_spoiled_month.get(g).copied().unwrap_or(0.0);
+        if amount <= 0.5 && last <= 0.5 && spoiled <= 0.01 { return None; }
+        let tg = &sim.goods[g];
+        let base = g * crate::sim::tick::GRADE_BANDS;
+        let monthly_need = hb.population
+            * tier_w[tg.need_tier.min(2) as usize]
+            * tg.desire.max(0.0)
+            * sim.need_scale
+            * crate::sim::tick::DEMAND_PRESSURE
+            * 30.0;
+        let cover_months = if monthly_need > 1e-3 { amount / monthly_need } else { f32::INFINITY };
+        Some(CityWarehouseGood {
+            good: g,
+            name: tg.name.clone(),
+            amount,
+            coarse: hb.stock.get(base).copied().unwrap_or(0.0),
+            common: hb.stock.get(base + 1).copied().unwrap_or(0.0),
+            fine: hb.stock.get(base + 2).copied().unwrap_or(0.0),
+            delta_month: amount - last,
+            spoiled_month: spoiled,
+            need_tier: tg.need_tier.min(2),
+            cover_months,
+        })
+    }).collect();
+    let used: f32 = goods.iter().map(|g| g.amount).sum();
+    let spoiled_total_month: f32 = goods.iter().map(|g| g.spoiled_month).sum();
+    let capacity = hb.wh_capacity;
+    Ok(Some(CityWarehouseInfo {
+        hub,
+        city: hb.name.clone(),
+        capacity,
+        used,
+        fill_frac: if capacity > 1e-3 { (used / capacity).min(2.0) } else { 0.0 },
+        spoiled_total_month,
+        goods,
+    }))
+}
+
+
 /// Live ranking of the wealthiest / busiest trading cities, with each city's share
 /// of all world trade — top to bottom.
 #[tauri::command]

@@ -656,6 +656,31 @@ export interface WarehouseInfo {
   contracts: number;         // futures contracts this depot supplies
   damage: number;
 }
+/** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.3 (D17) · one good's slot in the
+ *  CITY warehouse grid — three grade bands (D3), this month's movement, what
+ *  rotted, and a cover-in-months reading. */
+export interface CityWarehouseGood {
+  good: number;
+  name: string;
+  amount: number;
+  coarse: number;
+  common: number;
+  fine: number;
+  delta_month: number;
+  spoiled_month: number;
+  need_tier: number; // 0 Life · 1 Daily · 2 Luxury
+  cover_months: number;
+}
+/** The city's own warehouse (D17/F6) — distinct from a house/guild `WarehouseInfo` depot. */
+export interface CityWarehouseInfo {
+  hub: number;
+  city: string;
+  capacity: number;
+  used: number;
+  fill_frac: number;
+  spoiled_total_month: number;
+  goods: CityWarehouseGood[];
+}
 /** A foreign merchant's office hosted in a settlement (host-side view). */
 export interface OfficeHere {
   holder: string;          // house / guild name

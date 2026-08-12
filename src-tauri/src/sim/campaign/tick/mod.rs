@@ -2140,6 +2140,10 @@ pub struct TickHub {
     /// — the warehouse panel's own headline figure (§4.3/§8.1). Reset and
     /// refilled every monthly spoilage pass.
     #[serde(default)] pub wh_spoiled_month: Vec<f32>,
+    /// Each good's TOTAL stock as of the last monthly pass — the baseline the
+    /// warehouse panel's "▲+340" month-delta reads against (ng-length; empty
+    /// ⇒ every delta reads 0, never a spurious first-month spike).
+    #[serde(default)] pub wh_last_month: Vec<f32>,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by

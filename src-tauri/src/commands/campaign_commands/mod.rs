@@ -1848,6 +1848,37 @@ pub struct WarehouseInfo {
     pub damage: f32,
 }
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.3 (D17) · one good's row in the CITY
+/// warehouse slot grid — its three grade bands (D3), this month's movement, and
+/// what rotted. `need_tier` (0 Life · 1 Daily · 2 Luxury) is what the panel's
+/// three band tabs group on.
+#[derive(Serialize)]
+pub struct CityWarehouseGood {
+    pub good: usize,
+    pub name: String,
+    pub amount: f32,
+    pub coarse: f32,
+    pub common: f32,
+    pub fine: f32,
+    pub delta_month: f32,
+    pub spoiled_month: f32,
+    pub need_tier: u8,
+    pub cover_months: f32,
+}
+
+/// The city's own warehouse (D17/F6) — distinct from a house/guild `Warehouse`
+/// depot (`WarehouseInfo` above). One per non-estate hub.
+#[derive(Serialize)]
+pub struct CityWarehouseInfo {
+    pub hub: u32,
+    pub city: String,
+    pub capacity: f32,
+    pub used: f32,
+    pub fill_frac: f32,
+    pub spoiled_total_month: f32,
+    pub goods: Vec<CityWarehouseGood>,
+}
+
 /// One city in the live "richest cities" ranking.
 #[derive(Serialize)]
 pub struct CityRank {

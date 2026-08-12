@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorldEconomy } from "@types";
+import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorldEconomy } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -299,6 +299,12 @@ export async function campaignFuturesLanes(): Promise<FuturesLane[]> {
 /** All house/guild warehouses (largest stock first) for the Warehouses panel. */
 export async function campaignWarehouses(): Promise<WarehouseInfo[]> {
   return invoke("campaign_warehouses");
+}
+
+/** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.3 · the CITY's own warehouse (D17) —
+ *  null for an estate or an unknown hub. */
+export async function campaignCityWarehouse(hub: number): Promise<CityWarehouseInfo | null> {
+  return invoke("campaign_city_warehouse", { hub });
 }
 
 /** Live richest-cities ranking with each city's share of world trade. */

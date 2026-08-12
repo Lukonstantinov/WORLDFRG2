@@ -189,6 +189,7 @@ pub fn run() {
             campaign_commands::campaign_merchant_routes,
             campaign_commands::campaign_futures_lanes,
             campaign_commands::campaign_warehouses,
+            campaign_commands::campaign_city_warehouse,
             campaign_commands::campaign_city_ranking,
             campaign_commands::campaign_diagnostics,
             import_commands::import_world_layers,
