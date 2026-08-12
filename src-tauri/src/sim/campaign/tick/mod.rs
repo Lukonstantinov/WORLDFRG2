@@ -3667,7 +3667,11 @@ pub const POP_STATUS_CONTENT: u8 = 0;
 pub const POP_STATUS_SHORT: u8 = 1;
 pub const POP_STATUS_STARVING: u8 = 2;
 /// Display label — the dossier's own "pips and a phrase, never a raw 0..1"
-/// convention (`CLAUDE.md` §5, House Dossier).
+/// convention (`CLAUDE.md` §5, House Dossier). Reserved: `HubBrief.pop_status`
+/// currently ships the raw code and lets the frontend format it; this stays
+/// as the Rust-side vocabulary for a future chronicle line ("Genoa goes
+/// short") without duplicating the wording twice.
+#[allow(dead_code)]
 pub(crate) fn population_status_label(status: u8) -> &'static str {
     match status {
         POP_STATUS_STARVING => "starving",
