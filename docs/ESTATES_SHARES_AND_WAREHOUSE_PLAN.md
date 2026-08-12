@@ -352,6 +352,27 @@ wartime/construction demand → content · short · starving. The civic margin o
 essentials.
 *Gate:* `econ_` — moves consumption timing, expected to move numbers.
 
+**4.12 · Certification and adulteration (A2).** A certifying authority per (city,
+good) — guild, city or staple — taking a fee and setting the standard; a
+CERTIFIED grade distinct from the true grade; adulteration as a choice with
+detection, loss of the mark, and a collapse of the premium.
+*Gate:* `econ_` — it moves prices through the grade premium; expected small, but
+the fee is a new income stream for guilds and must be checked against rule 18's
+compounding lesson.
+
+**4.13 · Toponymic brands (A3).** A works at *great* or above renames its good
+after its place; the brand travels with the cargo and carries a premium in distant
+markets. Rides §4.6's rank, no new state beyond the name.
+*Gate:* `econ_` if the premium is real; `tsc` and the eye if it is presentation
+only. Decide which at build time and say so.
+
+> **Amendments to the slices above.** 4.5 now builds TWO instruments, share and
+> tenancy (A1), with renewal for the term-limited half. 4.7 takes the recalibrated
+> disaster table (A8) and the repair-liability rule (A9). 4.9 gains bills of
+> exchange (A5), bank credit-conversion as the primary acquisition route (A6), and
+> foreign ownership expressed as a city LAW rather than a scalar (A4). 4.10's
+> lease pays a royalty in kind (A7). 4.3 and 4.6 take the heraldic accents (A10).
+
 ---
 
 ## 5. Risks
@@ -414,12 +435,22 @@ the rank is relative.
 - **Strategic goods gating capabilities** (timber → fleets, iron → war). Named
   because it is the other half of the desire-to-control problem and this plan
   deliberately answers only the ownership half.
+- **Share fragmentation by inheritance.** Considered in 9.3 and not selected;
+  recorded there as the strongest candidate for a later addition, ahead of
+  anything else in this list.
+- **Putting-out (*Verlagssystem*) for manufactories.** See 9.3 — truer than D1's
+  dividend, rejected for compatibility with the existing `stake_bank` path.
+- **Mine grade drift and rising working cost.** See 9.3 — the available synthesis
+  if D9's permanence ever makes the world read as too static.
+- **A labour system for works.** See 9.4. The largest historical absence here.
+- **A trade calendar** (convoy seasons, fair cycles, Baltic ice) and **women as
+  named holders.** See 9.4; both cheap, neither in scope.
 
 ---
 
 ## 7. Order
 
-`4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 → 4.7 → 4.9 → 4.8 → 4.10 → 4.11`
+`4.1 → 4.2 → 4.3 → 4.4 → 4.5 → 4.6 → 4.13 → 4.7 → 4.9 → 4.8 → 4.12 → 4.10 → 4.11`
 
 Slices 4.1, 4.4, 4.5 and 4.6 should be bit-identical or near it and exist to put
 the structure and the views in place before anything moves. 4.2 and 4.7 move
@@ -429,8 +460,15 @@ chain around it has already been proven. 4.10 and 4.11 follow because both depen
 on 4.8 having settled.
 
 Note that 4.9 runs BEFORE 4.8 despite being the smaller change: envoys gate who
-can acquire a share at all, and it is better to have acquisition throttled before
-acquisition starts changing where goods physically go.
+can acquire a holding at all, and it is better to have acquisition throttled
+before acquisition starts changing where goods physically go.
+
+The two amendment slices slot by risk, not by theme. **4.13 (toponymic brands)
+runs early** — it rides 4.6's rank, adds no mechanism, and is the cheapest thing
+in the document that makes the world feel inhabited. **4.12 (certification and
+adulteration) runs late**, after offtake has settled, because it introduces both a
+new guild income stream and a new price premium, and stacking either on top of an
+unsettled goods flow would make the `econ_` reading unattributable.
 
 ---
 
@@ -576,3 +614,180 @@ presence, expressed as something you watch happen.
 A disaster, a funding refusal, a dilution, a rank collapse and recovery, and a
 rival buying at the top — all emergent from condition, shares, envoys and a yield
 index. No scripted events anywhere in it.
+
+---
+
+## 9. Historical critique and amendments
+
+§§1–8 were written as a design. This section is the same design read against the
+economic history it claims to model. **The original decisions above are left
+standing and unedited**; each amendment names the decision it changes, so the
+reasoning stays legible and a future session can see what was traded and why.
+
+### 9.1 · What survived the reading
+
+- **The office ladder (D6) is the Hanseatic and Venetian model.** The *Kontor*
+  (Bryggen, the Steelyard, the Novgorod Peterhof), the Venetian *fondaco*, the
+  Genoese colonies at Pera and Caffa: foreigners traded from designated compounds
+  under restriction. At Novgorod the Hansa could not trade retail, overwinter, or
+  partner with Russians. The plan's own vocabulary already borrows *bailo*.
+- **Cover-in-months (4.2) is how the offices actually thought.** Rome's *cura
+  annonae*, Venice's *Provveditori alle Biade*, Florence's *Abbondanza*, the
+  Ottoman *iaşe*. Venice targeted roughly a year's grain.
+- **The spoilage figures in §8.1 are period-correct** — grain near 1 %/month,
+  salt fish near 3 %. Well-kept granary grain lasted one to three years; the real
+  enemies were moisture, pests and heat, which is why the climate modifier earns
+  its place. F5 slightly overstates its case: the driver of the grain trade was
+  harvest VARIANCE, not storage decay. Soften F5 rather than the mechanic.
+- **City ownership of works is real** — communal mills and ovens (*banalités*),
+  municipal granaries, the Venetian Arsenal, civic salt monopolies.
+
+### 9.2 · Amendments adopted
+
+**A1 · Two instruments, split by works kind.** *Amends D1 and D14.*
+Nobody bought 38 % of a barley farm. Land moved by tenure — freehold, leasehold,
+*emphyteusis*, and above all sharecropping (*mezzadria*, *métayage*), where the
+landlord took a half or a third of the crop IN KIND. That is the offtake maths
+arriving under a different name, with different acquisition and transfer rules.
+
+```
+  SHARE   (perpetual, freely traded, divisible)   mine · quarry · fishery
+          Kuxen · carati · Bazacle mill shares    · manufactory
+  TENANCY (fixed term, renewed or lapsed)         farm · vineyard
+          mezzadria · métayage · emphyteusis      · plantation · pasture
+```
+The maths of payout is shared. What differs: a SHARE is bought and sold; a
+TENANCY is GRANTED, runs 5–9 years, and must be RENEWED. Renewal is the point —
+a Florentine *compagnia* was re-signed every few years, and re-signing is exactly
+when partners quarrelled, refused and split off. **A term that expires generates a
+recurring political event that a perpetual holding never can.**
+
+**A2 · Grade is certified by an authority, and can be faked.** *Amends D3;
+extends D20.*
+Grade was never measured, it was DECLARED: the *aulnage* seal on English cloth,
+wool sorted into marks, stockfish graded by cure, and the London **Garbler** — a
+public office existing solely to sift and certify spices, because adulteration was
+endemic (wine watered, pepper sanded, wool packed with dirt to make weight).
+Two mechanics follow:
+- **Whoever grades, profits.** A certifying authority per (city, good) — guild,
+  city, or staple — takes a fee and sets the standard. This is the historically
+  correct form of guild power, and it is far more interesting than the 12 % equity
+  stake D1 currently gives a guild.
+- **Certified grade may differ from true grade.** A holder may adulterate for
+  profit; detection costs it the MARK, which is worth more than the cargo.
+
+**A3 · A great works confers a toponymic brand.** *New; rides D15.*
+Nobody in 1400 could compute a world rank. What existed was reputation attached to
+a PLACE: Muzo emeralds, Cordovan leather, Damascus steel, Tyrian purple, Falernian
+wine, Sarmatian furs. A works reaching *great* or *world-class* therefore renames
+its good after its own place — "Kalos wine", "Upper Vein copper" — and the name
+travels with the cargo, commands a premium in distant markets, and enters the
+chronicle. Pure flavour off a statistic §4.6 already computes.
+
+**A4 · Foreign ownership is a LAW, not a mood.** *Amends D6.*
+Cities barred foreign ownership by statute; the bar lifted by treaty, by conquest,
+or by capitulation — not by a merchant being sufficiently well-regarded. Replace
+the `foreign_reluctance` scalar with a real law on `TickHub.laws` (the field
+exists): repealable, purchasable, extractable at swordpoint. This routes foreign
+acquisition through POLITICS, which is where the contest was wanted.
+
+**A5 · The envoy carries consent, not coin.** *Amends D7.*
+By the fourteenth century money moved by BILL OF EXCHANGE while agents moved
+physically — a Florentine house paid for a Bruges holding with a bill drawn on
+Florence and settled at the Lyon fairs. So travel gates the DEAL, and payment
+clears through a bank. Where no banking relationship spans both ends, payment
+falls back to specie: slower, costlier, and range-limited. This makes banks
+structurally necessary to distant acquisition rather than merely useful.
+
+**A6 · A bank acquires by converting credit, not by paying cash.** *Amends D7.*
+The model case is Jakob Fugger: he lent to Maximilian and the Habsburgs and took
+MINING OUTPUT as security and repayment — Schwaz silver and copper, then Hungarian
+copper. The Medici did the same with Tolfa alum. Finance BECAME offtake. So a
+bank's primary acquisition route is lend → arrears → conversion to a holding, with
+cash purchase secondary. This also wires the plan into the bank system already in
+the tree instead of running beside it.
+
+**A7 · The crown takes a royalty in kind.** *Amends D12.*
+The crown owned the subsoil (*Bergregal* across the Empire) and took a FRACTION OF
+PRODUCTION: the *Bergzehnt*, and in Spanish America the *quinto real*, the royal
+fifth of Potosí. D12's cash rent stands as an option, but the default lease
+payment is a royalty in kind, which ties a crown's wealth to what its land
+actually yields.
+
+**A8 · Disaster recalibration.** *Amends 4.7a.*
+- **Flooding should dominate and recur.** Water was THE constraint on pre-modern
+  mining — Newcomen's engine exists in 1712 because of it. It is the common case,
+  not a rare shock.
+- **"Blight" on vineyards is anachronistic** — phylloxera is the 1860s, downy
+  mildew 1878. The period killers are FROST (the winter of 1709 destroyed French
+  vineyards outright), HAIL, and WAR, since armies cut vines deliberately. Rename
+  accordingly.
+- **Murrain is very well chosen** — the cattle panzootic of 1315–22 killed around
+  60 % of cattle in parts of Europe alongside the Great Famine.
+- **Harvest failures came in RUNS.** 1315–17 was three consecutive catastrophic
+  years. Independent per-year rolls systematically under-produce clustered
+  catastrophe, which is where the real demographic damage lives: a bad year must
+  raise the odds of the next.
+
+**A9 · A holding can generate losses, not only fail to pay.** *Amends D11.*
+A *compagnia* partner was liable with his whole estate; when Edward III defaulted
+in the 1340s the Bardi and Peruzzi did not merely fail, the families were ruined.
+D11's dilution is half the mechanism. The other half: a disaster creates a REPAIR
+LIABILITY, refusing it costs standing as well as fraction, and for a TENANCY (A1)
+persistent failure to maintain voids the tenancy outright. The codebase's existing
+"limited liability, capped to owner wealth" convention sets the ceiling.
+
+**A10 · Panels are chronicle-themed with heraldic accents.** *Amends §8.*
+The existing `chronicleTheme` tokens are the base — no second visual language
+inside the campaign shell. But every shareholder or tenant row carries its
+holder's ACTUAL arms colour and shield badge (`houseColor`, `CoatOfArms`), so an
+ownership bar reads as heraldry rather than as a chart legend:
+
+```
+  ■ House Vetrani     42%   ████████░░░░░░░░░░░░
+  ▧ City of Thessaly  38%   ███████░░░░░░░░░░░░░   civic hatch, not a tincture
+  ■ Guild of Smiths   12%   ██░░░░░░░░░░░░░░░░░░
+  ■ Banco di Mare      8%   █░░░░░░░░░░░░░░░░░░░
+     each ■ is the holder's own shield colour, per houseColor()
+```
+A city is drawn as a HATCH rather than a tincture, so civic ownership is never
+mistaken for a family's arms — the same discipline that keeps realm tints from
+colliding with house colours.
+
+### 9.3 · Corrections considered and NOT adopted
+
+- **Putting-out (*Verlagssystem*) for manufactories.** The characteristic
+  pre-modern manufacturing relationship was the merchant supplying raw wool and
+  taking finished cloth — the *Verleger* owned the materials and the output, not
+  equity in a workshop. That is offtake, and it is truer than D1's dividend.
+  D1 stands anyway, for a stated engineering reason: dividends preserve the
+  existing `stake_bank` path unchanged. **Recorded here so the compatibility
+  choice is not mistaken for a historical one.**
+- **Share fragmentation by inheritance.** *Kuxen* were standardised at 128 per
+  mine precisely because generations of partible inheritance split holdings into
+  ever-smaller fractions. The machinery exists in the tree (`LineRule`,
+  `InheritanceRule`, `divide_estate`, and the documented fact that only `Partible`
+  divides), so this would connect the inheritance system to industrial property
+  and let a culture's law decide whether its people can hold a works together.
+  Considered and not selected this round. **It is the strongest single candidate
+  for a later addition** and should be reached for before anything in §6.
+- **Mine grade drift under D9.** Potosí kept producing for centuries; what changed
+  was that the ore got poorer and working it got costlier. Letting grade drift
+  down and cost drift up with cumulative extraction would preserve D9's permanence
+  (the prize never expires) while capturing the real arc. D9 stands as written;
+  this is recorded as the available synthesis if the world ever reads as too
+  static.
+
+### 9.4 · Historical holes named but not filled
+
+- **Labour.** The works in this plan have output, condition and ownership, and no
+  workers. Potosí ran on the *mita*, a rotational forced-labour draft; European
+  mines on wage labour that was often bound; plantations on slavery. This is the
+  largest historical absence in the document, and it carries moral weight that
+  should not be skipped silently. Named, not built.
+- **The trade calendar.** The Venetian *muda* convoys sailed on fixed dates, the
+  Champagne fairs cycled six a year, the Baltic closed with ice, the Levant had a
+  sailing season. `run_trade_fairs` already exists to hang this on.
+- **Women as holders.** Widows ran firms and Genoese women invested heavily in
+  *commenda*. The Kin roster already carries sex and the model already rolls an
+  8 % widow regency, so this is nearly free and historically well supported.
