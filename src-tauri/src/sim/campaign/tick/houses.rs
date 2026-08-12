@@ -97,11 +97,11 @@ impl CampaignSim {
                 let have0 = self.warehouses[i].stock.get(g).copied().unwrap_or(0.0);
                 if have0 < c.monthly_qty {
                     let reserve = needs[src][g] * TRADE_RESERVE_MULT;
-                    let avail = (self.hubs[src].stock[g] - reserve).max(0.0);
+                    let avail = (stock_of(&self.hubs[src].stock, g) - reserve).max(0.0);
                     let want = (c.monthly_qty - have0).min(avail);
                     if want > EPS {
                         let src_price = self.live_price(self.hub_stock(src, g), needs[src][g], self.goods[g].base_value);
-                        self.hubs[src].stock[g] -= want;
+                        stock_take(&mut self.hubs[src].stock, g, want);
                         self.warehouses[i].stock[g] += want;
                         self.houses[seller].wealth -= want * src_price;
                         self.hubs[src].civic_pool += want * src_price;
@@ -534,7 +534,7 @@ impl CampaignSim {
         });
         self.hubs.push(TickHub {
             id, x, y, name, population: est_pop, founding_pop: est_pop,
-            stock: vec![0.0; ng], price: self.goods.iter().map(|g| g.base_value).collect(),
+            stock: vec![0.0; ng * GRADE_BANDS], price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: true, parent, koppen, coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
@@ -585,7 +585,7 @@ impl CampaignSim {
                 .partial_cmp(&self.hubs[h].production[b]).unwrap_or(std::cmp::Ordering::Equal))
                 .unwrap_or(0);
             let prod = self.hubs[h].production.get(g).copied().unwrap_or(0.0);
-            let stock = self.hubs[h].stock.get(g).copied().unwrap_or(0.0);
+            let stock = stock_of(&self.hubs[h].stock, g);
             // Unprofitable this year: makes nothing (starved) OR a year-plus unsold glut.
             let unprofitable = prod <= EPS || stock > prod * 360.0;
             if unprofitable {
@@ -3776,8 +3776,8 @@ impl CampaignSim {
         for w in &self.warehouses {
             if w.owner == hi as i32 && (w.hub as usize) < self.hubs.len() {
                 let h = w.hub as usize;
-                for g in 0..self.hubs[h].stock.len().min(w.stock.len()) {
-                    self.hubs[h].stock[g] += w.stock[g];
+                for g in 0..w.stock.len() {
+                    stock_add_ungraded(&mut self.hubs[h].stock, g, w.stock[g]);
                 }
             }
         }

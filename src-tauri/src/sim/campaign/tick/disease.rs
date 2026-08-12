@@ -347,7 +347,7 @@ impl CampaignSim {
                 if self.goods[g].food {
                     food_need += needs[h][g];
                     food_prod += self.hubs[h].production[g];
-                    food_have += self.hubs[h].stock[g] + self.hubs[h].production[g];
+                    food_have += stock_of(&self.hubs[h].stock, g) + self.hubs[h].production[g];
                 }
             }
             // ── Settlement-colony food LIFELINE (dedicated supply ships) ─────────
@@ -388,9 +388,9 @@ impl CampaignSim {
                         for g in 0..ng {
                             if !self.goods[g].food || remaining <= EPS { continue; }
                             let buffer = self.hubs[s].production[g] * SOURCE_BUFFER_DAYS;
-                            let spare = ((self.hubs[s].stock[g] - buffer) * SUPPLY_SOURCE_SPARE_FRAC).max(0.0);
+                            let spare = ((stock_of(&self.hubs[s].stock, g) - buffer) * SUPPLY_SOURCE_SPARE_FRAC).max(0.0);
                             let take = spare.min(remaining);
-                            self.hubs[s].stock[g] -= take;
+                            stock_take(&mut self.hubs[s].stock, g, take);
                             self.hubs[s].export_earn += take * self.goods[g].base_value;
                             remaining -= take;
                         }
@@ -413,7 +413,7 @@ impl CampaignSim {
                     }
                     // Deliver the grain into the colony's first food good.
                     if let Some(fg) = (0..ng).find(|&g| self.goods[g].food) {
-                        self.hubs[h].stock[fg] += delivered;
+                        stock_add_ungraded(&mut self.hubs[h].stock, fg, delivered);
                         food_have += delivered;
                     }
                     self.hubs[h].supply_delivered = delivered * 30.0; // monthly, for the readout
@@ -425,7 +425,7 @@ impl CampaignSim {
                         // Eat into the reserve to stay fed; the supply record continues.
                         self.hubs[h].reserve_food -= 1.0;
                         if let Some(fg) = (0..ng).find(|&g| self.goods[g].food) {
-                            self.hubs[h].stock[fg] += short;
+                            stock_add_ungraded(&mut self.hubs[h].stock, fg, short);
                             food_have += short;
                         }
                         self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;

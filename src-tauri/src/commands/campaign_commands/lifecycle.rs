@@ -340,7 +340,15 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 name: eh.name.clone(),
                 population: founding,
                 founding_pop: founding,
-                stock: production.clone(), // seed one tick of stock so prices start sane
+                stock: {
+                    // Seed one tick of stock (into the COMMON band, D3's own
+                    // "mediocre" default — F4) so prices start sane.
+                    let mut s = vec![0.0f32; gc * crate::sim::tick::GRADE_BANDS];
+                    for (g, &p) in production.iter().enumerate() {
+                        crate::sim::tick::stock_set_total(&mut s, g, p);
+                    }
+                    s
+                },
                 price,
                 production,
                 grain_wealth: 0.0,
@@ -582,7 +590,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                     if tg.food {
                         h.base_per_capita[g] *= food_scale;
                         h.production[g] *= food_scale;
-                        h.stock[g] *= food_scale;
+                        crate::sim::tick::stock_scale(&mut h.stock, g, food_scale);
                     }
                 }
             }

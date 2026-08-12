@@ -275,13 +275,37 @@ impl CampaignSim {
     /// `hubs[h].stock[g]`, so behaviour is unchanged until house depots exist.
     #[inline]
     pub fn hub_stock(&self, h: usize, g: usize) -> f32 {
-        let mut s = self.hubs[h].stock.get(g).copied().unwrap_or(0.0);
+        let mut s = stock_of(&self.hubs[h].stock, g);
         for w in &self.warehouses {
             if w.hub as usize == h {
                 s += w.stock.get(g).copied().unwrap_or(0.0);
             }
         }
         s
+    }
+
+
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1 · one-time migration for a
+    /// pre-4.1 save: `stock` used to be `ng` floats (one per good); it is now
+    /// flat `ng × GRADE_BANDS`. A hub whose `stock.len()` still equals `ng` is
+    /// pre-migration — its old single value per good becomes that good's COMMON
+    /// band (F4's own "indistinguishable from 600 mediocre" starting point), the
+    /// other two bands zero. Idempotent: a hub already at `ng * GRADE_BANDS` (or
+    /// any other length — an empty/mid-tick hub) is left untouched by the first
+    /// branch and only defensively resized. Called once per load, right after
+    /// deserializing the sim (`ensure_campaign_loaded`).
+    pub(crate) fn migrate_stock_bands(&mut self) {
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        for h in self.hubs.iter_mut() {
+            if h.stock.len() == ng {
+                let mut banded = vec![0.0f32; ng * GRADE_BANDS];
+                for g in 0..ng { banded[g * GRADE_BANDS + GRADE_COMMON] = h.stock[g]; }
+                h.stock = banded;
+            } else if h.stock.len() != ng * GRADE_BANDS {
+                h.stock.resize(ng * GRADE_BANDS, 0.0);
+            }
+        }
     }
 
 
@@ -362,8 +386,8 @@ impl CampaignSim {
                 let mut by_inputs = f32::INFINITY;
                 for &(idx, qty) in &self.goods[g].inputs {
                     if qty <= 0.0 || idx >= ng { continue; }
-                    let mut avail = self.hubs[h].stock[idx];
-                    if let Some(sl) = subs.get(&idx) { for &s in sl { avail += self.hubs[h].stock[s]; } }
+                    let mut avail = stock_of(&self.hubs[h].stock, idx);
+                    if let Some(sl) = subs.get(&idx) { for &s in sl { avail += stock_of(&self.hubs[h].stock, s); } }
                     by_inputs = by_inputs.min(avail / qty);
                 }
                 if !by_inputs.is_finite() || by_inputs <= 0.0 { continue; }
@@ -374,21 +398,22 @@ impl CampaignSim {
                 for (idx, qty) in inputs {
                     if idx >= ng { continue; }
                     let mut need = made * qty;
-                    let take = self.hubs[h].stock[idx].min(need);
-                    self.hubs[h].stock[idx] -= take;
+                    let take = stock_of(&self.hubs[h].stock, idx).min(need);
+                    stock_take(&mut self.hubs[h].stock, idx, take);
                     need -= take;
                     if need > 0.0 {
                         if let Some(sl) = subs.get(&idx) {
                             for &s in sl {
                                 if need <= 0.0 { break; }
-                                let t = self.hubs[h].stock[s].min(need);
-                                self.hubs[h].stock[s] -= t;
+                                let t = stock_of(&self.hubs[h].stock, s).min(need);
+                                stock_take(&mut self.hubs[h].stock, s, t);
                                 need -= t;
                             }
                         }
                     }
                 }
-                self.hubs[h].stock[g] += made;
+                let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
+                stock_add(&mut self.hubs[h].stock, g, band, made);
                 self.hubs[h].production[g] += made;
             }
         }
@@ -687,7 +712,7 @@ impl CampaignSim {
             let mut sellers: Vec<(usize, f32)> = Vec::new();
             for a in 0..n {
                 // Keep a reserve (a granary for food) before exporting the rest.
-                let surplus = self.hubs[a].stock[g] - needs[a][g] * reserve_mult;
+                let surplus = stock_of(&self.hubs[a].stock, g) - needs[a][g] * reserve_mult;
                 if surplus > EPS {
                     sellers.push((a, surplus));
                 }
@@ -702,7 +727,7 @@ impl CampaignSim {
                 }
                 // A city under plague quarantine ships nothing out.
                 if quarantined[a] { continue; }
-                let pa = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
+                let pa = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
                 // A Guildhall at the SELLER's hub lowers freight on its exports.
                 let freight_rate = self.freight_per_day
                     * if self.hub_has_struct(a, STRUCT_GUILDHALL) { GUILDHALL_FREIGHT } else { 1.0 };
@@ -721,7 +746,7 @@ impl CampaignSim {
                     if !days.is_finite() {
                         continue;
                     }
-                    let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
+                    let pb = self.live_price(stock_of(&self.hubs[b].stock, g), needs[b][g], base);
                     // A trusted reserve coin at the buyer `b` shaves freight (DLC 3.5).
                     let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
                     let gap = pb - (pa + freight) - self.margin * base;
@@ -746,7 +771,7 @@ impl CampaignSim {
                     let delivered = pa + self.good_freight(g, freight_rate, days);
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
-                    let room = (max_stock - self.hubs[b].stock[g]).max(0.0);
+                    let room = (max_stock - stock_of(&self.hubs[b].stock, g)).max(0.0);
                     let mut amount = surplus.min(room * 0.5);
                     if amount <= EPS {
                         continue;
@@ -782,7 +807,7 @@ impl CampaignSim {
                         }
                     }
                     surplus -= amount;
-                    self.hubs[a].stock[g] -= amount;
+                    stock_take(&mut self.hubs[a].stock, g, amount);
                     let sale = amount * pa;
                     self.hubs[a].export_earn += sale;
                     // An ESTATE's sales pay rent to its OWNER: a share to the owning
@@ -1024,24 +1049,25 @@ impl CampaignSim {
         for g in 0..ng {
             let base = self.goods[g].base_value;
             let reserve_mult = if self.goods[g].food { FOOD_RESERVE_DAYS } else { TRADE_RESERVE_MULT };
-            let surplus = self.hubs[b].stock[g] - needs[b][g] * reserve_mult;
+            let b_stock = stock_of(&self.hubs[b].stock, g);
+            let surplus = b_stock - needs[b][g] * reserve_mult;
             if surplus <= EPS { continue; }
-            let pb = self.live_price(self.hubs[b].stock[g], needs[b][g], base);
+            let pb = self.live_price(b_stock, needs[b][g], base);
             // Occasional bargain when b is heavily oversupplied in this good.
-            let glut = self.hubs[b].stock[g] > (needs[b][g] * reserve_mult * 2.0).max(20.0);
+            let glut = b_stock > (needs[b][g] * reserve_mult * 2.0).max(20.0);
             let bargain = glut && hash01(self.seed,
                 (self.tick as u64) ^ 0x0BA46A1 ^ ((b as u64) << 8) ^ a as u64, g as u64) < 0.25;
             // Source-buy discount: an occasional glut bargain + any office −5%, capped.
             let discount = (if bargain { 0.25 } else { 0.0 } + office_disc).min(MAX_BUY_DISCOUNT);
             let pb_buy = pb * (1.0 - discount);
-            let pa_sell = self.live_price(self.hubs[a].stock[g], needs[a][g], base);
+            let pa_sell = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
             let freight = self.good_freight(g, freight_rate, days);
             let gap = pa_sell - pb_buy - freight - self.margin * base;
             if gap <= 0.0 { continue; }
             // Don't overfill a past delivered-cost parity.
             let delivered = pb_buy + freight;
             let max_stock = needs[a][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
-            let room = (max_stock - self.hubs[a].stock[g]).max(0.0);
+            let room = (max_stock - stock_of(&self.hubs[a].stock, g)).max(0.0);
             let amount = surplus.min(room * 0.5);
             if amount <= EPS { continue; }
             let score = gap * amount;
@@ -1054,7 +1080,7 @@ impl CampaignSim {
         let freight = self.good_freight(g, freight_rate, days);
         let sea = self.hubs[b].coastal && self.hubs[a].coastal;
         // Buy at b (goods leave b's stock), sell on arrival at a.
-        self.hubs[b].stock[g] -= amount;
+        stock_take(&mut self.hubs[b].stock, g, amount);
         self.hubs[b].export_earn += amount * pb_buy;
         self.hubs[a].import_spend += amount * (pb_buy + freight);
         // True-arbitrage profit (so the source discount actually pays).
@@ -1166,9 +1192,9 @@ impl CampaignSim {
         // Immediate one-shot effects.
         match kind {
             "fire" => {
-                for g in 0..self.goods.len() {
-                    self.hubs[hub].stock[g] *= 1.0 - mag;
-                }
+                // Every band scales equally — a blind multiply over the whole flat
+                // vector is exactly that, and sidesteps needing a per-good loop.
+                for v in self.hubs[hub].stock.iter_mut() { *v *= 1.0 - mag; }
                 // The warehouses that burn belong to the city's merchant houses:
                 // every resident house loses a slice of its wealth (stored stock
                 // value), the heavier the richer it is — a stabilizing loss that

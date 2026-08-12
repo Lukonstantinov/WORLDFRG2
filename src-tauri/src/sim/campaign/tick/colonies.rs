@@ -425,7 +425,7 @@ impl CampaignSim {
             let pop = self.hubs[t].population.max(0.0);
             let batch = (pop * 0.02).clamp(2.0, 60.0);
             let price = self.hubs[t].price.get(g).copied().unwrap_or(self.goods[g].base_value).max(EPS);
-            if g < self.hubs[t].stock.len() { self.hubs[t].stock[g] += batch; }
+            if g < ng { stock_add_ungraded(&mut self.hubs[t].stock, g, batch); }
             // The expedition COSTS the house (reach, not profit) — bounded, only reduces wealth.
             let cost = (batch * price * 0.05).min(self.houses[hi].wealth.max(0.0) * 0.02);
             self.houses[hi].wealth -= cost;
@@ -770,13 +770,13 @@ impl CampaignSim {
                 if !(self.goods[g].food || deps > 0) { continue; }
                 let have = self.hubs[h].civic_goods[g];
                 if have >= target { continue; }
-                let avail = self.hubs[h].stock.get(g).copied().unwrap_or(0.0).max(0.0);
+                let avail = stock_of(&self.hubs[h].stock, g).max(0.0);
                 let price = self.hubs[h].price.get(g).copied()
                     .unwrap_or(self.goods[g].base_value).max(0.01) * unit_mult;
                 let afford = (budget - spent).max(0.0) / price;
                 let buy = (target - have).min(avail).min(afford);
                 if buy <= 0.0 { continue; }
-                self.hubs[h].stock[g] -= buy;          // pre-empted out of the open market
+                stock_take(&mut self.hubs[h].stock, g, buy);          // pre-empted out of the open market
                 self.hubs[h].civic_goods[g] += buy;    // …into the civic warehouse
                 spent += buy * price;
             }
@@ -1353,7 +1353,8 @@ impl CampaignSim {
             if self.goods[g].food {
                 self.hubs[new].base_per_capita[g] *= FOOD_COLONY_FARM_MULT;
                 self.hubs[new].production[g] = self.hubs[new].base_per_capita[g] * pop;
-                self.hubs[new].stock[g] = self.hubs[new].production[g];
+                let v = self.hubs[new].production[g];
+                stock_set_total(&mut self.hubs[new].stock, g, v);
             }
         }
         self.hubs[new].reserve_food = 60.0;
@@ -1389,7 +1390,12 @@ impl CampaignSim {
         let component = self.hubs[founder].component;
         self.hubs.push(TickHub {
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
-            stock: production.clone(), price: self.goods.iter().map(|g| g.base_value).collect(),
+            stock: {
+                let mut s = vec![0.0f32; ng * GRADE_BANDS];
+                for (g, &p) in production.iter().enumerate() { stock_set_total(&mut s, g, p); }
+                s
+            },
+            price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,

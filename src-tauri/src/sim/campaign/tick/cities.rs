@@ -410,8 +410,8 @@ impl CampaignSim {
                 // MONETARY dues redirect to a house holder.
                 let to_market = (surplus - collected).max(0.0);
                 if let Some(fg) = food_good {
-                    if self.hubs[seat].stock.len() > fg {
-                        self.hubs[seat].stock[fg] += to_market;
+                    if fg < self.goods.len() {
+                        stock_add_ungraded(&mut self.hubs[seat].stock, fg, to_market);
                     }
                 }
                 if house_holds {
@@ -1502,7 +1502,12 @@ impl CampaignSim {
         let component = self.hubs[mother].component;
         self.hubs.push(TickHub {
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
-            stock: production.clone(), price: self.goods.iter().map(|g| g.base_value).collect(),
+            stock: {
+                let mut s = vec![0.0f32; ng * GRADE_BANDS];
+                for (g, &p) in production.iter().enumerate() { stock_set_total(&mut s, g, p); }
+                s
+            },
+            price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.62, sent_food: 0.7, sent_prosperity: 0.5,
@@ -1583,9 +1588,9 @@ impl CampaignSim {
             // …and ship a founding grant of food so it starts fed, not starving.
             for g in 0..ng {
                 if !self.goods[g].food { continue; }
-                let grant = (self.hubs[m].stock[g] * 0.10).max(0.0);
-                self.hubs[m].stock[g] -= grant;
-                self.hubs[h].stock[g] += grant;
+                let grant = (stock_of(&self.hubs[m].stock, g) * 0.10).max(0.0);
+                stock_take(&mut self.hubs[m].stock, g, grant);
+                stock_add_ungraded(&mut self.hubs[h].stock, g, grant);
             }
             self.hubs[h].colony_kind = 3;              // a metropolis-BOUND satellite now
             self.hubs[h].founder_hub = m as i32;
@@ -1791,9 +1796,11 @@ impl CampaignSim {
             h.structures.clear();
             h.civic_goods = vec![0.0; ng];
             // Seed one tick of stock at the new size so prices start sane, prices at base.
-            h.stock = h.base_per_capita.iter().map(|&pc| (pc * h.population).max(0.0)).collect();
-            if h.stock.len() != ng { h.stock.resize(ng, 0.0); }
-            h.production = h.stock.clone();
+            let mut totals: Vec<f32> = h.base_per_capita.iter().map(|&pc| (pc * h.population).max(0.0)).collect();
+            if totals.len() != ng { totals.resize(ng, 0.0); }
+            h.stock = vec![0.0f32; ng * GRADE_BANDS];
+            for (g, &v) in totals.iter().enumerate() { stock_set_total(&mut h.stock, g, v); }
+            h.production = totals;
             h.price = base_prices.clone();
             h.starving = 0.0; h.food_balance = 1.0;
             h.sent_food = 0.7; h.sent_prosperity = 0.3; h.sent_stability = 0.8; h.mood = 0.55;

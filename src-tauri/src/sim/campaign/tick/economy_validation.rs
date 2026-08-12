@@ -392,7 +392,7 @@ fn calibrate_like_campaign_start(s: &mut CampaignSim) {
                     if is_food {
                         h.base_per_capita[g] *= food_scale;
                         h.production[g] *= food_scale;
-                        h.stock[g] *= food_scale;
+                        stock_scale(&mut h.stock, g, food_scale);
                     }
                 }
             }

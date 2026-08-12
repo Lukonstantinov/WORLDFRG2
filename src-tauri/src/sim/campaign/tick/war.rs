@@ -881,13 +881,13 @@ impl CampaignSim {
                 if room <= EPS { break; }
                 if g >= ng || self.goods[g].food { continue; }
                 let reserve = needs[hub][g] * TRADE_RESERVE_MULT;
-                let surplus = (self.hubs[hub].stock[g] - reserve).max(0.0);
+                let surplus = (stock_of(&self.hubs[hub].stock, g) - reserve).max(0.0);
                 if surplus <= EPS { continue; }
                 let price = self.live_price(self.hub_stock(hub, g), needs[hub][g], self.goods[g].base_value);
                 let afford = if price > EPS { (self.houses[oi].wealth * 0.25).max(0.0) / price } else { 0.0 };
                 let take = (surplus * WH_STOCK_FRAC).min(room).min(afford);
                 if take <= EPS { continue; }
-                self.hubs[hub].stock[g] -= take;
+                stock_take(&mut self.hubs[hub].stock, g, take);
                 self.warehouses[wi].stock[g] += take;
                 let cost = take * price;
                 self.houses[oi].wealth -= cost;

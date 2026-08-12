@@ -645,6 +645,7 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
     cache.sim = match raw {
         Some(s) if !s.is_empty() => {
             let mut sim = decode_campaign_blob(&s)?;
+            sim.migrate_stock_bands(); // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1
             sim.rebuild_routes(); // `days` / `neighbors` are not serialized
             Some(std::sync::Arc::new(sim))
         }

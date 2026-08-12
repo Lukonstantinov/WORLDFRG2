@@ -60,7 +60,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 name: sim.goods[g].name.clone(),
                 price: hub.price[g],
                 base_value: sim.goods[g].base_value,
-                stock: hub.stock[g],
+                stock: crate::sim::tick::stock_of(&hub.stock, g),
                 // The REAL per-tick demand the sim consumes (matches base_need in
                 // tick.rs): pop × tier-weight × desire × need_scale × demand pressure.
                 // Showing raw desire×pop made every good read "0% of need".
@@ -398,8 +398,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .map(|g| hub.civic_goods.get(g).copied().unwrap_or(0.0).max(0.0)).sum::<f32>()
             + hub.reserve_food.max(0.0);
         // ALL goods held at the city = local merchant pool + every house/guild depot here.
-        let mut held: Vec<f32> = hub.stock.clone();
-        if held.len() < ng { held.resize(ng, 0.0); }
+        let mut held: Vec<f32> = (0..ng).map(|g| crate::sim::tick::stock_of(&hub.stock, g)).collect();
         for w in &sim.warehouses {
             if w.hub as usize == hi {
                 for g in 0..ng.min(w.stock.len()) { held[g] += w.stock[g].max(0.0); }
@@ -635,12 +634,10 @@ pub fn campaign_house_ledger(db: State<'_, WorldDb>, house: usize) -> Result<Opt
     // Warehouse = the home city's stored goods (what a warehouse fire destroys).
     let (warehouse, warehouse_city) = match sim.hubs.get(h.hub as usize) {
         Some(hb) => {
-            let mut w: Vec<LedgerLine> = hb
-                .stock
-                .iter()
-                .enumerate()
-                .filter(|(_, &s)| s > 0.5)
-                .map(|(g, &s)| LedgerLine {
+            let mut w: Vec<LedgerLine> = (0..sim.goods.len())
+                .map(|g| (g, crate::sim::tick::stock_of(&hb.stock, g)))
+                .filter(|&(_, s)| s > 0.5)
+                .map(|(g, s)| LedgerLine {
                     label: sim.goods.get(g).map(|gg| gg.name.clone()).unwrap_or_default(),
                     amount: s,
                 })

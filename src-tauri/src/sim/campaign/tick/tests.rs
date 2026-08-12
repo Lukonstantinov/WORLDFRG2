@@ -11,7 +11,7 @@
         let base_per_capita: Vec<f32> = prod.iter().map(|&p| p / pop.max(1.0)).collect();
         TickHub {
             id, x, y, name: format!("H{id}"), population: pop, founding_pop: pop,
-            stock: vec![0.0; ng], price: vec![1.0; ng], production: prod,
+            stock: vec![0.0; ng * GRADE_BANDS], price: vec![1.0; ng], production: prod,
             grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
             is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
             export_earn: 0.0, import_spend: 0.0,
@@ -191,7 +191,7 @@
         // `ensure_province_land` seeds the land state on the first pass, exactly as it
         // does for a save that predates it — so this also covers that path.
         let seat = s.province_seat_hub(0).expect("a province with towns has a seat");
-        let food0 = s.hubs[seat].stock[0];
+        let food0 = stock_of(&s.hubs[seat].stock, 0);
         let treasury0 = s.hubs[seat].treasury;
         for yr in 0..60u32 {
             s.province_demography_pass();
@@ -199,9 +199,9 @@
         }
         let seat = s.province_seat_hub(0).expect("still has a seat");
         // ── THE FEEDBACK EDGE: the countryside fed the city and paid it dues.
-        assert!(s.hubs[seat].stock[0] > food0,
+        assert!(stock_of(&s.hubs[seat].stock, 0) > food0,
             "the province's surplus must reach the seat's granary: {} → {}",
-            food0, s.hubs[seat].stock[0]);
+            food0, stock_of(&s.hubs[seat].stock, 0));
         assert!(s.hubs[seat].treasury > treasury0,
             "rural dues must reach the holder's treasury: {} → {}",
             treasury0, s.hubs[seat].treasury);
@@ -238,10 +238,10 @@
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
         let mut s = sim(hubs, goods);
-        let food0 = s.hubs[0].stock[0];
+        let food0 = stock_of(&s.hubs[0].stock, 0);
         let treasury0 = s.hubs[0].treasury;
         for yr in 0..25u32 { s.province_land_pass(yr); }
-        assert_eq!(s.hubs[0].stock[0], food0, "no province layer ⇒ no food delivered");
+        assert_eq!(stock_of(&s.hubs[0].stock, 0), food0, "no province layer ⇒ no food delivered");
         assert_eq!(s.hubs[0].treasury, treasury0, "no province layer ⇒ no dues collected");
         assert!(s.prov_forest.is_empty() && s.prov_history.is_empty(),
             "no province layer ⇒ no land state is even allocated");
@@ -997,7 +997,9 @@
             hub(1, 1.5, 0.0, 150.0, small_prod, 0),
         ];
         hubs[0].sent_prosperity = 0.65; hubs[0].starving = 0.0;
-        hubs[0].stock = vec![10_000.0, 4_000.0, 0.0]; // food to grant
+        for (g, &v) in [10_000.0f32, 4_000.0, 0.0].iter().enumerate() {
+            stock_set_total(&mut hubs[0].stock, g, v); // food to grant
+        }
         hubs[1].sent_prosperity = 0.25; hubs[1].starving = 0.2; // struggling
         let mut s = sim(hubs, goods);
         s.tick = 20 * 365; // old enough that the town is past ABSORB_MIN_AGE
@@ -1127,7 +1129,7 @@
             s.advance(365);
             // Per-hub persistent arrays must never lag the hub list (the crash class).
             assert!(s.hub_patron.len() <= s.hubs.len(), "hub_patron never exceeds hubs");
-            for h in &s.hubs { assert_eq!(h.stock.len(), ng, "every hub keeps ng columns"); }
+            for h in &s.hubs { assert_eq!(h.stock.len(), ng * GRADE_BANDS, "every hub keeps ng × GRADE_BANDS columns"); }
             if yr % 5 == 0 {
                 let outposts = s.hubs.iter().filter(|h| h.colony_kind == 2).count();
                 eprintln!("yr {yr:2}: hubs {} (+{} since start) · outposts {outposts}",
@@ -2691,7 +2693,8 @@
             good("silk", 1, 2, 20.0, 0.35, false),
         ];
         let mut s = sim(vec![hub(0, 10.0, 10.0, 10000.0, vec![50.0, 5.0], 0)], goods);
-        s.hubs[0].stock = vec![100.0, 0.0];
+        stock_set_total(&mut s.hubs[0].stock, 0, 100.0);
+        stock_set_total(&mut s.hubs[0].stock, 1, 0.0);
         // Empty warehouses → aggregate == the pool.
         assert_eq!(s.hub_stock(0, 0), 100.0);
         assert_eq!(s.hub_stock(0, 1), 0.0);

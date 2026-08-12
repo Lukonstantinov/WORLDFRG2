@@ -1780,6 +1780,12 @@ pub struct TickHub {
     pub name: String,
     pub population: f32,
     pub founding_pop: f32,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1/D3 · flat `ng × GRADE_BANDS`, NOT
+    /// one float per good any more — index `g * GRADE_BANDS + band` (0 coarse ·
+    /// 1 common · 2 fine). A pre-4.1 save's `stock` (length `ng`) is migrated into
+    /// the common band once by `migrate_stock_bands` on load. Never index this
+    /// directly; use `stock_of`/`stock_add`/`stock_take`/`stock_set_total` (mod.rs)
+    /// so a reader always sees "today's single value" (F4) unless it's grade-aware.
     pub stock: Vec<f32>,
     pub price: Vec<f32>,
     pub production: Vec<f32>,
@@ -3257,6 +3263,101 @@ impl LedgerAcc {
             v.push((city, amt));
         }
     }
+}
+
+// ── ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1 (D3/F4) · grade bands ─────────────
+// Three grade bands per good — coarse · common · fine — replacing the single
+// float `hubs[h].stock[g]` used to be. `TickHub.stock` is now flat
+// `ng × GRADE_BANDS`; every reader/writer goes through these helpers so the
+// band layout lives in exactly one place. `Warehouse.stock` (a house/guild
+// depot) is DELIBERATELY untouched by this slice — F4's own citation is
+// `hubs[h].stock[g]`, and the city-level warehouse this plan adds (§4.2/D17,
+// `wh_capacity`/`wh_spoiled_month`) is a new field on `TickHub`, not a rework
+// of the existing per-house `Warehouse` struct.
+pub const GRADE_BANDS: usize = 3;
+pub const GRADE_COARSE: usize = 0;
+pub const GRADE_COMMON: usize = 1;
+pub const GRADE_FINE: usize = 2;
+
+/// Sum a good's three grade bands — "today's single value" every pre-4.1 reader
+/// wants (D3's own "a summing accessor keeps every existing reader working").
+/// Defensive against a short/unmigrated vector (reads 0 rather than panicking).
+#[inline]
+pub(crate) fn stock_of(stock: &[f32], g: usize) -> f32 {
+    let base = g * GRADE_BANDS;
+    (0..GRADE_BANDS).map(|b| stock.get(base + b).copied().unwrap_or(0.0)).sum()
+}
+
+/// Add `amt` to good `g`'s specific band.
+#[inline]
+pub(crate) fn stock_add(stock: &mut [f32], g: usize, band: usize, amt: f32) {
+    let idx = g * GRADE_BANDS + band.min(GRADE_BANDS - 1);
+    if let Some(v) = stock.get_mut(idx) { *v += amt; }
+}
+
+/// Add `amt` to good `g` with no known grade — a delivery/transfer/civic release
+/// that hasn't been graded yet (supplier attribution is §4.4, later). Lands in
+/// the COMMON band, F4's own "indistinguishable from 600 mediocre" default.
+#[inline]
+pub(crate) fn stock_add_ungraded(stock: &mut [f32], g: usize, amt: f32) {
+    stock_add(stock, g, GRADE_COMMON, amt);
+}
+
+/// Draw up to `amt` of good `g` off the CHEAPEST bands first (coarse → common →
+/// fine) — the general market/consumption pool spends its worst stock first, the
+/// same "fine drains last" reading the warehouse panel's grade strip gives the
+/// *annona* year (§8.1). Returns the amount actually taken (capped by
+/// availability, never more than was there).
+#[inline]
+pub(crate) fn stock_take(stock: &mut [f32], g: usize, amt: f32) -> f32 {
+    let base = g * GRADE_BANDS;
+    let mut remaining = amt.max(0.0);
+    let mut taken = 0.0f32;
+    for b in 0..GRADE_BANDS {
+        if remaining <= 0.0 { break; }
+        if let Some(v) = stock.get_mut(base + b) {
+            let take = v.min(remaining);
+            *v -= take;
+            taken += take;
+            remaining -= take;
+        }
+    }
+    taken
+}
+
+/// Multiply every band of good `g` by `mult` in place (a proportional loss/gain
+/// applied to the whole stock, e.g. rescaling a founding world's food supply).
+#[inline]
+pub(crate) fn stock_scale(stock: &mut [f32], g: usize, mult: f32) {
+    let base = g * GRADE_BANDS;
+    for b in 0..GRADE_BANDS {
+        if let Some(v) = stock.get_mut(base + b) { *v *= mult; }
+    }
+}
+
+/// Set good `g`'s TOTAL to `total`, replacing whatever band mix it had — used by
+/// the few places that reseed a hub's whole stock from a formula (campaign
+/// start, cold start, a founding grant). Lands the new total in the COMMON
+/// band; the other two are zeroed, matching `stock_add_ungraded`'s convention.
+#[inline]
+pub(crate) fn stock_set_total(stock: &mut [f32], g: usize, total: f32) {
+    let base = g * GRADE_BANDS;
+    if base + GRADE_BANDS > stock.len() { return; }
+    stock[base] = 0.0;
+    stock[base + 1] = total.max(0.0);
+    stock[base + 2] = 0.0;
+}
+
+/// Which band a hub's OWN production lands in. An ESTATE (a real works) grades
+/// by its own per-good `quality` — D5's "the largest holder skims the finer
+/// part" needs a real quality spread to skim from. An ordinary settlement's
+/// bulk per-capita production is a VILLAGE in the plan's own sense (D14, "band
+/// 0-1 only") and is capped to coarse/common regardless of quality — ownership,
+/// grade and contest live only in works.
+#[inline]
+pub(crate) fn production_band(is_estate: bool, quality: f32) -> usize {
+    let band = if quality >= 0.7 { GRADE_FINE } else if quality >= 0.4 { GRADE_COMMON } else { GRADE_COARSE };
+    if is_estate { band } else { band.min(GRADE_COMMON) }
 }
 
 /// A merchant warehouse: a finite, OWNED store of goods sited in a city. Owner
@@ -4924,7 +5025,7 @@ impl CampaignSim {
                 if self.hubs[h].starving > 0.5 && self.hubs[h].civic_goods[fg] > 0.0 {
                     let rel = self.hubs[h].civic_goods[fg] * 0.5;
                     self.hubs[h].civic_goods[fg] -= rel;
-                    self.hubs[h].stock[fg] += rel;
+                    stock_add_ungraded(&mut self.hubs[h].stock, fg, rel);
                 } else if self.hubs[h].civic_goods[fg] < cap && self.hubs[h].treasury > 20.0 {
                     let price = self.goods[fg].base_value.max(0.1);
                     let buy = ((cap - self.hubs[h].civic_goods[fg]).min(self.hubs[h].treasury * 0.03 / price)).max(0.0);
@@ -5569,7 +5670,8 @@ impl CampaignSim {
                     let realized = percap * pop * self.seasonal_mult(h, g, doy)
                         * prod_mult[h][g] * tech * struct_bonus * eff;
                     self.hubs[h].production[g] = realized;
-                    self.hubs[h].stock[g] += realized;
+                    let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
+                    stock_add(&mut self.hubs[h].stock, g, band, realized);
                 }
                 // SUBSISTENCE FARMING — a REMOTE land settlement whose trade component
                 // cannot supply food feeds itself from its own fields, so an isolated
@@ -5599,7 +5701,8 @@ impl CampaignSim {
                         if let Some(g) = grown.or_else(|| self.climate_staple(self.hubs[h].koppen, &food_gs)) {
                             let add = target - food_prod;
                             self.hubs[h].production[g] += add;
-                            self.hubs[h].stock[g] += add;
+                            let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
+                            stock_add(&mut self.hubs[h].stock, g, band, add);
                         }
                     }
                 }
@@ -5705,8 +5808,8 @@ impl CampaignSim {
                 let mut tier_unmet = [0.0f32; 3];
                 for g in 0..ng {
                     let need = needs[h][g];
-                    let eat = need.min(self.hubs[h].stock[g]);
-                    self.hubs[h].stock[g] -= eat;
+                    let eat = need.min(stock_of(&self.hubs[h].stock, g));
+                    stock_take(&mut self.hubs[h].stock, g, eat);
                     let t = self.goods[g].need_tier.min(2) as usize;
                     tier_need[t] += need;
                     tier_unmet[t] += (need - eat).max(0.0);
@@ -5735,7 +5838,7 @@ impl CampaignSim {
                     if self.hubs[h].production.get(g).copied().unwrap_or(0.0) > 0.0 {
                         base *= quality_value_mult(self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                     }
-                    let target = self.live_price(self.hubs[h].stock[g], needs[h][g], base);
+                    let target = self.live_price(stock_of(&self.hubs[h].stock, g), needs[h][g], base);
                     self.hubs[h].price[g] = 0.6 * self.hubs[h].price[g] + 0.4 * target;
                 }
             }
@@ -5768,7 +5871,7 @@ impl CampaignSim {
             });
             for (to, g, amt, sea, phase, home, owner) in landed {
                 if to < self.hubs.len() {
-                    self.hubs[to].stock[g] += amt;
+                    stock_add_ungraded(&mut self.hubs[to].stock, g, amt);
                     if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
                 }
                 // Round trip: an OUTBOUND (phase 0) house cargo that just sold at `to`
@@ -6317,7 +6420,7 @@ impl CampaignSim {
     fn pick_build_supply_good(&self, metro: usize, cat: u8) -> u16 {
         let ng = self.goods.len();
         if ng == 0 || metro >= self.hubs.len() { return 0; }
-        let avail = |g: usize| self.hubs[metro].stock.get(g).copied().unwrap_or(0.0).max(0.0)
+        let avail = |g: usize| stock_of(&self.hubs[metro].stock, g).max(0.0)
             + self.hubs[metro].production.get(g).copied().unwrap_or(0.0).max(0.0);
         let name_has = |g: usize, subs: &[&str]| {
             let n = self.goods[g].name.to_lowercase();
@@ -6374,9 +6477,9 @@ impl CampaignSim {
                     delivered += from_civic;
                 }
                 // 2) then the open-market stock.
-                let from_stock = self.hubs[m].stock.get(g).copied().unwrap_or(0.0)
+                let from_stock = stock_of(&self.hubs[m].stock, g)
                     .max(0.0).min(SAT_STAGE_QUOTA - delivered);
-                if g < self.hubs[m].stock.len() { self.hubs[m].stock[g] -= from_stock; }
+                if g < ng { stock_take(&mut self.hubs[m].stock, g, from_stock); }
                 delivered += from_stock;
                 // 3) buy any remaining shortfall on the market with treasury.
                 let deficit = (SAT_STAGE_QUOTA - delivered).max(0.0);
@@ -6436,7 +6539,8 @@ impl CampaignSim {
                     if self.goods[g].food {
                         self.hubs[h].base_per_capita[g] *= FOOD_COLONY_FARM_MULT;
                         self.hubs[h].production[g] = self.hubs[h].base_per_capita[g] * self.hubs[h].population;
-                        self.hubs[h].stock[g] = self.hubs[h].production[g];
+                        let v = self.hubs[h].production[g];
+                        stock_set_total(&mut self.hubs[h].stock, g, v);
                     }
                 }
                 self.hubs[h].reserve_food = 60.0;
@@ -6581,7 +6685,7 @@ fn food_value(h: &TickHub, goods: &[TickGood]) -> f32 {
     let mut v = 0.0;
     for g in 0..goods.len() {
         if goods[g].food {
-            v += h.stock[g] * goods[g].base_value;
+            v += stock_of(&h.stock, g) * goods[g].base_value;
         }
     }
     v / h.population.max(1.0)
