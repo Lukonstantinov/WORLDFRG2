@@ -230,6 +230,16 @@ export interface QualityStop {
   /** How far the good's own hue is mixed in (0 = the pale ground tint, 1 = full). */
   mix: number;
 }
+/** An alternate reading of the same 0..1 belt-quality scale: a heat ramp (dark
+ *  blue → red) that ignores the good's own hue — added because the hue-mix scale
+ *  above is subtle for a muted or dark good. Same value, different paint. */
+export interface GradeStop {
+  at: number;
+  /** The `deposits::grade_label` word this breakpoint carries — coarse / ordinary /
+   *  good / fine / exquisite, the same vocabulary ore workings use. */
+  label: string;
+  color: string;
+}
 export interface RenderPalettes {
   elevation: RampStop[];
   bathymetry: RampStop[];
@@ -241,4 +251,6 @@ export interface RenderPalettes {
   elev_max_m: number;
   good_quality: QualityStop[];
   good_quality_pale: string;
+  good_quality_heatmap: RampStop[];
+  good_quality_grades: GradeStop[];
 }

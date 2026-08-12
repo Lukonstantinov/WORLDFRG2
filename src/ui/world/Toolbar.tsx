@@ -177,6 +177,8 @@ export function Toolbar() {
   const setElevationValue = useUIStore((s) => s.setElevationValue);
   const toggleOverlay = useUIStore((s) => s.toggleOverlay);
   const setOverlaysVisible = useUIStore((s) => s.setOverlaysVisible);
+  const goodQualityHeatmap = useUIStore((s) => s.goodQualityHeatmap);
+  const toggleGoodQualityHeatmap = useUIStore((s) => s.toggleGoodQualityHeatmap);
   const migrationMode = useUIStore((s) => s.migrationMode);
   const setMigrationMode = useUIStore((s) => s.setMigrationMode);
   const showBankIcons = useUIStore((s) => s.showBankIcons);
@@ -604,6 +606,46 @@ export function Toolbar() {
               );
             })}
         </div>
+        {/* The quality layer's PAINT: hue-mix (toward the good's own colour, the
+            default) or a heat ramp (dark blue = poorest land, red = finest) that
+            ignores the good's colour entirely. Added because a muted or dark good's
+            hue-mix reading can be too close to the pale ground tint to show any
+            change at all — the heat ramp has no such blind spot, since every good's
+            best land is red and worst is blue however that good happens to be
+            coloured on the map. Same numbers, different paint; only matters while
+            "quality" above is on. */}
+        {overlayVisibility.goodQuality && (
+          <div
+            onClick={toggleGoodQualityHeatmap}
+            title="Quality paint: hue-mix (toward the good's own colour) vs. a heat ramp (blue = poor, red = fine) that reads more clearly for muted colours"
+            style={{
+              display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+              fontSize: 9.5, color: "#93a8bd", marginBottom: 6, padding: "1px 2px",
+              userSelect: "none",
+            }}>
+            <span>Quality paint:</span>
+            <span style={{ color: !goodQualityHeatmap ? "#cfe0f4" : "#5f7390", fontWeight: !goodQualityHeatmap ? 600 : 400 }}>
+              hue
+            </span>
+            <span style={{
+              position: "relative", width: 26, height: 13, borderRadius: 7,
+              background: goodQualityHeatmap ? "#3a5a86" : "#243449",
+              border: "1px solid #2a3e58", flex: "0 0 auto",
+            }}>
+              <span style={{
+                position: "absolute", top: 1, left: goodQualityHeatmap ? 13 : 1,
+                width: 11, height: 11, borderRadius: "50%",
+                background: goodQualityHeatmap
+                  ? "linear-gradient(135deg, #c42020, #f0d640)"
+                  : "linear-gradient(135deg, #7fa8c8, #eceae0)",
+                transition: "left 0.12s ease",
+              }} />
+            </span>
+            <span style={{ color: goodQualityHeatmap ? "#cfe0f4" : "#5f7390", fontWeight: goodQualityHeatmap ? 600 : 400 }}>
+              🌡 heatmap
+            </span>
+          </div>
+        )}
         {/* One toggle per category (master checkbox shows all its goods, each in
             its own colour/icon); expand the caret to toggle a single good. */}
         {CATEGORY_ORDER.map((cat) => {

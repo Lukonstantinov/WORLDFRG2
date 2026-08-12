@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow } from "@types";
 import type { ClimateBands } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
@@ -540,6 +540,12 @@ export class OverlayManager {
    *  quality layer simply doesn't draw until then rather than inventing a ramp. */
   private goodQualityStops: QualityStop[] = [];
   private goodQualityPale: [number, number, number] = [236, 230, 224];
+  /** The alternate heat-ramp reading of the same D10 scale (dark blue → red),
+   *  SERVED alongside the hue-mix stops above — same discipline, §8.18. */
+  private goodQualityHeatmapStops: RampStop[] = [];
+  /** false = mix toward the good's own hue (default); true = the heat ramp. Set
+   *  from `uiStore.goodQualityHeatmap` in `MapCanvas.tsx`. */
+  private goodQualityHeatmap = false;
   private cultureRegions: CultureRegion[] = [];
   private stateRegions: StateRegion[] = [];
   /** States are rendered EXACTLY like provinces: a prebuilt raster-resolution fill
@@ -1375,11 +1381,44 @@ export class OverlayManager {
 
   /** D10 · the one absolute quality scale, served by `get_render_palettes`. Pushed
    *  in from `usePaletteStore` so there is exactly one copy of it, in Rust (§8.18). */
-  setGoodQualityScale(stops: QualityStop[], pale: string) {
+  setGoodQualityScale(stops: QualityStop[], pale: string, heatmap: RampStop[] = []) {
     this.goodQualityStops = stops;
     const rgb = parseColor(pale);
     if (rgb) this.goodQualityPale = rgb;
+    this.goodQualityHeatmapStops = heatmap;
     this.goodMasksDirty = true;
+  }
+
+  /** Switch the quality layer between the hue-mix reading (toward the good's own
+   *  colour) and the heat-ramp reading (dark blue → red, ignoring the good's hue).
+   *  Same underlying belt values either way — only the paint changes. */
+  setGoodQualityHeatmap(on: boolean) {
+    if (this.goodQualityHeatmap === on) return;
+    this.goodQualityHeatmap = on;
+    this.goodMasksDirty = true;
+  }
+
+  /** Sample the served HEAT ramp (RGB stops, hex colours) at an absolute belt value. */
+  private sampleGoodQualityHeatmap(t: number): [number, number, number] | null {
+    const s = this.goodQualityHeatmapStops;
+    if (s.length === 0) return null;
+    if (t <= s[0].at) return parseColor(s[0].color);
+    const last = s[s.length - 1];
+    if (t >= last.at) return parseColor(last.color);
+    for (let i = 0; i < s.length - 1; i++) {
+      const a = s[i], b = s[i + 1];
+      if (t <= b.at) {
+        const k = b.at === a.at ? 0 : (t - a.at) / (b.at - a.at);
+        const ca = parseColor(a.color), cb = parseColor(b.color);
+        if (!ca || !cb) return ca ?? cb;
+        return [
+          Math.round(ca[0] + (cb[0] - ca[0]) * k),
+          Math.round(ca[1] + (cb[1] - ca[1]) * k),
+          Math.round(ca[2] + (cb[2] - ca[2]) * k),
+        ];
+      }
+    }
+    return parseColor(last.color);
   }
 
   /** Sample the served quality scale at an ABSOLUTE belt value (D10 — the value
@@ -1424,7 +1463,7 @@ export class OverlayManager {
     this.goodMaskRender.clear();
     const showCoverage = !!this.visibility.goodCoverage;
     const showQuality = !!this.visibility.goodQuality && this.goodQualityStops.length > 0;
-    this.goodRenderKey = `${showCoverage}|${showQuality}|${this.goodQualityStops.length}`;
+    this.goodRenderKey = `${showCoverage}|${showQuality}|${this.goodQualityStops.length}|${this.goodQualityHeatmap}`;
     if (!showCoverage && !showQuality) return;
 
     /** Cap on a single good's fill canvas, in pixels (≈16 MB of RGBA). */
@@ -1507,13 +1546,25 @@ export class OverlayManager {
           const col = hasSub ? (subRGB[m.subtypes[qi]] ?? base) : base;
           let r = col[0], g = col[1], b = col[2], a = COVERAGE_ALPHA;
           if (showQuality) {
-            const q = this.sampleGoodQuality((m.quality[qi] ?? 0) / 255);
+            const t = (m.quality[qi] ?? 0) / 255;
+            const q = this.sampleGoodQuality(t);
             if (q) {
               a = showCoverage ? q.alpha : q.alpha * 0.9;
-              const k = q.mix;
-              r = Math.round(pr + (col[0] - pr) * k);
-              g = Math.round(pg + (col[1] - pg) * k);
-              b = Math.round(pb + (col[2] - pb) * k);
+              // HEATMAP mode (dark blue → red) ignores the good's own hue entirely —
+              // that is the whole point: a subtle good's colour can be too close to
+              // the pale ground tint for the hue-mix reading to show anything. Alpha
+              // is boosted with a floor, since colour contrast alone still needs
+              // enough opacity to actually read against the ground.
+              const heat = this.goodQualityHeatmap ? this.sampleGoodQualityHeatmap(t) : null;
+              if (heat) {
+                a = Math.max(a, showCoverage ? 0.55 : 0.65);
+                [r, g, b] = heat;
+              } else {
+                const k = q.mix;
+                r = Math.round(pr + (col[0] - pr) * k);
+                g = Math.round(pg + (col[1] - pg) * k);
+                b = Math.round(pb + (col[2] - pb) * k);
+              }
             }
           }
           const o = ci * 4;
@@ -2428,7 +2479,7 @@ export class OverlayManager {
     // path rather than showing nothing.
     const maskedGoods = new Set<string>();
     if (this.goodMasks.length > 0) {
-      const key = `${!!this.visibility.goodCoverage}|${!!this.visibility.goodQuality && this.goodQualityStops.length > 0}|${this.goodQualityStops.length}`;
+      const key = `${!!this.visibility.goodCoverage}|${!!this.visibility.goodQuality && this.goodQualityStops.length > 0}|${this.goodQualityStops.length}|${this.goodQualityHeatmap}`;
       if (this.goodMasksDirty || key !== this.goodRenderKey) this.buildGoodMaskRender();
       ctx.imageSmoothingEnabled = false;
       ctx.globalAlpha = 1;

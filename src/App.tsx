@@ -38,7 +38,7 @@ import { LandmarksPanel } from "@ui/campaign/LandmarksPanel";
 import { DynastiesPanel } from "@ui/campaign/DynastiesPanel";
 import { GoodsMarketPanel } from "@ui/goods/GoodsMarketPanel";
 import { SettlementSearch } from "@ui/world/SettlementSearch";
-import { LayerLegend } from "@ui/world/LayerLegend";
+import { LayerLegend, GoodQualityLegend } from "@ui/world/LayerLegend";
 import { GoodsEditor } from "@ui/goods/GoodsEditor";
 import { GoodsChainReview } from "@ui/goods/GoodsChainReview";
 import { GoodDetailPanel } from "@ui/goods/GoodDetailPanel";
@@ -740,6 +740,7 @@ export default function App() {
           <WarehousesPanel />
           <TradeMatrixPanel />
           <LayerLegend />
+          <GoodQualityLegend />
           </ErrorBoundary>
         </div>
 
