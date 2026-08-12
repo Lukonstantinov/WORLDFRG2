@@ -827,6 +827,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_net_mig: vec![],
         prov_neighbors: vec![],
         feuds: vec![],
+        envoys: vec![],
         prov_forest: vec![],
         prov_arable: vec![],
         prov_pasture: vec![],

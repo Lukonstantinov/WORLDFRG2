@@ -2394,6 +2394,11 @@ impl CampaignSim {
             // DLC 3.5 · resale market: distressed houses / thin-treasury poleis sell
             // holdings; solvent houses & banks buy them.
             self.estate_resale_pass();
+            // 4.9 (D7/D8) · out-of-town acquisition: dispatch, then resolve any
+            // envoy that has arrived. Both read the same for-sale picture
+            // `estate_resale_pass` just left, so run right after it.
+            self.envoy_dispatch_pass();
+            self.envoy_travel_pass();
             self.update_guilds_and_offices();
             // Offices (re)settled → update commercial influence, dominance & Bailos.
             self.update_influence_and_bailos();

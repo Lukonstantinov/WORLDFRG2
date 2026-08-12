@@ -96,6 +96,7 @@
             prov_rural: vec![], prov_cap: vec![], prov_culture: vec![], prov_seat: vec![],
             hub_province: vec![], prov_net_mig: vec![], prov_neighbors: vec![],
             feuds: vec![],
+            envoys: vec![],
             // Province LAND state — left empty exactly like the demography vectors
             // above, so `province_land_pass` early-returns and the dynamics run is
             // unaffected by the B1 land layer (that is the gate).
@@ -4442,4 +4443,44 @@
         s.hubs[2].is_estate = true;
         s.assign_city_tiers();
         assert_eq!(s.hubs[2].tier, 0, "an estate must never be tiered");
+    }
+
+    /// 4.9 (D7/D8) · a wealthy house's envoy travels to a for-sale estate in a
+    /// DIFFERENT, reachable city and resolves into a real outcome once it
+    /// arrives. Dispatch is chance-gated (`ENVOY_DISPATCH_CHANCE`), so drive
+    /// several months forward — the same "run the pass repeatedly" pattern
+    /// the rest of this suite already uses for stochastic mechanics — rather
+    /// than asserting on a single roll.
+    #[test]
+    fn an_envoy_travels_abroad_and_resolves() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let home = hub(0, 0.0, 0.0, 5000.0, vec![5000.0], 0);
+        let city = hub(1, 10.0, 0.0, 5000.0, vec![5000.0], 0); // treasury 0.0 < CIVIC_SALE_TREASURY_FLOOR: for sale
+        let mut estate = hub(2, 10.0, 0.0, 1000.0, vec![1000.0], 0);
+        estate.is_estate = true;
+        estate.estate_tier = 1;
+        estate.parent = 1;
+        let mut s = sim(vec![home, city, estate], goods);
+        s.houses = vec![house_at(0, vec![0], 0)];
+        s.houses[0].wealth = 200_000.0; // comfortably above ENVOY_MIN_WEALTH
+        s.tick = 25 * 365 + 1; // past ENVOY_MIN_YEAR
+
+        let mut dispatched = false;
+        for _ in 0..600 {
+            s.envoy_dispatch_pass();
+            if !s.envoys.is_empty() { dispatched = true; break; }
+            s.tick += 30;
+        }
+        assert!(dispatched, "an eligible wealthy house never dispatched an envoy after many months");
+        assert_eq!(s.envoys[0].house, 0);
+        assert_eq!(s.envoys[0].target_estate, 2);
+        assert_eq!(s.envoys[0].status, 0, "starts travelling");
+
+        s.tick = s.envoys[0].arrive_tick;
+        s.envoy_travel_pass();
+        assert_ne!(s.envoys[0].status, 0, "must resolve once arrived, not sit travelling forever");
+        // Whatever the outcome, wealth stays finite and bounded — the same
+        // discipline rule 18 asks of every new money-moving mechanic.
+        assert!(s.houses[0].wealth.is_finite() && s.houses[0].wealth >= 0.0,
+            "house wealth left its bounds: {}", s.houses[0].wealth);
     }

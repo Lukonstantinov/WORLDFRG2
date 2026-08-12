@@ -900,6 +900,12 @@ const CAPTOR_TARIFF_FAVOUR: f32 = 0.6;   // ×base for the captor's goods
 /// Trade-influence boost a captor gets at the city it controls (added to `influence`).
 const CAPTOR_INFLUENCE_BOOST: f32 = 0.12;
 const LAWS_CAP: usize = 12;
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.9 (A4) · a fresh captor OCCASIONALLY
+/// bars foreign ownership outright to protect its new turf — the conquest/
+/// capitulation origin the amendment names. Reuses the already-rare `captor !=
+/// prev` trigger (§ "5) Payoff on a fresh capture") rather than inventing a
+/// second one, so this stays as bounded as the favoured-house charter beside it.
+const FOREIGN_BAR_ON_CAPTURE_CHANCE: f32 = 0.15;
 
 /// Pick a deterministic archetype for a new house from the founding context.
 pub fn pick_archetype(seed: u64, salt: u64) -> u8 {
@@ -2292,13 +2298,22 @@ pub struct Official {
 pub struct Law {
     pub year: u32,
     /// 0 favoured-house charter · 1 protectionist tariff · 2 free-trade · 3 debasement ·
-    /// 4 grain law (civic granary) · 5 guild monopoly.
+    /// 4 grain law (civic granary) · 5 guild monopoly · 6 foreign-ownership bar
+    /// (ESTATES_SHARES_AND_WAREHOUSE_PLAN.md A4 — read by `resolve_envoy`;
+    /// enacted only at a fresh council capture, the "5) Payoff" step below).
+    /// Kinds 1-5 are the pre-existing aspirational set: documented since before
+    /// this slice, still enacted nowhere. Left as-is (not this slice's job).
     pub kind: u8,
     /// Beneficiary house (−1 none).
     pub house: i32,
     /// Relevant good (−1 none).
     pub good: i32,
 }
+
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.9 (A4) · `Law.kind` for a foreign-
+/// ownership bar. Kept as a top-level const (not just the doc-comment on
+/// `Law::kind`) because `resolve_envoy` compares against it directly.
+pub(crate) const LAW_FOREIGN_BAR: u8 = 6;
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
@@ -4245,6 +4260,30 @@ pub struct Expedition {
     #[serde(default = "neg_one_i32")] pub dest_province: i32,
 }
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.9 (D7/D8) · a house's out-of-town
+/// acquisition attempt: INTENT → DISPATCH → TRAVEL → STANDING → ROUNDS →
+/// OUTCOME (§8.4 of the plan). Cross-city only — a same-city buy stays on
+/// `estate_resale_pass`'s cheaper, instant path; the envoy exists because
+/// DISTANCE is the mechanic (a rival already resident can close the deal
+/// while the envoy is still travelling — `status` 5, pre-empted).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Envoy {
+    pub house: u32,
+    pub origin_hub: u32,
+    pub target_estate: u32,
+    pub dispatched_tick: u32,
+    pub arrive_tick: u32,
+    /// The negotiation is resolved in one settling at arrival (§8.4's "ROUNDS"
+    /// collapse to a single check here rather than their own multi-tick state —
+    /// the travel itself is what "rounds" would have added little to, and this
+    /// keeps the mechanic legible without a second timer). Always 0 while
+    /// travelling, 1 once resolved.
+    pub rounds_done: u8,
+    /// 0 travelling · 1 reserved · 2 agreed (full purchase) · 3 partial (a
+    /// minority share) · 4 refused · 5 pre-empted.
+    pub status: u8,
+}
+
 /// The attempt ledger for a city-pair (a<b by id): a corridor is established only
 /// after repeated proven success, so failures accumulate here first.
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
@@ -4559,6 +4598,11 @@ pub struct CampaignSim {
     /// rebuild their feuds from the current rival lists on the next pass.
     #[serde(default)]
     pub feuds: Vec<Feud>,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.9 (D7/D8) · out-of-town acquisition
+    /// attempts in flight or recently resolved (kept ~a month past resolution so
+    /// the House Dossier can show the outcome, then GC'd — see `envoy_travel_pass`).
+    #[serde(default)]
+    pub envoys: Vec<Envoy>,
     /// Phase 5 (flavour) · craft guilds (one per manufacturing city), seeded once.
     #[serde(default)]
     pub guilds: Vec<CraftGuild>,
@@ -5256,6 +5300,10 @@ impl CampaignSim {
             //    boost (its policy tilt is applied in `decide_polis_policy`).
             if captor >= 0 && captor != prev {
                 self.push_law(h, 0, captor, -1, year);
+                // 4.9 (A4) · the captor occasionally shuts the door behind it.
+                if hash01(self.seed, tick as u64 ^ 0x4A57B, h as u64) < FOREIGN_BAR_ON_CAPTURE_CHANCE {
+                    self.push_law(h, LAW_FOREIGN_BAR, captor, -1, year);
+                }
                 let ci = captor as usize;
                 if ci < self.houses.len() {
                     match self.houses[ci].influence.iter_mut().find(|(c, _)| *c == h as u32) {
@@ -6917,6 +6965,7 @@ mod schism;
 mod foreign_hand;
 mod production;
 mod realms;
+mod envoys;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the
 /// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"
