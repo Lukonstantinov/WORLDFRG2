@@ -142,6 +142,19 @@ const TECH_FACTOR_FLOOR: f32 = 0.85;
 /// Share of an estate's gross export sales that flows to its OWNER (a house, or the
 /// parent city). The estate's per-capita output is its scale; this is the rent.
 const ESTATE_OWNER_CUT: f32 = 0.5;
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.12 (A2) · "whoever grades, profits" —
+/// the certifying authority's slice of the owner-cut, taken BEFORE the owner/
+/// dividend split (mod.rs's own comment on that block). Deliberately a
+/// REDISTRIBUTION of the existing `cut`, never an addition on top of `sale` —
+/// this is what keeps it revenue-neutral (nothing is created, rule 18) and, on
+/// the evidence of this session's other two 4.x tuning stories (4.7, 4.9), is
+/// also what makes it SAFE against `econ_inheritance_rules_fragment_
+/// differently`: a uniform skim applied identically to every estate under
+/// every inheritance law is a far more symmetric perturbation than a targeted
+/// house-to-house transfer, which is the working hypothesis behind trying a
+/// real, wired fee here rather than scoping straight down to a query-side-only
+/// build the way 4.7/4.9 eventually had to for their own money-moving pieces.
+const CERT_FEE_FRAC: f32 = 0.04;
 /// A resident house this wealthy (or richer) takes ownership of a new estate its
 /// city founds; below it, the city owns the estate.
 const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
@@ -6991,6 +7004,7 @@ mod production;
 mod realms;
 mod envoys;
 mod offtake;
+mod certification;
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the
 /// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"

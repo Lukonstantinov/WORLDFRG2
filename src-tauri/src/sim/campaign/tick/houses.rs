@@ -2405,6 +2405,15 @@ impl CampaignSim {
             // since an envoy's PARTIAL outcome is currently the only source of
             // an offtake row.
             self.offtake_delivery_pass();
+            // 4.12 (A2) · adulteration (`certification::adulteration_pass`) is
+            // implemented but deliberately NOT called here — see that
+            // function's own doc comment. Its trigger is gated on estate-
+            // owner DISTRESS, a condition that differs structurally between
+            // inheritance regimes by construction (that is what `econ_
+            // inheritance_rules_fragment_differently` measures), so unlike
+            // the certification fee above it isn't a case dose-tuning can
+            // fix — deferred per the same §2.4 discipline 4.7's D11/A9 piece
+            // already used, not silently dropped.
             self.update_guilds_and_offices();
             // Offices (re)settled → update commercial influence, dominance & Bailos.
             self.update_influence_and_bailos();

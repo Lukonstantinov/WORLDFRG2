@@ -3096,8 +3096,15 @@
         let before = s.houses.len();
         for _ in 0..60 { s.advance(365); }
         assert!(s.houses[0].line.len() >= 2, "the guildmastership never turned over");
+        // Scoped to GUILD houses specifically, matching this test's own name — an
+        // ordinary NEW house founded during the run (`maybe_found_house`) dividing
+        // under this fixture's partible law is correct, unrelated behaviour, not
+        // the guild-division bug this test guards against. The unscoped version
+        // (any house anywhere) held only coincidentally in the old baseline, where
+        // this tiny 2-hub/60-year world never happened to grow a second house far
+        // enough to divide within the window.
         assert!(
-            !s.houses.iter().any(|h| h.name.contains(" Line)")),
+            !s.houses.iter().any(|h| h.is_guild && h.name.contains(" Line)")),
             "a guild spawned a co-heir house"
         );
         assert!(s.houses.len() >= before, "houses vanished");
@@ -4557,4 +4564,39 @@
 
         assert!(s.warehouses.is_empty(), "a manufactory's shares must never route physical offtake");
         assert!((stock_of(&s.hubs[0].stock, 0) - 50.0).abs() < 1e-3, "stock must stay untouched");
+    }
+
+    /// 4.12 (A2) · a distressed estate owner's adulteration windfall is real
+    /// (wealth rises), and detection strips more than the windfall was worth.
+    /// Direct coverage since `adulteration_pass` isn't called from the tick
+    /// loop (see certification.rs's own doc comment on why).
+    #[test]
+    fn an_adulteration_windfall_can_be_detected_and_stripped() {
+        let goods = vec![good("wine", 3, 2, 8.0, 0.4, false)];
+        let mut estate = hub(0, 0.0, 0.0, 2000.0, vec![0.0], 0);
+        estate.is_estate = true;
+        estate.estate_tier = 1;
+        estate.estate_kind = 2;
+        estate.parent = 1;
+        estate.owner_house = 0;
+        estate.stock[GRADE_COMMON] = 500.0;
+        let city = hub(1, 0.0, 0.0, 3000.0, vec![0.0], 0);
+        let mut s = sim(vec![estate, city], goods);
+        s.houses = vec![house_at(1, vec![0], 0)];
+        s.houses[0].wealth = 1000.0; // below ADULT_DISTRESS_WEALTH
+
+        let mut windfalls = 0u32;
+        let mut detections = 0u32;
+        let mut prev = s.houses[0].wealth;
+        for _ in 0..2000 {
+            s.adulteration_pass();
+            let w = s.houses[0].wealth;
+            if w > prev { windfalls += 1; }
+            if w < prev - 1.0 { detections += 1; } // a net drop beyond the windfall itself = caught
+            prev = w;
+            s.tick += 30;
+            assert!(w.is_finite(), "wealth left its bounds: {}", w);
+        }
+        assert!(windfalls > 0, "an eligible distressed owner never took a windfall in 2000 months");
+        assert!(detections > 0, "detection never fired in 2000 months — the risk half is dead");
     }

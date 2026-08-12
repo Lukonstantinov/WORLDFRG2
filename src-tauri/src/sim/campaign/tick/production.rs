@@ -883,6 +883,29 @@ impl CampaignSim {
                     // city's prosperity if the estate is city-owned.
                     if self.hubs[a].is_estate {
                         let mut cut = sale * ESTATE_OWNER_CUT;
+                        // 4.12 (A2) · "whoever grades, profits" — a certifying
+                        // authority takes CERT_FEE_FRAC of the cut BEFORE the
+                        // owner/dividend split below: a resident guild house at
+                        // the parent city if one exists, else the city's own
+                        // civic pool (D6's "guild, city, or staple" — a staple
+                        // isn't a modelled entity here, so it folds into "city").
+                        // A pure REDISTRIBUTION of `cut`, never added on top of
+                        // `sale` — nothing is created (rule 18).
+                        if cut > 0.0 {
+                            let parent = self.hubs[a].parent;
+                            let fee = cut * CERT_FEE_FRAC;
+                            if fee > 0.0 {
+                                let guild = self.houses.iter().position(|h|
+                                    h.is_guild && !h.defunct && parent >= 0 && h.hub == parent as u32);
+                                match guild {
+                                    Some(gi) => { self.houses[gi].wealth += fee; cut -= fee; }
+                                    None => if parent >= 0 && (parent as usize) < self.hubs.len() {
+                                        self.hubs[parent as usize].civic_pool += fee;
+                                        cut -= fee;
+                                    }
+                                }
+                            }
+                        }
                         // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · every
                         // DIVIDEND-payout row in the share table collects its
                         // fraction of the owner-cut BEFORE the owner (below)
