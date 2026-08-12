@@ -175,6 +175,11 @@ pub struct HubBrief {
     /// CITY_PROVINCE_WAR_PLAN.md §3.2 · 1 great · 2 major · 3 lesser · 4 marginal ·
     /// 0 = not yet assigned. §3.3 reads this to decide state eligibility (tier 1-2).
     #[serde(default)] pub tier: u8,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.11 (F8) · 0 content · 1 short ·
+    /// 2 starving — a pure derived read off `food_balance`/`starving`
+    /// (`population_status`, mod.rs), reusing the same 0.5 threshold the
+    /// existing civic-granary famine release already keys on.
+    #[serde(default)] pub pop_status: u8,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -794,6 +799,7 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                     h.history.iter().step_by(step).map(|s| s.population).collect()
                 },
                 tier: h.tier,
+                pop_status: crate::sim::tick::population_status(h.food_balance, h.starving),
             }
         })
         .collect();

@@ -47,6 +47,8 @@ export interface CampaignHubBrief {
   /** CITY_PROVINCE_WAR_PLAN.md §3.2 city tier: 1 great · 2 major · 3 lesser ·
    *  4 marginal · 0 = not yet assigned. §3.3 reads tier 1-2 for state eligibility. */
   tier: number;
+  /** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.11: 0 content · 1 short · 2 starving. */
+  pop_status?: number;
 }
 /** Atlas 2.0 · one named trade basin (campaign_get_trade_basins). */
 export interface TradeBasin {

@@ -4650,3 +4650,14 @@
         assert!(windfalls > 0, "an eligible distressed owner never took a windfall in 2000 months");
         assert!(detections > 0, "detection never fired in 2000 months — the risk half is dead");
     }
+
+    /// 4.11 (F8) · population status reuses the SAME 0.5 threshold the
+    /// existing civic-granary famine release keys on, so the two never
+    /// disagree about when a city is in genuine crisis.
+    #[test]
+    fn population_status_matches_the_granary_famine_threshold() {
+        assert_eq!(population_status(1.0, 0.0), POP_STATUS_CONTENT);
+        assert_eq!(population_status(-0.1, 0.0), POP_STATUS_SHORT, "a deficit with no built-up starvation is merely short");
+        assert_eq!(population_status(-0.5, 0.51), POP_STATUS_STARVING, "crosses the granary's own 0.5 release threshold");
+        assert_eq!(population_status(0.2, 0.6), POP_STATUS_STARVING, "starving overrides even a momentarily positive balance");
+    }

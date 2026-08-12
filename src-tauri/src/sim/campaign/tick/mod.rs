@@ -3650,6 +3650,32 @@ pub(crate) fn production_band(is_estate: bool, quality: f32) -> usize {
     if is_estate { band } else { band.min(GRADE_COMMON) }
 }
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.11 (F8) · a settlement's population
+/// status — content · short · starving — read straight off the SAME two
+/// fields the existing civic-granary release (mod.rs's own "6) Civic
+/// granary" step) and the disease pass's starvation accumulator already
+/// compute (`food_balance`/`starving`, `disease.rs`). A pure derived read, no
+/// new state: `starving` already crosses 0.5 at exactly the granary's own
+/// famine-release threshold, so this reuses that line rather than inventing
+/// a second one. `POP_STATUS_CONTENT`/`_SHORT`/`_STARVING` name the result.
+pub(crate) fn population_status(food_balance: f32, starving: f32) -> u8 {
+    if starving > 0.5 { POP_STATUS_STARVING }
+    else if food_balance < 0.0 { POP_STATUS_SHORT }
+    else { POP_STATUS_CONTENT }
+}
+pub const POP_STATUS_CONTENT: u8 = 0;
+pub const POP_STATUS_SHORT: u8 = 1;
+pub const POP_STATUS_STARVING: u8 = 2;
+/// Display label — the dossier's own "pips and a phrase, never a raw 0..1"
+/// convention (`CLAUDE.md` §5, House Dossier).
+pub(crate) fn population_status_label(status: u8) -> &'static str {
+    match status {
+        POP_STATUS_STARVING => "starving",
+        POP_STATUS_SHORT => "short",
+        _ => "content",
+    }
+}
+
 // ── ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.4 (D20) · supplier attribution ──
 // Five seller classes; the panel groups on these, never a named per-house
 // ledger (D20 rejects "separate books per seller and a full order book").
