@@ -18,6 +18,7 @@ import { CityView, BUILDING_INFO } from "@ui/campaign/CityView";
 import { FlowsView } from "@ui/campaign/FlowsView";
 import { CultureDonut } from "@ui/campaign/CultureDonut";
 import { CityWarehousePanel } from "@ui/campaign/CityWarehousePanel";
+import { WorksCard } from "@ui/campaign/WorksCard";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
@@ -220,12 +221,13 @@ export function HubPanel() {
   const [colony, setColony] = useState<ColonyDetail | null>(null);
   const [prov, setProv] = useState<ProvisioningBrief | null>(null);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
+  const [expandedEstate, setExpandedEstate] = useState<number | null>(null);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const setFlowHighlight = useUIStore((s) => s.setFlowHighlight);
 
   // Reset to the Overview tab whenever a different hub is opened.
-  useEffect(() => { setTab("summary"); setTradeView("market"); }, [selectedHub]);
+  useEffect(() => { setTab("summary"); setTradeView("market"); setExpandedEstate(null); }, [selectedHub]);
   // Clear any map flow-highlight when leaving the Flows view (or the panel).
   useEffect(() => {
     if (!(tab === "trade" && tradeView === "flows")) setFlowHighlight([]);
@@ -976,31 +978,37 @@ export function HubPanel() {
               const lineColor = isManu ? "#4fc06a" : "#ffe14a";
               const ownerColor = e.owner_is_civic ? "#7fb8ff" : e.owner_is_guild ? "#7fd0c0" : "#e8dcc0";
               const ownerLabel = e.owner_is_civic ? "city-owned" : e.owner;
+              const expanded = expandedEstate === e.hub;
               return (
-              <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c" }}>
-                <span style={{ alignSelf: "stretch", width: 4, borderRadius: 3, background: lineColor }} title={isManu ? "manufactory (green line)" : "estate (yellow line)"} />
-                <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: "#cdbb88", fontWeight: 600 }}>
-                    {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
-                    <span style={{ color: lineColor, fontSize: 8, marginLeft: 5, fontWeight: 700 }}>
-                      {isManu ? "MANUFACTORY" : "ESTATE"}
-                    </span>
-                    <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
-                      {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
-                    </span>
-                  </div>
-                  <div style={{ color: "#7a90a8", fontSize: 9 }}>
-                    owner: <span style={{ color: ownerColor }}>{ownerLabel}</span> · tier {e.tier ?? 1}/5
-                    {(e.damage ?? 0) > 0.01 && (
-                      <span style={{ color: "#e0764a", fontWeight: 700, marginLeft: 5 }}
-                        title="disaster damage — output suppressed until repaired">
-                        🔥 {Math.round((e.damage ?? 0) * 100)}% damaged
+              <div key={i}>
+                <div onClick={() => setExpandedEstate(expanded ? null : e.hub)}
+                  style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c", cursor: "pointer" }}>
+                  <span style={{ alignSelf: "stretch", width: 4, borderRadius: 3, background: lineColor }} title={isManu ? "manufactory (green line)" : "estate (yellow line)"} />
+                  <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: "#cdbb88", fontWeight: 600 }}>
+                      {ESTATE_LABEL[e.kind] ?? "Estate"} · {iconFor(e.good)} {labelFor(e.good)}
+                      <span style={{ color: lineColor, fontSize: 8, marginLeft: 5, fontWeight: 700 }}>
+                        {isManu ? "MANUFACTORY" : "ESTATE"}
                       </span>
-                    )}
+                      <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
+                        {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
+                      </span>
+                    </div>
+                    <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                      owner: <span style={{ color: ownerColor }}>{ownerLabel}</span> · tier {e.tier ?? 1}/5
+                      {(e.damage ?? 0) > 0.01 && (
+                        <span style={{ color: "#e0764a", fontWeight: 700, marginLeft: 5 }}
+                          title="disaster damage — output suppressed until repaired">
+                          🔥 {Math.round((e.damage ?? 0) * 100)}% damaged
+                        </span>
+                      )}
+                    </div>
                   </div>
+                  <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
+                  <span style={{ color: "#5a7390", fontSize: 9 }}>{expanded ? "▾" : "▸"}</span>
                 </div>
-                <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
+                {expanded && <WorksCard hub={e.hub} tick={campTick} />}
               </div>
             );})}
 

@@ -1141,6 +1141,19 @@ pub fn estate_kind_label(kind: u8) -> &'static str {
     }
 }
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (D15) · the five-step label a
+/// `yield_index` reads as — "the label leads" (shown before the number, the
+/// house dossier's own "pips and a phrase, never a raw 0..1" convention).
+pub fn yield_label(yield_index: f32) -> &'static str {
+    match yield_index {
+        y if y >= 3.0 => "world-class",
+        y if y >= 1.8 => "great",
+        y if y >= 1.1 => "notable",
+        y if y >= 0.5 => "ordinary",
+        _ => "marginal",
+    }
+}
+
 // ── Structures (per-settlement buildings) ───────────────────────────────────
 const STRUCT_GRANARY: u8 = 1;
 const STRUCT_WAREHOUSE: u8 = 2;
@@ -2158,6 +2171,10 @@ pub struct TickHub {
     /// "does a bank have a finance interest here" marker (`development_tier`'s
     /// `finance` check) and are written in lockstep by every acquisition site.
     #[serde(default)] pub shares: Vec<Share>,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (§3) · this works' own
+    /// twelve-month output/quality/price ring (its DOMINANT good only).
+    /// Empty for a non-estate hub — the works card is an estate-only view.
+    #[serde(default)] pub monthly: Vec<MonthSample>,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -2211,6 +2228,18 @@ pub struct HubSample {
     #[serde(default)] pub pop_local: f32,
     #[serde(default)] pub pop_guild: f32,
 }
+
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (§3) · one monthly sample of a
+/// works' DOMINANT good — output/quality/price — behind the works card's
+/// twelve-month curves. §3's own data model spells this as a fixed `[T; 12]`
+/// ring + a cursor; here it's a `Vec` capped at 12 (push-and-trim from the
+/// front) instead, for the same ring behaviour without a hand-rolled
+/// Deserialize impl for a fixed-size array of a custom struct — the
+/// serialized shape a reader cares about (≤12 chronological samples) is
+/// identical either way.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct MonthSample { pub output: f32, pub quality: f32, pub price: f32 }
+pub const WORKS_MONTHLY_CAP: usize = 12;
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct InTransit {
@@ -6041,6 +6070,7 @@ impl CampaignSim {
             if tick % 30 == 0 {
                 self.council_provision_pass(); // councils pre-empt needed goods into civic warehouses
                 self.warehouse_and_spoilage_pass(); // size city warehouses, spoil what rots (§4.2)
+                self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
                 self.sample_hub_history();
                 self.sample_journal();

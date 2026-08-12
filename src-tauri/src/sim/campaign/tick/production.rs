@@ -298,6 +298,33 @@ impl CampaignSim {
     }
 
 
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (D15) · this works' dominant
+    /// good, its `yield_index` (its own output ÷ the world mean output of that
+    /// good, over WORKS ONLY — D15's own "villages excluded from the mean"),
+    /// its 1-based world rank, and how many works produce it. A pure derived
+    /// read — no new state, computed fresh each query, exactly D15's own
+    /// closing note that a cross-good rank is meaningless and isn't offered.
+    pub fn works_rank(&self, h: usize) -> Option<(usize, f32, usize, usize)> {
+        let hub = self.hubs.get(h)?;
+        if !hub.is_estate || hub.abandoned { return None; }
+        let ng = self.goods.len().min(hub.production.len());
+        let g = (0..ng).max_by(|&a, &b| hub.production[a]
+            .partial_cmp(&hub.production[b]).unwrap_or(std::cmp::Ordering::Equal))?;
+        let my_output = hub.production[g];
+        if my_output <= EPS { return None; }
+        let outputs: Vec<f32> = self.hubs.iter()
+            .filter(|e| e.is_estate && !e.abandoned)
+            .filter_map(|e| e.production.get(g).copied())
+            .filter(|&o| o > EPS)
+            .collect();
+        if outputs.is_empty() { return None; }
+        let mean = outputs.iter().sum::<f32>() / outputs.len() as f32;
+        let yield_index = if mean > EPS { my_output / mean } else { 1.0 };
+        let rank = 1 + outputs.iter().filter(|&&o| o > my_output).count();
+        Some((g, yield_index, rank, outputs.len()))
+    }
+
+
     /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1 · one-time migration for a
     /// pre-4.1 save: `stock` used to be `ng` floats (one per good); it is now
     /// flat `ng × GRADE_BANDS`. A hub whose `stock.len()` still equals `ng` is

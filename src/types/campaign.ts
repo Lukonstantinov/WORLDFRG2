@@ -581,6 +581,8 @@ export interface TradeFlows {
 }
 /** One estate / manufactory in a settlement's hinterland. */
 export interface EstateRow {
+  /** 4.6 · this estate's own hub id — pass to campaignWorksCard(hub). */
+  hub: number;
   name: string;
   kind: number;       // 1 farm/2 mine/3 plantation/4 fishery/5 vineyard/6 manufactory
   good: string;
@@ -682,6 +684,41 @@ export interface CityWarehouseInfo {
   fill_frac: number;
   spoiled_total_month: number;
   goods: CityWarehouseGood[];
+}
+/** 4.6 (D15/D16/A10) · one resolved row of a works' ownership bar. */
+export interface WorksOwnerShare {
+  holder_kind: number; // 0 city · 1 house · 2 guild · 3 bank · 4 realm
+  name: string;
+  color: string;
+  frac: number;
+  payout: number;      // 0 offtake · 1 dividend
+  instrument: number;  // 0 perpetual SHARE · 1 fixed-term TENANCY
+  term_years: number;
+}
+/** One monthly sample point on a works card's curves. */
+export interface WorksMonthPoint { output: number; quality: number; price: number }
+/** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 · everything one expandable works
+ *  card needs — rank/yield (D15), condition, the ownership bar (D1), and the
+ *  twelve-month curves (§3). */
+export interface WorksCardInfo {
+  hub: number;
+  name: string;
+  kind: number;
+  kind_label: string;
+  tier: number;
+  good: number;
+  good_name: string;
+  condition: number;
+  damage: number;
+  yield_index: number;
+  yield_label: string;
+  rank: number;
+  rank_of: number;
+  monthly_output: number;
+  output_delta: number;
+  quality: number;
+  owners: WorksOwnerShare[];
+  monthly: WorksMonthPoint[];
 }
 /** A foreign merchant's office hosted in a settlement (host-side view). */
 export interface OfficeHere {

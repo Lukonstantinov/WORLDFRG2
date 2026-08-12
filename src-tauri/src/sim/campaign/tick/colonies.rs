@@ -843,6 +843,33 @@ impl CampaignSim {
     }
 
 
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (§3) · monthly: every ESTATE
+    /// samples its own DOMINANT good's output/quality/price into its 12-month
+    /// ring — the works card's curves. A non-estate hub is a village in the
+    /// plan's own sense (D14) and carries no card, so nothing is sampled for it.
+    pub(crate) fn works_monthly_pass(&mut self) {
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        for h in 0..self.hubs.len() {
+            if !self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let g = (0..ng.min(self.hubs[h].production.len()))
+                .max_by(|&a, &b| self.hubs[h].production[a]
+                    .partial_cmp(&self.hubs[h].production[b]).unwrap_or(std::cmp::Ordering::Equal));
+            let Some(g) = g else { continue };
+            let sample = MonthSample {
+                output: self.hubs[h].production.get(g).copied().unwrap_or(0.0),
+                quality: self.hubs[h].quality.get(g).copied().unwrap_or(0.0),
+                price: self.hubs[h].price.get(g).copied().unwrap_or(0.0),
+            };
+            self.hubs[h].monthly.push(sample);
+            if self.hubs[h].monthly.len() > WORKS_MONTHLY_CAP {
+                let excess = self.hubs[h].monthly.len() - WORKS_MONTHLY_CAP;
+                self.hubs[h].monthly.drain(0..excess);
+            }
+        }
+    }
+
+
     /// A mature, sizeable SATELLITE eventually outgrows its dependency and becomes a
     /// free city in its own right (colony_kind→0), keeping `founder_hub` so the map
     /// and panels can still show which metropolis raised it.
@@ -1469,7 +1496,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(),
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(),
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;

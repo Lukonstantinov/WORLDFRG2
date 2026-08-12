@@ -423,6 +423,87 @@ pub fn campaign_city_warehouse(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
 }
 
 
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (D15/D16/D2) · one works card:
+/// rank/yield, condition, ownership bar and the twelve-month curves. `None`
+/// for a non-estate or unknown hub — the card is an estate/manufactory view.
+#[tauri::command]
+pub fn campaign_works_card(hub: u32, db: State<'_, WorldDb>) -> Result<Option<WorksCardInfo>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let Some(h) = sim.hubs.iter().position(|hb| hb.id == hub) else { return Ok(None) };
+    let hb = &sim.hubs[h];
+    if !hb.is_estate { return Ok(None); }
+    let Some((g, yield_index, rank, rank_of)) = sim.works_rank(h) else { return Ok(None); };
+    let good_name = sim.goods.get(g).map(|tg| tg.name.clone()).unwrap_or_default();
+
+    // Ownership bar: resolve each share row to a display name/colour; whatever
+    // fraction the table doesn't claim still belongs to owner_house (or the
+    // parent city), D1's own "empty ⇒ 100% to owner" convention generalized to
+    // "unclaimed ⇒ the rest to owner".
+    let claimed: f32 = hb.shares.iter().map(|s| s.frac.max(0.0)).sum();
+    let mut owners: Vec<WorksOwnerShare> = hb.shares.iter().map(|s| {
+        let (name, color) = match s.holder_kind {
+            1 | 2 => {
+                let hi = s.holder as usize;
+                (sim.houses.get(hi).map(|x| x.name.clone()).unwrap_or_default(), distinct_color(hi))
+            }
+            3 => {
+                let bi = s.holder as usize;
+                (sim.banks.get(bi).map(|x| x.name.clone()).unwrap_or_default(), "#8a6fb0".into())
+            }
+            4 => {
+                let ri = s.holder as usize;
+                (sim.realms.get(ri).map(|x| x.name.clone()).unwrap_or_default(), "#d8b24a".into())
+            }
+            _ => (sim.hubs.get(hb.parent.max(0) as usize).map(|x| format!("City of {}", x.name)).unwrap_or_default(), "#6a86a6".into()),
+        };
+        WorksOwnerShare {
+            holder_kind: s.holder_kind, name, color, frac: s.frac.max(0.0),
+            payout: s.payout, instrument: s.instrument, term_years: s.term_years,
+        }
+    }).collect();
+    let remainder = (1.0 - claimed).max(0.0);
+    if remainder > 0.005 {
+        let (name, color) = if hb.owner_house >= 0 {
+            let oi = hb.owner_house as usize;
+            (sim.houses.get(oi).map(|x| x.name.clone()).unwrap_or_default(), distinct_color(oi))
+        } else {
+            (sim.hubs.get(hb.parent.max(0) as usize).map(|x| format!("City of {}", x.name)).unwrap_or_default(), "#6a86a6".into())
+        };
+        owners.push(WorksOwnerShare {
+            holder_kind: if hb.owner_house >= 0 { 1 } else { 0 }, name, color, frac: remainder,
+            payout: 1, instrument: crate::sim::tick::share_instrument_for_kind(hb.estate_kind), term_years: 0,
+        });
+    }
+
+    let monthly: Vec<WorksMonthPoint> = hb.monthly.iter()
+        .map(|m| WorksMonthPoint { output: m.output, quality: m.quality, price: m.price }).collect();
+    let monthly_output = hb.production.get(g).copied().unwrap_or(0.0);
+    let prev_output = hb.monthly.iter().rev().nth(1).map(|m| m.output).unwrap_or(monthly_output);
+
+    Ok(Some(WorksCardInfo {
+        hub,
+        name: hb.name.clone(),
+        kind: hb.estate_kind,
+        kind_label: crate::sim::tick::estate_kind_label(hb.estate_kind).to_string(),
+        tier: hb.estate_tier,
+        good: g,
+        good_name,
+        condition: (1.0 - hb.damage).clamp(0.0, 1.0),
+        damage: hb.damage,
+        yield_index,
+        yield_label: crate::sim::tick::yield_label(yield_index).to_string(),
+        rank,
+        rank_of,
+        monthly_output,
+        output_delta: monthly_output - prev_output,
+        quality: hb.quality.get(g).copied().unwrap_or(0.0),
+        owners,
+        monthly,
+    }))
+}
+
+
 /// Live ranking of the wealthiest / busiest trading cities, with each city's share
 /// of all world trade — top to bottom.
 #[tauri::command]

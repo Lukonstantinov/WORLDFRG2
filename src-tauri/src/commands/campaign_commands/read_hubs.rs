@@ -146,6 +146,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 (format!("City of {}", hub.name), false)
             };
             EstateRow {
+                hub: e.id,
                 name: e.name.clone(),
                 kind: e.estate_kind,
                 good: sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default(),

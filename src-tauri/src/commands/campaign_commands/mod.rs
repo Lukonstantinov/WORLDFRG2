@@ -610,6 +610,9 @@ pub struct TransitRow {
 /// One estate / manufactory in a settlement's hinterland (host-side view).
 #[derive(Serialize)]
 pub struct EstateRow {
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 · this estate's own hub id —
+    /// what campaign_works_card(hub) takes to open its full card.
+    #[serde(default)] pub hub: u32,
     pub name: String,
     pub kind: u8,            // 1 farm/2 mine/3 plantation/4 fishery/5 vineyard/6 manufactory
     pub good: String,
@@ -1881,6 +1884,51 @@ pub struct CityWarehouseInfo {
     pub fill_frac: f32,
     pub spoiled_total_month: f32,
     pub goods: Vec<CityWarehouseGood>,
+}
+
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (D15/D16) · one row of a works'
+/// ownership table, resolved to a display name/colour (the shares table
+/// itself only carries a holder kind + index).
+#[derive(Serialize)]
+pub struct WorksOwnerShare {
+    pub holder_kind: u8, // 0 city · 1 house · 2 guild · 3 bank · 4 realm
+    pub name: String,
+    pub color: String,
+    pub frac: f32,
+    pub payout: u8,
+    pub instrument: u8,
+    pub term_years: u32,
+}
+
+/// One monthly sample point for a works card's 12-month curves.
+#[derive(Serialize)]
+pub struct WorksMonthPoint { pub output: f32, pub quality: f32, pub price: f32 }
+
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.6 (D15/D16/D2) · everything one
+/// expandable works card needs: the GOOD's own icon leads (D16 — the frontend
+/// resolves `good_name` through the same good-icon lookup every other panel
+/// uses), the rank/yield line (D15), condition, the ownership bar (D1/A10),
+/// and the twelve-month curves (§3).
+#[derive(Serialize)]
+pub struct WorksCardInfo {
+    pub hub: u32,
+    pub name: String,
+    pub kind: u8,
+    pub kind_label: String,
+    pub tier: u8,
+    pub good: usize,
+    pub good_name: String,
+    pub condition: f32,
+    pub damage: f32,
+    pub yield_index: f32,
+    pub yield_label: String,
+    pub rank: usize,
+    pub rank_of: usize,
+    pub monthly_output: f32,
+    pub output_delta: f32,
+    pub quality: f32,
+    pub owners: Vec<WorksOwnerShare>,
+    pub monthly: Vec<WorksMonthPoint>,
 }
 
 /// One city in the live "richest cities" ranking.
