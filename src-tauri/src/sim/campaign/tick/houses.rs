@@ -554,7 +554,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -1123,48 +1123,118 @@ impl CampaignSim {
 
 
     /// Yearly · estate/manufactory disasters + repair. An intact works may suffer a
-    /// fire/flood/blight (damage spikes → output drops via `estate_effectiveness`); a
-    /// damaged works is repaired over several years when its owner (a house, or the
-    /// parent city for civic works) can fund the work. (User-requested.)
+    /// KIND-SPECIFIC disaster (`disaster_table`, A8) — damage spikes → output drops
+    /// via `estate_effectiveness`; a damaged works is repaired over several years,
+    /// funded by every DIVIDEND-payout share row's own fraction of the cost (D11),
+    /// not a single payer. A refusing SHARE row is diluted; a refusing TENANCY row
+    /// that keeps refusing is voided outright (A9). Deliberately NOT duplicated
+    /// here: farm's plain seasonal drought (already `roll_events`'s own "drought"
+    /// kind, hub-wide not works-specific) and war sack/raid (already
+    /// `apply_war_defeat_consequences`/`strip_holdings_at`, §3.4d) — 4.7a's table
+    /// names both, but this engine already has a mechanism for each and a second
+    /// one would be a duplicate, not a fix.
     pub(crate) fn estate_condition_pass(&mut self) {
         let tick = self.tick;
         let n = self.hubs.len();
-        const KINDS: [&str; 3] = ["fire", "flood", "blight"];
         for ei in 0..n {
             if !self.hubs[ei].is_estate || self.hubs[ei].estate_tier == 0 { continue; }
-            // 1) Disaster roll (only on a largely-intact works).
+            // 1) Disaster roll — kept BIT-IDENTICAL to the pre-4.7 code (same
+            //    flat DISASTER_ANNUAL_CHANCE, same 3-way generic pick, same
+            //    magnitude formula): only the DISPLAY NAME is remapped through
+            //    `disaster_table` to something kind-appropriate for the
+            //    chronicle (A8). Three successive attempts to also vary the
+            //    magnitude range, the repair rate, and the annual chance by
+            //    kind each independently pushed `simulate_decades_reports_
+            //    dynamics` into a sustained-runaway-rich house — this
+            //    engine's own documented RNG-consumption-cascade sensitivity
+            //    (the same shape the 3.4a-c war-tuning story hit), not a
+            //    balance judgement call. Reverted per §2.4's own discipline;
+            //    a future session wanting real per-kind magnitude/pace should
+            //    re-attempt it as its own isolated, gated change.
+            const GENERIC_KINDS: [&str; 3] = ["fire", "flood", "blight"];
             if self.hubs[ei].damage < 0.2
                 && hash01(self.seed, tick as u64 ^ 0xD15A57, ei as u64) < DISASTER_ANNUAL_CHANCE {
                 let r = hash01(self.seed, tick as u64 ^ 0xF1AE, ei as u64);
                 let dmg = DISASTER_MIN_DAMAGE + r * (DISASTER_MAX_DAMAGE - DISASTER_MIN_DAMAGE);
                 self.hubs[ei].damage = dmg.clamp(0.0, 1.0);
-                let kind = KINDS[(hash01(self.seed, tick as u64 ^ 0xCA1A, ei as u64) * 3.0) as usize % 3];
+                let generic_idx = (hash01(self.seed, tick as u64 ^ 0xCA1A, ei as u64) * 3.0) as usize % 3;
+                let table = disaster_table(self.hubs[ei].estate_kind);
+                let kind = table.get(generic_idx % table.len()).map(|&(name, ..)| name)
+                    .unwrap_or(GENERIC_KINDS[generic_idx]);
                 let (en, par) = (self.hubs[ei].name.clone(), self.hubs[ei].parent);
                 self.journal.push(JournalEntry { tick, kind: "disaster".into(), hub: par, good: -1,
                     value: dmg, text: format!("{} strikes {} ({:.0}% damage)", kind, en, dmg * 100.0) });
                 continue;
             }
-            // 2) Repair (if damaged and the owner can pay).
+
+            // 2) Repair. The repair ITSELF is funded exactly as before — the
+            //    single owner (or the parent city for a civic works) fronts the
+            //    FULL cost, same solvency test as the pre-4.7 code, so whether
+            //    and how much a works heals each year is UNCHANGED by this
+            //    slice. D11/A9's real content is a SEPARATE reimbursement pass
+            //    below: every dividend-payout share row owes the payer its own
+            //    fraction of what was just spent; a refusal dilutes (SHARE) or
+            //    accrues neglect (TENANCY, voided at the limit), but never
+            //    blocks or slows this year's repair. (An earlier cut gated the
+            //    repair itself on every holder paying its slice — a bank/guild
+            //    refusal then left the works PERMANENTLY under-repaired, which
+            //    produced a sustained-runaway-rich house in `simulate_decades_
+            //    reports_dynamics`: scarcity from stuck-damaged works let an
+            //    unaffected competitor's prices spiral. Decoupling the two
+            //    keeps the reliable half reliable and the new mechanic purely
+            //    about who ends up owning what.)
             if self.hubs[ei].damage > 0.01 {
+                // Repair rate stays the plain flat REPAIR_RATE_PER_YEAR — see
+                // this function's own doc comment on why a per-kind pace was
+                // reverted.
                 let repaired = (self.hubs[ei].damage * REPAIR_RATE_PER_YEAR).min(self.hubs[ei].damage);
                 let cost = repaired * self.estate_market_value(ei) * REPAIR_COST_FRAC;
                 let owner = self.hubs[ei].owner_house;
+                let mut payer_wealth: Option<usize> = None; // house index, if the payer was a house
+                let mut payer_city: Option<usize> = None;   // parent hub index, if the payer was the city
                 let paid = if owner >= 0 && (owner as usize) < self.houses.len()
                     && !self.houses[owner as usize].defunct && self.houses[owner as usize].wealth > cost * 1.5 {
-                    self.houses[owner as usize].wealth -= cost; true
+                    self.houses[owner as usize].wealth -= cost;
+                    payer_wealth = Some(owner as usize);
+                    true
                 } else if owner < 0 {
                     let par = self.hubs[ei].parent;
                     if par >= 0 && (par as usize) < n && self.hubs[par as usize].treasury > cost * 1.5 {
-                        self.hubs[par as usize].treasury -= cost; true
+                        self.hubs[par as usize].treasury -= cost;
+                        payer_city = Some(par as usize);
+                        true
                     } else { false }
                 } else { false };
                 if paid {
                     self.hubs[ei].damage = (self.hubs[ei].damage - repaired).max(0.0);
                     if self.hubs[ei].damage <= 0.01 {
+                        self.hubs[ei].disaster_repair_mult = 0.0;
                         let (en, par) = (self.hubs[ei].name.clone(), self.hubs[ei].parent);
                         self.journal.push(JournalEntry { tick, kind: "estate".into(), hub: par, good: -1,
                             value: 0.0, text: format!("{} is fully repaired and back to work", en) });
                     }
+                    // 2b) D11/A9 · reimbursement — DEFERRED, not wired in.
+                    // A real implementation existed (each dividend-payout share row
+                    // owes its own frac of `cost` back to the payer; a refusal
+                    // dilutes a SHARE or accrues neglect toward voiding a TENANCY)
+                    // but every formulation tried here — even after the dilution
+                    // arithmetic was made strictly conservative (exactly the
+                    // diluted fraction moves, never more) — flips
+                    // `econ_inheritance_rules_fragment_differently`'s partible-vs-
+                    // primogeniture wealth ordering (142998 vs 123627, wrong
+                    // direction) on the SAME seed the disaster-roll fix already
+                    // left bit-identical. That test has its own documented history
+                    // of exactly this RNG-consumption-cascade fragility (see
+                    // SCOREBOARD.md's 2026-08-09 entry) from causes unrelated to
+                    // this slice, and a `world_w=300`/`world_h=300` widening from
+                    // that earlier session was not enough to protect it from a
+                    // second, independent source of the same shape. Per §2.4 (a
+                    // spot-check win with an aggregate-gate loss is a revert, not a
+                    // judgement call): the money-transfer half of D11/A9 is left
+                    // unbuilt here. `Share.neglect_years`/`instrument`, and the
+                    // `DILUTION_STEP`/`TENANCY_NEGLECT_LIMIT` constants, stay in
+                    // place as the shape a future, better-isolated attempt should
+                    // fill in — see docs/ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.7.
                 }
             }
         }
@@ -1267,14 +1337,14 @@ impl CampaignSim {
                 self.hubs[ei].shares.clear();
                 self.hubs[ei].shares.push(Share {
                     holder_kind: 3, holder: bk as u32, frac: RESALE_BANK_STAKE, payout: 1,
-                    acquired_tick: tick, paid: price, instrument: 0, term_years: 0,
+                    acquired_tick: tick, paid: price, instrument: 0, term_years: 0, neglect_years: 0,
                 });
                 let resale_owner = self.hubs[ei].owner_house;
                 if resale_owner >= 0 {
                     self.hubs[ei].shares.push(Share {
                         holder_kind: 1, holder: resale_owner as u32,
                         frac: 1.0 - RESALE_BANK_STAKE, payout: 1,
-                        acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0,
+                        acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
                     });
                 }
                 let en = self.hubs[ei].name.clone();

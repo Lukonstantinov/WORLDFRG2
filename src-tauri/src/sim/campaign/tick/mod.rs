@@ -662,7 +662,15 @@ const ESTATE_LABOR_FULL_POP: f32 = 2_000.0;
 const ESTATE_LABOR_PENALTY_CAP: f32 = 0.12;
 /// Cap on the unrest/famine penalty (a fully-starving host city).
 const ESTATE_UNREST_PENALTY_CAP: f32 = 0.20;
-/// Per-year chance an intact works suffers a disaster (fire / flood / blight).
+/// Per-year BASE chance an intact works suffers a disaster, and the magnitude
+/// range every kind draws from — kept UNIFORM across kinds (`disaster_table`
+/// only weights WHICH kind is picked and how fast it repairs) so a works'
+/// first-ever disaster reproduces the pre-4.7 roll bit-for-bit. A first cut
+/// gave each kind its own damage range; even a modest per-kind spread was
+/// enough to perturb early wealth trajectories into a sustained-runaway-rich
+/// house via this test's own known RNG-consumption-cascade sensitivity (the
+/// same shape the 3.4a-c war-tuning story and inheritance-fragmentation fix
+/// both hit) — reverted, not chased further, per §2.4's own discipline.
 const DISASTER_ANNUAL_CHANCE: f32 = 0.035;
 const DISASTER_MIN_DAMAGE: f32 = 0.30;
 const DISASTER_MAX_DAMAGE: f32 = 0.70;
@@ -670,6 +678,21 @@ const DISASTER_MAX_DAMAGE: f32 = 0.70;
 const REPAIR_RATE_PER_YEAR: f32 = 0.30;
 /// Repair cost = (damage repaired) × (works value) × this.
 const REPAIR_COST_FRAC: f32 = 0.5;
+
+// ── ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.7 (D11/A9) · repair liability ──
+// RESERVED, not currently wired in — see `estate_condition_pass`'s own doc
+// comment on section 2b for why the reimbursement mechanic these feed was
+// reverted (it flips `econ_inheritance_rules_fragment_differently`, this
+// codebase's own documented RNG-cascade fragility, unrelated to this slice).
+/// A share row that won't fund its slice of a repair loses this much frac,
+/// redistributed to the rows that DID pay (D11 — the mechanism that lets a
+/// disaster CHANGE ownership, not just dent output).
+#[allow(dead_code)]
+const DILUTION_STEP: f32 = 0.05;
+/// A9 · a TENANCY that refuses its share this many years running is voided
+/// outright, not merely diluted — persistent neglect ends the grant.
+#[allow(dead_code)]
+const TENANCY_NEGLECT_LIMIT: u32 = 3;
 
 // ── Merchant fleets & voyage risk ────────────────────────────────────────────
 /// A prospering TOWN can charter a guild from year 5 (lower bar than the initial
@@ -1166,6 +1189,34 @@ pub const BRAND_YIELD_FLOOR: f32 = 1.8;
 pub fn brand_place(hub_name: &str, kind_label: &str) -> String {
     let suffix = format!(" {kind_label}");
     hub_name.strip_suffix(suffix.as_str()).unwrap_or(hub_name).trim().to_string()
+}
+
+/// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.7a (A8, recalibrated) · which
+/// disasters a work of this KIND can suffer: (name, pick weight among this
+/// kind's own options, repair-rate multiplier — <1 slower than
+/// `REPAIR_RATE_PER_YEAR`, >1 faster). The weight decides which NAME is drawn
+/// once a disaster is already rolling, not how OFTEN one strikes — every kind
+/// still draws its damage from the same `DISASTER_MIN_DAMAGE..MAX_DAMAGE`
+/// range (see that constant's own doc for why). FLOODING DOMINATES a mine's
+/// picks (A8 — water was THE constraint on pre-modern mining, "the common
+/// case, not a rare shock") rather than sharing equal odds with collapse.
+/// "Blight" is renamed FROST/HAIL for a vineyard (A8 — phylloxera/downy
+/// mildew are both centuries too late for this world) and, uniquely, also
+/// dents the vineyard's own grade, not just its output (handled by the
+/// caller). Farm and plantation share MURRAIN (A8's own well-chosen
+/// livestock-panzootic example) since neither carries a distinct "pasture"
+/// kind in this engine. Farm's plain seasonal DROUGHT and any kind's WAR
+/// sack/raid are deliberately NOT duplicated here — see the doc comment on
+/// `estate_condition_pass`.
+fn disaster_table(kind: u8) -> &'static [(&'static str, f32, f32)] {
+    match kind {
+        2 => &[("flooding", 2.2, 0.5), ("collapse", 0.6, 0.8)],
+        4 => &[("storm wreck", 1.0, 1.3)],
+        5 => &[("frost", 0.8, 0.25), ("hail", 0.5, 0.6)],
+        6 => &[("fire", 1.0, 0.8)],
+        1 | 3 => &[("murrain", 0.7, 0.6)],
+        _ => &[("fire", 0.5, 1.0)],
+    }
 }
 
 /// A3 · "Kalos wine", "Upper Vein copper" — the place, then the good in lower
@@ -2201,6 +2252,22 @@ pub struct TickHub {
     /// (same discipline as `golden_age_chronicled`/`dynasty_chronicled`), a
     /// later fall is not un-chronicled or re-announced.
     #[serde(default)] pub brand_chronicled: bool,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.7 (A8) · RESERVED, not currently
+    /// read anywhere. A8 asks for harvest-failure clustering (a bad year
+    /// raising next year's odds); a first cut wired this field into the
+    /// disaster roll's chance and, independently, gave each disaster kind its
+    /// own damage range and repair pace — each change, even alone, pushed
+    /// `simulate_decades_reports_dynamics` into a sustained-runaway-rich
+    /// house via this engine's own documented RNG-consumption-cascade
+    /// sensitivity (see `estate_condition_pass`'s own doc comment). Reverted
+    /// to keep the roll bit-identical to the pre-4.7 code; the field is left
+    /// in place, unread, for a future session to re-attempt as its own
+    /// isolated, separately-gated change.
+    #[serde(default)] pub bad_years: u8,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.7a · RESERVED, not currently
+    /// read — see `bad_years`' own doc comment for why a per-kind repair pace
+    /// was reverted.
+    #[serde(default)] pub disaster_repair_mult: f32,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -2964,6 +3031,12 @@ pub struct Share {
     /// Only meaningful for a TENANCY (`instrument == 1`): the granted term in
     /// years, 5-9 per A1's own mezzadria/métayage citation.
     #[serde(default)] pub term_years: u32,
+    /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.7 (A9) · consecutive years this
+    /// row has refused to fund its share of a repair. A TENANCY (never a
+    /// perpetual SHARE — A9 scopes voiding to the term-limited instrument)
+    /// that refuses `TENANCY_NEGLECT_LIMIT` years running is voided outright,
+    /// not merely diluted.
+    #[serde(default)] pub neglect_years: u32,
 }
 
 /// A1 · which works kinds carry a perpetual SHARE vs a fixed-term TENANCY.

@@ -844,11 +844,11 @@ impl CampaignSim {
         // cheap presence marker only.
         self.hubs[ei].shares.push(Share {
             holder_kind: 3, holder: bi as u32, frac: BANK_STAKE_SHARE, payout: 1,
-            acquired_tick: tick, paid: price, instrument: 0, term_years: 0,
+            acquired_tick: tick, paid: price, instrument: 0, term_years: 0, neglect_years: 0,
         });
         self.hubs[ei].shares.push(Share {
             holder_kind: 1, holder: oh as u32, frac: 1.0 - BANK_STAKE_SHARE, payout: 1,
-            acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0,
+            acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
         });
         let en = self.hubs[ei].name.clone();
         self.banks[bi].events.push(HouseEvent { tick, kind: "stake".into(),

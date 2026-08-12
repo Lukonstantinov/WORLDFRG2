@@ -359,12 +359,12 @@ impl CampaignSim {
                 let bank_frac = h.stake_share.clamp(0.0, 0.9);
                 h.shares.push(Share {
                     holder_kind: 3, holder: h.stake_bank as u32, frac: bank_frac,
-                    payout: 1, acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0,
+                    payout: 1, acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
                 });
                 if h.owner_house >= 0 {
                     h.shares.push(Share {
                         holder_kind: 1, holder: h.owner_house as u32, frac: 1.0 - bank_frac,
-                        payout: 1, acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0,
+                        payout: 1, acquired_tick: 0, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
                     });
                 }
             }
