@@ -9,6 +9,68 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## Current state — 2026-08-12 (`ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` — slices 4.1-4.9 and 4.13 built)
+
+**What shipped.** Grade bands on stock (4.1: `stock[g]` → `stock[g][band]`, three
+bands coarse/common/fine); spoilage + city warehouse capacity (4.2); the Warehouse
+panel, a 6×6 slot grid (4.3, frontend); supplier attribution (4.4); the share table
+replacing `stake_bank`/`stake_share` (4.5, two instruments — SHARE and TENANCY per
+amendment A1); works cards with rank + yield index (4.6, frontend+backend);
+toponymic brands for a *great*-or-above works (4.13, presentation only). Then the
+three hardest slices, each with a real tuning story:
+
+- **4.7 · disasters + repair.** The disaster ROLL is bit-identical to the pre-4.7
+  code (same chance, magnitude, 3-way pick) — three successive attempts to also vary
+  magnitude/repair-rate/frequency BY KIND each independently pushed
+  `simulate_decades_reports_dynamics` into a sustained-runaway-rich house and were
+  reverted per §2.4. D11/A9's real content (a repair-cost reimbursement pass:
+  dilution on refusal, tenancy voided on persistent neglect) was built, conservative
+  arithmetic and all, but flipped `econ_inheritance_rules_fragment_differently`'s
+  partible-vs-primogeniture ordering on the SAME seed the disaster fix had already
+  made bit-identical. Deferred, not shipped broken — `Share.neglect_years`/
+  `instrument` and the dilution constants stay in place, reserved, for a future,
+  better-isolated attempt.
+- **4.9 · envoys + negotiation.** Cross-city acquisition (intent → dispatch → travel
+  → standing → outcome), amended by A4 (a real `Law.kind` foreign-ownership bar,
+  enacted only occasionally at a fresh council capture) and A5 (a bank branch
+  spanning both cities clears the deal at full price; otherwise a costlier specie
+  fallback). A6 (bank credit-conversion, the Fugger lend-into-arrears model) was
+  named and deliberately NOT built — it needs a `Loan.estate_hub` field that doesn't
+  exist yet, and retrofitting one touches `bank_pass`'s own default handling, the
+  single most gate-sensitive loop in the tick. **A second, independent data point on
+  this codebase's RNG sensitivity**: unlike 4.7's discrete branching-order flips
+  (same final number regardless of tuning), reducing the envoy mechanism's trigger
+  rate moved `econ_inheritance_rules_fragment_differently`'s margin roughly IN
+  PROPORTION — 16.6% overshoot on the wrong side → 2.1% → passing — genuine
+  dose-dependence. Landed on a deliberately narrow trigger (elite wealth floor,
+  ~0.6%/month, year 25+) that proved real at a higher dose during tuning but is
+  inert in the small dynamics/`econ_` fixtures at the shipped dose.
+- **4.8 · offtake routing — "the big one," built last on purpose.** An extraction
+  estate's offtake-payout shares (never a manufactory — D1) now deliver physical
+  goods into the holder's own warehouse, largest holder first, off the FINEST grade
+  band first (D5) via a new `stock_take_finest_first`, the mirror of the existing
+  cheapest-first `stock_take`. Deliberately a MONTHLY pass over already-accumulated
+  stock rather than a hook into the daily production write (the single hottest loop
+  in the tick) — the same "drain a snapshot, don't touch the hot path" idiom
+  `sync_and_stock_warehouses` already uses. Currently reachable only through 4.9's
+  envoy PARTIAL outcome, so — like envoys — proven correct by two direct unit tests
+  (an exact-conservation finest-band-first delivery, and a manufactory-never-routes
+  guard) but not yet exercised by the dynamics/`econ_` fixtures at the shipped dose.
+
+**Deliberately not built** (named in the plan's own §6 and flagged again above, not
+silently skipped): A6's bank credit-conversion (4.9); the D11/A9 repair-cost
+reimbursement money transfer (4.7, though the disaster table itself shipped). Both
+recorded as open follow-ups, not abandoned.
+
+**Gates:** `cargo check` clean · `cargo test --lib` **300 passed, 0 failed, 22
+ignored** (was 294/0/21 before this session) · `earth_` unaffected (unchanged, this
+session never touches `step3_ocean_atmo`/`step4_climate`) · `simulate_decades_
+reports_dynamics` bit-identical to the pre-session baseline (richest 429723 at year
+50) · `econ_inheritance_rules_fragment_differently` passes (the fragile gate two of
+this session's three hardest slices had to tune against) · `npx tsc --noEmit` clean.
+
+---
+
 ## Current state — 2026-08-11 (`GOODS_LOCALITIES_PLAN.md` — all 8 slices built)
 
 **What shipped.** Trade goods got the belt→locality→cell hierarchy minerals already
@@ -1195,6 +1257,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-12 | *this* | 70.2% | 39.0% | 300 | 0 | `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` slices 4.1-4.9 + 4.13 built (grade bands, spoilage, warehouse panel, supplier attribution, share table, works cards, brands, disasters/repair, envoys, offtake routing). Two independent RNG-sensitivity data points against `econ_inheritance_rules_fragment_differently`: 4.7's discrete branching-order flip (reverted) and 4.9's genuine dose-dependent flip (tuned down to passing). A6 and D11/A9's reimbursement money transfer deliberately deferred |
 | 2026-08-11 | *this* | 70.2% | 39.0% | 294 | 0 | `GOODS_LOCALITIES_PLAN.md` all 8 slices built (rivers, marine bands, localities, naming, the two-layer overlay, province squares, production wiring). Slice 0's own gate found and fixed a process-global test race it had introduced, and printed (not asserted) a pre-existing `Deposits`-goods coastline-crossing finding for `DEPOSITS_AND_MINING_PLAN.md` |
 | 2026-07-31 | *this* | **70.2%** | 39.0% | 227 | 0 | Ocean evaporation's wind term was DEAD CODE — it read `|belt_wind|`, which is a unit vector, so the factor was identically 1.0. Now reads `jets::base_speed`, the real belt speed profile, as the bulk formula `E ∝ U·(q_s − q_a)` requires |
 | 2026-07-31 | *this* | 70.1% | **39.0%** | 227 | 0 | **Köppen no longer emits `H`.** Highland has no Köppen counterpart — the reference calls Tibet and the high Andes `ET`/`EF`/`Dwc` — so every `H` cell was unmatchable by construction. Exact-zone 33.7 → 39.0, the largest single move of the session, with main-class *identical* (it only ever sat on terrain the reference already calls polar). Alpine is unaffected on the Biomes layer, which has its own altitudinal band. Graded rain shadow tried and reverted (A15) |
