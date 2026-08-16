@@ -625,6 +625,40 @@
         assert!(fired, "a 51% private trade house must proclaim despite trading guilds present");
     }
 
+    /// The systematic real-world failure: on a HARD, starving world where trade has
+    /// collapsed, the house that dominates a single province's tiny trade is a POOR local
+    /// monopolist. The old 1000-flat founding-cost FLOOR priced such a house out and no
+    /// trade-realm ever formed. With the floor removed for the trade path (cost =
+    /// min(0.35·wealth, world_cost)), a poor province founds a poor realm — it must still
+    /// proclaim. Earlier trade tests all used a rich (300k) house and never caught this.
+    #[test]
+    fn a_poor_trade_dominant_house_can_still_crown_in_a_collapsed_economy() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 4000.0, vec![1500.0], 0)];
+        let mut fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            s.found_house_at(0);
+            s.hub_province = vec![0];
+            s.prov_rural = vec![100.0];
+            s.prov_holder = vec![0];
+            s.prov_holder_house = vec![-1];
+            s.prov_realm = vec![-1];
+            s.houses[0].trade_at = vec![(0, 100.0)];
+            s.houses[0].wealth = 500.0; // POOR — well under the old 1000 founding floor
+            s.houses[0].tier = 0;
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            if !s.realms.is_empty() {
+                assert!(s.houses[0].crowned, "the poor house is elevated to a (poor) crown");
+                assert!(s.realms[0].treasury >= 0.0, "treasury never goes negative");
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "a POOR house dominating a province's trade must still be able to crown");
+    }
+
     /// R2 · succession picks the ELDEST ELIGIBLE living child, sex-filtered by the
     /// capital's own `LineRule` — an older INeligible sibling must be passed over
     /// for a younger eligible one (rule 23). A minor heir installs a regency (the

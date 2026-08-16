@@ -539,12 +539,16 @@ pub fn campaign_province_trade(id: u32, db: State<'_, WorldDb>) -> Result<Provin
         }
     }
 
-    // Cities of the province, by their organized throughput.
+    // Cities of the province, by their organized throughput. `per_hub` is keyed by the
+    // hub INDEX (what `House.trade_at` stores — see `bump_trade_at`), NOT the hub id, so
+    // it indexes `sim.hubs` directly. (The earlier `h.id == hub` lookup treated the index
+    // as an id and found nothing → the panel wrongly read "no trade recorded".)
     let mut by_city: Vec<ProvinceTradeCity> = per_hub.into_iter()
         .filter_map(|(hub, vol)| {
-            let idx = sim.hubs.iter().position(|h| h.id == hub)?;
+            let idx = hub as usize;
+            let h = sim.hubs.get(idx)?;
             Some(ProvinceTradeCity {
-                hub, name: sim.hubs[idx].name.clone(), volume: vol,
+                hub: h.id, name: h.name.clone(), volume: vol,
                 share: if total > 0.0 { vol / total } else { 0.0 },
             })
         })

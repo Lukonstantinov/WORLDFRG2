@@ -156,14 +156,19 @@ impl CampaignSim {
     }
 
     /// The founding cost for a TRADE-DOMINANCE proclamation: a third of the founding
-    /// house's OWN fortune (a small city-state it can pay for), floored, and never more
-    /// than the world-scaled great-power price. This is what lets a regionally-dominant
-    /// but globally-minor house afford the realm its province-trade share entitles it to,
-    /// where the ordinary `realm_founding_cost` (pinned to the world's top stratum) would
-    /// price it out. See `PROV_TRADE_CONTROL_FRAC`.
+    /// house's OWN fortune (a small city-state it can pay for), never more than the
+    /// world-scaled great-power price. **No absolute floor** — deliberately, unlike the
+    /// seat-office `realm_founding_cost`: the house that dominates a SINGLE province's
+    /// trade is often a POOR local monopolist (especially in a hard, starving world where
+    /// trade has collapsed — the rich houses spread their commerce thin and dominate no
+    /// one province, so the 20% bar selects exactly the poor local ones). A 1000-flat
+    /// floor priced those houses out entirely and NO trade-realm ever formed on such a
+    /// world, which is the bug this removes. `cost = min(0.35·wealth, world_cost)` is
+    /// affordable for ANY solvent house by construction, so the cost never blocks the
+    /// trade path — a poor province simply founds a poor realm. See `PROV_TRADE_CONTROL_FRAC`.
     fn realm_founding_cost_for_house(&self, hi: usize, world_cost: f32) -> f32 {
         let own = REALM_PROCLAIM_COST_FRAC * self.houses[hi].wealth.max(0.0);
-        own.clamp(REALM_PROCLAIM_COST_FLOOR, world_cost.max(REALM_PROCLAIM_COST_FLOOR))
+        own.min(world_cost.max(0.0))
     }
 
     /// The house with the strongest merchant presence at hub `h` — the trade dynasty
