@@ -59,27 +59,11 @@ impl CampaignSim {
             //      never qualified. A candidate that has since been crowned elsewhere or
             //      isn't a tier 1-2 merchant able to afford the cost is simply skipped, so a
             //      weak formal holder no longer BLOCKS a strong trade dynasty at the same seat.
-            // The PROVINCE this seat administers — its own province id (h is that
-            // province's largest city / seat). The trade-share candidates below are
-            // drawn from whoever commands ≥ PROV_TRADE_CONTROL_FRAC of ITS commerce.
-            let seat_prov = self.hub_province.get(h).copied().unwrap_or(-1);
-            let mut candidates = vec![
+            let candidates = [
                 self.hubs[h].captor_house,
                 self.hubs[h].council_house,
                 self.dominant_house_at(h),
             ];
-            // SECOND ELIGIBILITY PATH (`PROV_TRADE_CONTROL_FRAC`): a house that
-            // commands a fifth of the whole province's trade may proclaim here even
-            // with no formal office at the seat — the measured funnel collapse
-            // (`econ_measure_realm_formation`: 24 tier-1-2 dynasties, only 3 hold a
-            // writ) was exactly this case. Appended AFTER the office holders so an
-            // actual seat-holder still gets first refusal; the per-candidate roll and
-            // the `realm >= 0` guard below make a duplicate harmless.
-            if seat_prov >= 0 {
-                for (hi, share) in self.province_trade_shares(seat_prov as usize) {
-                    if share >= PROV_TRADE_CONTROL_FRAC { candidates.push(hi as i32); }
-                }
-            }
             for &c in candidates.iter() {
                 if c < 0 { continue; }
                 let hi = c as usize;
@@ -98,6 +82,67 @@ impl CampaignSim {
                 break; // one realm per seat per year
             }
         }
+        // ── SECOND ELIGIBILITY PATH · trade dominance (`PROV_TRADE_CONTROL_FRAC`) ──
+        // A house commanding a fifth of a whole PROVINCE's trade may crown itself over
+        // that province even with no office at, and even without the province being
+        // administered from within — the Venice/Genoa case, and exactly the funnel
+        // collapse `econ_measure_realm_formation` measured (24 tier-1-2 dynasties, only
+        // 3 hold a seat writ). Runs AFTER the seat-office loop so an office holder gets
+        // first refusal at any seat. Founds at the province's OWN largest city (so a
+        // province administered from OUTSIDE — the "writ of X" case — still works, which
+        // the seat-office loop structurally could not reach), with two rules relaxed for
+        // this path: the global tier gate is WAIVED (regional trade dominance is itself
+        // the qualification, and such a house is often globally minor), and the cost is
+        // scaled to the founding house's OWN fortune (`realm_founding_cost_for_house`)
+        // so it can pay for the small city-state its trade entitles it to.
+        self.maybe_proclaim_trade_realms(yr, cost);
+    }
+
+    /// The trade-dominance proclamation pass (see the tail of `maybe_proclaim_realms`).
+    /// `world_cost` is the ordinary adaptive founding cost, used only as the CEILING on
+    /// the house-scaled cost this path charges.
+    fn maybe_proclaim_trade_realms(&mut self, yr: u32, world_cost: f32) {
+        let tick = self.tick;
+        for p in 0..self.prov_count() {
+            if self.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; } // already sovereign
+            let Some(seat) = self.province_seat_hub(p) else { continue }; // no city → nothing to crown
+            if self.hubs[seat].realm >= 0 || self.hubs[seat].tribute_to >= 0 { continue; }
+            let mut shares = self.province_trade_shares(p);
+            // Strongest trade presence first, so the province's dominant house is tried
+            // before any lesser one that also happens to clear the threshold.
+            shares.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+            for (hi, share) in shares {
+                if share < PROV_TRADE_CONTROL_FRAC { break; } // sorted → no later one clears it either
+                if hi >= self.houses.len() { continue; }
+                if !self.houses[hi].is_merchant() || self.houses[hi].is_guild { continue; }
+                let cost = self.realm_founding_cost_for_house(hi, world_cost);
+                if self.houses[hi].wealth < cost { continue; }
+                let bold = self.head_axis(hi, 0) as f32;
+                let expansive = self.head_axis(hi, 3) as f32;
+                let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
+                let salt = ((p as u64) << 20 ^ (yr as u64) << 4).wrapping_add(hi as u64);
+                if hash01(self.seed, tick as u64 ^ 0x7EA_DE01, salt) > chance { continue; }
+                // The province breaks away under its dominant merchant: its writ moves
+                // to its own largest city, which the new crown then administers directly
+                // — so `promote_house_to_realm` (which collects the seat's administered
+                // provinces) folds this province into the realm. Only mutated once the
+                // roll has actually succeeded, so a failed year changes nothing.
+                if p < self.prov_holder.len() { self.prov_holder[p] = seat as i32; }
+                self.promote_house_to_realm_with_cost(hi, seat, yr, cost);
+                break; // one realm per province per year
+            }
+        }
+    }
+
+    /// The founding cost for a TRADE-DOMINANCE proclamation: a third of the founding
+    /// house's OWN fortune (a small city-state it can pay for), floored, and never more
+    /// than the world-scaled great-power price. This is what lets a regionally-dominant
+    /// but globally-minor house afford the realm its province-trade share entitles it to,
+    /// where the ordinary `realm_founding_cost` (pinned to the world's top stratum) would
+    /// price it out. See `PROV_TRADE_CONTROL_FRAC`.
+    fn realm_founding_cost_for_house(&self, hi: usize, world_cost: f32) -> f32 {
+        let own = REALM_PROCLAIM_COST_FRAC * self.houses[hi].wealth.max(0.0);
+        own.clamp(REALM_PROCLAIM_COST_FLOOR, world_cost.max(REALM_PROCLAIM_COST_FLOOR))
     }
 
     /// The house with the strongest merchant presence at hub `h` — the trade dynasty
@@ -195,8 +240,18 @@ impl CampaignSim {
 
     /// The house is ELEVATED — its wealth and trade assets become the crown's and it
     /// leaves the merchant world (`REALM_AND_GOVERNMENT_PLAN.md` §3.2). Returns the
-    /// new realm's id.
+    /// new realm's id. Charges the ordinary world-scaled founding cost; the trade-
+    /// dominance path calls `promote_house_to_realm_with_cost` with a house-scaled one.
     pub(crate) fn promote_house_to_realm(&mut self, hi: usize, seat: usize, yr: u32) -> u32 {
+        let cost = self.realm_founding_cost();
+        self.promote_house_to_realm_with_cost(hi, seat, yr, cost)
+    }
+
+    /// As `promote_house_to_realm`, but the founding `cost` (spent from the house's
+    /// wealth into the new crown's treasury) is supplied by the caller — the seat-office
+    /// path passes the world-scaled `realm_founding_cost`, the trade-dominance path a
+    /// house-scaled `realm_founding_cost_for_house`.
+    pub(crate) fn promote_house_to_realm_with_cost(&mut self, hi: usize, seat: usize, yr: u32, cost: f32) -> u32 {
         let tick = self.tick;
 
         // Debts inherited whole — a crown can default (plan §3.2/§5.1).
@@ -228,11 +283,10 @@ impl CampaignSim {
 
         let (name, title) = self.generate_realm_name(seat, tick as u64);
 
-        // The house SPENDS the (adaptive) founding cost — a court, a retinue, a crown's
-        // apparatus — deducted from the wealth that becomes the new crown's treasury, so
-        // proclaiming is a real outlay, not a free relabelling. Floored at 0 (the gate
-        // already required `wealth >= cost`, so this only guards a rounding edge).
-        let cost = self.realm_founding_cost();
+        // The house SPENDS the founding cost the caller set — a court, a retinue, a
+        // crown's apparatus — deducted from the wealth that becomes the new crown's
+        // treasury, so proclaiming is a real outlay, not a free relabelling. Floored at 0
+        // (the gate already required `wealth >= cost`, so this only guards a rounding edge).
         let treasury = (self.houses[hi].wealth - cost).max(0.0);
         let house_name = self.houses[hi].name.clone();
         let head_name = self.houses[hi].head_name.clone();

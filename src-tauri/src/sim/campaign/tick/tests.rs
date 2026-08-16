@@ -500,6 +500,51 @@
         assert!(fired, "with every precondition met, a proclamation must be reachable");
     }
 
+    /// The SECOND eligibility path (`PROV_TRADE_CONTROL_FRAC`): a house that commands
+    /// ≥20% of a province's trade proclaims a realm over that province — seated at the
+    /// province's OWN largest city — even when (a) the province is administered from
+    /// OUTSIDE (the "writ of X" case the seat-office loop structurally can't reach),
+    /// (b) the house holds no office anywhere, and (c) the house is UNTIERED (tier 0),
+    /// which the ordinary path rejects outright. This is the exact case a real world
+    /// hits and the tiny econ fixture (5 office-saturated provinces) cannot exercise.
+    #[test]
+    fn a_trade_dominant_house_proclaims_over_a_province_administered_from_outside() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Two provinces: province 0 has its own city (hub 0), province 1 the external
+        // administrator (hub 1). Province 0's writ is held by hub 1 — Balytag/Besangar.
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![3000.0], 0), // the province's own city
+            hub(1, 5.0, 0.0, 9000.0, vec![6000.0], 0), // the external seat
+        ];
+
+        let mut fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            s.found_house_at(0);
+            s.hub_province = vec![0, 1];
+            s.prov_rural = vec![100.0, 100.0]; // non-empty ⇒ prov_count() = 2
+            s.prov_holder = vec![1, 1];        // province 0 administered from OUTSIDE (hub 1)
+            s.prov_holder_house = vec![-1, -1];
+            s.prov_realm = vec![-1, -1];
+            // House 0 commands ALL of province 0's trade (its trade_at is entirely in
+            // hub 0) but holds NO office and is left UNTIERED (tier 0).
+            s.houses[0].trade_at = vec![(0, 100.0)];
+            s.houses[0].wealth = 300_000.0;
+            s.houses[0].tier = 0;
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            if let Some(r) = s.realms.first() {
+                assert_eq!(r.capital_hub, 0, "the realm is seated at the province's OWN largest city");
+                assert!(r.provinces.contains(&0), "the realm holds the province it dominates");
+                assert_eq!(s.prov_realm[0], r.id as i32, "province 0's sovereignty is set");
+                assert!(s.houses[0].crowned, "the trade house is elevated, not left a merchant");
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "a house commanding a province's trade must be able to crown itself over it");
+    }
+
     /// R2 · succession picks the ELDEST ELIGIBLE living child, sex-filtered by the
     /// capital's own `LineRule` — an older INeligible sibling must be passed over
     /// for a younger eligible one (rule 23). A minor heir installs a regency (the

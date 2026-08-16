@@ -4907,16 +4907,22 @@ pub const REALM_PROCLAIM_COST_FLOOR: f32 = 1_000.0;
 /// lingering eligible-but-quiet for most of a reign.
 pub const REALM_PROCLAIM_CHANCE: f32 = 0.35;
 /// A SECOND path to realm eligibility (maintainer request, §2.4-measured): a house
-/// that commands at least this share of a whole PROVINCE's trade may proclaim a
-/// crown at that province's seat even without holding the seat's own council/captor
-/// office. The measured funnel (`econ_measure_realm_formation`) collapses precisely
-/// here — plenty of tier 1-2 merchant dynasties DOMINATE a province's commerce, but
-/// only a handful also hold the formal seat of its largest city, so the seat-writ
-/// gate throttled realm formation to ~1/decade. Trade dominance is the historically
-/// truer basis for a merchant republic's rise anyway (a Venice, a Genoa). Share is a
-/// house's portion of ALL merchant-house trade volume across the province's cities
-/// (`province_trade_shares`, summing `House.trade_at` over the province's hubs).
-/// Additive: the seat-writ path is unchanged.
+/// that commands at least this share of a whole PROVINCE's trade may proclaim a crown
+/// over that province — seated at the province's OWN largest city — with NO seat
+/// office, NO tier requirement, and a cost scaled to its OWN fortune rather than the
+/// world's top stratum. The measured funnel (`econ_measure_realm_formation`) collapses
+/// precisely at the seat-writ gate: plenty of tier 1-2 merchant dynasties DOMINATE a
+/// province's commerce, but only a handful also hold the formal seat of its largest
+/// city, so the seat-writ gate throttled realm formation to ~1/decade. Worse, a
+/// province administered from OUTSIDE (a "writ of X" case) could never be reached by
+/// the seat-office loop at all, and a regionally-dominant but globally-minor house was
+/// gated out by the tier-2 and world-scaled-cost bars even when it clearly ran a
+/// province's trade. Trade dominance is the historically truer basis for a merchant
+/// republic's rise anyway (a Venice, a Genoa). Share is a house's portion of ALL
+/// merchant-house trade volume across the province's cities (`province_trade_shares`,
+/// summing `House.trade_at` over the province's hubs). Additive: the seat-writ path
+/// (`maybe_proclaim_realms`' main loop) is unchanged; this runs as a second pass
+/// (`maybe_proclaim_trade_realms`).
 pub const PROV_TRADE_CONTROL_FRAC: f32 = 0.20;
 /// Starting legitimacy/cohesion for a freshly proclaimed realm — high but not
 /// perfect: the founding generation's own claim is the strongest a dynasty will ever

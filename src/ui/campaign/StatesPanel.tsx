@@ -158,13 +158,15 @@ export function StatesPanel() {
       <PanelHeader icon="👑" title="Realms" onDragStart={onPointerDown} onClose={close}
         right={rows.length > 0 ? <Badge tone="gold">{rows.length}</Badge> : undefined} />
       <PanelBody style={{ flex: 1 }}>
-        {!active && <EmptyNote>Begin the campaign — realms can be proclaimed from year 50, by a house that GOVERNS a city (captured it or dominates its council) and can afford the founding cost.</EmptyNote>}
+        {!active && <EmptyNote>Begin the campaign — realms can be proclaimed from year 50, either by a house that GOVERNS a province's seat city (as its captor or council) or by one that COMMANDS ≥20% of a whole province's trade.</EmptyNote>}
         {active && rows.length === 0 && (
           <EmptyNote>
-            No realm has been proclaimed yet. A house must GOVERN a city — either as its captor or by dominating its
-            council — be at least tier 2, hold at least one province's writ, and be able to SPEND the realm's founding
-            cost — a great sum scaled to this world (about 35% of the top stratum's fortune) — and none of this before
-            year 50. Once a governing house clears the bar it usually crowns itself within a few years.
+            No realm has been proclaimed yet — none can be before year 50. There are two paths. A GOVERNING house — the
+            captor or council of a province's seat city — that is at least tier 2 and can spend the world-scaled founding
+            cost (a great sum, ~35% of the top stratum's fortune). Or a TRADE house that commands ≥20% of a whole
+            province's commerce: it crowns itself over that province from the province's own largest city, paying a cost
+            scaled to its own fortune — no tier or seat office required. Either way it usually crowns itself within a few
+            years of clearing the bar. Open a province's Trade tab to see who commands its trade.
           </EmptyNote>
         )}
         {active && rows.length > 0 && (
