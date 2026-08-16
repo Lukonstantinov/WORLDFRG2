@@ -117,6 +117,7 @@ pub fn run() {
             campaign_commands::campaign_start_province_work,
             campaign_commands::campaign_cancel_province_work,
             campaign_commands::campaign_province_goods,
+            campaign_commands::campaign_province_trade,
             campaign_commands::campaign_province_potential,
             campaign_commands::compute_states,
             campaign_commands::campaign_get_realm_family,

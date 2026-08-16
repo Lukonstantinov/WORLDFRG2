@@ -399,6 +399,14 @@ export async function campaignProvinceGoods(id: number): Promise<import("@types"
   return invoke("campaign_province_goods", { id });
 }
 
+/** Province trade: who commands this province's commerce (by house/guild and by
+ *  city) and what crosses its border (per-good exports/imports, last full year).
+ *  Feeds the province view's circular diagrams. Empty/zero with no campaign, no
+ *  province layer, or a province where nothing has traded yet. */
+export async function campaignProvinceTrade(id: number): Promise<import("@types").ProvinceTrade> {
+  return invoke("campaign_province_trade", { id });
+}
+
 /** #9 · The full goods PICTURE for a province: every good the land COULD yield (with
  *  belt richness) whether or not it is worked today, plus the individual ore workings
  *  and their grade/depth — so a province producing nothing still shows its potential

@@ -4823,6 +4823,25 @@ pub struct CampaignSim {
     /// Per-province sovereignty: an index into `realms`, or −1 for free land.
     /// Sized alongside the rest of the land layer by `ensure_province_land`.
     #[serde(default)] pub prov_realm: Vec<i32>,
+
+    // ── Province TRADE FLOW (per-good origin→destination accounting) ─────────────
+    // The exact per-good tonnage crossing a province's boundary: a shipment from a
+    // hub in province A to a hub in province B is an EXPORT of that good from A and
+    // an IMPORT of it into B; an intra-province haul is neither. Accumulated in
+    // `accrue_flow` (the single choke point every shipment passes) and snapshotted
+    // yearly in `roll_city_finances`, exactly like `flow_accum`→`flow_year` and
+    // `good_flow_accum`→`hub_good_trade`. All gated on a NON-EMPTY `hub_province`,
+    // so a campaign without provinces (incl. the dynamics test) never touches them
+    // and stays bit-identical. Flat `prov_count * goods.len()`, province-major.
+    /// In-year export accumulator (goods leaving each province), rebuilt each year.
+    #[serde(skip)] pub prov_export_accum: Vec<f32>,
+    /// In-year import accumulator (goods entering each province from outside).
+    #[serde(skip)] pub prov_import_accum: Vec<f32>,
+    /// Last full year's exports per (province, good) — the figure the UI and the
+    /// realm trade-share eligibility read (a stable yearly total, not mid-year noise).
+    #[serde(default)] pub prov_export_year: Vec<f32>,
+    /// Last full year's imports per (province, good).
+    #[serde(default)] pub prov_import_year: Vec<f32>,
 }
 
 fn one_f32() -> f32 { 1.0 }
@@ -4887,6 +4906,18 @@ pub const REALM_PROCLAIM_COST_FLOOR: f32 = 1_000.0;
 /// qualified capital crowns itself within a few years of clearing the gate instead of
 /// lingering eligible-but-quiet for most of a reign.
 pub const REALM_PROCLAIM_CHANCE: f32 = 0.35;
+/// A SECOND path to realm eligibility (maintainer request, §2.4-measured): a house
+/// that commands at least this share of a whole PROVINCE's trade may proclaim a
+/// crown at that province's seat even without holding the seat's own council/captor
+/// office. The measured funnel (`econ_measure_realm_formation`) collapses precisely
+/// here — plenty of tier 1-2 merchant dynasties DOMINATE a province's commerce, but
+/// only a handful also hold the formal seat of its largest city, so the seat-writ
+/// gate throttled realm formation to ~1/decade. Trade dominance is the historically
+/// truer basis for a merchant republic's rise anyway (a Venice, a Genoa). Share is a
+/// house's portion of ALL merchant-house trade volume across the province's cities
+/// (`province_trade_shares`, summing `House.trade_at` over the province's hubs).
+/// Additive: the seat-writ path is unchanged.
+pub const PROV_TRADE_CONTROL_FRAC: f32 = 0.20;
 /// Starting legitimacy/cohesion for a freshly proclaimed realm — high but not
 /// perfect: the founding generation's own claim is the strongest a dynasty will ever
 /// have, and both gauges are designed to be spent down by real events (plan §5), not

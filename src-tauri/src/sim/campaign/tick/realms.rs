@@ -59,11 +59,27 @@ impl CampaignSim {
             //      never qualified. A candidate that has since been crowned elsewhere or
             //      isn't a tier 1-2 merchant able to afford the cost is simply skipped, so a
             //      weak formal holder no longer BLOCKS a strong trade dynasty at the same seat.
-            let candidates = [
+            // The PROVINCE this seat administers — its own province id (h is that
+            // province's largest city / seat). The trade-share candidates below are
+            // drawn from whoever commands ≥ PROV_TRADE_CONTROL_FRAC of ITS commerce.
+            let seat_prov = self.hub_province.get(h).copied().unwrap_or(-1);
+            let mut candidates = vec![
                 self.hubs[h].captor_house,
                 self.hubs[h].council_house,
                 self.dominant_house_at(h),
             ];
+            // SECOND ELIGIBILITY PATH (`PROV_TRADE_CONTROL_FRAC`): a house that
+            // commands a fifth of the whole province's trade may proclaim here even
+            // with no formal office at the seat — the measured funnel collapse
+            // (`econ_measure_realm_formation`: 24 tier-1-2 dynasties, only 3 hold a
+            // writ) was exactly this case. Appended AFTER the office holders so an
+            // actual seat-holder still gets first refusal; the per-candidate roll and
+            // the `realm >= 0` guard below make a duplicate harmless.
+            if seat_prov >= 0 {
+                for (hi, share) in self.province_trade_shares(seat_prov as usize) {
+                    if share >= PROV_TRADE_CONTROL_FRAC { candidates.push(hi as i32); }
+                }
+            }
             for &c in candidates.iter() {
                 if c < 0 { continue; }
                 let hi = c as usize;
@@ -103,6 +119,36 @@ impl CampaignSim {
             if score > best.1 { best = (hi as i32, score); }
         }
         best.0
+    }
+
+    /// Each live house's SHARE (0..1) of all merchant-house trade volume across the
+    /// cities of province `p` — the basis for the `PROV_TRADE_CONTROL_FRAC` realm
+    /// eligibility path and for the province-trade panel. Volume is `House.trade_at`
+    /// (the decaying per-hub tally `bump_trade_at` maintains) summed over the hubs
+    /// whose `hub_province == p`; the denominator is every house's total there, so a
+    /// share is "of the organized merchant trade", guilds included in the base.
+    /// Returns `(house_idx, share)` for houses with a positive presence, unsorted.
+    /// Empty when no province layer, no such province, or no trade there yet.
+    pub(crate) fn province_trade_shares(&self, p: usize) -> Vec<(usize, f32)> {
+        if self.hub_province.is_empty() { return Vec::new(); }
+        let mut per_house = vec![0.0f32; self.houses.len()];
+        let mut total = 0.0f32;
+        for (hi, hh) in self.houses.iter().enumerate() {
+            if hh.defunct { continue; }
+            let mut v = 0.0f32;
+            for &(hub, vol) in &hh.trade_at {
+                if self.hub_province.get(hub as usize).copied().unwrap_or(-1) == p as i32 {
+                    v += vol.max(0.0);
+                }
+            }
+            per_house[hi] = v;
+            total += v;
+        }
+        if total <= EPS { return Vec::new(); }
+        per_house.into_iter().enumerate()
+            .filter(|(_, v)| *v > 0.0)
+            .map(|(hi, v)| (hi, v / total))
+            .collect()
     }
 
     /// The ADAPTIVE realm founding cost for THIS world: `REALM_PROCLAIM_COST_FRAC` of the

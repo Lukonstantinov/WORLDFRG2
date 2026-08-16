@@ -404,6 +404,173 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     Ok(out)
 }
 
+// ═════════════════════════════════════════════════════════════════════════════════
+//  PROVINCE TRADE — who commands this province's commerce, and what crosses its
+//  borders. Read-only join over state the tick already holds: `House.trade_at`
+//  (the decaying per-hub trade tally) attributed to the province's cities, and the
+//  per-good `prov_export_year`/`prov_import_year` boundary-crossing accounting.
+//  Feeds the province view's circular diagrams AND documents the same trade-share
+//  the `PROV_TRADE_CONTROL_FRAC` realm-eligibility path reads (`province_trade_shares`).
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/// One trader's slice of a province's organized commerce.
+#[derive(Serialize, Clone)]
+pub struct ProvinceTradeHolder {
+    /// 0 = private house, 1 = civic guild, 2 = "others" aggregate (the long tail).
+    pub kind: u8,
+    /// House index (into the campaign's houses), or −1 for the aggregate.
+    pub holder: i32,
+    pub name: String,
+    pub volume: f32,
+    /// Fraction 0..1 of the province's total organized trade volume.
+    pub share: f32,
+    /// True for the leading house whose share clears `PROV_TRADE_CONTROL_FRAC`
+    /// (the realm-eligibility threshold) — the frontend highlights it.
+    pub eligible: bool,
+}
+
+/// One city's slice of a province's commerce.
+#[derive(Serialize, Clone)]
+pub struct ProvinceTradeCity {
+    pub hub: u32,
+    pub name: String,
+    pub volume: f32,
+    pub share: f32,
+}
+
+/// Per-good tonnage crossing the province boundary in one direction (last full year).
+#[derive(Serialize, Clone)]
+pub struct ProvinceTradeGood {
+    pub good: u8,
+    pub amount: f32,
+}
+
+/// The whole province-trade join for the province view's circular diagrams.
+#[derive(Serialize, Clone)]
+pub struct ProvinceTrade {
+    /// Total organized (house + guild) trade volume attributed to this province.
+    pub total: f32,
+    pub by_holder: Vec<ProvinceTradeHolder>,
+    pub by_city: Vec<ProvinceTradeCity>,
+    /// Goods EXPORTED out of the province last year, largest first.
+    pub exports: Vec<ProvinceTradeGood>,
+    /// Goods IMPORTED into the province from outside last year, largest first.
+    pub imports: Vec<ProvinceTradeGood>,
+    pub export_total: f32,
+    pub import_total: f32,
+    /// The house (if any) that commands ≥ `PROV_TRADE_CONTROL_FRAC` and could
+    /// therefore proclaim a realm here; −1 when none dominates yet.
+    pub controller_house: i32,
+    pub controller_name: String,
+    pub controller_share: f32,
+    /// The eligibility threshold itself, so the UI can label the bar without a copy.
+    pub control_threshold: f32,
+}
+
+/// The province-trade join for one province — the circular-diagram payload. Empty
+/// (all zero / no rows) on a world with no province layer, an out-of-range id, or a
+/// province where nothing has traded yet, exactly as the goods query degrades.
+#[tauri::command]
+pub fn campaign_province_trade(id: u32, db: State<'_, WorldDb>) -> Result<ProvinceTrade, String> {
+    let empty = ProvinceTrade {
+        total: 0.0, by_holder: vec![], by_city: vec![], exports: vec![], imports: vec![],
+        export_total: 0.0, import_total: 0.0, controller_house: -1,
+        controller_name: String::new(), controller_share: 0.0,
+        control_threshold: crate::sim::tick::PROV_TRADE_CONTROL_FRAC,
+    };
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(empty) };
+    let ng = sim.goods.len();
+    let np = sim.prov_rural.len();
+    let p = id as usize;
+    if p >= np || ng == 0 { return Ok(empty); }
+
+    // ── Organized trade, attributed to houses and to cities within the province ──
+    // Both read `House.trade_at` summed over the hubs whose `hub_province == p`, the
+    // same basis `province_trade_shares` uses for realm eligibility.
+    let mut per_hub: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    let mut holders: Vec<ProvinceTradeHolder> = Vec::new();
+    let mut total = 0.0f32;
+    for (hi, hh) in sim.houses.iter().enumerate() {
+        if hh.defunct { continue; }
+        let mut v = 0.0f32;
+        for &(hub, vol) in &hh.trade_at {
+            if sim.hub_province.get(hub as usize).copied().unwrap_or(-1) == p as i32 {
+                let vol = vol.max(0.0);
+                v += vol;
+                *per_hub.entry(hub).or_insert(0.0) += vol;
+            }
+        }
+        if v > 0.0 {
+            total += v;
+            holders.push(ProvinceTradeHolder {
+                kind: if hh.is_guild { 1 } else { 0 },
+                holder: hi as i32, name: hh.name.clone(), volume: v, share: 0.0, eligible: false,
+            });
+        }
+    }
+    // Shares + the eligible controller (top PRIVATE house clearing the threshold).
+    let frac = crate::sim::tick::PROV_TRADE_CONTROL_FRAC;
+    let (mut controller_house, mut controller_name, mut controller_share) = (-1i32, String::new(), 0.0f32);
+    if total > 0.0 {
+        for h in holders.iter_mut() {
+            h.share = h.volume / total;
+            if h.kind == 0 && h.share >= frac && h.share > controller_share {
+                controller_share = h.share;
+                controller_house = h.holder;
+                controller_name = h.name.clone();
+            }
+        }
+    }
+    holders.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+    for h in holders.iter_mut() {
+        h.eligible = h.holder == controller_house && controller_house >= 0;
+    }
+    // Fold the long tail past the top 10 into a single "Others" slice so the donut
+    // stays legible without dropping volume (shares still sum to 1).
+    if holders.len() > 10 {
+        let rest: f32 = holders[10..].iter().map(|h| h.volume).sum();
+        let rest_share: f32 = holders[10..].iter().map(|h| h.share).sum();
+        holders.truncate(10);
+        if rest > 0.0 {
+            holders.push(ProvinceTradeHolder {
+                kind: 2, holder: -1, name: "Others".into(), volume: rest, share: rest_share, eligible: false,
+            });
+        }
+    }
+
+    // Cities of the province, by their organized throughput.
+    let mut by_city: Vec<ProvinceTradeCity> = per_hub.into_iter()
+        .filter_map(|(hub, vol)| {
+            let idx = sim.hubs.iter().position(|h| h.id == hub)?;
+            Some(ProvinceTradeCity {
+                hub, name: sim.hubs[idx].name.clone(), volume: vol,
+                share: if total > 0.0 { vol / total } else { 0.0 },
+            })
+        })
+        .collect();
+    by_city.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
+
+    // ── Per-good exports/imports crossing the province boundary (last full year) ──
+    let good_rows = |src: &[f32]| -> (Vec<ProvinceTradeGood>, f32) {
+        let mut rows: Vec<ProvinceTradeGood> = Vec::new();
+        let mut sum = 0.0f32;
+        for g in 0..ng {
+            let a = src.get(p * ng + g).copied().unwrap_or(0.0);
+            if a > 1e-4 { rows.push(ProvinceTradeGood { good: g as u8, amount: a }); sum += a; }
+        }
+        rows.sort_by(|x, y| y.amount.partial_cmp(&x.amount).unwrap_or(std::cmp::Ordering::Equal));
+        (rows, sum)
+    };
+    let (exports, export_total) = good_rows(&sim.prov_export_year);
+    let (imports, import_total) = good_rows(&sim.prov_import_year);
+
+    Ok(ProvinceTrade {
+        total, by_holder: holders, by_city, exports, imports, export_total, import_total,
+        controller_house, controller_name, controller_share, control_threshold: frac,
+    })
+}
+
 /// #9 · One good this province COULD yield, whether or not it is worked today —
 /// the "unexploited opportunity" view `campaign_province_goods` deliberately omits.
 #[derive(Serialize)]

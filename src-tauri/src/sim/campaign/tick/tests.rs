@@ -113,6 +113,8 @@
             // realm is founded on a province writ), so the realm layer is a
             // structural no-op here and the dynamics run stays bit-identical.
             realms: vec![], prov_realm: vec![],
+            prov_export_accum: vec![], prov_import_accum: vec![],
+            prov_export_year: vec![], prov_import_year: vec![],
         };
         s.rebuild_routes();
         s

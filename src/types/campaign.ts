@@ -2403,6 +2403,54 @@ export interface ProvinceGoodExploit {
   market_share: number;
 }
 
+/** One trader's slice of a province's organized commerce. */
+export interface ProvinceTradeHolder {
+  /** 0 = private house, 1 = civic guild, 2 = "others" aggregate. */
+  kind: number;
+  /** House index, or −1 for the aggregate. */
+  holder: number;
+  name: string;
+  volume: number;
+  /** Fraction 0..1 of the province's total organized trade. */
+  share: number;
+  /** The leading house clearing the realm-eligibility threshold. */
+  eligible: boolean;
+}
+
+/** One city's slice of a province's commerce. */
+export interface ProvinceTradeCity {
+  hub: number;
+  name: string;
+  volume: number;
+  share: number;
+}
+
+/** Per-good tonnage crossing the province boundary in one direction (last full year). */
+export interface ProvinceTradeGood {
+  good: number;
+  amount: number;
+}
+
+/** Province trade join — the circular-diagram payload for the province view. */
+export interface ProvinceTrade {
+  /** Total organized (house + guild) trade volume attributed to this province. */
+  total: number;
+  by_holder: ProvinceTradeHolder[];
+  by_city: ProvinceTradeCity[];
+  /** Goods exported out of the province last year, largest first. */
+  exports: ProvinceTradeGood[];
+  /** Goods imported from outside last year, largest first. */
+  imports: ProvinceTradeGood[];
+  export_total: number;
+  import_total: number;
+  /** House that commands ≥ threshold and could proclaim a realm here (−1 = none). */
+  controller_house: number;
+  controller_name: string;
+  controller_share: number;
+  /** The eligibility threshold (e.g. 0.20), so the UI needs no local copy. */
+  control_threshold: number;
+}
+
 /** #9 · One good a province COULD yield (opportunity view), with richness. */
 export interface ProvinceGoodPotential {
   good: number;

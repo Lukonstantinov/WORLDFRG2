@@ -51,6 +51,15 @@ impl CampaignSim {
         if !self.good_flow_accum.is_empty() {
             self.hub_good_trade = std::mem::take(&mut self.good_flow_accum);
         }
+        // Per-province export/import snapshot — same take-and-open pattern. Only
+        // populated when a province layer is seeded, so a province-less sim leaves
+        // both empty and this is a no-op (bit-identical, matching the gate above).
+        if !self.prov_export_accum.is_empty() {
+            self.prov_export_year = std::mem::take(&mut self.prov_export_accum);
+        }
+        if !self.prov_import_accum.is_empty() {
+            self.prov_import_year = std::mem::take(&mut self.prov_import_accum);
+        }
         self.year_frames.push(YearFrame {
             year: yr.saturating_sub(1),
             pop: self.hubs.iter()

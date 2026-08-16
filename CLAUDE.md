@@ -829,7 +829,21 @@ commands/
                                   `compute_states` (§3.3) — every tier 1-2 city's
                                   writ as a territory (name/colour/cells), a pure
                                   derived read over `prov_holder`/`province_raster`,
-                                  nothing persisted
+                                  nothing persisted. `campaign_province_trade` —
+                                  who commands a province's commerce (share by
+                                  house/guild via `House.trade_at`, by city) + the
+                                  per-good exports/imports crossing its boundary
+                                  (`prov_export_year`/`prov_import_year`, accrued in
+                                  `accrue_flow`, snapshotted in `roll_city_finances`,
+                                  gated on a seeded province layer so a province-less
+                                  sim stays bit-identical). Feeds the Inspector's
+                                  Trade-tab donuts AND documents the ≥ `PROV_TRADE_
+                                  CONTROL_FRAC` (0.20) realm-eligibility path: a house
+                                  commanding a fifth of a province's trade may
+                                  proclaim at its seat WITHOUT the seat writ — the
+                                  measured funnel (`econ_measure_realm_formation`)
+                                  collapsed exactly at the writ gate (24 tier-1-2
+                                  dynasties, only 3 hold one)
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   goods_import.rs                 ← DEPOSITS_AND_MINING_PLAN slice 3: the INI-ish
                                   `.txt` goods importer (`import_goods_txt`) —

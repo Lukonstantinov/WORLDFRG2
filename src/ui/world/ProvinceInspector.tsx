@@ -11,6 +11,7 @@ import {
   DEFAULT_PLATES, PlateToggles, ProvinceMiniMap, soilWord, type PlateKey,
 } from "@ui/world/ProvinceMiniMap";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
+import { ProvinceTradeView } from "@ui/world/ProvinceTradeView";
 import {
   ELEV_WORD, borderKind, cellsToKm, goodEmoji, goodLabel, provinceFrontiers,
   provinceHistory, stars,
@@ -36,9 +37,9 @@ import type {
  *  on a world generated before it, and the whole land section hides on a campaign that
  *  has not run a year. */
 
-type Tab = "land" | "people" | "holdings" | "chronicle";
+type Tab = "land" | "people" | "holdings" | "trade" | "chronicle";
 const TABS: [Tab, string][] = [
-  ["land", "Land"], ["people", "People"], ["holdings", "Holdings"], ["chronicle", "Chronicle"],
+  ["land", "Land"], ["people", "People"], ["holdings", "Holdings"], ["trade", "Trade"], ["chronicle", "Chronicle"],
 ];
 
 const WORK_LABEL = ["Clear woodland", "Drain the marsh", "Build irrigation", "Make a road"];
@@ -709,6 +710,14 @@ export function ProvinceInspector() {
                 })}
               </>
             )}
+          </>
+        )}
+
+        {/* ── TRADE ────────────────────────────────────────────────────────── */}
+        {tab === "trade" && (
+          <>
+            <Section title="Commerce of the province" />
+            <ProvinceTradeView provinceId={p.id} reload={reload} />
           </>
         )}
 

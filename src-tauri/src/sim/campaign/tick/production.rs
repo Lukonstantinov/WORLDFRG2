@@ -23,8 +23,34 @@ impl CampaignSim {
             if self.good_flow_accum.len() < need { self.good_flow_accum.resize(need, 0.0); }
             self.good_flow_accum[from * ng + good] += amount;
             self.good_flow_accum[to * ng + good] += amount;
+            // Per-province origin→destination accounting: a shipment that crosses a
+            // province boundary is an EXPORT from the source province and an IMPORT
+            // into the destination province; an intra-province haul is neither.
+            // Gated on a seeded province layer so a province-less sim (the dynamics
+            // test) never allocates or writes here → bit-identical (rule).
+            let np = self.prov_count();
+            if np > 0 {
+                let pa = self.hub_province.get(from).copied().unwrap_or(-1);
+                let pb = self.hub_province.get(to).copied().unwrap_or(-1);
+                if pa >= 0 && pb >= 0 && pa != pb {
+                    let (pa, pb) = (pa as usize, pb as usize);
+                    if pa < np && pb < np {
+                        let pneed = np * ng;
+                        if self.prov_export_accum.len() < pneed { self.prov_export_accum.resize(pneed, 0.0); }
+                        if self.prov_import_accum.len() < pneed { self.prov_import_accum.resize(pneed, 0.0); }
+                        self.prov_export_accum[pa * ng + good] += amount;
+                        self.prov_import_accum[pb * ng + good] += amount;
+                    }
+                }
+            }
         }
     }
+
+    /// The canonical province count — the length of the per-province rural reservoir,
+    /// the first vector `campaign_start_sim` seeds. 0 on a campaign with no province
+    /// layer (every province routine early-returns on that, keeping it bit-identical).
+    #[inline]
+    pub(crate) fn prov_count(&self) -> usize { self.prov_rural.len() }
 
 
     /// Recent trade volume touching a hub (the decaying per-class tallies) — used

@@ -9,6 +9,45 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-16 — Province trade view + a trade-share path to realm formation
+
+**Player-reported: "no realms after 50 years."** First, the mechanical floor:
+`REALM_YEAR_FLOOR = 50`, so a realm cannot form before year 50 by design — "none
+by year 50" is expected. Beyond that, `econ_measure_realm_formation` (the funnel
+diagnostic) shows the choke precisely: 27 governing hubs → 24 tier-1-2 merchant
+rulers → **only 3 hold a province writ** → 3 afford. Affordability is a non-issue
+(richest governing house 32M vs a 159k cost); the seat-writ requirement is the
+throttle — trade dynasties dominate a province's commerce but rarely hold the
+formal seat of its largest city.
+
+**Fix (maintainer-chosen): a SECOND eligibility path.** A house commanding ≥
+`PROV_TRADE_CONTROL_FRAC` (0.20) of a whole province's trade may now proclaim at
+that province's seat without holding the seat office — the historically truer
+basis for a merchant republic (Venice, Genoa). Additive: the seat-writ path is
+unchanged. Trade share is `House.trade_at` summed over the province's cities
+(`province_trade_shares`). Measured effect on the reference fixture: realms
+12 → 13 over 120y, and the final-year count of ungoverned province seats fell
+1 → 0 (the mechanism now consumes essentially every eligible seat this
+deliberately-fragmented synthetic world offers; a real generated world has far
+more provinces). Per §2.4 the 0.20 was NOT tuned against the fixture's number.
+
+**Exact per-good province trade accounting.** New `prov_export_year` /
+`prov_import_year` (flat `prov_count × goods`) accumulate in `accrue_flow` — the
+one choke point every shipment passes — whenever a shipment crosses a province
+boundary (export from the source province, import into the destination),
+snapshotted yearly in `roll_city_finances`. Gated on a non-empty `hub_province`,
+so a province-less sim (the dynamics test) never touches them → **bit-identical**
+(dynamics gate green, econ scorecard green, all 135 tick unit + 15 realm tests pass).
+
+**New province-trade view.** `campaign_province_trade` (read-only) → per province:
+trade share by house/guild, by city, and per-good exports/imports. Rendered as
+dynamic donuts in the Province Inspector's new **Trade** tab, with the eligible
+≥20% controller highlighted. First change to move realm formation off its
+seat-writ bottleneck; realms-per-century on real worlds is still unmeasured
+outside the synthetic fixture.
+
+---
+
 ## Current state — 2026-08-12b (`ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` — ALL 13 slices addressed)
 
 **The remaining four slices, closing out the plan.** Continuing from the
