@@ -133,7 +133,14 @@ impl CampaignSim {
                 if self.houses[hi].wealth < cost { continue; }
                 let bold = self.head_axis(hi, 0) as f32;
                 let expansive = self.head_axis(hi, 3) as f32;
-                let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
+                // The trade-dominance chance SCALES WITH THE SHARE — a house commanding
+                // half a province's trade is determined to rule and should crown within a
+                // year or two, not linger eligible-but-quiet for a decade on a flat 35%
+                // roll (the player watched a 51% house wait 8 years). `base + share`
+                // gives ~0.86/yr at 51% (≈98% within two years) up to a near-certain 1.0
+                // at total dominance, times the usual bold/expansive character nudge.
+                let chance = ((REALM_PROCLAIM_CHANCE + share) * (1.0 + 0.15 * (bold + expansive)))
+                    .clamp(0.0, 1.0);
                 let salt = ((p as u64) << 20 ^ (yr as u64) << 4).wrapping_add(hi as u64);
                 if hash01(self.seed, tick as u64 ^ 0x7EA_DE01, salt) > chance { continue; }
                 // The province breaks away under its dominant merchant: its writ moves

@@ -585,6 +585,46 @@
         assert!(fired, "a dead-cored frontier province must not block its trade master's crown");
     }
 
+    /// The exact shape a player reported unfixed: a province with a LIVE seat city, a
+    /// PRIVATE house at 51% of its trade, and several GUILDS also trading there (36% +
+    /// smaller shares). The private house is the highest single share and must proclaim;
+    /// the guilds in the denominator and ahead-of-it-in-no-way must not block it. If this
+    /// passes, the engine is correct and an unfixed campaign is running a STALE binary.
+    #[test]
+    fn a_51pct_private_house_proclaims_past_trading_guilds() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 25000.0, vec![9000.0], 0), // the live seat, in province 0
+            hub(1, 3.0, 0.0, 8000.0, vec![4000.0], 0),  // another city in province 0
+        ];
+        let mut fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            s.found_house_at(0);       // house 0 = the private trade house (Pelopidai)
+            s.found_house_at(1);       // house 1 = a civic guild that also trades here
+            s.houses[1].is_guild = true;
+            s.hub_province = vec![0, 0];
+            s.prov_rural = vec![100.0];
+            s.prov_holder = vec![0];
+            s.prov_holder_house = vec![-1];
+            s.prov_realm = vec![-1];
+            // Province 0 trade: private house 51%, guild 49% — the private house is the
+            // single largest share and clears the 20% bar.
+            s.houses[0].trade_at = vec![(0, 51.0)];
+            s.houses[0].wealth = 300_000.0;
+            s.houses[0].tier = 0;
+            s.houses[1].trade_at = vec![(0, 49.0)];
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            if let Some(r) = s.realms.first() {
+                assert_eq!(r.ruling_house, 0, "the PRIVATE house crowns, never the guild");
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "a 51% private trade house must proclaim despite trading guilds present");
+    }
+
     /// R2 · succession picks the ELDEST ELIGIBLE living child, sex-filtered by the
     /// capital's own `LineRule` — an older INeligible sibling must be passed over
     /// for a younger eligible one (rule 23). A minor heir installs a regency (the
