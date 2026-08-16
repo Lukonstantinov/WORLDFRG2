@@ -263,6 +263,39 @@ impl CampaignSim {
             }
         }
 
+        // #6c · COASTAL CABOTAGE (see `CABOTAGE_SEA_FRAC`). Link each COASTAL hub to the
+        // nearest coastal hubs of OTHER geographic components within a SHORT sea crossing,
+        // so a near-shore island/coastal region the cross-component gate left isolated can
+        // still trade with the mainland — a dead-from-the-start island rescued by exactly
+        // the short-sea cabotage a pre-modern economy actually ran, WITHOUT reopening the
+        // long ocean lanes the horizon (#4) exists to cut. Cross-component only, so it is a
+        // strict no-op on a single-component world (the econ-fidelity reference stays
+        // bit-identical). The per-pair `is_finite` guard means an existing sea lane is
+        // never overwritten.
+        if self.world_w > 1.0 {
+            let cabotage_reach = self.world_w * CABOTAGE_SEA_FRAC;
+            let coastal: Vec<usize> = real.iter().cloned().filter(|&i| self.hubs[i].coastal).collect();
+            for &a in &coastal {
+                let mut cand: Vec<(f32, usize)> = coastal.iter()
+                    .filter(|&&b| b != a && self.hubs[b].component != self.hubs[a].component)
+                    .map(|&b| {
+                        let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+                        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                        let dy = self.hubs[a].y - self.hubs[b].y;
+                        ((dx * dx + dy * dy).sqrt(), b)
+                    })
+                    .filter(|&(d, _)| d <= cabotage_reach)
+                    .collect();
+                cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+                for &(dist, b) in cand.iter().take(CABOTAGE_LINKS) {
+                    if days[a * n + b].is_finite() { continue; }
+                    let d = (dist * self.days_per_cell).max(1.0);
+                    days[a * n + b] = d;
+                    days[b * n + a] = d;
+                }
+            }
+        }
+
         self.days = days;
         self.rebuild_neighbors();
         self.routes_dirty = false;

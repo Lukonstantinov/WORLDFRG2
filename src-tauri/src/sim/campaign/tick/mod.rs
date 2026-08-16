@@ -1481,6 +1481,19 @@ const MARKET_LINKS: usize = 2;
 /// ocean between two separate landmasses); this only stops a pathological line straight
 /// across a very large component's own gulf.
 const MARKET_REACH_FRAC: f32 = 0.5;
+/// #6c · COASTAL CABOTAGE. The cross-component gate (#4/#6/#6b) rightly keeps trade off
+/// long trans-oceanic lanes — but it also strands a SMALL ISLAND or near-shore coastal
+/// region that worldgen's pathfinder never joined by sea, leaving its towns dead from
+/// the start even though the mainland is a short crossing away. Pre-modern economies ran
+/// SHORT sea hops constantly (cabotage, coastal and inter-island trade); only the long
+/// ocean crossing didn't exist. So a COASTAL hub is linked to the nearest coastal hubs of
+/// OTHER components within `CABOTAGE_SEA_FRAC` of world width — a deliberately SHORT
+/// crossing (a third of the #4 horizon), so a near-shore island joins the mainland's
+/// trade while two continents an ocean apart still do not. Cross-component only, so on a
+/// single-component world (the econ-fidelity reference) it is a strict no-op.
+const CABOTAGE_SEA_FRAC: f32 = 0.08;
+/// How many nearest cross-component coastal partners a coastal hub gains by cabotage.
+const CABOTAGE_LINKS: usize = 2;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;

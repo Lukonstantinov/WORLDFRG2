@@ -39,6 +39,22 @@ snapshotted yearly in `roll_city_finances`. Gated on a non-empty `hub_province`,
 so a province-less sim (the dynamics test) never touches them → **bit-identical**
 (dynamics gate green, econ scorecard green, all 135 tick unit + 15 realm tests pass).
 
+**Dead-from-the-start cities · coastal cabotage (#6c).** Player-reported some cities
+never trade. The route graph already guarantees no route-dead city WITHIN a
+geographic component (`MIN_GUARANTEED_PARTNERS`, the per-component market lifeline)
+and folds tiny components in (`rescue_tiny_components`) — but a small island or
+near-shore region of ≥3 towns the worldgen pathfinder never joined by sea stayed
+isolated, because the cross-component gate (#4) refuses all straight-line links to
+avoid dishonest trans-oceanic arrows. New `CABOTAGE_SEA_FRAC` (0.08) pass links each
+COASTAL hub to the nearest coastal hubs of OTHER components within a SHORT crossing (a
+third of the #4 horizon) — the short-sea/inter-island trade a pre-modern economy
+actually ran, without reopening long ocean lanes. Cross-component only ⇒ strict no-op
+on the single-component econ-fidelity reference (scorecard bit-identical, dynamics
+green). Two follow-ups explicitly NOT done: a manual "reorganize trade" button (would
+mostly no-op — routes already exist) and a "why is this city dead" diagnostic
+(isolated / no surplus / starving) — starvation is a production-balance problem
+routing can't fix.
+
 **New province-trade view.** `campaign_province_trade` (read-only) → per province:
 trade share by house/guild, by city, and per-good exports/imports. Rendered as
 dynamic donuts in the Province Inspector's new **Trade** tab, with the eligible
