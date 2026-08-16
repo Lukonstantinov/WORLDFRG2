@@ -105,8 +105,12 @@ impl CampaignSim {
         let tick = self.tick;
         for p in 0..self.prov_count() {
             if self.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; } // already sovereign
-            let Some(seat) = self.province_seat_hub(p) else { continue }; // no city → nothing to crown
-            if self.hubs[seat].realm >= 0 || self.hubs[seat].tribute_to >= 0 { continue; }
+            // The province's own largest LIVE city, if it has one. A FRONTIER province
+            // whose only settlements have died/been abandoned (the very "dead cities"
+            // the player is seeing) has none — `province_seat_hub` returns None — and the
+            // realm then seats at the dominant house's OWN home city instead (below), so a
+            // dead-cored province no longer silently blocks its trade master's crown.
+            let province_seat = self.province_seat_hub(p);
             let mut shares = self.province_trade_shares(p);
             // Strongest trade presence first, so the province's dominant house is tried
             // before any lesser one that also happens to clear the threshold.
@@ -115,6 +119,16 @@ impl CampaignSim {
                 if share < PROV_TRADE_CONTROL_FRAC { break; } // sorted → no later one clears it either
                 if hi >= self.houses.len() { continue; }
                 if !self.houses[hi].is_merchant() || self.houses[hi].is_guild { continue; }
+                // Seat the crown at the province's own city, else at the dominant house's
+                // home city (a house crowns from its base and annexes the province whose
+                // trade it runs). Either must be a live, non-estate settlement.
+                let home = self.houses[hi].hub as usize;
+                let seat = province_seat.or_else(|| {
+                    (home < self.hubs.len() && !self.hubs[home].is_estate && !self.hubs[home].abandoned)
+                        .then_some(home)
+                });
+                let Some(seat) = seat else { continue };
+                if self.hubs[seat].realm >= 0 || self.hubs[seat].tribute_to >= 0 { continue; }
                 let cost = self.realm_founding_cost_for_house(hi, world_cost);
                 if self.houses[hi].wealth < cost { continue; }
                 let bold = self.head_axis(hi, 0) as f32;

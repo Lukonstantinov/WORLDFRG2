@@ -545,6 +545,46 @@
         assert!(fired, "a house commanding a province's trade must be able to crown itself over it");
     }
 
+    /// The trade path when the dominated province has NO live city of its own — a
+    /// FRONTIER province whose settlement has been abandoned (the "dead cities" the
+    /// player sees). `province_seat_hub` returns None, so the crown seats at the
+    /// dominant house's OWN home city and annexes the province. Without this fallback
+    /// a dead-cored province silently blocked its trade master's realm forever.
+    #[test]
+    fn a_trade_dominant_house_crowns_from_home_when_the_province_has_no_live_city() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Province 0 (the dominated one) has only hub 0, which is ABANDONED — no live
+        // seat. House 0's home is hub 1, a live city in province 1.
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 0.0, vec![0.0], 0),      // the province's own city — dead
+            hub(1, 5.0, 0.0, 9000.0, vec![6000.0], 0), // House 0's live home city
+        ];
+        let mut fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            s.found_house_at(1); // house 0 lives at hub 1
+            s.hubs[0].abandoned = true; // province 0's only city is dead
+            s.hub_province = vec![0, 1];
+            s.prov_rural = vec![100.0, 100.0];
+            s.prov_holder = vec![-1, 1];
+            s.prov_holder_house = vec![-1, -1];
+            s.prov_realm = vec![-1, -1];
+            // House 0 commands province 0's trade (its trade_at is in hub 0).
+            s.houses[0].trade_at = vec![(0, 100.0)];
+            s.houses[0].wealth = 300_000.0;
+            s.houses[0].tier = 0;
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            if let Some(r) = s.realms.first() {
+                assert_eq!(r.capital_hub, 1, "crowns from the house's own live home city");
+                assert!(r.provinces.contains(&0), "and annexes the province it dominates");
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "a dead-cored frontier province must not block its trade master's crown");
+    }
+
     /// R2 · succession picks the ELDEST ELIGIBLE living child, sex-filtered by the
     /// capital's own `LineRule` — an older INeligible sibling must be passed over
     /// for a younger eligible one (rule 23). A minor heir installs a regency (the
