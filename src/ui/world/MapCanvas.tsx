@@ -1352,6 +1352,8 @@ export function MapCanvas() {
   // routes (OverlayManager routes each lane; off-network lanes are dropped, never a
   // straight slash — the maintainer's MUST). Refreshes on good or campaign YEAR change.
   const goodFlowOn = useUIStore((s) => s.overlayVisibility.goodFlow);
+  const goodFlowColors = useUIStore((s) => s.goodFlowColors);
+  const goodFlowColorGlobal = useUIStore((s) => s.goodFlowColorGlobal);
   const campYear = campaignSnapshot?.clock?.year ?? 0;
   useEffect(() => {
     const om = overlayManagerRef.current;
@@ -1361,14 +1363,18 @@ export function MapCanvas() {
       om.drawGoodFlows([], gw, "#e0b24a"); requestRender(); return;
     }
     let stale = false;
-    const color = GOOD_DEFS.find((d) => d.name === codexGood)?.color ?? "#e0b24a";
+    // Colour resolution: a global override wins, else this good's own override, else
+    // its `GOOD_DEFS` default (the halo under the lane keeps even a pale one legible).
+    const color = goodFlowColorGlobal
+      ?? goodFlowColors[codexGood]
+      ?? GOOD_DEFS.find((d) => d.name === codexGood)?.color ?? "#e0b24a";
     campaignGoodAtlas(codexGood).then((atlas) => {
       if (stale) return;
       om.drawGoodFlows(atlas.flows, gw, color);
       requestRender();
     }).catch(() => {});
     return () => { stale = true; };
-  }, [goodFlowOn, codexGood, campYear, campaignSnapshot?.active, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [goodFlowOn, codexGood, campYear, campaignSnapshot?.active, meta, goodFlowColors, goodFlowColorGlobal, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Bank icons: mark each live bank's seat on the map (toggle in the Toolbar).
   const showBankIcons = useUIStore((s) => s.showBankIcons);

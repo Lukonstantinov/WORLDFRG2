@@ -212,6 +212,13 @@ interface UIStore {
   lakeHighlight: number | null;
   /** Goods Codex: the good whose provenance/history/scarcity is shown, or null. */
   codexGood: string | null;
+  /** Per-good override colour for the trade-FLOW overlay (keyed by good name). Lets a
+   *  user recolour a faint default (cotton/pearls/ivory). Absent key → the good's own
+   *  `GOOD_DEFS` colour. */
+  goodFlowColors: Record<string, string>;
+  /** A single colour applied to EVERY good's flow overlay when set (the "global
+   *  depiction" knob), overriding both the per-good override and the default. */
+  goodFlowColorGlobal: string | null;
   /** Colonial Office — empire-wide colony/outpost roster + founding-gate diagnostics. */
   showColonial: boolean;
   /** Dedicated Bank panel (balance-sheet charts / loans & deals / schematic / info). */
@@ -334,6 +341,10 @@ interface UIStore {
   setRiverHighlightColors: (c: Record<number, string> | null) => void;
   setLakeHighlight: (idx: number | null) => void;
   setCodexGood: (g: string | null) => void;
+  /** Set a good's flow-overlay colour; pass null to clear back to its default. */
+  setGoodFlowColor: (good: string, color: string | null) => void;
+  /** Apply one colour to EVERY good's flow overlay (the "global depiction" knob). */
+  setGoodFlowColorGlobal: (color: string | null) => void;
   setShowMoneyFinance: (v: boolean) => void;
   setShowColonial: (v: boolean) => void;
   setShowBank: (v: boolean) => void;
@@ -474,6 +485,8 @@ export const useUIStore = create<UIStore>((set) => ({
   riverHighlightColors: null,
   lakeHighlight: null,
   codexGood: null,
+  goodFlowColors: {},
+  goodFlowColorGlobal: null,
   showColonial: false,
   showBank: false,
   selectedBankIdx: null,
@@ -624,6 +637,12 @@ export const useUIStore = create<UIStore>((set) => ({
   setRiverHighlightColors: (c) => set({ riverHighlightColors: c }),
   setLakeHighlight: (idx) => set({ lakeHighlight: idx }),
   setCodexGood: (g) => set({ codexGood: g }),
+  setGoodFlowColor: (good, color) => set((state) => {
+    const next = { ...state.goodFlowColors };
+    if (color) next[good] = color; else delete next[good];
+    return { goodFlowColors: next };
+  }),
+  setGoodFlowColorGlobal: (color) => set({ goodFlowColorGlobal: color }),
   setShowColonial: (v) => set({ showColonial: v }),
   setShowBank: (v) => set({ showBank: v }),
   setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),

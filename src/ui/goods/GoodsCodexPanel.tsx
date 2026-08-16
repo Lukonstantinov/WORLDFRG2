@@ -6,7 +6,7 @@ import { useCampaignStore } from "@state/campaignStore";
 import { campaignGetWorldEconomy, campaignGoodAtlas } from "@bridge";
 import type { EconChain, WorldGoodPrice, GoodAtlas } from "@types";
 import { commodityHistory } from "@app/commodityHistory";
-import { goodOverlayKey } from "@goods";
+import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** #35/#36/#37 · Goods Codex. For a chosen good:
@@ -34,6 +34,10 @@ export function GoodsCodexPanel() {
   const [tab, setTab] = useState<"qual" | "trade" | "ctrl" | "flow" | "prov" | "hist" | "scar">("qual");
   const overlayVis = useUIStore((s) => s.overlayVisibility);
   const flowOn = !!overlayVis.goodFlow;
+  const goodFlowColors = useUIStore((s) => s.goodFlowColors);
+  const goodFlowColorGlobal = useUIStore((s) => s.goodFlowColorGlobal);
+  const setGoodFlowColor = useUIStore((s) => s.setGoodFlowColor);
+  const setGoodFlowColorGlobal = useUIStore((s) => s.setGoodFlowColorGlobal);
 
   // Goods Atlas · the live per-good facets (quality / trade / control / flow), refreshed
   // once per campaign YEAR so the atlas tracks the living economy.
@@ -216,8 +220,40 @@ export function GoodsCodexPanel() {
                 {flowOn ? "Hide flow on map" : "Show flow on map"}
               </button>
               <div style={{ color: "#5a6a80", fontSize: 9, margin: "6px 0 8px" }}>
-                Arrows follow the EXISTING trade routes, exporter → importer, width ∝ volume — redrawn each year.
+                Dash-dot lanes follow the EXISTING trade routes; arrowheads point exporter → importer,
+                width ∝ volume — redrawn each year. A dark halo keeps pale colours legible.
               </div>
+              {codexGood && (() => {
+                const def = GOOD_DEFS.find((d) => d.name === codexGood);
+                const effective = goodFlowColorGlobal ?? goodFlowColors[codexGood] ?? def?.color ?? "#e0b24a";
+                const overridden = !goodFlowColorGlobal && !!goodFlowColors[codexGood];
+                return (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, margin: "0 0 10px" }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <span style={{ color: "#8aa0b8", fontSize: 10, minWidth: 78 }}>Lane colour</span>
+                      <input type="color" value={effective} disabled={!!goodFlowColorGlobal}
+                        onChange={(e) => setGoodFlowColor(codexGood, e.target.value)}
+                        style={{ width: 34, height: 22, padding: 0, border: "1px solid #2a3a4a", borderRadius: 4, background: "none", cursor: goodFlowColorGlobal ? "not-allowed" : "pointer" }} />
+                      {overridden && (
+                        <button onClick={() => setGoodFlowColor(codexGood, null)}
+                          style={{ fontSize: 9, color: "#8aa8c8", background: "none", border: "1px solid #2a3a4a", borderRadius: 4, padding: "2px 6px", cursor: "pointer" }}>
+                          reset to default
+                        </button>
+                      )}
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 10, color: "#8aa0b8", cursor: "pointer" }}>
+                      <input type="checkbox" checked={!!goodFlowColorGlobal}
+                        onChange={(e) => setGoodFlowColorGlobal(e.target.checked ? effective : null)} />
+                      One colour for ALL goods
+                      {goodFlowColorGlobal && (
+                        <input type="color" value={goodFlowColorGlobal}
+                          onChange={(e) => setGoodFlowColorGlobal(e.target.value)}
+                          style={{ width: 34, height: 22, padding: 0, border: "1px solid #2a3a4a", borderRadius: 4, background: "none", cursor: "pointer" }} />
+                      )}
+                    </label>
+                  </div>
+                );
+              })()}
               <div style={sectionHdr}>Busiest lanes ({atlas.flows.length})</div>
               {atlas.flows.length === 0 ? <div style={empty}>No shipments of this good last year.</div> :
                 atlas.flows.slice(0, 12).map((f, i) => (

@@ -4022,41 +4022,86 @@ export class OverlayManager {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
     const col = this.goodFlowColor;
+    const dash = Math.max(1.4, 3 * inv);
+    // A dash-DOT lane (long dash · gap · dot · gap) so the flow reads as a directed
+    // route rather than a plain line, at any good's colour.
+    const dashDot = [dash * 2.4, dash * 1.1, Math.max(0.4, dash * 0.14), dash * 1.1];
     for (const fl of this.goodFlows) {
       const pts = fl.path;
       if (pts.length < 2) continue;
       const norm = fl.amount / this.goodFlowMax;
-      ctx.globalAlpha = 0.45 + 0.45 * norm;
+      const w = Math.max(0.7, (1.0 + norm * 5.0) * inv);
+      // 1) A dark HALO (solid, slightly wider) under the lane — so a pale good colour
+      //    (cotton, pearls, ivory) still reads against a light map, the user's
+      //    "some colours are seen very faintly" report. Independent of the chosen hue.
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 0.4 + 0.25 * norm;
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.lineWidth = w + 2.4 * inv;
+      this.strokeFlowPolyline(ctx, pts, W);
+      // 2) The coloured dash-dot lane on top.
+      ctx.setLineDash(dashDot);
+      ctx.globalAlpha = 0.8 + 0.2 * norm;
       ctx.strokeStyle = col;
-      ctx.lineWidth = Math.max(0.6, (1.0 + norm * 5.0) * inv);
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i < pts.length; i++) {
-        const px = pts[i][0] + 0.5, py = pts[i][1] + 0.5;
-        if (i > 0 && W > 0 && Math.abs(px - (pts[i - 1][0] + 0.5)) > W / 2) {
-          ctx.stroke(); ctx.beginPath(); started = false; // wrap seam
-        }
-        if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
-      }
-      ctx.stroke();
-      // Arrowhead at the importer end, pointing along the last on-screen segment.
-      const b = pts[pts.length - 1], a = pts[pts.length - 2];
-      let dx = (b[0] - a[0]), dy = (b[1] - a[1]);
-      if (W > 0 && Math.abs(dx) > W / 2) dx -= Math.sign(dx) * W;
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len, uy = dy / len;
-      const s = Math.max(2.2, (3.0 + norm * 4.0) * inv);
-      const bx = b[0] + 0.5, by = b[1] + 0.5;
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.moveTo(bx, by);
-      ctx.lineTo(bx - ux * s - uy * s * 0.5, by - uy * s + ux * s * 0.5);
-      ctx.lineTo(bx - ux * s + uy * s * 0.5, by - uy * s - ux * s * 0.5);
-      ctx.closePath();
-      ctx.fill();
+      ctx.lineWidth = w;
+      this.strokeFlowPolyline(ctx, pts, W);
+      ctx.setLineDash([]);
+      // 3) PERIODIC direction arrows exporter → importer along the whole lane, so the
+      //    trade DIRECTION is legible even on a long routed haul (not just one head).
+      this.drawFlowArrows(ctx, pts, W, col, Math.max(2.4, (3.2 + norm * 3.6) * inv));
     }
     ctx.globalAlpha = 1;
+    ctx.setLineDash([]);
+  }
+
+  /** Stroke a routed flow path with the shared cylindrical wrap-seam break. */
+  private strokeFlowPolyline(ctx: CanvasRenderingContext2D, pts: [number, number][], W: number) {
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < pts.length; i++) {
+      const px = pts[i][0] + 0.5, py = pts[i][1] + 0.5;
+      if (i > 0 && W > 0 && Math.abs(px - (pts[i - 1][0] + 0.5)) > W / 2) {
+        ctx.stroke(); ctx.beginPath(); started = false; // wrap seam
+      }
+      if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+    }
+    ctx.stroke();
+  }
+
+  /** Filled direction arrowheads placed at a roughly fixed on-screen spacing along the
+   *  lane (and always one at the importer end), each pointing exporter → importer. */
+  private drawFlowArrows(ctx: CanvasRenderingContext2D, pts: [number, number][], W: number, col: string, s: number) {
+    ctx.globalAlpha = 0.95;
+    ctx.fillStyle = col;
+    const spacing = Math.max(14, 26 * (1 / Math.sqrt(this.currentScale))); // world cells between arrows
+    let acc = spacing; // place one near the start too
+    const head = (x: number, y: number, ux: number, uy: number) => {
+      const cx = x + 0.5, cy = y + 0.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + ux * s, cy + uy * s);
+      ctx.lineTo(cx - ux * s * 0.4 - uy * s * 0.7, cy - uy * s * 0.4 + ux * s * 0.7);
+      ctx.lineTo(cx - ux * s * 0.4 + uy * s * 0.7, cy - uy * s * 0.4 - ux * s * 0.7);
+      ctx.closePath();
+      ctx.fill();
+    };
+    for (let i = 1; i < pts.length; i++) {
+      let dx = pts[i][0] - pts[i - 1][0], dy = pts[i][1] - pts[i - 1][1];
+      if (W > 0 && Math.abs(dx) > W / 2) { acc = 0; continue; } // skip the wrap-seam segment
+      const len = Math.hypot(dx, dy);
+      if (len < 1e-3) continue;
+      const ux = dx / len, uy = dy / len;
+      acc += len;
+      if (acc >= spacing) {
+        acc = 0;
+        head(pts[i][0], pts[i][1], ux, uy);
+      }
+    }
+    // Always mark the importer end.
+    const b = pts[pts.length - 1], a = pts[pts.length - 2];
+    let dx = b[0] - a[0], dy = b[1] - a[1];
+    if (W > 0 && Math.abs(dx) > W / 2) dx -= Math.sign(dx) * W;
+    const len = Math.hypot(dx, dy) || 1;
+    head(b[0], b[1], dx / len, dy / len);
   }
 
   /** Campaign trade CORRIDORS — each drawn as a dashed haul in its owner's colour,
