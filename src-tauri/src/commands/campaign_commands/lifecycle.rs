@@ -261,16 +261,24 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         })
         .collect();
 
-    // ── Hubs ── (cap to the strongest 250 to bound tick cost + state size). Raised
-    // 150→250 so more notable cities are actually simulated — a "large" city ranked
-    // 151+ was rendered but not a live hub, so it couldn't be clicked/inspected.
+    // ── Hubs ── (cap to the strongest `LIVE_HUB_CAP` to bound tick cost + state size).
+    // Raised 150→250→500: a small town beyond the cap is an inert `HinterlandTown`
+    // (drawn + clickable but NOT simulated — it can never trade, grow, or be felt, so it
+    // reads as "dead from the start" with only the frozen worldgen economy behind it).
+    // The player wants those small cities alive, and on a typical world 500 covers every
+    // real town, leaving only true hamlets inert. The cost is per-tick CPU (many passes
+    // are O(hubs)) + the O(hubs²) route matrix — 500² is ~1 MB and a fast, infrequent
+    // rebuild, so memory is a non-issue; if a very large world's daily tick feels slow,
+    // this is the single knob to lower. (The dynamics/econ gates build their own sims,
+    // not via `campaign_start_sim`, so this cap never touches them.)
+    const LIVE_HUB_CAP: usize = 500;
     let mut order: Vec<usize> = (0..econ.hubs.len()).collect();
     order.sort_by(|&a, &b| econ.hubs[b].population.cmp(&econ.hubs[a].population));
     // DECOUPLE: settlements ranked below the live cap aren't simulated, but they're
     // still real places — captured as `hinterland` so they stay drawn/clickable AND
     // their population is counted in the world census (fixes the Atlas undercount).
-    let overflow: Vec<usize> = order.iter().skip(250).copied().collect();
-    order.truncate(250);
+    let overflow: Vec<usize> = order.iter().skip(LIVE_HUB_CAP).copied().collect();
+    order.truncate(LIVE_HUB_CAP);
     order.sort_unstable(); // keep snapshot index order stable
     // Tiered founding populations (user rule): every settlement starts HUMBLE and
     // grows — small towns begin at 500, medium at 2000, large at 10000 — and the
