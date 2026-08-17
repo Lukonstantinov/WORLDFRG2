@@ -4956,28 +4956,76 @@ pub const REALM_RANK_NAMES: [&str; 4] = ["city-state", "kingdom", "great power",
 /// Tier 1 already carries its own absolute standing floor (`CITY_TIER1_STANDING_
 /// ENTER`), which is what lets this replace `REALM_YEAR_FLOOR`'s calendar gate
 /// with an EMERGENT condition: a young world simply has no tier-1 city yet.
-pub const REALM_CITY_PATH_TIER_MAX: u8 = 2;
+pub const REALM_CITY_PATH_TIER_MAX: u8 = 3;
 /// Yearly chance a qualifying city actually proclaims. Low: most great cities
 /// never became states, and the ones that did took their time about it.
-pub const REALM_CITY_PATH_CHANCE: f32 = 0.30;
+pub const REALM_CITY_PATH_CHANCE: f32 = 0.55;
 /// A city needs a treasury of at least this multiple of the world's median city
 /// treasury to raise a crown of its own.
-pub const REALM_CITY_PATH_TREASURY_MULT: f32 = 1.25;
+pub const REALM_CITY_PATH_TREASURY_MULT: f32 = 1.0;
 /// Chance a city-path realm comes out CIVIC (a republic) rather than dynastic,
 /// when no single house dominates its government.
 pub const REALM_CIVIC_CHANCE: f32 = 0.55;
 
 // ── PATH C · cultural domination ──────────────────────────────────────────────
 /// The smallest contiguous single-culture bloc that can unify into a realm.
-/// Below this a "people" is a region, not a nation.
-pub const REALM_CULTURE_MIN_PROVINCES: usize = 3;
+/// Deliberately LOW: small nations are real (the HRE's counties and
+/// prince-bishoprics, Andorra, San Marino) and a pre-modern world needs many
+/// polities, not a few large ones. The floor exists only to stop a lone province
+/// that happens to carry a culture string from calling itself a nation.
+pub const REALM_CULTURE_MIN_PROVINCES: usize = 2;
 /// Yearly chance a qualifying culture bloc unifies.
-pub const REALM_CULTURE_PATH_CHANCE: f32 = 0.30;
+pub const REALM_CULTURE_PATH_CHANCE: f32 = 0.50;
 /// The share of a people's provinces that must still be FREE for it to unify.
 /// Below this the people is already mostly somebody else's subjects, and putting
 /// it back together is a conquest rather than a unification — which this path
 /// deliberately is not.
 pub const REALM_CULTURE_MIN_FREE_FRAC: f32 = 0.60;
+
+// ── CONSOLIDATION (`realms.rs`) ──────────────────────────────────────────────
+// Tilly's count of European political units runs ~500 around 1500 down to ~25 by
+// 1900. Before this the model had only the first half of that curve: realms
+// formed and fragmented, and nothing ever merged, so a world reached 1500-style
+// fragmentation and stayed there permanently. These are the mechanisms that let
+// the curve bend back down.
+
+// The rates below are TUNED, and the tuning is the deliverable as much as the
+// mechanism. Shipped at their first-guess values (expand 0.22 · vassal 0.14 ·
+// integrate 0.18 after 40y) consolidation ran away: of 19 realms founded over two
+// centuries only FIVE were still standing, with 16 integrations — the model went
+// straight past Tilly's four-century curve and collapsed to a handful of empires
+// inside 200 years. Slowing all three and letting secession bite (a higher
+// cohesion ceiling, so a strained realm actually sheds ground) is what keeps a
+// world of many polities that CAN consolidate rather than one that inevitably
+// does. See docs/SCOREBOARD.md for the measured before/after.
+
+/// Yearly chance a realm annexes ONE adjacent free province, at full strength.
+/// Scaled by cohesion and rank — a crown that cannot govern what it has does not
+/// reach for more.
+pub const REALM_EXPAND_CHANCE: f32 = 0.06;
+/// A realm will not expand while its cohesion is below this: the grip has to
+/// exist before the reach does.
+pub const REALM_EXPAND_MIN_COHESION: f32 = 0.45;
+/// Treasury a realm must hold, as a multiple of its own province count, before it
+/// annexes another. Expansion is administration, and administration costs.
+pub const REALM_EXPAND_TREASURY_PER_PROV: f32 = 400.0;
+
+/// Yearly chance a strong realm imposes vassalage on a weaker ADJACENT one.
+pub const REALM_VASSAL_CHANCE: f32 = 0.035;
+/// How much stronger (by province count + rank) the overlord must be.
+pub const REALM_VASSAL_STRENGTH_RATIO: f32 = 2.5;
+/// Years a vassal is held before it can be INTEGRATED outright. Long, because
+/// swallowing a subject realm whole is the rarest and slowest of these moves.
+pub const REALM_VASSAL_INTEGRATE_YEARS: u32 = 80;
+/// Yearly chance an eligible vassal is integrated once the term has run.
+pub const REALM_INTEGRATE_CHANCE: f32 = 0.02;
+
+/// Yearly chance a province SECEDES when it is culturally foreign, distant and
+/// the crown's cohesion has collapsed. The counterweight to expansion, and the
+/// reason a realm can shrink and die rather than only ever growing.
+pub const REALM_SECEDE_CHANCE: f32 = 0.25;
+/// Cohesion below which secession becomes possible at all.
+pub const REALM_SECEDE_MAX_COHESION: f32 = 0.55;
 
 /// Years over which proclamation ramps in ABOVE `REALM_YEAR_FLOOR`.
 ///
@@ -4988,7 +5036,7 @@ pub const REALM_CULTURE_MIN_FREE_FRAC: f32 = 0.60;
 /// the first crown appears a little after the floor and the rest arrive as a
 /// stream — which is also how state formation actually looks: a slow start, then
 /// an accelerating cascade as neighbours' example and pressure spread.
-pub const REALM_RAMP_YEARS: f32 = 25.0;
+pub const REALM_RAMP_YEARS: f32 = 15.0;
 
 /// The hard floor on the first proclamation, in years. Not a trigger — after this
 /// date any house that meets the conditions may proclaim, and most never will.
@@ -5025,7 +5073,7 @@ pub const REALM_PROCLAIM_COST_FLOOR: f32 = 1_000.0;
 /// eligible house took ~7 years on average to proclaim; at 0.35 it is ~2-3, so a
 /// qualified capital crowns itself within a few years of clearing the gate instead of
 /// lingering eligible-but-quiet for most of a reign.
-pub const REALM_PROCLAIM_CHANCE: f32 = 0.35;
+pub const REALM_PROCLAIM_CHANCE: f32 = 0.50;
 /// A SECOND path to realm eligibility (maintainer request, §2.4-measured): a house
 /// that commands at least this share of a whole PROVINCE's trade may proclaim a crown
 /// over that province — seated at the province's OWN largest city — with NO seat

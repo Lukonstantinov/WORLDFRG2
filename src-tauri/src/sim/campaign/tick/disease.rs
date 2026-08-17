@@ -604,6 +604,14 @@ impl CampaignSim {
             // realm's rank is a reading of the year it just had, including how
             // much of its land it could actually collect from.
             self.update_realm_cohesion();
+            // CONSOLIDATION, in the order a year actually plays out: grow into
+            // free land, absorb a weaker neighbour, then lose what cannot be
+            // held. Secession runs LAST so a realm that overreached this year
+            // pays for it in the same year rather than a year later.
+            let yr_now = self.tick / TICKS_PER_YEAR;
+            self.realm_expansion_pass(yr_now);
+            self.realm_vassalage_pass(yr_now);
+            self.realm_secession_pass(yr_now);
             self.collect_realm_levies();
             for ri in 0..self.realms.len() { self.decide_realm_taxes(ri, self.tick / TICKS_PER_YEAR); }
             self.assign_realm_ranks();

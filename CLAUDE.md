@@ -2394,6 +2394,34 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     ~500 European polities c.1500 says MORE realms
                                     is right, and that nothing here CONSOLIDATES is
                                     now the binding gap).
+                                    **CONSOLIDATION** closes the half of Tilly's
+                                    curve the model lacked (it only ever
+                                    fragmented): `realm_expansion_pass` annexes an
+                                    ADJACENT free province preferring its own
+                                    culture, `realm_vassalage_pass` lets a 2.5×
+                                    stronger neighbour impose vassalage and, after
+                                    80 years, integrate outright (the first writer
+                                    `Realm.vassals` has ever had), and
+                                    `realm_secession_pass` lets a culturally
+                                    foreign province break away from a collapsed
+                                    crown — a realm that only grows converges on
+                                    one colour as surely as one that only splits
+                                    (§5.6). All three are CONTIGUITY-driven over
+                                    `prov_neighbors`, which is what makes a realm
+                                    read as a country. The RATES are the
+                                    deliverable as much as the mechanism: shipped
+                                    naive, consolidation ran away (19 founded, only
+                                    5 standing, 16 integrations); slowed, it holds
+                                    31 founded / 21 standing with all three paths,
+                                    both governments and the whole rank ladder
+                                    occupied. Partition is now CONTIGUOUS
+                                    (`province_hops` seeds heirs far apart and
+                                    grows connected shares) instead of round-robin
+                                    by index, which produced checkerboard realms;
+                                    and a realm founded by a PEOPLE is named for
+                                    that people (France is not "the Kingdom of
+                                    Paris"). Personal union, inherited claims and
+                                    conquering a foreign CAPITAL remain unbuilt.
                                     FRAGMENTATION is real (R5) but only Path A — a
                                     Partible culture's realm divides among eligible
                                     sons at EVERY succession (`partition_realm`,

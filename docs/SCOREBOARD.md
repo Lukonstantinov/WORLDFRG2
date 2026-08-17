@@ -9,6 +9,70 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-17d — Consolidation: realms grow, absorb, and break
+
+**The gap this closes.** Tilly's ~500 European polities c.1500 fall to ~25 by
+1900, and the model had only the first half of that curve — realms formed and
+fragmented, nothing ever merged, so a world reached 1500 and stayed there. Three
+new yearly passes in `realms.rs`, all CONTIGUITY-driven over `prov_neighbors`,
+which is also what makes a realm read as a country rather than a scatter:
+
+- `realm_expansion_pass` — annexes ONE adjacent free province, preferring land of
+  the realm's own culture (which is not flavour: growing along your own people
+  keeps the cohesion needed to keep growing). Gated on cohesion and treasury.
+- `realm_vassalage_pass` — a realm ≥2.5× stronger imposes vassalage on an
+  adjacent one; after 80 years it may integrate it outright, land and treasury
+  passing whole. `Realm.vassals` has existed since R1 and had no writer until now.
+- `realm_secession_pass` — a culturally foreign province breaks away from a crown
+  whose cohesion has collapsed; a realm losing its last province falls. Without
+  this a model that only grows converges on one colour as surely as one that only
+  fragments (the plan's own §5.6).
+
+**The tuning is the deliverable as much as the mechanism.** Shipped at
+first-guess rates, consolidation ran away: of 19 realms founded over two
+centuries only **5 were still standing**, with 16 integrations — straight past
+Tilly's four-century curve into a handful of empires inside 200 years. Measured
+progression on `econ_measure_realm_paths` (72 cities / 24 provinces / 6 peoples):
+
+| | founded | standing | annex | vassal | integrate | secede | largest |
+|---|---|---|---|---|---|---|---|
+| first guess | 19 | **5** | 19 | 14 | 16 | 1 | 7 |
+| slowed | 25 | 13 | 20 | 16 | 18 | 14 | 6 |
+| **shipped** | **31** | **21** | 8 | 17 | 12 | 3 | 5 |
+
+Shipped state: first realm at year 51, 23 of 24 provinces under a crown, live
+count rising 17 → 22 and holding, largest realm 5 of 24 (no runaway), mean
+cohesion 0.79. All three paths populated (merchant 3 · city 9 · culture 9), both
+governments (dynastic 11 · civic 10), the full rank ladder occupied (7 city-states
+· 8 kingdoms · 4 great powers · 2 hegemons).
+
+**Two more fixes for symptoms the maintainer reported.** Partition was
+round-robin BY INDEX — every n-th province by ID — which produced interleaved
+checkerboard realms, the worst thing this layer did to the map's readability.
+It now seeds each heir far from the others (`province_hops`) and grows connected
+shares outward, the way real divisions went (Verdun's three north-south strips,
+the Mongol uluses by campaign theatre). And a realm founded by a PEOPLE is now
+named for that people, not for whichever town led them — France is not "the
+Kingdom of Paris", and styling every realm after a city was why the names read
+wrong.
+
+**Two tests changed premise, and neither was a bug.** The merchant-gate test and
+the bloc-minimum test both began passing/failing for the wrong reason once Path B
+could found a republic on its own account and the culture minimum dropped: a city
+nobody governs crowning an office is exactly what Path B is FOR, so it was
+satisfying every "never proclaims" assertion for an unrelated reason. Both now
+isolate the gate they actually test.
+
+**Gates:** **325** lib tests pass (6 new consolidation gates). `econ_` scorecard
+green; dynamics green; `earth_` untouched. `cargo check` and `npx tsc --noEmit`
+clean.
+
+**Still not built:** personal union / cross-realm marriage, inherited claims, and
+conquering a foreign CAPITAL (still guarded off in `apply_war_goal`). Vassalage
+and integration are the consolidation routes that exist; dynastic union is not.
+
+---
+
 ## 2026-08-17c — Realms actually form: a real instrument, then the tuning
 
 **First, the instrument.** The 2026-08-17b entry recorded a null result — the two

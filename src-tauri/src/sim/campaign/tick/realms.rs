@@ -24,6 +24,13 @@ use super::*;
 const REALM_NAME_STYLES: [&str; 5] =
     ["{c}", "the Kingdom of {c}", "the Crown of {c}", "{c} and its lands", "the Realm of {c}"];
 
+/// Name styles for a realm founded by a PEOPLE rather than by a city — `{p}` is
+/// the culture, `{c}` its leading city. France is not "the Kingdom of Paris", and
+/// styling every realm after a town was the main reason the names read wrong.
+const REALM_NAME_STYLES_PEOPLE: [&str; 5] = [
+    "the Realm of the {p}", "{p}", "the {p} Crown", "the Lands of the {p}", "Greater {p}",
+];
+
 /// Ruler styles by RANK, for a crown that passes by blood. The old code had one
 /// flat four-name list, so a house holding a single town was styled "King" — the
 /// title claimed something the realm was not. Indexed by `Realm.rank`.
@@ -354,7 +361,7 @@ impl CampaignSim {
             if p < self.prov_realm.len() { self.prov_realm[p] = id as i32; }
         }
 
-        let (name, _) = self.generate_realm_name(seat, tick as u64 ^ 0x0C1B_1C55);
+        let (name, _) = self.generate_realm_name_for(seat, tick as u64 ^ 0x0C1B_1C55, path);
         let title = realm_title_for(REALM_CITY_STATE, REALM_GOV_CIVIC, id as u64);
         let endowment = (self.hubs[seat].treasury.max(0.0) * REALM_PROCLAIM_COST_FRAC).max(0.0);
         self.hubs[seat].treasury -= endowment;
@@ -636,6 +643,292 @@ impl CampaignSim {
         }
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  CONSOLIDATION. Tilly's ~500 European polities c.1500 fall to ~25 by 1900,
+    //  and the model had only the first half of that curve — realms formed and
+    //  fragmented, nothing ever merged, so a world reached 1500 and stayed there.
+    //
+    //  Three passes, in the order they run: GROW into free land, ABSORB a weaker
+    //  neighbour, and LOSE ground that cannot be held. The third is not a
+    //  concession — a model where realms only ever grow converges on one colour
+    //  just as surely as one where they only fragment (the realm plan's own §5.6:
+    //  "the gate that matters is not do realms form, it is do realms END").
+    //
+    //  All three are CONTIGUITY-DRIVEN, over `prov_neighbors`. That is what makes
+    //  a realm read as a country rather than as a scatter of provinces: territory
+    //  is only ever gained next to territory already held.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Province-graph hop distance between two provinces, capped so a
+    /// disconnected pair is merely "far" rather than infinite. Used to seed a
+    /// partition's shares far apart from one another.
+    pub(crate) fn province_hops(&self, from: u32, to: u32) -> u32 {
+        if from == to { return 0; }
+        const CAP: u32 = 24;
+        let np = self.prov_neighbors.len();
+        if np == 0 { return CAP; }
+        let mut seen = vec![false; np];
+        let mut q = std::collections::VecDeque::new();
+        if (from as usize) < np { seen[from as usize] = true; q.push_back((from, 0u32)); }
+        while let Some((p, d)) = q.pop_front() {
+            if d >= CAP { break; }
+            for &nb in self.prov_neighbors.get(p as usize).map(|v| v.as_slice()).unwrap_or(&[]) {
+                if nb == to { return d + 1; }
+                if (nb as usize) < np && !seen[nb as usize] {
+                    seen[nb as usize] = true;
+                    q.push_back((nb, d + 1));
+                }
+            }
+        }
+        CAP
+    }
+
+    /// The provinces this realm holds, as a set for adjacency tests.
+    fn realm_province_set(&self, ri: usize) -> std::collections::BTreeSet<usize> {
+        (0..self.prov_realm.len())
+            .filter(|&p| self.prov_realm[p] == ri as i32)
+            .collect()
+    }
+
+    /// Attach province `p` to realm `ri`, with its seat city. The ONE place
+    /// territory is added, so expansion, integration and war can never drift on
+    /// what "gaining a province" means.
+    fn attach_province(&mut self, ri: usize, p: usize) {
+        if p >= self.prov_realm.len() { return; }
+        self.prov_realm[p] = ri as i32;
+        if !self.realms[ri].provinces.contains(&(p as u32)) {
+            self.realms[ri].provinces.push(p as u32);
+        }
+        if let Some(seat) = self.province_seat_hub(p) {
+            if self.hubs[seat].realm < 0 {
+                self.hubs[seat].realm = ri as i32;
+                self.hubs[seat].realm_role = REALM_ROLE_SUBJECT;
+            }
+        }
+    }
+
+    /// Yearly · a realm annexes ONE adjacent province that no crown holds.
+    ///
+    /// Contiguous by construction: candidates come from `prov_neighbors` of land
+    /// already held, so a realm grows outward as a blob rather than acquiring
+    /// scattered enclaves. Gated on cohesion and treasury — a crown that cannot
+    /// govern what it has does not reach for more, which is also what stops one
+    /// realm running away with the whole map.
+    pub(crate) fn realm_expansion_pass(&mut self, yr: u32) {
+        if self.realms.is_empty() || self.prov_neighbors.is_empty() { return; }
+        let tick = self.tick;
+        for ri in 0..self.realms.len() {
+            if self.realms[ri].fallen_tick > 0 { continue; }
+            let cohesion = self.realms[ri].cohesion;
+            if cohesion < REALM_EXPAND_MIN_COHESION { continue; }
+            let held = self.realm_province_set(ri);
+            if held.is_empty() { continue; }
+            let need = held.len() as f32 * REALM_EXPAND_TREASURY_PER_PROV;
+            if self.realms[ri].treasury < need { continue; }
+
+            // Rank widens the reach: a great power annexes where a city-state
+            // cannot. Cohesion scales it because an ungovernable realm has no
+            // surplus attention for new ground.
+            let rank_boost = 1.0 + 0.25 * self.realms[ri].rank as f32;
+            let chance = REALM_EXPAND_CHANCE * cohesion * rank_boost;
+            let salt = ((ri as u64) << 20) ^ ((yr as u64) << 4);
+            if hash01(self.seed, tick as u64 ^ 0x6209_0077, salt) > chance { continue; }
+
+            // The best free neighbour: prefer land of the realm's OWN culture,
+            // then the richest. Culture first is not flavour — a realm that grows
+            // along its own people keeps the cohesion to keep growing, and one
+            // that swallows foreigners loses it (see `update_realm_cohesion`), so
+            // this is the choice that decides whether it can expand again.
+            let capital = self.realms[ri].capital_hub as usize;
+            let home = self.hub_province.get(capital).copied()
+                .filter(|&p| p >= 0)
+                .and_then(|p| self.prov_culture.get(p as usize).cloned());
+            let mut best: Option<(u8, u32, usize)> = None; // (rank, -cap, p)
+            for &p in &held {
+                for &q in self.prov_neighbors.get(p).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    let q = q as usize;
+                    if q >= self.prov_realm.len() || self.prov_realm[q] >= 0 { continue; }
+                    let same = home.as_ref()
+                        .map(|h| self.prov_culture.get(q).map(|c| c == h).unwrap_or(false))
+                        .unwrap_or(false);
+                    let cap = self.prov_cap.get(q).copied().unwrap_or(0.0).max(0.0) as u32;
+                    let cand = (if same { 0u8 } else { 1u8 }, u32::MAX - cap, q);
+                    if best.map(|b| cand < b).unwrap_or(true) { best = Some(cand); }
+                }
+            }
+            let Some((_, _, p)) = best else { continue };
+            self.attach_province(ri, p);
+            self.realms[ri].treasury -= need * 0.25; // the cost of taking it in hand
+            let realm_name = self.realms[ri].name.clone();
+            let people = self.prov_culture.get(p).cloned().unwrap_or_default();
+            let text = if people.is_empty() {
+                format!("{} extends its writ over a neighbouring province", realm_name)
+            } else {
+                format!("{} extends its writ over {} lands", realm_name, people)
+            };
+            self.realms[ri].events.push(RealmEvent { tick, kind: "annexed".into(), text });
+        }
+    }
+
+    /// Yearly · a strong realm makes a weaker ADJACENT one its vassal, and after
+    /// a long term may integrate it outright.
+    ///
+    /// This is the mechanism that actually bends Tilly's curve back down, and it
+    /// is deliberately the slowest of the three: vassalage first, integration only
+    /// after `REALM_VASSAL_INTEGRATE_YEARS`, because swallowing a neighbouring
+    /// crown whole was rare and took generations when it happened at all.
+    ///
+    /// `Realm.vassals` has existed since R1 and had no writer until now.
+    pub(crate) fn realm_vassalage_pass(&mut self, yr: u32) {
+        if self.realms.len() < 2 || self.prov_neighbors.is_empty() { return; }
+        let tick = self.tick;
+        let strength = |me: &Self, ri: usize| -> f32 {
+            me.realms[ri].provinces.len() as f32 * (1.0 + 0.4 * me.realms[ri].rank as f32)
+        };
+        for ri in 0..self.realms.len() {
+            if self.realms[ri].fallen_tick > 0 { continue; }
+            // ── 1. INTEGRATE a vassal already held long enough ──
+            let vassals = self.realms[ri].vassals.clone();
+            for &v in &vassals {
+                let vi = v as usize;
+                if vi >= self.realms.len() || self.realms[vi].fallen_tick > 0 { continue; }
+                let held_years = tick.saturating_sub(self.realms[vi].founded_tick) / TICKS_PER_YEAR;
+                if held_years < REALM_VASSAL_INTEGRATE_YEARS { continue; }
+                let salt = ((ri as u64) << 24) ^ ((vi as u64) << 8) ^ yr as u64;
+                if hash01(self.seed, tick as u64 ^ 0x1076_6247, salt) > REALM_INTEGRATE_CHANCE { continue; }
+                self.integrate_vassal(ri, vi);
+            }
+            // ── 2. IMPOSE vassalage on a weaker adjacent realm ──
+            let mine = strength(self, ri);
+            if mine <= 0.0 { continue; }
+            let held = self.realm_province_set(ri);
+            if held.is_empty() { continue; }
+            let mut target: Option<usize> = None;
+            for &p in &held {
+                for &q in self.prov_neighbors.get(p).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    let r = self.prov_realm.get(q as usize).copied().unwrap_or(-1);
+                    if r < 0 || r == ri as i32 { continue; }
+                    let other = r as usize;
+                    if self.realms[other].fallen_tick > 0 { continue; }
+                    // Never a realm that already answers to someone.
+                    if self.realms.iter().any(|x| x.vassals.contains(&(other as u32))) { continue; }
+                    if self.realms[other].vassals.contains(&(ri as u32)) { continue; }
+                    if mine < strength(self, other) * REALM_VASSAL_STRENGTH_RATIO { continue; }
+                    target = Some(other);
+                    break;
+                }
+                if target.is_some() { break; }
+            }
+            let Some(vi) = target else { continue };
+            let salt = ((ri as u64) << 24) ^ ((vi as u64) << 8) ^ ((yr as u64) << 1);
+            if hash01(self.seed, tick as u64 ^ 0x7A55_A100, salt) > REALM_VASSAL_CHANCE { continue; }
+            self.realms[ri].vassals.push(vi as u32);
+            // A vassal's own cities read as tributary, not conquered: it keeps its
+            // crown, its dynasty and its land — only its independence is gone.
+            for h in 0..self.hubs.len() {
+                if self.hubs[h].realm == vi as i32 && self.hubs[h].realm_role != REALM_ROLE_SEAT {
+                    self.hubs[h].realm_role = REALM_ROLE_TRIBUTARY;
+                }
+            }
+            let (over, under) = (self.realms[ri].name.clone(), self.realms[vi].name.clone());
+            let text = format!("{} submits to {} — a crown kept, an independence lost", under, over);
+            self.realms[ri].events.push(RealmEvent { tick, kind: "vassalized".into(), text: text.clone() });
+            self.realms[vi].events.push(RealmEvent { tick, kind: "submitted".into(), text: text.clone() });
+            self.journal.push(JournalEntry {
+                tick, kind: "realm_vassal".into(), hub: self.realms[vi].capital_hub as i32,
+                good: -1, value: 0.0, text,
+            });
+        }
+    }
+
+    /// A vassal is absorbed outright: its land, its treasury and its cities pass
+    /// to the overlord and its own crown ends. Routed through `dissolve_realm` so
+    /// there is still exactly ONE place a realm's life ends, then the territory is
+    /// re-attached — rather than a second, separately-drifting teardown.
+    fn integrate_vassal(&mut self, ri: usize, vi: usize) {
+        let tick = self.tick;
+        let provs: Vec<usize> = self.realm_province_set(vi).into_iter().collect();
+        let treasury = self.realms[vi].treasury.max(0.0);
+        let (over, under) = (self.realms[ri].name.clone(), self.realms[vi].name.clone());
+        let text = format!("{} is absorbed into {} — its crown ends and its lands pass whole", under, over);
+        self.dissolve_realm(vi, "integrated", text.clone());
+        for p in provs { self.attach_province(ri, p); }
+        self.realms[ri].treasury += treasury;
+        self.realms[ri].vassals.retain(|&v| v != vi as u32);
+        // Absorbing a foreign crown is a shock to the grip, not a free win: the
+        // new subjects are somebody else's people, and `update_realm_cohesion`
+        // will keep charging for them every year they are held.
+        self.realms[ri].cohesion = (self.realms[ri].cohesion * 0.85).max(0.05);
+        self.realms[ri].events.push(RealmEvent { tick, kind: "integrated".into(), text: text.clone() });
+        self.journal.push(JournalEntry {
+            tick, kind: "realm_integrated".into(), hub: self.realms[ri].capital_hub as i32,
+            good: -1, value: 0.0, text,
+        });
+    }
+
+    /// Yearly · a province the crown can no longer hold BREAKS AWAY.
+    ///
+    /// The counterweight to expansion. Without it a realm can only ever grow, and
+    /// a world of only-growing realms converges on one colour exactly as surely as
+    /// one that only fragments — which is what the realm plan's §5.6 means by "the
+    /// gate that matters is not do realms form, it is do realms END".
+    ///
+    /// Conditions are cumulative and all three must hold: the crown's cohesion has
+    /// collapsed, the province is culturally FOREIGN to the capital, and it is not
+    /// the capital's own. A realm losing its last province falls entirely.
+    pub(crate) fn realm_secession_pass(&mut self, yr: u32) {
+        if self.realms.is_empty() { return; }
+        let tick = self.tick;
+        for ri in 0..self.realms.len() {
+            if self.realms[ri].fallen_tick > 0 { continue; }
+            if self.realms[ri].cohesion > REALM_SECEDE_MAX_COHESION { continue; }
+            let capital = self.realms[ri].capital_hub as usize;
+            let capital_prov = self.hub_province.get(capital).copied().unwrap_or(-1);
+            let home = (capital_prov >= 0)
+                .then(|| self.prov_culture.get(capital_prov as usize).cloned())
+                .flatten();
+            let Some(home) = home else { continue };
+
+            let mut lost: Vec<usize> = Vec::new();
+            for p in self.realm_province_set(ri) {
+                if capital_prov >= 0 && p == capital_prov as usize { continue; }
+                let foreign = self.prov_culture.get(p).map(|c| c != &home).unwrap_or(false);
+                if !foreign { continue; }
+                let salt = ((ri as u64) << 24) ^ ((p as u64) << 8) ^ yr as u64;
+                let chance = REALM_SECEDE_CHANCE * (1.0 - self.realms[ri].cohesion);
+                if hash01(self.seed, tick as u64 ^ 0x5ECE_5510, salt) > chance { continue; }
+                lost.push(p);
+            }
+            for p in &lost {
+                self.prov_realm[*p] = -1;
+                self.realms[ri].provinces.retain(|&q| q as usize != *p);
+                if let Some(seat) = self.province_seat_hub(*p) {
+                    if self.hubs[seat].realm == ri as i32 {
+                        self.hubs[seat].realm = -1;
+                        self.hubs[seat].realm_role = 0;
+                    }
+                }
+            }
+            if lost.is_empty() { continue; }
+            let realm_name = self.realms[ri].name.clone();
+            let people = self.prov_culture.get(lost[0]).cloned().unwrap_or_default();
+            let text = if people.is_empty() {
+                format!("{} loses a province to revolt", realm_name)
+            } else {
+                format!("The {} throw off the writ of {}", people, realm_name)
+            };
+            self.realms[ri].events.push(RealmEvent { tick, kind: "seceded".into(), text: text.clone() });
+            self.journal.push(JournalEntry {
+                tick, kind: "realm_seceded".into(), hub: capital as i32, good: -1, value: 0.0, text,
+            });
+            // A crown with nothing left to rule is no longer a crown.
+            if self.realms[ri].provinces.is_empty() {
+                let n = self.realms[ri].name.clone();
+                self.dissolve_realm(ri, "collapsed", format!("{} collapses — no province still answers it", n));
+            }
+        }
+    }
+
     /// Yearly · the realm RANK ladder — a direct mirror of `assign_city_tiers`
     /// (percentile among LIVE realms + an absolute floor on the top rank +
     /// hysteresis), which is the shape `Realm.rank`'s own doc-comment already
@@ -731,10 +1024,33 @@ impl CampaignSim {
     /// Shared by every realm-CREATING path (a coronation, R5's partible division)
     /// so a cadet realm is named by the same rule its parent was.
     fn generate_realm_name(&self, capital: usize, salt: u64) -> (String, String) {
+        self.generate_realm_name_for(capital, salt, REALM_PATH_MERCHANT)
+    }
+
+    /// As `generate_realm_name`, but a realm founded by CULTURAL DOMINATION is
+    /// named for its PEOPLE, not for the city that happened to lead them.
+    ///
+    /// This is the difference between "the Kingdom of Vashira" (a city that grew)
+    /// and "the Aioran Realm" (a people that unified), and it is the whole reason
+    /// the title read oddly before: every realm, however founded, was styled after
+    /// a town. France is not "the Kingdom of Paris".
+    fn generate_realm_name_for(&self, capital: usize, salt: u64, path: u8) -> (String, String) {
         let city_name = self.hubs[capital].name.clone();
         let name_seed = (capital as u64).wrapping_mul(2654435761) ^ salt;
-        let style = REALM_NAME_STYLES[(name_seed as usize) % REALM_NAME_STYLES.len()];
-        let name = style.replace("{c}", &city_name);
+        let people = self.hub_province.get(capital).copied()
+            .filter(|&p| p >= 0)
+            .and_then(|p| self.prov_culture.get(p as usize).cloned())
+            .filter(|c| !c.is_empty());
+        let name = match (path, people) {
+            (REALM_PATH_CULTURE, Some(people)) => {
+                let style = REALM_NAME_STYLES_PEOPLE[(name_seed as usize) % REALM_NAME_STYLES_PEOPLE.len()];
+                style.replace("{p}", &people).replace("{c}", &city_name)
+            }
+            _ => {
+                let style = REALM_NAME_STYLES[(name_seed as usize) % REALM_NAME_STYLES.len()];
+                style.replace("{c}", &city_name)
+            }
+        };
         // A newly proclaimed realm is always rank 0 — `assign_realm_ranks` promotes
         // it (and re-styles it) once it has earned the standing.
         let title = realm_title_for(REALM_CITY_STATE, REALM_GOV_DYNASTIC, name_seed);
@@ -794,7 +1110,7 @@ impl CampaignSim {
             if p < self.prov_realm.len() { self.prov_realm[p] = id as i32; }
         }
 
-        let (name, title) = self.generate_realm_name(seat, tick as u64);
+        let (name, title) = self.generate_realm_name_for(seat, tick as u64, path);
 
         // The house SPENDS the founding cost the caller set — a court, a retinue, a
         // crown's apparatus — deducted from the wealth that becomes the new crown's
@@ -1224,11 +1540,59 @@ impl CampaignSim {
         let capital = self.realms[ri].capital_hub as usize;
         let capital_prov = self.hub_province.get(capital).copied().unwrap_or(-1);
 
+        // ── CONTIGUOUS shares, not round-robin by index ──────────────────────
+        // Round-robin gave each heir every n-th province by ID, which produces
+        // interleaved checkerboard realms — the single worst thing this layer did
+        // to the map's readability. Real divisions took coherent blocks: Verdun
+        // split the Frankish empire into three north-south strips, the Mongol
+        // uluses divided by campaign theatre. Each heir is seeded on a province
+        // far from the others and grows a connected share outward from it, so a
+        // partition yields n countries rather than n confetti patterns.
         let mut shares: Vec<Vec<u32>> = vec![Vec::new(); n];
-        if capital_prov >= 0 { shares[0].push(capital_prov as u32); }
-        let rest: Vec<u32> = provinces.iter().copied()
-            .filter(|&p| capital_prov < 0 || p != capital_prov as u32).collect();
-        for (i, &p) in rest.iter().enumerate() { shares[i % n].push(p); }
+        let mut unassigned: std::collections::BTreeSet<u32> = provinces.iter().copied().collect();
+        let mut frontier: Vec<std::collections::VecDeque<u32>> = vec![Default::default(); n];
+
+        // The eldest is seeded on the ORIGINAL capital's province, so the parent
+        // realm's identity survives coherently rather than landing wherever an
+        // index happened to fall.
+        if capital_prov >= 0 && unassigned.remove(&(capital_prov as u32)) {
+            shares[0].push(capital_prov as u32);
+            frontier[0].push_back(capital_prov as u32);
+        }
+        // Every other heir starts on whichever remaining province is FURTHEST
+        // (in province-graph hops) from the seeds already chosen.
+        for k in 1..n {
+            let Some(&seed_p) = unassigned.iter().max_by_key(|&&q| {
+                shares.iter().flatten().map(|&s| self.province_hops(s, q)).min().unwrap_or(u32::MAX)
+            }) else { break };
+            unassigned.remove(&seed_p);
+            shares[k].push(seed_p);
+            frontier[k].push_back(seed_p);
+        }
+        // Grow all shares outward together, so they stay roughly even in size.
+        let mut progress = true;
+        while !unassigned.is_empty() && progress {
+            progress = false;
+            for k in 0..n {
+                let mut took = false;
+                while let Some(p) = frontier[k].pop_front() {
+                    let mut grabbed = false;
+                    for &q in self.prov_neighbors.get(p as usize).map(|v| v.as_slice()).unwrap_or(&[]) {
+                        if unassigned.remove(&q) {
+                            shares[k].push(q);
+                            frontier[k].push_back(q);
+                            grabbed = true;
+                            break;
+                        }
+                    }
+                    if grabbed { frontier[k].push_front(p); took = true; break; }
+                }
+                if took { progress = true; }
+            }
+        }
+        // Anything unreachable (a province with no neighbour graph, or an island
+        // of the realm's territory) falls to the eldest rather than vanishing.
+        for p in unassigned { shares[0].push(p); }
 
         for (k, &heir_idx) in heirs.iter().enumerate().skip(1) {
             let heir_provs = shares[k].clone();

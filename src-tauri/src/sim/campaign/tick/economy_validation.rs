@@ -1347,6 +1347,16 @@ fn econ_measure_realm_paths() {
     println!("  realms/century (ever founded)      {:.1}", s.realms.len() as f32 * 100.0 / years as f32);
     println!("  provinces under a crown            {provs_sovereign} of 24  (realms list {provs_listed})");
     println!("  landless realms                    {landless}");
+    // CONSOLIDATION: the numbers that say whether the curve can bend back down.
+    let vassals: usize = live.iter().map(|r| r.vassals.len()).sum();
+    let ev = |kind: &str| -> usize {
+        s.realms.iter().flat_map(|r| r.events.iter()).filter(|e| e.kind == kind).count()
+    };
+    let biggest = live.iter().map(|r| r.provinces.len()).max().unwrap_or(0);
+    println!("  annexations · vassalizations       {} · {}", ev("annexed"), ev("vassalized"));
+    println!("  integrations · secessions          {} · {}", ev("integrated"), ev("seceded"));
+    println!("  vassals held now                   {vassals}");
+    println!("  largest realm (provinces)          {biggest} of 24");
     println!("  mean cohesion                      {coh:.2}");
     println!("  by path    merchant {}  ·  city {}  ·  culture {}", path[0], path[1], path[2]);
     println!("  by govt    dynastic {}  ·  civic {}", gov[0], gov[1]);
