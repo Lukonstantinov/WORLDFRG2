@@ -216,7 +216,19 @@ impl CampaignSim {
         // crown's own presence at its capital; fixing that is its own change).
         let ruler = if self.hub_is_realm_capital(win) {
             let ri = self.hubs[win].realm as usize;
-            Some(self.realms[ri].ruling_house as usize)
+            // A CIVIC realm has no dynasty (`ruling_house` is `u32::MAX`), so a
+            // sovereign hub's "true ruler" may genuinely be nobody. Resolve it
+            // through `houses.get` and fall through to the ordinary council/
+            // strongest-house path when there is no crowned family to award to —
+            // indexing it raw would panic the moment a republic won a war.
+            match self.houses.get(self.realms[ri].ruling_house as usize) {
+                Some(_) => Some(self.realms[ri].ruling_house as usize),
+                None => {
+                    let c = self.hubs[win].council_house;
+                    if c >= 0 && (c as usize) < self.houses.len() { Some(c as usize) }
+                    else { self.strongest_house_at(win) }
+                }
+            }
         } else {
             let c = self.hubs[win].council_house;
             if c >= 0 && (c as usize) < self.houses.len() { Some(c as usize) }

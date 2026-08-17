@@ -23,7 +23,36 @@ use super::*;
 /// right is R1b's job; a richer namer is a follow-up that touches no game state.
 const REALM_NAME_STYLES: [&str; 5] =
     ["{c}", "the Kingdom of {c}", "the Crown of {c}", "{c} and its lands", "the Realm of {c}"];
-const REALM_TITLES: [&str; 4] = ["King", "Sovereign", "Lord Protector", "High Ruler"];
+
+/// Ruler styles by RANK, for a crown that passes by blood. The old code had one
+/// flat four-name list, so a house holding a single town was styled "King" — the
+/// title claimed something the realm was not. Indexed by `Realm.rank`.
+const REALM_TITLES_DYNASTIC: [[&str; 3]; 4] = [
+    ["Lord", "Prince", "Ruler"],                    // 0 city-state
+    ["King", "Rex", "Lugal"],                       // 1 kingdom
+    ["Great King", "Basileus", "Shah"],             // 2 great power
+    ["Emperor", "Khagan", "Chakravartin"],          // 3 hegemon
+];
+
+/// Ruler styles for a CIVIC crown — an office, not a bloodline. A republic is
+/// never styled "King" at any rank, which is the whole reason `Realm.government`
+/// exists. The top two ranks reuse the third row: a republic that grew into a
+/// great power still elects a magistrate, it does not crown an emperor.
+const REALM_TITLES_CIVIC: [[&str; 3]; 4] = [
+    ["Doge", "Archon", "Podesta"],
+    ["First Citizen", "Gonfalonier", "Consul"],
+    ["Grand Consul", "Serene Prince", "Protector"],
+    ["Grand Consul", "Serene Prince", "Protector"],
+];
+
+/// The style of a realm's ruler, from its rank and its government. Deterministic
+/// in the realm's own id, so a realm's title is stable across saves and does not
+/// re-roll every time it is re-styled.
+pub(crate) fn realm_title_for(rank: u8, government: u8, salt: u64) -> String {
+    let table = if government == REALM_GOV_CIVIC { &REALM_TITLES_CIVIC } else { &REALM_TITLES_DYNASTIC };
+    let row = &table[(rank as usize).min(table.len() - 1)];
+    row[(salt.wrapping_mul(2654435761).rotate_left(7) as usize) % row.len()].to_string()
+}
 
 impl CampaignSim {
     /// Yearly · the whole of §3.1. Iterates CITIES (sovereignty is claimed by a seat,
@@ -96,6 +125,244 @@ impl CampaignSim {
         // scaled to the founding house's OWN fortune (`realm_founding_cost_for_house`)
         // so it can pay for the small city-state its trade entitles it to.
         self.maybe_proclaim_trade_realms(yr, cost);
+        // The two NON-MERCHANT paths, after both merchant paths have had their
+        // refusal — a house that already holds a seat outright should not lose it
+        // to a civic proclamation in the same year.
+        self.maybe_proclaim_city_realms(yr);
+        self.maybe_proclaim_culture_realms(yr);
+    }
+
+    /// PATH B · a powerful CITY proclaims for itself, with no merchant house
+    /// required (`docs/WORLD_REALISM_REVIEW.md` §3.3).
+    ///
+    /// The state this reads was built for exactly this and had no readers:
+    /// `assign_city_tiers` computes `hub.tier`/`hub.standing` from population,
+    /// trade wealth, treasury, territory administered and the ruling house's own
+    /// standing, and CLAUDE.md records it as "query-side only — nothing downstream
+    /// reads `hub.tier`". This is that reader.
+    ///
+    /// Tier 1 already carries its own ABSOLUTE standing floor, which is what lets
+    /// this path be an emergent condition rather than a calendar date: a young
+    /// world simply has no tier-1 city, so no city-path realm can form, without
+    /// anyone having to pick a year.
+    ///
+    /// GOVERNMENT is decided here and only here. A city whose government is
+    /// dominated by one house crowns that house (Rome's own path, and the
+    /// Medici's). A city with no dominant house proclaims as a REPUBLIC — an
+    /// office rather than a bloodline, with no `family` and no succession by
+    /// birth. That is the branch that lets Venice and Castile coexist in one
+    /// model instead of forcing every polity through a dynasty.
+    fn maybe_proclaim_city_realms(&mut self, yr: u32) {
+        let tick = self.tick;
+        // The bar scales to the world: a multiple of the MEDIAN live city
+        // treasury, so it means "rich among its peers" on a poor world and a rich
+        // one alike, rather than an absolute figure that is either trivial or
+        // unreachable (the same lesson `realm_founding_cost` already records).
+        let mut treasuries: Vec<f32> = (0..self.hubs.len())
+            .filter(|&h| !self.hubs[h].is_estate && !self.hubs[h].abandoned)
+            .map(|h| self.hubs[h].treasury.max(0.0))
+            .collect();
+        if treasuries.is_empty() { return; }
+        treasuries.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        // LOWER median (`(n-1)/2`), not `n/2`. With an even, small number of cities
+        // the upper median is the richer one, so on a two-city world the wealthiest
+        // city was measured against ITSELF and could never clear its own bar — the
+        // richest city in the world being structurally unable to raise a crown is
+        // exactly the funnel collapse `realm_founding_cost` already had to fix once.
+        let median = treasuries[(treasuries.len() - 1) / 2];
+        let bar = median * REALM_CITY_PATH_TREASURY_MULT;
+
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if self.hubs[h].realm >= 0 || self.hubs[h].tribute_to >= 0 { continue; }
+            if self.hubs[h].tier == 0 || self.hubs[h].tier > REALM_CITY_PATH_TIER_MAX { continue; }
+            // It must actually administer its own province — a city that does not
+            // hold a writ has nothing to raise a crown over.
+            if !self.prov_holder.contains(&(h as i32)) { continue; }
+            if self.hubs[h].treasury < bar { continue; }
+
+            let salt = ((h as u64) << 20) ^ ((yr as u64) << 4);
+            if hash01(self.seed, tick as u64 ^ 0xC17_9_1A1E, salt) > REALM_CITY_PATH_CHANCE { continue; }
+
+            // Whoever holds the government here, if anyone does strongly enough.
+            let dominant = if self.hubs[h].captor_house >= 0 { self.hubs[h].captor_house }
+                else { self.hubs[h].council_house };
+            let dominant = usize::try_from(dominant).ok()
+                .filter(|&hi| hi < self.houses.len())
+                .filter(|&hi| self.houses[hi].is_merchant() && !self.houses[hi].is_guild);
+            let civic = match dominant {
+                None => true, // nobody holds it — it can only be an office
+                Some(_) => hash01(self.seed, tick as u64 ^ 0x0C1B_1C00_u64, salt) < REALM_CIVIC_CHANCE,
+            };
+
+            match (civic, dominant) {
+                (false, Some(hi)) => {
+                    let cost = self.realm_founding_cost_for_house(hi, self.realm_founding_cost());
+                    if self.houses[hi].wealth < cost { continue; }
+                    self.promote_house_to_realm_with_cost(hi, h, yr, cost, REALM_PATH_CITY);
+                }
+                _ => { self.found_civic_realm(h, yr, REALM_PATH_CITY); }
+            }
+        }
+    }
+
+    /// PATH C · CULTURAL DOMINATION — a contiguous single-culture bloc unifies
+    /// under its largest city (`docs/WORLD_REALISM_REVIEW.md` §3.3).
+    ///
+    /// The substrate was already present and unused: `prov_culture` (one culture
+    /// per province) plus `prov_neighbors` (adjacency) make a connected
+    /// same-culture component a free computation. This is the ethnogenesis path —
+    /// Franks, Poles, Rus' — and the only one of the three whose borders a player
+    /// can read straight off the culture map, because the frontier IS where a
+    /// people ends.
+    ///
+    /// It also produces the tightest realms by construction (`REALM_COHESION_
+    /// TARGET[REALM_PATH_CULTURE]`), which is the point: a state made of one
+    /// people governs its own ground better than a trade network does.
+    fn maybe_proclaim_culture_realms(&mut self, yr: u32) {
+        let tick = self.tick;
+        let np = self.prov_count();
+        if np == 0 || self.prov_neighbors.is_empty() { return; }
+
+        let mut seen = vec![false; np];
+        for start in 0..np {
+            if seen[start] { continue; }
+            let Some(culture) = self.prov_culture.get(start).cloned() else { continue };
+            if culture.is_empty() { seen[start] = true; continue; }
+
+            // Flood the CONTIGUOUS same-culture component containing `start`.
+            let mut bloc: Vec<usize> = Vec::new();
+            let mut queue = std::collections::VecDeque::new();
+            seen[start] = true;
+            queue.push_back(start);
+            while let Some(p) = queue.pop_front() {
+                bloc.push(p);
+                for &q in self.prov_neighbors.get(p).map(|v| v.as_slice()).unwrap_or(&[]) {
+                    let q = q as usize;
+                    if q >= np || seen[q] { continue; }
+                    if self.prov_culture.get(q).map(|c| c == &culture).unwrap_or(false) {
+                        seen[q] = true;
+                        queue.push_back(q);
+                    }
+                }
+            }
+            if bloc.len() < REALM_CULTURE_MIN_PROVINCES { continue; }
+            // Already spoken for: a bloc with ANY sovereign province is not
+            // available to unify (no secession from within a realm — the plan's
+            // own §6 decision, unchanged here).
+            if bloc.iter().any(|&p| self.prov_realm.get(p).copied().unwrap_or(-1) >= 0) { continue; }
+
+            // The bloc's largest live city becomes the capital.
+            let capital = bloc.iter()
+                .filter_map(|&p| self.province_seat_hub(p))
+                .filter(|&h| !self.hubs[h].is_estate && !self.hubs[h].abandoned
+                    && self.hubs[h].realm < 0 && self.hubs[h].tribute_to < 0)
+                .max_by(|&a, &b| self.hubs[a].population.partial_cmp(&self.hubs[b].population)
+                    .unwrap_or(std::cmp::Ordering::Equal));
+            let Some(capital) = capital else { continue };
+
+            let salt = ((start as u64) << 20) ^ ((yr as u64) << 4);
+            if hash01(self.seed, tick as u64 ^ 0x0C17_09E5, salt) > REALM_CULTURE_PATH_CHANCE { continue; }
+
+            // A people unifying under its own great city crowns the house that
+            // holds that city if one does; otherwise the city itself does it.
+            let dominant = if self.hubs[capital].captor_house >= 0 { self.hubs[capital].captor_house }
+                else { self.hubs[capital].council_house };
+            let dominant = usize::try_from(dominant).ok()
+                .filter(|&hi| hi < self.houses.len())
+                .filter(|&hi| self.houses[hi].is_merchant() && !self.houses[hi].is_guild);
+
+            // The whole bloc's writ moves to the new capital, so the coronation's
+            // own territory sweep folds every province of the people into the realm.
+            for &p in &bloc {
+                if p < self.prov_holder.len() { self.prov_holder[p] = capital as i32; }
+            }
+            match dominant {
+                Some(hi) => {
+                    let cost = self.realm_founding_cost_for_house(hi, self.realm_founding_cost());
+                    if self.houses[hi].wealth >= cost {
+                        self.promote_house_to_realm_with_cost(hi, capital, yr, cost, REALM_PATH_CULTURE);
+                        continue;
+                    }
+                    self.found_civic_realm(capital, yr, REALM_PATH_CULTURE);
+                }
+                None => { self.found_civic_realm(capital, yr, REALM_PATH_CULTURE); }
+            }
+        }
+    }
+
+    /// Found a realm with NO founding house — a city or a people crowning an
+    /// OFFICE rather than a family.
+    ///
+    /// Deliberately NOT a variant of `promote_house_to_realm`: that function's
+    /// whole job is the house→crown TRANSFER (wealth, debts, estates-to-crown-lease,
+    /// the `crowned` flag, the merchant ladder exit), and none of it applies when
+    /// there is no house. Forcing the two through one path would have meant a
+    /// pile of `if house.is_some()` branches through the most consequential
+    /// function in the file.
+    ///
+    /// The crown's opening treasury is a SHARE of the founding city's own, not an
+    /// invention: a republic is funded by the city that raised it.
+    pub(crate) fn found_civic_realm(&mut self, seat: usize, yr: u32, path: u8) -> u32 {
+        let tick = self.tick;
+        let id = self.realms.len() as u32;
+
+        let mut provinces: Vec<u32> = Vec::new();
+        for p in 0..self.prov_holder.len() {
+            if self.prov_holder.get(p).copied().unwrap_or(-1) != seat as i32 { continue; }
+            // Rule 24: a province a HOUSE holds as dues is that house's territory,
+            // not the city's, and a civic founding does not seize it.
+            if self.prov_holder_house.get(p).copied().unwrap_or(-1) >= 0 { continue; }
+            provinces.push(p as u32);
+            if p < self.prov_realm.len() { self.prov_realm[p] = id as i32; }
+        }
+
+        let (name, _) = self.generate_realm_name(seat, tick as u64 ^ 0x0C1B_1C55);
+        let title = realm_title_for(REALM_CITY_STATE, REALM_GOV_CIVIC, id as u64);
+        let endowment = (self.hubs[seat].treasury.max(0.0) * REALM_PROCLAIM_COST_FRAC).max(0.0);
+        self.hubs[seat].treasury -= endowment;
+
+        let city_name = self.hubs[seat].name.clone();
+        let text = format!("{} proclaims {} — a commonwealth, answering to no house", city_name, name);
+        let realm = Realm {
+            id, name: name.clone(), title, capital_hub: seat as u32,
+            origin_realm: -1,
+            // No dynasty. `ruling_house` is a u32 with no niche for "none", so a
+            // civic realm points at `u32::MAX` and every reader that resolves it
+            // through `self.houses.get(..)` already yields None — no new guard
+            // needed at any existing call site.
+            ruling_house: u32::MAX,
+            rank: REALM_CITY_STATE, autonomy: AUTONOMY_CORE_PERIPHERY,
+            provinces: provinces.clone(), vassals: Vec::new(),
+            treasury: endowment, debts: 0.0,
+            legitimacy: REALM_FOUNDING_LEGITIMACY,
+            cohesion: REALM_COHESION_TARGET[(path as usize).min(2)],
+            founded_tick: tick, fallen_tick: 0,
+            events: vec![RealmEvent { tick, kind: "founded".into(), text: text.clone() }],
+            // A republic has no family, so `realm_family_pass` finds an empty
+            // roster and leaves it alone — there is no ruler to age or bury.
+            ruler: -1, regent: -1, family: Vec::new(),
+            tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
+            founding_path: path, government: REALM_GOV_CIVIC,
+        };
+        self.realms.push(realm);
+
+        self.hubs[seat].realm = id as i32;
+        self.hubs[seat].realm_role = REALM_ROLE_SEAT;
+        for &p in &provinces {
+            if let Some(ph) = self.prov_holder.get(p as usize).copied().filter(|&h| h >= 0) {
+                let ph = ph as usize;
+                if ph != seat && ph < self.hubs.len() && self.hubs[ph].realm < 0 {
+                    self.hubs[ph].realm = id as i32;
+                    self.hubs[ph].realm_role = REALM_ROLE_SUBJECT;
+                }
+            }
+        }
+        self.journal.push(JournalEntry {
+            tick, kind: "realm_founded".into(), hub: seat as i32, good: -1, value: 0.0, text,
+        });
+        let _ = yr;
+        id
     }
 
     /// The trade-dominance proclamation pass (see the tail of `maybe_proclaim_realms`).
@@ -149,7 +416,7 @@ impl CampaignSim {
                 // provinces) folds this province into the realm. Only mutated once the
                 // roll has actually succeeded, so a failed year changes nothing.
                 if p < self.prov_holder.len() { self.prov_holder[p] = seat as i32; }
-                self.promote_house_to_realm_with_cost(hi, seat, yr, cost);
+                self.promote_house_to_realm_with_cost(hi, seat, yr, cost, REALM_PATH_MERCHANT);
                 break; // one realm per province per year
             }
         }
@@ -251,6 +518,163 @@ impl CampaignSim {
         (REALM_PROCLAIM_COST_FRAC * reference).max(REALM_PROCLAIM_COST_FLOOR)
     }
 
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  COHESION, RANK, AND THE TWO NON-MERCHANT FORMATION PATHS.
+    //
+    //  Before this, three `Realm` fields were dead: `cohesion` was set to 1.0 at
+    //  founding and never written again (so `realm_collection_efficiency` — the
+    //  plan's headline "a state is limited by what it can COLLECT" — reduced to
+    //  distance alone), `rank` was never promoted off `REALM_CITY_STATE` despite
+    //  its own doc describing a percentile ladder, and `legitimacy` was written by
+    //  two paths and read as a decision input by none.
+    //
+    //  They are fixed together because they are one mechanism: the path a realm
+    //  formed by sets what its cohesion tends toward, cohesion decides what it can
+    //  collect, what it collects decides how big it grows, and rank is the reading
+    //  of that. Fixing any one alone would have left it inert in a different way.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Yearly · move each realm's cohesion toward the target its founding path and
+    /// its current territory imply.
+    ///
+    /// Three terms, in order of weight:
+    ///   1. THE PATH's own target (`REALM_COHESION_TARGET`) — a merchant crown
+    ///      assembled out of trade interests never grips like a unified people.
+    ///   2. CULTURAL DISTANCE: every province whose culture differs from the
+    ///      capital's drags the target down, in proportion. This is the brake on
+    ///      unlimited expansion and the reason the three paths DIVERGE over time
+    ///      instead of converging — conquering foreign ground is exactly how a
+    ///      tight realm becomes a loose one.
+    ///   3. LEGITIMACY, lightly. A contested or regency-weakened crown governs
+    ///      worse, but legitimacy is about the RULER's right to rule and cohesion
+    ///      about the realm's grip on its land — related, not the same.
+    ///
+    /// Drift is slow (`REALM_COHESION_DRIFT`) because a realm's grip is a
+    /// generational property, not something one bad year swings.
+    pub(crate) fn update_realm_cohesion(&mut self) {
+        if self.realms.is_empty() { return; }
+        for ri in 0..self.realms.len() {
+            if self.realms[ri].fallen_tick > 0 { continue; }
+            let path = (self.realms[ri].founding_path as usize).min(REALM_COHESION_TARGET.len() - 1);
+            let mut target = REALM_COHESION_TARGET[path];
+
+            // Cultural distance, measured against the CAPITAL's own province.
+            let capital = self.realms[ri].capital_hub as usize;
+            let home_culture = self.hub_province.get(capital).copied()
+                .filter(|&p| p >= 0)
+                .and_then(|p| self.prov_culture.get(p as usize).cloned());
+            if let Some(home) = home_culture {
+                let provs = &self.realms[ri].provinces;
+                if !provs.is_empty() {
+                    let foreign = provs.iter()
+                        .filter(|&&p| {
+                            self.prov_culture.get(p as usize).map(|c| c != &home).unwrap_or(false)
+                        })
+                        .count();
+                    let frac = foreign as f32 / provs.len() as f32;
+                    target -= REALM_COHESION_FOREIGN_PENALTY * frac;
+                }
+            }
+
+            let legit = self.realms[ri].legitimacy.clamp(0.0, 1.0);
+            target += REALM_LEGITIMACY_TO_COHESION * (legit - REALM_FOUNDING_LEGITIMACY);
+            let target = target.clamp(0.05, 1.0);
+
+            let cur = self.realms[ri].cohesion;
+            self.realms[ri].cohesion = (cur + (target - cur) * REALM_COHESION_DRIFT).clamp(0.05, 1.0);
+        }
+    }
+
+    /// Yearly · the realm RANK ladder — a direct mirror of `assign_city_tiers`
+    /// (percentile among LIVE realms + an absolute floor on the top rank +
+    /// hysteresis), which is the shape `Realm.rank`'s own doc-comment already
+    /// described and which had simply never been written.
+    ///
+    /// Percentile rather than absolute thresholds for the same reason house and
+    /// city tiers use it: "great power" has to mean *relative to the other states
+    /// of this world*, not a fixed province count that means nothing as a world
+    /// grows. The top rank carries an additional absolute floor so a young world,
+    /// where every realm is a single city and its hinterland, correctly has no
+    /// hegemon at all.
+    pub(crate) fn assign_realm_ranks(&mut self) {
+        let tick = self.tick;
+        let live: Vec<usize> = (0..self.realms.len())
+            .filter(|&ri| self.realms[ri].fallen_tick == 0)
+            .collect();
+        let n = live.len();
+        if n == 0 { return; }
+
+        // Population under each realm's writ, precomputed once.
+        let mut pop_of = vec![0.0f32; self.realms.len()];
+        for h in 0..self.hubs.len() {
+            let r = self.hubs[h].realm;
+            if r >= 0 && (r as usize) < pop_of.len() && !self.hubs[h].abandoned {
+                pop_of[r as usize] += self.hubs[h].population.max(0.0);
+            }
+        }
+
+        let provs: Vec<f32> = live.iter().map(|&ri| self.realms[ri].provinces.len() as f32).collect();
+        let pops: Vec<f32> = live.iter().map(|&ri| pop_of[ri]).collect();
+        let treas: Vec<f32> = live.iter().map(|&ri| self.realms[ri].treasury.max(0.0)).collect();
+        let pr = rank_norm(&provs);
+        let pp = rank_norm(&pops);
+        let tr = rank_norm(&treas);
+
+        // Four axes, the fourth being COHESION itself — a sprawling realm that
+        // cannot collect from its own land is not a great power, and this is the
+        // one place the two repaired fields meet.
+        let mut standings = vec![0.0f32; n];
+        for k in 0..n {
+            let coh = self.realms[live[k]].cohesion.clamp(0.0, 1.0);
+            standings[k] = (0.35 * pr[k] + 0.25 * pp[k] + 0.20 * tr[k] + 0.20 * coh).clamp(0.0, 1.0);
+        }
+
+        let mut order: Vec<usize> = (0..n).collect();
+        order.sort_by(|&a, &b| standings[b].partial_cmp(&standings[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut pct = vec![0.0f32; n];
+        for (rank, &k) in order.iter().enumerate() {
+            pct[k] = if n > 1 { rank as f32 / (n - 1) as f32 } else { 0.0 };
+        }
+
+        for k in 0..n {
+            let ri = live[k];
+            let prev = self.realms[ri].rank;
+            let new_rank = Self::realm_rank_with_hysteresis(prev, pct[k], standings[k]);
+            if new_rank > prev {
+                // A RISE is chronicled; a fall is not — the same asymmetry house
+                // and city tiers already use.
+                let name = self.realms[ri].name.clone();
+                let text = format!("{} is now reckoned a {}", name, REALM_RANK_NAMES[new_rank as usize]);
+                self.realms[ri].events.push(RealmEvent { tick, kind: "rank".into(), text: text.clone() });
+                self.journal.push(JournalEntry {
+                    tick, kind: "realm_rank".into(), hub: self.realms[ri].capital_hub as i32,
+                    good: -1, value: new_rank as f32, text,
+                });
+                // The ruler's STYLE follows the rank: a lord of one city is not a
+                // king, and a king of twenty provinces is not a lord. Re-styled on
+                // a rise only, so a realm never loses its title in a bad decade.
+                let gov = self.realms[ri].government;
+                self.realms[ri].title = realm_title_for(new_rank, gov, self.realms[ri].id as u64);
+            }
+            self.realms[ri].rank = new_rank;
+        }
+    }
+
+    /// The rank a realm holds this year given the one it held last year. `rank` 3
+    /// (hegemon) carries an absolute standing floor on top of the percentile cut,
+    /// with its own hysteresis, exactly as tier 1 does for houses and cities.
+    fn realm_rank_with_hysteresis(prev: u8, pct: f32, standing: f32) -> u8 {
+        let mut cuts = REALM_RANK_PCT_CUTS;
+        // Widen the band the realm is currently IN, in both directions.
+        if (1..=3).contains(&prev) { cuts[(prev - 1) as usize] += REALM_RANK_PCT_DEAD_BAND; }
+        if prev <= 2 { cuts[prev as usize] -= REALM_RANK_PCT_DEAD_BAND; }
+        let floor = if prev == 3 { REALM_RANK_TOP_STANDING_EXIT } else { REALM_RANK_TOP_STANDING_ENTER };
+        if pct < cuts[0] && standing >= floor { 3 }
+        else if pct < cuts[1] { 2 }
+        else if pct < cuts[2] { 1 }
+        else { 0 }
+    }
+
     /// Placeholder naming (see the module doc) — a culture-vocabulary namer that
     /// reads `prov_culture` at the capital is real follow-up work, not built here.
     /// Shared by every realm-CREATING path (a coronation, R5's partible division)
@@ -260,7 +684,9 @@ impl CampaignSim {
         let name_seed = (capital as u64).wrapping_mul(2654435761) ^ salt;
         let style = REALM_NAME_STYLES[(name_seed as usize) % REALM_NAME_STYLES.len()];
         let name = style.replace("{c}", &city_name);
-        let title = REALM_TITLES[(name_seed.rotate_left(7) as usize) % REALM_TITLES.len()].to_string();
+        // A newly proclaimed realm is always rank 0 — `assign_realm_ranks` promotes
+        // it (and re-styles it) once it has earned the standing.
+        let title = realm_title_for(REALM_CITY_STATE, REALM_GOV_DYNASTIC, name_seed);
         (name, title)
     }
 
@@ -270,14 +696,16 @@ impl CampaignSim {
     /// dominance path calls `promote_house_to_realm_with_cost` with a house-scaled one.
     pub(crate) fn promote_house_to_realm(&mut self, hi: usize, seat: usize, yr: u32) -> u32 {
         let cost = self.realm_founding_cost();
-        self.promote_house_to_realm_with_cost(hi, seat, yr, cost)
+        self.promote_house_to_realm_with_cost(hi, seat, yr, cost, REALM_PATH_MERCHANT)
     }
 
     /// As `promote_house_to_realm`, but the founding `cost` (spent from the house's
     /// wealth into the new crown's treasury) is supplied by the caller — the seat-office
     /// path passes the world-scaled `realm_founding_cost`, the trade-dominance path a
     /// house-scaled `realm_founding_cost_for_house`.
-    pub(crate) fn promote_house_to_realm_with_cost(&mut self, hi: usize, seat: usize, yr: u32, cost: f32) -> u32 {
+    pub(crate) fn promote_house_to_realm_with_cost(
+        &mut self, hi: usize, seat: usize, yr: u32, cost: f32, path: u8,
+    ) -> u32 {
         let tick = self.tick;
 
         // Debts inherited whole — a crown can default (plan §3.2/§5.1).
@@ -347,7 +775,11 @@ impl CampaignSim {
             origin_realm: -1, // an original proclamation, not a partible offshoot
             ruling_house: hi as u32, rank: REALM_CITY_STATE, autonomy: AUTONOMY_CORE_PERIPHERY,
             provinces: provinces.clone(), vassals: Vec::new(),
-            treasury, debts, legitimacy: REALM_FOUNDING_LEGITIMACY, cohesion: REALM_FOUNDING_COHESION,
+            treasury, debts, legitimacy: REALM_FOUNDING_LEGITIMACY,
+            // Cohesion starts AT the path's own target rather than at a universal
+            // 1.0 — a merchant crown never had the grip a unified people does, and
+            // starting every realm at perfect cohesion is what made the field inert.
+            cohesion: REALM_COHESION_TARGET[(path as usize).min(2)],
             founded_tick: tick, fallen_tick: 0,
             events: vec![RealmEvent {
                 tick, kind: "founded".into(),
@@ -356,6 +788,7 @@ impl CampaignSim {
             }],
             ruler: 0, regent: -1, family: vec![founder],
             tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
+            founding_path: path, government: REALM_GOV_DYNASTIC,
         };
         self.realms.push(realm);
 
@@ -799,6 +1232,10 @@ impl CampaignSim {
                 events: vec![RealmEvent { tick, kind: "partitioned".into(), text: text.clone() }],
                 ruler: 0, regent: -1, family: vec![new_person],
                 tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
+                // A cadet realm inherits its parent's path and government: a
+                // partition splits a state, it does not re-found one.
+                founding_path: self.realms[ri].founding_path,
+                government: self.realms[ri].government,
             };
             self.realms.push(new_realm);
             for &p in &heir_provs {

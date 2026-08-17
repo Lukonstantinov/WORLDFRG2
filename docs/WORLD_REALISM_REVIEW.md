@@ -1,7 +1,7 @@
 # World Realism Review — realms, goods, city placement
 
-**Status: goods findings are BUILT (see §2). Realm and settlement findings are
-DIAGNOSIS ONLY — nothing in §3 or §4 has been implemented.**
+**Status: goods findings BUILT (§2). Realm findings §3.1-§3.3 and §3.5 BUILT;
+§3.4's smaller points and ALL of §4 (city placement) remain DIAGNOSIS ONLY.**
 
 A review of three areas against the historical record: how realms come into
 being, how trade goods appear on the map, and how cities are placed. Written
@@ -191,7 +191,7 @@ climate anywhere still appeared, somewhere implausible, with no indication why.
 
 ---
 
-## 3. Realms — DIAGNOSIS ONLY, NOT BUILT
+## 3. Realms — §3.1-§3.3 now BUILT (see §3.5); §3.4 still diagnosis
 
 ### 3.1 Three pieces of dead state
 
@@ -251,6 +251,55 @@ the honest way to have Venice and Castile in one model.
 
 With Paths B and C in place, `REALM_YEAR_FLOOR = 50` can go: the tier-1 absolute
 floor is an emergent condition rather than a calendar date.
+
+### 3.5 What was built — and the measurement that did NOT move
+
+All three dead fields are now live, and the two non-merchant paths exist:
+
+| Change | What it does |
+|---|---|
+| `Realm.founding_path` | `MERCHANT` / `CITY` / `CULTURE`, set at the coronation |
+| `update_realm_cohesion` (yearly) | drifts cohesion toward the path's target, dragged down per culturally-foreign province held and nudged by legitimacy — so `realm_collection_efficiency` is no longer distance alone, and `legitimacy` finally has a reader |
+| `assign_realm_ranks` (yearly) | the percentile ladder + top-rank absolute floor + hysteresis that `Realm.rank`'s own doc already described. Four axes: provinces, population, treasury, **cohesion** |
+| `realm_title_for(rank, government)` | replaces the flat four-name list that styled a one-town house "King" |
+| `Realm.government` + `found_civic_realm` | a republic: no `family`, no succession by birth, never a dynastic title |
+| Path B (`maybe_proclaim_city_realms`) | a tier-1 city proclaims for itself — the first reader `hub.tier`/`hub.standing` has ever had |
+| Path C (`maybe_proclaim_culture_realms`) | a contiguous single-culture bloc of ≥4 provinces unifies under its largest city |
+
+**The negative result, recorded because it is the more useful half.** A matched
+before/after of `econ_measure_realm_formation` (stash, run, restore) gives
+**8 realms by year 170 both before and after**. The two new paths added exactly
+zero on the reference world, and the reason is the *oracle*, not the mechanism:
+
+- **Path C cannot run there at all.** `reference_world()` seeds `prov_culture` as
+  `Culture{i}` — a different culture for every province — and never seeds
+  `prov_neighbors`. So no contiguous same-culture bloc of any size can exist, and
+  `maybe_proclaim_culture_realms` early-returns on the empty neighbour graph.
+- **Path B has no tier-1 city to work with.** Tier 1 carries an absolute standing
+  floor by design ("a tier that is always occupied carries no information"), and
+  the fixture's 30 cities are too undifferentiated to clear it.
+
+So both paths are gated by unit tests
+(`a_powerful_city_can_proclaim_without_a_house`,
+`a_culture_bloc_unifies_into_one_realm`, `a_bloc_below_the_minimum_does_not_unify`)
+rather than by the funnel diagnostic, and **realms-per-century on a real
+generated world remains unmeasured** — exactly as it was before this change, now
+with the reason known. Making the reference world able to express a culture bloc
+would be the right next step, but it changes `prov_culture`, which feeds
+migration, so it must be done against the `econ_` scorecard rather than alongside
+a mechanism change.
+
+One bug found by the unit tests rather than by review: Path B's treasury bar used
+the UPPER median of city treasuries, so on a small even-numbered world the richest
+city was measured against itself and could never clear its own bar — the same
+funnel collapse `realm_founding_cost` already had to fix once. It uses the lower
+median now.
+
+And one latent panic fixed on the way: `war.rs` resolved a sovereign hub's "true
+ruler" by indexing `realms[ri].ruling_house` raw. A civic realm has no dynasty
+(`ruling_house` is `u32::MAX`), so the first republic to win a war would have
+crashed the tick. It resolves through `houses.get` and falls through to the
+ordinary council path now.
 
 ### 3.4 Smaller points
 
@@ -364,8 +413,12 @@ just the scorer.
 
 Stated rather than silently dropped:
 
-- **Everything in §3 and §4.** Realm paths B and C, the rank ladder, live
-  `cohesion`, and the settlement oracle are diagnosis only.
+- **§3.4's smaller points and all of §4.** Realm consolidation (cross-realm
+  marriage, personal union, vassalising a realm, conquering a foreign capital),
+  contiguous partition instead of round-robin, dynastic demography (maternal
+  mortality, bastards), the regalian monopolies, and the whole settlement-placement
+  oracle are diagnosis only. Paths B and C, the rank ladder and live `cohesion`
+  ARE built — see §3.5.
 - **Diffusion over time.** A good's range is climate ∩ how far it had spread by a
   date. `origins` expresses several hearths but cannot animate spread — silk
   reaching Byzantium in 552 is unrepresentable without a time axis.

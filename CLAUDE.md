@@ -2307,6 +2307,51 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     vassalizing a realm's own CAPITAL (a full
                                     foreign-crown conquest, explicitly guarded off
                                     in `apply_war_goal` pending its own design).
+                                    **THREE FORMATION PATHS now, not one.** Every
+                                    realm used to be a merchant republic wearing
+                                    the word "Kingdom": both eligibility paths ran
+                                    through a house. `Realm.founding_path` adds
+                                    PATH B (`maybe_proclaim_city_realms` — a tier-1
+                                    city proclaims for itself, the FIRST reader
+                                    `hub.tier`/`hub.standing` has ever had) and
+                                    PATH C (`maybe_proclaim_culture_realms` — a
+                                    contiguous single-culture bloc of ≥4 provinces
+                                    unifies under its largest city, over
+                                    `prov_culture` + `prov_neighbors`).
+                                    `Realm.government` splits DYNASTIC from CIVIC:
+                                    a republic (`found_civic_realm`) has no
+                                    `family`, no succession by birth, and
+                                    `ruling_house = u32::MAX` — every reader must
+                                    resolve it through `houses.get`, never index it
+                                    raw (war.rs did, and the first republic to win
+                                    a war would have panicked the tick).
+                                    **THREE DEAD FIELDS REVIVED**, together because
+                                    they are one mechanism: `update_realm_cohesion`
+                                    (yearly) drifts cohesion toward the founding
+                                    path's target, dragged down per culturally-
+                                    FOREIGN province held — the brake on unlimited
+                                    expansion — and nudged by `legitimacy`, which
+                                    now finally has a reader; `assign_realm_ranks`
+                                    (yearly) is the percentile ladder + top-rank
+                                    absolute floor + hysteresis that `Realm.rank`'s
+                                    own doc already described and nobody had
+                                    written, with COHESION as one of its four axes;
+                                    and `realm_title_for(rank, government)` replaces
+                                    the flat four-name list that styled a house
+                                    holding one town "King". **The measured result
+                                    is a NEGATIVE one and matters more than the
+                                    code**: a matched before/after of
+                                    `econ_measure_realm_formation` gives 8 realms
+                                    by year 170 BOTH before and after, because the
+                                    reference world cannot express either new path
+                                    (it seeds `prov_culture` as `Culture{i}`, a
+                                    different culture per province, and never seeds
+                                    `prov_neighbors`, so Path C early-returns; and
+                                    its 30 undifferentiated cities never clear tier
+                                    1's absolute standing floor). Both paths are
+                                    gated by unit tests instead, and realms/century
+                                    on a REAL world stays unmeasured — see
+                                    `docs/WORLD_REALISM_REVIEW.md` §3.5.
                                     FRAGMENTATION is real (R5) but only Path A — a
                                     Partible culture's realm divides among eligible
                                     sons at EVERY succession (`partition_realm`,

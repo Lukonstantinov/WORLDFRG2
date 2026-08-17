@@ -4883,6 +4883,81 @@ pub const REALM_ROLE_SUBJECT: u8 = 1;
 pub const REALM_ROLE_TRIBUTARY: u8 = 2;
 pub const REALM_ROLE_OCCUPIED: u8 = 3;
 
+// ── Realm formation paths (`Realm.founding_path`) ────────────────────────────
+// The three ways a state comes into being in this world. `REALM_PATH_MERCHANT`
+// is 0 so every realm founded before the field existed reads as what it was.
+/// A merchant house crowned itself — trade dominance or a captured seat. Venice,
+/// Genoa, the Hansa. Rich, and the LOOSEST of the three: its borders follow trade
+/// interests rather than land or people.
+pub const REALM_PATH_MERCHANT: u8 = 0;
+/// A powerful city proclaimed for itself. Rome, Assur, Axum. Compact borders, and
+/// it holds together better than a trade network because the thing being held is
+/// a city and its own hinterland.
+pub const REALM_PATH_CITY: u8 = 1;
+/// A contiguous single-culture bloc unified under its largest city. Franks, Poles,
+/// Rus'. The TIGHTEST of the three, because the border is where a people ends —
+/// and the only path whose frontier a player can read off the culture map.
+pub const REALM_PATH_CULTURE: u8 = 2;
+
+/// A crown that passes by blood (`Realm.government`).
+pub const REALM_GOV_DYNASTIC: u8 = 0;
+/// A crown held by an office, not a family — a republic. Its `family` stays empty
+/// and succession is by the council, never by birth.
+pub const REALM_GOV_CIVIC: u8 = 1;
+
+/// Cohesion a realm settles toward, by founding path. Cohesion is the share of
+/// what a crown assesses that it can actually COLLECT (see
+/// `realm_collection_efficiency`), so these are not flavour — a mercantile realm
+/// is measurably poorer at governing the same land than a national one.
+pub const REALM_COHESION_TARGET: [f32; 3] = [0.62, 0.78, 0.92];
+/// How fast cohesion moves toward its target each year. Slow: a realm's grip is a
+/// generational property, not something that swings with one bad harvest.
+pub const REALM_COHESION_DRIFT: f32 = 0.10;
+/// Cohesion lost per province held whose culture differs from the capital's, as a
+/// share of the realm's provinces. THE brake on unlimited expansion, and the
+/// reason the three paths diverge over time rather than converging: conquest of
+/// foreign ground is what turns a tight realm into a loose one.
+pub const REALM_COHESION_FOREIGN_PENALTY: f32 = 0.45;
+/// How much a realm's own legitimacy pulls its cohesion. Small — legitimacy is
+/// about the RULER's right to rule, cohesion about the realm's grip on its land;
+/// they are related, not the same thing.
+pub const REALM_LEGITIMACY_TO_COHESION: f32 = 0.15;
+
+/// Percentile cuts for the realm rank ladder, mirroring `CITY_TIER_PCT_CUTS`.
+pub const REALM_RANK_PCT_CUTS: [f32; 3] = [0.08, 0.30, 0.70];
+/// Hysteresis on those cuts, so a realm on a boundary does not relabel yearly.
+pub const REALM_RANK_PCT_DEAD_BAND: f32 = 0.04;
+/// The ADDITIONAL absolute floor the top rank carries, so a young world — where
+/// every realm is small — has no hegemon at all. A rank that is always occupied
+/// carries no information, the same reasoning `TIER1_STANDING_ENTER` encodes.
+pub const REALM_RANK_TOP_STANDING_ENTER: f32 = 0.60;
+pub const REALM_RANK_TOP_STANDING_EXIT: f32 = REALM_RANK_TOP_STANDING_ENTER - 0.04;
+/// Names for `Realm.rank`, indexed by it.
+pub const REALM_RANK_NAMES: [&str; 4] = ["city-state", "kingdom", "great power", "hegemon"];
+
+// ── PATH B · a powerful city proclaims for itself ────────────────────────────
+/// The city tier at or above which a settlement may proclaim on its own account.
+/// Tier 1 already carries its own absolute standing floor (`CITY_TIER1_STANDING_
+/// ENTER`), which is what lets this replace `REALM_YEAR_FLOOR`'s calendar gate
+/// with an EMERGENT condition: a young world simply has no tier-1 city yet.
+pub const REALM_CITY_PATH_TIER_MAX: u8 = 1;
+/// Yearly chance a qualifying city actually proclaims. Low: most great cities
+/// never became states, and the ones that did took their time about it.
+pub const REALM_CITY_PATH_CHANCE: f32 = 0.20;
+/// A city needs a treasury of at least this multiple of the world's median city
+/// treasury to raise a crown of its own.
+pub const REALM_CITY_PATH_TREASURY_MULT: f32 = 2.0;
+/// Chance a city-path realm comes out CIVIC (a republic) rather than dynastic,
+/// when no single house dominates its government.
+pub const REALM_CIVIC_CHANCE: f32 = 0.55;
+
+// ── PATH C · cultural domination ──────────────────────────────────────────────
+/// The smallest contiguous single-culture bloc that can unify into a realm.
+/// Below this a "people" is a region, not a nation.
+pub const REALM_CULTURE_MIN_PROVINCES: usize = 4;
+/// Yearly chance a qualifying culture bloc unifies.
+pub const REALM_CULTURE_PATH_CHANCE: f32 = 0.18;
+
 /// The hard floor on the first proclamation, in years. Not a trigger — after this
 /// date any house that meets the conditions may proclaim, and most never will.
 pub const REALM_YEAR_FLOOR: u32 = 50;
@@ -5125,6 +5200,21 @@ pub struct Realm {
     /// and where most realms stay most of the time — a farm is a CASH-NOW
     /// decision, not a steady-state policy).
     #[serde(default)] pub tax_farm: Option<TaxFarm>,
+    // ─────────────────────────────────────────────────────────────────────────
+    // Realm formation paths + the two fields that make `cohesion` and `rank`
+    // mean something. All serde-defaulted, so every realm founded before this
+    // loads as a dynastic mercantile city-state — which is exactly what it was.
+    // ─────────────────────────────────────────────────────────────────────────
+    /// HOW this realm came to be — see `REALM_PATH_*`. Not decoration: it sets the
+    /// realm's cohesion target, and the three paths were chosen precisely because
+    /// they hold together differently. A merchant republic assembled out of trade
+    /// interests is a looser thing than a people that unified itself.
+    #[serde(default)] pub founding_path: u8,
+    /// Dynastic or civic — see `REALM_GOV_*`. A city that proclaims through its
+    /// COUNCIL has no family, so it cannot succeed by birth and must never be
+    /// styled "King". This is the split that lets Venice and Castile exist in one
+    /// model instead of forcing every polity through a bloodline.
+    #[serde(default)] pub government: u8,
 }
 
 /// R3 · one active tax farm — `publicani`/*iltizam*, sell N years of collection for

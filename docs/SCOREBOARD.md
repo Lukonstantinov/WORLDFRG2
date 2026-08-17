@@ -9,6 +9,56 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-17b — Realms: three dead fields revived, two non-merchant paths
+
+**The three fields that did nothing.** `cohesion` was set to 1.0 at founding and
+never written again (so `realm_collection_efficiency` — the plan's own "a state
+is limited by what it can COLLECT" — reduced to distance alone); `rank` was never
+promoted off `REALM_CITY_STATE` despite its doc describing a percentile ladder;
+`legitimacy` was written by two paths and read as a decision input by none. Fixed
+together because they are one mechanism: the path a realm formed by sets its
+cohesion target, cohesion decides what it can collect, and rank is the reading of
+that. `assign_realm_ranks` mirrors `assign_city_tiers` exactly (percentile among
+live realms + an absolute floor on the top rank + hysteresis), and `realm_title_
+for(rank, government)` replaces the flat four-name list that styled a house
+holding one town "King".
+
+**Two non-merchant formation paths** (maintainer's decision: stateless start,
+merchants + powerful settlements + cultural domination). Path B — a tier-1 city
+proclaims for itself, the FIRST reader `hub.tier`/`hub.standing` has ever had.
+Path C — a contiguous single-culture bloc of ≥4 provinces unifies under its
+largest city, over `prov_culture` + `prov_neighbors`, both previously unread for
+this. `Realm.government` splits dynastic from CIVIC: a republic has no `family`,
+no succession by birth, and never a dynastic title.
+
+**THE NEGATIVE RESULT, which is the more useful half.** A matched before/after of
+`econ_measure_realm_formation` (stash, run, restore) gives **8 realms by year 170
+both before and after** — the two new paths added exactly zero on the reference
+world. The cause is the ORACLE, not the mechanism: `reference_world()` seeds
+`prov_culture` as `Culture{i}` (a different culture per province) and never seeds
+`prov_neighbors`, so no culture bloc can exist and Path C early-returns; and the
+fixture's 30 undifferentiated cities never clear tier 1's absolute standing
+floor, so Path B has nothing to fire on. Both paths are therefore gated by unit
+tests, not by the funnel, and **realms-per-century on a real generated world
+remains unmeasured — as it was before, now with the reason known.** Making the
+reference world express a culture bloc is the right next step but changes
+`prov_culture`, which feeds migration, so it belongs with the `econ_` scorecard
+rather than alongside a mechanism change.
+
+**Two bugs the tests caught that review did not.** Path B's treasury bar used the
+UPPER median of city treasuries, so on a small even-numbered world the richest
+city was measured against ITSELF and could never clear its own bar (the same
+funnel collapse `realm_founding_cost` already had to fix once). And `war.rs`
+resolved a sovereign hub's ruler by indexing `ruling_house` raw — a civic realm
+has none (`u32::MAX`), so the first republic to win a war would have panicked the
+tick.
+
+**Gates:** **319** lib tests pass. `econ_` scorecard green with top-10% wealth
+share **0.696** and Gini **0.785**, both in band; dynamics run green; `earth_`
+untouched. `cargo check` and `npx tsc --noEmit` clean.
+
+---
+
 ## 2026-08-17 — Goods: a climate-placement bug, the cull, origins, endemics, terroir
 
 **A measured mis-placement, not a tuning question.** `good_score` folded the

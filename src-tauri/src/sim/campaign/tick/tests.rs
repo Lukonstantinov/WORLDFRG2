@@ -4822,3 +4822,268 @@
         assert_eq!(population_status(-0.5, 0.51), POP_STATUS_STARVING, "crosses the granary's own 0.5 release threshold");
         assert_eq!(population_status(0.2, 0.6), POP_STATUS_STARVING, "starving overrides even a momentarily positive balance");
     }
+
+    /// A minimal one-realm world for the cohesion/rank/path tests: two hubs, two
+    /// provinces, one crowned house. Built the same way the existing R1b tests
+    /// build theirs (`sim` + `hub` + `good`), rather than sharing one of them, so a
+    /// change to their premise cannot silently alter these.
+    fn realm_fixture() -> CampaignSim {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 8.0, 0.0, 4000.0, vec![2000.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.houses[0].wealth = 300_000.0;
+        s.houses[0].tier = 2;
+        s.hubs[0].captor_house = 0;
+        s.hubs[0].tier = 2;
+        s.prov_holder = vec![0, 1];
+        s.prov_holder_house = vec![-1, -1];
+        s.prov_realm = vec![-1, -1];
+        s.hub_province = vec![0, 1];
+        s.prov_culture = vec!["Aiora".into(), "Aiora".into()];
+        s.prov_rural = vec![50_000.0, 40_000.0];
+        s.prov_cap = vec![120_000.0, 100_000.0];
+        s.prov_neighbors = vec![vec![1], vec![0]];
+        s.promote_house_to_realm(0, 0, REALM_YEAR_FLOOR);
+        s
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  COHESION · RANK · THE TWO NON-MERCHANT FORMATION PATHS
+    //  (docs/WORLD_REALISM_REVIEW.md §3). Each of these guards a field that was
+    //  previously DEAD — written once at founding and never read as a decision
+    //  input — so the tests assert that the field now MOVES and that it moves for
+    //  the documented reason, not merely that a function was called.
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    /// Cohesion must actually drift, and a MERCANTILE realm must settle lower than
+    /// a CULTURAL one on identical territory. If both converge on the same number
+    /// the founding path is decoration and `realm_collection_efficiency` is back to
+    /// being distance alone, which is the state this replaced.
+    #[test]
+    fn cohesion_settles_by_founding_path() {
+        let settle = |path: u8| -> f32 {
+            let mut s = realm_fixture();
+            let ri = s.realms.len() - 1;
+            s.realms[ri].founding_path = path;
+            s.realms[ri].cohesion = 1.0; // start ABOVE every target, so any move is a fall
+            for _ in 0..200 { s.update_realm_cohesion(); }
+            s.realms[ri].cohesion
+        };
+        let merchant = settle(REALM_PATH_MERCHANT);
+        let city = settle(REALM_PATH_CITY);
+        let culture = settle(REALM_PATH_CULTURE);
+        assert!(merchant < 1.0, "cohesion never moved off its founding value ({merchant})");
+        assert!(merchant < city, "a merchant realm should grip worse than a city one ({merchant} vs {city})");
+        assert!(city < culture, "a city realm should grip worse than a national one ({city} vs {culture})");
+        for (label, v) in [("merchant", merchant), ("city", city), ("culture", culture)] {
+            assert!((0.05..=1.0).contains(&v), "{label} cohesion {v} out of range");
+        }
+    }
+
+    /// Holding CULTURALLY FOREIGN provinces must cost cohesion. This is the brake
+    /// on unlimited expansion and the reason the three paths diverge rather than
+    /// converge — without it, conquest is free and every realm ends up identical.
+    #[test]
+    fn foreign_provinces_cost_cohesion() {
+        let run = |foreign: bool| -> f32 {
+            let mut s = realm_fixture();
+            let ri = s.realms.len() - 1;
+            s.realms[ri].founding_path = REALM_PATH_CULTURE;
+            // Give the realm two provinces; the second either shares the capital's
+            // culture or does not.
+            s.realms[ri].provinces = vec![0, 1];
+            s.prov_culture = vec!["Aiora".into(), if foreign { "Belgar".into() } else { "Aiora".into() }];
+            for _ in 0..200 { s.update_realm_cohesion(); }
+            s.realms[ri].cohesion
+        };
+        let same = run(false);
+        let mixed = run(true);
+        assert!(mixed < same, "a foreign province cost nothing ({mixed} vs {same})");
+    }
+
+    /// The rank ladder must actually promote, and the TOP rank must stay empty on a
+    /// world of one small realm — a rank that is always occupied carries no
+    /// information, the same reasoning house and city tier-1 floors encode.
+    #[test]
+    fn realm_ranks_promote_and_the_top_rank_has_an_absolute_floor() {
+        let mut s = realm_fixture();
+        let ri = s.realms.len() - 1;
+        // A lone, tiny realm: percentile puts it first, but the absolute floor
+        // must keep it off the top rank.
+        s.realms[ri].provinces = vec![0];
+        s.realms[ri].treasury = 10.0;
+        s.realms[ri].cohesion = 0.2;
+        s.assign_realm_ranks();
+        assert!(s.realms[ri].rank < 3,
+            "a single tiny realm reached the top rank ({})", s.realms[ri].rank);
+
+        // Now make it genuinely dominant on every axis and it must climb.
+        s.realms[ri].provinces = vec![0, 1, 2, 3, 4, 5];
+        s.realms[ri].treasury = 500_000.0;
+        s.realms[ri].cohesion = 1.0;
+        for _ in 0..6 { s.assign_realm_ranks(); } // hysteresis needs a few years
+        assert!(s.realms[ri].rank >= 1,
+            "a dominant realm never promoted off city-state (rank {})", s.realms[ri].rank);
+    }
+
+    /// A realm's TITLE must follow its rank and its government. The old code had one
+    /// flat list, so a house holding a single town was styled "King"; and a republic
+    /// must never be styled by a dynastic title at any rank.
+    #[test]
+    fn titles_follow_rank_and_government() {
+        let city = crate::sim::campaign::tick::realms::realm_title_for(REALM_CITY_STATE, REALM_GOV_DYNASTIC, 7);
+        let hegemon = crate::sim::campaign::tick::realms::realm_title_for(3, REALM_GOV_DYNASTIC, 7);
+        assert_ne!(city, hegemon, "a city-state and a hegemon share a style");
+        let dynastic_words = ["King", "Rex", "Lugal", "Emperor", "Khagan", "Chakravartin",
+                              "Great King", "Basileus", "Shah"];
+        for salt in 0..64u64 {
+            for rank in 0..4u8 {
+                let civic = crate::sim::campaign::tick::realms::realm_title_for(rank, REALM_GOV_CIVIC, salt);
+                assert!(!dynastic_words.contains(&civic.as_str()),
+                    "a republic was styled `{civic}` (rank {rank}, salt {salt})");
+            }
+        }
+    }
+
+    /// PATH B · a tier-1 city with its own province writ and a full treasury must be
+    /// able to raise a crown with NO merchant house involved. This is the reader
+    /// `assign_city_tiers` was built for and never had.
+    #[test]
+    fn a_powerful_city_can_proclaim_without_a_house() {
+        let mut s = realm_fixture();
+        // Clear the fixture's own realm so the city path has a free field.
+        s.realms.clear();
+        for h in 0..s.hubs.len() { s.hubs[h].realm = -1; s.hubs[h].realm_role = 0; }
+        for p in 0..s.prov_realm.len() { s.prov_realm[p] = -1; }
+
+        let h = 0usize;
+        s.hubs[h].tier = 1;
+        s.hubs[h].standing = 0.9;
+        s.hubs[h].treasury = 1_000_000.0;
+        s.hubs[h].captor_house = -1;
+        s.hubs[h].council_house = -1; // nobody holds it -> it can only be an office
+        if !s.prov_holder.is_empty() { s.prov_holder[0] = h as i32; }
+
+        let mut founded = false;
+        for yr in REALM_YEAR_FLOOR..REALM_YEAR_FLOOR + 60 {
+            s.maybe_proclaim_realms(yr);
+            s.tick += TICKS_PER_YEAR;
+            if !s.realms.is_empty() { founded = true; break; }
+        }
+        assert!(founded, "a tier-1 city with a writ and a treasury never proclaimed");
+        let r = &s.realms[0];
+        assert_eq!(r.government, REALM_GOV_CIVIC, "a city nobody holds must crown an OFFICE, not a family");
+        assert!(r.family.is_empty(), "a republic must have no dynasty");
+        assert_eq!(r.ruler, -1, "a republic has no ruler by birth");
+        assert!(s.hubs[h].realm >= 0, "the founding city did not join its own realm");
+    }
+
+    /// PATH C · a contiguous single-culture bloc must unify under its largest city.
+    ///
+    /// This needs its own test because the `econ_` reference world CANNOT express
+    /// it: that fixture seeds `prov_culture` as `Culture{i}` — a different culture
+    /// per province — and never seeds `prov_neighbors` at all, so no bloc of any
+    /// size can exist and `maybe_proclaim_culture_realms` early-returns. The
+    /// funnel diagnostic is therefore blind to this path by construction, which is
+    /// a documented limitation of the oracle rather than of the mechanism.
+    #[test]
+    fn a_culture_bloc_unifies_into_one_realm() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 8.0, 0.0, 3000.0, vec![1500.0], 0),
+            hub(2, 16.0, 0.0, 2000.0, vec![1000.0], 0),
+            hub(3, 24.0, 0.0, 1000.0, vec![500.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        // Four provinces, ONE people, a connected chain — the minimum bloc.
+        s.prov_holder = vec![0, 1, 2, 3];
+        s.prov_holder_house = vec![-1; 4];
+        s.prov_realm = vec![-1; 4];
+        s.hub_province = vec![0, 1, 2, 3];
+        s.prov_culture = vec!["Aiora".into(); 4];
+        s.prov_rural = vec![40_000.0; 4];
+        s.prov_cap = vec![100_000.0; 4];
+        s.prov_seat = vec![[0.0, 0.0], [8.0, 0.0], [16.0, 0.0], [24.0, 0.0]];
+        s.prov_neighbors = vec![vec![1], vec![0, 2], vec![1, 3], vec![2]];
+
+        let mut founded = false;
+        for yr in REALM_YEAR_FLOOR..REALM_YEAR_FLOOR + 80 {
+            s.maybe_proclaim_realms(yr);
+            s.tick += TICKS_PER_YEAR;
+            if !s.realms.is_empty() { founded = true; break; }
+        }
+        assert!(founded, "a four-province single-culture bloc never unified");
+        let r = &s.realms[0];
+        assert_eq!(r.founding_path, REALM_PATH_CULTURE,
+            "the bloc unified by some other path than cultural domination");
+        assert_eq!(r.capital_hub, 0, "the bloc's LARGEST city should be the capital");
+        assert_eq!(r.provinces.len(), 4, "the whole people should be in one realm, got {:?}", r.provinces);
+        // The tightest of the three paths, by construction.
+        assert!(r.cohesion >= REALM_COHESION_TARGET[REALM_PATH_CITY as usize],
+            "a national realm founded looser than a city one ({})", r.cohesion);
+    }
+
+    /// A bloc SMALLER than the minimum must not unify — a "people" of two provinces
+    /// is a region, not a nation, and without this the path would fire on any pair
+    /// of neighbours that happened to share a culture string.
+    #[test]
+    fn a_bloc_below_the_minimum_does_not_unify() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 8.0, 0.0, 3000.0, vec![1500.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.prov_holder = vec![0, 1];
+        s.prov_holder_house = vec![-1; 2];
+        s.prov_realm = vec![-1; 2];
+        s.hub_province = vec![0, 1];
+        s.prov_culture = vec!["Aiora".into(); 2];
+        s.prov_rural = vec![40_000.0; 2];
+        s.prov_cap = vec![100_000.0; 2];
+        s.prov_seat = vec![[0.0, 0.0], [8.0, 0.0]];
+        s.prov_neighbors = vec![vec![1], vec![0]];
+        // No tier-1 city and no governing house either, so ONLY path C could fire.
+        for yr in REALM_YEAR_FLOOR..REALM_YEAR_FLOOR + 80 {
+            s.maybe_proclaim_realms(yr);
+            s.tick += TICKS_PER_YEAR;
+        }
+        assert!(s.realms.iter().all(|r| r.founding_path != REALM_PATH_CULTURE),
+            "a two-province bloc unified as a nation");
+    }
+
+    /// A CIVIC realm must survive every pass that assumes a dynasty. `ruling_house`
+    /// is `u32::MAX` for a republic, and the readers that resolve it through
+    /// `houses.get` must degrade rather than panic — war resolution indexed it raw
+    /// before this, so a republic winning a war would have crashed the tick.
+    #[test]
+    fn a_civic_realm_survives_the_dynastic_passes() {
+        let mut s = realm_fixture();
+        s.realms.clear();
+        for h in 0..s.hubs.len() { s.hubs[h].realm = -1; s.hubs[h].realm_role = 0; }
+        for p in 0..s.prov_realm.len() { s.prov_realm[p] = -1; }
+        if !s.prov_holder.is_empty() { s.prov_holder[0] = 0; }
+        let id = s.found_civic_realm(0, REALM_YEAR_FLOOR, REALM_PATH_CITY) as usize;
+        assert_eq!(s.realms[id].government, REALM_GOV_CIVIC);
+        // Every yearly realm pass, on a realm with no family at all.
+        for _ in 0..5 {
+            s.realm_family_pass(REALM_YEAR_FLOOR);
+            s.update_realm_cohesion();
+            s.assign_realm_ranks();
+            s.collect_realm_levies();
+            s.decide_realm_taxes(id, REALM_YEAR_FLOOR);
+            s.maybe_relocate_abandoned_capitals(REALM_YEAR_FLOOR);
+            s.tick += TICKS_PER_YEAR;
+        }
+        assert_eq!(s.realms[id].fallen_tick, 0, "a republic dissolved itself by having no dynasty");
+        assert!(s.realms[id].cohesion > 0.0);
+    }
+

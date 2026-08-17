@@ -927,8 +927,16 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
             v.sort_unstable();
             v
         }).unwrap_or_default();
+        // A CIVIC realm has no dynasty at all (`ruling_house` is `u32::MAX`), which
+        // is a real answer rather than missing data — say so instead of showing a
+        // blank where a family name would go.
         let ruling_house = sim.houses.get(realm.ruling_house as usize)
-            .map(|h| h.name.clone()).unwrap_or_default();
+            .map(|h| h.name.clone())
+            .unwrap_or_else(|| if realm.government == crate::sim::tick::REALM_GOV_CIVIC {
+                "a commonwealth".to_string()
+            } else {
+                String::new()
+            });
         out.push(StateRegion {
             id: realm.id,
             capital_hub: realm.capital_hub,
