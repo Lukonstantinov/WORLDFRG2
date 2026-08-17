@@ -380,7 +380,7 @@ mod tests {
             // Decode the coverage RLE — the frontend's own loop.
             let mut cov = vec![0u8; (m.w * m.h) as usize];
             let mut pos = 0usize;
-            for pair in m.coverage_rle.chunks(2) {
+            for pair in m.quality_rle.chunks(2) {
                 let (v, cnt) = (pair[0], pair[1] as usize);
                 if v != 0 {
                     let end = (pos + cnt).min(cov.len());
@@ -409,7 +409,7 @@ mod tests {
             let path = format!("{dir}/belt_{}.png", spec.id);
             image::save_buffer(&path, &px, w, h, image::ColorType::Rgb8).unwrap();
             println!("{:<12} {:>7} cells  bbox {}×{} at ({},{})  rle {} runs  → {}",
-                spec.id, m.cells, m.w, m.h, m.x0, m.y0, m.coverage_rle.len() / 2, path);
+                spec.id, m.cells, m.w, m.h, m.x0, m.y0, m.quality_rle.len() / 2, path);
             wrote += 1;
         }
         assert!(wrote > 0, "no sampled good placed anything — nothing to look at");

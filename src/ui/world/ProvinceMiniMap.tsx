@@ -569,6 +569,18 @@ export function ProvinceMiniMap({
             colour language the rest of the app already uses for a good. */}
         {on("goods") && localities.length > 0 && raster && (() => {
           const clipId = `pmm-prov-${province.id}`;
+          // A good whose BELT MASK is present already has its area drawn, cell by
+          // cell, by plate 6a above. Drawing its locality as a true-to-scale square
+          // on top is then both redundant and actively misleading: the size ladder
+          // is in km (a staple region is 900 km, GOODS_LOCALITIES_PLAN §2.1) while a
+          // province is 200-400 km across, so the square covered the entire plate
+          // and the province read as one flat block — the "large squares" the belt
+          // mask was introduced to replace. Where a mask exists the locality is
+          // reduced to what only it can say: a CORE marker at the real cell, plus
+          // its name. Where no mask exists (a world generated before the belt
+          // column, or a good with no belt here) the full square is still the
+          // honest reading and is kept.
+          const masked = new Set(goodMasks.filter((m) => m.cells > 0).map((m) => m.good));
           // A land square's true span is safe to draw whole — the footprint clip
           // bounds it. A SEA one has no clip (it is outside the province by
           // definition, D4), and a 400 km bank drawn true-to-scale would wash over
@@ -580,8 +592,12 @@ export function ProvinceMiniMap({
           };
           const colorOf = (good: string) =>
             GOOD_DEFS.find((d) => d.name === good)?.color ?? "#56c8d8";
-          const land = localities.filter((l) => !l.sea);
+          const land = localities.filter((l) => !l.sea && !masked.has(l.good));
           const sea = localities.filter((l) => l.sea);
+          // Cores: the locality's real position for a good whose area plate 6a has
+          // already drawn. Small, fixed-size and unclipped-by-scale, so it reads as
+          // a survey mark on the belt rather than as a second area.
+          const cores = localities.filter((l) => !l.sea && masked.has(l.good));
           const square = (l: ProvinceLocalityDot, key: string, dashed: boolean) => {
             const [lx, ly] = toLocal(l.x, l.y);
             const s = half(l);
@@ -616,6 +632,32 @@ export function ProvinceMiniMap({
               </clipPath>
               <g clipPath={`url(#${clipId})`}>
                 {land.map((l, i) => square(l, `ll${i}`, false))}
+                {cores.map((l, i) => {
+                  const [lx, ly] = toLocal(l.x, l.y);
+                  const r = stride * 0.9;
+                  const g = Math.max(0, Math.min(1, l.grade));
+                  return (
+                    <g key={`lc${i}`} style={{ cursor: "pointer" }}
+                      onMouseEnter={(e) => setHover({
+                        x: e.nativeEvent.offsetX, y: e.nativeEvent.offsetY,
+                        title: `${l.name ? `${l.name} — ` : ""}${l.good}`,
+                        rows: [
+                          ["grade", `${Math.round(l.grade * 100)}%`],
+                          ["span", `${Math.round(l.radius_km)} km`],
+                          ["extent", ["a pocket", "small", "broad", "a great homeland"][Math.max(0, Math.min(3, l.extent))]],
+                          ...(l.river_fed ? [["watered", "river-fed"] as [string, string]] : []),
+                          ["note", "core of the belt drawn above"] as [string, string],
+                        ],
+                      })}
+                      onMouseLeave={() => setHover(null)}>
+                      {/* A diamond, so a locality core never reads as an ore
+                          working (a circle, plate 6b) or a belt cell (a square). */}
+                      <path d={`M ${lx} ${ly - r} L ${lx + r} ${ly} L ${lx} ${ly + r} L ${lx - r} ${ly} Z`}
+                        fill={colorOf(l.good)} opacity={0.55 + 0.45 * g}
+                        stroke="#0a1620" strokeWidth={Math.max(0.4, stride * 0.18)} />
+                    </g>
+                  );
+                })}
               </g>
               {/* Unclipped, dashed: the water off this coast (D4). */}
               {sea.map((l, i) => square(l, `ls${i}`, true))}

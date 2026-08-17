@@ -4,6 +4,8 @@ import { useGoodsStore } from "@state/goodsStore";
 import { simBiological } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey } from "@goods";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
+import { GoodsReportPanel } from "@ui/goods/GoodsReportPanel";
+import { useState } from "react";
 
 interface Props {
   seed: number;
@@ -30,9 +32,14 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const applyGoodsToWorld = useGoodsStore((s) => s.applyToWorld);
 
   const openChainReview = useUIStore((s) => s.openChainReview);
+  // The placement report (§8.20). Opened automatically once generation finishes —
+  // an absent or fallback-seeded good is exactly the thing the user needs to see at
+  // that moment, and it is persisted, so it can be reopened any time afterwards.
+  const [reportOpen, setReportOpen] = useState(false);
 
   const step6Done = stepCompleted[6] === true;
   const step7Done = stepCompleted[7] === true;
+  const step8Done = stepCompleted[8] === true;
 
   // The actual generation, run only after the user confirms in the Chain Review.
   const runGeneration = async () => {
@@ -53,6 +60,7 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       setOverlayVisible("tradeRoutes", true);
       setOverlayVisible("tradeFlows", true);
       setStatus("Biological-Trade computed: sharks, shipworms, goods, routes & trade matrix");
+      setReportOpen(true);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };
@@ -210,6 +218,14 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
 
       <button onClick={openEditor}
         style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>{"\u{1F4DD}"} Edit Goods Library…</button>
+
+      {step8Done && !reportOpen && (
+        <button onClick={() => setReportOpen(true)}
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>
+          {"\u{1F33F}"} Goods placement report…
+        </button>
+      )}
+      {reportOpen && <GoodsReportPanel onClose={() => setReportOpen(false)} />}
 
       <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
         Shark waters: warm, shallow, frequented coasts (bull/tiger-shark habitat).

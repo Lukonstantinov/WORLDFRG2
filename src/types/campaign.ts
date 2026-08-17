@@ -1283,7 +1283,12 @@ export interface GoodBeltMask {
   h: number;
   /** Full-resolution 0/1 over the box, row-major, as flat (value, run) pairs — the
    *  same encoding `SimProvincesResult.raster_rle` already uses. */
-  coverage_rle: number[];
+  /** Coverage AND quality in one run-length-encoded layer: flat `(level, run)`
+   *  pairs at the mask's full resolution. `level` is 0 for an uncovered cell and
+   *  1..15 for the belt's own absolute value quantized into 16 buckets. Replaced a
+   *  0/1 coverage RLE plus a separate coarse quality grid — the two resolutions
+   *  were the visible bug (a sharp coastline outline filled with ~8-cell blocks). */
+  quality_rle: number[];
   /** The belt's own ABSOLUTE value 0..255 on a `qw × qh` grid of `coarse`-cell
    *  blocks over the same box. Never per-good normalised (D10). */
   quality: number[];

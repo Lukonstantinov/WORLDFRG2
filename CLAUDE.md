@@ -2163,8 +2163,34 @@ slope was never computed. Three rules:
   elevation AND latitude, one more gate moved it off every settlement's catchment
   and tripped the Slice 0 coverage floor.
 
+**The two RENDER fixes that went with this.** Both were the same bug in two
+places — a real per-cell field being drawn at a coarser resolution than it has:
+
+- **The world quality overlay carried TWO resolutions.** Coverage was a
+  full-resolution 0/1 RLE, but the quality wash clipped to it still rode the old
+  ~8-cell coarse grid, so a belt read as blocky value steps inside a sharp
+  coastline outline. `GoodBeltMask.coverage_rle` is now `quality_rle`: the SAME
+  runs carry a 4-bit quantized belt value (0 = uncovered, 1..15 = quality), so
+  coverage and quality are one layer at one resolution. Quantizing is what keeps
+  the runs long — a belt varies smoothly, so neighbours share a bucket and the
+  payload stays close to the old boolean RLE. `quality`/`qw`/`qh`/`coarse`
+  survive only as the index space the per-block SUBTYPE classification
+  (grain species / paper source) is addressed in. Gate:
+  `quality_levels_never_swallow_a_covered_cell` (a covered cell may never
+  quantize to 0, and the scale is monotone).
+- **The province plate drew a locality as a true-to-scale square.** The size
+  ladder is in km — a staple region is 900 km — while a province is 200-400 km
+  across, so one grain locality filled the entire plate and the province read as
+  one flat block. Where a belt MASK exists (plate 6a already draws the real
+  per-cell area) the locality is now reduced to what only it can say: a small
+  CORE diamond at its real cell plus its name. Where no mask exists (an older
+  world, or a good with no belt here) the full square is still the honest
+  reading and is kept.
+
 **The placement report** (`GoodsPlacementReport`, `metadata["goods_report"]`,
-served by `get_goods_report`) — per good: cells, land share, origins actually
+served by `get_goods_report`, shown by `ui/goods/GoodsReportPanel.tsx` — opened
+automatically when the Biological step finishes, and reopenable from that step
+afterwards since it is persisted) — per good: cells, land share, origins actually
 seeded, localities, notable names, mean grade. Its reason for existing is the
 FLAGS: `absent` (placed nothing), `fallback_seed` (placed only because the seeder
 fell back to the least-bad cell — this world may have no suitable climate),

@@ -997,11 +997,23 @@ pub struct GoodBeltMask {
     pub y0: u32,
     pub w: u32,
     pub h: u32,
-    /// COVERAGE — full-resolution 0/1 over the box, row-major, run-length encoded as
-    /// flat `(value, run)` pairs (the same shape `province_raster_rle` already uses).
-    pub coverage_rle: Vec<u32>,
-    /// QUALITY — the belt's own absolute value 0..255 on a coarse grid over the same
-    /// box (`qw × qh`, block size `coarse`). Never per-good normalised (D10).
+    /// COVERAGE **and** QUALITY in one layer — full-resolution over the box,
+    /// row-major, run-length encoded as flat `(level, run)` pairs (the same shape
+    /// `province_raster_rle` already uses). `level` is `0` for an uncovered cell and
+    /// `1..=QUALITY_LEVELS-1` for the belt's own absolute value quantized into that
+    /// many buckets. Never per-good normalised (D10).
+    ///
+    /// This REPLACED a 0/1 coverage RLE plus a separate coarse quality grid. The two
+    /// resolutions were the visible bug: coverage ended exactly on the coastline
+    /// while the quality wash it was clipped to still rode ~8-cell blocks, so a belt
+    /// read as blocky value steps inside a sharp outline. Quantizing to
+    /// `QUALITY_LEVELS` is what keeps the runs long — a belt's value varies smoothly,
+    /// so neighbouring cells almost always land in the same bucket and the encoded
+    /// size stays close to the old boolean RLE.
+    pub quality_rle: Vec<u32>,
+    /// Per-coarse-block belt value, kept ONLY as the index space `subtypes` is
+    /// addressed in (grain species / paper source), which is genuinely a
+    /// block-level classification rather than a per-cell one.
     pub quality: Vec<u8>,
     pub qw: u32,
     pub qh: u32,
@@ -1012,6 +1024,21 @@ pub struct GoodBeltMask {
     pub subtypes: Vec<u8>,
     /// Covered cells, so the frontend can size a medallion / report an extent.
     pub cells: u32,
+}
+
+/// Quality buckets carried on the coverage runs. 16 (4 bits) is comfortably more
+/// resolution than the five-stop scale the legend shows, while coarse enough that
+/// neighbouring cells of a smoothly-varying belt share a bucket and the runs stay
+/// long.
+pub const QUALITY_LEVELS: u8 = 16;
+
+/// Quantize a belt byte into a `quality_rle` level. `0` is reserved for "not
+/// covered", so a covered cell is never allowed to quantize down to it.
+#[inline]
+fn quality_level(v: u8) -> u8 {
+    if v < COVERAGE_MIN_U8 { return 0; }
+    let top = (QUALITY_LEVELS - 1) as u32;
+    (((v as u32 * top) + 127) / 255).max(1) as u8
 }
 
 /// Run-length encode a row-major boolean field into flat `(value, run)` pairs.
@@ -1057,13 +1084,14 @@ pub(crate) fn build_belt_mask(
 
     let bw = x1 - x0 + 1;
     let bh = y1 - y0 + 1;
-    // Coverage: full-resolution 0/1 over the box.
+    // Coverage AND quality, full-resolution over the box, in ONE field: 0 =
+    // uncovered, 1.. = the belt's quantized value (see `quality_level`).
     let mut cov = vec![0u8; (bw as usize) * (bh as usize)];
     for by in 0..bh {
         let src = ((y0 + by) as usize) * (grid_w as usize) + x0 as usize;
         let dst = (by as usize) * (bw as usize);
         for bx in 0..bw as usize {
-            if belt[src + bx] >= COVERAGE_MIN_U8 { cov[dst + bx] = 1; }
+            cov[dst + bx] = quality_level(belt[src + bx]);
         }
     }
 
@@ -1098,7 +1126,7 @@ pub(crate) fn build_belt_mask(
     Some(GoodBeltMask {
         good: good.to_string(),
         x0, y0, w: bw, h: bh,
-        coverage_rle: rle_encode_mask(&cov),
+        quality_rle: rle_encode_mask(&cov),
         quality, qw, qh, coarse,
         subtypes,
         cells: covered,
@@ -1297,7 +1325,7 @@ pub fn province_good_belt_masks(
 
 #[cfg(test)]
 mod belt_mask_tests {
-    use super::rle_encode_mask;
+    use super::{quality_level, rle_encode_mask, COVERAGE_MIN_U8, QUALITY_LEVELS};
 
     /// The RLE is the whole reason a FULL-RESOLUTION coverage layer is affordable,
     /// so it has to round-trip exactly — a decoder disagreeing with the encoder would
@@ -1311,6 +1339,10 @@ mod belt_mask_tests {
             vec![0, 0, 0, 1, 1, 0, 1],
             vec![1; 1000],
             (0..500).map(|i| (i % 3 == 0) as u8).collect(),
+            // Multi-LEVEL runs: `quality_rle` now carries quantized belt values,
+            // not just 0/1, so the encoder has to round-trip arbitrary bytes.
+            vec![0, 3, 3, 3, 15, 15, 1, 0, 0, 9],
+            (0..600u32).map(|i| (i % 16) as u8).collect(),
         ];
         for src in cases {
             let rle = rle_encode_mask(&src);
@@ -1320,6 +1352,31 @@ mod belt_mask_tests {
                 for _ in 0..pair[1] { back.push(pair[0] as u8); }
             }
             assert_eq!(back, src, "coverage RLE did not round-trip");
+        }
+    }
+
+    /// `quality_level` must keep the two ends of the contract: a cell below the
+    /// coverage floor is 0 (uncovered), and a covered cell NEVER quantizes down to
+    /// 0 — otherwise a faint but real belt cell would silently disappear from the
+    /// overlay, which is the exact class of silent loss this layer exists to avoid.
+    #[test]
+    fn quality_levels_never_swallow_a_covered_cell() {
+        assert_eq!(quality_level(0), 0, "an empty cell is uncovered");
+        if COVERAGE_MIN_U8 > 0 {
+            assert_eq!(quality_level(COVERAGE_MIN_U8 - 1), 0, "below the floor is uncovered");
+        }
+        for v in COVERAGE_MIN_U8..=255u8 {
+            let l = quality_level(v);
+            assert!(l >= 1, "covered value {v} quantized to 0");
+            assert!(l < QUALITY_LEVELS, "level {l} out of range for value {v}");
+        }
+        assert_eq!(quality_level(255), QUALITY_LEVELS - 1, "the top value is the top level");
+        // Monotone: a better cell never reads as a worse one.
+        let mut prev = 0u8;
+        for v in COVERAGE_MIN_U8..=255u8 {
+            let l = quality_level(v);
+            assert!(l >= prev, "quality_level is not monotone at {v}");
+            prev = l;
         }
     }
 

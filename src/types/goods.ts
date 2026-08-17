@@ -71,3 +71,34 @@ export interface GoodSpec {
    *  comfort ~45, durables/luxuries ~180). Long = weak local pull → wholesale. */
   consumption_interval?: number;
 }
+
+/** One good's line in the post-generation placement report (§8.20). Mirrors
+ *  `biological::GoodPlacementRow`. */
+export interface GoodPlacementRow {
+  id: string;
+  name: string;
+  icon: string;
+  /** "global" | "local" | "endemic" | "deposits" | "manufactured". */
+  distribution: string;
+  category: string;
+  cells: number;
+  land_share: number;
+  /** Independent homelands actually seeded (the spec's `origins` is the request). */
+  origins: number;
+  localities: number;
+  /** Named (notable-grade) localities — the "subcategories" reading. */
+  notable: string[];
+  /** Mean belt value where present, 0..1. */
+  mean_grade: number;
+  /** "absent" | "fallback_seed" | "ubiquitous" | "single_cell"; empty when healthy. */
+  flags: string[];
+}
+
+/** Mirrors `biological::GoodsPlacementReport`. */
+export interface GoodsPlacementReport {
+  rows: GoodPlacementRow[];
+  enabled: number;
+  placed: number;
+  absent: number;
+  flagged: number;
+}

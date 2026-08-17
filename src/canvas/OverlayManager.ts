@@ -1470,6 +1470,9 @@ export class OverlayManager {
     const MASK_MAX_PX = 4_000_000;
     /** Longest side of the grid the BORDER is traced on. */
     const BORDER_GRID = 900;
+    /** Top level in a mask's quantized quality, mirroring the backend's
+     *  `QUALITY_LEVELS - 1`. Levels are 0 (uncovered) then 1..this. */
+    const QUALITY_LEVEL_MAX = 15;
     /** The flat wash a coverage-only belt draws at — the "can it grow here" answer
      *  with the quality layer switched off. Not a colour table: one constant. */
     const COVERAGE_ALPHA = 0.22;
@@ -1478,12 +1481,15 @@ export class OverlayManager {
       if (!this.visibility[goodOverlayKey(m.good)]) continue;
       if (m.w === 0 || m.h === 0) continue;
 
-      // ── Decode the coverage RLE into the mask's own full-resolution grid. ──
+      // ── Decode the RLE into the mask's own full-resolution grid. Each cell
+      //    holds a LEVEL: 0 = uncovered, 1..QUALITY_LEVELS-1 = the belt's own
+      //    quantized absolute value. Coverage and quality now ride one layer, so
+      //    the wash is per-cell instead of the old ~8-cell blocks. ──
       const full = new Uint8Array(m.w * m.h);
       let pos = 0;
-      for (let i = 0; i + 1 < m.coverage_rle.length; i += 2) {
-        const v = m.coverage_rle[i], cnt = m.coverage_rle[i + 1];
-        if (v) full.fill(1, pos, Math.min(full.length, pos + cnt));
+      for (let i = 0; i + 1 < m.quality_rle.length; i += 2) {
+        const v = m.quality_rle[i], cnt = m.quality_rle[i + 1];
+        if (v) full.fill(v, pos, Math.min(full.length, pos + cnt));
         pos += cnt;
       }
 
@@ -1501,6 +1507,7 @@ export class OverlayManager {
         for (let cy = 0; cy < ch; cy++) {
           for (let cx = 0; cx < cw; cx++) {
             let hits = 0;
+            let best = 0;
             for (let sy = 0; sy < step; sy++) {
               const y = cy * step + sy;
               if (y >= m.h) break;
@@ -1508,10 +1515,15 @@ export class OverlayManager {
               for (let sx = 0; sx < step; sx++) {
                 const x = cx * step + sx;
                 if (x >= m.w) break;
-                hits += full[row + x];
+                const lv = full[row + x];
+                if (lv) { hits++; if (lv > best) best = lv; }
               }
             }
-            if (hits >= need) cov[cy * cw + cx] = 1;
+            // COVERAGE reduces by majority (never "any" — that is what put a belt
+            // back over the water a block at a time); the surviving block's VALUE
+            // is the MAX, matching the backend's own block-max choice, so a small
+            // excellent patch is not averaged away.
+            if (hits >= need) cov[cy * cw + cx] = best;
           }
         }
       }
@@ -1546,7 +1558,10 @@ export class OverlayManager {
           const col = hasSub ? (subRGB[m.subtypes[qi]] ?? base) : base;
           let r = col[0], g = col[1], b = col[2], a = COVERAGE_ALPHA;
           if (showQuality) {
-            const t = (m.quality[qi] ?? 0) / 255;
+            // Per-CELL now, off the decoded level, rather than the old coarse
+            // block grid. `m.quality`/`m.coarse` survive only as the index space
+            // the per-block SUBTYPE classification is addressed in.
+            const t = cov[ci] / QUALITY_LEVEL_MAX;
             const q = this.sampleGoodQuality(t);
             if (q) {
               a = showCoverage ? q.alpha : q.alpha * 0.9;

@@ -60,7 +60,21 @@ silently failed to place was previously invisible until someone went looking for
 it on the map; `fallback_seed` was entirely unreported even though the seeder
 falls back to the best passable cell *regardless of score*.
 
-**Gates:** all **310** lib tests pass (goods coverage floor, belt-coastline claim,
+**Render + report UI (same day, follow-up commit).** The two remaining goods
+issues, which turned out to be one bug in two places — a real per-cell field
+drawn at a coarser resolution than it has. (1) The world quality overlay carried
+TWO resolutions: full-resolution coverage clipped a quality wash that still rode
+the old ~8-cell grid, so belts read as blocky steps inside a sharp coastline.
+`coverage_rle` → `quality_rle`: the same runs now carry a 4-bit quantized belt
+value, one layer at one resolution, payload roughly unchanged because a smooth
+belt's neighbours share a bucket. (2) The province plate drew each locality as a
+true-to-scale square — a 900 km staple on a 200-400 km province filled the whole
+plate, which is what "large squares" meant; where a belt mask already draws the
+real per-cell area, the locality is now a small core diamond at its real cell.
+Plus `GoodsReportPanel`, opened automatically when Biological finishes. New gate:
+`quality_levels_never_swallow_a_covered_cell`.
+
+**Gates:** all **311** lib tests pass (goods coverage floor, belt-coastline claim,
 `econ_` scorecard, `simulate_decades_reports_dynamics`, `earth_` untouched —
 no `step3`/`step4` change). `cargo check` and `npx tsc --noEmit` clean.
 

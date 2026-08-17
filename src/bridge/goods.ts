@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { GoodRegion, GoodSpec } from "@types";
+import type { GoodRegion, GoodSpec, GoodsPlacementReport } from "@types";
 
 // ── Trade-good library (editable specs; per-world + global) ──
 /** The shipped 30-good defaults (for "reset to default"). */
@@ -56,4 +56,10 @@ export async function importGoodsTxt(path: string): Promise<GoodsImportReport> {
 /** Cluster every trade-good belt into labelled regions. */
 export async function computeGoodRegions(): Promise<GoodRegion[]> {
   return invoke("compute_good_regions");
+}
+
+/** The post-generation goods placement report (§8.20). Read-only; a world
+ *  generated before the report existed returns an empty one rather than erroring. */
+export async function getGoodsReport(): Promise<GoodsPlacementReport> {
+  return invoke("get_goods_report");
 }
