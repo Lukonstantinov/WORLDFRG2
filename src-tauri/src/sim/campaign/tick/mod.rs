@@ -5092,6 +5092,12 @@ pub const REALM_PROCLAIM_CHANCE: f32 = 0.50;
 /// (`maybe_proclaim_realms`' main loop) is unchanged; this runs as a second pass
 /// (`maybe_proclaim_trade_realms`).
 pub const PROV_TRADE_CONTROL_FRAC: f32 = 0.20;
+/// The flat wealth a house needs — and pays — to proclaim a realm through PURE TRADE
+/// DOMINANCE (`maybe_proclaim_trade_realms`). Per the maintainer: the trade path is
+/// deterministic, NOT a yearly dice roll — a private house commanding at least
+/// `PROV_TRADE_CONTROL_FRAC` of a province's trade and holding at least this much
+/// wealth crowns itself the same year it becomes eligible, spending this sum to do it.
+pub const REALM_TRADE_MIN_WEALTH: f32 = 50_000.0;
 /// Starting legitimacy/cohesion for a freshly proclaimed realm — high but not
 /// perfect: the founding generation's own claim is the strongest a dynasty will ever
 /// have, and both gauges are designed to be spent down by real events (plan §5), not

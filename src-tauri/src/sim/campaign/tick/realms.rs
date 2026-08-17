@@ -152,7 +152,7 @@ impl CampaignSim {
         // the qualification, and such a house is often globally minor), and the cost is
         // scaled to the founding house's OWN fortune (`realm_founding_cost_for_house`)
         // so it can pay for the small city-state its trade entitles it to.
-        self.maybe_proclaim_trade_realms(yr, cost);
+        self.maybe_proclaim_trade_realms(yr);
         self.maybe_proclaim_city_realms(yr);
     }
 
@@ -412,8 +412,7 @@ impl CampaignSim {
     /// The trade-dominance proclamation pass (see the tail of `maybe_proclaim_realms`).
     /// `world_cost` is the ordinary adaptive founding cost, used only as the CEILING on
     /// the house-scaled cost this path charges.
-    fn maybe_proclaim_trade_realms(&mut self, yr: u32, world_cost: f32) {
-        let tick = self.tick;
+    fn maybe_proclaim_trade_realms(&mut self, yr: u32) {
         for p in 0..self.prov_count() {
             if self.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; } // already sovereign
             // The province's own largest LIVE city, if it has one. A FRONTIER province
@@ -439,26 +438,24 @@ impl CampaignSim {
                         .then_some(home)
                 });
                 let Some(seat) = seat else { continue };
-                if self.hubs[seat].realm >= 0 || self.hubs[seat].tribute_to >= 0 { continue; }
-                let cost = self.realm_founding_cost_for_house(hi, world_cost);
-                if self.houses[hi].wealth < cost { continue; }
-                let bold = self.head_axis(hi, 0) as f32;
-                let expansive = self.head_axis(hi, 3) as f32;
-                // The trade-dominance chance SCALES WITH THE SHARE — a house commanding
-                // half a province's trade is determined to rule and should crown within a
-                // year or two, not linger eligible-but-quiet for a decade on a flat 35%
-                // roll (the player watched a 51% house wait 8 years). `base + share`
-                // gives ~0.86/yr at 51% (≈98% within two years) up to a near-certain 1.0
-                // at total dominance, times the usual bold/expansive character nudge.
-                let chance = ((REALM_PROCLAIM_CHANCE + share) * (1.0 + 0.15 * (bold + expansive))
-                    * self.realm_epoch_ramp(yr)).clamp(0.0, 1.0);
-                let salt = ((p as u64) << 20 ^ (yr as u64) << 4).wrapping_add(hi as u64);
-                if hash01(self.seed, tick as u64 ^ 0x7EA_DE01, salt) > chance { continue; }
-                // The province breaks away under its dominant merchant: its writ moves
-                // to its own largest city, which the new crown then administers directly
-                // — so `promote_house_to_realm` (which collects the seat's administered
-                // provinces) folds this province into the realm. Only mutated once the
-                // roll has actually succeeded, so a failed year changes nothing.
+                // The ONLY hard block: a seat already inside another realm cannot found
+                // a second one (rule 27 — taking sovereign ground needs a war, not a
+                // coronation). A tributary seat is NOT blocked — proclaiming sovereignty
+                // is exactly how a tributary throws off its overlord, so we clear the
+                // tribute below rather than let it veto the crown.
+                if self.hubs[seat].realm >= 0 { continue; }
+                // PURE TRADE DOMINANCE, no dice. A private house that commands at least
+                // `PROV_TRADE_CONTROL_FRAC` of the province's trade AND holds at least
+                // `REALM_TRADE_MIN_WEALTH` proclaims a realm — deterministically, the
+                // same year it becomes eligible. The founding costs that flat price; the
+                // house keeps the rest as the new crown's treasury. (Per the maintainer:
+                // "no chances — just pure trade dominance and a price of 50k.")
+                if self.houses[hi].wealth < REALM_TRADE_MIN_WEALTH { continue; }
+                let cost = REALM_TRADE_MIN_WEALTH;
+                // The province breaks away under its dominant merchant: its writ moves to
+                // the crown's seat, which then administers it directly, and the seat sheds
+                // any tributary bond as it claims sovereignty.
+                self.hubs[seat].tribute_to = -1;
                 if p < self.prov_holder.len() { self.prov_holder[p] = seat as i32; }
                 self.promote_house_to_realm_with_cost(hi, seat, yr, cost, REALM_PATH_MERCHANT);
                 break; // one realm per province per year

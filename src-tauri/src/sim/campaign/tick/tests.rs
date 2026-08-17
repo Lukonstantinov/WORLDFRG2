@@ -638,18 +638,17 @@
         assert!(fired, "a 51% private trade house must proclaim despite trading guilds present");
     }
 
-    /// The systematic real-world failure: on a HARD, starving world where trade has
-    /// collapsed, the house that dominates a single province's tiny trade is a POOR local
-    /// monopolist. The old 1000-flat founding-cost FLOOR priced such a house out and no
-    /// trade-realm ever formed. With the floor removed for the trade path (cost =
-    /// min(0.35·wealth, world_cost)), a poor province founds a poor realm — it must still
-    /// proclaim. Earlier trade tests all used a rich (300k) house and never caught this.
+    /// The trade path is DETERMINISTIC and priced: a house commanding ≥20% of a
+    /// province's trade proclaims the same year IF (and only if) it can pay
+    /// `REALM_TRADE_MIN_WEALTH`. A house below that floor — however dominant its trade —
+    /// cannot yet crown; the same house at the floor crowns immediately, on the first
+    /// eligible year, with no dice. (Maintainer's rule: "no chances — pure trade
+    /// dominance and a price of 50k.")
     #[test]
-    fn a_poor_trade_dominant_house_can_still_crown_in_a_collapsed_economy() {
+    fn the_trade_path_is_gated_on_wealth_then_fires_deterministically() {
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let hubs = vec![hub(0, 0.0, 0.0, 4000.0, vec![1500.0], 0)];
-        let mut fired = false;
-        for t in 0..400u32 {
+        let base = |wealth: f32| {
             let mut s = sim(hubs.clone(), goods.clone());
             s.found_house_at(0);
             s.hub_province = vec![0];
@@ -657,19 +656,26 @@
             s.prov_holder = vec![0];
             s.prov_holder_house = vec![-1];
             s.prov_realm = vec![-1];
-            s.houses[0].trade_at = vec![(0, 100.0)];
-            s.houses[0].wealth = 500.0; // POOR — well under the old 1000 founding floor
+            s.houses[0].trade_at = vec![(0, 100.0)]; // commands ALL of the province's trade
+            s.houses[0].wealth = wealth;
             s.houses[0].tier = 0;
-            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
-            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
-            if !s.realms.is_empty() {
-                assert!(s.houses[0].crowned, "the poor house is elevated to a (poor) crown");
-                assert!(s.realms[0].treasury >= 0.0, "treasury never goes negative");
-                fired = true;
-                break;
-            }
-        }
-        assert!(fired, "a POOR house dominating a province's trade must still be able to crown");
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+            s
+        };
+
+        // Below the price: dominant trade is not enough — no crown.
+        let mut poor = base(REALM_TRADE_MIN_WEALTH - 1.0);
+        poor.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
+        assert!(poor.realms.is_empty(),
+            "a house under REALM_TRADE_MIN_WEALTH cannot crown, however dominant its trade");
+
+        // At the price: crowns the FIRST eligible year — no waiting on a roll.
+        let mut rich = base(REALM_TRADE_MIN_WEALTH);
+        rich.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
+        assert!(!rich.realms.is_empty(),
+            "a house at REALM_TRADE_MIN_WEALTH crowns deterministically the first eligible year");
+        assert!(rich.houses[0].crowned, "the trade house is elevated to a crown");
+        assert!(rich.realms[0].treasury >= 0.0, "treasury never goes negative");
     }
 
     /// R2 · succession picks the ELDEST ELIGIBLE living child, sex-filtered by the
