@@ -102,6 +102,7 @@
             // unaffected by the B1 land layer (that is the gate).
             prov_forest: vec![], prov_arable: vec![], prov_pasture: vec![],
             prov_irrigated: vec![], prov_soil: vec![], prov_tenure: vec![],
+            suppress_realms: false,
             prov_tax: vec![], prov_arrears: vec![], prov_unrest: vec![],
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
             prov_holder_house: vec![],
@@ -434,11 +435,11 @@
         // through the council path too.)
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR;
         eligible(&mut s);
         s.hubs[0].captor_house = -1;
         s.hubs[0].council_house = -1; // governs nothing here
-        s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+        s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
         assert!(s.realms.is_empty(), "a house that neither captured nor leads the council never proclaims");
 
         // A council-DOMINANT house (no capture) is now a valid founder — the widening
@@ -452,7 +453,7 @@
             eligible(&mut s);
             s.hubs[0].captor_house = -1; // never captured
             s.hubs[0].council_house = 0; // but dominates the council
-            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
             if !s.realms.is_empty() { council_fired = true; break; }
         }
         assert!(council_fired, "a council-dominant house must be able to proclaim a realm");
@@ -461,21 +462,21 @@
         // second house raises the bar (0.6 × the richest) above the captor's own wealth.
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR;
         eligible(&mut s);
         s.houses.push(house_at(0, vec![0], 2));
         s.houses[1].wealth = 10_000_000.0; // the richest house → cost ≈ 6M
         s.houses[0].wealth = 100_000.0;    // the captor, far below the bar
-        s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+        s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
         assert!(s.realms.is_empty(), "a house that cannot afford the adaptive founding cost never proclaims");
 
         // Captor and rich, but holds no province writ: never (rule 25).
         let mut s = sim(hubs.clone(), goods.clone());
         s.found_house_at(0);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR;
         eligible(&mut s);
         s.prov_holder = vec![-1]; // no city administers this province — the seat holds nothing
-        s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+        s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
         assert!(s.realms.is_empty(), "no province writ ⇒ no proclamation, regardless of everything else");
 
         // Every condition satisfied — proclamation must be REACHABLE (rolled against
@@ -487,7 +488,7 @@
             s.found_house_at(0);
             s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
             eligible(&mut s);
-            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
             if let Some(r) = s.realms.first() {
                 // Single house → cost = 0.6 × its own wealth, so the crown keeps the rest.
                 let expected = 300_000.0 * (1.0 - REALM_PROCLAIM_COST_FRAC);
@@ -532,7 +533,7 @@
             s.houses[0].wealth = 300_000.0;
             s.houses[0].tier = 0;
             s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
-            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
             if let Some(r) = s.realms.first() {
                 assert_eq!(r.capital_hub, 0, "the realm is seated at the province's OWN largest city");
                 assert!(r.provinces.contains(&0), "the realm holds the province it dominates");
@@ -574,7 +575,7 @@
             s.houses[0].wealth = 300_000.0;
             s.houses[0].tier = 0;
             s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
-            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
             if let Some(r) = s.realms.first() {
                 assert_eq!(r.capital_hub, 1, "crowns from the house's own live home city");
                 assert!(r.provinces.contains(&0), "and annexes the province it dominates");
@@ -615,7 +616,7 @@
             s.houses[0].tier = 0;
             s.houses[1].trade_at = vec![(0, 49.0)];
             s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
-            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
             if let Some(r) = s.realms.first() {
                 assert_eq!(r.ruling_house, 0, "the PRIVATE house crowns, never the guild");
                 fired = true;
@@ -648,7 +649,7 @@
             s.houses[0].wealth = 500.0; // POOR — well under the old 1000 founding floor
             s.houses[0].tier = 0;
             s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
-            s.maybe_proclaim_realms(REALM_YEAR_FLOOR);
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
             if !s.realms.is_empty() {
                 assert!(s.houses[0].crowned, "the poor house is elevated to a (poor) crown");
                 assert!(s.realms[0].treasury >= 0.0, "treasury never goes negative");
@@ -725,7 +726,7 @@
         let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
         let mut s = sim(hubs, goods);
         s.found_house_at(0);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR; // realistic — a realm can't exist at tick 0
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR; // realistic — a realm can't exist at tick 0
         s.prov_holder = vec![0]; s.prov_holder_house = vec![-1]; s.prov_realm = vec![-1];
         s.hub_province = vec![0]; s.prov_culture = vec!["Solo".into()];
         let id = s.promote_house_to_realm(0, 0, 60);
@@ -2535,7 +2536,7 @@
         ];
         let mut s = sim(hubs, goods);
         s.found_house_at(0);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR; // realistic — tick 0 is the "never fallen" sentinel
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR; // realistic — tick 0 is the "never fallen" sentinel
         s.prov_holder = vec![0, 0]; s.prov_holder_house = vec![-1, -1]; s.prov_realm = vec![-1, -1];
         s.hub_province = vec![0, 1]; s.prov_culture = vec!["Solo".into(), "Solo".into()];
         let id = s.promote_house_to_realm(0, 0, 60);
@@ -4823,6 +4824,12 @@
         assert_eq!(population_status(0.2, 0.6), POP_STATUS_STARVING, "starving overrides even a momentarily positive balance");
     }
 
+    /// The first year at which the proclamation ramp (`REALM_RAMP_YEARS`) is at
+    /// full strength. The gate tests below check PRECONDITIONS, not cadence, so
+    /// they run at a year where the ramp cannot be the reason nothing happened —
+    /// otherwise every one of them would pass for the wrong reason.
+    const REALM_FULL_RAMP_YEAR: u32 = REALM_YEAR_FLOOR + REALM_RAMP_YEARS as u32 + 1;
+
     /// A minimal one-realm world for the cohesion/rank/path tests: two hubs, two
     /// provinces, one crowned house. Built the same way the existing R1b tests
     /// build theirs (`sim` + `hub` + `good`), rather than sharing one of them, so a
@@ -4835,7 +4842,7 @@
         ];
         let mut s = sim(hubs, goods);
         s.found_house_at(0);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR;
         s.houses[0].wealth = 300_000.0;
         s.houses[0].tier = 2;
         s.hubs[0].captor_house = 0;
@@ -5001,7 +5008,7 @@
             hub(3, 24.0, 0.0, 1000.0, vec![500.0], 0),
         ];
         let mut s = sim(hubs, goods);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR;
         // Four provinces, ONE people, a connected chain — the minimum bloc.
         s.prov_holder = vec![0, 1, 2, 3];
         s.prov_holder_house = vec![-1; 4];
@@ -5041,7 +5048,7 @@
             hub(1, 8.0, 0.0, 3000.0, vec![1500.0], 0),
         ];
         let mut s = sim(hubs, goods);
-        s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR;
+        s.tick = REALM_FULL_RAMP_YEAR * TICKS_PER_YEAR;
         s.prov_holder = vec![0, 1];
         s.prov_holder_house = vec![-1; 2];
         s.prov_realm = vec![-1; 2];

@@ -4768,6 +4768,22 @@ pub struct CampaignSim {
     /// Tenure shares — [civic/crown, house/noble, temple, common], summing to ~1.
     #[serde(default)] pub prov_tenure: Vec<[f32; 4]>,
     /// Rural tax rate 0..`PROV_TAX_MAX` set by the holder polis (or a player).
+    /// Suppress realm formation entirely. Exists for ONE caller: the inheritance
+    /// gate (`econ_inheritance_rules_fragment_differently`), which compares four
+    /// 60-year sub-simulations that differ only in inheritance law.
+    ///
+    /// `REALM_YEAR_FLOOR` is 50 and that gate runs 60 years, so a decade of
+    /// realm formation lands inside its window — and a coronation moves a whole
+    /// house's fortune out of the merchant pool at once (the plan's own §5.2
+    /// warning, "crowns drain the merchant pool"). That perturbation is large,
+    /// path-dependent, and entirely orthogonal to which law the test is measuring:
+    /// it swamped the wealth signal and inverted the result. Excluding it isolates
+    /// the variable rather than hiding a regression — the same reason the gate
+    /// already fixes the seed and the world.
+    ///
+    /// Never set outside that test. Realm formation is measured by
+    /// `econ_measure_realm_paths` instead, on a world built for it.
+    #[serde(default)] pub suppress_realms: bool,
     #[serde(default)] pub prov_tax: Vec<f32>,
     /// Unpaid dues accumulated in bad years — collected later or written off.
     #[serde(default)] pub prov_arrears: Vec<f32>,
@@ -4940,13 +4956,13 @@ pub const REALM_RANK_NAMES: [&str; 4] = ["city-state", "kingdom", "great power",
 /// Tier 1 already carries its own absolute standing floor (`CITY_TIER1_STANDING_
 /// ENTER`), which is what lets this replace `REALM_YEAR_FLOOR`'s calendar gate
 /// with an EMERGENT condition: a young world simply has no tier-1 city yet.
-pub const REALM_CITY_PATH_TIER_MAX: u8 = 1;
+pub const REALM_CITY_PATH_TIER_MAX: u8 = 2;
 /// Yearly chance a qualifying city actually proclaims. Low: most great cities
 /// never became states, and the ones that did took their time about it.
-pub const REALM_CITY_PATH_CHANCE: f32 = 0.20;
+pub const REALM_CITY_PATH_CHANCE: f32 = 0.30;
 /// A city needs a treasury of at least this multiple of the world's median city
 /// treasury to raise a crown of its own.
-pub const REALM_CITY_PATH_TREASURY_MULT: f32 = 2.0;
+pub const REALM_CITY_PATH_TREASURY_MULT: f32 = 1.25;
 /// Chance a city-path realm comes out CIVIC (a republic) rather than dynastic,
 /// when no single house dominates its government.
 pub const REALM_CIVIC_CHANCE: f32 = 0.55;
@@ -4954,9 +4970,25 @@ pub const REALM_CIVIC_CHANCE: f32 = 0.55;
 // ── PATH C · cultural domination ──────────────────────────────────────────────
 /// The smallest contiguous single-culture bloc that can unify into a realm.
 /// Below this a "people" is a region, not a nation.
-pub const REALM_CULTURE_MIN_PROVINCES: usize = 4;
+pub const REALM_CULTURE_MIN_PROVINCES: usize = 3;
 /// Yearly chance a qualifying culture bloc unifies.
-pub const REALM_CULTURE_PATH_CHANCE: f32 = 0.18;
+pub const REALM_CULTURE_PATH_CHANCE: f32 = 0.30;
+/// The share of a people's provinces that must still be FREE for it to unify.
+/// Below this the people is already mostly somebody else's subjects, and putting
+/// it back together is a conquest rather than a unification — which this path
+/// deliberately is not.
+pub const REALM_CULTURE_MIN_FREE_FRAC: f32 = 0.60;
+
+/// Years over which proclamation ramps in ABOVE `REALM_YEAR_FLOOR`.
+///
+/// Without it the floor is a cliff: nothing at all happens until the year it
+/// names and then several realms appear in that single year, which reads as a
+/// scripted event rather than as a world developing. The ramp scales every
+/// proclamation chance from 0 at the floor to full `REALM_RAMP_YEARS` later, so
+/// the first crown appears a little after the floor and the rest arrive as a
+/// stream — which is also how state formation actually looks: a slow start, then
+/// an accelerating cascade as neighbours' example and pressure spread.
+pub const REALM_RAMP_YEARS: f32 = 25.0;
 
 /// The hard floor on the first proclamation, in years. Not a trigger — after this
 /// date any house that meets the conditions may proclaim, and most never will.

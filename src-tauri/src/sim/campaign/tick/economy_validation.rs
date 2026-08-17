@@ -1154,6 +1154,210 @@ fn econ_measure_war_frequency() {
 /// a reference run plus, for the seat cities, the tier of whichever house governs them —
 /// the maintainer's hypothesis is that powerful trade dynasties don't govern, and the
 /// houses that DO govern are too low-tier / too poor to found a crown.
+/// A WIDER world, built for one question only: how often do realms form, and by
+/// which path?
+///
+/// `reference_world()` cannot answer it. That world has **5 provinces**, every one
+/// a different culture (`Culture{i}`), and no `prov_neighbors` graph at all — so a
+/// contiguous single-culture bloc cannot exist, `maybe_proclaim_culture_realms`
+/// early-returns on the empty neighbour list, and its 30 undifferentiated cities
+/// never clear tier 1's absolute standing floor. Both non-merchant paths are
+/// structurally invisible there, which is why a matched before/after of adding
+/// them measured exactly zero change.
+///
+/// This fixture is deliberately NOT a tuned-to-flatter world. It is the same hub
+/// and house construction, widened to a scale where the political layer has
+/// something to work with:
+///   · 72 cities on a 12x6 grid
+///   · 24 provinces in a 6x4 grid, each seated near its own cities
+///   · a 4-connected `prov_neighbors` graph over that grid (wrap-free)
+///   · SIX peoples in CONTIGUOUS blocs of four provinces each — the shape real
+///     culture maps have, and the shape Path C needs to see
+///
+/// It exists beside `reference_world` rather than replacing it because
+/// `prov_culture` feeds rural→urban migration: changing the scorecard's world to
+/// suit a realm measurement would move the economy metrics for a reason that has
+/// nothing to do with the economy.
+#[cfg(test)]
+fn realm_reference_world() -> CampaignSim {
+    let goods = vec![
+        good("wheat", 0, 0, 1.0, 0.85, true),
+        good("fish", 0, 0, 1.2, 0.7, true),
+        good("olives", 0, 0, 1.6, 0.6, true),
+        good("silk", 1, 2, 20.0, 0.35, false),
+        good("iron", 2, 1, 5.0, 0.45, false),
+        good("wine", 3, 2, 8.0, 0.4, false),
+    ];
+    let ng = goods.len();
+    const COLS: u32 = 12;
+    const ROWS: u32 = 6;
+    const NHUB: u32 = COLS * ROWS;
+    let mut hubs = Vec::new();
+    for i in 0..NHUB {
+        let x = (i % COLS) as f32 * 9.0;
+        let y = (i / COLS) as f32 * 9.0;
+        // A REAL spread of city sizes, not a flat one. Tier 1 carries an absolute
+        // standing floor by design, so an undifferentiated world correctly has no
+        // great cities at all — and then Path B can never fire, which is exactly
+        // what made it invisible on the reference world. A rank-size-ish spread is
+        // both more historical and what gives the tier ladder something to rank.
+        let rank = (i * 7 % NHUB) as f32;
+        let pop = 60_000.0 / (1.0 + rank * 0.55) + 3_000.0;
+        let prod: Vec<f32> = (0..ng)
+            .map(|g| if (g + i as usize) % 3 == 0 { pop * 0.012 } else { pop * 0.0015 })
+            .collect();
+        hubs.push(hub(i, x, y, pop, prod, 0));
+    }
+    let mut s = sim(hubs, goods);
+
+    for i in 0..24u32 {
+        let seat = (i * 3) % NHUB;
+        let mut h = house_at(seat, vec![3 + (i as usize % 3)], 3);
+        h.archetype = (i % 4) as u8;
+        h.wealth = 40.0 + (i as f32) * 8.0;
+        h.prestige = 0.5;
+        h.dominant_seat = i % 2 == 0;
+        s.houses.push(h);
+    }
+    s.seed_house_count = s.houses.len() as u32;
+
+    // ── The province layer: a 6x4 grid, six peoples in contiguous 2x2 blocs ──
+    const PCOLS: usize = 6;
+    const PROWS: usize = 4;
+    let nprov = PCOLS * PROWS;
+    let urban_seed: f32 = s.hubs.iter().map(|h| h.population).sum();
+    let rural_each = (urban_seed * 9.0 / nprov as f32).max(1.0);
+
+    s.prov_rural = vec![rural_each; nprov];
+    s.prov_cap = (0..nprov).map(|i| rural_each * (1.2 + 0.3 * ((i % 5) as f32))).collect();
+    s.prov_seat = (0..nprov)
+        .map(|p| [((p % PCOLS) as f32) * 18.0, ((p / PCOLS) as f32) * 13.5])
+        .collect();
+    // SIX peoples, each holding a contiguous 2x2 block of the province grid — the
+    // shape a real culture map has. `Culture{i}` per province (the reference
+    // world's seeding) is the one shape that makes a bloc impossible.
+    s.prov_culture = (0..nprov)
+        .map(|p| {
+            let bloc = ((p / PCOLS) / 2) * (PCOLS / 2) + ((p % PCOLS) / 2);
+            format!("People{bloc}")
+        })
+        .collect();
+    // 4-connected neighbours over the grid. Without this `maybe_proclaim_culture_
+    // realms` returns immediately, which is the other half of why Path C was
+    // invisible.
+    s.prov_neighbors = (0..nprov)
+        .map(|p| {
+            let (c, r) = (p % PCOLS, p / PCOLS);
+            let mut out: Vec<u32> = Vec::new();
+            if c > 0 { out.push((p - 1) as u32); }
+            if c + 1 < PCOLS { out.push((p + 1) as u32); }
+            if r > 0 { out.push((p - PCOLS) as u32); }
+            if r + 1 < PROWS { out.push((p + PCOLS) as u32); }
+            out
+        })
+        .collect();
+    s.prov_net_mig = vec![0.0; nprov];
+    // Each city belongs to the province its grid position falls in.
+    s.hub_province = (0..NHUB)
+        .map(|i| {
+            let pc = ((i % COLS) as usize * PCOLS) / COLS as usize;
+            let pr = ((i / COLS) as usize * PROWS) / ROWS as usize;
+            (pr * PCOLS + pc) as i32
+        })
+        .collect();
+    // Each province is administered by the largest city inside it.
+    s.prov_holder = (0..nprov)
+        .map(|p| {
+            (0..NHUB as usize)
+                .filter(|&h| s.hub_province[h] == p as i32)
+                .max_by(|&a, &b| s.hubs[a].population.partial_cmp(&s.hubs[b].population).unwrap())
+                .map(|h| h as i32)
+                .unwrap_or(-1)
+        })
+        .collect();
+    s.prov_holder_house = vec![-1; nprov];
+    s.prov_realm = vec![-1; nprov];
+    // `ensure_province_land` seeds EVERY land array from scratch, and its fill loop
+    // starts at `prov_forest.len()` — so pre-filling forest/arable here would leave
+    // every sibling array (pasture, tenure, arrears, unrest...) empty and panic the
+    // land pass on the first tick. Seed first, then vary.
+    s.ensure_province_land(nprov);
+    for p in 0..nprov {
+        // Land use is a PARTITION: forest + arable + pasture must stay <= 1.
+        let forest = 0.10 + 0.12 * ((p % 5) as f32);
+        let arable = (0.35 - 0.05 * ((p % 4) as f32)).min(1.0 - forest - 0.05);
+        s.prov_forest[p] = forest;
+        s.prov_arable[p] = arable;
+        s.prov_pasture[p] = ((1.0 - forest - arable).max(0.0) * 0.55).clamp(0.0, 1.0);
+        s.prov_soil[p] = 0.45 + 0.10 * ((p % 5) as f32);
+        s.prov_tax[p] = 0.10;
+    }
+    s
+}
+
+
+/// REALMS PER CENTURY, BY PATH — the measurement `docs/WORLD_REALISM_REVIEW.md`
+/// §3.5 recorded as missing, on a world that can actually express all three
+/// paths (see `realm_reference_world`).
+///
+/// Printed, never asserted, for the reason §2.5 gives: a number outside a band is
+/// a FINDING here, and there is no published series for "realms per century" the
+/// way there is for grain prices. The historical anchor is Tilly's count of
+/// political units in Europe — roughly 500 around 1500, consolidating to ~25 by
+/// 1900 — so a world of ~70 cities and 24 provinces should carry TENS of
+/// polities, not a handful.
+#[test]
+#[ignore]
+fn econ_measure_realm_paths() {
+    let mut s = realm_reference_world();
+    let years = 200u32;
+    let mut first = 0u32;
+    let mut by_year: Vec<(u32, usize)> = Vec::new();
+    for _ in 0..years {
+        s.advance(TICKS_PER_YEAR);
+        let yr = s.tick / TICKS_PER_YEAR;
+        if first == 0 && !s.realms.is_empty() { first = yr; }
+        if yr % 25 == 0 { by_year.push((yr, s.realms.iter().filter(|r| r.fallen_tick == 0).count())); }
+    }
+    let live: Vec<&Realm> = s.realms.iter().filter(|r| r.fallen_tick == 0).collect();
+    let mut path = [0usize; 3];
+    let mut gov = [0usize; 2];
+    let mut rank = [0usize; 4];
+    for r in &live {
+        path[(r.founding_path as usize).min(2)] += 1;
+        gov[(r.government as usize).min(1)] += 1;
+        rank[(r.rank as usize).min(3)] += 1;
+    }
+    let fallen = s.realms.len() - live.len();
+    let coh: f32 = if live.is_empty() { 0.0 }
+        else { live.iter().map(|r| r.cohesion).sum::<f32>() / live.len() as f32 };
+    // `prov_realm` is AUTHORITATIVE for sovereignty; `Realm.provinces` is a
+    // derived second copy that war and partition can leave stale. Report both, so
+    // a divergence is visible rather than silently averaged into one number.
+    let provs_sovereign = s.prov_realm.iter().filter(|&&r| r >= 0).count();
+    let provs_listed: usize = live.iter().map(|r| r.provinces.len()).sum();
+    let landless = live.iter().filter(|r| r.provinces.is_empty()).count();
+
+    println!();
+    println!("═══ realm formation by path ({years}y, 72 cities / 24 provinces / 6 peoples) ═══");
+    println!("  first realm at year                {first}");
+    println!("  realms ever founded                {}", s.realms.len());
+    println!("  ...still standing                  {}", live.len());
+    println!("  ...fallen                          {fallen}");
+    println!("  realms/century (ever founded)      {:.1}", s.realms.len() as f32 * 100.0 / years as f32);
+    println!("  provinces under a crown            {provs_sovereign} of 24  (realms list {provs_listed})");
+    println!("  landless realms                    {landless}");
+    println!("  mean cohesion                      {coh:.2}");
+    println!("  by path    merchant {}  ·  city {}  ·  culture {}", path[0], path[1], path[2]);
+    println!("  by govt    dynastic {}  ·  civic {}", gov[0], gov[1]);
+    println!("  by rank    city-state {}  ·  kingdom {}  ·  great power {}  ·  hegemon {}",
+        rank[0], rank[1], rank[2], rank[3]);
+    print!("  live count by year ");
+    for (y, n) in &by_year { print!("{y}:{n} "); }
+    println!();
+    println!("═════════════════════════════════════════════════════════════════════");
+}
+
 #[test]
 #[ignore]
 fn econ_measure_realm_formation() {
@@ -1442,6 +1646,16 @@ fn measure_fragmentation(s: &CampaignSim) -> Fragmentation {
 
 fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
     let mut s = reference_world();
+    // Sovereignty OFF for this gate. `REALM_YEAR_FLOOR` is 50 and this runs 60
+    // years, so a decade of realm formation falls inside the window — and a
+    // coronation moves an entire house's fortune out of the merchant pool in one
+    // step (the realm plan's own §5.2 warning: "crowns drain the merchant pool").
+    // That perturbation is large, path-dependent, and orthogonal to the law being
+    // measured: with it in, partible measured RICHER than primogeniture (137401 vs
+    // 133569), inverting the gate's own claim. Excluding it isolates the variable,
+    // exactly as fixing the seed and the world already do — realm formation has
+    // its own instrument, `econ_measure_realm_paths`.
+    s.suppress_realms = true;
     // `reference_world()`'s hub grid (6x5 at 9-unit spacing) spans up to ~58 units
     // corner-to-corner, but its native `world_w`=100 was set before the trade
     // HORIZON existed (`TRADE_MAX_DIST_FRAC`=0.24, tuned against a real generated

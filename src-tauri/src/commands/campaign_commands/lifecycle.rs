@@ -842,6 +842,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_irrigated: vec![],
         prov_soil: vec![],
         prov_tenure: vec![],
+        suppress_realms: false,
         prov_tax: vec![],
         prov_arrears: vec![],
         prov_unrest: vec![],

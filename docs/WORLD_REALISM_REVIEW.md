@@ -301,6 +301,50 @@ ruler" by indexing `realms[ri].ruling_house` raw. A civic realm has no dynasty
 crashed the tick. It resolves through `houses.get` and falls through to the
 ordinary council path now.
 
+### 3.6 Is "more realms" historically right? — yes, with one caveat
+
+The question is worth answering directly rather than assuming, because the
+instinct "more states = more realistic" could easily be wrong.
+
+**The anchor is Charles Tilly's count of political units in Europe: roughly 500
+around 1500, consolidating to about 25 by 1900.** The Holy Roman Empire alone
+held some 300 polities — imperial free cities, prince-bishoprics, abbeys,
+counties. Classical Greece carried on the order of 1,000 poleis in the Aegean.
+Northern Italy ran 200-300 effectively sovereign communes between 1100 and 1300.
+Mesopotamia had dozens of city-states by 2900 BC. At the urbanisation this model
+simulates, **many small polities is the norm and a handful of large ones is the
+anomaly.**
+
+So: 8 realms on a world of 30 cities was too few by a wide margin, and 17 live
+realms on 72 cities (≈4 cities per polity) sits comfortably inside the historical
+range. The direction the maintainer asked for is the direction the evidence
+supports.
+
+Three further points where the model is now *more* right, not merely more
+numerous:
+
+- **A stateless frontier is the unhistorical outcome.** Merchant-only left 9 of 24
+  provinces under no crown at all after two centuries. Unclaimed land existed at
+  the margins of the pre-modern world, but not a third of a settled, urbanised
+  region.
+- **Mixed constitutions are the norm.** Venice and Genoa were republics while
+  their neighbours were monarchies, and the Hansa was neither. A model producing
+  only dynasties was making a claim about the era that the era does not support.
+  The split now measures 7 dynastic to 10 civic.
+- **A ladder of ranks is how the era actually looked.** Not 17 equal states but a
+  few great powers over many small ones — the measured 5 city-states, 7 kingdoms,
+  3 great powers, 2 hegemons is that shape.
+
+**The caveat, and it is a real one.** Tilly's number is a *curve*: 500 units
+collapsing to 25 over four centuries. This model has the fragmentation half and
+**none of the consolidation half** — no personal union, no vassalising another
+realm, no conquering a foreign capital (explicitly guarded off), no inherited
+claims. So a world here reaches something like Europe in 1500 and then stays
+there indefinitely. Making realms frequent is right for the *starting* condition
+and, without consolidation, permanently wrong for the *trajectory*. That is the
+single largest remaining gap in the realm layer, and it is now the binding one:
+before this change the world had too few states to notice that they never merge.
+
 ### 3.4 Smaller points
 
 - **The trade path is a very low bar.** No cost floor, tier gate waived, chance

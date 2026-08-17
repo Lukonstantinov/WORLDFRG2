@@ -55,12 +55,30 @@ pub(crate) fn realm_title_for(rank: u8, government: u8, salt: u64) -> String {
 }
 
 impl CampaignSim {
+    /// How far into the state-formation era this year is, 0..1 — see
+    /// `REALM_RAMP_YEARS`. Multiplies every proclamation chance so the political
+    /// layer FADES IN after the floor instead of switching on in a single year.
+    fn realm_epoch_ramp(&self, yr: u32) -> f32 {
+        if yr <= REALM_YEAR_FLOOR { return 0.0; }
+        (((yr - REALM_YEAR_FLOOR) as f32) / REALM_RAMP_YEARS).clamp(0.0, 1.0)
+    }
+
     /// Yearly · the whole of §3.1. Iterates CITIES (sovereignty is claimed by a seat,
     /// not chosen by a house in the abstract) rather than houses, because the trigger
     /// is fundamentally about a captured government, not about wealth alone.
     pub(crate) fn maybe_proclaim_realms(&mut self, yr: u32) {
         if yr < REALM_YEAR_FLOOR { return; }
+        if self.suppress_realms { return; } // see the field — the inheritance gate only
         if self.prov_holder.is_empty() { return; } // rule 25 — no province layer, no sovereignty
+        // CULTURE FIRST. A people that can unify does so before its individual
+        // cities break away — run last, a single city proclaiming anywhere in a
+        // bloc permanently foreclosed that people's nationhood, which measured as
+        // Path C firing exactly ZERO times. It is also the wrong history in the
+        // other direction: nations DO form, so the model must at least allow the
+        // larger event to happen before the smaller ones fragment the ground it
+        // needs. (Italy's communes foreclosing Italian unity is the other real
+        // case, and it still happens here whenever the roll simply fails.)
+        self.maybe_proclaim_culture_realms(yr);
         let tick = self.tick;
         let n = self.hubs.len();
         // ADAPTIVE founding cost (see `realm_founding_cost`) — scales to THIS world so it
@@ -75,6 +93,8 @@ impl CampaignSim {
             // province is controlled iff its largest settlement is. Shared by every
             // candidate below, so check it once.
             if !self.prov_holder.contains(&(h as i32)) { continue; }
+            // ...and at least one of them must still be free (see the helper).
+            if !self.has_free_province_at(h) { continue; }
             // Who CONTROLS this settlement — three candidates, tried best-first:
             //   1. `captor_house` — seized the government outright.
             //   2. `council_house` — holds the council.
@@ -102,7 +122,8 @@ impl CampaignSim {
                 if self.houses[hi].wealth < cost { continue; } // must afford the (adaptive) founding spend
                 let bold = self.head_axis(hi, 0) as f32;
                 let expansive = self.head_axis(hi, 3) as f32;
-                let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))).max(0.0);
+                let chance = (REALM_PROCLAIM_CHANCE * (1.0 + 0.15 * (bold + expansive))
+                    * self.realm_epoch_ramp(yr)).max(0.0);
                 // The roll folds in `hi`, so each candidate gets its own independent chance
                 // rather than all three sharing one seed.
                 let salt = ((h as u64) << 20 ^ (yr as u64) << 4).wrapping_add(hi as u64);
@@ -125,11 +146,7 @@ impl CampaignSim {
         // scaled to the founding house's OWN fortune (`realm_founding_cost_for_house`)
         // so it can pay for the small city-state its trade entitles it to.
         self.maybe_proclaim_trade_realms(yr, cost);
-        // The two NON-MERCHANT paths, after both merchant paths have had their
-        // refusal — a house that already holds a seat outright should not lose it
-        // to a civic proclamation in the same year.
         self.maybe_proclaim_city_realms(yr);
-        self.maybe_proclaim_culture_realms(yr);
     }
 
     /// PATH B · a powerful CITY proclaims for itself, with no merchant house
@@ -179,10 +196,12 @@ impl CampaignSim {
             // It must actually administer its own province — a city that does not
             // hold a writ has nothing to raise a crown over.
             if !self.prov_holder.contains(&(h as i32)) { continue; }
+            if !self.has_free_province_at(h) { continue; }
             if self.hubs[h].treasury < bar { continue; }
 
             let salt = ((h as u64) << 20) ^ ((yr as u64) << 4);
-            if hash01(self.seed, tick as u64 ^ 0xC17_9_1A1E, salt) > REALM_CITY_PATH_CHANCE { continue; }
+            let chance = REALM_CITY_PATH_CHANCE * self.realm_epoch_ramp(yr);
+            if hash01(self.seed, tick as u64 ^ 0xC17_9_1A1E, salt) > chance { continue; }
 
             // Whoever holds the government here, if anyone does strongly enough.
             let dominant = if self.hubs[h].captor_house >= 0 { self.hubs[h].captor_house }
@@ -247,10 +266,24 @@ impl CampaignSim {
                 }
             }
             if bloc.len() < REALM_CULTURE_MIN_PROVINCES { continue; }
-            // Already spoken for: a bloc with ANY sovereign province is not
-            // available to unify (no secession from within a realm — the plan's
-            // own §6 decision, unchanged here).
-            if bloc.iter().any(|&p| self.prov_realm.get(p).copied().unwrap_or(-1) >= 0) { continue; }
+            // A people unifies out of whatever of itself is still FREE. Requiring
+            // the whole bloc to be unclaimed is what made this path fire exactly
+            // zero times on a measurable world: from year 50 the merchant and city
+            // paths take provinces one at a time, and a single sovereign province
+            // anywhere in a bloc killed that people's chance permanently.
+            //
+            // It is also the wrong history. Unification characteristically happens
+            // AGAINST existing statelets, not in a vacuum — Piedmont unified Italy
+            // and Prussia unified Germany out of lands already full of principalities.
+            // So the bloc must still be MOSTLY free (a people already largely ruled
+            // by others cannot spontaneously unify — that would be conquest, which
+            // this path is not), and only its free provinces join.
+            let free: Vec<usize> = bloc.iter().copied()
+                .filter(|&p| self.prov_realm.get(p).copied().unwrap_or(-1) < 0)
+                .collect();
+            if free.len() < REALM_CULTURE_MIN_PROVINCES { continue; }
+            if (free.len() as f32) < bloc.len() as f32 * REALM_CULTURE_MIN_FREE_FRAC { continue; }
+            let bloc = free;
 
             // The bloc's largest live city becomes the capital.
             let capital = bloc.iter()
@@ -262,7 +295,8 @@ impl CampaignSim {
             let Some(capital) = capital else { continue };
 
             let salt = ((start as u64) << 20) ^ ((yr as u64) << 4);
-            if hash01(self.seed, tick as u64 ^ 0x0C17_09E5, salt) > REALM_CULTURE_PATH_CHANCE { continue; }
+            let chance = REALM_CULTURE_PATH_CHANCE * self.realm_epoch_ramp(yr);
+            if hash01(self.seed, tick as u64 ^ 0x0C17_09E5, salt) > chance { continue; }
 
             // A people unifying under its own great city crowns the house that
             // holds that city if one does; otherwise the city itself does it.
@@ -313,6 +347,9 @@ impl CampaignSim {
             // Rule 24: a province a HOUSE holds as dues is that house's territory,
             // not the city's, and a civic founding does not seize it.
             if self.prov_holder_house.get(p).copied().unwrap_or(-1) >= 0 { continue; }
+            // And never a province another crown already holds (see the same
+            // guard in `promote_house_to_realm_with_cost`).
+            if self.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; }
             provinces.push(p as u32);
             if p < self.prov_realm.len() { self.prov_realm[p] = id as i32; }
         }
@@ -406,8 +443,8 @@ impl CampaignSim {
                 // roll (the player watched a 51% house wait 8 years). `base + share`
                 // gives ~0.86/yr at 51% (≈98% within two years) up to a near-certain 1.0
                 // at total dominance, times the usual bold/expansive character nudge.
-                let chance = ((REALM_PROCLAIM_CHANCE + share) * (1.0 + 0.15 * (bold + expansive)))
-                    .clamp(0.0, 1.0);
+                let chance = ((REALM_PROCLAIM_CHANCE + share) * (1.0 + 0.15 * (bold + expansive))
+                    * self.realm_epoch_ramp(yr)).clamp(0.0, 1.0);
                 let salt = ((p as u64) << 20 ^ (yr as u64) << 4).wrapping_add(hi as u64);
                 if hash01(self.seed, tick as u64 ^ 0x7EA_DE01, salt) > chance { continue; }
                 // The province breaks away under its dominant merchant: its writ moves
@@ -420,6 +457,20 @@ impl CampaignSim {
                 break; // one realm per province per year
             }
         }
+    }
+
+    /// Does this seat administer at least one province NOT already under a crown?
+    ///
+    /// A realm is a claim to LAND. Without this a city could proclaim over a
+    /// province some earlier realm already held — the coronation's own
+    /// already-sovereign guard would then skip every province and leave a LANDLESS
+    /// realm, a sovereign entity holding nothing at all. That is not a rare edge
+    /// case: measured, it was most of them (45 live realms against 24 provinces).
+    fn has_free_province_at(&self, seat: usize) -> bool {
+        (0..self.prov_holder.len()).any(|p| {
+            self.prov_holder.get(p).copied().unwrap_or(-1) == seat as i32
+                && self.prov_realm.get(p).copied().unwrap_or(-1) < 0
+        })
     }
 
     /// The founding cost for a TRADE-DOMINANCE proclamation: a third of the founding
@@ -730,6 +781,14 @@ impl CampaignSim {
             let admin_here = self.prov_holder.get(p).copied().unwrap_or(-1) == seat as i32;
             let house_held = self.prov_holder_house.get(p).copied().unwrap_or(-1) == hi as i32;
             if !admin_here && !house_held { continue; }
+            // ALREADY SOVEREIGN: a province belonging to another crown is not
+            // available to a new one. Administration (`prov_holder`) and
+            // sovereignty (`prov_realm`) are independent layers (rule 27), so a
+            // city can perfectly well administer a province that another realm
+            // owns — and without this check the new realm listed it too, which is
+            // how `provinces under a crown` measured 36 of 24. Taking it needs a
+            // war, not a coronation.
+            if self.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; }
             provinces.push(p as u32);
             if house_held { self.prov_holder_house[p] = -1; } // the crown administers directly now
             if p < self.prov_realm.len() { self.prov_realm[p] = id as i32; }

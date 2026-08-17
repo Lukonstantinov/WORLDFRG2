@@ -9,6 +9,79 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-17c — Realms actually form: a real instrument, then the tuning
+
+**First, the instrument.** The 2026-08-17b entry recorded a null result — the two
+new formation paths added zero realms — and blamed the oracle. That was right, and
+the fix was to build one that works. `realm_reference_world()` +
+`econ_measure_realm_paths` (both `#[ignore]`d): **72 cities, 24 provinces in a 6x4
+grid, six peoples in contiguous 2x2 blocs, a 4-connected `prov_neighbors` graph,
+and a rank-size spread of city populations.** `reference_world()` could not
+express any of that — 5 provinces, a unique culture each, no neighbour graph, flat
+city sizes — so Path C early-returned and Path B never found a tier-1 city. It is
+kept SEPARATE rather than replacing the scorecard's world, because `prov_culture`
+feeds migration.
+
+**Measured, on a world that can answer the question:**
+
+| | merchant paths only | all three paths |
+|---|---|---|
+| realms/century | 8.0 | **11.5** |
+| live at year 200 | 11 | **17** |
+| provinces under a crown | 15 of 24 | **22 of 24** |
+| paths firing | merchant 11 | merchant 5 · city 8 · culture 4 |
+
+The ablation is the point: merchant-only leaves **9 of 24 provinces permanently
+stateless**, which is the genuinely unhistorical outcome. First realm at year 51.
+
+**Three bugs the instrument exposed that review had not.**
+1. **Sovereignty was double-assigned.** A coronation collected provinces by
+   `prov_holder == seat` without checking `prov_realm`, so a new realm could list
+   a province another crown already held — measured as "36 provinces under a crown
+   of 24". Administration and sovereignty are independent layers (rule 27); taking
+   an owned province needs a war, not a coronation.
+2. **Path C could never fire.** It required the WHOLE culture bloc to be
+   unclaimed, and from year 50 the other paths take provinces one at a time, so a
+   single proclamation anywhere in a bloc foreclosed that people's nationhood
+   forever. Now a people unifies out of whatever of itself is still free (≥
+   `REALM_CULTURE_MIN_FREE_FRAC`), and the culture pass runs FIRST — unification
+   characteristically happens against existing statelets (Piedmont, Prussia), not
+   in a vacuum.
+3. **Landless realms.** A city could proclaim over a province already under
+   another crown and end up sovereign over nothing — most of them, measured (45
+   live realms against 24 provinces). `has_free_province_at` now gates both the
+   merchant seat and city paths.
+
+**The year-50 cliff is gone.** `REALM_RAMP_YEARS` (25) scales every proclamation
+chance from 0 at the floor to full a generation later, so the first crown appears
+just after 50 and the rest arrive as a stream — which is also how state formation
+looks: a slow start, then an accelerating cascade.
+
+**The fragile inheritance gate, and why it is now isolated rather than tuned.**
+`econ_inheritance_rules_fragment_differently` inverted (partible measured RICHER
+than primogeniture, 137401 vs 133569). It was NOT the city path — tier 1 and tier
+2 gave byte-identical numbers, so that path never fires on the reference world at
+all. The cause is realm formation itself: `REALM_YEAR_FLOOR` is 50 and that gate
+runs 60 years, so a decade of coronations lands inside its window, and each moves
+a whole house's fortune out of the merchant pool at once — the realm plan's own
+§5.2 warning, "crowns drain the merchant pool". That perturbation is large,
+path-dependent and orthogonal to the law being measured. New `suppress_realms`
+flag, set by that one test, isolates the variable the same way fixing the seed and
+the world already do. Realm formation keeps its own instrument.
+
+**Historical judgement** (`docs/WORLD_REALISM_REVIEW.md` §3.6): more realms is the
+historically correct direction. Tilly counts ~500 political units in Europe c.1500
+consolidating to ~25 by 1900; the HRE alone held ~300. A world of 72 cities
+carrying 17 polities is squarely in that range, and the previous 8-on-a-5-province
+world was not. The standing caveat is the other half of Tilly's curve: **nothing
+in this model consolidates** — no personal union, no vassalising a realm, no
+conquering a foreign capital — so the world reaches 1500 and stays there.
+
+**Gates:** **319** lib tests pass. `econ_` scorecard green; dynamics green;
+`earth_` untouched. `cargo check` and `npx tsc --noEmit` clean.
+
+---
+
 ## 2026-08-17b — Realms: three dead fields revived, two non-merchant paths
 
 **The three fields that did nothing.** `cohesion` was set to 1.0 at founding and

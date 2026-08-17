@@ -2349,9 +2349,51 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     `prov_neighbors`, so Path C early-returns; and
                                     its 30 undifferentiated cities never clear tier
                                     1's absolute standing floor). Both paths are
-                                    gated by unit tests instead, and realms/century
-                                    on a REAL world stays unmeasured — see
-                                    `docs/WORLD_REALISM_REVIEW.md` §3.5.
+                                    gated by unit tests instead. That null result
+                                    was then FIXED by building an instrument that
+                                    works: `realm_reference_world` +
+                                    `econ_measure_realm_paths` (72 cities · 24
+                                    provinces · six peoples in contiguous blocs · a
+                                    real neighbour graph · a rank-size city
+                                    spread), kept SEPARATE from the scorecard's
+                                    world because `prov_culture` feeds migration.
+                                    Measured there: merchant-only 8.0 realms/
+                                    century leaving 9 of 24 provinces permanently
+                                    STATELESS, versus 11.5/century and 22 of 24
+                                    under a crown with all three paths — the
+                                    ablation is the evidence the paths matter.
+                                    Three bugs it exposed that review had not:
+                                    sovereignty was DOUBLE-ASSIGNED (a coronation
+                                    collected by `prov_holder` without checking
+                                    `prov_realm`, so two realms could list one
+                                    province — rule 27's layers are independent and
+                                    taking an owned province needs a war); Path C
+                                    could never fire (it required the WHOLE culture
+                                    bloc free, so one proclamation anywhere
+                                    foreclosed a people's nationhood forever — it
+                                    now unifies whatever of itself is still free
+                                    and runs FIRST, since unification happens
+                                    against existing statelets); and LANDLESS
+                                    realms (a city proclaiming over a province
+                                    another crown held — `has_free_province_at`
+                                    gates both seat paths now). `REALM_RAMP_YEARS`
+                                    removes the year-50 cliff so crowns fade in
+                                    over a generation rather than all appearing in
+                                    one year. **`suppress_realms`** exists for ONE
+                                    caller — `econ_inheritance_rules_fragment_
+                                    differently`, whose 60-year window overlaps the
+                                    realm era; a coronation moves a whole house's
+                                    fortune out of the merchant pool at once (§5.2,
+                                    "crowns drain the merchant pool") and that
+                                    swamped the gate's wealth signal and INVERTED
+                                    it. Isolating it is the same discipline as
+                                    fixing the seed and the world; realm formation
+                                    keeps its own instrument. See
+                                    `docs/WORLD_REALISM_REVIEW.md` §3.5-§3.6 —
+                                    including §3.6's historical verdict (Tilly's
+                                    ~500 European polities c.1500 says MORE realms
+                                    is right, and that nothing here CONSOLIDATES is
+                                    now the binding gap).
                                     FRAGMENTATION is real (R5) but only Path A — a
                                     Partible culture's realm divides among eligible
                                     sons at EVERY succession (`partition_realm`,
