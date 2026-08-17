@@ -140,3 +140,21 @@ pub fn save_goods_library(app: tauri::AppHandle, specs: Vec<GoodSpec>) -> Result
     let json = serde_json::to_string_pretty(&specs).map_err(|e| e.to_string())?;
     std::fs::write(&path, json).map_err(|e| e.to_string())
 }
+
+/// The post-generation goods placement report (see
+/// `biological::GoodsPlacementReport`). Read-only; returns an empty report on a
+/// world generated before the report existed, rather than erroring — an old world
+/// simply has nothing to say here.
+#[tauri::command]
+pub fn get_goods_report(
+    db: State<'_, WorldDb>,
+) -> Result<crate::sim::biological::GoodsPlacementReport, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let raw = crate::db::metadata::get_meta(&conn, "goods_report")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    if raw.is_empty() {
+        return Ok(Default::default());
+    }
+    serde_json::from_str(&raw).map_err(|e| e.to_string())
+}

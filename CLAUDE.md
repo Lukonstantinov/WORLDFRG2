@@ -921,7 +921,10 @@ sim/                            ← organised into per-phase step folders; mod.r
                                     hierarchy + full modulation for every
                                     Global/Local good, see §8.19)
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured;
-                                    `marine_band` — Inshore/Bank/Either, §8.19)
+                                    `marine_band` — Inshore/Bank/Either, §8.19;
+                                    `origins` — independent homelands per good;
+                                    `soil`/`relief` — the FINE-GRAIN terroir terms,
+                                    §8.20; `Distribution::Endemic`, §8.20)
                                   · goods_validation.rs (test-only — Slice 0's coverage
                                     diagnostic, §8.19)
   shared/                       ← cultures.rs (organic peoples map + 14 traits + per-kit
@@ -2081,6 +2084,102 @@ territory** (D4).
 
 ---
 
+### 8.20 Goods: climate adherence, origins, endemics, terroir
+
+Four changes to how a good gets onto the map, plus the report that makes a
+failed placement visible. Full account (including this review's own three wrong
+first readings) in `docs/WORLD_REALISM_REVIEW.md`.
+
+**The `clim_base` fold is a FALLBACK, never a pre-pass.** `good_score` used to
+fold the dry-winter/dry-summer Köppen variants onto their humid equivalents
+BEFORE its match, which made every arm naming `CWA`/`CWB`/`CWC`/`DW*`/`DS*`
+**unreachable**. Tea and coffee both name `CWB` — subtropical highland, dry
+winter: Darjeeling, Yunnan, the Ethiopian highlands — and both scored exactly
+**0.0** there, placed instead by weak fallback arms in the wrong climates. Now the
+RAW zone is scored first and the fold applies only if it yields nothing.
+`envelope_score` follows the same rule; before this, custom goods saw raw Köppen
+while built-ins saw folded Köppen, so one cell was scored under two different
+climate labels depending on which scorer ran. Gates:
+`dry_winter_zones_are_reachable` (the claim) and
+`the_humid_fold_still_applies_as_a_fallback` (the fix didn't cost the fold its
+purpose).
+
+**`GoodSpec.origins`** — how many INDEPENDENT homelands a `Local` good seeds
+(serde-default 1 = the old single-homeland behaviour, so every save is
+unchanged). Multi-origin is the historical norm: pepper from Malabar *and*
+Sumatra, cinnamon from Ceylon *and* China, cotton independently domesticated in
+India, Peru and the Levant. Each origin repels the earlier ones through the same
+dispersion penalty already applied between different goods. Two rules: the
+extreme-rarity homeland cap is a budget for the good AS A WHOLE, split between
+origins (or a rare good doubles its own world supply); and only the FIRST origin
+may fall back to the least-bad cell — a second origin that can't clear the
+threshold simply doesn't exist on this world.
+
+**`LandmassContext` + `Distribution::Endemic`** — the connected-component pass
+this codebase never had. `Domain::Island` was `distance_to_ocean < 0.20`, i.e.
+*near-coast land*, which matched the coastal fringe of every continent, so an
+"island" good was really a coastal good. One 8-connected BFS, wrap-aware, built
+ONCE per world (same discipline as `RiverContext`/`GeoContext`). An `Endemic`
+good is confined to ONE landmass with the island-jump DISABLED — the Banda
+nutmeg case: nutmeg grows across the wet tropics, but the tree only grew on ten
+islands totalling 60 km², and `rarity` cannot express that (it makes a good
+scarce *everywhere* rather than abundant in one place and absent elsewhere).
+Six ship: nutmeg, mace (sharing an envelope — two products of one tree),
+dragon's blood, camphor, benzoin, sandalwood.
+
+Three rules learned by MEASUREMENT here, each a silent-vanish failure:
+- **An island threshold must be stated in km², not cells** (`ISLAND_MAX_KM2`).
+  A cell is ~11 km at 3600×1800 and ~133 km on a test world, so a fixed cell
+  count meant "Great Britain" on one world and "most of Eurasia" on another.
+- **DOMAIN and DISTRIBUTION must not both gate the same thing.** Shipping the
+  endemics as `Domain::Island` zeroed their SCORE on every continental cell
+  before the distribution could choose a home — all six measured **zero cells**.
+  Domain says where the plant can grow (a wet tropical coast); distribution says
+  how it is confined (the smallest landmass that scores, preferring a true
+  island).
+- **The endemic home is chosen up front, not filtered per cell.** That is what
+  makes the guarantee unconditional: if the climate exists anywhere, the good
+  gets exactly one home; if it exists nowhere it is honestly absent.
+
+**`GoodSpec.soil` / `GoodSpec.relief` — the FINE-GRAIN terroir terms.** Every
+other scoring term varies over HUNDREDS of km (Köppen zone, temperature,
+precipitation, |latitude|, normalized elevation, fertility — itself a smoothed
+blend), which is why a belt rendered as one smooth continent-sized wash: nothing
+varied at the 2–10 km scale at which real crop distributions are mottled.
+`soil_type` was computed by phase 6 and read by NOTHING in the goods layer;
+slope was never computed. Three rules:
+- **They live on the SPEC, not on `Envelope`.** They must apply to built-ins
+  (scored by the hardcoded matcher, which has no Envelope) and customs alike;
+  putting them in `Envelope` silently REPLACED a built-in's whole climate scorer
+  with an envelope holding only these two terms.
+- **Soil is a preference, never a veto.** An unclassified cell scores 1.0 (no
+  information is not bad ground — the same discipline an empty kin roster gets);
+  a classified-but-unlisted soil keeps `SOIL_UNLISTED`.
+- **`TERROIR_FLOOR` remaps the whole multiplier into `[0.45, 1.0]`.** Applied
+  raw it pushed `tea` and `saffron` under the seed threshold and both placed
+  literally nothing. Terroir shapes a belt's TEXTURE; it must not decide whether
+  the belt exists — the same call the locality pass's FRINGE/FLOOR already made.
+  `saffron` is deliberately NOT in the terroir table: already bounded by climate,
+  elevation AND latitude, one more gate moved it off every settlement's catchment
+  and tripped the Slice 0 coverage floor.
+
+**The placement report** (`GoodsPlacementReport`, `metadata["goods_report"]`,
+served by `get_goods_report`) — per good: cells, land share, origins actually
+seeded, localities, notable names, mean grade. Its reason for existing is the
+FLAGS: `absent` (placed nothing), `fallback_seed` (placed only because the seeder
+fell back to the least-bad cell — this world may have no suitable climate),
+`ubiquitous` (a non-staple over 25% of the world), `single_cell`. Before it, a
+good that silently failed to place was invisible until someone went looking for
+it on the map.
+
+**Retired as duplicates** (disabled, never deleted — fixed indices in
+`TileData.goods`, rule 7): `gemstones` (a generic gem alongside ELEVEN specific
+stones, and §8.16 already repurposed `gem_deposits` to mean ore districts) and
+`dyes` (marine murex, i.e. the same product as `tyrian_purple`, and the one good
+`goods_validation` carried as a standing coverage-floor exception).
+
+---
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -2352,7 +2451,20 @@ Three rules:
     province is released only when its OWN holder house dissolves; nothing else
     (a war, a rival) currently takes it away — that gap is deliberate and recorded,
     not an oversight to silently work around.
-25. **Sovereignty is never assumed to exist.** `prov_realm == -1` (free land) is the
+25. **A good's DOMAIN and its DISTRIBUTION must not gate the same thing** (§8.20).
+    Domain = where it can grow; distribution = how it is confined. Both gating
+    "is this an island" zeroed all six endemics before the distribution could pick
+    a home. Related: any size threshold about the WORLD (an island, a locality)
+    is stated in km² and converted per world, never as a cell count — a cell is
+    ~11 km at 3600×1800 and ~133 km on a test world.
+26. **A terroir/texture term may never delete a belt.** Fine-grain terms
+    (`soil`/`relief`) are remapped into `[TERROIR_FLOOR, 1.0]` and soil never
+    vetoes an unlisted or unclassified class. Applied raw they pushed `tea` and
+    `saffron` to zero cells. Same reasoning as the locality pass's FRINGE/FLOOR:
+    shape the texture, never decide existence. After ANY change to
+    `step8_biological_goods/` run `cargo test --lib goods_ -- --nocapture` and
+    read the per-good table, not just the pass/fail.
+27. **Sovereignty is never assumed to exist.** `prov_realm == -1` (free land) is the
     default every province starts and most still end at — a genuine third authority
     layer above rule 24 (`prov_holder` seat · `prov_holder_house` dues ·
     `prov_realm` sovereignty), all three independent and all three legal at once

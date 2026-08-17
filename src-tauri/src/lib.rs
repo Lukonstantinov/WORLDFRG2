@@ -73,6 +73,7 @@ pub fn run() {
             goods_commands::set_goods_spec,
             goods_commands::preview_good_score,
             goods_commands::preview_land_grid,
+            goods_commands::get_goods_report,
             goods_commands::get_goods_library,
             goods_commands::save_goods_library,
             goods_import::import_goods_txt,

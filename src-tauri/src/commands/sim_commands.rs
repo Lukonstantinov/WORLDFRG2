@@ -14,12 +14,20 @@ fn persist_goods_placement(
     conn: &rusqlite::Connection,
     ore: &[crate::sim::deposits::Deposit],
     localities: &[crate::sim::localities::GoodLocality],
+    report: &crate::sim::biological::GoodsPlacementReport,
 ) -> Result<(), String> {
     metadata::set_meta(conn, "deposits",
         &serde_json::to_string(ore).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     metadata::set_meta(conn, "good_localities",
         &serde_json::to_string(localities).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    // The post-generation placement report — which goods actually made it onto
+    // this world, and which quietly did not. Persisted like the two above (JSON in
+    // `metadata`, no tile column, rule 7) so it survives a save and can be
+    // re-opened later rather than being a one-shot toast the user can miss.
+    metadata::set_meta(conn, "goods_report",
+        &serde_json::to_string(report).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
     Ok(())
 }
@@ -294,8 +302,8 @@ pub fn sim_biological(
     // belt column cannot carry. Persisted alongside the tiles exactly as the
     // province list is — the belt stays the source of truth for production and
     // overlays; this is the record a mining industry and the quarry view read.
-    let (ore, localities) = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
-    persist_goods_placement(&conn, &ore, &localities)?;
+    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &river_data, seed, gem_deposits, climate_strictness, &goods);
+    persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
 
     // Terminal salt lakes → brine into the salinity column + inland salt-pan
     // production. Lakes are re-derived here (this phase does not receive them).
@@ -358,8 +366,8 @@ pub fn sim_refresh_hydrology_biology(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let (ore, localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
-    persist_goods_placement(&conn, &ore, &localities)?;
+    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
+    persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     let modified = buf.save(&conn, "Refresh hydrology & biology")?;
@@ -463,8 +471,8 @@ pub fn sim_run_all(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let (ore, localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
-    persist_goods_placement(&conn, &ore, &localities)?;
+    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
@@ -667,8 +675,8 @@ pub fn sim_run_all_from_terrain(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let (ore, localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
-    persist_goods_placement(&conn, &ore, &localities)?;
+    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 

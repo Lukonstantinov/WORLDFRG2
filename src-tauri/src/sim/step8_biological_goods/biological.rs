@@ -847,14 +847,252 @@ fn marine_band_ok(buf: &WorldBuffer, x: u32, y: u32, marine_band: MarineBand) ->
     }
 }
 
+/// The FINE-GRAIN terrain multiplier for one good at one cell — soil class and
+/// local slope, the two channels that vary at 2-10 km rather than at hundreds of
+/// km (see `GoodSpec::soil`/`::relief` for why that matters). Returns exactly 1.0
+/// for a good declaring neither, so this is a true no-op on every good and every
+/// saved world that predates it, not an approximation of one.
+fn terroir_multiplier(buf: &WorldBuffer, spec: &GoodSpec, x: u32, y: u32) -> f32 {
+    if spec.soil.is_empty() && spec.relief.is_none() { return 1.0; }
+    let i = buf.idx(x, y);
+    let mut m = 1.0f32;
+    if !spec.soil.is_empty() && buf.terrain[i] == 1 {
+        let sc = buf.soil_type.get(i).copied().unwrap_or(0);
+        // Soil is a PREFERENCE, never a veto — two deliberate rules:
+        //  • An UNCLASSIFIED cell (class 0, or a world generated before phase 6
+        //    ran) scores 1.0: no information is not the same as bad ground, the
+        //    same discipline the campaign applies to an empty kin roster.
+        //  • A classified-but-unlisted soil keeps `SOIL_UNLISTED`, not zero.
+        //    Vetoing would let one term silently delete a good's entire belt —
+        //    which is what a first cut of this did, and it emptied `saffron`
+        //    outright. The floor still produces the intended patchiness (a 4x
+        //    contrast between preferred and indifferent ground) while keeping the
+        //    "a good must never silently vanish" rule §8.16 already holds
+        //    minerals to.
+        m *= if sc == 0 {
+            1.0
+        } else {
+            spec.soil.iter().find(|(c, _)| *c == sc).map(|(_, w)| *w).unwrap_or(SOIL_UNLISTED)
+        };
+    }
+    if let Some([lo, hi, e]) = spec.relief {
+        m *= band(local_relief(buf, x, y), lo, hi, e);
+    }
+    // Remap into [TERROIR_FLOOR, 1.0] — see the constant for why this floor is
+    // the whole safety mechanism.
+    TERROIR_FLOOR + (1.0 - TERROIR_FLOOR) * m.clamp(0.0, 1.0)
+}
+
+/// Local RELIEF at a cell: the greatest normalized-elevation drop between the
+/// cell and any neighbour within 2 cells. A slope measure, deliberately NOT an
+/// altitude measure — terraced vines and hill tea want a slope at any height,
+/// paddy rice and cereal want flat ground at any height, and `elevation` alone
+/// cannot distinguish those two cases.
+///
+/// Cheap by construction: a bounded 5x5 max over a field already in memory, only
+/// evaluated for goods that actually declare an `Envelope::relief` band, so the
+/// default path costs nothing (§8.9 rule 1 — no outward scan per cell in the
+/// general case).
+fn local_relief(buf: &WorldBuffer, x: u32, y: u32) -> f32 {
+    let e0 = buf.elevation[buf.idx(x, y)];
+    let mut lo = e0;
+    let mut hi = e0;
+    for dy in -2i32..=2 {
+        for dx in -2i32..=2 {
+            let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+            if buf.terrain[ni] != 1 { continue; }
+            let e = buf.elevation[ni];
+            if e < lo { lo = e; }
+            if e > hi { hi = e; }
+        }
+    }
+    hi - lo
+}
+
+/// Weight kept by a classified soil class a good does not list. A preference, not
+/// a veto — see `terroir_multiplier`.
+const SOIL_UNLISTED: f32 = 0.25;
+
+/// The least a good's score may be reduced to by the fine-grain terroir terms.
+///
+/// Terroir shapes a belt's TEXTURE; it must not decide whether the belt exists.
+/// A first cut applied soil x relief as a raw multiplier and pushed `tea` and
+/// `saffron` — whose climates were already marginal on the diagnostic world —
+/// under `localize_good`'s seed threshold, so both placed literally nothing. That
+/// is the same failure mode the locality pass already guards with its own FRINGE
+/// and FLOOR (GOODS_LOCALITIES_PLAN D5), and it gets the same answer here: the
+/// multiplier is remapped into `[TERROIR_FLOOR, 1.0]`, which still gives roughly a
+/// 2x contrast between preferred and indifferent ground — plenty for visible
+/// patchiness — while never being able to delete a good from a world.
+const TERROIR_FLOOR: f32 = 0.45;
+
+/// How many of the world's smallest landmasses an endemic good may fall back to
+/// when no true island carries it (see `localize_good`'s `island_relax`).
+const SMALLEST_LANDMASS_FALLBACK: usize = 6;
+
+/// The largest a landmass may be and still count as an ISLAND, in km². Stated in
+/// km² and converted per world, never in cells, for the same reason the locality
+/// size ladder is (§8.19 / GOODS_LOCALITIES_PLAN §2.1): a cell is ~11 km across
+/// at 3600x1800 but ~133 km at the sizes the test worlds use, so a fixed CELL
+/// count would mean "Great Britain" on one world and "most of Eurasia" on
+/// another. ~250,000 km² is roughly Great Britain plus Ireland — generous on
+/// purpose, because the failure it guards against (no landmass anywhere
+/// qualifies, so every endemic good silently vanishes) is far worse than an
+/// endemic occasionally landing on a large island.
+pub const ISLAND_MAX_KM2: f32 = 250_000.0;
+
+/// Connected-component labelling of the world's LAND — the pass this codebase
+/// never had.
+///
+/// Until now `Domain::Island` was approximated as `distance_to_ocean < 0.20`,
+/// which is *near-coast land*, not an island: it matched the entire coastal
+/// fringe of every continent. So an "island" good was really a coastal good, and
+/// a true island endemic — the single most valuable structure in the pre-modern
+/// spice trade — could not be expressed at all.
+///
+/// One BFS over the whole grid, wrap-aware in X and clamped at the poles (rule
+/// 6), built ONCE per world and shared by every good — the same discipline
+/// `deposits::GeoContext` and `RiverContext` already follow. Never a per-good
+/// scan (§8.9 rule 1).
+pub struct LandmassContext {
+    /// Component id per cell; `u32::MAX` for sea.
+    pub id: Vec<u32>,
+    /// Cell count per component, indexed by component id.
+    pub area: Vec<u32>,
+    /// `ISLAND_MAX_KM2` converted to this world's cells (see the const).
+    pub island_max_cells: u32,
+}
+
+impl LandmassContext {
+    pub fn build(buf: &WorldBuffer) -> LandmassContext {
+        let w = buf.width;
+        let h = buf.height;
+        let n = buf.total();
+        let mut id = vec![u32::MAX; n];
+        let mut area: Vec<u32> = Vec::new();
+        let mut queue: VecDeque<usize> = VecDeque::new();
+        for start in 0..n {
+            if buf.terrain[start] != 1 || id[start] != u32::MAX { continue; }
+            let comp = area.len() as u32;
+            let mut count = 0u32;
+            id[start] = comp;
+            queue.clear();
+            queue.push_back(start);
+            while let Some(ci) = queue.pop_front() {
+                count += 1;
+                let cx = (ci as u32 % w) as i32;
+                let cy = (ci as u32 / w) as i32;
+                // 8-connected: a diagonal land step keeps an isthmus or a chain of
+                // skerries as ONE landmass, which is what a walker (or a nutmeg
+                // tree) experiences. 4-connectivity would split Denmark from itself.
+                for dy in -1i32..=1 {
+                    for dx in -1i32..=1 {
+                        if dx == 0 && dy == 0 { continue; }
+                        let ny = cy + dy;
+                        if ny < 0 || ny >= h as i32 { continue; }
+                        let ni = buf.idx(buf.wrap_x(cx + dx), ny as u32);
+                        if buf.terrain[ni] == 1 && id[ni] == u32::MAX {
+                            id[ni] = comp;
+                            queue.push_back(ni);
+                        }
+                    }
+                }
+            }
+            area.push(count);
+        }
+        // A cell's area in km²: the equatorial circumference divided by the grid
+        // width gives its width; cells are square in this projection's own units.
+        let km_per_cell = 40075.0f32 / w.max(1) as f32;
+        let cell_km2 = (km_per_cell * km_per_cell).max(1.0);
+        let island_max_cells = (ISLAND_MAX_KM2 / cell_km2).round().max(1.0) as u32;
+        LandmassContext { id, area, island_max_cells }
+    }
+
+    /// Cells in the landmass containing `i`, or 0 for a sea cell.
+    pub fn area_at(&self, i: usize) -> u32 {
+        match self.id.get(i).copied() {
+            Some(c) if c != u32::MAX => self.area.get(c as usize).copied().unwrap_or(0),
+            _ => 0,
+        }
+    }
+
+    /// Is this cell on a landmass small enough to count as an island?
+    pub fn is_island(&self, i: usize) -> bool {
+        let a = self.area_at(i);
+        a > 0 && a <= self.island_max_cells
+    }
+
+    /// Is this cell on one of the world's `k` SMALLEST landmasses? The relaxation
+    /// an endemic good falls back to when no landmass clears `is_island` — a world
+    /// whose islands are all slightly too big must still be able to grow nutmeg
+    /// somewhere, and "the smallest land there is" is the honest answer. Ranking
+    /// is by area then component id, so it is deterministic.
+    pub fn is_among_smallest(&self, i: usize, k: usize) -> bool {
+        let Some(c) = self.id.get(i).copied().filter(|&c| c != u32::MAX) else { return false };
+        let mut order: Vec<(u32, u32)> =
+            self.area.iter().copied().enumerate().map(|(idx, a)| (a, idx as u32)).collect();
+        order.sort();
+        order.iter().take(k).any(|&(_, idx)| idx == c)
+    }
+}
+
+
 /// Place every good's belt. Returns the discrete ORE WORKINGS (see `sim::deposits`)
 /// — the per-deposit grade / extent / depth that the u8 belt column cannot carry.
 /// The belt column is still written exactly as before, so every existing reader,
 /// the overlay and the v2 blob format are untouched (rule 7).
+/// One good's line in the post-generation placement report.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+pub struct GoodPlacementRow {
+    pub id: String,
+    pub name: String,
+    pub icon: String,
+    /// "global" | "local" | "endemic" | "deposits" | "manufactured".
+    pub distribution: String,
+    pub category: String,
+    /// Cells carrying any production, and that as a share of the world's LAND
+    /// (or, for a marine good, of its sea).
+    pub cells: u32,
+    pub land_share: f32,
+    /// Independent homelands actually seeded (`GoodSpec::origins` is the request;
+    /// this is what the world could deliver).
+    pub origins: u8,
+    pub localities: u32,
+    /// Named (notable-grade) localities, for the "subcategories" reading.
+    pub notable: Vec<String>,
+    /// Mean belt value where present, 0..1 — the good's typical QUALITY here.
+    pub mean_grade: f32,
+    /// Empty when placement is healthy; otherwise why it is not.
+    pub flags: Vec<String>,
+}
+
+/// The whole report. `absent` and `flagged` are the point of it: a good that
+/// silently failed to place used to be invisible until someone went looking for
+/// it on the map.
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, Default)]
+pub struct GoodsPlacementReport {
+    pub rows: Vec<GoodPlacementRow>,
+    pub enabled: u32,
+    pub placed: u32,
+    pub absent: u32,
+    pub flagged: u32,
+}
+
+/// Flag kinds, as stable strings the frontend can style. Kept as consts so the
+/// report and any future test agree on the vocabulary.
+pub const FLAG_ABSENT: &str = "absent";
+pub const FLAG_FALLBACK: &str = "fallback_seed";
+pub const FLAG_UBIQUITOUS: &str = "ubiquitous";
+pub const FLAG_SINGLE_CELL: &str = "single_cell";
+
 pub fn compute_trade_goods(
     buf: &mut WorldBuffer, rivers: &[River], seed: u64, gem_deposits: u32,
     climate_strictness: f32, specs: &[GoodSpec],
-) -> (Vec<crate::sim::deposits::Deposit>, Vec<super::localities::GoodLocality>) {
+) -> (
+    Vec<crate::sim::deposits::Deposit>,
+    Vec<super::localities::GoodLocality>,
+    GoodsPlacementReport,
+) {
     use crate::sim::deposits::{self, DepositModel, GeoContext, MineralPlan};
     let w = buf.width;
     let h = buf.height;
@@ -866,6 +1104,10 @@ pub fn compute_trade_goods(
     // preview, which has no rivers to hand) — see `river_multiplier`'s neutral
     // fallback.
     let river_ctx = Some(RiverContext::build(buf, rivers));
+    // Connected-component labelling of the land, built ONCE for the whole world
+    // (same discipline as `RiverContext`/`GeoContext`). Needed by `Domain::Island`
+    // and by every `Distribution::Endemic` good.
+    let land_ctx = LandmassContext::build(buf);
     // GOODS_LOCALITIES_PLAN.md Slice 3 — every locality placed this run, across
     // every good, flattened for persistence exactly as the ore workings are.
     let mut all_localities: Vec<super::localities::GoodLocality> = Vec::new();
@@ -884,6 +1126,12 @@ pub fn compute_trade_goods(
     // Seed cells of the homelands placed so far, so each new Local good is pushed
     // to a DIFFERENT part of the continent (plausible spread, not all clustered).
     let mut placed_seeds: Vec<usize> = Vec::new();
+    // Goods whose FIRST homeland could not clear the seed threshold anywhere and
+    // had to fall back to the least-bad cell on the map. That is the honest
+    // signal "this world may have no suitable climate for this good" — before the
+    // report it was completely silent, and the good simply appeared somewhere
+    // implausible.
+    let mut fallback_seeded: std::collections::BTreeSet<String> = Default::default();
 
     // ── GEOLOGICAL CONTEXT for deposit goods ────────────────────────────────
     // Built ONCE for the whole world (a per-good BFS across 45 goods would be a
@@ -971,12 +1219,17 @@ pub fn compute_trade_goods(
                 for y in 0..h {
                     for x in 0..w {
                         let s = if let Some(env) = &spec.scoring {
-                            envelope_score(buf, env, spec.domain, x, y, river_ctx.as_ref(), spec.marine_band)
+                            envelope_score(buf, env, spec.domain, x, y, river_ctx.as_ref(), spec.marine_band, Some(&land_ctx))
                         } else if let Some(idx) = builtin_idx {
                             good_score(buf, idx, x, y, river_ctx.as_ref(), spec.marine_band)
                         } else {
                             0.0
                         };
+                        // FINE-GRAIN terroir, applied AFTER whichever scorer ran
+                        // so it covers built-in and custom goods identically (see
+                        // `GoodSpec::soil` / `::relief`). Absent by default, so a
+                        // good that declares neither is scored exactly as before.
+                        let s = s * terroir_multiplier(buf, spec, x, y);
                         score[buf.idx(x, y)] = shape(s);
                     }
                 }
@@ -986,10 +1239,19 @@ pub fn compute_trade_goods(
                     Some(idx) if spec.scoring.is_none() => (idx as u64).wrapping_mul(SEED_SALT_K),
                     _ => id_salt(&spec.id),
                 };
-                let (mut belt, seed_cell) =
-                    localize_good(buf, &score, marine, unlimited, spec.rarity, salt, seed, &placed_seeds);
-                // Remember a Local homeland so the next good is seeded elsewhere.
-                if !unlimited { if let Some(sc) = seed_cell { placed_seeds.push(sc); } }
+                let endemic = matches!(spec.distribution, Distribution::Endemic);
+                let best_score = score.iter().copied().fold(0.0f32, f32::max);
+                let (mut belt, seed_cells) = localize_good(
+                    buf, &score, marine, unlimited, spec.rarity, salt, seed, &placed_seeds,
+                    spec.origins, endemic, Some(&land_ctx));
+                // Remember every homeland so the next good is seeded elsewhere.
+                placed_seeds.extend(seed_cells.iter().copied());
+                // `localize_good`'s seed threshold, recomputed here so the report
+                // can say WHY a good landed where it did rather than guessing.
+                let seed_thresh = (0.45 + (spec.rarity - 0.5).clamp(-0.5, 0.5) * 0.30).clamp(0.20, 0.75);
+                if !unlimited && !seed_cells.is_empty() && best_score < seed_thresh {
+                    fallback_seeded.insert(spec.id.clone());
+                }
                 // GOODS_LOCALITIES_PLAN.md Slice 3 (D1/D5/D6) — cluster the belt into
                 // real terroir patches and thin it between them (full modulation, with
                 // a floor so a producing cell never reaches literal zero). Runs BEFORE
@@ -1057,7 +1319,101 @@ pub fn compute_trade_goods(
     // Phase 7's culture map is active (see `sim_run_all`'s ordering).
     super::localities::name_notable_localities(buf, &mut all_localities);
 
-    (all, all_localities)
+    let report = build_placement_report(buf, specs, &all_localities, &fallback_seeded);
+    (all, all_localities, report)
+}
+
+
+/// Build the post-generation placement report from the finished belts.
+///
+/// Pure read-back over `buf.goods` — it changes nothing and can never move a
+/// belt. Its whole value is the two lists nobody could see before: goods that
+/// placed NOTHING, and goods that placed only because the seeder fell back to the
+/// least-bad cell on a world with no suitable climate for them.
+fn build_placement_report(
+    buf: &WorldBuffer,
+    specs: &[GoodSpec],
+    localities: &[super::localities::GoodLocality],
+    fallback_seeded: &std::collections::BTreeSet<String>,
+) -> GoodsPlacementReport {
+    let n = buf.total();
+    let land_cells = buf.terrain.iter().filter(|&&t| t == 1).count().max(1) as f32;
+    let sea_cells = (n as f32 - land_cells).max(1.0);
+
+    let mut report = GoodsPlacementReport::default();
+    for (slot, spec) in specs.iter().enumerate() {
+        if !spec.enabled { continue; }
+        report.enabled += 1;
+        let marine = matches!(spec.domain, Domain::Marine);
+        let col = buf.goods.get(slot);
+        let (cells, sum) = match col {
+            Some(c) => {
+                let mut cells = 0u32;
+                let mut sum = 0.0f32;
+                for &v in c.iter() {
+                    if v > 0 { cells += 1; sum += v as f32 / 255.0; }
+                }
+                (cells, sum)
+            }
+            None => (0, 0.0),
+        };
+        let denom = if marine { sea_cells } else { land_cells };
+        let mine: Vec<&super::localities::GoodLocality> =
+            localities.iter().filter(|l| l.good == spec.id).collect();
+        let mut notable: Vec<String> =
+            mine.iter().filter(|l| !l.name.is_empty()).map(|l| l.name.clone()).collect();
+        notable.sort();
+        notable.dedup();
+
+        let mut flags: Vec<String> = Vec::new();
+        let manufactured = matches!(spec.distribution, Distribution::Manufactured);
+        if cells == 0 && !manufactured {
+            flags.push(FLAG_ABSENT.to_string());
+            report.absent += 1;
+        } else {
+            if !manufactured { report.placed += 1; }
+            if fallback_seeded.contains(&spec.id) { flags.push(FLAG_FALLBACK.to_string()); }
+            let share = cells as f32 / denom;
+            // A non-staple covering a quarter of the world is almost always a
+            // scoring mistake, not a rich world.
+            if share > 0.25 && spec.need_tier > 0 { flags.push(FLAG_UBIQUITOUS.to_string()); }
+            if cells <= 2 && !matches!(spec.distribution, Distribution::Deposits) {
+                flags.push(FLAG_SINGLE_CELL.to_string());
+            }
+        }
+        if !flags.is_empty() && !flags.iter().any(|f| f == FLAG_ABSENT) { report.flagged += 1; }
+
+        report.rows.push(GoodPlacementRow {
+            id: spec.id.clone(),
+            name: spec.name.clone(),
+            icon: spec.icon.clone(),
+            distribution: match spec.distribution {
+                Distribution::Global => "global",
+                Distribution::Local => "local",
+                Distribution::Endemic => "endemic",
+                Distribution::Deposits => "deposits",
+                Distribution::Manufactured => "manufactured",
+            }
+            .to_string(),
+            category: spec.category.clone(),
+            cells,
+            land_share: cells as f32 / denom,
+            origins: mine.len().min(u8::MAX as usize) as u8,
+            localities: mine.len() as u32,
+            notable,
+            mean_grade: if cells > 0 { sum / cells as f32 } else { 0.0 },
+            flags,
+        });
+    }
+    // Absent and flagged goods first — the report exists to surface them.
+    report.rows.sort_by(|a, b| {
+        let rank = |r: &GoodPlacementRow| if r.flags.iter().any(|f| f == FLAG_ABSENT) { 0 }
+            else if !r.flags.is_empty() { 1 } else { 2 };
+        rank(a).cmp(&rank(b))
+            .then_with(|| a.category.cmp(&b.category))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    report
 }
 
 /// Declarative envelope scorer for custom (and overridden) goods. Reproduces the
@@ -1065,7 +1421,7 @@ pub fn compute_trade_goods(
 /// fertility Ã— coast bonus. Absent terms contribute a neutral 1.0.
 fn envelope_score(
     buf: &WorldBuffer, env: &Envelope, domain: Domain, x: u32, y: u32,
-    rc: Option<&RiverContext>, marine_band: MarineBand,
+    rc: Option<&RiverContext>, marine_band: MarineBand, lm: Option<&LandmassContext>,
 ) -> f32 {
     let i = buf.idx(x, y);
     let land = buf.terrain[i] == 1;
@@ -1082,9 +1438,17 @@ fn envelope_score(
             if !land { return 0.0; }
         }
         Domain::Island => {
-            // Approximation (no connected-component pass): near-coast land stands
-            // in for island / small-landmass placement.
-            if !land || buf.distance_to_ocean[i] >= 0.20 { return 0.0; }
+            if !land { return 0.0; }
+            match lm {
+                // A REAL island now (`LandmassContext`), not the old near-coast
+                // approximation — which matched the entire coastal fringe of every
+                // continent, so an "island" good was really just a coastal good.
+                Some(l) => if !l.is_island(i) { return 0.0; },
+                // No landmass context: the Goods Editor's live preview, which has
+                // no world to label. Fall back to the old approximation rather
+                // than scoring nothing, so the preview still shows something.
+                None => if buf.distance_to_ocean[i] >= 0.20 { return 0.0; },
+            }
         }
     }
 
@@ -1097,7 +1461,18 @@ fn envelope_score(
 
     let mut s = 1.0f32;
     if !env.climate.is_empty() {
-        s *= env.climate.iter().find(|(z, _)| *z == k).map(|(_, w)| *w).unwrap_or(0.0);
+        // Same raw-then-folded rule `good_score` uses: an author who listed the
+        // humid zone (`CFB`) and not its dry-winter twin (`CWB`) still scores in
+        // the twin, but an author who listed the twin EXPLICITLY is never
+        // overridden by the fold. Before this, custom goods saw raw Köppen while
+        // built-ins saw folded Köppen — the same cell scored under two different
+        // climate labels depending on which scorer ran.
+        let w_raw = env.climate.iter().find(|(z, _)| *z == k).map(|(_, w)| *w);
+        let w = w_raw.or_else(|| {
+            let kf = clim_base(k);
+            (kf != k).then(|| env.climate.iter().find(|(z, _)| *z == kf).map(|(_, w)| *w)).flatten()
+        });
+        s *= w.unwrap_or(0.0);
     }
     if let Some([c, wd]) = env.temp { s *= bell(t, c, wd); }
     if let Some([lo, hi, e]) = env.precip { s *= band(p, lo, hi, e); }
@@ -1119,6 +1494,11 @@ fn envelope_score(
 /// the newly-introduced Cw*/Dw* zones came up empty. Mediterranean (Cs*) and
 /// tropical savanna (As) are climatically meaningful for their goods (olives,
 /// wine, etc.) and are deliberately NOT folded.
+///
+/// **Used as a FALLBACK only, never as a pre-pass.** `good_score` applied this
+/// before its match, which made every arm naming a Cw/Dw/Ds zone unreachable and
+/// scored tea and coffee at exactly 0.0 in Cwb — their home climate. See
+/// `good_score`'s own doc and the `dry_winter_zones_are_reachable` gate.
 fn clim_base(k: u8) -> u8 {
     match k {
         CWA => CFA, CWB => CFB, CWC => CFC,
@@ -1129,9 +1509,42 @@ fn clim_base(k: u8) -> u8 {
 }
 
 /// Raw 0..1 suitability of good `g` at one cell (before localization).
+///
+/// The dry-winter / dry-summer Köppen variants are scored in their **RAW** zone
+/// first and folded onto the humid equivalent (`clim_base`) only as a FALLBACK.
+/// Folding unconditionally — which is what this did — made every match arm below
+/// that names `CWA`/`CWB`/`CWC`/`DW*`/`DS*` **unreachable**, because `k` could
+/// never hold those codes by the time the match ran. That was not cosmetic: tea
+/// and coffee both name `CWB` (subtropical highland, dry winter — Darjeeling,
+/// Yunnan, the Ethiopian and Kenyan highlands, i.e. THE tea and coffee climate)
+/// and both scored exactly **0.0** there, since `CWB` folds to `CFB` and neither
+/// good lists it. They were placed by their weak fallback arms instead, which put
+/// them in the wrong climates entirely. Wine's `DSA|DSB` and silk's `CWB` arms
+/// were dead the same way.
+///
+/// Raw-first preserves `clim_base`'s original purpose (a good that genuinely
+/// doesn't care about winter dryness still scores in a Cw/Dw/Ds zone via its
+/// humid arm) while never zeroing a good that named the dry-winter zone
+/// explicitly. Gate: `dry_winter_zones_are_reachable`.
 fn good_score(
     buf: &WorldBuffer, g: usize, x: u32, y: u32,
     rc: Option<&RiverContext>, marine_band: MarineBand,
+) -> f32 {
+    let k_raw = buf.koppen[buf.idx(x, y)];
+    let s = good_score_in_zone(buf, g, x, y, rc, marine_band, k_raw);
+    if s > 0.0 { return s; }
+    let k_folded = clim_base(k_raw);
+    if k_folded != k_raw {
+        return good_score_in_zone(buf, g, x, y, rc, marine_band, k_folded);
+    }
+    0.0
+}
+
+/// `good_score` evaluated against ONE specific Köppen zone code (see the two-pass
+/// raw-then-folded scheme documented on `good_score`). Never call this directly.
+fn good_score_in_zone(
+    buf: &WorldBuffer, g: usize, x: u32, y: u32,
+    rc: Option<&RiverContext>, marine_band: MarineBand, k: u8,
 ) -> f32 {
     let i = buf.idx(x, y);
     let land = buf.terrain[i] == 1;
@@ -1140,7 +1553,6 @@ fn good_score(
     if !marine && !land { return 0.0; }
     if marine && !marine_band_ok(buf, x, y, marine_band) { return 0.0; }
 
-    let k = clim_base(buf.koppen[i]);
     let t = buf.temperature[i];
     let p = buf.precipitation[i];
     let elev = buf.elevation[i];
@@ -1506,10 +1918,18 @@ fn good_score(
 /// passability rule, `unlimited` chooses the Global (every-cell) vs Local (one
 /// seeded homeland) model, `rarity` (0..1, 0.5 = neutral) tightens the seed/spread
 /// thresholds, and `salt` seeds the deterministic homeland pick.
+/// Place a good's belt. Returns the belt column and EVERY homeland seed cell it
+/// used (one per origin; empty for a `Global` good, which has no homeland).
+///
+/// `origins` is how many independent homelands to seed (1 = the historical
+/// behaviour). `endemic` confines the good to a single small landmass and
+/// disables the island-jump, which is the difference between "rare" and "grows
+/// in exactly one place on Earth" — see `Distribution::Endemic`.
+#[allow(clippy::too_many_arguments)]
 fn localize_good(
     buf: &WorldBuffer, score: &[f32], marine: bool, unlimited: bool, rarity: f32, salt: u64, seed: u64,
-    existing: &[usize],
-) -> (Vec<u8>, Option<usize>) {
+    existing: &[usize], origins: u8, endemic: bool, lm: Option<&LandmassContext>,
+) -> (Vec<u8>, Vec<usize>) {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
@@ -1527,11 +1947,54 @@ fn localize_good(
         (((1.0 - rarity).max(0.05)) * 1800.0 + 30.0) as usize
     } else { usize::MAX };
 
+    // ── ENDEMIC: pick the ONE landmass this good lives on ─────────────────────
+    // The smallest landmass that carries any positive score for it — preferring a
+    // true island (`is_island`) when one qualifies, and otherwise taking the
+    // smallest scoring landmass there is.
+    //
+    // Choosing the target up front, rather than filtering per cell against a size
+    // threshold, is what makes the guarantee unconditional: if this good's climate
+    // exists ANYWHERE on this world, it gets exactly one home, and if it exists
+    // nowhere it is honestly absent (and the report says so). A first cut filtered
+    // on a size threshold alone and all six shipped endemics measured ZERO cells —
+    // a silent total failure of the feature, which is the exact outcome §8.16's
+    // "a mineral must never silently vanish" rule exists to prevent.
+    let endemic_comp: Option<u32> = if endemic {
+        lm.and_then(|l| {
+            let mut best: Option<(u8, u32, u32)> = None; // (rank, area, comp)
+            let mut seen: std::collections::BTreeSet<u32> = Default::default();
+            for i in 0..n {
+                if buf.terrain[i] != 1 || score[i] <= 0.0 { continue; }
+                let Some(c) = l.id.get(i).copied().filter(|&c| c != u32::MAX) else { continue };
+                if !seen.insert(c) { continue; }
+                // rank 0 = a true island, 1 = anything else: a real island always
+                // beats a smaller-but-continental landmass.
+                let rank = if l.is_island(i) { 0u8 } else { 1u8 };
+                let area = l.area.get(c as usize).copied().unwrap_or(u32::MAX);
+                let cand = (rank, area, c);
+                if best.map(|b| cand < b).unwrap_or(true) { best = Some(cand); }
+            }
+            best.map(|(_, _, c)| c)
+        })
+    } else {
+        None
+    };
+
     let passable = |i: usize| -> bool {
         if marine {
             buf.terrain[i] == 0
+        } else if !(buf.terrain[i] == 1 && buf.elevation[i] < MOUNTAIN_NORM) {
+            false
+        } else if endemic {
+            // Confined to its ONE chosen landmass. Combined with the disabled
+            // island-jump below, the belt physically cannot reach the mainland or
+            // a neighbouring island — which is the whole mechanism.
+            match (endemic_comp, lm) {
+                (Some(c), Some(l)) => l.id.get(i).copied() == Some(c),
+                _ => false,
+            }
         } else {
-            buf.terrain[i] == 1 && buf.elevation[i] < MOUNTAIN_NORM
+            true
         }
     };
 
@@ -1542,86 +2005,118 @@ fn localize_good(
                 out[i] = q(score[i]);
             }
         }
-        return (out, None);
+        return (out, Vec::new());
     }
 
-    // Dispersion: push each good's homeland AWAY from the homelands already placed
-    // this run, so the world's goods spread plausibly across different parts of a
-    // continent instead of all piling into the single most-suitable region.
+    // Dispersion: push each homeland AWAY from those already placed — both the
+    // homelands of OTHER goods (`existing`) and the earlier origins of THIS good —
+    // so the world's goods spread plausibly instead of all piling into the single
+    // most-suitable region, and a multi-origin good's origins land in genuinely
+    // different parts of the world rather than adjacent to each other.
     let disp_r = (w as f32 * 0.16).max(8.0);
     let wrapdx = |a: i32, b: i32| -> i32 { let mut d = (a - b).abs(); if d > w as i32 / 2 { d = w as i32 - d; } d };
-    let dispersion = |i: usize| -> f32 {
-        if existing.is_empty() { return 1.0; }
+    let dispersion = |i: usize, others: &[usize]| -> f32 {
+        if others.is_empty() { return 1.0; }
         let cx = (i as u32 % w) as i32;
         let cy = (i as u32 / w) as i32;
         let mut nd = f32::INFINITY;
-        for &e in existing {
+        for &e in others {
             let ex = (e as u32 % w) as i32;
             let ey = (e as u32 / w) as i32;
             let dx = wrapdx(cx, ex) as f32;
             let dy = (cy - ey) as f32;
             nd = nd.min((dx * dx + dy * dy).sqrt());
         }
-        (nd / disp_r).clamp(0.15, 1.0) // ~0.15 right on a rival homeland â†’ 1.0 far away
+        (nd / disp_r).clamp(0.15, 1.0) // ~0.15 right on a rival homeland -> 1.0 far away
     };
 
-    // â”€â”€ SEEDED goods: one contiguous homeland â”€â”€
-    // Deterministic weighted-random seed selection (Ã— dispersion penalty).
+    // ── SEEDED goods: one contiguous homeland PER ORIGIN ──────────────────────
+    // `origins` is 1 for every good that predates the field, in which case this is
+    // exactly the old single-homeland behaviour.
     let gs = seed ^ salt;
-    let mut best_seed = usize::MAX;
-    let mut best_key = -1.0f32;
-    let mut fallback = usize::MAX;
-    let mut fallback_score = spread_thresh;
-    for i in 0..n {
-        if !passable(i) { continue; }
-        let s = score[i];
-        if s > fallback_score { fallback_score = s; fallback = i; }
-        if s >= seed_thresh {
-            let key = s * dispersion(i) * hash01(gs ^ (i as u64).wrapping_mul(0x100000001B3));
-            if key > best_key { best_key = key; best_seed = i; }
-        }
-    }
-    let seed_cell = if best_seed != usize::MAX {
-        best_seed
-    } else if fallback != usize::MAX {
-        fallback
-    } else {
-        return (out, None); // good's climate doesn't exist in this world
-    };
+    let n_origins = origins.max(1) as usize;
+    // The extreme-rarity homeland cap is a budget for the good AS A WHOLE, split
+    // between its origins — two origins of a rare good are two small patches, not
+    // two full-size ones (which would double the world's supply of it).
+    let cap_per_origin = if cap == usize::MAX { usize::MAX } else { (cap / n_origins).max(30) };
 
     // Island-jump: a seeded belt may hop a narrow sea (or, for marine goods, a
     // narrow land bridge) up to ~4% of the map width, so thin straits / island
-    // chains don't chop one homeland into several disconnected patches.
-    let jump = ((w as f32) * 0.04).round().clamp(2.0, 80.0) as i32;
+    // chains don't chop one homeland into several disconnected patches. An
+    // ENDEMIC good may never hop: that is what keeps nutmeg on the Bandas rather
+    // than spreading down the whole archipelago.
+    let jump = if endemic { 1 } else { ((w as f32) * 0.04).round().clamp(2.0, 80.0) as i32 };
 
     let mut visited = vec![false; n];
+    let mut seeds: Vec<usize> = Vec::new();
     let mut queue = VecDeque::new();
-    visited[seed_cell] = true;
-    queue.push_back(seed_cell);
-    let mut placed = 0usize;
-    while let Some(ci) = queue.pop_front() {
-        out[ci] = q(score[ci]);
-        placed += 1;
-        if placed >= cap { break; } // extreme-rare homeland stays tiny
-        let cx = (ci as u32 % w) as i32;
-        let cy = (ci as u32 / w) as i32;
-        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            // Step 1 = ordinary neighbour; steps 2..=jump = water/land gap hops.
-            for k in 1..=jump {
-                let nx = buf.wrap_x(cx + dx * k);
-                let ny = cy + dy * k;
-                if ny < 0 || ny >= h as i32 { break; }
-                let ni = buf.idx(nx, ny as u32);
-                if !passable(ni) { continue; } // still in the gap â€” keep probing
-                if !visited[ni] && score[ni] >= spread_thresh {
-                    visited[ni] = true;
-                    queue.push_back(ni);
+
+    for origin in 0..n_origins {
+        // Every origin repels both the other goods' homelands and this good's own
+        // earlier origins.
+        let mut repel: Vec<usize> = existing.to_vec();
+        repel.extend(seeds.iter().copied());
+
+        let mut best_seed = usize::MAX;
+        let mut best_key = -1.0f32;
+        let mut fallback = usize::MAX;
+        let mut fallback_score = spread_thresh;
+        for i in 0..n {
+            if !passable(i) { continue; }
+            if visited[i] { continue; } // already inside an earlier origin's belt
+            let s = score[i];
+            if s > fallback_score { fallback_score = s; fallback = i; }
+            if s >= seed_thresh {
+                // The origin index enters the hash, so origin 2 is not simply the
+                // runner-up of origin 1's ranking — it is its own draw.
+                let key = s * dispersion(i, &repel)
+                    * hash01(gs ^ (origin as u64).wrapping_mul(0x9E3779B97F4A7C15)
+                        ^ (i as u64).wrapping_mul(0x100000001B3));
+                if key > best_key { best_key = key; best_seed = i; }
+            }
+        }
+        let seed_cell = if best_seed != usize::MAX {
+            best_seed
+        } else if origin == 0 && fallback != usize::MAX {
+            // Only the FIRST origin may fall back to the least-bad cell (the
+            // "a mineral must never silently vanish" rule, applied to belts). A
+            // second origin that cannot clear the threshold simply does not exist
+            // in this world, which is the honest answer — not a duplicate homeland
+            // shoved onto marginal ground.
+            fallback
+        } else {
+            break;
+        };
+
+        seeds.push(seed_cell);
+        visited[seed_cell] = true;
+        queue.clear();
+        queue.push_back(seed_cell);
+        let mut placed = 0usize;
+        while let Some(ci) = queue.pop_front() {
+            out[ci] = q(score[ci]);
+            placed += 1;
+            if placed >= cap_per_origin { break; }
+            let cx = (ci as u32 % w) as i32;
+            let cy = (ci as u32 / w) as i32;
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                // Step 1 = ordinary neighbour; steps 2..=jump = water/land gap hops.
+                for k in 1..=jump {
+                    let nx = buf.wrap_x(cx + dx * k);
+                    let ny = cy + dy * k;
+                    if ny < 0 || ny >= h as i32 { break; }
+                    let ni = buf.idx(nx, ny as u32);
+                    if !passable(ni) { continue; } // still in the gap - keep probing
+                    if !visited[ni] && score[ni] >= spread_thresh {
+                        visited[ni] = true;
+                        queue.push_back(ni);
+                    }
+                    break; // first passable cell along this ray decides the ray
                 }
-                break; // first passable cell along this ray decides the ray
             }
         }
     }
-    (out, Some(seed_cell))
+    (out, seeds)
 }
 
 
@@ -1679,7 +2174,7 @@ pub fn preview_score_grid(buf: &WorldBuffer, spec: &GoodSpec, pw: u32, ph: u32) 
             let x = (px * buf.width / pw).min(buf.width - 1);
             let y = (py * buf.height / ph).min(buf.height - 1);
             let s = if let Some(env) = &spec.scoring {
-                envelope_score(buf, env, spec.domain, x, y, None, spec.marine_band)
+                envelope_score(buf, env, spec.domain, x, y, None, spec.marine_band, None)
             } else if let Some(idx) = builtin_idx {
                 good_score(buf, idx, x, y, None, spec.marine_band)
             } else { 0.0 };
@@ -1705,6 +2200,34 @@ fn has_land_within(buf: &WorldBuffer, x: u32, y: u32, r: i32) -> bool {
 mod tests {
     use crate::sim::elevation::fbm_noise;
     use std::collections::HashSet;
+    use super::*;
+
+    /// A minimal all-land world buffer for scoring tests. Mirrors the literal in
+    /// `salt_pans_make_salt_and_brine` rather than sharing it, so a change to that
+    /// test's fixture cannot silently alter this one's premise.
+    fn scoring_buf(w: u32, h: u32) -> crate::sim::world_buffer::WorldBuffer {
+        use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+        let n = (w * h) as usize;
+        WorldBuffer {
+            cols: ColumnSet::ALL, width: w, height: h, tiles_x: 1, tiles_y: 1,
+            equator_offset: 0.5, lat_scale: 1.0, lat_ratio: 1.0, obliquity: 23.44,
+            rotation_rate: 1.0, solar_lum: 1.0, greenhouse: 1.0, eccentricity: 0.0167, dryness: 1.0,
+            terrain: vec![1u8; n], elevation: vec![0.2f32; n], sea_depth: vec![0.0; n],
+            is_shelf: vec![0; n], is_shelf_edge: vec![0; n], locked_bits: Vec::new(),
+            plate_index: Vec::new(), boundary_type: Vec::new(), is_volcanic: Vec::new(),
+            temperature: vec![18.0; n], precipitation: vec![1200.0; n],
+            koppen: vec![0u8; n],
+            soil_type: vec![9u8; n], fertility: vec![0.7f32; n], fishery: Vec::new(),
+            current_type: Vec::new(), wind_vx: Vec::new(), wind_vy: Vec::new(), wind_speed: Vec::new(),
+            current_vx: Vec::new(), current_vy: Vec::new(),
+            distance_to_ocean: vec![0.5f32; n],
+            habitability: Vec::new(), salinity: vec![0u8; n], shark_risk: Vec::new(),
+            goods: Vec::new(), shipworm_risk: Vec::new(), storm_base: Vec::new(),
+            reef_risk: Vec::new(), disease_risk: Vec::new(), precip_summer_frac: Vec::new(),
+            seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
+        }
+    }
+
 
     /// The ore-province fix: each deposit good's candidate field is its OWN
     /// salt-seeded low-frequency noise, so two minerals rank DIFFERENT highland
@@ -1787,6 +2310,87 @@ mod tests {
     /// adjacent to land, and an Inshore good may never place a cell that isn't
     /// adjacent to land. `Either` is untouched (reproduces the old undifferentiated
     /// `sea_coastal` gate) on both a shore cell and a bank cell.
+    /// THE regression gate for the `clim_base` fold.
+    ///
+    /// `good_score` used to fold the dry-winter Köppen variants onto their humid
+    /// equivalents BEFORE its match ran, which made every arm naming `CWA`/`CWB`/
+    /// `CWC`/`DW*`/`DS*` unreachable. Tea and coffee both name `CWB` — subtropical
+    /// highland, dry winter: Darjeeling, Yunnan, the Ethiopian and Kenyan
+    /// highlands, i.e. exactly where tea and coffee come from — and both scored
+    /// 0.0 there, because `CWB` folds to `CFB` and neither good lists `CFB`. They
+    /// were placed by weak fallback arms in the wrong climates instead.
+    ///
+    /// The test asserts the CLAIM, not the implementation: a good that names a
+    /// dry-winter zone must score in that zone. Any future refactor of the fold
+    /// that reintroduces the bug fails here.
+    #[test]
+    fn dry_winter_zones_are_reachable() {
+        let w = 8u32;
+        let h = 4u32;
+        let mut buf = scoring_buf(w, h);
+        for i in 0..buf.total() {
+            buf.koppen[i] = crate::sim::koppen::CWB;
+            buf.elevation[i] = 0.30;
+        }
+        for (label, g) in [("tea", GOOD_TEA), ("coffee", GOOD_COFFEE)] {
+            let s = good_score(&buf, g, 3, 2, None, MarineBand::Either);
+            assert!(
+                s > 0.0,
+                "{label} scored {s} in Cwb — its own home climate. The clim_base \
+                 fold has been reapplied before the match, which makes every arm \
+                 naming a Cw/Dw/Ds zone unreachable."
+            );
+        }
+    }
+
+    /// The fold must still WORK as a fallback: a good that lists only the humid
+    /// zone keeps scoring in the dry-winter twin, which is the behaviour
+    /// `clim_base` was introduced for and which the fix must not cost.
+    #[test]
+    fn the_humid_fold_still_applies_as_a_fallback() {
+        let w = 8u32;
+        let h = 4u32;
+        let mut buf = scoring_buf(w, h);
+        for i in 0..buf.total() {
+            // Dwb folds to Dfb, which timber lists at full weight.
+            buf.koppen[i] = crate::sim::koppen::DWB;
+            buf.temperature[i] = 8.0;
+            buf.precipitation[i] = 700.0;
+        }
+        let s = good_score(&buf, GOOD_TIMBER, 3, 2, None, MarineBand::Either);
+        assert!(s > 0.0, "timber lost its humid-equivalent fallback in Dwb (scored {s})");
+    }
+
+    /// A landmass component must be a real connected region, and an island must be
+    /// distinguishable from a continent — the capability `Domain::Island` and
+    /// `Distribution::Endemic` both rest on, and which did not exist before.
+    #[test]
+    fn landmass_labelling_separates_an_island_from_a_continent() {
+        // A realistic grid width matters here: `ISLAND_MAX_KM2` converts to cells
+        // per world, so on a very coarse grid one cell is already several hundred
+        // km across and almost nothing qualifies as an island. 720 wide puts a
+        // cell at ~56 km, close to the app's "Large" preset.
+        let w = 720u32;
+        let h = 360u32;
+        let mut buf = scoring_buf(w, h);
+        for i in 0..buf.total() { buf.terrain[i] = 0; }
+        // A continent comfortably OVER `ISLAND_MAX_CELLS` (60x50 = 3000 cells)...
+        for y in 40..100u32 {
+            for x in 20..120u32 { let i = buf.idx(x, y); buf.terrain[i] = 1; }
+        }
+        // ...and a small island, separated by open water.
+        for y in 200..203u32 {
+            for x in 400..404u32 { let i = buf.idx(x, y); buf.terrain[i] = 1; }
+        }
+        let lm = LandmassContext::build(&buf);
+        let cont = buf.idx(60, 60);
+        let isle = buf.idx(401, 201);
+        assert_ne!(lm.id[cont], lm.id[isle], "the island was merged into the continent");
+        assert!(!lm.is_island(cont), "a 6000-cell continent must not read as an island");
+        assert!(lm.is_island(isle), "a 4x3 island must read as an island");
+        assert_eq!(lm.area_at(isle), 12, "island area");
+    }
+
     #[test]
     fn marine_band_splits_inshore_from_bank() {
         use crate::sim::world_buffer::{ColumnSet, WorldBuffer};

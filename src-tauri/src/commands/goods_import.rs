@@ -264,6 +264,9 @@ fn build_good(sec: &RawSection, report: &mut ImportReport) -> Option<GoodSpec> {
     }
 
     Some(GoodSpec {
+        origins: crate::sim::goods_spec::default_origins_for(&sec.id),
+        soil: Vec::new(),
+        relief: None,
         id: sec.id.clone(),
         name: name.to_string(),
         icon,
@@ -415,6 +418,7 @@ mod tests {
     #[test]
     fn add_only_never_overwrites_an_existing_id() {
         let mut existing = vec![GoodSpec {
+            origins: 1, soil: Vec::new(), relief: None,
             id: "iron".into(), name: "Iron (existing)".into(), icon: "x".into(), color: "#000".into(),
             enabled: true, domain: Domain::Continental, distribution: Distribution::Deposits,
             rarity: 0.5, desire: 0.5, network_luxury: false, builtin: true, deposit: None, scoring: None,

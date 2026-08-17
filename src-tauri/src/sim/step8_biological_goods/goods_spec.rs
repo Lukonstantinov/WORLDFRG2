@@ -16,7 +16,8 @@ use serde::{Deserialize, Serialize};
 use super::biological::{
     deposit_params, GOOD_BASE_VALUE, GOOD_BULK, GOOD_CATEGORY, GOOD_COLOR, GOOD_DESIRE, GOOD_ICON,
     GOOD_LABEL, GOOD_MARINE, GOOD_NAMES, GOOD_NEED_TIER, GOOD_NETWORK_LUXURY, GOOD_PERISH,
-    GOOD_RARITY, GOOD_UNLIMITED, GOOD_FRANKINCENSE, GOOD_INDIGO, GOOD_TOBACCO,
+    GOOD_RARITY, GOOD_UNLIMITED, GOOD_DYES, GOOD_FRANKINCENSE, GOOD_GEMSTONES, GOOD_INDIGO,
+    GOOD_TOBACCO,
 };
 use crate::tile::cell::GOODS_COUNT;
 
@@ -56,6 +57,19 @@ pub enum Distribution {
     Local,
     /// Discrete highland-locked blobs scattered worldwide (gems / metals).
     Deposits,
+    /// Confined to ONE small landmass and unable to leave it — the Banda nutmeg
+    /// case. Distinct from `Local` in two ways that matter: the homeland is chosen
+    /// among cells on landmasses under `ISLAND_MAX_CELLS`, and the flood-fill's
+    /// island-jump is DISABLED, so the belt physically cannot hop to a neighbouring
+    /// island or the mainland.
+    ///
+    /// This is why nutmeg was worth its weight in gold for two centuries: not
+    /// because the climate was rare (nutmeg grows happily across the wet tropics)
+    /// but because the *tree* only grew on ten islands totalling 60 km². A rarity
+    /// knob cannot express that — it makes a good scarce EVERYWHERE rather than
+    /// abundant in exactly one place and absent from the rest of the world, which
+    /// is the shape that actually produced the spice trade.
+    Endemic,
     /// Made in cities from a recipe (`inputs`), not extracted from any cell — has
     /// NO per-cell belt. Placed by `apply_manufacturing`, not the worldgen placer.
     Manufactured,
@@ -71,6 +85,11 @@ pub struct RecipeInput {
 
 fn default_province_scale() -> f32 {
     0.06
+}
+
+/// One homeland — the historical behaviour of every good before `origins` existed.
+fn default_origins() -> u8 {
+    1
 }
 
 /// Parameters for a `Deposits`-distributed good.
@@ -181,6 +200,52 @@ pub struct GoodSpec {
     /// gate exactly, so every save predating this field is unaffected.
     #[serde(default)]
     pub marine_band: MarineBand,
+    /// How many INDEPENDENT homelands a `Local` good seeds. 1 (the serde default,
+    /// so every pre-existing good and save is byte-identical) is the old
+    /// one-seed-one-flood-fill behaviour.
+    ///
+    /// Multi-origin is the historical NORM, not an exception: pepper came from
+    /// Malabar *and* Sumatra, cinnamon from Ceylon *and* China (cassia), cotton was
+    /// domesticated independently in India, Peru and the Levant, frankincense grew
+    /// in Hadhramaut *and* the Horn. A single homeland per good made every world's
+    /// trade map a set of one-source monopolies, which is the rarest case in the
+    /// record, not the usual one.
+    ///
+    /// Each origin repels the ones already placed through the SAME dispersion
+    /// penalty `localize_good` already applies between different goods, so origins
+    /// land on genuinely different parts of the world.
+    #[serde(default = "default_origins")]
+    pub origins: u8,
+    // ── FINE-GRAIN terrain factors (the patchiness pass) ──────────────────────
+    // These live on the SPEC, not on `Envelope`, deliberately: they must apply to
+    // built-in goods (scored by the hardcoded matcher, which has no Envelope) and
+    // to custom goods (scored by `envelope_score`) alike, and they are applied
+    // once by the placer after whichever scorer ran. Putting them in `Envelope`
+    // would have silently REPLACED a built-in's whole climate scorer with an
+    // envelope holding only these two terms.
+    //
+    // Every other scoring term varies over hundreds of km — Köppen zone,
+    // temperature, precipitation, |latitude|, normalized elevation, and fertility
+    // (itself a smoothed blend). That is why a belt rendered as one smooth
+    // continent-sized wash: nothing in the model varied at the 2-10 km scale at
+    // which real crop distributions are actually mottled. `soil_type` was computed
+    // by phase 6 and read by NOTHING in the goods layer; slope was never computed.
+    /// Sparse per-soil-class suitability (soil code → weight 0..1). Empty (the
+    /// serde default) = any soil, i.e. exactly the old behaviour.
+    ///
+    /// This is what separates goods that SHARE a climate: vines want stony,
+    /// sharply drained ground and fail on heavy clay; rice wants that clay
+    /// precisely because it holds water; olives want thin calcareous soil that
+    /// would starve a cereal. All three are Mediterranean.
+    #[serde(default)]
+    pub soil: Vec<(u8, f32)>,
+    /// Local relief band `{lo, hi, edge}` — the drop in normalized elevation
+    /// across a 2-cell neighbourhood. A SLOPE gate, not an altitude gate, and the
+    /// distinction is the point: terraced vines and hill tea want a slope at any
+    /// altitude, paddy rice and cereal want flat ground at any altitude, and
+    /// `Envelope::elevation` alone cannot say either.
+    #[serde(default)]
+    pub relief: Option<[f32; 3]>,
     // ── Market fields (serde defaults keep pre-market spec JSON loading) ──
     /// Need category; alternatives within a category substitute for each other
     /// in the market's needs ladder ("" = no substitution group).
@@ -326,7 +391,24 @@ pub fn default_list() -> Vec<GoodSpec> {
                 // ~1400 curation: tobacco is post-period flavor and frankincense/
                 // indigo fold into the incense/dyes categories — shipped disabled
                 // (still selectable in the editor, and old worlds keep them).
-                enabled: !matches!(g, GOOD_TOBACCO | GOOD_FRANKINCENSE | GOOD_INDIGO),
+                //
+                // RETIRED as duplicates (goods cull). Disabled, never deleted: these
+                // are fixed indices in `TileData.goods`, so removing a slot would
+                // break every saved `.worldforge` (rule 7). An old world keeps
+                // whatever its snapshot says; only NEW worlds ship without them.
+                //   • `gemstones` — a generic "gem" alongside ELEVEN specific stones
+                //     (jade, ruby, sapphire, emerald, diamond, amethyst, topaz,
+                //     garnet, carnelian, lapis_lazuli, turquoise). §8.16 already
+                //     repurposed `gem_deposits` to mean ore DISTRICTS, so the
+                //     generic's original job no longer exists.
+                //   • `dyes` — marine murex purple, i.e. the same product as the
+                //     custom `tyrian_purple`. It is also the one good
+                //     `goods_validation` carries as a standing coverage-floor
+                //     EXCEPTION, so retiring it removes that exception too.
+                enabled: !matches!(
+                    g,
+                    GOOD_TOBACCO | GOOD_FRANKINCENSE | GOOD_INDIGO | GOOD_GEMSTONES | GOOD_DYES
+                ),
                 domain,
                 distribution,
                 rarity: GOOD_RARITY[g],
@@ -347,6 +429,9 @@ pub fn default_list() -> Vec<GoodSpec> {
                 }),
                 scoring: None,
                 marine_band: default_marine_band_for(GOOD_NAMES[g]),
+                origins: default_origins_for(GOOD_NAMES[g]),
+                soil: Vec::new(),
+                relief: None,
                 category: GOOD_CATEGORY[g].to_string(),
                 need_tier: GOOD_NEED_TIER[g],
                 base_value: GOOD_BASE_VALUE[g],
@@ -385,7 +470,61 @@ pub fn default_list() -> Vec<GoodSpec> {
             _ => {}
         }
     }
+    apply_terroir_defaults(&mut list);
     list
+}
+
+/// Attach the FINE-GRAIN terrain terms (`Envelope::soil` / `Envelope::relief`) to
+/// the goods whose real distribution is decided by them.
+///
+/// Why this exists: every other scoring term varies over hundreds of km — Köppen
+/// zone, temperature, precipitation, |latitude|, normalized elevation, and
+/// fertility (itself a smoothed blend). That is precisely why a belt rendered as
+/// one smooth continent-sized wash: the model had NO channel varying at the 2-10
+/// km scale at which real crop distributions are actually mottled. `soil_type`
+/// was computed by phase 6 and read by nothing in the goods layer; slope was
+/// never computed at all.
+///
+/// These entries are the classic soil preferences, and note that they *separate
+/// goods that share a climate*, which is the whole point — vines and cereal want
+/// opposite ground in the same Mediterranean zone:
+///   • vines/olives  thin, stony, sharply-drained ground on a SLOPE; heavy
+///                   alluvial clay makes vigorous vines and poor wine.
+///   • rice          the clay and the flat that vines reject — it must hold water.
+///   • cereals       deep prairie/forest loams on gentle ground.
+///   • tea/coffee    volcanic and leached uplands, on a slope for drainage.
+///   • dates/millet  desert and young soils nothing else will take.
+///
+/// Applied here rather than in each good's own constructor so the whole table is
+/// readable in one place, exactly as the ceramics/glassware conversion above is.
+fn apply_terroir_defaults(list: &mut [GoodSpec]) {
+    use crate::sim::soil::*;
+    // (id, soil weights, optional relief band {lo, hi, edge})
+    let table: &[(&str, &[(u8, f32)], Option<[f32; 3]>)] = &[
+        ("wine",      &[(SOIL_ENTISOL,1.0),(SOIL_ALFISOL,0.85),(SOIL_MOLLISOL,0.6),(SOIL_ANDISOL,0.9),(SOIL_ULTISOL,0.5),(SOIL_ARIDISOL,0.45),(SOIL_ALLUVIAL,0.3)], Some([0.010,0.090,0.030])),
+        ("oliveoil",  &[(SOIL_ENTISOL,1.0),(SOIL_ARIDISOL,0.7),(SOIL_ALFISOL,0.8),(SOIL_MOLLISOL,0.55),(SOIL_ALLUVIAL,0.35)], Some([0.008,0.080,0.030])),
+        ("rice",      &[(SOIL_ALLUVIAL,1.0),(SOIL_ULTISOL,0.75),(SOIL_OXISOL,0.6),(SOIL_HISTOSOL,0.55),(SOIL_ANDISOL,0.7),(SOIL_ENTISOL,0.3)], Some([0.0,0.022,0.012])),
+        ("wheat",     &[(SOIL_MOLLISOL,1.0),(SOIL_ALFISOL,0.85),(SOIL_ALLUVIAL,0.8),(SOIL_ULTISOL,0.5),(SOIL_ENTISOL,0.4),(SOIL_ARIDISOL,0.3)], Some([0.0,0.045,0.020])),
+        ("barley",    &[(SOIL_MOLLISOL,0.9),(SOIL_ALFISOL,0.9),(SOIL_SPODOSOL,0.7),(SOIL_ENTISOL,0.6),(SOIL_ALLUVIAL,0.7)], Some([0.0,0.060,0.025])),
+        ("millet",    &[(SOIL_ARIDISOL,1.0),(SOIL_ENTISOL,0.85),(SOIL_MOLLISOL,0.7),(SOIL_ALFISOL,0.4)], None),
+        ("tea",       &[(SOIL_ULTISOL,1.0),(SOIL_ANDISOL,0.95),(SOIL_OXISOL,0.7),(SOIL_ALFISOL,0.5)], Some([0.020,0.120,0.040])),
+        ("coffee",    &[(SOIL_ANDISOL,1.0),(SOIL_VOLCANIC_ASH,0.95),(SOIL_ULTISOL,0.8),(SOIL_OXISOL,0.6)], Some([0.020,0.120,0.040])),
+        ("cotton",    &[(SOIL_ALLUVIAL,1.0),(SOIL_MOLLISOL,0.7),(SOIL_ULTISOL,0.6),(SOIL_ARIDISOL,0.5),(SOIL_ENTISOL,0.4)], Some([0.0,0.030,0.015])),
+        ("dates",     &[(SOIL_ARIDISOL,1.0),(SOIL_ENTISOL,0.8),(SOIL_ALLUVIAL,0.9)], None),
+        ("timber",    &[(SOIL_SPODOSOL,1.0),(SOIL_ALFISOL,0.9),(SOIL_HISTOSOL,0.5),(SOIL_MOLLISOL,0.4),(SOIL_ANDISOL,0.7)], None),
+        ("horses",    &[(SOIL_MOLLISOL,1.0),(SOIL_ARIDISOL,0.6),(SOIL_ALFISOL,0.6),(SOIL_ENTISOL,0.5)], Some([0.0,0.040,0.020])),
+        ("flax",      &[(SOIL_ALLUVIAL,1.0),(SOIL_ALFISOL,0.8),(SOIL_MOLLISOL,0.7),(SOIL_HISTOSOL,0.5)], Some([0.0,0.030,0.015])),
+        // saffron is deliberately NOT here. Its belt is already tightly bounded by
+        // climate, elevation AND latitude, and adding a soil preference on top
+        // over-constrained it: it moved off every settlement's catchment and
+        // tripped the Slice 0 coverage floor. A good this narrow has no room for
+        // another gate.
+    ];
+    for spec in list.iter_mut() {
+        let Some((_, soil, relief)) = table.iter().find(|(id, _, _)| *id == spec.id) else { continue };
+        spec.soil = soil.to_vec();
+        spec.relief = *relief;
+    }
 }
 
 /// Curated extra goods shipped on top of the 30+ built-ins: grain & paper & salt
@@ -406,6 +545,9 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             enabled: true, domain, distribution: dist, rarity, desire, network_luxury: luxury,
             builtin: false, deposit, scoring: Some(env),
             marine_band: default_marine_band_for(id),
+            origins: default_origins_for(id),
+            soil: Vec::new(),
+            relief: None,
             category: String::new(), need_tier: 0, base_value: 1.0,
             bulk: 1.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
             consumption_interval: 45.0,
@@ -422,6 +564,9 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             enabled: true, domain: Domain::Continental, distribution: Distribution::Manufactured,
             rarity: 0.5, desire: 0.55, network_luxury: luxury, builtin: false, deposit: None,
             marine_band: MarineBand::Either,
+            origins: 1,
+            soil: Vec::new(),
+            relief: None,
             scoring: None, category: String::new(), need_tier: 0, base_value,
             bulk, perishable: perish, labor,
             inputs: inputs.into_iter().map(|(g, q)| RecipeInput { good: g.into(), qty: q }).collect(),
@@ -456,6 +601,9 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             enabled: true, domain, distribution: Distribution::Deposits, rarity, desire,
             network_luxury: luxury, builtin: false,
             marine_band: MarineBand::Either,
+            origins: 1,
+            soil: Vec::new(),
+            relief: None,
             deposit: Some(DepositSpec {
                 min_elev: 0.0, count_num: num, count_den: den,
                 province_scale: default_province_scale(),
@@ -482,6 +630,45 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             None, env(vec![(12,1.0),(11,0.7),(15,0.8),(14,0.7)], Some([14.0,7.0]), Some([500.0,1200.0,300.0]), None, None, 0.5, 0.0)),
         cg("coral", "Red Coral", "\u{1FAB8}", "#ff6f61", Domain::Marine, Distribution::Local, 0.60, 0.40, true,
             None, env(vec![], Some([26.0,5.0]), None, None, Some([0.0,30.0,8.0]), 0.0, 0.6)),
+        // ── ISLAND ENDEMICS (`Distribution::Endemic`) ─────────────────────────
+        // NOTE the domain: these are `Coastal`, not `Island`, and the split is
+        // deliberate. DOMAIN says where the plant can grow at all (a wet tropical
+        // coast); DISTRIBUTION says how it is confined (one landmass, chosen by
+        // `localize_good` as the smallest that scores, preferring a true island).
+        // Using `Domain::Island` here instead zeroed the SCORE on every
+        // continental cell before the distribution could pick a home, so all six
+        // measured zero cells on the coverage diagnostic — the domain gate and the
+        // distribution gate were fighting each other.
+        // A good that grows in exactly ONE place on the whole world and cannot
+        // spread off it. Every entry below is a real endemic whose value came
+        // from its geography rather than from its climate being rare — nutmeg
+        // grows happily across the wet tropics, but the TREE only grew on ten
+        // islands totalling 60 km², and that is why it was worth its weight in
+        // gold. `rarity` cannot express this: it makes a good scarce everywhere,
+        // rather than abundant in one place and absent from the rest of the
+        // world, which is the shape that actually produced the spice trade.
+        //
+        // NUTMEG and MACE deliberately share an envelope and a domain: they are
+        // two products of ONE tree (the seed and its aril), so on any world they
+        // land on the same archipelago and trade as a pair at different values —
+        // the Banda relationship exactly.
+        cg("nutmeg", "Nutmeg", "\u{1F330}", "#8b5a2b", Domain::Coastal, Distribution::Endemic, 0.93, 0.60, true,
+            None, env(vec![(1,1.0),(2,0.9)], Some([26.0,4.0]), Some([1800.0,3500.0,500.0]), Some([0.0,0.30,0.12]), Some([0.0,12.0,5.0]), 0.0, 0.8)),
+        cg("mace", "Mace", "\u{1F536}", "#d2691e", Domain::Coastal, Distribution::Endemic, 0.94, 0.55, true,
+            None, env(vec![(1,1.0),(2,0.9)], Some([26.0,4.0]), Some([1800.0,3500.0,500.0]), Some([0.0,0.30,0.12]), Some([0.0,12.0,5.0]), 0.0, 0.8)),
+        // Socotra's dragon's blood — one island, an ARID one, which is why this
+        // envelope looks nothing like the other endemics'.
+        cg("dragons_blood", "Dragon's Blood Resin", "\u{1FA78}", "#a41d1d", Domain::Coastal, Distribution::Endemic, 0.95, 0.50, true,
+            None, env(vec![(6,1.0),(4,0.8),(7,0.5)], Some([25.0,7.0]), Some([100.0,500.0,200.0]), Some([0.05,0.45,0.18]), Some([8.0,22.0,7.0]), 0.0, 0.5)),
+        // Barus camphor (Sumatra / Borneo) — a wet-tropical island forest resin.
+        cg("camphor", "Camphor", "\u{1F9CA}", "#e8f4f8", Domain::Coastal, Distribution::Endemic, 0.90, 0.50, true,
+            None, env(vec![(1,1.0),(2,0.8)], Some([25.0,5.0]), Some([2000.0,4000.0,600.0]), Some([0.05,0.40,0.15]), Some([0.0,10.0,5.0]), 0.4, 0.3)),
+        // Sumatran / Javanese benzoin — the same islands, drier margin.
+        cg("benzoin", "Benzoin", "\u{1F36F}", "#c98a3c", Domain::Coastal, Distribution::Endemic, 0.88, 0.45, true,
+            None, env(vec![(2,1.0),(1,0.7),(3,0.5)], Some([24.0,5.0]), Some([1400.0,3000.0,500.0]), Some([0.05,0.45,0.18]), Some([0.0,14.0,6.0]), 0.3, 0.3)),
+        // Timor / Sumba sandalwood — the dry-monsoon island heartwood.
+        cg("sandalwood", "Sandalwood", "\u{1FAB5}", "#c8a165", Domain::Coastal, Distribution::Endemic, 0.87, 0.55, true,
+            None, env(vec![(3,1.0),(23,0.8),(2,0.5)], Some([26.0,5.0]), Some([700.0,1600.0,400.0]), Some([0.05,0.45,0.18]), Some([5.0,20.0,7.0]), 0.0, 0.4)),
         // ── Extreme-rare luxuries (harsh placement: tiny homelands / few deposits) ──
         cg("cinnamon", "Cinnamon", "\u{1F33F}", "#a9603a", Domain::Coastal, Distribution::Local, 0.72, 0.50, true,
             None, env(vec![(2,1.0),(1,0.8),(3,0.6)], Some([27.0,6.0]), Some([1200.0,3000.0,400.0]), None, Some([0.0,15.0,6.0]), 0.0, 0.5)),
@@ -596,6 +783,9 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             enabled: true, domain: Domain::Continental, distribution: Distribution::Global,
             rarity: 0.40, desire: 0.35, network_luxury: false, builtin: false, deposit: None,
             marine_band: MarineBand::Either,
+            origins: 1,
+            soil: Vec::new(),
+            relief: None,
             scoring: Some(env(vec![], None, None, Some([0.0, 0.30, 0.20]), None, 0.5, 0.0)),
             category: "construction".into(), need_tier: 1, base_value: 0.5,
             bulk: 2.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
@@ -661,6 +851,36 @@ pub fn default_marine_band_for(id: &str) -> MarineBand {
         "pearls" | "coral" | "bay_salt" | "tyrian_purple" | "amber" => MarineBand::Inshore,
         "stockfish" | "herring" | "whaling" => MarineBand::Bank,
         _ => MarineBand::Either,
+    }
+}
+
+/// How many independent homelands a good seeds, by id — the historically-grounded
+/// defaults for `GoodSpec.origins`. Anything not named here gets 1, which is the
+/// old behaviour, so this table is purely additive.
+///
+/// Every entry is a real case of independent or separately-diffused origin, not a
+/// variety knob:
+///   • `pepper`     Malabar and Sumatra — two distinct trades that reached Europe
+///                  by two different routes.
+///   • `cinnamon`   Ceylon (true cinnamon) and Chinese cassia — different species
+///                  sold as one commodity, which is exactly what a second origin
+///                  of the same good models.
+///   • `cotton`     independently domesticated in India, Peru AND the Levant.
+///   • `spices`     the generic aromatic basket was never one place: three.
+///   • `incense`    Hadhramaut and the Horn.
+///   • `silk`       China, then Byzantium (552) and Italy — diffusion the model
+///                  can't animate over time, but CAN express as several homelands.
+///   • `sugar`      New Guinea → India → the Mediterranean.
+///   • `coffee`     Kaffa and Yemen.
+///   • `wine`/`oliveoil`/`horses`/`hides`/`honey`  broad domesticates that had
+///                  many separate centres; two apiece keeps them from reading as
+///                  a single improbable world monopoly.
+pub fn default_origins_for(id: &str) -> u8 {
+    match id {
+        "cotton" | "spices" => 3,
+        "pepper" | "cinnamon" | "incense" | "silk" | "sugar" | "coffee" | "wine" | "oliveoil"
+        | "horses" | "hides" | "honey" | "flax" | "tea" => 2,
+        _ => 1,
     }
 }
 

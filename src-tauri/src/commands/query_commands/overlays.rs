@@ -856,7 +856,9 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
         let (max_keep, min_cells) = match spec.distribution {
             Distribution::Deposits => (32usize, 1usize),
             Distribution::Global => (14, 1),
-            Distribution::Local => (4, 1),
+            // Endemic is a Local good confined to one island — same shape, and
+            // its whole footprint is small, so it keeps the same tight budget.
+            Distribution::Local | Distribution::Endemic => (4, 1),
             Distribution::Manufactured => (8, 1),
         };
         // For a manufactured good, synthesize a candidate grid = the co-occurrence

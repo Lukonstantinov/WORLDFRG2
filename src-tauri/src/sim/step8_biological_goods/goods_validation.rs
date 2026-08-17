@@ -117,7 +117,7 @@ fn reference_world(w: u32, h: u32, seed: u64) -> (
     // 6 — so a handful of ore/gem districts landing far from every settlement is
     // not just small-world sampling noise (§2.4: a floor should measure the real
     // failure mode, not an artefact of an unrealistically sparse test world).
-    let (_ore, _localities) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 18, 0.5, &specs);
+    let (_ore, _localities, _report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 18, 0.5, &specs);
 
     (buf, extracted_rivers, settled, province_id, specs)
 }

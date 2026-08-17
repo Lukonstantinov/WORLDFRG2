@@ -9,6 +9,74 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-17 — Goods: a climate-placement bug, the cull, origins, endemics, terroir
+
+**A measured mis-placement, not a tuning question.** `good_score` folded the
+dry-winter Köppen variants onto their humid equivalents BEFORE its match ran, so
+every arm naming `CWA`/`CWB`/`CWC`/`DW*`/`DS*` was **unreachable**. Tea and coffee
+both name `CWB` (subtropical highland, dry winter — Darjeeling, Yunnan, the
+Ethiopian highlands) and both scored exactly **0.0** there, placed instead by
+their weak fallback arms in the wrong climates. Silk was silently downgraded
+0.5 → 0.25; wine survived only via its `med_like` fallback. Fixed by scoring the
+RAW zone first and folding only as a fallback. `envelope_score` now follows the
+same rule — before this, custom goods read raw Köppen and built-ins read folded
+Köppen, so one cell was scored under two different climate labels depending on
+which scorer ran. Gates: `dry_winter_zones_are_reachable` and
+`the_humid_fold_still_applies_as_a_fallback`.
+
+**Catalogue 92 → 90 active.** `gemstones` (a generic gem alongside ELEVEN
+specific stones) and `dyes` (marine murex, the same product as `tyrian_purple`,
+and the one standing coverage-floor exception) retired — disabled, never deleted,
+since both are fixed indices in `TileData.goods` (rule 7). Six island endemics
+added: nutmeg, mace, dragon's blood, camphor, benzoin, sandalwood.
+
+**Three new capabilities.** `GoodSpec.origins` (independent homelands per good —
+pepper from Malabar *and* Sumatra, cotton's three domestications);
+`LandmassContext` + `Distribution::Endemic` (the connected-component pass this
+codebase never had — `Domain::Island` was `distance_to_ocean < 0.20`, i.e.
+near-coast land, so an "island" good was really a coastal good); and
+`GoodSpec.soil`/`relief`, the fine-grain terroir terms — `soil_type` was computed
+by phase 6 and read by NOTHING in the goods layer, and slope was never computed,
+which is why belts rendered as smooth continent-sized washes.
+
+**Three silent-vanish failures caught by MEASUREMENT, not review** — the whole
+value of running the coverage diagnostic and reading the per-good table:
+
+| Attempt | Measured | Cause |
+|---|---|---|
+| endemics shipped as `Domain::Island` | all six placed **0 cells** | domain and distribution both gated "is this an island"; the domain gate zeroed the score before the distribution could choose a home |
+| `ISLAND_MAX_CELLS` as a fixed cell count | islands unresolvable | resolution-dependent: a cell is ~11 km at 3600×1800 and ~133 km on a test world. Now `ISLAND_MAX_KM2`, converted per world |
+| terroir applied as a raw multiplier | `tea` and `saffron` placed **0 cells** | soil×relief pushed already-marginal climates under the seed threshold. Now remapped into `[TERROIR_FLOOR, 1.0]`, soil never vetoes, and `saffron` is excluded from the table entirely |
+
+Final placement on the diagnostic world: nutmeg 54 cells / 2 settlements, mace 29/2,
+dragon's blood 28/1, camphor 45/2, benzoin 111/3, sandalwood 23/2, tea 47/2,
+saffron 7/1. Slice 0 coverage floor green.
+
+**New: the placement report.** `GoodsPlacementReport` →
+`metadata["goods_report"]` → `get_goods_report`. Per good: cells, land share,
+origins seeded, localities, notable names, mean grade, and the flags that are the
+point of it — `absent`, `fallback_seed`, `ubiquitous`, `single_cell`. A good that
+silently failed to place was previously invisible until someone went looking for
+it on the map; `fallback_seed` was entirely unreported even though the seeder
+falls back to the best passable cell *regardless of score*.
+
+**Gates:** all **310** lib tests pass (goods coverage floor, belt-coastline claim,
+`econ_` scorecard, `simulate_decades_reports_dynamics`, `earth_` untouched —
+no `step3`/`step4` change). `cargo check` and `npx tsc --noEmit` clean.
+
+**Not built, stated rather than dropped:** diffusion over time; Old/New World
+separation (the same flood-fill labels continents, so it's cheap now); knowledge
+as a scarcity axis; endemic value derived from island size/remoteness; an
+exhaustible good; and the two RENDER fixes — the province plate draws a 900 km
+staple locality as a square on a 200–400 km province, and the world quality
+overlay still rides the old coarse 8-cell grid. Realm and city-placement findings
+are **diagnosis only** in `docs/WORLD_REALISM_REVIEW.md`: three dead realm fields
+(`cohesion` never written after founding, `rank` never promoted off `city_state`,
+`legitimacy` read by nothing), the merchant-republic monoculture, and the absence
+of any settlement-placement oracle.
+
+---
+
 ## 2026-08-16 — Province trade view + a trade-share path to realm formation
 
 **Player-reported: "no realms after 50 years."** First, the mechanical floor:
