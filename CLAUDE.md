@@ -873,8 +873,17 @@ tile/
   lod.rs                        ← LOD supertile pyramid (lod 1-4)
 
 render/
-  mod.rs · tile_image.rs        ← 25 render layers (land, elevation, climate, … see §8.7);
-                                  the biomes layer carries PROCEDURAL PATTERN FILLS (§8.12)
+  mod.rs · tile_image.rs        ← 26 render layers (land, elevation, climate, … see §8.7);
+                                  the biomes layer carries PROCEDURAL PATTERN FILLS (§8.12).
+                                  Also the SHARED RELIEF CORE (`relief_at`) — two lights +
+                                  ambient occlusion — used by both shaded base layers, and
+                                  `sea_shade`, which shades the seafloor for the first time
+  natural.rs                    ← NATURAL COLOUR (§8.21): the land-cover palette the
+                                  `natural` layer draws with. A SECOND, independent table,
+                                  deliberately NOT `tile_image::biome_color` — that one is
+                                  held apart at a CIELAB floor for thematic legibility and
+                                  this one is deliberately overlapping, because real
+                                  vegetation grades continuously
 
 paint/
   mod.rs · stroke.rs            ← PaintValue enum (terrain/elevation/shelf/volcanic)
@@ -1354,10 +1363,12 @@ Mediterranean (Cs) only forms on **windward (west-facing) coasts** beside a cold
 offshore current (`cold_override` gated on `is_windward_ocean` + no warm influence);
 a warm-current **east** coast reads humid-subtropical (Cfa).
 
-### 8.7 Render layers (25) & paint tools (5)
+### 8.7 Render layers (26) & paint tools (5)
 The **biomes** layer is no longer a Köppen recolour — it reads the `biome` column
-and draws procedural pattern fills (§8.12).
-land, elevation, terrain (hillshade), plates, shelf, ridges, fisheries, currents,
+and draws procedural pattern fills (§8.12). **`natural`** is the land-COVER view
+(§8.21) — the only layer whose land colour is not a function of height or class
+index but of what grows there.
+land, elevation, terrain (hillshade), **natural**, plates, shelf, ridges, fisheries, currents,
 **sst** (sea-surface temperature), temperature, precipitation, wind, **windspeed**
 (low-level wind intensity incl. jets), **snow** (annual snow-cover fraction), climate,
 biomes, soil, fertility, salinity, habitability, shark, shipworm, reef, storm, disease.
@@ -1816,8 +1827,8 @@ colour. The app had 25 base layers and ~30 overlay toggles and no way to express
 
 A `MapTheme` is that composition in state that already existed: one `ActiveLayer`, a
 set of overlay keys, and optionally a label-typography theme (§8.11) and an
-overlay-line preset. **Eleven plates ship**, ordered the way the pipeline builds the
-world: Physical · Relief & Height · Ocean & Currents · Climate · Hydrology · Ecology ·
+overlay-line preset. **Twelve plates ship**, ordered the way the pipeline builds the
+world: Physical · Natural Colour · Relief & Height · Ocean & Currents · Climate · Hydrology · Ecology ·
 Settlement · Peoples · Political · Goods & Trade · Hazards.
 
 Four rules for anyone changing this:
@@ -2203,6 +2214,74 @@ it on the map.
 stones, and §8.16 already repurposed `gem_deposits` to mean ore districts) and
 `dyes` (marine murex, i.e. the same product as `tyrian_purple`, and the one good
 `goods_validation` carried as a standing coverage-floor exception).
+
+---
+
+### 8.21 Natural colour & the shared relief core (`render/natural.rs`)
+
+The `natural` layer is the reference-atlas view: **land coloured by what grows on
+it**, sea by depth, both shaded. It reads `biome` (41 classes, §8.12), elevation,
+temperature, precipitation and `snow_frac` — all already computed — and adds no
+tile column and no sim phase. Gated on step 6 like the biomes plate; a world
+without biomes falls back to a continuous climate tint rather than to blank, the
+same discipline as `koppen_fallback_biome`.
+
+**It does not reuse `biome_color`, and that is the whole design.** That table is
+THEMATIC: `biome_colors_are_distinct` holds all 41 classes apart at a CIELAB floor
+so a reader can separate them in a legend. Natural colour wants the opposite —
+real vegetation grades continuously, and a palette engineered for class separation
+renders a satellite-style map as a discretised poster with a visible edge at every
+biome boundary. So there is a second, deliberately OVERLAPPING table, and
+`neighbouring_vegetation_classes_stay_close` asserts that overlap so a
+well-meaning future "improve the contrast" edit fails loudly. Class edges are
+further dissolved by mixing back a continuous temperature/precipitation tint —
+the same trick and the same reasoning as `lowland_tint` (§8.18).
+
+**The shared relief core** (`tile_image::relief_at`) now serves both shaded base
+layers. Three changes from the single-lamp Lambertian it replaced:
+
+- **A fill light.** One NW lamp leaves every SE-facing slope at one flat tone, so
+  the lee side of every range on the map carried no information. Weak, low,
+  opposite quadrant. Above roughly `FILL_WEIGHT` 0.35 the two lamps cancel and the
+  relief flattens — that is the failure mode the constant guards.
+- **Ambient occlusion** from local concavity, which is orientation-INDEPENDENT, so
+  a valley reads as a valley under any lighting.
+- **Shaded bathymetry** (`sea_shade`). The sea was an unshaded ramp beside a
+  hillshaded continent.
+
+Three things measured here, all of which look like tuning and are not:
+
+- **`AO_REF` is the difference between ambient occlusion and film grain.** Set to a
+  plausible-sounding 44 m ("valleys are shallow"), AO speckled the ENTIRE map:
+  `apply_micro_relief` deliberately dithers every land cell by ±14 m, and against
+  an 8-neighbour mean that per-cell dither *is* the concavity signal, so AO
+  resolved to ±16% white noise per cell. Rendering with `AO_AMP = 0` isolated it
+  conclusively. It is now 240 m; anything under ~150 m re-admits the grain.
+- **A per-cell detail dither was built here and REMOVED.** A tile is exactly one
+  pixel per cell, so there is no sub-cell space for synthetic detail to live in and
+  it resolves as film grain rather than as terrain. Recorded so it is not
+  attempted again: detail below the cell needs somewhere to be DRAWN — tiles
+  rendered at higher pixel density than cell density, i.e. an inverse LOD pyramid.
+  No shading trick substitutes for the missing raster.
+- **The bathymetry ramp's dark end was a void.** It fell to (5,15,46) by depth 0.65
+  and near-black at 1.0, while `compute_sea_depth` saturates about 20 cells from
+  any coast — so on a full-size world essentially ALL open water sat in the black
+  tail, and the new seafloor shading had nothing to modulate. Rebalanced to keep
+  tone all the way down, still strictly monotone in luminance.
+
+**`NATURAL_SHEET_DIR=/tmp/n cargo test --lib dump_natural_sheet -- --ignored
+--nocapture`** builds a REAL world (plates through biomes, mirroring `sim_run_all`
+— rule 11) and renders it through the real `render_tile` path, writing
+`world_natural.png` and `world_terrain.png` plus a per-biome census. Use it to look
+at a palette or shading change instead of arguing about it — it is what caught both
+the AO grain and the black ocean, neither of which any assertion would have found.
+
+What it also makes unmissable is that the remaining problems are in the SIM, not
+the renderer: coastlines are literal Voronoi polygon edges (land/sea is decided
+purely by `plate.is_oceanic`), orogenic ridges run as straight lines along plate
+boundary segments, and land relief is texturally uniform because
+`generate_elevation` uses one global noise recipe (`f_base`/`f_range`/`f_hill`,
+`RIDGE_AMP`, `HILL_AMP`) for every continent.
 
 ---
 

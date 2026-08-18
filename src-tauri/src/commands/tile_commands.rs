@@ -133,7 +133,7 @@ fn render_full_res(
         .iter()
         .any(|l| {
             let (base, _) = tile_image::split_isolate(l.as_str());
-            matches!(base, "terrain" | "climate" | "biomes" | "soil" | "fertility")
+            matches!(base, "terrain" | "natural" | "climate" | "biomes" | "soil" | "fertility")
         });
     let (gw, gh) = grid_dims(db);
 
@@ -205,7 +205,7 @@ fn render_full_res(
                         tile,
                         layer,
                         &neighbors,
-                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty, step: 1, isolate: None },
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty, tx, step: 1, isolate: None },
                     ),
                 }
             }).collect::<Vec<_>>()
@@ -320,7 +320,7 @@ fn render_supertiles(
                     rgba: tile_image::render_tile_ctx(
                         tile,
                         layer,
-                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty: *ty, step: s as u32, isolate: None },
+                        &tile_image::RenderCtx { grid_w: gw, grid_h: gh, ty: *ty, tx: *tx, step: s as u32, isolate: None },
                     ),
                 }
             }).collect::<Vec<_>>()

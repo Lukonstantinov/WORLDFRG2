@@ -106,7 +106,7 @@ export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "sst" | "snow"
   | "soil" | "fertility" | "plates"
-  | "biomes" | "fisheries" | "terrain" | "shelf" | "ridges" | "wind" | "windspeed" | "currents"
+  | "biomes" | "fisheries" | "terrain" | "natural" | "shelf" | "ridges" | "wind" | "windspeed" | "currents"
   | "habitability" | "salinity" | "shark" | "shipworm" | "storm" | "reef" | "disease";
 
 export interface VectorSample {

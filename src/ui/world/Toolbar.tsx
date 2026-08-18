@@ -85,6 +85,7 @@ const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[]
     layers: [
       { id: "climate", label: "Climate (Köppen)" },
       { id: "biomes", label: "Biomes" },
+      { id: "natural", label: "Natural Colour" },
     ],
   },
   {

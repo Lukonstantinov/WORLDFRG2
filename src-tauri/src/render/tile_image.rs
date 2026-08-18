@@ -53,6 +53,7 @@ fn render_tile_full(tile: &TileData, layer: &str, n: &TileNeighbors, ctx: &Rende
         "biomes" => render_biomes(tile, n, ctx, &mut rgba),
         "fisheries" => render_fisheries(tile, &mut rgba),
         "terrain" => render_terrain_hillshade_halo(tile, n, ctx, &mut rgba),
+        "natural" => render_natural(tile, n, ctx, &mut rgba),
         "shelf" => render_shelf(tile, &mut rgba),
         "ridges" => render_ridges(tile, &mut rgba),
         "wind" => render_wind(tile, &mut rgba),
@@ -194,12 +195,21 @@ fn elevation_color(e: f32) -> (u8, u8, u8) {
 ///
 /// Unifying on this one table fixes the key for all three layers at once, and
 /// keeps the physically sensible direction: deeper is darker.
-pub const BATHYMETRY_STOPS: [(f32, (u8, u8, u8)); 5] = [
-    (0.00, (29, 120, 196)),
-    (0.10, (26, 100, 180)),
-    (0.25, (20, 74, 140)),
-    (0.65, (5, 15, 46)),
-    (1.00, (2, 5, 20)),
+/// The deep end used to fall to (5,15,46) by depth 0.65 and (2,5,20) at 1.0 —
+/// effectively black. That reads as a void rather than as ocean, and it hides
+/// everything drawn ON the sea: `compute_sea_depth` saturates about 20 cells from
+/// any coast, so on a full-size world essentially ALL open water sat in the black
+/// tail and the seafloor shading had nothing to modulate. Published bathymetric
+/// tints keep tone all the way down for exactly this reason. Still strictly
+/// monotone in luminance (`bathymetry_darkens_with_depth`), just over a usable
+/// range.
+pub const BATHYMETRY_STOPS: [(f32, (u8, u8, u8)); 6] = [
+    (0.00, (38, 126, 194)),
+    (0.10, (30, 106, 174)),
+    (0.25, (23, 84, 146)),
+    (0.55, (17, 62, 116)),
+    (0.80, (12, 44, 90)),
+    (1.00, (9, 32, 70)),
 ];
 
 fn bathymetry_color(depth: f32) -> (u8, u8, u8) {
@@ -1260,6 +1270,10 @@ pub struct RenderCtx {
     pub grid_h: u32,
     /// Tile row of the tile being rendered (for latitude).
     pub ty: i32,
+    /// Tile COLUMN of the tile being rendered. Only the natural-colour layer's
+    /// detail dither reads it — it needs a world-stable x so the dither does not
+    /// restart at every tile edge and print a 128-cell grid across the map.
+    pub tx: i32,
     /// Base cells per rendered pixel: 1 at LOD 0, 2^lod on a supertile. Relief must
     /// not strengthen just because the pyramid samples more coarsely.
     pub step: u32,
@@ -1304,80 +1318,261 @@ impl RenderCtx {
 }
 
 fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
-    // Directional light from NW (azimuth 315, altitude 45 degrees)
-    let az = 315.0_f32.to_radians();
-    let alt = 45.0_f32.to_radians();
-    let light_x = az.sin() * alt.cos();
-    let light_y = -az.cos() * alt.cos(); // negative because y increases downward
-    let light_z = alt.sin();
-    let z = ctx.z_factor();
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        let (x, y) = (i % SIZE, i / SIZE);
 
-    for y in 0..SIZE {
-        for x in 0..SIZE {
-            let i = y * SIZE + x;
-            let offset = i * 4;
-
-            if tile.terrain[i] == 0 {
-                // Sea: the shared bathymetry ramp (see BATHYMETRY_STOPS).
-                let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
-                rgba[offset] = r;
-                rgba[offset + 1] = g;
-                rgba[offset + 2] = b;
-                rgba[offset + 3] = 255;
-                continue;
-            }
-
-            let e = tile.elevation[i];
-            // Slope from neighbours, reaching into adjacent tiles at the edges so
-            // there is no derivative discontinuity at 128-cell tile boundaries.
-            let (xi, yi) = (x as isize, y as isize);
-            let left = halo_elev(tile, n, xi - 1, yi);
-            let right = halo_elev(tile, n, xi + 1, yi);
-            let up = halo_elev(tile, n, xi, yi - 1);
-            let down = halo_elev(tile, n, xi, yi + 1);
-
-            // Z-factor derived from real ground distance, so the same mountains
-            // shade the same on any grid size and at any LOD; the x-gradient is
-            // additionally stretched by 1/cos(lat) because an equirectangular
-            // cell narrows toward the poles.
-            let dzdx = (right - left) * z * ctx.lat_stretch(y);
-            let dzdy = (down - up) * z;
-
-            // Surface normal
-            let len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
-            let nx = -dzdx / len;
-            let ny = -dzdy / len;
-            let nz = 1.0 / len;
-
-            // Lambertian, NORMALISED so flat ground shades to exactly 1.0. Raw
-            // Lambertian gives flat land `sin(45°)` = 0.707, so the whole terrain
-            // layer rendered ~29% darker than the elevation layer showing the very
-            // same hypsometric colours.
-            let lambert = (nx * light_x + ny * light_y + nz * light_z) / light_z;
-
-            // AERIAL PERSPECTIVE (Imhof): shading contrast is LOW in the lowlands
-            // and rises with elevation, so a summit reads crisp while a plain stays
-            // soft and keeps its tint. The old code did the reverse — a flat 0.15
-            // shadow floor crushed mountain colour to 21% of its value, exactly
-            // where hypsometric tint carries the most information.
-            let contrast = 0.42 + 0.58 * e.clamp(0.0, 1.0);
-            let shade = (1.0 + (lambert - 1.0) * contrast).clamp(SHADOW_FLOOR, 1.30);
-
-            // Shadow is SKYLIGHT, and skylight is blue: a shaded slope should lose
-            // more red than blue rather than darkening to neutral grey.
-            let shadow = (1.0 - shade).max(0.0);
-            let (kr, kg, kb) = (
-                shade * (1.0 - 0.10 * shadow),
-                shade * (1.0 - 0.03 * shadow),
-                shade * (1.0 + 0.14 * shadow),
-            );
-
-            let (br, bg, bb) = elevation_color_climate(e, tile.temperature[i], tile.precipitation[i]);
-            rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
-            rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
-            rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
+        if tile.terrain[i] == 0 {
+            // Sea: the shared bathymetry ramp, now SHADED like the land beside it.
+            let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
+            let m = sea_shade(tile, n, ctx, x, y);
+            rgba[offset] = (r as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = (g as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (b as f32 * m).clamp(0.0, 255.0) as u8;
             rgba[offset + 3] = 255;
+            continue;
         }
+
+        let e = tile.elevation[i];
+        let rel = relief_at(tile, n, ctx, x, y, e);
+        let (kr, kg, kb) = relief_channels(&rel);
+        let (br, bg, bb) = elevation_color_climate(e, tile.temperature[i], tile.precipitation[i]);
+        rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
+        rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
+        rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
+        rgba[offset + 3] = 255;
+    }
+}
+
+// ── Relief shading ──────────────────────────────────────────────────────────
+//
+// Shared by the terrain hillshade and the natural-colour layer. Three departures
+// from the single-lamp Lambertian this file started with, each fixing something a
+// reader could see:
+//
+// 1. **A FILL LIGHT.** One NW lamp leaves every SE-facing slope at one flat tone,
+//    so the lee side of a range loses all its structure — half of every mountain
+//    on the map was information-free. Imhof's own practice is never a single lamp.
+//    The fill is weak, low and from the opposite quadrant: it recovers lee-slope
+//    form without ever competing with the key light for which way is "up".
+// 2. **AMBIENT OCCLUSION**, from local concavity. Directional light alone cannot
+//    distinguish a valley from a plain that happens to face away from the sun —
+//    both simply go dark. Concavity is orientation-INDEPENDENT, so a valley reads
+//    as a valley from any lighting direction, which is what makes a drainage
+//    network legible at 11 km posting.
+// 3. **NOT a detail dither.** A slope-keyed, world-stable per-cell height
+//    perturbation was built here and REMOVED after looking at it
+//    (`dump_natural_sheet`). At one pixel per cell there is no sub-cell space for
+//    it to live in, so it resolves as white-noise FILM GRAIN over the whole map
+//    rather than as terrain — worst of all on snow and ice, where it speckled a
+//    fifth of the land. Recording it so it is not attempted again: synthetic
+//    detail below the cell needs somewhere to be drawn, i.e. tiles rendered at
+//    higher pixel density than cell density (an inverse LOD pyramid). There is no
+//    shading trick that substitutes for the missing raster.
+//
+// The lights are NORMALISED so flat ground shades to exactly 1.0, exactly as the
+// single-light version was. That property is what keeps a shaded layer from
+// rendering systematically darker than an unshaded one showing the same colours.
+
+/// Key light: NW, the cartographic convention. Reversing it inverts every
+/// landform for most readers, so this azimuth is not a free parameter.
+const KEY_AZ_DEG: f32 = 315.0;
+const KEY_ALT_DEG: f32 = 45.0;
+/// Fill light: opposite quadrant, low, and weak. Recovers lee-slope form.
+const FILL_AZ_DEG: f32 = 135.0;
+const FILL_ALT_DEG: f32 = 22.0;
+/// Fill share of the total. Above roughly 0.35 the two lamps start to cancel and
+/// the relief flattens out — the failure mode this constant exists to avoid.
+const FILL_WEIGHT: f32 = 0.26;
+
+/// How far ambient occlusion may darken a concavity / brighten a convexity.
+const AO_AMP: f32 = 0.16;
+/// Concavity (in normalised elevation, against the 8-neighbour mean) at which AO
+/// saturates.
+///
+/// This constant is the whole difference between ambient occlusion and FILM GRAIN,
+/// and it was measured, not guessed. At 44 m — a plausible-sounding "valleys are
+/// shallow features" value — AO speckled the entire map: `apply_micro_relief`
+/// (`step2_terrain/elevation.rs`) deliberately dithers every land cell by ±14 m,
+/// and against an 8-neighbour mean that per-cell dither IS the concavity signal,
+/// so AO resolved to ±16% white noise per cell. Rendering with `AO_AMP = 0`
+/// isolated it conclusively (see `dump_natural_sheet`).
+///
+/// The reference must therefore sit well above the sim's own per-cell dither and
+/// at the scale of a real landform. Anything below ~150 m re-admits the grain.
+const AO_REF: f32 = 240.0 / 8848.0;
+
+/// A unit light vector from azimuth/altitude in degrees. `y` is negated because
+/// raster y increases downward.
+fn light_vec(az_deg: f32, alt_deg: f32) -> (f32, f32, f32) {
+    let az = az_deg.to_radians();
+    let alt = alt_deg.to_radians();
+    (az.sin() * alt.cos(), -az.cos() * alt.cos(), alt.sin())
+}
+
+/// Everything the shaded layers need about one cell's relief.
+struct Relief {
+    /// Multiplicative brightness. 1.0 on flat ground by construction.
+    shade: f32,
+    /// Ambient-occlusion multiplier, already folded into `shade`; kept separate so
+    /// a caller can tint by it (occluded ground is lit by SKY, not by the sun).
+    ao: f32,
+}
+
+/// The shared relief solve for one cell of a shaded layer.
+fn relief_at(
+    tile: &TileData,
+    n: &TileNeighbors,
+    ctx: &RenderCtx,
+    x: usize,
+    y: usize,
+    e: f32,
+) -> Relief {
+    let (xi, yi) = (x as isize, y as isize);
+    let left = halo_elev(tile, n, xi - 1, yi);
+    let right = halo_elev(tile, n, xi + 1, yi);
+    let up = halo_elev(tile, n, xi, yi - 1);
+    let down = halo_elev(tile, n, xi, yi + 1);
+
+    let z = ctx.z_factor();
+    let dzdx = (right - left) * z * ctx.lat_stretch(y);
+    let dzdy = (down - up) * z;
+
+    let len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
+    let nx = -dzdx / len;
+    let ny = -dzdy / len;
+    let nz = 1.0 / len;
+
+    // Two lights, each normalised so flat ground gives exactly 1.0, then mixed.
+    let (kx, ky, kz) = light_vec(KEY_AZ_DEG, KEY_ALT_DEG);
+    let (fx, fy, fz) = light_vec(FILL_AZ_DEG, FILL_ALT_DEG);
+    let key = (nx * kx + ny * ky + nz * kz) / kz;
+    let fill = (nx * fx + ny * fy + nz * fz) / fz;
+    let lambert = key * (1.0 - FILL_WEIGHT) + fill * FILL_WEIGHT;
+
+    // AMBIENT OCCLUSION from concavity against the 8-neighbour mean. Positive =
+    // convex (a ridge, more sky) → brighter; negative = concave (a valley, less
+    // sky) → darker. Independent of light direction, which is the whole point.
+    let ul = halo_elev(tile, n, xi - 1, yi - 1);
+    let ur = halo_elev(tile, n, xi + 1, yi - 1);
+    let bl = halo_elev(tile, n, xi - 1, yi + 1);
+    let br = halo_elev(tile, n, xi + 1, yi + 1);
+    let mean8 = (left + right + up + down + ul + ur + bl + br) / 8.0;
+    let concavity = (e - mean8) / AO_REF;
+    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * AO_AMP;
+
+    // AERIAL PERSPECTIVE (Imhof): contrast is low in the lowlands and rises with
+    // height, so a summit reads crisp while a plain keeps its tint.
+    let contrast = 0.42 + 0.58 * e.clamp(0.0, 1.0);
+    let shade = (1.0 + (lambert - 1.0) * contrast).clamp(SHADOW_FLOOR, 1.30) * ao;
+
+    Relief { shade, ao }
+}
+
+/// Turn a relief solve into per-channel multipliers. Shadow is SKYLIGHT and
+/// skylight is blue, so a shaded slope loses more red than blue rather than
+/// darkening toward neutral grey.
+fn relief_channels(r: &Relief) -> (f32, f32, f32) {
+    let shadow = (1.0 - r.shade).max(0.0);
+    (
+        r.shade * (1.0 - 0.10 * shadow),
+        r.shade * (1.0 - 0.03 * shadow),
+        r.shade * (1.0 + 0.14 * shadow),
+    )
+}
+
+/// Depth sample with a neighbour halo, so SEAFLOOR shading is continuous across
+/// tile boundaries for exactly the same reason land shading is.
+fn halo_depth(tile: &TileData, n: &TileNeighbors, x: isize, y: isize) -> f32 {
+    let sz = SIZE as isize;
+    if x < 0 {
+        let yy = y.clamp(0, sz - 1) as usize;
+        return n.west.map(|t| t.sea_depth[yy * SIZE + (SIZE - 1)])
+            .unwrap_or(tile.sea_depth[yy * SIZE]);
+    }
+    if x >= sz {
+        let yy = y.clamp(0, sz - 1) as usize;
+        return n.east.map(|t| t.sea_depth[yy * SIZE])
+            .unwrap_or(tile.sea_depth[yy * SIZE + (SIZE - 1)]);
+    }
+    if y < 0 {
+        let xx = x as usize;
+        return n.north.map(|t| t.sea_depth[(SIZE - 1) * SIZE + xx])
+            .unwrap_or(tile.sea_depth[xx]);
+    }
+    if y >= sz {
+        let xx = x as usize;
+        return n.south.map(|t| t.sea_depth[xx])
+            .unwrap_or(tile.sea_depth[(SIZE - 1) * SIZE + xx]);
+    }
+    tile.sea_depth[y as usize * SIZE + x as usize]
+}
+
+/// How strongly the seafloor is shaded, relative to land. Bathymetry is a much
+/// smoother field than topography and it must stay visually SUBORDINATE — the eye
+/// should read the coastline first — so this is deliberately gentle.
+const SEA_RELIEF_AMP: f32 = 0.22;
+
+/// Shaded bathymetry. The sea in this app is currently an unshaded ramp, which is
+/// why an ocean basin reads as flat colour next to a hillshaded continent.
+///
+/// Note what this can and cannot show: `compute_sea_depth` derives depth purely
+/// from distance to the coast, so today this shades the CONTINENTAL SLOPE and
+/// little else — there are no ridges, trenches or fracture zones in the field to
+/// bring out. That is a `sim` gap, not a render one, and shading it is what makes
+/// the gap visible instead of invisible.
+fn sea_shade(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, x: usize, y: usize) -> f32 {
+    let (xi, yi) = (x as isize, y as isize);
+    let left = halo_depth(tile, n, xi - 1, yi);
+    let right = halo_depth(tile, n, xi + 1, yi);
+    let up = halo_depth(tile, n, xi, yi - 1);
+    let down = halo_depth(tile, n, xi, yi + 1);
+    // Depth increases downward, so the sign is flipped against the land case: a
+    // shoaling seamount must catch the light the way a hill does.
+    let z = ctx.z_factor() * SEA_RELIEF_AMP;
+    let dzdx = -(right - left) * z * ctx.lat_stretch(y);
+    let dzdy = -(down - up) * z;
+    let len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
+    let (kx, ky, kz) = light_vec(KEY_AZ_DEG, KEY_ALT_DEG);
+    let lambert = ((-dzdx / len) * kx + (-dzdy / len) * ky + (1.0 / len) * kz) / kz;
+    (1.0 + (lambert - 1.0) * 0.8).clamp(0.72, 1.18)
+}
+
+/// NATURAL COLOUR — the reference-atlas view: land coloured by land COVER, sea by
+/// depth, both shaded. See `render::natural` for why the palette is its own table
+/// and not the thematic biome one.
+fn render_natural(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
+    use crate::render::natural::natural_color;
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        let (x, y) = (i % SIZE, i / SIZE);
+
+        if tile.terrain[i] == 0 {
+            let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
+            let m = sea_shade(tile, n, ctx, x, y);
+            rgba[offset] = (r as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = (g as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (b as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 3] = 255;
+            continue;
+        }
+
+        let e = tile.elevation[i];
+        let snow = tile.snow_frac.get(i).copied().unwrap_or(0);
+        let biome = tile.biome.get(i).copied().unwrap_or(0);
+        let (br, bg, bb) = natural_color(
+            biome,
+            e,
+            tile.temperature[i],
+            tile.precipitation[i],
+            snow,
+        );
+        let rel = relief_at(tile, n, ctx, x, y, e);
+        let (kr, kg, kb) = relief_channels(&rel);
+        rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
+        rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
+        rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
+        rgba[offset + 3] = 255;
     }
 }
 
@@ -1730,7 +1925,7 @@ mod tests {
     #[test]
     fn relief_z_factor_is_grid_and_lod_independent() {
         let at = |w: u32, step: u32| {
-            RenderCtx { grid_w: w, grid_h: w / 2, ty: 0, step, isolate: None }.z_factor()
+            RenderCtx { grid_w: w, grid_h: w / 2, ty: 0, tx: 0, step, isolate: None }.z_factor()
         };
         assert_eq!(at(3600, 1), RELIEF_Z, "the reference grid must be unchanged");
         assert_eq!(RenderCtx::default().z_factor(), RELIEF_Z, "unknown geometry = legacy");
@@ -1747,9 +1942,9 @@ mod tests {
     /// away from the equator and stay bounded at the pole.
     #[test]
     fn polar_cells_are_stretched_not_squared() {
-        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 0, step: 1, isolate: None };
+        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 0, tx: 0, step: 1, isolate: None };
         // Row 0 of tile row 0 is the north pole; the equator is grid_h / 2.
-        let equator = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 7, step: 1, isolate: None }.lat_stretch(4);
+        let equator = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 7, tx: 0, step: 1, isolate: None }.lat_stretch(4);
         let pole = ctx.lat_stretch(0);
         assert!((equator - 1.0).abs() < 0.02, "equator must be unstretched, got {equator}");
         assert!(pole > equator, "polar cells must stretch more than equatorial");
@@ -1935,7 +2130,7 @@ mod tests {
         // Flat ground must be EXACTLY unshaded, or every plate shifts tone wholesale
         // — the same normalisation bug the terrain layer carried for years.
         let flat = TileData::new_sea();
-        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 4, step: 1, isolate: None };
+        let ctx = RenderCtx { grid_w: 3600, grid_h: 1800, ty: 4, tx: 0, step: 1, isolate: None };
         let k = thematic_relief(&flat, &TileNeighbors::default(), &ctx, 40, 40);
         assert!((k - 1.0).abs() < 1e-4, "flat ground shades to {k}, not 1.0");
     }

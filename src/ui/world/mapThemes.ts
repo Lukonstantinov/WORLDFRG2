@@ -63,6 +63,16 @@ export const MAP_THEMES: MapTheme[] = [
     requires: 2,
   },
   {
+    id: "natural",
+    name: "Natural Colour",
+    glyph: "\u25D5",
+    blurb: "The land as it would look from orbit — cover, not height — over shaded relief and shaded sea.",
+    layer: "natural",
+    overlays: ["rivers", "lakes", "latLines"],
+    labelTheme: "Modern Cartographic",
+    requires: 6,
+  },
+  {
     id: "relief",
     name: "Relief & Height",
     glyph: "◭",
@@ -207,6 +217,11 @@ export const LAYER_REQUIRES: Record<ActiveLayer, number> = {
   plates: 1,
   elevation: 2,
   terrain: 2,
+  // Natural colour reads the BIOME column, so it waits for phase 6b like the
+  // biomes plate does. It degrades to a continuous climate tint rather than to
+  // blank if selected earlier (see `render::natural`), but the gate names the
+  // step that makes it truthful.
+  natural: 6,
   ridges: 2,
   shelf: 2,
   currents: 3,
