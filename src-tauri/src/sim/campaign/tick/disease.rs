@@ -630,6 +630,9 @@ impl CampaignSim {
             // #23 · Peoples: seed/settle cultures, drift people toward opportunity
             // (draws migration arrows), and slowly assimilate minority quarters.
             self.ensure_hub_cultures();
+            // …and mirror their language kits into the sim's own registry, so trait
+            // lookups stop depending on a process global (`CampaignSim::culture_kits`).
+            self.ensure_culture_kits();
             // Phase 0.4 · a people new to the world (a colony's creole, a resettled
             // hub) gets its law of inheritance resolved here, once, and keeps it.
             self.ensure_culture_rules();

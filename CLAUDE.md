@@ -626,6 +626,24 @@ serde-defaulted so old saves load). Grouped by theme:
   Exposed read-only to the frontend via the EXISTING `ProvinceLand` query (no new
   command) — `holder_house: i32` alongside `holder_hub`, and `holder_name` reads as
   the house's name when one holds the writ.
+- **Culture traits, and why they were inert** (`docs/CULTURE_TRADE_PLAN.md`): the 14
+  `cultures::TRAITS` are read by THREE places — assimilation resistance, a Clannish
+  matriliny precondition, and a panel tooltip. `Mercantile`, `Seafaring`, `Martial`,
+  `Agrarian`, `Scholarly` and `Artisan` drive nothing, so every economy in the world
+  is the same economy wearing a different name-bank. Step 0 shipped the PLUMBING and
+  the INSTRUMENT, not the wiring: `CampaignSim.culture_kits` (a sim-local culture→kit
+  registry, serde-defaulted, seeded beside `ensure_hub_cultures` and backfilled on
+  load) lets a tick resolve traits WITHOUT the process-global `CultureMap` — which
+  both repairs a real contradiction with §5's own "no DB, no global RNG" purity claim
+  and fixes the reason traits were untestable: §8.19 forbids a test from calling
+  `cultures::set_active`, so `culture_trait_ids` returned EMPTY in every test and the
+  one live trait reader was invisible to every gate in the project.
+  `culture_trait_factor(culture, trait, gain)` is the bus — a **true** 1.0 with no
+  traits (the `head_character_factor` precedent, so no call site needs a branch),
+  signed `gain` clamped ONCE to ±`TRAIT_KNOB_CAP` (0.15) because a ceiling enforced
+  per-call-site is a ceiling that gets forgotten at one of them (rule 18, and a trait
+  applies to a whole PEOPLE, not one family). **It has no call sites yet** — that is
+  deliberate, so each trait is one commit with its own `econ_` before/after.
 - **Succession & inheritance (Phase 0.4):** each people carries a **line rule** (who may
   inherit) and a **division rule** (how the estate divides) resolved once from its language
   kit into `culture_rules` (`sim/shared/inheritance.rs`, §8.15). `succeed_house` reads them
@@ -2239,6 +2257,29 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
+CULTURE_TRADE_PLAN.md             ← ⭐ STEP 0 BUILT (the instrument); steps 1-6
+                                    approved, STEP 7 BLOCKED BY ITS OWN
+                                    MEASUREMENT. The culture layer is a CLOSED
+                                    LOOP: three well-built subsystems (14 traits,
+                                    creoles, lingua franca) that feed only each
+                                    other. `hub_minorities` has six readers, four
+                                    of them display — so `diaspora_pass` moves
+                                    settlers along trade ties for 500 years and
+                                    not one coin moves differently. Eleven of the
+                                    fourteen traits drive NOTHING. Step 0 built
+                                    `econ_measure_diaspora_reach` +
+                                    `culture_reference_world` and measured the
+                                    thing that blocks the rest: **one people ends
+                                    as the majority in 39 of 40 cities, saturating
+                                    in year 120**; 4 of 6 peoples rule nothing.
+                                    The planned `kin_pull` return edge is a
+                                    REINFORCING term, so it cannot be wired onto a
+                                    loop already at its ceiling — bounding
+                                    `diaspora_pass` (step 6b) is now a prerequisite.
+                                    Carries its own measured findings (F1 the
+                                    unreachable Nomadic arm · F2 Insular silently
+                                    truncated away · F4 the convergence) and its own
+                                    "deliberately not built" list
 GOODS_LOCALITIES_PLAN.md          ← ⭐ ALL 8 SLICES BUILT. Trade goods got what
                                     minerals already had (§8.16): belt → LOCALITY →
                                     cell, persisted to `metadata["good_localities"]`
@@ -2620,3 +2661,23 @@ Three rules:
     crises` in R2) were each the SAME mistake found through a different call site —
     audit every house-iteration loop a new realm-facing pass touches, not just the
     one it's adding.
+28. **A fixture that cannot express a mechanism returns a silent zero, not an error.**
+    `reference_world()` could not express realm paths B/C (measured: "8 realms before
+    and after") and cannot express cultures at all — its peoples match no hearth, its
+    9-cell grid pitch (~3607 km) exceeds `MIGRATION_MAX_KM` (3000) so `diaspora_pass`
+    can never move anyone, and only one of its five cultures is travel-prone by luck
+    of a name hash. Before trusting ANY measurement, prove the fixture can express
+    the thing being measured, and assert that it did (`econ_measure_diaspora_reach`
+    fails if no quarter ever forms). Corollary, learned the same day: read a
+    denominator LIVE. The first cut of that diagnostic reported a people in "188% of
+    the world" — cities are founded during a 300-year run, and estates are hubs.
+    Numerator and denominator must share one predicate.
+29. **Culture must never converge on one people.** Measured today: one travel-prone
+    culture reaches every city by year 120 and ends the majority in 39 of 40, with
+    4 of 6 peoples ruling nothing (`docs/SCOREBOARD.md`, 2026-08-18). `diaspora_pass`
+    caps a quarter's SIZE (`DIASPORA_MAX_MINORITY`) but not the NUMBER of cities one
+    people may reach. Any new coupling between cultures and the economy — above all
+    the planned `kin_pull` dispatch term — is a REINFORCING term on that loop and
+    must not be wired until the spread itself is bounded. Same discipline as realm
+    consolidation, which shipped as a runaway (19 founded, 5 standing) before it was
+    slowed.

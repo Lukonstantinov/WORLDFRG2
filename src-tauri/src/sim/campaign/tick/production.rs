@@ -1666,6 +1666,31 @@ impl CampaignSim {
     }
 
 
+    /// Copy each live culture's language kit + mutation seed out of the worldgen
+    /// culture map into the sim's OWN `culture_kits` registry, so the tick can resolve
+    /// traits without reaching for a process global (see `CampaignSim::culture_kits`).
+    ///
+    /// Runs beside `ensure_hub_cultures`, which is why backfill-on-load is free: a
+    /// campaign saved before this field existed is topped up the first year it runs,
+    /// exactly as `ensure_province_land` backfills a layer joined mid-campaign.
+    /// ADD-ONLY — an entry already present is never rewritten, so a people's kit
+    /// cannot silently change under a running campaign.
+    pub(crate) fn ensure_culture_kits(&mut self) {
+        let Some(map) = crate::sim::cultures::active() else { return };
+        // Only cultures actually present in this campaign, so the registry stays the
+        // size of the world's live peoples rather than every hearth ever seeded.
+        let mut live: Vec<String> = Vec::new();
+        for c in self.hub_culture.iter().chain(self.prov_culture.iter()) {
+            if c.is_empty() || c == "—" { continue; }
+            if !live.iter().any(|x| x == c) { live.push(c.clone()); }
+        }
+        for name in live {
+            if self.culture_kits.iter().any(|c| c.culture == name) { continue; }
+            let Some(h) = map.hearths.iter().find(|h| h.people == name) else { continue };
+            self.culture_kits.push(CultureKit { culture: name, kit: h.kit, mut_seed: h.mut_seed });
+        }
+    }
+
     /// The city's people composition for DISPLAY: the plurality people as the
     /// majority + the rest as minority quarters (shares ~sum to 1). Read-only, so
     /// the panel shows the true dominant people even before the next yearly

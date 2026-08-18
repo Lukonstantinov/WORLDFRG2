@@ -1354,12 +1354,21 @@ impl CampaignSim {
     /// merchant diasporas (mobility ≥ 0.7); the rest are more sedentary. Modelled on
     /// historical trading minorities (Hanseatic Germans, Jewish/Armenian/Greek
     /// diasporas) whose communities spread through the trade network.
+    ///
+    /// Delegates to `cultures::people_mobility`, which held a BYTE-IDENTICAL copy of
+    /// this hash. Two copies of one number, in two files, about to become
+    /// load-bearing (`docs/CULTURE_TRADE_PLAN.md`) — the same drift the legend/renderer
+    /// palettes suffered (§8.18). Provably no behaviour change: the bodies matched.
+    ///
+    /// Note what the shape of that function means, measured rather than assumed: it
+    /// maps `r > 0.80` onto `0.7..1.0` and everything else onto `0.1..0.5`, so it is
+    /// BIMODAL and **nothing can land in `[0.5, 0.68)`**. `DIASPORA_MOBILITY_GATE`
+    /// (0.5) and `kit_traits`' Diaspora gate (0.68) are therefore the same gate in
+    /// practice, and `kit_traits`' `else if mobility >= 0.5 { Nomadic }` branch is
+    /// unreachable for every culture (Nomadic can only arrive as a Turkic/Mongol
+    /// archetype trait or the seeded flavour).
     pub(crate) fn culture_mobility(name: &str) -> f32 {
-        if name.is_empty() || name == "—" { return 0.2; }
-        let mut h = 0xcbf29ce484222325u64;
-        for b in name.bytes() { h ^= b as u64; h = h.wrapping_mul(0x100000001b3); }
-        let r = (h % 1000) as f32 / 1000.0;
-        if r > 0.80 { 0.7 + (r - 0.80) / 0.20 * 0.30 } else { 0.1 + r / 0.80 * 0.4 }
+        crate::sim::cultures::people_mobility(name)
     }
 
 

@@ -770,6 +770,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         base_n: 0,
         hub_culture: vec![],
         hub_minorities: vec![],
+        culture_kits: vec![],
         estate_idle_years: vec![],
         colony_supply: Vec::new(),
         diag_shipments: 0,

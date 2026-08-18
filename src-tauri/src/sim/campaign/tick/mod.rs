@@ -567,6 +567,29 @@ const SUBSISTENCE_FOOD_FRAC: f32 = 0.9;
 /// by trade (or face shortage), so subsistence never props up a large city that
 /// outgrew its region: big cities live and grow on trade, remote hamlets stay small.
 const REMOTE_MAX_POP: f32 = 4000.0;
+/// ── The culture TRAIT BUS (`docs/CULTURE_TRADE_PLAN.md`) ──────────────────────
+/// The most a single culture trait may move any one decision, either way. Same
+/// discipline and roughly the same magnitude as `CHARACTER_KNOB_CAP` (0.15) for a
+/// house head's character: a disposition should colour an outcome, never decide it.
+/// Rule 18 — an uncapped per-event multiplier took the sustained-richest house from
+/// 298k to 1.9M, and a trait applies to a whole PEOPLE, not one family.
+pub(crate) const TRAIT_KNOB_CAP: f32 = 0.15;
+/// Indices into `cultures::TRAITS`. Named here so a call site reads
+/// `TRAIT_MERCANTILE` rather than a bare `0`, and so the compiler — not a comment —
+/// carries the mapping. `TRAITS`' own doc mandates append-only ordering, which is
+/// what makes these constants safe to persist against.
+pub(crate) const TRAIT_MERCANTILE: usize = 0;
+pub(crate) const TRAIT_SEAFARING: usize = 1;
+pub(crate) const TRAIT_INSULAR: usize = 2;
+pub(crate) const TRAIT_MARTIAL: usize = 3;
+pub(crate) const TRAIT_DIASPORA: usize = 6;
+pub(crate) const TRAIT_ASSIMILATIVE: usize = 7;
+pub(crate) const TRAIT_CLANNISH: usize = 8;
+pub(crate) const TRAIT_SCHOLARLY: usize = 9;
+pub(crate) const TRAIT_AGRARIAN: usize = 10;
+pub(crate) const TRAIT_ARTISAN: usize = 12;
+pub(crate) const TRAIT_XENOPHOBIC: usize = 13;
+
 /// ── Diaspora: travel-prone MERCHANT cultures (Hansa-in-the-Baltic / trading
 /// minority) spread as minority quarters along trade ties. Roughly a third of cultures
 /// are mobile enough (mobility ≥ gate); they send settlers to trade partners each year,
@@ -3356,6 +3379,16 @@ pub struct MigrationRoute {
     pub to_hub: i32,
 }
 
+/// One entry in `CampaignSim.culture_kits` — a live culture's language kit and its
+/// per-world mutation seed, the two inputs `cultures::kit_traits` needs. Mirrors what
+/// a `Hearth` carries, copied into the sim so the tick never reads a process global.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct CultureKit {
+    pub culture: String,
+    pub kit: u8,
+    pub mut_seed: u64,
+}
+
 /// Cultures 2.0 · a CREOLE people — a new culture born of sustained blending in one
 /// city (ethnogenesis). It carries a synthesized name drawn from BOTH parent peoples'
 /// word-banks and its own static origin card, then lives like any other culture
@@ -4543,6 +4576,31 @@ pub struct CampaignSim {
     /// economic coupling), so it never affects the dynamics guardrails.
     #[serde(default)]
     pub hub_minorities: Vec<Vec<(String, f32)>>,
+    /// The sim's OWN culture→kit registry, so a tick can resolve a people's traits
+    /// without reaching into the process-global `cultures::CultureMap`.
+    ///
+    /// Two reasons this exists, and both are real rather than cosmetic:
+    ///
+    /// 1. §5 documents a tick as "Pure & deterministic per `(seed, tick)` — no DB, no
+    ///    global RNG, no tile access". Resolving traits through `cultures::active()`
+    ///    quietly contradicted that; this is the first repair to it.
+    /// 2. §8.19 forbids a TEST from calling `cultures::set_active` (a process global —
+    ///    it raced two existing tests). So in every test `culture_trait_ids` returned
+    ///    EMPTY and `traits_resist_assimilation` returned a flat 1.0: the one wired
+    ///    trait reader in the whole project was invisible to every gate. That is why
+    ///    eleven dead traits went unnoticed — the live one was untestable too.
+    ///
+    /// Seeded once at campaign start and backfilled lazily on load (the same
+    /// "backfill on demand" pattern `ensure_province_land` uses). EMPTY falls through
+    /// to the old global path, so every existing save behaves exactly as before.
+    ///
+    /// The INPUTS are persisted, never the derived trait list: `kit_traits` stays the
+    /// single source of truth (§8.18 — one copy cannot drift). Accepted, documented
+    /// cost: once traits are load-bearing, retuning `kit_traits` moves an existing
+    /// save's behaviour. `TRAITS`' own doc already mandates the mitigation — append at
+    /// the end, never reorder.
+    #[serde(default)]
+    pub culture_kits: Vec<CultureKit>,
     /// Cultures 2.0 · creole peoples born of blending during the campaign (ethnogenesis).
     /// `#[serde(default)]` → old saves load with none.
     #[serde(default)]
@@ -7009,21 +7067,60 @@ impl CampaignSim {
     /// kit archetype, travel-proneness and a stable seed. Empty for a legacy/unknown
     /// culture. Drives trait-based behaviour (e.g. assimilation resistance).
     pub(crate) fn culture_trait_ids(&self, name: &str) -> Vec<usize> {
-        let kit = if let Some(cr) = self.creoles.iter().find(|c| c.name == name) {
-            cr.kit_a as usize
-        } else if let Some(k) = crate::sim::cultures::kit_of_people(name) {
-            k
-        } else {
-            return Vec::new();
-        };
-        let seed = crate::sim::cultures::active()
+        // The sim's OWN registry first — a creole knows its own parent kit, and
+        // `culture_kits` carries every hearth culture the campaign was seeded with.
+        // Only then the process global, which is absent in every test (§8.19) and is
+        // exactly what made this function silently return empty there.
+        if let Some(cr) = self.creoles.iter().find(|c| c.name == name) {
+            let seed = self.culture_mut_seed(name);
+            return crate::sim::cultures::kit_traits(cr.kit_a as usize, Self::culture_mobility(name), seed);
+        }
+        if let Some(ck) = self.culture_kits.iter().find(|c| c.culture == name) {
+            return crate::sim::cultures::kit_traits(ck.kit as usize, Self::culture_mobility(name), ck.mut_seed);
+        }
+        let Some(kit) = crate::sim::cultures::kit_of_people(name) else { return Vec::new() };
+        crate::sim::cultures::kit_traits(kit, Self::culture_mobility(name), self.culture_mut_seed(name))
+    }
+
+    /// A culture's per-world mutation seed: the registry, then the active map, then a
+    /// stable hash of the name. Unchanged in meaning from the inline version this
+    /// replaced — only the registry lookup is new.
+    fn culture_mut_seed(&self, name: &str) -> u64 {
+        if let Some(ck) = self.culture_kits.iter().find(|c| c.culture == name) { return ck.mut_seed; }
+        crate::sim::cultures::active()
             .and_then(|m| m.hearths.iter().find(|h| h.people == name).map(|h| h.mut_seed))
             .unwrap_or_else(|| {
                 let mut x = 0xcbf29ce484222325u64;
                 for b in name.bytes() { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
                 x
-            });
-        crate::sim::cultures::kit_traits(kit, Self::culture_mobility(name), seed)
+            })
+    }
+
+    /// Does a live culture carry `trait_id` (an index into `cultures::TRAITS`)?
+    pub(crate) fn culture_has_trait(&self, name: &str, trait_id: usize) -> bool {
+        self.culture_trait_ids(name).contains(&trait_id)
+    }
+
+    /// THE CULTURE TRAIT BUS (`docs/CULTURE_TRADE_PLAN.md` step 0).
+    ///
+    /// A multiplier a caller applies at ONE decision point, so a people's disposition
+    /// finally reaches the economy instead of stopping at a tooltip. Deliberately
+    /// modelled on `head_character_factor`, which is this codebase's own precedent for
+    /// a knob that is a **true** 1.0 when its data is absent rather than an
+    /// approximation — that is what lets a call site read
+    /// `x * self.culture_trait_factor(c, TRAIT_MERCANTILE, 0.10)` with no branch, and
+    /// what keeps "no traits ⇒ bit-identical" true without a special case anywhere.
+    ///
+    /// `gain` is SIGNED (a trait may make something cheaper as easily as dearer) and
+    /// is clamped to ±`TRAIT_KNOB_CAP` here, in ONE place — rule 18: every new
+    /// multiplier needs a ceiling, and a ceiling enforced at each call site is a
+    /// ceiling that will eventually be forgotten at one of them.
+    ///
+    /// **No call sites in step 0.** This is plumbing, so steps 1-6 are one-line
+    /// commits that each carry their own `econ_` before/after.
+    pub(crate) fn culture_trait_factor(&self, name: &str, trait_id: usize, gain: f32) -> f32 {
+        if !self.culture_has_trait(name, trait_id) { return 1.0; }
+        1.0 + gain.clamp(-TRAIT_KNOB_CAP, TRAIT_KNOB_CAP)
     }
 
     /// Auto-pick the good that feeds one construction category (0 food · 1 preservables ·

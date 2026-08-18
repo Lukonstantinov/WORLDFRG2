@@ -9,6 +9,80 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-18 — The culture layer, measured: it converges on one people by year 120
+
+**The finding, which is the deliverable.** `docs/CULTURE_TRADE_PLAN.md` step 0 built
+an instrument before a mechanism, per §2.4. Over 300 years on a world built to
+express cultures: **one travel-prone people ends as the majority in 39 of 40
+cities**, saturating every city in **year 120** and holding it for the remaining
+180. Two of six peoples hold no quarter anywhere; **four of six rule no city at
+all**. Mean ethnic overlap across trading pairs reaches 0.47 and is still rising at
+year 300.
+
+The maintainer's stated invariant for this workstream — cultural diversity must
+never converge on one colour — is **already violated today**, with no economic
+coupling whatsoever. `diaspora_pass` caps how BIG a quarter may get
+(`DIASPORA_MAX_MINORITY` = 0.45) but places no cap at all on how MANY cities one
+people may reach.
+
+**This blocks the workstream's own step 7.** The planned return edge (`kin_pull` —
+weighting the dispatch shortlist toward cities that share a people) is a
+*reinforcing* term, and a reinforcing term on a mechanism already pinned at its
+ceiling can only make a runaway worse. A new step 6b (bound the spread) is now a
+prerequisite, not a cleanup. The quieter half of the reading: overlap at 0.47 means
+`kin_pull` would have had ample to multiply — the edge is a good idea aimed at a
+loop with no brake yet.
+
+**Why the instrument had to be new.** `reference_world()` cannot express this, and
+would have returned a silent zero — the exact failure that made
+`econ_measure_realm_formation` report "8 realms before and after" for two paths it
+could not express. Three independent reasons, each measured: its peoples
+(`Culture0..4`) match no hearth, so with `cultures::set_active` forbidden in tests
+(§8.19) `culture_trait_ids` returned EMPTY for every culture and
+`traits_resist_assimilation` a flat 1.0 — **the one wired trait reader in the
+project was invisible to every gate, which is why eleven dead traits went
+unnoticed**; its 9-cell grid pitch is ~3607 km against a `MIGRATION_MAX_KM` of 3000,
+so `diaspora_pass` could never move anyone; and only one of its five cultures is
+travel-prone, by luck of a name hash rather than design.
+
+**Three bugs found on the way, none fixed here** (each is a behaviour change needing
+its own gate; step 0 changes no behaviour):
+
+- **F2** — `kit_traits` pushes Diaspora *and* Insular for a mobile people onto a list
+  already holding two archetype traits, then calls `truncate(3)`. No kit's archetype
+  pair contains Diaspora, so **Insular is always discarded**:
+  `traits_resist_assimilation` returns 0.40 where the doc intends 0.18. Quarters
+  dissolve **2.2× faster than designed**, and the brake is weakest exactly where the
+  loop is strongest.
+- **F1** — `culture_mobility` is bimodal (`r > 0.80` → 0.7..1.0, else 0.1..0.5), so
+  nothing can land in `[0.5, 0.68)`. `DIASPORA_MOBILITY_GATE` (0.5) and the
+  Diaspora-trait gate (0.68) are the same gate in practice, and `kit_traits`'
+  `mobility >= 0.5 => Nomadic` arm is **unreachable for every culture in the game**.
+- **The instrument's own first result was wrong** and is recorded rather than
+  quietly corrected: it reported one people in "188% of the world", because the
+  denominator was captured before the run while cities are founded during it, and
+  estates were counted as cities. Both now read live through one shared predicate.
+
+**Also shipped (plumbing, no behaviour):** `CampaignSim.culture_kits` — the sim's own
+culture→kit registry, so a tick resolves traits without the process-global
+`CultureMap`, repairing a real contradiction with §5's "no DB, no global RNG" purity
+claim and making traits testable at all. `culture_trait_factor(culture, trait, gain)`
+— the trait bus, a **true** 1.0 with no traits (the `head_character_factor`
+precedent), capped once at `TRAIT_KNOB_CAP` = 0.15 per rule 18, with **no call
+sites** so steps 1-6 are one-line commits with their own gates.
+`culture_mobility` deduplicated onto `cultures::people_mobility` — byte-identical
+twins in two files, about to become load-bearing.
+
+**Gates:** dynamics run verified **BIT-IDENTICAL** by stash/run/restore diff, not
+argued. **325** lib tests pass. `econ_` green — top-10% wealth share **0.713**, house
+wealth Gini **0.800**, both in band. `cargo check` and `npx tsc --noEmit` clean.
+
+**Still unmeasured:** whether bounding the spread (step 6b) is better done as a hard
+reach cap or as a stronger assimilation brake (F2). The instrument now exists to
+compare them; the choice is a design decision, not a measurement.
+
+---
+
 ## 2026-08-17d — Consolidation: realms grow, absorb, and break
 
 **The gap this closes.** Tilly's ~500 European polities c.1500 fall to ~25 by

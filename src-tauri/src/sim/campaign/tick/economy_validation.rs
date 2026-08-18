@@ -1872,3 +1872,327 @@ fn econ_measure_seed_variance() {
               fixed.len(), names.len(), fixed.join(", "));
     eprintln!("These are the outcomes a new seed cannot change — the ceiling on replay value.\n");
 }
+
+// ── The CULTURE reference world + the diaspora instrument ────────────────────────
+//  `docs/CULTURE_TRADE_PLAN.md` step 0.
+//
+//  Run: cargo test --lib econ_measure_diaspora_reach -- --ignored --nocapture
+
+/// A world built to express CULTURES, kept separate from `reference_world()` for the
+/// same reason `realm_reference_world` is: `hub_culture` feeds migration, so making
+/// the scorecard's own world express cultures would move the scorecard.
+///
+/// Three things `reference_world()` cannot do, each of which silently produced a zero
+/// rather than an error — the exact failure mode that made `econ_measure_realm_
+/// formation` report "8 realms before and after" for two paths it could not express:
+///
+///  1. **Its peoples have no kit.** `Culture0..4` match no hearth, and a test may not
+///     call `cultures::set_active` (§8.19 — it raced two existing tests), so
+///     `culture_trait_ids` returned EMPTY for every culture and
+///     `traits_resist_assimilation` a flat 1.0. Here the kits are seeded directly into
+///     `CampaignSim::culture_kits`, so traits resolve with no global at all.
+///  2. **Its cities are too far apart to migrate between.** `MIGRATION_MAX_KM` is
+///     3000 and a cell spans `EARTH_EQUATOR_KM / world_w` = ~401 km, so the reference
+///     world's 9-cell grid pitch is ~3607 km — over the limit in every direction.
+///     `diaspora_pass` could never move ANYONE. The pitch here is 6 cells (~2404 km).
+///  3. **Only one of its five cultures is travel-prone**, and `culture_mobility` is a
+///     hash of the NAME, so that is luck rather than design. These six names were
+///     chosen by computing their mobility: two clear the diaspora gate, four do not.
+///
+/// No province layer, deliberately: every `prov_*` routine early-returns, so
+/// rural→urban migration contributes nothing and `diaspora_pass` is the ONLY thing
+/// mixing cultures. That is what makes the measurement attributable.
+fn culture_reference_world() -> CampaignSim {
+    let goods = vec![
+        good("wheat", 0, 0, 1.0, 0.85, true),
+        good("fish", 0, 0, 1.2, 0.7, true),
+        good("olives", 0, 0, 1.6, 0.6, true),
+        good("silk", 1, 2, 20.0, 0.35, false),
+        good("iron", 2, 1, 5.0, 0.45, false),
+        good("wine", 3, 2, 8.0, 0.4, false),
+    ];
+    let ng = goods.len();
+    const COLS: u32 = 7;
+    const ROWS: u32 = 6;
+    const NHUB: u32 = COLS * ROWS;
+    /// 6 cells at ~401 km/cell ≈ 2404 km — inside `MIGRATION_MAX_KM` (3000) on the
+    /// orthogonals and outside it on the diagonals, so a diaspora spreads city by
+    /// neighbouring city instead of teleporting across the grid.
+    const PITCH: f32 = 6.0;
+
+    let mut hubs = Vec::new();
+    for i in 0..NHUB {
+        let x = (i % COLS) as f32 * PITCH;
+        let y = (i / COLS) as f32 * PITCH;
+        // A rank-size-ish spread rather than a flat one, for the same reason
+        // `realm_reference_world` uses one: identical cities make every ranking
+        // degenerate. Every city clears DIASPORA_MIN_POP (800).
+        let rank = (i * 5 % NHUB) as f32;
+        let pop = 40_000.0 / (1.0 + rank * 0.45) + 4_000.0;
+        let prod: Vec<f32> = (0..ng)
+            .map(|g| if (g + i as usize) % 3 == 0 { pop * 0.012 } else { pop * 0.0015 })
+            .collect();
+        hubs.push(hub(i, x, y, pop, prod, 0));
+    }
+    let mut s = sim(hubs, goods);
+
+    // SIX peoples, one per row of the grid, each holding a contiguous band of 7
+    // cities. Names are not decorative: `culture_mobility` is a hash of the name, so
+    // each was CHOSEN by computing it. The generator is bimodal (`r > 0.80` →
+    // 0.7..1.0, else 0.1..0.5) — there is no middle, so "travel-prone" and "rooted"
+    // are the only two populations that can exist.
+    //
+    //   people        mobility   diaspora gate (>=0.50)   kit
+    //   Numidian        0.973    YES                      2  Punic    (mercantile, seafaring)
+    //   Ilyric          0.758    YES                      17 Mande    (mercantile, pastoral)
+    //   Kolchis         0.467    no                       4  Norse    (martial, seafaring)
+    //   Astaran         0.486    no                       0  Roman    (martial, scholarly)
+    //   Sarmatian       0.391    no                       9  Slavic   (agrarian, clannish)
+    //   Vendran         0.378    no                       8  Sinitic  (scholarly, artisan)
+    const PEOPLES: [(&str, u8); 6] = [
+        ("Numidian", 2), ("Ilyric", 17), ("Kolchis", 4),
+        ("Astaran", 0), ("Sarmatian", 9), ("Vendran", 8),
+    ];
+    s.hub_culture = (0..NHUB).map(|i| PEOPLES[(i / COLS) as usize].0.to_string()).collect();
+    s.hub_minorities = vec![Vec::new(); NHUB as usize];
+    // The registry that makes traits resolvable without the process global. The seed
+    // is the people's own name hash — the same fallback `culture_mut_seed` uses, so a
+    // people's traits here are exactly what they would be in a world with no stored
+    // mutation seed.
+    s.culture_kits = PEOPLES
+        .iter()
+        .map(|(name, kit)| {
+            let mut x = 0xcbf29ce484222325u64;
+            for b in name.bytes() { x ^= b as u64; x = x.wrapping_mul(0x100000001b3); }
+            CultureKit { culture: (*name).to_string(), kit: *kit, mut_seed: x }
+        })
+        .collect();
+
+    for i in 0..14u32 {
+        let seat = (i * 3) % NHUB;
+        let mut h = house_at(seat, vec![3 + (i as usize % 3)], 3);
+        h.archetype = (i % 4) as u8;
+        h.wealth = 40.0 + (i as f32) * 8.0;
+        h.prestige = 0.5;
+        h.dominant_seat = i % 2 == 0;
+        s.houses.push(h);
+    }
+    s.seed_house_count = s.houses.len() as u32;
+    // Realms are noise for this question and cannot form without provinces anyway —
+    // stated explicitly rather than relied on, the same isolation
+    // `econ_inheritance_rules_fragment_differently` needed (§5.2).
+    s.suppress_realms = true;
+    s
+}
+
+/// THE DIASPORA INSTRUMENT (`docs/CULTURE_TRADE_PLAN.md` step 0) — measure before
+/// building, the precedent `econ_measure_foreign_hand_conjunction` set and the
+/// discipline §2.4 requires ("a diagnosis is a complete task").
+///
+/// The question it exists to answer: `diaspora_pass` has moved settlers along trade
+/// ties for the whole life of this project and NOTHING reads the resulting quarters
+/// back into the economy — `hub_minorities` has six readers, four of them display.
+/// Step 7 of the plan would close that loop by weighting the dispatch shortlist
+/// toward cities that share a people. Before wiring a POSITIVE FEEDBACK LOOP into
+/// trade (quarters raise the tie, the tie is where the next wave is sent), three
+/// things have to be known:
+///
+///  1. Do quarters spread at all, or does `assimilation_pass` eat them?
+///  2. Is there any ethnic OVERLAP between trading pairs for `kin_pull` to multiply?
+///     If this is ~0 the return edge is not worth building, and that is a finding.
+///  3. How many cities can ONE people reach? The quarter's SIZE is bounded twice
+///     (`DIASPORA_MAX_MINORITY` = 0.45, and assimilation), but the NUMBER of cities
+///     holding one is bounded by nothing. That is the runaway axis, and this number
+///     is what sets step 7's own assertion threshold instead of a guess.
+///
+/// Printed, never asserted (§2.5): there is no published series for "share of cities
+/// holding a Genoese quarter".
+#[test]
+#[ignore]
+fn econ_measure_diaspora_reach() {
+    let mut s = culture_reference_world();
+    let years = 300u32;
+    let founded_with = live_cities(&s);
+    // The founding peoples, in seeding order — creoles born later are reported
+    // separately so ethnogenesis cannot be mistaken for diaspora spread.
+    let founders: Vec<String> = s.culture_kits.iter().map(|c| c.culture.clone()).collect();
+
+    // Sampled every decade so the SHAPE of the spread is visible, not just its end
+    // state — a mechanism that saturates in year 30 and one that grows all the way to
+    // year 300 need different brakes, and only a trace can tell them apart.
+    // (year, max cities one people reaches, live city count that year, mean overlap)
+    let mut trace: Vec<(u32, usize, usize, f32)> = Vec::new();
+
+    for yr in 1..=years {
+        s.advance(365);
+        if yr % 30 == 0 || yr == years {
+            let reach = founders.iter()
+                .map(|c| cities_holding(&s, c))
+                .max().unwrap_or(0);
+            trace.push((yr, reach, live_cities(&s), mean_pair_overlap(&s)));
+        }
+    }
+
+    println!();
+    let ncity = live_cities(&s);
+    println!("═══ diaspora reach — {years}y, {founded_with} cities at founding → {ncity} at the end, {} peoples ═══", founders.len());
+    println!();
+    println!("  {:<12} {:>5} {:>9} {:>8} {:>6} {:>7}  {:<34} {}",
+             "people", "mob", "quarters", "of all", "major", "resist", "traits", "trade factor");
+    println!("  {}", "─".repeat(111));
+    let mut holdings: Vec<f32> = Vec::new();
+    for c in &founders {
+        let ids = s.culture_trait_ids(c);
+        let names: Vec<&str> = ids.iter()
+            .map(|&i| crate::sim::cultures::TRAITS[i].name).collect();
+        let held = cities_holding(&s, c);
+        holdings.push(held as f32);
+        // The bus itself, exercised rather than left as unreferenced plumbing: what a
+        // Mercantile people would get at step 1's proposed +0.10 on dispatch margin.
+        let f = s.culture_trait_factor(c, TRAIT_MERCANTILE, 0.10);
+        // Holding a quarter somewhere and RULING a city are different fates, and the
+        // difference is the whole question of whether the layer stays diverse: a
+        // people can be present everywhere and dominant nowhere, or vice versa.
+        let maj = cities_where_majority(&s, c);
+        println!("  {:<12} {:>5.3} {:>9} {:>7.1}% {:>6} {:>7.2}  {:<34} {:>6.3}",
+                 c, CampaignSim::culture_mobility(c), held,
+                 100.0 * held as f32 / ncity.max(1) as f32, maj,
+                 crate::sim::cultures::traits_resist_assimilation(&ids),
+                 names.join("+"), f);
+    }
+
+    // Concentration across peoples: 1/n = every people spread equally, 1.0 = one
+    // people holds every quarter in the world.
+    let total: f32 = holdings.iter().sum();
+    let hhi: f32 = if total > 0.0 {
+        holdings.iter().map(|h| (h / total) * (h / total)).sum()
+    } else { 0.0 };
+    let max_reach = holdings.iter().copied().fold(0.0f32, f32::max);
+    let max_frac = max_reach / ncity as f32;
+
+    println!();
+    println!("  spread over time (max cities one people reaches · mean pair overlap)");
+    for (yr, reach, live, ov) in &trace {
+        println!("     year {yr:>3}   {reach:>3} of {live:>3} cities ({:>5.1}%)   overlap {ov:.4}",
+                 100.0 * *reach as f32 / (*live).max(1) as f32);
+    }
+    println!();
+    println!("  furthest-reaching people        {:>6.0} cities   {:>5.1}% of the world",
+             max_reach, 100.0 * max_frac);
+    println!("  concentration (HHI, 1/n={:.3})   {:>6.3}", 1.0 / founders.len() as f32, hhi);
+    println!("  mean ethnic overlap, trading pairs {:>10.4}", mean_pair_overlap(&s));
+    println!("  creoles born (ethnogenesis)       {:>6}", s.creoles.len());
+    // The year the furthest-reaching people first touched EVERY city — the number
+    // that decides whether the return edge is safe to build, because a mechanism
+    // already at its ceiling cannot be given a reinforcing term.
+    let saturated = trace.iter().find(|(_, reach, live, _)| *reach >= *live).map(|(y, ..)| *y);
+    let gone = founders.iter().filter(|c| cities_holding(&s, c) == 0).count();
+    let landless = founders.iter().filter(|c| cities_where_majority(&s, c) == 0).count();
+
+    println!();
+    println!("  peoples with no quarter left anywhere  {:>4} of {}", gone, founders.len());
+    println!("  peoples that rule no city at all       {:>4} of {}", landless, founders.len());
+    match saturated {
+        Some(y) => println!("  SATURATION — one people reached every city in year {y}, and held it"),
+        None    => println!("  no people ever reached every city"),
+    }
+    println!();
+    println!("  ⇒ kin_pull verdict: {}", if mean_pair_overlap(&s) < 0.01 {
+        "overlap is ~0 — trading pairs share almost no people. The return edge would multiply nothing; do NOT build step 7."
+    } else if max_frac >= 0.9 {
+        "DO NOT BUILD STEP 7 YET. There is ample overlap to multiply, but diaspora spread ALREADY saturates without any economic coupling — a travel-prone people reaches every city and stays there. kin_pull is a reinforcing term on a mechanism that is at its ceiling, so it could only make an existing runaway worse. Bound `diaspora_pass` first (see F2), re-run this, and only then wire the edge."
+    } else {
+        "trading pairs carry real shared population and spread is still bounded — kin_pull has something to multiply and room to do it in."
+    });
+    if max_frac < 0.9 {
+        println!("  ⇒ step 7's assertion threshold: no people above {:.0}% of cities",
+                 (100.0 * max_frac + 15.0).min(100.0));
+    } else {
+        // Deliberately NOT printed as a threshold here: "no people above 100%" is an
+        // assertion that cannot fail, which is worse than no assertion at all. The
+        // threshold is only meaningful once spread is bounded — re-run then.
+        println!("  ⇒ no threshold offered: at saturation the measured max is 100%, and");
+        println!("     an assertion that cannot fail is worse than none.");
+    }
+    println!();
+    println!("  ── FINDINGS THIS RUN DOES NOT FIX (each needs its own gate) ──");
+    println!("  F2 · `kit_traits` pushes Diaspora AND Insular for a mobile people, then");
+    println!("       calls truncate(3) on a list that already holds 2 archetype traits.");
+    println!("       No kit's archetype pair contains Diaspora, so INSULAR IS ALWAYS");
+    println!("       DROPPED. resist reads 0.40 where the doc intends 0.18 — quarters");
+    println!("       dissolve 2.2x faster than designed, and the assimilation brake is");
+    println!("       weakest exactly where the feedback loop would be strongest.");
+    println!("  F1 · `culture_mobility` is bimodal (no value can land in [0.5, 0.68)),");
+    println!("       so kit_traits' `mobility >= 0.5 => Nomadic` arm is unreachable for");
+    println!("       every culture in the game.");
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!();
+
+    // Diagnostic only — it must not fail the build (§2.5's printed-metric rule). The
+    // one thing asserted is that the INSTRUMENT works: if no quarter ever formed we
+    // measured nothing, which is the `econ_measure_realm_formation` failure this
+    // fixture was built to avoid repeating.
+    let any: usize = founders.iter().map(|c| cities_holding(&s, c)).sum();
+    assert!(any > ncity, "no diaspora spread at all — the fixture cannot express the mechanism it is measuring");
+}
+
+/// A real, live CITY — not an estate (a house's farm is not a place with a quarter)
+/// and not an abandoned ruin. Both the numerator and the denominator of every share
+/// this diagnostic prints must use this same predicate, or the result is nonsense:
+/// the first cut counted quarters over ALL hubs while dividing by the city count
+/// captured before the run, and reported one people holding quarters in "188% of the
+/// world" — cities are FOUNDED during 300 years, so the denominator has to be read
+/// live, exactly like the numerator.
+fn is_real_city(s: &CampaignSim, h: usize) -> bool {
+    !s.hubs[h].is_estate && !s.hubs[h].abandoned
+}
+
+/// How many real cities exist right now.
+fn live_cities(s: &CampaignSim) -> usize {
+    (0..s.hubs.len()).filter(|&h| is_real_city(s, h)).count()
+}
+
+/// Cities where `culture` is present as a real quarter (or the majority) — the 2%
+/// floor is `diaspora_pass`' own "is this a real quarter" cut, reused rather than
+/// invented so the measurement matches the mechanism.
+fn cities_holding(s: &CampaignSim, culture: &str) -> usize {
+    (0..s.hubs.len())
+        .filter(|&h| is_real_city(s, h) && s.culture_share_at(h, culture) >= 0.02)
+        .count()
+}
+
+/// Cities where `culture` is the outright majority — ruling a place, not merely
+/// living in it.
+fn cities_where_majority(s: &CampaignSim, culture: &str) -> usize {
+    (0..s.hubs.len())
+        .filter(|&h| is_real_city(s, h) && s.hub_culture.get(h).map(|c| c == culture).unwrap_or(false))
+        .count()
+}
+
+/// Mean ethnic overlap across every ordered trading pair `(a, b)` — for each pair,
+/// `Σ_c min(share_c(a), share_c(b))`, i.e. the share of two cities' populations that
+/// share a people. This is exactly the quantity step 7's `kin_pull` would multiply
+/// the dispatch shortlist score by, computed here BEFORE anything depends on it.
+fn mean_pair_overlap(s: &CampaignSim) -> f32 {
+    let mut cultures: Vec<String> = Vec::new();
+    for h in 0..s.hubs.len() {
+        if let Some(c) = s.hub_culture.get(h) {
+            if !c.is_empty() && c != "—" && !cultures.contains(c) { cultures.push(c.clone()); }
+        }
+        if let Some(mins) = s.hub_minorities.get(h) {
+            for (c, _) in mins { if !cultures.contains(c) { cultures.push(c.clone()); } }
+        }
+    }
+    let (mut sum, mut pairs) = (0.0f32, 0u32);
+    for a in 0..s.hubs.len() {
+        for &bn in s.neighbors.get(a).map(|v| v.as_slice()).unwrap_or(&[]) {
+            let b = bn as usize;
+            if b == a || b >= s.hubs.len() { continue; }
+            sum += cultures.iter()
+                .map(|c| s.culture_share_at(a, c).min(s.culture_share_at(b, c)))
+                .sum::<f32>();
+            pairs += 1;
+        }
+    }
+    if pairs == 0 { 0.0 } else { sum / pairs as f32 }
+}
