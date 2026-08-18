@@ -629,6 +629,21 @@ impl CampaignSim {
     }
 
 
+    /// Local DEMAND PRESSURE on good `g` at hub `h`: how dear it is relative to its
+    /// intrinsic worth (`price` is in the grain-equivalent numeraire, `base_value` the
+    /// good's intrinsic value), clamped so it re-weights a founder's choice of good
+    /// without dominating it. A value above 1 means the city is UNDER-SUPPLIED and a
+    /// new producer would be profitable — this is the signal that turns unmet demand
+    /// into new estates and manufactories (a wine-capable city short of wine plants a
+    /// vineyard, and so on for every good). Returns a flat 1.0 (no effect) on a
+    /// province-less world, so the province-less dynamics gate stays bit-identical.
+    pub(crate) fn demand_pressure_at(&self, h: usize, g: usize) -> f32 {
+        if self.prov_cap.is_empty() { return 1.0; }
+        let base = self.goods[g].base_value.max(1e-3);
+        let price = self.hubs[h].price.get(g).copied().unwrap_or(base);
+        (price / base).clamp(0.6, 3.0)
+    }
+
     pub(crate) fn maybe_found_estate(&mut self) {
         // Reserve `OUTPOST_RESERVED_ESTATES` slots off the shared budget so ordinary
         // estates (founded far more often than an outpost) cannot starve the outpost
@@ -654,12 +669,19 @@ impl CampaignSim {
             if score > best_score { best_score = score; best = Some(h); }
         }
         let Some(parent) = best else { return };
-        // The estate works the parent's strongest export (highest per-capita output);
-        // its kind follows that good (farm / mine / plantation / vineyard / fishery).
+        // Which good the estate works, and so its kind (farm / mine / plantation /
+        // vineyard / fishery). Among goods the LAND here can actually yield
+        // (`base_per_capita > 0`), prefer the one under the most local DEMAND PRESSURE
+        // — dear relative to its base value, i.e. under-supplied — rather than merely
+        // the largest existing output. That is what makes unmet demand for a good like
+        // wine URGE a city sitting on wine-capable land to plant a vineyard instead of
+        // endlessly reinforcing what it already exports.
         let mut bestg = (usize::MAX, 0.0f32);
         for g in 0..ng {
             let pc = self.hubs[parent].base_per_capita.get(g).copied().unwrap_or(0.0);
-            if pc > bestg.1 { bestg = (g, pc); }
+            if pc <= 0.0 { continue; }
+            let score = pc * self.demand_pressure_at(parent, g);
+            if score > bestg.1 { bestg = (g, score); }
         }
         let Some(mut g0) = (bestg.0 != usize::MAX).then_some(bestg.0) else { return };
         let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
@@ -777,9 +799,12 @@ impl CampaignSim {
             // get both raw output and value-added luxuries.
             let house_lux = self.houses[hi].spec.iter().cloned()
                 .find(|&g| g < ng && !self.goods[g].food && self.goods[g].base_value >= 4.0);
+            // Bias the luxury choice by local demand too, so a house re-tools toward
+            // the scarce, dear luxury the city is short of rather than only its biggest.
             let city_lux = (0..ng)
                 .filter(|&g| !self.goods[g].food && self.goods[g].base_value >= 4.0)
-                .map(|g| (g, self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0)))
+                .map(|g| (g, self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0)
+                    * self.demand_pressure_at(target, g)))
                 .filter(|(_, pc)| *pc > 0.0)
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(g, _)| g);
@@ -789,10 +814,16 @@ impl CampaignSim {
             let (g0, kind, percap) = if want_manu && manu_good.is_some() {
                 (manu_good.unwrap(), 6u8, MANUFACTORY_PERCAP)
             } else {
+                // Among goods the target's land can yield, the one under the most local
+                // demand pressure (under-supplied → profitable to add), not just its
+                // biggest current output — the same demand-driven bias as
+                // `maybe_found_estate`, so a house's raw investment follows real scarcity.
                 let mut bg = (usize::MAX, 0.0f32);
                 for g in 0..ng {
                     let pc = self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0);
-                    if pc > bg.1 { bg = (g, pc); }
+                    if pc <= 0.0 { continue; }
+                    let score = pc * self.demand_pressure_at(target, g);
+                    if score > bg.1 { bg = (g, score); }
                 }
                 if bg.0 == usize::MAX { continue; }
                 let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food);

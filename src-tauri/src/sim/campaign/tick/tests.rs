@@ -638,14 +638,17 @@
         assert!(fired, "a 51% private trade house must proclaim despite trading guilds present");
     }
 
-    /// The trade path is DETERMINISTIC and priced: a house commanding ≥20% of a
-    /// province's trade proclaims the same year IF (and only if) it can pay
-    /// `REALM_TRADE_MIN_WEALTH`. A house below that floor — however dominant its trade —
-    /// cannot yet crown; the same house at the floor crowns immediately, on the first
-    /// eligible year, with no dice. (Maintainer's rule: "no chances — pure trade
-    /// dominance and a price of 50k.")
+    /// The trade path is DETERMINISTIC and gated ONLY on trade share: a house
+    /// commanding ≥ `PROV_TRADE_CONTROL_FRAC` (20%) of a province's trade proclaims
+    /// the same year it becomes eligible, with NO dice and NO wealth floor.
+    /// (Maintainer's rule: "leave only 20% trade required for a realm to appear.")
+    /// The founding cost scales to the founder's own fortune, so even a near-broke
+    /// dominant house crowns — and its crown's treasury never goes negative. This is
+    /// the fix for the "no realms ever appear" report on a poor/starving world, where
+    /// the old flat 50k floor priced out exactly the local monopolist the 20% bar
+    /// selects while the UI still flagged it "eligible".
     #[test]
-    fn the_trade_path_is_gated_on_wealth_then_fires_deterministically() {
+    fn the_trade_path_fires_on_share_alone_regardless_of_wealth() {
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let hubs = vec![hub(0, 0.0, 0.0, 4000.0, vec![1500.0], 0)];
         let base = |wealth: f32| {
@@ -663,17 +666,19 @@
             s
         };
 
-        // Below the price: dominant trade is not enough — no crown.
-        let mut poor = base(REALM_TRADE_MIN_WEALTH - 1.0);
+        // A POOR but dominant house now crowns — trade share is the sole qualification.
+        let mut poor = base(1_200.0);
         poor.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
-        assert!(poor.realms.is_empty(),
-            "a house under REALM_TRADE_MIN_WEALTH cannot crown, however dominant its trade");
+        assert!(!poor.realms.is_empty(),
+            "a house commanding 20%+ of a province's trade crowns regardless of its wealth");
+        assert!(poor.houses[0].crowned, "the poor trade house is still elevated to a crown");
+        assert!(poor.realms[0].treasury >= 0.0, "treasury never goes negative even when poor");
 
-        // At the price: crowns the FIRST eligible year — no waiting on a roll.
+        // A rich house behaves the same — deterministic, first eligible year.
         let mut rich = base(REALM_TRADE_MIN_WEALTH);
         rich.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
         assert!(!rich.realms.is_empty(),
-            "a house at REALM_TRADE_MIN_WEALTH crowns deterministically the first eligible year");
+            "a wealthy dominant house crowns deterministically the first eligible year");
         assert!(rich.houses[0].crowned, "the trade house is elevated to a crown");
         assert!(rich.realms[0].treasury >= 0.0, "treasury never goes negative");
     }

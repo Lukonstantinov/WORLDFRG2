@@ -330,7 +330,15 @@ const COLONY_CAP_DEV: f32 = 22.0;
 /// `econ_diagnose_population_growth` (economy_validation.rs) and
 /// docs/SCOREBOARD.md. Landed conservative on purpose; raising it further needs
 /// its own iteration against this same gate, not a one-shot guess.
-const WORLD_AGE_DEV_CAP: f32 = 2.8;
+///
+/// RAISED 2.8 → 6.0 (maintainer request: "world population must grow past ~8M").
+/// This is SAFE against the dynamics gate by construction: `world_age_cap` below
+/// (`disease.rs`) is gated on `has_prov`, and `simulate_decades_reports_dynamics`
+/// seeds NO province layer, so it takes the hardcoded `else` = 2.0 branch and never
+/// sees this constant at all. Only a real, provinced campaign (every generated
+/// world) feels the higher ceiling; food-security still gates the first factor of
+/// `cap_mult`, so a hub only reaches the taller ceiling if it is actually fed.
+const WORLD_AGE_DEV_CAP: f32 = 6.0;
 /// Years of campaign elapsed to earn ~63% of `WORLD_AGE_DEV_CAP`. Larger = slower
 /// ramp (population takes longer to feel this headroom, so it keeps room to grow
 /// later in a long campaign); smaller = faster ramp (saturates, and stops helping,

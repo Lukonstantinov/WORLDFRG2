@@ -444,14 +444,20 @@ impl CampaignSim {
                 // is exactly how a tributary throws off its overlord, so we clear the
                 // tribute below rather than let it veto the crown.
                 if self.hubs[seat].realm >= 0 { continue; }
-                // PURE TRADE DOMINANCE, no dice. A private house that commands at least
-                // `PROV_TRADE_CONTROL_FRAC` of the province's trade AND holds at least
-                // `REALM_TRADE_MIN_WEALTH` proclaims a realm — deterministically, the
-                // same year it becomes eligible. The founding costs that flat price; the
-                // house keeps the rest as the new crown's treasury. (Per the maintainer:
-                // "no chances — just pure trade dominance and a price of 50k.")
-                if self.houses[hi].wealth < REALM_TRADE_MIN_WEALTH { continue; }
-                let cost = REALM_TRADE_MIN_WEALTH;
+                // PURE TRADE DOMINANCE, no dice, NO wealth gate. A private house that
+                // commands at least `PROV_TRADE_CONTROL_FRAC` of the province's trade
+                // proclaims a realm — deterministically, the same year it becomes
+                // eligible. Trade share alone is the qualification (maintainer: "leave
+                // only 20% trade required for a realm to appear"). The old flat
+                // `REALM_TRADE_MIN_WEALTH` gate priced out exactly the poor local
+                // monopolist this path selects (the 20% bar picks the house that
+                // dominates ONE province, which on a hard/starving world is usually a
+                // minor one), so on such a world NO trade realm ever formed and the UI's
+                // "eligible" badge — which only checks the share — never came true.
+                // The cost now SCALES to the founder (a third of its own fortune, capped
+                // at the flat price) so it is affordable by construction and never both
+                // blocks the crown and drives the treasury negative.
+                let cost = self.realm_founding_cost_for_house(hi, REALM_TRADE_MIN_WEALTH);
                 // The province breaks away under its dominant merchant: its writ moves to
                 // the crown's seat, which then administers it directly, and the seat sheds
                 // any tributary bond as it claims sovereignty.
