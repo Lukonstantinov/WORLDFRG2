@@ -178,7 +178,13 @@ pub const ELEVATION_STOPS: [(f32, (u8, u8, u8)); 8] = [
     (2000.0, (219, 200, 155)),
     (3000.0, (231, 210, 186)),
     (5000.0, (241, 231, 222)),
-    (8848.0, (255, 255, 255)),
+    // Terrain 2.0 slice 6 (docs/TERRAIN_2_PLAN.md section 6): the top stop used
+    // to be pure white, which blows every summit out to one flat colour with no
+    // headroom left for the hillshade to darken it back down into — a snow cap
+    // reads as a featureless white blob instead of a shaded one. Still strictly
+    // brighter than the 5000 m stop (the monotone-lightness rule), just short of
+    // the ceiling.
+    (8848.0, (250, 248, 244)),
 ];
 
 fn elevation_color(e: f32) -> (u8, u8, u8) {
@@ -1402,6 +1408,25 @@ const AO_AMP: f32 = 0.16;
 /// at the scale of a real landform. Anything below ~150 m re-admits the grain.
 const AO_REF: f32 = 240.0 / 8848.0;
 
+/// Terrain 2.0 slice 6 (docs/TERRAIN_2_PLAN.md section 6, "texture shading" —
+/// the honest answer to the lee-slope flatness the reverted fill light failed
+/// to fix, see section 8.21). A single directional light collapses a slope
+/// facing AWAY from it to `SHADOW_FLOOR` regardless of how textured that slope
+/// actually is — Lambertian shading has nothing left to say once a surface
+/// faces away from the key light. Real texture shading (Leland Brown) answers
+/// this with a full multi-scale curvature transform; that needs a wide
+/// cross-tile halo this renderer's `TileNeighbors` doesn't carry (only the
+/// immediate edge of each cardinal neighbour, see `halo_elev`), so this is a
+/// bounded, HONEST approximation using the SAME single-ring 3x3 curvature
+/// `relief_at` already computes for ambient occlusion: on the shadowed side of
+/// a landform, boost how strongly that curvature reads, so a lee slope gets
+/// its ridge-and-valley texture from CURVATURE instead of from light it never
+/// receives. On the lit side this is a no-op (`texture_boost` → 1.0), so the
+/// key-light shading already tuned for the sunward slopes is untouched — this
+/// is not a second light source, only a wider gain on the existing
+/// direction-independent AO term precisely where directional light runs out.
+const TEXTURE_SHADOW_BOOST: f32 = 0.65;
+
 /// A unit light vector from azimuth/altitude in degrees. `y` is negated because
 /// raster y increases downward.
 fn light_vec(az_deg: f32, alt_deg: f32) -> (f32, f32, f32) {
@@ -1458,7 +1483,12 @@ fn relief_at(
     let br = halo_elev(tile, n, xi + 1, yi + 1);
     let mean8 = (left + right + up + down + ul + ur + bl + br) / 8.0;
     let concavity = (e - mean8) / AO_REF;
-    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * AO_AMP;
+    // Texture-shading follow-up (see `TEXTURE_SHADOW_BOOST`): widen the AO
+    // gain on the side the key light doesn't reach, so a lee slope keeps real
+    // ridge-and-valley texture instead of reading as one flat shadow tone.
+    let shadow_amount = (1.0 - lambert).clamp(0.0, 1.0);
+    let texture_boost = 1.0 + shadow_amount * TEXTURE_SHADOW_BOOST;
+    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * AO_AMP * texture_boost;
 
     // AERIAL PERSPECTIVE (Imhof): contrast is low in the lowlands and rises with
     // height, so a summit reads crisp while a plain keeps its tint.

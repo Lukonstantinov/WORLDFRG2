@@ -1,6 +1,7 @@
 ﻿use rand::prelude::*;
 use std::collections::VecDeque;
 use crate::sim::world_buffer::WorldBuffer;
+use super::geology;
 
 // â”€â”€ Seeded noise helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -82,87 +83,184 @@ fn warped_coords(x: f32, y: f32, seed: u64, strength: f32) -> (f32, f32) {
 
 // â”€â”€ Erosion â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-/// Hydraulic erosion: droplet simulation for valleys and channels
-fn hydraulic_erosion(
+/// Priority-flood over LAND only, seeded from every ocean cell at fixed sea
+/// level (Barnes et al. 2014 depression-filling, the same family phase 5's
+/// rivers already use -- kept as a separate implementation here rather than
+/// shared, per TERRAIN_2_PLAN.md section 4 slice 1 risk 2: phase 2 runs long
+/// before rivers exist and unifying the two would be its own, separately
+/// gated change). Returns, per land cell: `flow_to` (the neighbour it drains
+/// toward -- itself for an outlet cell directly on the coast) and `order`
+/// (the pop order, ascending filled elevation -- headwaters last).
+fn priority_flood_flow(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (Vec<usize>, Vec<usize>) {
+    use std::cmp::Ordering;
+    use std::collections::BinaryHeap;
+
+    #[derive(Copy, Clone)]
+    struct HeapItem { elev: f32, idx: usize }
+    impl PartialEq for HeapItem { fn eq(&self, o: &Self) -> bool { self.elev == o.elev } }
+    impl Eq for HeapItem {}
+    impl Ord for HeapItem {
+        fn cmp(&self, o: &Self) -> Ordering {
+            // Min-heap: BinaryHeap is a max-heap, so reverse the float compare.
+            o.elev.partial_cmp(&self.elev).unwrap_or(Ordering::Equal)
+        }
+    }
+    impl PartialOrd for HeapItem { fn partial_cmp(&self, o: &Self) -> Option<Ordering> { Some(self.cmp(o)) } }
+
+    let n = (w * h) as usize;
+    let wi = w as i32;
+    let hi = h as i32;
+    const EPS: f32 = 0.00002;
+
+    let mut visited = vec![false; n];
+    let mut flow_to = vec![0usize; n];
+    let mut order = Vec::with_capacity(n);
+    let mut heap = BinaryHeap::new();
+
+    for i in 0..n {
+        if terrain[i] != 1 { visited[i] = true; }
+    }
+    for y in 0..hi {
+        for x in 0..wi {
+            let i = (y as u32 * w + x as u32) as usize;
+            if terrain[i] != 1 { continue; }
+            let mut coastal = false;
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = (((x + dx) % wi) + wi) % wi;
+                let ny = (y + dy).clamp(0, hi - 1);
+                if terrain[(ny as u32 * w + nx as u32) as usize] != 1 { coastal = true; break; }
+            }
+            if coastal {
+                visited[i] = true;
+                flow_to[i] = i;
+                order.push(i);
+                heap.push(HeapItem { elev: elevation[i], idx: i });
+            }
+        }
+    }
+    // Fallback for a landmass with no coast at all (an all-land world): seed
+    // from the single lowest land cell so the pass still does something sane
+    // rather than silently erode nothing.
+    if heap.is_empty() {
+        if let Some(lowest) = (0..n).filter(|&i| terrain[i] == 1)
+            .min_by(|&a, &b| elevation[a].partial_cmp(&elevation[b]).unwrap())
+        {
+            visited[lowest] = true;
+            flow_to[lowest] = lowest;
+            order.push(lowest);
+            heap.push(HeapItem { elev: elevation[lowest], idx: lowest });
+        }
+    }
+
+    while let Some(HeapItem { elev, idx }) = heap.pop() {
+        let x = (idx as u32 % w) as i32;
+        let y = (idx as u32 / w) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = (((x + dx) % wi) + wi) % wi;
+            let ny = y + dy;
+            if ny < 0 || ny >= hi { continue; }
+            let ni = (ny as u32 * w + nx as u32) as usize;
+            if visited[ni] || terrain[ni] != 1 { continue; }
+            visited[ni] = true;
+            flow_to[ni] = idx;
+            order.push(ni);
+            let filled = elevation[ni].max(elev + EPS);
+            heap.push(HeapItem { elev: filled, idx: ni });
+        }
+    }
+
+    (flow_to, order)
+}
+
+/// Stream-power erosion: priority-flood fill removes depressions with a
+/// guaranteed-drainage gradient, D8 flow directions fall straight out of the
+/// fill order, drainage AREA accumulates from headwaters to the coast, and
+/// incision follows `K*A^m*S^n` -- the standard landscape-evolution formula
+/// (Whipple & Tucker 1999). Replaces the old droplet simulation
+/// (TERRAIN_2_PLAN.md section 4 slice 1, D6): droplets landing on ocean
+/// discarded ~42% of a 15k-90k budget and left ~1.4 visits per land cell even
+/// at full budget -- a sampling accident, not a network. This instead incises
+/// every land cell's real flow path every outer pass.
+///
+/// `erodibility`/`climate` (both centred on 1.0) are optional per-cell K
+/// multipliers -- lithology resistance and the phase-2 climate-erosion proxy
+/// (TERRAIN_2_PLAN.md section 4 slice 2). `None` is a true 1.0 no-op, so a
+/// caller with no `GeoContext` (tests, the paint-stroke ridge tool) is
+/// unaffected.
+fn stream_power_erosion(
     elevation: &mut [f32], terrain: &[u8],
     w: u32, h: u32, seed: u64, iterations: u32,
+    erodibility: Option<&[f32]>, climate: Option<&[f32]>,
 ) {
-    let mut rng = StdRng::seed_from_u64(seed);
-    let wf = w as f32;
-    let hf = h as f32;
+    let n = (w * h) as usize;
+    if n == 0 || !terrain.iter().any(|&t| t == 1) { return; }
 
-    for _ in 0..iterations {
-        let mut px = rng.gen::<f32>() * wf;
-        let mut py = rng.gen::<f32>() * hf;
-        let start_idx = (py as u32 * w + px as u32) as usize;
-        if start_idx >= terrain.len() || terrain[start_idx] != 1 { continue; }
+    // Outer passes: re-fill + re-route + incise repeatedly so the network
+    // adjusts as incision reshapes local slope -- a single pass under-carves
+    // low-order tributaries near their headwaters. Each pass is a full
+    // priority-flood over the whole grid (O(n log n), unparallelised -- a
+    // priority queue doesn't parallelise the way the phase-3 row loops do),
+    // so this count is also the dominant phase-2 perf cost (`bench_phase2`).
+    //
+    // Scaled by GRID SIZE, not by `iterations` (the old droplet-count knob):
+    // wall-clock cost is set by how many cells a pass touches, which is `n`,
+    // not by the erosion-strength slider callers already tune via
+    // `iterations`. A world under ~1M cells (this includes every unit test
+    // fixture) can afford 8 full passes for effectively free; only a large
+    // real-generation world (multiple millions of cells) needs the count
+    // capped down to stay inside the plan's own "no slower than before"
+    // budget (section 5). The `/passes` scaling below keeps total incision
+    // depth roughly invariant as this count changes, so fewer passes trades
+    // network self-correction for speed rather than trading away erosion
+    // strength outright -- `cordillera_crest_runs_parallel_to_the_coast` is
+    // the gate that caught this mattering: below ~5-6 passes the traced
+    // spine no longer differentiates from generic ridged noise.
+    let passes: u32 = if n > 4_000_000 {
+        4
+    } else if n > 1_000_000 {
+        6
+    } else {
+        8
+    };
+    let _ = iterations; // kept as the public erosion-strength knob; no longer sizes pass count
+    const K_BASE: f32 = 0.030;
+    const M_AREA: f32 = 0.5;
+    const N_SLOPE: f32 = 1.0;
 
-        let mut dir_x = 0.0f32;
-        let mut dir_y = 0.0f32;
-        let mut water = 1.0f32;
-        let mut sediment = 0.0f32;
-        let mut speed = 0.5f32;
+    let mut rng = StdRng::seed_from_u64(seed ^ 0xE205_17A3);
+    for pass in 0..passes {
+        let (flow_to, order) = priority_flood_flow(elevation, terrain, w, h);
 
-        for _ in 0..120 {
-            let ix = px as i32;
-            let iy = py as i32;
-            if ix < 0 || ix >= w as i32 || iy < 0 || iy >= h as i32 { break; }
-            let idx = (iy as u32 * w + ix as u32) as usize;
-            if terrain[idx] != 1 { break; }
+        let mut area = vec![1.0f32; n];
+        for &i in order.iter().rev() {
+            let t = flow_to[i];
+            if t != i { area[t] += area[i]; }
+        }
 
-            // Gradient
-            let x0 = ((ix - 1 + w as i32) % w as i32) as u32;
-            let x1 = ((ix + 1) % w as i32) as u32;
-            let y0 = (iy - 1).max(0) as u32;
-            let y1 = ((iy + 1) as u32).min(h - 1);
-            let gx = (elevation[(iy as u32 * w + x1) as usize] - elevation[(iy as u32 * w + x0) as usize]) * 0.5;
-            let gy = (elevation[(y1 * w + ix as u32) as usize] - elevation[(y0 * w + ix as u32) as usize]) * 0.5;
+        for &i in &order {
+            let t = flow_to[i];
+            if t == i { continue; } // coastal outlet: nothing downstream to incise into
+            let drop = (elevation[i] - elevation[t]).max(0.0);
+            let k_e = erodibility.map_or(1.0, |e| e[i]);
+            let k_c = climate.map_or(1.0, |c| c[i]);
+            let a = area[i].max(1.0).powf(M_AREA);
+            let s = drop.max(0.0004).powf(N_SLOPE);
+            let incise = K_BASE * k_e * k_c * a * s / passes as f32 * 3.0;
+            // Never erode a cell below its own downstream neighbour -- the
+            // standard stream-power safety clamp; it also self-limits the
+            // A^m blow-up near a river mouth without any extra bookkeeping.
+            elevation[i] = (elevation[i] - incise).max(elevation[t]);
+        }
 
-            // Update direction with inertia
-            dir_x = dir_x * 0.3 - gx * 0.7;
-            dir_y = dir_y * 0.3 - gy * 0.7;
-            let dir_len = (dir_x * dir_x + dir_y * dir_y).sqrt();
-            if dir_len < 0.0001 {
-                let a = rng.gen::<f32>() * std::f32::consts::TAU;
-                dir_x = a.cos();
-                dir_y = a.sin();
-            } else {
-                dir_x /= dir_len;
-                dir_y /= dir_len;
-            }
-
-            let npx = px + dir_x;
-            let npy = py + dir_y;
-            let nix = npx as i32;
-            let niy = npy as i32;
-            if nix < 0 || nix >= w as i32 || niy < 0 || niy >= h as i32 { break; }
-            let nidx = (niy as u32 * w + nix as u32) as usize;
-            let height_diff = elevation[nidx] - elevation[idx];
-
-            let slope = (-height_diff).max(0.005);
-            let capacity = (slope * speed * water * 6.0).max(0.0);
-
-            if sediment > capacity || height_diff > 0.0 {
-                let deposit = if height_diff > 0.0 {
-                    sediment.min(height_diff)
-                } else {
-                    (sediment - capacity) * 0.02
-                };
-                elevation[idx] += deposit;
-                sediment -= deposit;
-            } else {
-                let erode = ((capacity - sediment) * 0.03).min(elevation[idx] - 0.01);
-                if erode > 0.0 {
-                    elevation[idx] -= erode;
-                    sediment += erode;
+        // A small seed-reproducible jitter between passes keeps the drainage
+        // network from locking into a single deterministic tree on pass 1,
+        // so channels meander rather than snapping to one rigid path.
+        if pass + 1 < passes {
+            for i in 0..n {
+                if terrain[i] == 1 {
+                    elevation[i] = (elevation[i] + (rng.gen::<f32>() - 0.5) * 0.0004).max(0.001);
                 }
             }
-
-            speed = (speed * speed + height_diff * 4.0).max(0.0).sqrt();
-            water *= 0.985;
-            if water < 0.01 { break; }
-            px = npx;
-            py = npy;
         }
     }
 }
@@ -361,47 +459,65 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     let terrain = buf.terrain.clone();
     let have_boundary = !buf.boundary_type.is_empty();
 
-    // â”€â”€ Orogenic front: distance (in cells) from the nearest convergent boundary
-    // land cell. Ranges bloom here and fade inland. Transform boundaries add a
-    // weaker uplift (transpressional ranges). â”€â”€
-    let mut orogeny_dist = vec![u16::MAX; n];
-    {
-        let mut queue = VecDeque::new();
+    // Real orogeny field (TERRAIN_2_PLAN.md section 4 slice 3): BFS distance
+    // from, and setting/age inherited from, the nearest convergent/transform
+    // boundary land cell. `None` when there is no plate data at all (should
+    // not happen on this path, but stay defensive).
+    let orogeny = geology::compute_orogeny_field(buf, seed, 240);
+
+    // Distance from the nearest DIVERGENT boundary land cell (rifts), same BFS
+    // shape as `orogeny`'s own seeding. Sampled at the SAME warped position
+    // below (D4) so the rift-valley pulldown doesn't scar a straight line
+    // either -- it used to read `boundary_type[idx]` directly, a hard 1-cell
+    // multiply exactly on the literal Voronoi edge.
+    let mut rift_dist = vec![u16::MAX; n];
+    if have_boundary {
+        let mut rq = VecDeque::new();
         for i in 0..n {
-            if terrain[i] != 1 || !have_boundary { continue; }
-            let b = buf.boundary_type[i];
-            if b == 1 || b == 3 {
-                orogeny_dist[i] = 0;
-                queue.push_back(i);
+            if terrain[i] == 1 && buf.boundary_type[i] == 2 {
+                rift_dist[i] = 0;
+                rq.push_back(i);
             }
         }
-        while let Some(ci) = queue.pop_front() {
+        while let Some(ci) = rq.pop_front() {
+            let d = rift_dist[ci];
+            if d >= 24 { continue; }
             let cx = (ci % w as usize) as i32;
             let cy = (ci / w as usize) as i32;
-            let d = orogeny_dist[ci];
-            if d >= 240 { continue; }
             for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                 let nx = buf.wrap_x(cx + dx);
                 let ny = (cy + dy).clamp(0, h as i32 - 1) as u32;
                 let ni = buf.idx(nx, ny);
-                if terrain[ni] == 1 && orogeny_dist[ni] > d + 1 {
-                    orogeny_dist[ni] = d + 1;
-                    queue.push_back(ni);
+                if terrain[ni] == 1 && rift_dist[ni] > d + 1 {
+                    rift_dist[ni] = d + 1;
+                    rq.push_back(ni);
                 }
             }
         }
     }
+
     // Belt half-width (cells) scales with map size so ranges are a plausible
     // fraction of a continent wide at any resolution.
     let belt_reach = (w as f32 * 0.045).clamp(14.0, 90.0);
 
-    // Absolute feature wavelengths (in cells) â†’ feature COUNT scales with the map.
+    // Absolute feature wavelengths (in cells) -> feature COUNT scales with the map.
     let f_base = 1.0 / 760.0;   // broad continental swell
     let f_range = 1.0 / 210.0;  // ridge wavelength
     let f_hill = 1.0 / 52.0;    // fine hills
     let warp = 1.8f32;
     const RIDGE_AMP: f32 = 0.95;
     const HILL_AMP: f32 = 0.07;
+
+    // D4: a plate boundary is a straight Voronoi edge, and every prior version
+    // of this belt read `orogeny.dist` at the cell's OWN position, so however
+    // much `belt_noise` below varies the belt's STRENGTH, its CREST still
+    // traced that literal straight line -- the diagonal-line artefact named in
+    // TERRAIN_2_PLAN.md's own evidence column. So belt cells instead sample the
+    // orogeny field at a WARPED position: which boundary point "nearest" means
+    // wanders smoothly rather than being the true nearest, bending the belt's
+    // geometry the way a real orogen curves along an irregular margin.
+    let oro_warp_strength = belt_reach * 0.9;
+    let oro_warp_freq = 1.0 / (belt_reach * 2.6);
 
     let mut elevation = vec![0.0f32; n];
     for y in 0..h {
@@ -411,30 +527,66 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             let ax = x as f32;
             let ay = y as f32;
 
-            // Belt strength from convergent proximity (smoothstep), multiplied by
-            // a low-frequency noise so ranges break into segments and passes
-            // instead of forming one unbroken wall on the boundary line.
-            let od = orogeny_dist[idx];
-            let mut belt = if od == u16::MAX {
-                0.0
+            // Warped sample position for the orogeny AND rift lookups (D4):
+            // which boundary point "nearest" means wanders smoothly instead
+            // of being the true nearest, so neither reads as a straight line.
+            let warped_idx = if have_boundary {
+                let wxn = fbm_noise(ax * oro_warp_freq + 31.0, ay * oro_warp_freq + 7.0,
+                                    seed.wrapping_add(0xD4D4_0001), 3, 2.0, 0.5) - 0.5;
+                let wyn = fbm_noise(ax * oro_warp_freq + 91.0, ay * oro_warp_freq + 47.0,
+                                    seed.wrapping_add(0xD4D4_0002), 3, 2.0, 0.5) - 0.5;
+                let sx = ax + wxn * oro_warp_strength;
+                let sy = (ay + wyn * oro_warp_strength).clamp(0.0, h as f32 - 1.0);
+                let sxi = buf.wrap_x(sx.round() as i32);
+                let syi = sy.round() as u32;
+                Some(buf.idx(sxi, syi))
             } else {
-                (1.0 - od as f32 / belt_reach).clamp(0.0, 1.0)
+                None
+            };
+            let (od, oset, oage) = match (&orogeny, warped_idx) {
+                (Some(field), Some(sidx)) => (field.dist[sidx], field.setting[sidx], field.age[sidx]),
+                _ => (u16::MAX, 0u8, 0.5f32),
+            };
+
+            // Belt strength + relative ridge amplitude from the real orogeny
+            // setting (D2/D3/D4): an active margin's arc offset from the
+            // trench, a broad collision, a narrow island arc -- no longer one
+            // symmetric smoothstep for every geometry.
+            let (mut belt, setting_amp) = if od != u16::MAX {
+                (geology::belt_profile(od, oset, belt_reach), geology::setting_ridge_amp(oset))
+            } else {
+                (0.0, 1.0)
             };
             belt = belt * belt * (3.0 - 2.0 * belt); // smoothstep
             let belt_noise = fbm_noise(ax * f_base * 2.3 + 19.0, ay * f_base * 2.3 + 5.0,
                                        seed.wrapping_add(0xB317), 4, 2.0, 0.5);
             belt *= 0.35 + 0.65 * belt_noise;
+            // Age modulates amplitude: a young orogen stands sharper/taller,
+            // an old one is already worn down -- an old range beside a young
+            // one is the plan's own "single biggest visual win", read
+            // straight off the age this belt cell inherited in the BFS.
+            let age_amp = if od != u16::MAX { 1.25 - oage * 0.5 } else { 1.0 };
 
             let base = fbm_noise(ax * f_base + 3.1, ay * f_base + 7.7, seed, 5, 2.0, 0.5);
             let (rx, ry) = warped_coords(ax * f_range, ay * f_range, seed.wrapping_add(0x9E37), warp);
             let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 7, 2.1, 2.0);
             let hill = fbm_noise(ax * f_hill, ay * f_hill, seed.wrapping_add(0xFEED), 3, 2.0, 0.45);
-            let mut e = base * 0.42 + ridge * belt * RIDGE_AMP + hill * HILL_AMP;
+            let mut e = base * 0.42 + ridge * belt * RIDGE_AMP * setting_amp * age_amp + hill * HILL_AMP;
 
             // Divergent boundaries are rifts (continental rift valleys / nascent
-            // ocean) â€” pull the surface DOWN a little where crust is stretching.
-            if have_boundary && buf.boundary_type[idx] == 2 {
-                e *= 0.7;
+            // ocean) -- pull the surface DOWN a little where crust is
+            // stretching. Read at the SAME warped position as the orogeny
+            // lookup above (not `boundary_type[idx]` directly, which used to
+            // pull down a hard 1-cell-wide straight line exactly on the raw
+            // Voronoi edge) and fade smoothly with distance rather than
+            // switching on/off, so the rift reads as a valley, not a scar.
+            if let Some(sidx) = warped_idx {
+                let rd = rift_dist[sidx];
+                if rd != u16::MAX {
+                    let t = (1.0 - rd as f32 / 22.0).clamp(0.0, 1.0);
+                    let t2 = t * t * (3.0 - 2.0 * t);
+                    e *= 1.0 - 0.32 * t2;
+                }
             }
 
             // Valley incision: a higher-frequency inverted ridged field dissects
@@ -450,7 +602,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
     }
 
-    // â”€â”€ Distance-from-coast (full flood) for the coastal falloff â”€â”€
+    // -- Distance-from-coast (full flood) for the coastal falloff --
     let mut coast_dist = vec![0u16; n];
     {
         let mut visited = vec![false; n];
@@ -488,10 +640,16 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
     }
 
-    // â”€â”€ Erosion (hydraulic droplets + thermal slump) then hypsometric match â”€â”€
+    // Transient geology (TERRAIN_2_PLAN.md section 4 slices 1-2): lithology +
+    // tectonic-setting/age erodibility, the phase-2 climate proxy, and the
+    // per-plate region id used to regionalise the hypsometric redistribution.
+    let geo = geology::build_geo_context(buf, seed, &elevation, &coast_dist, orogeny.as_ref());
+
+    // -- Erosion (stream power + thermal slump) then hypsometric match --
     let hydro_iterations = ((n as f32 * 0.012) as u32).clamp(15_000, 90_000);
     let pre_erosion = elevation.clone();
-    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
+                          Some(&geo.erodibility), Some(&geo.climate));
     thermal_erosion(&mut elevation, &terrain, w, h, 3);
     // Isostatic adjustment (erosional rebound + mountain roots) before the rank-based
     // hypsometric redistribution reshapes the histogram.
@@ -523,7 +681,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             }
         }
         let target = build_target_histogram(height, density);
-        redistribute_elevation(&mut elevation, &terrain, n, &target);
+        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
     }
 
     // Terrain-aware micro-relief so no land area is ever a perfectly flat, mono
@@ -591,6 +749,79 @@ pub fn compute_sea_depth(buf: &mut WorldBuffer) {
     }
 }
 
+/// BFS distance (in cells) from an ocean cell to the nearest land cell whose
+/// `boundary_type` is in `types`: first a bounded land-side BFS out to
+/// `land_reach` from those boundary cells, then a bounded ocean-side flood out
+/// to `cap` from ocean cells directly touching that land. Shared by the
+/// active-margin shelf pinch and, since Terrain 2.0 slice 5 (D11), trench and
+/// mid-ocean-ridge placement -- each cares about a different boundary subset
+/// of the same underlying sweep. `[]` when there is no plate data at all.
+fn ocean_distance_from_boundary(buf: &WorldBuffer, types: &[u8], land_reach: u16, cap: u16) -> Vec<u16> {
+    if buf.boundary_type.is_empty() {
+        return Vec::new();
+    }
+    let w = buf.width;
+    let h = buf.height;
+    let mut bdist = vec![u16::MAX; buf.total()];
+    let mut q = VecDeque::new();
+    for i in 0..buf.total() {
+        if buf.terrain[i] == 1 && types.contains(&buf.boundary_type[i]) {
+            bdist[i] = 0;
+            q.push_back(i);
+        }
+    }
+    while let Some(ci) = q.pop_front() {
+        let d = bdist[ci];
+        if d >= land_reach { continue; }
+        let cx = (ci % w as usize) as i32;
+        let cy = (ci / w as usize) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = buf.wrap_x(cx + dx);
+            let ny = (cy + dy).clamp(0, h as i32 - 1) as u32;
+            let ni = buf.idx(nx, ny);
+            if buf.terrain[ni] == 1 && bdist[ni] > d + 1 {
+                bdist[ni] = d + 1;
+                q.push_back(ni);
+            }
+        }
+    }
+    let mut adist = vec![u16::MAX; buf.total()];
+    let mut oq = VecDeque::new();
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if buf.terrain[i] != 0 { continue; }
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let ny = y as i32 + dy;
+                if ny < 0 || ny >= h as i32 { continue; }
+                let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny as u32);
+                if buf.terrain[ni] == 1 && bdist[ni] != u16::MAX {
+                    adist[i] = 0;
+                    oq.push_back(i);
+                    break;
+                }
+            }
+        }
+    }
+    while let Some(ci) = oq.pop_front() {
+        let d = adist[ci];
+        if d >= cap { continue; }
+        let cx = (ci % w as usize) as i32;
+        let cy = (ci / w as usize) as i32;
+        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+            let nx = buf.wrap_x(cx + dx);
+            let ny = cy + dy;
+            if ny < 0 || ny >= h as i32 { continue; }
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] == 0 && adist[ni] > d + 1 {
+                adist[ni] = d + 1;
+                oq.push_back(ni);
+            }
+        }
+    }
+    adist
+}
+
 /// Generate continental shelves with configurable parameters.
 pub fn generate_shelves(
     buf: &mut WorldBuffer, seed: u64,
@@ -633,73 +864,15 @@ pub fn generate_shelves(
     // edge, no nearby boundary â€” the Atlantic geometry) builds a BROAD shelf. We
     // find ocean cells whose nearest coast is active and shrink their shelf.
     // Falls back to all-passive when no plate data is loaded (template worlds).
-    let active_dist: Vec<u16> = if buf.boundary_type.is_empty() {
-        Vec::new()
-    } else {
-        let ar = (w as f32 * 0.02).clamp(6.0, 40.0) as u16;
-        // Boundary proximity over land (BFS from convergent/transform cells).
-        let mut bdist = vec![u16::MAX; buf.total()];
-        let mut q = VecDeque::new();
-        for i in 0..buf.total() {
-            if buf.terrain[i] == 1 && matches!(buf.boundary_type[i], 1 | 3) {
-                bdist[i] = 0;
-                q.push_back(i);
-            }
-        }
-        while let Some(ci) = q.pop_front() {
-            let d = bdist[ci];
-            if d >= ar { continue; }
-            let cx = (ci % w as usize) as i32;
-            let cy = (ci / w as usize) as i32;
-            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                let nx = buf.wrap_x(cx + dx);
-                let ny = (cy + dy).clamp(0, h as i32 - 1) as u32;
-                let ni = buf.idx(nx, ny);
-                if buf.terrain[ni] == 1 && bdist[ni] > d + 1 {
-                    bdist[ni] = d + 1;
-                    q.push_back(ni);
-                }
-            }
-        }
-        // Flood into the ocean from cells adjacent to an ACTIVE coast (coastal
-        // land within `ar` of a boundary), capped at the shelf's reach.
-        let cap = (base_width + drop_w + 6.0) as u16;
-        let mut adist = vec![u16::MAX; buf.total()];
-        let mut oq = VecDeque::new();
-        for y in 0..h {
-            for x in 0..w {
-                let i = buf.idx(x, y);
-                if buf.terrain[i] != 0 { continue; }
-                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                    let ny = y as i32 + dy;
-                    if ny < 0 || ny >= h as i32 { continue; }
-                    let ni = buf.idx(buf.wrap_x(x as i32 + dx), ny as u32);
-                    if buf.terrain[ni] == 1 && bdist[ni] != u16::MAX {
-                        adist[i] = 0;
-                        oq.push_back(i);
-                        break;
-                    }
-                }
-            }
-        }
-        while let Some(ci) = oq.pop_front() {
-            let d = adist[ci];
-            if d >= cap { continue; }
-            let cx = (ci % w as usize) as i32;
-            let cy = (ci / w as usize) as i32;
-            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                let nx = buf.wrap_x(cx + dx);
-                let ny = cy + dy;
-                if ny < 0 || ny >= h as i32 { continue; }
-                let ni = buf.idx(nx, ny as u32);
-                if buf.terrain[ni] == 0 && adist[ni] > d + 1 {
-                    adist[ni] = d + 1;
-                    oq.push_back(ni);
-                }
-            }
-        }
-        adist
-    };
+    let ar = (w as f32 * 0.02).clamp(6.0, 40.0) as u16;
+    let cap = (base_width + drop_w + 6.0) as u16;
+    let active_dist = ocean_distance_from_boundary(buf, &[1, 3], ar, cap);
+    // Terrain 2.0 slice 5 (D11): a mid-ocean ridge follows a DIVERGENT boundary
+    // and a trench follows a CONVERGENT one specifically -- narrower than the
+    // combined active-margin reach above, since a real ridge/trench is a sharp
+    // feature, not the whole margin.
+    let ridge_dist = ocean_distance_from_boundary(buf, &[2], ar, 28);
+    let trench_dist = ocean_distance_from_boundary(buf, &[1], ar, 16);
 
     let noise_scale = w.max(h) as f32 / 20.0;
     for y in 0..h {
@@ -759,6 +932,61 @@ pub fn generate_shelves(
             // coastal ring.
             buf.is_shelf[idx] = if depth < 0.24 { 1 } else { 0 };
             buf.is_shelf_edge[idx] = if (0.20..0.28).contains(&depth) { 1 } else { 0 };
+        }
+    }
+
+    // â”€â”€ Terrain 2.0 slice 5 (docs/TERRAIN_2_PLAN.md D11): seafloor structure.
+    // Everything above is a pure function of distance-to-coast; real ocean
+    // floor also carries a mid-ocean ridge along a divergent boundary, a
+    // trench at a subducting convergent one, abyssal-hill texture in the deep,
+    // and scattered seamounts/guyots -- none of which distance-to-coast alone
+    // can produce. Applied past the shelf/dropoff so it never fights the
+    // coastal profile above; each term is bounded and additive so a world with
+    // no plate data (ridge_dist/trench_dist empty) just skips those two terms.
+    for y in 0..h {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 0 { continue; }
+            let mut depth = buf.sea_depth[idx];
+            let ax = x as f32;
+            let ay = y as f32;
+
+            if !ridge_dist.is_empty() && ridge_dist[idx] != u16::MAX {
+                let rd = ridge_dist[idx] as f32;
+                const REACH: f32 = 24.0;
+                if rd < REACH {
+                    let t = (1.0 - rd / REACH).clamp(0.0, 1.0);
+                    // Along-ridge segmentation: transform offsets read as gaps
+                    // in the crest rather than one unbroken seam.
+                    let seg = fbm_noise(ax * 0.02 + 3.0, ay * 0.02 + 9.0, seed.wrapping_add(0x51DE_51DE), 3, 2.0, 0.5);
+                    let seg_gate = (0.25 + 0.9 * seg).clamp(0.0, 1.0);
+                    depth -= 0.30 * t * t * seg_gate;
+                }
+            }
+            if !trench_dist.is_empty() && trench_dist[idx] != u16::MAX {
+                let td = trench_dist[idx] as f32;
+                const REACH: f32 = 13.0;
+                if td < REACH {
+                    let t = (1.0 - td / REACH).clamp(0.0, 1.0);
+                    depth += 0.30 * t * t * t;
+                }
+            }
+            // Abyssal hills: fine noise texture, everywhere, scaled by depth so
+            // the shelf itself stays smooth and only the deep floor textures.
+            let hills = fbm_noise(ax * 0.09 + 41.0, ay * 0.09 + 17.0, seed.wrapping_add(0x0AB7_0AB7), 3, 2.0, 0.5) - 0.5;
+            depth += hills * 0.05 * depth.clamp(0.0, 1.0);
+            // Scattered seamounts/guyots: sparse hotspot noise peaks read as
+            // isolated shallow bumps in otherwise deep water (not traced as
+            // literal chains -- a documented simplification of the plan's
+            // "seamount chains").
+            let hotspot = fbm_noise(ax * 0.05 + 91.0, ay * 0.05 + 37.0, seed.wrapping_add(0x5EA5_5EA5), 2, 2.0, 0.5);
+            if hotspot > 0.80 && depth > 0.5 {
+                let bump = ((hotspot - 0.80) / 0.20).clamp(0.0, 1.0);
+                depth -= 0.22 * bump * bump;
+            }
+
+            buf.sea_depth[idx] = depth.clamp(0.0, 1.0);
+            buf.is_shelf[idx] = if buf.sea_depth[idx] < 0.24 { 1 } else { 0 };
         }
     }
 }
@@ -966,7 +1194,11 @@ pub fn generate_elevation_from_terrain(
     let erosion_scale = 0.5 + roughness * 0.5; // rougher = more erosion detail
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     let pre_erosion = elevation.clone();
-    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+    // No real plate data on this path -- the relief pseudo-setting only
+    // (TERRAIN_2_PLAN.md section 2's documented fiction, never real polarity/age).
+    let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
+    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
+                          Some(&geo.erodibility), Some(&geo.climate));
 
     // â”€â”€ Step 4: Thermal erosion â€” smooth sharp ridges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Fewer passes than before (2-4) so the carved valley networks aren't
@@ -1019,7 +1251,7 @@ pub fn generate_elevation_from_terrain(
         // The `height` slider interpolates the target between a low, coastal
         // world and a dramatic alpine one; `density` biases toward more highland.
         let target = build_target_histogram(height, density);
-        redistribute_elevation(&mut elevation, &terrain, n, &target);
+        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
     }
 
     // â”€â”€ Step 6: Terrain-aware micro-relief, then write back to buffer â”€â”€â”€â”€
@@ -1142,7 +1374,9 @@ pub fn generate_elevation_ridged(
     let erosion_scale = 0.5 + roughness * 0.5;
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     let pre_erosion = elevation.clone();
-    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+    let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
+    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
+                          Some(&geo.erodibility), Some(&geo.climate));
     let thermal_passes = 2 + (roughness * 2.0) as u32; // fewer passes so valleys survive
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
     isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
@@ -1171,7 +1405,7 @@ pub fn generate_elevation_ridged(
             }
         }
         let target = build_target_histogram(height, density);
-        redistribute_elevation(&mut elevation, &terrain, n, &target);
+        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
     }
 
     // Terrain-aware micro-relief (plateaus smooth, hillsides roll, flats flat).
@@ -1385,11 +1619,13 @@ pub fn generate_elevation_cordillera(
     let erosion_scale = 0.5 + roughness * 0.5;
     let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     let pre_erosion = elevation.clone();
-    hydraulic_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations);
+    let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
+    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
+                          Some(&geo.erodibility), Some(&geo.climate));
     thermal_erosion(&mut elevation, &terrain, w, h, 2 + (roughness * 2.0) as u32);
     isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
-    normalize_and_redistribute(&mut elevation, &terrain, n, height, density);
+    normalize_and_redistribute(&mut elevation, &terrain, n, height, density, &geo.region_id, geo.region_count);
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
 
     for i in 0..n {
@@ -1583,6 +1819,7 @@ fn walk_spine(
 /// path cannot drift apart in how they set final altitudes.
 fn normalize_and_redistribute(
     elevation: &mut [f32], terrain: &[u8], n: usize, height: f32, density: f32,
+    region_id: &[u32], region_count: u32,
 ) {
     let mut max_h = 0.0f32;
     for i in 0..n {
@@ -1617,7 +1854,7 @@ fn normalize_and_redistribute(
         }
     }
     let target = build_target_histogram(height, density);
-    redistribute_elevation(elevation, terrain, n, &target);
+    redistribute_elevation_regional(elevation, terrain, n, &target, region_id, region_count);
 }
 
 /// Scale every land cell's elevation by `scale` (0.5 = halve heights, 1.5 =
@@ -1654,9 +1891,9 @@ pub struct RidgeLine {
 /// widened into a rounded ridge whose footprint width comes from `width` and
 /// whose peak height comes from `height`; the crest is broken into sub-peaks by
 /// the shared `ridged_multifractal` field (scaled by `character`), then the new
-/// range is carved by the SAME hydraulic + thermal erosion the other generators
-/// use. Reuses `hydraulic_erosion`/`thermal_erosion`/`ridged_multifractal`/
-/// `warped_coords` directly.
+/// range is carved by the SAME stream-power + thermal erosion the other
+/// generators use. Reuses `stream_power_erosion`/`thermal_erosion`/
+/// `ridged_multifractal`/`warped_coords` directly.
 ///
 /// Design (see plan): SCREEN-blends onto existing elevation (so it also works on
 /// a flat world), LAND ONLY (ocean/coastline/depth/shelf untouched), and erosion
@@ -1808,7 +2045,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         // small fraction of a droplet per land cell) â€” enough to carve valleys
         // into the new range without eroding the crest away.
         let iters = ((mask_count as f32 * 0.6) as u32).clamp(1_000, 60_000);
-        hydraulic_erosion(&mut elevation, &mask_terrain, w, h, seed.wrapping_add(42), iters);
+        stream_power_erosion(&mut elevation, &mask_terrain, w, h, seed.wrapping_add(42), iters, None, None);
         let passes = 2 + (avg_char * 3.0) as u32;
         thermal_erosion(&mut elevation, &mask_terrain, w, h, passes);
     }
@@ -1926,6 +2163,62 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
     while cell_idx < total_land {
         elevation[land_indices[cell_idx]] = (last_min + 0.01).min(1.0);
         cell_idx += 1;
+    }
+}
+
+/// `redistribute_elevation`, then a REGIONALISED correction (TERRAIN_2_PLAN.md
+/// section 4 slice 2, D9). The plain global version squeezes every region's
+/// land into one rank histogram, which sets a plausible overall hypsometric
+/// curve but ACTIVELY ERASES between-region contrast: a region the erosion
+/// pass just made systematically lower (soft lithology, an old worn craton)
+/// reads identically to a resistant young belt once both are re-ranked into
+/// the same global bands.
+///
+/// So: run the existing global pass first (it still owns the overall SHAPE),
+/// then measure each region's own pre-redistribution character -- its mean
+/// elevation relative to the whole map's land mean, captured before that
+/// character gets rank-squeezed away -- and reapply a bounded fraction of it
+/// as a per-region offset. A region with too few land cells to trust a mean
+/// from is left alone.
+fn redistribute_elevation_regional(
+    elevation: &mut [f32], terrain: &[u8], n: usize, target_pcts: &[f32; 9],
+    region_id: &[u32], region_count: u32,
+) {
+    if region_count == 0 || region_id.len() != n {
+        redistribute_elevation(elevation, terrain, n, target_pcts);
+        return;
+    }
+    let rc = region_count as usize;
+    let mut region_sum = vec![0.0f64; rc];
+    let mut region_cnt = vec![0u32; rc];
+    let mut land_sum = 0.0f64;
+    let mut land_cnt = 0u32;
+    for i in 0..n {
+        if terrain[i] != 1 || elevation[i] <= 0.0 { continue; }
+        let r = region_id[i] as usize;
+        if r < rc {
+            region_sum[r] += elevation[i] as f64;
+            region_cnt[r] += 1;
+        }
+        land_sum += elevation[i] as f64;
+        land_cnt += 1;
+    }
+    if land_cnt == 0 { return; }
+    let land_mean = land_sum / land_cnt as f64;
+    let region_bias: Vec<f32> = (0..rc)
+        .map(|r| if region_cnt[r] >= 8 { (region_sum[r] / region_cnt[r] as f64 - land_mean) as f32 } else { 0.0 })
+        .collect();
+
+    redistribute_elevation(elevation, terrain, n, target_pcts);
+
+    const REGION_CONTRAST: f32 = 0.35;
+    for i in 0..n {
+        if terrain[i] != 1 { continue; }
+        let r = region_id[i] as usize;
+        if r >= rc { continue; }
+        let bias = region_bias[r];
+        if bias == 0.0 { continue; }
+        elevation[i] = (elevation[i] + bias * REGION_CONTRAST).clamp(0.01, 1.0);
     }
 }
 
@@ -2311,7 +2604,7 @@ mod tests {
         let pre = elevation.clone();
 
         // Erode it hard.
-        hydraulic_erosion(&mut elevation, &terrain, w, h, 7, 40_000);
+        stream_power_erosion(&mut elevation, &terrain, w, h, 7, 40_000, None, None);
         thermal_erosion(&mut elevation, &terrain, w, h, 4);
         let eroded = elevation.clone();
 
@@ -2384,9 +2677,249 @@ mod tests {
                 "{w}x{h}  cells={:>9}  land={:>5.1}%  | plates {plates_ms:>5} ms                   shape {shape_ms:>5} ms  sea_depth {depth_ms:>4} ms",
                 buf.total(), 100.0 * land_frac);
             println!(
-                "         erosion budget {iters} droplets, but ~{:.0}% start on OCEAN                  and are discarded -> ~{:.0} effective land droplets",
-                100.0 * (1.0 - land_frac), iters as f32 * land_frac);
+                "         erosion budget {iters} droplet-equivalents (now stream-power outer passes, not droplets), ~{:.0}% of the map is OCEAN",
+                100.0 * (1.0 - land_frac));
+        }
+    }
+
+    /// TERRAIN 2.0 INSTRUMENTATION (`TERRAIN_2_PLAN.md` section 3, "to build").
+    /// One table per elevation model of the metrics the plan's own gates are
+    /// stated in: RMS slope, slope SPREAD across windows (the headline gate —
+    /// a world where every range shades alike scores near zero on this),
+    /// drainage density (share of land cells carrying real accumulated flow,
+    /// read straight off the same priority-flood/accumulation the erosion
+    /// pass itself uses), the hypsometric integral, coast-on-plate-boundary
+    /// fraction (should fall well under 100% after slice 4's decoupling), and
+    /// the sea_depth<->distance-to-coast correlation (should fall after slice
+    /// 5's seafloor structure). Printing only — no assertions here, exactly
+    /// like `bench_phase2`; this is the read-it-yourself instrument the plan
+    /// asks for, not a pass/fail gate.
+    ///   cargo test --release --lib terrain_metrics -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn terrain_metrics() {
+        fn rms_slope(elevation: &[f32], terrain: &[u8], w: u32, h: u32, xr: std::ops::Range<u32>, yr: std::ops::Range<u32>) -> f32 {
+            let mut sum = 0.0f64;
+            let mut cnt = 0u64;
+            for y in yr {
+                for x in xr.clone() {
+                    let i = (y * w + x) as usize;
+                    if terrain[i] != 1 { continue; }
+                    let xr1 = ((x + 1) % w) as usize + (y * w) as usize;
+                    let yr1 = (((y + 1).min(h - 1)) * w + x) as usize;
+                    let dx = elevation[i] - elevation[xr1];
+                    let dy = elevation[i] - elevation[yr1];
+                    sum += (dx * dx + dy * dy) as f64;
+                    cnt += 1;
+                }
+            }
+            if cnt == 0 { 0.0 } else { (sum / cnt as f64).sqrt() as f32 }
+        }
+
+        fn slope_spread(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> f32 {
+            const WIN: u32 = 8;
+            let mut vals = Vec::new();
+            for wy in 0..WIN {
+                for wx in 0..WIN {
+                    let x0 = wx * w / WIN;
+                    let x1 = ((wx + 1) * w / WIN).max(x0 + 1);
+                    let y0 = wy * h / WIN;
+                    let y1 = ((wy + 1) * h / WIN).max(y0 + 1);
+                    let s = rms_slope(elevation, terrain, w, h, x0..x1, y0..y1);
+                    if s > 0.0 { vals.push(s as f64); }
+                }
+            }
+            if vals.len() < 2 { return 0.0; }
+            let mean: f64 = vals.iter().sum::<f64>() / vals.len() as f64;
+            let var: f64 = vals.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / vals.len() as f64;
+            (var.sqrt() / mean.max(1e-9)) as f32 // coefficient of variation
+        }
+
+        fn drainage_density(buf: &WorldBuffer) -> f32 {
+            let (flow_to, order) = priority_flood_flow(&buf.elevation, &buf.terrain, buf.width, buf.height);
+            let n = buf.total();
+            let mut area = vec![1.0f32; n];
+            for &i in order.iter().rev() {
+                let t = flow_to[i];
+                if t != i { area[t] += area[i]; }
+            }
+            let land = order.len().max(1);
+            let channels = order.iter().filter(|&&i| area[i] >= 40.0).count();
+            channels as f32 / land as f32
+        }
+
+        fn hypsometric_integral(elevation: &[f32], terrain: &[u8]) -> f32 {
+            let vals: Vec<f32> = (0..terrain.len()).filter(|&i| terrain[i] == 1).map(|i| elevation[i]).collect();
+            if vals.is_empty() { return 0.0; }
+            let min = vals.iter().cloned().fold(f32::MAX, f32::min);
+            let max = vals.iter().cloned().fold(f32::MIN, f32::max);
+            let mean = vals.iter().sum::<f32>() / vals.len() as f32;
+            if max <= min { 0.0 } else { (mean - min) / (max - min) }
+        }
+
+        fn coast_on_boundary_fraction(buf: &WorldBuffer) -> f32 {
+            if buf.boundary_type.is_empty() { return f32::NAN; }
+            let w = buf.width;
+            let h = buf.height;
+            let mut coastal = 0u32;
+            let mut on_boundary = 0u32;
+            for y in 0..h {
+                for x in 0..w {
+                    let i = buf.idx(x, y);
+                    if buf.terrain[i] != 1 { continue; }
+                    let mut is_coast = false;
+                    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                        let nx = buf.wrap_x(x as i32 + dx);
+                        let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+                        if buf.terrain[buf.idx(nx, ny)] != 1 { is_coast = true; break; }
+                    }
+                    if !is_coast { continue; }
+                    coastal += 1;
+                    if buf.boundary_type[i] != 0 { on_boundary += 1; continue; }
+                    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                        let nx = buf.wrap_x(x as i32 + dx);
+                        let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+                        if buf.boundary_type[buf.idx(nx, ny)] != 0 { on_boundary += 1; break; }
+                    }
+                }
+            }
+            if coastal == 0 { 0.0 } else { on_boundary as f32 / coastal as f32 }
+        }
+
+        fn depth_distance_correlation(buf: &WorldBuffer) -> f32 {
+            let n = buf.total();
+            let mut dist = vec![0.0f64; n];
+            {
+                let w = buf.width;
+                let h = buf.height;
+                let mut d = vec![u32::MAX; n];
+                let mut q = VecDeque::new();
+                for i in 0..n { if buf.terrain[i] == 1 { d[i] = 0; q.push_back(i); } }
+                while let Some(ci) = q.pop_front() {
+                    let dd = d[ci];
+                    if dd >= 200 { continue; }
+                    let cx = (ci % w as usize) as i32;
+                    let cy = (ci / w as usize) as i32;
+                    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                        let nx = buf.wrap_x(cx + dx);
+                        let ny = (cy + dy).clamp(0, h as i32 - 1) as u32;
+                        let ni = buf.idx(nx, ny);
+                        if d[ni] > dd + 1 { d[ni] = dd + 1; q.push_back(ni); }
+                    }
+                }
+                for i in 0..n { dist[i] = d[i].min(200) as f64; }
+            }
+            let pts: Vec<(f64, f64)> = (0..n)
+                .filter(|&i| buf.terrain[i] == 0)
+                .map(|i| (dist[i], buf.sea_depth[i] as f64))
+                .collect();
+            if pts.len() < 2 { return f32::NAN; }
+            let mx = pts.iter().map(|p| p.0).sum::<f64>() / pts.len() as f64;
+            let my = pts.iter().map(|p| p.1).sum::<f64>() / pts.len() as f64;
+            let mut cov = 0.0f64;
+            let mut vx = 0.0f64;
+            let mut vy = 0.0f64;
+            for &(x, y) in &pts {
+                cov += (x - mx) * (y - my);
+                vx += (x - mx).powi(2);
+                vy += (y - my).powi(2);
+            }
+            if vx <= 0.0 || vy <= 0.0 { return f32::NAN; }
+            (cov / (vx.sqrt() * vy.sqrt())) as f32
+        }
+
+        fn report(name: &str, buf: &WorldBuffer) {
+            let rms = rms_slope(&buf.elevation, &buf.terrain, buf.width, buf.height, 0..buf.width, 0..buf.height);
+            let spread = slope_spread(&buf.elevation, &buf.terrain, buf.width, buf.height);
+            let drainage = drainage_density(buf);
+            let hi = hypsometric_integral(&buf.elevation, &buf.terrain);
+            let coast_frac = coast_on_boundary_fraction(buf);
+            let depth_corr = depth_distance_correlation(buf);
+            println!(
+                "{name:<12} rms_slope={rms:.5}  slope_spread={spread:.3}  drainage_density={:.1}%  hypsometric={hi:.3}  coast_on_boundary={:.1}%  sea_depth_vs_dist_r={depth_corr:.3}",
+                drainage * 100.0,
+                if coast_frac.is_nan() { 0.0 } else { coast_frac * 100.0 },
+            );
+        }
+
+        let (w, h) = (900u32, 500u32);
+        println!("\n== TERRAIN 2.0 metrics @ {w}x{h} (docs/TERRAIN_2_PLAN.md section 3) ==");
+
+        let mut plate_buf = continent(w, h, w / 12);
+        let n = plate_buf.total();
+        plate_buf.plate_index = vec![0u16; n];
+        plate_buf.boundary_type = vec![0u8; n];
+        plate_buf.is_volcanic = vec![0u8; n];
+        crate::sim::plates::generate_plates_and_landmass(&mut plate_buf, 7, 14);
+        generate_elevation(&mut plate_buf, 7);
+        compute_sea_depth(&mut plate_buf);
+        generate_shelves(&mut plate_buf, 7, 12.0, 0.4, 0.3, 8.0);
+        report("plates", &plate_buf);
+
+        let mut shape_buf = continent(w, h, w / 12);
+        generate_elevation_from_terrain(&mut shape_buf, 7, 0.5, 0.5, 0.5, 0.4);
+        compute_sea_depth(&mut shape_buf);
+        generate_shelves(&mut shape_buf, 7, 12.0, 0.4, 0.3, 8.0);
+        report("shape", &shape_buf);
+
+        let mut ridged_buf = continent(w, h, w / 12);
+        generate_elevation_ridged(&mut ridged_buf, 7, 0.5, 0.5, 0.5, 0.4);
+        compute_sea_depth(&mut ridged_buf);
+        generate_shelves(&mut ridged_buf, 7, 12.0, 0.4, 0.3, 8.0);
+        report("ridged", &ridged_buf);
+
+        let mut cordillera_buf = continent(w, h, w / 12);
+        generate_elevation_cordillera(&mut cordillera_buf, 7, 0.5, 0.5, 0.5, 0.4);
+        compute_sea_depth(&mut cordillera_buf);
+        generate_shelves(&mut cordillera_buf, 7, 12.0, 0.4, 0.3, 8.0);
+        report("cordillera", &cordillera_buf);
+
+        println!("(coast_on_boundary is only meaningful for `plates`, the only model with real boundary_type)");
+    }
+
+
+    /// TERRAIN 2.0 slice 4 (D1/T1) gate: the coastline must depart from the
+    /// raw plate Voronoi edge, not merely compute a numerically different
+    /// crust field that happens to threshold into the identical `terrain`
+    /// (the real failure mode this test caught during tuning -- see the
+    /// comment on `warp_strength` in `plates.rs`). Two probe worlds/seeds
+    /// so a single lucky configuration can't pass by chance.
+    #[test]
+    fn coastline_departs_from_the_plate_boundary() {
+        for (seed, plate_count) in [(42u64, 10u32), (777, 16)] {
+            let (w, h) = (400u32, 250u32);
+            let mut buf = continent(w, h, w / 12);
+            let n = buf.total();
+            buf.plate_index = vec![0u16; n];
+            buf.boundary_type = vec![0u8; n];
+            buf.is_volcanic = vec![0u8; n];
+            crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+            let mut coastal = 0u32;
+            let mut on_boundary = 0u32;
+            for y in 0..h { for x in 0..w {
+                let i = buf.idx(x, y);
+                if buf.terrain[i] != 1 { continue; }
+                let mut is_coast = false;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = buf.wrap_x(x as i32 + dx);
+                    let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+                    if buf.terrain[buf.idx(nx, ny)] != 1 { is_coast = true; break; }
+                }
+                if !is_coast { continue; }
+                coastal += 1;
+                if buf.boundary_type[i] != 0 { on_boundary += 1; continue; }
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = buf.wrap_x(x as i32 + dx);
+                    let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+                    if buf.boundary_type[buf.idx(nx, ny)] != 0 { on_boundary += 1; break; }
+                }
+            }}
+            assert!(coastal > 0, "seed {seed}: probe world grew no coastline at all");
+            let frac = on_boundary as f32 / coastal as f32;
+            assert!(frac < 0.85,
+                "seed {seed}: coastline still reads as the raw Voronoi edge: {:.1}% of coastal \
+                 land cells sit on a plate boundary (a pre-slice-4 world measures ~100%)",
+                frac * 100.0);
         }
     }
 }
-
