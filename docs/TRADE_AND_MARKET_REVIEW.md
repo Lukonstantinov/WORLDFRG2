@@ -415,3 +415,267 @@ that are all currently unbuildable for want of a price that can move.
 Everything in Tier 1 and Tier 2 is more interesting. None of it should be built
 first — §2.4's own rule: *never tune a constant without a gate that isn't the target*,
 and right now the market's central claim has no gate at all.
+
+---
+
+# Part 2 — decisions taken, and the design that follows
+
+§1–6 above were written before the maintainer answered §5's questions. This part
+records the answers, what they settle, and the concrete design they imply. Still
+**not approved for build** — but the open questions are now closed, so this is a
+design rather than a menu.
+
+## 7. The answers
+
+| # | Question | Answer | What it settles |
+|---|---|---|---|
+| 1 | Simulation or view? | *(clarified below)* | Both, **view + instrumentation first** |
+| 2 | Who is the player? | **The polis.** A city controls its own market; houses reach it through government (`council_house`/`captor_house`) and through a realm they hold | Tier 3's verb list is the right one; no house-side cargo verbs |
+| 3 | Is grain the right yardstick? | Consider gold, or "the right equivalent" | See §8 — keep grain as numeraire, change what is *measured* |
+| 4 | Re-baseline the scoreboard? | Maintainer's discretion, optimise for legibility and flow | Free to append worse-but-truer rows |
+| 5 | Save budget for price history? | **Yes** to a sparse per-(hub, good) series | 0b is approved in principle |
+| 6 | Institutions or microstructure? | *(elaborated below)* | See §9 |
+| 7 | Price risk acceptable? | **Yes** — this is an observation game, instability is fine. Add **AI price regulation in a crisis** | T1a is unblocked; a new polis lever, §10 |
+
+### §1 clarified — what "simulation or view" meant
+
+Two bodies of work that share almost no code:
+
+* **The simulation half** — `production.rs`, `mod.rs`'s day loop, `polis.rs`,
+  `money.rs`. Elasticity, arrival settlement, margins, institutions. Every change
+  here moves the `econ_` numbers, needs its own gate, and can regress things far
+  away (this codebase has a documented history of that — see 4.7/4.9/A6 in
+  `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md`).
+* **The view half** — `HubPanel.tsx`, a new Markets window, `read_hubs.rs`.
+  Making state that already exists legible. Cannot regress the sim by construction.
+
+The recommendation is **view + instrumentation first**, for a specific reason and
+not out of caution: the mechanism half is currently **undiagnosable from inside the
+app**. F1's flat gradient was invisible for the whole life of the project because no
+screen and no persisted series could have shown it. Build the instruments, then the
+mechanism work has something to aim at.
+
+## 8. The numeraire — keep grain, change what is measured
+
+Two different things were being conflated, mine as much as anyone's:
+
+* **The NUMERAIRE** — the unit of account. `base_value` is quoted in grain
+  (`goods_spec.rs:257`: *"wheat = 1.0"*), and every price in the sim is a multiple
+  of it.
+* **The YARDSTICK** — the good `economy_validation.rs` measures integration on.
+
+**Do not move the numeraire to gold.** Three reasons, in order of weight:
+
+1. **Gold's own value is a variable this project already simulates.** Debasement,
+   seigniorage, bullion-limited minting, `coin_trust`, recoinage and reform all
+   exist in `money.rs`. Measuring in gold means the ruler moves whenever the mint
+   does — you would lose the ability to distinguish "grain got dear" from "the coin
+   got bad", which is the single most important distinction in pre-modern price
+   history and one this model is otherwise equipped to make.
+2. **It is not what the literature does.** Allen's welfare ratios, Persson's and
+   Federico's integration series, Clark's real wages — all grain- or basket-based.
+   A gold numeraire makes every band in the scorecard uncomparable to its source.
+3. It would touch every `base_value` in the goods spec and every price in every
+   save. Enormous blast radius, no gain.
+
+**"Or the right equivalent" — the right answer is a BASKET, and half of it is
+already built.** `campaign_city_price_index` computes a need-weighted cost-of-living
+basket per city (`types/campaign.ts:1030`, "100 = the world standard"). That is the
+honest general-purpose yardstick — a bundle of what people actually consume, not one
+commodity.
+
+So the change is in the **oracle**, not the model:
+
+* **8a** — report the price/distance gradient **per good**, top and bottom five,
+  not for grain alone (F2).
+* **8b** — report a second gradient on the **basket index**, which is the closest
+  thing to what Chilosi/Persson actually measure across a whole economy.
+* **8c** — keep the grain row, but label it as what it is: the numeraire, and the
+  one good with a 45-day export reserve and a subsistence top-up. Report it beside
+  a "tradeable goods" aggregate rather than as the headline.
+
+All three are test-only, read-only, and cannot move a simulated number.
+
+## 9. Institutions vs microstructure — elaborated
+
+**Institutions** are the legal and organisational forms trade happened *through*.
+They are visible, nameable and chronicle-able:
+
+* a **bill of exchange** drawn at Bruges and accepted at Venice, settled at a fair
+  so balances net and no specie crosses the Alps;
+* the **commenda / colleganza** — the sedentary partner puts up the capital, the
+  travelling partner the voyage, and they split the realised proceeds;
+* **marine insurance** — a premium priced off a route's own loss rate;
+* the **staple right** — goods passing must be landed and offered here first;
+* the **fair** — periodic concentration of exchange AND of credit settlement.
+
+**Microstructure** is the mechanics of how a single price forms *inside* a market:
+bid/ask spreads, an order book, market makers, limit orders, tick size. That is a
+19th–20th century exchange. A medieval market cleared by bilateral haggling, with a
+guild or a fair sometimes publishing a reference price. Modelling an order book
+would be both an anachronism and far more expensive per tick, for a level of detail
+no observation game would ever surface.
+
+**Recommendation: build institutions, not microstructure** — with one exception,
+because one microstructure-shaped idea *is* period-correct:
+
+> **One good, several prices, depending on who you are.** A guild brother, a
+> foreigner paying a stranger's toll, and a council exercising right of first buy did
+> not pay the same. The sim already has fragments — `COUNCIL_BUY_PRICE` vs
+> `COUNCIL_RETAIL_PRICE`, the office discount, `MAX_BUY_DISCOUNT`, the coin discount
+> — scattered across three files with no shared concept. Formalising them into one
+> "who is buying" modifier is the historically correct version of microstructure, and
+> it is mostly consolidation of code that already exists.
+
+## 10. Crisis price regulation (answer to §5 Q7)
+
+Real, well documented, and it fits the existing decide/apply split exactly: a new
+field on `PolisChoice`, decided in `decide_polis_policy`, applied in
+`apply_polis_policy`. Historical precedents: the Roman *annona*, Venice's
+*Provveditori alle Biade*, Florence's *Abbondanza*, the English Assize of Bread.
+
+**Trigger** — state that already exists: `lack_basic` above a threshold, or
+`food_balance < 0`, or `starving > 0`, with a treasury floor.
+
+**Four levers, escalating. They are NOT equally worth building today:**
+
+| | Lever | Status |
+|---|---|---|
+| 1 | **Release the civic granary** into the market | ⭐ **Build this first.** `civic_goods` exists and `council_provision_pass` FILLS it — but nothing ever releases it back to relieve a price. This is the missing second half of an already-built mechanism, not a new one |
+| 2 | **Suspend food export** (the *tratta* prohibition) | Cheap — dispatch already checks per-hub conditions (`quarantined`), so an `export_locked` flag is the same shape |
+| 3 | **Import bounty** — pay merchants a premium to bring grain in | Meaningful today; costs the treasury, which gives treasury a job in a crisis |
+| 4 | **Price ceiling / assize** | ⚠️ **Cosmetic until T1c.** A ceiling's entire historical consequence is that it causes shortage and hoarding. With demand inelastic (F5) the shortage is already unconditional, so a ceiling would change nothing but a number on screen. Build after elasticity, with hoarding (stock leaving the open market into private warehouses) as its documented cost |
+
+**Gate:** with the AI supplying the choice and no crisis firing,
+`simulate_decades_reports_dynamics` must be **bit-identical**. With crises firing,
+`crisis_year_share` (measured 0.000 against a 0.05–0.20 band) must not fall further —
+a regulation that eliminates famine entirely has broken the model, not fixed the city.
+
+## 11. The city market view — schematic
+
+### What is wrong with the current Trade tab
+
+It is three columns (arrivals ⇢ Market ⇢ departures), then Transit, then six
+sparklines, then Exports/Imports, then a chain ladder — ~230 lines of JSX. It answers
+*"what ships are moving"* well and *"what IS this market"* poorly. A single good's
+story is spread across four places in three different units, and there is no sense of
+the market as a place with a **balance**.
+
+### The redesign: one row per good, and the row is the story
+
+```
+  ⚖  RAVENNA — market                        pop 21,400 · basket 118 · ⚠ salt dear
+  ────────────────────────────────────────────────────────────────────────────────
+  GOOD          SUPPLY                     DEMAND      HELD   PRICE          VERDICT
+  🌾 wheat      ████████░ 820 own +40 imp   740 basic   38 d   0.42× ▁▁▂▂▁▁▂  cheap · we export
+  🧂 salt       ░░███ 0 own +180 imp        170 basic    9 d   1.90× ▂▃▅▆▇█▇  DEAR · 1 of 3 sources lost
+  🫒 olive oil  █████ 300 own               120 comfort 62 d   0.31× ▁▁▁▁▁▁▁  glut · nobody is buying
+  🌶 pepper     — none —                     90 luxury    0 d      —  ·······  ABSENT · unreachable
+  🐟 stockfish  ██ 60 own +210 imp          260 basic   14 d   0.88× ▃▃▂▂▃▄▃  supplied
+```
+
+Six decisions behind that, each with a reason:
+
+1. **Sorted by what is unusual**, not by production: `|price − world_avg| × need_weight`.
+   The goods where this city is odd are the goods worth looking at. Sortable, but that
+   is the default.
+2. **The supply bar is stacked by ORIGIN** — own production / imports / civic stores.
+   Currently split across three columns in three units; it is the single most
+   informative thing a market can tell you and it is not assembled anywhere.
+3. **Stock in DAYS of need, not units.** "38 days of grain" means something; "820
+   units" does not. Free — `stock / need` is already computed every tick.
+4. **One price unit everywhere** (× world standard), with the world min/max as a
+   range bar so you see where this city sits in the world spread. `HubGoodDetail`
+   already carries `world_min`/`world_max`/`world_avg` **with the hub names**, and
+   today they are used only as a text aside.
+5. **A trend sparkline that survives closing the panel** — this needs 0b, and is the
+   one part of the redesign with a backend prerequisite.
+6. **A verdict phrase, not a raw number.** Same discipline as the house stability
+   gauges: pips and a phrase, and a healthy row stays quiet so a warning still means
+   something.
+
+### Expanding a row: the price build-up
+
+This is the part that exists nowhere and is the reason to build the view at all —
+every number in it is already computed *inside* `dispatch()` and then discarded.
+
+```
+  🧂 salt at Ravenna — 1.90× world standard
+  ──────────────────────────────────────────────────────────
+    cheapest reachable source   Comacchio    0.38×    2 d by sea
+    + freight                                +0.09    bulk 2.4 × 2 d
+    + import tariff                          +0.11    6% · council Ottaviani (protectionist)
+    − reserve-coin discount                  −0.02    Ravenna ducat trusted at source
+    ────────────────────────────────────────────────
+    = delivered cost                          0.56×
+      local price                             1.90×   ← a 3.4× gap nobody is closing
+  ──────────────────────────────────────────────────────────
+    why: of 32 reachable markets, 2 hold any surplus; both are barred to our houses
+    supplied by: Comacchio 61% · Cervia 39%      moves on to: —
+```
+
+That last "why" line is the feature. A market view that says *why a gap is not being
+closed* is a diagnostic tool for F1 as much as a screen for the player — it would
+have made the flat gradient obvious years ago.
+
+## 12. The Markets window — schematic
+
+Answer to *"a campaign subwindow for markets so I can pick the city"*: yes, and it
+slots into machinery that already exists. `CampaignTopBar`'s **📦 Economy** group is
+where it belongs; `useFloatingWindow` + `@ui/kit`'s `Panel`/`Tabs`/`Chip` are the
+shell; `SettlementSearch`'s prefix-match-by-name is the city picker.
+
+```
+  ┌─ 📈 Markets ─────────────────────────────────────────────────── ✕ ─┐
+  │  [ 🏙 City ] [ 📦 Good ] [ 🌍 World ]                               │
+  │  city  ⌕ rav|                    ▸ Ravenna  21,400  Romagna        │
+  │                                    Ravello   3,100  Campania       │
+  ├────────────────────────────────────────────────────────────────────┤
+  │  … the §11 table for the chosen city …                             │
+  └────────────────────────────────────────────────────────────────────┘
+```
+
+**Three lenses on the same data**, and the second and third do not exist anywhere
+today:
+
+* **🏙 City** — §11's table, for a city chosen by typing its name. Its selection is
+  seeded from `uiStore.selectedHub` but **not bound to it**, so you can read one
+  city's market while the map is somewhere else, and open two windows to compare.
+* **📦 Good** — the good-centric screen the app has never had: one good, its price in
+  **every** city ranked cheapest-to-dearest, the spread, who produces it, who eats
+  it, where it moves, and its price over time. Clicking a row flies the map there and
+  lights the belt overlay. Every field exists except the series (0b).
+
+```
+    📦 pepper · 45 markets · world avg 3.1×  · spread 0.4× → 9.8× (24×)
+    ────────────────────────────────────────────────────────────────
+    Calicut     0.4×  ███░░░░░░░  produces 1,240   →  exports to 6
+    Alexandria  1.9×  █████░░░░░  entrepôt         →  exports to 11
+    Venezia     3.4×  ███████░░░  —                ←  imports 380
+    Bruges      9.8×  ██████████  —                ←  imports 40   ⚠ 24× the source
+```
+
+* **🌍 World** — the market's own vital signs, and this is the genuinely new idea:
+  **put the fidelity oracle on screen.** The price index over time, the spatial
+  spread, and the integration scatter (price gap vs travel days, one dot per city
+  pair) — literally `economy_validation.rs`'s own plot, live. A flat cloud says *this
+  world's markets are not integrated*; a rising one says they are. It serves the
+  player as world-character flavour and the maintainer as a live gauge on the number
+  that currently has none.
+
+## 13. Recommended build order
+
+Each step's gate is named, and no step's gate is its own target.
+
+| # | Step | Touches | Gate |
+|---|---|---|---|
+| 1 | **0b · persist a sparse per-(hub, good) yearly price series** (`TradeHist`'s shape) | `tick/mod.rs` | `simulate_decades_reports_dynamics` **bit-identical** — a write-only observability field cannot move the sim |
+| 2 | **The Markets window + the §11 city view** | frontend + `read_hubs.rs` | `npx tsc --noEmit`; no sim code touched |
+| 3 | **8a/8b/8c · per-good and basket gradients in the oracle** | `economy_validation.rs` | test-only; `econ_scorecard_is_deterministic` unchanged |
+| 4 | **Crisis regulation, lever 1 (granary release)** | `polis.rs` | bit-identical when no crisis fires; `crisis_year_share` must not fall to 0 |
+| 5 | *re-read F1 with real instruments*, then Tier 1 | — | — |
+
+Steps 1–3 cannot regress the simulation. Step 4 is a genuine mechanism change and is
+deliberately the smallest one available (completing a mechanism that is already half
+built). Everything with real risk waits until §5 can be answered from evidence rather
+than from reading the code.
