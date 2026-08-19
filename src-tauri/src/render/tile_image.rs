@@ -1346,15 +1346,21 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, ctx: &Rende
 
 // ── Relief shading ──────────────────────────────────────────────────────────
 //
-// Shared by the terrain hillshade and the natural-colour layer. Three departures
-// from the single-lamp Lambertian this file started with, each fixing something a
-// reader could see:
+// Shared by the terrain hillshade and the natural-colour layer. What it does, and
+// two things it deliberately does NOT do because both were built, rendered and
+// measured worse than their absence:
 //
-// 1. **A FILL LIGHT.** One NW lamp leaves every SE-facing slope at one flat tone,
-//    so the lee side of a range loses all its structure — half of every mountain
-//    on the map was information-free. Imhof's own practice is never a single lamp.
-//    The fill is weak, low and from the opposite quadrant: it recovers lee-slope
-//    form without ever competing with the key light for which way is "up".
+// 1. **NOT a fill light.** A second lamp was built here and REMOVED after looking
+//    at four configurations side by side (`dump_natural_sheet`, SHEET_TAG). The
+//    theory was Imhof's — one NW lamp leaves SE-facing slopes at a flat tone — but
+//    a fill lamp brightens exactly the shadows that CARRY the relief, and the
+//    measured result is a milky, flattened map at every weight tried:
+//    opposite-quadrant (135°) at 0.26 was the worst, a non-opposing 225° at 0.18
+//    still clearly worse than none. Ranked: no fill > 225°/0.18 > 135°/0.26.
+//    A fill light is a technique for a 3-D scene with real geometry; on a shaded
+//    DEM whose only signal IS the shadow, it subtracts. If this is revisited, the
+//    thing that actually fixes lee-slope flatness is a higher-frequency relief
+//    term (texture shading), not more lamps.
 // 2. **AMBIENT OCCLUSION**, from local concavity. Directional light alone cannot
 //    distinguish a valley from a plain that happens to face away from the sun —
 //    both simply go dark. Concavity is orientation-INDEPENDENT, so a valley reads
@@ -1378,12 +1384,6 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, ctx: &Rende
 /// landform for most readers, so this azimuth is not a free parameter.
 const KEY_AZ_DEG: f32 = 315.0;
 const KEY_ALT_DEG: f32 = 45.0;
-/// Fill light: opposite quadrant, low, and weak. Recovers lee-slope form.
-const FILL_AZ_DEG: f32 = 135.0;
-const FILL_ALT_DEG: f32 = 22.0;
-/// Fill share of the total. Above roughly 0.35 the two lamps start to cancel and
-/// the relief flattens out — the failure mode this constant exists to avoid.
-const FILL_WEIGHT: f32 = 0.26;
 
 /// How far ambient occlusion may darken a concavity / brighten a convexity.
 const AO_AMP: f32 = 0.16;
@@ -1443,12 +1443,11 @@ fn relief_at(
     let ny = -dzdy / len;
     let nz = 1.0 / len;
 
-    // Two lights, each normalised so flat ground gives exactly 1.0, then mixed.
+    // ONE light, normalised so flat ground gives exactly 1.0. Raw Lambertian gives
+    // flat land sin(45°) = 0.707, which would render this layer ~29% darker than
+    // an unshaded one showing the very same colours.
     let (kx, ky, kz) = light_vec(KEY_AZ_DEG, KEY_ALT_DEG);
-    let (fx, fy, fz) = light_vec(FILL_AZ_DEG, FILL_ALT_DEG);
-    let key = (nx * kx + ny * ky + nz * kz) / kz;
-    let fill = (nx * fx + ny * fy + nz * fz) / fz;
-    let lambert = key * (1.0 - FILL_WEIGHT) + fill * FILL_WEIGHT;
+    let lambert = (nx * kx + ny * ky + nz * kz) / kz;
 
     // AMBIENT OCCLUSION from concavity against the 8-neighbour mean. Positive =
     // convex (a ridge, more sky) → brighter; negative = concave (a valley, less

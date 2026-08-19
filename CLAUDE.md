@@ -2240,14 +2240,11 @@ the same trick and the same reasoning as `lowland_tint` (§8.18).
 **The shared relief core** (`tile_image::relief_at`) now serves both shaded base
 layers. Three changes from the single-lamp Lambertian it replaced:
 
-- **A fill light.** One NW lamp leaves every SE-facing slope at one flat tone, so
-  the lee side of every range on the map carried no information. Weak, low,
-  opposite quadrant. Above roughly `FILL_WEIGHT` 0.35 the two lamps cancel and the
-  relief flattens — that is the failure mode the constant guards.
 - **Ambient occlusion** from local concavity, which is orientation-INDEPENDENT, so
   a valley reads as a valley under any lighting.
 - **Shaded bathymetry** (`sea_shade`). The sea was an unshaded ramp beside a
   hillshaded continent.
+- **NOT a fill light.** One shipped and was REVERTED — see below.
 
 Three things measured here, all of which look like tuning and are not:
 
@@ -2257,6 +2254,18 @@ Three things measured here, all of which look like tuning and are not:
   an 8-neighbour mean that per-cell dither *is* the concavity signal, so AO
   resolved to ±16% white noise per cell. Rendering with `AO_AMP = 0` isolated it
   conclusively. It is now 240 m; anything under ~150 m re-admits the grain.
+- **A FILL LIGHT was shipped, and it was a REGRESSION.** The theory was Imhof's
+  (one NW lamp leaves every SE-facing slope at a flat tone), and it survived
+  `cargo check`, 20 render tests and a whole-world PNG — then read as obviously
+  worse the moment anyone looked at a magnified mountain crop. A fill lamp
+  brightens exactly the shadows that CARRY the relief. Four configurations
+  rendered side by side (`SHEET_TAG`): no fill > 225°/0.18 > 135°/0.26, the last
+  being what shipped. A fill light is a technique for a 3-D scene with real
+  geometry; on a shaded DEM whose only signal IS the shadow it subtracts. The
+  lesson generalises past this constant: **a whole-world thumbnail is not enough
+  to judge shading** — `dump_natural_sheet` now also writes a 3× magnified crop of
+  the most mountainous window, because the regression was invisible at world zoom
+  and unmistakable at 3×.
 - **A per-cell detail dither was built here and REMOVED.** A tile is exactly one
   pixel per cell, so there is no sub-cell space for synthetic detail to live in and
   it resolves as film grain rather than as terrain. Recorded so it is not
