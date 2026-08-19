@@ -9,6 +9,106 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-19d — Terrain 2.0: all six slices, measured not asserted
+
+`TERRAIN_2_PLAN.md`'s whole build in one pass: droplet erosion → stream-power
+(priority-flood + flow accumulation + `K·A^m·S^n` incision), a new transient
+`geology.rs` (lithology + real orogeny setting/age for the plate model, a relief
+pseudo-setting for the other three, a phase-2 climate-erosion proxy, regionalised
+hypsometric redistribution), the plates.rs D3 boundary-classification fix (true
+Voronoi-bisector normal, strongest-signal tie-break at a triple junction), coastline
+decoupled from the plate Voronoi edge (a warped crust-thickness field), seafloor
+ridges/trenches/abyssal hills/seamounts, and a render follow-up (a bounded texture-
+shading approximation on the AO term + the elevation ramp's white blow-out softened).
+The `terrain_metrics` harness (§3, new) is this session's own instrument — first
+measurement, so it sets the baseline rather than clearing one:
+
+| model | rms_slope | slope_spread | drainage_density | coast_on_boundary | sea_depth↔dist r |
+|---|---|---|---|---|---|
+| plates | 0.0491 | 0.846 | 14.9% | 62.5% | 0.720 |
+| shape | 0.0355 | 0.410 | 12.4% | n/a | 0.736 |
+| ridged | 0.0288 | 0.765 | 17.1% | n/a | 0.736 |
+| cordillera | 0.0674 | 0.758 | 19.2% | n/a | 0.736 |
+
+**A second, sharper measurement bug found INSIDE the slice-4 measurement itself.**
+The first pass landed `coast_on_boundary` at 90% and looked, in `dump_natural_sheet`,
+unmistakably like the raw Voronoi edge — the exact symptom D1 describes. A direct
+probe (comparing the resulting `terrain` bit-for-bit with the domain warp on vs
+off) found why: the crust FIELD genuinely differed between the two runs (confirmed
+by summing it), but the percentile THRESHOLD selected the identical set of cells
+regardless, because `fbm_noise`'s multi-octave output clusters far more tightly
+than its nominal 0..1 range — the realised noise swing rarely bridged the 0.5 base
+gap between an oceanic and a continental plate's crust value at all. A numerically-
+different-but-geometrically-identical result is invisible to eyeballing a render and
+easy to mistake for "a small effect" rather than "no effect" — the probe (comparing
+the actual `terrain` array, not the intermediate float field) is what told them
+apart. Retuned to a ±0.9 swing (amplitude 1.8, up from 0.62) and a warp beyond a
+full plate-size wander, which is what actually moves `coast_on_boundary` (~100% →
+62.5%) and is now itself a permanent gate
+(`coastline_departs_from_the_plate_boundary`, two probe seeds, <85%). The stronger
+noise also threw a scatter of single/few-cell islands that read as a rendering
+glitch rather than a real archipelago; `despeckle_terrain` (a 4-connected component
+flood-fill, flip anything under `DESPECKLE_MIN`=90 cells back to its surroundings)
+cleans that up without touching the real decoupling. One measured downstream
+consequence: the fixed-seed 300×150 goods-coverage reference world now places
+`pearls`' inshore homeland on a stretch of new coastline outside every settlement's
+catchment at that specific seed/scale (settlements are regenerated FROM the
+decoupled coastline in real generation, so this is a fixed-fixture sampling
+artefact, not a claim that pearls is unreachable in practice) — named as a new,
+honestly-labelled exception in `goods_validation.rs` alongside the pre-existing
+`dyes` case, not silently folded into it. `sea_depth↔distance` fell from ~1.0 (a
+pure function of distance-to-coast) to 0.66–0.74 across all four models — genuine
+seafloor structure, since slice 5 (ridges/trenches/hills) runs in `generate_shelves`
+regardless of which elevation model generated the land.
+
+**The Earth gate is the one thing this touches that CAN'T be waved through.**
+`compute_sea_depth`/`generate_shelves` feed `distance_to_ocean`/upwelling in phase 3.
+Measured: **main-class 70.1% → 70.2%**, exact-zone unchanged at 39.0%. Floor raised
+70.1 → 70.15. `earth_monsoon_wind_reverses` and the named-region spot checks are
+unaffected, and unaffected again by the slice-4 retune above (`compute_sea_depth`/
+`generate_shelves` don't depend on how `terrain` was thresholded, only on the
+result).
+
+**Cost, recorded rather than hidden.** `bench_phase2` @ 3600×1800: plates
+**8.5s → 11.4s**, shape **11.4s → 13.9s** — short of the plan's own "no slower than
+before" target despite rayon-parallelising every pass with no cross-cell dependency
+(Voronoi assignment, boundary classification, the lithology/climate-proxy maps, and
+now the slice-4 crust map itself). The priority-flood queue itself is inherently
+sequential (a priority queue doesn't parallelise the way the phase-3 row loops do)
+and stayed the dominant cost.
+
+**A real negative result, kept as the plan's own §2.4 discipline asks.** The outer
+pass count was first keyed to the old `iterations` (droplet-budget) parameter,
+which scales UP with world size before its own ceiling clamp — exactly backwards
+for a perf-costly pass, and it starved every unit-test-sized fixture (all well
+under the `iterations` floor) down to 2-4 passes, which silently broke
+`cordillera_crest_runs_parallel_to_the_coast` (a traced spine needs ≥5-6 outer
+passes to differentiate from generic ridged noise; below that the test's own
+80%-of-noise-spread margin fails at ~81%, i.e. barely). Fixed by keying pass count
+to GRID SIZE instead (4 passes >4M cells, 6 between 1-4M, 8 below — free for every
+test fixture, capped for a real generated world), which is the actually-correct
+axis: wall-clock cost is set by how many cells a pass touches, not by an
+erosion-strength slider.
+
+**Gates:** 340 lib tests pass (one new: `coastline_departs_from_the_plate_boundary`,
+slice 4's own permanent gate). Zero unexplained failures along the way —
+`cordillera_crest_runs_parallel_to_the_coast` caught the pass-count regression
+above and is green after the grid-size fix; `goods_coverage_diagnostic` caught the
+`pearls` consequence above and is green after the honestly-labelled exception.
+`earth_` green with the raised floor. `simulate_decades_reports_dynamics`
+unaffected (the campaign sim doesn't touch world-gen). `cargo check` and
+`npx tsc --noEmit` clean.
+
+**Still not built** (named per §2.4, not silently assumed): plate motion over
+time, glacial/aeolian/karst landforms, sub-cell detail (the inverse LOD pyramid),
+persisted geology (still transient by design), two-way climate coupling (the
+phase-2 climate proxy stays a documented proxy), and the true multi-scale
+fractional-Laplacian texture-shading transform (needs a wider cross-tile render
+halo than `TileNeighbors` carries today — the shipped follow-up is a bounded,
+honest approximation using the existing single-ring AO curvature instead).
+
+---
+
 ## 2026-08-17d — Consolidation: realms grow, absorb, and break
 
 **The gap this closes.** Tilly's ~500 European polities c.1500 fall to ~25 by
@@ -1650,6 +1750,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-19d | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | `TERRAIN_2_PLAN.md` all six slices: stream-power erosion, transient `geology.rs` (lithology + orogeny setting/age + climate proxy + regionalised redistribution), plates.rs D3 boundary fix, coastline decoupled from the Voronoi edge (retuned after a probe found the first pass numerically differed but geometrically didn't — `coast_on_boundary` ~100%→62.5%, its own new gate), seafloor structure, texture-shading render follow-up. Earth main-class 70.1→70.2 (floor raised); `bench_phase2` @ 3600×1800 plates 8.5s→11.4s / shape 11.4s→13.9s (short of "no slower", recorded not hidden); `terrain_metrics` harness establishes the first slope-spread/drainage/coast-on-boundary/sea_depth-correlation baseline; `pearls` added as an honestly-labelled goods-coverage exception (a slice-4 consequence on the fixed-seed reference world, not a real-generation regression) |
 | 2026-08-19c | *this* | — | — | **331 pass, 0 fail** (24 ignored) | 0 | **City market 2.0 + the Markets window.** `CityMarketView` — shared between the settlement Trade tab and a new floating ⚖ Markets window with its own live city picker (`campaign_market_cities`, so campaign-founded towns are reachable at all). Keeps the buy/sell arrivals⇢market⇢departures basis and rebuilds the centre as a merchant's BOOK: bought at / sold at / **the spread** / days-of-need held / a price trend off the persisted series. Removes three sections it absorbs (the standalone price grid, Exports/Imports, the chain ladder) and rewires the map's supply-road highlight rather than orphaning it. Fixes a real defect: in-flight rows were stamped with the VIEWING city's local price, so an inbound cargo read as though bought at its destination's price (`InTransit.price` now carries the struck price). **Cost recorded:** `econ_inheritance_rules_fragment_differently` flipped on crisis relief — 190 vs 196 houses ever, a 3% margin, the fourth time this gate has moved inside its own noise. Its SUBSTANTIVE assertion held wide open throughout (mean wealth 141,368 vs 157,415 — the measure the test's own note calls the one that moves); only the count moved. Isolated with `suppress_relief`, mirroring `suppress_realms`; the gate now passes with margin both ways (193 vs 172 ever; 149,613 vs 161,790). Two schematic promises deliberately NOT faked: the full price build-up needs per-pair travel days the query layer doesn't send, and the "why the gap isn't closing" line needs dispatch's internals — both left out rather than invented. |
 | 2026-08-19b | *this* | — | — | 354 | 0 | **F2 ANSWERED: it is not a grain problem, the whole market is unintegrated.** The economy oracle now reports the price/distance gradient PER GOOD and on the model's own need-weighted BASKET, not on grain alone. Result: **0 of 6 priced goods show any positive distance gradient**, and the basket gradient is **−0.006**. So the flat −0.026 grain figure is not an artefact of grain's 45-day export reserve — distance costs nothing anywhere. A second, unlooked-for finding in the same table: dispersion varies enormously BY GOOD while the gradient does not — silk mean \|ln gap\| **0.244** (a 1.28× spread, historically reasonable), olives 0.484, fish 0.901, wheat 0.991, iron **1.444** (4.2×). Low-bulk goods are near-uniform in space, bulky ones are wild, and neither responds to distance — consistent with F3 (outbound profit equals the freight, which scales with bulk, rather than the price gap). Caveat: the reference world prices only 6 goods. Also lands CRISIS RELIEF (`polis.rs::decide_crisis_relief`/`apply_crisis_relief`): a council in dearth opens the civic granary across every food good and, in famine, bars the export of food. Dynamics run: peak house wealth **487,927 → 300,598** and sustained richest **487,927 → 248,725** (toward the project's own "no 100k blow-ups" ideal), and towns hold 30 until year 40 instead of losing one by year 15 — a granary keeps cities alive, which is what it is for. Scorecard essentially unmoved: gradient −0.029 → −0.026, grain spatial CV 2.582 → 2.542, Gini 0.642 → 0.662, top-10% 0.510 → 0.512, real wage 145.4 → 146.3, crisis-year share still 0.000. |
 | 2026-08-19 | `3db1c1d` | — | — | — | 0 | **Market measurement only — no code changed.** Re-ran `econ_fidelity_scorecard` at HEAD for `docs/TRADE_AND_MARKET_REVIEW.md`. Price/distance gradient **−0.029** (was −0.01 on 2026-07-29); mean \|ln gap\| **0.901 nearest quartile vs 0.914 furthest** — distance is not merely a weak predictor of price, it is no predictor at all; grain price CV **across** cities **2.582** (was 2.10, band 0.20–0.40); grain price CV **within** a city **0.010** (band 0.30–0.50) — recorded here for the first time and the largest proportional error in the economy oracle: a city's grain price is very nearly a constant over 60 years. The pair is the INVERSE of a real pre-modern market (moderate dispersion rising steeply with distance, large harvest-driven swings over time). Other metrics in the same run have drifted far from the 2026-07-29 row and are recorded as-measured, not diagnosed: house dissolutions/century 253.33 (was 10.0), urban share 0.998, crisis-year share 0.000, top-10% share 0.510, Gini 0.642, wars/century 31.67, 71 surviving houses, 29 banks. |

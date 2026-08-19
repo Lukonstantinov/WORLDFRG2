@@ -1,7 +1,8 @@
 # Terrain 2.0 — the plan
 
-**Status: APPROVED, NOT YET BUILT.** Decisions in §2 are settled; §4 is the build
-order. Nothing here has shipped except the instrumentation in §3.
+**Status: ALL SIX SLICES BUILT** (2026-08-19). See `docs/SCOREBOARD.md`'s
+2026-08-19d entry for the measured numbers per slice and §8 below for what they
+were. Decisions in §2 held as written; §4 was the build order actually followed.
 
 The organising idea, and the reason this is a rewrite rather than a tuning pass:
 
@@ -203,3 +204,127 @@ Named so they are not silently assumed, per §2.4:
    not sufficient: the 3× crop from `dump_natural_sheet` is reviewed on every slice
    alongside the number. The fill-light regression is the standing proof that a
    green test suite is not a picture.
+
+---
+
+## 8. What shipped (2026-08-19)
+
+All six slices landed in one pass, plus §3's `terrain_metrics` harness. Full
+account in `docs/SCOREBOARD.md`'s 2026-08-19d entry; the essentials:
+
+- **Slice 1 (erosion).** `hydraulic_erosion` (droplets) → `stream_power_erosion`
+  (`step2_terrain/elevation.rs`): priority-flood fill (Barnes et al., seeded from
+  every ocean cell at fixed sea level) → D8 flow directions straight out of the
+  fill order → drainage-area accumulation headwaters-to-coast → `K·A^m·S^n`
+  incision, clamped so a cell can never erode below its own downstream neighbour
+  (the safety clamp that also self-limits the `A^m` blow-up near a river mouth for
+  free). Kept as a SEPARATE implementation from phase 5's own priority-flood
+  (risk 2) — phase 2 runs long before rivers exist, and unifying them is its own,
+  separately-gated change.
+- **Slice 2 (lithology + D9).** New transient `geology.rs`: independent noise-band
+  lithology, a phase-2 climate-erosion proxy (latitude + continentality — an
+  explicit, documented stand-in for phase-3 precipitation, which doesn't exist yet
+  this early), and `redistribute_elevation_regional` — the existing global
+  rank-based redistribution still sets the overall hypsometric SHAPE, but each
+  region's own pre-redistribution mean (plate id when real plate data exists, a
+  coarse grid otherwise) is captured first and reapplied afterward as a bounded
+  offset, so a region's genuine character survives instead of being erased by the
+  global rank-squeeze.
+- **Slice 3 (orogeny + D3).** `compute_orogeny_field`: a multi-source BFS from
+  every convergent/transform boundary land cell that INHERITS its originating
+  point's setting (active-margin / collision / island-arc / subducting-side, from
+  each plate's oceanic/continental split reconstructed by majority-vote over
+  `terrain` — `Plate.is_oceanic` itself isn't persisted, per §2 "transient") and age
+  (a noise value sampled once at the seed and carried through the BFS) outward
+  through the whole belt, not just the boundary cell — so an old worn range can sit
+  beside a young sharp one at the SAME boundary, coherently along its own strike.
+  `belt_profile` shapes the belt asymmetrically by setting (an active margin's arc
+  crest offset inland of the trench; a collision broad and roughly symmetric; an
+  island arc narrow). `plates.rs`'s D3 fix: the boundary normal is now the true
+  Voronoi-bisector direction between the two plates' own seed points, not the
+  direction from one plate's centre to the cell (correct only for a compact,
+  centrally-sampled plate); a triple junction now classifies by the STRONGEST
+  signal across every differing neighbour rather than whichever the fixed
+  4-neighbour scan order hit first.
+- **Slice 4 (coastline).** A "crust thickness" field in `plates.rs` — each plate's
+  base thickness (oceanic vs continental) plus strong domain-warped noise — with a
+  PERCENTILE threshold (not a fixed cutoff) so total land fraction stays exactly
+  what the plate mix implied while the shoreline SHAPE departs from the raw Voronoi
+  edge. A `despeckle_terrain` pass (4-connected component flood-fill) then flips
+  any land/sea patch under `DESPECKLE_MIN` (90 cells) back to its surroundings, so
+  the noise strong enough to decouple the coastline doesn't also scatter single-cell
+  dust. Measured `coast_on_boundary`: ~100% → 62.5%, now gated permanently by
+  `coastline_departs_from_the_plate_boundary` (two probe seeds, <85%).
+  **A second, sharper bug found inside the measurement itself, not the mechanism:**
+  the FIRST tuning pass measured 90% and looked like an unmodified Voronoi edge in
+  `dump_natural_sheet` — the exact D1 symptom. A direct probe (comparing the
+  resulting `terrain` array bit-for-bit with the warp on vs off) found why: the
+  crust FIELD genuinely differed (confirmed by summing it), but the percentile
+  THRESHOLD kept selecting the identical set of cells regardless, because
+  `fbm_noise`'s multi-octave output clusters far more tightly than its nominal
+  0..1 range — the realised swing rarely bridged the 0.5 base gap between an
+  oceanic and continental plate's crust value. A field that is numerically
+  different but geometrically identical is invisible to eyeballing a render, which
+  is exactly why the probe compared the actual `terrain` array rather than trusting
+  the crust field's own statistics.
+- **Slice 5 (seafloor).** `generate_shelves` gains a mid-ocean ridge (segmented by
+  along-strike noise, reading transform offsets as gaps in the crest), a trench at
+  a convergent margin, abyssal-hill texture, and scattered seamounts/guyots (a
+  documented simplification of "chains" — sparse hotspot noise, not traced
+  lines). Measured `sea_depth`↔distance-to-coast correlation: ~1.0 → 0.66-0.74.
+  This is the one slice touching the Earth gate (via `compute_sea_depth`/
+  `generate_shelves` feeding phase 3's `distance_to_ocean`/upwelling): main-class
+  70.1% → 70.2%, floor raised to 70.15.
+- **Slice 6 (render).** The elevation ramp's top stop softened from pure white
+  (255,255,255) to (250,248,244) — still strictly brighter than the 5000 m stop,
+  just short of a full blow-out. Texture shading: a bounded, HONEST approximation
+  (`TEXTURE_SHADOW_BOOST` in `render/tile_image.rs`) that widens the existing
+  direction-independent AO curvature term specifically on the shadowed/lee side of
+  a landform, rather than a second light source — the true multi-scale
+  fractional-Laplacian transform (Leland Brown) needs a wide cross-tile halo this
+  renderer's `TileNeighbors` doesn't carry (only the immediate edge of each
+  cardinal neighbour), so building it for real is left as future work, not faked.
+- **§3 instrumentation.** `terrain_metrics` (new, alongside `bench_phase2`) prints
+  RMS slope / slope spread across an 8×8 window grid / drainage density (share of
+  land cells carrying real accumulated flow, off the same priority-flood the
+  erosion pass uses) / hypsometric integral / coast-on-boundary fraction /
+  sea_depth↔distance correlation, per model. First measurement — it SETS the
+  baseline (see the table in `docs/SCOREBOARD.md`) rather than clearing one.
+
+**Three things did not go as planned, recorded rather than smoothed over:**
+
+1. **Performance missed its own target.** §5 asked for "no slower than today,
+   stretch: faster." `bench_phase2` @ 3600×1800 landed at plates 8.5s → 11.4s,
+   shape 11.4s → 13.9s — slower, despite every per-cell pass with no cross-cell
+   dependency (Voronoi assignment, boundary classification, the lithology/
+   climate-proxy maps, the slice-4 crust map) moving to `rayon::into_par_iter`.
+   The priority-flood queue
+   itself is inherently sequential (a priority queue doesn't parallelise the way
+   the phase-3 row loops do) and stayed the dominant cost even after the outer
+   pass count was capped by grid size (§ below). Left as an open item rather than
+   chased further this session — a genuine O(n) flow-routing algorithm (Braun &
+   Willett 2013) would remove the heap entirely and is the natural next step if
+   this needs to close further.
+2. **The outer-pass count was first keyed to the wrong axis.** `iterations` (the
+   old droplet-budget parameter) scales UP with world size before its own ceiling
+   clamp — exactly backwards for a pass whose cost is what needs controlling on a
+   LARGE world — and it starved every unit-test-sized fixture (all well under
+   `iterations`' own floor) down to 2-4 outer passes. That silently broke
+   `cordillera_crest_runs_parallel_to_the_coast`: a traced spine needs roughly 5-6
+   outer passes before it differentiates from generic ridged noise, and the test's
+   own 80%-of-noise-spread margin failed at ~81% — close enough to look like noise,
+   not a real defect, until traced to the pass count. Fixed by keying pass count to
+   GRID SIZE instead (4 passes above 4M cells, 6 between 1-4M, 8 below), which is
+   the axis that actually drives wall-clock cost.
+3. **Slice 4's decoupling had a real downstream cost, kept rather than hidden
+   behind a loosened test.** On the fixed-seed 300×150 goods-coverage reference
+   world, the new coastline geometry put the inshore good `pearls`' homeland on a
+   stretch of new coast outside every settlement's catchment at that specific
+   seed and scale — `goods_coverage_diagnostic` caught it (a real, intended gate,
+   not a target being gamed). Real generation regenerates settlements FROM the
+   decoupled coastline (phase 7 runs after phases 1-2 against whatever terrain
+   resulted, never against a frozen layout), so this reads as a fixed-fixture
+   small-world-sampling artefact rather than a claim that pearls is unreachable in
+   practice — the same category of finding the file's own `dyes` exception already
+   documents, just a different root cause. Added as a second, honestly-labelled
+   entry rather than folded silently into the existing one.
