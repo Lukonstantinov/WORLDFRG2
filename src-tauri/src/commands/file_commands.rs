@@ -5,8 +5,17 @@ use crate::tile::cell::TileData;
 use crate::render::tile_image::render_tile;
 use rusqlite::Connection;
 
-/// Save the WORLD file: full SQLite backup, then strip campaign data — the
-/// `.worldforge` file carries geography only; campaigns save separately.
+/// Save the WORLD file: full SQLite backup, then strip only the RUN — the
+/// `.worldforge` file carries the world INCLUDING its human layer (settlements +
+/// economy), so a campaign can be started straight from it. Playthrough state
+/// (`campaign_sim`, the campaign's name and progress) saves separately as
+/// `.campaign`.
+///
+/// This used to `DELETE FROM campaign` wholesale. `settlements` and `economy` are
+/// campaign-table keys, so every world file the app wrote was missing the two rows
+/// `campaign_start_sim` requires — "Open a world, press Begin Campaign" could not
+/// work, and the only recovery (re-running step 7) silently invalidated the frozen
+/// province layer, whose `Province.settlements` holds settlement IDs.
 #[tauri::command]
 pub fn save_world_as(
     path: String,
@@ -21,8 +30,9 @@ pub fn save_world_as(
         backup.run_to_completion(100, std::time::Duration::from_millis(10), None)
             .map_err(|e| e.to_string())?;
     }
-    // The backup copies every table; campaign rows don't belong in a world file.
-    dest.execute("DELETE FROM campaign", []).map_err(|e| e.to_string())?;
+    // The backup copies every table; one PLAYTHROUGH doesn't belong in a world file,
+    // but the world's own human layer does.
+    crate::commands::campaign_commands::clear_campaign_run(&dest)?;
     Ok(())
 }
 

@@ -2590,3 +2590,48 @@ export interface PersonBrief {
   /** 0 if this person has never reigned. */
   reign_years: number;
 }
+
+// ── The campaign library (mirrors commands/campaign_library.rs) ──
+
+/** One `.campaign` file as the library lists it. Read from each save's small header,
+ *  never from its simulation blob. */
+export interface CampaignFileInfo {
+  path: string;
+  file_name: string;
+  name: string;
+  world_name: string;
+  year: number;
+  tick: number;
+  hubs: number;
+  houses: number;
+  /** Unix seconds; falls back to the file's mtime when the save carries no header. */
+  saved_at: number;
+  size_bytes: number;
+  /** True when this save's world matches the world currently open. */
+  world_match: boolean;
+  /** False for pre-header saves — the year shown was recovered by scanning. */
+  has_header: boolean;
+}
+
+/** Whether the open world can start a campaign, and what a rebuild has to work with
+ *  (mirrors campaign_commands::WorldHumanLayerStatus). */
+export interface WorldHumanLayerStatus {
+  has_settlements: boolean;
+  settlement_count: number;
+  has_economy: boolean;
+  hub_count: number;
+  can_start_campaign: boolean;
+  has_provinces: boolean;
+  /** Present ⇒ a rebuild reproduces the SAME towns with the SAME ids. */
+  settlements_seed: number | null;
+  settlements_realism: number | null;
+  settlements_max: number | null;
+}
+
+/** What `repair_province_settlements` changed. */
+export interface ProvinceRepairReport {
+  provinces: number;
+  provinces_changed: number;
+  settlements_attached: number;
+  settlements_orphaned: number;
+}

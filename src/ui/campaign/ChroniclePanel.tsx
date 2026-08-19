@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { useCampaignStore } from "@state/campaignStore";
 import { useUIStore } from "@state/uiStore";
 import { T, SERIF, sectionHdr, cardStyle } from "@ui/campaign/chronicleTheme";
+import { worldHumanLayerStatus } from "@bridge";
+import type { WorldHumanLayerStatus } from "@types";
 
 /** The Chronicle's left rail — the WORLD LEDGER. Pure reading matter: the
  *  world's pulse, movers, price history, shortages and the running chronicle.
@@ -23,6 +25,13 @@ export function ChroniclePanel() {
   // The campaign RNG seed. Random per session start; the campaign, once begun,
   // carries its own state, so this only seeds a fresh "Begin Campaign".
   const [seed] = useState(() => Math.floor(Math.random() * 999999));
+
+  // Whether this world can start a campaign at all. A world file saved before the
+  // human layer travelled with it (settlements + economy were stripped by
+  // `save_world_as`) carries no economy, and "Begin Campaign" can then only throw —
+  // so ask first and say what is missing instead.
+  const [layer, setLayer] = useState<WorldHumanLayerStatus | null>(null);
+  useEffect(() => { worldHumanLayerStatus().then(setLayer).catch(() => setLayer(null)); }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
 
@@ -50,7 +59,37 @@ export function ChroniclePanel() {
         </div>
       </div>
 
-      {!active && (
+      {!active && layer && !layer.can_start_campaign && (
+        <div style={{ ...cardStyle, border: `1px solid ${T.badInk}`, padding: "10px" }}>
+          <div style={{ fontFamily: SERIF, color: T.parchment, fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
+            This world has no economy yet
+          </div>
+          <div style={{ color: T.inkDim, fontSize: 11, lineHeight: 1.5, marginBottom: 6 }}>
+            A campaign is seeded from the world's trade economy, and this world does not
+            carry one{layer.has_settlements ? "" : " (nor its settlements)"}. World files
+            saved by older builds had both stripped out, which is why an opened map could
+            not begin a campaign.
+          </div>
+          <div style={{ color: T.inkDim, fontSize: 11, lineHeight: 1.5 }}>
+            <b style={{ color: T.inkMid }}>If you still have this world's .campaign file</b>,
+            open it (📂 Open Campaign, or 📚 Campaigns) — it carries the settlements and
+            economy, and saving the world again afterwards makes the world file
+            self-sufficient from then on.
+          </div>
+          <div style={{ color: T.inkDim, fontSize: 11, lineHeight: 1.5, marginTop: 6 }}>
+            <b style={{ color: T.inkMid }}>Otherwise</b>, switch to 🛠 Forge and re-run
+            Settlements → Political → Economy.
+            {layer.has_provinces && (
+              <> This world has provinces, and rebuilding gives its towns new identities
+              {layer.settlements_seed === null
+                ? " — its original settlement seed was not recorded, so the new towns will differ from the ones the provinces were drawn around."
+                : " — its settlement seed was recorded, so the same towns come back."}</>
+            )}
+          </div>
+        </div>
+      )}
+
+      {!active && (!layer || layer.can_start_campaign) && (
         <div style={{ ...cardStyle, border: `1px solid ${T.goldDim}`, padding: "10px" }}>
           <div style={{ fontFamily: SERIF, color: T.parchment, fontSize: 13, fontWeight: 700, marginBottom: 4 }}>
             Begin the Chronicle
@@ -196,20 +235,39 @@ export function ChroniclePanel() {
             )}
           </div>
 
-          {/* A running campaign is NEVER restarted in place. Starting another game
-              first SAVES this one to its own .campaign file, then seeds a fresh,
-              dynamic campaign on the same world (a new random seed). */}
+          {/* Two ways to begin again on the same world, and the difference between
+              them is what happens to the run on screen — so they are two buttons with
+              two words, never one button with a hidden policy. */}
           <button
             onClick={async () => {
               pause();
               const ok = await newGame(Math.floor(Math.random() * 1_000_000_000));
-              if (ok) { setStatus("New campaign started (previous one saved)."); await refresh(); }
+              if (ok) { setStatus("New campaign started — the previous one is in your Campaigns folder."); await refresh(); }
             }}
             disabled={busy}
             style={{ ...smallReset, opacity: busy ? 0.5 : 1 }}
-            title="Saves the current campaign to its own file, then begins a fresh one"
+            title="Archives the current campaign into your campaigns folder, then begins a fresh one on this world"
           >
-            ➕ New campaign (saves the current one first)
+            ➕ New campaign (archives this one)
+          </button>
+
+          <button
+            onClick={async () => {
+              pause();
+              const y = clock?.year ?? 0;
+              if (!confirm(
+                `Start over?\n\nThis discards the current campaign at year ${y} — it is NOT saved, ` +
+                `and cannot be recovered. The world itself is untouched; a fresh campaign begins on it.\n\n` +
+                `To keep this run instead, cancel and use “New campaign (archives this one)”.`
+              )) return;
+              const ok = await newGame(Math.floor(Math.random() * 1_000_000_000), { archive: false });
+              if (ok) { setStatus("Started over — a fresh campaign on the same world."); await refresh(); }
+            }}
+            disabled={busy}
+            style={{ ...smallReset, opacity: busy ? 0.5 : 1, borderColor: "#5a2f2f", color: "#d9a2a2" }}
+            title="Discard the current run and begin again on this same world"
+          >
+            ↺ Start over (discards this run)
           </button>
         </>
       )}

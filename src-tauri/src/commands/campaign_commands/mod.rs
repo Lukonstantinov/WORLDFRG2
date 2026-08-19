@@ -29,19 +29,132 @@ fn panic_payload_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     }
 }
 
-/// Campaign keys carried by `.campaign` files (and stripped from world saves
-/// via the whole-table strip — this list is what save/open copies explicitly).
-const CAMPAIGN_KEYS: [&str; 7] = [
+/// The world's HUMAN LAYER — produced by wizard steps 7-10 against the world's own
+/// (soon frozen) geography, and just as much a property of the world as its rivers
+/// are. It lives in the `campaign` table for historical reasons only, which is what
+/// made `save_world_as` strip it: a `.worldforge` file could be opened but a campaign
+/// could never be started from one, because `campaign_start_sim` reads `economy`.
+///
+/// It ships in the world file. A RUN does not — see `CAMPAIGN_RUN_KEYS`.
+///
+/// `bio_params` is currently written by nothing; it is listed here so that if it ever
+/// gains a writer it travels with the world (the trade-reach settings the economy was
+/// built with describe the world's economy, not one playthrough of it).
+pub const WORLD_HUMAN_KEYS: [&str; 3] = [
+    "settlements",
+    "economy",
+    "bio_params",
+];
+
+/// One RUN of the campaign — a playthrough, not a property of the world. Stripped
+/// from world saves and cleared when a new campaign is started on the same world.
+pub const CAMPAIGN_RUN_KEYS: [&str; 5] = [
+    "name",
+    "campaign_progress",
+    "world_ref",
+    // A tiny header (year, hubs, houses, when it was saved) written at save time so
+    // the campaign library can list a folder of saves WITHOUT parsing every
+    // multi-megabyte `campaign_sim` blob.
+    "campaign_summary",
+    // DLC 1 "Living Trade" tick-simulation state (serialized CampaignSim incl.
+    // the append-only journal). Travels with the .campaign file.
+    "campaign_sim",
+];
+
+/// Everything a `.campaign` file carries: the run PLUS the human layer it was built
+/// on, so a campaign file stays a complete save against its world.
+const CAMPAIGN_KEYS: [&str; 8] = [
     "name",
     "settlements",
     "economy",
     "bio_params",
     "campaign_progress",
     "world_ref",
-    // DLC 1 "Living Trade" tick-simulation state (serialized CampaignSim incl.
-    // the append-only journal). Travels with the .campaign file.
     "campaign_sim",
+    "campaign_summary",
 ];
+
+#[cfg(test)]
+mod campaign_key_split_tests {
+    use super::*;
+
+    fn db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        crate::db::schema::create_tables(&conn).unwrap();
+        conn
+    }
+
+    /// The two sets must PARTITION what a `.campaign` file carries. If a key ends up
+    /// in neither, `save_campaign_as` silently drops it; if it ends up in both,
+    /// `clear_campaign_run` deletes part of the world. Either is invisible until a
+    /// user loses a save, which is exactly how the original bug shipped.
+    #[test]
+    fn the_key_sets_partition_a_campaign_file() {
+        let mut union: Vec<&str> = WORLD_HUMAN_KEYS.iter()
+            .chain(CAMPAIGN_RUN_KEYS.iter()).copied().collect();
+        union.sort_unstable();
+        let dupes = union.len();
+        union.dedup();
+        assert_eq!(dupes, union.len(), "a key is in BOTH sets: {union:?}");
+
+        let mut all: Vec<&str> = CAMPAIGN_KEYS.to_vec();
+        all.sort_unstable();
+        assert_eq!(union, all,
+            "WORLD_HUMAN_KEYS + CAMPAIGN_RUN_KEYS must cover exactly CAMPAIGN_KEYS");
+    }
+
+    /// The fix itself: ending a run must never take the world's human layer with it.
+    /// This is what `save_world_as` and `new_campaign` both rely on.
+    #[test]
+    fn clearing_a_run_keeps_the_worlds_human_layer() {
+        let conn = db();
+        for key in CAMPAIGN_KEYS {
+            metadata::campaign_set(&conn, key, &format!("value-of-{key}")).unwrap();
+        }
+
+        clear_campaign_run(&conn).unwrap();
+
+        for key in WORLD_HUMAN_KEYS {
+            assert_eq!(
+                metadata::campaign_get(&conn, key).unwrap().as_deref(),
+                Some(format!("value-of-{key}").as_str()),
+                "{key} is part of the WORLD and must survive clearing a run",
+            );
+        }
+        for key in CAMPAIGN_RUN_KEYS {
+            assert_eq!(metadata::campaign_get(&conn, key).unwrap(), None,
+                "{key} belongs to one playthrough and must be cleared");
+        }
+    }
+
+    /// `economy` is the row `campaign_start_sim` reads first and refuses to start
+    /// without. A world save that keeps it is the whole point of the change, so it
+    /// gets its own named assertion rather than only being covered by the loop above.
+    #[test]
+    fn a_saved_world_keeps_the_economy_a_campaign_starts_from() {
+        let conn = db();
+        metadata::campaign_set(&conn, "economy", "{\"hubs\":[]}").unwrap();
+        metadata::campaign_set(&conn, "campaign_sim", "a-running-playthrough").unwrap();
+
+        clear_campaign_run(&conn).unwrap();
+
+        assert!(metadata::campaign_get(&conn, "economy").unwrap().is_some(),
+            "stripping this is what made `Open world → Begin Campaign` impossible");
+        assert!(metadata::campaign_get(&conn, "campaign_sim").unwrap().is_none(),
+            "a world file must not carry someone else's playthrough");
+    }
+}
+
+/// Clear one PLAYTHROUGH, leaving the world's human layer (settlements, economy)
+/// in place. Use this instead of `DELETE FROM campaign` anywhere the intent is
+/// "end/replace this run" rather than "load a whole different world".
+pub fn clear_campaign_run(conn: &Connection) -> Result<(), String> {
+    for key in CAMPAIGN_RUN_KEYS {
+        conn.execute("DELETE FROM campaign WHERE key = ?1", rusqlite::params![key])
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct WorldRef {
@@ -49,6 +162,21 @@ pub struct WorldRef {
     pub grid_width: u32,
     pub grid_height: u32,
     pub world_name: String,
+}
+
+/// The header written into every `.campaign` file at save time. Small on purpose:
+/// the campaign library lists a whole folder by reading only this, never the
+/// `campaign_sim` blob beside it.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CampaignSummary {
+    pub name: String,
+    pub world_name: String,
+    pub year: u32,
+    pub tick: u32,
+    pub hubs: u32,
+    pub houses: u32,
+    /// Unix seconds. 0 when the clock was unavailable.
+    pub saved_at: u64,
 }
 
 #[derive(Serialize)]
@@ -95,7 +223,7 @@ fn finalized_fp(conn: &Connection) -> Option<(i64, i64)> {
     Some((a.parse().ok()?, b.parse().ok()?))
 }
 
-fn current_world_ref(conn: &Connection) -> Result<WorldRef, String> {
+pub fn current_world_ref(conn: &Connection) -> Result<WorldRef, String> {
     let fingerprint = finalized_fp(conn)
         .ok_or_else(|| "Finalize the world before starting a campaign.".to_string())?;
     let grid_width: u32 = metadata::get_meta_required(conn, "grid_width")
