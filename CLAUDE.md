@@ -2522,6 +2522,23 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     entity above cities. Carries its own caveats (§5)
                                     and "deliberately not built" list (§6); §7's
                                     order table records exactly what each phase shipped
+TWO_APPS_AND_FILE_UPLOAD_PLAN.md  ← ⭐ AUDIT DONE, PLAN NOT BUILT. Every file-upload
+                                    path measured. The finding: `save_world_as` does
+                                    `DELETE FROM campaign` after the backup, and
+                                    `settlements`/`economy` are CAMPAIGN keys — so a
+                                    `.worldforge` file can be opened but a campaign
+                                    can NEVER be started from one (`campaign_start_sim`
+                                    errors, and Chronicle mode has no step-10 button to
+                                    recover with). Re-running step 7 is not a fix:
+                                    `Province.settlements` holds settlement IDs, provinces
+                                    live in world metadata and survive, step 7b is
+                                    freeze-gated — so recovery silently corrupts the
+                                    political layer. Recommends NOT splitting into two
+                                    binaries (the campaign seeds itself from the whole
+                                    world pipeline; FIX_PLAN B1 wants that edge tighter,
+                                    not process-separated) and instead splitting
+                                    `CAMPAIGN_KEYS` into a world HUMAN LAYER that ships
+                                    in the world file and a RUN that does not
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
