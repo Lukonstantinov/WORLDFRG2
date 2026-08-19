@@ -170,7 +170,10 @@ export function WorkflowPanel() {
     setSimRunning(true);
     setStatus("Running full world generation (from plates)...");
     try {
-      const result = await simRunAll(seed, plateCount);
+      const result = await simRunAll(
+        seed, plateCount, terrainParams.mode,
+        terrainParams.density, terrainParams.height, terrainParams.spread, terrainParams.roughness,
+      );
       setRivers(result.rivers);
       setLakes(result.lakes);
       setSettlements(result.settlements);
@@ -200,7 +203,8 @@ export function WorkflowPanel() {
     setStatus("Running full generation (keeping your landmass)...");
     try {
       const result = await simRunAllFromTerrain(
-        seed, terrainParams.density, terrainParams.height, terrainParams.spread, terrainParams.roughness,
+        seed, terrainParams.mode,
+        terrainParams.density, terrainParams.height, terrainParams.spread, terrainParams.roughness,
       );
       setRivers(result.rivers);
       setLakes(result.lakes);

@@ -255,6 +255,19 @@ Run in order. Each phase depends on previous phases' data.
 | All | `sim_run_all` | Phases 1-8 from plates |
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
 
+**FOUR elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
+the single place a mode string picks a generator — `plates` (the tectonic model,
+`generate_elevation`, the ONLY one that reads `boundary_type`) · `shape` ·
+`cordillera` (§8.13) · `ridged`. Both run-alls used to HARDCODE a generator and
+silently discard the user's pick and all four sliders, so "Generate Full World"
+produced the same relief however `StepElevation`'s picker was set; the models were
+reachable only from step 2's own button. Two rules: the tectonic model is offered
+only where plate data exists (`landmassSource === "plates"`) and degrades to the
+shape model otherwise, and an UNRECOGNISED mode must still build terrain — a bad
+string may never leave a world with no elevation. Gated by
+`elevation_model_tests`, which asserts the four disagree on >25% of land (a
+picker that does not reach the generator makes them identical).
+
 **Phase 3 runs this exact sequence** (`sim_commands.rs`; `earth_validation.rs` mirrors
 it — keep the two in sync):
 ```
