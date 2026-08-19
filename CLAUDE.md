@@ -851,6 +851,21 @@ commands/
                                   reject, never a silent drop
   import_commands.rs            ← import_world_layers (layered world import)
   preview_commands.rs           ← preview_zonal_profile / preview_coarse_climate (§8.14)
+  campaign_library.rs           ← THE CAMPAIGN LIBRARY: a real folder on the user's
+                                  disk (`<Documents>/WorldForge2 Campaigns`, re-pointable,
+                                  openable in the OS file manager) holding `.campaign`
+                                  saves, listed in-app with the YEAR each reached.
+                                  `campaign_library_dir`/`set_…`/`reveal_…`/
+                                  `list_campaigns`/`save_campaign_to_library`/
+                                  `delete_campaign_file`. **Listing must never parse a
+                                  `campaign_sim` blob** — a long run serializes to
+                                  megabytes — so every save stamps a small
+                                  `campaign_summary` header and the listing reads only
+                                  that; a pre-header file falls back to a BOUNDED 4 KB
+                                  scan for `"tick":` and reports the year as unknown
+                                  past that window rather than lying or paying for a
+                                  megabyte scan. `delete_campaign_file` refuses any
+                                  path outside the library folder
   palette_commands.rs           ← get_render_palettes (§8.18) — serves the renderer's
                                   OWN colour tables to the legend, so the key cannot
                                   drift from the map. Read-only, touches no tile.
@@ -1196,7 +1211,18 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
   LandmarksPanel.tsx            ← Notable landmarks
   AtlasPanel.tsx                ← Atlas 2.0 (eras / world frame)
   NewsFeedPanel.tsx             ← Campaign news feed
-  ChroniclePanel.tsx            ← World ledger — reading matter (left rail)
+  ChroniclePanel.tsx            ← World ledger — reading matter (left rail). Also the
+                                  two ways to begin again on this world — ➕ New
+                                  campaign (archives the running one into the library,
+                                  no dialog) vs ↺ Start over (confirm-gated, names the
+                                  year discarded) — and the card shown when a world
+                                  carries NO economy, which says what is missing and
+                                  that opening the matching `.campaign` recovers it
+  CampaignLibraryPanel.tsx      ← 📚 Campaigns — the library folder listed in-app:
+                                  every save with its year, world, cities, houses and
+                                  save date; Open / Delete / Save-here / Open folder /
+                                  Change folder. A save whose world does not match the
+                                  one open is shown but marked, never hidden
   YearChronicle.tsx             ← SHARED year-grouped expandable chronicle
   cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art
 
@@ -2522,23 +2548,25 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     entity above cities. Carries its own caveats (§5)
                                     and "deliberately not built" list (§6); §7's
                                     order table records exactly what each phase shipped
-TWO_APPS_AND_FILE_UPLOAD_PLAN.md  ← ⭐ AUDIT DONE, PLAN NOT BUILT. Every file-upload
-                                    path measured. The finding: `save_world_as` does
-                                    `DELETE FROM campaign` after the backup, and
-                                    `settlements`/`economy` are CAMPAIGN keys — so a
-                                    `.worldforge` file can be opened but a campaign
-                                    can NEVER be started from one (`campaign_start_sim`
-                                    errors, and Chronicle mode has no step-10 button to
-                                    recover with). Re-running step 7 is not a fix:
-                                    `Province.settlements` holds settlement IDs, provinces
-                                    live in world metadata and survive, step 7b is
-                                    freeze-gated — so recovery silently corrupts the
-                                    political layer. Recommends NOT splitting into two
+TWO_APPS_AND_FILE_UPLOAD_PLAN.md  ← ⭐ SLICES 1-2 BUILT + the campaign LIBRARY and
+                                    START OVER; slices 3-5 unbuilt. The audit found
+                                    `save_world_as` doing `DELETE FROM campaign` after
+                                    the backup while `settlements`/`economy` are CAMPAIGN
+                                    keys — so no `.worldforge` file the app had ever
+                                    written could start a campaign. `CAMPAIGN_KEYS` is
+                                    now split into `WORLD_HUMAN_KEYS` (ships in the world
+                                    file) and `CAMPAIGN_RUN_KEYS` (does not) — see §10
+                                    rule 28. Implementation found a SECOND site of the
+                                    same bug the audit missed: `new_campaign` wiped the
+                                    table too, so Finalize → New Campaign → Begin
+                                    Campaign failed on a world that had never been
+                                    saved at all. Recommends NOT splitting into two
                                     binaries (the campaign seeds itself from the whole
                                     world pipeline; FIX_PLAN B1 wants that edge tighter,
-                                    not process-separated) and instead splitting
-                                    `CAMPAIGN_KEYS` into a world HUMAN LAYER that ships
-                                    in the world file and a RUN that does not
+                                    not process-separated). §8 of the doc records what
+                                    shipped, including what it does NOT fix — old world
+                                    files still carry no economy, and nothing can
+                                    retro-fit data a file never contained
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
@@ -2716,3 +2744,14 @@ Three rules:
     crises` in R2) were each the SAME mistake found through a different call site —
     audit every house-iteration loop a new realm-facing pass touches, not just the
     one it's adding.
+28. **A campaign key belongs to the WORLD or to one RUN — never to neither, never
+    to both.** `WORLD_HUMAN_KEYS` (settlements · economy) ships inside the
+    `.worldforge` file; `CAMPAIGN_RUN_KEYS` (the sim, the run's name/progress/summary)
+    does not. They must PARTITION `CAMPAIGN_KEYS` exactly, and
+    `the_key_sets_partition_a_campaign_file` asserts it: a key in neither is silently
+    dropped from every campaign save, a key in both is silently deleted from every
+    world. Both are invisible until a user loses data — which is exactly how the
+    original bug shipped (`save_world_as` stripped the whole table, so no world file
+    could ever start a campaign). Clear a playthrough with `clear_campaign_run`, never
+    with `DELETE FROM campaign`; the bare wipe is correct ONLY when a whole different
+    world is being loaded over the top (`open_world`, `new_world`, `open_campaign`).

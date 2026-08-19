@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy } from "@types";
+import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -427,4 +427,55 @@ export async function computeStates(): Promise<import("@types").StateRegion[]> {
  *  coronation, but degrades rather than erroring). */
 export async function campaignGetRealmFamily(realmId: number): Promise<import("@types").PersonBrief[]> {
   return invoke("campaign_get_realm_family", { realmId });
+}
+
+// ── The campaign LIBRARY: a real folder of .campaign saves, listed with each
+//    save's year so a run can be resumed without hunting through a file dialog. ──
+
+/** Absolute path of the campaigns folder (created on first call). */
+export async function campaignLibraryDir(): Promise<string> {
+  return invoke("campaign_library_dir");
+}
+
+/** Point the library at a different folder; "" restores the default. Returns the
+ *  folder now in use. */
+export async function setCampaignLibraryDir(path: string): Promise<string> {
+  return invoke("set_campaign_library_dir", { path });
+}
+
+/** Open the campaigns folder in the OS file manager. */
+export async function revealCampaignLibrary(): Promise<void> {
+  return invoke("reveal_campaign_library");
+}
+
+/** Every .campaign save in the library, newest first. Reads only each file's small
+ *  header — never its simulation blob — so a folder of long runs lists instantly. */
+export async function listCampaigns(): Promise<CampaignFileInfo[]> {
+  return invoke("list_campaigns");
+}
+
+/** Save the running campaign into the library folder. Returns the path written. */
+export async function saveCampaignToLibrary(name?: string): Promise<string> {
+  return invoke("save_campaign_to_library", { name: name ?? null });
+}
+
+/** Delete a save from the library (refused for any path outside that folder). */
+export async function deleteCampaignFile(path: string): Promise<void> {
+  return invoke("delete_campaign_file", { path });
+}
+
+/** What the currently open world can do: whether a campaign can start right now,
+ *  and if not, what a rebuild has to work with. */
+export async function worldHumanLayerStatus(): Promise<WorldHumanLayerStatus> {
+  return invoke("world_human_layer_status");
+}
+
+/** Re-attach settlements to the EXISTING province partition (membership + seat only;
+ *  no geometry, no id changes), after a rebuild changed the settlement set. */
+export async function repairProvinceSettlements(
+  settlements: { id: string; x: number; y: number; population: number }[],
+): Promise<ProvinceRepairReport> {
+  return invoke("repair_province_settlements", {
+    settlementsJson: JSON.stringify(settlements),
+  });
 }

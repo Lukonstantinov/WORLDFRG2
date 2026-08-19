@@ -766,6 +766,19 @@ pub fn sim_generate_settlements(
     settlements::write_habitability(&mut buf, &habitability);
     let modified = buf.save(&conn, "Settlements & habitability")?;
 
+    // Record the exact inputs this settlement set was generated from, in WORLD
+    // metadata (so they survive a `.worldforge` save). Placement is deterministic in
+    // (tiles, rivers, seed, realism, cap), so storing them is what lets a world whose
+    // human layer was lost regenerate the SAME towns — with the same ids — instead of
+    // a different set that the frozen province layer no longer references.
+    let _ = metadata::set_meta(&conn, "settlements_seed", &seed.to_string());
+    let _ = metadata::set_meta(&conn, "settlements_realism", &realism.unwrap_or(0.55).to_string());
+    let _ = metadata::set_meta(
+        &conn,
+        "settlements_max",
+        &max_settlements.map(|c| c.to_string()).unwrap_or_default(),
+    );
+
     Ok(SimSettlementsResult { modified, settlements: result })
 }
 
@@ -961,6 +974,121 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
             .unwrap_or((0, 0, Vec::new()));
     crate::sim::provinces::migrate_rle_sentinel(&mut raster_rle);
     Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle })
+}
+
+/// What `repair_province_settlements` changed.
+#[derive(serde::Serialize)]
+pub struct ProvinceRepairReport {
+    pub provinces: usize,
+    /// Provinces whose town list or seat actually moved.
+    pub provinces_changed: usize,
+    /// Settlements successfully placed inside a province.
+    pub settlements_attached: usize,
+    /// Settlements whose cell falls on no province (islands the partition skipped).
+    pub settlements_orphaned: usize,
+}
+
+/// Re-attach settlements to the EXISTING province partition.
+///
+/// `Province.settlements` holds settlement IDs, and provinces live in world metadata
+/// while settlements lived (until this change) only in the campaign table — so any
+/// world whose human layer was rebuilt ends up with provinces naming towns that no
+/// longer exist. `sim_generate_provinces` cannot fix it: it is freeze-gated, because
+/// regenerating recompacts every province id and rewrites the raster the campaign's
+/// `hub_province` / `prov_*` / realm state was seeded from.
+///
+/// This repairs MEMBERSHIP ONLY — the same "settlements per province, seat = largest
+/// population" pass `generate_provinces` runs, replayed against the stored
+/// full-resolution raster. No province id changes, no cell changes to the raster, no
+/// geometry, so it is safe on a frozen world and is NOT freeze-gated.
+#[tauri::command]
+pub fn repair_province_settlements(
+    settlements_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<ProvinceRepairReport, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let mut provinces: Vec<crate::sim::provinces::Province> =
+        metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if provinces.is_empty() {
+        return Err("No province layer to repair — this world has none.".into());
+    }
+    let settle: Vec<settlements::Settlement> =
+        serde_json::from_str(&settlements_json).map_err(|e| format!("settlements parse: {e}"))?;
+
+    // Full-resolution id map (the downsample would misplace a town by up to `step`
+    // cells, which near a border is a different province).
+    let (w, h, mut rle): (u32, u32, Vec<u32>) =
+        metadata::get_meta(&conn, "province_raster_rle").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .ok_or("province raster not found — this world's province layer cannot be repaired")?;
+    crate::sim::provinces::migrate_rle_sentinel(&mut rle);
+    let total = (w as usize) * (h as usize);
+    if total == 0 { return Err("world grid not initialised".into()); }
+    let mut province_id = vec![crate::sim::provinces::NO_PROVINCE; total];
+    {
+        let mut idx = 0usize;
+        let mut i = 0usize;
+        while i + 1 < rle.len() && idx < total {
+            let v = rle[i];
+            let n = rle[i + 1] as usize;
+            let end = (idx + n).min(total);
+            for c in province_id.iter_mut().take(end).skip(idx) { *c = v; }
+            idx = end;
+            i += 2;
+        }
+    }
+
+    // Bucket the towns by province, exactly as `generate_provinces` does.
+    let mut by_province: std::collections::HashMap<u32, Vec<(String, u32)>> =
+        std::collections::HashMap::new();
+    let mut orphaned = 0usize;
+    let mut attached = 0usize;
+    for st in &settle {
+        let x = st.x.min(w.saturating_sub(1));
+        let y = st.y.min(h.saturating_sub(1));
+        let pid = province_id[(y as usize) * (w as usize) + x as usize];
+        if pid == crate::sim::provinces::NO_PROVINCE {
+            orphaned += 1;
+        } else {
+            by_province.entry(pid).or_default().push((st.id.clone(), st.population));
+            attached += 1;
+        }
+    }
+
+    let mut changed = 0usize;
+    for pr in provinces.iter_mut() {
+        let mut towns = by_province.remove(&pr.id).unwrap_or_default();
+        // seat = largest population; ties broken on id so the result is deterministic.
+        towns.sort_by(|a, b| b.1.cmp(&a.1).then_with(|| a.0.cmp(&b.0)));
+        let ids: Vec<String> = towns.iter().map(|t| t.0.clone()).collect();
+        let mut moved = ids != pr.settlements;
+        // A province with towns seats on its largest; one with none keeps the seed
+        // cell `generate_provinces` gave it (there is nothing better to point at).
+        if let Some(top) = towns.first() {
+            if let Some(st) = settle.iter().find(|s| s.id == top.0) {
+                let (sx, sy) = (st.x.min(w.saturating_sub(1)), st.y.min(h.saturating_sub(1)));
+                if pr.seat_x != sx || pr.seat_y != sy {
+                    pr.seat_x = sx;
+                    pr.seat_y = sy;
+                    moved = true;
+                }
+            }
+        }
+        pr.settlements = ids;
+        if moved { changed += 1; }
+    }
+
+    metadata::set_meta(&conn, "provinces",
+        &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+
+    Ok(ProvinceRepairReport {
+        provinces: provinces.len(),
+        provinces_changed: changed,
+        settlements_attached: attached,
+        settlements_orphaned: orphaned,
+    })
 }
 
 /// POST-GENERATION cleanup: fold every province smaller than a cell threshold into

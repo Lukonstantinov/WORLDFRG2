@@ -10,7 +10,7 @@ import {
   campaignGetHouses,
   campaignDiagnostics,
   campaignPersist,
-  saveCampaignAs,
+  saveCampaignToLibrary,
 } from "@bridge";
 
 /** Auto-advance step size for the campaign clock. */
@@ -46,10 +46,11 @@ interface CampaignStore {
    *  institutions) and reset cities to small seeds, so on unpause the world builds itself
    *  up from nothing. Only valid on a fresh (tick 0) campaign. */
   coldStart: () => Promise<void>;
-  /** Start a NEW dynamic campaign on the same world — first SAVES the current running
-   *  campaign to its own .campaign file (a running campaign is never wiped), then
-   *  reseeds fresh. Returns false if the user cancelled the save dialog. */
-  newGame: (seed: number) => Promise<boolean>;
+  /** Start a NEW dynamic campaign on the same world. By default the running campaign
+   *  is ARCHIVED into the campaign library first (no dialog — a running campaign is
+   *  never silently lost); pass `archive: false` to start over and discard it, which
+   *  the caller must confirm with the user. Returns false if it could not proceed. */
+  newGame: (seed: number, opts?: { archive?: boolean }) => Promise<boolean>;
   /** Advance N days. `heavy` (default true) also refreshes the world-economy +
    *  houses + diagnostics; pass false during fast Play to update only the snapshot
    *  (clock + map markers) and skip the costlier panel queries. */
@@ -132,32 +133,25 @@ export const useCampaignStore = create<CampaignStore>((set, get) => ({
     }
   },
 
-  newGame: async (seed) => {
+  newGame: async (seed, opts) => {
     if (get().busy) return false;
     set({ playing: false }); // stop the clock before swapping campaigns
     const snap = get().snapshot;
     const running = snap?.active === true && (snap?.clock.tick ?? 0) > 0;
-    // A running campaign must be preserved in its OWN file before a new one starts.
-    if (running) {
-      let path: string | null = null;
-      try {
-        const { save } = await import("@tauri-apps/plugin-dialog");
-        path = await save({
-          title: "Save the current campaign before starting a new one",
-          filters: [{ name: "WorldForge Campaign", extensions: ["campaign"] }],
-          defaultPath: "campaign.campaign",
-        });
-      } catch {
-        path = prompt("Save the current campaign to path (.campaign):", "campaign.campaign");
-      }
-      if (!path) return false; // cancelled → keep the running game untouched
+    const archive = opts?.archive !== false;
+    // A running campaign is archived into the campaign LIBRARY rather than through a
+    // save dialog. The dialog version could not be completed at all when
+    // `plugin-dialog` was unavailable — its `prompt()` fallback returns null on every
+    // Tauri webview, so the whole action silently did nothing. The library needs no
+    // path from the user and the result is visible in the Campaigns panel.
+    if (running && archive) {
       set({ busy: true, error: null });
       try {
         await campaignPersist();
-        await saveCampaignAs(path);
+        await saveCampaignToLibrary();
       } catch (e) {
-        set({ error: String(e), busy: false });
-        return false;
+        set({ error: "Could not archive the running campaign: " + String(e), busy: false });
+        return false; // never reseed over a campaign we failed to preserve
       }
     } else {
       set({ busy: true, error: null });

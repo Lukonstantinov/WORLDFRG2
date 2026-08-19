@@ -44,6 +44,8 @@ import { GoodsChainReview } from "@ui/goods/GoodsChainReview";
 import { GoodDetailPanel } from "@ui/goods/GoodDetailPanel";
 import { ImportWorldDialog } from "@ui/world/ImportWorldDialog";
 import { SettingsPanel } from "@ui/SettingsPanel";
+import { CampaignLibraryPanel } from "@ui/campaign/CampaignLibraryPanel";
+import { useCampaignStore } from "@state/campaignStore";
 import { WindowBar } from "@ui/world/WindowBar";
 import { CampaignTopBar } from "@ui/campaign/CampaignTopBar";
 import { ErrorBoundary } from "@ui/world/ErrorBoundary";
@@ -51,7 +53,7 @@ import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
 import { useViewportStore } from "@state/viewportStore";
 import { useGoodsStore } from "@state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer } from "@bridge";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
 import { useSettingsStore } from "@state/settingsStore";
 
 const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
@@ -390,6 +392,8 @@ export default function App() {
   const [showImport, setShowImport] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [showCampaignDialog, setShowCampaignDialog] = useState(false);
+  const [showLibrary, setShowLibrary] = useState(false);
+  const campaignActive = useCampaignStore((s) => s.snapshot?.active === true);
 
   const handleOpen = async () => {
     try {
@@ -397,7 +401,7 @@ export default function App() {
       try {
         const { open } = await import("@tauri-apps/plugin-dialog");
         const result = await open({
-          filters: [{ name: "WorldForge", extensions: ["worldforge", "db"] }],
+          filters: [{ name: "WorldForge world", extensions: ["worldforge", "db"] }],
         });
         if (result) path = result as string;
       } catch {
@@ -447,12 +451,18 @@ export default function App() {
           if (ov.economy && ov.economy.hubs.length) [8, 9, 10].forEach(markStepCompleted);
         }
         // A finalized (locked) world is read-only — jump straight to the campaign
-        // side. If its economy is already built, land on the campaign step;
-        // otherwise the economy step so it can be (re)built on the locked map.
-        if (res.meta.frozen) {
-          setWorkflowStep((ov.economy && ov.economy.hubs.length ? 11 : 10) as never);
-          // A finalized world is a Chronicle (campaign) product — open it there.
+        // side, but ONLY if it can actually start one. Landing in Chronicle with no
+        // economy used to strand the user: Chronicle renders ChroniclePanel, not the
+        // WorkflowPanel, so there was no step-10 button to recover with and "Begin
+        // Campaign" could only throw. A world missing its economy opens in Forge, on
+        // the step that rebuilds it.
+        const playable = (ov.economy?.hubs.length ?? 0) >= 2;
+        if (res.meta.frozen && playable) {
+          setWorkflowStep(11 as never);
           setAppMode("chronicle");
+        } else if (res.meta.frozen) {
+          setWorkflowStep(10 as never);
+          setAppMode("forge");
         } else {
           // An unfinalized world is a Forge product — never strand the UI in
           // Chronicle (e.g. left over from a previously-open frozen world).
@@ -496,29 +506,38 @@ export default function App() {
         if (input) path = input;
       }
       if (!path) return;
-
-      const info = await openCampaign(path);
-      if (!info.world_match) {
-        alert(
-          "This campaign was saved against a different (or since-modified) world. " +
-          "Its settlements and economy may not line up with the current map."
-        );
-      }
-      const ov = await getOverlays();
-      setSettlements(ov.settlements ?? []);
-      setEconomy(ov.economy && ov.economy.hubs.length ? ov.economy : null);
-      try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
-      const restored = parseProgress(info.campaign_progress);
-      const ui = useUIStore.getState();
-      const worldSteps = Object.entries(ui.stepCompleted)
-        .filter(([k, v]) => v && Number(k) <= 6)
-        .map(([k]) => Number(k));
-      setStepsCompleted([...worldSteps, ...restored]);
-      setStatus(`Campaign loaded: ${info.name}`);
+      await loadCampaignFrom(path);
     } catch (err) {
       console.error("Failed to open campaign:", err);
       alert("Failed to open campaign: " + err);
     }
+  };
+
+  /// Load one `.campaign` file and re-hydrate everything that hangs off it. Shared by
+  /// the Open Campaign dialog and the campaign library, so a save opened either way
+  /// lands in exactly the same state.
+  const loadCampaignFrom = async (path: string) => {
+    const info = await openCampaign(path);
+    if (!info.world_match) {
+      alert(
+        "This campaign was saved against a different (or since-modified) world. " +
+        "Its settlements and economy may not line up with the current map."
+      );
+    }
+    const ov = await getOverlays();
+    setSettlements(ov.settlements ?? []);
+    setEconomy(ov.economy && ov.economy.hubs.length ? ov.economy : null);
+    try { const tp = await getToponyms(); if (tp.length) { setToponyms(tp); useUIStore.getState().setOverlayVisible("toponyms", true); } } catch { /* none saved */ }
+    const restored = parseProgress(info.campaign_progress);
+    const ui = useUIStore.getState();
+    const worldSteps = Object.entries(ui.stepCompleted)
+      .filter(([k, v]) => v && Number(k) <= 6)
+      .map(([k]) => Number(k));
+    setStepsCompleted([...worldSteps, ...restored]);
+    // A loaded campaign is a Chronicle product — show it there, and let the resident
+    // sim be picked up by the panel's own snapshot read.
+    setAppMode("chronicle");
+    setStatus(`Campaign loaded: ${info.name}`);
   };
 
   const handleSaveCampaign = async () => {
@@ -677,6 +696,8 @@ export default function App() {
                 title="Save the CAMPAIGN — resume later from this exact year with all houses, banks, trade and economy state intact">💾 Save Campaign</button>
               <button onClick={handleOpenCampaign} style={campaignBtn}
                 title="Load a saved campaign and continue from the year it was saved">📂 Open Campaign</button>
+              <button onClick={() => setShowLibrary(true)} style={campaignBtn}
+                title="Browse your campaigns folder — every save, with the year it reached">📚 Campaigns</button>
             </>
           )}
         </div>
@@ -764,6 +785,13 @@ export default function App() {
       {showExport && <ExportDialog name={meta?.name || "world"} onClose={() => setShowExport(false)} />}
       {showImport && <ImportWorldDialog onClose={() => setShowImport(false)} />}
       {showSettings && <SettingsPanel onClose={() => setShowSettings(false)} />}
+      {showLibrary && (
+        <CampaignLibraryPanel
+          onClose={() => setShowLibrary(false)}
+          onOpen={loadCampaignFrom}
+          canSave={campaignActive}
+        />
+      )}
     </div>
   );
 }
