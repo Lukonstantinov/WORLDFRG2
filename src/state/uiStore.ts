@@ -250,6 +250,14 @@ interface UIStore {
   showDynasties: boolean;
   /** DLC 4 · the floating Goods (quality & trade) window. */
   showGoodsWindow: boolean;
+  /** The floating MARKETS window — one city's buy/sell book, with its own city
+   *  picker so it is not bound to the map selection (you can read one market
+   *  while looking at somewhere else, or open the settlement window alongside).
+   *  See `docs/TRADE_AND_MARKET_REVIEW.md` Part 3. */
+  showMarkets: boolean;
+  /** The city the Markets window is showing. Seeded from `selectedHub` on open,
+   *  then independent of it. */
+  marketsHub: number | null;
   /** Chrome visibility — lets the user hide the left workflow panel and the right
    *  toolbar to get a clean map with just the floating window bar. */
   showWorkflow: boolean;
@@ -360,6 +368,8 @@ interface UIStore {
   setShowLandmarks: (v: boolean) => void;
   setShowDynasties: (v: boolean) => void;
   setShowGoodsWindow: (v: boolean) => void;
+  setShowMarkets: (v: boolean) => void;
+  setMarketsHub: (id: number | null) => void;
   setShowWorkflow: (v: boolean) => void;
   setShowToolbar: (v: boolean) => void;
   setCoinOverlayHub: (v: number | null) => void;
@@ -501,6 +511,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showLandmarks: false,
   showDynasties: false,
   showGoodsWindow: false,
+  showMarkets: false,
+  marketsHub: null,
   showWorkflow: true,
   showToolbar: true,
   coinOverlayHub: null,
@@ -657,6 +669,13 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowLandmarks: (v) => set({ showLandmarks: v }),
   setShowDynasties: (v) => set({ showDynasties: v }),
   setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),
+  // Opening the Markets window seeds it from whatever city is selected on the map,
+  // but never re-binds afterwards — that independence is the point of the window.
+  setShowMarkets: (v) => set((s) => ({
+    showMarkets: v,
+    marketsHub: v && s.marketsHub === null ? s.selectedHub : s.marketsHub,
+  })),
+  setMarketsHub: (id) => set({ marketsHub: id }),
   setShowWorkflow: (v) => set({ showWorkflow: v }),
   setShowToolbar: (v) => set({ showToolbar: v }),
   setCoinOverlayHub: (v) => set({ coinOverlayHub: v }),

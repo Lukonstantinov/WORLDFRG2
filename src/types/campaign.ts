@@ -319,6 +319,13 @@ export interface ShipmentRow {
   value: number;          // amount × local price (ranking key)
   sea: boolean;
   returning_home: boolean;
+  /** The price the DEAL was struck at (×-world), as distinct from `price`, which
+   *  is the viewing city's own local quote. 0 = unknown (a pre-existing save). */
+  deal_price?: number;
+  /** Days until an in-flight cargo lands (0 for a completed deal). */
+  eta_days?: number;
+  /** Days since a completed deal was struck (0 for in-flight). */
+  age_days?: number;
 }
 /** Full live per-settlement detail (sentiment + market + history). */
 export interface CoinShare {
@@ -1030,6 +1037,15 @@ export interface WorldGoodPrice {
   top_hub: string;
 }
 /** #30 · one city's live cost-of-living basket index (campaign_city_price_index). */
+/** One live city in the Markets window's picker (campaign_market_cities). */
+export interface MarketCity {
+  /** Hub INDEX — the same id campaignGetHub takes. */
+  id: number;
+  name: string;
+  population: number;
+  x: number;
+  y: number;
+}
 export interface CityPriceIndex {
   name: string;
   index: number; // need-weighted mean of price ÷ base_value, ×100 (100 = world standard)

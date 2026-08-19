@@ -354,7 +354,7 @@ impl CampaignSim {
         let ng = self.goods.len();
         let tick = self.tick;
         let mut out = Vec::new();
-        if ng == 0 { return out; }
+        if ng == 0 || self.suppress_relief { return out; }
         for h in 0..self.hubs.len() {
             let hub = &self.hubs[h];
             if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }

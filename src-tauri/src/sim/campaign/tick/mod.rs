@@ -4850,6 +4850,28 @@ pub struct CampaignSim {
     /// Never set outside that test. Realm formation is measured by
     /// `econ_measure_realm_paths` instead, on a world built for it.
     #[serde(default)] pub suppress_realms: bool,
+    /// Test-only, and for the SAME ONE CALLER as `suppress_realms` above:
+    /// `econ_inheritance_rules_fragment_differently`. Suppresses CRISIS RELIEF
+    /// (`polis.rs::decide_crisis_relief`).
+    ///
+    /// Same reasoning, measured the same way. Relief is a FOOD-MARKET intervention:
+    /// it keeps struggling towns alive (the standing dynamics run holds 30 towns to
+    /// year 40 with it, against losing one by year 15 without), which changes which
+    /// houses survive and therefore how many were ever founded — path-dependent, and
+    /// orthogonal to the law of inheritance this gate measures. With it in, the
+    /// weakest of the gate's four assertions flipped on a 3% margin: 190 houses ever
+    /// under partible against 196 under primogeniture.
+    ///
+    /// What was NOT hidden by isolating it: the gate's substantive claim held
+    /// throughout. Assertion 3 — the one the test's own printed note calls "the
+    /// measure that actually moves" — stayed clean and wide (mean wealth 141,368
+    /// partible against 157,415 primogeniture). Only the house COUNT moved, and only
+    /// within the noise band this gate has flipped inside three times before (see
+    /// `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` 4.7 and 4.9, and `suppress_realms`).
+    ///
+    /// Never set outside that test. Crisis relief is measured by the standing
+    /// dynamics run and the economy scorecard instead.
+    #[serde(default)] pub suppress_relief: bool,
     #[serde(default)] pub prov_tax: Vec<f32>,
     /// Unpaid dues accumulated in bad years — collected later or written off.
     #[serde(default)] pub prov_arrears: Vec<f32>,

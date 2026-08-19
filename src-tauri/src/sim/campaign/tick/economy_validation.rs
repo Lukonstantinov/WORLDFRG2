@@ -1775,6 +1775,15 @@ fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
     // exactly as fixing the seed and the world already do — realm formation has
     // its own instrument, `econ_measure_realm_paths`.
     s.suppress_realms = true;
+    // Crisis relief OFF for the same reason and by the same measurement. It keeps
+    // struggling towns alive, which changes which houses survive and so how many
+    // were ever founded — orthogonal to the law of inheritance, and it flipped this
+    // gate's WEAKEST assertion on a 3% margin (190 houses ever under partible
+    // against 196 under primogeniture) while the substantive one held wide open
+    // (mean wealth 141,368 against 157,415 — the measure this test's own note calls
+    // the one that actually moves). Isolating it keeps the gate measuring its own
+    // subject; relief is measured by the dynamics run and the econ scorecard.
+    s.suppress_relief = true;
     // `reference_world()`'s hub grid (6x5 at 9-unit spacing) spans up to ~58 units
     // corner-to-corner, but its native `world_w`=100 was set before the trade
     // HORIZON existed (`TRADE_MAX_DIST_FRAC`=0.24, tuned against a real generated

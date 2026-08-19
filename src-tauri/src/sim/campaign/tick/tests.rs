@@ -102,7 +102,7 @@
             // unaffected by the B1 land layer (that is the gate).
             prov_forest: vec![], prov_arable: vec![], prov_pasture: vec![],
             prov_irrigated: vec![], prov_soil: vec![], prov_tenure: vec![],
-            suppress_realms: false,
+            suppress_realms: false, suppress_relief: false,
             prov_tax: vec![], prov_arrears: vec![], prov_unrest: vec![],
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
             prov_holder_house: vec![],

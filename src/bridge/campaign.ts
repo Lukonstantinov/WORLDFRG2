@@ -163,6 +163,12 @@ export async function campaignCityPriceIndex(): Promise<import("@types").CityPri
   return invoke("campaign_city_price_index");
 }
 
+/** The Markets window's city picker — every LIVE city, including ones founded
+ *  during the campaign (which the frozen worldgen economy snapshot cannot list). */
+export async function campaignMarketCities(): Promise<import("@types").MarketCity[]> {
+  return invoke("campaign_market_cities");
+}
+
 /** All merchant families (active first, richest first). */
 export async function campaignGetHouses(): Promise<HouseBrief[]> {
   return invoke("campaign_get_houses");

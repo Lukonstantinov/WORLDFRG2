@@ -273,6 +273,17 @@ pub struct HubGoodDetail {
     #[serde(default)] pub vol_hist: Vec<f32>,
 }
 
+/// One live city in the Markets window's picker.
+#[derive(Serialize, Clone)]
+pub struct MarketCity {
+    /// Hub INDEX — the same id `campaign_get_hub` takes.
+    pub id: u32,
+    pub name: String,
+    pub population: f32,
+    pub x: f32,
+    pub y: f32,
+}
+
 /// One shipment touching a settlement (Market tab arrivals/departures), with its
 /// owner so houses/guilds and round-trip return legs are identifiable.
 #[derive(Serialize, Clone)]
@@ -287,6 +298,19 @@ pub struct ShipmentRow {
     pub value: f32,             // amount × local price (the ranking key)
     pub sea: bool,
     pub returning_home: bool,   // a round-trip RETURN leg (goods bought abroad, coming home)
+    /// The price the DEAL was struck at when the cargo left, as a ×-world multiple
+    /// — `InTransit.price` / `RecentTrade.price` over the good's base value.
+    ///
+    /// Distinct from `price`, which is the VIEWING city's own local price. The two
+    /// used to be conflated for in-flight rows: `mk_row` stamped every one with the
+    /// destination's local price, so an inbound cargo displayed as though it had
+    /// been bought at the price of the city it was sailing towards. A buy/sell view
+    /// needs the deal, not the quote — see `docs/TRADE_AND_MARKET_REVIEW.md` Part 3.
+    #[serde(default)] pub deal_price: f32,
+    /// Days until the cargo lands (in-flight rows), else 0 for a completed deal.
+    #[serde(default)] pub eta_days: u32,
+    /// Ticks since a COMPLETED deal was struck (0 for in-flight).
+    #[serde(default)] pub age_days: u32,
 }
 
 /// DLC 3 · a polis seat's government, for the settlement Government subtab: the

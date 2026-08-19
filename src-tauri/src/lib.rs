@@ -155,6 +155,7 @@ pub fn run() {
             campaign_commands::campaign_get_culture_history,
             campaign_commands::campaign_culture_hubs,
             campaign_commands::campaign_get_hub,
+            campaign_commands::campaign_market_cities,
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_satellite,
             campaign_commands::campaign_get_migration_routes,

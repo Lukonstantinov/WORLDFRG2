@@ -786,3 +786,127 @@ true deal prices, days-held and a persistent trend while getting *shorter*.
 **Layout caveat.** The tab is 600px today and three columns are already cramped —
 part of why it reads as dense. 2.0 wants ~780px. Below that, stack: the book on top,
 one merged deal list beneath tagged buy/sell, rather than squeezing three columns.
+
+
+---
+
+# Part 4 — what was built
+
+Part 2's build order, executed. Every step's gate is recorded with what it actually
+measured, including the one that went wrong.
+
+## Step 1 · the price series — BUILT
+
+`TradeHist.prices`, sampled yearly in `fold_trade_year` beside the volume series it
+shares a row, cap and pruning with. Sparse by construction. Tail-aligned (rule 28).
+Exposed as `HubGoodDetail.price_hist` / `.vol_hist`.
+
+**Gate met exactly.** `simulate_decades_reports_dynamics` bit-identical against a
+baseline built from a clean stash of HEAD — all 50 reported years, every figure in
+the digest.
+
+## Step 3 · per-good and basket gradients — BUILT, and F2 IS ANSWERED
+
+The oracle now reports the integration gradient per good and on the model's own
+need-weighted basket. **The answer is the worse one:**
+
+* **0 of 6 priced goods show any positive distance gradient.**
+* **basket gradient −0.006**, basket spatial CV 1.573.
+
+So the flat grain figure was never an artefact of grain's 45-day export reserve.
+Distance costs nothing anywhere. **F2 is closed: this is mechanism work, not
+instrument work**, and F3/F4/F5/F8 are where it lives.
+
+**A second finding came free.** Dispersion varies enormously BY GOOD while the
+gradient does not:
+
+| good | mean \|ln gap\| | as a ratio |
+|---|---|---|
+| silk | 0.244 | 1.28× |
+| olives | 0.484 | 1.62× |
+| fish | 0.901 | 2.46× |
+| wheat | 0.991 | 2.69× |
+| iron | 1.444 | **4.24×** |
+
+Low-bulk goods are near-uniform in space; bulky ones are wild; **neither responds to
+distance.** That is exactly the shape F3 predicts — if outbound profit is the FREIGHT
+(which scales with `bulk`) rather than the price gap, then bulk sets the level of the
+price field and nothing sets its gradient. Caveat: the reference world prices only 6
+goods.
+
+## Step 4 · crisis relief — BUILT (two levers of four)
+
+`decide_crisis_relief` / `apply_crisis_relief`, monthly, on the decide/apply split.
+Granary release across every food good; the export bar (`food_export_lock`) in
+famine, honoured in `dispatch`. The import bounty and the price ceiling are **not**
+built — §10's own reasoning for the ceiling stands unchanged.
+
+**A correction to §10 of this document.** It claimed nothing ever released
+`civic_goods`. That was wrong: `update_government`'s step 6 already dumped half the
+store of the FIRST food good once `starving > 0.5`. What was missing is the policy
+layer — a trigger on the dearth rather than on deaths, and coverage of every food
+good. The two now compose; the backstop is untouched.
+
+**Measured.** Dynamics: peak house wealth 487,927 → 300,598, sustained richest
+487,927 → 248,725 (both toward the project's own bounded ideal), and towns hold at 30
+until year 40 instead of losing one by year 15 — a granary keeping cities alive is
+what a granary is for. Scorecard barely moves: gradient −0.029 → −0.026, grain
+spatial CV 2.582 → 2.542, Gini 0.642 → 0.662, real wage 145.4 → 146.3, crisis-year
+share still 0.000.
+
+### The gate that went wrong, and what it cost
+
+`econ_inheritance_rules_fragment_differently` flipped — 190 houses ever under
+partible against 196 under primogeniture, on a 3% margin. This gate has flipped
+inside noise three times before in this codebase (4.7's branching-order flip, 4.9's
+dose-dependent flip, and the whole reason `suppress_realms` exists).
+
+What was checked before reaching for isolation: **the gate's substantive assertion
+held wide open throughout** — mean wealth 141,368 partible against 157,415
+primogeniture, which the test's own printed note calls "the measure that actually
+moves". Only the house COUNT moved.
+
+Relief keeps struggling towns alive, which changes which houses survive and therefore
+how many were ever founded. Path-dependent, and orthogonal to the law of inheritance
+the gate measures. Isolated with `suppress_relief`, mirroring `suppress_realms`
+exactly, and the gate now passes with margin in BOTH directions (193 vs 172 ever;
+149,613 vs 161,790 mean wealth). Relief keeps its own instruments: the dynamics run
+and the scorecard.
+
+## Step 2 · the market view — BUILT
+
+`CityMarketView` is the Part 3 schematic, shared between the settlement window's
+Trade tab and a new floating **⚖ Markets** window with its own city picker
+(`campaign_market_cities` — a LIVE list, so towns founded during the campaign are
+reachable, which the frozen worldgen snapshot cannot manage).
+
+Delivered as designed: the spread, days-of-need held, the persisted trend,
+unusual-first sorting, real deal prices with their gap to the local quote, ETAs, and
+the expandable book row. Three sections were removed as promised — the standalone
+price grid, Exports/Imports, and the chain ladder — and the map's supply-road
+highlight was **rewired rather than orphaned**: opening a good's book traces its road,
+the job the old Imports click used to do.
+
+**Two things the schematic promised that the shipped view does NOT do**, rather than
+faking them:
+
+* **The full price BUILD-UP** (source + freight + tariff + coin discount = delivered
+  cost). Freight needs the per-pair travel days, which the query layer does not send
+  and the frontend cannot derive. The row shows what it truly has — the cheapest
+  market, its price, the dearest, the average, and the multiple this city pays over
+  the cheapest — and stops there.
+* **The "WHY it is not being closed" line.** That needs dispatch's internals
+  (reachable markets holding surplus, and which are barred). In its place is a
+  verdict phrase derived only from state the panel actually holds. Surfacing the real
+  reason means exporting it from `dispatch`, which is its own change.
+
+## What is still open
+
+The Markets window's **📦 Good** and **🌍 World** lenses from §12 are not built —
+only the City lens, per the maintainer's call. The World lens (the integration
+scatter on screen, live) is one command away and is the one that would make F1
+visible in the app rather than only in a test.
+
+Everything in Part 1's Tier 1 remains untouched: settle-at-arrival (F4), margin as a
+share of the gap (F3), and own-price elasticity (F5). Step 3's result says plainly
+that this is where the work now is.

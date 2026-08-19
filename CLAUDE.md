@@ -658,6 +658,24 @@ serde-defaulted so old saves load). Grouped by theme:
 - **Polis + Speculation (DLC 3):** `decide_polis_policy` (council/tariff/mint/
   treasury) + `compute_speculation` (per-polis `SpecCenter` risk + ranked
   `SpecDriver` why-chain).
+- **Crisis price regulation (`polis.rs::decide_crisis_relief`/`apply_crisis_relief`):**
+  the council's answer to a DEARTH, on the same decide/apply split as
+  `decide_polis_policy` so a player holding the seat can supply the choice.
+  Monthly, right after `council_provision_pass`. Two levers: the civic granary
+  opens across EVERY food good held (`RELIEF_RELEASE_DEARTH`/`_FAMINE`), and in
+  famine the export of food is barred (`TickHub.food_export_lock`, honoured in
+  `dispatch` by the same precomputed-flag shape plague quarantine uses — the
+  *tratta* prohibition). Triggers on the DEARTH (`lack_basic`, `food_balance`)
+  rather than on deaths. **A narrower release already existed and is deliberately
+  left in place**: `update_government`'s step 6 dumps half the store of the FIRST
+  food good once `starving > 0.5` — a famine backstop firing when people already
+  die, on one good. The two compose. The design's other two levers are NOT built:
+  an import bounty, and a price ceiling — a ceiling's whole historical consequence
+  is that it CAUSES shortage, and with demand still price-inelastic the shortage is
+  already unconditional, so it would move a number on screen and nothing else.
+  Gated by `crisis_relief_is_inert_until_a_city_is_actually_short`, and isolated
+  from `econ_inheritance_rules_fragment_differently` by `suppress_relief` for the
+  reason `suppress_realms` exists (see that field's doc).
 - **Coin / Credit / Crashes (DLC 3.5):** `decide_coinage` (named polis coin, sticky
   `coin_trust`, seigniorage, `coin_discount` freight, `coin_value` index); `Bank`
   balance sheets (`update_banks` founding+branches, `bank_pass` lend/service/fail);
@@ -793,6 +811,10 @@ commands/
                                   campaign_commands::* paths unchanged):
       lifecycle.rs                finalize/new/save/open/progress/persist/start/advance/state
       read_hubs.rs · read_money.rs  hubs/journal/houses; coin/bank/crash/war/inequality/poleis
+                                  read_hubs.rs also serves `campaign_market_cities`
+                                  (the Markets picker's LIVE city list) and, on every
+                                  `HubGoodDetail`, `price_hist`/`vol_hist` — the
+                                  persisted per-(hub, good) yearly series
       read_people.rs · read_colonies.rs  cultures/pops/figures/dynasties; colonies/migration
       read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
       read_houses.rs              House Dossier reads: the five STABILITY gauges
@@ -1122,7 +1144,28 @@ ui/goods/  — goods
 ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, settlementArt)
   CampaignTopBar.tsx            ← Campaign era / advance controls
   HubPanel.tsx                  ← Settlement detail (Summary/Trade/Estates/People + City finances,
-                                  Transit, year-grouped Chronicle). ~2k lines
+                                  Transit, year-grouped Chronicle). Its Trade ▸ Market
+                                  sub-view is now `CityMarketView` (below) — three
+                                  sections that used to sit apart (arrivals/market/
+                                  departures, the standalone price grid, Exports/Imports
+                                  + the chain ladder) collapsed into one book
+  CityMarketView.tsx            ← THE CITY MARKET 2.0 (see `docs/TRADE_AND_MARKET_
+                                  REVIEW.md` Part 3). Keeps the buy/sell arrivals ⇢
+                                  market ⇢ departures basis and rebuilds the centre as a
+                                  MERCHANT'S BOOK: bought at / sold at / the SPREAD
+                                  between them / days of need held / a price trend from
+                                  the PERSISTED `TradeHist.prices` series. Rows sort by
+                                  what is UNUSUAL here (|price − world_avg| × need), not
+                                  by production order. SHARED between HubPanel's Trade
+                                  tab and MarketsPanel, the same way ProvinceMiniMap is
+                                  shared between the two province views
+  MarketsPanel.tsx              ← The floating ⚖ Markets window: the same
+                                  `CityMarketView` behind its OWN city picker
+                                  (`campaign_market_cities` — a live list, so towns
+                                  founded during the campaign are reachable, which the
+                                  frozen worldgen snapshot cannot do). Seeded from
+                                  `selectedHub` on open, then never re-bound to it, so
+                                  two markets can be read side by side
   CityView.tsx · SettlementScene.tsx ← Isometric city view + scene
   HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
                                   HousesPanel has a world ⚔ Feuds tab; the list is
@@ -2699,3 +2742,11 @@ Three rules:
     crises` in R2) were each the SAME mistake found through a different call site —
     audit every house-iteration loop a new realm-facing pass touches, not just the
     one it's adding.
+28. **A parallel history series is TAIL-aligned, never index-aligned.**
+    `TradeHist.prices` was appended beside the pre-existing `vols` and is
+    serde-defaulted, so an older save loads with `prices` empty while `vols`
+    already holds up to `TRADE_HIST_CAP` years. Both then grow and drain in
+    lockstep, so the LAST entry of each is always the same year and every reader
+    must zip from the END. Never back-fill to make the lengths match — a
+    fabricated price history is worse than a short one. (Rules are APPENDED here,
+    never renumbered: code comments cite them by number — `git grep "rule 25"`.)

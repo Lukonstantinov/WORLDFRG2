@@ -37,6 +37,7 @@ import { FiguresPanel } from "@ui/campaign/FiguresPanel";
 import { LandmarksPanel } from "@ui/campaign/LandmarksPanel";
 import { DynastiesPanel } from "@ui/campaign/DynastiesPanel";
 import { GoodsMarketPanel } from "@ui/goods/GoodsMarketPanel";
+import { MarketsPanel } from "@ui/campaign/MarketsPanel";
 import { SettlementSearch } from "@ui/world/SettlementSearch";
 import { LayerLegend, GoodQualityLegend } from "@ui/world/LayerLegend";
 import { GoodsEditor } from "@ui/goods/GoodsEditor";
@@ -708,6 +709,7 @@ export default function App() {
           }}>
           <InfoPanel />
           <HubPanel />
+          <MarketsPanel />
           <SatelliteConstructionPanel />
           <GoodFlowPanel />
           <GoodsBrowserPanel />
