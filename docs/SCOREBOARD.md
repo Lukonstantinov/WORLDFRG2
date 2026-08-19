@@ -9,6 +9,65 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-19e — Terrain 2.0 slice 4, take three: a level-set coastline
+
+The 2026-08-19d entry's slice 4 (below) shipped a real, measured, but visually
+unconvincing fix: `coast_on_boundary` fell from ~100% to 62.5%, yet a maintainer
+screenshot showed the coastline still reading as an almost-unmodified Voronoi
+polygon (a perfect triangular island included), with a scatter of speckle-islands
+bolted on elsewhere — plus straight diagonal "scar" lines cutting across
+continental interiors that turned out to be the divergent-boundary rift pulldown
+(`e *= 0.7` on `boundary_type[idx] == 2`, read at the cell's own UNwarped
+position, exactly on the raw Voronoi edge — a bug the D4 orogeny-belt warp never
+touched because it's a separate code path).
+
+**Root cause, finally correct.** A 2-D noise field thresholded per-cell has no
+notion of "near the boundary" — wherever it crosses zero, it crosses in whatever
+shape ITS OWN contours happen to make, uncorrelated with where the true 1-D
+boundary curve runs. Fixed by construction instead of by amplitude: a SIGNED
+DISTANCE TO THE NEAREST BOUNDARY (positive on the land side, negative on the sea
+side, from a plain BFS) is perturbed by noise and re-thresholded at zero — the
+level-set technique real coastline generators use. Only cells within `reach`
+(~0.55×plate-size) of an actual boundary are ever eligible to flip; a deep
+continental interior or open ocean is untouched by construction, so the far-flung
+speckle islands are gone without needing the aggressive despeckle floor the
+previous pass required (90 cells → 14). Two noise octaves scaled to complete
+several cycles across `reach` (a broad one for sweeping peninsulas/bays, a
+shorter one for headlands on a bulge's own edge) replace the single frequency
+that couldn't do both jobs at once. The rift-pulldown line is fixed the same way
+as the D4 orogeny belt already was: read at the SAME warped position, faded
+smoothly with distance instead of switching on a hard 1-cell line.
+
+**Measured: dramatically better, not marginally.** On the exact `dump_natural_sheet`
+world (1440×720, seed 20260818) that produced the maintainer's screenshot,
+`coast_on_boundary` fell from **78.9% → 6.9%** (a different config than 08-19d's
+62.5% figure — that entry's own number came from a different world size, which is
+itself part of why the visual didn't match the metric). On the `terrain_metrics`
+config: **6.2%** (was 90.0% before ANY slice-4 work, per the 08-19d table). Land
+fraction preserved to within 20 cells out of 367,224 (the percentile-threshold
+mechanism, unchanged). A visual check (`dump_natural_sheet`, both the whole-world
+PNG and the 3× mountainous crop) now shows real peninsulas, bays and irregular
+islands in place of the polygon; the diagonal scar lines are gone.
+
+**Gates:** all 340 lib tests still pass, including `coastline_departs_from_the_
+plate_boundary` (now easily clears its 85% floor at single-digit percentages) and
+`goods_coverage_diagnostic` (the `pearls` exception from 08-19d is still needed —
+re-verified by removing it and watching the test fail again). `earth_koppen_
+agreement` unaffected (still 70.2%/39.0%). `bench_phase2` @ 3600×1800 essentially
+unchanged (plates 11.1s, shape 13.3s) — the level-set score pass early-returns
+for any cell outside `reach`, so it's no more expensive than the approach it
+replaced despite computing a real BFS field.
+
+**Lesson for the record:** the 08-19d entry's own `coast_on_boundary` number was
+real and correctly measured, but a single scalar from a config nobody was
+looking at is not the same claim as "the picture looks right" — the codebase's
+own rule 4 (§4 of `TERRAIN_2_PLAN.md`, "the headline gate could be gamed") warned
+about exactly this for slope spread and it applied here too. The fix was to look
+at the actual image the user was looking at, not just trust a different number
+from a different world.
+
+---
+
 ## 2026-08-19d — Terrain 2.0: all six slices, measured not asserted
 
 `TERRAIN_2_PLAN.md`'s whole build in one pass: droplet erosion → stream-power
@@ -1750,6 +1809,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-19e | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | Slice 4 redone as a level-set (signed distance-to-boundary + noise, re-thresholded at zero) after a maintainer screenshot showed the 08-19d fix still reading as an unmodified Voronoi polygon despite its own 62.5% number. `coast_on_boundary` now 6-7% (was 90-100% pre-slice-4); real peninsulas/bays/islands, not speckle. Also fixed the divergent-boundary rift pulldown, a second straight-line artefact (read at an unwarped cell position, unrelated to the D4 orogeny-belt warp) the maintainer separately flagged as visible "plate line ridges" |
 | 2026-08-19d | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | `TERRAIN_2_PLAN.md` all six slices: stream-power erosion, transient `geology.rs` (lithology + orogeny setting/age + climate proxy + regionalised redistribution), plates.rs D3 boundary fix, coastline decoupled from the Voronoi edge (retuned after a probe found the first pass numerically differed but geometrically didn't — `coast_on_boundary` ~100%→62.5%, its own new gate), seafloor structure, texture-shading render follow-up. Earth main-class 70.1→70.2 (floor raised); `bench_phase2` @ 3600×1800 plates 8.5s→11.4s / shape 11.4s→13.9s (short of "no slower", recorded not hidden); `terrain_metrics` harness establishes the first slope-spread/drainage/coast-on-boundary/sea_depth-correlation baseline; `pearls` added as an honestly-labelled goods-coverage exception (a slice-4 consequence on the fixed-seed reference world, not a real-generation regression) |
 | 2026-08-19c | *this* | — | — | **331 pass, 0 fail** (24 ignored) | 0 | **City market 2.0 + the Markets window.** `CityMarketView` — shared between the settlement Trade tab and a new floating ⚖ Markets window with its own live city picker (`campaign_market_cities`, so campaign-founded towns are reachable at all). Keeps the buy/sell arrivals⇢market⇢departures basis and rebuilds the centre as a merchant's BOOK: bought at / sold at / **the spread** / days-of-need held / a price trend off the persisted series. Removes three sections it absorbs (the standalone price grid, Exports/Imports, the chain ladder) and rewires the map's supply-road highlight rather than orphaning it. Fixes a real defect: in-flight rows were stamped with the VIEWING city's local price, so an inbound cargo read as though bought at its destination's price (`InTransit.price` now carries the struck price). **Cost recorded:** `econ_inheritance_rules_fragment_differently` flipped on crisis relief — 190 vs 196 houses ever, a 3% margin, the fourth time this gate has moved inside its own noise. Its SUBSTANTIVE assertion held wide open throughout (mean wealth 141,368 vs 157,415 — the measure the test's own note calls the one that moves); only the count moved. Isolated with `suppress_relief`, mirroring `suppress_realms`; the gate now passes with margin both ways (193 vs 172 ever; 149,613 vs 161,790). Two schematic promises deliberately NOT faked: the full price build-up needs per-pair travel days the query layer doesn't send, and the "why the gap isn't closing" line needs dispatch's internals — both left out rather than invented. |
 | 2026-08-19b | *this* | — | — | 354 | 0 | **F2 ANSWERED: it is not a grain problem, the whole market is unintegrated.** The economy oracle now reports the price/distance gradient PER GOOD and on the model's own need-weighted BASKET, not on grain alone. Result: **0 of 6 priced goods show any positive distance gradient**, and the basket gradient is **−0.006**. So the flat −0.026 grain figure is not an artefact of grain's 45-day export reserve — distance costs nothing anywhere. A second, unlooked-for finding in the same table: dispersion varies enormously BY GOOD while the gradient does not — silk mean \|ln gap\| **0.244** (a 1.28× spread, historically reasonable), olives 0.484, fish 0.901, wheat 0.991, iron **1.444** (4.2×). Low-bulk goods are near-uniform in space, bulky ones are wild, and neither responds to distance — consistent with F3 (outbound profit equals the freight, which scales with bulk, rather than the price gap). Caveat: the reference world prices only 6 goods. Also lands CRISIS RELIEF (`polis.rs::decide_crisis_relief`/`apply_crisis_relief`): a council in dearth opens the civic granary across every food good and, in famine, bars the export of food. Dynamics run: peak house wealth **487,927 → 300,598** and sustained richest **487,927 → 248,725** (toward the project's own "no 100k blow-ups" ideal), and towns hold 30 until year 40 instead of losing one by year 15 — a granary keeps cities alive, which is what it is for. Scorecard essentially unmoved: gradient −0.029 → −0.026, grain spatial CV 2.582 → 2.542, Gini 0.642 → 0.662, top-10% 0.510 → 0.512, real wage 145.4 → 146.3, crisis-year share still 0.000. |

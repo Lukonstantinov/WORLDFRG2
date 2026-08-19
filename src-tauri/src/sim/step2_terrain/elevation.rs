@@ -465,6 +465,37 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     // not happen on this path, but stay defensive).
     let orogeny = geology::compute_orogeny_field(buf, seed, 240);
 
+    // Distance from the nearest DIVERGENT boundary land cell (rifts), same BFS
+    // shape as `orogeny`'s own seeding. Sampled at the SAME warped position
+    // below (D4) so the rift-valley pulldown doesn't scar a straight line
+    // either -- it used to read `boundary_type[idx]` directly, a hard 1-cell
+    // multiply exactly on the literal Voronoi edge.
+    let mut rift_dist = vec![u16::MAX; n];
+    if have_boundary {
+        let mut rq = VecDeque::new();
+        for i in 0..n {
+            if terrain[i] == 1 && buf.boundary_type[i] == 2 {
+                rift_dist[i] = 0;
+                rq.push_back(i);
+            }
+        }
+        while let Some(ci) = rq.pop_front() {
+            let d = rift_dist[ci];
+            if d >= 24 { continue; }
+            let cx = (ci % w as usize) as i32;
+            let cy = (ci / w as usize) as i32;
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = buf.wrap_x(cx + dx);
+                let ny = (cy + dy).clamp(0, h as i32 - 1) as u32;
+                let ni = buf.idx(nx, ny);
+                if terrain[ni] == 1 && rift_dist[ni] > d + 1 {
+                    rift_dist[ni] = d + 1;
+                    rq.push_back(ni);
+                }
+            }
+        }
+    }
+
     // Belt half-width (cells) scales with map size so ranges are a plausible
     // fraction of a continent wide at any resolution.
     let belt_reach = (w as f32 * 0.045).clamp(14.0, 90.0);
@@ -496,21 +527,25 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             let ax = x as f32;
             let ay = y as f32;
 
-            // Warped sample position for the orogeny lookup (D4).
-            let (od, oset, oage) = match &orogeny {
-                Some(field) => {
-                    let wxn = fbm_noise(ax * oro_warp_freq + 31.0, ay * oro_warp_freq + 7.0,
-                                        seed.wrapping_add(0xD4D4_0001), 3, 2.0, 0.5) - 0.5;
-                    let wyn = fbm_noise(ax * oro_warp_freq + 91.0, ay * oro_warp_freq + 47.0,
-                                        seed.wrapping_add(0xD4D4_0002), 3, 2.0, 0.5) - 0.5;
-                    let sx = ax + wxn * oro_warp_strength;
-                    let sy = (ay + wyn * oro_warp_strength).clamp(0.0, h as f32 - 1.0);
-                    let sxi = buf.wrap_x(sx.round() as i32);
-                    let syi = sy.round() as u32;
-                    let sidx = buf.idx(sxi, syi);
-                    (field.dist[sidx], field.setting[sidx], field.age[sidx])
-                }
-                None => (u16::MAX, 0u8, 0.5f32),
+            // Warped sample position for the orogeny AND rift lookups (D4):
+            // which boundary point "nearest" means wanders smoothly instead
+            // of being the true nearest, so neither reads as a straight line.
+            let warped_idx = if have_boundary {
+                let wxn = fbm_noise(ax * oro_warp_freq + 31.0, ay * oro_warp_freq + 7.0,
+                                    seed.wrapping_add(0xD4D4_0001), 3, 2.0, 0.5) - 0.5;
+                let wyn = fbm_noise(ax * oro_warp_freq + 91.0, ay * oro_warp_freq + 47.0,
+                                    seed.wrapping_add(0xD4D4_0002), 3, 2.0, 0.5) - 0.5;
+                let sx = ax + wxn * oro_warp_strength;
+                let sy = (ay + wyn * oro_warp_strength).clamp(0.0, h as f32 - 1.0);
+                let sxi = buf.wrap_x(sx.round() as i32);
+                let syi = sy.round() as u32;
+                Some(buf.idx(sxi, syi))
+            } else {
+                None
+            };
+            let (od, oset, oage) = match (&orogeny, warped_idx) {
+                (Some(field), Some(sidx)) => (field.dist[sidx], field.setting[sidx], field.age[sidx]),
+                _ => (u16::MAX, 0u8, 0.5f32),
             };
 
             // Belt strength + relative ridge amplitude from the real orogeny
@@ -539,9 +574,19 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             let mut e = base * 0.42 + ridge * belt * RIDGE_AMP * setting_amp * age_amp + hill * HILL_AMP;
 
             // Divergent boundaries are rifts (continental rift valleys / nascent
-            // ocean) -- pull the surface DOWN a little where crust is stretching.
-            if have_boundary && buf.boundary_type[idx] == 2 {
-                e *= 0.7;
+            // ocean) -- pull the surface DOWN a little where crust is
+            // stretching. Read at the SAME warped position as the orogeny
+            // lookup above (not `boundary_type[idx]` directly, which used to
+            // pull down a hard 1-cell-wide straight line exactly on the raw
+            // Voronoi edge) and fade smoothly with distance rather than
+            // switching on/off, so the rift reads as a valley, not a scar.
+            if let Some(sidx) = warped_idx {
+                let rd = rift_dist[sidx];
+                if rd != u16::MAX {
+                    let t = (1.0 - rd as f32 / 22.0).clamp(0.0, 1.0);
+                    let t2 = t * t * (3.0 - 2.0 * t);
+                    e *= 1.0 - 0.32 * t2;
+                }
             }
 
             // Valley incision: a higher-frequency inverted ridged field dissects

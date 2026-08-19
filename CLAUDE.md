@@ -2452,28 +2452,43 @@ TERRAIN_2_PLAN.md                 ← ⭐ ALL SIX SLICES BUILT. `hydraulic_erosi
                                     junction classifies by strongest signal across
                                     every differing neighbour instead of scan order.
                                     Coastlines are DECOUPLED from the Voronoi edge
-                                    (D1/T1): a warped "crust thickness" field lets
-                                    the shoreline wander off the plate boundary,
-                                    despeckled (a component flood-fill flips any
-                                    patch under `DESPECKLE_MIN`=90 cells) so the
-                                    noise strong enough to decouple it doesn't also
-                                    scatter single-cell dust — measured coast-on-
-                                    plate-boundary 62.5%, down from ~100%, now its
-                                    own permanent gate
-                                    (`coastline_departs_from_the_plate_boundary`).
-                                    A first tuning pass measured 90% and still
-                                    LOOKED like the raw Voronoi edge; a bit-for-bit
-                                    probe of `terrain` (not the crust float field)
-                                    found why — `fbm_noise`'s realised swing rarely
-                                    bridged the base gap between an oceanic and
-                                    continental plate's crust value, so the field
-                                    was numerically different but geometrically
-                                    IDENTICAL after thresholding, invisible to
-                                    eyeballing a render — retuned to a wider swing
-                                    and warp until the actual `terrain` array moved.
-                                    A percentile threshold (not a fixed cutoff)
-                                    still holds the total land fraction exactly what
-                                    the plate mix implied throughout. Seafloor gets ridges/trenches/abyssal
+                                    (D1/T1) by a LEVEL SET, the third pass at this
+                                    (see `docs/SCOREBOARD.md`'s 2026-08-19e entry):
+                                    a signed distance-to-nearest-boundary field
+                                    (BFS; positive on the land side, negative on
+                                    the sea side) perturbed by noise and re-
+                                    thresholded at zero, so only cells within
+                                    `reach` (~0.55×plate-size) of a real boundary
+                                    can ever flip — no far-flung speckle islands by
+                                    construction. The first two passes each
+                                    measured a real number (90%, then 62.5% coast-
+                                    on-boundary) that still looked, in
+                                    `dump_natural_sheet`, like an unmodified
+                                    Voronoi edge or a scatter of dots bolted onto
+                                    one — a plain 2-D noise threshold has no notion
+                                    of "near the true 1-D boundary curve", so
+                                    wherever it flipped a cell, the flip was
+                                    uncorrelated with where the coastline actually
+                                    needed to bend. The level set fixes this by
+                                    construction rather than by amplitude tuning:
+                                    measured coast-on-plate-boundary 6-7% (both the
+                                    `terrain_metrics` config and the exact
+                                    `dump_natural_sheet` world a maintainer
+                                    screenshot came from), gated permanently by
+                                    `coastline_departs_from_the_plate_boundary`. A
+                                    despeckle pass (component flood-fill, now
+                                    `DESPECKLE_MIN`=14 cells) is a safety net, not
+                                    the mechanism. The SAME screenshot also showed
+                                    straight diagonal "scar" lines across
+                                    continental interiors — a SEPARATE bug, the
+                                    divergent-boundary rift pulldown reading
+                                    `boundary_type[idx]` at the cell's own unwarped
+                                    position; fixed the same way as the D4 orogeny
+                                    belt (read at the warped position, fade
+                                    smoothly with distance). A percentile threshold
+                                    (not a fixed cutoff) still holds the total land
+                                    fraction exactly what the plate mix implied
+                                    throughout. Seafloor gets ridges/trenches/abyssal
                                     hills/scattered seamounts in `generate_shelves`
                                     (measured sea_depth↔distance-to-coast r ≈
                                     0.66-0.74, down from ~1.0 — a real decorrelation,

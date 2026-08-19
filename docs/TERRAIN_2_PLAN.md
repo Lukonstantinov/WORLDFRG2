@@ -246,27 +246,36 @@ account in `docs/SCOREBOARD.md`'s 2026-08-19d entry; the essentials:
   centrally-sampled plate); a triple junction now classifies by the STRONGEST
   signal across every differing neighbour rather than whichever the fixed
   4-neighbour scan order hit first.
-- **Slice 4 (coastline).** A "crust thickness" field in `plates.rs` — each plate's
-  base thickness (oceanic vs continental) plus strong domain-warped noise — with a
-  PERCENTILE threshold (not a fixed cutoff) so total land fraction stays exactly
-  what the plate mix implied while the shoreline SHAPE departs from the raw Voronoi
-  edge. A `despeckle_terrain` pass (4-connected component flood-fill) then flips
-  any land/sea patch under `DESPECKLE_MIN` (90 cells) back to its surroundings, so
-  the noise strong enough to decouple the coastline doesn't also scatter single-cell
-  dust. Measured `coast_on_boundary`: ~100% → 62.5%, now gated permanently by
-  `coastline_departs_from_the_plate_boundary` (two probe seeds, <85%).
-  **A second, sharper bug found inside the measurement itself, not the mechanism:**
-  the FIRST tuning pass measured 90% and looked like an unmodified Voronoi edge in
-  `dump_natural_sheet` — the exact D1 symptom. A direct probe (comparing the
-  resulting `terrain` array bit-for-bit with the warp on vs off) found why: the
-  crust FIELD genuinely differed (confirmed by summing it), but the percentile
-  THRESHOLD kept selecting the identical set of cells regardless, because
-  `fbm_noise`'s multi-octave output clusters far more tightly than its nominal
-  0..1 range — the realised swing rarely bridged the 0.5 base gap between an
-  oceanic and continental plate's crust value. A field that is numerically
-  different but geometrically identical is invisible to eyeballing a render, which
-  is exactly why the probe compared the actual `terrain` array rather than trusting
-  the crust field's own statistics.
+- **Slice 4 (coastline) — THREE passes, the first two measured wrong.** Pass 1 (a
+  crust-thickness field, modest noise) moved `coast_on_boundary` from ~100% to
+  ~90% and still looked, in `dump_natural_sheet`, like an unmodified Voronoi edge
+  — a direct probe (comparing `terrain` bit-for-bit with the noise on vs off)
+  found the crust FIELD genuinely differed but the percentile THRESHOLD kept
+  selecting the identical set of cells, because `fbm_noise`'s realised swing
+  rarely bridged the 0.5 base gap between an oceanic and continental plate's
+  value — numerically different, geometrically identical, invisible to
+  eyeballing a render. Pass 2 widened the swing until `terrain` genuinely moved
+  (62.5%), but at a single 2-D noise frequency uncorrelated with WHERE the true
+  boundary ran, so it flipped scattered isolated cells (speckle islands) instead
+  of bending the coastline — a maintainer screenshot caught this when the
+  metric said "fixed" and the picture didn't. **Pass 3, shipped:** a LEVEL SET.
+  A signed distance-to-nearest-boundary field (positive on the land side,
+  negative on the sea side, a plain BFS) is perturbed by two noise octaves
+  (scaled to complete several cycles across `reach`, ~0.55×plate-size) and
+  re-thresholded at zero — the technique real coastline generators use. Only
+  cells within `reach` of an actual boundary are ever eligible to flip, so
+  far-flung speckle islands are gone by construction (the despeckle floor
+  dropped from 90 to 14 cells, now a pure safety net) and land fraction is
+  still preserved by the same percentile mechanism. Measured `coast_on_boundary`:
+  6-7% (both the `terrain_metrics` config and the exact `dump_natural_sheet`
+  world the screenshot came from), gated permanently by
+  `coastline_departs_from_the_plate_boundary`. A second straight-line artefact
+  in the same screenshot — diagonal "scar" lines across continental interiors —
+  turned out to be unrelated to slice 3's own D4 warp: the divergent-boundary
+  rift pulldown (`e *= 0.7`) read `boundary_type[idx]` directly at the cell's
+  own unwarped position, a hard 1-cell multiply exactly on the raw Voronoi
+  edge. Fixed the same way as the orogeny belt — read at the SAME warped
+  position, fade smoothly with distance instead of switching on a line.
 - **Slice 5 (seafloor).** `generate_shelves` gains a mid-ocean ridge (segmented by
   along-strike noise, reading transform offsets as gaps in the crest), a trench at
   a convergent margin, abyssal-hill texture, and scattered seamounts/guyots (a
