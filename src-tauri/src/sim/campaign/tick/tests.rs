@@ -26,7 +26,7 @@
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -250,6 +250,46 @@
         assert_eq!(s.hubs[0].treasury, treasury0, "no province layer ⇒ no dues collected");
         assert!(s.prov_forest.is_empty() && s.prov_history.is_empty(),
             "no province layer ⇒ no land state is even allocated");
+    }
+
+    /// Crisis relief must be INERT on a healthy city — the gate that lets the
+    /// standing dynamics run stay comparable, and the same discipline
+    /// `province_land_pass_is_a_noop_without_provinces` applies to the land pass.
+    /// A council with a full granary and no dearth releases nothing and bars
+    /// nothing; the moment the dearth is real it does both.
+    #[test]
+    fn crisis_relief_is_inert_until_a_city_is_actually_short() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        // A well-fed city holding a full public granary.
+        s.hubs[0].civic_goods = vec![400.0];
+        s.hubs[0].lack_basic = 0.0;
+        s.hubs[0].food_balance = 1.0;
+        s.hubs[0].starving = 0.0;
+        let stock0 = stock_of(&s.hubs[0].stock, 0);
+        let journal0 = s.journal.len();
+        s.run_crisis_relief();
+        assert_eq!(s.hubs[0].civic_goods[0], 400.0, "no dearth ⇒ the granary is untouched");
+        assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0, "no dearth ⇒ nothing reaches the market");
+        assert_eq!(s.hubs[0].food_export_lock, 0, "no dearth ⇒ no export bar");
+        assert_eq!(s.journal.len(), journal0, "no dearth ⇒ no chronicle beat");
+
+        // Now a real dearth, short of famine: the granary opens, exports stay free.
+        s.hubs[0].lack_basic = 0.40;
+        s.run_crisis_relief();
+        assert!(s.hubs[0].civic_goods[0] < 400.0, "a dearth opens the granary");
+        assert!(stock_of(&s.hubs[0].stock, 0) > stock0, "released grain reaches the open market");
+        assert_eq!(s.hubs[0].food_export_lock, 0, "a dearth short of famine bars no exports");
+
+        // Famine: the export bar goes up and the episode is chronicled ONCE.
+        s.hubs[0].starving = 0.6;
+        s.run_crisis_relief();
+        assert!(s.hubs[0].food_export_lock > s.tick, "famine bars the export of food");
+        assert_eq!(s.journal.len(), journal0 + 1, "the episode is chronicled once");
+        s.run_crisis_relief();
+        assert_eq!(s.journal.len(), journal0 + 1,
+            "a standing bar is not re-announced every month");
     }
 
     /// R1 · the realm layer must be structurally inert until a realm is proclaimed

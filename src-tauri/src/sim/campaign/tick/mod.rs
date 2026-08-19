@@ -510,6 +510,26 @@ pub(crate) const COUNCIL_RESERVE_BASE: f32 = 180.0;  // target civic stock per n
 const COUNCIL_BUY_PRICE: f32 = 1.0;                  // first-buy pays market price
 const COUNCIL_RETAIL_PRICE: f32 = 1.4;               // dominated council must buy at a retail premium
 const COUNCIL_DOMINANCE_THRESHOLD: f32 = 0.60;       // houses carrying ≥60% of the city's trade
+// ── CRISIS RELIEF (`polis.rs::decide_crisis_relief`) ────────────────────────────
+// The council's response to a dearth. Triggers deliberately sit EARLIER than
+// `update_government`'s existing famine backstop (`starving > 0.5`, one good), which
+// this layer sits above rather than replaces — see that function's own note.
+/// Share of basic demand left unmet before the council calls it a dearth.
+const RELIEF_LACK_TRIGGER: f32 = 0.25;
+/// A food balance below this is a dearth even when the granaries still hold.
+const RELIEF_BALANCE_TRIGGER: f32 = -0.10;
+/// Above this share of the population starving, a dearth is a FAMINE.
+const RELIEF_STARVE_TRIGGER: f32 = 0.25;
+/// Share of the civic store released per month in a dearth / in a famine. A council
+/// that empties its granary in one month has no second month, which is precisely the
+/// mistake the historical *annona* boards were organised to avoid.
+const RELIEF_RELEASE_DEARTH: f32 = 0.25;
+const RELIEF_RELEASE_FAMINE: f32 = 0.50;
+/// Don't bother releasing dust (and don't chronicle it).
+const RELIEF_MIN_RELEASE: f32 = 1.0;
+/// How long the export bar stands once imposed — two months, re-imposed monthly
+/// while the famine lasts, so it lapses on its own when the crisis passes.
+const RELIEF_EXPORT_LOCK_TICKS: u32 = 60;
                                                      // (or a captured govt) suspend first-buy
 
 /// Fraction of a hub's trade carried by merchant HOUSES (vs local traders + guilds).
@@ -2211,6 +2231,13 @@ pub struct TickHub {
     #[serde(default)] pub officials: Vec<Official>,
     /// The government's own strategic granary/stockpile (ng-length; empty ⇒ zeros).
     #[serde(default)] pub civic_goods: Vec<f32>,
+    /// CRISIS RELIEF (`polis.rs::decide_crisis_relief`) · while this exceeds the
+    /// current tick the council has forbidden the EXPORT of food — the *tratta*
+    /// prohibition every dearth-struck pre-modern city reached for. Doubles as the
+    /// "relief is currently running here" flag, so one chronicle beat is written per
+    /// EPISODE rather than one per month. 0 = no relief. Serde-default → a save from
+    /// before this loads with every city unrestricted.
+    #[serde(default)] pub food_export_lock: u32,
     /// Recently enacted laws/policies (capped log) — the government's decisions.
     #[serde(default)] pub laws: Vec<Law>,
     /// The house that currently CONTROLS this government (captured a majority of its
@@ -2409,6 +2436,17 @@ pub struct InTransit {
     /// standing per-contract reservation in `dispatch`, so the spot-trade capacity
     /// pass must NOT subtract it again (that would double-count the same ship).
     #[serde(default)] pub contract: bool,
+    /// The price the cargo was actually STRUCK at when it left, grain-equivalent —
+    /// `pa` for an outbound spot leg, `pb_buy` for a return leg, the contract price
+    /// for a futures delivery. The same figure `RecentTrade.price` records for a
+    /// completed deal.
+    ///
+    /// Purely for the market view. Before this, a settlement's in-flight rows were
+    /// stamped with the VIEWING hub's own local price (`read_hubs.rs`'s `mk_row`),
+    /// so an inbound cargo displayed as though it had been bought at the price of
+    /// the city it was sailing towards — see `docs/TRADE_AND_MARKET_REVIEW.md`
+    /// Part 3. Written here, read only by the query layer.
+    #[serde(default)] pub price: f32,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -6542,6 +6580,10 @@ impl CampaignSim {
             //    (sparkline), and a rich world-summary chronicle row with numbers.
             if tick % 30 == 0 {
                 self.council_provision_pass(); // councils pre-empt needed goods into civic warehouses
+                // …and, in a dearth, open that same granary again and bar food exports.
+                // Runs AFTER provisioning on purpose: a council in famine finds nothing
+                // left on its own market to pre-empt, so the two cannot chase each other.
+                self.run_crisis_relief();
                 self.warehouse_and_spoilage_pass(); // size city warehouses, spoil what rots (§4.2)
                 self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay

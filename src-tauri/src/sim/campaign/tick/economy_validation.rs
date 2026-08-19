@@ -82,6 +82,25 @@ pub struct EconScorecard {
     /// fixed day threshold silently empties itself on a small or fast world.
     pub gap_near: f32,
     pub gap_far: f32,
+    /// PER-GOOD integration gradient, `(good name, r, mean |ln gap|, n pairs)`,
+    /// sorted best-integrated first. `integration_gradient` above measures GRAIN
+    /// alone, and grain is the one good this tick treats specially — a 45-day
+    /// export reserve (`FOOD_RESERVE_DAYS`) against 1.1 days for everything else
+    /// (`TRADE_RESERVE_MULT`), plus a subsistence top-up. Reporting only grain
+    /// therefore risks pointing the instrument at the least-traded good in the
+    /// world and reading the result as a fact about the whole market. Splitting
+    /// them is what distinguishes "no market integrates" from "grain doesn't" —
+    /// two findings that lead to completely different work.
+    /// See `docs/TRADE_AND_MARKET_REVIEW.md` F2.
+    pub per_good: Vec<(String, f32, f32, usize)>,
+    /// The same gradient measured on each city's need-weighted BASKET index rather
+    /// than on any single commodity — the closest available analogue to what
+    /// Chilosi/Persson measure across a whole economy, and the "right equivalent"
+    /// to a single-commodity yardstick. Uses the same weights the tick's own
+    /// consumption ladder does, so it is the model's own basket, not a new one.
+    pub basket_gradient: f32,
+    /// Spatial CV of that basket index across cities.
+    pub basket_cv: f32,
     /// Surviving (non-defunct) houses at the end of the run. Reported because the
     /// wealth statistics below are meaningless when only a handful remain.
     pub houses_alive: usize,
@@ -477,6 +496,71 @@ fn measure(s: &mut CampaignSim) -> EconScorecard {
         card.gap_far = mean(&pairs[pairs.len() - q..].iter().map(|p| p.1).collect::<Vec<_>>());
     }
 
+    // ── The same gradient PER GOOD, and on the consumption basket ───────────
+    // `integration_gradient` above is grain only. These two answer the question it
+    // cannot: is the whole market unintegrated, or is grain simply the good this
+    // model discourages from moving? (F2.)
+    let ngoods = s.goods.len();
+    let mut per_good: Vec<(String, f32, f32, usize)> = Vec::new();
+    for g in 0..ngoods {
+        let mut gd = Vec::new();
+        let mut gg = Vec::new();
+        for (ai, &a) in live.iter().enumerate() {
+            for &b in live.iter().skip(ai + 1) {
+                let d = s.days.get(a * n + b).copied().unwrap_or(f32::INFINITY);
+                if !d.is_finite() || d <= 0.0 { continue; }
+                let (pa, pb) = (s.hubs[a].price[g], s.hubs[b].price[g]);
+                if !(pa.is_finite() && pb.is_finite() && pa > 0.0 && pb > 0.0) { continue; }
+                gd.push(d);
+                gg.push((pa.ln() - pb.ln()).abs());
+            }
+        }
+        // A good priced at fewer than a handful of markets has no gradient to
+        // measure — reporting one would be the empty-band mistake this file's own
+        // quartile comment already records.
+        if gd.len() < 10 { continue; }
+        per_good.push((s.goods[g].name.clone(), pearson(&gd, &gg), mean(&gg), gd.len()));
+    }
+    // Best-integrated first: a steep POSITIVE r is the historical expectation.
+    per_good.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
+    card.per_good = per_good;
+
+    // The basket: each city's need-weighted mean of price ÷ base_value, i.e. the
+    // model's own cost-of-living index (the same shape `campaign_city_price_index`
+    // serves the Economy Dashboard).
+    let basket_of = |h: usize| -> f32 {
+        let mut num = 0.0f32;
+        let mut den = 0.0f32;
+        for g in 0..ngoods {
+            let w = [1.0f32, 0.45, 0.22][s.goods[g].need_tier.min(2) as usize]
+                * s.goods[g].desire.max(0.0);
+            let base = s.goods[g].base_value;
+            if !(w > 0.0 && base > 1e-6) { continue; }
+            let p = s.hubs[h].price[g];
+            if !(p.is_finite() && p > 0.0) { continue; }
+            num += w * (p / base);
+            den += w;
+        }
+        if den > 1e-6 { num / den } else { 0.0 }
+    };
+    {
+        let mut bd = Vec::new();
+        let mut bg = Vec::new();
+        let baskets: Vec<f32> = live.iter().map(|&h| basket_of(h)).collect();
+        for (ai, &a) in live.iter().enumerate() {
+            for (bi, &b) in live.iter().enumerate().skip(ai + 1) {
+                let d = s.days.get(a * n + b).copied().unwrap_or(f32::INFINITY);
+                if !d.is_finite() || d <= 0.0 { continue; }
+                let (ba, bb) = (baskets[ai], baskets[bi]);
+                if !(ba > 0.0 && bb > 0.0) { continue; }
+                bd.push(d);
+                bg.push((ba.ln() - bb.ln()).abs());
+            }
+        }
+        card.basket_gradient = pearson(&bd, &bg);
+        card.basket_cv = cv(&baskets.iter().copied().filter(|v| *v > 0.0).collect::<Vec<_>>());
+    }
+
     // ── Price dispersion, in space and in time ──────────────────────────────
     let final_prices: Vec<f32> = live.iter()
         .map(|&i| s.hubs[i].price[GRAIN])
@@ -563,6 +647,31 @@ fn print_scorecard(c: &EconScorecard) {
     println!("    mean |ln gap| furthest quartile{:>8.3}", c.gap_far);
     println!("  grain price CV across cities    {:>9.3}     0.20 – 0.40         Chilosi et al.",
              c.spatial_cv);
+    // GRAIN IS THE SPECIAL CASE, not the representative one: 45 days of export
+    // reserve against 1.1 for every other good, plus a subsistence top-up. The
+    // per-good and basket rows below are what say whether the market as a whole
+    // integrates. See docs/TRADE_AND_MARKET_REVIEW.md F2.
+    println!("    ↑ GRAIN is the numeraire AND the least-traded good (45-day export");
+    println!("      reserve vs 1.1 for all others) — read the basket + per-good rows too");
+    println!("  basket price gap × distance (r) {:>9.3}     positive, steep     Chilosi/Persson",
+             c.basket_gradient);
+    println!("  basket price CV across cities   {:>9.3}     0.20 – 0.40         Chilosi et al.",
+             c.basket_cv);
+    if !c.per_good.is_empty() {
+        println!("  ── integration PER GOOD (r vs travel days; + = distance costs) ──");
+        let show = 5.min(c.per_good.len());
+        for (nm, r, gap, np) in c.per_good.iter().take(show) {
+            println!("    best  {:<14} r {:>6.3}   mean |ln gap| {:>6.3}  ({} pairs)", nm, r, gap, np);
+        }
+        if c.per_good.len() > show * 2 {
+            for (nm, r, gap, np) in c.per_good.iter().rev().take(show) {
+                println!("    worst {:<14} r {:>6.3}   mean |ln gap| {:>6.3}  ({} pairs)", nm, r, gap, np);
+            }
+        }
+        let positive = c.per_good.iter().filter(|(_, r, _, _)| *r > 0.05).count();
+        println!("    {} of {} priced goods show ANY positive distance gradient",
+                 positive, c.per_good.len());
+    }
     println!("  grain price CV within a city    {:>9.3}     0.30 – 0.50         Persson; Clark",
              c.temporal_cv);
     println!("  rank-size (Zipf) slope          {:>9.3}    −0.8 – −1.2          De Vries; Bairoch",

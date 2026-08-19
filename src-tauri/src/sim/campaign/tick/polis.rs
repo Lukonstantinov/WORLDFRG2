@@ -19,6 +19,24 @@ pub(crate) struct PolisChoice {
     fund_health: bool,
 }
 
+/// One council's CRISIS RELIEF decision for this month — the dearth counterpart to
+/// `PolisChoice`, produced by `decide_crisis_relief` and consumed by
+/// `apply_crisis_relief` (FIX_PLAN B2's decide/apply split, so a player holding the
+/// seat can supply one directly).
+pub(crate) struct ReliefChoice {
+    pub hub: usize,
+    /// 0 = no crisis · 1 = dearth · 2 = famine.
+    pub severity: u8,
+    /// (good, units) drawn from `civic_goods` into the open market.
+    pub release: Vec<(usize, f32)>,
+    /// Bar the export of food until this tick (0 = don't touch the lock).
+    pub lock_until: u32,
+    /// True when the lock is being imposed FRESH (a lapsed or absent lock) — the one
+    /// condition under which the episode is chronicled, so a months-long dearth
+    /// produces one beat rather than one per month.
+    pub announce: bool,
+}
+
 impl CampaignSim {
 
     /// DLC 3 · Phase 0 — the POLIS as an actor. Once a year each seat city's
@@ -308,5 +326,107 @@ impl CampaignSim {
     pub(crate) fn council_reserve_target(&self, h: usize, deps: usize) -> f32 {
         COUNCIL_RESERVE_BASE * (1.0 + deps as f32)
             * (self.hubs[h].population / 5_000.0).clamp(0.3, 4.0)
+    }
+
+
+    // ── CRISIS PRICE REGULATION ────────────────────────────────────────────────
+    // The council's response to a DEARTH, on the same decide/apply split as
+    // `decide_polis_policy` (FIX_PLAN B2), so a player holding the seat can supply
+    // a `ReliefChoice` in place of the AI's without the sim knowing the difference.
+    //
+    // Two of the four levers `docs/TRADE_AND_MARKET_REVIEW.md` §10 lists are built
+    // here — releasing the civic store, and barring the export of food (the *tratta*
+    // prohibition). The import bounty is not, and the price ceiling deliberately is
+    // not: a ceiling's entire historical consequence is that it CAUSES shortage, and
+    // with demand still price-inelastic (F5) the shortage is already unconditional,
+    // so a ceiling would move a number on screen and nothing else.
+    //
+    // A NARROWER RELEASE ALREADY EXISTED and is deliberately left alone:
+    // `update_government`'s step 6 dumps half the civic store of the FIRST food good
+    // once `starving > 0.5`. That is a famine backstop — it fires when people are
+    // already dying, on one good. This pass is the POLICY layer above it: it triggers
+    // on the dearth (unmet basic demand, a negative food balance) rather than on
+    // deaths, and it covers EVERY food good the council actually holds. The two
+    // compose rather than duplicate — the backstop simply finds less left to dump.
+
+    /// Pure AI proposal — reads `&self` only.
+    pub(crate) fn decide_crisis_relief(&self) -> Vec<ReliefChoice> {
+        let ng = self.goods.len();
+        let tick = self.tick;
+        let mut out = Vec::new();
+        if ng == 0 { return out; }
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }
+            if hub.civic_goods.len() < ng { continue; }
+            // FAMINE is the harder of the two signals; DEARTH is the earlier one.
+            let famine = hub.starving > RELIEF_STARVE_TRIGGER;
+            let dearth = famine
+                || hub.lack_basic > RELIEF_LACK_TRIGGER
+                || hub.food_balance < RELIEF_BALANCE_TRIGGER;
+            if !dearth { continue; }
+            let frac = if famine { RELIEF_RELEASE_FAMINE } else { RELIEF_RELEASE_DEARTH };
+            let mut release = Vec::new();
+            for g in 0..ng {
+                if !self.goods[g].food { continue; }
+                let held = hub.civic_goods[g];
+                if !(held > 0.0) { continue; }
+                let amt = held * frac;
+                if amt >= RELIEF_MIN_RELEASE { release.push((g, amt)); }
+            }
+            // A council with an empty granary and no famine has nothing to say.
+            if release.is_empty() && !famine { continue; }
+            // The export bar is the FAMINE lever: releasing grain into a market that
+            // ships it straight back out again is futile, which is exactly why the
+            // prohibition and the release are historically the same policy.
+            let (lock_until, announce) = if famine {
+                (tick + RELIEF_EXPORT_LOCK_TICKS, hub.food_export_lock <= tick)
+            } else {
+                (0, false)
+            };
+            out.push(ReliefChoice {
+                hub: h,
+                severity: if famine { 2 } else { 1 },
+                release,
+                lock_until,
+                announce,
+            });
+        }
+        out
+    }
+
+    /// The only part that mutates.
+    pub(crate) fn apply_crisis_relief(&mut self, choices: Vec<ReliefChoice>) {
+        let tick = self.tick;
+        for c in choices {
+            let h = c.hub;
+            for (g, amt) in c.release {
+                if g >= self.hubs[h].civic_goods.len() { continue; }
+                let take = amt.min(self.hubs[h].civic_goods[g]).max(0.0);
+                if take <= 0.0 { continue; }
+                self.hubs[h].civic_goods[g] -= take;
+                // Into the OPEN market, ungraded — the same convention every other
+                // civic release uses. Price relief follows from `live_price` reading
+                // a larger stock on the next tick; nothing sets a price directly.
+                stock_add_ungraded(&mut self.hubs[h].stock, g, take);
+            }
+            if c.lock_until > 0 { self.hubs[h].food_export_lock = c.lock_until; }
+            if c.announce {
+                let city = self.hubs[h].name.clone();
+                self.journal.push(JournalEntry {
+                    tick, kind: "relief".into(), hub: h as i32, good: -1, value: 0.0,
+                    text: format!(
+                        "Dearth at {}: the council opens the public granary and forbids the export of grain.",
+                        city),
+                });
+            }
+            let _ = c.severity;
+        }
+    }
+
+    /// Decide + apply, the entry point the monthly block calls.
+    pub(crate) fn run_crisis_relief(&mut self) {
+        let choices = self.decide_crisis_relief();
+        self.apply_crisis_relief(choices);
     }
 }

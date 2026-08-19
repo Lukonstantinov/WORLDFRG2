@@ -785,6 +785,11 @@ impl CampaignSim {
                 quarantined[e.hub as usize] = true;
             }
         }
+        // CRISIS RELIEF · a council that has barred the export of food (the *tratta*
+        // prohibition, `polis.rs::apply_crisis_relief`) ships no food out while the
+        // bar stands. Precomputed once per dispatch for the same reason `quarantined`
+        // is — it is read inside the seller × target × good loop.
+        let food_locked: Vec<bool> = self.hubs.iter().map(|h| h.food_export_lock > tick).collect();
         // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
         // (it's constant across this dispatch round and read in the hot inner loop).
         let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
@@ -854,6 +859,8 @@ impl CampaignSim {
                 }
                 // A city under plague quarantine ships nothing out.
                 if quarantined[a] { continue; }
+                // …nor does a city whose council has barred the export of food.
+                if food_locked[a] && self.goods[g].food { continue; }
                 let pa = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
                 // A Guildhall at the SELLER's hub lowers freight on its exports.
                 let freight_rate = self.freight_per_day
@@ -1191,6 +1198,7 @@ impl CampaignSim {
                         phase: 0,
                         home: if owner >= 0 { a as i32 } else { -1 },
                         contract: false,
+                        price: pa,
                     });
                     self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
@@ -1308,6 +1316,7 @@ impl CampaignSim {
             phase: 1,
             home: -1,
             contract: false,
+            price: pb_buy,
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
     }
