@@ -2402,6 +2402,25 @@ DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geolog
                                     unbuilt). Carries the
                                     measured findings that motivated it and its own
                                     "deliberately not built" list
+TERRAIN_2_PLAN.md                 ← ⭐ APPROVED, NOT YET BUILT (instrumentation
+                                    partly done). The WORLD-GEN half's counterpart
+                                    to the campaign plans: coastlines are literal
+                                    Voronoi polygon edges, `density` is generated
+                                    and never read so there is no subduction
+                                    polarity, one global noise recipe gives every
+                                    continent identical texture (which is WHY every
+                                    range hillshades alike), there is no lithology
+                                    field, and the erosion budget works out to ~1.4
+                                    droplet-visits per land cell — measured, not
+                                    guessed. Six slices, each independently gated;
+                                    the headline gate is SLOPE SPREAD across map
+                                    windows, which scores ~0 on a uniform world.
+                                    Carries the finding that the Earth gate CANNOT
+                                    be regressed by slices 1-4 (it loads a real DEM
+                                    fixture and never calls the procedural
+                                    generators), its own perf budget from
+                                    `bench_phase2`, and its own "deliberately not
+                                    built" list
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
                                     the settlement panel rework · provinces (enclave fix,
                                     sizing, real-terrain view, goods & exploitation) ·
