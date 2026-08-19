@@ -41,6 +41,16 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     };
     let hub = &sim.hubs[hi];
     let ng = sim.goods.len();
+    // The persisted per-(hub, good) price/volume series for THIS hub, indexed by
+    // good. `trade_hist` is a sparse row list (only pairs that actually traded),
+    // so this is one linear pass rather than a scan per good.
+    let mut price_hist: Vec<&[f32]> = vec![&[]; ng];
+    let mut vol_hist: Vec<&[f32]> = vec![&[]; ng];
+    for th in &sim.trade_hist {
+        if th.hub as usize != hi { continue; }
+        let g = th.good as usize;
+        if g < ng { price_hist[g] = &th.prices; vol_hist[g] = &th.vols; }
+    }
     // Per-good world cheapest/dearest (×-world price) across hubs.
     let goods: Vec<HubGoodDetail> = (0..ng)
         .map(|g| {
@@ -79,6 +89,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 grade: if hub.production[g] > 0.0 {
                     crate::sim::tick::quality_grade(hub.quality.get(g).copied().unwrap_or(0.0)).to_string()
                 } else { String::new() },
+                price_hist: price_hist[g].to_vec(),
+                vol_hist: vol_hist[g].to_vec(),
             }
         })
         .collect();

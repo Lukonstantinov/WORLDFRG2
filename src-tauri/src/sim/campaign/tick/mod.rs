@@ -2446,6 +2446,26 @@ pub struct TradeHist {
     pub good: u32,
     /// Total volume traded each year (most recent last), capped to `TRADE_HIST_CAP`.
     pub vols: Vec<f32>,
+    /// This hub's LOCAL PRICE for the good (grain-equivalent, the smoothed
+    /// `hubs[h].price[g]`), sampled once at each New Year alongside `vols` — the
+    /// only per-(hub, good) price series the project keeps. Before it, the sole
+    /// price history anywhere was one world scalar (`sample_journal`) and a
+    /// per-hub BASKET index (`HubSample.price_index`), so nothing could answer
+    /// "what happened to the price of pepper here" — see
+    /// `docs/TRADE_AND_MARKET_REVIEW.md` F9.
+    ///
+    /// Sparse BY CONSTRUCTION: a row exists only for a (hub, good) pair that
+    /// actually traded, and shares `vols`' row cap and pruning, so this costs
+    /// nothing on top of the series that was already kept.
+    ///
+    /// **Tail-aligned, not index-aligned.** A save written before this field
+    /// loads with `prices` empty while `vols` already holds up to
+    /// `TRADE_HIST_CAP` years, and both then grow and drain in lockstep — so
+    /// the LAST entry of each is always the same year and readers must zip from
+    /// the END. Nothing is back-filled: a fabricated price history would be
+    /// worse than a short one.
+    #[serde(default)]
+    pub prices: Vec<f32>,
 }
 
 /// One milestone in a house's chronicle (its timeline view).

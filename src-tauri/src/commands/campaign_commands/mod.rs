@@ -259,6 +259,18 @@ pub struct HubGoodDetail {
     /// DLC 4 · this hub's production quality 0..1 for the good + its grade label.
     #[serde(default)] pub quality: f32,
     #[serde(default)] pub grade: String,
+    /// The PERSISTED yearly price series for this (hub, good) — `TradeHist.prices`,
+    /// grain-equivalent, most recent last. Empty for a good this hub has never
+    /// traded (no `TradeHist` row exists), and short in the years right after a
+    /// pre-existing save is loaded.
+    ///
+    /// Before this the only price history the Trade tab could draw was accumulated
+    /// in a React `useRef` that reset on every hub switch and only filled while the
+    /// panel was open — see `docs/TRADE_AND_MARKET_REVIEW.md` F9.
+    #[serde(default)] pub price_hist: Vec<f32>,
+    /// The matching yearly traded VOLUME series (`TradeHist.vols`), same length and
+    /// same years, so a price move can be read against the trade that caused it.
+    #[serde(default)] pub vol_hist: Vec<f32>,
 }
 
 /// One shipment touching a settlement (Market tab arrivals/departures), with its

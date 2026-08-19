@@ -281,6 +281,11 @@ export interface HubGoodDetail {
   world_avg?: number; // mean ×-world price across all settlements right now
   quality?: number;   // this hub's production quality 0..1 for the good
   grade?: string;     // grade label if the hub produces it ("Fine", "Exquisite", …)
+  /** PERSISTED yearly price series for this (hub, good), grain-eq, most recent
+   *  last (`TradeHist.prices`). Empty for a good this hub has never traded. */
+  price_hist?: number[];
+  /** Matching yearly traded volume — same years, same length. */
+  vol_hist?: number[];
 }
 /** One good's world-wide quality + trade picture (the floating Goods window). */
 export interface GoodMarketRow {

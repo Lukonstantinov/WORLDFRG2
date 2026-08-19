@@ -679,3 +679,110 @@ Steps 1–3 cannot regress the simulation. Step 4 is a genuine mechanism change 
 deliberately the smallest one available (completing a mechanism that is already half
 built). Everything with real risk waits until §5 can be answered from evidence rather
 than from reading the code.
+
+---
+
+# Part 3 — the city market view 2.0 (same skeleton, better market)
+
+Amends §11. The maintainer's call: **keep the view on its buy/sell arrivals ⇢
+market ⇢ departures basis as it is now**, rather than replacing it with §11's
+per-good balance table. §11's table is superseded; the price build-up survives as a
+row expansion.
+
+The organising idea: the tab already shows *deals*. Make it show a **merchant's
+book** — what we bought a good for, what we sold it for, the spread, and what we are
+sitting on — which is what a buy/sell view is for and is exactly what is missing.
+
+## The tab
+
+```
+┌─ 🏙 RAVENNA · market ───────────────────────────────────────────── 780px ─┐
+│  year 1341   turnover 4,820 ▲6%   bought 2,610  sold 2,210  net −400      │
+│  ⚠ salt 1.90× and rising — 1 of 3 sources lost                            │
+│  [ Market ] [ Flows ]        sort ▾ unusual   filter ▾ all   ⌕ good…      │
+├──────────────── ⇢ WE BUY ────────┬─ THE BOOK ─┬──── WE SELL ⇢ ────────────┤
+│ ⏳3d ▲Trevisan  Comacchio        │  (below)   │  ⏳2d ▲Ottaviani  Forlì   │
+│      🧂 salt ×110  0.58  −1.32   │            │      🌾 wheat ×240  0.44  │
+│      ⛵ 64 gr-eq                  │            │      🐫 106 gr-eq         │
+│ ⏳6d ▲local     Cervia           │            │  ⏳9d ▲Trevisan   Venezia │
+│      🧂 salt ×70   0.66  −1.24   │            │      🫒 oil  ×180  0.33   │
+│ ── landed ──                     │            │  ── departed ──           │
+│ 12 Mar ▲Bardi   Ancona           │            │  09 Mar ▲local   Rimini   │
+│      🐟 stockfish ×210  0.81     │            │      🌾 wheat ×90   0.45  │
+└──────────────────────────────────┴────────────┴───────────────────────────┘
+```
+
+## The book — the centre column, rebuilt
+
+```
+ GOOD          BOUGHT        SOLD          SPREAD  HELD   LOCAL   40 yr
+ 🧂 salt       180 @ 0.61    —             —        9 d   1.90×  ▁▂▃▅▆▇█  ▲
+ 🌾 wheat      40 @ 0.39     330 @ 0.44   +0.05    38 d   0.42×  ▁▁▂▂▁▁▂
+ 🫒 olive oil  —             180 @ 0.33    —       62 d   0.31×  ▁▁▁▁▁▁▁  glut
+ 🐟 stockfish  210 @ 0.81    60 @ 0.86    +0.05    14 d   0.88×  ▃▃▂▂▃▄▃
+ 🌶 pepper     —             —             —        0 d      —   ·······  absent
+```
+
+Four things that do not exist today:
+
+* **The SPREAD** — mean sell price less mean buy price. It is *the* number in a
+  buy/sell view and it appears nowhere in the app. Both sides are already carried
+  per deal (`RecentTrade.price`); nothing aggregates them.
+* **HELD in days of need**, not units. "38 days of grain" carries meaning; "820
+  units" does not. Free — `stock / need` is computed every tick already.
+* **A trend that survives closing the panel** — Part 2 step 1, now built
+  (`TradeHist.prices`).
+* **Sorted by what is UNUSUAL** (`|price − world_avg| × need_weight`) by default,
+  so the row worth reading is at the top rather than buried in production order.
+
+## A deal row
+
+```
+now:   ● Trevisan   Comacchio   🧂 salt ×110    1.90×   ⛵
+2.0:   ⏳3d  ● Trevisan   ← Comacchio
+             🧂 salt ×110  @ 0.58  ▼ −1.32 vs local     ⛵ 64 gr-eq
+```
+
+Three fixes, one of which is a real defect:
+
+* **ETA.** The most interesting property of an in-flight cargo is when it lands, and
+  it is not shown.
+* **The real deal price.** `read_hubs.rs`'s `mk_row` stamps every IN-FLIGHT row with
+  `hub.price[g]` — *the viewing city's own local price* — rather than the price the
+  deal was struck at. `mk_recent` (completed deals) correctly uses `RecentTrade.price`.
+  So an arrival currently reads as though it were bought at the destination's price.
+  2.0 shows the deal price and its gap to local, which is the buyer's actual position.
+* **Direction and value**, so buy/sell reads without consulting the column header.
+
+## Expanding a book row
+
+This absorbs two sections that currently sit apart and say overlapping things.
+
+```
+🧂 salt — bought 180 @ 0.61 · sold none · held 9 d · local 1.90×
+──────────────────────────────────────────────────────────────────
+  BOUGHT FROM   Comacchio  110 @ 0.58   ● Trevisan        2 d ⛵
+                Cervia      70 @ 0.66   ● local merchants 3 d 🐫
+  SOLD TO       — nothing leaves —
+  PRICE  40 yr  ▁▁▂▂▃▃▄▅▅▆▇█▇▆▇█   0.4 → 1.9×    volume ▂▃▃▂▁▁▁
+  WHY DEAR      of 32 reachable markets, 2 hold surplus; both barred to our houses
+```
+
+The **WHY** line is the one worth fighting for. Every number in it is computed inside
+`dispatch()` on every tick and then discarded. A market view that explains why a
+price gap is *not* being closed is a diagnostic for F1 as much as a screen for the
+player.
+
+## 2.0 REMOVES more than it adds
+
+* the standalone "Prices — local vs world average" grid → its sparklines move into
+  the book rows;
+* the Exports / Imports two-column block → becomes the row expansion;
+* the supply-chain price ladder → same.
+
+Three scattered sections collapse into one book, and the tab gains the spread, ETAs,
+true deal prices, days-held and a persistent trend while getting *shorter*.
+
+**Layout caveat.** The tab is 600px today and three columns are already cramped —
+part of why it reads as dense. 2.0 wants ~780px. Below that, stack: the book on top,
+one merged deal list beneath tagged buy/sell, rather than squeezing three columns.
