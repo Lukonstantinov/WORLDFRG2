@@ -33,8 +33,12 @@ pub fn new_campaign(name: String, db: State<'_, WorldDb>) -> Result<(), String> 
         return Err("Finalize the world before starting a campaign.".into());
     }
     let world_ref = current_world_ref(&conn)?;
-    conn.execute("DELETE FROM campaign", [])
-        .map_err(|e| e.to_string())?;
+    // Clear the RUN only. The world's human layer (settlements + economy) is a
+    // property of the world, not of one playthrough: wiping it here left
+    // `campaign_start_sim` with no economy to seed from, so "New Campaign" →
+    // "Begin Campaign" failed on a finalized world, and re-running step 7 to
+    // recover was blocked from repairing the freeze-gated province layer.
+    clear_campaign_run(&conn)?;
     // Drop the resident sim so a fresh campaign truly starts from scratch — otherwise
     // the running-campaign restart guard in `campaign_start_sim` would see the stale
     // cached sim (tick > 0) and refuse to reseed.
@@ -73,6 +77,8 @@ pub fn save_campaign_as(path: String, db: State<'_, WorldDb>) -> Result<(), Stri
         &serde_json::to_string(&world_ref).map_err(|e| e.to_string())?,
     )
     .map_err(|e| e.to_string())?;
+    // Refresh the header the campaign library lists folders from.
+    write_campaign_summary(&db, &conn, &world_ref)?;
 
     let dest = Connection::open(&path).map_err(|e| e.to_string())?;
     dest.execute_batch(
@@ -90,6 +96,41 @@ pub fn save_campaign_as(path: String, db: State<'_, WorldDb>) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+
+/// Stamp the small `campaign_summary` header (year, hubs, houses, saved-at) into the
+/// campaign table so a `.campaign` file can be listed without parsing its `campaign_sim`
+/// blob. Best-effort: a campaign that has not been seeded yet simply gets zeros.
+pub fn write_campaign_summary(
+    db: &State<'_, WorldDb>,
+    conn: &Connection,
+    world_ref: &WorldRef,
+) -> Result<(), String> {
+    let name = metadata::campaign_get(conn, "name")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "Campaign".to_string());
+    let mut summary = CampaignSummary {
+        name,
+        world_name: world_ref.world_name.clone(),
+        saved_at: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0),
+        ..Default::default()
+    };
+    if let Ok(Some(sim)) = get_sim(db, conn) {
+        summary.year = sim.year();
+        summary.tick = sim.tick;
+        summary.hubs = sim.hubs.len() as u32;
+        summary.houses = sim.houses.iter().filter(|h| !h.defunct).count() as u32;
+    }
+    metadata::campaign_set(
+        conn,
+        "campaign_summary",
+        &serde_json::to_string(&summary).map_err(|e| e.to_string())?,
+    )
+    .map_err(|e| e.to_string())
 }
 
 
@@ -129,9 +170,27 @@ pub fn open_campaign(path: String, db: State<'_, WorldDb>) -> Result<CampaignInf
         _ => false,
     };
 
+    // A campaign file normally carries the human layer it was built on. If this one
+    // doesn't (an older or hand-built file), keep the CURRENT world's — otherwise the
+    // load would leave the world with no settlements/economy and no way back.
+    let mut carried_over: Vec<(String, String)> = Vec::new();
+    for key in WORLD_HUMAN_KEYS {
+        if rows.iter().any(|(k, v)| k == key && !v.is_empty()) {
+            continue;
+        }
+        if let Some(v) = metadata::campaign_get(&conn, key).map_err(|e| e.to_string())? {
+            if !v.is_empty() {
+                carried_over.push((key.to_string(), v));
+            }
+        }
+    }
+
     conn.execute("DELETE FROM campaign", [])
         .map_err(|e| e.to_string())?;
     for (k, v) in &rows {
+        metadata::campaign_set(&conn, k, v).map_err(|e| e.to_string())?;
+    }
+    for (k, v) in &carried_over {
         metadata::campaign_set(&conn, k, v).map_err(|e| e.to_string())?;
     }
     // The resident sim now belongs to the old campaign — drop it so the next read
@@ -148,6 +207,62 @@ pub fn open_campaign(path: String, db: State<'_, WorldDb>) -> Result<CampaignInf
         .find(|(k, _)| k == "campaign_progress")
         .map(|(_, v)| v.clone());
     Ok(CampaignInfo { name, world_match, campaign_progress })
+}
+
+
+/// Whether the currently-open world can start a campaign, and if not, what it is
+/// missing and what a rebuild has to work with.
+#[derive(serde::Serialize)]
+pub struct WorldHumanLayerStatus {
+    pub has_settlements: bool,
+    pub settlement_count: usize,
+    pub has_economy: bool,
+    pub hub_count: usize,
+    /// True when `campaign_start_sim` would succeed right now.
+    pub can_start_campaign: bool,
+    /// The world carries a province layer, so a rebuild that changes settlement ids
+    /// must repair province membership afterwards (`repair_province_settlements`).
+    pub has_provinces: bool,
+    /// The inputs the world's settlements were generated from, when the world
+    /// recorded them. Present ⇒ a rebuild reproduces the SAME towns with the SAME
+    /// ids; absent (a world saved before those were persisted) ⇒ a rebuild must pick
+    /// a new seed and will produce a DIFFERENT set of towns.
+    pub settlements_seed: Option<u64>,
+    pub settlements_realism: Option<f32>,
+    pub settlements_max: Option<u32>,
+}
+
+#[tauri::command]
+pub fn world_human_layer_status(db: State<'_, WorldDb>) -> Result<WorldHumanLayerStatus, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let read = |key: &str| -> Option<String> {
+        metadata::campaign_get_or_meta(&conn, key).ok().flatten().filter(|s| !s.is_empty())
+    };
+
+    let settlement_count = read("settlements")
+        .and_then(|s| serde_json::from_str::<Vec<serde_json::Value>>(&s).ok())
+        .map(|v| v.len())
+        .unwrap_or(0);
+    let hub_count = read("economy")
+        .and_then(|s| serde_json::from_str::<EconomySnapshot>(&s).ok())
+        .map(|e| e.hubs.len())
+        .unwrap_or(0);
+    let meta = |key: &str| -> Option<String> {
+        metadata::get_meta(&conn, key).ok().flatten().filter(|s| !s.is_empty())
+    };
+
+    Ok(WorldHumanLayerStatus {
+        has_settlements: settlement_count > 0,
+        settlement_count,
+        has_economy: hub_count > 0,
+        hub_count,
+        // `campaign_start_sim` needs at least two hubs to have a trade network.
+        can_start_campaign: hub_count >= 2,
+        has_provinces: meta("provinces").is_some(),
+        settlements_seed: meta("settlements_seed").and_then(|s| s.parse().ok()),
+        settlements_realism: meta("settlements_realism").and_then(|s| s.parse().ok()),
+        settlements_max: meta("settlements_max").and_then(|s| s.parse().ok()),
+    })
 }
 
 
@@ -454,6 +569,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 govt_type: 0,
                 officials: Vec::new(),
                 civic_goods: Vec::new(),
+                food_export_lock: 0,
                 laws: Vec::new(),
                 captor_house: -1,
                 // Atlas 2.0 lifecycle: primordial (worldgen) settlements.
@@ -843,6 +959,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_soil: vec![],
         prov_tenure: vec![],
         suppress_realms: false,
+        suppress_relief: false,
         prov_tax: vec![],
         prov_arrears: vec![],
         prov_unrest: vec![],

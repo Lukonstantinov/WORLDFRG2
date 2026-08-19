@@ -11,3 +11,4 @@ pub mod campaign_commands;
 pub mod import_commands;
 pub mod preview_commands;
 pub mod palette_commands;
+pub mod campaign_library;

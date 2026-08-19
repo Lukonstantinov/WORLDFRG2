@@ -785,6 +785,11 @@ impl CampaignSim {
                 quarantined[e.hub as usize] = true;
             }
         }
+        // CRISIS RELIEF · a council that has barred the export of food (the *tratta*
+        // prohibition, `polis.rs::apply_crisis_relief`) ships no food out while the
+        // bar stands. Precomputed once per dispatch for the same reason `quarantined`
+        // is — it is read inside the seller × target × good loop.
+        let food_locked: Vec<bool> = self.hubs.iter().map(|h| h.food_export_lock > tick).collect();
         // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
         // (it's constant across this dispatch round and read in the hot inner loop).
         let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
@@ -854,6 +859,8 @@ impl CampaignSim {
                 }
                 // A city under plague quarantine ships nothing out.
                 if quarantined[a] { continue; }
+                // …nor does a city whose council has barred the export of food.
+                if food_locked[a] && self.goods[g].food { continue; }
                 let pa = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
                 // A Guildhall at the SELLER's hub lowers freight on its exports.
                 let freight_rate = self.freight_per_day
@@ -1191,6 +1198,7 @@ impl CampaignSim {
                         phase: 0,
                         home: if owner >= 0 { a as i32 } else { -1 },
                         contract: false,
+                        price: pa,
                     });
                     self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
@@ -1308,6 +1316,7 @@ impl CampaignSim {
             phase: 1,
             home: -1,
             contract: false,
+            price: pb_buy,
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
     }
@@ -1734,11 +1743,27 @@ impl CampaignSim {
         let mut vol: std::collections::HashMap<(u32, u32), f32> = std::collections::HashMap::new();
         for f in &last { *vol.entry((f.hub, f.good)).or_insert(0.0) += f.amount; }
         // Extend existing series (0 for goods not traded this year → visible decline).
+        // This hub's local price for the good, read fresh at the New Year. A pure
+        // OBSERVATION: `prices` is written here and read nowhere in the tick, so it
+        // cannot move a simulated number (the bit-identical gate on this change).
+        // Disjoint field borrows — `&self.hubs` alongside `&mut self.trade_hist`.
+        let hubs = &self.hubs;
+        let price_at = |hub: u32, good: u32| -> f32 {
+            hubs.get(hub as usize)
+                .and_then(|h| h.price.get(good as usize))
+                .copied()
+                .filter(|p| p.is_finite())
+                .unwrap_or(0.0)
+        };
         let mut seen: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
         for h in self.trade_hist.iter_mut() {
             let v = vol.get(&(h.hub, h.good)).copied().unwrap_or(0.0);
             h.vols.push(v);
             if h.vols.len() > TRADE_HIST_CAP { let d = h.vols.len() - TRADE_HIST_CAP; h.vols.drain(0..d); }
+            // Pushed and drained in lockstep with `vols`, so the two stay
+            // TAIL-aligned even on a save whose `prices` started empty.
+            h.prices.push(price_at(h.hub, h.good));
+            if h.prices.len() > TRADE_HIST_CAP { let d = h.prices.len() - TRADE_HIST_CAP; h.prices.drain(0..d); }
             seen.insert((h.hub, h.good));
         }
         // Brand-new (hub,good) trades start a fresh series. DETERMINISM: pushing in
@@ -1748,7 +1773,12 @@ impl CampaignSim {
         let mut fresh: Vec<((u32, u32), f32)> = vol.iter().map(|(&k, &v)| (k, v)).collect();
         fresh.sort_by_key(|&(k, _)| k);
         for ((hub, good), v) in fresh {
-            if !seen.contains(&(hub, good)) { self.trade_hist.push(TradeHist { hub, good, vols: vec![v] }); }
+            if !seen.contains(&(hub, good)) {
+                let p = self.hubs.get(hub as usize)
+                    .and_then(|h| h.price.get(good as usize))
+                    .copied().filter(|p| p.is_finite()).unwrap_or(0.0);
+                self.trade_hist.push(TradeHist { hub, good, vols: vec![v], prices: vec![p] });
+            }
         }
         // Bound memory: if over the row cap, drop the deadest trades (lowest peak).
         if self.trade_hist.len() > TRADE_HIST_ROWS {

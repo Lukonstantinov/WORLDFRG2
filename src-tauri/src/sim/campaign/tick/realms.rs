@@ -154,6 +154,73 @@ impl CampaignSim {
         // so it can pay for the small city-state its trade entitles it to.
         self.maybe_proclaim_trade_realms(yr);
         self.maybe_proclaim_city_realms(yr);
+        // SAFETY NET + DIAGNOSTIC. If the world is still realm-less past the floor,
+        // crown the single strongest ≥20%-trade house anywhere with the barest set of
+        // filters — so a realm ALWAYS appears once any house dominates a province's
+        // trade, even if some subtle precondition tripped the detailed passes above.
+        // When it genuinely cannot (no dominant house / no seat), it records WHY to the
+        // world chronicle, so a persistent absence is observable instead of silent.
+        self.ensure_a_realm_exists(yr);
+    }
+
+    /// The GUARANTEE (maintainer: "make realms appear ALWAYS"). Runs only when the
+    /// world has NO realm yet and the floor has passed. Scans every free province for
+    /// the strongest merchant house commanding ≥ `PROV_TRADE_CONTROL_FRAC` of its
+    /// trade and crowns it, trying three seats in turn (the province's own city, the
+    /// house's home, then any live city) so seat resolution can never be the thing
+    /// that blocks it. If nothing qualifies, it writes the reason to the journal once
+    /// this year rather than failing silently — the diagnostic that turns "no realms,
+    /// no idea why" into a visible fact in the Chronicle.
+    fn ensure_a_realm_exists(&mut self, yr: u32) {
+        if !self.realms.is_empty() { return; }
+        if yr < REALM_YEAR_FLOOR { return; }
+        // Strongest eligible (province, house, share) across all free provinces.
+        let mut best: Option<(usize, usize, f32)> = None;
+        for p in 0..self.prov_count() {
+            if self.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; }
+            for (hi, share) in self.province_trade_shares(p) {
+                if share < PROV_TRADE_CONTROL_FRAC { continue; }
+                if hi >= self.houses.len() { continue; }
+                if !self.houses[hi].is_merchant() || self.houses[hi].is_guild { continue; }
+                if best.map(|b| share > b.2).unwrap_or(true) { best = Some((p, hi, share)); }
+            }
+        }
+        let tick = self.tick;
+        let Some((p, hi, share)) = best else {
+            // Nothing dominates a province's trade yet — say so, once, in the chronicle.
+            let any20 = (0..self.prov_count()).any(|p| {
+                self.province_trade_shares(p).iter().any(|&(_, s)| s >= PROV_TRADE_CONTROL_FRAC)
+            });
+            self.journal.push(JournalEntry {
+                tick, kind: "realm_founded".into(), hub: -1, good: -1, value: 0.0,
+                text: format!(
+                    "No realm yet (year {}): no MERCHANT house commands ≥20% of any free province's trade \
+                     (provinces={}, some house ≥20% incl. guilds={}). A crown waits on a trade monopoly.",
+                    yr, self.prov_count(), any20),
+            });
+            return;
+        };
+        // Seat: the province's own largest city, else the house's home, else any live city.
+        let seat = self.province_seat_hub(p)
+            .or_else(|| {
+                let h = self.houses[hi].hub as usize;
+                (h < self.hubs.len() && !self.hubs[h].is_estate && !self.hubs[h].abandoned).then_some(h)
+            })
+            .or_else(|| (0..self.hubs.len())
+                .find(|&h| !self.hubs[h].is_estate && !self.hubs[h].abandoned));
+        let Some(seat) = seat else {
+            self.journal.push(JournalEntry {
+                tick, kind: "realm_founded".into(), hub: -1, good: -1, value: 0.0,
+                text: format!("No realm yet (year {}): {} dominates province {} at {:.0}% but no live seat city could be found.",
+                    yr, self.houses[hi].name, p, share * 100.0),
+            });
+            return;
+        };
+        if self.hubs[seat].realm >= 0 { return; } // that seat already belongs to a crown
+        let cost = self.realm_founding_cost_for_house(hi, REALM_TRADE_MIN_WEALTH);
+        self.hubs[seat].tribute_to = -1;
+        if p < self.prov_holder.len() { self.prov_holder[p] = seat as i32; }
+        self.promote_house_to_realm_with_cost(hi, seat, yr, cost, REALM_PATH_MERCHANT);
     }
 
     /// PATH B · a powerful CITY proclaims for itself, with no merchant house
@@ -444,14 +511,20 @@ impl CampaignSim {
                 // is exactly how a tributary throws off its overlord, so we clear the
                 // tribute below rather than let it veto the crown.
                 if self.hubs[seat].realm >= 0 { continue; }
-                // PURE TRADE DOMINANCE, no dice. A private house that commands at least
-                // `PROV_TRADE_CONTROL_FRAC` of the province's trade AND holds at least
-                // `REALM_TRADE_MIN_WEALTH` proclaims a realm — deterministically, the
-                // same year it becomes eligible. The founding costs that flat price; the
-                // house keeps the rest as the new crown's treasury. (Per the maintainer:
-                // "no chances — just pure trade dominance and a price of 50k.")
-                if self.houses[hi].wealth < REALM_TRADE_MIN_WEALTH { continue; }
-                let cost = REALM_TRADE_MIN_WEALTH;
+                // PURE TRADE DOMINANCE, no dice, NO wealth gate. A private house that
+                // commands at least `PROV_TRADE_CONTROL_FRAC` of the province's trade
+                // proclaims a realm — deterministically, the same year it becomes
+                // eligible. Trade share alone is the qualification (maintainer: "leave
+                // only 20% trade required for a realm to appear"). The old flat
+                // `REALM_TRADE_MIN_WEALTH` gate priced out exactly the poor local
+                // monopolist this path selects (the 20% bar picks the house that
+                // dominates ONE province, which on a hard/starving world is usually a
+                // minor one), so on such a world NO trade realm ever formed and the UI's
+                // "eligible" badge — which only checks the share — never came true.
+                // The cost now SCALES to the founder (a third of its own fortune, capped
+                // at the flat price) so it is affordable by construction and never both
+                // blocks the crown and drives the treasury negative.
+                let cost = self.realm_founding_cost_for_house(hi, REALM_TRADE_MIN_WEALTH);
                 // The province breaks away under its dominant merchant: its writ moves to
                 // the crown's seat, which then administers it directly, and the seat sheds
                 // any tributary bond as it claims sovereignty.

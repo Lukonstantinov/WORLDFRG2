@@ -263,6 +263,7 @@ impl CampaignSim {
                 eta_tick: tick + (days.ceil() as u32).max(1),
                 owner: seller as i32, sea, phase: 1, home: -1, // one-way: no return leg
                 contract: true, // its vessel is held by the standing contract reservation
+                price: pt,
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
@@ -551,7 +552,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -629,6 +630,21 @@ impl CampaignSim {
     }
 
 
+    /// Local DEMAND PRESSURE on good `g` at hub `h`: how dear it is relative to its
+    /// intrinsic worth (`price` is in the grain-equivalent numeraire, `base_value` the
+    /// good's intrinsic value), clamped so it re-weights a founder's choice of good
+    /// without dominating it. A value above 1 means the city is UNDER-SUPPLIED and a
+    /// new producer would be profitable — this is the signal that turns unmet demand
+    /// into new estates and manufactories (a wine-capable city short of wine plants a
+    /// vineyard, and so on for every good). Returns a flat 1.0 (no effect) on a
+    /// province-less world, so the province-less dynamics gate stays bit-identical.
+    pub(crate) fn demand_pressure_at(&self, h: usize, g: usize) -> f32 {
+        if self.prov_cap.is_empty() { return 1.0; }
+        let base = self.goods[g].base_value.max(1e-3);
+        let price = self.hubs[h].price.get(g).copied().unwrap_or(base);
+        (price / base).clamp(0.6, 3.0)
+    }
+
     pub(crate) fn maybe_found_estate(&mut self) {
         // Reserve `OUTPOST_RESERVED_ESTATES` slots off the shared budget so ordinary
         // estates (founded far more often than an outpost) cannot starve the outpost
@@ -654,12 +670,19 @@ impl CampaignSim {
             if score > best_score { best_score = score; best = Some(h); }
         }
         let Some(parent) = best else { return };
-        // The estate works the parent's strongest export (highest per-capita output);
-        // its kind follows that good (farm / mine / plantation / vineyard / fishery).
+        // Which good the estate works, and so its kind (farm / mine / plantation /
+        // vineyard / fishery). Among goods the LAND here can actually yield
+        // (`base_per_capita > 0`), prefer the one under the most local DEMAND PRESSURE
+        // — dear relative to its base value, i.e. under-supplied — rather than merely
+        // the largest existing output. That is what makes unmet demand for a good like
+        // wine URGE a city sitting on wine-capable land to plant a vineyard instead of
+        // endlessly reinforcing what it already exports.
         let mut bestg = (usize::MAX, 0.0f32);
         for g in 0..ng {
             let pc = self.hubs[parent].base_per_capita.get(g).copied().unwrap_or(0.0);
-            if pc > bestg.1 { bestg = (g, pc); }
+            if pc <= 0.0 { continue; }
+            let score = pc * self.demand_pressure_at(parent, g);
+            if score > bestg.1 { bestg = (g, score); }
         }
         let Some(mut g0) = (bestg.0 != usize::MAX).then_some(bestg.0) else { return };
         let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
@@ -777,9 +800,12 @@ impl CampaignSim {
             // get both raw output and value-added luxuries.
             let house_lux = self.houses[hi].spec.iter().cloned()
                 .find(|&g| g < ng && !self.goods[g].food && self.goods[g].base_value >= 4.0);
+            // Bias the luxury choice by local demand too, so a house re-tools toward
+            // the scarce, dear luxury the city is short of rather than only its biggest.
             let city_lux = (0..ng)
                 .filter(|&g| !self.goods[g].food && self.goods[g].base_value >= 4.0)
-                .map(|g| (g, self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0)))
+                .map(|g| (g, self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0)
+                    * self.demand_pressure_at(target, g)))
                 .filter(|(_, pc)| *pc > 0.0)
                 .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|(g, _)| g);
@@ -789,10 +815,16 @@ impl CampaignSim {
             let (g0, kind, percap) = if want_manu && manu_good.is_some() {
                 (manu_good.unwrap(), 6u8, MANUFACTORY_PERCAP)
             } else {
+                // Among goods the target's land can yield, the one under the most local
+                // demand pressure (under-supplied → profitable to add), not just its
+                // biggest current output — the same demand-driven bias as
+                // `maybe_found_estate`, so a house's raw investment follows real scarcity.
                 let mut bg = (usize::MAX, 0.0f32);
                 for g in 0..ng {
                     let pc = self.hubs[target].base_per_capita.get(g).copied().unwrap_or(0.0);
-                    if pc > bg.1 { bg = (g, pc); }
+                    if pc <= 0.0 { continue; }
+                    let score = pc * self.demand_pressure_at(target, g);
+                    if score > bg.1 { bg = (g, score); }
                 }
                 if bg.0 == usize::MAX { continue; }
                 let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food);

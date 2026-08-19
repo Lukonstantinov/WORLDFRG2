@@ -286,6 +286,65 @@ pub fn compute_economy(
         }
     }
 
+    // ── COVERAGE BACKSTOP · every good that EXISTS in the world reaches a producer ──
+    // A seeded good gets ONE small homeland belt; if that homeland fell outside every
+    // settlement's catchment (the 50–120 km radii above) it was credited to no hub, so
+    // the good read "0 src" and could never be produced or traded for the entire
+    // campaign (wine was the reported case, and every other seeded good is exposed to
+    // the same accident of geography). For each good with ZERO catchment production,
+    // find its single strongest belt cell anywhere in the world and credit it to the
+    // NEAREST hub — the good enters the economy through whichever town is closest to
+    // its homeland, scarce but ALIVE. A good with no belt cell anywhere (no suitable
+    // climate on this world, or a manufactured good with no belt) is left absent —
+    // that is the honest reading, not a bug, and manufactured goods are made live in
+    // the tick regardless.
+    {
+        let uncovered: Vec<usize> = (0..gc)
+            .filter(|&g| prod.iter().all(|p| p[g] <= 0.0))
+            .collect();
+        if !uncovered.is_empty() && nn > 0 {
+            let mut best = vec![(0.0f32, 0u32, 0u32); uncovered.len()]; // (belt value, wx, wy)
+            let ntx = ((grid_w + TILE_SIZE - 1) / TILE_SIZE) as i32;
+            let nty = ((grid_h + TILE_SIZE - 1) / TILE_SIZE) as i32;
+            for ty in 0..nty {
+                for tx in 0..ntx {
+                    let tile = world.tile(tx, ty);
+                    for ly in 0..TILE_SIZE {
+                        let wy = ty as u32 * TILE_SIZE + ly;
+                        if wy >= grid_h { break; }
+                        for lx in 0..TILE_SIZE {
+                            let wx = tx as u32 * TILE_SIZE + lx;
+                            if wx >= grid_w { break; }
+                            let ti = (ly * TILE_SIZE + lx) as usize;
+                            for (k, &g) in uncovered.iter().enumerate() {
+                                if g >= tile.goods.len() { continue; }
+                                let v = tile.goods[g][ti] as f32;
+                                if v > best[k].0 { best[k] = (v, wx, wy); }
+                            }
+                        }
+                    }
+                }
+            }
+            for (k, &g) in uncovered.iter().enumerate() {
+                let (v, wx, wy) = best[k];
+                if v <= 0.0 { continue; } // genuinely absent on this world — do not invent it
+                // Nearest live hub to the homeland cell (X wraps, Y clamps).
+                let mut nh = 0usize;
+                let mut nd = i64::MAX;
+                for hh in 0..nn {
+                    let raw = (nodes[hh].x as i64 - wx as i64).rem_euclid(grid_w as i64);
+                    let dx = raw.min(grid_w as i64 - raw);
+                    let dy = nodes[hh].y as i64 - wy as i64;
+                    let d2 = dx * dx + dy * dy;
+                    if d2 < nd { nd = d2; nh = hh; }
+                }
+                // Enough to clear the `> 0.05` emit gate below and read as a real, if
+                // scarce, source (belt value is 0..1 after the /255).
+                prod[nh][g] += (v / 255.0).max(0.12);
+            }
+        }
+    }
+
     // Absolute scarcity (#18) + deposit floor (#19): rescale by global abundance.
     let raw_total: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).sum::<f32>()).collect();
     let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);

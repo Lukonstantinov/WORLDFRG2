@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
@@ -16,19 +16,11 @@ import type { HouseBrief } from "@types";
 import { SettlementScene } from "@ui/campaign/SettlementScene";
 import { CityView, BUILDING_INFO } from "@ui/campaign/CityView";
 import { FlowsView } from "@ui/campaign/FlowsView";
+import { CityMarketView } from "@ui/campaign/CityMarketView";
 import { CultureDonut } from "@ui/campaign/CultureDonut";
 import { CityWarehousePanel } from "@ui/campaign/CityWarehousePanel";
 import { WorksCard } from "@ui/campaign/WorksCard";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
-
-/** DLC 4 · grade colour ramp (Coarse→Exquisite) for the quality labels. */
-function gradeColor(q: number): string {
-  if (q >= 0.85) return "#78c8e6";
-  if (q >= 0.68) return "#6eb496";
-  if (q >= 0.5) return "#96aa78";
-  if (q >= 0.32) return "#aa966e";
-  return "#96786e";
-}
 
 /** Icons/colours for the settlement chronicle's event kinds (year-grouped view). */
 const HUB_EVENT_ICON: Record<string, string> = {
@@ -189,10 +181,7 @@ export function HubPanel() {
   const selectedHub = useUIStore((s) => s.selectedHub);
   const setSelectedHub = useUIStore((s) => s.setSelectedHub);
   const setShowColonial = useUIStore((s) => s.setShowColonial);
-  const selectedChain = useUIStore((s) => s.selectedChain);
   const setSelectedChain = useUIStore((s) => s.setSelectedChain);
-  const selectedExport = useUIStore((s) => s.selectedExport);
-  const setSelectedExport = useUIStore((s) => s.setSelectedExport);
   const economy = useWorldStore((s) => s.economy);
   const goodMeta = useGoodsStore((s) => s.meta);
   const campActive = useCampaignStore((s) => s.snapshot?.active ?? false);
@@ -254,20 +243,9 @@ export function HubPanel() {
     return () => { alive = false; };
   }, [selectedHub, campActive, campTick]);
 
-  // Accumulate per-good local price (and the world average) over ticks for the
-  // Market price graphs — reset whenever a different city is opened.
-  const priceHist = useRef<{ hub: number | null; data: Record<string, { local: number[]; world: number[] }> }>({ hub: null, data: {} });
-  useEffect(() => {
-    if (!detail) return;
-    const ph = priceHist.current;
-    if (ph.hub !== detail.id) { ph.hub = detail.id; ph.data = {}; }
-    for (const g of detail.goods) {
-      const xw = g.price / Math.max(1e-6, g.base_value);
-      const e = ph.data[g.name] ?? (ph.data[g.name] = { local: [], world: [] });
-      e.local.push(xw); e.world.push(g.world_avg ?? 1);
-      if (e.local.length > 80) { e.local.shift(); e.world.shift(); }
-    }
-  }, [detail]);
+  // (The old client-side price accumulator lived here: a useRef that reset on every
+  //  hub switch and only filled while the panel was open. Superseded by the PERSISTED
+  //  per-(hub, good) series — `HubGoodDetail.price_hist` — which CityMarketView draws.)
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.settlement);
   if (selectedHub === null || !economy || isConstruction) return null;
@@ -292,8 +270,6 @@ export function HubPanel() {
 
   const iconFor = (id: string) => goodMeta(id).icon;
   const labelFor = (id: string) => goodMeta(id).name;
-  const hubName = (id: number) => economy.hubs.find((h) => h.id === id)?.name ?? `Hub ${id}`;
-  const chain = selectedChain !== null ? economy.chains.find((c) => c.id === selectedChain) ?? null : null;
   const fmt = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0);
   const stars = Math.max(1, Math.min(5, hub.stars));
 
@@ -738,220 +714,24 @@ export function HubPanel() {
           {tradeView === "flows" && (
             <FlowsView hubId={hub.id} active={campActive} tick={campTick} setFlowHighlight={setFlowHighlight} />
           )}
-          {tradeView === "market" && (<>
-          {/* Live market FLOW: arrivals ⇢ market ⇢ departures (campaign only) */}
-          {detail ? (
-            <>
-              <div style={{ display: "flex", gap: 6 }}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={sectionHdr}>⇢ Arrivals</div>
-                  {(detail.arrivals ?? []).length === 0 && (detail.recent_arrivals ?? []).length === 0 && <div style={emptyTxt}>none inbound</div>}
-                  {(detail.arrivals ?? []).slice(0, 14).map((s, i) => (
-                    <ShipRow key={"a" + i} s={s} side="in" icon={iconFor} label={labelFor} />
-                  ))}
-                  {(detail.recent_arrivals ?? []).length > 0 && (
-                    <div style={{ color: "#56708e", fontSize: 8, margin: "3px 0 1px", borderTop: "1px solid #131f2c", paddingTop: 2 }}>recent</div>
-                  )}
-                  {(detail.recent_arrivals ?? []).slice(0, 10).map((s, i) => (
-                    <ShipRow key={"ra" + i} s={s} side="in" icon={iconFor} label={labelFor} faded />
-                  ))}
-                </div>
-                <div style={{ flex: 1.25, minWidth: 0, borderLeft: "1px solid #1e2e42", borderRight: "1px solid #1e2e42", padding: "0 6px" }}>
-                  <div style={{ textAlign: "center", color: "#e8d8b0", fontSize: 11, fontWeight: 700 }}>Market</div>
-                  <div style={{ textAlign: "center", color: "#9ab0c8", fontSize: 9, marginBottom: 3 }}>
-                    💰 bought {fmt(detail.bought ?? 0)} · sold {fmt(detail.sold ?? 0)}
-                  </div>
-                  {(() => {
-                    // Per-good import / export amounts reaching THIS market, summed
-                    // from the in-flight + recent shipments (whoever carried them).
-                    const sumBy = (rows?: typeof detail.arrivals) => {
-                      const m: Record<string, number> = {};
-                      for (const s of rows ?? []) m[s.good] = (m[s.good] ?? 0) + s.amount;
-                      return m;
-                    };
-                    const imp = sumBy([...(detail.arrivals ?? []), ...(detail.recent_arrivals ?? [])]);
-                    const exp = sumBy([...(detail.departures ?? []), ...(detail.recent_departures ?? [])]);
-                    const traded = new Set([...Object.keys(imp), ...Object.keys(exp)]);
-                    const rows = [...detail.goods]
-                      .filter((g) => g.production > 0.01 || g.stock > 0.01 || traded.has(g.name))
-                      .sort((a, b) => (b.production + (imp[b.name] ?? 0)) - (a.production + (imp[a.name] ?? 0)))
-                      .slice(0, 16);
-                    return (<>
-                      <div style={{ display: "flex", gap: 3, fontSize: 8, color: "#56708e" }}>
-                        <span style={{ flex: 1 }}>good</span>
-                        <span style={{ minWidth: 30, textAlign: "right" }}>made</span>
-                        <span style={{ minWidth: 26, textAlign: "right", color: "#7fd0a0" }}>in</span>
-                        <span style={{ minWidth: 26, textAlign: "right", color: "#e0a080" }}>out</span>
-                        <span style={{ minWidth: 26, textAlign: "right" }}>×</span>
-                      </div>
-                      {rows.map((g) => {
-                        const xw = g.price / Math.max(1e-6, g.base_value);
-                        const gi = imp[g.name] ?? 0, go = exp[g.name] ?? 0;
-                        return (
-                          <div key={g.good} style={{ display: "flex", gap: 3, fontSize: 9, alignItems: "baseline" }}>
-                            <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#c0d0e0" }}>
-                              {iconFor(g.name)} {labelFor(g.name)}
-                              {g.production > 0.01 && g.grade ? <span title={`Quality: ${g.grade}`} style={{ color: gradeColor(g.quality ?? 0), marginLeft: 3 }}>· {g.grade}</span> : null}
-                            </span>
-                            <span style={{ minWidth: 30, textAlign: "right", color: "#9ab0c8" }}>{g.production > 0.01 ? fmt(g.production) : "—"}</span>
-                            <span style={{ minWidth: 26, textAlign: "right", color: "#7fd0a0" }}>{gi > 0.01 ? fmt(gi) : "·"}</span>
-                            <span style={{ minWidth: 26, textAlign: "right", color: "#e0a080" }}>{go > 0.01 ? fmt(go) : "·"}</span>
-                            <span style={{ minWidth: 26, textAlign: "right", fontWeight: 600, color: xw > 1.3 ? "#e08080" : xw < 0.77 ? "#7fd0a0" : "#c0d0e0" }}>{xw.toFixed(1)}×</span>
-                          </div>
-                        );
-                      })}
-                    </>);
-                  })()}
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ ...sectionHdr, textAlign: "right" }}>Departures ⇢</div>
-                  {(detail.departures ?? []).length === 0 && (detail.recent_departures ?? []).length === 0 && <div style={emptyTxt}>none outbound</div>}
-                  {(detail.departures ?? []).slice(0, 14).map((s, i) => (
-                    <ShipRow key={"d" + i} s={s} side="out" icon={iconFor} label={labelFor} />
-                  ))}
-                  {(detail.recent_departures ?? []).length > 0 && (
-                    <div style={{ color: "#56708e", fontSize: 8, margin: "3px 0 1px", borderTop: "1px solid #131f2c", paddingTop: 2, textAlign: "right" }}>recent</div>
-                  )}
-                  {(detail.recent_departures ?? []).slice(0, 10).map((s, i) => (
-                    <ShipRow key={"rd" + i} s={s} side="out" icon={iconFor} label={labelFor} faded />
-                  ))}
-                </div>
-              </div>
-              {/* DLC 3.5 · Transit — the carrying trade: this city's merchants hauling
-                  goods between OTHER cities (the entrepôt handling-trade). */}
-              <div style={{ ...sectionHdr, marginTop: 8 }}>
-                Transit — carrying trade <span style={{ color: "#56708e", fontWeight: 400 }}>(our merchants moving goods between other cities)</span>
-              </div>
-              {(detail.transit ?? []).length === 0 && <div style={emptyTxt}>no goods passing through our hands right now</div>}
-              {(detail.transit ?? []).map((t, i) => (
-                <div key={"t" + i} style={{ borderBottom: "1px solid #131f2c", padding: "2px 0" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9.5 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: 2, background: t.color, flex: "0 0 auto" }} />
-                    <span style={{ color: "#cbd8e6", fontWeight: 600 }}>{t.merchant}{t.is_guild ? " (guild)" : ""}</span>
-                    <span style={{ color: "#cdbb88" }}>{iconFor(t.good)} {labelFor(t.good)} ×{fmt(t.amount)}</span>
-                    <span style={{ flex: 1 }} />
-                    <span style={{ fontSize: 10 }}>{t.sea ? "🚢" : "🐫"}</span>
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#8aa8c8" }}>
-                    <span style={{ color: "#9ab0c8" }}>{t.from_name}</span>
-                    <span style={{ flex: 1, height: 1, background: "#24364e" }} />
-                    <span>▶</span>
-                    <span style={{ color: "#cfe0f4" }}>{t.to_name}</span>
-                  </div>
-                  <div style={{ fontSize: 9, color: "#7a90a8" }}>
-                    {t.coin
-                      ? <>deal {fmt(t.value)} <span style={{ color: "#d8c878" }}>{t.coin}</span></>
-                      : <>barter <span style={{ color: "#9ab0c8" }}>{t.barter}</span></>}
-                  </div>
-                </div>
-              ))}
-
-              <div style={{ ...sectionHdr, marginTop: 8 }}>Prices — local vs world average (live)</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 10px" }}>
-                {[...detail.goods].filter((g) => g.production > 0.01 || g.stock > 0.01)
-                  .sort((a, b) => b.production - a.production).slice(0, 6).map((g) => {
-                  const e = priceHist.current.data[g.name];
-                  return (
-                    <div key={g.good}>
-                      <div style={{ fontSize: 9, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                        {iconFor(g.name)} {labelFor(g.name)}
-                        <span style={{ color: "#e0c060" }}> {(g.price / Math.max(1e-6, g.base_value)).toFixed(2)}×</span>
-                        <span style={{ color: "#8aa0c0" }}> · w {(g.world_avg ?? 1).toFixed(2)}×</span>
-                      </div>
-                      {e && e.local.length > 1 ? <DualSpark local={e.local} world={e.world} /> : <div style={{ fontSize: 8, color: "#56708e" }}>gathering…</div>}
-                    </div>
-                  );
-                })}
-              </div>
-              <div style={{ fontSize: 8, color: "#56708e", marginTop: 2 }}>
-                <span style={{ color: "#e0c060" }}>━ local price</span> · <span style={{ color: "#8aa0c0" }}>┈ world average</span>
-              </div>
-            </>
-          ) : hub.market ? (
-            hub.market.prices.slice(0, 16).map((p) => (
-              <div key={p.good} style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "1px 0" }}>
-                <span style={{ minWidth: 110, color: "#9ab0c8", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                  {iconFor(p.good_name)} {labelFor(p.good_name)}
-                </span>
-                <span style={{ minWidth: 44, textAlign: "right", fontWeight: 600,
-                  color: p.price > p.base_value * 1.3 ? "#e08080" : p.price < p.base_value * 0.77 ? "#7fd0a0" : "#c0d0e0" }}>
-                  {(p.price / Math.max(1e-6, p.base_value)).toFixed(2)}×
-                </span>
-              </div>
-            ))
-          ) : <div style={emptyTxt}>no market here</div>}
-
-          {/* Exports / Imports two-column */}
-          <div style={{ display: "flex", gap: 8, marginTop: 6 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={sectionHdr}>→ Exports ({hub.produces.length})</div>
-              {hub.produces.length === 0 && <div style={emptyTxt}>nothing of note</div>}
-              {hub.produces.slice(0, 14).map((p) => {
-                const dests = (hub.exports_to ?? []).filter((e) => e.good_name === p.good_name);
-                const active = selectedExport === p.good_name;
-                return (
-                  <div key={`p${p.good}`}>
-                    <div onClick={() => setSelectedExport(active ? null : p.good_name)}
-                      style={{ ...row, cursor: dests.length ? "pointer" : "default", background: active ? "#1a2c40" : "transparent", borderRadius: 3 }}>
-                      <span style={{ minWidth: 14 }}>{iconFor(p.good_name)}</span>
-                      <span style={{ flex: 1, color: active ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {labelFor(p.good_name)}
-                      </span>
-                      <span style={{ color: "#9ab0c8", fontSize: 9 }}>{p.grade}</span>
-                      <span style={{ color: "#e0c060", fontSize: 10, minWidth: 30, textAlign: "right" }}>{p.price.toFixed(1)}×</span>
-                    </div>
-                    {active && (
-                      <div style={{ padding: "1px 4px 3px 16px" }}>
-                        {dests.length === 0 && <div style={emptyTxt}>consumed locally — not shipped</div>}
-                        {dests.slice(0, 8).map((e) => (
-                          <div key={e.chain} style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#9ab0c8" }}>
-                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>→ {hubName(e.to_hub)}</span>
-                            <span style={{ color: "#7fd0a0" }}>{Math.round(e.pct)}%</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={sectionHdr}>← Imports ({hub.receives.length})</div>
-              {hub.receives.length === 0 && <div style={emptyTxt}>self-sufficient</div>}
-              {hub.receives.slice(0, 16).map((r) => {
-                const active = selectedChain === r.chain;
-                return (
-                  <div key={`r${r.chain}-${r.good}`} onClick={() => setSelectedChain(active ? null : r.chain)}
-                    style={{ ...row, cursor: "pointer", background: active ? "#1a2c40" : "transparent", borderRadius: 3 }}>
-                    <span style={{ minWidth: 14 }}>{iconFor(r.good_name)}</span>
-                    <span style={{ flex: 1, color: active ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {labelFor(r.good_name)}
-                    </span>
-                    <span style={{ color: "#7a90a8", fontSize: 8 }}>{hubName(r.from_hub).slice(0, 6)}</span>
-                    <span style={{ color: "#ff9a6a", fontSize: 10, minWidth: 30, textAlign: "right" }}>{r.price.toFixed(1)}×</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-          {chain && (
-            <div style={{ marginTop: 6, padding: "6px 8px", background: "#0b1622", borderRadius: 5, border: "1px solid #1e3550" }}>
-              <div style={{ color: "#9ab0c8", fontSize: 10, marginBottom: 4 }}>
-                {iconFor(chain.good_name)} {labelFor(chain.good_name)} — price along the road
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, fontSize: 11 }}>
-                {chain.stops.map((s, i) => (
-                  <span key={i} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    {i > 0 && <span style={{ color: "#5a7090" }}>→</span>}
-                    <span style={{ color: i === 0 ? "#80dc8c" : i === chain.stops.length - 1 ? "#ff9a6a" : "#e0c060" }}>
-                      {hubName(s.hub)} <b>{s.price.toFixed(1)}×</b>
-                    </span>
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          </>)}
+          {/* ── THE MARKET · buy/sell book (CityMarketView, docs/TRADE_AND_MARKET_
+                 REVIEW.md Part 3). This replaces three sections that used to sit
+                 apart and say overlapping things — the arrivals/market/departures
+                 columns, the standalone "Prices vs world average" grid, and the
+                 Exports/Imports pair with its price-along-the-road ladder. The
+                 book carries all three, plus the SPREAD and a price history that
+                 survives closing the panel. Shared with the Markets window. ── */}
+          {tradeView === "market" && (detail
+            ? <CityMarketView
+                detail={detail}
+                onFocusGood={(g) => {
+                  // Opening a good's book traces its supply road on the map, which
+                  // is what clicking the old Imports row used to do.
+                  const c = g ? hub.receives.find((r) => r.good_name === g)?.chain : undefined;
+                  setSelectedChain(c ?? null);
+                }}
+              />
+            : <div style={emptyTxt}>no market here</div>)}
         </>
       )}
 
@@ -1956,54 +1736,7 @@ function officialMeta(status: string): { icon: string; label: string; bar: strin
   }
 }
 
-/** One shipment row in the Market flow (arrivals / departures), tagged with its
- *  owner (house/guild/local), origin or destination, carrier, good, amount and
- *  price — ranked by value upstream. A round-trip return leg is marked ↩. */
-function ShipRow({ s, side, icon, label, faded }: {
-  s: import("@types").ShipmentRow; side: "in" | "out";
-  icon: (id: string) => string; label: (id: string) => string; faded?: boolean;
-}) {
-  const carrier = s.sea ? "🚢" : "🐫";
-  const arrow = <span style={{ color: "#5a7090" }}>─▶</span>;
-  return (
-    <div style={{ fontSize: 8.5, marginBottom: 2, lineHeight: 1.25, opacity: faded ? 0.6 : 1 }}
-      title={`${s.owner}${s.is_guild ? " (guild)" : ""} · ${s.other} · ${label(s.good)} ${fmtN(s.amount)} · value ${fmtN(s.value)}`}>
-      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-        {side === "out" && arrow}
-        <span style={{ width: 7, height: 7, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
-        <span style={{ flex: 1, color: s.is_guild ? "#9ab0c8" : "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-          {s.returning_home ? "↩ " : ""}{s.owner}
-        </span>
-        {side === "in" && arrow}
-      </div>
-      <div style={{ display: "flex", gap: 3, color: "#9ab0c8" }}>
-        <span>{carrier}</span>
-        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: 52 }}>{s.other}</span>
-        <span style={{ flex: 1, textAlign: "right", color: "#c0d0e0" }}>{icon(s.good)} {fmtN(s.amount)}</span>
-        <span style={{ color: "#e0c060" }}>{s.price.toFixed(1)}×</span>
-      </div>
-    </div>
-  );
-}
 
-/** Two-line price spark: local price (solid gold) vs the world average (dashed
- *  slate), sharing a y-scale, with the 1.0× world-standard line dotted. */
-function DualSpark({ local, world }: { local: number[]; world: number[] }) {
-  const all = [...local, ...world, 1];
-  const lo = Math.min(...all), hi = Math.max(...all);
-  const span = Math.max(1e-6, hi - lo);
-  const W = 220, H = 30;
-  const path = (arr: number[]) => arr.map((v, i) =>
-    `${((i / Math.max(1, arr.length - 1)) * W).toFixed(1)},${(H - ((v - lo) / span) * (H - 4) - 2).toFixed(1)}`).join(" ");
-  const oneY = H - ((1 - lo) / span) * (H - 4) - 2;
-  return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
-      <line x1={0} y1={oneY} x2={W} y2={oneY} stroke="#2a3a50" strokeWidth={0.5} strokeDasharray="2 2" />
-      <polyline points={path(world)} fill="none" stroke="#8aa0c0" strokeWidth={1} strokeDasharray="3 2" />
-      <polyline points={path(local)} fill="none" stroke="#e0c060" strokeWidth={1.4} />
-    </svg>
-  );
-}
 
 const BASKET_PALETTE = ["#f0d77a", "#c9a227", "#6fae8a", "#5f97c0", "#52708e"];
 

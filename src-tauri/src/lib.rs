@@ -7,7 +7,7 @@ pub mod commands;
 pub mod sim;
 pub mod import;
 
-use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, goods_import, campaign_commands, import_commands, preview_commands, palette_commands};
+use commands::{world_commands, tile_commands, paint_commands, query_commands, template_commands, sim_commands, file_commands, goods_commands, goods_import, campaign_commands, import_commands, preview_commands, palette_commands, campaign_library};
 use db::WorldDb;
 use tauri::Manager;
 
@@ -105,6 +105,7 @@ pub fn run() {
             sim_commands::get_toponyms,
             sim_commands::sim_generate_provinces,
             sim_commands::sim_merge_small_provinces,
+            sim_commands::repair_province_settlements,
             sim_commands::sim_split_large_provinces,
             sim_commands::get_provinces,
             sim_commands::get_province_layer,
@@ -136,6 +137,13 @@ pub fn run() {
             campaign_commands::new_campaign,
             campaign_commands::save_campaign_as,
             campaign_commands::open_campaign,
+            campaign_commands::world_human_layer_status,
+            campaign_library::campaign_library_dir,
+            campaign_library::set_campaign_library_dir,
+            campaign_library::reveal_campaign_library,
+            campaign_library::list_campaigns,
+            campaign_library::save_campaign_to_library,
+            campaign_library::delete_campaign_file,
             campaign_commands::set_progress,
             campaign_commands::set_appearance,
             campaign_commands::get_appearance,
@@ -155,6 +163,7 @@ pub fn run() {
             campaign_commands::campaign_get_culture_history,
             campaign_commands::campaign_culture_hubs,
             campaign_commands::campaign_get_hub,
+            campaign_commands::campaign_market_cities,
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_satellite,
             campaign_commands::campaign_get_migration_routes,

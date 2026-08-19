@@ -28,6 +28,31 @@ pub fn campaign_get_journal(
 /// Full live detail for one settlement (sentiment, market, history) for the
 /// redesigned settlement window. Returns None-equivalent error string handling
 /// via an empty Option when no sim / hub.
+/// The live city list the MARKETS window's picker searches — id, name, population
+/// and position for every non-estate, non-abandoned hub.
+///
+/// Deliberately NOT served from the worldgen `economy` snapshot the rest of the UI
+/// picks cities from: that snapshot is frozen at finalize, so towns founded DURING
+/// the campaign (swarm towns, finished satellites, independent ex-colonies) are
+/// absent from it and would simply be unreachable in the picker.
+#[tauri::command]
+pub fn campaign_market_cities(db: State<'_, WorldDb>) -> Result<Vec<MarketCity>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => return Ok(vec![]),
+    };
+    let mut out: Vec<MarketCity> = sim.hubs.iter().enumerate()
+        .filter(|(_, h)| !h.is_estate && !h.abandoned && h.population >= 1.0)
+        .map(|(i, h)| MarketCity {
+            id: i as u32, name: h.name.clone(), population: h.population, x: h.x, y: h.y,
+        })
+        .collect();
+    out.sort_by(|a, b| b.population.partial_cmp(&a.population).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+
 #[tauri::command]
 pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDetail>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -41,6 +66,16 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     };
     let hub = &sim.hubs[hi];
     let ng = sim.goods.len();
+    // The persisted per-(hub, good) price/volume series for THIS hub, indexed by
+    // good. `trade_hist` is a sparse row list (only pairs that actually traded),
+    // so this is one linear pass rather than a scan per good.
+    let mut price_hist: Vec<&[f32]> = vec![&[]; ng];
+    let mut vol_hist: Vec<&[f32]> = vec![&[]; ng];
+    for th in &sim.trade_hist {
+        if th.hub as usize != hi { continue; }
+        let g = th.good as usize;
+        if g < ng { price_hist[g] = &th.prices; vol_hist[g] = &th.vols; }
+    }
     // Per-good world cheapest/dearest (×-world price) across hubs.
     let goods: Vec<HubGoodDetail> = (0..ng)
         .map(|g| {
@@ -79,6 +114,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 grade: if hub.production[g] > 0.0 {
                     crate::sim::tick::quality_grade(hub.quality.get(g).copied().unwrap_or(0.0)).to_string()
                 } else { String::new() },
+                price_hist: price_hist[g].to_vec(),
+                vol_hist: vol_hist[g].to_vec(),
             }
         })
         .collect();
@@ -99,6 +136,12 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             other: cname(other), good: sim.goods[g].name.clone(), amount: s.amount,
             price: hub.price[g] / base, value: s.amount * hub.price[g], sea: s.sea,
             returning_home: s.phase == 1,
+            // The price the cargo actually left at — 0 on a pre-existing save whose
+            // in-flight legs predate the field, which the view renders as "—" rather
+            // than as a free good.
+            deal_price: if s.price > 0.0 { s.price / base } else { 0.0 },
+            eta_days: s.eta_tick.saturating_sub(sim.tick),
+            age_days: 0,
         }
     };
     let mut arrivals: Vec<ShipmentRow> = Vec::new();
@@ -119,7 +162,10 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         ShipmentRow {
             owner: owner_name(r.owner), color: owner_color(r.owner), is_guild: owner_is_guild(r.owner),
             other: cname(other), good: sim.goods[g].name.clone(), amount: r.amount,
-            price: r.price / base, value: r.amount * r.price, sea: r.sea, returning_home: false,
+            price: hub.price[g] / base, value: r.amount * r.price, sea: r.sea, returning_home: false,
+            deal_price: r.price / base,
+            eta_days: 0,
+            age_days: sim.tick.saturating_sub(r.tick),
         }
     };
     let mut recent_arrivals: Vec<ShipmentRow> = Vec::new();

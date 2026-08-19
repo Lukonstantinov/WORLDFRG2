@@ -281,6 +281,11 @@ export interface HubGoodDetail {
   world_avg?: number; // mean ×-world price across all settlements right now
   quality?: number;   // this hub's production quality 0..1 for the good
   grade?: string;     // grade label if the hub produces it ("Fine", "Exquisite", …)
+  /** PERSISTED yearly price series for this (hub, good), grain-eq, most recent
+   *  last (`TradeHist.prices`). Empty for a good this hub has never traded. */
+  price_hist?: number[];
+  /** Matching yearly traded volume — same years, same length. */
+  vol_hist?: number[];
 }
 /** One good's world-wide quality + trade picture (the floating Goods window). */
 export interface GoodMarketRow {
@@ -314,6 +319,13 @@ export interface ShipmentRow {
   value: number;          // amount × local price (ranking key)
   sea: boolean;
   returning_home: boolean;
+  /** The price the DEAL was struck at (×-world), as distinct from `price`, which
+   *  is the viewing city's own local quote. 0 = unknown (a pre-existing save). */
+  deal_price?: number;
+  /** Days until an in-flight cargo lands (0 for a completed deal). */
+  eta_days?: number;
+  /** Days since a completed deal was struck (0 for in-flight). */
+  age_days?: number;
 }
 /** Full live per-settlement detail (sentiment + market + history). */
 export interface CoinShare {
@@ -1025,6 +1037,15 @@ export interface WorldGoodPrice {
   top_hub: string;
 }
 /** #30 · one city's live cost-of-living basket index (campaign_city_price_index). */
+/** One live city in the Markets window's picker (campaign_market_cities). */
+export interface MarketCity {
+  /** Hub INDEX — the same id campaignGetHub takes. */
+  id: number;
+  name: string;
+  population: number;
+  x: number;
+  y: number;
+}
 export interface CityPriceIndex {
   name: string;
   index: number; // need-weighted mean of price ÷ base_value, ×100 (100 = world standard)
@@ -2568,4 +2589,49 @@ export interface PersonBrief {
   epithet: string;
   /** 0 if this person has never reigned. */
   reign_years: number;
+}
+
+// ── The campaign library (mirrors commands/campaign_library.rs) ──
+
+/** One `.campaign` file as the library lists it. Read from each save's small header,
+ *  never from its simulation blob. */
+export interface CampaignFileInfo {
+  path: string;
+  file_name: string;
+  name: string;
+  world_name: string;
+  year: number;
+  tick: number;
+  hubs: number;
+  houses: number;
+  /** Unix seconds; falls back to the file's mtime when the save carries no header. */
+  saved_at: number;
+  size_bytes: number;
+  /** True when this save's world matches the world currently open. */
+  world_match: boolean;
+  /** False for pre-header saves — the year shown was recovered by scanning. */
+  has_header: boolean;
+}
+
+/** Whether the open world can start a campaign, and what a rebuild has to work with
+ *  (mirrors campaign_commands::WorldHumanLayerStatus). */
+export interface WorldHumanLayerStatus {
+  has_settlements: boolean;
+  settlement_count: number;
+  has_economy: boolean;
+  hub_count: number;
+  can_start_campaign: boolean;
+  has_provinces: boolean;
+  /** Present ⇒ a rebuild reproduces the SAME towns with the SAME ids. */
+  settlements_seed: number | null;
+  settlements_realism: number | null;
+  settlements_max: number | null;
+}
+
+/** What `repair_province_settlements` changed. */
+export interface ProvinceRepairReport {
+  provinces: number;
+  provinces_changed: number;
+  settlements_attached: number;
+  settlements_orphaned: number;
 }
