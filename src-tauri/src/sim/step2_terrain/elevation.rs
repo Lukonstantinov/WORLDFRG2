@@ -2347,5 +2347,46 @@ mod tests {
         isostatic_adjust(&mut again, &terrain, &[], &pre, w, h);
         assert_eq!(again, adjusted, "isostatic_adjust must be deterministic");
     }
+
+    /// PHASE-2 COST, the counterpart to `step3_ocean_atmo/bench.rs`. Phase 3 has a
+    /// millisecond breakdown and phase 2 has never had one, so any claim about what
+    /// terrain generation can afford has been guesswork.
+    ///   cargo test --release --lib bench_phase2 -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn bench_phase2() {
+        use std::time::Instant;
+        for (w, h) in [(1800u32, 900u32), (3600, 1800)] {
+            let mut buf = continent(w, h, w / 12);
+            // `continent` leaves the plate columns empty; the plate generator writes them.
+            let n = buf.total();
+            buf.plate_index = vec![0u16; n];
+            buf.boundary_type = vec![0u8; n];
+            buf.is_volcanic = vec![0u8; n];
+            crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 14);
+            let land = (0..buf.total()).filter(|&i| buf.terrain[i] == 1).count();
+
+            let t = Instant::now();
+            generate_elevation(&mut buf, 7);
+            let plates_ms = t.elapsed().as_millis();
+
+            let t = Instant::now();
+            generate_elevation_from_terrain(&mut buf, 7, 0.5, 0.5, 0.5, 0.4);
+            let shape_ms = t.elapsed().as_millis();
+
+            let t = Instant::now();
+            compute_sea_depth(&mut buf);
+            let depth_ms = t.elapsed().as_millis();
+
+            let iters = ((buf.total() as f32 * 0.012) as u32).clamp(15_000, 90_000);
+            let land_frac = land as f32 / buf.total() as f32;
+            println!(
+                "{w}x{h}  cells={:>9}  land={:>5.1}%  | plates {plates_ms:>5} ms                   shape {shape_ms:>5} ms  sea_depth {depth_ms:>4} ms",
+                buf.total(), 100.0 * land_frac);
+            println!(
+                "         erosion budget {iters} droplets, but ~{:.0}% start on OCEAN                  and are discarded -> ~{:.0} effective land droplets",
+                100.0 * (1.0 - land_frac), iters as f32 * land_frac);
+        }
+    }
 }
 

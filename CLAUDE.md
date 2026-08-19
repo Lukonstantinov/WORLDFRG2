@@ -22,6 +22,7 @@ cargo test --lib tick::tests                                   # campaign-sim un
 cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the living economy (5-yearly digest)
 cargo test --lib earth_ -- --nocapture                         # EARTH CLIMATE FIDELITY scorecard (§2.3)
 cargo test --lib econ_ -- --nocapture                          # ECONOMY FIDELITY scorecard (§2.5)
+cargo test --release --lib bench_phase2 -- --ignored --nocapture                 # phase-2 (terrain) ms breakdown
 cargo test --release --lib bench_ocean_atmosphere -- --ignored --nocapture       # phase-3 ms breakdown (§8.9)
 cargo test --release --lib ocean_atmosphere_field_checksums -- --ignored --nocapture  # phase-3 bit-exactness
 ```
