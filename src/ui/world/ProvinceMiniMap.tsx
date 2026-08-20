@@ -29,6 +29,34 @@ function reliefColor(elev: number, isLand: boolean): string {
   return mix(lo[1], hi[1], t);
 }
 
+/** Darken/lighten a `#rrggbb` colour by a multiplicative factor (>1 lightens). */
+function shadeColor(hex: string, factor: number): string {
+  const c = [1, 3, 5].map((i) => Math.round(Math.max(0, Math.min(255, parseInt(hex.slice(i, i + 2), 16) * factor))));
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+/** A single directional hillshade (NW light, one lamp — never a second/fill light;
+ *  §8.21's own lesson is that a fill light washes out the exact shadows that carry
+ *  the relief on a shaded DEM). Central-difference slope from the four orthogonal
+ *  neighbours in the terrain grid, clamped to a modest readable swing so the plate
+ *  still reads as height-tinted land, not a raw shading study. */
+function hillshadeFactor(
+  terrain: ProvinceTerrainCrop, r: number, c: number,
+): number {
+  const { cols, rows, elevation, land } = terrain;
+  const at = (rr: number, cc: number): number => {
+    const rc = Math.max(0, Math.min(rows - 1, rr)), cc2 = Math.max(0, Math.min(cols - 1, cc));
+    const i = rc * cols + cc2;
+    return land[i] === 1 ? elevation[i] : elevation[r * cols + c];
+  };
+  const dx = at(r, c + 1) - at(r, c - 1);
+  const dy = at(r + 1, c) - at(r - 1, c);
+  // NW light: brighten where the surface faces north/west (negative dx/dy slope
+  // toward the light), darken the opposite (SE-facing) slope.
+  const light = -(dx + dy) * 6.0;
+  return Math.max(0.72, Math.min(1.28, 1.0 + light));
+}
+
 // The province SURVEY PLATE: a stack of toggleable layers over one province's
 // footprint, in the tradition of an estate map or a geological sheet — the same idiom
 // §8.12 established for the biome hatching on the main map.
@@ -288,7 +316,14 @@ export function ProvinceMiniMap({
         const wy = terrain.oy + r * terrain.stride;
         const i = r * terrain.cols + c;
         const [lx, ly] = geo.toLocal(wx, wy);
-        out.push({ lx, ly, color: reliefColor(terrain.elevation[i], terrain.land[i] === 1) });
+        const isLand = terrain.land[i] === 1;
+        const base = reliefColor(terrain.elevation[i], isLand);
+        // Real terrain, not just a height tint: a single NW hillshade (§8.21's own
+        // "one lamp, never a fill light" discipline) so ridges and valleys actually
+        // read, the same idiom the main map's relief_at/AO uses. Sea stays flat —
+        // this crop carries no bathymetry, only a land/sea flag + elevation.
+        const color = isLand ? shadeColor(base, hillshadeFactor(terrain, r, c)) : base;
+        out.push({ lx, ly, color });
       }
     }
     return out;

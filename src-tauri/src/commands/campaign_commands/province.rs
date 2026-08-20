@@ -13,7 +13,7 @@
 //!   sim side does — a campaign without provinces must behave as it always did.
 use super::*;
 use crate::sim::tick::{
-    PROV_TAX_MAX, ProvWork, WORK_COST, WORK_KINDS, WORK_YEARS,
+    PROV_TAX_MAX, ProvWork, WORK_KINDS, WORK_YEARS,
 };
 
 /// One province's mutable land state, joined for the Province panel's Land tab.
@@ -174,7 +174,10 @@ fn build_province_land(sim: &CampaignSim, id: u32) -> Option<ProvinceLand> {
     };
     let works = sim.prov_works.iter().filter(|w| w.province == id).map(|w| {
         let k = (w.kind as usize).min(WORK_KINDS.len() - 1);
-        let funder = if w.funder_hub >= 0 {
+        // v2.0 · a realm-funded work names the CROWN, not a city or a house.
+        let funder = if w.funder_realm >= 0 {
+            sim.realms.get(w.funder_realm as usize).map(|r| r.name.clone()).unwrap_or_default()
+        } else if w.funder_hub >= 0 {
             sim.hubs.get(w.funder_hub as usize).map(|h| h.name.clone()).unwrap_or_default()
         } else if w.funder_house >= 0 {
             sim.houses.get(w.funder_house as usize).map(|h| h.name.clone()).unwrap_or_default()
@@ -182,7 +185,7 @@ fn build_province_land(sim: &CampaignSim, id: u32) -> Option<ProvinceLand> {
         ProvinceWorkRow {
             kind: w.kind, label: WORK_KINDS[k].to_string(), progress: w.progress,
             years_left: ((1.0 - w.progress) * WORK_YEARS[k]).max(0.0),
-            yearly_cost: WORK_COST[k], funder, stalled: w.idle_years > 0,
+            yearly_cost: sim.work_cost(p, w.kind), funder, stalled: w.idle_years > 0,
         }
     }).collect();
     let cap = sim.prov_cap.get(p).copied().unwrap_or(0.0);
@@ -280,8 +283,9 @@ pub fn campaign_start_province_work(
     if sim.prov_works.iter().any(|w| w.province == id && w.kind == kind) {
         return Err(format!("{} is already under way here", WORK_KINDS[k]));
     }
-    // A funder must exist and be able to carry the first year.
-    let cost = WORK_COST[k];
+    // A funder must exist and be able to carry the first year. v2.0 · scaled by the
+    // province's real size and terrain (`work_cost`), same as the automatic pass.
+    let cost = sim.work_cost(p, kind);
     if funder_hub >= 0 {
         let fh = funder_hub as usize;
         match sim.hubs.get(fh) {
@@ -309,7 +313,7 @@ pub fn campaign_start_province_work(
     }
     sim.prov_works.push(ProvWork {
         province: id, kind, progress: 0.0,
-        funder_hub, funder_house, start_tick: sim.tick, idle_years: 0,
+        funder_hub, funder_house, funder_realm: -1, start_tick: sim.tick, idle_years: 0,
     });
     let yr = sim.tick / crate::sim::tick::TICKS_PER_YEAR;
     let pn = sim.province_name(p);

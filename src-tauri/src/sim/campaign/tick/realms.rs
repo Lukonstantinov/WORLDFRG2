@@ -76,7 +76,26 @@ impl CampaignSim {
     pub(crate) fn maybe_proclaim_realms(&mut self, yr: u32) {
         if yr < REALM_YEAR_FLOOR { return; }
         if self.suppress_realms { return; } // see the field — the inheritance gate only
-        if self.prov_holder.is_empty() { return; } // rule 25 — no province layer, no sovereignty
+        if self.prov_holder.is_empty() {
+            // rule 25 — no province layer, no sovereignty. Provinces cannot be added
+            // mid-campaign (world geography freezes at campaign start), so if this is
+            // empty now it stays empty for the campaign's whole life — a realm can
+            // NEVER form here. That used to be entirely silent (every other early
+            // return here at least eventually logs via `ensure_a_realm_exists`); log
+            // it once, the year the floor is crossed, so an absent realm is a visible
+            // fact instead of an unexplained one.
+            if yr == REALM_YEAR_FLOOR {
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "realm_founded".into(), hub: -1, good: -1, value: 0.0,
+                    text: format!(
+                        "No realm can ever form on this world (year {}): no province layer was \
+                         generated before this campaign began. Provinces (Toolbar step 7b) must be \
+                         generated and the world finalized BEFORE starting a campaign — sovereignty \
+                         is claimed over provinces, and this campaign has none.", yr),
+                });
+            }
+            return;
+        }
         // CULTURE FIRST. A people that can unify does so before its individual
         // cities break away — run last, a single city proclaiming anywhere in a
         // bloc permanently foreclosed that people's nationhood, which measured as

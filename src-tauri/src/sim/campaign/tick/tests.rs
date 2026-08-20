@@ -101,7 +101,8 @@
             // above, so `province_land_pass` early-returns and the dynamics run is
             // unaffected by the B1 land layer (that is the gate).
             prov_forest: vec![], prov_arable: vec![], prov_pasture: vec![],
-            prov_irrigated: vec![], prov_soil: vec![], prov_tenure: vec![],
+            prov_irrigated: vec![], prov_soil: vec![],
+            prov_area_km2: vec![], prov_relief_m: vec![], prov_tenure: vec![],
             suppress_realms: false, suppress_relief: false,
             prov_tax: vec![], prov_arrears: vec![], prov_unrest: vec![],
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
@@ -1116,7 +1117,7 @@
         let arable0 = s.prov_arable[0];
         let treasury0 = s.hubs[0].treasury;
         s.prov_works.push(ProvWork { province: 0, kind: WORK_CLEAR, progress: 0.0,
-            funder_hub: 0, funder_house: -1, start_tick: 0, idle_years: 0 });
+            funder_hub: 0, funder_house: -1, funder_realm: -1, start_tick: 0, idle_years: 0 });
         // One year in: paid for, under way, land untouched.
         s.province_land_pass(0);
         assert!(s.hubs[0].treasury < treasury0, "the first year must be paid for");
@@ -1152,13 +1153,179 @@
         s.prov_forest[0] = 0.5;
         let arable0 = s.prov_arable[0];
         s.prov_works.push(ProvWork { province: 0, kind: WORK_CLEAR, progress: 0.0,
-            funder_hub: 0, funder_house: -1, start_tick: 0, idle_years: 0 });
+            funder_hub: 0, funder_house: -1, funder_realm: -1, start_tick: 0, idle_years: 0 });
         for yr in 0..20u32 { s.province_land_pass(yr); }
         assert_eq!(s.prov_works.len(), 1, "an unfunded work stalls, it does not vanish");
         assert!(s.prov_works[0].progress < 0.2,
             "an unfunded work makes no real progress: {}", s.prov_works[0].progress);
         assert!(s.prov_arable[0] <= arable0 + 0.02,
             "no improvement lands without being paid for");
+    }
+
+    /// Province works v2.0 · a work must now BEGIN ON ITS OWN, without any player
+    /// verb ever being called — before this the four kinds were reachable only from
+    /// `campaign_start_province_work`, so a campaign nobody micromanaged never
+    /// improved a single province's land on any world, ever.
+    ///
+    /// Also asserts the ELIGIBILITY TIER that decides who may improve at all: an
+    /// untiered seat city (a town with nothing to spare) outside a realm must NOT
+    /// start one, which is what keeps this from being a free global upgrade.
+    #[test]
+    fn province_works_begin_on_their_own_once_the_seat_is_advanced() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mk = |tier: u8| {
+            let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+            let mut s = sim(hubs, goods.clone());
+            s.prov_cap = vec![50_000.0];
+            s.prov_rural = vec![30_000.0];
+            s.prov_culture = vec!["Aiora".into()];
+            s.prov_seat = vec![[0.0, 0.0]];
+            s.hub_province = vec![0];
+            s.prov_net_mig = vec![0.0];
+            s.ensure_province_land(1);
+            s.hubs[0].treasury = 50_000.0; // richly able to pay
+            s.hubs[0].tier = tier;
+            s.prov_forest[0] = 0.5;
+            s.prov_arable[0] = 0.3;
+            s
+        };
+
+        // An ADVANCED seat: over a few decades of yearly rolls a work must appear.
+        let mut adv = mk(2);
+        let mut ever_started = false;
+        for yr in 0..40u32 {
+            adv.maybe_fund_province_works(yr);
+            if !adv.prov_works.is_empty() { ever_started = true; }
+            adv.tick += TICKS_PER_YEAR;
+        }
+        assert!(ever_started,
+            "an advanced seat city with a full treasury must begin a land improvement on its own");
+
+        // An UNTIERED seat outside a realm: never, however rich it is.
+        let mut town = mk(0);
+        for yr in 0..40u32 {
+            town.maybe_fund_province_works(yr);
+            town.tick += TICKS_PER_YEAR;
+        }
+        assert!(town.prov_works.is_empty(),
+            "an untiered town outside a realm may not begin works, however rich");
+    }
+
+    /// Province works v2.0 · STATE INFRASTRUCTURE needs a state. An irrigation
+    /// system or a made road may only be begun on a province under a realm's
+    /// sovereignty; a free province still improves its land (clearance, drainage)
+    /// but never gains the infrastructure. This is the concrete meaning of "a
+    /// province is worked FULLY once it is under a realm".
+    ///
+    /// It is also the load-bearing half economically: irrigation carries
+    /// `PROV_IRRIGATION_GAIN` (+45% on the harvest at full watering), far the
+    /// largest term here. Letting every city-funded province drive it to cap made
+    /// autonomous works a world-wide yield multiplier and INVERTED
+    /// `econ_inheritance_rules_fragment_differently`'s substantive claim (partible
+    /// 191,991 against primogeniture 163,230, when partible must come out poorer).
+    /// With the gate, that test passes on a wider margin than the pristine baseline.
+    /// So this is not a flavour rule — remove it and a fidelity gate fails.
+    #[test]
+    fn state_infrastructure_needs_a_realm() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // A province begging for a road: heavy arrears AND unrest, no woodland to
+        // clear and no waste to drain, so a ROAD is the only thing left to want.
+        let mk = || {
+            let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+            let mut s = sim(hubs, goods.clone());
+            s.prov_cap = vec![50_000.0];
+            s.prov_rural = vec![30_000.0];
+            s.prov_culture = vec!["Aiora".into()];
+            s.prov_seat = vec![[0.0, 0.0]];
+            s.hub_province = vec![0];
+            s.prov_net_mig = vec![0.0];
+            s.ensure_province_land(1);
+            s.hubs[0].treasury = 80_000.0;
+            s.hubs[0].tier = 1;
+            s.prov_arrears[0] = 500.0;   // dues leaking badly → wants a road
+            s.prov_unrest[0] = 0.8;
+            s.prov_forest[0] = 0.05;     // nothing worth clearing
+            s.prov_arable[0] = 0.55;
+            s.prov_pasture[0] = 0.40;    // …and no waste to drain (shares sum to 1.0)
+            s
+        };
+
+        // FREE province: never a road or an irrigation channel, however rich and
+        // however badly it needs one.
+        let mut free = mk();
+        for yr in 0..60u32 { free.maybe_fund_province_works(yr); free.tick += TICKS_PER_YEAR; }
+        assert!(!free.prov_works.iter().any(|w| w.kind == WORK_ROAD || w.kind == WORK_IRRIGATE),
+            "a province outside a realm may never begin state infrastructure");
+
+        // The SAME province under a crown: the road becomes reachable, and the
+        // realm's own treasury is what pays for it. The realm is founded through
+        // the REAL `found_civic_realm` rather than a hand-built literal, so this
+        // test can never drift from how a realm is actually constructed.
+        let mut held = mk();
+        held.prov_holder = vec![0];
+        held.prov_holder_house = vec![-1];
+        held.prov_realm = vec![-1];
+        let rid = held.found_civic_realm(0, REALM_YEAR_FLOOR, REALM_PATH_CITY);
+        assert_eq!(held.prov_realm[0], rid as i32, "the founding must actually take the province");
+        held.realms[rid as usize].treasury = 500_000.0; // able to pay for anything
+        let mut got_infra = false;
+        for yr in 0..60u32 {
+            held.maybe_fund_province_works(yr);
+            if held.prov_works.iter().any(|w| w.kind == WORK_ROAD || w.kind == WORK_IRRIGATE) {
+                got_infra = true;
+                assert!(held.prov_works.iter().all(|w| w.funder_realm == 0),
+                    "a sovereign province's works are funded by its crown, not its city");
+                break;
+            }
+            held.tick += TICKS_PER_YEAR;
+        }
+        assert!(got_infra, "a province under a realm must be able to begin state infrastructure");
+    }
+
+    /// Province works v2.0 · cost must scale with the province's real SIZE and
+    /// TERRAIN ROUGHNESS (the maintainer's own rule), and a road — carved through
+    /// the relief itself — must be the kind that responds most to it. A pre-v2.0
+    /// save carries neither figure and must keep the old flat price exactly.
+    #[test]
+    fn work_cost_scales_with_province_size_and_roughness() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.prov_cap = vec![50_000.0];
+        s.prov_rural = vec![30_000.0];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.prov_culture = vec!["Aiora".into()];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        s.ensure_province_land(1);
+
+        // No geography recorded (an older save) → exactly the old flat cost.
+        s.prov_area_km2 = vec![0.0];
+        s.prov_relief_m = vec![0.0];
+        for k in 0..4u8 {
+            assert!((s.work_cost(0, k) - WORK_COST[k as usize]).abs() < 1e-3,
+                "a save with no area/relief must keep the flat cost for kind {}", k);
+        }
+
+        // A big province costs more than a small one, same terrain.
+        s.prov_relief_m = vec![0.0];
+        s.prov_area_km2 = vec![3_000.0];
+        let small = s.work_cost(0, WORK_CLEAR);
+        s.prov_area_km2 = vec![27_000.0];
+        let big = s.work_cost(0, WORK_CLEAR);
+        assert!(big > small * 1.5, "a far larger province must cost far more: {} vs {}", small, big);
+
+        // Broken country costs more than a plain, same size — and a ROAD responds
+        // hardest, since it is cut through the relief rather than around it.
+        s.prov_area_km2 = vec![WORK_AREA_REFERENCE_KM2];
+        s.prov_relief_m = vec![0.0];
+        let (flat_road, flat_irr) = (s.work_cost(0, WORK_ROAD), s.work_cost(0, WORK_IRRIGATE));
+        s.prov_relief_m = vec![2_400.0];
+        let (rough_road, rough_irr) = (s.work_cost(0, WORK_ROAD), s.work_cost(0, WORK_IRRIGATE));
+        assert!(rough_road > flat_road, "a road costs more through broken country");
+        assert!(rough_irr > flat_irr, "so does irrigation, but less so");
+        assert!(rough_road / flat_road > rough_irr / flat_irr,
+            "a road must respond to roughness MORE than an irrigation channel does");
     }
 
     /// FEUDS · the elaborated model must do the four things the flat `rivals` list could

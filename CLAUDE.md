@@ -739,7 +739,8 @@ serde-defaulted so old saves load). Grouped by theme:
      `prov_irrigated` (woodland cleared under population pressure, regrown when
      abandoned), `prov_soil` (worn by cropping INTENSITY = people per unit arable,
      rested back on fallow, floored at `PROV_SOIL_FLOOR`), `prov_works` (multi-year
-     clearance/drainage/irrigation/road, funded yearly, **stalling** when unpaid),
+     clearance/drainage/irrigation/road, funded yearly, **stalling** when unpaid —
+     v2.0: begun AUTONOMOUSLY by `maybe_fund_province_works`, see §5.3),
      the harvest, `prov_tenure` drifting toward whoever actually holds estates, then
      `prov_unrest` → revolt, and a yearly `prov_history` sample + `prov_events` entry.
   **THE FEEDBACK EDGE** closes at step 6 of the land pass: `prov_surplus` is added to the
@@ -769,7 +770,10 @@ serde-defaulted so old saves load). Grouped by theme:
   computed, not new production. The ONE piece of state that persists is
   `prov_good_depletion` (flat, same shape), updated yearly in `update_province_goods_
   pressure` right after the land pass, reusing `prov_soil`'s own wear/heal SHAPE with an
-  estate-KIND-aware rate (`dominant_estate_kind`): a mine barely recovers ("exhausts"), a
+  estate-KIND-aware rate (`dominant_estate_kind`): a MINE never accrues depletion at all
+  (**v2.0** — an ore body's `grade`/`extent` are a worldgen-frozen geological fact §8.16
+  sets once, not something digging thins out; it was `(1.3, 0.15)` "exhausts, almost never
+  heals", which made every mining province decay toward worthlessness), a
   fishery recovers fast ("collapses and recovers"), a vineyard doesn't accrue depletion at
   all (doesn't lose tonnage — the "raises grade instead" half is not tracked), a plantation
   also nudges `prov_soil` down under pressure ("wears soil"). A manufactory is excluded
@@ -793,6 +797,12 @@ Three facts about the campaign that are easy to miss and shape any change here:
   is read-only, and every AI `decide_*` function is still a *latent player verb* — see
   item B2 in `docs/FIX_PLAN.md`. The province verbs are the pattern to copy: validate,
   call the same routine the AI would, persist.
+  **v2.0 caveat:** the two WORK verbs still exist and still work (command + `bridge/`
+  wrapper intact), but **nothing in the UI calls them any more** — land improvement is
+  autonomous now (§5.3), and the Inspector shows works read-only. Only
+  `campaign_set_province_tax` is still reachable by a player. That is a deliberate
+  narrowing of agency, not an oversight; re-exposing the work verbs is a UI change
+  alone, no backend work needed.
 - **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the
@@ -800,6 +810,61 @@ Three facts about the campaign that are easy to miss and shape any change here:
 - **`Pop` is inert.** `hubs[h].pops` is written yearly in `cities.rs` and read ONLY by
   `campaign_get_pops` for display; `militancy`/`consciousness` are computed and
   discarded. The live social model is the abstract `Society` shares (item B3).
+
+### 5.3 Province works v2.0 — autonomous land improvement
+`maybe_fund_province_works` (`cities.rs`, yearly, just before `province_land_pass`)
+decides whether a province BEGINS a work. It never touches how one progresses —
+`advance_province_works` is unchanged and still funded-or-stalls, so the mechanic
+is identical once started; only who starts it is new.
+
+Before this, the four kinds were reachable **only** from the player verb, so a
+campaign nobody was micromanaging never improved a single province's land on any
+world, ever. That is the whole reason this exists.
+
+Three rules:
+
+- **Sovereignty is the difference, on BOTH axes — who may, and what.** Outside a
+  realm a province may improve only once its own seat city has cleared some tier
+  (`hub.tier > 0`, the ladder `assign_city_tiers` already computes monthly), that
+  city's treasury pays, and **only the LOCAL kinds are available** — clearance and
+  drainage, the manorial work a town does to its own hinterland. Under a realm
+  (`prov_realm >= 0`, rule 27) the tier gate is waived, the CROWN pays
+  (`ProvWork.funder_realm`, a third funder beside hub and house), and the STATE
+  INFRASTRUCTURE kinds unlock: an irrigation system and a made road, the classic
+  crown projects. That is what "a province is worked FULLY once it is under a
+  realm" means concretely, and it is what makes sovereignty matter on the land
+  rather than only in the tax ledger.
+  **The infrastructure gate is load-bearing, not flavour.** Irrigation carries
+  `PROV_IRRIGATION_GAIN` (+45% on the harvest at full watering), far the largest
+  term here. The first cut let every city-funded province drive it to cap, which
+  made autonomous works a world-wide yield multiplier and INVERTED
+  `econ_inheritance_rules_fragment_differently`'s substantive claim (partible
+  191,991 against primogeniture 163,230, when partible must come out *poorer*).
+  Gating infrastructure on sovereignty fixed it on the merits — that gate now
+  passes at 171,184 against 253,572, a **wider** margin than the pristine baseline's
+  149,925/174,496. A `suppress_auto_works` isolation flag was written first, on the
+  `suppress_realms` precedent, and then **deleted**: the correct model beat the
+  workaround, and dead isolation machinery is worse than none. Gated by
+  `state_infrastructure_needs_a_realm`.
+- **Cost scales with real geography, never a flat price.** `work_cost(p, kind)`
+  multiplies `WORK_COST[kind]` by the province's real **area** (`prov_area_km2`)
+  and its real **relief** (`prov_relief_m`), both snapshotted at campaign start
+  from the world's own `Province`. A road responds hardest to roughness
+  (`WORK_ROUGHNESS_WEIGHT`) because it is cut *through* the relief; an irrigation
+  channel least, because it follows the easiest contour it can find. **A save with
+  neither figure keeps the old flat cost exactly** — both fields serde-default to
+  empty and the multipliers collapse to 1.0, so this is an extension, never a
+  repricing of an existing campaign (gated by
+  `work_cost_scales_with_province_size_and_roughness`).
+- **It picks ONE kind by need, not at random**: a road where arrears or unrest are
+  biting, else irrigation where the arable is dry, else drainage where waste is
+  high, else clearance — the first two only under a realm, per the rule above. One
+  work per province at a time.
+
+Gates: `province_works_begin_on_their_own_once_the_seat_is_advanced` (an advanced
+seat DOES start one; an untiered town outside a realm does not, however rich),
+`state_infrastructure_needs_a_realm`, `work_cost_scales_with_province_size_and_
+roughness`, and the two pre-existing work tests, which still pass unchanged.
 
 ---
 
@@ -1142,19 +1207,41 @@ ui/world/  — map & world
   (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
   HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
-  ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate)
+  ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate).
+                                  v2.0 · its "Goods produced" block reads REAL yield
+                                  (`campaign_province_goods` + `_potential`) — actual/yr
+                                  where the campaign produces, potential/yr where it does
+                                  not, plus the ore-deposit count and mean grade. It was
+                                  the only province view with no yield numbers at all,
+                                  showing quality STARS alone off the frozen worldgen
+                                  shortlist; that list is still the fallback on a world
+                                  with no campaign running
   ProvinceInspector.tsx         ← 🏞 Dossier for ONE province, opened by CLICKING the map.
-                                  FOUR TABS (Land · People · Holdings · Chronicle) over
-                                  the layered survey plate, plus a YEAR SLIDER that
+                                  v2.0 · rebuilt on the shared `@ui/kit` primitives +
+                                  `chronicleTheme` tokens (Panel/PanelHeader/Section/
+                                  Card/Tabs/Meter/Badge), the SAME system the Realms
+                                  panel uses — the two now read as one designed app,
+                                  which matters because a province and the realm holding
+                                  it are constantly read together. No ad-hoc hexes left.
+                                  FIVE TABS (Land · People · Holdings · Trade · Chronicle)
+                                  over the layered survey plate, plus a YEAR SLIDER that
                                   scrubs `ProvinceLand.history` — a plate that differs
                                   between year 1 and year 500 is the visible proof the
-                                  two halves are one simulation. Holdings carries the
-                                  CONTROL verbs (dues slider, begin/abandon a work),
-                                  read-only on a province no town administers. Phase 5 ·
-                                  the "writ of {holder_name}" line, granary note and
-                                  works-funding note all read correctly whether a CITY
-                                  or a HOUSE holds the province's writ
-                                  (`ProvinceLand.holder_house`).
+                                  two halves are one simulation.
+                                  A REALM BANNER sits under the identity line when a
+                                  crown holds this province (`compute_states`, matched by
+                                  `province_ids`): its own tint swatch, title, rank and
+                                  cohesion, clicking through to the Realms panel. Same
+                                  colour and rank vocabulary as that panel and the map
+                                  tint, because all three read the one persisted `Realm`.
+                                  Holdings keeps the ONE remaining control verb (the dues
+                                  slider); the begin/abandon WORK buttons are gone — land
+                                  improvement is autonomous now (§5.3) and shows on Land
+                                  as a read-only "Under way" card naming the funder
+                                  (a crown, or the seat city) and its real yearly cost.
+                                  Phase 5 · the "writ of {holder_name}" line and granary
+                                  note read correctly whether a CITY or a HOUSE holds the
+                                  writ (`ProvinceLand.holder_house`).
                                   Selection is two-way with ProvincePanel via
                                   uiStore.selectedProvince; hit-test is a client-side
                                   raster lookup in OverlayManager.provinceAt (no IPC)
@@ -2745,9 +2832,13 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     city proclaims for itself, the FIRST reader
                                     `hub.tier`/`hub.standing` has ever had) and
                                     PATH C (`maybe_proclaim_culture_realms` — a
-                                    contiguous single-culture bloc of ≥4 provinces
+                                    contiguous single-culture bloc of at least
+                                    `REALM_CULTURE_MIN_PROVINCES` provinces
                                     unifies under its largest city, over
-                                    `prov_culture` + `prov_neighbors`).
+                                    `prov_culture` + `prov_neighbors`; cite the
+                                    constant, never a number — this line read
+                                    "≥4" against a shipped value of 2 until a
+                                    v2.0 audit caught it).
                                     `Realm.government` splits DYNASTIC from CIVIC:
                                     a republic (`found_civic_realm`) has no
                                     `family`, no succession by birth, and

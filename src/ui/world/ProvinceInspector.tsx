@@ -2,9 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import {
-  campaignCancelProvinceWork, campaignProvinceDetail, campaignProvinceGoods, campaignProvinceLand,
-  campaignProvincePotential, campaignProvinceState, campaignSetProvinceTax, campaignStartProvinceWork,
-  getProvinceTerrainCrop, provinceGoodBeltMasks,
+  campaignProvinceDetail, campaignProvinceGoods, campaignProvinceLand,
+  campaignProvincePotential, campaignProvinceState, campaignSetProvinceTax,
+  computeStates, getProvinceTerrainCrop, provinceGoodBeltMasks,
 } from "@bridge";
 import { koppenName } from "@ui/world/climate";
 import {
@@ -17,38 +17,35 @@ import {
   provinceHistory, stars,
 } from "@ui/world/provinceStory";
 import { GOOD_DEFS } from "@goods";
+import { T, FZ, SPACE, SERIF } from "@ui/campaign/chronicleTheme";
+import { Panel, PanelHeader, PanelBody, Section, Card, Badge, Meter as KitMeter, Tabs, Button, EmptyNote, FootNote } from "@ui/kit";
 import type {
   Province, ProvinceDetail, ProvinceGoodExploit, ProvinceGoodMask, ProvinceLand, ProvinceLive, ProvinceTerrainCrop, PSettlement,
-  ProvincePotential,
+  ProvincePotential, StateRegion,
 } from "@types";
 
-/** 🏞 Province Inspector — the dossier for ONE province, opened by clicking the map
- *  (or a row in the Provinces browser).
+/** 🏞 Province Inspector v2.0 — the dossier for ONE province, opened by clicking the
+ *  map (or a row in the Provinces browser).
  *
- *  This used to be a flat list of twenty-five `<Row>`s: no hierarchy (coastline length
- *  had the same visual weight as fertility), no time, no comparison, and no agency. And
- *  everything except four live numbers was frozen at worldgen, so a province looked
- *  identical in year 1 and year 500.
+ *  Rebuilt on the shared `@ui/kit` design system (the same tokens/primitives the
+ *  Realms panel already uses) so the two read as one designed app instead of two —
+ *  a province and the realm that may hold it now share type, colour and spacing.
+ *  The manual "begin a work" controls are gone: land improvement (clearance,
+ *  drainage, irrigation, roads) is now autonomous — a province under a realm is
+ *  funded by its crown, otherwise by its own seat city once advanced enough — so
+ *  the Holdings tab shows what's under way as a read-only status, not a button row.
  *
- *  It is now four tabs over a layered survey plate, with a year slider. The frozen
- *  geography still comes from the partition; the LAND — what is wooded, cropped, worn,
- *  held, taxed and resented — comes from the campaign, and changes. Fields added after
- *  the first province release are optional on the Rust side, so each block hides itself
- *  on a world generated before it, and the whole land section hides on a campaign that
- *  has not run a year. */
+ *  Four tabs over a layered survey plate, with a year slider. The frozen geography
+ *  still comes from the partition; the LAND — what is wooded, cropped, worn, held,
+ *  taxed and resented — comes from the campaign, and changes. */
 
 type Tab = "land" | "people" | "holdings" | "trade" | "chronicle";
 const TABS: [Tab, string][] = [
   ["land", "Land"], ["people", "People"], ["holdings", "Holdings"], ["trade", "Trade"], ["chronicle", "Chronicle"],
 ];
 
-const WORK_LABEL = ["Clear woodland", "Drain the marsh", "Build irrigation", "Make a road"];
-const WORK_BLURB = [
-  "woodland → arable, at the cost of the wood",
-  "waste to crop, and a little less fever",
-  "a durable lift to what the land yields",
-  "dues arrive instead of falling into arrears",
-];
+/** `Realm.rank` — 0 city-state · 1 kingdom · 2 great power · 3 hegemon. */
+const RANK_NAMES = ["City-state", "Kingdom", "Great power", "Hegemon"];
 
 export function ProvinceInspector() {
   const open = useUIStore((s) => s.showProvinceInspector);
@@ -56,6 +53,7 @@ export function ProvinceInspector() {
   const setSelected = useUIStore((s) => s.setSelectedProvince);
   const close = () => useUIStore.getState().setShowProvinceInspector(false);
   const setStatus = useUIStore((s) => s.setStatus);
+  const setShowStates = useUIStore((s) => s.setShowStates);
 
   const provinces = useWorldStore((s) => s.provinces);
   const settlements = useWorldStore((s) => s.settlements);
@@ -69,6 +67,7 @@ export function ProvinceInspector() {
   const [terrain, setTerrain] = useState<ProvinceTerrainCrop | null>(null);
   const [exploit, setExploit] = useState<ProvinceGoodExploit[]>([]);
   const [potential, setPotential] = useState<ProvincePotential | null>(null);
+  const [states, setStates] = useState<StateRegion[]>([]);
   // Belt COVERAGE + QUALITY for each of the province's goods, sampled to its raster —
   // what lets the plate draw goods as AREAS + a quality wash like the main map (reads
   // the goods tile column, so it works on any world with no re-gen).
@@ -114,6 +113,12 @@ export function ProvinceInspector() {
     campaignProvincePotential(p.id)
       .then((pot) => { if (!stale) setPotential(pot); })
       .catch(() => { if (!stale) setPotential(null); });
+    // v2.0 · cohesion with the Realms panel — which crown (if any) holds this
+    // province's sovereignty, read from the SAME persisted state the map tint and
+    // the Realms panel both use, never re-derived.
+    computeStates()
+      .then((rows) => { if (!stale) setStates(rows); })
+      .catch(() => { if (!stale) setStates([]); });
     return () => { stale = true; };
   }, [open, p?.id, provinces, reload]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -194,6 +199,13 @@ export function ProvinceInspector() {
     goodMasks.filter((m) => !goodFilter || goodFilter.has(m.good)),
     [goodMasks, goodFilter]);
 
+  // v2.0 · which realm (if any) holds this province's sovereignty — a pure lookup
+  // over the SAME `compute_states` read the map tint and the Realms panel use.
+  const realm = useMemo(
+    () => (p ? states.find((s) => s.province_ids.includes(p.id)) ?? null : null),
+    [states, p],
+  );
+
   if (!open || !p) return null;
 
   const fmt = (n: number) => Math.round(n).toLocaleString();
@@ -216,7 +228,8 @@ export function ProvinceInspector() {
   const koppenShares = p.koppen_shares ?? [];
   const nd = p.neighbors_detail ?? [];
 
-  // ── Control verbs. Only the holder may act, so a frontier province is read-only.
+  // ── The rural-dues control verb. This is the one player-facing lever left in
+  //    the Holdings tab — land improvement itself is autonomous now (v2.0).
   const holderHub = land?.holder_hub ?? -1;
   const canAct = !!land && holderHub >= 0;
   const act = async (fn: () => Promise<string | number | void>) => {
@@ -232,19 +245,17 @@ export function ProvinceInspector() {
     }
   };
 
-  return (
-    <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
-      {/* Header (drag handle) */}
-      <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <strong style={{ fontSize: 14 }}>🏞 {p.name}</strong>
-        <span style={{ opacity: 0.55, fontSize: 12 }}>province</span>
-        <div style={{ flex: 1 }} />
-        <button data-no-drag onClick={close} style={btn}>×</button>
-      </div>
+  const realmColor = realm ? `rgb(${realm.color[0]},${realm.color[1]},${realm.color[2]})` : undefined;
 
-      <div style={{ overflowY: "auto", padding: "10px 14px", minHeight: 0 }}>
+  return (
+    <Panel onPointerDown={onPointerDown} width={460} maxHeight="82vh"
+      style={{ top: 80, right: 90, zIndex: 41, ...rootStyle }}>
+      <PanelHeader icon="🏞" title={p.name} onClose={close} onDragStart={onPointerDown}
+        right={<span style={{ color: T.inkFaint, fontSize: FZ.small }}>province</span>} />
+
+      <PanelBody>
         {/* Identity */}
-        <div style={{ opacity: 0.75, marginBottom: 8 }}>
+        <div style={{ color: T.inkMid, fontSize: FZ.body, marginBottom: SPACE.md }}>
           {p.culture} · {ELEV_WORD[p.elevation_class] ?? "country"} · {koppenName(p.koppen)}
           {p.coastal ? " · coastal" : ""} · {fmt(p.area_km2)} km²
           {land && land.holder_name
@@ -253,6 +264,25 @@ export function ProvinceInspector() {
                 : "The city whose writ runs here"}>writ of {land.holder_name}</span></>
             : land ? " · frontier" : ""}
         </div>
+
+        {/* v2.0 · REALM / SOVEREIGNTY — cohesion with the Realms panel: same colour
+            swatch, same rank vocabulary, one click to open the full dossier. */}
+        {realm && (
+          <div onClick={() => setShowStates(true)} title="Open the Realms panel"
+            style={{
+              display: "flex", alignItems: "center", gap: SPACE.sm, marginBottom: SPACE.md,
+              padding: "5px 9px", borderRadius: 6, cursor: "pointer",
+              background: T.card, border: `1px solid ${realmColor ?? T.lineSoft}55`,
+            }}>
+            <span style={{ width: 10, height: 10, borderRadius: 3, background: realmColor, flex: "0 0 auto" }} />
+            <span style={{ fontFamily: SERIF, color: T.gold, fontWeight: 700, fontSize: FZ.base }}>
+              {realm.title} of {realm.name}
+            </span>
+            <Badge tone="gold">{RANK_NAMES[realm.rank] ?? "Realm"}</Badge>
+            <span style={{ flex: 1 }} />
+            <span style={{ color: T.inkFaint, fontSize: FZ.tiny }}>cohesion {pct(realm.cohesion)} ›</span>
+          </div>
+        )}
 
         {/* ── The survey plate ───────────────────────────────────────────────── */}
         <ProvinceMiniMap
@@ -292,7 +322,7 @@ export function ProvinceInspector() {
             all. Only when the "goods" plate is on and there are belt goods. */}
         {(plates.includes("goods") || plates.includes("quality")) && beltGoods.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5, alignItems: "center" }}>
-            <span style={{ fontSize: 10, opacity: 0.6, marginRight: 2 }}>Goods:</span>
+            <span style={{ fontSize: 10, color: T.inkFaint, marginRight: 2 }}>Goods:</span>
             {beltGoods.map((g) => {
               const isolated = !!goodFilter && goodFilter.size === 1 && goodFilter.has(g.name);
               const shown = !goodFilter || goodFilter.has(g.name);
@@ -305,18 +335,18 @@ export function ProvinceInspector() {
                 })}
                   title={`${goodLabel(g.good)} · quality ${Math.round(g.quality * 100)}% — click to ${isolated ? "show all" : "show only this"}`}
                   style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, cursor: "pointer",
-                    padding: "1px 5px", borderRadius: 10, border: "1px solid #24384a",
-                    background: shown ? "#12202c" : "#0b141c", color: shown ? "#cfe0f4" : "#4a6076", opacity: shown ? 1 : 0.7 }}>
+                    padding: "1px 5px", borderRadius: 10, border: `1px solid ${T.lineSoft}`,
+                    background: shown ? T.raised : T.card, color: shown ? T.ink : T.inkFaint, opacity: shown ? 1 : 0.7 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: col, opacity: shown ? 1 : 0.35, flexShrink: 0 }} />
                   {goodEmoji(g.good)} {goodLabel(g.good)}
-                  <span style={{ color: "#e3c14a", letterSpacing: 0.5, fontSize: 8 }}>{stars(g.quality)}</span>
+                  <span style={{ color: T.gold, letterSpacing: 0.5, fontSize: 8 }}>{stars(g.quality)}</span>
                 </button>
               );
             })}
             {goodFilter && (
               <button onClick={() => setGoodFilter(null)} title="Show all goods"
                 style={{ fontSize: 10, cursor: "pointer", padding: "1px 6px", borderRadius: 10,
-                  border: "1px solid #3a4a2e", background: "#1a2416", color: "#9fd07a" }}>all</button>
+                  border: `1px solid ${TONE_GOOD_LINE}`, background: TONE_GOOD_FILL, color: T.goodInk }}>all</button>
             )}
           </div>
         )}
@@ -331,120 +361,141 @@ export function ProvinceInspector() {
                 setScrub(v === history.length - 1 ? null : v);
               }}
               style={{ flex: 1 }} />
-            <span style={{ fontSize: 12, opacity: 0.8, minWidth: 74, textAlign: "right" }}>
+            <span style={{ fontSize: 12, color: T.inkMid, minWidth: 74, textAlign: "right" }}>
               {scrubbing ? `year ${sample!.year}` : "today"}
             </span>
             {scrubbing && (
-              <button onClick={() => setScrub(null)} style={btnSm}>today</button>
+              <Button variant="ghost" onClick={() => setScrub(null)}>today</Button>
             )}
           </div>
         )}
 
         {/* Tabs */}
-        <div style={{ display: "flex", gap: 2, margin: "10px 0 4px", borderBottom: "1px solid #22342a" }}>
-          {TABS.map(([id, label]) => (
-            <div key={id} onClick={() => setTab(id)} style={{
-              padding: "3px 9px", cursor: "pointer", fontSize: 12,
-              fontWeight: tab === id ? 700 : 400,
-              color: tab === id ? "#e6f2ea" : "#7f9a8a",
-              borderBottom: tab === id ? "2px solid #7fb069" : "2px solid transparent",
-            }}>{label}</div>
-          ))}
-        </div>
+        <Tabs tabs={TABS} active={tab} onSelect={setTab} style={{ margin: "10px 0 4px" }} />
 
         {/* ── LAND ─────────────────────────────────────────────────────────── */}
         {tab === "land" && (
           <>
             {land ? (
               <>
-                <Section title={scrubbing ? `Land use · year ${sample!.year}` : "Land use"} />
-                <Row k="Woodland" v={pct(sample?.forest ?? land.forest)}
-                  trend={trend(history, scrub, "forest")} />
-                <Row k="Arable" v={pct(sample?.arable ?? land.arable)}
-                  trend={trend(history, scrub, "arable")} />
-                <Row k="Pasture" v={pct(sample?.pasture ?? land.pasture)} />
-                {(sample?.irrigated ?? land.irrigated) > 0.005 && (
-                  <Row k="Irrigated" v={pct(sample?.irrigated ?? land.irrigated)} />
-                )}
-                <Row k="Soil" v={`${soilWord(sample?.soil ?? land.soil)} (${(sample?.soil ?? land.soil).toFixed(2)})`}
-                  trend={trend(history, scrub, "soil")} />
+                <Section title={scrubbing ? `Land use · year ${sample!.year}` : "Land use"}>
+                  <Row k="Woodland" v={pct(sample?.forest ?? land.forest)}
+                    trend={trend(history, scrub, "forest")} />
+                  <Row k="Arable" v={pct(sample?.arable ?? land.arable)}
+                    trend={trend(history, scrub, "arable")} />
+                  <Row k="Pasture" v={pct(sample?.pasture ?? land.pasture)} />
+                  {(sample?.irrigated ?? land.irrigated) > 0.005 && (
+                    <Row k="Irrigated" v={pct(sample?.irrigated ?? land.irrigated)} />
+                  )}
+                  <Row k="Soil" v={`${soilWord(sample?.soil ?? land.soil)} (${(sample?.soil ?? land.soil).toFixed(2)})`}
+                    trend={trend(history, scrub, "soil")} />
+                </Section>
 
-                <Section title="The harvest" />
-                <Row k="Surplus above subsistence" v={`${fmt(sample?.surplus ?? land.surplus)} /yr`}
-                  trend={trend(history, scrub, "surplus")} />
-                <Row k="Dues collected" v={`${fmt(land.revenue)} /yr`} />
-                {land.arrears > 1 && <Row k="Arrears" v={fmt(land.arrears)} />}
-                <div style={{ opacity: 0.6, fontSize: 12, marginTop: 2 }}>
-                  {land.holder_house >= 0
-                    ? <>Grain still reaches the seat city's granary; the dues go instead
-                        to {land.holder_name}'s own treasury.</>
-                    : <>What the land grows above what the countryside eats and the
-                        holder takes reaches {land.holder_name || "no city"}'s granary.</>}
-                </div>
+                {/* v2.0 · read-only work status — replaces the old start/abandon
+                    buttons. Land improvement is autonomous now: a realm funds its
+                    own provinces in full; otherwise the seat city funds it once
+                    advanced enough (see the Holdings tab for who and why). */}
+                {land.works.length > 0 && (
+                  <Section title="Under way">
+                    {land.works.map((w) => (
+                      <Card key={w.kind} style={{ marginBottom: SPACE.sm }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FZ.body, marginBottom: 3 }}>
+                          <span style={{ flex: 1, color: T.ink }}>
+                            {w.label}{w.stalled && <span style={{ color: T.bad }}> · stalled, unpaid</span>}
+                          </span>
+                          <span style={{ color: T.inkDim, fontSize: FZ.small }}>
+                            {w.years_left < 1 ? "<1y left" : `${Math.round(w.years_left)}y left`}
+                          </span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <KitMeter value={w.progress} color={T.good} />
+                          <span style={{ color: T.inkFaint, fontSize: FZ.tiny, whiteSpace: "nowrap" }}>
+                            {Math.round(w.progress * 100)}%
+                          </span>
+                        </div>
+                        <FootNote>funded by {w.funder || "an unknown patron"} · {fmt(w.yearly_cost)}/yr</FootNote>
+                      </Card>
+                    ))}
+                  </Section>
+                )}
+
+                <Section title="The harvest">
+                  <Row k="Surplus above subsistence" v={`${fmt(sample?.surplus ?? land.surplus)} /yr`}
+                    trend={trend(history, scrub, "surplus")} />
+                  <Row k="Dues collected" v={`${fmt(land.revenue)} /yr`} />
+                  {land.arrears > 1 && <Row k="Arrears" v={fmt(land.arrears)} />}
+                  <div style={{ color: T.inkDim, fontSize: 12, marginTop: 2 }}>
+                    {land.holder_house >= 0
+                      ? <>Grain still reaches the seat city's granary; the dues go instead
+                          to {land.holder_name}'s own treasury.</>
+                      : <>What the land grows above what the countryside eats and the
+                          holder takes reaches {land.holder_name || "no city"}'s granary.</>}
+                  </div>
+                </Section>
               </>
             ) : (
-              <div style={{ opacity: 0.6, fontSize: 12, padding: "4px 0" }}>
+              <EmptyNote>
                 No live land state — begin the campaign and advance a year, and this
                 province's woodland, soil, harvest and dues appear here (and start moving).
-              </div>
+              </EmptyNote>
             )}
 
             {/* The frozen geography, now clearly secondary to the living land. */}
-            <Section title="Climate & relief" />
-            {p.elev_max_m !== undefined && (
-              <Row k="Elevation" v={`${fmt(p.elev_min_m ?? 0)} – ${fmt(p.elev_max_m)} m (mean ${fmt(p.elev_mean_m ?? 0)} m)`} />
-            )}
-            {p.relief_m !== undefined && <Row k="Relief" v={`${fmt(p.relief_m)} m`} />}
-            {p.temp_mean !== undefined && <Row k="Temperature" v={`${p.temp_mean.toFixed(1)} °C`} />}
-            {p.season_amp !== undefined && p.season_amp > 0 && (
-              <Row k="Seasonality" v={`±${p.season_amp.toFixed(1)} °C`} />
-            )}
-            {p.precip_mean !== undefined && p.precip_mean > 0 && (
-              <Row k="Rainfall" v={`${fmt(p.precip_mean)} mm/yr`} />
-            )}
-            {p.arid_frac !== undefined && p.arid_frac > 0.02 && (
-              <Row k="Arid land" v={pct(p.arid_frac)} />
-            )}
-            <Row k="Fertility" v={p.mean_fertility.toFixed(2)} />
-            {p.disease_mean !== undefined && p.disease_mean > 0.02 && (
-              <Row k="Fever risk" v={pct(p.disease_mean)} />
-            )}
-            {cellKm > 0 && (p.coast_cells ?? 0) > 0 && (
-              <Row k="Coastline" v={cellsToKm(p.coast_cells!, cellKm)} />
-            )}
-            {cellKm > 0 && (p.river_cells ?? 0) > 0 && (
-              <Row k="Rivers" v={`${cellsToKm(p.river_cells!, cellKm)}${p.navigable_river ? " · navigable" : ""}`} />
-            )}
-            {(p.lake_cells ?? 0) > 0 && <Row k="Lakeshore" v={`${fmt(p.lake_cells!)} cells`} />}
-            {koppenShares.length > 1 && (
-              <>
-                <ShareBar rows={koppenShares.map(([k, s]) => ({ label: koppenName(k), share: s }))} />
-                <div style={{ opacity: 0.7, fontSize: 12, marginTop: 2 }}>
-                  {koppenShares.map(([k, s]) => `${pct(s)} ${koppenName(k)}`).join(" · ")}
-                </div>
-              </>
-            )}
+            <Section title="Climate & relief">
+              {p.elev_max_m !== undefined && (
+                <Row k="Elevation" v={`${fmt(p.elev_min_m ?? 0)} – ${fmt(p.elev_max_m)} m (mean ${fmt(p.elev_mean_m ?? 0)} m)`} />
+              )}
+              {p.relief_m !== undefined && <Row k="Relief" v={`${fmt(p.relief_m)} m`} />}
+              {p.temp_mean !== undefined && <Row k="Temperature" v={`${p.temp_mean.toFixed(1)} °C`} />}
+              {p.season_amp !== undefined && p.season_amp > 0 && (
+                <Row k="Seasonality" v={`±${p.season_amp.toFixed(1)} °C`} />
+              )}
+              {p.precip_mean !== undefined && p.precip_mean > 0 && (
+                <Row k="Rainfall" v={`${fmt(p.precip_mean)} mm/yr`} />
+              )}
+              {p.arid_frac !== undefined && p.arid_frac > 0.02 && (
+                <Row k="Arid land" v={pct(p.arid_frac)} />
+              )}
+              <Row k="Fertility" v={p.mean_fertility.toFixed(2)} />
+              {p.disease_mean !== undefined && p.disease_mean > 0.02 && (
+                <Row k="Fever risk" v={pct(p.disease_mean)} />
+              )}
+              {cellKm > 0 && (p.coast_cells ?? 0) > 0 && (
+                <Row k="Coastline" v={cellsToKm(p.coast_cells!, cellKm)} />
+              )}
+              {cellKm > 0 && (p.river_cells ?? 0) > 0 && (
+                <Row k="Rivers" v={`${cellsToKm(p.river_cells!, cellKm)}${p.navigable_river ? " · navigable" : ""}`} />
+              )}
+              {(p.lake_cells ?? 0) > 0 && <Row k="Lakeshore" v={`${fmt(p.lake_cells!)} cells`} />}
+              {koppenShares.length > 1 && (
+                <>
+                  <ShareBar rows={koppenShares.map(([k, s]) => ({ label: koppenName(k), share: s }))} />
+                  <div style={{ color: T.inkMid, fontSize: 12, marginTop: 2 }}>
+                    {koppenShares.map(([k, s]) => `${pct(s)} ${koppenName(k)}`).join(" · ")}
+                  </div>
+                </>
+              )}
+            </Section>
 
             {/* Currently worked — the LIVE production (§2.5), if any. */}
             {land && exploit.length > 0 && (
-              <>
-                <Section title="Currently worked" />
+              <Section title="Currently worked">
                 {exploit.map((g) => (
                   <div key={g.good} style={{ marginBottom: 5 }}>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
-                      <span style={{ opacity: 0.7, fontSize: 12 }}>{fmt(g.actual)}/yr</span>
+                      <span style={{ width: 132, color: T.ink }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                      <span style={{ color: T.inkMid, fontSize: 12 }}>{fmt(g.actual)}/yr</span>
                       <span style={{ flex: 1 }} />
-                      <span style={{ opacity: 0.6, fontSize: 12 }} title="share leaving the province via trade">
+                      <span style={{ color: T.inkDim, fontSize: 12 }} title="share leaving the province via trade">
                         {Math.round(g.market_share * 100)}% to market
                       </span>
                     </div>
-                    <Meter frac={Math.min(1, g.exploitation)} warn={g.exploitation > 1}
+                    <MeterLabel frac={Math.min(1, g.exploitation)} warn={g.exploitation > 1}
                       label={`${Math.round(g.exploitation * 100)}% worked` +
                         (g.depletion > 0.02 ? ` · ${Math.round(g.depletion * 100)}% depleted` : "")} />
                   </div>
                 ))}
-              </>
+              </Section>
             )}
 
             {/* #9 · POTENTIAL & DEPOSITS — every good the land could yield (richest
@@ -453,7 +504,7 @@ export function ProvinceInspector() {
               const rows = (potential?.goods ?? []).filter((g) => !depositsOnly || g.is_deposit);
               if (rows.length === 0) {
                 return exploit.length === 0
-                  ? <><Section title="Goods" /><div style={{ opacity: 0.5 }}>no notable produce</div></>
+                  ? <><Section title="Goods" /><div style={{ color: T.inkFaint }}>no notable produce</div></>
                   : null;
               }
               // Quality (0..1): the province's own per-good rank where it has one, else
@@ -469,26 +520,25 @@ export function ProvinceInspector() {
               const meanGrade = dep.length ? dep.reduce((s, d) => s + d.grade, 0) / dep.length : 0;
               const bestDepth = dep.reduce((m, d) => Math.max(m, d.depth), 0);
               return (
-                <>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "10px 0 3px" }}>
-                    <Section title="Potential & deposits" />
-                    <span style={{ flex: 1 }} />
+                <Section title="Potential & deposits" right={
+                  <div style={{ display: "flex", gap: 4 }}>
                     <button onClick={() => setGoodSort((s) => s === "quality" ? "potential" : "quality")}
                       title="Sort by land quality, or by potential yield"
                       style={sortBtn}>{goodSort === "quality" ? "by quality" : "by potential"}</button>
                     <button onClick={() => setDepositsOnly((v) => !v)}
                       title="Show only ore/mineral deposits"
-                      style={{ ...sortBtn, color: depositsOnly ? "#e3c14a" : "#7fa0bd" }}>💎 only</button>
+                      style={{ ...sortBtn, color: depositsOnly ? T.gold : T.accent }}>💎 only</button>
                   </div>
+                }>
                   {/* TOTAL — the whole province's producible worth at a glance. */}
                   <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "3px 6px", marginBottom: 5,
-                    background: "#0e1a12", border: "1px solid #1e3327", borderRadius: 4, fontSize: 12 }}>
-                    <b style={{ color: "#8fd6a0" }}>TOTAL</b>
-                    <span>~{fmt(totalPot)}/yr potential</span>
-                    <span style={{ color: "#e3c14a", letterSpacing: 1 }} title={`mean land quality ${(meanQ * 100).toFixed(0)}%`}>{stars(meanQ)}</span>
+                    background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 4, fontSize: 12 }}>
+                    <b style={{ color: T.goodInk }}>TOTAL</b>
+                    <span style={{ color: T.ink }}>~{fmt(totalPot)}/yr potential</span>
+                    <span style={{ color: T.gold, letterSpacing: 1 }} title={`mean land quality ${(meanQ * 100).toFixed(0)}%`}>{stars(meanQ)}</span>
                     <span style={{ flex: 1 }} />
                     {dep.length > 0 && (
-                      <span style={{ opacity: 0.75, fontSize: 11 }}>
+                      <span style={{ color: T.inkMid, fontSize: 11 }}>
                         💎 {dep.length} deposit{dep.length === 1 ? "" : "s"} · grade {(meanGrade * 100).toFixed(0)}% · best {depthWord(bestDepth)}
                       </span>
                     )}
@@ -499,27 +549,27 @@ export function ProvinceInspector() {
                     return (
                       <div key={g.good} style={{ marginBottom: 4, opacity: g.actual > 1e-4 ? 1 : 0.94 }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span style={{ width: 132 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
-                          <span style={{ color: "#e3c14a", letterSpacing: 1 }}
+                          <span style={{ width: 132, color: T.ink }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                          <span style={{ color: T.gold, letterSpacing: 1 }}
                             title={g.is_deposit ? `mean ore grade ${(q * 100).toFixed(0)}%` : `land quality ${(q * 100).toFixed(0)}%`}>{stars(q)}</span>
                           {g.is_deposit && g.workings > 0 ? (
-                            <span style={{ opacity: 0.6, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
+                            <span style={{ color: T.inkDim, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
                           ) : pg?.rank ? (
-                            <span style={{ opacity: 0.6, fontSize: 11 }}>
-                              {pg.rank === 1 ? <b style={{ color: "#e3c14a" }}>finest in the world</b> : `#${pg.rank} of ${pg.of}`}
+                            <span style={{ color: T.inkDim, fontSize: 11 }}>
+                              {pg.rank === 1 ? <b style={{ color: T.gold }}>finest in the world</b> : `#${pg.rank} of ${pg.of}`}
                             </span>
                           ) : null}
                           <span style={{ flex: 1 }} />
-                          <span style={{ opacity: 0.55, fontSize: 11 }}>
-                            {fmt(g.potential)}/yr{g.actual <= 1e-4 && <span style={{ opacity: 0.6 }}> · untapped</span>}
+                          <span style={{ color: T.inkFaint, fontSize: 11 }}>
+                            {fmt(g.potential)}/yr{g.actual <= 1e-4 && <span> · untapped</span>}
                           </span>
                         </div>
-                        <Meter frac={Math.min(1, q)} label={`quality ${(q * 100).toFixed(0)}% · potential ${fmt(g.potential)}/yr` +
+                        <MeterLabel frac={Math.min(1, q)} label={`quality ${(q * 100).toFixed(0)}% · potential ${fmt(g.potential)}/yr` +
                           (g.actual > 1e-4 ? ` · ${fmt(g.actual)}/yr worked` : "")} />
                       </div>
                     );
                   })}
-                </>
+                </Section>
               );
             })()}
           </>
@@ -528,47 +578,46 @@ export function ProvinceInspector() {
         {/* ── PEOPLE ───────────────────────────────────────────────────────── */}
         {tab === "people" && (
           <>
-            <Section title="People" />
-            <Row k="Rural" v={fmt(sample?.rural ?? rural)} trend={trend(history, scrub, "rural")} />
-            {cap > 0 && (
-              <>
-                <Row k="Carrying capacity" v={fmt(land?.rural_cap ?? cap)} />
-                <Meter frac={saturation} warn={saturation > 1}
-                  label={`${Math.round(saturation * 100)}% of what the land supports`} />
-              </>
-            )}
-            <Row k="Urban" v={(sample?.urban ?? urban) ? fmt(sample?.urban ?? urban) : "—"}
-              trend={trend(history, scrub, "urban")} />
-            <Row k="Total" v={fmt((sample?.rural ?? rural) + (sample?.urban ?? urban))} />
-            {live && live.net_migration < 0 && (
-              <Row k="Migration" v={`↗ ${fmt(-live.net_migration)}/yr to the cities`} />
-            )}
+            <Section title="People">
+              <Row k="Rural" v={fmt(sample?.rural ?? rural)} trend={trend(history, scrub, "rural")} />
+              {cap > 0 && (
+                <>
+                  <Row k="Carrying capacity" v={fmt(land?.rural_cap ?? cap)} />
+                  <MeterLabel frac={saturation} warn={saturation > 1}
+                    label={`${Math.round(saturation * 100)}% of what the land supports`} />
+                </>
+              )}
+              <Row k="Urban" v={(sample?.urban ?? urban) ? fmt(sample?.urban ?? urban) : "—"}
+                trend={trend(history, scrub, "urban")} />
+              <Row k="Total" v={fmt((sample?.rural ?? rural) + (sample?.urban ?? urban))} />
+              {live && live.net_migration < 0 && (
+                <Row k="Migration" v={`↗ ${fmt(-live.net_migration)}/yr to the cities`} />
+              )}
+            </Section>
 
             {land && (
-              <>
-                <Section title="Discontent" />
+              <Section title="Discontent">
                 {/* Unrest is rural here for the first time. Every major pre-modern
                     revolt was — Jacquerie, 1381, the Peasants' War — and it was a
                     city-only property in this model until now. */}
-                <Meter frac={sample?.unrest ?? land.unrest} warn={(sample?.unrest ?? land.unrest) > 0.5}
+                <MeterLabel frac={sample?.unrest ?? land.unrest} warn={(sample?.unrest ?? land.unrest) > 0.5}
                   label={unrestWord(sample?.unrest ?? land.unrest)} />
                 <Row k="Dues" v={pct(land.tax_rate)} />
                 {land.arrears > 1 && (
-                  <div style={{ opacity: 0.65, fontSize: 12 }}>
+                  <div style={{ color: T.inkDim, fontSize: 12 }}>
                     {fmt(land.arrears)} in arrears — dues assessed that never arrived.
                   </div>
                 )}
-              </>
+              </Section>
             )}
 
             {shares.length > 0 && (
-              <>
-                <Section title="Peoples" />
+              <Section title="Peoples">
                 <ShareBar rows={shares.map(([name, s]) => ({ label: name, share: s }))} />
-                <div style={{ opacity: 0.7, fontSize: 12, marginTop: 2 }}>
+                <div style={{ color: T.inkMid, fontSize: 12, marginTop: 2 }}>
                   {shares.map(([n, s]) => `${pct(s)} ${n}`).join(" · ")}
                 </div>
-              </>
+              </Section>
             )}
           </>
         )}
@@ -576,117 +625,79 @@ export function ProvinceInspector() {
         {/* ── HOLDINGS ─────────────────────────────────────────────────────── */}
         {tab === "holdings" && (
           <>
-            <Section title="Settlements" />
-            {miniSettlements.length === 0 ? (
-              <div style={{ opacity: 0.5 }}>frontier — no towns</div>
-            ) : miniSettlements.slice().sort((a, b) => b.population - a.population).map((s, i) => (
-              <div key={`${s.name}-${i}`} style={{ padding: "1px 0" }}>
-                {s.seat ? "★ " : "· "}{s.name} <span style={{ opacity: 0.55 }}>{fmt(s.population)}</span>
-                {s.seat ? <span style={{ opacity: 0.5 }}> (seat)</span> : null}
-              </div>
-            ))}
+            <Section title="Settlements">
+              {miniSettlements.length === 0 ? (
+                <div style={{ color: T.inkFaint }}>frontier — no towns</div>
+              ) : miniSettlements.slice().sort((a, b) => b.population - a.population).map((s, i) => (
+                <div key={`${s.name}-${i}`} style={{ padding: "1px 0", color: T.ink }}>
+                  {s.seat ? "★ " : "· "}{s.name} <span style={{ color: T.inkDim }}>{fmt(s.population)}</span>
+                  {s.seat ? <span style={{ color: T.inkFaint }}> (seat)</span> : null}
+                </div>
+              ))}
+            </Section>
 
             {land && (
               <>
-                <Section title="Tenure" />
-                {/* Who holds the land is the most consequential single variable in
-                    pre-modern economic history, and the model had no answer to it. */}
-                {(["civic & crown", "house & noble", "temple", "common land"] as const).map((lbl, i) => (
-                  <Row key={lbl} k={lbl} v={pct(land.tenure[i])} />
-                ))}
-                {land.holders.length > 0 && (
-                  <>
-                    <div style={{ opacity: 0.7, fontSize: 12, marginTop: 4 }}>Families holding estates here</div>
-                    {land.holders.map((h) => (
-                      <div key={h.house} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1px 0" }}>
-                        <span style={{ width: 9, height: 9, borderRadius: 2, background: h.color }} />
-                        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                          {h.name}
-                        </span>
-                        <span style={{ opacity: 0.6, fontSize: 12 }}>
-                          {h.estates} estate{h.estates === 1 ? "" : "s"}
-                        </span>
+                <Section title="Tenure">
+                  {/* Who holds the land is the most consequential single variable in
+                      pre-modern economic history, and the model had no answer to it. */}
+                  {(["civic & crown", "house & noble", "temple", "common land"] as const).map((lbl, i) => (
+                    <Row key={lbl} k={lbl} v={pct(land.tenure[i])} />
+                  ))}
+                  {land.holders.length > 0 && (
+                    <>
+                      <div style={{ color: T.inkMid, fontSize: 12, marginTop: 4 }}>Families holding estates here</div>
+                      {land.holders.map((h) => (
+                        <div key={h.house} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1px 0" }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 2, background: h.color }} />
+                          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.ink }}>
+                            {h.name}
+                          </span>
+                          <span style={{ color: T.inkDim, fontSize: 12 }}>
+                            {h.estates} estate{h.estates === 1 ? "" : "s"}
+                          </span>
+                        </div>
+                      ))}
+                    </>
+                  )}
+                </Section>
+
+                {/* ── The one remaining player verb: rural dues. Land improvement
+                       itself is autonomous now (v2.0) — see "Under way" on the
+                       Land tab for what's happening and who's paying. */}
+                <Section title="Control">
+                  {!canAct ? (
+                    <div style={{ color: T.inkDim, fontSize: 12 }}>
+                      No town administers this province — there is nobody to collect dues.
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ color: T.inkMid, minWidth: 96 }}>Rural dues</span>
+                        <input type="range" min={0} max={Math.round(land.tax_max * 100)}
+                          value={Math.round(land.tax_rate * 100)} disabled={busy}
+                          onChange={(e) => act(() =>
+                            campaignSetProvinceTax(p.id, Number(e.target.value) / 100))}
+                          style={{ flex: 1 }} />
+                        <span style={{ minWidth: 34, textAlign: "right", color: T.ink }}>{pct(land.tax_rate)}</span>
                       </div>
-                    ))}
-                  </>
-                )}
-
-                {/* ── CONTROL. Before this, campaign_advance was the only command that
-                       mutated a running simulation. A province is the right place to
-                       break that: a decision here has a PLACE the player can see. */}
-                <Section title="Control" />
-                {!canAct ? (
-                  <div style={{ opacity: 0.6, fontSize: 12 }}>
-                    No town administers this province — there is nobody to collect dues
-                    or fund works.
-                  </div>
-                ) : (
-                  <>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ opacity: 0.65, minWidth: 96 }}>Rural dues</span>
-                      <input type="range" min={0} max={Math.round(land.tax_max * 100)}
-                        value={Math.round(land.tax_rate * 100)} disabled={busy}
-                        onChange={(e) => act(() =>
-                          campaignSetProvinceTax(p.id, Number(e.target.value) / 100))}
-                        style={{ flex: 1 }} />
-                      <span style={{ minWidth: 34, textAlign: "right" }}>{pct(land.tax_rate)}</span>
-                    </div>
-                    <div style={{ opacity: 0.6, fontSize: 12, marginBottom: 6 }}>
-                      Above about 15% the countryside resents it, evades more, and
-                      eventually rises.
-                    </div>
-
-                    {land.works.length > 0 && (
-                      <>
-                        <div style={{ opacity: 0.7, fontSize: 12 }}>Under way</div>
-                        {land.works.map((w) => (
-                          <div key={w.kind} style={{ marginBottom: 5 }}>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                              <span style={{ flex: 1 }}>
-                                {w.label}
-                                {w.stalled && <span style={{ color: "#c96a4a" }}> · stalled, unpaid</span>}
-                              </span>
-                              <span style={{ opacity: 0.6 }}>
-                                {w.years_left < 1 ? "<1y" : `${Math.round(w.years_left)}y left`}
-                              </span>
-                              <button style={btnSm} disabled={busy}
-                                onClick={() => act(() => campaignCancelProvinceWork(p.id, w.kind))}>
-                                abandon
-                              </button>
-                            </div>
-                            <Meter frac={w.progress} label={`${Math.round(w.progress * 100)}% · ${fmt(w.yearly_cost)}/yr from ${w.funder}`} />
-                          </div>
-                        ))}
-                      </>
-                    )}
-
-                    <div style={{ opacity: 0.7, fontSize: 12, marginTop: 4 }}>Begin a work</div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                      {WORK_LABEL.map((lbl, kind) => {
-                        const running = land.works.some((w) => w.kind === kind);
-                        return (
-                          <button key={kind} style={{ ...btnSm, opacity: running || busy ? 0.45 : 1 }}
-                            disabled={running || busy}
-                            title={running ? "already under way" : WORK_BLURB[kind]}
-                            onClick={() => act(() =>
-                              campaignStartProvinceWork(p.id, kind, holderHub, -1))}>
-                            {lbl}
-                          </button>
-                        );
-                      })}
-                    </div>
-                    <div style={{ opacity: 0.55, fontSize: 12, marginTop: 3 }}>
-                      Funded from {land.holder_house >= 0 ? "the seat city's" : `${land.holder_name}'s`} treasury, over years. Unpaid work
-                      stalls rather than failing.
-                    </div>
-                  </>
-                )}
+                      <div style={{ color: T.inkDim, fontSize: 12, marginBottom: 4 }}>
+                        Above about 15% the countryside resents it, evades more, and
+                        eventually rises.
+                      </div>
+                      <FootNote>
+                        {realm
+                          ? `Land improvement here is funded by ${realm.name}'s own treasury — sovereignty grants full capability regardless of the seat's own advancement.`
+                          : `Land improvement here begins on its own once ${land.holder_name || "the seat city"} is advanced enough to administer it, funded from its treasury.`}
+                      </FootNote>
+                    </>
+                  )}
+                </Section>
               </>
             )}
 
             {nd.length > 0 && (
-              <>
-                <Section title={`Borders (${nd.length})`} />
+              <Section title={`Borders (${nd.length})`}>
                 {nd.slice(0, 8).map((b) => {
                   const kind = borderKind(b.kind);
                   const nb = provinces.find((q) => q.id === b.neighbor);
@@ -695,30 +706,29 @@ export function ProvinceInspector() {
                       title={`Divided by ${kind.label}`}
                       style={{ display: "flex", gap: 8, alignItems: "center", padding: "2px 4px",
                         cursor: "pointer", borderRadius: 4 }}
-                      onMouseEnter={(e) => (e.currentTarget.style.background = "#1b2b22")}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = T.raised)}
                       onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
                       <span style={{ width: 16, textAlign: "center" }}>{kind.icon}</span>
-                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: T.ink }}>
                         {nb?.name ?? `province ${b.neighbor}`}
                       </span>
-                      <span style={{ opacity: 0.55, fontSize: 12 }}>{kind.label}</span>
-                      <span style={{ opacity: 0.5, fontSize: 12, width: 62, textAlign: "right" }}>
+                      <span style={{ color: T.inkDim, fontSize: 12 }}>{kind.label}</span>
+                      <span style={{ color: T.inkFaint, fontSize: 12, width: 62, textAlign: "right" }}>
                         {cellKm > 0 ? cellsToKm(b.cells, cellKm) : `${b.cells} cells`}
                       </span>
                     </div>
                   );
                 })}
-              </>
+              </Section>
             )}
           </>
         )}
 
         {/* ── TRADE ────────────────────────────────────────────────────────── */}
         {tab === "trade" && (
-          <>
-            <Section title="Commerce of the province" />
+          <Section title="Commerce of the province">
             <ProvinceTradeView provinceId={p.id} reload={reload} />
-          </>
+          </Section>
         )}
 
         {/* ── CHRONICLE ────────────────────────────────────────────────────── */}
@@ -726,36 +736,39 @@ export function ProvinceInspector() {
           <>
             {/* A city chronicle is a biography; a province chronicle is a history, and
                 the province is the natural unit for one. */}
-            <Section title="This country's history" />
-            {!land || land.events.length === 0 ? (
-              <div style={{ opacity: 0.6, fontSize: 12 }}>
-                Nothing recorded yet. Clearances, dearths, revolts and finished works
-                are written down here as the campaign runs.
-              </div>
-            ) : land.events.slice().reverse().map((e, i) => (
-              <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
-                <span style={{ opacity: 0.55, width: 52, flex: "0 0 auto" }}>yr {e.year}</span>
-                <span style={{ width: 18, flex: "0 0 auto" }}>{eventIcon(e.kind)}</span>
-                <span style={{ flex: 1 }}>{e.text}</span>
-              </div>
-            ))}
+            <Section title="This country's history">
+              {!land || land.events.length === 0 ? (
+                <EmptyNote>
+                  Nothing recorded yet. Clearances, dearths, revolts and finished works
+                  are written down here as the campaign runs.
+                </EmptyNote>
+              ) : land.events.slice().reverse().map((e, i) => (
+                <div key={i} style={{ display: "flex", gap: 8, padding: "2px 0" }}>
+                  <span style={{ color: T.inkDim, width: 52, flex: "0 0 auto" }}>yr {e.year}</span>
+                  <span style={{ width: 18, flex: "0 0 auto" }}>{eventIcon(e.kind)}</span>
+                  <span style={{ flex: 1, color: T.ink }}>{e.text}</span>
+                </div>
+              ))}
+            </Section>
 
-            <div style={{ marginTop: 12, padding: "8px 10px", background: "rgba(0,0,0,0.25)",
-              border: "1px solid #24382c", borderRadius: 6 }}>
-              <div style={{ opacity: 0.8 }}>🌍 <b>Looks most like</b></div>
-              <div style={{ marginBottom: 8 }}>{p.analog}</div>
-              <div style={{ opacity: 0.8 }}>📜 <b>Character</b></div>
-              <div style={{ fontStyle: "italic", opacity: 0.9 }}>{provinceHistory(p, urban)}</div>
+            <Card>
+              <div style={{ color: T.inkMid }}>🌍 <b style={{ color: T.ink }}>Looks most like</b></div>
+              <div style={{ marginBottom: 8, color: T.ink }}>{p.analog}</div>
+              <div style={{ color: T.inkMid }}>📜 <b style={{ color: T.ink }}>Character</b></div>
+              <div style={{ fontStyle: "italic", color: T.ink }}>{provinceHistory(p, urban)}</div>
               {provinceFrontiers(p) && (
-                <div style={{ opacity: 0.75, marginTop: 6 }}>{provinceFrontiers(p)}</div>
+                <div style={{ color: T.inkMid, marginTop: 6 }}>{provinceFrontiers(p)}</div>
               )}
-            </div>
+            </Card>
           </>
         )}
-      </div>
-    </div>
+      </PanelBody>
+    </Panel>
   );
 }
+
+const TONE_GOOD_LINE = "rgba(76,174,122,0.4)";
+const TONE_GOOD_FILL = "rgba(76,174,122,0.16)";
 
 /** Change in a land series between the shown year and ~20 years earlier. A trend arrow
  *  is what turns a number into a reading — "38% arable" says nothing, "38% and rising"
@@ -799,56 +812,46 @@ function eventIcon(kind: string): string {
   }
 }
 
-function Section({ title }: { title: string }) {
-  return (
-    <div style={{ marginTop: 12, marginBottom: 4, fontWeight: 600, opacity: 0.85,
-      borderBottom: "1px solid #22342a", paddingBottom: 2 }}>{title}</div>
-  );
-}
-
 /** #9 · Deposit depth (0 surface … 3 flooded) → a word for the workings note. */
 function depthWord(d: number): string {
   return ["surface", "shallow", "deep", "flooded"][Math.max(0, Math.min(3, d))];
 }
 
 const sortBtn: React.CSSProperties = {
-  background: "#12202c", border: "1px solid #24384a", color: "#7fa0bd",
+  background: T.raised, border: `1px solid ${T.line}`, color: T.accent,
   borderRadius: 4, fontSize: 10, padding: "1px 6px", cursor: "pointer", whiteSpace: "nowrap",
 };
 
 function Row({ k, v, trend }: { k: string; v: string; trend?: "up" | "down" | null }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
-      <span style={{ opacity: 0.65 }}>{k}</span>
-      <span>
+      <span style={{ color: T.inkDim }}>{k}</span>
+      <span style={{ color: T.ink }}>
         {v}
-        {trend === "up" && <span style={{ color: "#7fb069" }} title="rising over the last ~20 years"> ▲</span>}
-        {trend === "down" && <span style={{ color: "#c96a4a" }} title="falling over the last ~20 years"> ▼</span>}
+        {trend === "up" && <span style={{ color: T.good }} title="rising over the last ~20 years"> ▲</span>}
+        {trend === "down" && <span style={{ color: T.bad }} title="falling over the last ~20 years"> ▼</span>}
       </span>
     </div>
   );
 }
 
-/** Rural population against what the land can actually feed. */
-function Meter({ frac, label, warn }: { frac: number; label: string; warn?: boolean }) {
+/** A labelled meter, over the shared `Meter` bar primitive. */
+function MeterLabel({ frac, label, warn }: { frac: number; label: string; warn?: boolean }) {
   return (
     <div style={{ margin: "3px 0 5px" }}>
-      <div style={{ height: 6, background: "#16241b", borderRadius: 3, overflow: "hidden" }}>
-        <div style={{ width: `${Math.min(100, frac * 100)}%`, height: "100%",
-          background: warn ? "#c96a4a" : "#7fb069" }} />
-      </div>
-      <div style={{ opacity: 0.6, fontSize: 12 }}>{label}</div>
+      <KitMeter value={Math.min(1, Math.max(0, frac))} color={warn ? T.bad : T.good} />
+      <div style={{ color: T.inkDim, fontSize: 12 }}>{label}</div>
     </div>
   );
 }
 
-const SHARE_COLORS = ["#7fb069", "#5a9bd4", "#e3c14a", "#c98c62", "#9b7fc0"];
+const SHARE_COLORS = [T.good, T.accent, T.gold, "#c98c62", "#9b7fc0"];
 
 /** A single stacked bar for a share breakdown (peoples, climates). */
 function ShareBar({ rows }: { rows: { label: string; share: number }[] }) {
   return (
     <div style={{ display: "flex", height: 8, borderRadius: 4, overflow: "hidden",
-      marginTop: 6, background: "#16241b" }}>
+      marginTop: 6, background: T.card }}>
       {rows.map((r, i) => (
         <div key={r.label} title={`${r.label} ${Math.round(r.share * 100)}%`}
           style={{ width: `${r.share * 100}%`, background: SHARE_COLORS[i % SHARE_COLORS.length] }} />
@@ -856,19 +859,3 @@ function ShareBar({ rows }: { rows: { label: string; share: number }[] }) {
     </div>
   );
 }
-
-const panel: React.CSSProperties = {
-  position: "absolute", top: 80, right: 90, width: 460, maxHeight: "82vh",
-  border: "1px solid #24382c", borderRadius: 10,
-  color: "#d6e6da", font: "13px/1.45 system-ui, sans-serif", zIndex: 41,
-  display: "flex", flexDirection: "column", boxShadow: "0 8px 30px rgba(0,0,0,.5)",
-};
-const header: React.CSSProperties = {
-  display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
-  borderBottom: "1px solid #1b2b22",
-};
-const btn: React.CSSProperties = {
-  background: "#1b2b22", color: "#d6e6da", border: "1px solid #24382c",
-  borderRadius: 5, padding: "3px 9px", cursor: "pointer", fontSize: 13,
-};
-const btnSm: React.CSSProperties = { ...btn, padding: "1px 7px", fontSize: 11 };

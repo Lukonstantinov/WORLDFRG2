@@ -2,11 +2,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { simGenerateProvinces, simMergeSmallProvinces, simSplitLargeProvinces, campaignProvinceState, campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop } from "@bridge";
+import {
+  simGenerateProvinces, simMergeSmallProvinces, simSplitLargeProvinces, campaignProvinceState,
+  campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop,
+  campaignProvinceGoods, campaignProvincePotential,
+} from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
-import type { Province, ProvinceLive, ProvinceDetail, ProvinceLand, ProvinceTerrainCrop, PSettlement } from "@types";
+import type {
+  Province, ProvinceLive, ProvinceDetail, ProvinceLand, ProvinceTerrainCrop, PSettlement,
+  ProvinceGoodExploit, ProvincePotential,
+} from "@types";
 
 import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
 
@@ -145,6 +152,23 @@ export function ProvincePanel() {
       .catch(() => { if (!stale) setDetail(null); });
     return () => { stale = true; };
   }, [open, selected?.id, provinces]);
+
+  // v2.0 · what's actually PRODUCED here (actual/potential/yr), not just the frozen
+  // worldgen quality shortlist — the browser list used to be the only province view
+  // with no real yield numbers at all, unlike the full Inspector dossier.
+  const [exploit, setExploit] = useState<ProvinceGoodExploit[]>([]);
+  const [potential, setPotential] = useState<ProvincePotential | null>(null);
+  useEffect(() => {
+    if (!open || !selected) { setExploit([]); setPotential(null); return; }
+    let stale = false;
+    campaignProvinceGoods(selected.id)
+      .then((g) => { if (!stale) setExploit(g); })
+      .catch(() => { if (!stale) setExploit([]); });
+    campaignProvincePotential(selected.id)
+      .then((pot) => { if (!stale) setPotential(pot); })
+      .catch(() => { if (!stale) setPotential(null); });
+    return () => { stale = true; };
+  }, [open, selected?.id]);
 
   // The survey plate's real terrain crop (§2.3) — world geography, independent of
   // the campaign join above.
@@ -430,15 +454,66 @@ export function ProvincePanel() {
                       rivers={rivers}
                     />
 
-                    <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>Goods (quality)</div>
-                    {selected.goods.length === 0 ? (
-                      <div style={{ opacity: 0.5 }}>no notable produce</div>
-                    ) : selected.goods.map((g) => (
-                      <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>
-                        <span style={{ width: 130 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
-                        <span style={{ color: "#e3c14a", letterSpacing: 1 }}>{stars(g.quality)}</span>
-                      </div>
-                    ))}
+                    <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>
+                      Goods produced
+                    </div>
+                    {(() => {
+                      // v2.0 · real yield, not just the frozen quality shortlist: actual
+                      // production where the campaign has any, live potential otherwise,
+                      // falling all the way back to the worldgen quality list on a world
+                      // with no campaign running yet (or a good below its top-6 shortlist).
+                      const exploitByGood = new Map(exploit.map((g) => [g.good, g]));
+                      const potByGood = new Map((potential?.goods ?? []).map((g) => [g.good, g]));
+                      const rows = potential && potential.goods.length > 0
+                        ? potential.goods.slice().sort((a, b) => {
+                            const qa = a.is_deposit && a.workings > 0 ? a.mean_grade
+                              : (a.actual > 1e-4 ? 1 : 0) * 10 + a.belt;
+                            const qb = b.is_deposit && b.workings > 0 ? b.mean_grade
+                              : (b.actual > 1e-4 ? 1 : 0) * 10 + b.belt;
+                            return qb - qa;
+                          })
+                        : null;
+                      const dep = potential?.deposits ?? [];
+                      if (!rows) {
+                        return selected.goods.length === 0 ? (
+                          <div style={{ opacity: 0.5 }}>no notable produce</div>
+                        ) : selected.goods.map((g) => (
+                          <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>
+                            <span style={{ width: 130 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                            <span style={{ color: "#e3c14a", letterSpacing: 1 }}>{stars(g.quality)}</span>
+                          </div>
+                        ));
+                      }
+                      if (rows.length === 0) return <div style={{ opacity: 0.5 }}>no notable produce</div>;
+                      return (
+                        <>
+                          {dep.length > 0 && (
+                            <div style={{ opacity: 0.7, fontSize: 11, marginBottom: 3 }}>
+                              💎 {dep.length} deposit{dep.length === 1 ? "" : "s"} · mean grade{" "}
+                              {Math.round(dep.reduce((s, d) => s + d.grade, 0) / dep.length * 100)}%
+                            </div>
+                          )}
+                          {rows.slice(0, 10).map((g) => {
+                            const ex = exploitByGood.get(g.good);
+                            const q = g.is_deposit && g.workings > 0 ? g.mean_grade : g.belt;
+                            return (
+                              <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>
+                                <span style={{ width: 130 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                                <span style={{ color: "#e3c14a", letterSpacing: 1, fontSize: 11 }}>{stars(q)}</span>
+                                <span style={{ flex: 1 }} />
+                                <span style={{ opacity: 0.6, fontSize: 11 }}>
+                                  {ex && ex.actual > 1e-4
+                                    ? `${Math.round(ex.actual).toLocaleString()}/yr`
+                                    : g.actual > 1e-4
+                                    ? `${Math.round(g.actual).toLocaleString()}/yr`
+                                    : `~${Math.round(g.potential).toLocaleString()}/yr potential`}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </>
+                      );
+                    })()}
 
                     <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>
                       Settlements {towns.length ? `(${towns.length})` : ""}

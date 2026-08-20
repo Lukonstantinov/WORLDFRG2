@@ -957,6 +957,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_pasture: vec![],
         prov_irrigated: vec![],
         prov_soil: vec![],
+        prov_area_km2: vec![],
+        prov_relief_m: vec![],
         prov_tenure: vec![],
         suppress_realms: false,
         suppress_relief: false,
@@ -1109,6 +1111,10 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     let mut arable = vec![0.0f32; n];
     let mut pasture = vec![0.0f32; n];
     let mut soil = vec![0.6f32; n];
+    // Province works v2.0 · real size + relief, straight off the world's own partition
+    // — a work's cost scales with both (see `CampaignSim::work_cost`).
+    let mut area_km2 = vec![0.0f32; n];
+    let mut relief_m = vec![0.0f32; n];
     let mut tenure = vec![[0.18f32, 0.10, 0.09, 0.63]; n];
     // §2.5 · the frozen per-(province, good) belt score, flat `n * ng`. `good_belt`
     // is indexed identically to `sim.goods` (both trace back to `load_world_goods`),
@@ -1134,6 +1140,8 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
         };
         let fert = p.mean_fertility.clamp(0.0, 1.0);
         let upland = match p.elevation_class { 0 => 1.0, 1 => 0.85, _ => 0.6 };
+        area_km2[i] = p.area_km2 as f32;
+        relief_m[i] = p.relief_m.max(0) as f32;
         forest[i] = (climate_wood * (1.0 - 0.7 * arid) * upland).clamp(0.02, 0.85);
         // Cleared land at campaign start scales with how much of the province the
         // countryside already works — good land is already partly under the plough.
@@ -1158,6 +1166,8 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     sim.prov_pasture = pasture;
     sim.prov_irrigated = vec![0.0; n];
     sim.prov_soil = soil;
+    sim.prov_area_km2 = area_km2;
+    sim.prov_relief_m = relief_m;
     sim.prov_tenure = tenure;
     sim.prov_tax = vec![0.12; n];
     sim.prov_arrears = vec![0.0; n];

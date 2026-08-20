@@ -1134,17 +1134,25 @@ fn make_working(
 ) -> Deposit {
     // Grade follows the local setting fit — a camp is richest at its centre and
     // poorer at the margins, which is what zoning around an intrusion looks like.
+    // v2.0 · baseline and floor both raised (was 0.25 base / 0.05 floor): a working
+    // that clears every placement gate (real tectonic setting, real proximity, real
+    // grade fit) is meant to be worth digging, not a coin flip against being a scrap
+    // deposit — the gates already do the "does this exist at all" job (§8.16's five
+    // rules), so grade no longer needs to re-litigate that with a low floor too.
     let fit = (local * 0.6 + cscore * 0.4).clamp(0.0, 1.0);
-    let grade = (0.25 + 0.65 * fit + 0.20 * (hash01(ks ^ 0x51) - 0.5)).clamp(0.05, 1.0);
+    let grade = (0.42 + 0.55 * fit + 0.14 * (hash01(ks ^ 0x51) - 0.5)).clamp(0.20, 1.0);
 
     // Extent: most bodies are small. A world-class one is rare and is the reason a
-    // Potosí or a Rammelsberg exists at all.
-    let r = hash01(ks ^ 0x62) * (0.65 + 0.35 * fit);
-    let extent = if r > 0.93 {
+    // Potosí or a Rammelsberg exists at all. v2.0 · thresholds lowered so a well-fit
+    // working is more often a real body worth working, not a pocket — still weighted
+    // toward WEAK/MODERATE at a poor-fit margin (the `fit` term still narrows the
+    // random draw there), so a camp's own centre-to-edge zoning is unchanged.
+    let r = hash01(ks ^ 0x62) * (0.70 + 0.30 * fit);
+    let extent = if r > 0.85 {
         EXTENT_WORLD_CLASS
-    } else if r > 0.76 {
+    } else if r > 0.62 {
         EXTENT_GREAT
-    } else if r > 0.45 {
+    } else if r > 0.32 {
         EXTENT_MODERATE
     } else {
         EXTENT_WEAK

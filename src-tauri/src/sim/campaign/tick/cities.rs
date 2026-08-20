@@ -717,8 +717,13 @@ impl CampaignSim {
                 let pressure = (exploitation - 1.0).max(0.0);
                 let ease = (1.0 - exploitation).max(0.0);
                 let kind = self.dominant_estate_kind(p, g);
+                // v2.0 · a mine no longer wears down under pressure at all — the ore
+                // body's richness (grade/extent, `deposits.rs` §8.16) is a fixed
+                // geological fact set once at worldgen, not something a decade of
+                // digging should thin out. Same treatment a vineyard already gets
+                // ("doesn't lose tonnage") and for the identical reason.
                 let (wear_k, recover_k): (f32, f32) = match kind {
-                    2 => (1.3, 0.15), // mine — "exhausts": wears fast, almost never heals
+                    2 => (0.0, 1.0),  // mine — the deposit's richness never erodes
                     4 => (0.8, 2.2),  // fishery — "collapses and recovers": hard down, fast back
                     5 => (0.0, 1.0),  // vineyard — doesn't lose tonnage under pressure
                     _ => (1.0, 1.0),
@@ -886,16 +891,23 @@ impl CampaignSim {
         for wi in idx {
             let kind = self.prov_works[wi].kind as usize;
             if kind >= WORK_KINDS.len() { continue; }
-            let cost = WORK_COST[kind];
-            // Draw the year's cost. A polis pays from its treasury, a house from wealth.
+            let cost = self.work_cost(p, kind as u8);
+            // Draw the year's cost. A polis pays from its treasury, a house from
+            // wealth, or (v2.0) a realm from its own treasury when it holds this
+            // province's sovereignty — the crown administering its own land.
             let paid = {
                 let fh = self.prov_works[wi].funder_hub;
                 let fs = self.prov_works[wi].funder_house;
+                let fr = self.prov_works[wi].funder_realm;
                 if fh >= 0 && (fh as usize) < self.hubs.len() && self.hubs[fh as usize].treasury >= cost {
                     self.hubs[fh as usize].treasury -= cost; true
                 } else if fs >= 0 && (fs as usize) < self.houses.len()
                     && self.houses[fs as usize].wealth >= cost * 1.5 {
                     self.houses[fs as usize].wealth -= cost; true
+                } else if fr >= 0 && (fr as usize) < self.realms.len()
+                    && self.realms[fr as usize].fallen_tick == 0
+                    && self.realms[fr as usize].treasury >= cost {
+                    self.realms[fr as usize].treasury -= cost; true
                 } else { false }
             };
             if !paid {
@@ -941,6 +953,104 @@ impl CampaignSim {
             });
         }
         self.prov_works.retain(|w| w.progress < 1.0);
+    }
+
+    /// A work's real yearly cost in THIS province — the flat `WORK_COST[kind]` scaled
+    /// by real size (a big province has more land to clear/drain/irrigate/road) and
+    /// real terrain roughness (a road through the mountains costs far more than one
+    /// across a plain). Zero-area/zero-relief data (a pre-v2.0 save; see the two
+    /// fields' own doc) leaves both multipliers at 1.0 — the old flat cost — so this
+    /// is a pure extension, never a repricing of an existing save.
+    pub(crate) fn work_cost(&self, p: usize, kind: u8) -> f32 {
+        let base = WORK_COST[(kind as usize).min(WORK_COST.len() - 1)];
+        let area = self.prov_area_km2.get(p).copied().unwrap_or(0.0).max(0.0);
+        let size_factor = if area > 0.0 { (area / WORK_AREA_REFERENCE_KM2).clamp(0.5, 3.0) } else { 1.0 };
+        let relief = self.prov_relief_m.get(p).copied().unwrap_or(0.0).max(0.0);
+        let roughness = (relief / WORK_RELIEF_REFERENCE_M).clamp(0.0, 3.0);
+        let w = WORK_ROUGHNESS_WEIGHT[(kind as usize).min(3)];
+        let terrain_factor = 1.0 + roughness * w * 0.5;
+        base * size_factor * terrain_factor
+    }
+
+    /// Yearly · autonomous land-improvement funding (province works v2.0). Picks, for
+    /// every province with no work already under way, the single most useful kind for
+    /// its CURRENT land state — a road where arrears or unrest are biting, irrigation
+    /// where the arable share is dry, drainage where waste is high, clearance only once
+    /// none of those apply.
+    ///
+    /// Eligibility and funder are two tiers (maintainer's own design): a province NOT
+    /// under a realm can only improve once its own seat city is advanced enough to
+    /// administer the project (`hub.tier > 0` — the city-tier ladder §3.2 computes
+    /// monthly), and the city's OWN treasury pays. A province UNDER a realm's
+    /// sovereignty (`prov_realm >= 0`, rule 27) gets FULL capability regardless of its
+    /// seat's own tier — the crown's administration substitutes — and the REALM's
+    /// treasury pays instead.
+    pub(crate) fn maybe_fund_province_works(&mut self, yr: u32) {
+        let np = self.prov_forest.len();
+        if np == 0 { return; }
+        let tick = self.tick;
+        for p in 0..np {
+            // Already working something here — don't pile on a second project.
+            if self.prov_works.iter().any(|w| w.province as usize == p) { continue; }
+            let Some(seat) = self.province_seat_hub(p) else { continue };
+            let realm = self.prov_realm.get(p).copied().unwrap_or(-1);
+            let under_realm = realm >= 0 && (realm as usize) < self.realms.len()
+                && self.realms[realm as usize].fallen_tick == 0;
+            // Eligibility: sovereignty always qualifies; otherwise the seat city must
+            // have cleared SOME tier — an untiered town has nothing to spare yet.
+            if !under_realm && self.hubs.get(seat).map(|h| h.tier).unwrap_or(0) == 0 { continue; }
+
+            // WHICH kinds are available is the other half of "a province is worked
+            // FULLY once it is under a realm". STATE INFRASTRUCTURE — an irrigation
+            // system, a made road — needs a state: these are the classic crown
+            // projects (qanats, Roman roads), they span more than one community's
+            // land, and they are what a crown's reach buys. CLEARANCE and DRAINAGE
+            // are local, manorial work a town does to its own hinterland, so a free
+            // province still improves its land, just never gains the infrastructure.
+            //
+            // This is also what keeps the pass's economic weight honest: irrigation
+            // carries `PROV_IRRIGATION_GAIN` (+45% on the harvest at full watering),
+            // far the largest single term here, so letting every city-funded province
+            // drive it to cap made autonomous works a world-wide yield multiplier
+            // rather than a slow improvement — measured, it inverted
+            // `econ_inheritance_rules_fragment_differently`'s substantive claim.
+            let waste = (1.0 - self.prov_forest[p] - self.prov_arable[p] - self.prov_pasture[p]).max(0.0);
+            let kind = if under_realm && (self.prov_arrears[p] > PROV_WORK_ROAD_ARREARS
+                || self.prov_unrest[p] > PROV_WORK_ROAD_UNREST) {
+                WORK_ROAD
+            } else if under_realm && self.prov_irrigated[p] < 0.55 && self.prov_arable[p] > 0.15 {
+                WORK_IRRIGATE
+            } else if waste > 0.15 {
+                WORK_DRAIN
+            } else if self.prov_forest[p] > 0.18 && self.prov_arable[p] < 0.85 {
+                WORK_CLEAR
+            } else {
+                continue;
+            };
+            let k = kind as usize;
+            let cost = self.work_cost(p, kind);
+
+            let (funder_hub, funder_house, funder_realm): (i32, i32, i32) = if under_realm {
+                if self.realms[realm as usize].treasury < cost * PROV_WORK_AUTO_REALM_MULT { continue; }
+                (-1, -1, realm)
+            } else if self.hubs.get(seat).is_some_and(|h| h.treasury >= cost * PROV_WORK_AUTO_HUB_MULT) {
+                (seat as i32, -1, -1)
+            } else { continue };
+
+            let salt = ((p as u64) << 20) ^ ((yr as u64) << 4) ^ (k as u64);
+            if hash01(self.seed, tick as u64 ^ 0x9707_0A62, salt) > PROV_WORK_AUTO_CHANCE { continue; }
+            self.prov_works.push(ProvWork {
+                province: p as u32, kind, progress: 0.0,
+                funder_hub, funder_house, funder_realm, start_tick: tick, idle_years: 0,
+            });
+            let pn = self.province_name(p);
+            let label = WORK_KINDS[k];
+            let funder_name = if funder_realm >= 0 { self.realms[funder_realm as usize].name.clone() }
+                else if funder_hub >= 0 { self.hubs[funder_hub as usize].name.clone() }
+                else { "an unknown patron".to_string() };
+            self.push_prov_event(p, yr, label,
+                format!("{} begun in {}, funded by {}", label, pn, funder_name));
+        }
     }
 
     /// The province id a world cell (x,y) falls in, via the nearest seat (used to place

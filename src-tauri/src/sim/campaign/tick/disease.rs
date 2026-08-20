@@ -578,6 +578,11 @@ impl CampaignSim {
             // its cities (migration carries culture); big cities pay a graveyard mortality.
             // No-op unless a province layer was seeded into the campaign.
             self.province_demography_pass();
+            // Province works v2.0 · a prosperous holder autonomously begins a land
+            // improvement here (no player action required — see the pass's own doc).
+            // Runs BEFORE the land pass so a work started this year can also progress
+            // in the SAME year's `advance_province_works` call below.
+            self.maybe_fund_province_works(self.tick / TICKS_PER_YEAR);
             // B1 · then the LAND itself: woodland cleared, soil worn or rested, works
             // advanced, the harvest taken, dues collected — and the surplus delivered
             // into the seat city's granary and treasury. Also a no-op without provinces.

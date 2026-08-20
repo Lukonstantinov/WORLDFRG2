@@ -4837,6 +4837,16 @@ pub struct CampaignSim {
     #[serde(default)] pub prov_irrigated: Vec<f32>,
     /// Soil condition 0..1. Depletes under intensive cropping, recovers on fallow.
     #[serde(default)] pub prov_soil: Vec<f32>,
+    /// Province works v2.0 · real area (km², from the world's own `Province.area_km2`)
+    /// — a work's cost scales with how much land there actually is to clear/drain/
+    /// irrigate/road. Frozen at campaign start like every other geography figure;
+    /// zero (and so a no-op multiplier, see `work_cost`) on a pre-v2.0 save.
+    #[serde(default)] pub prov_area_km2: Vec<f32>,
+    /// Province works v2.0 · real relief (m, `Province.relief_m` = max−min elevation)
+    /// — how broken the country is, which is what actually drives the cost of a road
+    /// or a drainage channel far more than flat acreage does. Same freeze/fallback
+    /// discipline as `prov_area_km2`.
+    #[serde(default)] pub prov_relief_m: Vec<f32>,
     /// Tenure shares — [civic/crown, house/noble, temple, common], summing to ~1.
     #[serde(default)] pub prov_tenure: Vec<[f32; 4]>,
     /// Rural tax rate 0..`PROV_TAX_MAX` set by the holder polis (or a player).
@@ -5549,8 +5559,54 @@ pub const WORK_YEARS: [f32; 4] = [6.0, 10.0, 8.0, 5.0];
 /// Yearly cost (grain-eq) drawn from the funding treasury, per kind.
 pub const WORK_COST: [f32; 4] = [40.0, 70.0, 55.0, 45.0];
 
+/// Province works v2.0 · these four kinds used to be startable ONLY by the player
+/// (`campaign_start_province_work` — one of just four mutating campaign verbs), so
+/// a campaign nobody was micromanaging never improved a single province's land, on
+/// any world, ever. `maybe_fund_province_works` gives every province the same
+/// opportunity a player had, through the identical `ProvWork`/`advance_province_works`
+/// funded-or-stalls machinery — this only decides WHETHER one begins, never how it
+/// progresses. Per-province yearly roll, so on average a qualifying province waits
+/// `1/PROV_WORK_AUTO_CHANCE` years for its holder to act.
+///
+/// Two eligibility/funding TIERS (maintainer's design, not the plan's original
+/// city-or-house choice): outside a realm, a province may only improve once its own
+/// seat city is advanced enough to administer the project (`hub.tier > 0`) and pays
+/// from that city's treasury; under a realm's sovereignty it gets FULL capability
+/// regardless of the seat's own tier, and the REALM's treasury pays instead — a
+/// crown administers its own land whether or not any one of its cities has grown.
+const PROV_WORK_AUTO_CHANCE: f32 = 0.12;
+/// Arrears above which a road becomes worth building on its own (dues are visibly
+/// leaking into arrears).
+const PROV_WORK_ROAD_ARREARS: f32 = 6.0;
+/// Rural unrest above which a road (which eases unrest 0.08 on completion) becomes
+/// worth building even with no arrears yet.
+const PROV_WORK_ROAD_UNREST: f32 = 0.30;
+/// A funder must hold this many times a work's (size/terrain-scaled) yearly cost
+/// before starting one autonomously — headroom so the work doesn't stall the moment
+/// it begins, unlike the player verb's bare `>= cost` (a player can watch and
+/// refund; the AI cannot).
+const PROV_WORK_AUTO_HUB_MULT: f32 = 2.0;
+const PROV_WORK_AUTO_REALM_MULT: f32 = 2.0;
+
+/// The province SIZE at which `work_cost`'s area multiplier is exactly 1.0 — a
+/// "typical" province, so a much bigger one costs proportionally more to improve
+/// and a tiny one proportionally less.
+const WORK_AREA_REFERENCE_KM2: f32 = 9000.0;
+/// The RELIEF (max−min elevation, m) at which `work_cost`'s terrain multiplier
+/// starts to bite meaningfully — broken, mountainous country.
+const WORK_RELIEF_REFERENCE_M: f32 = 1200.0;
+/// How strongly each work kind's cost responds to terrain roughness — order matches
+/// `WORK_CLEAR`/`WORK_DRAIN`/`WORK_IRRIGATE`/`WORK_ROAD`. A road is carved through
+/// the relief itself (highest); clearing/draining are harder on a slope but not
+/// defined by it (moderate); an irrigation channel follows the easiest contour it
+/// can find (lowest — it avoids roughness rather than fighting it).
+const WORK_ROUGHNESS_WEIGHT: [f32; 4] = [0.9, 0.8, 0.5, 1.3];
+
 /// A land improvement under way in a province. Funded yearly out of the funder's
-/// treasury (a polis) or wealth (a house); starved work stalls rather than failing.
+/// treasury (a polis), wealth (a house), or — v2.0, when the province lies inside a
+/// realm — the CROWN's own treasury (rule 27: sovereignty is a real, independent
+/// funding source, not just a tax destination). Starved work stalls rather than
+/// failing, whichever funder is set.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct ProvWork {
     pub province: u32,
@@ -5562,6 +5618,10 @@ pub struct ProvWork {
     pub funder_hub: i32,
     /// House paying instead, or −1.
     pub funder_house: i32,
+    /// Appended v2.0 · the realm paying instead (index into `CampaignSim::realms`),
+    /// or −1. A province under a realm's sovereignty (`prov_realm >= 0`) is funded
+    /// this way in preference to its seat city — the crown administers its own land.
+    #[serde(default = "neg_one_i32")] pub funder_realm: i32,
     pub start_tick: u32,
     /// Consecutive years the work went unpaid (decays progress past 2).
     pub idle_years: u32,
