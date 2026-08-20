@@ -37,9 +37,16 @@ fn render_tile_full(tile: &TileData, layer: &str, n: &TileNeighbors, ctx: &Rende
         (base, None) => (base, *ctx),
     };
     let ctx = &ctx;
+    // Elevation styles ride a SECOND key modifier, `"elevation#style=alpine"` /
+    // `"terrain#style=antique"`, checked after isolation since the two are
+    // orthogonal and a style never applies to a biome/climate/soil key.
+    let (layer, style) = split_style(layer);
     let mut rgba = vec![0u8; PIXEL_COUNT * 4];
 
     match layer {
+        "elevation" | "terrain" if style.is_some() => {
+            render_elevation_styled(tile, n, ctx, style.unwrap(), &mut rgba)
+        }
         "land" => render_land(tile, &mut rgba),
         "elevation" => render_elevation(tile, &mut rgba),
         "climate" => render_climate(tile, n, ctx, &mut rgba),
@@ -280,6 +287,493 @@ fn elevation_color_climate(e: f32, temp_c: f32, precip_mm: f32) -> (u8, u8, u8) 
         return base;
     }
     lerp_rgb(base, lowland_tint(temp_c, precip_mm), w)
+}
+
+// ── Elevation styles ────────────────────────────────────────────────────────
+//
+// The default "elevation" layer is a flat, unshaded hypsometric tint (see
+// `render_elevation` above) and "terrain" is the one shaded hillshade — two
+// names for what an atlas treats as one decision (how to paint height) times
+// two independent axes (which palette, how much relief). A STYLE is that pair,
+// selected in the LAYER KEY exactly like class isolation (`split_isolate`,
+// `"biomes#iso=12"`): `"elevation#style=alpine"` rides the same string the
+// frontend's tile cache already keys on, so a styled request caches,
+// invalidates and degrades (an unknown style name renders the plain layer)
+// with no cache-layer change at all.
+//
+// Seven styles, each a real cartographic convention rather than a colour
+// experiment — Bartholomew/Times classed layer-tinting, Imhof's Swiss neutral
+// relief-forward mountain style (now reading the world's OWN `snow_frac`
+// field for its snowcap rather than inferring it from height), a warm desert
+// preset, a cool low-sun-angle polar preset, a monochrome analytical hillshade
+// (colour carries zero elevation information — relief alone does), a
+// sepia/parchment antique engraved plate, and an "Abyssal" showcase that mutes
+// the land so Terrain 2.0 slice 5's ridges/trenches/seamounts (`SEA_RELIEF_AMP`
+// boosted well past the default) read as the subject of the map instead of a
+// footnote beside it.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum ElevationStyle {
+    LayerColouring,
+    Alpine,
+    Arid,
+    Polar,
+    Analytical,
+    Antique,
+    Abyssal,
+}
+
+impl ElevationStyle {
+    /// Parse the `#style=` suffix value. An unrecognised name returns `None`,
+    /// which callers treat as "no style" — a bad key must never blank the map.
+    pub fn parse(name: &str) -> Option<Self> {
+        match name {
+            "layers" => Some(Self::LayerColouring),
+            "alpine" => Some(Self::Alpine),
+            "arid" => Some(Self::Arid),
+            "polar" => Some(Self::Polar),
+            "analytical" => Some(Self::Analytical),
+            "antique" => Some(Self::Antique),
+            "abyssal" => Some(Self::Abyssal),
+            _ => None,
+        }
+    }
+
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::LayerColouring => "layers",
+            Self::Alpine => "alpine",
+            Self::Arid => "arid",
+            Self::Polar => "polar",
+            Self::Analytical => "analytical",
+            Self::Antique => "antique",
+            Self::Abyssal => "abyssal",
+        }
+    }
+
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::LayerColouring => "Layer Colouring",
+            Self::Alpine => "Alpine",
+            Self::Arid => "Arid",
+            Self::Polar => "Polar",
+            Self::Analytical => "Analytical",
+            Self::Antique => "Antique Plate",
+            Self::Abyssal => "Abyssal",
+        }
+    }
+
+    pub fn all() -> [Self; 7] {
+        [
+            Self::LayerColouring,
+            Self::Alpine,
+            Self::Arid,
+            Self::Polar,
+            Self::Analytical,
+            Self::Antique,
+            Self::Abyssal,
+        ]
+    }
+}
+
+/// Split a layer key into its base layer and any elevation style.
+/// `"elevation#style=alpine"` → `("elevation", Some(Alpine))`. Mirrors
+/// `split_isolate` exactly, including the "unparsable code is ignored"
+/// discipline.
+pub fn split_style(layer: &str) -> (&str, Option<ElevationStyle>) {
+    match layer.split_once("#style=") {
+        Some((base, name)) => (base, ElevationStyle::parse(name)),
+        None => (layer, None),
+    }
+}
+
+/// Stepped sibling of `ramp_lookup`: the colour of the highest stop at or
+/// below `x`, with no interpolation between bands. This is what "layer
+/// colouring" / "hypsometric tinting" means in the classical atlas sense —
+/// a small number of flat, legible tint bands rather than a smooth gradient —
+/// and what an engraved plate's discrete print runs looked like.
+pub fn band_lookup(x: f32, stops: &[(f32, (u8, u8, u8))]) -> (u8, u8, u8) {
+    if stops.is_empty() {
+        return (128, 128, 128);
+    }
+    let mut result = stops[0].1;
+    for &(sx, c) in stops {
+        if x >= sx {
+            result = c;
+        } else {
+            break;
+        }
+    }
+    result
+}
+
+/// Everything a style needs to know to paint land + sea + relief. Land stops
+/// are in METRES (like `ELEVATION_STOPS`); sea stops are normalised depth
+/// 0..1 (like `BATHYMETRY_STOPS`).
+struct StyleParams {
+    land_stops: &'static [(f32, (u8, u8, u8))],
+    sea_stops: &'static [(f32, (u8, u8, u8))],
+    /// Land uses stepped classed bands instead of a smooth ramp (layer
+    /// tinting / engraved-plate convention). Sea always stays a smooth
+    /// gradient — real atlases classed the land, never the water.
+    classed: bool,
+    /// 0..1 multiplier on the existing cross-blended climate tint
+    /// (`lowland_tint`); 0 disables it entirely.
+    climate_tint: f32,
+    /// 0..1 — how strongly the world's own per-cell `snow_frac` (the "snow"
+    /// layer's own field, §8.7) pulls a cell toward white, independent of
+    /// the land ramp's own colour at that height. 0 disables it.
+    snow_boost: f32,
+    /// Analytical: strip all hue, leaving pure relief-carried luminance.
+    gray: bool,
+    ao_amp: f32,
+    shadow_floor: f32,
+    contrast_lo: f32,
+    contrast_hi: f32,
+    /// Key-light altitude in degrees (default hillshade uses `KEY_ALT_DEG` =
+    /// 45°); a lower sun gives longer, harsher raking shadows.
+    alt_deg: f32,
+    /// Shadow tints warm/sepia instead of the default cool skylight blue.
+    warm_shadow: bool,
+    sea_relief_amp: f32,
+}
+
+const LAND_STOPS_LAYERS: [(f32, (u8, u8, u8)); 9] = [
+    (0.0, (66, 143, 62)),
+    (200.0, (104, 166, 66)),
+    (500.0, (150, 186, 77)),
+    (1000.0, (199, 199, 84)),
+    (2000.0, (219, 175, 80)),
+    (3000.0, (200, 128, 68)),
+    (4000.0, (163, 92, 74)),
+    (6000.0, (160, 140, 160)),
+    (8848.0, (255, 255, 255)),
+];
+const SEA_STOPS_LAYERS: [(f32, (u8, u8, u8)); 5] = [
+    // Kept short of 255 after the shading multiply's 1.18 ceiling (§ sea_shade_amp) —
+    // a paler top stop here clipped to solid white on a sunlit shelf, reading as a
+    // rendering artefact rather than the intended pale shelf tint.
+    (0.00, (150, 196, 214)),
+    (0.15, (133, 193, 216)),
+    (0.35, (90, 161, 199)),
+    (0.65, (53, 122, 171)),
+    (1.00, (27, 79, 130)),
+];
+
+const LAND_STOPS_ALPINE: [(f32, (u8, u8, u8)); 7] = [
+    (0.0, (150, 168, 120)),
+    (600.0, (168, 172, 132)),
+    (1400.0, (184, 176, 152)),
+    (2200.0, (178, 170, 164)),
+    (3200.0, (196, 192, 190)),
+    (4200.0, (224, 224, 226)),
+    (8848.0, (255, 255, 255)),
+];
+const SEA_STOPS_ALPINE: [(f32, (u8, u8, u8)); 4] = [
+    (0.00, (151, 196, 214)),
+    (0.30, (101, 159, 193)),
+    (0.65, (63, 120, 166)),
+    (1.00, (35, 84, 130)),
+];
+
+const LAND_STOPS_ARID: [(f32, (u8, u8, u8)); 7] = [
+    (0.0, (196, 158, 94)),
+    (300.0, (206, 150, 82)),
+    (800.0, (188, 120, 64)),
+    (1600.0, (163, 96, 58)),
+    (2600.0, (176, 132, 96)),
+    (4000.0, (214, 196, 170)),
+    (8848.0, (245, 238, 222)),
+];
+const SEA_STOPS_ARID: [(f32, (u8, u8, u8)); 4] = [
+    (0.00, (88, 198, 196)),
+    (0.25, (48, 158, 178)),
+    (0.60, (28, 110, 150)),
+    (1.00, (14, 66, 110)),
+];
+
+const LAND_STOPS_POLAR: [(f32, (u8, u8, u8)); 6] = [
+    (0.0, (198, 210, 206)),
+    (400.0, (214, 220, 220)),
+    (1000.0, (226, 232, 236)),
+    (2000.0, (238, 242, 246)),
+    (4000.0, (248, 250, 252)),
+    (8848.0, (255, 255, 255)),
+];
+const SEA_STOPS_POLAR: [(f32, (u8, u8, u8)); 4] = [
+    (0.00, (210, 231, 236)),
+    (0.30, (150, 190, 206)),
+    (0.65, (90, 140, 172)),
+    (1.00, (48, 90, 132)),
+];
+
+const LAND_STOPS_ANALYTICAL: [(f32, (u8, u8, u8)); 2] =
+    [(0.0, (150, 150, 150)), (8848.0, (150, 150, 150))];
+const SEA_STOPS_ANALYTICAL: [(f32, (u8, u8, u8)); 2] =
+    [(0.00, (150, 150, 150)), (1.00, (150, 150, 150))];
+
+const LAND_STOPS_ANTIQUE: [(f32, (u8, u8, u8)); 7] = [
+    (0.0, (214, 198, 158)),
+    (300.0, (206, 186, 142)),
+    (800.0, (196, 172, 126)),
+    (1600.0, (182, 152, 108)),
+    (3000.0, (168, 136, 96)),
+    (5500.0, (196, 178, 150)),
+    (8848.0, (232, 222, 200)),
+];
+const SEA_STOPS_ANTIQUE: [(f32, (u8, u8, u8)); 4] = [
+    (0.00, (200, 206, 188)),
+    (0.30, (172, 184, 176)),
+    (0.65, (140, 158, 158)),
+    (1.00, (104, 126, 132)),
+];
+
+const LAND_STOPS_ABYSSAL: [(f32, (u8, u8, u8)); 5] = [
+    (0.0, (176, 172, 150)),
+    (1000.0, (188, 182, 164)),
+    (3000.0, (202, 196, 182)),
+    (5500.0, (220, 216, 206)),
+    (8848.0, (240, 238, 232)),
+];
+const SEA_STOPS_ABYSSAL: [(f32, (u8, u8, u8)); 7] = [
+    (0.00, (120, 214, 214)),
+    (0.12, (64, 178, 196)),
+    (0.28, (34, 138, 178)),
+    (0.45, (24, 102, 158)),
+    (0.62, (28, 68, 124)),
+    (0.82, (30, 40, 88)),
+    (1.00, (20, 22, 54)),
+];
+
+fn style_params(style: ElevationStyle) -> StyleParams {
+    match style {
+        ElevationStyle::LayerColouring => StyleParams {
+            land_stops: &LAND_STOPS_LAYERS,
+            sea_stops: &SEA_STOPS_LAYERS,
+            classed: true,
+            climate_tint: 0.0,
+            snow_boost: 0.0,
+            gray: false,
+            ao_amp: 0.10,
+            shadow_floor: 0.72,
+            contrast_lo: 0.21,
+            contrast_hi: 0.29,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: false,
+            sea_relief_amp: 0.15,
+        },
+        ElevationStyle::Alpine => StyleParams {
+            land_stops: &LAND_STOPS_ALPINE,
+            sea_stops: &SEA_STOPS_ALPINE,
+            classed: false,
+            climate_tint: 0.15,
+            snow_boost: 0.85,
+            gray: false,
+            ao_amp: 0.24,
+            shadow_floor: 0.42,
+            contrast_lo: 0.50,
+            contrast_hi: 0.85,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: false,
+            sea_relief_amp: 0.22,
+        },
+        ElevationStyle::Arid => StyleParams {
+            land_stops: &LAND_STOPS_ARID,
+            sea_stops: &SEA_STOPS_ARID,
+            classed: false,
+            climate_tint: 0.0,
+            snow_boost: 0.0,
+            gray: false,
+            ao_amp: 0.22,
+            shadow_floor: 0.45,
+            contrast_lo: 0.50,
+            contrast_hi: 0.85,
+            alt_deg: 38.0,
+            warm_shadow: true,
+            sea_relief_amp: 0.18,
+        },
+        ElevationStyle::Polar => StyleParams {
+            land_stops: &LAND_STOPS_POLAR,
+            sea_stops: &SEA_STOPS_POLAR,
+            classed: false,
+            climate_tint: 0.0,
+            snow_boost: 0.90,
+            gray: false,
+            ao_amp: 0.14,
+            shadow_floor: 0.65,
+            contrast_lo: 0.30,
+            contrast_hi: 0.40,
+            alt_deg: 18.0,
+            warm_shadow: false,
+            sea_relief_amp: 0.16,
+        },
+        ElevationStyle::Analytical => StyleParams {
+            land_stops: &LAND_STOPS_ANALYTICAL,
+            sea_stops: &SEA_STOPS_ANALYTICAL,
+            classed: false,
+            climate_tint: 0.0,
+            snow_boost: 0.0,
+            gray: true,
+            ao_amp: 0.30,
+            shadow_floor: 0.15,
+            contrast_lo: 0.60,
+            contrast_hi: 1.00,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: false,
+            sea_relief_amp: 0.30,
+        },
+        ElevationStyle::Antique => StyleParams {
+            land_stops: &LAND_STOPS_ANTIQUE,
+            sea_stops: &SEA_STOPS_ANTIQUE,
+            classed: true,
+            climate_tint: 0.0,
+            snow_boost: 0.0,
+            gray: false,
+            ao_amp: 0.18,
+            shadow_floor: 0.55,
+            contrast_lo: 0.40,
+            contrast_hi: 0.55,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: true,
+            sea_relief_amp: 0.14,
+        },
+        ElevationStyle::Abyssal => StyleParams {
+            land_stops: &LAND_STOPS_ABYSSAL,
+            sea_stops: &SEA_STOPS_ABYSSAL,
+            classed: false,
+            climate_tint: 0.0,
+            snow_boost: 0.0,
+            gray: false,
+            ao_amp: 0.08,
+            shadow_floor: 0.75,
+            contrast_lo: 0.20,
+            contrast_hi: 0.25,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: false,
+            sea_relief_amp: 0.55,
+        },
+    }
+}
+
+/// One elevation style's palette, served over IPC exactly like `ELEVATION_STOPS`/
+/// `BATHYMETRY_STOPS` (§8.18) so the legend can never disagree with what
+/// `render_elevation_styled` actually paints — the "served, not copied" rule
+/// applies to a style's ramps precisely as much as it applies to the default one.
+pub struct StylePalette {
+    pub key: &'static str,
+    pub label: &'static str,
+    pub land: &'static [(f32, (u8, u8, u8))],
+    pub sea: &'static [(f32, (u8, u8, u8))],
+    pub classed: bool,
+}
+
+pub fn elevation_style_palettes() -> Vec<StylePalette> {
+    ElevationStyle::all()
+        .iter()
+        .map(|&s| {
+            let sp = style_params(s);
+            StylePalette {
+                key: s.key(),
+                label: s.label(),
+                land: sp.land_stops,
+                sea: sp.sea_stops,
+                classed: sp.classed,
+            }
+        })
+        .collect()
+}
+
+fn grayscale(c: (u8, u8, u8)) -> (u8, u8, u8) {
+    let l = (0.299 * c.0 as f32 + 0.587 * c.1 as f32 + 0.114 * c.2 as f32) as u8;
+    (l, l, l)
+}
+
+fn land_color_styled(
+    sp: &StyleParams,
+    e: f32,
+    temp_c: f32,
+    precip_mm: f32,
+    snow_frac_u8: u8,
+) -> (u8, u8, u8) {
+    let m = e.clamp(0.0, 1.0) * ELEV_MAX_M;
+    let mut base = if sp.classed {
+        band_lookup(m, sp.land_stops)
+    } else {
+        ramp_lookup(m, sp.land_stops)
+    };
+    if sp.climate_tint > 0.0 {
+        let w = (1.0 - m / LOWLAND_TINT_CEILING_M).clamp(0.0, 1.0)
+            * LOWLAND_TINT_STRENGTH
+            * sp.climate_tint;
+        if w > 0.0 {
+            base = lerp_rgb(base, lowland_tint(temp_c, precip_mm), w);
+        }
+    }
+    if sp.snow_boost > 0.0 {
+        let sf = snow_frac_u8 as f32 / 255.0;
+        let w = (sf * sp.snow_boost).clamp(0.0, 1.0);
+        if w > 0.0 {
+            base = lerp_rgb(base, (250, 251, 253), w);
+        }
+    }
+    if sp.gray {
+        base = grayscale(base);
+    }
+    base
+}
+
+/// The styled counterpart of `render_elevation` / `render_terrain_hillshade_halo`
+/// — one function serves every style, keyed entirely off `StyleParams`, so a
+/// new style is data (a palette + a handful of relief scalars) rather than a
+/// new render function. Always shaded: a style exists to show relief, and this
+/// is also what finally gives the "Relief & Height" plate (which used to reuse
+/// the flat, unshaded `elevation` layer) a real identity distinct from
+/// "Physical" — see `mapThemes.ts`.
+fn render_elevation_styled(
+    tile: &TileData,
+    n: &TileNeighbors,
+    ctx: &RenderCtx,
+    style: ElevationStyle,
+    rgba: &mut [u8],
+) {
+    let sp = style_params(style);
+    for i in 0..PIXEL_COUNT {
+        let offset = i * 4;
+        let (x, y) = (i % SIZE, i / SIZE);
+        if tile.terrain[i] == 1 {
+            let e = tile.elevation[i];
+            let snow = tile.snow_frac.get(i).copied().unwrap_or(0);
+            let (br, bg, bb) =
+                land_color_styled(&sp, e, tile.temperature[i], tile.precipitation[i], snow);
+            let rel = relief_at_params(
+                tile, n, ctx, x, y, e, sp.ao_amp, sp.shadow_floor, sp.contrast_lo, sp.contrast_hi,
+                sp.alt_deg,
+            );
+            let (kr, kg, kb) = if sp.warm_shadow {
+                relief_channels_warm(&rel)
+            } else {
+                relief_channels(&rel)
+            };
+            rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
+            rgba[offset + 3] = 255;
+        } else {
+            let d = tile.sea_depth[i].clamp(0.0, 1.0);
+            let mut base = if sp.classed {
+                band_lookup(d, sp.sea_stops)
+            } else {
+                ramp_lookup(d, sp.sea_stops)
+            };
+            if sp.gray {
+                base = grayscale(base);
+            }
+            let m = sea_shade_amp(tile, n, ctx, x, y, sp.sea_relief_amp);
+            rgba[offset] = (base.0 as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = (base.1 as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (base.2 as f32 * m).clamp(0.0, 255.0) as u8;
+            rgba[offset + 3] = 255;
+        }
+    }
 }
 
 fn render_climate(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &mut [u8]) {
@@ -1453,6 +1947,27 @@ fn relief_at(
     y: usize,
     e: f32,
 ) -> Relief {
+    relief_at_params(tile, n, ctx, x, y, e, AO_AMP, SHADOW_FLOOR, 0.42, 0.58, KEY_ALT_DEG)
+}
+
+/// Parameterised relief solve — the shared shading math behind the default
+/// hillshade (`relief_at`, a thin wrapper passing the historical constants
+/// unchanged) AND every elevation STYLE, which each tune the AO strength,
+/// shadow floor, contrast curve and key-light altitude differently (a lower
+/// sun for Arid/Polar's raking-shadow look, for instance).
+fn relief_at_params(
+    tile: &TileData,
+    n: &TileNeighbors,
+    ctx: &RenderCtx,
+    x: usize,
+    y: usize,
+    e: f32,
+    ao_amp: f32,
+    shadow_floor: f32,
+    contrast_lo: f32,
+    contrast_hi: f32,
+    alt_deg: f32,
+) -> Relief {
     let (xi, yi) = (x as isize, y as isize);
     let left = halo_elev(tile, n, xi - 1, yi);
     let right = halo_elev(tile, n, xi + 1, yi);
@@ -1471,7 +1986,7 @@ fn relief_at(
     // ONE light, normalised so flat ground gives exactly 1.0. Raw Lambertian gives
     // flat land sin(45°) = 0.707, which would render this layer ~29% darker than
     // an unshaded one showing the very same colours.
-    let (kx, ky, kz) = light_vec(KEY_AZ_DEG, KEY_ALT_DEG);
+    let (kx, ky, kz) = light_vec(KEY_AZ_DEG, alt_deg);
     let lambert = (nx * kx + ny * ky + nz * kz) / kz;
 
     // AMBIENT OCCLUSION from concavity against the 8-neighbour mean. Positive =
@@ -1488,12 +2003,12 @@ fn relief_at(
     // ridge-and-valley texture instead of reading as one flat shadow tone.
     let shadow_amount = (1.0 - lambert).clamp(0.0, 1.0);
     let texture_boost = 1.0 + shadow_amount * TEXTURE_SHADOW_BOOST;
-    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * AO_AMP * texture_boost;
+    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * ao_amp * texture_boost;
 
     // AERIAL PERSPECTIVE (Imhof): contrast is low in the lowlands and rises with
     // height, so a summit reads crisp while a plain keeps its tint.
-    let contrast = 0.42 + 0.58 * e.clamp(0.0, 1.0);
-    let shade = (1.0 + (lambert - 1.0) * contrast).clamp(SHADOW_FLOOR, 1.30) * ao;
+    let contrast = contrast_lo + contrast_hi * e.clamp(0.0, 1.0);
+    let shade = (1.0 + (lambert - 1.0) * contrast).clamp(shadow_floor, 1.30) * ao;
 
     Relief { shade, ao }
 }
@@ -1507,6 +2022,17 @@ fn relief_channels(r: &Relief) -> (f32, f32, f32) {
         r.shade * (1.0 - 0.10 * shadow),
         r.shade * (1.0 - 0.03 * shadow),
         r.shade * (1.0 + 0.14 * shadow),
+    )
+}
+
+/// Warm/sepia sibling of `relief_channels` for the Arid and Antique styles:
+/// shadow tints toward brown instead of skylight blue.
+fn relief_channels_warm(r: &Relief) -> (f32, f32, f32) {
+    let shadow = (1.0 - r.shade).max(0.0);
+    (
+        r.shade * (1.0 + 0.06 * shadow),
+        r.shade * (1.0 - 0.02 * shadow),
+        r.shade * (1.0 - 0.14 * shadow),
     )
 }
 
@@ -1551,6 +2077,14 @@ const SEA_RELIEF_AMP: f32 = 0.22;
 /// bring out. That is a `sim` gap, not a render one, and shading it is what makes
 /// the gap visible instead of invisible.
 fn sea_shade(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, x: usize, y: usize) -> f32 {
+    sea_shade_amp(tile, n, ctx, x, y, SEA_RELIEF_AMP)
+}
+
+/// Parameterised sibling of `sea_shade` — every elevation style tunes how
+/// strongly the seafloor shades (the "Abyssal" style boosts this well past
+/// the default specifically to showcase Terrain 2.0 slice 5's ridges/
+/// trenches/seamounts; "Abyssal"'s land side is muted instead).
+fn sea_shade_amp(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, x: usize, y: usize, amp: f32) -> f32 {
     let (xi, yi) = (x as isize, y as isize);
     let left = halo_depth(tile, n, xi - 1, yi);
     let right = halo_depth(tile, n, xi + 1, yi);
@@ -1558,7 +2092,7 @@ fn sea_shade(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, x: usize, y: u
     let down = halo_depth(tile, n, xi, yi + 1);
     // Depth increases downward, so the sign is flipped against the land case: a
     // shoaling seamount must catch the light the way a hill does.
-    let z = ctx.z_factor() * SEA_RELIEF_AMP;
+    let z = ctx.z_factor() * amp;
     let dzdx = -(right - left) * z * ctx.lat_stretch(y);
     let dzdy = -(down - up) * z;
     let len = (dzdx * dzdx + dzdy * dzdy + 1.0).sqrt();
@@ -2325,5 +2859,182 @@ mod tests {
         let p2 = format!("{dir}/biome_seams.png");
         image::save_buffer(&p2, &seam, sw2 as u32, sh2 as u32, image::ColorType::Rgb8).unwrap();
         println!("wrote {p2}  ({sw2}×{sh2})");
+    }
+
+    /// One real, generated world (plates through biomes, mirroring
+    /// `dump_natural_sheet`) rendered through EVERY elevation style, via the
+    /// real `render_tile_full` dispatch — so this is what a user actually sees,
+    /// not a synthesized swatch. Writes one full-world PNG per style plus the
+    /// two baseline layers ("elevation" unstyled, "terrain" the default
+    /// hillshade) for comparison, and a numbered contact-sheet montage.
+    #[test]
+    #[ignore]
+    fn dump_elevation_style_sheet() {
+        use crate::db::schema;
+        use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+        use crate::sim::*;
+        use rusqlite::Connection;
+
+        const W: u32 = 1440;
+        const H: u32 = 720;
+        let seed: u64 = std::env::var("ELEVATION_STYLE_SEED")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(20260818);
+
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", W.to_string()), ("grid_height", H.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+
+        plates::generate_plates_and_landmass(&mut buf, seed, 14);
+        elevation::generate_elevation(&mut buf, seed);
+        elevation::compute_sea_depth(&mut buf);
+        elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+
+        ocean::compute_wind_belts(&mut buf);
+        ocean::compute_salinity(&mut buf);
+        ocean::generate_ocean_currents(&mut buf);
+        ocean::advect_salinity_and_recouple(&mut buf);
+        ocean::compute_sst(&mut buf);
+        ocean::compute_distance_to_ocean(&mut buf);
+        let sea_freeze = ocean::compute_shelf_freeze(&buf);
+        ocean::reinforce_cold_shelf_currents(&mut buf, &sea_freeze);
+        temperature::compute_temperature(&mut buf);
+        ocean::compute_upwelling_zones(&mut buf);
+        ocean::apply_cold_shelf_cooling(&mut buf, &sea_freeze);
+        temperature::compute_seasonal_amplitude(&mut buf);
+        temperature::apply_ice_albedo_feedback(&mut buf);
+        jets::compute_low_level_jets(&mut buf);
+        precipitation::compute_precipitation(&mut buf);
+        koppen::classify_koppen(&mut buf);
+
+        let hydro = rivers::compute_hydrology(&buf);
+        let lake_max = (buf.total() / 2000).max(20);
+        let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+        let rv = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+        rivers::classify_salt_lakes(&buf, &mut lakes, &rv);
+        soil::classify_soil(&mut buf);
+        fertility::compute_fertility(&mut buf, &rv);
+        biome::classify_biomes(&mut buf, &rv, &lakes);
+
+        // ── Cut into tiles, exactly as the tile store would ──
+        let ts = TILE_SIZE as usize;
+        let tw = (W as usize).div_ceil(ts);
+        let th = (H as usize).div_ceil(ts);
+        let mut tiles: Vec<TileData> = Vec::with_capacity(tw * th);
+        for ty in 0..th {
+            for tx in 0..tw {
+                let mut t = TileData::new_sea();
+                for ly in 0..ts {
+                    for lx in 0..ts {
+                        let gx = tx * ts + lx;
+                        let gy = ty * ts + ly;
+                        if gx >= W as usize || gy >= H as usize { continue; }
+                        let g = gy * W as usize + gx;
+                        let l = ly * ts + lx;
+                        t.terrain[l] = buf.terrain[g];
+                        t.elevation[l] = buf.elevation[g];
+                        t.sea_depth[l] = buf.sea_depth[g];
+                        t.temperature[l] = buf.temperature[g];
+                        t.precipitation[l] = buf.precipitation[g];
+                        t.koppen[l] = buf.koppen[g];
+                        t.biome[l] = buf.biome[g];
+                        t.snow_frac[l] = buf.snow_frac[g];
+                    }
+                }
+                tiles.push(t);
+            }
+        }
+
+        let dir = std::env::var("ELEVATION_STYLE_SHEET_DIR")
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+        std::fs::create_dir_all(&dir).ok();
+
+        let mut layer_keys: Vec<(String, &'static str)> = vec![
+            ("elevation".to_string(), "elevation (default, unshaded)"),
+            ("terrain".to_string(), "terrain (default hillshade)"),
+        ];
+        for s in ElevationStyle::all() {
+            layer_keys.push((format!("elevation#style={}", s.key()), s.label()));
+        }
+
+        // Downscaled panel size for the montage (full-world renders are the real
+        // deliverable; the montage is only for at-a-glance comparison).
+        const PW: usize = 360;
+        const PH: usize = 180;
+        const COLS: usize = 3;
+        let rows = layer_keys.len().div_ceil(COLS);
+        const GAP: usize = 6;
+        let mw = COLS * PW + (COLS + 1) * GAP;
+        let mh = rows * PH + (rows + 1) * GAP;
+        let mut montage = vec![18u8; mw * mh * 3];
+
+        for (idx, (layer, label)) in layer_keys.iter().enumerate() {
+            let mut img = vec![0u8; W as usize * H as usize * 3];
+            for ty in 0..th {
+                for tx in 0..tw {
+                    let at = |x: isize, y: isize| -> Option<&TileData> {
+                        if x < 0 || y < 0 || x >= tw as isize || y >= th as isize { return None; }
+                        tiles.get(y as usize * tw + x as usize)
+                    };
+                    let n = TileNeighbors {
+                        west: at(tx as isize - 1, ty as isize),
+                        east: at(tx as isize + 1, ty as isize),
+                        north: at(tx as isize, ty as isize - 1),
+                        south: at(tx as isize, ty as isize + 1),
+                    };
+                    let ctx = RenderCtx {
+                        grid_w: W, grid_h: H,
+                        tx: tx as i32, ty: ty as i32,
+                        step: 1, isolate: None,
+                    };
+                    let rgba = render_tile_with_neighbors_ctx(&tiles[ty * tw + tx], layer, &n, &ctx);
+                    for ly in 0..ts {
+                        for lx in 0..ts {
+                            let gx = tx * ts + lx;
+                            let gy = ty * ts + ly;
+                            if gx >= W as usize || gy >= H as usize { continue; }
+                            let src = (ly * ts + lx) * 4;
+                            let dst = (gy * W as usize + gx) * 3;
+                            img[dst] = rgba[src];
+                            img[dst + 1] = rgba[src + 1];
+                            img[dst + 2] = rgba[src + 2];
+                        }
+                    }
+                }
+            }
+            let slug = layer.replace(['#', '='], "_");
+            let path = format!("{dir}/world_{slug}.png");
+            image::save_buffer(&path, &img, W, H, image::ColorType::Rgb8).unwrap();
+            println!("wrote {path}  [{label}]");
+
+            // Nearest-neighbour downscale into the montage panel.
+            let px = GAP + (idx % COLS) * (PW + GAP);
+            let py = GAP + (idx / COLS) * (PH + GAP);
+            for y in 0..PH {
+                for x in 0..PW {
+                    let sx = x * W as usize / PW;
+                    let sy = y * H as usize / PH;
+                    let s = (sy * W as usize + sx) * 3;
+                    let d = ((py + y) * mw + px + x) * 3;
+                    montage[d] = img[s];
+                    montage[d + 1] = img[s + 1];
+                    montage[d + 2] = img[s + 2];
+                }
+            }
+            draw_code(&mut montage, mw, px + 3, py + 3, (idx + 1) as u8);
+        }
+        let mp = format!("{dir}/style_montage.png");
+        image::save_buffer(&mp, &montage, mw as u32, mh as u32, image::ColorType::Rgb8).unwrap();
+        println!("wrote {mp}  ({mw}×{mh}) — panel N is layer_keys[N-1]:");
+        for (i, (layer, label)) in layer_keys.iter().enumerate() {
+            println!("  {:>2}  {:<28} {}", i + 1, layer, label);
+        }
     }
 }

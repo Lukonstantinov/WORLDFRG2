@@ -126,14 +126,24 @@ export function MapCanvas() {
   // The isolated class rides in the LAYER KEY, so the tile cache treats an
   // isolated view as its own layer and invalidates correctly for free.
   const isolateClass = useUIStore((s) => s.isolateClass);
+  // ELEVATION STYLES: only meaningful on the two layers that carry a style
+  // (`render_tile_full`'s dispatch ignores `#style=` on any other key), so it
+  // rides the layer key here exactly like `isolateClass` above.
+  const elevationStyle = useUIStore((s) => s.elevationStyle);
   const compareLayer = useUIStore((s) => s.compareLayer);
   const comparePos = useUIStore((s) => s.comparePos);
   const setComparePos = useUIStore((s) => s.setComparePos);
   const compareRef = useRef<{ layer: string | null; pos: number }>({ layer: null, pos: 0.5 });
   compareRef.current = { layer: compareLayer, pos: comparePos };
   const activeLayerRef = useRef(activeLayer);
-  activeLayerRef.current =
-    isolateClass === null ? activeLayer : (`${activeLayer}#iso=${isolateClass}` as typeof activeLayer);
+  activeLayerRef.current = (() => {
+    let key: string = activeLayer;
+    if (isolateClass !== null) key += `#iso=${isolateClass}`;
+    if (elevationStyle && (activeLayer === "elevation" || activeLayer === "terrain")) {
+      key += `#style=${elevationStyle}`;
+    }
+    return key as typeof activeLayer;
+  })();
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
   const brushRadiusRef = useRef(brushRadius);
@@ -382,7 +392,7 @@ export function MapCanvas() {
   // switching back is instant. Just (re)load the now-active layer's visible tiles.
   useEffect(() => {
     refreshTiles();
-  }, [activeLayer, isolateClass, compareLayer, refreshTiles]);
+  }, [activeLayer, isolateClass, elevationStyle, compareLayer, refreshTiles]);
 
   // Wipe the cache only when the world changes or its data changes (a sim step
   // bumps tileVersion) — every layer's rendered tiles are then stale.

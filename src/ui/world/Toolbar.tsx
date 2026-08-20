@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
+import { usePaletteStore } from "@state/paletteStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
@@ -188,6 +189,10 @@ export function Toolbar() {
   const activeMapTheme = useUIStore((s) => s.activeMapTheme);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const activePlate = MAP_THEMES.find((t) => t.id === activeMapTheme);
+  const elevationStyle = useUIStore((s) => s.elevationStyle);
+  const setElevationStyle = useUIStore((s) => s.setElevationStyle);
+  const palettes = usePaletteStore((s) => s.palettes);
+  const loadPalettes = usePaletteStore((s) => s.load);
   const compareLayer = useUIStore((s) => s.compareLayer);
   const setCompareLayer = useUIStore((s) => s.setCompareLayer);
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
@@ -196,6 +201,7 @@ export function Toolbar() {
     Plates: true, Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, Provinces: false, View: true,
   });
   const toggleSection = (k: string) => setOpenSection((s) => ({ ...s, [k]: !s[k] }));
+  useEffect(() => { loadPalettes(); }, [loadPalettes]);
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
   const hubDisplay = useUIStore((s) => s.hubDisplay);
@@ -373,6 +379,33 @@ export function Toolbar() {
           </div>
         ))}
       </div>
+
+      {/* ELEVATION STYLES: a named alternative palette+relief treatment for the
+          "elevation"/"terrain" layers only — Bartholomew/Times classed layer
+          tinting, Imhof Alpine, Arid, Polar, a monochrome Analytical hillshade,
+          a sepia Antique plate, and an Abyssal bathymetry showcase. Rides in the
+          layer key (`#style=`) exactly like class isolation, so it only appears
+          while one of those two layers is active. */}
+      {(activeLayer === "elevation" || activeLayer === "terrain") && (
+        <div style={section}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={sliderLabel}>Style</span>
+            <select
+              value={elevationStyle ?? ""}
+              onChange={(e) => setElevationStyle(e.target.value || null)}
+              style={{
+                flex: 1, minWidth: 0, background: "#0e1826", color: "#a8bed4",
+                border: "1px solid #20304a", borderRadius: 4, fontSize: 10, padding: "2px 4px",
+              }}
+            >
+              <option value="">Default</option>
+              {(palettes?.elevation_styles ?? []).map((s) => (
+                <option key={s.key} value={s.key}>{s.label}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {/* SWIPE COMPARE — every causal chain here is a two-layer question
           (precipitation vs elevation for rain shadow, currents vs temperature,

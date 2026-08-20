@@ -133,7 +133,12 @@ fn render_full_res(
         .iter()
         .any(|l| {
             let (base, _) = tile_image::split_isolate(l.as_str());
-            matches!(base, "terrain" | "natural" | "climate" | "biomes" | "soil" | "fertility")
+            let (base, _) = tile_image::split_style(base);
+            // "elevation" is included unconditionally rather than only when a
+            // `#style=` suffix is present: every elevation STYLE is shaded (see
+            // `render_elevation_styled`), the plain unstyled request just wastes
+            // a cheap neighbour fetch it doesn't use.
+            matches!(base, "terrain" | "natural" | "climate" | "biomes" | "soil" | "fertility" | "elevation")
         });
     let (gw, gh) = grid_dims(db);
 

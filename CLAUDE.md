@@ -910,7 +910,9 @@ commands/
                                   drift from the map. Read-only, touches no tile.
                                   Also carries `GOOD_QUALITY_STOPS` — the ONE
                                   absolute 0–1 belt-quality scale every good's
-                                  quality layer shades on (§8.19, D10)
+                                  quality layer shades on (§8.19, D10) — and
+                                  `elevation_styles`, every named elevation
+                                  style's own served land+sea ramps (§8.22)
   template_commands.rs          ← Image → land/sea detection (4-bit quantization)
   file_commands.rs              ← Save/open world (.worldforge), export heightmap/layers
 
@@ -931,7 +933,11 @@ render/
                                   the biomes layer carries PROCEDURAL PATTERN FILLS (§8.12).
                                   Also the SHARED RELIEF CORE (`relief_at`) — two lights +
                                   ambient occlusion — used by both shaded base layers, and
-                                  `sea_shade`, which shades the seafloor for the first time
+                                  `sea_shade`, which shades the seafloor for the first time.
+                                  ELEVATION STYLES (§8.22): seven named alternative
+                                  palette+relief treatments for "elevation"/"terrain"
+                                  (`"elevation#style=alpine"`), one shared
+                                  `render_elevation_styled` keyed off `StyleParams`
   natural.rs                    ← NATURAL COLOUR (§8.21): the land-cover palette the
                                   `natural` layer draws with. A SECOND, independent table,
                                   deliberately NOT `tile_image::biome_color` — that one is
@@ -1109,7 +1115,10 @@ ui/world/  — map & world
   Toolbar.tsx                   ← Tools, PLATE picker (§8.17), layer selector, overlay
                                   toggles (RIGHT side). `layerGroups` classifies the 25
                                   render layers into SIX groups — Terrain · Ocean ·
-                                  Atmosphere · Climate & Biomes · Settlement · Hazards
+                                  Atmosphere · Climate & Biomes · Settlement · Hazards.
+                                  A STYLE picker (§8.22) appears only while
+                                  "elevation"/"terrain" is active, reading the served
+                                  `elevation_styles` list — never a hard-coded one
   mapThemes.ts                  ← MAP PLATES (§8.17): 11 named compositions of base
                                   layer + overlays + label typography + line palette.
                                   Display-only (rule 14); `MANAGED_OVERLAYS` is DERIVED
@@ -1126,7 +1135,9 @@ ui/world/  — map & world
   LayerLegend.tsx               ← THE MAP KEY (§8.18) — exact, renderer-sourced keys
                                   for elevation · terrain · temperature · sst ·
                                   precipitation · climate. Colours come from
-                                  `get_render_palettes`, never a local copy
+                                  `get_render_palettes`, never a local copy. The
+                                  elevation key swaps to the ACTIVE style's own served
+                                  ramp (§8.22) when `uiStore.elevationStyle` is set
   ElevationHistogram.tsx        ← Elevation distribution chart
   (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
@@ -2387,11 +2398,69 @@ at a palette or shading change instead of arguing about it — it is what caught
 the AO grain and the black ocean, neither of which any assertion would have found.
 
 What it also makes unmissable is that the remaining problems are in the SIM, not
-the renderer: coastlines are literal Voronoi polygon edges (land/sea is decided
-purely by `plate.is_oceanic`), orogenic ridges run as straight lines along plate
-boundary segments, and land relief is texturally uniform because
-`generate_elevation` uses one global noise recipe (`f_base`/`f_range`/`f_hill`,
-`RIDGE_AMP`, `HILL_AMP`) for every continent.
+the renderer: land relief is texturally uniform because `generate_elevation`
+uses one global noise recipe (`f_base`/`f_range`/`f_hill`, `RIDGE_AMP`,
+`HILL_AMP`) for every continent. (The coastline-follows-Voronoi-edge and
+straight-plate-boundary-ridge defects this paragraph used to name here were
+Terrain 2.0's own slices 3-4 — see `TERRAIN_2_PLAN.md` in §9 — fixed and gated
+by `coastline_departs_from_the_plate_boundary`.)
+
+---
+
+### 8.22 Elevation styles (`render/tile_image.rs`)
+
+The default "elevation" layer is a flat, UNSHADED hypsometric tint and
+"terrain" is the one shaded hillshade — two names for what an atlas treats as
+one decision (how to paint height) times two independent axes (which palette,
+how much relief). A STYLE is that pair, selected in the layer key exactly like
+class isolation (`split_isolate`, `"biomes#iso=12"`):
+`"elevation#style=alpine"` rides the same string the frontend's tile cache
+already keys on, so a styled request caches, invalidates and degrades (an
+unknown style name falls back to the plain layer) with zero cache-layer
+change. Parsed by `split_style`, dispatched by `render_elevation_styled` —
+ONE function for every style, keyed entirely off a `StyleParams` struct (land
++ sea ramp, classed-vs-smooth, climate-tint strength, real-`snow_frac` blend
+strength, AO/contrast/shadow-floor/light-altitude, warm-vs-cool shadow tint,
+sea relief amplitude), so a new style is DATA, not a new render function.
+
+Seven ship, each a real cartographic convention rather than a colour
+experiment: **Layer Colouring** (classed Bartholomew/Times hypsometric bands —
+also what `mapThemes.ts`'s "Relief & Height" plate now uses, giving it a real
+identity distinct from "Physical" instead of reusing the flat unshaded
+default); **Alpine** (Imhof's neutral Swiss relief-forward palette, reading
+the world's own per-cell `snow_frac` field for its snowcap rather than
+inferring it from height alone); **Arid** (warm sand/canyon palette, a lower
+key-light altitude for longer raking desert shadows, a sepia shadow tint);
+**Polar** (cool ice-blue palette, a very low key-light altitude, strong
+`snow_frac` blending); **Analytical** (monochrome — colour carries ZERO
+elevation information, relief alone does, maximum AO for a scientific
+hillshade); **Antique Plate** (sepia/parchment engraved-atlas look, classed
+bands, a warm shadow tint); **Abyssal** (a bathymetry SHOWCASE — land muted
+to a low-contrast neutral so it recedes, `sea_relief_amp` boosted well past
+the default so Terrain 2.0 slice 5's ridges/trenches/seamounts read as the
+map's actual subject).
+
+Two rules:
+
+- **Served, not copied** (§8.18 applies here exactly as it does to every other
+  ramp). `elevation_style_palettes()` exposes each style's own land+sea stops;
+  `get_render_palettes()` serves them as `elevation_styles` so
+  `LayerLegend.tsx`'s elevation legend swaps to the ACTIVE style's real ramp
+  (and its `classed` flag, so a stepped style draws a stepped legend) rather
+  than guessing a second copy.
+- **A style is a VIEW, exactly like a map plate** (rule 14/§8.17) — it changes
+  what the elevation/terrain layers look like, never what the world IS.
+  `elevationStyle` lives in `uiStore` beside `isolateClass`, rides the layer
+  key the same way, and is cleared by any manual change (§8.17's third rule)
+  so a picked style can't silently survive switching to an unrelated plate.
+
+`cargo test --release --lib dump_elevation_style_sheet -- --ignored
+--nocapture` (env `ELEVATION_STYLE_SHEET_DIR`, `ELEVATION_STYLE_SEED`) builds
+one real generated world and renders it through EVERY style via the real
+`render_tile_full` dispatch — one full-world PNG per style plus the two
+default baselines, and a numbered contact-sheet montage — the same
+"render it for real, don't argue about it" discipline `dump_natural_sheet`
+and `dump_biome_swatch_sheet` already established.
 
 ---
 

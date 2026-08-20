@@ -58,6 +58,7 @@ const ticks: React.CSSProperties = {
 
 export function LayerLegend() {
   const activeLayer = useUIStore((s) => s.activeLayer);
+  const elevationStyle = useUIStore((s) => s.elevationStyle);
   const palettes = usePaletteStore((s) => s.palettes);
   const load = usePaletteStore((s) => s.load);
   const isolateClass = useUIStore((s) => s.isolateClass);
@@ -87,12 +88,20 @@ export function LayerLegend() {
   if (!spec || !palettes) return null;
 
   if (spec.kind === "elevation") {
-    const land = palettes.elevation;
-    const sea = palettes.bathymetry;
+    // A STYLE (§ elevation styles) carries its own served land+sea ramps —
+    // reading them here instead of the default `palettes.elevation`/
+    // `.bathymetry` is what keeps this legend from disagreeing with a styled
+    // map exactly as §8.18 requires of the default one.
+    const active = elevationStyle
+      ? palettes.elevation_styles.find((s) => s.key === elevationStyle)
+      : undefined;
+    const land = active?.land ?? palettes.elevation;
+    const sea = active?.sea ?? palettes.bathymetry;
+    const gradient = active?.classed ? bandGradient : rampGradient;
     return (
       <div style={box}>
-        <div style={title}>Elevation</div>
-        <div style={{ ...barBase, background: rampGradient(land) }} />
+        <div style={title}>{active ? `Elevation — ${active.label}` : "Elevation"}</div>
+        <div style={{ ...barBase, background: gradient(land) }} />
         {/* Labels sit at each stop's TRUE metric position, so a colour read off
             the map resolves to the height the renderer actually used. */}
         <div style={{ position: "relative", height: 12, marginTop: 2 }}>
@@ -110,7 +119,7 @@ export function LayerLegend() {
         </div>
         {dist.length > 0 && (() => {
           const maxPct = Math.max(...dist.map((d) => d.percentage), 1);
-          const top = palettes.elevation[palettes.elevation.length - 1].at;
+          const top = land[land.length - 1].at;
           return (
             <div style={{ marginTop: 8 }}>
               <div style={{ display: "flex", alignItems: "flex-end", height: 26, gap: 1 }}>
@@ -122,7 +131,7 @@ export function LayerLegend() {
                       // so the shape reads against the colours directly above it.
                       flex: Math.min(1000, top - i * 1000) / top,
                       height: `${Math.max(2, (d.percentage / maxPct) * 100)}%`,
-                      background: rampAt(palettes.elevation, i * 1000 + 500),
+                      background: rampAt(land, i * 1000 + 500),
                       opacity: 0.85,
                     }} />
                 ))}
@@ -135,7 +144,7 @@ export function LayerLegend() {
         })()}
 
         <div style={{ ...title, marginTop: 10 }}>Sea depth</div>
-        <div style={{ ...barBase, background: rampGradient(sea) }} />
+        <div style={{ ...barBase, background: gradient(sea) }} />
         <div style={ticks}><span>Shore</span><span>Shelf</span><span>Abyss</span></div>
         <div style={{ fontSize: 9, color: "#5a7390", marginTop: 6, lineHeight: 1.4 }}>
           Metres above sea level; breaks follow atlas convention, not even steps.

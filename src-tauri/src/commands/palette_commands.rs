@@ -1,8 +1,8 @@
 use serde::Serialize;
 
 use crate::render::tile_image::{
-    biome_color, koppen_color, soil_color, BATHYMETRY_STOPS, ELEVATION_STOPS, ELEV_MAX_M,
-    PRECIP_BANDS, TEMPERATURE_STOPS,
+    biome_color, elevation_style_palettes, koppen_color, soil_color, BATHYMETRY_STOPS,
+    ELEVATION_STOPS, ELEV_MAX_M, PRECIP_BANDS, TEMPERATURE_STOPS,
 };
 use crate::sim::deposits::grade_label;
 
@@ -115,6 +115,30 @@ pub struct GradeStop {
     pub color: String,
 }
 
+/// One elevation STYLE's served palette (§ "Elevation styles" in
+/// `render/tile_image.rs`) — a named alternative land+sea ramp for the
+/// "elevation"/"terrain" layer keys (`"elevation#style=alpine"`), each a real
+/// cartographic convention (classed layer tinting, Imhof neutral relief,
+/// desert/polar presets, a monochrome analytical hillshade, a sepia antique
+/// plate, a bathymetry-showcase "Abyssal"). Served exactly like every other
+/// ramp here so a style's own legend can never disagree with what the map
+/// actually paints.
+#[derive(Serialize)]
+pub struct StylePaletteOut {
+    /// The `#style=` key, e.g. "alpine".
+    pub key: String,
+    /// Human-readable name for a style picker, e.g. "Alpine".
+    pub label: String,
+    /// Land ramp, x in METRES (same units as `elevation`).
+    pub land: Vec<RampStop>,
+    /// Sea ramp, x = normalised depth 0..1 (same units as `bathymetry`).
+    pub sea: Vec<RampStop>,
+    /// If true, `land`/`sea` are STEPPED classed bands (no interpolation
+    /// between stops) rather than a smooth ramp — read them as discrete tiles,
+    /// not a gradient.
+    pub classed: bool,
+}
+
 /// The breakpoints `grade_label` itself switches on (kept in sync by
 /// `grade_labels_match_the_served_breakpoints` below).
 const GRADE_BREAKS: [f32; 5] = [0.0, 0.34, 0.52, 0.70, 0.86];
@@ -143,6 +167,8 @@ pub struct RenderPalettes {
     /// The heatmap ramp's colour at each `grade_label` breakpoint, so the legend's
     /// swatches are guaranteed to match what the map actually paints there.
     pub good_quality_grades: Vec<GradeStop>,
+    /// Every named elevation style's own land+sea palette (§ elevation styles).
+    pub elevation_styles: Vec<StylePaletteOut>,
 }
 
 fn hex(c: (u8, u8, u8)) -> String {
@@ -181,6 +207,16 @@ pub fn get_render_palettes() -> RenderPalettes {
                 at,
                 label: grade_label(at).to_string(),
                 color: hex(heatmap_at(at)),
+            })
+            .collect(),
+        elevation_styles: elevation_style_palettes()
+            .into_iter()
+            .map(|sp| StylePaletteOut {
+                key: sp.key.to_string(),
+                label: sp.label.to_string(),
+                land: stops(sp.land),
+                sea: stops(sp.sea),
+                classed: sp.classed,
             })
             .collect(),
     }
