@@ -2616,6 +2616,42 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
+MERCHANT_VESSELS_AND_INFORMATION_PLAN.md
+                                  ← ⭐ DESIGN, NOT APPROVED, NOTHING BUILT. Six
+                                    staged changes to the trade mechanism, built on
+                                    one finding: a VESSEL IS NOT A THING. `fleet_sea`/
+                                    `_river`/`_caravan` are three counters on `House`
+                                    with no identity, location or cargo; `dispatch`
+                                    decrements one slot per shipment REGARDLESS of
+                                    quantity, and `SHIP/BOAT/CARAVAN_CAPACITY` are
+                                    read only by futures-contract delivery. So one
+                                    shipment carries exactly one good, and "which
+                                    vessels are in port" is missing STATE, not a
+                                    missing query. Stage 1 makes a `Vessel` real
+                                    (manifest, capacity that binds, port dwell);
+                                    stage 4 is the substantive one — a house trades on
+                                    the price it BELIEVES, with a spread set by how
+                                    fresh its knowledge is (never been → surveyed →
+                                    office → controls the seat), which is the
+                                    information-decay mechanism Persson/Federico
+                                    credit for real market integration and the most
+                                    plausible fix for the measured −0.026 gradient.
+                                    Stages 5-6 generalise the EXISTING `envoys.rs`
+                                    into survey agents and finally wire the EXISTING
+                                    `RouteProspect`/`establish_corridor` loop into
+                                    trade (today a corridor feeds only the overlay).
+                                    Stage 7 is the STAPLE RIGHT — a house holding a
+                                    seat sets the price on its chartered goods within
+                                    a band, and rivals learn to route elsewhere; it
+                                    REQUIRES stage 4, because price-setting with no
+                                    way for rivals to learn the price is bad is upside
+                                    with no downside. Carries its own gates per stage
+                                    — including the companion gate that matters most,
+                                    that long-haul trade VOLUME must not collapse —
+                                    and its own "deliberately not built" list. Four
+                                    design decisions are recorded at the top
+                                    (individual vessels · houses+guilds only ·
+                                    privilege staged as terms-then-price · no code yet)
 GOODS_LOCALITIES_PLAN.md          ← ⭐ ALL 8 SLICES BUILT. Trade goods got what
                                     minerals already had (§8.16): belt → LOCALITY →
                                     cell, persisted to `metadata["good_localities"]`

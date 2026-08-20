@@ -346,6 +346,9 @@ pub fn compute_economy(
     }
 
     // Absolute scarcity (#18) + deposit floor (#19): rescale by global abundance.
+    // A good below this abundance keeps at least this share of the top good's rate, so a
+    // scarce-but-real good still clears the 0.05 producer-emit gate (see the floor below).
+    const NONDEPOSIT_ABUNDANCE_FLOOR: f32 = 0.15;
     let raw_total: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).sum::<f32>()).collect();
     let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
     let is_deposit: Vec<bool> = (0..gc)
@@ -355,7 +358,17 @@ pub fn compute_economy(
         .collect();
     let abundance: Vec<f32> = (0..gc).map(|g| {
         let a = (raw_total[g] / raw_total_max).sqrt();
-        if is_deposit[g] { a.max(0.6) } else { a }
+        // A FLOOR so a good that exists ANYWHERE stays visibly produced. The rescale
+        // below is `prod / good_max * abundance`, and for a SEEDED luxury (wine, silk,
+        // spices…) the small world-total collapsed `sqrt`-abundance to ~0.03 — under the
+        // 0.05 producer-emit gate — so EVERY one of its hubs dropped out and it read
+        // "0 cities · never produced" while its belt still painted the map. Deposits
+        // already carried this guard (0.6); non-deposit goods had none, which is the
+        // root cause of the "tons of wine, no wineries" report. The floor only lifts a
+        // good below it (a scarce one), leaving common goods' relative abundance intact.
+        if is_deposit[g] { a.max(0.6) }
+        else if raw_total[g] > 0.0 { a.max(NONDEPOSIT_ABUNDANCE_FLOOR) }
+        else { a }
     }).collect();
     let good_max: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).fold(0.0f32, f32::max).max(1e-6)).collect();
 

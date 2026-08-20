@@ -638,6 +638,53 @@
         assert!(fired, "a dead-cored frontier province must not block its trade master's crown");
     }
 
+    /// EXACT reproduction of a player screenshot: the province's TOP trader is a GUILD
+    /// (33%), and the eligible PRIVATE house (27%) sits BELOW it, with more guilds at
+    /// 18/16/2% and a second private house at 3%. The guild-above-house ordering must
+    /// NOT block the crown — the sorted loop skips the guild (`continue`, not `break`)
+    /// and reaches the 27% private house. If this passes, the engine is correct and a
+    /// campaign showing "no realm" is running a STALE binary.
+    #[test]
+    fn a_private_house_crowns_even_when_a_guild_out_trades_it() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 22000.0, vec![9000.0], 0), // the seat, province 0
+            hub(1, 3.0, 0.0, 7000.0, vec![4000.0], 0),
+        ];
+        let mut fired = false;
+        for t in 0..400u32 {
+            let mut s = sim(hubs.clone(), goods.clone());
+            // house 0 = the eligible PRIVATE controller (Qaisariia), 27%
+            // houses 1..=4 = trading GUILDS at 33/18/16/2%
+            // house 5 = a second minor private house at 3%
+            s.found_house_at(0); // Qaisariia, home = hub 0
+            for _ in 0..5 { s.found_house_at(1); } // 5 more houses at hub 1
+            s.hub_province = vec![0, 0];
+            s.prov_rural = vec![100.0];
+            s.prov_holder = vec![0];
+            s.prov_holder_house = vec![-1];
+            s.prov_realm = vec![-1];
+            // Trade shares within province 0 (all trade in hub 0), mirroring the screenshot.
+            s.houses[0].trade_at = vec![(0, 27.0)]; // private controller
+            s.houses[1].trade_at = vec![(0, 33.0)]; s.houses[1].is_guild = true; // guild, TOP
+            s.houses[2].trade_at = vec![(0, 18.0)]; s.houses[2].is_guild = true;
+            s.houses[3].trade_at = vec![(0, 16.0)]; s.houses[3].is_guild = true;
+            s.houses[4].trade_at = vec![(0, 2.0)];  s.houses[4].is_guild = true;
+            s.houses[5].trade_at = vec![(0, 3.0)];  // second private house, minor
+            s.houses[0].wealth = 1000.0; // deliberately POOR — share alone must suffice
+            s.houses[0].tier = 0;
+            s.tick = REALM_YEAR_FLOOR * TICKS_PER_YEAR + t;
+            s.maybe_proclaim_realms(REALM_FULL_RAMP_YEAR);
+            if let Some(r) = s.realms.first() {
+                assert_eq!(r.ruling_house, 0,
+                    "the 27% PRIVATE house crowns, not the 33% guild (guilds cannot found realms)");
+                fired = true;
+                break;
+            }
+        }
+        assert!(fired, "a private house past 20% must crown even when a guild out-trades it");
+    }
+
     /// The exact shape a player reported unfixed: a province with a LIVE seat city, a
     /// PRIVATE house at 51% of its trade, and several GUILDS also trading there (36% +
     /// smaller shares). The private house is the highest single share and must proclaim;
