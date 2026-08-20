@@ -2571,10 +2571,18 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md
                                     into survey agents and finally wire the EXISTING
                                     `RouteProspect`/`establish_corridor` loop into
                                     trade (today a corridor feeds only the overlay).
-                                    Carries its own gates per stage — including the
-                                    companion gate that matters most, that long-haul
-                                    trade VOLUME must not collapse — and its own
-                                    "deliberately not built" list
+                                    Stage 7 is the STAPLE RIGHT — a house holding a
+                                    seat sets the price on its chartered goods within
+                                    a band, and rivals learn to route elsewhere; it
+                                    REQUIRES stage 4, because price-setting with no
+                                    way for rivals to learn the price is bad is upside
+                                    with no downside. Carries its own gates per stage
+                                    — including the companion gate that matters most,
+                                    that long-haul trade VOLUME must not collapse —
+                                    and its own "deliberately not built" list. Four
+                                    design decisions are recorded at the top
+                                    (individual vessels · houses+guilds only ·
+                                    privilege staged as terms-then-price · no code yet)
 GOODS_LOCALITIES_PLAN.md          ← ⭐ ALL 8 SLICES BUILT. Trade goods got what
                                     minerals already had (§8.16): belt → LOCALITY →
                                     cell, persisted to `metadata["good_localities"]`

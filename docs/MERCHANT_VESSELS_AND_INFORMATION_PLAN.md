@@ -1,7 +1,17 @@
 # Merchant vessels, cargo, and the price a house *believes*
 
-**Status: DESIGN, NOT APPROVED.** Six stages, each independently useful, each with
-its own gate. Nothing here is committed to.
+**Status: DESIGN, NOT APPROVED. Nothing built.** Seven stages, each independently
+useful, each with its own gate.
+
+**Decisions taken** (2026-08-20, in answer to this document's own open questions):
+
+| | Decision |
+|---|---|
+| Vessel granularity | **Individual** lightweight records — a specific hull sinks, and the map can draw every one |
+| Who gets vessels | **Houses and guilds.** Local merchants stay abstract |
+| Privilege where a house controls a city | **Both, staged** — better TERMS in stage 4, real price-setting as its own stage 7 behind its own gate |
+| Blindness (`SPREAD_MAX`) | Mine to tune, swept against the gradient + volume gates (§4.9) |
+| Build order | Design first; no code yet |
 
 Companion to `docs/TRADE_AND_MARKET_REVIEW.md`, which measured the problem. That
 document ends by saying the work is now in the mechanism (F3/F4/F5/F8, and the
@@ -78,14 +88,104 @@ traders sold and bought at each stop along a coast. A vessel with a manifest and
 dwell state can express a circuit; whether stage 1 builds circuits or only keeps the
 existing out-and-back is a scope decision (recommend: out-and-back first).
 
-**Decision — vessel granularity: INDIVIDUAL, lightweight.** Counts would serve the
+**DECIDED — vessel granularity: INDIVIDUAL, lightweight.** Counts would serve the
 "10 boats, 7 ships" display, but not "where is each vessel". Individual records are
-also what let a *specific* ship sink rather than a counter decrement.
+also what let a *specific* ship sink rather than a counter decrement. Cost accepted:
+thousands of records in a long campaign, all of which serialize into the save.
 
-**Decision — who gets vessels: houses and guilds only.** Guilds already receive a
+**DECIDED — who gets vessels: houses and guilds only.** Guilds already receive a
 fleet at founding (`found_guild` → `initial_fleet`). Local merchants stay abstract:
 they are the city's own short-haul trade, and giving them entities multiplies the
-count for nothing anyone would look at.
+count for nothing anyone would look at. Consequence to accept: the in-port strips
+show house and guild vessels only, and a city whose trade is mostly local reads
+quieter than it is.
+
+### 1.1 How a manifest is actually assembled — and the loop inversion
+
+This is the hard part of stage 1 and the reason it moves every number.
+
+`dispatch` today is **good-major**:
+
+```
+for g in goods:
+    sellers = hubs with surplus of g
+    for a in sellers:
+        targets = top 3 of a's 32 nearest, ranked by gap × hub_pull
+        ship min(surplus, room/2) of g to each
+```
+
+A manifest cannot be built that way: a hold is filled from *many* goods for *one*
+destination. The loop has to invert to **lane-major**:
+
+```
+for a in hubs:
+    for b in a's K nearest reachable:
+        candidates = every good where a has surplus and the (believed) gap > 0
+        rank by PROFIT DENSITY — expected profit per unit of HOLD SPACE
+        fill the available hulls greedily down that ranking
+        if the hold is worth sailing, dispatch one voyage carrying the manifest
+```
+
+Greedy-by-density is the standard approximation to the knapsack this is, and it is
+also what a supercargo actually did: load the most valuable thing per barrel of
+space first, then fill the gaps.
+
+**Two consequences to accept up front:**
+
+* **Iteration order changes**, so floating-point accumulation order changes, so the
+  output changes even where the logic is equivalent. There is no bit-identical
+  version of this change.
+* **Fewer, larger voyages.** Today a hub can dispatch one shipment per good per
+  destination per tick. Lane-major produces ONE voyage per lane carrying several
+  goods. That is the realistic outcome and it is the point — but it changes the
+  shape of `in_transit`, the merchant-route overlay, and every diagnostic that
+  counts shipments (`diag_shipments`).
+
+### 1.2 What a hold is measured in — and the calibration trap
+
+Capacity must be consumed in **bulk-weighted** units:
+
+```
+hold_space_used = qty * GoodSpec.bulk
+```
+
+So a 120-capacity ship carries 120 units of silk (`bulk` 1.0) or ~30 units of a
+`bulk` 4.0 staple. That is physically right and reuses a field that already exists
+and already means exactly this in `freight_of`.
+
+**⚠ THE CALIBRATION TRAP, and it is the biggest risk in this document.**
+`SHIP_CAPACITY = 120` / `BOAT_CAPACITY = 70` / `CARAVAN_CAPACITY = 40` were tuned for
+**futures-contract delivery**, where a large contract deliberately fans out over many
+vessels (`(monthly_qty / SHIP_CAPACITY).ceil()`). They have never constrained a spot
+shipment, whose size is `min(surplus, room * 0.5)` and is unbounded.
+
+If typical spot shipments are, say, 500 units and a house owns 6 hulls, then applying
+these constants unchanged throttles spot trade by an order of magnitude, cities
+starve, and the price/distance gradient goes flat again from the other side. That is
+exactly the failure the companion gate exists to catch — but it would be far cheaper
+to catch it *before* writing the stage.
+
+**So stage 1 opens with a read-only diagnostic, not with code:** measure the
+distribution of spot shipment sizes in the reference world (median, p90, max, by
+mode), and the distribution of fleet sizes. Only then decide whether to (a) raise the
+capacities, (b) raise fleet sizes, or (c) accept a smaller number of larger voyages
+as the intended outcome. Guessing here would be the "tune a constant without a gate"
+mistake §2.4 of `CLAUDE.md` warns about.
+
+### 1.3 Loss, now that a hull is a thing
+
+`damage_fleet` currently decrements a counter. With entities, the existing
+`SEA_LOSS`/`CARAVAN_LOSS` roll picks a *specific* vessel: its manifest is lost, the
+hull is removed, and the chronicle can name what went down with it. That is strictly
+better storytelling for free — but note it changes the loss ARITHMETIC, because today
+a "loss" destroys one shipment of one good and tomorrow it destroys a mixed hold.
+
+### 1.4 Determinism
+
+Vessels must be iterated in a **stable order** (by id, never by a `HashMap`), and ids
+must be assigned from a monotonic counter, not from a hash. This project has already
+been bitten four times by hash-iteration order (see `fold_trade_year`'s own comment,
+and `econ_scorecard_is_deterministic`'s four fixed sites).
 
 **Gate.** Two, and the second is the real one:
 1. `simulate_decades_reports_dynamics` still passes its bounded/finite wealth and
@@ -266,17 +366,18 @@ worth writing:
 > *Trevisan's factor had reported pepper at 4.2× in Ragusa; the galley found it at
 > 1.1×, and the voyage was a loss.*
 
-### 4.8 Privilege where a house controls a city
+### 4.8 Privilege where a house controls a city — stage 4's half
 
-**Decision: privilege changes that house's TERMS, never the city's actual price.**
-Extend the ladder that already exists — `OFFICE_BUY_DISCOUNT` (−5%),
+**DECIDED: BOTH, STAGED.** Stage 4 gives the controlling house better TERMS; stage 7
+gives it the power to set a price. They are separated because they carry completely
+different risk, not because the second is optional.
+
+Stage 4's half extends the ladder that already exists — `OFFICE_BUY_DISCOUNT` (−5%),
 `BAILO_CONCESSION_TOLL`, and the council's own `COUNCIL_BUY_PRICE` right of first
-refusal — rather than bending `live_price`. That keeps the market price honest and
-keeps the mechanic contained.
-
-The alternative — a controlling house actually setting the local price on its
-chartered goods — is what a real staple right did, and is a much larger change. Left
-as an explicit open option, not folded in silently.
+refusal — and does **not** touch `live_price`. The city's market price stays honest;
+only what this house pays and receives moves. Contained, and it composes cleanly with
+the spread table above (control already sets spread to zero, so terms and certainty
+arrive together).
 
 ### 4.9 The gate — and the failure mode it must catch
 
@@ -348,7 +449,50 @@ compose rather than conflict.
 
 ---
 
-## 7. Order, and what each stage costs
+## 7. Stage 7 — the staple right: a controlling house SETS the price
+
+The second half of the privilege decision, deliberately last, because it is the only
+change in this document that makes a house's political power bend the market itself
+rather than its own terms.
+
+**The history is unambiguous.** Venice's *staple*, Bruges' and later Amsterdam's
+*stapelrecht*, the English Merchant Adventurers' cloth monopoly: goods passing had to
+be landed, offered locally first, and sold on terms the holder set. This is not a
+flavour detail — it is a large part of why those particular cities became rich, and
+the model currently has only `hub_pull` (a statistical gravity term) standing in for
+it.
+
+**Scope, deliberately narrow.** A house may set the price only:
+* at a city where it holds the **council seat, captor seat or a bailo**, and
+* on goods it holds a **charter** for (`House.charters`, which exists and already
+  carries `CHARTER_RENT`), and
+* within a **band** around the market-clearing price — not an arbitrary number.
+  A staple right let you squeeze; it did not repeal supply and demand.
+
+**Why the band matters more than the mechanic.** Without a cap, the optimum is always
+"set the price to the ceiling", the holder's wealth runs away, and rule 18's whole
+lesson about uncapped rents (prestige took the richest house from 298k to 1.9M) gets
+re-learned the expensive way. The band is the design.
+
+**The cost it must carry.** A staple right that is pure upside is a bug. Historically
+squeezing a market drove trade to rivals — Bruges lost to Antwerp, Antwerp to
+Amsterdam. So a house holding prices above the clearing level should measurably
+**divert trade to neighbouring ports**, which the belief system (stage 4) makes
+expressible for the first time: rival houses learn the price is bad here and route
+elsewhere. Stage 7 without stage 4 would be upside with no downside, which is why the
+ordering is not negotiable.
+
+**Gate.** Three:
+1. A staple city's own trade volume rises **and** its neighbours' falls — the
+   diversion is real, not just a wealth transfer.
+2. The richest house's sustained wealth stays bounded (`simulate_decades_reports_
+   dynamics`' own assertion), which is rule 18 applied to a new rent.
+3. `top10_share` and `wealth_gini` stay inside their historical bands — a
+   price-setting privilege is exactly the kind of mechanism that would push them out.
+
+---
+
+## 8. Order, and what each stage costs
 
 | # | Stage | Moves the numbers? | Gate |
 |---|---|---|---|
@@ -358,14 +502,19 @@ compose rather than conflict.
 | 4 | Belief & spread | **yes, everything** | gradient rises, `spatial_cv` does not worsen, long-haul volume holds |
 | 5 | Survey agents + log | some | tuned against the inheritance gate, or isolated |
 | 6 | Corridors pay · prospecting · offices | some | corridor count and office count both rise; volume holds |
+| 7 | Staple right — price-setting | **yes, everything** | trade diverts to neighbours; richest wealth bounded; Gini/top-10% stay in band |
 
-**Stages 1 and 4 are done separately, never together.** Each will move every `econ_`
+**Stage 7 requires stage 4.** A price-setting privilege with no way for rivals to
+LEARN that the price is bad is upside with no downside. The ordering is structural,
+not preference.
+
+**Stages 1, 4 and 7 are done separately, never together.** Each will move every `econ_`
 number and each needs its own diagnosis. This codebase has punished combined changes
 four times on record (4.7, 4.9, the realm work, and crisis relief).
 
 ---
 
-## 8. Deliberately not built
+## 9. Deliberately not built
 
 * **In-transit spoilage.** Raised, and it was a misreading of "rates" as "rats".
   `perishable` stays a freight-price term. (Static spoilage in a city already exists:
@@ -373,8 +522,6 @@ four times on record (4.7, 4.9, the realm work, and crisis relief).
 * **Per-arrival buyer attribution** ("who bought THIS cargo"). Needs new state; the
   existing seller-class attribution plus the council/warehouse purchase totals cover
   most of what the view needs.
-* **A controlling house setting the actual local price.** §4.8 — real staple-right
-  behaviour, much larger change, left as an open option.
 * **Named vessels.** Lightweight records; a ship is a hull and a hold, not a
   character.
 * **Multi-leg trading circuits** in stage 1 (out-and-back first).
