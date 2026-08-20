@@ -35,9 +35,39 @@ const TIER_WEIGHT: [f32; 3] = [1.0, 0.45, 0.22];
 const LUX_IMPORT_DESIRE: f32 = 0.7;
 /// Share of `LUX_IMPORT_DESIRE` a COMFORT-tier good draws when a city cannot make it
 /// at home (a luxury draws the full amount). See `production.rs::base_need` for the
-/// measurement behind this value — it is the dose that keeps
-/// `econ_inheritance_rules_fragment_differently` green, and it shipped at 0.60 which
-/// left that gate red on main for four commits.
+/// mechanism.
+///
+/// **THIS VALUE IS SET BY A GATE THAT HAS NOTHING TO DO WITH TRADE, AND THE TRADE
+/// EVIDENCE POINTS THE OTHER WAY.** Recorded rather than acted on, because raising it
+/// re-breaks `econ_inheritance_rules_fragment_differently` (that is exactly why it is
+/// 0.30: it shipped at 0.60 and left that gate red on main for four commits).
+///
+/// Measured — `econ_fidelity_scorecard`, one seed per dose, sweeping this constant:
+///
+/// | dose | basket price gap × distance | goods with a positive gradient | basket CV | real wage |
+/// |------|------|------|------|------|
+/// | 0.00 | −0.006 | 0 of 6 | 1.573 | 146.3 |
+/// | 0.30 | **−0.064** | **0 of 6** | 1.596 | 162.5 |
+/// | 0.60 | **+0.041** | **2 of 6** | 1.672 | 169.4 |
+/// | 0.90 | +0.053 | 3 of 6 | 1.678 | 152.9 |
+///
+/// A POSITIVE price/distance gradient is the historically correct sign (Federico,
+/// Persson) and its absence is the single largest market-realism failure this project
+/// has named — `docs/TRADE_AND_MARKET_REVIEW.md` F2, "distance costs nothing
+/// anywhere". Only doses at or above 0.60 produce it. The shipped 0.30 is the WORST
+/// of the four tested on that measure.
+///
+/// Read the caveats before acting on the table: one seed per dose; the low end is not
+/// monotone (0.00 → 0.30 makes the gradient *more* negative); real wage peaks at 0.60
+/// rather than rising; and every dose leaves basket CV at 1.57–1.68 against a
+/// historical 0.20–0.40, so no value here makes the market realistic — the differences
+/// are directional inside an already badly-calibrated regime.
+///
+/// So this is a genuine conflict between two gates, not a value waiting to be nudged.
+/// Resolving it means fixing the thing F2 actually blames (freight is ~11% of grain
+/// value over the longest route; i.i.d. per-hub harvest shocks leave no regional
+/// scarcity for a gradient to form against) rather than paying for integration with a
+/// demand constant. Reproduce with the sweep recipe in `docs/SCOREBOARD.md` 2026-08-20d.
 const COMFORT_IMPORT_FRAC: f32 = 0.30;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;

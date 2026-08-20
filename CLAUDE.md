@@ -1879,10 +1879,21 @@ is a multiplier on merchant wealth"), which is an artefact of the 0.60 dose and 
 property of the model. Before concluding an assertion is unsound, check that the world you
 measured in is not itself the thing that is broken.
 
-One residual caveat, flagged rather than resolved: 0.30 was chosen because it restores
-this gate, which is weak grounds for a demand parameter. The dose-dependence above shows
-the gate is measuring something real rather than noise, so the choice is defensible — but
-`COMFORT_IMPORT_FRAC` still has no independent justification of its own.
+**THE TWO GATES DISAGREE ABOUT THAT DOSE, and the one that set it isn't about trade.**
+0.30 was chosen because it restores this gate — weak grounds for a demand parameter, so
+it was measured against a gate that isn't the target (§2.4). Sweeping it against
+`econ_fidelity_scorecard`: the basket price/distance gradient reads **−0.064 at the
+shipped 0.30 (0 of 6 goods showing any gradient)** and turns **positive at 0.60 (+0.041,
+2 of 6)** and 0.90 (+0.053, 3 of 6). A positive gradient is the historically correct sign
+and its absence is `TRADE_AND_MARKET_REVIEW.md`'s F2 — the largest market failure this
+project has named. So the shipped value is the worst of four tested on market integration.
+
+**Nothing was changed**: raising it re-breaks this gate, and buying integration with a
+demand constant is not the fix F2 asks for (it blames freight at ~11% of grain value over
+the longest route, and i.i.d. per-hub harvest shocks leaving no regional scarcity). Full
+table, caveats and reproduction recipe at the constant's own doc comment and in
+`docs/SCOREBOARD.md` 2026-08-20d. Read the caveats before acting: one seed per dose, the
+low end is not monotone, and every dose leaves basket CV far outside its band.
 
 **Read this before "fixing" this gate again.** It has been perturbed five times (realms,
 crisis relief, the trade horizon, estate-share tuning, comfort-good import demand). The

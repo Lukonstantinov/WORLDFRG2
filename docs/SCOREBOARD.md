@@ -9,6 +9,57 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-20d — The two gates disagree about `COMFORT_IMPORT_FRAC`, and the one that won isn't about trade
+
+Follow-up to 20c, which closed by flagging that `COMFORT_IMPORT_FRAC` = 0.30 had no
+justification independent of the inheritance gate it was tuned against — the exact thing
+§2.4 forbids. **It now has independent evidence, and the evidence cuts against 0.30.**
+
+Measured by sweeping the constant and reading `econ_fidelity_scorecard` (one seed per
+dose — see caveats):
+
+| dose | basket price gap × distance | goods with a positive gradient | basket CV | real wage |
+|---|---|---|---|---|
+| 0.00 | −0.006 | 0 of 6 | 1.573 | 146.3 |
+| **0.30 (shipped)** | **−0.064** | **0 of 6** | 1.596 | 162.5 |
+| 0.60 (the reverted dose) | **+0.041** | **2 of 6** | 1.672 | 169.4 |
+| 0.90 | +0.053 | 3 of 6 | 1.678 | 152.9 |
+
+A POSITIVE price/distance gradient is the historically correct sign (Federico; Persson),
+and its absence is the largest market failure this project has named for itself —
+`TRADE_AND_MARKET_REVIEW.md` F2, *"0 of 6 priced goods show any positive distance
+gradient… distance costs nothing anywhere."* **Only doses ≥0.60 produce one. The shipped
+0.30 is the worst of the four tested on that measure.**
+
+So the two gates genuinely disagree: `econ_inheritance_rules_fragment_differently` wants
+the dose low (0.60 inverts it — that is the 20c story), and market integration wants it
+high. The value currently in the tree was chosen by the gate that has nothing to do with
+trade, because that is the gate that was red.
+
+**Nothing was changed.** Raising it would re-break a gate and turn `main` red again, and
+the right fix is not to buy market integration with a demand constant anyway — F2 already
+names the real culprits (freight is ~11% of grain value over the longest route, against
+real carting that roughly doubled grain's price over 150–300 km; and i.i.d. per-hub
+harvest shocks leave no regional scarcity for a gradient to form against). This is a
+finding handed to the maintainer, recorded at the constant and here.
+
+**Caveats, stated because the table is seductive:** one seed per dose; the low end is not
+monotone (0.00 → 0.30 makes the gradient *more* negative, so this is not a clean "more is
+better" curve); real wage peaks at 0.60 rather than tracking the dose; and every dose
+leaves basket CV at 1.57–1.68 against a historical 0.20–0.40 — no value tested makes this
+market realistic, the differences are directional inside an already badly-calibrated
+regime. Treat the table as "0.30 is not the best-supported value", not as "0.60 is right".
+
+Reproduce: for each dose, `sed` the constant in `sim/campaign/tick/mod.rs` and run
+`cargo test --release --lib econ_fidelity_scorecard -- --nocapture`, reading the
+basket-gradient and per-good rows. (Deliberately not built as a permanent `econ_measure_*`
+harness: sweeping a `const` needs it promoted to a runtime field on `CampaignSim`, which is
+a real change to the sim struct for a diagnostic that runs about once a year.)
+
+No code changed; no test counts moved.
+
+---
+
 ## 2026-08-20c — CORRECTION: 20b was wrong, and the way it was wrong is the finding
 
 **The 20b entry below is left standing because it is a textbook error, not because it is
@@ -1993,6 +2044,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-20d | *this* | 70.2% | 39.0% | 342 pass, 0 fail (28 ignored) | 0 | **`COMFORT_IMPORT_FRAC` measured against a gate that isn't the one it was tuned on — and the evidence cuts against the shipped value.** Sweeping the dose against `econ_fidelity_scorecard`: the basket price/distance gradient is −0.064 at the shipped 0.30 (0 of 6 goods showing any gradient) and turns POSITIVE at 0.60 (+0.041, 2 of 6) and 0.90 (+0.053, 3 of 6). A positive gradient is the historically correct sign and its absence is F2, the largest market failure this project has named. So the inheritance gate and market integration want opposite doses, and the value in the tree was set by the one unrelated to trade. **Nothing changed** — raising it re-breaks a gate, and F2's real culprits (freight ~11% of grain value; i.i.d. harvest shocks) are the thing to fix. Caveats recorded: one seed/dose, non-monotone at the low end, and every dose leaves basket CV at 1.57–1.68 vs a historical 0.20–0.40 |
 | 2026-08-20c | *this* | 70.2% | 39.0% | **342 pass, 0 fail** (28 ignored) | 0 | **CORRECTION of 20b, which was wrong.** 20b's 6-seed sweep ran at the broken `COMFORT_IMPORT_FRAC`=0.60 — the dose that inverted the gate — and concluded the mean-wealth assertion was "measurably false" (1/6). At the corrected 0.30 it holds **5/6**; the assertion is restored and the concurrent session's bisect-and-fix-the-dose diagnosis was right. **The lesson is the deliverable: a seed sweep only reads the world you point it at**, and measuring robustness inside an already-bent economy produced a confident, quantified, false conclusion. Kept from 20b: `a_division_moves_capital_and_creates_none` (zero-sum asserted at the mechanism) and `econ_measure_inheritance_robustness` (now carrying the dose-comparison table). Margin comment also corrected — its "1.08–1.45 across seeds" was likewise a 0.60 artefact |
 | 2026-08-20b | *this* | 70.2% | 39.0% | 342 pass, 0 fail (28 ignored) | 0 | **SUPERSEDED by 20c — central conclusion WRONG, left unedited as the record of the mistake.** `econ_inheritance_rules_fragment_differently` "fixed" — and the fix is a finding, not a repair. Measured across 6 seeds (`econ_measure_inheritance_robustness`, new): the failing assertion (partible leaves the average house poorer) holds **1/6**; houses-still-standing 4/6; concentration 2/6 — and all three pass on the gate's own seed, so any could have been swapped in to go green while asserting something false. Only houses-ever is structural (6/6), so the assertion is **not replaced**, just strengthened to require a real margin (≥1.05×; a bare `>` is what let crisis relief flip it at 190v196). **The merchant pool is not conserved**: `divide_estate` is exactly zero-sum (now asserted at the mechanism by `a_division_moves_capital_and_creates_none`), but the extra firms trade, so partible ends **richer** in total 5/6 (~30-45%). Firm count is a multiplier on merchant wealth, not a divisor of a fixed stock. Assertion 4's false "more total wealth ⇒ minting money" inference deleted |
 | 2026-08-20 | *this* | — | — | **341 pass, 0 fail** (26 ignored) | 0 | **main was RED and had been for four commits.** `econ_inheritance_rules_fragment_differently` was failing its SUBSTANTIVE assertion — partible left the average house RICHER than primogeniture (193,720 vs 164,858), the opposite of what dividing an estate must do. Bisected to `a7ff520` ("Demand: comfort goods also draw foreign-import craving"), which raised the foreign-craving gain to tier-1 goods at 0.60 of the luxury rate; its parent `96ef1e2` is green with byte-identical numbers to the pre-change baseline. It then survived `2153af3` (Terrain 2.0) and `345c807` (wine fix) because **each of those was verified against a different SUBSET** — "cargo check + tsc + realm suite", "dynamics test passes" — and none ran `econ_`. That is the failure mode §2.5 and rule 16 exist to prevent, and it is the finding here, more than the constant. The response is dose-dependent (the `envoys.rs` shape, not 4.7's discrete branching flip), so the fix is the dose and not the mechanism: `COMFORT_IMPORT_FRAC` 0.60 → **0.30**. Comfort goods still draw real foreign craving at half strength; the gate returns with a WIDE margin (149,925 vs 174,496 mean wealth, 194 vs 176 houses ever) rather than a thin one, deliberately, because this gate has now flipped inside its own noise band five times. Scorecard on the repaired main: gradient −0.052, basket −0.064, grain spatial CV 2.471, Zipf −0.625 (from −0.485, toward its band), Gini 0.717 (in band), top-10% 0.588 (from 0.512, approaching band), real wage 162.5. Those reflect everything on main since the last row, not this tuning alone — not isolated per-commit.  This is the fix for the "1 pre-existing unrelated fail" the row below correctly observed and left in place. |
