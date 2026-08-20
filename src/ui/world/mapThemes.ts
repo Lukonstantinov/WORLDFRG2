@@ -42,6 +42,11 @@ export interface MapTheme {
   linePreset?: PresetKey;
   /** Workflow step whose data this plate needs. Shown dimmed until it is done. */
   requires: number;
+  /** An elevation STYLE (§ elevation styles) to apply when `layer` is
+   *  "elevation"/"terrain" — omit for the plain default rendering. Lets a plate
+   *  give those two layers a real identity of their own instead of sharing the
+   *  same flat/hillshade pair every other view would also see. */
+  elevationStyle?: string;
 }
 
 /** The plates, ordered the way the pipeline builds the world: the land first, then
@@ -81,6 +86,11 @@ export const MAP_THEMES: MapTheme[] = [
     overlays: ["rivers", "lakes", "latLines"],
     labelTheme: "Classic Atlas",
     requires: 2,
+    // Layer Colouring: classed hypsometric bands (the Bartholomew/Times
+    // convention) instead of the plain unshaded default — the default
+    // "elevation" layer carries no shading at all, which used to leave this
+    // plate reading as a flatter, less informative copy of "Physical".
+    elevationStyle: "layers",
   },
   {
     id: "ocean",
@@ -268,6 +278,10 @@ export function applyMapTheme(theme: MapTheme): void {
     layerOpacity: theme.layerOpacity ?? 1,
     provinceOpacity: theme.provinceOpacity ?? s.provinceOpacity,
     activeMapTheme: theme.id,
+    // Cleared to `null` (never left stale) when a plate doesn't name one, or
+    // switching from "Relief & Height" to another elevation-styled plate would
+    // silently carry the previous plate's style over.
+    elevationStyle: theme.elevationStyle ?? null,
   }));
 
   const settings = useSettingsStore.getState();

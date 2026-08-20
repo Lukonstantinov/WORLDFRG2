@@ -94,6 +94,13 @@ interface UIStore {
    *  change to the cache scheme. Cleared whenever the layer changes, since a code
    *  means a different thing on each layer. */
   isolateClass: number | null;
+  /** ELEVATION STYLES: the named alternative palette+relief treatment for the
+   *  "elevation"/"terrain" layers (§ elevation styles, `render/tile_image.rs`) —
+   *  Layer Colouring, Alpine, Arid, Polar, Analytical, Antique Plate, Abyssal.
+   *  Rides in the layer key ("elevation#style=alpine") exactly like
+   *  `isolateClass`, so the tile cache keys and invalidates for free. `null` =
+   *  the plain default rendering for that layer. */
+  elevationStyle: string | null;
   /** GOODS_LOCALITIES_PLAN.md D10 · how the "quality" belt layer paints a cell's
    *  absolute 0..1 value. false (default) = mix toward the good's own hue; true =
    *  a heat ramp (dark blue → red) shared by every good, added because the hue-mix
@@ -303,6 +310,7 @@ interface UIStore {
   setLayerOpacity: (opacity: number) => void;
   setHoverInfo: (c: CellInfo | null) => void;
   setIsolateClass: (c: number | null) => void;
+  setElevationStyle: (s: string | null) => void;
   setGoodQualityHeatmap: (on: boolean) => void;
   toggleGoodQualityHeatmap: () => void;
   setCompareLayer: (l: ActiveLayer | null) => void;
@@ -445,6 +453,7 @@ export const useUIStore = create<UIStore>((set) => ({
   activeMapTheme: null,
   hoverInfo: null,
   isolateClass: null,
+  elevationStyle: null,
   goodQualityHeatmap: false,
   compareLayer: null,
   comparePos: 0.5,
@@ -556,6 +565,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
   setHoverInfo: (c) => set({ hoverInfo: c }),
   setIsolateClass: (c) => set({ isolateClass: c }),
+  setElevationStyle: (s) => set({ elevationStyle: s, activeMapTheme: null }),
   setGoodQualityHeatmap: (on) => set({ goodQualityHeatmap: on }),
   toggleGoodQualityHeatmap: () => set((state) => ({ goodQualityHeatmap: !state.goodQualityHeatmap })),
   setCompareLayer: (l) => set({ compareLayer: l }),

@@ -9,6 +9,64 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-20 — Seven elevation styles, served not copied
+
+Render-only follow-up to Terrain 2.0, prompted by the maintainer asking whether
+the app offered any elevation-style choices beyond the two hard-coded layers
+("elevation" flat/unshaded, "terrain" the one hillshade). It didn't — every
+atlas convention (classed hypsometric bands, Imhof's neutral Alpine relief, a
+monochrome analytical hillshade, a sepia antique plate) was unavailable no
+matter how the map was configured.
+
+Seven ship — Layer Colouring, Alpine, Arid, Polar, Analytical, Antique Plate,
+Abyssal — as **data, not new render functions**: `ElevationStyle` + `StyleParams`
+(land/sea ramp, classed-vs-smooth, climate-tint strength, real-`snow_frac`
+blend strength, AO/contrast/shadow-floor/light-altitude, warm-vs-cool shadow
+tint, sea relief amplitude) drive ONE shared `render_elevation_styled`, selected
+via a layer-key modifier (`"elevation#style=alpine"`) that mirrors class
+isolation's own `#iso=` mechanism exactly, so the frontend tile cache keys and
+invalidates for free. `relief_at`/`sea_shade`/`relief_channels` were
+parameterised (`relief_at_params`/`sea_shade_amp`/`relief_channels_warm`) with
+the ORIGINAL functions kept as thin wrappers passing the historical constants —
+bit-identical default rendering, gated by the full unit-test suite passing
+unchanged (339/340; the one failure is the pre-existing, unrelated
+`econ_inheritance_rules_fragment_differently` regression from `a7ff520`, see
+below).
+
+Two things worth recording:
+
+- **Every style's palette is SERVED, not copied** (§8.18's rule applied to a
+  new table for the first time since it was written): `elevation_style_palettes()`
+  → `get_render_palettes()`'s new `elevation_styles` field → `LayerLegend.tsx`
+  reads the ACTIVE style's real ramp. No second hand-written copy was created to
+  drift.
+- **A shallow-water clipping artefact, caught by actually rendering a world, not
+  by reading the constants.** Layer Colouring's first sea stop (176,219,231) is
+  already close to white; `sea_shade_amp`'s ×1.18 sunlit-slope ceiling pushed it
+  to solid (255,255,255) on every sunlit shelf cell, reading as a bright halo
+  hugging every coastline in the full-world render. Darkened to (150,196,214) —
+  same pale "classic atlas shelf blue" once shaded, no clipping. `AO_REF`
+  (§8.21) was exactly this lesson the first time; it recurred here in a
+  different table, which is why `dump_elevation_style_sheet` renders a REAL
+  generated world through the real dispatch path rather than sampling constants.
+
+`cargo test --release --lib dump_elevation_style_sheet -- --ignored --nocapture`
+(env `ELEVATION_STYLE_SHEET_DIR`, `ELEVATION_STYLE_SEED`) writes one full-world
+PNG per style plus the two default baselines and a numbered montage — the
+`dump_natural_sheet`/`dump_biome_swatch_sheet` discipline applied to a new
+render feature.
+
+**Pre-existing, unrelated finding, not fixed here:** `cargo test --lib` on this
+branch (merged from `origin/main` at `a7ff520`, "Demand: comfort goods also draw
+foreign-import craving...") shows `econ_inheritance_rules_fragment_differently`
+failing — partible leaves the average house RICHER than primogeniture
+(193,720 vs 164,858), the inverse of the assertion. Confirmed via `git worktree`
+against `origin/main` in isolation (no terrain/render changes present) that the
+failure reproduces there too, so it predates and is unrelated to this session's
+work. Left for a session that can attribute it to `a7ff520` specifically.
+
+---
+
 ## 2026-08-19e — Terrain 2.0 slice 4, take three: a level-set coastline
 
 The 2026-08-19d entry's slice 4 (below) shipped a real, measured, but visually
@@ -1809,6 +1867,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-20 | *this* | 70.2% | 39.0% | 339 pass, **1 pre-existing unrelated fail** (27 ignored) | 0 | Seven elevation styles (Layer Colouring, Alpine, Arid, Polar, Analytical, Antique Plate, Abyssal), data-driven off one shared `render_elevation_styled`; palettes served via `get_render_palettes` (§8.18); `relief_at`/`sea_shade` parameterised, default rendering bit-identical. The one failing test (`econ_inheritance_rules_fragment_differently`) is confirmed pre-existing on `origin/main` via an isolated worktree check, unrelated to this change |
 | 2026-08-19e | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | Slice 4 redone as a level-set (signed distance-to-boundary + noise, re-thresholded at zero) after a maintainer screenshot showed the 08-19d fix still reading as an unmodified Voronoi polygon despite its own 62.5% number. `coast_on_boundary` now 6-7% (was 90-100% pre-slice-4); real peninsulas/bays/islands, not speckle. Also fixed the divergent-boundary rift pulldown, a second straight-line artefact (read at an unwarped cell position, unrelated to the D4 orogeny-belt warp) the maintainer separately flagged as visible "plate line ridges" |
 | 2026-08-19d | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | `TERRAIN_2_PLAN.md` all six slices: stream-power erosion, transient `geology.rs` (lithology + orogeny setting/age + climate proxy + regionalised redistribution), plates.rs D3 boundary fix, coastline decoupled from the Voronoi edge (retuned after a probe found the first pass numerically differed but geometrically didn't — `coast_on_boundary` ~100%→62.5%, its own new gate), seafloor structure, texture-shading render follow-up. Earth main-class 70.1→70.2 (floor raised); `bench_phase2` @ 3600×1800 plates 8.5s→11.4s / shape 11.4s→13.9s (short of "no slower", recorded not hidden); `terrain_metrics` harness establishes the first slope-spread/drainage/coast-on-boundary/sea_depth-correlation baseline; `pearls` added as an honestly-labelled goods-coverage exception (a slice-4 consequence on the fixed-seed reference world, not a real-generation regression) |
 | 2026-08-19c | *this* | — | — | **331 pass, 0 fail** (24 ignored) | 0 | **City market 2.0 + the Markets window.** `CityMarketView` — shared between the settlement Trade tab and a new floating ⚖ Markets window with its own live city picker (`campaign_market_cities`, so campaign-founded towns are reachable at all). Keeps the buy/sell arrivals⇢market⇢departures basis and rebuilds the centre as a merchant's BOOK: bought at / sold at / **the spread** / days-of-need held / a price trend off the persisted series. Removes three sections it absorbs (the standalone price grid, Exports/Imports, the chain ladder) and rewires the map's supply-road highlight rather than orphaning it. Fixes a real defect: in-flight rows were stamped with the VIEWING city's local price, so an inbound cargo read as though bought at its destination's price (`InTransit.price` now carries the struck price). **Cost recorded:** `econ_inheritance_rules_fragment_differently` flipped on crisis relief — 190 vs 196 houses ever, a 3% margin, the fourth time this gate has moved inside its own noise. Its SUBSTANTIVE assertion held wide open throughout (mean wealth 141,368 vs 157,415 — the measure the test's own note calls the one that moves); only the count moved. Isolated with `suppress_relief`, mirroring `suppress_realms`; the gate now passes with margin both ways (193 vs 172 ever; 149,613 vs 161,790). Two schematic promises deliberately NOT faked: the full price build-up needs per-pair travel days the query layer doesn't send, and the "why the gap isn't closing" line needs dispatch's internals — both left out rather than invented. |

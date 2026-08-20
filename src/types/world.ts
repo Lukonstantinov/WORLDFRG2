@@ -240,6 +240,14 @@ export interface GradeStop {
   label: string;
   color: string;
 }
+export interface StylePalette {
+  key: string;
+  label: string;
+  land: RampStop[];
+  sea: RampStop[];
+  classed: boolean;
+}
+
 export interface RenderPalettes {
   elevation: RampStop[];
   bathymetry: RampStop[];
@@ -253,4 +261,5 @@ export interface RenderPalettes {
   good_quality_pale: string;
   good_quality_heatmap: RampStop[];
   good_quality_grades: GradeStop[];
+  elevation_styles: StylePalette[];
 }
