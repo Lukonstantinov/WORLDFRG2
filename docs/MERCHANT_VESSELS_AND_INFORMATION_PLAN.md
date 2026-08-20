@@ -196,8 +196,15 @@ and `econ_scorecard_is_deterministic`'s four fixed sites).
    vanish.
 
 **Expect every `econ_` number to move**, and expect
-`econ_inheritance_rules_fragment_differently` to flip — it has flipped on four
-consecutive changes now. Diagnose before isolating, exactly as crisis relief did.
+`econ_inheritance_rules_fragment_differently` to flip — it has flipped on five
+consecutive changes now. Diagnose before isolating, exactly as crisis relief did —
+and note that the FIFTH flip was not a confounder at all: the assertion it broke
+(partible leaves the average house poorer) turned out to hold on 1 seed in 6 and to
+be simply false of the model, so isolating the trigger would have preserved a wrong
+claim. Run `econ_measure_inheritance_robustness` across seeds BEFORE deciding
+whether you are looking at a confounder or at a bad assertion — and note that the
+two rejected replacement metrics BOTH pass on the gate's fixed seed, so "it goes
+green again" is not evidence of anything.
 
 ---
 

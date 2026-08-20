@@ -9,6 +9,72 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-20b — The merchant pool is not conserved (a gate that was asserting a false claim)
+
+The 2026-08-20 entry below recorded `econ_inheritance_rules_fragment_differently`
+failing after `a7ff520` and left it for a later session as "pre-existing and
+unrelated". Diagnosed and fixed here. **It was not a confounder to isolate — the
+assertion was simply false.**
+
+**The measurement.** A new `#[ignore]`d diagnostic,
+`econ_measure_inheritance_robustness`, runs the partible/primogeniture pair across
+6 seeds and asks how often each candidate contrast actually holds:
+
+| contrast | holds on |
+|---|---|
+| partible fragments more (houses ever) | **6/6** |
+| partible leaves more houses standing | 4/6 |
+| partible disperses more (lower top share) | 2/6 |
+| partible leaves the average house poorer (mean wealth) | **1/6** |
+| partible holds no MORE capital in total | 1/6 |
+
+The failing assertion holds on ONE seed in six, and not on the gate's own. **Every
+one of the three rejected candidates passes on the gate's own fixed seed**, so any
+of them could have been dropped in to make the suite green while asserting something
+false — precisely §2.4's "spot-check win with an aggregate loss". Both replacements
+tried here (concentration, then houses-still-standing) were caught that way and
+rejected; measuring first is the only reason.
+
+**The mechanism, and why it matters beyond this test.** `divide_estate` is exactly
+zero-sum: it debits the parent what it credits the co-heir (now asserted directly by
+`a_division_moves_capital_and_creates_none`, at the mechanism, where the claim is
+decidable). But the extra firms then TRADE, and trade captures profit from the wider
+economy — so partible ends the run holding **MORE** total merchant wealth, 5 seeds in
+6, typically 30-45% more (seed 42: 8,523,684 against 5,934,903). **Firm count is a
+multiplier on merchant wealth, not a divisor of a fixed stock.** The gate's own
+printed note had been telling every reader the opposite ("the same capital, spread
+over more houses") for as long as it has existed.
+
+That also names a real model limit: with no fixed factor and no diminishing return to
+firm count, the model cannot reproduce the historical case partible inheritance is
+usually cited for — that fragmentation left Florentine and Venetian firms genuinely
+smaller. Recorded, not fixed.
+
+**What changed.** The false assertion is gone and **not replaced** — only one aggregate
+contrast survived measurement, and inventing a second to keep the count up is the thing
+that caused this. What remains is strengthened instead: the fragmentation assertion now
+requires a real MARGIN (≥1.05×; measured 1.08–1.45 across seeds, 1.23 here) rather than a
+bare `>`, because a bare `>` on a near-tie is a coin flip dressed as a gate — that is
+exactly how crisis relief flipped it at 190 against 196. Assertion 4's comment, which
+inferred "if the partible world has more total wealth, the split is minting money", was
+deleted as a false inference that would have sent the next session hunting a nonexistent
+bug; the invariant it wanted is now its own unit test. The gate's printed note reports
+every rejected contrast with the seed count behind it, so nobody reads an unmeasured
+claim off it again.
+
+**The meta-lesson, recorded because this gate has now been perturbed five times**
+(realms, crisis relief, the trade horizon, estate-share tuning, comfort-good import
+demand): the first three were genuine confounders and are correctly isolated
+(`suppress_realms`, `suppress_relief`, a widened `world_w`). The fifth was an
+unrelated change exposing a wrong assertion — and the established reflex, isolating
+the trigger, would have preserved the wrong claim indefinitely. Diagnose across seeds
+before reaching for another suppression flag.
+
+Rust tests: **342 pass, 0 fail** (28 ignored) — two added (the conservation unit test
+and the seed diagnostic), the standing failure resolved.
+
+---
+
 ## 2026-08-20 — Seven elevation styles, served not copied
 
 Render-only follow-up to Terrain 2.0, prompted by the maintainer asking whether
@@ -1867,6 +1933,7 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
+| 2026-08-20b | *this* | 70.2% | 39.0% | **342 pass, 0 fail** (28 ignored) | 0 | `econ_inheritance_rules_fragment_differently` fixed — and the fix is a finding, not a repair. Measured across 6 seeds (`econ_measure_inheritance_robustness`, new): the failing assertion (partible leaves the average house poorer) holds **1/6**; houses-still-standing 4/6; concentration 2/6 — and all three pass on the gate's own seed, so any could have been swapped in to go green while asserting something false. Only houses-ever is structural (6/6), so the assertion is **not replaced**, just strengthened to require a real margin (≥1.05×; a bare `>` is what let crisis relief flip it at 190v196). **The merchant pool is not conserved**: `divide_estate` is exactly zero-sum (now asserted at the mechanism by `a_division_moves_capital_and_creates_none`), but the extra firms trade, so partible ends **richer** in total 5/6 (~30-45%). Firm count is a multiplier on merchant wealth, not a divisor of a fixed stock. Assertion 4's false "more total wealth ⇒ minting money" inference deleted |
 | 2026-08-20 | *this* | 70.2% | 39.0% | 339 pass, **1 pre-existing unrelated fail** (27 ignored) | 0 | Seven elevation styles (Layer Colouring, Alpine, Arid, Polar, Analytical, Antique Plate, Abyssal), data-driven off one shared `render_elevation_styled`; palettes served via `get_render_palettes` (§8.18); `relief_at`/`sea_shade` parameterised, default rendering bit-identical. The one failing test (`econ_inheritance_rules_fragment_differently`) is confirmed pre-existing on `origin/main` via an isolated worktree check, unrelated to this change |
 | 2026-08-19e | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | Slice 4 redone as a level-set (signed distance-to-boundary + noise, re-thresholded at zero) after a maintainer screenshot showed the 08-19d fix still reading as an unmodified Voronoi polygon despite its own 62.5% number. `coast_on_boundary` now 6-7% (was 90-100% pre-slice-4); real peninsulas/bays/islands, not speckle. Also fixed the divergent-boundary rift pulldown, a second straight-line artefact (read at an unwarped cell position, unrelated to the D4 orogeny-belt warp) the maintainer separately flagged as visible "plate line ridges" |
 | 2026-08-19d | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | `TERRAIN_2_PLAN.md` all six slices: stream-power erosion, transient `geology.rs` (lithology + orogeny setting/age + climate proxy + regionalised redistribution), plates.rs D3 boundary fix, coastline decoupled from the Voronoi edge (retuned after a probe found the first pass numerically differed but geometrically didn't — `coast_on_boundary` ~100%→62.5%, its own new gate), seafloor structure, texture-shading render follow-up. Earth main-class 70.1→70.2 (floor raised); `bench_phase2` @ 3600×1800 plates 8.5s→11.4s / shape 11.4s→13.9s (short of "no slower", recorded not hidden); `terrain_metrics` harness establishes the first slope-spread/drainage/coast-on-boundary/sea_depth-correlation baseline; `pearls` added as an honestly-labelled goods-coverage exception (a slice-4 consequence on the fixed-seed reference world, not a real-generation regression) |
