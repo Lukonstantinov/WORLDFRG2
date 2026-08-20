@@ -1764,7 +1764,16 @@ fn measure_fragmentation(s: &CampaignSim) -> Fragmentation {
 }
 
 fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
+    run_under_seeded(line, rule, None)
+}
+
+/// As `run_under`, but with the world's `seed` overridable so
+/// `econ_measure_inheritance_robustness` can ask whether a given contrast is
+/// STRUCTURAL or an accident of the one seed this gate fixes. `None` keeps
+/// `reference_world()`'s own seed, which is what the gate itself runs on.
+fn run_under_seeded(line: LineRule, rule: InheritanceRule, seed: Option<u64>) -> Fragmentation {
     let mut s = reference_world();
+    if let Some(sd) = seed { s.seed = sd; }
     // Sovereignty OFF for this gate. `REALM_YEAR_FLOOR` is 50 and this runs 60
     // years, so a decade of realm formation falls inside the window — and a
     // coronation moves an entire house's fortune out of the merchant pool in one
@@ -1774,6 +1783,13 @@ fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
     // 133569), inverting the gate's own claim. Excluding it isolates the variable,
     // exactly as fixing the seed and the world already do — realm formation has
     // its own instrument, `econ_measure_realm_paths`.
+    //
+    // NOTE on reading that inversion as evidence: "partible measured RICHER" is a
+    // symptom shared by several unrelated causes — realm formation here, and (later)
+    // `COMFORT_IMPORT_FRAC` at 0.60, which inverted this gate globally rather than
+    // through any confounder. The inversion tells you something is wrong, not what.
+    // Realm suppression is still right for the reason given above; confirm the cause
+    // before adding another suppression flag on the strength of the same symptom.
     s.suppress_realms = true;
     // Crisis relief OFF for the same reason and by the same measurement. It keeps
     // struggling towns alive, which changes which houses survive and so how many
@@ -1805,6 +1821,104 @@ fn run_under(line: LineRule, rule: InheritanceRule) -> Fragmentation {
     measure_fragmentation(&s)
 }
 
+/// A DIVISION MOVES CAPITAL AND CREATES NONE — asserted at the mechanism, which
+/// is the only place the claim is actually decidable.
+///
+/// `econ_inheritance_rules_fragment_differently` used to try to infer this from an
+/// aggregate 60 years downstream ("if the partible world simply has more total
+/// wealth, the split is minting money"). That inference is false: the partible
+/// world DOES end up with more total merchant wealth on 5 seeds in 6, and the split
+/// is nonetheless exactly zero-sum — the extra comes from the extra firms trading,
+/// not from the division. Testing the invariant where it lives keeps the two apart,
+/// so a genuine minting bug fails loudly here instead of hiding inside a downstream
+/// number every other subsystem also moves.
+#[test]
+fn a_division_moves_capital_and_creates_none() {
+    let mut s = reference_world();
+    force_inheritance(&mut s, LineRule::Agnatic, InheritanceRule::Partible);
+
+    // A house rich enough that every heir's share clears `HOUSE_SEED_MIN`, so the
+    // estate actually splits rather than taking the *fraterna* (joint) path.
+    let hi = s.houses.iter().position(|h| !h.is_guild && !h.defunct)
+        .expect("the reference world seeds merchant houses");
+    s.houses[hi].wealth = 4_000.0;
+
+    let merchant_total = |s: &CampaignSim| -> f64 {
+        s.houses.iter().filter(|h| !h.is_guild && !h.defunct)
+            .map(|h| h.wealth as f64).sum()
+    };
+    let before = merchant_total(&s);
+    let houses_before = s.houses.len();
+
+    s.divide_estate(hi, 2);
+
+    let after = merchant_total(&s);
+    let coheirs = s.houses.len() - houses_before;
+
+    assert!(coheirs > 0, "a rich estate under partible must actually split");
+    assert!(
+        (after - before).abs() < 1e-3,
+        "a division must MOVE capital, never create or destroy it: \
+         {before:.6} before, {after:.6} after ({} co-heir(s))", coheirs
+    );
+    // And it must come out of the PARENT specifically — a conserved total could
+    // still hide capital taken from some third house.
+    assert!(
+        s.houses[hi].wealth < 4_000.0,
+        "the parent house must be debited by what the co-heirs received (still {:.1})",
+        s.houses[hi].wealth
+    );
+}
+
+/// DIAGNOSTIC · IS THE CONTRAST STRUCTURAL, OR IS IT THIS SEED?
+///
+/// `econ_inheritance_rules_fragment_differently` runs ONE fixed seed, which is
+/// what makes it reproducible — and also what makes it impossible to tell, from
+/// the gate alone, whether a contrast it asserts is a property of the RULE or an
+/// accident of that world. This runs the partible/primogeniture pair across
+/// several seeds and reports how often each candidate contrast holds, so an
+/// assertion in that gate can be chosen on measured robustness rather than on
+/// whichever number happens to be passing today (§2.4: never tune to the target).
+///
+/// Run: cargo test --release --lib econ_measure_inheritance_robustness -- --ignored --nocapture
+#[test]
+#[ignore]
+fn econ_measure_inheritance_robustness() {
+    const SEEDS: [u64; 6] = [42, 1337, 7, 90210, 2024, 8_675_309];
+    println!();
+    println!("═══ Which inheritance contrasts are STRUCTURAL, and which are one seed? ═══");
+    println!("  Partible vs primogeniture, {} seeds. A contrast that holds on every", SEEDS.len());
+    println!("  seed is a property of the RULE; one that flips is a property of the world.");
+    println!();
+    println!("  {:>10} {:>15} {:>15} {:>18} {:>18} {:>18}",
+             "seed", "houses ever", "houses alive", "top share", "mean wealth", "total wealth");
+    let (mut ever_ok, mut alive_ok, mut top_ok, mut mean_ok, mut total_ok) = (0, 0, 0, 0, 0);
+    for sd in SEEDS {
+        let p = run_under_seeded(LineRule::Agnatic, InheritanceRule::Partible, Some(sd));
+        let r = run_under_seeded(LineRule::Agnatic, InheritanceRule::Primogeniture, Some(sd));
+        let mark = |cond: bool| if cond { "OK " } else { "-- " };
+        if p.houses_ever > r.houses_ever { ever_ok += 1; }
+        if p.houses_alive > r.houses_alive { alive_ok += 1; }
+        if p.top_share < r.top_share { top_ok += 1; }
+        if p.mean_wealth < r.mean_wealth { mean_ok += 1; }
+        if p.total_wealth <= r.total_wealth { total_ok += 1; }
+        println!("  {sd:>10} {}{:>5}v{:<5} {}{:>5}v{:<5} {}{:>7.3}v{:<7.3} {}{:>7.0}v{:<7.0} {}{:>7.0}v{:<7.0}",
+                 mark(p.houses_ever > r.houses_ever), p.houses_ever, r.houses_ever,
+                 mark(p.houses_alive > r.houses_alive), p.houses_alive, r.houses_alive,
+                 mark(p.top_share < r.top_share), p.top_share, r.top_share,
+                 mark(p.mean_wealth < r.mean_wealth), p.mean_wealth, r.mean_wealth,
+                 mark(p.total_wealth <= r.total_wealth), p.total_wealth, r.total_wealth);
+    }
+    let n = SEEDS.len();
+    println!();
+    println!("  partible fragments more (houses ever)    : {ever_ok}/{n}");
+    println!("  partible leaves more standing (alive)    : {alive_ok}/{n}");
+    println!("  partible disperses more (lower top share): {top_ok}/{n}");
+    println!("  partible is poorer per house (mean)      : {mean_ok}/{n}");
+    println!("  partible holds no MORE capital in total  : {total_ok}/{n}");
+    println!("═══════════════════════════════════════════════════════════════════════");
+}
+
 #[test]
 fn econ_inheritance_rules_fragment_differently() {
     let part = run_under(LineRule::Agnatic, InheritanceRule::Partible);
@@ -1813,26 +1927,38 @@ fn econ_inheritance_rules_fragment_differently() {
     let seni = run_under(LineRule::Agnatic, InheritanceRule::Seniority);
 
     let row = |name: &str, f: &Fragmentation| {
-        println!("  {name:<16} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>9.3} {:>7.3} {:>11.0}",
+        println!("  {name:<16} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>9.3} {:>7.3} {:>11.0} {:>12.0}",
                  f.houses_alive, f.houses_ever, f.successions, f.divisions, f.coheirs,
-                 f.joint, f.top_share, f.gini, f.mean_wealth);
+                 f.joint, f.top_share, f.gini, f.mean_wealth, f.total_wealth);
     };
     println!();
     println!("═══ Phase 0.4 · inheritance ({RUN_YEARS} years, one world, four laws) ═══");
-    println!("  {:<16} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>9} {:>7} {:>11}",
+    println!("  {:<16} {:>7} {:>6} {:>7} {:>7} {:>6} {:>6} {:>9} {:>7} {:>11} {:>12}",
              "rule", "alive", "ever", "succ", "divided", "co-heir", "joint",
-             "top share", "gini", "mean wealth");
+             "top share", "gini", "mean wealth", "total wealth");
     row("partible", &part);
     row("primogeniture", &prim);
     row("ultimogeniture", &ulti);
     row("seniority", &seni);
     println!();
     println!("  Partible splits the capital at every death: MORE firms, each SMALLER.");
-    println!("  Note what it does NOT do — the top share and Gini do not fall, because a");
-    println!("  division adds small firms at the bottom as fast as it trims the top. The");
-    println!("  measure that moves is mean wealth per house: the same capital, spread");
-    println!("  over more houses. Seniority fragments by a different route — short");
-    println!("  tenures, so many more successions, so many more branches.");
+    println!("  Both halves are asserted — houses ever founded, and mean wealth per");
+    println!("  house. Seniority fragments by a different route: short tenures, so");
+    println!("  many more successions, so many more branches.");
+    println!();
+    println!("  What partible does NOT reliably do — measured across 6 seeds by");
+    println!("  `econ_measure_inheritance_robustness`, not assumed:");
+    println!("    leave more houses standing ....... 2/6");
+    println!("    lower the top share .............. 3/6");
+    println!("  A division adds small firms at the bottom about as fast as it trims");
+    println!("  the top, so concentration barely moves. The measure that moves is");
+    println!("  mean wealth: the same capital, spread over more houses.");
+    println!();
+    println!("  Every number here is dose-sensitive to COMFORT_IMPORT_FRAC (see the");
+    println!("  table at assertion 3). At `a7ff520`'s 0.60 the mean-wealth contrast");
+    println!("  INVERTED, and a seed sweep run in that world concluded — wrongly, and");
+    println!("  in detail — that the claim was false of the model. Re-measure the dose");
+    println!("  before concluding an assertion is unsound.");
     println!("═══════════════════════════════════════════════════════════════════════");
     println!();
 
@@ -1846,24 +1972,68 @@ fn econ_inheritance_rules_fragment_differently() {
     assert_eq!(seni.divisions, 0, "seniority must not divide an estate");
 
     // 2. The rule MATTERS: fragmentation differs measurably. More firms ever founded
-    //    under partible than under any rule that concentrates.
+    //    under partible than under any rule that concentrates — and by a REAL MARGIN,
+    //    not by one house.
+    //
+    //    The margin is the point. This assertion used to be a bare `>`, and a bare `>`
+    //    on a near-tie is a coin flip dressed as a gate: crisis relief once flipped it
+    //    at 190 against 196, which says nothing about inheritance and everything about
+    //    noise. On this gate's own fixed seed the ratio is 194/176 = 1.10, so a 1.05
+    //    floor keeps real headroom while still failing loudly if the contrast erodes.
+    //
+    //    Be careful reading robustness into that floor: across the 6 seeds of
+    //    `econ_measure_inheritance_robustness` this contrast holds 5/6 at the shipped
+    //    dose (seed 1337 inverts it outright, 180 against 193). So 1.05 is calibrated
+    //    to THIS seed with headroom, not to a measured cross-seed minimum — the
+    //    cross-seed minimum is below 1.0. Stated plainly because an earlier version of
+    //    this comment claimed a measured 1.08–1.45 range, which was true only at the
+    //    broken 0.60 `COMFORT_IMPORT_FRAC` dose it happened to be measured under.
     assert!(
-        part.houses_ever > prim.houses_ever,
-        "partible must fragment the merchant class more than primogeniture \
-         ({} vs {} houses ever)", part.houses_ever, prim.houses_ever
+        part.houses_ever as f32 >= prim.houses_ever as f32 * 1.05,
+        "partible must fragment the merchant class MATERIALLY more than primogeniture \
+         ({} vs {} houses ever — a margin under 5% is noise, not a law of inheritance)",
+        part.houses_ever, prim.houses_ever
     );
 
-    // 3. The same capital is spread THINNER. This is the measure that actually moves
-    //    (see the note printed above): a division does not lower the top share, it
-    //    lowers what an average house holds.
+    // 3. The same capital is spread THINNER: the average house holds less.
+    //
+    //    THIS ASSERTION WAS ONCE REMOVED AS "MEASURABLY FALSE", AND THAT WAS A
+    //    MISTAKE — recorded here because the mistake is more instructive than the
+    //    assertion. It was measured across 6 seeds and found to hold on only 1, so it
+    //    was deleted as a claim the model does not support. But that sweep was run
+    //    while `COMFORT_IMPORT_FRAC` was still at `a7ff520`'s 0.60, which had already
+    //    inverted this very gate. Re-run at the corrected 0.30 the same sweep gives:
+    //
+    //        contrast                    @0.60 (broken)   @0.30 (shipped)
+    //        houses ever ..............     6/6               5/6
+    //        houses still standing ....     4/6               2/6
+    //        lower top share ..........     2/6               3/6
+    //        lower mean wealth ........     1/6               5/6   <-- this one
+    //        no MORE capital in total .     1/6               5/6
+    //
+    //    So the claim is real and the dose genuinely broke it. THE LESSON: a seed
+    //    sweep only tells you about the world you ran it in. Measuring robustness
+    //    inside an already-distorted economy produced a confident, well-documented,
+    //    wrong conclusion — "the merchant pool is not conserved, firm count is a
+    //    multiplier on merchant wealth" — which is an artefact of the 0.60 dose, not
+    //    a property of the model. Before concluding an assertion is false, check that
+    //    the world you measured in is not itself the thing that is broken.
     assert!(
         part.mean_wealth < prim.mean_wealth,
         "partible must leave the average house poorer than primogeniture \
          ({:.0} vs {:.0})", part.mean_wealth, prim.mean_wealth
     );
 
-    // 4. Nothing is created. A division MOVES capital from parent to co-heir; if the
-    //    partible world simply has more total wealth, the split is minting money.
+    // 4. Nothing is created. A division MOVES capital from parent to co-heir.
+    //    The zero-sum invariant itself is asserted AT THE MECHANISM, where it is
+    //    actually decidable, by `a_division_moves_capital_and_creates_none` — rather
+    //    than inferred from an aggregate 60 years downstream that every other
+    //    subsystem also moves. (Inferring it here is not safe: at the broken 0.60 dose
+    //    the partible world held 44% MORE total wealth while `divide_estate` remained
+    //    exactly zero-sum, so "more total wealth" would have read as a minting bug
+    //    that did not exist.)
+    assert!(part.total_wealth.is_finite() && prim.total_wealth.is_finite(),
+            "house wealth is not finite");
     assert!(part.total_wealth.is_finite() && prim.total_wealth.is_finite(),
             "house wealth is not finite");
     for f in [&part, &prim, &ulti, &seni] {

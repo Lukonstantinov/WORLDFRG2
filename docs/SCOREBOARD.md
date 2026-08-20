@@ -9,6 +9,183 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-20d — The two gates disagree about `COMFORT_IMPORT_FRAC`, and the one that won isn't about trade
+
+Follow-up to 20c, which closed by flagging that `COMFORT_IMPORT_FRAC` = 0.30 had no
+justification independent of the inheritance gate it was tuned against — the exact thing
+§2.4 forbids. **It now has independent evidence, and the evidence cuts against 0.30.**
+
+Measured by sweeping the constant and reading `econ_fidelity_scorecard` (one seed per
+dose — see caveats):
+
+| dose | basket price gap × distance | goods with a positive gradient | basket CV | real wage |
+|---|---|---|---|---|
+| 0.00 | −0.006 | 0 of 6 | 1.573 | 146.3 |
+| **0.30 (shipped)** | **−0.064** | **0 of 6** | 1.596 | 162.5 |
+| 0.60 (the reverted dose) | **+0.041** | **2 of 6** | 1.672 | 169.4 |
+| 0.90 | +0.053 | 3 of 6 | 1.678 | 152.9 |
+
+A POSITIVE price/distance gradient is the historically correct sign (Federico; Persson),
+and its absence is the largest market failure this project has named for itself —
+`TRADE_AND_MARKET_REVIEW.md` F2, *"0 of 6 priced goods show any positive distance
+gradient… distance costs nothing anywhere."* **Only doses ≥0.60 produce one. The shipped
+0.30 is the worst of the four tested on that measure.**
+
+So the two gates genuinely disagree: `econ_inheritance_rules_fragment_differently` wants
+the dose low (0.60 inverts it — that is the 20c story), and market integration wants it
+high. The value currently in the tree was chosen by the gate that has nothing to do with
+trade, because that is the gate that was red.
+
+**Nothing was changed.** Raising it would re-break a gate and turn `main` red again, and
+the right fix is not to buy market integration with a demand constant anyway — F2 already
+names the real culprits (freight is ~11% of grain value over the longest route, against
+real carting that roughly doubled grain's price over 150–300 km; and i.i.d. per-hub
+harvest shocks leave no regional scarcity for a gradient to form against). This is a
+finding handed to the maintainer, recorded at the constant and here.
+
+**Caveats, stated because the table is seductive:** one seed per dose; the low end is not
+monotone (0.00 → 0.30 makes the gradient *more* negative, so this is not a clean "more is
+better" curve); real wage peaks at 0.60 rather than tracking the dose; and every dose
+leaves basket CV at 1.57–1.68 against a historical 0.20–0.40 — no value tested makes this
+market realistic, the differences are directional inside an already badly-calibrated
+regime. Treat the table as "0.30 is not the best-supported value", not as "0.60 is right".
+
+Reproduce: for each dose, `sed` the constant in `sim/campaign/tick/mod.rs` and run
+`cargo test --release --lib econ_fidelity_scorecard -- --nocapture`, reading the
+basket-gradient and per-good rows. (Deliberately not built as a permanent `econ_measure_*`
+harness: sweeping a `const` needs it promoted to a runtime field on `CampaignSim`, which is
+a real change to the sim struct for a diagnostic that runs about once a year.)
+
+No code changed; no test counts moved.
+
+---
+
+## 2026-08-20c — CORRECTION: 20b was wrong, and the way it was wrong is the finding
+
+**The 20b entry below is left standing because it is a textbook error, not because it is
+right.** It concluded that `econ_inheritance_rules_fragment_differently`'s mean-wealth
+assertion was "measurably false" — 1 seed in 6 — and removed it, with several pages of
+supporting reasoning about the merchant pool not being conserved.
+
+The sweep behind that conclusion was run while `COMFORT_IMPORT_FRAC` was still at
+`a7ff520`'s 0.60: **the very dose that had inverted the gate in the first place.** A
+concurrent session had already bisected to that commit and corrected the dose to 0.30.
+Re-running the identical 6-seed sweep at 0.30:
+
+| contrast | @0.60 (broken) | @0.30 (shipped) |
+|---|---|---|
+| more houses ever founded | 6/6 | 5/6 |
+| more houses still standing | 4/6 | 2/6 |
+| lower top share | 2/6 | 3/6 |
+| **lower mean wealth per house** | **1/6** | **5/6** |
+| no MORE capital in total | 1/6 | 5/6 |
+
+The disputed assertion goes from 1/6 to 5/6. It is real, the dose genuinely broke it, and
+the other session's diagnosis was correct. The assertion is **restored**.
+
+**The lesson, which is worth more than the assertion.** A seed sweep is an instrument, and
+an instrument reads the world it is pointed at. Measuring "robustness" inside an economy
+that a known bug had already bent produced a conclusion that was confident, quantified,
+documented at length, and false — including a crisp, memorable, wrong slogan ("firm count
+is a multiplier on merchant wealth, not a divisor of a fixed stock") that was purely an
+artefact of the 0.60 dose. Quantification is not the same as validity. **Before concluding
+an assertion is unsound, establish that the world you measured in is not itself broken** —
+and prefer fixing a bisected mechanism over deleting a claim it contradicts.
+
+Also corrected: 20b's margin comment cited a "measured 1.08–1.45" cross-seed range for the
+houses-ever ratio. That range was likewise from the 0.60 world; at the shipped dose the
+contrast holds 5/6 and seed 1337 inverts it outright (180 v 193), so the ≥1.05 floor is
+calibrated to this gate's own seed with headroom, not to a cross-seed minimum. Said plainly
+in the code rather than left to imply a robustness it does not have.
+
+Kept from 20b, both still useful and both independent of the error:
+`a_division_moves_capital_and_creates_none` (the zero-sum invariant asserted at
+`divide_estate`, where it is decidable — worth having regardless, since at 0.60 the
+partible world held 44% more total wealth while the split remained exactly zero-sum, so a
+downstream inference would have reported a minting bug that did not exist), and
+`econ_measure_inheritance_robustness` itself, which is the instrument that settled the
+disagreement and now carries the dose-comparison table.
+
+One residual caveat, flagged not resolved: 0.30 was chosen because it restores this gate,
+which is thin grounds for a demand parameter. The dose-dependence above shows the gate is
+reading something real rather than noise, so the choice is defensible — but
+`COMFORT_IMPORT_FRAC` still has no independent justification.
+
+Rust tests: **342 pass, 0 fail** (28 ignored).
+
+---
+
+## 2026-08-20b — The merchant pool is not conserved (a gate that was asserting a false claim)
+
+> **SUPERSEDED — see 2026-08-20c above. The central conclusion of this entry is WRONG.**
+> The 6-seed sweep it rests on was run at the broken `COMFORT_IMPORT_FRAC` = 0.60; at the
+> corrected 0.30 the "false" assertion holds 5/6 and has been restored. Left in place
+> unedited as the honest record of a well-documented mistake.
+
+The 2026-08-20 entry below recorded `econ_inheritance_rules_fragment_differently`
+failing after `a7ff520` and left it for a later session as "pre-existing and
+unrelated". Diagnosed and fixed here. **It was not a confounder to isolate — the
+assertion was simply false.**
+
+**The measurement.** A new `#[ignore]`d diagnostic,
+`econ_measure_inheritance_robustness`, runs the partible/primogeniture pair across
+6 seeds and asks how often each candidate contrast actually holds:
+
+| contrast | holds on |
+|---|---|
+| partible fragments more (houses ever) | **6/6** |
+| partible leaves more houses standing | 4/6 |
+| partible disperses more (lower top share) | 2/6 |
+| partible leaves the average house poorer (mean wealth) | **1/6** |
+| partible holds no MORE capital in total | 1/6 |
+
+The failing assertion holds on ONE seed in six, and not on the gate's own. **Every
+one of the three rejected candidates passes on the gate's own fixed seed**, so any
+of them could have been dropped in to make the suite green while asserting something
+false — precisely §2.4's "spot-check win with an aggregate loss". Both replacements
+tried here (concentration, then houses-still-standing) were caught that way and
+rejected; measuring first is the only reason.
+
+**The mechanism, and why it matters beyond this test.** `divide_estate` is exactly
+zero-sum: it debits the parent what it credits the co-heir (now asserted directly by
+`a_division_moves_capital_and_creates_none`, at the mechanism, where the claim is
+decidable). But the extra firms then TRADE, and trade captures profit from the wider
+economy — so partible ends the run holding **MORE** total merchant wealth, 5 seeds in
+6, typically 30-45% more (seed 42: 8,523,684 against 5,934,903). **Firm count is a
+multiplier on merchant wealth, not a divisor of a fixed stock.** The gate's own
+printed note had been telling every reader the opposite ("the same capital, spread
+over more houses") for as long as it has existed.
+
+That also names a real model limit: with no fixed factor and no diminishing return to
+firm count, the model cannot reproduce the historical case partible inheritance is
+usually cited for — that fragmentation left Florentine and Venetian firms genuinely
+smaller. Recorded, not fixed.
+
+**What changed.** The false assertion is gone and **not replaced** — only one aggregate
+contrast survived measurement, and inventing a second to keep the count up is the thing
+that caused this. What remains is strengthened instead: the fragmentation assertion now
+requires a real MARGIN (≥1.05×; measured 1.08–1.45 across seeds, 1.23 here) rather than a
+bare `>`, because a bare `>` on a near-tie is a coin flip dressed as a gate — that is
+exactly how crisis relief flipped it at 190 against 196. Assertion 4's comment, which
+inferred "if the partible world has more total wealth, the split is minting money", was
+deleted as a false inference that would have sent the next session hunting a nonexistent
+bug; the invariant it wanted is now its own unit test. The gate's printed note reports
+every rejected contrast with the seed count behind it, so nobody reads an unmeasured
+claim off it again.
+
+**The meta-lesson, recorded because this gate has now been perturbed five times**
+(realms, crisis relief, the trade horizon, estate-share tuning, comfort-good import
+demand): the first three were genuine confounders and are correctly isolated
+(`suppress_realms`, `suppress_relief`, a widened `world_w`). The fifth was an
+unrelated change exposing a wrong assertion — and the established reflex, isolating
+the trigger, would have preserved the wrong claim indefinitely. Diagnose across seeds
+before reaching for another suppression flag.
+
+Rust tests: **342 pass, 0 fail** (28 ignored) — two added (the conservation unit test
+and the seed diagnostic), the standing failure resolved.
+
+---
+
 ## 2026-08-20 — Seven elevation styles, served not copied
 
 Render-only follow-up to Terrain 2.0, prompted by the maintainer asking whether
@@ -1867,7 +2044,10 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
-| 2026-08-20 | *this* | — | — | **344 pass, 0 fail** (27 ignored) | 0 | **Province & realm 2.0.** Four findings, one of them the point of the session. (1) **Realms could never form on a world with no province layer, silently.** `maybe_proclaim_realms` early-returns on `prov_holder.is_empty()`, and province generation (step 7b) is a standalone step neither run-all calls — so a campaign started on such a world has sovereignty structurally impossible for its whole life, with no journal line, ever. Every *other* early return here eventually reports itself via `ensure_a_realm_exists`; this earlier, more total one did not. Now writes one chronicle line at `REALM_YEAR_FLOOR`. The mechanism itself is fine — verified, not assumed: `econ_measure_realm_paths` on a properly seeded world gives first realm at year 50, 23 founded, 24/24 provinces under a crown by year 200. (2) **Land improvement was unreachable without a player.** The four `prov_works` kinds were startable ONLY from `campaign_start_province_work`, so an unattended campaign never improved a single province on any world. `maybe_fund_province_works` (§5.3) makes it autonomous, through the identical funded-or-stalls machinery. (3) **The infrastructure/sovereignty split is load-bearing, and measurement is what found it.** Shipped naive it inverted `econ_inheritance_rules_fragment_differently`'s SUBSTANTIVE assertion — partible 191,991 against primogeniture 163,230, when dividing an estate must leave the average house *poorer* — a ~32pt swing against a margin the row below had deliberately widened because this gate has flipped six times now. Cause: irrigation carries `PROV_IRRIGATION_GAIN` (+45% harvest at full watering) and the pass *prioritised* it, so every city-funded province drove it to cap: a world-wide yield multiplier wearing the name of a local improvement. Fix on the merits, not by isolation — irrigation and roads are STATE projects (qanats, Roman roads) and now require `prov_realm >= 0`; clearance and drainage stay local. Gate returns at **171,184 against 253,572, wider than the pristine 149,925/174,496**. A `suppress_auto_works` flag was written first on the `suppress_realms` precedent and then **deleted** — the correct model beat the workaround, and dead isolation machinery is worse than none. Recorded because the reflex was to reach for the flag. (4) **Ore deposits both too poor and self-erasing.** `grade` rolled 0.25+0.65·fit floored at 0.05 (mean 0.575) and a mine was the WORST-eroding kind in `update_province_goods_pressure` (`wear 1.3 / recover 0.15`, "exhausts") — so a mining province decayed toward worthlessness even though §8.16 sets `grade`/`extent` as worldgen-frozen geology. Now 0.42+0.55·fit floored at 0.20 (**mean 0.695**), extent thresholds lowered (**great+world-class 9.1% → 26.6%**), and a mine accrues NO depletion, exactly as a vineyard already did and for the same stated reason. Frontend: Province Inspector rebuilt on the shared `@ui/kit`/`chronicleTheme` system the Realms panel uses (was ~60 ad-hoc hexes), gains a realm banner reading the same persisted `Realm` the map tint does; survey plate gains a real NW hillshade (one lamp, §8.21's rule); the browser list finally shows real yield instead of quality stars alone; the manual work buttons are gone, replaced by a read-only "Under way" card naming the crown or city funding it. Doc drift fixed: CLAUDE.md said Path C needs "≥4 provinces" against a shipped `REALM_CULTURE_MIN_PROVINCES` of **2**. |
+| 2026-08-20e | *this* | — | — | **344 pass, 0 fail** (27 ignored) | 0 | **Province & realm 2.0.** Four findings, one of them the point of the session. (1) **Realms could never form on a world with no province layer, silently.** `maybe_proclaim_realms` early-returns on `prov_holder.is_empty()`, and province generation (step 7b) is a standalone step neither run-all calls — so a campaign started on such a world has sovereignty structurally impossible for its whole life, with no journal line, ever. Every *other* early return here eventually reports itself via `ensure_a_realm_exists`; this earlier, more total one did not. Now writes one chronicle line at `REALM_YEAR_FLOOR`. The mechanism itself is fine — verified, not assumed: `econ_measure_realm_paths` on a properly seeded world gives first realm at year 50, 23 founded, 24/24 provinces under a crown by year 200. (2) **Land improvement was unreachable without a player.** The four `prov_works` kinds were startable ONLY from `campaign_start_province_work`, so an unattended campaign never improved a single province on any world. `maybe_fund_province_works` (§5.3) makes it autonomous, through the identical funded-or-stalls machinery. (3) **The infrastructure/sovereignty split is load-bearing, and measurement is what found it.** Shipped naive it inverted `econ_inheritance_rules_fragment_differently`'s SUBSTANTIVE assertion — partible 191,991 against primogeniture 163,230, when dividing an estate must leave the average house *poorer* — a ~32pt swing against a margin the row below had deliberately widened because this gate has flipped six times now. Cause: irrigation carries `PROV_IRRIGATION_GAIN` (+45% harvest at full watering) and the pass *prioritised* it, so every city-funded province drove it to cap: a world-wide yield multiplier wearing the name of a local improvement. Fix on the merits, not by isolation — irrigation and roads are STATE projects (qanats, Roman roads) and now require `prov_realm >= 0`; clearance and drainage stay local. Gate returns at **171,184 against 253,572, wider than the pristine 149,925/174,496**. A `suppress_auto_works` flag was written first on the `suppress_realms` precedent and then **deleted** — the correct model beat the workaround, and dead isolation machinery is worse than none. Recorded because the reflex was to reach for the flag. (4) **Ore deposits both too poor and self-erasing.** `grade` rolled 0.25+0.65·fit floored at 0.05 (mean 0.575) and a mine was the WORST-eroding kind in `update_province_goods_pressure` (`wear 1.3 / recover 0.15`, "exhausts") — so a mining province decayed toward worthlessness even though §8.16 sets `grade`/`extent` as worldgen-frozen geology. Now 0.42+0.55·fit floored at 0.20 (**mean 0.695**), extent thresholds lowered (**great+world-class 9.1% → 26.6%**), and a mine accrues NO depletion, exactly as a vineyard already did and for the same stated reason. Frontend: Province Inspector rebuilt on the shared `@ui/kit`/`chronicleTheme` system the Realms panel uses (was ~60 ad-hoc hexes), gains a realm banner reading the same persisted `Realm` the map tint does; survey plate gains a real NW hillshade (one lamp, §8.21's rule); the browser list finally shows real yield instead of quality stars alone; the manual work buttons are gone, replaced by a read-only "Under way" card naming the crown or city funding it. Doc drift fixed: CLAUDE.md said Path C needs "≥4 provinces" against a shipped `REALM_CULTURE_MIN_PROVINCES` of **2**. |
+| 2026-08-20d | *this* | 70.2% | 39.0% | 342 pass, 0 fail (28 ignored) | 0 | **`COMFORT_IMPORT_FRAC` measured against a gate that isn't the one it was tuned on — and the evidence cuts against the shipped value.** Sweeping the dose against `econ_fidelity_scorecard`: the basket price/distance gradient is −0.064 at the shipped 0.30 (0 of 6 goods showing any gradient) and turns POSITIVE at 0.60 (+0.041, 2 of 6) and 0.90 (+0.053, 3 of 6). A positive gradient is the historically correct sign and its absence is F2, the largest market failure this project has named. So the inheritance gate and market integration want opposite doses, and the value in the tree was set by the one unrelated to trade. **Nothing changed** — raising it re-breaks a gate, and F2's real culprits (freight ~11% of grain value; i.i.d. harvest shocks) are the thing to fix. Caveats recorded: one seed/dose, non-monotone at the low end, and every dose leaves basket CV at 1.57–1.68 vs a historical 0.20–0.40 |
+| 2026-08-20c | *this* | 70.2% | 39.0% | **342 pass, 0 fail** (28 ignored) | 0 | **CORRECTION of 20b, which was wrong.** 20b's 6-seed sweep ran at the broken `COMFORT_IMPORT_FRAC`=0.60 — the dose that inverted the gate — and concluded the mean-wealth assertion was "measurably false" (1/6). At the corrected 0.30 it holds **5/6**; the assertion is restored and the concurrent session's bisect-and-fix-the-dose diagnosis was right. **The lesson is the deliverable: a seed sweep only reads the world you point it at**, and measuring robustness inside an already-bent economy produced a confident, quantified, false conclusion. Kept from 20b: `a_division_moves_capital_and_creates_none` (zero-sum asserted at the mechanism) and `econ_measure_inheritance_robustness` (now carrying the dose-comparison table). Margin comment also corrected — its "1.08–1.45 across seeds" was likewise a 0.60 artefact |
+| 2026-08-20b | *this* | 70.2% | 39.0% | 342 pass, 0 fail (28 ignored) | 0 | **SUPERSEDED by 20c — central conclusion WRONG, left unedited as the record of the mistake.** `econ_inheritance_rules_fragment_differently` "fixed" — and the fix is a finding, not a repair. Measured across 6 seeds (`econ_measure_inheritance_robustness`, new): the failing assertion (partible leaves the average house poorer) holds **1/6**; houses-still-standing 4/6; concentration 2/6 — and all three pass on the gate's own seed, so any could have been swapped in to go green while asserting something false. Only houses-ever is structural (6/6), so the assertion is **not replaced**, just strengthened to require a real margin (≥1.05×; a bare `>` is what let crisis relief flip it at 190v196). **The merchant pool is not conserved**: `divide_estate` is exactly zero-sum (now asserted at the mechanism by `a_division_moves_capital_and_creates_none`), but the extra firms trade, so partible ends **richer** in total 5/6 (~30-45%). Firm count is a multiplier on merchant wealth, not a divisor of a fixed stock. Assertion 4's false "more total wealth ⇒ minting money" inference deleted |
 | 2026-08-20 | *this* | — | — | **341 pass, 0 fail** (26 ignored) | 0 | **main was RED and had been for four commits.** `econ_inheritance_rules_fragment_differently` was failing its SUBSTANTIVE assertion — partible left the average house RICHER than primogeniture (193,720 vs 164,858), the opposite of what dividing an estate must do. Bisected to `a7ff520` ("Demand: comfort goods also draw foreign-import craving"), which raised the foreign-craving gain to tier-1 goods at 0.60 of the luxury rate; its parent `96ef1e2` is green with byte-identical numbers to the pre-change baseline. It then survived `2153af3` (Terrain 2.0) and `345c807` (wine fix) because **each of those was verified against a different SUBSET** — "cargo check + tsc + realm suite", "dynamics test passes" — and none ran `econ_`. That is the failure mode §2.5 and rule 16 exist to prevent, and it is the finding here, more than the constant. The response is dose-dependent (the `envoys.rs` shape, not 4.7's discrete branching flip), so the fix is the dose and not the mechanism: `COMFORT_IMPORT_FRAC` 0.60 → **0.30**. Comfort goods still draw real foreign craving at half strength; the gate returns with a WIDE margin (149,925 vs 174,496 mean wealth, 194 vs 176 houses ever) rather than a thin one, deliberately, because this gate has now flipped inside its own noise band five times. Scorecard on the repaired main: gradient −0.052, basket −0.064, grain spatial CV 2.471, Zipf −0.625 (from −0.485, toward its band), Gini 0.717 (in band), top-10% 0.588 (from 0.512, approaching band), real wage 162.5. Those reflect everything on main since the last row, not this tuning alone — not isolated per-commit.  This is the fix for the "1 pre-existing unrelated fail" the row below correctly observed and left in place. |
 | 2026-08-20 | *this* | 70.2% | 39.0% | 339 pass, **1 pre-existing unrelated fail** (27 ignored) | 0 | Seven elevation styles (Layer Colouring, Alpine, Arid, Polar, Analytical, Antique Plate, Abyssal), data-driven off one shared `render_elevation_styled`; palettes served via `get_render_palettes` (§8.18); `relief_at`/`sea_shade` parameterised, default rendering bit-identical. The one failing test (`econ_inheritance_rules_fragment_differently`) is confirmed pre-existing on `origin/main` via an isolated worktree check, unrelated to this change |
 | 2026-08-19e | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | Slice 4 redone as a level-set (signed distance-to-boundary + noise, re-thresholded at zero) after a maintainer screenshot showed the 08-19d fix still reading as an unmodified Voronoi polygon despite its own 62.5% number. `coast_on_boundary` now 6-7% (was 90-100% pre-slice-4); real peninsulas/bays/islands, not speckle. Also fixed the divergent-boundary rift pulldown, a second straight-line artefact (read at an unwarped cell position, unrelated to the D4 orogeny-belt warp) the maintainer separately flagged as visible "plate line ridges" |

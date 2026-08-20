@@ -196,8 +196,15 @@ and `econ_scorecard_is_deterministic`'s four fixed sites).
    vanish.
 
 **Expect every `econ_` number to move**, and expect
-`econ_inheritance_rules_fragment_differently` to flip — it has flipped on four
-consecutive changes now. Diagnose before isolating, exactly as crisis relief did.
+`econ_inheritance_rules_fragment_differently` to flip — it has flipped on five
+consecutive changes now. Diagnose before isolating, exactly as crisis relief did —
+and note that the FIFTH flip was neither a confounder nor a bad assertion but a real
+break in a real mechanism, fixed at its source (`COMFORT_IMPORT_FRAC` 0.60 → 0.30).
+`econ_measure_inheritance_robustness` runs the contrast across seeds and will help
+you tell the three cases apart — but read its own docs first: a sweep run at the
+broken dose reported the (correct) assertion as holding on 1 seed in 6, and a session
+deleted it on that evidence. **An instrument only reads the world you point it at.**
+Establish that the world is not itself bent before concluding a claim is unsound.
 
 ---
 

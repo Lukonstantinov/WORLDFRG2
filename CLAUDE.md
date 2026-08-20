@@ -1932,9 +1932,62 @@ Four rules for anyone changing this:
 
 Gate: `cargo test --lib econ_inheritance_rules_fragment_differently -- --nocapture` runs
 ONE world four times, changing only the law, and asserts the rule is wired (partible
-divides, the rest do not) and that it MATTERS (more houses ever founded, lower mean wealth
-per house). Note what it does *not* claim: the top share and Gini do not fall under
+divides, the rest do not) and that it MATTERS — **more houses ever founded** (now by a
+≥1.05× margin rather than a bare `>`, which on a near-tie is a coin flip dressed as a
+gate: crisis relief once flipped it at 190 against 196) **and lower mean wealth per
+house**. Note what it does *not* claim: the top share and Gini do not fall under
 partible, because a division adds small firms at the bottom as fast as it trims the top.
+
+Two companions were added alongside. `a_division_moves_capital_and_creates_none` asserts
+the zero-sum invariant AT `divide_estate`, where it is decidable, instead of inferring it
+from an aggregate 60 years downstream. `econ_measure_inheritance_robustness` (`#[ignore]`d)
+runs the partible/primogeniture pair across 6 seeds and reports how often each candidate
+contrast holds.
+
+**A CAUTIONARY TALE ABOUT THAT SWEEP — read it before trusting a robustness measurement.**
+The mean-wealth assertion was once *removed* from this gate as "measurably false": the
+6-seed sweep found it holding on only 1 seed. That conclusion was confident, documented at
+length, and **wrong**. The sweep had been run while `COMFORT_IMPORT_FRAC` still sat at
+`a7ff520`'s 0.60 — the very dose that had inverted this gate in the first place. Re-run at
+the corrected 0.30:
+
+| contrast | @0.60 (broken) | @0.30 (shipped) |
+|---|---|---|
+| more houses ever founded | 6/6 | 5/6 |
+| more houses still standing | 4/6 | 2/6 |
+| lower top share | 2/6 | 3/6 |
+| **lower mean wealth per house** | **1/6** | **5/6** |
+| no MORE capital in total | 1/6 | 5/6 |
+
+The claim is real; the dose genuinely broke it. **A seed sweep only tells you about the
+world you ran it in** — measuring robustness inside an already-distorted economy produced
+a thorough, plausible, false conclusion ("the merchant pool is not conserved; firm count
+is a multiplier on merchant wealth"), which is an artefact of the 0.60 dose and not a
+property of the model. Before concluding an assertion is unsound, check that the world you
+measured in is not itself the thing that is broken.
+
+**THE TWO GATES DISAGREE ABOUT THAT DOSE, and the one that set it isn't about trade.**
+0.30 was chosen because it restores this gate — weak grounds for a demand parameter, so
+it was measured against a gate that isn't the target (§2.4). Sweeping it against
+`econ_fidelity_scorecard`: the basket price/distance gradient reads **−0.064 at the
+shipped 0.30 (0 of 6 goods showing any gradient)** and turns **positive at 0.60 (+0.041,
+2 of 6)** and 0.90 (+0.053, 3 of 6). A positive gradient is the historically correct sign
+and its absence is `TRADE_AND_MARKET_REVIEW.md`'s F2 — the largest market failure this
+project has named. So the shipped value is the worst of four tested on market integration.
+
+**Nothing was changed**: raising it re-breaks this gate, and buying integration with a
+demand constant is not the fix F2 asks for (it blames freight at ~11% of grain value over
+the longest route, and i.i.d. per-hub harvest shocks leaving no regional scarcity). Full
+table, caveats and reproduction recipe at the constant's own doc comment and in
+`docs/SCOREBOARD.md` 2026-08-20d. Read the caveats before acting: one seed per dose, the
+low end is not monotone, and every dose leaves basket CV far outside its band.
+
+**Read this before "fixing" this gate again.** It has been perturbed five times (realms,
+crisis relief, the trade horizon, estate-share tuning, comfort-good import demand). The
+first three were genuine confounders and are isolated with `suppress_realms` /
+`suppress_relief` / a widened `world_w`. The fifth was a real break in a real mechanism,
+fixed at its source. Diagnose which of the three you have — confounder, broken mechanism,
+or bad assertion — and be sure your instrument is not reading a world the bug already bent.
 
 ---
 
