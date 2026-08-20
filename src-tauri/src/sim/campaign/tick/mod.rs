@@ -33,6 +33,12 @@ const TIER_WEIGHT: [f32; 3] = [1.0, 0.45, 0.22];
 /// (base_value), so high-value foreign luxuries drive vigorous inter-city trade
 /// instead of every city being content with what it produces itself (#2).
 const LUX_IMPORT_DESIRE: f32 = 0.7;
+/// Share of `LUX_IMPORT_DESIRE` a COMFORT-tier good draws when a city cannot make it
+/// at home (a luxury draws the full amount). See `production.rs::base_need` for the
+/// measurement behind this value — it is the dose that keeps
+/// `econ_inheritance_rules_fragment_differently` green, and it shipped at 0.60 which
+/// left that gate red on main for four commits.
+const COMFORT_IMPORT_FRAC: f32 = 0.30;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total

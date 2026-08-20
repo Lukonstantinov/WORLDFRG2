@@ -588,12 +588,30 @@ impl CampaignSim {
         // The finer/dearer the good, the stronger the craving; comfort goods pull a bit
         // less than luxuries (everyday finery, not status pieces), so luxuries still
         // drive the hardest trade.
+        //
+        // COMFORT_IMPORT_FRAC is 0.30, MEASURED not chosen. Shipped at 0.60 in
+        // `a7ff520`, which was verified against the dynamics test alone and left
+        // `econ_inheritance_rules_fragment_differently` RED on main for four commits
+        // (through Terrain 2.0 and the wine fix, each of which was itself verified
+        // against a different subset). At 0.60 that gate's SUBSTANTIVE assertion
+        // inverted — partible left the average house RICHER than primogeniture
+        // (193,720 vs 164,858), the opposite of what dividing an estate must do.
+        // Bisected to this line: the parent commit `96ef1e2` is green and byte-
+        // identical to the pre-change numbers.
+        //
+        // The response is dose-dependent (the same shape `envoys.rs` records for its
+        // own dispatch rate, and unlike 4.7's discrete branching-order flip), so the
+        // fix is the dose, not the mechanism: comfort goods still draw real foreign
+        // craving, at half the strength. 0.30 restores the gate with a WIDE margin
+        // (149,925 vs 174,496 mean wealth; 194 vs 176 houses ever) rather than a thin
+        // one — deliberate, because this gate has flipped inside its own noise band
+        // five times now and a knife-edge value would not survive the next change.
         let mut foreign_lux = 1.0;
         if tg.need_tier >= 1 {
             let local = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
             if local < 1e-4 {
                 let prestige = (tg.base_value / 15.0).clamp(0.4, 1.6);
-                let tier_gain = if tg.need_tier >= 2 { LUX_IMPORT_DESIRE } else { LUX_IMPORT_DESIRE * 0.6 };
+                let tier_gain = if tg.need_tier >= 2 { LUX_IMPORT_DESIRE } else { LUX_IMPORT_DESIRE * COMFORT_IMPORT_FRAC };
                 foreign_lux = 1.0 + tier_gain * prestige;
             }
         }
