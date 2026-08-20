@@ -1558,6 +1558,19 @@ const MARKET_REACH_FRAC: f32 = 0.5;
 const CABOTAGE_SEA_FRAC: f32 = 0.08;
 /// How many nearest cross-component coastal partners a coastal hub gains by cabotage.
 const CABOTAGE_LINKS: usize = 2;
+/// Terroir estates (wine country, silk hills, spice coast…): the estate founder used
+/// to pick a good ONLY from what the frozen worldgen snapshot credited the CITY hub
+/// with producing (`base_per_capita > 0`), so a province rich in a good the snapshot
+/// missed — the classic case being a fine wine belt a cell or two outside the seat's
+/// own catchment — could never seed the vineyard it plainly warranted. A good the city
+/// does not itself produce may now be planted where the PROVINCE's own belt score
+/// (`prov_good_belt`) is at least this suitable; below it the ground isn't worth it.
+const ESTATE_TERROIR_BELT_MIN: f32 = 0.35;
+/// A full-strength (belt = 1) terroir good is worth this fraction of the city's MEAN
+/// specialty per-capita rate. Self-scaling to the world (so it competes on the city's
+/// own production scale, never an unrelated absolute one) and < 1 so a terroir estate
+/// can never out-produce the city's real specialties. See `maybe_found_estate`.
+const ESTATE_TERROIR_FRAC: f32 = 0.6;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;

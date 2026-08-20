@@ -671,20 +671,44 @@ impl CampaignSim {
         }
         let Some(parent) = best else { return };
         // Which good the estate works, and so its kind (farm / mine / plantation /
-        // vineyard / fishery). Among goods the LAND here can actually yield
-        // (`base_per_capita > 0`), prefer the one under the most local DEMAND PRESSURE
-        // — dear relative to its base value, i.e. under-supplied — rather than merely
-        // the largest existing output. That is what makes unmet demand for a good like
-        // wine URGE a city sitting on wine-capable land to plant a vineyard instead of
-        // endlessly reinforcing what it already exports.
-        let mut bestg = (usize::MAX, 0.0f32);
+        // vineyard / fishery). Among goods the LAND here can actually yield, prefer the
+        // one under the most local DEMAND PRESSURE — dear relative to its base value,
+        // i.e. under-supplied — rather than merely the largest existing output. That is
+        // what makes unmet demand for a good like wine URGE a city sitting on
+        // wine-capable land to plant a vineyard instead of reinforcing what it exports.
+        //
+        // "Can yield" is the city's own production (`base_per_capita > 0`) OR a good the
+        // surrounding PROVINCE is strongly suited to (`prov_good_belt`) even where the
+        // frozen hub snapshot never credited the city with it — the wine-country gap.
+        // The belt (0..1) is converted to this city's OWN production scale (`ref_pc`, a
+        // fraction of its mean specialty rate) so a terroir estate competes fairly and
+        // can never out-produce the city's real specialties. Both `hub_province` and
+        // `prov_good_belt` are empty on a province-less campaign, so terroir is then a
+        // strict no-op and the selection is byte-identical to before.
+        let prov = self.hub_province.get(parent).copied().unwrap_or(-1);
+        let ref_pc = {
+            let (mut sum, mut cnt) = (0.0f32, 0u32);
+            for &v in &self.hubs[parent].base_per_capita { if v > 0.0 { sum += v; cnt += 1; } }
+            if cnt > 0 { sum / cnt as f32 } else { 0.0 }
+        };
+        let terroir_cap = |me: &Self, g: usize| -> f32 {
+            if prov < 0 || ref_pc <= 0.0 { return 0.0; }
+            let belt = me.prov_good_belt.get(prov as usize * ng + g).copied().unwrap_or(0.0);
+            if belt >= ESTATE_TERROIR_BELT_MIN { belt * ref_pc * ESTATE_TERROIR_FRAC } else { 0.0 }
+        };
+        // (good, score, effective per-capita for the winner).
+        let mut bestg = (usize::MAX, 0.0f32, 0.0f32);
         for g in 0..ng {
             let pc = self.hubs[parent].base_per_capita.get(g).copied().unwrap_or(0.0);
-            if pc <= 0.0 { continue; }
-            let score = pc * self.demand_pressure_at(parent, g);
-            if score > bestg.1 { bestg = (g, score); }
+            // A good the city already yields uses its own rate; one it does not may
+            // still be planted where the province's belt is strong enough.
+            let cap = if pc > 0.0 { pc } else { terroir_cap(self, g) };
+            if cap <= 0.0 { continue; }
+            let score = cap * self.demand_pressure_at(parent, g);
+            if score > bestg.1 { bestg = (g, score, cap); }
         }
         let Some(mut g0) = (bestg.0 != usize::MAX).then_some(bestg.0) else { return };
+        let mut eff_percap = bestg.2;
         let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
         // A fishery needs a coast; inland, fall back to the strongest food good (a farm).
         if kind == 4 && !self.hubs[parent].coastal {
@@ -697,6 +721,7 @@ impl CampaignSim {
             }
             g0 = bf.0;
             kind = 1;
+            eff_percap = self.hubs[parent].base_per_capita.get(g0).copied().unwrap_or(0.05);
         }
         let owner_house = self.strongest_house_at(parent)
             .filter(|&hi| self.houses[hi].wealth >= ESTATE_HOUSE_OWNER_WEALTH)
@@ -707,7 +732,9 @@ impl CampaignSim {
         let ey = self.hubs[parent].y + (hash01(self.seed, parent as u64, self.tick as u64) - 0.5)
             * self.world_w * 0.02;
         let est_pop = self.hubs[parent].founding_pop * 0.15;
-        let percap = self.hubs[parent].base_per_capita.get(g0).copied().unwrap_or(0.05).max(0.05) * 1.5;
+        // The winner's effective capacity (its own rate, or the terroir-derived one for
+        // a good the city didn't itself produce) sets the estate's output rate.
+        let percap = eff_percap.max(0.05) * 1.5;
         let (koppen, coastal, component) =
             (self.hubs[parent].koppen, self.hubs[parent].coastal, self.hubs[parent].component);
         self.create_estate(parent as i32, ex, ey, g0, kind, owner_house, koppen, coastal,

@@ -122,6 +122,49 @@
         s
     }
 
+    /// A good the frozen hub snapshot never credited to a city is still planted as an
+    /// estate where the surrounding PROVINCE is strongly suited to it — the wine-country
+    /// gap `maybe_found_estate` used to miss. Without the belt the same city plants its
+    /// own staple instead, so the belt is provably what let the vineyard form.
+    #[test]
+    fn a_strong_provincial_belt_lets_a_vineyard_form() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("wine", 3, 2, 8.0, 0.4, false),
+        ];
+        // One commercial city that grows wheat but has NEVER produced wine
+        // (base_per_capita[wine] == 0), where wine is DEAR (high demand pressure).
+        let mk = || {
+            let mut hubs = vec![hub(0, 0.0, 0.0, 10_000.0, vec![10_000.0 * 0.012, 0.0], 0)];
+            hubs[0].trade_wealth = 1.0;
+            hubs[0].food_balance = 1.0;
+            hubs[0].price[1] = 24.0; // wine base_value 8 → demand pressure clamps to 3.0
+            let mut s = sim(hubs, goods.clone());
+            s.hub_province = vec![0];
+            s.prov_cap = vec![100_000.0]; // non-empty so demand pressure is actually read
+            s
+        };
+
+        // With a strong wine belt in the province, the city plants a VINEYARD (kind 5).
+        let mut s = mk();
+        s.prov_good_belt = vec![0.0, 0.83]; // [wheat, wine] belt for province 0
+        let before = s.hubs.len();
+        s.maybe_found_estate();
+        assert_eq!(s.hubs.len(), before + 1, "an eligible wine-country city founds an estate");
+        let est = s.hubs.last().unwrap();
+        assert!(est.is_estate && est.estate_kind == 5,
+            "the terroir estate is a vineyard (kind 5), got kind {}", est.estate_kind);
+        assert!(est.production[1] > 0.0, "the vineyard actually produces wine");
+
+        // The SAME city with no belt falls back to its own staple — never a vineyard,
+        // proving the province belt is what unlocked the wine estate.
+        let mut s2 = mk();
+        s2.prov_good_belt = vec![0.0, 0.0];
+        s2.maybe_found_estate();
+        assert!(s2.hubs.last().unwrap().estate_kind != 5,
+            "with no terroir there is no vineyard, got kind {}", s2.hubs.last().unwrap().estate_kind);
+    }
+
     /// Phase 2b · with a seeded province layer, the rural reservoir must FEED the cities
     /// (net rural→urban migration) while TOTAL population stays bounded and finite over
     /// decades — the urban-graveyard/reservoir loop must not blow up or crater.
