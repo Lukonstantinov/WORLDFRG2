@@ -579,16 +579,22 @@ impl CampaignSim {
         // cadence goods (furs, luxuries) sit cheaper locally and skew to wholesale.
         let interval = if tg.consumption_interval > 0.0 { tg.consumption_interval } else { 30.0 };
         let cadence = (30.0 / interval).clamp(0.30, 1.8);
-        // Craving for FOREIGN luxuries (#2): a luxury-tier good a city can't make at
-        // home is coveted the more — and the finer/dearer it is, the more so — so
-        // distant high-value luxuries pull strong import demand and feed inter-city
-        // trade, instead of every city resting on its own produce.
+        // Craving for the VARIETY of goods a city can't make at home (#2) — the engine
+        // of inter-city trade. Applies to COMFORT and LUXURY goods (need_tier >= 1): a
+        // people covets the whole spread of finer goods it can't produce itself —
+        // textiles, wine, spices, dyes, worked metal — not only the top luxuries, so
+        // every non-local comfort good draws real import demand instead of each city
+        // resting on its own produce (the "consumed locally or unreachable" case).
+        // The finer/dearer the good, the stronger the craving; comfort goods pull a bit
+        // less than luxuries (everyday finery, not status pieces), so luxuries still
+        // drive the hardest trade.
         let mut foreign_lux = 1.0;
-        if tg.need_tier >= 2 {
+        if tg.need_tier >= 1 {
             let local = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
             if local < 1e-4 {
                 let prestige = (tg.base_value / 15.0).clamp(0.4, 1.6);
-                foreign_lux = 1.0 + LUX_IMPORT_DESIRE * prestige;
+                let tier_gain = if tg.need_tier >= 2 { LUX_IMPORT_DESIRE } else { LUX_IMPORT_DESIRE * 0.6 };
+                foreign_lux = 1.0 + tier_gain * prestige;
             }
         }
         self.hubs[h].population

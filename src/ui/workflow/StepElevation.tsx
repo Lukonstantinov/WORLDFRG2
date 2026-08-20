@@ -1,15 +1,26 @@
 import { useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { simGenerateShelves, simGenerateTerrainFromTemplate, simGenerateTerrainRidged,
+import { simGenerateShelves, simGenerateTerrain, simGenerateTerrainFromTemplate, simGenerateTerrainRidged,
   simGenerateTerrainCordillera, simScaleElevation, simGenerateRidges, undoAction } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
 
-/** The three elevation MODELS. Each reads the same four sliders below but builds
- *  relief a fundamentally different way, so the choice belongs up front rather
- *  than buried in a row of buttons. */
-type ElevMode = "shape" | "cordillera" | "ridged";
+/** The four elevation MODELS. Each builds relief a fundamentally different way,
+ *  so the choice belongs up front rather than buried in a row of buttons.
+ *
+ *  All four are now honoured by BOTH run-all buttons as well as this step. They
+ *  used to be reachable only from here: `sim_run_all` hardcoded the tectonic
+ *  model and `sim_run_all_from_terrain` the shape model, each silently
+ *  discarding this picker AND all four sliders — so "Generate Full World"
+ *  produced the same relief however it was set. */
+type ElevMode = "plates" | "shape" | "cordillera" | "ridged";
 
-const ELEV_MODES: { id: ElevMode; label: string; blurb: string }[] = [
+const ELEV_MODES: { id: ElevMode; label: string; blurb: string; needsPlates?: boolean }[] = [
+  {
+    id: "plates",
+    label: "Tectonic",
+    blurb: "Uplift bloomed off the CONVERGENT plate boundaries, broken into segments by noise, then eroded and isostatically rebounded. The only model that reads the tectonic map, so ranges land where the plates actually collide — and the only one unavailable on a painted or imported landmass.",
+    needsPlates: true,
+  },
   {
     id: "shape",
     label: "Shape-based",
@@ -72,7 +83,15 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
 
   // Which elevation MODEL to build relief with. Persisted with the other terrain
   // params so it survives switching workflow steps.
-  const elevMode: ElevMode = terrainParams.mode ?? "shape";
+  // Default to the tectonic model where it is available (it is the only one that
+  // uses the plate map this app is built around), and fall back the moment it is
+  // not — a stored "plates" on a painted world must never generate nothing.
+  // The tectonic model needs `boundary_type`, which only the plate generator
+  // writes — a painted, imported or template landmass has none.
+  const havePlates = landmassSource === "plates";
+  const storedMode: ElevMode = terrainParams.mode ?? "plates";
+  const elevMode: ElevMode = storedMode === "plates" && !havePlates ? "shape" : storedMode;
+  const shownModes = ELEV_MODES.filter((m) => !m.needsPlates || havePlates);
   const setElevMode = (m: ElevMode) => setTerrainParams({ mode: m });
   const activeMode = ELEV_MODES.find((m) => m.id === elevMode)!;
 
@@ -103,7 +122,6 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   // always has complete control over mountains/relief regardless of how the
   // landmass was made.
   const step1Done = stepCompleted[1] === true;
-  void landmassSource;
 
   const runElevation = async (useSeed: number, mode: ElevMode = elevMode) => {
     if (simRunning) return;
@@ -116,7 +134,10 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
     setStatus(`Generating ${modeInfo.label.toLowerCase()} elevation…`);
     try {
       const args = [useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness] as const;
-      if (mode === "ridged") await simGenerateTerrainRidged(...args);
+      // The tectonic model derives its relief from the plate map rather than from
+      // the four sliders, so it takes the seed alone.
+      if (mode === "plates") await simGenerateTerrain(useSeed);
+      else if (mode === "ridged") await simGenerateTerrainRidged(...args);
       else if (mode === "cordillera") await simGenerateTerrainCordillera(...args);
       else await simGenerateTerrainFromTemplate(...args);
       invalidateTiles();
@@ -214,7 +235,7 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
           Generation Mode
         </div>
         <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
-          {ELEV_MODES.map((m) => (
+          {shownModes.map((m) => (
             <button key={m.id} onClick={() => setElevMode(m.id)} title={m.blurb}
               style={{
                 flex: 1, padding: "4px 2px", borderRadius: 3, cursor: "pointer", fontSize: 9,

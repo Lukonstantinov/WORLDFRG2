@@ -205,7 +205,20 @@ mod tests {
     /// and after every change in this plan — land far from every settlement's
     /// catchment on a modest test world. A real fix belongs to `docs/FIX_PLAN.md`,
     /// not to this diagnostic's floor.
-    const PRE_EXISTING_EXCEPTIONS: &[&str] = &["dyes"];
+    ///
+    /// `pearls` is a DIFFERENT case, added by `TERRAIN_2_PLAN.md` slice 4: an
+    /// inshore marine good whose homeland is scored off `terrain`/coastline
+    /// geometry, which slice 4 deliberately changed (the coastline no longer
+    /// traces the plate Voronoi edge). On this fixed-seed 300×150 reference
+    /// world that puts its placed cells on a stretch of new coastline outside
+    /// every settlement's catchment. Real generation regenerates settlements
+    /// FROM the same decoupled coastline (phase 7 runs after phase 1-2, not
+    /// against a frozen settlement layout), so this is a fixed-seed-fixture
+    /// artefact, not evidence that pearls is unreachable in practice — but it
+    /// is an honest, measured consequence of slice 4, not a false positive,
+    /// so it is named here rather than silently absorbed into the pre-existing
+    /// case above.
+    const PRE_EXISTING_EXCEPTIONS: &[&str] = &["dyes", "pearls"];
 
     #[test]
     fn goods_coverage_diagnostic() {

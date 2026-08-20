@@ -290,8 +290,19 @@ export async function previewCoarseClimate(
   return invoke("preview_coarse_climate", { ...s });
 }
 
-export async function simRunAll(seed: number, plateCount: number): Promise<import("@types").SimRunAllResult> {
-  return invoke("sim_run_all", { seed, plateCount });
+export async function simRunAll(
+  seed: number,
+  plateCount: number,
+  elevMode: string,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<import("@types").SimRunAllResult> {
+  return invoke("sim_run_all", {
+    seed, plateCount, elevMode,
+    mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
 }
 
 /** Generate mountain ridges from hand-drawn ridge lines. Each line carries its
@@ -329,13 +340,14 @@ export async function getToponyms(): Promise<import("@types").Toponym[]> {
 
 export async function simRunAllFromTerrain(
   seed: number,
+  elevMode: string,
   mountainDensity: number,
   mountainHeight: number,
   mountainSpread: number,
   noiseRoughness: number,
 ): Promise<import("@types").SimRunAllResult> {
   return invoke("sim_run_all_from_terrain", {
-    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+    seed, elevMode, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
   });
 }
 

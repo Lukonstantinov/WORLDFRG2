@@ -307,8 +307,8 @@ mod tests {
         use crate::tile::coords::TILE_SIZE;
         use rusqlite::Connection;
 
-        const W: u32 = 720;
-        const H: u32 = 360;
+        const W: u32 = 1440;
+        const H: u32 = 720;
         let seed = 20260818u64;
 
         let conn = Connection::open_in_memory().unwrap();
@@ -419,9 +419,39 @@ mod tests {
                     }
                 }
             }
-            let path = format!("{dir}/world_{layer}.png");
+            let tag = std::env::var("SHEET_TAG").unwrap_or_default();
+            let path = format!("{dir}/world_{layer}{tag}.png");
             image::save_buffer(&path, &img, W, H, image::ColorType::Rgb8).unwrap();
             println!("wrote {path}");
+
+            // A 3x-magnified crop of the most mountainous window, because a whole
+            // world at 1440px cannot show what a hillshade is doing.
+            let (cw, ch) = (240usize, 160usize);
+            let mut best = (0usize, 0usize, -1.0f32);
+            for oy in (0..H as usize - ch).step_by(40) {
+                for ox in (0..W as usize - cw).step_by(40) {
+                    let mut score = 0.0f32;
+                    for y in (oy..oy + ch).step_by(3) {
+                        for x in (ox..ox + cw).step_by(3) {
+                            let g = y * W as usize + x;
+                            if buf.terrain[g] == 1 { score += buf.elevation[g]; }
+                        }
+                    }
+                    if score > best.2 { best = (ox, oy, score); }
+                }
+            }
+            const M: usize = 3;
+            let mut crop = vec![0u8; cw * M * ch * M * 3];
+            for y in 0..ch * M {
+                for x in 0..cw * M {
+                    let src = ((best.1 + y / M) * W as usize + (best.0 + x / M)) * 3;
+                    let dst = (y * cw * M + x) * 3;
+                    crop[dst..dst + 3].copy_from_slice(&img[src..src + 3]);
+                }
+            }
+            let cp = format!("{dir}/crop_{layer}{tag}.png");
+            image::save_buffer(&cp, &crop, (cw * M) as u32, (ch * M) as u32, image::ColorType::Rgb8).unwrap();
+            println!("wrote {cp} (from {},{})", best.0, best.1);
         }
 
         // A quick census, so the run says something even without opening the PNGs.

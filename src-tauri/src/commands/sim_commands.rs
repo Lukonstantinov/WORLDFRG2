@@ -376,10 +376,49 @@ pub fn sim_refresh_hydrology_biology(
 
 /// Run all simulations in sequence (full world generation pipeline).
 /// This is a convenience command that runs all phases.
+
+/// THE ELEVATION MODEL SELECTOR — the one place a mode string picks a generator.
+///
+/// Four models ship and until now only the wizard's step 2 could reach three of
+/// them: both run-alls hardcoded a generator and silently discarded the user's
+/// choice AND all four sliders, so "Generate Full World" always produced the
+/// plate model however the picker was set. That is the bug this exists to close.
+///
+/// `"plates"` is the only model that reads `boundary_type`, so it is the natural
+/// default for a plate-derived world and is NOT reachable on a painted or
+/// imported one (there is no tectonic data to read) — a caller without plates
+/// passes `allow_plates = false` and falls back to the shape model.
+fn apply_elevation_model(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mode: &str,
+    density: f32,
+    height: f32,
+    spread: f32,
+    roughness: f32,
+    allow_plates: bool,
+) {
+    match mode {
+        "cordillera" => elevation::generate_elevation_cordillera(buf, seed, density, height, spread, roughness),
+        "ridged" => elevation::generate_elevation_ridged(buf, seed, density, height, spread, roughness),
+        "shape" => elevation::generate_elevation_from_terrain(buf, seed, density, height, spread, roughness),
+        // "plates" and anything unrecognised: the tectonic model where it can be
+        // used, the shape model where it cannot. An unknown string must never
+        // leave a world with no elevation at all.
+        _ if allow_plates => elevation::generate_elevation(buf, seed),
+        _ => elevation::generate_elevation_from_terrain(buf, seed, density, height, spread, roughness),
+    }
+}
+
 #[tauri::command]
 pub fn sim_run_all(
     seed: u64,
     plate_count: u32,
+    elev_mode: String,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
     db: State<'_, WorldDb>,
 ) -> Result<SimRunAllResult, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
@@ -390,8 +429,10 @@ pub fn sim_run_all(
     // Phase 1: Plates & landmass
     plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
 
-    // Phase 2: Elevation & depth
-    elevation::generate_elevation(&mut buf, seed);
+    // Phase 2: Elevation & depth. Plates exist on this path, so every model is
+    // available and "plates" is the default.
+    apply_elevation_model(&mut buf, seed, &elev_mode,
+        mountain_density, mountain_height, mountain_spread, noise_roughness, true);
     elevation::compute_sea_depth(&mut buf);
     // Phase 2b: continental shelves (default params). Without this the only
     // shelf-tagged cells are the thin 1-shelf ring compute_sea_depth marks, so
@@ -584,6 +625,7 @@ pub fn sim_generate_ridges(
 #[tauri::command]
 pub fn sim_run_all_from_terrain(
     seed: u64,
+    elev_mode: String,
     mountain_density: f32,
     mountain_height: f32,
     mountain_spread: f32,
@@ -595,8 +637,10 @@ pub fn sim_run_all_from_terrain(
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load(&conn)?;
 
-    // Phase 2: Elevation from terrain (no plates)
-    elevation::generate_elevation_from_terrain(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    // Phase 2: Elevation from the existing land mask. No plate data here, so the
+    // tectonic model is unavailable and "plates" degrades to the shape model.
+    apply_elevation_model(&mut buf, seed, &elev_mode,
+        mountain_density, mountain_height, mountain_spread, noise_roughness, false);
     elevation::compute_sea_depth(&mut buf);
     // Phase 2b: continental shelves (default params) — previously omitted here
     // despite the doc-comment claiming it ran, so template worlds had no visible
@@ -1592,4 +1636,94 @@ pub fn campaign_province_state(db: State<'_, WorldDb>) -> Result<Vec<ProvinceLiv
         hub_count: hubs.get(&p.id).copied().unwrap_or(0),
         net_migration: net_mig.get(p.id as usize).map(|&m| m as i32).unwrap_or(0),
     }).collect())
+}
+
+#[cfg(test)]
+mod elevation_model_tests {
+    use super::*;
+    use crate::db::schema;
+    use rusqlite::Connection;
+
+    /// A small world with a real plate map, so every model has something to read.
+    fn plate_world(seed: u64) -> WorldBuffer {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", "180"), ("grid_height", "90")] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        plates::generate_plates_and_landmass(&mut buf, seed, 10);
+        buf
+    }
+
+    fn land_elevations(buf: &WorldBuffer) -> Vec<f32> {
+        (0..buf.total()).filter(|&i| buf.terrain[i] == 1).map(|i| buf.elevation[i]).collect()
+    }
+
+    /// THE POINT OF THE SELECTOR. Both run-alls used to hardcode a generator and
+    /// silently discard the user's choice, so "Generate Full World" produced the
+    /// same relief however the picker was set. Every mode must now yield a
+    /// materially DIFFERENT elevation field from every other.
+    #[test]
+    fn every_elevation_model_builds_a_different_world() {
+        let seed = 4242u64;
+        let modes = ["plates", "shape", "cordillera", "ridged"];
+        let fields: Vec<(&str, Vec<f32>)> = modes.iter().map(|&m| {
+            let mut buf = plate_world(seed);
+            apply_elevation_model(&mut buf, seed, m, 0.5, 0.5, 0.5, 0.4, true);
+            (m, land_elevations(&buf))
+        }).collect();
+
+        for (m, f) in &fields {
+            assert!(!f.is_empty(), "model {m} produced no land at all");
+            assert!(f.iter().any(|&e| e > 0.05), "model {m} produced a flat world");
+        }
+        for (i, (ma, fa)) in fields.iter().enumerate() {
+            for (mb, fb) in fields.iter().skip(i + 1) {
+                let diff = fa.iter().zip(fb.iter()).filter(|(a, b)| (*a - *b).abs() > 1e-4).count();
+                let frac = diff as f32 / fa.len() as f32;
+                assert!(
+                    frac > 0.25,
+                    "models {ma} and {mb} agree on {:.1}% of land — the picker is not \
+                     reaching the generator", 100.0 * (1.0 - frac)
+                );
+            }
+        }
+    }
+
+    /// An unrecognised mode string (an older save, a typo, a future model) must
+    /// never leave a world with NO elevation — the silent-blank-world failure this
+    /// codebase keeps hitting. It degrades to a real model instead.
+    #[test]
+    fn an_unknown_model_still_builds_terrain() {
+        let seed = 99u64;
+        for allow_plates in [true, false] {
+            let mut buf = plate_world(seed);
+            apply_elevation_model(&mut buf, seed, "no-such-model", 0.5, 0.5, 0.5, 0.4, allow_plates);
+            let land = land_elevations(&buf);
+            assert!(!land.is_empty(), "no land (allow_plates={allow_plates})");
+            assert!(
+                land.iter().any(|&e| e > 0.05),
+                "unknown model produced a flat world (allow_plates={allow_plates})"
+            );
+        }
+    }
+
+    /// Without plate data the tectonic model is not available, so "plates" must
+    /// fall back rather than read an empty `boundary_type` and produce nothing.
+    #[test]
+    fn the_tectonic_model_falls_back_where_there_are_no_plates() {
+        let seed = 7u64;
+        let mut buf = plate_world(seed);
+        apply_elevation_model(&mut buf, seed, "plates", 0.5, 0.5, 0.5, 0.4, false);
+        let land = land_elevations(&buf);
+        assert!(land.iter().any(|&e| e > 0.05), "fallback produced a flat world");
+
+        let mut shape = plate_world(seed);
+        apply_elevation_model(&mut shape, seed, "shape", 0.5, 0.5, 0.5, 0.4, false);
+        assert_eq!(land, land_elevations(&shape), "the fallback must BE the shape model");
+    }
 }

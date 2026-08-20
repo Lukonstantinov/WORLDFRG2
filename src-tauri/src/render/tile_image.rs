@@ -178,7 +178,13 @@ pub const ELEVATION_STOPS: [(f32, (u8, u8, u8)); 8] = [
     (2000.0, (219, 200, 155)),
     (3000.0, (231, 210, 186)),
     (5000.0, (241, 231, 222)),
-    (8848.0, (255, 255, 255)),
+    // Terrain 2.0 slice 6 (docs/TERRAIN_2_PLAN.md section 6): the top stop used
+    // to be pure white, which blows every summit out to one flat colour with no
+    // headroom left for the hillshade to darken it back down into — a snow cap
+    // reads as a featureless white blob instead of a shaded one. Still strictly
+    // brighter than the 5000 m stop (the monotone-lightness rule), just short of
+    // the ceiling.
+    (8848.0, (250, 248, 244)),
 ];
 
 fn elevation_color(e: f32) -> (u8, u8, u8) {
@@ -1346,15 +1352,21 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, ctx: &Rende
 
 // ── Relief shading ──────────────────────────────────────────────────────────
 //
-// Shared by the terrain hillshade and the natural-colour layer. Three departures
-// from the single-lamp Lambertian this file started with, each fixing something a
-// reader could see:
+// Shared by the terrain hillshade and the natural-colour layer. What it does, and
+// two things it deliberately does NOT do because both were built, rendered and
+// measured worse than their absence:
 //
-// 1. **A FILL LIGHT.** One NW lamp leaves every SE-facing slope at one flat tone,
-//    so the lee side of a range loses all its structure — half of every mountain
-//    on the map was information-free. Imhof's own practice is never a single lamp.
-//    The fill is weak, low and from the opposite quadrant: it recovers lee-slope
-//    form without ever competing with the key light for which way is "up".
+// 1. **NOT a fill light.** A second lamp was built here and REMOVED after looking
+//    at four configurations side by side (`dump_natural_sheet`, SHEET_TAG). The
+//    theory was Imhof's — one NW lamp leaves SE-facing slopes at a flat tone — but
+//    a fill lamp brightens exactly the shadows that CARRY the relief, and the
+//    measured result is a milky, flattened map at every weight tried:
+//    opposite-quadrant (135°) at 0.26 was the worst, a non-opposing 225° at 0.18
+//    still clearly worse than none. Ranked: no fill > 225°/0.18 > 135°/0.26.
+//    A fill light is a technique for a 3-D scene with real geometry; on a shaded
+//    DEM whose only signal IS the shadow, it subtracts. If this is revisited, the
+//    thing that actually fixes lee-slope flatness is a higher-frequency relief
+//    term (texture shading), not more lamps.
 // 2. **AMBIENT OCCLUSION**, from local concavity. Directional light alone cannot
 //    distinguish a valley from a plain that happens to face away from the sun —
 //    both simply go dark. Concavity is orientation-INDEPENDENT, so a valley reads
@@ -1378,12 +1390,6 @@ fn render_terrain_hillshade_halo(tile: &TileData, n: &TileNeighbors, ctx: &Rende
 /// landform for most readers, so this azimuth is not a free parameter.
 const KEY_AZ_DEG: f32 = 315.0;
 const KEY_ALT_DEG: f32 = 45.0;
-/// Fill light: opposite quadrant, low, and weak. Recovers lee-slope form.
-const FILL_AZ_DEG: f32 = 135.0;
-const FILL_ALT_DEG: f32 = 22.0;
-/// Fill share of the total. Above roughly 0.35 the two lamps start to cancel and
-/// the relief flattens out — the failure mode this constant exists to avoid.
-const FILL_WEIGHT: f32 = 0.26;
 
 /// How far ambient occlusion may darken a concavity / brighten a convexity.
 const AO_AMP: f32 = 0.16;
@@ -1401,6 +1407,25 @@ const AO_AMP: f32 = 0.16;
 /// The reference must therefore sit well above the sim's own per-cell dither and
 /// at the scale of a real landform. Anything below ~150 m re-admits the grain.
 const AO_REF: f32 = 240.0 / 8848.0;
+
+/// Terrain 2.0 slice 6 (docs/TERRAIN_2_PLAN.md section 6, "texture shading" —
+/// the honest answer to the lee-slope flatness the reverted fill light failed
+/// to fix, see section 8.21). A single directional light collapses a slope
+/// facing AWAY from it to `SHADOW_FLOOR` regardless of how textured that slope
+/// actually is — Lambertian shading has nothing left to say once a surface
+/// faces away from the key light. Real texture shading (Leland Brown) answers
+/// this with a full multi-scale curvature transform; that needs a wide
+/// cross-tile halo this renderer's `TileNeighbors` doesn't carry (only the
+/// immediate edge of each cardinal neighbour, see `halo_elev`), so this is a
+/// bounded, HONEST approximation using the SAME single-ring 3x3 curvature
+/// `relief_at` already computes for ambient occlusion: on the shadowed side of
+/// a landform, boost how strongly that curvature reads, so a lee slope gets
+/// its ridge-and-valley texture from CURVATURE instead of from light it never
+/// receives. On the lit side this is a no-op (`texture_boost` → 1.0), so the
+/// key-light shading already tuned for the sunward slopes is untouched — this
+/// is not a second light source, only a wider gain on the existing
+/// direction-independent AO term precisely where directional light runs out.
+const TEXTURE_SHADOW_BOOST: f32 = 0.65;
 
 /// A unit light vector from azimuth/altitude in degrees. `y` is negated because
 /// raster y increases downward.
@@ -1443,12 +1468,11 @@ fn relief_at(
     let ny = -dzdy / len;
     let nz = 1.0 / len;
 
-    // Two lights, each normalised so flat ground gives exactly 1.0, then mixed.
+    // ONE light, normalised so flat ground gives exactly 1.0. Raw Lambertian gives
+    // flat land sin(45°) = 0.707, which would render this layer ~29% darker than
+    // an unshaded one showing the very same colours.
     let (kx, ky, kz) = light_vec(KEY_AZ_DEG, KEY_ALT_DEG);
-    let (fx, fy, fz) = light_vec(FILL_AZ_DEG, FILL_ALT_DEG);
-    let key = (nx * kx + ny * ky + nz * kz) / kz;
-    let fill = (nx * fx + ny * fy + nz * fz) / fz;
-    let lambert = key * (1.0 - FILL_WEIGHT) + fill * FILL_WEIGHT;
+    let lambert = (nx * kx + ny * ky + nz * kz) / kz;
 
     // AMBIENT OCCLUSION from concavity against the 8-neighbour mean. Positive =
     // convex (a ridge, more sky) → brighter; negative = concave (a valley, less
@@ -1459,7 +1483,12 @@ fn relief_at(
     let br = halo_elev(tile, n, xi + 1, yi + 1);
     let mean8 = (left + right + up + down + ul + ur + bl + br) / 8.0;
     let concavity = (e - mean8) / AO_REF;
-    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * AO_AMP;
+    // Texture-shading follow-up (see `TEXTURE_SHADOW_BOOST`): widen the AO
+    // gain on the side the key light doesn't reach, so a lee slope keeps real
+    // ridge-and-valley texture instead of reading as one flat shadow tone.
+    let shadow_amount = (1.0 - lambert).clamp(0.0, 1.0);
+    let texture_boost = 1.0 + shadow_amount * TEXTURE_SHADOW_BOOST;
+    let ao = 1.0 + concavity.clamp(-1.0, 1.0) * AO_AMP * texture_boost;
 
     // AERIAL PERSPECTIVE (Imhof): contrast is low in the lowlands and rises with
     // height, so a summit reads crisp while a plain keeps its tint.

@@ -22,6 +22,7 @@ cargo test --lib tick::tests                                   # campaign-sim un
 cargo test --lib simulate_decades_reports_dynamics -- --nocapture  # WATCH the living economy (5-yearly digest)
 cargo test --lib earth_ -- --nocapture                         # EARTH CLIMATE FIDELITY scorecard (§2.3)
 cargo test --lib econ_ -- --nocapture                          # ECONOMY FIDELITY scorecard (§2.5)
+cargo test --release --lib bench_phase2 -- --ignored --nocapture                 # phase-2 (terrain) ms breakdown
 cargo test --release --lib bench_ocean_atmosphere -- --ignored --nocapture       # phase-3 ms breakdown (§8.9)
 cargo test --release --lib ocean_atmosphere_field_checksums -- --ignored --nocapture  # phase-3 bit-exactness
 ```
@@ -80,8 +81,11 @@ It prints a scorecard + confusion matrix and HARD-ASSERTS a floor
 (`EARTH_MAIN_FLOOR`), so a change that breaks the global pattern fails the build.
 **Raise the floor after an improvement** so it always guards the current best.
 
-Measured baseline: **main-class 70.1%**, **exact-zone 39.0%** (was 66.2 / 29.0 at
-`d53fdc9`). BOTH are now asserted — `EARTH_MAIN_FLOOR` **and** `EARTH_EXACT_FLOOR`.
+Measured baseline: **main-class 70.2%**, **exact-zone 39.0%** (was 66.2 / 29.0 at
+`d53fdc9`; main-class was 70.1 before `TERRAIN_2_PLAN.md` slice 5's seafloor
+structure — the one part of that plan touching `compute_sea_depth`/`generate_shelves`
+— nudged it to 70.2, floor raised to 70.15). BOTH are now asserted — `EARTH_MAIN_FLOOR`
+**and** `EARTH_EXACT_FLOOR`.
 A third gate, `earth_monsoon_wind_reverses`, asserts the PHYSICS rather than the
 score: monsoon winds must reverse between the two seasons and the mid-latitude
 controls must not. It exists because the main-class floor was deliberately lowered
@@ -254,6 +258,19 @@ Run in order. Each phase depends on previous phases' data.
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
 | All | `sim_run_all` | Phases 1-8 from plates |
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
+
+**FOUR elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
+the single place a mode string picks a generator — `plates` (the tectonic model,
+`generate_elevation`, the ONLY one that reads `boundary_type`) · `shape` ·
+`cordillera` (§8.13) · `ridged`. Both run-alls used to HARDCODE a generator and
+silently discard the user's pick and all four sliders, so "Generate Full World"
+produced the same relief however `StepElevation`'s picker was set; the models were
+reachable only from step 2's own button. Two rules: the tectonic model is offered
+only where plate data exists (`landmassSource === "plates"`) and degrades to the
+shape model otherwise, and an UNRECOGNISED mode must still build terrain — a bad
+string may never leave a world with no elevation. Gated by
+`elevation_model_tests`, which asserts the four disagree on >25% of land (a
+picker that does not reach the generator makes them identical).
 
 **Phase 3 runs this exact sequence** (`sim_commands.rs`; `earth_validation.rs` mirrors
 it — keep the two in sync):
@@ -933,8 +950,23 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   each leaf module so paths stay sim::plates, sim::tick, …
   mod.rs                        ← Sim module declarations + `pub use` re-exports
   world_buffer.rs               ← WorldBuffer: flat arrays + per-phase ColumnSet masks
-  step1_plates/plates.rs        ← Ph1: Voronoi plate tectonics
-  step2_terrain/elevation.rs    ← Ph2: plate-based + template-based elevation
+  step1_plates/plates.rs        ← Ph1: Voronoi plate tectonics; terrain is a warped
+                                  "crust thickness" threshold, not the raw Voronoi
+                                  edge (Terrain 2.0 slice 4)
+  step2_terrain/elevation.rs    ← Ph2: plate-based + template-based elevation.
+                                  `stream_power_erosion` (priority-flood + flow
+                                  accumulation + K·A^m·S^n incision) replaced the old
+                                  droplet simulation (Terrain 2.0 slice 1); outer-pass
+                                  count is keyed to GRID SIZE, not the `iterations`
+                                  strength knob (see `terrain_metrics`, §3 below)
+  step2_terrain/geology.rs      ← TRANSIENT geology (Terrain 2.0 slices 2-3):
+                                  recomputed from seed + persisted plate data every
+                                  phase-2 run, used, discarded — no tile column.
+                                  Lithology noise, real orogeny setting/age (plate
+                                  model only) or a relief pseudo-setting (the other
+                                  three models), the phase-2 climate-erosion proxy,
+                                  and the region id `redistribute_elevation_regional`
+                                  keys off
   step3_ocean_atmo/             ← Ph3 (the physics core — see §8.2):
       ocean.rs                    winds · Sverdrup gyres · currents · salinity · thermohaline · SST
       insolation.rs               astronomical daily-mean insolation (ANY obliquity)
@@ -2309,14 +2341,11 @@ the same trick and the same reasoning as `lowland_tint` (§8.18).
 **The shared relief core** (`tile_image::relief_at`) now serves both shaded base
 layers. Three changes from the single-lamp Lambertian it replaced:
 
-- **A fill light.** One NW lamp leaves every SE-facing slope at one flat tone, so
-  the lee side of every range on the map carried no information. Weak, low,
-  opposite quadrant. Above roughly `FILL_WEIGHT` 0.35 the two lamps cancel and the
-  relief flattens — that is the failure mode the constant guards.
 - **Ambient occlusion** from local concavity, which is orientation-INDEPENDENT, so
   a valley reads as a valley under any lighting.
 - **Shaded bathymetry** (`sea_shade`). The sea was an unshaded ramp beside a
   hillshaded continent.
+- **NOT a fill light.** One shipped and was REVERTED — see below.
 
 Three things measured here, all of which look like tuning and are not:
 
@@ -2326,6 +2355,18 @@ Three things measured here, all of which look like tuning and are not:
   an 8-neighbour mean that per-cell dither *is* the concavity signal, so AO
   resolved to ±16% white noise per cell. Rendering with `AO_AMP = 0` isolated it
   conclusively. It is now 240 m; anything under ~150 m re-admits the grain.
+- **A FILL LIGHT was shipped, and it was a REGRESSION.** The theory was Imhof's
+  (one NW lamp leaves every SE-facing slope at a flat tone), and it survived
+  `cargo check`, 20 render tests and a whole-world PNG — then read as obviously
+  worse the moment anyone looked at a magnified mountain crop. A fill lamp
+  brightens exactly the shadows that CARRY the relief. Four configurations
+  rendered side by side (`SHEET_TAG`): no fill > 225°/0.18 > 135°/0.26, the last
+  being what shipped. A fill light is a technique for a 3-D scene with real
+  geometry; on a shaded DEM whose only signal IS the shadow it subtracts. The
+  lesson generalises past this constant: **a whole-world thumbnail is not enough
+  to judge shading** — `dump_natural_sheet` now also writes a 3× magnified crop of
+  the most mountainous window, because the regression was invisible at world zoom
+  and unmistakable at 3×.
 - **A per-cell detail dither was built here and REMOVED.** A tile is exactly one
   pixel per cell, so there is no sub-cell space for synthetic detail to live in and
   it resolves as film grain rather than as terrain. Recorded so it is not
@@ -2379,6 +2420,125 @@ DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geolog
                                     unbuilt). Carries the
                                     measured findings that motivated it and its own
                                     "deliberately not built" list
+TERRAIN_2_PLAN.md                 ← ⭐ ALL SIX SLICES BUILT. `hydraulic_erosion`
+                                    (droplets, ~1.4 visits/land cell measured) is
+                                    replaced by `stream_power_erosion` — priority-
+                                    flood fill + flow accumulation + `K·A^m·S^n`
+                                    incision (`step2_terrain/elevation.rs`), touching
+                                    every land cell's real flow path every outer
+                                    pass instead of sampling a fraction of them.
+                                    New transient module `step2_terrain/geology.rs`
+                                    (§2's "transient first" — recomputed from seed +
+                                    persisted plate data every phase-2 run, zero tile-
+                                    format change) supplies: LITHOLOGY (independent
+                                    noise bands so resistant rock holds ridges),
+                                    OROGENY setting+age (real, from `density`'s
+                                    oceanic/continental split reconstructed via
+                                    majority-vote terrain per plate — active-margin
+                                    arc-offset-from-trench / collision / island-arc,
+                                    inherited outward through a belt by the same BFS
+                                    that measures distance from it, so an old worn
+                                    range sits beside a young sharp one), a phase-2
+                                    CLIMATE PROXY (latitude + continentality — an
+                                    explicit stand-in for phase-3 precipitation,
+                                    documented to disagree with it), and REGIONALISED
+                                    hypsometric redistribution (D9 — a region's own
+                                    pre-redistribution character survives the global
+                                    rank-squeeze instead of being erased by it).
+                                    `plates.rs`'s boundary classification is fixed
+                                    (D3): the normal is now the true Voronoi-bisector
+                                    direction between two plates' seed points, not
+                                    one plate's centre to the cell, and a triple
+                                    junction classifies by strongest signal across
+                                    every differing neighbour instead of scan order.
+                                    Coastlines are DECOUPLED from the Voronoi edge
+                                    (D1/T1) by a LEVEL SET, the third pass at this
+                                    (see `docs/SCOREBOARD.md`'s 2026-08-19e entry):
+                                    a signed distance-to-nearest-boundary field
+                                    (BFS; positive on the land side, negative on
+                                    the sea side) perturbed by noise and re-
+                                    thresholded at zero, so only cells within
+                                    `reach` (~0.55×plate-size) of a real boundary
+                                    can ever flip — no far-flung speckle islands by
+                                    construction. The first two passes each
+                                    measured a real number (90%, then 62.5% coast-
+                                    on-boundary) that still looked, in
+                                    `dump_natural_sheet`, like an unmodified
+                                    Voronoi edge or a scatter of dots bolted onto
+                                    one — a plain 2-D noise threshold has no notion
+                                    of "near the true 1-D boundary curve", so
+                                    wherever it flipped a cell, the flip was
+                                    uncorrelated with where the coastline actually
+                                    needed to bend. The level set fixes this by
+                                    construction rather than by amplitude tuning:
+                                    measured coast-on-plate-boundary 6-7% (both the
+                                    `terrain_metrics` config and the exact
+                                    `dump_natural_sheet` world a maintainer
+                                    screenshot came from), gated permanently by
+                                    `coastline_departs_from_the_plate_boundary`. A
+                                    despeckle pass (component flood-fill, now
+                                    `DESPECKLE_MIN`=14 cells) is a safety net, not
+                                    the mechanism. The SAME screenshot also showed
+                                    straight diagonal "scar" lines across
+                                    continental interiors — a SEPARATE bug, the
+                                    divergent-boundary rift pulldown reading
+                                    `boundary_type[idx]` at the cell's own unwarped
+                                    position; fixed the same way as the D4 orogeny
+                                    belt (read at the warped position, fade
+                                    smoothly with distance). A percentile threshold
+                                    (not a fixed cutoff) still holds the total land
+                                    fraction exactly what the plate mix implied
+                                    throughout. Seafloor gets ridges/trenches/abyssal
+                                    hills/scattered seamounts in `generate_shelves`
+                                    (measured sea_depth↔distance-to-coast r ≈
+                                    0.66-0.74, down from ~1.0 — a real decorrelation,
+                                    §2's ONE slice that touches the Earth gate, which
+                                    HELD: 70.1%→70.2% main-class, floor raised to
+                                    70.15). Render follow-up: a bounded, honest
+                                    approximation of texture shading (widens the
+                                    existing direction-independent AO term
+                                    specifically on the lee/shadowed side, never a
+                                    second light — a true multi-scale fractional-
+                                    Laplacian transform needs a wider cross-tile halo
+                                    this renderer doesn't carry) plus the elevation
+                                    ramp's white blow-out softened. `terrain_metrics`
+                                    (§3's harness) prints RMS slope / slope spread /
+                                    drainage density / hypsometric integral / coast-
+                                    on-boundary / sea_depth-correlation per model —
+                                    the FIRST measurement of these, so it establishes
+                                    the baseline rather than clearing a pre-set floor.
+                                    NEGATIVE RESULT kept as a record, not chased
+                                    further: stream-power's outer-pass count had to
+                                    be decoupled from the old `iterations` (droplet-
+                                    budget) knob and keyed to GRID SIZE instead —
+                                    keying it to `iterations` gave a SMALL world
+                                    fewer passes than a large one, which is backwards
+                                    for performance AND broke
+                                    `cordillera_crest_runs_parallel_to_the_coast`
+                                    (a real world's stream-power run stays at 4-6
+                                    outer passes for the plan's own perf budget, but
+                                    every unit-test-sized fixture gets 8 for free).
+                                    Even so, phase-2 cost real time — `bench_phase2`
+                                    @ 3600×1800: plates 8.5s→11.4s, shape
+                                    11.4s→13.9s (rayon-parallelised where a pass has
+                                    no cross-cell dependency: the Voronoi assignment,
+                                    boundary classification and lithology/climate-
+                                    proxy maps all moved to `into_par_iter`, but the
+                                    priority-flood queue itself is inherently
+                                    sequential and stayed the dominant cost) — short
+                                    of the "no slower" target, recorded rather than
+                                    hidden. A downstream consequence also recorded
+                                    rather than hidden: the fixed-seed 300×150 goods-
+                                    coverage reference world now places `pearls`'
+                                    inshore homeland outside every settlement's
+                                    catchment at that seed/scale — real generation
+                                    regenerates settlements FROM the decoupled
+                                    coastline, so this is a fixed-fixture sampling
+                                    artefact (a second, honestly-labelled exception
+                                    in `goods_validation.rs`, not folded into the
+                                    pre-existing `dyes` one). Slice 4's blast radius is real but scoped
+                                    exactly as flagged: only NEW generation changes;
+                                    a saved world's stored tiles are untouched
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
                                     the settlement panel rework · provinces (enclave fix,
                                     sizing, real-terrain view, goods & exploitation) ·
