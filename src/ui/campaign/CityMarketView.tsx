@@ -3,7 +3,29 @@ import type { HubDetail, HubGoodDetail, ShipmentRow } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
 
 /** ─────────────────────────────────────────────────────────────────────────────
- *  CITY MARKET 2.0 — `docs/TRADE_AND_MARKET_REVIEW.md` Part 3.
+ *  CITY MARKET — VARIANT C, "the quay" (`docs/TRADE_AND_MARKET_REVIEW.md` Part 3,
+ *  `docs/MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2).
+ *
+ *  The organising unit is the PARTNER CITY, not the voyage and not the good: cargo
+ *  lines nest under the city they came from or are going to, the way a port book is
+ *  actually kept. Chosen over the by-voyage and by-good variants because it is the
+ *  only one where a city you hold an office in reads differently from one you touched
+ *  once — which is what makes the office and exploration mechanics legible when they
+ *  land.
+ *
+ *  **What this deliberately does NOT show.** The design's "IN PORT, LOADING" and
+ *  "READY TO SAIL" strips are absent, because a vessel is not a thing yet:
+ *  `fleet_sea`/`_river`/`_caravan` are three counters on `House` with no identity or
+ *  location, and `dispatch` decrements one slot per shipment regardless of quantity.
+ *  Vessels in port is missing STATE, not a missing query, and faking it from in-flight
+ *  legs would report cargoes as hulls. It arrives with stage 1 of the vessel plan.
+ *  For the same reason a lane shows its CARGO count, never a vessel count.
+ *
+ *  The "by good" grouping keeps the previous book view (spread, days held, trend) —
+ *  nothing was removed to make room for C.
+ *  ─────────────────────────────────────────────────────────────────────────────
+ *
+ *  (Original 2.0 notes, still true of the "by good" grouping and the row detail:)
  *
  *  Keeps the view on its buy/sell arrivals ⇢ market ⇢ departures basis (the
  *  maintainer's call over an earlier per-good balance-table design) and rebuilds
@@ -123,6 +145,99 @@ function Spark({ vals, base, w = 62, h = 14 }: { vals: number[]; base: number; w
   );
 }
 
+/** Who supplied this good here, as a five-class stacked bar. Silent (a dash) when
+ *  nothing has arrived — an empty bar would read as "supplied by nobody" rather than
+ *  "nothing to attribute". */
+function SupplyBar({ shares }: { shares?: [number, number, number, number, number] }) {
+  const total = (shares ?? []).reduce((a, b) => a + b, 0);
+  if (!shares || total < 0.01) return <span style={{ color: C.faint }}>—</span>;
+  const top = shares.indexOf(Math.max(...shares));
+  return (
+    <span title={shares.map((v, i) => `${SUPPLY_LABEL[i]} ${Math.round(v * 100)}%`).filter((_, i) => shares[i] > 0.005).join(" · ")}
+      style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
+      <span style={{ display: "inline-flex", width: 34, height: 6, borderRadius: 2, overflow: "hidden", background: C.raised }}>
+        {shares.map((v, i) => v > 0.005
+          ? <span key={i} style={{ width: `${v * 100}%`, background: SUPPLY_TINT[i] }} />
+          : null)}
+      </span>
+      <span style={{ color: SUPPLY_TINT[top], fontSize: 8 }}>{SUPPLY_LABEL[top]}</span>
+    </span>
+  );
+}
+
+/** VARIANT C's side column: one collapsible block per partner city, cargo nested. */
+function QuayColumn({ quays, side, openCity, setOpenCity, icon, label, focus, labelOf }: {
+  quays: Quay[]; side: "in" | "out";
+  openCity: string | null; setOpenCity: (c: string | null) => void;
+  icon: (id: string) => string; label: (id: string) => string;
+  focus: string | null; labelOf: (id: string) => string;
+}) {
+  const tint = side === "in" ? C.buy : C.sell;
+  return (
+    <div style={{ flex: 1, minWidth: 0 }}>
+      <div style={{ color: tint, fontSize: 9, fontWeight: 700, marginBottom: 3,
+        textAlign: side === "out" ? "right" : "left" }}>
+        {side === "in" ? "\u21E2 ARRIVING FROM" : "SOLD TO \u21E2"}
+        {focus ? <span style={{ color: C.faint, fontWeight: 400 }}> · {labelOf(focus)}</span> : null}
+      </div>
+      {quays.length === 0 && (
+        <div style={{ color: C.faint, fontSize: 9 }}>
+          {side === "in" ? "nothing inbound" : "nothing outbound"}
+        </div>
+      )}
+      {quays.map((q) => {
+        const isOpen = openCity === q.city;
+        return (
+          <div key={q.city} style={{ marginBottom: 3 }}>
+            <div onClick={() => setOpenCity(isOpen ? null : q.city)}
+              style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
+                fontSize: 9.5, padding: "1px 2px", borderRadius: 3,
+                background: isOpen ? "#16263a" : "transparent" }}
+              title={`${q.lines.length} cargo${q.lines.length === 1 ? "" : "es"} \u00b7 ${fmt(q.value)} gr-eq`}>
+              <span style={{ color: C.faint, fontSize: 8 }}>{isOpen ? "\u25BE" : "\u25B8"}</span>
+              <span style={{ flex: 1, color: "#cfe0f4", fontWeight: 600, overflow: "hidden",
+                textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.city}</span>
+              {q.eta !== null && <span style={{ color: C.inkDim, fontSize: 8 }}>{"\u23F3"}{q.eta}d</span>}
+              <span style={{ fontSize: 9 }}>{q.sea ? "\u26F5" : "\u{1F42B}"}</span>
+              {q.inflight > 0 && (
+                <span style={{ color: C.inkDim, fontSize: 8 }} title="cargoes in flight on this lane">
+                  ×{q.inflight}
+                </span>
+              )}
+              <span style={{ color: tint, fontSize: 9 }}>{fmt(q.value)}</span>
+            </div>
+            {isOpen && q.lines.slice(0, 8).map((r, i) => {
+              const deal = r.deal_price && r.deal_price > 0 ? r.deal_price : null;
+              const gap = deal !== null ? deal - r.price : null;
+              return (
+                <div key={i} style={{ display: "flex", gap: 4, alignItems: "baseline",
+                  fontSize: 8.5, paddingLeft: 12, color: C.inkMid }}>
+                  <span style={{ width: 7, height: 7, borderRadius: 2, background: r.color, flex: "0 0 auto" }} />
+                  <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {icon(r.good)} {label(r.good)} ×{fmt(r.amount)}
+                  </span>
+                  <span style={{ color: C.gold }}>{deal !== null ? deal.toFixed(2) : "\u2014"}</span>
+                  {gap !== null && Math.abs(gap) > 0.02 && (
+                    <span style={{ color: gap < 0 ? C.good : C.warn, fontSize: 8 }}>
+                      {gap < 0 ? "\u25BC" : "\u25B2"}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {isOpen && (
+              <div style={{ paddingLeft: 12, fontSize: 8, color: C.faint }}>
+                {q.lines.length} cargo{q.lines.length === 1 ? "" : "es"} · {fmt(q.units)} units
+                {q.lines.some((l) => l.is_guild) ? " \u00b7 incl. guild" : ""}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
 /** One deal, on either side of the book. Shows the DEAL price and its gap to the
  *  local quote — the buyer's actual position — plus when it lands or how long ago
  *  it was struck. */
@@ -168,6 +283,48 @@ const SORTS: [Sort, string][] = [
   ["odd", "unusual"], ["spread", "spread"], ["traded", "traded"], ["name", "name"],
 ];
 
+/** The five seller classes of `SUPPLY_*`, in payload order. */
+const SUPPLY_LABEL = ["city", "houses", "guilds", "local", "foreign"] as const;
+const SUPPLY_TINT = ["#8aa0c0", "#c9a04a", "#7fa0c0", "#8fbf8f", "#c07a5a"];
+
+/** Estate kind → the word a reader knows it by (1 farm … 6 manufactory). */
+const ESTATE_WORD = ["works", "farm", "mine", "plantation", "fishery", "vineyard", "manufactory"];
+
+/** One partner city on either side of the quay, with the cargo that moved. */
+type Quay = {
+  city: string;
+  lines: ShipmentRow[];
+  units: number;
+  value: number;
+  /** Soonest ETA among in-flight cargoes, or null when everything here has landed. */
+  eta: number | null;
+  sea: boolean;
+  /** Distinct in-flight CARGOES on this lane. Deliberately not called vessels — one
+   *  shipment consumes one fleet slot whatever its size, so a cargo count is the only
+   *  honest figure until vessels are real. */
+  inflight: number;
+};
+
+/** Group one side's shipments by the partner city, busiest first. */
+function quaysOf(rows: ShipmentRow[], focus: string | null): Quay[] {
+  const m = new Map<string, Quay>();
+  for (const r of rows) {
+    if (focus && r.good !== focus) continue;
+    const q = m.get(r.other) ?? { city: r.other, lines: [], units: 0, value: 0, eta: null, sea: false, inflight: 0 };
+    q.lines.push(r);
+    q.units += r.amount;
+    q.value += r.value;
+    q.sea = q.sea || r.sea;
+    if (r.eta_days && r.eta_days > 0) {
+      q.inflight += 1;
+      q.eta = q.eta === null ? r.eta_days : Math.min(q.eta, r.eta_days);
+    }
+    m.set(r.other, q);
+  }
+  for (const q of m.values()) q.lines.sort((a, b) => b.value - a.value);
+  return [...m.values()].sort((a, b) => b.value - a.value);
+}
+
 export function CityMarketView({ detail, compact, onFocusGood }: {
   detail: HubDetail;
   compact?: boolean;
@@ -182,11 +339,35 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
   const [sort, setSort] = useState<Sort>("odd");
   const [open, setOpen] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null); // filter deals to one good
+  const [group, setGroup] = useState<"city" | "good">("city");
+  const [openQuay, setOpenQuay] = useState<string | null>(null);
 
   const buys = useMemo(
     () => [...(detail.arrivals ?? []), ...(detail.recent_arrivals ?? [])], [detail]);
   const sells = useMemo(
     () => [...(detail.departures ?? []), ...(detail.recent_departures ?? [])], [detail]);
+  const inQuays = useMemo(() => quaysOf(buys, focus), [buys, focus]);
+  const outQuays = useMemo(() => quaysOf(sells, focus), [sells, focus]);
+  // MADE HERE · the city's own fields plus every estate and manufactory in its
+  // hinterland. `estates_here` are separate hubs parented to this one, so a good's
+  // `production` on the city itself and its estates' output are different figures
+  // and are shown as different lines.
+  const madeHere = useMemo(() => {
+    const own = detail.goods
+      .filter((g) => g.production > 0.01)
+      .sort((a, b) => b.production - a.production)
+      .map((g) => ({ good: g.name, output: g.production, source: "city fields", grade: g.grade ?? "" }));
+    const est = (detail.estates_here ?? [])
+      .filter((e) => e.output > 0.01)
+      .sort((a, b) => b.output - a.output)
+      .map((e) => ({
+        good: e.good,
+        output: e.output,
+        source: e.name || ESTATE_WORD[Math.min(e.kind, 6)] || "works",
+        grade: "",
+      }));
+    return [...own, ...est].slice(0, 14);
+  }, [detail]);
 
   const rows = useMemo<BookRow[]>(() => {
     const out: BookRow[] = [];
@@ -238,6 +419,15 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
           net {sold - bought >= 0 ? "+" : ""}{fmt(sold - bought)}
         </span>
         <span style={{ flex: 1 }} />
+        {(["city", "good"] as const).map((gmode) => (
+          <span key={gmode} onClick={() => setGroup(gmode)} style={{
+            cursor: "pointer", fontSize: 9, padding: "1px 6px", borderRadius: 3,
+            background: group === gmode ? "#21344a" : "transparent",
+            color: group === gmode ? "#cfe2f6" : C.inkDim,
+            border: `1px solid ${group === gmode ? "#3a80c0" : "transparent"}`,
+          }}>{gmode === "city" ? "by city" : "by good"}</span>
+        ))}
+        <span style={{ width: 6 }} />
         {SORTS.map(([id, lbl]) => (
           <span key={id} onClick={() => setSort(id)} style={{
             cursor: "pointer", fontSize: 9, padding: "1px 6px", borderRadius: 3,
@@ -253,6 +443,89 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
         </div>
       )}
 
+      {/* ── VARIANT C · THE QUAY: partner cities left and right, the market between ── */}
+      {group === "city" && (
+        <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "flex-start" }}>
+          <QuayColumn quays={inQuays} side="in" openCity={openQuay} setOpenCity={setOpenQuay}
+            icon={icon} label={label} focus={focus} labelOf={label} />
+
+          <div style={{ flex: 1.35, minWidth: 0, padding: "0 8px",
+            borderLeft: `1px solid ${C.line}`, borderRight: `1px solid ${C.line}` }}>
+            {/* MADE HERE — the city's own fields, then every estate and manufactory */}
+            <div style={{ color: C.head, fontSize: 9, fontWeight: 700, textAlign: "center" }}>── MADE HERE ──</div>
+            {madeHere.length === 0 && <div style={{ color: C.faint, fontSize: 9 }}>produces nothing of note</div>}
+            {madeHere.map((m, i) => (
+              <div key={i} style={{ display: "flex", gap: 4, fontSize: 9, alignItems: "baseline" }}>
+                <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {icon(m.good)} {label(m.good)}
+                </span>
+                <span style={{ color: C.inkMid }}>{fmt(m.output)}</span>
+                <span style={{ color: C.faint, fontSize: 8, maxWidth: 92, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.source}</span>
+              </div>
+            ))}
+
+            {/* ON THE MARKET — what is on offer, how long it lasts, and who supplied it */}
+            <div style={{ color: C.head, fontSize: 9, fontWeight: 700, textAlign: "center", marginTop: 6 }}>
+              ── ON THE MARKET ──
+            </div>
+            <div style={{ display: "flex", gap: 4, fontSize: 8, color: C.faint }}>
+              <span style={{ flex: 1 }}>good</span>
+              <span style={{ width: 26, textAlign: "right" }}>held</span>
+              <span style={{ width: 38, textAlign: "right" }}>price</span>
+              <span style={{ width: 72 }}>supplied by</span>
+            </div>
+            {rows.length === 0 && <div style={{ color: C.faint, fontSize: 9 }}>no market here yet</div>}
+            {rows.map((r) => {
+              const isOpen = open === r.g.name;
+              return (
+                <div key={r.g.good}>
+                  <div
+                    onClick={() => {
+                      const next = isOpen ? null : r.g.name;
+                      setOpen(next); setFocus(next); onFocusGood?.(next);
+                    }}
+                    style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 9,
+                      padding: "1px 2px", cursor: "pointer", borderRadius: 3,
+                      borderBottom: `1px solid ${C.lineSoft}`,
+                      background: isOpen ? "#16263a" : "transparent" }}
+                    title="Click for this good's book — who supplied it, where it went, and its price history"
+                  >
+                    <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <span style={{ color: C.faint, fontSize: 8 }}>{isOpen ? "▾ " : "▸ "}</span>
+                      {icon(r.g.name)} {label(r.g.name)}
+                    </span>
+                    <span style={{ width: 26, textAlign: "right", color: r.days < 5 ? C.warn : C.inkMid }}>
+                      {r.g.need > 1e-6 ? `${Math.round(r.days)}d` : "—"}
+                    </span>
+                    <span style={{ width: 38, textAlign: "right", fontWeight: 600, color: priceColor(r.xw) }}>
+                      {r.xw.toFixed(2)}×
+                    </span>
+                    <span style={{ width: 72 }}><SupplyBar shares={r.g.supply_shares} /></span>
+                  </div>
+                  {r.verdict && !isOpen && (
+                    <div style={{ fontSize: 8, color: r.verdict.tone, paddingLeft: 14 }}>{r.verdict.text}</div>
+                  )}
+                  {isOpen && <BookDetail r={r} buys={buys} sells={sells} icon={icon} label={label} />}
+                </div>
+              );
+            })}
+          </div>
+
+          <QuayColumn quays={outQuays} side="out" openCity={openQuay} setOpenCity={setOpenQuay}
+            icon={icon} label={label} focus={focus} labelOf={label} />
+        </div>
+      )}
+      {group === "city" && (
+        <div style={{ fontSize: 8, color: C.faint, marginTop: 4 }}>
+          Prices are ×-world-standard, and a cargo's own price is what the deal was struck at.
+          Lane counts are CARGOES, not vessels — a shipment takes one fleet slot whatever its
+          size, so vessels in port cannot be shown until they are real.
+        </div>
+      )}
+
+
+      {group === "good" && (<>
       {/* ── THE BOOK ────────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", fontSize: 8, color: C.faint, padding: "4px 2px 2px" }}>
         <span style={{ flex: "0 0 108px" }}>good</span>
@@ -335,6 +608,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
         Prices are ×-world-standard. “bought @ / sold @” aggregate the deals shown —
         in-flight plus recently completed — at the price each was actually struck at.
       </div>
+      </>)}
     </>
   );
 }

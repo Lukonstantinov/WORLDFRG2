@@ -1207,16 +1207,33 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   sections that used to sit apart (arrivals/market/
                                   departures, the standalone price grid, Exports/Imports
                                   + the chain ladder) collapsed into one book
-  CityMarketView.tsx            ← THE CITY MARKET 2.0 (see `docs/TRADE_AND_MARKET_
-                                  REVIEW.md` Part 3). Keeps the buy/sell arrivals ⇢
-                                  market ⇢ departures basis and rebuilds the centre as a
-                                  MERCHANT'S BOOK: bought at / sold at / the SPREAD
-                                  between them / days of need held / a price trend from
-                                  the PERSISTED `TradeHist.prices` series. Rows sort by
-                                  what is UNUSUAL here (|price − world_avg| × need), not
-                                  by production order. SHARED between HubPanel's Trade
-                                  tab and MarketsPanel, the same way ProvinceMiniMap is
-                                  shared between the two province views
+  CityMarketView.tsx            ← THE CITY MARKET — VARIANT C, "the quay" (see
+                                  `docs/TRADE_AND_MARKET_REVIEW.md` Part 3 and
+                                  `MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
+                                  organising unit is the PARTNER CITY: arrivals group
+                                  under the city they came from, departures under the
+                                  city they go to, cargo nested and collapsible — the
+                                  way a port book is actually kept, and the only
+                                  variant where a city you hold an OFFICE in can read
+                                  differently from one you touched once. Between them:
+                                  MADE HERE (the city's own fields, then every estate
+                                  and manufactory by name) over ON THE MARKET (good ·
+                                  days of need held · price · WHO SUPPLIED IT, from
+                                  `supply_accum`'s five seller classes — state the sim
+                                  has kept since 4.4 that only the warehouse panel
+                                  ever read). A row expands to the good's own book:
+                                  bought-from / sold-to by city, the world's cheapest
+                                  and dearest market by NAME, and the PERSISTED
+                                  `TradeHist.prices` trend. The "by good" chip keeps
+                                  the previous 2.0 book (bought at / sold at / the
+                                  SPREAD / unusual-first sorting) — nothing was removed
+                                  to make room. **No in-port / ready-to-sail strips**:
+                                  a vessel is not a thing yet (three counters on
+                                  `House`, no identity or location), so lanes report
+                                  CARGOES, never vessels. SHARED between HubPanel's
+                                  Trade tab and MarketsPanel, the same way
+                                  ProvinceMiniMap is shared between the two province
+                                  views
   MarketsPanel.tsx              ← The floating ⚖ Markets window: the same
                                   `CityMarketView` behind its OWN city picker
                                   (`campaign_market_cities` — a live list, so towns

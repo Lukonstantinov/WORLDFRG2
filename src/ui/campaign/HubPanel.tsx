@@ -321,7 +321,9 @@ export function HubPanel() {
   ];
 
   return (
-    <div data-draggable style={{ ...panel, ...rootStyle, width: tab === "trade" ? 600 : 360, transition: "width 160ms ease" }} onPointerDown={onPointerDown}>
+    <div data-draggable style={{ ...panel, ...rootStyle, // The Trade tab renders CityMarketView's three-column quay (partner cities either
+      // side of the market); 600px squeezed them to the point the city names elided.
+      width: tab === "trade" ? 780 : 360, transition: "width 160ms ease" }} onPointerDown={onPointerDown}>
       {/* ── Title + stats header (always visible; drag handle) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>

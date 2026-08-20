@@ -286,6 +286,10 @@ export interface HubGoodDetail {
   price_hist?: number[];
   /** Matching yearly traded volume — same years, same length. */
   vol_hist?: number[];
+  /** Who SUPPLIED this good here recently, shares summing to 1 (all zero = nothing
+   *  arrived): [city, house, guild, local, foreign]. Seller side only — there is no
+   *  buyer attribution, see docs/TRADE_AND_MARKET_REVIEW.md. */
+  supply_shares?: [number, number, number, number, number];
 }
 /** One good's world-wide quality + trade picture (the floating Goods window). */
 export interface GoodMarketRow {

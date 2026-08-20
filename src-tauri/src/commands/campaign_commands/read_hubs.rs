@@ -116,6 +116,13 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 } else { String::new() },
                 price_hist: price_hist[g].to_vec(),
                 vol_hist: vol_hist[g].to_vec(),
+                supply_shares: {
+                    let sbase = g * crate::sim::tick::SUPPLY_CLASSES;
+                    let raw: [f32; 5] = std::array::from_fn(|c|
+                        hub.supply_accum.get(sbase + c).copied().unwrap_or(0.0).max(0.0));
+                    let total: f32 = raw.iter().sum();
+                    if total > 1e-3 { raw.map(|v| v / total) } else { [0.0; 5] }
+                },
             }
         })
         .collect();

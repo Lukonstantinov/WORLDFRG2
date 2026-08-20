@@ -76,7 +76,7 @@ export function MarketsPanel() {
   const current = cities.find((c) => c.id === hubId);
 
   return (
-    <Panel onPointerDown={onPointerDown} width={720} maxHeight="82vh"
+    <Panel onPointerDown={onPointerDown} width={800} maxHeight="82vh"
       style={{ top: 74, left: 320, zIndex: 41, ...rootStyle }}>
       <PanelHeader icon="⚖" title="Markets — the buy/sell book" onDragStart={onPointerDown} onClose={close} />
       {!active && <EmptyNote>Begin the campaign (Step 11) — a market needs merchants.</EmptyNote>}
