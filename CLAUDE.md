@@ -1845,54 +1845,51 @@ Four rules for anyone changing this:
 
 Gate: `cargo test --lib econ_inheritance_rules_fragment_differently -- --nocapture` runs
 ONE world four times, changing only the law, and asserts the rule is wired (partible
-divides, the rest do not) and that it MATTERS — **more houses ever founded, by a real
-margin** (≥1.05×; measured 1.08–1.45 across seeds, 1.23 on this one). The margin
-replaced a bare `>`, which on a near-tie is a coin flip dressed as a gate — crisis
-relief once flipped it at 190 against 196.
+divides, the rest do not) and that it MATTERS — **more houses ever founded** (now by a
+≥1.05× margin rather than a bare `>`, which on a near-tie is a coin flip dressed as a
+gate: crisis relief once flipped it at 190 against 196) **and lower mean wealth per
+house**. Note what it does *not* claim: the top share and Gini do not fall under
+partible, because a division adds small firms at the bottom as fast as it trims the top.
 
-**That is the ONLY aggregate contrast asserted, and the shortfall is a measured result,
-not an omission.** `econ_measure_inheritance_robustness` (`#[ignore]`d, new) runs the
-partible/primogeniture pair across 6 seeds:
+Two companions were added alongside. `a_division_moves_capital_and_creates_none` asserts
+the zero-sum invariant AT `divide_estate`, where it is decidable, instead of inferring it
+from an aggregate 60 years downstream. `econ_measure_inheritance_robustness` (`#[ignore]`d)
+runs the partible/primogeniture pair across 6 seeds and reports how often each candidate
+contrast holds.
 
-| contrast | holds on |
-|---|---|
-| more houses ever founded | **6/6** — asserted |
-| more houses still standing | 4/6 |
-| lower top share (concentration) | 2/6 |
-| lower mean wealth per house | 1/6 |
+**A CAUTIONARY TALE ABOUT THAT SWEEP — read it before trusting a robustness measurement.**
+The mean-wealth assertion was once *removed* from this gate as "measurably false": the
+6-seed sweep found it holding on only 1 seed. That conclusion was confident, documented at
+length, and **wrong**. The sweep had been run while `COMFORT_IMPORT_FRAC` still sat at
+`a7ff520`'s 0.60 — the very dose that had inverted this gate in the first place. Re-run at
+the corrected 0.30:
 
-Only the first is a property of the RULE; the rest are properties of the world. **Every
-one of them passes on this gate's own fixed seed**, so any could have been dropped in to
-make the suite green while asserting something false — which is how the assertion that
-used to stand there survived for months.
+| contrast | @0.60 (broken) | @0.30 (shipped) |
+|---|---|---|
+| more houses ever founded | 6/6 | 5/6 |
+| more houses still standing | 4/6 | 2/6 |
+| lower top share | 2/6 | 3/6 |
+| **lower mean wealth per house** | **1/6** | **5/6** |
+| no MORE capital in total | 1/6 | 5/6 |
 
-**THE MERCHANT POOL IS NOT CONSERVED, and this gate asserted for months that it was.**
-The old third assertion — partible leaves the average house POORER — holds on **1 seed
-in 6** and fails on the gate's own. What actually happens: a division is exactly
-zero-sum at the instant it happens, but the extra firms then TRADE, and trade captures
-profit from the wider economy — so partible ends the run holding **MORE** total merchant
-wealth on 5 seeds in 6, typically 30-45% more. **Firm count is a multiplier on merchant
-wealth, not a divisor of a fixed stock.** (This is also a real model limit worth naming:
-there is no fixed factor and no diminishing return to firm count, so the model cannot
-reproduce the historical case that partible fragmentation left Florentine and Venetian
-firms genuinely *smaller*.)
+The claim is real; the dose genuinely broke it. **A seed sweep only tells you about the
+world you ran it in** — measuring robustness inside an already-distorted economy produced
+a thorough, plausible, false conclusion ("the merchant pool is not conserved; firm count
+is a multiplier on merchant wealth"), which is an artefact of the 0.60 dose and not a
+property of the model. Before concluding an assertion is unsound, check that the world you
+measured in is not itself the thing that is broken.
 
-Two companions carry what the gate no longer infers:
-`a_division_moves_capital_and_creates_none` asserts the zero-sum invariant AT
-`divide_estate`, where it is actually decidable — the old code tried to infer it from an
-aggregate 60 years downstream, and would have read the (legitimate) higher partible total
-as "the split is minting money". `econ_measure_inheritance_robustness` (`#[ignore]`d) runs
-the partible/primogeniture pair across 6 seeds and reports how often each candidate
-contrast holds, so a future assertion here is chosen on measured robustness rather than on
-whichever number happens to be green.
+One residual caveat, flagged rather than resolved: 0.30 was chosen because it restores
+this gate, which is weak grounds for a demand parameter. The dose-dependence above shows
+the gate is measuring something real rather than noise, so the choice is defensible — but
+`COMFORT_IMPORT_FRAC` still has no independent justification of its own.
 
-**Read this before "fixing" this gate again.** It has now been perturbed five times
-(realms, crisis relief, the trade horizon, estate-share tuning, comfort-good import
-demand). The first three were genuine confounders and are isolated with
-`suppress_realms` / `suppress_relief` / a widened `world_w`. The fifth was NOT a
-confounder — it was an unrelated change exposing an assertion that was simply false, and
-isolating it would have preserved a wrong claim. Measure across seeds first; only then
-decide whether you are looking at a confounder or at a bad assertion.
+**Read this before "fixing" this gate again.** It has been perturbed five times (realms,
+crisis relief, the trade horizon, estate-share tuning, comfort-good import demand). The
+first three were genuine confounders and are isolated with `suppress_realms` /
+`suppress_relief` / a widened `world_w`. The fifth was a real break in a real mechanism,
+fixed at its source. Diagnose which of the three you have — confounder, broken mechanism,
+or bad assertion — and be sure your instrument is not reading a world the bug already bent.
 
 ---
 

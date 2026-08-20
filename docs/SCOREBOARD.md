@@ -9,7 +9,67 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-20c — CORRECTION: 20b was wrong, and the way it was wrong is the finding
+
+**The 20b entry below is left standing because it is a textbook error, not because it is
+right.** It concluded that `econ_inheritance_rules_fragment_differently`'s mean-wealth
+assertion was "measurably false" — 1 seed in 6 — and removed it, with several pages of
+supporting reasoning about the merchant pool not being conserved.
+
+The sweep behind that conclusion was run while `COMFORT_IMPORT_FRAC` was still at
+`a7ff520`'s 0.60: **the very dose that had inverted the gate in the first place.** A
+concurrent session had already bisected to that commit and corrected the dose to 0.30.
+Re-running the identical 6-seed sweep at 0.30:
+
+| contrast | @0.60 (broken) | @0.30 (shipped) |
+|---|---|---|
+| more houses ever founded | 6/6 | 5/6 |
+| more houses still standing | 4/6 | 2/6 |
+| lower top share | 2/6 | 3/6 |
+| **lower mean wealth per house** | **1/6** | **5/6** |
+| no MORE capital in total | 1/6 | 5/6 |
+
+The disputed assertion goes from 1/6 to 5/6. It is real, the dose genuinely broke it, and
+the other session's diagnosis was correct. The assertion is **restored**.
+
+**The lesson, which is worth more than the assertion.** A seed sweep is an instrument, and
+an instrument reads the world it is pointed at. Measuring "robustness" inside an economy
+that a known bug had already bent produced a conclusion that was confident, quantified,
+documented at length, and false — including a crisp, memorable, wrong slogan ("firm count
+is a multiplier on merchant wealth, not a divisor of a fixed stock") that was purely an
+artefact of the 0.60 dose. Quantification is not the same as validity. **Before concluding
+an assertion is unsound, establish that the world you measured in is not itself broken** —
+and prefer fixing a bisected mechanism over deleting a claim it contradicts.
+
+Also corrected: 20b's margin comment cited a "measured 1.08–1.45" cross-seed range for the
+houses-ever ratio. That range was likewise from the 0.60 world; at the shipped dose the
+contrast holds 5/6 and seed 1337 inverts it outright (180 v 193), so the ≥1.05 floor is
+calibrated to this gate's own seed with headroom, not to a cross-seed minimum. Said plainly
+in the code rather than left to imply a robustness it does not have.
+
+Kept from 20b, both still useful and both independent of the error:
+`a_division_moves_capital_and_creates_none` (the zero-sum invariant asserted at
+`divide_estate`, where it is decidable — worth having regardless, since at 0.60 the
+partible world held 44% more total wealth while the split remained exactly zero-sum, so a
+downstream inference would have reported a minting bug that did not exist), and
+`econ_measure_inheritance_robustness` itself, which is the instrument that settled the
+disagreement and now carries the dose-comparison table.
+
+One residual caveat, flagged not resolved: 0.30 was chosen because it restores this gate,
+which is thin grounds for a demand parameter. The dose-dependence above shows the gate is
+reading something real rather than noise, so the choice is defensible — but
+`COMFORT_IMPORT_FRAC` still has no independent justification.
+
+Rust tests: **342 pass, 0 fail** (28 ignored).
+
+---
+
 ## 2026-08-20b — The merchant pool is not conserved (a gate that was asserting a false claim)
+
+> **SUPERSEDED — see 2026-08-20c above. The central conclusion of this entry is WRONG.**
+> The 6-seed sweep it rests on was run at the broken `COMFORT_IMPORT_FRAC` = 0.60; at the
+> corrected 0.30 the "false" assertion holds 5/6 and has been restored. Left in place
+> unedited as the honest record of a well-documented mistake.
 
 The 2026-08-20 entry below recorded `econ_inheritance_rules_fragment_differently`
 failing after `a7ff520` and left it for a later session as "pre-existing and
@@ -1933,7 +1993,8 @@ subsystem is one you cannot have an opinion about.
 
 | Date | Commit | Earth main | Earth exact | Rust tests | FE tests | Note |
 |---|---|---|---|---|---|---|
-| 2026-08-20b | *this* | 70.2% | 39.0% | **342 pass, 0 fail** (28 ignored) | 0 | `econ_inheritance_rules_fragment_differently` fixed — and the fix is a finding, not a repair. Measured across 6 seeds (`econ_measure_inheritance_robustness`, new): the failing assertion (partible leaves the average house poorer) holds **1/6**; houses-still-standing 4/6; concentration 2/6 — and all three pass on the gate's own seed, so any could have been swapped in to go green while asserting something false. Only houses-ever is structural (6/6), so the assertion is **not replaced**, just strengthened to require a real margin (≥1.05×; a bare `>` is what let crisis relief flip it at 190v196). **The merchant pool is not conserved**: `divide_estate` is exactly zero-sum (now asserted at the mechanism by `a_division_moves_capital_and_creates_none`), but the extra firms trade, so partible ends **richer** in total 5/6 (~30-45%). Firm count is a multiplier on merchant wealth, not a divisor of a fixed stock. Assertion 4's false "more total wealth ⇒ minting money" inference deleted |
+| 2026-08-20c | *this* | 70.2% | 39.0% | **342 pass, 0 fail** (28 ignored) | 0 | **CORRECTION of 20b, which was wrong.** 20b's 6-seed sweep ran at the broken `COMFORT_IMPORT_FRAC`=0.60 — the dose that inverted the gate — and concluded the mean-wealth assertion was "measurably false" (1/6). At the corrected 0.30 it holds **5/6**; the assertion is restored and the concurrent session's bisect-and-fix-the-dose diagnosis was right. **The lesson is the deliverable: a seed sweep only reads the world you point it at**, and measuring robustness inside an already-bent economy produced a confident, quantified, false conclusion. Kept from 20b: `a_division_moves_capital_and_creates_none` (zero-sum asserted at the mechanism) and `econ_measure_inheritance_robustness` (now carrying the dose-comparison table). Margin comment also corrected — its "1.08–1.45 across seeds" was likewise a 0.60 artefact |
+| 2026-08-20b | *this* | 70.2% | 39.0% | 342 pass, 0 fail (28 ignored) | 0 | **SUPERSEDED by 20c — central conclusion WRONG, left unedited as the record of the mistake.** `econ_inheritance_rules_fragment_differently` "fixed" — and the fix is a finding, not a repair. Measured across 6 seeds (`econ_measure_inheritance_robustness`, new): the failing assertion (partible leaves the average house poorer) holds **1/6**; houses-still-standing 4/6; concentration 2/6 — and all three pass on the gate's own seed, so any could have been swapped in to go green while asserting something false. Only houses-ever is structural (6/6), so the assertion is **not replaced**, just strengthened to require a real margin (≥1.05×; a bare `>` is what let crisis relief flip it at 190v196). **The merchant pool is not conserved**: `divide_estate` is exactly zero-sum (now asserted at the mechanism by `a_division_moves_capital_and_creates_none`), but the extra firms trade, so partible ends **richer** in total 5/6 (~30-45%). Firm count is a multiplier on merchant wealth, not a divisor of a fixed stock. Assertion 4's false "more total wealth ⇒ minting money" inference deleted |
 | 2026-08-20 | *this* | — | — | **341 pass, 0 fail** (26 ignored) | 0 | **main was RED and had been for four commits.** `econ_inheritance_rules_fragment_differently` was failing its SUBSTANTIVE assertion — partible left the average house RICHER than primogeniture (193,720 vs 164,858), the opposite of what dividing an estate must do. Bisected to `a7ff520` ("Demand: comfort goods also draw foreign-import craving"), which raised the foreign-craving gain to tier-1 goods at 0.60 of the luxury rate; its parent `96ef1e2` is green with byte-identical numbers to the pre-change baseline. It then survived `2153af3` (Terrain 2.0) and `345c807` (wine fix) because **each of those was verified against a different SUBSET** — "cargo check + tsc + realm suite", "dynamics test passes" — and none ran `econ_`. That is the failure mode §2.5 and rule 16 exist to prevent, and it is the finding here, more than the constant. The response is dose-dependent (the `envoys.rs` shape, not 4.7's discrete branching flip), so the fix is the dose and not the mechanism: `COMFORT_IMPORT_FRAC` 0.60 → **0.30**. Comfort goods still draw real foreign craving at half strength; the gate returns with a WIDE margin (149,925 vs 174,496 mean wealth, 194 vs 176 houses ever) rather than a thin one, deliberately, because this gate has now flipped inside its own noise band five times. Scorecard on the repaired main: gradient −0.052, basket −0.064, grain spatial CV 2.471, Zipf −0.625 (from −0.485, toward its band), Gini 0.717 (in band), top-10% 0.588 (from 0.512, approaching band), real wage 162.5. Those reflect everything on main since the last row, not this tuning alone — not isolated per-commit.  This is the fix for the "1 pre-existing unrelated fail" the row below correctly observed and left in place. |
 | 2026-08-20 | *this* | 70.2% | 39.0% | 339 pass, **1 pre-existing unrelated fail** (27 ignored) | 0 | Seven elevation styles (Layer Colouring, Alpine, Arid, Polar, Analytical, Antique Plate, Abyssal), data-driven off one shared `render_elevation_styled`; palettes served via `get_render_palettes` (§8.18); `relief_at`/`sea_shade` parameterised, default rendering bit-identical. The one failing test (`econ_inheritance_rules_fragment_differently`) is confirmed pre-existing on `origin/main` via an isolated worktree check, unrelated to this change |
 | 2026-08-19e | *this* | **70.2%** | 39.0% | **340 pass, 0 fail** (26 ignored) | 0 | Slice 4 redone as a level-set (signed distance-to-boundary + noise, re-thresholded at zero) after a maintainer screenshot showed the 08-19d fix still reading as an unmodified Voronoi polygon despite its own 62.5% number. `coast_on_boundary` now 6-7% (was 90-100% pre-slice-4); real peninsulas/bays/islands, not speckle. Also fixed the divergent-boundary rift pulldown, a second straight-line artefact (read at an unwarped cell position, unrelated to the D4 orogeny-belt warp) the maintainer separately flagged as visible "plate line ridges" |
