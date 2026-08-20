@@ -399,6 +399,19 @@ pub struct HubGoodDetail {
     /// The matching yearly traded VOLUME series (`TradeHist.vols`), same length and
     /// same years, so a price move can be read against the trade that caused it.
     #[serde(default)] pub vol_hist: Vec<f32>,
+    /// WHO SUPPLIED this good here recently, as shares summing to 1 (or all zero when
+    /// nothing has arrived): `[city, house, guild, local, foreign]` — the five seller
+    /// classes of `SUPPLY_*`, read from the hub's decaying `supply_accum`.
+    ///
+    /// The sim has tracked this since `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` 4.4 and
+    /// only the City Warehouse panel ever read it. The market view's "supplied by"
+    /// column is the same figure — no new state, no new pass.
+    ///
+    /// Note this is the SELLER side. There is no matching buyer attribution: arriving
+    /// cargo lands in one undifferentiated pool that `council_provision_pass`,
+    /// `sync_and_stock_warehouses` and daily consumption all draw from, so "who bought
+    /// this cargo" would need new state — see `docs/TRADE_AND_MARKET_REVIEW.md`.
+    #[serde(default)] pub supply_shares: [f32; 5],
 }
 
 /// One live city in the Markets window's picker.
