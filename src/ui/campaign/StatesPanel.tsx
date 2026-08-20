@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useWorldStore } from "@state/worldStore";
-import { computeStates, campaignProvinceLandAll, campaignGetRealmFamily } from "@bridge";
-import type { StateRegion, ProvinceLand, PersonBrief } from "@types";
+import { computeStates, campaignProvinceLandAll, campaignGetRealmFamily, campaignRealmWatch } from "@bridge";
+import type { StateRegion, ProvinceLand, PersonBrief, RealmWatch } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Card, StatGrid, Stat, Badge, Chip, EmptyNote, FootNote } from "@ui/kit";
@@ -98,11 +98,13 @@ export function StatesPanel() {
   const [sort, setSort] = useState<Sort>("territory");
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [families, setFamilies] = useState<Record<number, PersonBrief[]>>({});
+  const [watch, setWatch] = useState<RealmWatch | null>(null);
 
   useEffect(() => {
     if (!open || !active) return;
     computeStates().then(setStates).catch(() => setStates([]));
     campaignProvinceLandAll().then(setLand).catch(() => setLand([]));
+    campaignRealmWatch().then(setWatch).catch(() => setWatch(null));
     setFamilies({}); // the year turned — every realm's family may have changed
   }, [open, active, Math.floor(tick / 365)]);
 
@@ -160,14 +162,49 @@ export function StatesPanel() {
       <PanelBody style={{ flex: 1 }}>
         {!active && <EmptyNote>Begin the campaign — realms can be proclaimed from year 50, either by a house that GOVERNS a province's seat city (as its captor or council) or by one that COMMANDS ≥20% of a whole province's trade.</EmptyNote>}
         {active && rows.length === 0 && (
-          <EmptyNote>
-            No realm has been proclaimed yet — none can be before year 50. There are two paths. A GOVERNING house — the
-            captor or council of a province's seat city — that is at least tier 2 and can spend the world-scaled founding
-            cost (a great sum, ~35% of the top stratum's fortune). Or a TRADE house that commands ≥20% of a whole
-            province's commerce: it crowns itself over that province from the province's own largest city, paying a cost
-            scaled to its own fortune — no tier or seat office required. Either way it usually crowns itself within a few
-            years of clearing the bar. Open a province's Trade tab to see who commands its trade.
-          </EmptyNote>
+          <>
+            <EmptyNote>
+              No realm has been proclaimed yet — none can be before year 50. There are two paths. A GOVERNING house — the
+              captor or council of a province's seat city — that is at least tier 2 and can spend the world-scaled founding
+              cost (a great sum, ~35% of the top stratum's fortune). Or a TRADE house that commands ≥20% of a whole
+              province's commerce: it crowns itself over that province from the province's own largest city, paying a cost
+              scaled to its own fortune — no tier or seat office required.
+            </EmptyNote>
+            {watch && (
+              <Card style={{ marginTop: SPACE.sm }}>
+                <div style={{ color: T.parchment, fontWeight: 700, fontSize: FZ.small, marginBottom: 4 }}>
+                  Why no realm yet?
+                </div>
+                <div style={{ color: watch.eligible_count > 0 ? T.gold : T.inkMid, fontSize: FZ.tiny, marginBottom: watch.entries.length ? SPACE.sm : 0 }}>
+                  {watch.summary}
+                </div>
+                {watch.entries.length > 0 && (
+                  <>
+                    <div style={{ color: T.inkDim, fontSize: FZ.micro, marginBottom: 3 }}>
+                      Closest free provinces (strongest private house):
+                    </div>
+                    {watch.entries.map((e) => (
+                      <div key={e.province_id} style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "2px 0" }}>
+                        <span style={{ width: 7, height: 7, borderRadius: 2, flex: "0 0 auto",
+                          background: e.eligible ? T.gold : T.lineSoft, marginTop: 2 }} />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div style={{ color: T.inkMid, fontSize: FZ.tiny, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            <span onClick={() => focusProvince(e.province_id)} style={{ color: T.accent, cursor: "pointer" }}>
+                              {provinceName.get(e.province_id) ?? `Province ${e.province_id}`}
+                            </span>
+                            {" — "}{e.house_name} {(e.share * 100).toFixed(0)}%
+                          </div>
+                          {!e.eligible && <div style={{ color: T.inkFaint, fontSize: FZ.micro }}>{e.reason}</div>}
+                        </div>
+                        {e.eligible && <Badge tone="gold">eligible</Badge>}
+                      </div>
+                    ))}
+                  </>
+                )}
+                <FootNote>Open a province's Trade tab to see who commands its trade. A crown is proclaimed on day 0 of a year.</FootNote>
+              </Card>
+            )}
+          </>
         )}
         {active && rows.length > 0 && (
           <>

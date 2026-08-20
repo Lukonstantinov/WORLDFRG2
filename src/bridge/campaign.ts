@@ -413,6 +413,14 @@ export async function campaignProvinceTrade(id: number): Promise<import("@types"
   return invoke("campaign_province_trade", { id });
 }
 
+/** REALM WATCH · the live "why has no realm formed yet?" diagnostic. Scans every
+ *  free province the same way the yearly proclamation pass does and reports which
+ *  house is closest to a crown, whether it clears the 20% bar, and the top-line
+ *  reason none has proclaimed. Empty/degraded with no campaign or no province layer. */
+export async function campaignRealmWatch(): Promise<import("@types").RealmWatch> {
+  return invoke("campaign_realm_watch");
+}
+
 /** #9 · The full goods PICTURE for a province: every good the land COULD yield (with
  *  belt richness) whether or not it is worked today, plus the individual ore workings
  *  and their grade/depth — so a province producing nothing still shows its potential

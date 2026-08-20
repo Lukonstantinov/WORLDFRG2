@@ -123,6 +123,7 @@ pub fn run() {
             campaign_commands::campaign_province_potential,
             campaign_commands::compute_states,
             campaign_commands::campaign_get_realm_family,
+            campaign_commands::campaign_realm_watch,
             // House Dossier: the stability gauges and the feud board.
             campaign_commands::campaign_house_stability,
             campaign_commands::campaign_get_feuds,

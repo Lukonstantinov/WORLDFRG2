@@ -1023,3 +1023,125 @@ pub fn campaign_get_realm_family(realm_id: u32, db: State<'_, WorldDb>) -> Resul
     }).collect();
     Ok(out)
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  REALM WATCH — the "why has no realm formed yet?" diagnostic, live.
+//
+//  The realm mechanism is deterministic (`maybe_proclaim_trade_realms`): a PRIVATE
+//  (non-guild) house commanding ≥ `PROV_TRADE_CONTROL_FRAC` of a FREE province's
+//  trade crowns itself at the next YEAR turn, no dice. When a player sees "eligible"
+//  on a province but no realm appears, the answer is almost always timing (the pass
+//  runs on day 0 of a year, not mid-year) or that the guilds — not any one house —
+//  command the trade. This turns that from a mystery into a stated fact, by scanning
+//  every free province the same way the proclamation pass does. Read-only.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/// One free province's realm-eligibility reading — the strongest PRIVATE house
+/// commanding its trade, whether it clears the bar, and if not, why.
+#[derive(Serialize, Clone)]
+pub struct RealmWatchEntry {
+    pub province_id: u32,
+    /// House index of the strongest non-guild trader here, or −1 if none.
+    pub house: i32,
+    pub house_name: String,
+    /// That house's share (0..1) of the province's total organized trade.
+    pub share: f32,
+    pub seat_hub: i32,
+    pub seat_name: String,
+    /// True when this province WOULD crown at the next year turn.
+    pub eligible: bool,
+    /// "" when eligible; otherwise the exact reason it cannot crown yet.
+    pub reason: String,
+}
+
+/// The whole realm-watch payload. `realms_exist=false, entries=[]` on a world with
+/// no province layer or no campaign, exactly as every other query here degrades.
+#[derive(Serialize, Clone)]
+pub struct RealmWatch {
+    pub realms_exist: bool,
+    pub year: u32,
+    pub year_floor: u32,
+    pub control_threshold: f32,
+    pub eligible_count: usize,
+    /// The strongest free provinces first (capped), for the panel to list.
+    pub entries: Vec<RealmWatchEntry>,
+    /// A single top-line sentence stating the situation in plain words.
+    pub summary: String,
+}
+
+/// Live realm diagnostic — mirrors `maybe_proclaim_trade_realms`' own eligibility
+/// test over every free province, so the Realms panel can say WHY none has formed.
+#[tauri::command]
+pub fn campaign_realm_watch(db: State<'_, WorldDb>) -> Result<RealmWatch, String> {
+    let frac = crate::sim::tick::PROV_TRADE_CONTROL_FRAC;
+    let floor = crate::sim::tick::REALM_YEAR_FLOOR;
+    let mut out = RealmWatch {
+        realms_exist: false, year: 0, year_floor: floor, control_threshold: frac,
+        eligible_count: 0, entries: vec![], summary: String::new(),
+    };
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => { out.summary = "No campaign is running.".into(); return Ok(out); }
+    };
+    out.year = sim.tick / crate::sim::tick::TICKS_PER_YEAR;
+    out.realms_exist = !sim.realms.is_empty();
+    let np = sim.prov_count();
+    if np == 0 || sim.hub_province.is_empty() {
+        out.summary = "This world has no province layer — sovereignty is claimed over \
+            provinces, so no realm can ever form here (regenerate provinces before starting \
+            a campaign).".into();
+        return Ok(out);
+    }
+    for p in 0..np {
+        if sim.prov_realm.get(p).copied().unwrap_or(-1) >= 0 { continue; } // already sovereign
+        // The strongest PRIVATE (non-guild) merchant house in this province — the exact
+        // candidate `maybe_proclaim_trade_realms` would crown.
+        let mut best: Option<(usize, f32)> = None;
+        for (hi, share) in sim.province_trade_shares(p) {
+            if hi >= sim.houses.len() { continue; }
+            if !sim.houses[hi].is_merchant() || sim.houses[hi].is_guild { continue; }
+            if best.map(|b| share > b.1).unwrap_or(true) { best = Some((hi, share)); }
+        }
+        let Some((hi, share)) = best else { continue }; // only guilds trade here — skip
+        let seat = sim.province_seat_hub(p).map(|h| h as i32).unwrap_or(-1);
+        let seat_name = if seat >= 0 { sim.hubs[seat as usize].name.clone() } else { String::new() };
+        let clears = share >= frac;
+        let seat_free = seat >= 0 && sim.hubs[seat as usize].realm < 0;
+        let (eligible, reason) = if !clears {
+            (false, format!("holds only {:.0}% of the trade (needs {:.0}%)",
+                share * 100.0, frac * 100.0))
+        } else if seat < 0 {
+            (false, "commands the trade but the province has no live seat city".to_string())
+        } else if !seat_free {
+            (false, "the seat city already belongs to a crown".to_string())
+        } else {
+            (true, String::new())
+        };
+        out.entries.push(RealmWatchEntry {
+            province_id: p as u32, house: hi as i32,
+            house_name: sim.houses[hi].name.clone(), share, seat_hub: seat, seat_name,
+            eligible, reason,
+        });
+    }
+    out.entries.sort_by(|a, b| b.share.partial_cmp(&a.share).unwrap_or(std::cmp::Ordering::Equal));
+    out.eligible_count = out.entries.iter().filter(|e| e.eligible).count();
+    out.entries.truncate(10);
+    out.summary = if out.realms_exist {
+        format!("{} realm(s) already stand.", sim.realms.len())
+    } else if out.year < floor {
+        format!("No realm can form before year {} — it is year {}.", floor, out.year)
+    } else if out.eligible_count > 0 {
+        format!("{} province(s) have a house eligible to crown (≥{:.0}% of provincial trade). \
+            A realm is proclaimed on the DAY 0 of a year, not mid-year — advance to the next \
+            year turn and it will appear.", out.eligible_count, frac * 100.0)
+    } else if out.entries.is_empty() {
+        "No private house commands any free province's trade yet — only guilds do, and a guild \
+            is a civic office, not a dynasty. A crown waits on a private house.".to_string()
+    } else {
+        format!("No house yet commands {:.0}% of any free province's trade. The strongest is \
+            {} at {:.0}% — a crown waits on a trade monopoly.",
+            frac * 100.0, out.entries[0].house_name, out.entries[0].share * 100.0)
+    };
+    Ok(out)
+}

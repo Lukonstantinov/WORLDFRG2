@@ -2481,6 +2481,34 @@ export interface ProvinceTrade {
   control_threshold: number;
 }
 
+/** One free province's realm-eligibility reading (see RealmWatch). */
+export interface RealmWatchEntry {
+  province_id: number;
+  /** Strongest non-guild trader here, or −1 if none. */
+  house: number;
+  house_name: string;
+  /** Its share (0..1) of the province's total organized trade. */
+  share: number;
+  seat_hub: number;
+  seat_name: string;
+  /** True when this province WOULD crown at the next year turn. */
+  eligible: boolean;
+  /** "" when eligible; otherwise the exact reason it cannot crown yet. */
+  reason: string;
+}
+
+/** The live "why has no realm formed yet?" diagnostic — mirrors the yearly
+ *  proclamation pass's own eligibility test over every free province. */
+export interface RealmWatch {
+  realms_exist: boolean;
+  year: number;
+  year_floor: number;
+  control_threshold: number;
+  eligible_count: number;
+  entries: RealmWatchEntry[];
+  summary: string;
+}
+
 /** #9 · One good a province COULD yield (opportunity view), with richness. */
 export interface ProvinceGoodPotential {
   good: number;
