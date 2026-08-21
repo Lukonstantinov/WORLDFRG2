@@ -434,6 +434,58 @@
         assert_eq!(s.prov_realm, vec![id as i32], "sovereignty is recorded on the province");
     }
 
+    /// REGRESSION (the "72 realms, panel shows none" bug): a realm proclaimed while
+    /// `prov_realm` is UNSIZED (the real-campaign state — `seed_province_land` used to
+    /// omit it and `ensure_province_land` early-returned before sizing it) recorded no
+    /// sovereignty, since the coronation's `p < prov_realm.len()` guard is a no-op on an
+    /// empty vec. `compute_states` then drew none of them. `ensure_province_land` must
+    /// size `prov_realm` even when the core land layer already exists, and reconcile a
+    /// landless realm's territory back from its own `provinces` list.
+    #[test]
+    fn ensure_province_land_recovers_a_realm_left_landless_by_an_unsized_prov_realm() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.found_house_at(0);
+        s.houses[0].wealth = 100_000.0;
+        s.hub_province = vec![0];
+        s.prov_culture = vec!["Aiora".into()];
+        // The CORE land layer is fully sized, exactly as `seed_province_land` leaves a
+        // real campaign — but the SOVEREIGNTY array (and the other newer per-province
+        // arrays it forgot) is left EMPTY. That is the bug's exact precondition.
+        s.prov_rural = vec![100.0];
+        s.prov_cap = vec![100.0];
+        s.prov_forest = vec![0.3];
+        s.prov_arable = vec![0.2];
+        s.prov_pasture = vec![0.1];
+        s.prov_irrigated = vec![0.0];
+        s.prov_soil = vec![0.6];
+        s.prov_tenure = vec![[0.18, 0.10, 0.09, 0.63]];
+        s.prov_tax = vec![0.12];
+        s.prov_arrears = vec![0.0];
+        s.prov_unrest = vec![0.0];
+        s.prov_surplus = vec![0.0];
+        s.prov_revenue = vec![0.0];
+        s.prov_holder = vec![0];
+        s.prov_history = vec![Vec::new()];
+        s.prov_realm = vec![];        // the omitted array — the bug
+        s.prov_holder_house = vec![]; // likewise never sized
+
+        let id = s.promote_house_to_realm(0, 0, 60);
+        // The realm formed and lists its province, but recorded NO sovereignty (the bug).
+        assert_eq!(s.realms.len(), 1);
+        assert_eq!(s.realms[0].provinces, vec![0], "the realm knows its own territory");
+        assert!(s.prov_realm.is_empty(), "…but prov_realm was never sized, so it's landless here");
+
+        // The land pass's sizing step must now fix it — without re-running the core loop
+        // (prov_forest is already sized), so this exercises the top backfill + reconcile.
+        s.ensure_province_land(1);
+        assert_eq!(s.prov_realm, vec![id as i32],
+            "ensure_province_land sizes prov_realm and reconciles the realm's territory");
+        assert_eq!(s.prov_holder_house.len(), 1, "the other newer arrays are backfilled too");
+        assert_eq!(s.prov_holder, vec![0], "the core layer is untouched (its loop did not re-run)");
+    }
+
     /// 4.10 (D12) · coronation converts every estate the crowned house owned
     /// into crown title: a plain wholly-owned estate gets a full-fraction
     /// realm Share row and loses its private owner; a pre-existing minority

@@ -789,7 +789,41 @@ impl CampaignSim {
     /// Called from the land pass rather than only at campaign start, so a province
     /// layer joined mid-campaign (or a save written before this existed) fills in.
     pub(crate) fn ensure_province_land(&mut self, np: usize) {
-        if self.prov_forest.len() >= np && self.prov_history.len() >= np { return; }
+        if np == 0 { return; }
+        // ── Backfill the per-province arrays ADDED AFTER the core land layer, ALWAYS
+        // (before the early-return below). These are newer fields, or ones a start-time
+        // seeder never sized. `prov_realm` in particular is NOT sized by
+        // `seed_province_land`, and this backfill USED to sit AFTER an early-return that
+        // fired whenever `prov_forest`/`prov_history` were already sized — which they
+        // always are in a real campaign — so `prov_realm` stayed empty forever. Every
+        // coronation's `if p < prov_realm.len()` guard then silently did nothing: realms
+        // formed but recorded NO sovereignty here, and `compute_states` drew none of
+        // them (the "72 realms, panel shows none" bug). ──
+        if self.prov_history.len() < np { self.prov_history.resize(np, Vec::new()); }
+        if self.prov_events.len() < np { self.prov_events.resize(np, Vec::new()); }
+        if self.prov_holder_house.len() < np { self.prov_holder_house.resize(np, -1); }
+        // Sovereignty (rule 25/27). −1 = free land, the default every province starts in.
+        if self.prov_realm.len() < np {
+            self.prov_realm.resize(np, -1);
+            // A realm proclaimed BEFORE `prov_realm` was sized set its sovereignty
+            // behind a `p < len()==0` no-op, so its territory lives only in the realm's
+            // own `provinces` list. Rebuild the authoritative map from there so an
+            // existing save's landless realms recover their ground (earliest realm wins
+            // a contested province — the coronation's double-claim guard, which reads
+            // this same field, also never ran while it was empty).
+            let claims: Vec<(usize, i32)> = self.realms.iter()
+                .filter(|r| r.fallen_tick == 0)
+                .flat_map(|r| { let id = r.id as i32; r.provinces.iter().map(move |&p| (p as usize, id)) })
+                .collect();
+            for (p, id) in claims {
+                if let Some(slot) = self.prov_realm.get_mut(p) { if *slot < 0 { *slot = id; } }
+            }
+        }
+        let ng = self.goods.len();
+        if self.prov_good_belt.len() < np * ng { self.prov_good_belt.resize(np * ng, 0.0); }
+        if self.prov_good_depletion.len() < np * ng { self.prov_good_depletion.resize(np * ng, 0.0); }
+        // ── The CORE land layer is only (re)seeded where a province genuinely has none. ──
+        if self.prov_forest.len() >= np { return; }
         // Initial land use from what the world half already knows: fertile, wet, low
         // country starts largely wooded with a modest clearing around the seat; arid or
         // upland country starts open. `prov_cap` is the land's food potential, which is
@@ -823,25 +857,13 @@ impl CampaignSim {
             self.prov_surplus.push(0.0);
             self.prov_revenue.push(0.0);
             self.prov_holder.push(-1);
-            self.prov_holder_house.push(-1);
+            // NOTE: prov_holder_house is NOT pushed here — the top-of-function backfill
+            // already sized it to `np`. Pushing it in this loop too would DOUBLE it on a
+            // fresh/old-save layer (where this loop runs after the backfill already ran).
         }
-        // The remaining vectors are plain per-province containers. `prov_holder_house`
-        // is included here too — an old save whose OTHER province vectors already
-        // reached `np` (so the loop above never ran) still needs it backfilled, since
-        // it's a field newer than the rest of the land layer.
-        if self.prov_history.len() < np { self.prov_history.resize(np, Vec::new()); }
-        if self.prov_events.len() < np { self.prov_events.resize(np, Vec::new()); }
-        if self.prov_holder_house.len() < np { self.prov_holder_house.resize(np, -1); }
-        // Sovereignty (rule 25). −1 = free land, which is the default every province
-        // starts and most provinces end in — a realm only ever claims what it takes.
-        if self.prov_realm.len() < np { self.prov_realm.resize(np, -1); }
-        // §2.5 · flat `np * ng` arrays. A province that arrives via this fallback
-        // path (no `Province.good_belt` in hand — only `campaign_start_sim`'s own
-        // seeding has that) simply gets zero belt score everywhere, which the
-        // exploitation query already treats as "nothing known to grow here".
-        let ng = self.goods.len();
-        if self.prov_good_belt.len() < np * ng { self.prov_good_belt.resize(np * ng, 0.0); }
-        if self.prov_good_depletion.len() < np * ng { self.prov_good_depletion.resize(np * ng, 0.0); }
+        // (The newer per-province arrays — history/events/holder_house/realm/good_belt/
+        // good_depletion — are backfilled at the TOP of this function now, so they are
+        // sized even when the core land layer already was; see the note there.)
     }
 
     /// The hub that administers province `p`: its largest live member city. Returns

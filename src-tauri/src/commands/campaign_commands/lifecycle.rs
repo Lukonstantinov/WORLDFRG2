@@ -1178,6 +1178,11 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     sim.prov_revenue = vec![0.0; n];
     sim.prov_holder = vec![-1; n];
     sim.prov_holder_house = vec![-1; n];
+    // Sovereignty (rule 25/27) — −1 = free land. Sized HERE from the start so a realm
+    // proclaimed in the very first realm-era year records its territory (a coronation's
+    // `prov_realm[p] = id` is guarded by `p < len()`). `ensure_province_land` also
+    // backfills+reconciles it, but seeding it here keeps it correct before the first tick.
+    sim.prov_realm = vec![-1; n];
     sim.prov_history = vec![Vec::new(); n];
     sim.prov_events = vec![Vec::new(); n];
 }
