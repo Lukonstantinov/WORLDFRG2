@@ -883,6 +883,90 @@ impl CampaignSim {
     }
 
 
+    /// Does this settlement's majority — or a real (≥3%) minority — carry the Artisan
+    /// trait? Renowned crafters draw the manufacturing trade (#1 bias / #3 teeth).
+    pub(crate) fn hub_has_artisan(&self, h: usize) -> bool {
+        const ARTISAN: usize = 12;
+        let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+        if !maj.is_empty() && self.culture_trait_ids(&maj).contains(&ARTISAN) { return true; }
+        if let Some(mins) = self.hub_minorities.get(h) {
+            for (c, s) in mins {
+                if *s > 0.03 && self.culture_trait_ids(c).contains(&ARTISAN) { return true; }
+            }
+        }
+        false
+    }
+
+    /// The natural owner of a new civic workshop: the city's own CRAFT GUILD (an
+    /// `is_guild` house seated here) if one exists — the guild of masters literally
+    /// running the trade — else the strongest merchant house present, else none.
+    pub(crate) fn guild_or_strong_owner_at(&self, h: usize) -> i32 {
+        if let Some(i) = self.houses.iter().position(|hh| !hh.defunct && hh.is_guild && hh.hub as usize == h) {
+            return i as i32;
+        }
+        self.strongest_house_at(h).map(|i| i as i32).unwrap_or(-1)
+    }
+
+    /// #1 · ARTISAN-GUILD WORKSHOPS. A manufactory forms where TRADE has delivered the
+    /// raws and the finished good is under-supplied — the cloth town beside the wool
+    /// road, the glassworks on the sand coast. Unlike `maybe_house_invests` (a rich
+    /// house's luxury whim), this is founded on the CITY's own supply+demand: the good
+    /// is already made diffusely here (`production > 0`, i.e. its inputs arrive), and
+    /// it is dear. So workshops are many and cluster at entrepôts. Owned by the local
+    /// craft guild, else the strongest house; Artisan peoples raise the odds. Reuses
+    /// `create_estate` (kind 6) and the reserved-slot cap. The demand gate self-limits:
+    /// a workshop only opens where the good is scarce, so its new supply can't glut.
+    pub(crate) fn maybe_found_guild_workshop(&mut self) {
+        if self.estate_count() >= MAX_TOTAL_ESTATES.saturating_sub(OUTPOST_RESERVED_ESTATES) { return; }
+        let n = self.hubs.len();
+        let ng = self.goods.len();
+        let mut best = (usize::MAX, usize::MAX, 0.0f32);
+        for h in 0..n {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.abandoned || hub.population < WORKSHOP_MIN_POP { continue; }
+            let artisan = self.hub_has_artisan(h);
+            for g in 0..ng {
+                if self.goods[g].inputs.is_empty() { continue; } // manufactured goods only
+                if self.hubs[h].production.get(g).copied().unwrap_or(0.0) < WORKSHOP_MIN_PROD { continue; }
+                // One workshop per (city, good) — don't stack. An estate's good is the
+                // single non-zero index of its per-capita output (no `good` field).
+                if self.hubs.iter().any(|e| e.is_estate && e.estate_kind == 6
+                    && e.parent == h as i32
+                    && e.base_per_capita.get(g).copied().unwrap_or(0.0) > 0.0) { continue; }
+                let demand = self.demand_pressure_at(h, g);
+                if demand < WORKSHOP_MIN_DEMAND { continue; }
+                let mut score = demand * self.goods[g].base_value.max(1.0);
+                if artisan { score *= WORKSHOP_ARTISAN_BONUS; }
+                if score > best.2 { best = (h, g, score); }
+            }
+        }
+        let (h, g, _) = best;
+        if h == usize::MAX { return; }
+        let owner = self.guild_or_strong_owner_at(h);
+        // Charge a modest founding cost to the owning house/guild (skip if city-owned).
+        if owner >= 0 {
+            if self.houses[owner as usize].wealth < WORKSHOP_FOUND_COST { return; }
+            self.houses[owner as usize].wealth -= WORKSHOP_FOUND_COST;
+        }
+        let est_pop = self.hubs[h].founding_pop * 0.12;
+        let off = hash01(self.seed, self.tick as u64 ^ 0x9412, h as u64);
+        let ex = self.hubs[h].x + (off - 0.5) * self.world_w * 0.02;
+        let ey = self.hubs[h].y
+            + (hash01(self.seed, h as u64, self.tick as u64 ^ 0x55) - 0.5) * self.world_w * 0.02;
+        let (koppen, coastal, component) =
+            (self.hubs[h].koppen, self.hubs[h].coastal, self.hubs[h].component);
+        self.create_estate(h as i32, ex, ey, g, 6, owner, koppen, coastal, component,
+            est_pop, MANUFACTORY_PERCAP);
+        let (city, gn) = (self.hubs[h].name.clone(), self.goods[g].name.clone());
+        let who = if owner >= 0 && self.houses[owner as usize].is_guild {
+            format!("The {} guild of {}", gn, city)
+        } else { format!("A workshop in {}", city) };
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "estate".into(), hub: h as i32, good: g as i32, value: 6.0,
+            text: format!("{} opens a manufactory ({})", who, gn),
+        });
+    }
+
     /// HOUSE colony — a wealthy house plants a remote, low-population TRADE OUTPOST
     /// on a poorer, trade-prone (coastal) frontier site within reach of its home or
     /// an office (the office is the relay "ground"). Reuses the estate machinery but
@@ -2503,6 +2587,9 @@ impl CampaignSim {
             self.poleis_sponsor_migration();
             if ENABLE_CADET_BRANCHES { self.maybe_branch_houses(); } // disabled (user rule)
             self.maybe_house_invests();
+            // #1 · a civic craft guild opens a workshop where the trade already delivers
+            // the raws and the finished good is dear (one founding per month, capped).
+            self.maybe_found_guild_workshop();
             // DLC 3.5 · resale market: distressed houses / thin-treasury poleis sell
             // holdings; solvent houses & banks buy them.
             self.estate_resale_pass();

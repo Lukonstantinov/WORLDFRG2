@@ -1299,7 +1299,17 @@ impl CampaignSim {
             let largest_min = self.hub_minorities.get(h)
                 .map(|m| m.iter().fold(0.0f32, |a, (_, s)| a.max(*s))).unwrap_or(0.0);
             let stress = (lackb + starv + (1.0 - mood) * 0.5).clamp(0.0, 1.0);
-            let minority_unrest = MINORITY_UNREST * largest_min.clamp(0.0, 1.0) * stress;
+            // #3 · the majority's disposition scales minority friction: a Xenophobic or
+            // Insular people suppresses/chafes (more unrest), an Assimilative one absorbs.
+            let maj_disp = {
+                let maj = self.hub_culture.get(h).cloned().unwrap_or_default();
+                let t = self.culture_trait_ids(&maj);
+                if t.contains(&13) { XENO_MINORITY_UNREST }
+                else if t.contains(&2) { INSULAR_MINORITY_UNREST }
+                else if t.contains(&7) { ASSIM_MINORITY_UNREST }
+                else { 1.0 }
+            };
+            let minority_unrest = MINORITY_UNREST * largest_min.clamp(0.0, 1.0) * stress * maj_disp;
             // Cultures 2.0 · unmet cultural cravings stoke unrest (pop-weighted): a city
             // that never supplies its peoples the goods they prize grows restive.
             let cult_discontent = self.cultural_discontent(h);

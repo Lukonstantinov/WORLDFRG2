@@ -495,6 +495,12 @@ const HOMOPHILY_PULL: f32 = 0.15;
 /// target at full (one-culture-minority) blend — modest, feeds the existing clamped
 /// unrest/revolt system so a big disaffected quarter can stir trouble over years.
 const MINORITY_UNREST: f32 = 0.06;
+// #3 · a majority's disposition toward its minorities scales the friction they cause:
+// a Xenophobic or Insular people suppresses/chafes against outsiders (more unrest per
+// minority), an Assimilative melting-pot people absorbs them (less). 1.0 = neutral.
+const XENO_MINORITY_UNREST: f32 = 1.6;
+const INSULAR_MINORITY_UNREST: f32 = 1.3;
+const ASSIM_MINORITY_UNREST: f32 = 0.6;
 /// Cultures 2.0 · ethnic-APPEARANCE affinity: minorities of the same appearance group
 /// (climate/dress) as the majority assimilate this much faster even across language
 /// families — "people who look alike blend a little more easily". Small, bounded.
@@ -702,6 +708,24 @@ const ESTATE_BIG_CITY_POP: f32 = 150_000.0;    // pop at which the 4th/5th slot 
 const ESTATE_HIGH_SLOT_COST_MULT: f32 = 6.0;   // steep cost premium for the 4th/5th slot
 /// Per-capita output rate of a house-built manufactory's luxury good.
 const MANUFACTORY_PERCAP: f32 = 0.2;
+// ── #1 · ARTISAN-GUILD WORKSHOPS ──────────────────────────────────────────────
+// A manufactory founded on the city's own supply+demand (the diffuse city
+// manufacturing already proves the raws arrive), not on a rich house's whim — so
+// workshops are MANY and cluster at trade hubs. The demand gate is the guardrail:
+// one only opens where the finished good is scarce, so its added supply self-limits.
+/// A town needs at least this population to host a founded workshop.
+const WORKSHOP_MIN_POP: f32 = 6_000.0;
+/// The city must already make at least this much of the good (diffuse manufacturing),
+/// which is proof its raw inputs are actually arriving/held.
+const WORKSHOP_MIN_PROD: f32 = 0.02;
+/// …and the good must be at least this dear vs its base value (under-supplied) to be
+/// worth concentrating into a workshop. This is the self-limiting guardrail.
+const WORKSHOP_MIN_DEMAND: f32 = 1.08;
+/// An Artisan-trait people (majority or a real minority) raises a city's workshop
+/// odds — renowned crafters draw the trade (#3's artisan-minority teeth).
+const WORKSHOP_ARTISAN_BONUS: f32 = 1.6;
+/// Founding cost charged to the owning guild/house (modest — a workshop, not a fleet).
+const WORKSHOP_FOUND_COST: f32 = 900.0;
 /// Derived manufacturing demand: per unit of a city's labour capacity, how much
 /// raw INPUT stock it wants buffered so its workshops can keep producing. This is
 /// what pulls wool/iron/sugar into the weaving/forge/refining cities so the

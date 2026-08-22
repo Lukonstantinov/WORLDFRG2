@@ -78,6 +78,25 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
   const conditionColor = card.condition > 0.7 ? T.good : card.condition > 0.35 ? T.warn : T.bad;
   const conditionWord = card.damage <= 0.01 ? "sound" : card.damage < 0.4 ? "worn" : card.damage < 0.75 ? "damaged" : "ruined";
 
+  // ── #2 · production Sankey (manufactories only): raw INPUTS → workshop → OUTPUT,
+  // bar widths carrying TONNAGE (qty × output). Margin = output value vs input cost;
+  // waste = mass that doesn't leave as product. All derived from the recipe + output
+  // + prices already on the card, so it's live once a workshop actually trades. ──
+  const baseVal = (id: string) => specs.find((s) => s.id === id || s.name === id)?.base_value ?? 1;
+  const out = card.monthly_output;
+  const outPrice = prices.length ? prices[prices.length - 1] : baseVal(card.good_name);
+  const inFlows = recipe.map((r) => {
+    const m = goodMeta(r.good);
+    const ton = r.qty * out;
+    return { name: m.name, icon: m.icon, color: m.color, ton, cost: ton * baseVal(r.good) };
+  });
+  const inCost = inFlows.reduce((s, f) => s + f.cost, 0);
+  const marginPct = inCost > 1e-6 ? Math.round(((out * outPrice - inCost) / inCost) * 100) : null;
+  const totalInTon = inFlows.reduce((s, f) => s + f.ton, 0);
+  const lossPct = totalInTon > out ? Math.round(((totalInTon - out) / totalInTon) * 100) : 0;
+  const maxTon = Math.max(out, ...inFlows.map((f) => f.ton), 1e-6);
+  const outMeta = goodMeta(card.good_name);
+
   return (
     <div style={{ border: `1px solid ${T.line}`, borderRadius: RADIUS.md, padding: 8, background: T.raised, marginTop: 4 }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -87,15 +106,6 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
           <div style={{ color: T.inkDim, fontSize: FZ.small }}>
             {card.kind_label.toLowerCase()} · tier {card.tier} · {card.good_name}
           </div>
-          {recipe.length > 0 && (
-            <div style={{ color: T.inkMid, fontSize: FZ.small, marginTop: 1 }}
-              title="A manufactory: it works these raw inputs into its good">
-              ⚒ from {recipe.map((r) => {
-                const im = goodMeta(r.good);
-                return `${im.icon} ${im.name}${r.qty !== 1 ? ` ×${r.qty}` : ""}`;
-              }).join(" + ")}
-            </div>
-          )}
           {card.brand && (
             <div style={{ color: T.parchment, fontSize: FZ.small, fontStyle: "italic", marginTop: 1 }}
               title="A toponymic brand — this works' name for its good, carried with the cargo and known in distant markets">
@@ -104,6 +114,37 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
           )}
         </div>
       </div>
+
+      {inFlows.length > 0 && (
+        <div style={{ marginTop: 6, padding: "6px 4px", background: T.card, borderRadius: RADIUS.sm, border: `1px solid ${T.line}` }}
+          title="Production flow — raw inputs worked into the finished good; bar length is monthly tonnage">
+          {inFlows.map((f, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
+              <span style={{ width: 74, fontSize: FZ.small, color: T.inkMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.icon} {f.name}</span>
+              <div style={{ flex: 1, height: 8, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ width: `${Math.max(4, (f.ton / maxTon) * 100)}%`, height: "100%", background: f.color, opacity: 0.85 }} />
+              </div>
+              <span style={{ width: 40, textAlign: "right", fontSize: FZ.small, color: T.inkDim }}>{fmt(f.ton)}</span>
+            </div>
+          ))}
+          <div style={{ textAlign: "center", fontSize: FZ.small, color: T.inkFaint, margin: "1px 0" }}>⚒ works into ▼</div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ width: 74, fontSize: FZ.small, color: T.gold, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{outMeta.icon} {outMeta.name}</span>
+            <div style={{ flex: 1, height: 8, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+              <div style={{ width: `${Math.max(4, (out / maxTon) * 100)}%`, height: "100%", background: T.gold }} />
+            </div>
+            <span style={{ width: 40, textAlign: "right", fontSize: FZ.small, color: T.gold }}>{fmt(out)}/mo</span>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: FZ.small }}>
+            {marginPct !== null && (
+              <span style={{ color: marginPct >= 0 ? T.goodInk : T.badInk }} title="output value vs input cost">
+                margin {marginPct >= 0 ? "+" : ""}{marginPct}%
+              </span>
+            )}
+            {lossPct > 0 && <span style={{ color: T.inkFaint }} title="mass that does not leave as product">waste {lossPct}%</span>}
+          </div>
+        </div>
+      )}
 
       <div style={{ marginTop: 4, fontSize: FZ.small, color: T.inkMid }}>
         ⭐ {card.rank}{card.rank === 1 ? "st" : card.rank === 2 ? "nd" : card.rank === 3 ? "rd" : "th"} of {card.rank_of} ·
