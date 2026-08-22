@@ -11,7 +11,7 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "silk", label: "Silk", emoji: "\u{1F41B}", color: "#d97fb0" },
   { name: "wine", label: "Wine", emoji: "\u{1F377}", color: "#9b2d4f" },
   { name: "oliveoil", label: "Olive Oil", emoji: "\u{1FAD2}", color: "#8ea33a" },
-  { name: "sugar", label: "Sugar Cane", emoji: "\u{1F36C}", color: "#e8d8a0" },
+  { name: "sugar", label: "Sugar Cane", emoji: "\u{1F38B}", color: "#c8d69a" },
   { name: "frankincense", label: "Frankincense", emoji: "\u{1FA94}", color: "#c79a4b" },
   { name: "stockfish", label: "Stockfish & Salt-cod", emoji: "\u{1F41F}", color: "#6fb0c8" },
   { name: "spices", label: "Spices", emoji: "\u{1F336}\u{FE0F}", color: "#d2622a" },

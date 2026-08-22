@@ -1583,6 +1583,24 @@ const MAX_TOTAL_ESTATES: usize = 220;
 /// `colonizable` sites — `maybe_found_house_outpost` shares the exact same global
 /// check and was starved forever, not merely rarely.
 const OUTPOST_RESERVED_ESTATES: usize = 20;
+/// A trade outpost used to work only a good its FOUNDER already produced, so a good
+/// no house had ever learned to make — a fine wine/cotton/sugar belt sitting outside
+/// every existing city's catchment, the exact "ABSENT" case the goods codex flags —
+/// stayed unexploited forever, because the one path that could reach it copied the
+/// founder's own output. An outpost may now be founded specifically to OPEN such a
+/// trade: if its site's province is at least this suitable (`prov_good_belt`) for a
+/// non-food good the WORLD barely produces, the outpost works THAT good instead.
+const OUTPOST_EXPLOIT_BELT_MIN: f32 = 0.30;
+/// A good counts as "unexploited" (worth opening with an outpost, above) while the
+/// total per-capita output summed across every live hub stays under this — i.e. no
+/// city has a real industry in it yet. Deliberately small so a good with even one
+/// modest producer is left to the ordinary estate path.
+const OUTPOST_EXPLOIT_PROD_MAX: f32 = 0.05;
+/// Weight of the unexploited-belt pull in site scoring — how strongly an outpost is
+/// drawn toward a province that could open a valuable new trade, relative to a site's
+/// ordinary trade value. Big enough to redirect a founder toward wine/cotton/sugar
+/// country, small enough not to overrule a genuinely rich, already-worked coast.
+const OUTPOST_EXPLOIT_SITE_BONUS: f32 = 0.8;
 
 pub const SHIP_COST: f32 = 7.0;
 const RIVER_COST: f32 = 4.5;

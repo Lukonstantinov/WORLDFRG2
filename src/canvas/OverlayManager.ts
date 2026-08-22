@@ -83,24 +83,23 @@ function riverShade(major: boolean | undefined): string {
   return major ? "rgb(34,96,165)" : "rgb(120,190,225)";
 }
 
-/** Stroke a cell path as a smooth Catmull-Rom spline (converted to cubic Béziers)
- *  so rivers read as natural meanders instead of the 8-neighbour grid staircase.
- *  Falls back to straight segments for 2-point paths. Points are cell coords;
- *  +0.5 centres the line in the cell. */
-function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][]) {
-  const n = pts.length;
+/** Stroke a contiguous run pts[a..b) as a smooth Catmull-Rom spline (converted to
+ *  cubic Béziers). Points are cell coords; +0.5 centres the line in the cell. */
+function strokeSmoothRun(ctx: CanvasRenderingContext2D, pts: [number, number][], a: number, b: number) {
+  const n = b - a;
+  if (n < 2) return;
   ctx.beginPath();
-  ctx.moveTo(pts[0][0] + 0.5, pts[0][1] + 0.5);
+  ctx.moveTo(pts[a][0] + 0.5, pts[a][1] + 0.5);
   if (n === 2) {
-    ctx.lineTo(pts[1][0] + 0.5, pts[1][1] + 0.5);
+    ctx.lineTo(pts[a + 1][0] + 0.5, pts[a + 1][1] + 0.5);
     ctx.stroke();
     return;
   }
-  for (let i = 0; i < n - 1; i++) {
-    const p0 = pts[i === 0 ? 0 : i - 1];
+  for (let i = a; i < b - 1; i++) {
+    const p0 = pts[i === a ? a : i - 1];
     const p1 = pts[i];
     const p2 = pts[i + 1];
-    const p3 = pts[i + 2 < n ? i + 2 : n - 1];
+    const p3 = pts[i + 2 < b ? i + 2 : b - 1];
     // Catmull-Rom → cubic Bézier control points (tension 1/6).
     const c1x = p1[0] + (p2[0] - p0[0]) / 6;
     const c1y = p1[1] + (p2[1] - p0[1]) / 6;
@@ -109,6 +108,26 @@ function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][]
     ctx.bezierCurveTo(c1x + 0.5, c1y + 0.5, c2x + 0.5, c2y + 0.5, p2[0] + 0.5, p2[1] + 0.5);
   }
   ctx.stroke();
+}
+/** Stroke a cell path as a smooth Catmull-Rom spline so rivers read as natural
+ *  meanders instead of the 8-neighbour grid staircase. A river whose path crosses
+ *  the x-wrap SEAM comes back rewrapped into [0,w), so two consecutive points jump
+ *  ~worldW apart at the same y — drawn naively that spans a straight horizontal line
+ *  clear across the map (and the open ocean between two coasts). `maxGap` splits the
+ *  path at any such jump so each side draws only up to the seam. */
+function strokeSmoothPath(ctx: CanvasRenderingContext2D, pts: [number, number][], maxGap = Infinity) {
+  const n = pts.length;
+  if (n < 2) return;
+  let start = 0;
+  for (let i = 1; i <= n; i++) {
+    const brk = i === n
+      || Math.abs(pts[i][0] - pts[i - 1][0]) > maxGap
+      || Math.abs(pts[i][1] - pts[i - 1][1]) > maxGap;
+    if (brk) {
+      strokeSmoothRun(ctx, pts, start, i);
+      start = i;
+    }
+  }
 }
 /** Displace a cell path with gentle, deterministic MEANDERS so rivers read as
  *  natural winding channels rather than the straight diagonal grid-lines the
@@ -2155,6 +2174,9 @@ export class OverlayManager {
       // stream is thin and pale, a great trunk river wide and deep blue. Width is
       // zoom-compensated so even small streams stay visible.
       const inv = 1 / Math.sqrt(this.currentScale);
+      // Break river paths at a wrap-seam / teleport jump (a rewrapped seam crossing
+      // is ~worldW apart; a real river step is ≈1 cell) so none draws across the map.
+      const seamGap = this.worldW > 0 ? Math.min(this.worldW / 2, 64) : 64;
       ctx.lineJoin = "round";
       ctx.lineCap = "round";
       // Hydrology selection: when a river system is picked, its subtree glows and
@@ -2180,14 +2202,29 @@ export class OverlayManager {
           ctx.globalAlpha = (hasHL ? (isHL ? 0.6 : 0.14) : 0.5);
           ctx.lineWidth = Math.max(0.6, riverW * 0.55);
           for (const strand of river.braids) {
-            if (strand.length >= 2) strokeSmoothPath(ctx, strand);
+            if (strand.length >= 2) strokeSmoothPath(ctx, strand, seamGap);
           }
           ctx.restore();
         }
         // Meander + Catmull-Rom smoothing so the drainage lines read as natural
         // winding channels rather than the straight diagonal grid-lines the
         // steepest-descent flow produces on flats.
-        strokeSmoothPath(ctx, this.riverPath(river, i, ord));
+        const mainPath = this.riverPath(river, i, ord);
+        strokeSmoothPath(ctx, mainPath, seamGap);
+        // MOUTH WIDENING: a river reaching the sea flares toward its outlet like a
+        // real estuary. Draw the lower reach as nested, progressively wider (and
+        // shorter, so closer to the mouth) sub-strokes — round caps blend them into a
+        // smooth funnel. Trunks only, so creeks don't grow a blob at the coast.
+        if (river.mouth_kind && (ord >= 3 || river.major) && mainPath.length >= 6) {
+          const m = mainPath.length;
+          for (const [f, mult] of [[0.78, 1.6], [0.89, 2.4], [0.96, 3.4]] as const) {
+            const a = Math.floor(m * f);
+            if (m - a < 2) continue;
+            ctx.lineWidth = riverW * mult;
+            strokeSmoothPath(ctx, mainPath.slice(a), seamGap);
+          }
+          ctx.lineWidth = riverW;
+        }
         // Delta: braided distributary fan + marsh stipple over the shallow shelf.
         if (river.mouth_kind === 1 && river.delta && river.delta.length > 0) {
           const [mx, my] = river.points[river.points.length - 1];
@@ -2218,7 +2255,7 @@ export class OverlayManager {
           ctx.shadowColor = col;
           const ord = river.order ?? (river.major ? 4 : 1);
           ctx.lineWidth = Math.max(1.1, Math.min(3.4, 1.2 + Math.min(ord, 6) * 0.34) * inv);
-          strokeSmoothPath(ctx, this.riverPath(river, i, ord));
+          strokeSmoothPath(ctx, this.riverPath(river, i, ord), seamGap);
         });
         ctx.restore();
       }

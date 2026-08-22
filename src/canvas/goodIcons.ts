@@ -538,7 +538,7 @@ const candle: Sym = (ctx, x, y, s, ink, accent) => {
 const SYMBOLS: Record<string, Sym> = {
   silk: spool, cotton: bale, wool_fleece: bale, wool_llama: bale, flax: sheaf,
   wine: grapes, oliveoil: amphora, ceramics: pot, glassware: goblet,
-  sugar: crystals, salt: crystals, bay_salt: crystals,
+  sugar: sheaf, salt: crystals, bay_salt: crystals,
   frankincense: smoke, incense: smoke,
   stockfish: fish, dyes: drop, indigo: drop, tyrian_purple: shell,
   spices: leaf, tea: leaf, cloves: leaf, pepper: berries, tobacco: leaf,

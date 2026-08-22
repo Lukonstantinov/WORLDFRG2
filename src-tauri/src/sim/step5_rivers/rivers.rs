@@ -708,14 +708,18 @@ fn build_meander_path(
         let mut slow = ((1.0 - (grad - FLAT_G) / (STEEP_G - FLAT_G)) as f32).clamp(0.0, 1.0);
         slow = slow * slow * (3.0 - 2.0 * slow);
 
-        // Advance meander phase along arc length, wavelength noise-jittered.
+        // Advance meander phase along arc length, wavelength strongly noise-jittered
+        // so no two bends share a period — a regular sine reads as mechanical, an
+        // irregular one as a real river.
         let jit = fbm_noise(x * 0.05 + 3.1, y * 0.05 + 7.7, seed ^ 0xA53F, 3, 2.0, 0.5);
-        let wav = base_wav * (0.75 + 0.5 * jit);
+        let wav = base_wav * (0.6 + 0.85 * jit);
         let seg = ((x - px).powi(2) + (y - py).powi(2)).sqrt();
         phase += seg * (std::f32::consts::TAU / wav);
 
         let mut off = 0.0f32;
-        if slow > 0.12 {
+        // Gate lowered (was 0.12) so gently-sloping ground also wanders — the diagonal
+        // drift the user asked for lives on moderate slopes, not just dead-flat floodplain.
+        if slow > 0.05 {
             // Measure the flat valley half-width on each bank so the meander is
             // clamped to the valley floor â€” the channel never climbs the hillside
             // (this is what keeps the bends looking natural). A valley wall is
@@ -738,14 +742,23 @@ fn build_meander_path(
                     d += 1.0;
                 }
             }
-            // Amplitude â‰ˆ 0.11Ã— wavelength (channel width already encodes river
-            // size), never more than ~0.4 of the flat half-width â€” kept modest so
-            // adjacent rivers keep their own corridors instead of weaving together.
-            let amp = slow * (base_wav * 0.11).min(half * 0.4);
+            // Amplitude â‰ˆ 0.16Ã— wavelength (channel width already encodes river
+            // size), never more than ~0.5 of the flat half-width. Raised from 0.11 for
+            // deeper, more obvious bends, still corridor-clamped so adjacent rivers
+            // keep their own valley and can't weave together.
+            let amp = slow * (base_wav * 0.16).min(half * 0.5);
             // Primary bend + weak second harmonic â†’ asymmetric, non-sinusoidal.
-            off = amp * (phase.sin() + 0.22 * (2.0 * phase + 0.7).sin());
+            let bend = amp * (phase.sin() + 0.25 * (2.0 * phase + 0.7).sin());
+            // Low-frequency WANDER: a slow, noise-driven lateral drift over ~80-cell
+            // scales, independent of the meander period, so the channel strays
+            // unpredictably across its floodplain (diagonal reaches, no two bends
+            // alike) instead of tracing a tidy repeating wave. Corridor-clamped like
+            // the bend, so it can never climb the valley wall or cross a neighbour.
+            let wnoise = fbm_noise(x * 0.012 + 11.0, y * 0.012 + 5.0, seed ^ 0x1D3B, 4, 2.0, 0.5) - 0.5;
+            let wander = slow * (base_wav * 0.14).min(half * 0.45) * 2.0 * wnoise;
+            off = bend + wander;
             // Final safety clamp to the measured corridor.
-            let lim = (half * 0.5).max(0.0);
+            let lim = (half * 0.6).max(0.0);
             off = off.clamp(-lim, lim);
         }
         let ry = (y + nry * off).clamp(0.0, h as f32 - 1.0);

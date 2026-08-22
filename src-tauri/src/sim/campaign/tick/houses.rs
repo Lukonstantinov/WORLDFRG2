@@ -910,6 +910,45 @@ impl CampaignSim {
         }
     }
 
+    /// Per-good total per-capita output across every hub — the cheap proxy the
+    /// outpost path uses to judge a good "unexploited" (no city has a real industry
+    /// in it yet). Includes estates: an estate already working a good means the
+    /// trade IS being opened, so it should no longer read as a gap.
+    pub(crate) fn world_good_output(&self) -> Vec<f32> {
+        let ng = self.goods.len();
+        let mut out = vec![0.0f32; ng];
+        for h in &self.hubs {
+            for g in 0..ng.min(h.base_per_capita.len()) { out[g] += h.base_per_capita[g]; }
+        }
+        out
+    }
+
+    /// The most valuable good a province is well suited to (`prov_good_belt`) but the
+    /// world barely produces — the trade an outpost founded here could OPEN. Returns
+    /// `(good, weight)` where weight blends belt suitability with the good's base
+    /// value (both normalized), or `None` if the province offers no such gap.
+    /// Skips food staples and manufactured goods (which have no belt of their own).
+    pub(crate) fn prov_best_unexploited_good(&self, prov: i32, world_out: &[f32]) -> Option<(usize, f32)> {
+        if prov < 0 { return None; }
+        let ng = self.goods.len();
+        let np = if ng > 0 { self.prov_good_belt.len() / ng } else { 0 };
+        if (prov as usize) >= np { return None; }
+        let base = prov as usize * ng;
+        let mut best: Option<(usize, f32)> = None;
+        for g in 0..ng {
+            if self.goods[g].food || !self.goods[g].inputs.is_empty() { continue; }
+            if world_out.get(g).copied().unwrap_or(0.0) > OUTPOST_EXPLOIT_PROD_MAX { continue; }
+            let belt = self.prov_good_belt.get(base + g).copied().unwrap_or(0.0);
+            if belt < OUTPOST_EXPLOIT_BELT_MIN { continue; }
+            // Value weight: a dear good (high base value) is worth reaching for; clamp
+            // so one very expensive good can't wholly dominate belt suitability.
+            let val = (self.goods[g].base_value.max(1.0) / 12.0).min(1.5);
+            let w = belt * val;
+            if best.map_or(true, |(_, bw)| w > bw) { best = Some((g, w)); }
+        }
+        best
+    }
+
     /// One house's attempt at planting a single trade outpost — see
     /// `maybe_found_house_outpost` for why several houses each get a try per call.
     fn try_found_house_outpost(&mut self, hi: usize) -> bool {
@@ -932,16 +971,23 @@ impl CampaignSim {
             nodes.push((h.x, h.y));
         }
         let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
+        // Per-good world output — the proxy for deciding a valuable good is still
+        // UNEXPLOITED and so worth reaching a frontier province to open.
+        let world_out = self.world_good_output();
         // Pick the best reachable site for a TRADE outpost: a house plants its
         // factory where the valuable trade goods are. Site trade-value dominates,
         // a coast (shippable) adds a bonus, and nearer is better. Fertility is
         // irrelevant — an outpost imports its food and exists to work the cargo.
+        // An UNEXPLOITED-belt bonus draws the outpost to a province that could open a
+        // new, valuable trade the world lacks (the wine/cotton/sugar-country gap).
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
             let trade_score = s.trade_value + if s.coastal { 0.30 } else { 0.0 };
-            let score = trade_score * (1.0 - d / cap);
+            let exploit_bonus = self.prov_best_unexploited_good(s.province, &world_out)
+                .map(|(_, v)| v * OUTPOST_EXPLOIT_SITE_BONUS).unwrap_or(0.0);
+            let score = (trade_score + exploit_bonus) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return false };
@@ -981,6 +1027,13 @@ impl CampaignSim {
             }
         }
         if g0 == usize::MAX { return false; }
+        // Unexploited-belt override: if this site's province is strongly suited to a
+        // valuable good no city yet produces, the outpost is founded to OPEN that
+        // trade rather than to duplicate the founder's own output — this is the one
+        // path that can seed a good sitting outside every existing catchment.
+        if let Some((ug, _)) = self.prov_best_unexploited_good(self.colonizable[si].province, &world_out) {
+            g0 = ug;
+        }
         let cost = OUTPOST_FOUND_COST;
         if self.houses[hi].wealth < cost { return false; }
         let site = self.colonizable.swap_remove(si);
