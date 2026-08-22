@@ -618,12 +618,18 @@ impl GeoContext {
             DepositModel::VolcanicArc => {
                 let volc = near(Self::d(&self.volc_dist, i), 12.0);
                 let conv = near(Self::d(&self.conv_dist, i), 25.0);
+                // A RELIEF floor applies on BOTH paths now. On a plate world whose
+                // continents happen to have no on-land subduction arc (common — most
+                // convergent margins are offshore, and volcanism is painted at only
+                // ~8% of convergent cells), the pure volc+conv score is ≈0 everywhere,
+                // so copper/silver/mercury/alum/sapphire silently vanished. Giving arc
+                // minerals a rugged-upland floor (geology stays PRIMARY — the floor is
+                // lower than the arc signal) means they always find plausible ground.
+                let relief_floor = relief.min(0.08) / 0.08;
                 let base = if use_plates {
-                    (volc * 0.65 + conv * 0.35).min(1.0)
+                    (volc * 0.65 + conv * 0.35).min(1.0).max(relief_floor * 0.30)
                 } else {
-                    // No plates: volcanism may still have been painted; otherwise
-                    // fall back to rugged uplands.
-                    (volc * 0.7 + conv * 0.3).max(relief.min(0.08) / 0.08 * 0.45)
+                    (volc * 0.7 + conv * 0.3).max(relief_floor * 0.45)
                 };
                 base * (0.55 + 0.45 * ((elev - self.elev_p40) / 0.3).clamp(0.0, 1.0))
             }
@@ -1185,7 +1191,10 @@ fn make_working(
 
 #[inline]
 fn write_belt(belt: &mut [u8], i: usize, dep: &Deposit) {
-    let v = (dep.workable_intensity() * 255.0) as u8;
+    // Floor at 1: a working that is genuinely PLACED here must register a nonzero
+    // belt byte, or a deep/low-grade deposit rounds to 0 and the placement report
+    // reads the good as "absent" even though the geology put it on the map.
+    let v = ((dep.workable_intensity() * 255.0) as u8).max(1);
     if v > belt[i] {
         belt[i] = v;
     }

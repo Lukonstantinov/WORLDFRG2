@@ -265,13 +265,17 @@ fn stream_power_erosion(
     }
 }
 
-/// Thermal erosion: material slumps from steep slopes
+/// Thermal (hillslope) erosion: material slumps from steep slopes, rounding sharp
+/// peaks into weathered massifs and filling the sharpest incisions. Strengthened
+/// (talus 0.03→0.025 so slopes slump sooner, rate 0.4→0.55) so mountains read as
+/// ERODED rather than knife-edged — the shaping the reduced valley-carving now
+/// leaves to it (user: "erode the mounts so they are more realistic").
 fn thermal_erosion(
     elevation: &mut [f32], terrain: &[u8],
     w: u32, h: u32, passes: u32,
 ) {
-    let talus = 0.03f32;
-    let rate = 0.4f32;
+    let talus = 0.025f32;
+    let rate = 0.55f32;
     let dirs: [(i32, i32); 8] = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)];
 
     for _ in 0..passes {
@@ -589,10 +593,13 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
                 }
             }
 
-            // Valley incision: a higher-frequency inverted ridged field dissects
-            // the ranges into ridge-and-valley relief.
+            // Valley incision: a higher-frequency inverted ridged field lightly
+            // dissects the ranges. Kept SMALL (was 0.16) so mountains read as ROUNDED,
+            // WEATHERED massifs — eroded down by the thermal pass below — rather than
+            // knife-cut ridge-and-valley networks (user: "do not make valleys, just
+            // erode the mounts"). The thermal (slumping) erosion does the shaping now.
             let vridge = ridged_multifractal(rx * 1.9, ry * 1.9, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
-            let carve = (1.0 - vridge).powi(2) * 0.16 * e;
+            let carve = (1.0 - vridge).powi(2) * 0.05 * e;
             // Fine dendritic drainage: a small ABSOLUTE incision everywhere so
             // even lowland interiors get subtle channels for rivers to bed into
             // (matches the template path; keeps plains from sheet-flowing).
@@ -1156,7 +1163,9 @@ pub fn generate_elevation_from_terrain(
             // highlands get dissected into ridge-and-valley relief while
             // lowlands stay broad. This is what was missing â€” "almost no valleys".
             let vridge = ridged_multifractal(wnx * ridge_scale * 1.8, wny * ridge_scale * 1.8, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
-            let carve = (1.0 - vridge).powi(2) * (0.14 + 0.22 * roughness) * combined;
+            // Small (was 0.14 + 0.22·roughness) so ranges stay rounded/eroded rather
+            // than dissected into ridge-and-valley relief — thermal slumping shapes them.
+            let carve = (1.0 - vridge).powi(2) * (0.05 + 0.07 * roughness) * combined;
 
             // â”€â”€ Fine dendritic drainage (moderate, natural) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // A high-frequency inverted ridged field carves shallow valleys
