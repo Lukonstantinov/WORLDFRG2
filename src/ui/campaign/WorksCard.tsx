@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { campaignWorksCard } from "@bridge";
 import type { WorksCardInfo } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
@@ -53,12 +53,21 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
 export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
   const [card, setCard] = useState<WorksCardInfo | null>(null);
   const goodMeta = useGoodsStore((s) => s.meta);
+  const specs = useGoodsStore((s) => s.specs);
 
   useEffect(() => {
     let alive = true;
     campaignWorksCard(hub).then((c) => { if (alive) setCard(c); }).catch(() => { if (alive) setCard(null); });
     return () => { alive = false; };
   }, [hub, tick]);
+
+  // A manufactory turns raw INPUTS into its good — surface the recipe so the card
+  // reads as a workshop (what it consumes → what it makes), not just another farm.
+  const recipe = useMemo(() => {
+    const g = card?.good_name;
+    if (!g) return [] as { good: string; qty: number }[];
+    return specs.find((s) => s.id === g || s.name === g)?.inputs ?? [];
+  }, [specs, card?.good_name]);
 
   if (!card) return <div style={{ fontSize: FZ.small, color: T.inkFaint, padding: "6px 2px" }}>Loading…</div>;
 
@@ -78,6 +87,15 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
           <div style={{ color: T.inkDim, fontSize: FZ.small }}>
             {card.kind_label.toLowerCase()} · tier {card.tier} · {card.good_name}
           </div>
+          {recipe.length > 0 && (
+            <div style={{ color: T.inkMid, fontSize: FZ.small, marginTop: 1 }}
+              title="A manufactory: it works these raw inputs into its good">
+              ⚒ from {recipe.map((r) => {
+                const im = goodMeta(r.good);
+                return `${im.icon} ${im.name}${r.qty !== 1 ? ` ×${r.qty}` : ""}`;
+              }).join(" + ")}
+            </div>
+          )}
           {card.brand && (
             <div style={{ color: T.parchment, fontSize: FZ.small, fontStyle: "italic", marginTop: 1 }}
               title="A toponymic brand — this works' name for its good, carried with the cargo and known in distant markets">
