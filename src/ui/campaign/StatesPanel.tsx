@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useWorldStore } from "@state/worldStore";
@@ -42,6 +42,48 @@ function GaugeBar({ label, v, tone }: { label: string; v: number; tone: "good" |
         <div style={{ width: `${Math.round(Math.min(1, Math.max(0, v)) * 100)}%`, height: "100%", background: color, borderRadius: 2 }} />
       </div>
     </div>
+  );
+}
+
+/** A realm's territory drawn as its own PROVINCE-LAYER minimap: `StateRegion.cells`
+ *  is the realm's coarse province raster (the exact cells the map overlay tints), so
+ *  the same data that colours the world map here becomes a cropped thumbnail of THIS
+ *  realm — its shape and neighbours at a glance, coloured by each realm's own tint. */
+function RealmMiniMap({ states, focus }: { states: StateRegion[]; focus: StateRegion }) {
+  const ref = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const cv = ref.current; if (!cv) return;
+    const ctx = cv.getContext("2d"); if (!ctx) return;
+    const W = cv.width, H = cv.height;
+    ctx.clearRect(0, 0, W, H);
+    const cs = focus.cell_size || 1;
+    // Bounding box of the focused realm (+ padding), so the crop frames it tightly.
+    let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+    for (const [x, y] of focus.cells) {
+      minx = Math.min(minx, x); miny = Math.min(miny, y);
+      maxx = Math.max(maxx, x + cs); maxy = Math.max(maxy, y + cs);
+    }
+    if (!isFinite(minx)) return;
+    const pad = Math.max(maxx - minx, maxy - miny) * 0.28 + cs * 2;
+    minx -= pad; miny -= pad; maxx += pad; maxy += pad;
+    const bw = maxx - minx, bh = maxy - miny;
+    const scale = Math.min(W / bw, H / bh);
+    const ox = (W - bw * scale) / 2 - minx * scale;
+    const oy = (H - bh * scale) / 2 - miny * scale;
+    const s = cs * scale + 0.6;
+    // Neighbouring realms drawn faint for context; the focused realm full-strength.
+    for (const st of states) {
+      if (st.id === focus.id) continue;
+      ctx.fillStyle = `rgba(${st.color.join(",")},0.22)`;
+      for (const [x, y] of st.cells) ctx.fillRect(ox + x * scale, oy + y * scale, s, s);
+    }
+    ctx.fillStyle = `rgb(${focus.color.join(",")})`;
+    for (const [x, y] of focus.cells) ctx.fillRect(ox + x * scale, oy + y * scale, s, s);
+  }, [states, focus]);
+  return (
+    <canvas ref={ref} width={336} height={132}
+      style={{ width: "100%", height: 132, borderRadius: 4, background: "#0c1420",
+        border: `1px solid ${T.lineSoft}`, display: "block", marginBottom: SPACE.sm }} />
   );
 }
 
@@ -241,6 +283,7 @@ export function StatesPanel() {
                   </div>
                   {isOpen && (
                     <div style={{ marginTop: SPACE.sm, paddingTop: SPACE.sm, borderTop: `1px solid ${T.lineSoft}` }}>
+                      <RealmMiniMap states={states} focus={st} />
                       <StatGrid cols={3} style={{ marginBottom: SPACE.sm }}>
                         <Stat label="Revenue" value={fmtk(revenue)} hint="yearly, from held provinces" tone="gold" />
                         <Stat label="Surplus" value={fmtk(surplus)} hint="food, feeds the seat" />
