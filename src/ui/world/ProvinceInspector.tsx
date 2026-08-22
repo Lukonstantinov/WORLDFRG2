@@ -154,6 +154,9 @@ export function ProvinceInspector() {
   // by both the Goods panel and the minimap's untapped-goods squares. Kept ABOVE the
   // early return below so the hook count is stable across renders (rules of hooks).
   const goodQ = useMemo(() => new Map((p?.goods ?? []).map((g) => [g.good, g])), [p?.goods]);
+  // §2.5 · the live exploitation reading per good (utilisation % + market share +
+  // depletion), so the full goods list can show how hard each good is worked inline.
+  const exploitMap = useMemo(() => new Map(exploit.map((g) => [g.good, g])), [exploit]);
   // Real quality (0..1): the province's full per-good grade (`good_quality`, best-patch
   // suitability) is the primary source — it differentiates every good; the top-6
   // shortlist rank and belt coverage are only fallbacks for pre-#9 worlds.
@@ -520,7 +523,7 @@ export function ProvinceInspector() {
               const meanGrade = dep.length ? dep.reduce((s, d) => s + d.grade, 0) / dep.length : 0;
               const bestDepth = dep.reduce((m, d) => Math.max(m, d.depth), 0);
               return (
-                <Section title="Potential & deposits" right={
+                <Section title={`Goods of the region · ${rows.length}`} right={
                   <div style={{ display: "flex", gap: 4 }}>
                     <button onClick={() => setGoodSort((s) => s === "quality" ? "potential" : "quality")}
                       title="Sort by land quality, or by potential yield"
@@ -561,11 +564,25 @@ export function ProvinceInspector() {
                           ) : null}
                           <span style={{ flex: 1 }} />
                           <span style={{ color: T.inkFaint, fontSize: 11 }}>
-                            {fmt(g.potential)}/yr{g.actual <= 1e-4 && <span> · untapped</span>}
+                            {fmt(g.potential)}/yr
+                            {(() => {
+                              const ex = exploitMap.get(g.good);
+                              return ex
+                                ? <span style={{ color: T.accent }}> · {Math.round(ex.exploitation * 100)}% worked · {Math.round(ex.market_share * 100)}% to market</span>
+                                : <span> · untapped</span>;
+                            })()}
                           </span>
                         </div>
-                        <MeterLabel frac={Math.min(1, q)} label={`quality ${(q * 100).toFixed(0)}% · potential ${fmt(g.potential)}/yr` +
-                          (g.actual > 1e-4 ? ` · ${fmt(g.actual)}/yr worked` : "")} />
+                        {(() => {
+                          const ex = exploitMap.get(g.good);
+                          // For a WORKED good, the meter reads utilisation (how hard the
+                          // land is being pushed); for an untapped one, its quality.
+                          return ex
+                            ? <MeterLabel frac={Math.min(1, ex.exploitation)} warn={ex.exploitation > 1}
+                                label={`${fmt(ex.actual)}/yr of ~${fmt(g.potential)}/yr · ${Math.round(ex.exploitation * 100)}% worked` +
+                                  (ex.depletion > 0.02 ? ` · ${Math.round(ex.depletion * 100)}% depleted` : "")} />
+                            : <MeterLabel frac={Math.min(1, q)} label={`quality ${(q * 100).toFixed(0)}% · potential ${fmt(g.potential)}/yr · untapped`} />;
+                        })()}
                       </div>
                     );
                   })}
