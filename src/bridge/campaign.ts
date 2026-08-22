@@ -102,6 +102,11 @@ export async function campaignGetCulturePresence(name: string): Promise<import("
   return invoke("campaign_get_culture_presence", { name });
 }
 
+/** Per-settlement peoples & powers: minority population/civic/market power + fondaco. */
+export async function campaignSettlementPeoples(hub: number): Promise<import("@types").SettlementPeoples | null> {
+  return invoke("campaign_settlement_peoples", { hub });
+}
+
 /** Notable people (merchant magnates / dynastic heads) of one people. */
 export async function campaignGetCultureNotables(name: string): Promise<import("@types").NotablePerson[]> {
   return invoke("campaign_get_culture_notables", { name });

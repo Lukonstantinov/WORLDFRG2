@@ -109,6 +109,28 @@ export interface CultureBrief {
   lingua_regions?: number; // # trade regions where this people's tongue is the lingua franca
 }
 export interface CultureTraitBrief { name: string; emoji: string; blurb: string }
+/** One people/community's standing in a settlement (campaign_settlement_peoples). */
+export interface PeopleGroup {
+  culture: string;
+  is_majority: boolean;
+  pop_share: number;    // 0..1 of the settlement's population
+  civic: number;        // 0..1 share of civic influence
+  market: number;       // 0..1 share of trade + production
+  power: number;        // blended 0..1
+  fondaco: boolean;     // a foreign trading community keeps a bailo (fondaco) here
+  council_seat: boolean;
+  houses: number;       // houses of this culture operating here
+  works: number;        // estates/manufactories they own here
+  traits: CultureTraitBrief[];
+  note: string;
+}
+export interface SettlementPeoples {
+  hub: number;
+  name: string;
+  population: number;
+  majority_culture: string;
+  groups: PeopleGroup[];
+}
 export interface CultureRelation { name: string; kind: string } // kin|friendly|rival|hostile
 export interface NotableCity { name: string; x: number; y: number; role: string } // seat|office
 export interface NotablePerson {

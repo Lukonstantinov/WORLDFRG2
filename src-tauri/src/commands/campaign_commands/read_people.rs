@@ -571,3 +571,152 @@ pub fn campaign_get_dynasties(db: State<'_, WorldDb>) -> Result<DynastiesPayload
     }
     Ok(DynastiesPayload { alliances, feuds })
 }
+
+
+// ═══════════════════════════════════════════════════════════════════════════════
+//  SETTLEMENT PEOPLES & POWERS — per-settlement minority-power reading.
+//  A pure DERIVED read: population share (hub_minorities/hub_culture), civic
+//  influence and market/production control (house influence + trade + estates +
+//  bailos), blended into a POWER score, with a FONDACO flag when a foreign trading
+//  community keeps a bailo here. Adds no sim state, so it cannot touch the economy.
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/// One people/community's standing in a single settlement.
+#[derive(serde::Serialize)]
+pub struct PeopleGroup {
+    pub culture: String,
+    pub is_majority: bool,
+    pub pop_share: f32,      // 0..1 of the settlement's population
+    pub civic: f32,          // 0..1 share of civic influence here
+    pub market: f32,         // 0..1 share of trade + production here
+    pub power: f32,          // blended 0..1 (pop · civic · market, +fondaco)
+    pub fondaco: bool,       // a foreign-culture house keeps a bailo (fondaco) here
+    pub council_seat: bool,  // this people holds the council / captor seat
+    pub houses: u32,         // houses of this culture operating here
+    pub works: u32,          // estates/manufactories at this hub they own
+    pub traits: Vec<CultureTraitBrief>,
+    pub note: String,        // one-line flavour of why they matter
+}
+
+/// A settlement's peoples, majority first then minorities/communities by power.
+#[derive(serde::Serialize)]
+pub struct SettlementPeoples {
+    pub hub: u32,
+    pub name: String,
+    pub population: f32,
+    pub majority_culture: String,
+    pub groups: Vec<PeopleGroup>,
+}
+
+#[tauri::command]
+pub fn campaign_settlement_peoples(hub: u32, db: State<'_, WorldDb>) -> Result<Option<SettlementPeoples>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let h = hub as usize;
+    if h >= sim.hubs.len() || sim.hubs[h].is_estate { return Ok(None); }
+    let maj = sim.hub_culture.get(h).cloned().unwrap_or_default();
+    if maj.is_empty() || maj == "—" { return Ok(None); }
+    use std::collections::HashMap;
+
+    #[derive(Default)]
+    struct Acc { pop: f32, civic: f32, trade: f32, prod: f32, houses: u32, works: u32, fondaco: bool, seat: bool }
+    let mut acc: HashMap<String, Acc> = HashMap::new();
+    macro_rules! ent { ($c:expr) => { acc.entry($c).or_default() } }
+
+    // ── population shares (majority = 1 − Σ minorities) ──
+    let mins = sim.hub_minorities.get(h).cloned().unwrap_or_default();
+    let mshare: f32 = mins.iter().map(|(_, s)| *s).sum();
+    ent!(maj.clone()).pop += (1.0 - mshare).clamp(0.0, 1.0);
+    for (c, s) in &mins {
+        if c.is_empty() || c == "—" { continue; }
+        ent!(c.clone()).pop += *s;
+    }
+
+    // ── who holds the seat (captor outranks a merely-dominant council) ──
+    let seat_house = if sim.hubs[h].captor_house >= 0 { sim.hubs[h].captor_house } else { sim.hubs[h].council_house };
+
+    let culture_of = |hi: usize| -> String {
+        let home = sim.houses[hi].hub as usize;
+        sim.hub_culture.get(home).cloned().unwrap_or_default()
+    };
+
+    // ── house presence: civic influence, market trade, bailo/fondaco, seat ──
+    for hi in 0..sim.houses.len() {
+        let hh = &sim.houses[hi];
+        if hh.defunct { continue; }
+        let c = culture_of(hi);
+        if c.is_empty() || c == "—" { continue; }
+        let inf = hh.influence.iter().find(|(hb, _)| *hb as usize == h).map(|(_, v)| *v).unwrap_or(0.0);
+        let trd = hh.trade_at.iter().find(|(hb, _)| *hb as usize == h).map(|(_, v)| *v).unwrap_or(0.0);
+        let bailo = hh.bailos.iter().any(|&c2| c2 as usize == h);
+        if inf <= 0.0 && trd <= 0.0 && !bailo && hh.hub as usize != h { continue; }
+        let a = ent!(c.clone());
+        a.civic += inf;
+        a.trade += trd;
+        a.houses += 1;
+        if bailo && c != maj { a.fondaco = true; }
+        if seat_house == hi as i32 { a.seat = true; }
+    }
+
+    // ── production control: estates/manufactories here, by owner's culture ──
+    for e in &sim.hubs {
+        if !e.is_estate || e.parent != h as i32 || e.owner_house < 0 { continue; }
+        let oc = culture_of(e.owner_house as usize);
+        if oc.is_empty() || oc == "—" { continue; }
+        let a = ent!(oc);
+        a.works += 1;
+        a.prod += e.production.iter().copied().fold(0.0f32, |s, v| s + v.max(0.0));
+    }
+
+    // ── normalise each axis to a within-city share ──
+    let tot_civic: f32 = acc.values().map(|a| a.civic).sum();
+    let tot_trade: f32 = acc.values().map(|a| a.trade).sum();
+    let tot_prod: f32  = acc.values().map(|a| a.prod).sum();
+    let has_prod = tot_prod > 1e-6;
+
+    let trait_briefs = |ids: &[usize]| -> Vec<CultureTraitBrief> {
+        ids.iter().filter_map(|&i| crate::sim::cultures::TRAITS.get(i)).map(|t| CultureTraitBrief {
+            name: t.name.to_string(), emoji: t.emoji.to_string(), blurb: t.blurb.to_string(),
+        }).collect()
+    };
+
+    let mut groups: Vec<PeopleGroup> = acc.into_iter().map(|(culture, a)| {
+        let civic_share = if tot_civic > 1e-6 { a.civic / tot_civic } else { 0.0 };
+        // A seat-holder is civically dominant by definition — floor its bar.
+        let civic = if a.seat { civic_share.max(0.5) } else { civic_share };
+        let trade_share = if tot_trade > 1e-6 { a.trade / tot_trade } else { 0.0 };
+        let prod_share  = if has_prod { a.prod / tot_prod } else { 0.0 };
+        let market = if has_prod { 0.6 * trade_share + 0.4 * prod_share } else { trade_share };
+        // Blend: the user's three axes, weighted toward commercial/production power,
+        // with a modest fondaco premium (a trading community punches above its numbers).
+        let mut power = 0.30 * a.pop + 0.30 * civic + 0.40 * market;
+        if a.fondaco { power = (power * 1.15).min(1.0); }
+        let ids = sim.culture_trait_ids(&culture);
+        // One-line note: strongest signal first.
+        let mut note = String::new();
+        if a.fondaco { note = "keeps a fondaco — a foreign trading quarter".into(); }
+        else if a.seat { note = "holds the city's seat of council".into(); }
+        else if a.works > 0 && ids.contains(&12) { note = format!("master craftsmen — {} works", a.works); }
+        else if a.works > 0 { note = format!("owns {} works here", a.works); }
+        else if a.houses > 0 { note = format!("{} merchant hous{} operating here", a.houses, if a.houses == 1 { "e" } else { "es" }); }
+        PeopleGroup {
+            is_majority: culture == maj,
+            culture, pop_share: a.pop, civic, market, power,
+            fondaco: a.fondaco, council_seat: a.seat, houses: a.houses, works: a.works,
+            traits: trait_briefs(&ids), note,
+        }
+    }).collect();
+
+    // Drop negligible communities (no people AND no commercial footing), keep the
+    // majority and any real fondaco/house presence.
+    groups.retain(|g| g.is_majority || g.pop_share > 0.005 || g.houses > 0 || g.works > 0 || g.fondaco);
+    // Majority first, then minorities/communities by power.
+    groups.sort_by(|a, b| b.is_majority.cmp(&a.is_majority)
+        .then(b.power.partial_cmp(&a.power).unwrap_or(std::cmp::Ordering::Equal)));
+    groups.truncate(10);
+
+    Ok(Some(SettlementPeoples {
+        hub, name: sim.hubs[h].name.clone(), population: sim.hubs[h].population.max(0.0),
+        majority_culture: maj, groups,
+    }))
+}

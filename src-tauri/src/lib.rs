@@ -159,6 +159,7 @@ pub fn run() {
             campaign_commands::campaign_get_good_heat,
             campaign_commands::campaign_get_era_frame,
             campaign_commands::campaign_get_cultures,
+            campaign_commands::campaign_settlement_peoples,
             campaign_commands::campaign_get_culture_presence,
             campaign_commands::campaign_get_culture_notables,
             campaign_commands::campaign_get_culture_history,

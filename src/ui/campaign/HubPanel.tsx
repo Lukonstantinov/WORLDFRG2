@@ -3,8 +3,8 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning } from "@bridge";
-import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo } from "@types";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples } from "@bridge";
+import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -974,7 +974,11 @@ export function HubPanel() {
               )}
             </>
           )}
-          <div style={{ ...sectionHdr, marginTop: detail?.culture ? 8 : 0 }}>Society</div>
+          {/* Minority-power ledger: pop% · civic · market → a blended POWER, with a
+              FONDACO badge where a foreign trading community keeps a bailo here. */}
+          <PeoplePowers hub={hub.id} />
+
+          <div style={{ ...sectionHdr, marginTop: 8 }}>Society</div>
           <div style={{ display: "flex", gap: 4 }}>
             <ClassTile label="Nobility" value={hub.nobility ?? 0} level={hub.elite_level ?? 0} color="#e0c060" />
             <ClassTile label="Merchants" value={hub.merchants ?? 0} level={hub.merchant_level ?? 0} color="#5fc8a8" />
@@ -1388,6 +1392,70 @@ function SatelliteVillages({ villages }: { villages: NonNullable<HubDetail["sate
 
 /** One resident people's contentment: a face by satisfaction + the prized goods this
  *  city supplies (met) or leaves them craving (unmet). */
+/** Minority-power ledger for one settlement: each people/community as a row with
+ *  pop% · civic · market mini-bars and a blended POWER pip, majority summarised on
+ *  top. Fondaco communities (foreign trading quarters) carry a 🏛 badge. Pure read
+ *  of `campaign_settlement_peoples` — display-only, no economy effect. */
+function PeoplePowers({ hub }: { hub: number }) {
+  const [data, setData] = useState<SettlementPeoples | null>(null);
+  useEffect(() => {
+    let alive = true;
+    campaignSettlementPeoples(hub).then((d) => { if (alive) setData(d); }).catch(() => { if (alive) setData(null); });
+    return () => { alive = false; };
+  }, [hub]);
+  if (!data) return null;
+  const majority = data.groups.find((g) => g.is_majority);
+  const minorities = data.groups.filter((g) => !g.is_majority);
+  const clamp = (v: number) => Math.max(0, Math.min(1, v));
+  const Bar = ({ v, color }: { v: number; color: string }) => (
+    <div style={{ width: 34, height: 5, background: "#0a1018", borderRadius: 2, overflow: "hidden", flex: "0 0 auto" }}>
+      <div style={{ width: `${Math.round(clamp(v) * 100)}%`, height: "100%", background: color }} />
+    </div>
+  );
+  const pips = (v: number) => { const n = Math.round(clamp(v) * 5); return "●".repeat(n) + "○".repeat(5 - n); };
+  return (
+    <>
+      <div style={{ ...sectionHdr, marginTop: 8 }}>Powers — who commands the city</div>
+      {majority && (
+        <div style={{ fontSize: 10, color: "#9ab0c8", marginBottom: 5 }}>
+          Majority <b style={{ color: "#cfe2f6" }}>{majority.culture}</b> {Math.round(majority.pop_share * 100)}%
+          {" "}{majority.traits.map((t) => t.emoji).join("")}
+          {majority.council_seat && <span style={{ color: "#7fd0a0" }}> · holds the seat</span>}
+        </div>
+      )}
+      {minorities.length === 0 ? (
+        <div style={{ color: "#7a90a8", fontSize: 10 }}>No minority holds notable power here.</div>
+      ) : (
+        <>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 8, color: "#6a86a6", marginBottom: 2 }}>
+            <span style={{ flex: 1 }} />
+            <span style={{ width: 34, textAlign: "center" }}>pop</span>
+            <span style={{ width: 34, textAlign: "center" }}>civic</span>
+            <span style={{ width: 34, textAlign: "center" }}>market</span>
+            <span style={{ width: 44, textAlign: "right" }}>power</span>
+          </div>
+          {minorities.map((g) => (
+            <div key={g.culture} style={{ marginBottom: 5 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={g.traits.map((t) => `${t.emoji} ${t.name}`).join(" · ")}>
+                  {g.traits[0]?.emoji ?? "•"} {g.culture}
+                  {g.fondaco && <span title="keeps a fondaco — a foreign trading quarter" style={{ color: "#e0b050" }}> 🏛</span>}
+                </span>
+                <Bar v={g.pop_share} color="#8aa0c0" />
+                <Bar v={g.civic} color="#5fc8a8" />
+                <Bar v={g.market} color="#e0c060" />
+                <span style={{ width: 44, textAlign: "right", fontSize: 10, color: "#e0b050", letterSpacing: 0.5 }}>{pips(g.power)}</span>
+              </div>
+              {g.note && <div style={{ fontSize: 9, color: "#7a90a8", marginLeft: 16 }}>{g.note}</div>}
+            </div>
+          ))}
+        </>
+      )}
+    </>
+  );
+}
+
 function CultureMoodRow({ m }: { m: CultureMood }) {
   const rgb = `rgb(${m.color[0]},${m.color[1]},${m.color[2]})`;
   const s = m.satisfaction;
