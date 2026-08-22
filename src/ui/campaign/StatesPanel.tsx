@@ -51,39 +51,60 @@ function GaugeBar({ label, v, tone }: { label: string; v: number; tone: "good" |
  *  realm — its shape and neighbours at a glance, coloured by each realm's own tint. */
 function RealmMiniMap({ states, focus }: { states: StateRegion[]; focus: StateRegion }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  // Two scopes, switchable: WORLD frames every realm (this one highlighted among all
+  // the world's countries) · REALM crops tight to this realm + its neighbours.
+  const [worldView, setWorldView] = useState(false);
   useEffect(() => {
     const cv = ref.current; if (!cv) return;
     const ctx = cv.getContext("2d"); if (!ctx) return;
     const W = cv.width, H = cv.height;
     ctx.clearRect(0, 0, W, H);
     const cs = focus.cell_size || 1;
-    // Bounding box of the focused realm (+ padding), so the crop frames it tightly.
     let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
-    for (const [x, y] of focus.cells) {
-      minx = Math.min(minx, x); miny = Math.min(miny, y);
-      maxx = Math.max(maxx, x + cs); maxy = Math.max(maxy, y + cs);
-    }
+    const acc = (cells: [number, number][]) => {
+      for (const [x, y] of cells) {
+        minx = Math.min(minx, x); miny = Math.min(miny, y);
+        maxx = Math.max(maxx, x + cs); maxy = Math.max(maxy, y + cs);
+      }
+    };
+    if (worldView) { for (const st of states) acc(st.cells); } else { acc(focus.cells); }
     if (!isFinite(minx)) return;
-    const pad = Math.max(maxx - minx, maxy - miny) * 0.28 + cs * 2;
+    const pad = worldView ? cs * 2 : Math.max(maxx - minx, maxy - miny) * 0.28 + cs * 2;
     minx -= pad; miny -= pad; maxx += pad; maxy += pad;
     const bw = maxx - minx, bh = maxy - miny;
     const scale = Math.min(W / bw, H / bh);
     const ox = (W - bw * scale) / 2 - minx * scale;
     const oy = (H - bh * scale) / 2 - miny * scale;
     const s = cs * scale + 0.6;
-    // Neighbouring realms drawn faint for context; the focused realm full-strength.
+    // Every OTHER realm drawn faint (a touch stronger in world view so the whole
+    // political map reads); the focused realm full-strength on top.
     for (const st of states) {
       if (st.id === focus.id) continue;
-      ctx.fillStyle = `rgba(${st.color.join(",")},0.22)`;
+      ctx.fillStyle = `rgba(${st.color.join(",")},${worldView ? 0.4 : 0.22})`;
       for (const [x, y] of st.cells) ctx.fillRect(ox + x * scale, oy + y * scale, s, s);
     }
     ctx.fillStyle = `rgb(${focus.color.join(",")})`;
     for (const [x, y] of focus.cells) ctx.fillRect(ox + x * scale, oy + y * scale, s, s);
-  }, [states, focus]);
+    // Capital marker (gold pip) — `x`/`y` is the realm's own label centroid, i.e.
+    // inside its territory near the seat.
+    const capx = ox + focus.x * scale, capy = oy + focus.y * scale;
+    ctx.beginPath(); ctx.arc(capx, capy, 3.2, 0, Math.PI * 2);
+    ctx.fillStyle = "#ffd86a"; ctx.fill();
+    ctx.lineWidth = 0.9; ctx.strokeStyle = "#1a1206"; ctx.stroke();
+  }, [states, focus, worldView]);
   return (
-    <canvas ref={ref} width={336} height={132}
-      style={{ width: "100%", height: 132, borderRadius: 4, background: "#0c1420",
-        border: `1px solid ${T.lineSoft}`, display: "block", marginBottom: SPACE.sm }} />
+    <div style={{ position: "relative", marginBottom: SPACE.sm }} data-no-drag>
+      <canvas ref={ref} width={336} height={140}
+        style={{ width: "100%", height: 140, borderRadius: 4, background: "#0c1420",
+          border: `1px solid ${T.lineSoft}`, display: "block" }} />
+      <button onClick={() => setWorldView((v) => !v)}
+        title={worldView ? "Frame this realm + its neighbours" : "See this realm within the whole world"}
+        style={{ position: "absolute", top: 5, right: 5, fontSize: FZ.micro, cursor: "pointer",
+          background: "rgba(10,16,26,0.82)", color: T.parchment, border: `1px solid ${T.lineSoft}`,
+          borderRadius: 10, padding: "2px 8px" }}>
+        {worldView ? "🔍 realm" : "🌍 world"}
+      </button>
+    </div>
   );
 }
 
