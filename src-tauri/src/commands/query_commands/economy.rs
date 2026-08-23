@@ -426,6 +426,14 @@ pub fn compute_economy(
     // reflects Slice 3's modulated belt values); everything else keeps the old
     // richer-territory-share formula. All three get a small deterministic jitter so
     // equal inputs still differ between hubs/goods.
+    // BASELINE HINTERLAND PRODUCTION · a city works whatever grows in its own
+    // catchment, however little — even with no estate or manufactory behind it (user
+    // rule). Any good whose belt actually reaches this hub's catchment is floored just
+    // above the 0.05 producer-emit gate (see ~L985/L1018) so a scarce local good reads
+    // as a real, tiny source instead of being rescaled out of existence. Manufactured
+    // goods have no belt anywhere, so the floor never applies to them — they stay 0
+    // here and are made live in the tick from their recipes.
+    const CATCHMENT_MIN_PROD: f32 = 0.06;
     let mut quality = vec![vec![0.0f32; gc]; nn];
     for hh in 0..nn {
         for g in 0..gc {
@@ -442,7 +450,11 @@ pub fn compute_economy(
             };
             quality[hh][g] = (base + jitter).clamp(0.0, 1.0);
             // apply abundance scaling to production AFTER quality is read off share
+            let belt_in_catchment = prod[hh][g] > 0.0;
             prod[hh][g] = prod[hh][g] / good_max[g] * abundance[g];
+            if belt_in_catchment {
+                prod[hh][g] = prod[hh][g].max(CATCHMENT_MIN_PROD);
+            }
         }
     }
 
