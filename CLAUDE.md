@@ -1029,7 +1029,12 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   accumulation + K·A^m·S^n incision) replaced the old
                                   droplet simulation (Terrain 2.0 slice 1); outer-pass
                                   count is keyed to GRID SIZE, not the `iterations`
-                                  strength knob (see `terrain_metrics`, §3 below)
+                                  strength knob (see `terrain_metrics`, §3 below).
+                                  Fluvial incision is SUB-GRID and is scaled + spread
+                                  accordingly, `thermal_erosion` is a simultaneous
+                                  (scan-order-free) update, and the finished field's
+                                  one-cell band is capped by `limit_grid_scale_relief`
+                                  — the three fixes behind §8.23
   step2_terrain/geology.rs      ← TRANSIENT geology (Terrain 2.0 slices 2-3):
                                   recomputed from seed + persisted plate data every
                                   phase-2 run, used, discarded — no tile column.
@@ -2621,6 +2626,112 @@ and `dump_biome_swatch_sheet` already established.
 
 ---
 
+### 8.23 Erosion appearance — relief at the scale a cell can hold
+
+Every world's grid spans Earth's equator, so a cell is `KM_EQUATOR / w` wide: 11 km
+on the default 3600×1800 grid. **Fluvial dissection is therefore SUB-GRID** — the
+Grand Canyon is 16 km across and would not fill one cell — and what a cell can
+honestly record is the MEAN lowering over its whole footprint, which is both far
+shallower than the thalweg and spatially smooth.
+
+Phase 2 recorded neither, and the map showed it: measured on a plate world at
+1800×900, **2.77% of land sat more than 120 m below its own 8-neighbour mean,
+averaging 346 m** — a 22-km-wide, 350-m-deep slot — with one-cell RMS concavity at
+**102.7 m** against `AO_REF`'s 240 m. Rendered, that is a dendritic scratch network
+over the whole world plus regular comb striations on every flank: the "too thin
+lines, looks like river erosion" report this section answers.
+
+**Three causes, and only one of them was the obvious one.** The noise `carve` /
+`fine_carve` terms — cut hard by an earlier attempt at the same complaint
+(`3943136`, 0.16 → 0.05) — are NOT a cause: measured per stage they leave notch
+density at 0.05%, and removing them entirely makes the finished figure WORSE
+(93 → 112 m), because the hypsometric redistribution equalises whatever histogram
+it is given. Do not reach for those knobs again.
+
+1. **Stream power cut one-cell trenches.** `K·A^m·S^n` incision applied straight
+   down the D8 path, plus the parallel single-cell rills D8 routing always produces
+   on a planar slope. Incision is now scaled by `FLUVIAL_VALLEY_KM / km_per_cell`
+   (floored at `FLUVIAL_MIN_RECORDED` so it can never silently vanish on a coarse
+   grid) and SPREAD over `FLUVIAL_SPREAD_KM` — **inside each pass**, so the next
+   pass re-routes over the broadened valley instead of re-cutting the same rill
+   deeper, which is what made the combing so regular. It redistributes the carve
+   rather than deleting it, so the denudation budget and `isostatic_adjust`'s
+   rebound are unchanged in kind.
+2. **`thermal_erosion` depended on scan order.** It wrote both donor and recipient
+   in place while scanning rows top-to-bottom, so a cell was slumped into before it
+   was itself visited. Now a simultaneous delta-buffer update.
+3. **The finished field carried more one-cell content than the grid can hold.**
+   `redistribute_elevation` multiplies landform relief ×7.7 and grid-scale relief
+   ×8.9, so whatever the noise stack leaves is what the map is textured with.
+   `limit_grid_scale_relief` caps the one-cell band at `GRID_RELIEF_BUDGET_M`.
+
+**The result** (one-cell RMS concavity · notch density · landform relief, @1800×900):
+
+| model | before | after |
+|---|---|---|
+| plates | 102.7 m · 2.77% · 2178 m | **18.7 m · 0.22% · 2176 m** |
+| shape | 98.6 m · 3.84% · 2261 m | 20.5 m · 0.28% · 2267 m |
+| cordillera | 340.2 m · 7.83% · 2084 m | 22.9 m · 0.28% · 2132 m |
+| ridged | 125.8 m · 3.69% · 2249 m | 19.3 m · 0.26% · 2253 m |
+
+Grid-scale texture down 82–93%; **landform relief moves under 2% on every model**.
+That pair is the whole claim — a limiter that also flattened the mountains would
+"succeed" on the first number and ruin the map.
+
+Five rules for anyone changing this:
+
+- **Look at it.** `EROSION_SHEET_DIR=/tmp/e cargo test --release --lib
+  dump_erosion_sheet -- --ignored --nocapture` renders a real world through the
+  REAL hillshade in the monochrome `analytical` style (colour carries zero
+  information there, so what is left on the page is exactly the shading) plus a 4×
+  crop. Every finding here came from that sheet and none from reading the code;
+  `erosion_texture_metrics` is the numeric companion. Same discipline as
+  `dump_natural_sheet` (§8.21) and for the same reason.
+- **A local mean near a coast must be LAND-ONLY.** A plain box blur averages a
+  3000 m coastal cell against sea held at 0, calls the coastline itself "detail",
+  and then planes the coast DOWN toward sea level — drawing the exact hard dark rim
+  the budget exists to remove.
+- **`e' = m + k(e−m)` is not idempotent.** It leaves `(1−k)(m − blur m)` behind, so
+  one pass aimed at 16 m settled at **41 m** on a real world. `limit_grid_scale_relief`
+  iterates to its fixed point; the pass cap is a termination guarantee, not the
+  mechanism.
+- **A gate needs a fixture that can fail.** `fluvial_incision_is_spread_not_slotted`
+  first used a tilted plane and **passed on the unfixed code** — a uniform slope
+  drains every cell alike, so its carve is broad however it is applied. It only
+  discriminates on a real generated landscape (0.409 sharp vs 0.189 spread). The
+  scan-order gate was verified the same way: revert the fix, watch it fail.
+- **The budget is set below what the variance argument alone allows, deliberately.**
+  Scaling real continental relief to a 22 km cell suggests a legitimate one-cell
+  residual nearer 60 m. Ours cannot be spent that way because our one-cell content is
+  UNCORRELATED between neighbours (independent noise at the top of an fbm stack)
+  while Earth's is STRUCTURED — part of a cascade whose ridges continue across cells.
+  Same RMS, completely different reading: noise looks like grain, structure looks
+  like terrain. Buying that headroom back means generating structured sub-grid
+  detail (a real multifractal cascade, or erosion run finer and averaged down) —
+  a terrain-generation change, not a shading one, and not built.
+
+**NEGATIVE RESULT, so it is not attempted again:** `redistribute_elevation` assigns
+each cell a height by its RANK, whose ties break on the row-major index — which
+looks exactly like the cause of one-row striping. Rewriting it as a monotone
+value-transfer curve measured **bit-identical to the displayed precision** and was
+reverted. With ~500k distinct f32 elevations there are no ties to break, so the rank
+map already IS a monotone curve; the striping was ordinary high-frequency content,
+and `axis_curvature` (curvY/curvX ≈ 0.94) proved the field isotropic before any of
+this was changed.
+
+**Still open, named rather than quietly fixed:** a 1–2 cell dark lineament survives
+every erosion ablation — it is in the base tectonic/noise field, not the erosion —
+and the hypsometric target puts implausibly much land above 6 km.
+
+`bench_phase2` @3600×1800 went plates 11.4 → 12.5 s, shape 13.9 → 14.5 s (+9% / +4%)
+after rayon-parallelising `box_blur_wrap`, which the new passes made hot.
+
+**The Earth fidelity gate cannot move here, by construction**: `earth_validation.rs`
+scores against the baked GMT DEM and never calls `generate_elevation`. Verified
+unchanged at 70.2 / 39.0 all the same.
+
+---
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -3232,3 +3343,11 @@ Three rules:
     must zip from the END. Never back-fill to make the lengths match — a
     fabricated price history is worse than a short one. (Rules are APPENDED here,
     never renumbered: code comments cite them by number — `git grep "rule 25"`.)
+30. **Relief must be stated at a scale the grid can hold** (§8.23). A cell is
+    `KM_EQUATOR / w` km wide — 11 km on the default world — so fluvial incision is
+    SUB-GRID and one-cell content is capped (`limit_grid_scale_relief`). Any new
+    phase-2 pass that writes per-cell detail must say what physical scale that
+    detail is, and judge it by RENDERING a world (`dump_erosion_sheet`), not by
+    reading the code: every cause found in §8.23 was invisible in review and
+    obvious in a 4× hillshade crop. Corollary: a local mean taken near a coast is
+    LAND-ONLY, or the coastline itself is measured as detail and planed down.

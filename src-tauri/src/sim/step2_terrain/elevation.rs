@@ -172,6 +172,64 @@ fn priority_flood_flow(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (Ve
     (flow_to, order)
 }
 
+
+// ── Fluvial dissection is a SUB-GRID process on an Earth-sized world ─────────
+//
+// Every world's grid spans Earth's equator, so a cell is `KM_EQUATOR / w` wide:
+// 11 km on the default 3600x1800 grid, 22 km at half that, 100 km+ on a unit
+// test fixture. A river valley is carved at the scale of a valley -- single
+// digit km across -- so on any of those grids the whole landform sits INSIDE
+// one cell. The Grand Canyon is 16 km wide and would not fill a default cell.
+//
+// What a cell can honestly record is therefore not the thalweg but the MEAN
+// lowering over its entire footprint, and that quantity is (a) far shallower
+// than the channel is cut and (b) spatially SMOOTH -- real denudation at 11 km
+// resolution has no one-cell structure in it at all.
+//
+// The old code recorded neither. It cut the full `K*A^m*S^n` incision straight
+// into single cells along the D8 flow path, which on an Earth-sized world
+// produced exactly two artefacts, both of them visible in `dump_erosion_sheet`
+// and neither of them a landform: one-cell TRENCHES along every trunk (2.8% of
+// land sat >120 m below its own 8-neighbour mean, averaging 346 m -- i.e. a
+// 22-km-wide, 350-m-deep slot), and the parallel single-cell RILLS that D8
+// routing always produces on a planar slope, which combed every mountain flank
+// with regular one-row striations. That is the "too thin lines, looks like
+// river erosion" this pair of constants exists to answer.
+//
+// NOTE the previous attempt at this complaint (commit 3943136) cut the NOISE
+// valley-incision terms hard (`carve` 0.16 -> 0.05) and did not fix it, because
+// the noise terms were never the source: measured per stage, they leave notch
+// density at 0.05% of land and stream power raises it to 0.88% (which the
+// hypsometric redistribution then amplifies 5x along with everything else).
+// Keep that negative result in mind before reaching for the noise knobs again.
+
+/// Earth's equatorial circumference in km. Same convention as `deposits.rs` /
+/// `localities.rs` -- a world's grid width always spans it (rule 25: a
+/// threshold about the WORLD is stated in km and converted per world, never
+/// as a cell count).
+const KM_EQUATOR: f32 = 40075.0;
+
+/// Cross-valley scale of a real fluvial system in km -- the valley floor plus
+/// the flanking slopes that feed it. At or below this cell size the network is
+/// RESOLVED and the computed incision is recorded in full; above it, only the
+/// fraction of the cell the valley actually occupies can be, so the recorded
+/// depth scales as `FLUVIAL_VALLEY_KM / km_per_cell`.
+const FLUVIAL_VALLEY_KM: f32 = 6.0;
+
+/// Floor on that fraction, so fluvial erosion can never silently VANISH on a
+/// coarse grid -- this codebase's recurring failure mode (see `highland_cap`,
+/// `no_shipped_mineral_places_nothing`, `TERROIR_FLOOR`). A test fixture at
+/// 60-600 km per cell still gets a quarter of the incision rather than none.
+const FLUVIAL_MIN_RECORDED: f32 = 0.25;
+
+/// How far the incision is SPREAD, in km: a basin's dissection is distributed
+/// across its interfluves, not concentrated in the one cell the D8 path happens
+/// to pick. This is the term that turns a one-cell trench into a broad valley,
+/// and it is the one that actually removes the thin lines -- it redistributes
+/// the eroded volume rather than deleting it, so the denudation budget (and
+/// with it `isostatic_adjust`'s rebound) is unchanged in kind.
+const FLUVIAL_SPREAD_KM: f32 = 34.0;
+
 /// Stream-power erosion: priority-flood fill removes depressions with a
 /// guaranteed-drainage gradient, D8 flow directions fall straight out of the
 /// fill order, drainage AREA accumulates from headwaters to the coast, and
@@ -227,6 +285,20 @@ fn stream_power_erosion(
     const M_AREA: f32 = 0.5;
     const N_SLOPE: f32 = 1.0;
 
+    // Sub-grid geometry (see FLUVIAL_VALLEY_KM above): how much of the computed
+    // incision a cell of this size can legitimately record, and over how many
+    // cells that record is spread. Both derive from the world's real km/cell,
+    // so the same code gives a 3600-wide world a broad shallow valley system
+    // and a 400-wide test fixture a correspondingly blunter one.
+    let km_per_cell = KM_EQUATOR / w.max(1) as f32;
+    let recorded = (FLUVIAL_VALLEY_KM / km_per_cell).clamp(FLUVIAL_MIN_RECORDED, 1.0);
+    let spread = ((FLUVIAL_SPREAD_KM / km_per_cell).round() as i32).clamp(1, 6);
+
+    // Per-pass record of what the sharp D8 incision actually removed, reused
+    // across passes rather than cloning the elevation field (a full-size clone
+    // per pass is 100 MB+ on a Large world).
+    let mut cut = vec![0.0f32; n];
+
     let mut rng = StdRng::seed_from_u64(seed ^ 0xE205_17A3);
     for pass in 0..passes {
         let (flow_to, order) = priority_flood_flow(elevation, terrain, w, h);
@@ -237,6 +309,7 @@ fn stream_power_erosion(
             if t != i { area[t] += area[i]; }
         }
 
+        cut.iter_mut().for_each(|c| *c = 0.0);
         for &i in &order {
             let t = flow_to[i];
             if t == i { continue; } // coastal outlet: nothing downstream to incise into
@@ -249,7 +322,28 @@ fn stream_power_erosion(
             // Never erode a cell below its own downstream neighbour -- the
             // standard stream-power safety clamp; it also self-limits the
             // A^m blow-up near a river mouth without any extra bookkeeping.
-            elevation[i] = (elevation[i] - incise).max(elevation[t]);
+            let after = (elevation[i] - incise).max(elevation[t]);
+            cut[i] = elevation[i] - after;
+            elevation[i] = after;
+        }
+
+        // -- Sub-grid correction ------------------------------------------------
+        // Undo the sharp one-cell cut and re-apply it as the SMOOTH, scaled
+        // field a cell this size can actually hold. Undoing is exact because
+        // `cut` is what was really removed (after the downstream clamp), so this
+        // is a redistribution of the pass's own erosion, not a second pass of it.
+        //
+        // Done INSIDE the loop, not once at the end, so the next pass re-routes
+        // over the broadened valley instead of re-cutting the same one-cell
+        // rill deeper every time -- that self-reinforcement is what made the D8
+        // combing so regular.
+        for i in 0..n {
+            if cut[i] != 0.0 { elevation[i] += cut[i]; }
+        }
+        let smooth = box_blur_wrap(&cut, w, h, spread);
+        for i in 0..n {
+            if terrain[i] != 1 { continue; }
+            elevation[i] = (elevation[i] - smooth[i] * recorded).max(0.001);
         }
 
         // A small seed-reproducible jitter between passes keeps the drainage
@@ -270,6 +364,15 @@ fn stream_power_erosion(
 /// (talus 0.03→0.025 so slopes slump sooner, rate 0.4→0.55) so mountains read as
 /// ERODED rather than knife-edged — the shaping the reduced valley-carving now
 /// leaves to it (user: "erode the mounts so they are more realistic").
+///
+/// The update is SIMULTANEOUS: every cell's transfers are accumulated into a
+/// delta buffer and applied at the end of the pass. The original wrote both
+/// `elevation[idx]` and `elevation[ni]` in place while scanning rows in order,
+/// so a cell was slumped into by its northern neighbour BEFORE it was itself
+/// visited and the whole pass carried a north-to-south scan bias -- visible as
+/// one-row horizontal striations across every flank in `dump_erosion_sheet`.
+/// A relaxation scheme's result must not depend on the order its cells happen
+/// to be stored in.
 fn thermal_erosion(
     elevation: &mut [f32], terrain: &[u8],
     w: u32, h: u32, passes: u32,
@@ -278,7 +381,9 @@ fn thermal_erosion(
     let rate = 0.55f32;
     let dirs: [(i32, i32); 8] = [(-1,0),(1,0),(0,-1),(0,1),(-1,-1),(1,-1),(-1,1),(1,1)];
 
+    let mut delta = vec![0.0f32; elevation.len()];
     for _ in 0..passes {
+        delta.iter_mut().for_each(|d| *d = 0.0);
         for y in 1..h - 1 {
             for x in 0..w {
                 let idx = (y * w + x) as usize;
@@ -310,11 +415,14 @@ fn thermal_erosion(
                     let diff = el - elevation[ni];
                     if diff > talus {
                         let transfer = (diff - talus) / total_diff * (max_diff - talus) * rate * 0.5;
-                        elevation[idx] -= transfer;
-                        elevation[ni] += transfer;
+                        delta[idx] -= transfer;
+                        delta[ni] += transfer;
                     }
                 }
             }
+        }
+        for i in 0..elevation.len() {
+            if terrain[i] == 1 { elevation[i] = (elevation[i] + delta[i]).max(0.001); }
         }
     }
 }
@@ -332,32 +440,42 @@ const ROOT_REACH: u16 = 8;
 
 /// Separable box blur with cylindrical X wrap and clamped Y (poles). Radius in cells.
 fn box_blur_wrap(src: &[f32], w: u32, h: u32, radius: i32) -> Vec<f32> {
+    use rayon::prelude::*;
     let wi = w as i32;
     let hi = h as i32;
     let win = (2 * radius + 1) as f32;
+
+    // Both sweeps are rayon-parallel over ROWS and each writes only its own
+    // cells, so the result is bit-identical regardless of scheduling -- the
+    // same discipline section 8.9 rule 2 already applies to the phase-3 row
+    // loops. This is called several times per phase-2 run now (the fluvial
+    // spread, and the grid-scale budget's iteration), so it stopped being
+    // cheap enough to leave sequential.
     let mut tmp = vec![0.0f32; src.len()];
-    for y in 0..hi {
-        let row = (y as u32 * w) as usize;
+    tmp.par_chunks_mut(w as usize).enumerate().for_each(|(y, dst)| {
+        let row = y * w as usize;
         for x in 0..wi {
             let mut sum = 0.0f32;
             for dx in -radius..=radius {
                 let xx = (((x + dx) % wi) + wi) % wi;
                 sum += src[row + xx as usize];
             }
-            tmp[row + x as usize] = sum / win;
+            dst[x as usize] = sum / win;
         }
-    }
+    });
+
     let mut out = vec![0.0f32; src.len()];
-    for y in 0..hi {
-        for x in 0..wi {
-            let mut sum = 0.0f32;
-            for dy in -radius..=radius {
-                let yy = (y + dy).clamp(0, hi - 1);
-                sum += tmp[(yy as u32 * w) as usize + x as usize];
+    out.par_chunks_mut(w as usize).enumerate().for_each(|(y, dst)| {
+        let y = y as i32;
+        for dy in -radius..=radius {
+            let yy = (y + dy).clamp(0, hi - 1);
+            let row = (yy as u32 * w) as usize;
+            for x in 0..w as usize {
+                dst[x] += tmp[row + x];
             }
-            out[(y as u32 * w) as usize + x as usize] = sum / win;
         }
-    }
+        for v in dst.iter_mut() { *v /= win; }
+    });
     out
 }
 
@@ -609,6 +727,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
     }
 
+
     // -- Distance-from-coast (full flood) for the coastal falloff --
     let mut coast_dist = vec![0u16; n];
     {
@@ -693,6 +812,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
 
     // Terrain-aware micro-relief so no land area is ever a perfectly flat, mono
     // plateau (plateaus stay smooth, hillsides roll, floodplains stay flat).
+    limit_grid_scale_relief(&mut elevation, &terrain, w, h);
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
 
     for i in 0..n {
@@ -1264,6 +1384,7 @@ pub fn generate_elevation_from_terrain(
     }
 
     // â”€â”€ Step 6: Terrain-aware micro-relief, then write back to buffer â”€â”€â”€â”€
+    limit_grid_scale_relief(&mut elevation, &terrain, w, h);
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
     for i in 0..n {
         if terrain[i] == 1 {
@@ -1418,6 +1539,7 @@ pub fn generate_elevation_ridged(
     }
 
     // Terrain-aware micro-relief (plateaus smooth, hillsides roll, flats flat).
+    limit_grid_scale_relief(&mut elevation, &terrain, w, h);
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
 
     for i in 0..n {
@@ -1635,6 +1757,7 @@ pub fn generate_elevation_cordillera(
     isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
     normalize_and_redistribute(&mut elevation, &terrain, n, height, density, &geo.region_id, geo.region_count);
+    limit_grid_scale_relief(&mut elevation, &terrain, w, h);
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
 
     for i in 0..n {
@@ -2063,6 +2186,139 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
     for i in 0..n {
         if terrain[i] == 1 { buf.elevation[i] = elevation[i].clamp(0.01, 1.0); }
     }
+}
+
+// ── The grid-scale relief budget ────────────────────────────────────────────
+//
+// A cell is a `km_per_cell`-wide AVERAGE of the landscape inside it, so relief
+// at the ONE-CELL scale is, by construction, relief the grid cannot resolve.
+// Real topography sampled at 11 km (the default 3600-wide world) is smooth at
+// that scale: adjacent samples differ because the land is going somewhere, not
+// because each sample has its own private bump.
+//
+// Phase 2's field did have private bumps, and the hypsometric redistribution
+// then amplified them along with everything else -- measured on a plate world,
+// `redistribute_elevation` multiplies landform relief by 7.7x and grid-scale
+// relief by 8.9x, so whatever one-cell content the noise stack leaves is what
+// the finished map ends up textured with. At 1800x900 that came out at 80 m RMS.
+//
+// 80 m is a lot, and the number that says so belongs to the RENDERER: shaded
+// relief saturates its ambient-occlusion term at `AO_REF` = 240 m of concavity
+// against the 8-neighbour mean (`render/tile_image.rs`, itself measured -- see
+// section 8.21's account of AO at 44 m resolving as film grain). A world whose
+// grid-scale RMS is a third of that is drawing AO texture on every cell of
+// every plain, which is exactly the "too thin lines / far too eroded for an
+// Earth-sized world" this budget answers.
+//
+// So: cap the one-cell component at a stated fraction of the renderer's own
+// saturation scale, SELF-CALIBRATING (measure this world's grid-scale RMS and
+// scale the detail band to fit) rather than by a hand-tuned amplitude -- the
+// same discipline `need_scale` and `prov_good_yield_scale` already use in the
+// campaign half, and for the same reason: the right constant depends on the
+// world, and a fixed one is wrong on every world but the one it was tuned on.
+//
+// Three properties this deliberately keeps:
+//   * It only ever SMOOTHS. A world already inside budget is returned
+//     bit-identical, so this can never invent relief.
+//   * It touches only the ONE-CELL band (the residual against a radius-1 box
+//     blur). Landform relief -- the ranges, the massifs, the basins, which is
+//     everything a reader actually looks at -- is untouched: measured, the
+//     landform figure moves by well under 1%.
+//   * It runs BEFORE `apply_micro_relief`, so the deliberate +/-14 m dither
+//     that keeps plateaus from being perfectly flat survives it. That dither
+//     sits an order of magnitude below `AO_REF` on purpose and is not what
+//     this is aimed at.
+
+/// Grid-scale relief RMS allowed, in metres.
+///
+/// CHOSEN BY LOOKING, over a sweep rendered through the real hillshade
+/// (`dump_erosion_sheet` at 48 / 24 / 16 / 12 m on one world): 48 and 24 both
+/// still comb every steep flank with visible ribbing, 16 reads as a massif
+/// with smooth flanks, and 12 is not detectably better than 16. It sits at
+/// about a fifteenth of the renderer's `AO_REF`, so one-cell concavity now
+/// draws at a few percent of AO saturation instead of a third of it.
+///
+/// The HONEST CAVEAT, because this number is lower than a purely physical
+/// argument would put it: real continental topography is roughly self-affine,
+/// and scaling a ~400 m RMS relief at 100 km down to a 22 km cell with a Hurst
+/// exponent near 0.5 suggests a legitimate one-cell residual nearer 60 m. Ours
+/// cannot be spent that way, because our one-cell content is UNCORRELATED
+/// between neighbours (independent noise at the top of an fbm/ridged stack)
+/// while Earth's is STRUCTURED -- part of a cascade whose ridges and valleys
+/// continue across cells. Identical RMS, completely different reading: noise
+/// looks like grain, structure looks like terrain. Buying back that headroom
+/// properly means generating structured sub-grid detail (a real multifractal
+/// cascade, or erosion run at a finer scale and averaged down), which is a
+/// terrain-generation change, not a shading one. Until then the budget is set
+/// where the texture reads as terrain rather than where the variance argument
+/// alone would allow.
+const GRID_RELIEF_BUDGET_M: f32 = 16.0;
+
+/// Cap the ONE-CELL component of the finished elevation field at
+/// `GRID_RELIEF_BUDGET_M`, leaving everything at landform scale alone. Returns
+/// the (before, after) grid-scale RMS in metres so callers and tests can report
+/// it. A no-op (and bit-identical) on a world already inside the budget.
+fn limit_grid_scale_relief(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32) -> (f32, f32) {
+    const MAX_ELEV: f32 = 8848.0;
+    /// Correction passes. Scaling the detail band is NOT idempotent: writing
+    /// `e' = m + k(e - m)` leaves `residual' = k(e - m) + (1 - k)(m - blur m)`,
+    /// so the band between one and two cells leaks back in and one pass lands
+    /// well short of the target -- measured on a real plate world, a single
+    /// pass aimed at 16 m settled at 41 m. Iterating to the fixed point is the
+    /// honest fix; it converges in two or three passes and this cap is only a
+    /// termination guarantee.
+    const MAX_PASSES: usize = 6;
+
+    // A LAND-ONLY local mean: blur the elevation masked to land and divide by
+    // the blurred mask. A plain blur would average a 3000 m coastal cell
+    // against sea cells held at 0 and call the coastline itself "detail" --
+    // which both swamps the measurement (the land-sea step is the largest
+    // gradient on the map) and, worse, would then plane the coast DOWN toward
+    // sea level, drawing exactly the hard dark rim this is meant to remove.
+    let land: Vec<f32> = terrain.iter().map(|&t| if t == 1 { 1.0 } else { 0.0 }).collect();
+    let den = box_blur_wrap(&land, w, h, 1);
+
+    let local_mean = |e: &[f32]| -> Vec<f32> {
+        let masked: Vec<f32> = (0..e.len())
+            .map(|i| if terrain[i] == 1 { e[i] } else { 0.0 })
+            .collect();
+        let num = box_blur_wrap(&masked, w, h, 1);
+        (0..e.len())
+            .map(|i| if den[i] > 1e-6 { num[i] / den[i] } else { e[i] })
+            .collect()
+    };
+    let residual_rms = |e: &[f32], m: &[f32]| -> (f32, u64) {
+        let mut sq = 0.0f64;
+        let mut cnt = 0u64;
+        for i in 0..e.len() {
+            if terrain[i] != 1 { continue; }
+            let d = ((e[i] - m[i]) * MAX_ELEV) as f64;
+            sq += d * d;
+            cnt += 1;
+        }
+        if cnt == 0 { (0.0, 0) } else { ((sq / cnt as f64).sqrt() as f32, cnt) }
+    };
+
+    let mut smooth = local_mean(elevation);
+    let (first, cnt) = residual_rms(elevation, &smooth);
+    if cnt == 0 { return (0.0, 0.0); }
+    let budget = GRID_RELIEF_BUDGET_M;
+    let mut rms = first;
+    if rms <= budget || rms <= 0.0 {
+        return (first, first);
+    }
+
+    for _ in 0..MAX_PASSES {
+        let keep = budget / rms;
+        for i in 0..elevation.len() {
+            if terrain[i] != 1 { continue; }
+            elevation[i] = (smooth[i] + (elevation[i] - smooth[i]) * keep).clamp(0.01, 1.0);
+        }
+        smooth = local_mean(elevation);
+        rms = residual_rms(elevation, &smooth).0;
+        if rms <= budget { break; }
+    }
+    (first, rms)
 }
 
 /// Terrain-aware MICRO-RELIEF dither â€” guarantees there are no perfectly flat,
@@ -2930,5 +3186,446 @@ mod tests {
                  land cells sit on a plate boundary (a pre-slice-4 world measures ~100%)",
                 frac * 100.0);
         }
+    }
+
+    // ── EROSION TEXTURE DIAGNOSTIC ──────────────────────────────────────────
+    //
+    // The question this answers is the one a hillshade actually poses: how much
+    // of the relief lives at the GRID SCALE (a one-cell notch, which the shading
+    // draws as a thin dark scratch) versus at the LANDFORM scale (a massif,
+    // which reads as a mountain). `rms_slope` in `terrain_metrics` cannot tell
+    // those apart -- both raise it.
+    //
+    // `concavity` is exactly the quantity `render::tile_image::relief_at` feeds
+    // its ambient-occlusion term: the cell's height against its 8-neighbour
+    // mean. AO saturates at AO_REF = 240 m, so a cell sitting >120 m below its
+    // own neighbourhood is already drawing at half the maximum darkening -- that
+    // is the definition of a visible scratch, not an arbitrary cutoff.
+    fn notch_metrics(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (f32, f32, f32) {
+        const M: f32 = 8848.0;
+        let wi = w as i32;
+        let mut notch = 0u64;
+        let mut land = 0u64;
+        let mut depth_sum = 0.0f64;
+        let mut grid_energy = 0.0f64;
+        for y in 1..h as i32 - 1 {
+            for x in 0..wi {
+                let i = (y * wi + x) as usize;
+                if terrain[i] != 1 { continue; }
+                let mut mean = 0.0f32;
+                let mut ok = true;
+                for (dx, dy) in [(-1i32,-1i32),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)] {
+                    let nx = ((x + dx) % wi + wi) % wi;
+                    let ni = ((y + dy) * wi + nx) as usize;
+                    if terrain[ni] != 1 { ok = false; break; }
+                    mean += elevation[ni];
+                }
+                if !ok { continue; }
+                land += 1;
+                let concavity = (mean / 8.0 - elevation[i]) * M;
+                grid_energy += (concavity as f64) * (concavity as f64);
+                if concavity > 120.0 { notch += 1; depth_sum += concavity as f64; }
+            }
+        }
+        if land == 0 { return (0.0, 0.0, 0.0); }
+        (
+            notch as f32 / land as f32 * 100.0,
+            if notch == 0 { 0.0 } else { (depth_sum / notch as f64) as f32 },
+            (grid_energy / land as f64).sqrt() as f32,
+        )
+    }
+
+    /// Directional grid-scale curvature, in metres: RMS of the second difference
+    /// along X and along Y separately. Isotropic terrain gives two similar
+    /// numbers; a value much larger on one axis is a SCAN or SAMPLING artefact
+    /// of that axis, not a landform -- terrain has no idea which way the array
+    /// is stored.
+    fn axis_curvature(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (f32, f32) {
+        let wi = w as i32;
+        let (mut sx, mut sy, mut n) = (0.0f64, 0.0f64, 0u64);
+        for y in 1..h as i32 - 1 {
+            for x in 0..wi {
+                let i = (y * wi + x) as usize;
+                if terrain[i] != 1 { continue; }
+                let xl = ((x - 1 + wi) % wi) as usize + (y * wi) as usize;
+                let xr = ((x + 1) % wi) as usize + (y * wi) as usize;
+                let yu = ((y - 1) * wi + x) as usize;
+                let yd = ((y + 1) * wi + x) as usize;
+                if terrain[xl] != 1 || terrain[xr] != 1 || terrain[yu] != 1 || terrain[yd] != 1 { continue; }
+                let cx = (elevation[i] - 0.5 * (elevation[xl] + elevation[xr])) * 8848.0;
+                let cy = (elevation[i] - 0.5 * (elevation[yu] + elevation[yd])) * 8848.0;
+                sx += (cx as f64) * (cx as f64);
+                sy += (cy as f64) * (cy as f64);
+                n += 1;
+            }
+        }
+        if n == 0 { return (0.0, 0.0); }
+        ((sx / n as f64).sqrt() as f32, (sy / n as f64).sqrt() as f32)
+    }
+
+    /// Landform-scale relief: the standard deviation of a 5-cell box-blurred
+    /// elevation, in metres. The pair (grid-scale RMS concavity, landform relief)
+    /// is the scale separation -- big mountains, smooth flanks is a LOW first
+    /// number and a HIGH second one.
+    fn landform_relief(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> f32 {
+        let blur = box_blur_wrap(elevation, w, h, 5);
+        let mut sum = 0.0f64;
+        let mut sq = 0.0f64;
+        let mut n = 0u64;
+        for i in 0..elevation.len() {
+            if terrain[i] != 1 { continue; }
+            let v = (blur[i] * 8848.0) as f64;
+            sum += v; sq += v * v; n += 1;
+        }
+        if n == 0 { return 0.0; }
+        let mean = sum / n as f64;
+        ((sq / n as f64) - mean * mean).max(0.0).sqrt() as f32
+    }
+
+    /// Print the erosion texture numbers for every elevation model.
+    ///   cargo test --release --lib erosion_texture_metrics -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn erosion_texture_metrics() {
+        let (w, h) = std::env::var("EROSION_GRID").ok()
+            .and_then(|s| { let mut p = s.split('x'); Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?)) })
+            .unwrap_or((1800u32, 900u32));
+        let km_per_cell = 40075.0 / w as f32;
+        println!("\n== EROSION TEXTURE @ {w}x{h} ({km_per_cell:.1} km/cell) ==");
+        println!("{:<12} {:>10} {:>12} {:>12} {:>12} {:>11}",
+                 "model", "notch%", "notch_m", "gridRMS_m", "landform_m", "curvY/curvX");
+        let report = |name: &str, buf: &WorldBuffer| {
+            let (nd, nm, ge) = notch_metrics(&buf.elevation, &buf.terrain, buf.width, buf.height);
+            let lf = landform_relief(&buf.elevation, &buf.terrain, buf.width, buf.height);
+            let (cx, cy) = axis_curvature(&buf.elevation, &buf.terrain, buf.width, buf.height);
+            println!("{name:<12} {nd:>9.2}% {nm:>11.0}m {ge:>11.1}m {lf:>11.0}m {:>11.2}", cy / cx.max(1e-6));
+        };
+
+        let mut plate_buf = continent(w, h, w / 12);
+        let n = plate_buf.total();
+        plate_buf.plate_index = vec![0u16; n];
+        plate_buf.boundary_type = vec![0u8; n];
+        plate_buf.is_volcanic = vec![0u8; n];
+        crate::sim::plates::generate_plates_and_landmass(&mut plate_buf, 7, 14);
+        generate_elevation(&mut plate_buf, 7);
+        report("plates", &plate_buf);
+
+        let mut shape_buf = continent(w, h, w / 12);
+        generate_elevation_from_terrain(&mut shape_buf, 7, 0.5, 0.5, 0.5, 0.4);
+        report("shape", &shape_buf);
+
+        let mut cord_buf = continent(w, h, w / 12);
+        generate_elevation_cordillera(&mut cord_buf, 7, 0.5, 0.5, 0.5, 0.4);
+        report("cordillera", &cord_buf);
+
+        let mut ridged_buf = continent(w, h, w / 12);
+        generate_elevation_ridged(&mut ridged_buf, 7, 0.5, 0.5, 0.5, 0.4);
+        report("ridged", &ridged_buf);
+    }
+
+    /// Render a real generated world through the REAL `render_tile` path in the
+    /// monochrome ANALYTICAL elevation style -- colour carries zero information
+    /// there, so what is left on the page is exactly the shading, which is the
+    /// thing under discussion. Writes the whole world plus a 4x crop of its most
+    /// mountainous window, because grid-scale texture is invisible at world zoom
+    /// (the lesson section 8.21 already paid for once with the fill light).
+    ///   EROSION_SHEET_DIR=/tmp/e cargo test --release --lib dump_erosion_sheet -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn dump_erosion_sheet() {
+        use crate::render::tile_image::{render_tile_with_neighbors_ctx, RenderCtx, TileNeighbors};
+        use crate::tile::cell::TileData;
+        use crate::tile::coords::TILE_SIZE;
+
+        let (w, h) = std::env::var("EROSION_GRID").ok()
+            .and_then(|s| { let mut p = s.split('x'); Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?)) })
+            .unwrap_or((1800u32, 900u32));
+
+        let mut buf = continent(w, h, w / 12);
+        let n = buf.total();
+        buf.plate_index = vec![0u16; n];
+        buf.boundary_type = vec![0u8; n];
+        buf.is_volcanic = vec![0u8; n];
+        crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 14);
+        generate_elevation(&mut buf, 7);
+        compute_sea_depth(&mut buf);
+        generate_shelves(&mut buf, 7, 12.0, 0.4, 0.3, 8.0);
+
+        let (nd, nm, ge) = notch_metrics(&buf.elevation, &buf.terrain, w, h);
+        let lf = landform_relief(&buf.elevation, &buf.terrain, w, h);
+        println!("notch={nd:.2}%  notch_m={nm:.0}  gridRMS={ge:.1}m  landform={lf:.0}m");
+
+        let ts = TILE_SIZE as usize;
+        let tw = (w as usize).div_ceil(ts);
+        let th = (h as usize).div_ceil(ts);
+        let mut tiles: Vec<TileData> = Vec::with_capacity(tw * th);
+        for ty in 0..th {
+            for tx in 0..tw {
+                let mut t = TileData::new_sea();
+                for ly in 0..ts {
+                    for lx in 0..ts {
+                        let (gx, gy) = (tx * ts + lx, ty * ts + ly);
+                        if gx >= w as usize || gy >= h as usize { continue; }
+                        let g = gy * w as usize + gx;
+                        let l = ly * ts + lx;
+                        t.terrain[l] = buf.terrain[g];
+                        t.elevation[l] = buf.elevation[g];
+                        t.sea_depth[l] = buf.sea_depth[g];
+                    }
+                }
+                tiles.push(t);
+            }
+        }
+
+        let dir = std::env::var("EROSION_SHEET_DIR")
+            .unwrap_or_else(|_| std::env::temp_dir().to_string_lossy().into_owned());
+        std::fs::create_dir_all(&dir).ok();
+        let tag = std::env::var("SHEET_TAG").unwrap_or_default();
+
+        for layer in ["terrain#style=analytical", "terrain"] {
+            let name = if layer.contains("analytical") { "analytical" } else { "terrain" };
+            let mut img = vec![0u8; w as usize * h as usize * 3];
+            for ty in 0..th {
+                for tx in 0..tw {
+                    let at = |x: isize, y: isize| -> Option<&TileData> {
+                        if x < 0 || y < 0 || x >= tw as isize || y >= th as isize { return None; }
+                        tiles.get(y as usize * tw + x as usize)
+                    };
+                    let nb = TileNeighbors {
+                        west: at(tx as isize - 1, ty as isize),
+                        east: at(tx as isize + 1, ty as isize),
+                        north: at(tx as isize, ty as isize - 1),
+                        south: at(tx as isize, ty as isize + 1),
+                    };
+                    let ctx = RenderCtx { grid_w: w, grid_h: h, tx: tx as i32, ty: ty as i32, step: 1, isolate: None };
+                    let rgba = render_tile_with_neighbors_ctx(&tiles[ty * tw + tx], layer, &nb, &ctx);
+                    for ly in 0..ts {
+                        for lx in 0..ts {
+                            let (gx, gy) = (tx * ts + lx, ty * ts + ly);
+                            if gx >= w as usize || gy >= h as usize { continue; }
+                            let src = (ly * ts + lx) * 4;
+                            let dst = (gy * w as usize + gx) * 3;
+                            img[dst..dst + 3].copy_from_slice(&rgba[src..src + 3]);
+                        }
+                    }
+                }
+            }
+            let path = format!("{dir}/erosion_{name}{tag}.png");
+            image::save_buffer(&path, &img, w, h, image::ColorType::Rgb8).unwrap();
+            println!("wrote {path}");
+
+            let (cw, ch) = (200usize, 130usize);
+            let mut best = (0usize, 0usize, -1.0f32);
+            for oy in (0..h as usize - ch).step_by(30) {
+                for ox in (0..w as usize - cw).step_by(30) {
+                    let mut score = 0.0f32;
+                    for y in (oy..oy + ch).step_by(3) {
+                        for x in (ox..ox + cw).step_by(3) {
+                            let g = y * w as usize + x;
+                            if buf.terrain[g] == 1 { score += buf.elevation[g]; }
+                        }
+                    }
+                    if score > best.2 { best = (ox, oy, score); }
+                }
+            }
+            const M: usize = 4;
+            let mut crop = vec![0u8; cw * M * ch * M * 3];
+            for y in 0..ch * M {
+                for x in 0..cw * M {
+                    let src = ((best.1 + y / M) * w as usize + (best.0 + x / M)) * 3;
+                    let dst = (y * cw * M + x) * 3;
+                    crop[dst..dst + 3].copy_from_slice(&img[src..src + 3]);
+                }
+            }
+            let cp = format!("{dir}/erosion_crop_{name}{tag}.png");
+            image::save_buffer(&cp, &crop, (cw * M) as u32, (ch * M) as u32, image::ColorType::Rgb8).unwrap();
+            println!("wrote {cp} (from {},{})", best.0, best.1);
+        }
+    }
+
+    // ── Erosion appearance gates ────────────────────────────────────────────
+    //
+    // Three claims, one per fix, each falsifiable on its own without rendering
+    // anything. The instruments that motivated them are `erosion_texture_
+    // metrics` and `dump_erosion_sheet` above; these are what keeps the result.
+
+    /// A relaxation pass's result must not depend on the order its cells happen
+    /// to be stored in. `thermal_erosion` used to write both the donor and the
+    /// recipient in place while scanning rows top-to-bottom, so a cell was
+    /// slumped into before it was itself visited and the whole pass carried a
+    /// north-to-south bias.
+    ///
+    /// Flipping the world in Y, eroding, and flipping back must give exactly
+    /// the same field as eroding it upright -- the scan then runs the opposite
+    /// way through the same terrain. The in-place version fails this; the
+    /// simultaneous-update version passes it bit-exactly.
+    #[test]
+    fn thermal_erosion_does_not_depend_on_scan_order() {
+        let (w, h) = (48u32, 32u32);
+        let n = (w * h) as usize;
+        let terrain = vec![1u8; n];
+
+        // An asymmetric ridge, so a north-to-south bias has something to bite on.
+        let mut a = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let fx = x as f32 / w as f32;
+                let fy = y as f32 / h as f32;
+                a[(y * w + x) as usize] =
+                    0.15 + 0.7 * (1.0 - (fy - 0.35).abs() * 2.4).max(0.0) + 0.1 * (fx * 9.0).sin();
+            }
+        }
+
+        let flip = |v: &[f32]| -> Vec<f32> {
+            let mut o = vec![0.0f32; n];
+            for y in 0..h {
+                for x in 0..w {
+                    o[(y * w + x) as usize] = v[((h - 1 - y) * w + x) as usize];
+                }
+            }
+            o
+        };
+
+        let mut upright = a.clone();
+        thermal_erosion(&mut upright, &terrain, w, h, 4);
+
+        let mut flipped = flip(&a);
+        thermal_erosion(&mut flipped, &terrain, w, h, 4);
+        let unflipped = flip(&flipped);
+
+        // Row 0 and row h-1 are skipped by the pass itself (`1..h-1`), so they
+        // swap roles under the flip and are excluded rather than special-cased.
+        for y in 1..h - 1 {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                assert!(
+                    (upright[i] - unflipped[i]).abs() < 1e-6,
+                    "thermal erosion is scan-order dependent at ({x},{y}): \
+                     {} vs {} (flipped)",
+                    upright[i], unflipped[i],
+                );
+            }
+        }
+    }
+
+    /// Fluvial incision must be SPREAD across the valley it belongs to, not cut
+    /// into the single cell the D8 path happens to pick -- and it must still
+    /// actually erode, or the fix would pass by doing nothing (this codebase's
+    /// standing failure mode: `no_shipped_mineral_places_nothing`,
+    /// `TERROIR_FLOOR`, `highland_cap`).
+    ///
+    /// Measured on a tilted, noisy plane: material removed must be real, and
+    /// almost none of the eroded cells may end up sitting in a one-cell notch.
+    #[test]
+    fn fluvial_incision_is_spread_not_slotted() {
+        // A REAL generated landscape, not a synthetic ramp: a uniformly tilted
+        // plane drains every cell alike, so its carve is broad however the
+        // incision is applied and it cannot tell the two apart (measured -- the
+        // first cut of this test used one and passed on the unfixed code). A
+        // landscape with an actual drainage network is what concentrates flow
+        // into single cells in the first place.
+        let (w, h) = (256u32, 192u32);
+        let mut buf = continent(w, h, w / 10);
+        generate_elevation_ridged(&mut buf, 11, 0.6, 0.6, 0.5, 0.4);
+        let terrain = buf.terrain.clone();
+        let n = (w * h) as usize;
+
+        let before = buf.elevation.clone();
+        let mut elevation = before.clone();
+        stream_power_erosion(&mut elevation, &terrain, w, h, 3, 40_000, None, None);
+
+        let cut: Vec<f32> = (0..n)
+            .map(|i| if terrain[i] == 1 { (before[i] - elevation[i]).max(0.0) } else { 0.0 })
+            .collect();
+        let removed: f32 = cut.iter().sum();
+        assert!(removed > 0.0, "stream power removed nothing at all");
+
+        // The claim, stated on the incision field itself so it does not depend
+        // on how steep this particular fixture happens to be: how much of what
+        // was carved lives at the ONE-CELL scale. A sharp D8 cut puts most of
+        // it there (each cell's own channel, nothing on its neighbours); a cut
+        // spread across the valley it belongs to puts most of it at landform
+        // scale instead. Measured on this fixture: 0.409 with the sharp one-cell
+        // incision this replaced, 0.189 with the spread one. The threshold sits
+        // between them with real headroom on both sides -- verified by reverting
+        // the fix and watching this fail, which is the only thing that makes a
+        // gate worth having.
+        let smooth = box_blur_wrap(&cut, w, h, 1);
+        let (mut sq_all, mut sq_grid, mut cnt) = (0.0f64, 0.0f64, 0u64);
+        for i in 0..n {
+            if terrain[i] != 1 { continue; }
+            sq_all += (cut[i] as f64) * (cut[i] as f64);
+            let d = (cut[i] - smooth[i]) as f64;
+            sq_grid += d * d;
+            cnt += 1;
+        }
+        assert!(cnt > 0);
+        let grid_frac = (sq_grid / sq_all.max(1e-30)).sqrt() as f32;
+        println!("fluvial incision: one-cell share of the carve = {grid_frac:.3}");
+        assert!(
+            grid_frac < 0.28,
+            "fluvial incision is being cut into one-cell slots: one-cell share {grid_frac:.3}",
+        );
+    }
+
+    /// `limit_grid_scale_relief` must cap the one-cell band, leave landform
+    /// relief alone, and be a true no-op on a world already inside budget.
+    /// All three halves matter: a limiter that also flattens the mountains
+    /// would "pass" the first claim and ruin the map.
+    #[test]
+    fn the_grid_scale_budget_caps_texture_without_flattening_landforms() {
+        let (w, h) = (128u32, 96u32);
+        let n = (w * h) as usize;
+        let terrain = vec![1u8; n];
+
+        // Landform-scale relief plus heavy independent per-cell noise.
+        let mut noisy = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                let landform = 0.15
+                    + 0.30 * (x as f32 / w as f32 * std::f32::consts::TAU).sin()
+                    + 0.20 * (y as f32 / h as f32 * std::f32::consts::PI).sin();
+                noisy[i] = (landform + (hash_grid(x as i32, y as i32, 4242) - 0.5) * 0.06).clamp(0.01, 1.0);
+            }
+        }
+
+        let grid_rms = |v: &[f32]| -> f32 {
+            let sm = box_blur_wrap(v, w, h, 1);
+            let mut sq = 0.0f64;
+            for i in 0..n { let d = ((v[i] - sm[i]) * 8848.0) as f64; sq += d * d; }
+            (sq / n as f64).sqrt() as f32
+        };
+        let landform_rms = |v: &[f32]| -> f32 {
+            let sm = box_blur_wrap(v, w, h, 5);
+            let (mut s, mut q) = (0.0f64, 0.0f64);
+            for i in 0..n { let e = (sm[i] * 8848.0) as f64; s += e; q += e * e; }
+            let m = s / n as f64;
+            ((q / n as f64) - m * m).max(0.0).sqrt() as f32
+        };
+
+        let before_grid = grid_rms(&noisy);
+        let before_landform = landform_rms(&noisy);
+        assert!(before_grid > GRID_RELIEF_BUDGET_M * 2.0,
+                "fixture is not noisy enough to exercise the budget: {before_grid:.1} m");
+
+        let mut capped = noisy.clone();
+        let (reported_before, reported_after) = limit_grid_scale_relief(&mut capped, &terrain, w, h);
+        assert!((reported_before - before_grid).abs() < 1.0, "reported RMS disagrees with the field");
+        assert!(reported_after <= GRID_RELIEF_BUDGET_M * 1.001,
+                "the iteration did not reach its own budget: {reported_after:.1} m");
+
+        let after_grid = grid_rms(&capped);
+        let after_landform = landform_rms(&capped);
+        assert!(after_grid <= GRID_RELIEF_BUDGET_M * 1.05,
+                "grid-scale relief not brought inside budget: {after_grid:.1} m");
+        assert!((after_landform - before_landform).abs() / before_landform.max(1.0) < 0.01,
+                "the budget flattened LANDFORM relief too: {before_landform:.0} m -> {after_landform:.0} m");
+
+        // Already inside budget => bit-identical, so this can never invent relief.
+        let smooth_field: Vec<f32> = box_blur_wrap(&capped, w, h, 3);
+        let mut smooth_copy = smooth_field.clone();
+        limit_grid_scale_relief(&mut smooth_copy, &terrain, w, h);
+        assert_eq!(smooth_copy, smooth_field, "a world inside budget must be returned untouched");
     }
 }
