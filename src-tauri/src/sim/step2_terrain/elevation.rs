@@ -91,6 +91,10 @@ fn warped_coords(x: f32, y: f32, seed: u64, strength: f32) -> (f32, f32) {
 /// gated change). Returns, per land cell: `flow_to` (the neighbour it drains
 /// toward -- itself for an outlet cell directly on the coast) and `order`
 /// (the pop order, ascending filled elevation -- headwaters last).
+/// Test-only now that phase 2 does no fluvial carving (see "NO VALLEY CARVING"
+/// below): `terrain_metrics` still reports drainage density from it, and phase 5
+/// keeps its own separate implementation for the real river network.
+#[cfg(test)]
 fn priority_flood_flow(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (Vec<usize>, Vec<usize>) {
     use std::cmp::Ordering;
     use std::collections::BinaryHeap;
@@ -173,191 +177,42 @@ fn priority_flood_flow(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (Ve
 }
 
 
-// ── Fluvial dissection is a SUB-GRID process on an Earth-sized world ─────────
+// ── NO VALLEY CARVING ───────────────────────────────────────────────────────
 //
-// Every world's grid spans Earth's equator, so a cell is `KM_EQUATOR / w` wide:
-// 11 km on the default 3600x1800 grid, 22 km at half that, 100 km+ on a unit
-// test fixture. A river valley is carved at the scale of a valley -- single
-// digit km across -- so on any of those grids the whole landform sits INSIDE
-// one cell. The Grand Canyon is 16 km wide and would not fill a default cell.
+// Phase 2 no longer carves valleys, in any generator, by any mechanism. Three
+// separate attempts to make channel-carving look right on an Earth-sized world
+// all failed for the same underlying reason, and this note records it so a
+// fourth is not attempted from scratch.
 //
-// What a cell can honestly record is therefore not the thalweg but the MEAN
-// lowering over its entire footprint, and that quantity is (a) far shallower
-// than the channel is cut and (b) spatially SMOOTH -- real denudation at 11 km
-// resolution has no one-cell structure in it at all.
+// The mechanisms that were removed, and what each drew on the map:
 //
-// The old code recorded neither. It cut the full `K*A^m*S^n` incision straight
-// into single cells along the D8 flow path, which on an Earth-sized world
-// produced exactly two artefacts, both of them visible in `dump_erosion_sheet`
-// and neither of them a landform: one-cell TRENCHES along every trunk (2.8% of
-// land sat >120 m below its own 8-neighbour mean, averaging 346 m -- i.e. a
-// 22-km-wide, 350-m-deep slot), and the parallel single-cell RILLS that D8
-// routing always produces on a planar slope, which combed every mountain flank
-// with regular one-row striations. That is the "too thin lines, looks like
-// river erosion" this pair of constants exists to answer.
+//   * `carve` / `fine_carve` -- an INVERTED ridged-multifractal field subtracted
+//     from the elevation. An inverted ridged field is a dendritic tree BY
+//     CONSTRUCTION, so this drew a branching dark scratch network across every
+//     continent. `fine_carve` was the worst of them because it was an ABSOLUTE
+//     subtraction: full strength on flat plains, where a drainage tree is
+//     exactly what you do not want painted over an otherwise smooth interior.
 //
-// NOTE the previous attempt at this complaint (commit 3943136) cut the NOISE
-// valley-incision terms hard (`carve` 0.16 -> 0.05) and did not fix it, because
-// the noise terms were never the source: measured per stage, they leave notch
-// density at 0.05% of land and stream power raises it to 0.88% (which the
-// hypsometric redistribution then amplifies 5x along with everything else).
-// Keep that negative result in mind before reaching for the noise knobs again.
-
-/// Earth's equatorial circumference in km. Same convention as `deposits.rs` /
-/// `localities.rs` -- a world's grid width always spans it (rule 25: a
-/// threshold about the WORLD is stated in km and converted per world, never
-/// as a cell count).
-const KM_EQUATOR: f32 = 40075.0;
-
-/// Cross-valley scale of a real fluvial system in km -- the valley floor plus
-/// the flanking slopes that feed it. At or below this cell size the network is
-/// RESOLVED and the computed incision is recorded in full; above it, only the
-/// fraction of the cell the valley actually occupies can be, so the recorded
-/// depth scales as `FLUVIAL_VALLEY_KM / km_per_cell`.
-const FLUVIAL_VALLEY_KM: f32 = 6.0;
-
-/// Floor on that fraction, so fluvial erosion can never silently VANISH on a
-/// coarse grid -- this codebase's recurring failure mode (see `highland_cap`,
-/// `no_shipped_mineral_places_nothing`, `TERROIR_FLOOR`). A test fixture at
-/// 60-600 km per cell still gets a quarter of the incision rather than none.
-const FLUVIAL_MIN_RECORDED: f32 = 0.25;
-
-/// How far the incision is SPREAD, in km: a basin's dissection is distributed
-/// across its interfluves, not concentrated in the one cell the D8 path happens
-/// to pick. This is the term that turns a one-cell trench into a broad valley,
-/// and it is the one that actually removes the thin lines -- it redistributes
-/// the eroded volume rather than deleting it, so the denudation budget (and
-/// with it `isostatic_adjust`'s rebound) is unchanged in kind.
-const FLUVIAL_SPREAD_KM: f32 = 34.0;
-
-/// Stream-power erosion: priority-flood fill removes depressions with a
-/// guaranteed-drainage gradient, D8 flow directions fall straight out of the
-/// fill order, drainage AREA accumulates from headwaters to the coast, and
-/// incision follows `K*A^m*S^n` -- the standard landscape-evolution formula
-/// (Whipple & Tucker 1999). Replaces the old droplet simulation
-/// (TERRAIN_2_PLAN.md section 4 slice 1, D6): droplets landing on ocean
-/// discarded ~42% of a 15k-90k budget and left ~1.4 visits per land cell even
-/// at full budget -- a sampling accident, not a network. This instead incises
-/// every land cell's real flow path every outer pass.
-///
-/// `erodibility`/`climate` (both centred on 1.0) are optional per-cell K
-/// multipliers -- lithology resistance and the phase-2 climate-erosion proxy
-/// (TERRAIN_2_PLAN.md section 4 slice 2). `None` is a true 1.0 no-op, so a
-/// caller with no `GeoContext` (tests, the paint-stroke ridge tool) is
-/// unaffected.
-fn stream_power_erosion(
-    elevation: &mut [f32], terrain: &[u8],
-    w: u32, h: u32, seed: u64, iterations: u32,
-    erodibility: Option<&[f32]>, climate: Option<&[f32]>,
-) {
-    let n = (w * h) as usize;
-    if n == 0 || !terrain.iter().any(|&t| t == 1) { return; }
-
-    // Outer passes: re-fill + re-route + incise repeatedly so the network
-    // adjusts as incision reshapes local slope -- a single pass under-carves
-    // low-order tributaries near their headwaters. Each pass is a full
-    // priority-flood over the whole grid (O(n log n), unparallelised -- a
-    // priority queue doesn't parallelise the way the phase-3 row loops do),
-    // so this count is also the dominant phase-2 perf cost (`bench_phase2`).
-    //
-    // Scaled by GRID SIZE, not by `iterations` (the old droplet-count knob):
-    // wall-clock cost is set by how many cells a pass touches, which is `n`,
-    // not by the erosion-strength slider callers already tune via
-    // `iterations`. A world under ~1M cells (this includes every unit test
-    // fixture) can afford 8 full passes for effectively free; only a large
-    // real-generation world (multiple millions of cells) needs the count
-    // capped down to stay inside the plan's own "no slower than before"
-    // budget (section 5). The `/passes` scaling below keeps total incision
-    // depth roughly invariant as this count changes, so fewer passes trades
-    // network self-correction for speed rather than trading away erosion
-    // strength outright -- `cordillera_crest_runs_parallel_to_the_coast` is
-    // the gate that caught this mattering: below ~5-6 passes the traced
-    // spine no longer differentiates from generic ridged noise.
-    let passes: u32 = if n > 4_000_000 {
-        4
-    } else if n > 1_000_000 {
-        6
-    } else {
-        8
-    };
-    let _ = iterations; // kept as the public erosion-strength knob; no longer sizes pass count
-    const K_BASE: f32 = 0.030;
-    const M_AREA: f32 = 0.5;
-    const N_SLOPE: f32 = 1.0;
-
-    // Sub-grid geometry (see FLUVIAL_VALLEY_KM above): how much of the computed
-    // incision a cell of this size can legitimately record, and over how many
-    // cells that record is spread. Both derive from the world's real km/cell,
-    // so the same code gives a 3600-wide world a broad shallow valley system
-    // and a 400-wide test fixture a correspondingly blunter one.
-    let km_per_cell = KM_EQUATOR / w.max(1) as f32;
-    let recorded = (FLUVIAL_VALLEY_KM / km_per_cell).clamp(FLUVIAL_MIN_RECORDED, 1.0);
-    let spread = ((FLUVIAL_SPREAD_KM / km_per_cell).round() as i32).clamp(1, 6);
-
-    // Per-pass record of what the sharp D8 incision actually removed, reused
-    // across passes rather than cloning the elevation field (a full-size clone
-    // per pass is 100 MB+ on a Large world).
-    let mut cut = vec![0.0f32; n];
-
-    let mut rng = StdRng::seed_from_u64(seed ^ 0xE205_17A3);
-    for pass in 0..passes {
-        let (flow_to, order) = priority_flood_flow(elevation, terrain, w, h);
-
-        let mut area = vec![1.0f32; n];
-        for &i in order.iter().rev() {
-            let t = flow_to[i];
-            if t != i { area[t] += area[i]; }
-        }
-
-        cut.iter_mut().for_each(|c| *c = 0.0);
-        for &i in &order {
-            let t = flow_to[i];
-            if t == i { continue; } // coastal outlet: nothing downstream to incise into
-            let drop = (elevation[i] - elevation[t]).max(0.0);
-            let k_e = erodibility.map_or(1.0, |e| e[i]);
-            let k_c = climate.map_or(1.0, |c| c[i]);
-            let a = area[i].max(1.0).powf(M_AREA);
-            let s = drop.max(0.0004).powf(N_SLOPE);
-            let incise = K_BASE * k_e * k_c * a * s / passes as f32 * 3.0;
-            // Never erode a cell below its own downstream neighbour -- the
-            // standard stream-power safety clamp; it also self-limits the
-            // A^m blow-up near a river mouth without any extra bookkeeping.
-            let after = (elevation[i] - incise).max(elevation[t]);
-            cut[i] = elevation[i] - after;
-            elevation[i] = after;
-        }
-
-        // -- Sub-grid correction ------------------------------------------------
-        // Undo the sharp one-cell cut and re-apply it as the SMOOTH, scaled
-        // field a cell this size can actually hold. Undoing is exact because
-        // `cut` is what was really removed (after the downstream clamp), so this
-        // is a redistribution of the pass's own erosion, not a second pass of it.
-        //
-        // Done INSIDE the loop, not once at the end, so the next pass re-routes
-        // over the broadened valley instead of re-cutting the same one-cell
-        // rill deeper every time -- that self-reinforcement is what made the D8
-        // combing so regular.
-        for i in 0..n {
-            if cut[i] != 0.0 { elevation[i] += cut[i]; }
-        }
-        let smooth = box_blur_wrap(&cut, w, h, spread);
-        for i in 0..n {
-            if terrain[i] != 1 { continue; }
-            elevation[i] = (elevation[i] - smooth[i] * recorded).max(0.001);
-        }
-
-        // A small seed-reproducible jitter between passes keeps the drainage
-        // network from locking into a single deterministic tree on pass 1,
-        // so channels meander rather than snapping to one rigid path.
-        if pass + 1 < passes {
-            for i in 0..n {
-                if terrain[i] == 1 {
-                    elevation[i] = (elevation[i] + (rng.gen::<f32>() - 0.5) * 0.0004).max(0.001);
-                }
-            }
-        }
-    }
-}
+//   * `stream_power_erosion` -- priority-flood + flow accumulation + `K*A^m*S^n`
+//     incision (Whipple & Tucker 1999). Correct landscape-evolution physics at
+//     the resolution it is meant for, and wrong here: a cell is `KM_EQUATOR / w`
+//     wide (11 km on the default 3600x1800 grid), so the valley it models is
+//     SUB-GRID -- the Grand Canyon is 16 km across and would not fill one cell.
+//     Applied at cell resolution it cut one-cell trenches down every D8 path
+//     plus the parallel single-cell rills D8 routing always produces on a planar
+//     slope. Scaling and spreading it (the previous session's fix, measured to
+//     cut grid-scale texture 82-93%) made it subtler but did not change what it
+//     draws, because the STRUCTURE is what reads as wrong, not the amplitude.
+//
+// What remains is `thermal_erosion` -- hillslope slumping, which only ROUNDS
+// and never incises -- plus `limit_grid_scale_relief`. Relief comes from the
+// noise stack and the tectonic terms.
+//
+// Rivers are unaffected: phase 5 (`step5_rivers`) runs its own priority-flood
+// fill and derives channels from the finished surface, so it never needed
+// pre-cut channels to bed into. What phase 2 owes it is a surface with enough
+// large-scale structure to route over, which is `apply_micro_relief`'s rolling
+// undulation and the noise stack's own lows -- not a drawn-in drainage tree.
 
 /// Thermal (hillslope) erosion: material slumps from steep slopes, rounding sharp
 /// peaks into weathered massifs and filling the sharpest incisions. Strengthened
@@ -711,19 +566,13 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
                 }
             }
 
-            // Valley incision: a higher-frequency inverted ridged field lightly
-            // dissects the ranges. Kept SMALL (was 0.16) so mountains read as ROUNDED,
-            // WEATHERED massifs — eroded down by the thermal pass below — rather than
-            // knife-cut ridge-and-valley networks (user: "do not make valleys, just
-            // erode the mounts"). The thermal (slumping) erosion does the shaping now.
-            let vridge = ridged_multifractal(rx * 1.9, ry * 1.9, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
-            let carve = (1.0 - vridge).powi(2) * 0.05 * e;
-            // Fine dendritic drainage: a small ABSOLUTE incision everywhere so
-            // even lowland interiors get subtle channels for rivers to bed into
-            // (matches the template path; keeps plains from sheet-flowing).
-            let dridge = ridged_multifractal(rx * 3.4, ry * 3.4, seed.wrapping_add(0x0DDA), 4, 2.0, 2.0);
-            let fine_carve = (1.0 - dridge).powi(2) * 0.045;
-            elevation[idx] = (e - carve - fine_carve).clamp(0.01, 1.5);
+            // NO VALLEY INCISION. See the "no valley carving" note above
+            // `thermal_erosion`: an inverted ridged field is a DENDRITIC TREE by
+            // construction, and subtracting one drew a branching dark scratch
+            // network over every continent -- the thing this generator was
+            // repeatedly asked to stop doing. Relief comes from the noise stack
+            // and the tectonic terms alone; hillslope slumping rounds it.
+            elevation[idx] = e.clamp(0.01, 1.5);
         }
     }
 
@@ -772,10 +621,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     let geo = geology::build_geo_context(buf, seed, &elevation, &coast_dist, orogeny.as_ref());
 
     // -- Erosion (stream power + thermal slump) then hypsometric match --
-    let hydro_iterations = ((n as f32 * 0.012) as u32).clamp(15_000, 90_000);
     let pre_erosion = elevation.clone();
-    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
-                          Some(&geo.erodibility), Some(&geo.climate));
     thermal_erosion(&mut elevation, &terrain, w, h, 3);
     // Isostatic adjustment (erosional rebound + mountain roots) before the rank-based
     // hypsometric redistribution reshapes the histogram.
@@ -1282,21 +1128,12 @@ pub fn generate_elevation_from_terrain(
             // erosion alone left too shallow). Scaled by the local height so
             // highlands get dissected into ridge-and-valley relief while
             // lowlands stay broad. This is what was missing â€” "almost no valleys".
-            let vridge = ridged_multifractal(wnx * ridge_scale * 1.8, wny * ridge_scale * 1.8, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
-            // Small (was 0.14 + 0.22·roughness) so ranges stay rounded/eroded rather
-            // than dissected into ridge-and-valley relief — thermal slumping shapes them.
-            let carve = (1.0 - vridge).powi(2) * (0.05 + 0.07 * roughness) * combined;
-
-            // â”€â”€ Fine dendritic drainage (moderate, natural) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-            // A high-frequency inverted ridged field carves shallow valleys
-            // EVERYWHERE â€” a small ABSOLUTE incision independent of local height,
-            // so broad lowland interiors also get subtle channels for rivers to
-            // bed into. Without it, plains stayed too flat and rivers ran straight
-            // or braided across sheet-flow terrain.
-            let dridge = ridged_multifractal(wnx * ridge_scale * 3.1, wny * ridge_scale * 3.1, seed.wrapping_add(0x0DDA), 4, 2.0, 2.0);
-            let fine_carve = (1.0 - dridge).powi(2) * (0.035 + 0.05 * roughness);
-
-            elevation[idx] = (combined - carve - fine_carve).clamp(0.01, 1.0);
+            // NO VALLEY INCISION -- see the note above `thermal_erosion`. This
+            // path's absolute `fine_carve` term was the most visible of the lot:
+            // an inverted ridged field subtracted EVERYWHERE, at full strength on
+            // flat interiors, which is precisely a dendritic drainage tree drawn
+            // across every plain on the map.
+            elevation[idx] = combined.clamp(0.01, 1.0);
         }
     }
 
@@ -1320,14 +1157,10 @@ pub fn generate_elevation_from_terrain(
 
     // â”€â”€ Step 3: Hydraulic erosion â€” droplet simulation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Scale iterations with world size (small worlds ~15K, large ~100K)
-    let erosion_scale = 0.5 + roughness * 0.5; // rougher = more erosion detail
-    let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     let pre_erosion = elevation.clone();
     // No real plate data on this path -- the relief pseudo-setting only
     // (TERRAIN_2_PLAN.md section 2's documented fiction, never real polarity/age).
     let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
-    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
-                          Some(&geo.erodibility), Some(&geo.climate));
 
     // â”€â”€ Step 4: Thermal erosion â€” smooth sharp ridges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Fewer passes than before (2-4) so the carved valley networks aren't
@@ -1473,16 +1306,8 @@ pub fn generate_elevation_ridged(
             let hill = fbm_noise(ax * f_hill, ay * f_hill, seed.wrapping_add(0xFEED), 3, 2.0, 0.45);
             let e = base * 0.5 + ridge * belt * ridge_amp + hill * hill_amp;
 
-            // Valley incision: a higher-frequency inverted ridged field carves
-            // dendritic valleys through the ranges so highlands read as proper
-            // ridge-and-valley relief instead of smooth domes.
-            let vridge = ridged_multifractal(rx * 2.1, ry * 2.1, seed.wrapping_add(0x5A1F), 5, 2.0, 2.0);
-            let carve = (1.0 - vridge).powi(2) * (0.14 + 0.20 * roughness) * e;
-            // Fine dendritic drainage everywhere (see generate_elevation_from_terrain).
-            let dridge = ridged_multifractal(rx * 3.6, ry * 3.6, seed.wrapping_add(0x0DDA), 4, 2.0, 2.0);
-            let fine_carve = (1.0 - dridge).powi(2) * (0.035 + 0.05 * roughness);
-
-            elevation[idx] = (e - carve - fine_carve).clamp(0.01, 1.5);
+            // NO VALLEY INCISION -- see the note above `thermal_erosion`.
+            elevation[idx] = e.clamp(0.01, 1.5);
         }
     }
 
@@ -1501,12 +1326,8 @@ pub fn generate_elevation_ridged(
     }
 
     // â”€â”€ Erosion (hydraulic droplets + thermal slump) â”€â”€
-    let erosion_scale = 0.5 + roughness * 0.5;
-    let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     let pre_erosion = elevation.clone();
     let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
-    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
-                          Some(&geo.erodibility), Some(&geo.climate));
     let thermal_passes = 2 + (roughness * 2.0) as u32; // fewer passes so valleys survive
     thermal_erosion(&mut elevation, &terrain, w, h, thermal_passes);
     isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
@@ -1747,12 +1568,8 @@ pub fn generate_elevation_cordillera(
     }
 
     // ── Erosion + the shared hypsometric pipeline ──
-    let erosion_scale = 0.5 + roughness * 0.5;
-    let hydro_iterations = ((n as f32 * 0.015 * erosion_scale) as u32).clamp(15_000, 100_000);
     let pre_erosion = elevation.clone();
     let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
-    stream_power_erosion(&mut elevation, &terrain, w, h, seed.wrapping_add(42), hydro_iterations,
-                          Some(&geo.erodibility), Some(&geo.climate));
     thermal_erosion(&mut elevation, &terrain, w, h, 2 + (roughness * 2.0) as u32);
     isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
@@ -2024,7 +1841,7 @@ pub struct RidgeLine {
 /// whose peak height comes from `height`; the crest is broken into sub-peaks by
 /// the shared `ridged_multifractal` field (scaled by `character`), then the new
 /// range is carved by the SAME stream-power + thermal erosion the other
-/// generators use. Reuses `stream_power_erosion`/`thermal_erosion`/
+/// generators use. Reuses `thermal_erosion`/
 /// `ridged_multifractal`/`warped_coords` directly.
 ///
 /// Design (see plan): SCREEN-blends onto existing elevation (so it also works on
@@ -2177,7 +1994,6 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         // small fraction of a droplet per land cell) â€” enough to carve valleys
         // into the new range without eroding the crest away.
         let iters = ((mask_count as f32 * 0.6) as u32).clamp(1_000, 60_000);
-        stream_power_erosion(&mut elevation, &mask_terrain, w, h, seed.wrapping_add(42), iters, None, None);
         let passes = 2 + (avg_char * 3.0) as u32;
         thermal_erosion(&mut elevation, &mask_terrain, w, h, passes);
     }
@@ -2869,7 +2685,6 @@ mod tests {
         let pre = elevation.clone();
 
         // Erode it hard.
-        stream_power_erosion(&mut elevation, &terrain, w, h, 7, 40_000, None, None);
         thermal_erosion(&mut elevation, &terrain, w, h, 4);
         let eroded = elevation.clone();
 
@@ -3235,6 +3050,76 @@ mod tests {
         )
     }
 
+    /// The size of the largest 8-CONNECTED chain of notch cells, as a fraction
+    /// of land, meant to separate "a rough surface" from "a drawn drainage
+    /// tree" (scattered roughness gives isolated specks; a carved network is one
+    /// enormous component spanning a continent).
+    ///
+    /// NEGATIVE RESULT, recorded so it is not built into a gate: on the plate
+    /// model it DOES NOT DISCRIMINATE. Re-adding `fine_carve` to a clean build
+    /// and sweeping the visibility threshold gives 0.110 / 0.177 / 0.287% at
+    /// 60 / 25 / 12 m against a clean 0.122 / 0.186 / 0.299% -- carved measures
+    /// slightly LOWER at every threshold. The reason is `limit_grid_scale_relief`:
+    /// it normalises the one-cell band to a fixed RMS, so whatever pattern the
+    /// noise stack leaves is rescaled to the same amplitude either way, and no
+    /// amplitude statistic downstream of it can see structure. The difference is
+    /// real and obvious on the TEMPLATE path (`EROSION_MODEL=shape` in
+    /// `dump_erosion_sheet`, where the carve was both absolute and stronger) --
+    /// it is simply not a difference these numbers can hold. Look at the sheet.
+    fn largest_notch_component(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> f32 {
+        // 25 m, not the 120 m the notch-density metric uses. That figure is
+        // calibrated to the HILLSHADE (half of `AO_REF`), but the flat
+        // `elevation` tint has no shading at all, so a systematic pattern shows
+        // there at a far shallower amplitude -- which is why the statistics once
+        // read "fixed" while the map plainly was not.
+        const NOTCH_VISIBLE_M: f32 = 25.0;
+        let wi = w as i32;
+        let n = elevation.len();
+        let mut notch = vec![false; n];
+        let mut land = 0u64;
+        for y in 1..h as i32 - 1 {
+            for x in 0..wi {
+                let i = (y * wi + x) as usize;
+                if terrain[i] != 1 { continue; }
+                land += 1;
+                let mut mean = 0.0f32;
+                let mut ok = true;
+                for (dx, dy) in [(-1i32,-1i32),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)] {
+                    let nx = ((x + dx) % wi + wi) % wi;
+                    let ni = ((y + dy) * wi + nx) as usize;
+                    if terrain[ni] != 1 { ok = false; break; }
+                    mean += elevation[ni];
+                }
+                if ok && (mean / 8.0 - elevation[i]) * 8848.0 > NOTCH_VISIBLE_M { notch[i] = true; }
+            }
+        }
+        if land == 0 { return 0.0; }
+
+        let mut seen = vec![false; n];
+        let mut best = 0usize;
+        let mut stack: Vec<usize> = Vec::new();
+        for start in 0..n {
+            if !notch[start] || seen[start] { continue; }
+            seen[start] = true;
+            stack.push(start);
+            let mut size = 0usize;
+            while let Some(i) = stack.pop() {
+                size += 1;
+                let x = (i % w as usize) as i32;
+                let y = (i / w as usize) as i32;
+                for (dx, dy) in [(-1i32,-1i32),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)] {
+                    let ny = y + dy;
+                    if ny < 0 || ny >= h as i32 { continue; }
+                    let nx = ((x + dx) % wi + wi) % wi;
+                    let ni = (ny * wi + nx) as usize;
+                    if notch[ni] && !seen[ni] { seen[ni] = true; stack.push(ni); }
+                }
+            }
+            if size > best { best = size; }
+        }
+        best as f32 / land as f32 * 100.0
+    }
+
     /// Directional grid-scale curvature, in metres: RMS of the second difference
     /// along X and along Y separately. Isotropic terrain gives two similar
     /// numbers; a value much larger on one axis is a SCAN or SAMPLING artefact
@@ -3294,11 +3179,13 @@ mod tests {
         println!("\n== EROSION TEXTURE @ {w}x{h} ({km_per_cell:.1} km/cell) ==");
         println!("{:<12} {:>10} {:>12} {:>12} {:>12} {:>11}",
                  "model", "notch%", "notch_m", "gridRMS_m", "landform_m", "curvY/curvX");
+        println!("(last column: largest connected notch chain, % of land -- a drawn drainage tree is ONE huge component)");
         let report = |name: &str, buf: &WorldBuffer| {
             let (nd, nm, ge) = notch_metrics(&buf.elevation, &buf.terrain, buf.width, buf.height);
             let lf = landform_relief(&buf.elevation, &buf.terrain, buf.width, buf.height);
             let (cx, cy) = axis_curvature(&buf.elevation, &buf.terrain, buf.width, buf.height);
-            println!("{name:<12} {nd:>9.2}% {nm:>11.0}m {ge:>11.1}m {lf:>11.0}m {:>11.2}", cy / cx.max(1e-6));
+            let comp = largest_notch_component(&buf.elevation, &buf.terrain, buf.width, buf.height);
+            println!("{name:<12} {nd:>9.2}% {nm:>11.0}m {ge:>11.1}m {lf:>11.0}m {:>11.2} {comp:>11.3}%", cy / cx.max(1e-6));
         };
 
         let mut plate_buf = continent(w, h, w / 12);
@@ -3341,13 +3228,34 @@ mod tests {
             .and_then(|s| { let mut p = s.split('x'); Some((p.next()?.parse().ok()?, p.next()?.parse().ok()?)) })
             .unwrap_or((1800u32, 900u32));
 
+        // EROSION_MODEL picks which generator to look at. `shape` is the
+        // TEMPLATE path ("Complete from Landmass"), which is what a user who
+        // imported a real-world coastline is actually running -- a different
+        // generator from `plates`, with its own carve terms and its own taper.
+        let model = std::env::var("EROSION_MODEL").unwrap_or_else(|_| "plates".into());
         let mut buf = continent(w, h, w / 12);
         let n = buf.total();
         buf.plate_index = vec![0u16; n];
         buf.boundary_type = vec![0u8; n];
         buf.is_volcanic = vec![0u8; n];
-        crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 14);
-        generate_elevation(&mut buf, 7);
+        match model.as_str() {
+            "shape" => {
+                let mut b = continent(w, h, w / 12);
+                let bn = b.total();
+                b.plate_index = vec![0u16; bn];
+                b.boundary_type = vec![0u8; bn];
+                b.is_volcanic = vec![0u8; bn];
+                crate::sim::plates::generate_plates_and_landmass(&mut b, 7, 14);
+                buf.terrain = b.terrain.clone(); // a real, irregular landmass to work from
+                generate_elevation_from_terrain(&mut buf, 7, 0.5, 0.5, 0.5, 0.4);
+            }
+            "cordillera" => generate_elevation_cordillera(&mut buf, 7, 0.5, 0.5, 0.5, 0.4),
+            "ridged" => generate_elevation_ridged(&mut buf, 7, 0.5, 0.5, 0.5, 0.4),
+            _ => {
+                crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 14);
+                generate_elevation(&mut buf, 7);
+            }
+        }
         compute_sea_depth(&mut buf);
         generate_shelves(&mut buf, 7, 12.0, 0.4, 0.3, 8.0);
 
@@ -3382,8 +3290,8 @@ mod tests {
         std::fs::create_dir_all(&dir).ok();
         let tag = std::env::var("SHEET_TAG").unwrap_or_default();
 
-        for layer in ["terrain#style=analytical", "terrain"] {
-            let name = if layer.contains("analytical") { "analytical" } else { "terrain" };
+        for layer in ["terrain#style=analytical", "terrain", "elevation"] {
+            let name = if layer.contains("analytical") { "analytical" } else { layer };
             let mut img = vec![0u8; w as usize * h as usize * 3];
             for ty in 0..th {
                 for tx in 0..tw {
@@ -3508,65 +3416,6 @@ mod tests {
         }
     }
 
-    /// Fluvial incision must be SPREAD across the valley it belongs to, not cut
-    /// into the single cell the D8 path happens to pick -- and it must still
-    /// actually erode, or the fix would pass by doing nothing (this codebase's
-    /// standing failure mode: `no_shipped_mineral_places_nothing`,
-    /// `TERROIR_FLOOR`, `highland_cap`).
-    ///
-    /// Measured on a tilted, noisy plane: material removed must be real, and
-    /// almost none of the eroded cells may end up sitting in a one-cell notch.
-    #[test]
-    fn fluvial_incision_is_spread_not_slotted() {
-        // A REAL generated landscape, not a synthetic ramp: a uniformly tilted
-        // plane drains every cell alike, so its carve is broad however the
-        // incision is applied and it cannot tell the two apart (measured -- the
-        // first cut of this test used one and passed on the unfixed code). A
-        // landscape with an actual drainage network is what concentrates flow
-        // into single cells in the first place.
-        let (w, h) = (256u32, 192u32);
-        let mut buf = continent(w, h, w / 10);
-        generate_elevation_ridged(&mut buf, 11, 0.6, 0.6, 0.5, 0.4);
-        let terrain = buf.terrain.clone();
-        let n = (w * h) as usize;
-
-        let before = buf.elevation.clone();
-        let mut elevation = before.clone();
-        stream_power_erosion(&mut elevation, &terrain, w, h, 3, 40_000, None, None);
-
-        let cut: Vec<f32> = (0..n)
-            .map(|i| if terrain[i] == 1 { (before[i] - elevation[i]).max(0.0) } else { 0.0 })
-            .collect();
-        let removed: f32 = cut.iter().sum();
-        assert!(removed > 0.0, "stream power removed nothing at all");
-
-        // The claim, stated on the incision field itself so it does not depend
-        // on how steep this particular fixture happens to be: how much of what
-        // was carved lives at the ONE-CELL scale. A sharp D8 cut puts most of
-        // it there (each cell's own channel, nothing on its neighbours); a cut
-        // spread across the valley it belongs to puts most of it at landform
-        // scale instead. Measured on this fixture: 0.409 with the sharp one-cell
-        // incision this replaced, 0.189 with the spread one. The threshold sits
-        // between them with real headroom on both sides -- verified by reverting
-        // the fix and watching this fail, which is the only thing that makes a
-        // gate worth having.
-        let smooth = box_blur_wrap(&cut, w, h, 1);
-        let (mut sq_all, mut sq_grid, mut cnt) = (0.0f64, 0.0f64, 0u64);
-        for i in 0..n {
-            if terrain[i] != 1 { continue; }
-            sq_all += (cut[i] as f64) * (cut[i] as f64);
-            let d = (cut[i] - smooth[i]) as f64;
-            sq_grid += d * d;
-            cnt += 1;
-        }
-        assert!(cnt > 0);
-        let grid_frac = (sq_grid / sq_all.max(1e-30)).sqrt() as f32;
-        println!("fluvial incision: one-cell share of the carve = {grid_frac:.3}");
-        assert!(
-            grid_frac < 0.28,
-            "fluvial incision is being cut into one-cell slots: one-cell share {grid_frac:.3}",
-        );
-    }
 
     /// `limit_grid_scale_relief` must cap the one-cell band, leave landform
     /// relief alone, and be a true no-op on a world already inside budget.

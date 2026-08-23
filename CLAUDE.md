@@ -1030,11 +1030,10 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   droplet simulation (Terrain 2.0 slice 1); outer-pass
                                   count is keyed to GRID SIZE, not the `iterations`
                                   strength knob (see `terrain_metrics`, §3 below).
-                                  Fluvial incision is SUB-GRID and is scaled + spread
-                                  accordingly, `thermal_erosion` is a simultaneous
-                                  (scan-order-free) update, and the finished field's
-                                  one-cell band is capped by `limit_grid_scale_relief`
-                                  — the three fixes behind §8.23
+                                  NO VALLEY CARVING (§8.23): `stream_power_erosion`
+                                  and both noise `carve` terms are GONE — only
+                                  `thermal_erosion` (rounds, never incises) and
+                                  `limit_grid_scale_relief` remain
   step2_terrain/geology.rs      ← TRANSIENT geology (Terrain 2.0 slices 2-3):
                                   recomputed from seed + persisted plate data every
                                   phase-2 run, used, discarded — no tile column.
@@ -2626,7 +2625,765 @@ and `dump_biome_swatch_sheet` already established.
 
 ---
 
-### 8.23 Erosion appearance — relief at the scale a cell can hold
+### 8.23 No valley carving — and why three attempts at it failed
+
+**Phase 2 does not carve valleys. In any generator, by any mechanism.** Three
+separate attempts to make channel-carving look right on an Earth-sized world all
+failed, and the record of them is the point of this section — the fourth attempt
+should not start from scratch.
+
+What was removed, and what each drew on the map:
+
+- **`carve` / `fine_carve`** — an INVERTED ridged-multifractal field subtracted
+  from the elevation. An inverted ridged field is a **dendritic tree by
+  construction**, so this drew a branching dark scratch network across every
+  continent. `fine_carve` was the worst because it was an ABSOLUTE subtraction:
+  full strength on flat plains, which is exactly where a drainage tree painted
+  over an otherwise smooth interior is most obvious.
+- **`stream_power_erosion`** — priority-flood + flow accumulation + `K·A^m·S^n`
+  (Whipple & Tucker 1999). Correct landscape-evolution physics at the resolution
+  it is meant for, and wrong here: a cell is `KM_EQUATOR / w` wide (11 km on the
+  default grid), so the valley it models is SUB-GRID — the Grand Canyon is 16 km
+  across and would not fill one cell. At cell resolution it cut one-cell trenches
+  down every D8 path plus the parallel single-cell rills D8 routing always makes
+  on a planar slope.
+
+**The three attempts, in order, so the pattern is visible:**
+
+| | what it changed | why it failed |
+|---|---|---|
+| `3943136` | noise `carve` 0.16 → 0.05, thermal slump strengthened | aimed at the wrong term — measured per stage, the noise carve leaves notch density at 0.05% of land |
+| `e66dc9f` | stream power scaled + spread to its physical scale; thermal scan-order fixed; a grid-scale relief budget | cut grid-scale texture 82–93% **and the map still showed the tree** — subtler lines are still lines |
+| *this* | every carving mechanism deleted | — |
+
+The lesson the second attempt paid for: **the STRUCTURE is what reads as wrong,
+not the amplitude.** A dendritic pattern at 40 m is still a dendritic pattern.
+Damping it is not the same as not drawing it.
+
+**A measurement caveat that matters more than the fix**, because it is why the
+statistics said "fixed" while the map plainly was not: `notch_metrics`'s 120 m
+threshold is calibrated to the HILLSHADE (half of `AO_REF`), but the flat
+`elevation` tint has no shading at all, and a systematic pattern shows there at a
+far shallower amplitude. **Judge a tint layer on a tint render, not on a
+hillshade statistic.** `dump_erosion_sheet` now writes `elevation` alongside the
+analytical hillshade, and takes `EROSION_MODEL=shape` for the TEMPLATE path —
+which is what anyone who imported a real-world coastline is actually running, a
+different generator with its own carve terms.
+
+**A second negative result, recorded so it is not built into a gate:**
+`largest_notch_component` (the largest 8-connected chain of notch cells — meant
+to separate "rough" from "a drawn tree") **does not discriminate on the plate
+model**. Re-adding `fine_carve` to a clean build measures 0.110 / 0.177 / 0.287%
+at 60 / 25 / 12 m thresholds against a clean 0.122 / 0.186 / 0.299% — carved
+reads *lower* at every threshold. `limit_grid_scale_relief` normalises the
+one-cell band to a fixed RMS, so no amplitude statistic downstream of it can see
+structure. There is therefore **no cheap statistical gate for this**, and none
+was shipped: a gate that passes either way is worse than none.
+
+**What remains** is `thermal_erosion` — hillslope slumping, which only ROUNDS and
+never incises, and whose scan-order fix and gate from the second attempt are kept
+— plus `limit_grid_scale_relief` (below). Relief comes from the noise stack and
+the tectonic terms.
+
+**Rivers are unaffected.** Phase 5 runs its own priority-flood fill and derives
+channels from the finished surface; it never needed pre-cut channels to bed into.
+`priority_flood_flow` in `elevation.rs` is now `#[cfg(test)]`, kept only so
+`terrain_metrics` can still report drainage density.
+
+---
+
+### 8.23b The grid-scale relief budget — relief at the scale a cell can hold
+
+A cell is a `KM_EQUATOR / w`-wide AVERAGE of the landscape inside it, so relief at
+the ONE-CELL scale is by construction relief the grid cannot resolve. Real
+topography sampled at 11 km is smooth at that scale: adjacent samples differ
+because the land is going somewhere, not because each sample has a private bump.
+
+Phase 2's field did have private bumps, and `redistribute_elevation` amplifies
+them along with everything else — measured on a plate world it multiplies landform
+relief **×7.7** and grid-scale relief **×8.9**, so whatever the noise stack leaves
+is what the finished map is textured with. At 1800×900 that came out at **80 m
+RMS** against `AO_REF`'s 240 m: AO texture drawn on every cell of every plain.
+
+`limit_grid_scale_relief` caps the one-cell band at `GRID_RELIEF_BUDGET_M` (16 m),
+self-calibrating — measure this world's grid-scale RMS and scale the detail band to
+fit — rather than by a hand-tuned amplitude, the same discipline `need_scale` and
+`prov_good_yield_scale` use in the campaign half. It only ever SMOOTHS (a world
+inside budget comes back bit-identical), touches only the one-cell band, and runs
+BEFORE `apply_micro_relief` so the deliberate ±14 m dither survives.
+
+Measured, with the erosion of §8.23 also gone (one-cell RMS concavity · notch
+density · landform relief, @1800×900):
+
+| model | before any of this | now |
+|---|---|---|
+| plates | 102.7 m · 2.77% · 2178 m | **19.8 m · 0.30% · 2174 m** |
+| shape | 98.6 m · 3.84% · 2261 m | 18.2 m · 0.19% · 2274 m |
+| cordillera | 340.2 m · 7.83% · 2084 m | 21.2 m · 0.27% · 2172 m |
+| ridged | 125.8 m · 3.69% · 2249 m | 17.3 m · 0.15% · 2293 m |
+
+**Landform relief moves under 2% on every model** — that pair is the whole claim,
+since a limiter that also flattened the mountains would "succeed" on the first
+number and ruin the map.
+
+Four rules for anyone changing this:
+
+Five rules for anyone changing this:
+
+- **A mineral must never silently vanish.** This is the failure mode this codebase
+  keeps hitting (`highland_cap` exists for the same reason). Two guards: the
+  threshold-loosening loop, and — when a world's plate geometry offers no ground at
+  all for a model — a forced fall back to the relief proxy. That is not
+  hypothetical: most divergent boundaries on any Earth-like world are OCEANIC, so
+  keying `Rift` strictly on the boundary emptied it, and
+  `no_shipped_mineral_places_nothing` caught it.
+- **Template worlds have NO plate data** (`boundary_type` is empty). Every model
+  degrades to a relief-and-continentality proxy;
+  `template_world_without_plates_still_places` guards it.
+- **Diamond belongs on flat cratons, not peaks.** The old spec said `min_elev: 0.55`
+  — the highest mountains — which is exactly backwards.
+  `diamond_lands_on_craton_not_on_peaks` guards it.
+- **A derived model needs its parent placed first.** `Weathering` minerals are run
+  in a SECOND pass after the main loop, rather than reordering it (which would
+  change every other good's placement seed order).
+- **`GeoContext` is built ONCE per world**, never per good — 45 goods × a full-grid
+  BFS would be a real cost. Its distance fields are multi-source BFS (a linear
+  sweep from all seeds at once), never an outward scan per cell (§8.9 rule 1).
+
+**Slice 2 (built):** `economy.rs::compute_economy` now reads `metadata["deposits"]`
+and attributes each working to the hub whose catchment claims its cell (the same
+`claim` map the belt-production pass already builds), so a `Deposits`-distribution
+good's quality is the mean `grade` of the workings actually inside a hub's
+territory — not, as before, that hub's share of world production (which read
+backwards: a big cheap deposit scored as fine stones). Every other good keeps the
+old share-based formula.
+
+**Slice 3 (built):** an INI-ish `.txt` importer (`commands/goods_import.rs`,
+`import_goods_txt`, wired to a "Import .txt" button in the Goods Editor) adds
+minerals to the global library — ADD-ONLY, an id already present is rejected, never
+overwritten. Only `[id]` and `name` are required; `domain`/`distribution`/
+`deposit_model` parse through the real enums' own serde representation, so the
+parser can't disagree with the type. Eight new minerals ship in
+`default_custom_goods()` itself (not through the importer — they're the app's own
+library): mercury, alum, lapis_lazuli, turquoise, bog_iron, coal, garnet, carnelian
+— each exercising a model or mechanic the shipped six/gem-split never did (a
+near-single-source district count, a derived weathering mineral, a bog deposit an
+elevation floor could never place). Full detail, including what is deliberately
+NOT wired (mercury→silver amalgamation, alum→cloth as a hard recipe input — both
+real economic changes that need their own `econ_` measurement, not an add-only
+slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
+
+> **Still not built:** nothing reads `depth` yet. A mine is still a substring
+> match on the good's name (`tick/mod.rs`) and is mechanically identical to a
+> farm — no mining capability, no depth gating, no mine-vs-quarry split. See
+> `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
+
+---
+
+### 8.17 Map plates (`ui/world/mapThemes.ts`)
+
+A published atlas never shows one raster on its own. A climate plate is Köppen fill
+PLUS the circulation that produces it PLUS the graticule, set in the face that plate
+uses; a political plate is a province wash PLUS borders PLUS city dots sized by rank.
+What distinguishes one plate from another is the whole COMPOSITION, not the base
+colour. The app had 25 base layers and ~30 overlay toggles and no way to express that
+— every informative view had to be assembled by hand, from memory, every time.
+
+A `MapTheme` is that composition in state that already existed: one `ActiveLayer`, a
+set of overlay keys, and optionally a label-typography theme (§8.11) and an
+overlay-line preset. **Twelve plates ship**, ordered the way the pipeline builds the
+world: Physical · Natural Colour · Relief & Height · Ocean & Currents · Climate · Hydrology · Ecology ·
+Settlement · Peoples · Political · Goods & Trade · Hazards.
+
+Four rules for anyone changing this:
+
+- **A plate is a VIEW, never a decision.** It sets what you SEE, never what the world
+  IS — rule 14 restated. Nothing here is persisted and nothing writes a generation
+  setting, so switching plates can never alter a world or invalidate a tile.
+- **`MANAGED_OVERLAYS` is DERIVED from the plates, never hand-listed.** Applying a
+  plate sets each managed key explicitly — on if the plate lists it, off otherwise —
+  so a plate lands in a KNOWN composition instead of washing additively over
+  leftovers. Deriving the set is what bounds the blast radius: per-good overlays,
+  campaign-only layers and anything else no plate mentions are never touched, so a
+  plate cannot silently clear work done in another panel.
+- **`activeMapTheme` is cleared by any manual change** (`setLayer`, `toggleOverlay`,
+  `setOverlayVisible`, `setOverlaysVisible`, `setWorkflowStep`). A chip that keeps
+  claiming a plate after the view stops being one is worse than no chip.
+- **A plate whose data isn't generated reads dimmed with the step it waits on**, not
+  hidden (`requires` + `themeReady`). Seeing what the finished world will offer is the
+  same logic the workflow panel already uses.
+
+The picker exists twice — a compact chip grid in the Toolbar and the full annotated
+list in ⚙ Appearance ▸ Map plates. Both read the same `MAP_THEMES`, so they cannot
+drift; only the presentation differs.
+
+**The layer taxonomy was fixed in the same change.** `layerGroups` misfiled in both
+directions: "Biosphere" held `climate` (Köppen is atmospheric), `soil` (pedosphere)
+and `habitability` (a human settlement score), while "Ocean" held four biological
+layers plus `storm`, which is a cyclone belt. The cause was under-population — only
+TWO layers are genuinely biological and non-hazard, so the group was padded to a
+plausible size with things that aren't biology. Six groups now: Terrain · Ocean ·
+Atmosphere · Climate & Biomes · Settlement · Hazards. `ridges` is reachable for the
+first time — it had always existed in `ActiveLayer` and in `render_tile`
+(`render_ridges`) but belonged to no group.
+
+---
+
+### 8.18 The palette is served, not copied (`commands/palette_commands.rs`)
+
+The legend used to keep **hand-maintained copies** of the renderer's colour tables —
+four of them, across three files, none checked against the Rust that paints the
+pixels. §8.12 already warned about this for `biome_color`/`BIOME_SWATCH`. They
+drifted anyway, in two measured ways:
+
+- **The Elevation layer's sea key ran BACKWARDS.** `ElevationLegend.SEA_BANDS` was
+  copied from `render_land`'s bathymetry, but `render_elevation` drew its own ramp
+  `(10+d·10, 25+d·30, 70+d·100)` — dark shelf *brightening* to abyss. Reading a
+  deep-ocean colour off the map and looking it up in the key landed you on "Shelf".
+- **The land bands implied a linear scale the ramp never had.** Six equal blocks
+  labelled 0/1500/3000/5000/7000/8848 m described stops that actually fell at
+  1327/3097/5309/7521 m.
+
+`get_render_palettes` serves `ELEVATION_STOPS`, `BATHYMETRY_STOPS`,
+`TEMPERATURE_STOPS`, `PRECIP_BANDS` and the Köppen/biome/soil class colours straight
+out of `tile_image.rs`. **This removes the second copy rather than testing it** — the
+legend cannot be wrong about the map without the map being wrong about itself.
+
+Three rules:
+
+- **Never reintroduce a hand-copied colour table in the frontend.** If a legend needs
+  a colour, it comes through `usePaletteStore`. A test comparing two copies only
+  catches drift after someone remembers to write it; having one copy cannot drift.
+- **A ramp is DATA, not a chain of branches.** Every continuous ramp goes through
+  `ramp_lookup` over a `(position, colour)` stop table, which is exactly what lets the
+  same constants serve both the renderer and the legend. A ramp written as `if e <
+  0.15 { … } else if …` cannot be served, and that is how the old drift started.
+- **Position a legend's labels at each stop's TRUE value**, never at even intervals —
+  even spacing is what made the old land key misreport by up to ~520 m.
+
+**Cross-blended hypsometric tints** (§8.18 companion, `lowland_tint`): below
+`LOWLAND_TINT_CEILING_M` (1200 m) the elevation/terrain tint also carries CLIMATE —
+desert lowland reads khaki, rainforest green, tundra grey — converging on the shared
+ramp above it (Patterson & Jenny, *Cartographic Perspectives* 69). The climate axes
+are **temperature and precipitation, both continuous**, never the categorical Köppen
+code: keying on Köppen would draw every class boundary as a hard colour edge and a
+reader would take those edges for terrain, which is the artefact the technique exists
+to avoid. Guarded by `cross_blended_tints_converge_with_height`, which asserts BOTH
+halves — that three climates differ at sea level, and that they are bit-identical
+above the ceiling. The legend must keep declaring this, or it misreports the lowland.
+
+`LayerLegend.tsx` covers the six layers with an exact key (elevation · terrain ·
+temperature · sst · precipitation · climate). The layers whose ramps are still
+written inline in Rust are **deliberately left without a key** rather than given an
+invented one — a legend that guesses is how this broke the first time. They are
+served by the StatusBar hover readout, which reports the real value under the cursor.
+
+**Swipe compare** (`uiStore.compareLayer`/`comparePos`): a second layer drawn over
+the same ground, clipped to the right of a draggable divider. Every causal chain in
+this app is a two-layer question — precipitation against elevation for rain shadow,
+currents against temperature, biomes against Köppen — and they were previously
+answered by flipping back and forth from memory. Two rules: the clip is computed in
+WORLD space by converting the divider's screen fraction back through the viewport
+(the canvas is mid-transform at that point, so a screen-space rect would be wrong),
+and the divider is its OWN DOM element with its own pointer handlers, so it cannot
+interfere with the canvas's pan/paint logic. The compare layer draws through the
+same tile cache and LOD as the base, so a swipe costs one extra blit per visible
+tile and nothing else.
+
+**Class isolation** (`RenderCtx.isolate`): clicking a class in the Köppen or biome
+key keeps that class in full colour and desaturates the rest. The selected code
+rides in the LAYER KEY (`"biomes#iso=12"`), which is why it needed no cache change —
+`TileManager` already keys by layer string, so an isolated view caches and
+invalidates as its own layer, and a client that knows nothing about isolation still
+asks for plain `"biomes"`. It is done in the RENDERER because only the renderer
+knows each cell's class; matching colours back in canvas would be slow and, now that
+the thematic plates carry relief shading, simply wrong. `split_isolate` degrades a
+malformed key to the plain layer rather than erroring — a bad key must never blank
+the map (`isolate_layer_keys_parse_or_degrade`).
+
+Guarded in Rust by `koppen_colors_are_distinct` (Dsc and Dsd shipped IDENTICAL, so
+two zones rendered as one), `elevation_ramp_is_monotone_in_lightness`,
+`bathymetry_darkens_with_depth`, `precipitation_bands_are_sequential_and_never_neutral`
+and `temperature_ramp_pivots_on_freezing`.
+
+---
+
+### 8.19 Goods localities — the agricultural/biological hierarchy (`docs/GOODS_LOCALITIES_PLAN.md`)
+
+Trade goods get what minerals already had (§8.16): belt → LOCALITY → cell, the
+same two-level structure `deposits.rs` uses, for every enabled `Global`/`Local`
+good (`Deposits`/`Manufactured` goods are out of scope — F2's whole premise is
+that minerals already have their own, better hierarchy).
+
+- **Rivers as a placement factor** (Slice 1, F6). `biological::RiverContext`
+  (built ONCE per world — the same discipline `deposits::GeoContext` already
+  applies) carries distance-to-any-river, distance-to-NAVIGABLE-river and
+  delta/floodplain membership, multi-source BFS (§8.9 rule 1). `river_multiplier`
+  is a MULTIPLIER on an existing score, never a replacement (§5.4 of the plan) —
+  `floodplain`/`irrigation`/`riverbank`/`float_out` weights, wired into the
+  specific built-in goods the plan names (rice, cotton, wheat, sugar, indigo,
+  dates, paper's papyrus branch, honey, hides, timber, hardwoods, furs) and
+  exposed as four new `Envelope` fields (serde-defaulted to 0 — no effect) for
+  custom goods. `good_score`/`envelope_score` both take `rc: Option<&RiverContext>`;
+  `None` (the Goods Editor's live preview, which has no rivers to hand) is a true
+  no-op, not an approximation.
+- **Marine inshore/bank split** (Slice 2, F5). `GoodSpec.marine_band`
+  (`Either`/`Inshore`/`Bank`, serde-defaulted to `Either`) narrows the old
+  undifferentiated `sea_coastal` gate to a STRICT SUBSET of itself —
+  `marine_band_ok` — so an `Either` good's placement is byte-identical to before
+  this slice. Shipped defaults (`default_marine_band_for`): inshore = pearls,
+  coral, bay_salt, tyrian_purple, amber; bank = stockfish, herring, whaling.
+- **The locality generator + full modulation** (Slice 3, D1/D5/D6,
+  `localities.rs`). `GoodLocality { good, x, y, radius_km, grade, extent, name,
+  river_fed }` — deliberately the same shape as `deposits::Deposit`. The size
+  ladder (§2.1 of the plan): luxury locality 175 km (wine, silk, spices, cacao,
+  cloves, pepper) · pastoral/secondary 400 km (wool, hides, horses, timber,
+  tobacco) · staple region 900 km (grain, rice, furs, barley, millet) — every
+  other good falls back to a tier from its own `Distribution`/rarity, so nothing
+  is left without an answer. Full modulation: `belt[i] = max(FLOOR, belt[i] *
+  (FRINGE + (1-FRINGE)*influence[i]))` — `FLOOR` is the entire safety mechanism
+  (D5's own risk 5.1): a belt cell already producing never falls to literal zero,
+  however far it sits from every locality core. Runs BEFORE `dilate_belt` so the
+  trade-reach rings spread from the already-modulated belt.
+- **Notable naming** (Slice 4, D8). Localities at/above a quality threshold draw
+  a deterministic name from `names::gen_name` — the SAME per-cell hearth lookup
+  settlements already use, so a locality's name is in the local culture for free,
+  no new naming machinery.
+- **Persistence.** `metadata["good_localities"]` (JSON), exactly parallel to
+  `metadata["deposits"]` — no tile-column change (rule 7). Written by
+  `commands::sim_commands::persist_goods_placement`, the one helper all four
+  `compute_trade_goods` call sites now share.
+- **Production wiring** (Slice 7, D2). `compute_economy`
+  (`commands/query_commands/economy.rs`) reads `good_localities` exactly the way
+  it already reads `deposits` — a hub's quality for a good blends toward the mean
+  grade of any locality inside its catchment (50% weight; `share`-based quality
+  still carries the other half, since Slice 3's modulated belt VALUES already
+  partly reflect locality quality — a blend, not a replacement, per D2).
+  `campaign_province_potential` (`campaign_commands/province.rs`) exposes
+  `ProvincePotential.localities: Vec<ProvinceLocalityDot>` alongside the existing
+  `.deposits`, and `ProvinceGoodPotential` gained `has_locality`/
+  `mean_locality_grade`/`locality_count`, mirrored in `types/campaign.ts`.
+- **Slice 0's own gate**: `sim::step8_biological_goods::goods_validation`
+  (test-only) builds a real, moderate-sized procedural world end-to-end (plates
+  through biological — NOT the synthetic `CampaignSim` fixture `economy_
+  validation.rs` uses) and asserts no enabled `Global`/`Local` good places a belt
+  that reaches zero settlements' catchments. `Deposits`-distribution goods are
+  explicitly OUT of that hard floor (F2 — they have their own, different
+  coverage guarantee, `no_shipped_mineral_places_nothing`); a handful of the
+  rarest deposit goods missing every settlement's catchment at this diagnostic's
+  deliberately modest world size is printed as a FINDING, not asserted. One
+  pre-existing belt good, `dyes` (murex purple, untouched by any Slice 1-4
+  change — verified), is named as an explicit, documented exception rather than
+  either silently loosening the floor or leaving the gate permanently red.
+  **Do not add a process-global `cultures::set_active` call to a test** — `cargo
+  test --lib` runs the suite in parallel within one process, and this diagnostic
+  originally raced `econ_inheritance_rules_fragment_differently` /
+  `econ_scorecard_is_deterministic` by mutating that exact global; it now relies
+  on `names::gen_name`'s legacy-culture-grid fallback instead, which is
+  deterministic on its own.
+
+**The overlay (Slices 5-6) — two layers, at full resolution.** `compute_good_regions`
+rasterised a belt onto a COARSE grid — `f = grid_w / 450`, about 8×8 world cells at
+the default size — and the frontend filled each block. A block holding one land cell
+of belt painted all sixty-four of its cells, so a belt's edge was a staircase that
+ignored the coastline and spilled into the sea. No amount of shading could fix it: the
+information was not in the payload.
+
+Full resolution IS the coastline clip. `compute_good_belt_masks` copies the belt
+column verbatim above `COVERAGE_MIN_U8` and consults no land mask at all, because a
+`Global`/`Local` belt good's byte is already exactly zero on the wrong side of the
+coast — every one is placed through `envelope_score`, whose first act is the domain
+gate. `goods_validation::a_belt_never_crosses_the_coastline` asserts exactly that
+claim, against the shared constant rather than a copy of it, because the render path
+has no opinion about where the coast is and would silently start painting into the
+ocean again if it stopped holding. The same test PRINTS a finding it deliberately
+does not assert: `Distribution::Deposits` goods never touch `envelope_score` (§8.16
+places them from tectonic setting), so `CoastalMarine` can put a salt pan a cell into
+the tidal water — measured at 300×150 as bay_salt 115 cells, tyrian_purple 16,
+ambergris 1. That is a `deposits.rs` question, not a render bug, and clamping it here
+would hide it.
+
+Two layers, split because they compress differently. COVERAGE ("can it grow here")
+is boolean at full resolution and run-length encoded — a belt is contiguous, so a
+world-spanning staple region costs a few thousand runs, not one per cell. QUALITY
+("is it fine here") is the belt value on the OLD coarse grid, because a wash needs no
+per-cell precision; it is painted only where coverage says so, so the coarse wash
+still ends exactly on the coastline. Both are switched independently in the Toolbar's
+Trade Goods section.
+
+Four rules for anyone changing this:
+
+- **The quality scale is ABSOLUTE and shared by every good** (D10). The belt's own
+  0..1 value, never rescaled against that good's own maximum — otherwise a good whose
+  whole belt is mediocre gets promoted to full colour just for being its own best. The
+  stops live once, in `palette_commands.rs`, and are SERVED (§8.18). Until they
+  arrive the overlay draws coverage only rather than inventing a ramp.
+- **The scale has TWO paints, same numbers.** The default mixes toward the good's
+  own colour, which is unreadable for a good whose hue is already close to the pale
+  ground tint — a real user report. `GOOD_QUALITY_HEATMAP_STOPS` (dark blue → red)
+  is an alternate reading of the identical belt value, switched per-session via
+  `uiStore.goodQualityHeatmap` (Toolbar → Trade Goods → "🌡 heatmap", only shown
+  while the quality layer itself is on). `GradeStop`/`good_quality_grades` serves
+  the SAME `deposits::grade_label` vocabulary (coarse/ordinary/good/fine/exquisite)
+  ore workings already use, at heatmap-exact colours, so `GoodQualityLegend`
+  (`ui/world/LayerLegend.tsx`) can show swatches guaranteed to match the map. It
+  docks to the opposite corner from the main `LayerLegend`, since it keys off the
+  `goodQuality` OVERLAY rather than the active base layer and can be showing at the
+  same time as either.
+- **A very large belt is downsampled by MAJORITY, never by "any".** Above
+  `MASK_MAX_PX` a canvas per good becomes real memory, so the mask reduces — and a
+  reduce that takes a block when ANY sub-cell is covered puts the belt back over the
+  water one block at a time, which is the original bug in miniature.
+- **The FILL is exact; the BORDER is traced at a bounded step.** The fill is what
+  carries the coastline. The outline is a stroke a pixel or two wide, so tracing it on
+  millions of cells buys nothing and costs a Path2D with a hundred thousand segments.
+- **Never re-derive the belt's shape from province polygons** (D3). A wine belt
+  crossing three provinces is one belt; snapping it to political lines would make a
+  physical fact look administrative.
+
+`GOOD_MASK_DIR=/tmp/g cargo test --lib dump_good_belt_mask_sheet -- --ignored
+--nocapture` writes a PNG per sampled good over the world's land/sea, through the
+REAL `build_belt_mask` and the frontend's own decode — use it to answer "does the belt
+end on the coastline" instead of arguing it, the same way `dump_biome_swatch_sheet`
+serves the biome palette.
+
+**The province plate (Slice 6)** is the other half. Land use and tenure are SHARES
+and must dither (rule 17), but a `GoodLocality` is not a share — it carries a real
+cell and a real `radius_km` — so it draws as a real square at its real position,
+clipped to the province footprint, opacity from `grade` and hue from `GOOD_DEFS`. A
+MARINE locality sits on shelf water where the province raster is `NO_PROVINCE`, so
+`campaign_province_potential` attaches it to the nearest coast within
+`MARINE_ATTACH_CELLS` and flags it `sea`: it draws dashed in the adjacent water, is
+excluded from the province's own `has_locality` aggregate, and confers **no maritime
+territory** (D4).
+
+---
+
+### 8.20 Goods: climate adherence, origins, endemics, terroir
+
+Four changes to how a good gets onto the map, plus the report that makes a
+failed placement visible. Full account (including this review's own three wrong
+first readings) in `docs/WORLD_REALISM_REVIEW.md`.
+
+**The `clim_base` fold is a FALLBACK, never a pre-pass.** `good_score` used to
+fold the dry-winter/dry-summer Köppen variants onto their humid equivalents
+BEFORE its match, which made every arm naming `CWA`/`CWB`/`CWC`/`DW*`/`DS*`
+**unreachable**. Tea and coffee both name `CWB` — subtropical highland, dry
+winter: Darjeeling, Yunnan, the Ethiopian highlands — and both scored exactly
+**0.0** there, placed instead by weak fallback arms in the wrong climates. Now the
+RAW zone is scored first and the fold applies only if it yields nothing.
+`envelope_score` follows the same rule; before this, custom goods saw raw Köppen
+while built-ins saw folded Köppen, so one cell was scored under two different
+climate labels depending on which scorer ran. Gates:
+`dry_winter_zones_are_reachable` (the claim) and
+`the_humid_fold_still_applies_as_a_fallback` (the fix didn't cost the fold its
+purpose).
+
+**`GoodSpec.origins`** — how many INDEPENDENT homelands a `Local` good seeds
+(serde-default 1 = the old single-homeland behaviour, so every save is
+unchanged). Multi-origin is the historical norm: pepper from Malabar *and*
+Sumatra, cinnamon from Ceylon *and* China, cotton independently domesticated in
+India, Peru and the Levant. Each origin repels the earlier ones through the same
+dispersion penalty already applied between different goods. Two rules: the
+extreme-rarity homeland cap is a budget for the good AS A WHOLE, split between
+origins (or a rare good doubles its own world supply); and only the FIRST origin
+may fall back to the least-bad cell — a second origin that can't clear the
+threshold simply doesn't exist on this world.
+
+**`LandmassContext` + `Distribution::Endemic`** — the connected-component pass
+this codebase never had. `Domain::Island` was `distance_to_ocean < 0.20`, i.e.
+*near-coast land*, which matched the coastal fringe of every continent, so an
+"island" good was really a coastal good. One 8-connected BFS, wrap-aware, built
+ONCE per world (same discipline as `RiverContext`/`GeoContext`). An `Endemic`
+good is confined to ONE landmass with the island-jump DISABLED — the Banda
+nutmeg case: nutmeg grows across the wet tropics, but the tree only grew on ten
+islands totalling 60 km², and `rarity` cannot express that (it makes a good
+scarce *everywhere* rather than abundant in one place and absent elsewhere).
+Six ship: nutmeg, mace (sharing an envelope — two products of one tree),
+dragon's blood, camphor, benzoin, sandalwood.
+
+Three rules learned by MEASUREMENT here, each a silent-vanish failure:
+- **An island threshold must be stated in km², not cells** (`ISLAND_MAX_KM2`).
+  A cell is ~11 km at 3600×1800 and ~133 km on a test world, so a fixed cell
+  count meant "Great Britain" on one world and "most of Eurasia" on another.
+- **DOMAIN and DISTRIBUTION must not both gate the same thing.** Shipping the
+  endemics as `Domain::Island` zeroed their SCORE on every continental cell
+  before the distribution could choose a home — all six measured **zero cells**.
+  Domain says where the plant can grow (a wet tropical coast); distribution says
+  how it is confined (the smallest landmass that scores, preferring a true
+  island).
+- **The endemic home is chosen up front, not filtered per cell.** That is what
+  makes the guarantee unconditional: if the climate exists anywhere, the good
+  gets exactly one home; if it exists nowhere it is honestly absent.
+
+**`GoodSpec.soil` / `GoodSpec.relief` — the FINE-GRAIN terroir terms.** Every
+other scoring term varies over HUNDREDS of km (Köppen zone, temperature,
+precipitation, |latitude|, normalized elevation, fertility — itself a smoothed
+blend), which is why a belt rendered as one smooth continent-sized wash: nothing
+varied at the 2–10 km scale at which real crop distributions are mottled.
+`soil_type` was computed by phase 6 and read by NOTHING in the goods layer;
+slope was never computed. Three rules:
+- **They live on the SPEC, not on `Envelope`.** They must apply to built-ins
+  (scored by the hardcoded matcher, which has no Envelope) and customs alike;
+  putting them in `Envelope` silently REPLACED a built-in's whole climate scorer
+  with an envelope holding only these two terms.
+- **Soil is a preference, never a veto.** An unclassified cell scores 1.0 (no
+  information is not bad ground — the same discipline an empty kin roster gets);
+  a classified-but-unlisted soil keeps `SOIL_UNLISTED`.
+- **`TERROIR_FLOOR` remaps the whole multiplier into `[0.45, 1.0]`.** Applied
+  raw it pushed `tea` and `saffron` under the seed threshold and both placed
+  literally nothing. Terroir shapes a belt's TEXTURE; it must not decide whether
+  the belt exists — the same call the locality pass's FRINGE/FLOOR already made.
+  `saffron` is deliberately NOT in the terroir table: already bounded by climate,
+  elevation AND latitude, one more gate moved it off every settlement's catchment
+  and tripped the Slice 0 coverage floor.
+
+**The two RENDER fixes that went with this.** Both were the same bug in two
+places — a real per-cell field being drawn at a coarser resolution than it has:
+
+- **The world quality overlay carried TWO resolutions.** Coverage was a
+  full-resolution 0/1 RLE, but the quality wash clipped to it still rode the old
+  ~8-cell coarse grid, so a belt read as blocky value steps inside a sharp
+  coastline outline. `GoodBeltMask.coverage_rle` is now `quality_rle`: the SAME
+  runs carry a 4-bit quantized belt value (0 = uncovered, 1..15 = quality), so
+  coverage and quality are one layer at one resolution. Quantizing is what keeps
+  the runs long — a belt varies smoothly, so neighbours share a bucket and the
+  payload stays close to the old boolean RLE. `quality`/`qw`/`qh`/`coarse`
+  survive only as the index space the per-block SUBTYPE classification
+  (grain species / paper source) is addressed in. Gate:
+  `quality_levels_never_swallow_a_covered_cell` (a covered cell may never
+  quantize to 0, and the scale is monotone).
+- **The province plate drew a locality as a true-to-scale square.** The size
+  ladder is in km — a staple region is 900 km — while a province is 200-400 km
+  across, so one grain locality filled the entire plate and the province read as
+  one flat block. Where a belt MASK exists (plate 6a already draws the real
+  per-cell area) the locality is now reduced to what only it can say: a small
+  CORE diamond at its real cell plus its name. Where no mask exists (an older
+  world, or a good with no belt here) the full square is still the honest
+  reading and is kept.
+
+**The placement report** (`GoodsPlacementReport`, `metadata["goods_report"]`,
+served by `get_goods_report`, shown by `ui/goods/GoodsReportPanel.tsx` — opened
+automatically when the Biological step finishes, and reopenable from that step
+afterwards since it is persisted) — per good: cells, land share, origins actually
+seeded, localities, notable names, mean grade. Its reason for existing is the
+FLAGS: `absent` (placed nothing), `fallback_seed` (placed only because the seeder
+fell back to the least-bad cell — this world may have no suitable climate),
+`ubiquitous` (a non-staple over 25% of the world), `single_cell`. Before it, a
+good that silently failed to place was invisible until someone went looking for
+it on the map.
+
+**Retired as duplicates** (disabled, never deleted — fixed indices in
+`TileData.goods`, rule 7): `gemstones` (a generic gem alongside ELEVEN specific
+stones, and §8.16 already repurposed `gem_deposits` to mean ore districts) and
+`dyes` (marine murex, i.e. the same product as `tyrian_purple`, and the one good
+`goods_validation` carried as a standing coverage-floor exception).
+
+---
+
+### 8.21 Natural colour & the shared relief core (`render/natural.rs`)
+
+The `natural` layer is the reference-atlas view: **land coloured by what grows on
+it**, sea by depth, both shaded. It reads `biome` (41 classes, §8.12), elevation,
+temperature, precipitation and `snow_frac` — all already computed — and adds no
+tile column and no sim phase. Gated on step 6 like the biomes plate; a world
+without biomes falls back to a continuous climate tint rather than to blank, the
+same discipline as `koppen_fallback_biome`.
+
+**It does not reuse `biome_color`, and that is the whole design.** That table is
+THEMATIC: `biome_colors_are_distinct` holds all 41 classes apart at a CIELAB floor
+so a reader can separate them in a legend. Natural colour wants the opposite —
+real vegetation grades continuously, and a palette engineered for class separation
+renders a satellite-style map as a discretised poster with a visible edge at every
+biome boundary. So there is a second, deliberately OVERLAPPING table, and
+`neighbouring_vegetation_classes_stay_close` asserts that overlap so a
+well-meaning future "improve the contrast" edit fails loudly. Class edges are
+further dissolved by mixing back a continuous temperature/precipitation tint —
+the same trick and the same reasoning as `lowland_tint` (§8.18).
+
+**The shared relief core** (`tile_image::relief_at`) now serves both shaded base
+layers. Three changes from the single-lamp Lambertian it replaced:
+
+- **Ambient occlusion** from local concavity, which is orientation-INDEPENDENT, so
+  a valley reads as a valley under any lighting.
+- **Shaded bathymetry** (`sea_shade`). The sea was an unshaded ramp beside a
+  hillshaded continent.
+- **NOT a fill light.** One shipped and was REVERTED — see below.
+
+Three things measured here, all of which look like tuning and are not:
+
+- **`AO_REF` is the difference between ambient occlusion and film grain.** Set to a
+  plausible-sounding 44 m ("valleys are shallow"), AO speckled the ENTIRE map:
+  `apply_micro_relief` deliberately dithers every land cell by ±14 m, and against
+  an 8-neighbour mean that per-cell dither *is* the concavity signal, so AO
+  resolved to ±16% white noise per cell. Rendering with `AO_AMP = 0` isolated it
+  conclusively. It is now 240 m; anything under ~150 m re-admits the grain.
+- **A FILL LIGHT was shipped, and it was a REGRESSION.** The theory was Imhof's
+  (one NW lamp leaves every SE-facing slope at a flat tone), and it survived
+  `cargo check`, 20 render tests and a whole-world PNG — then read as obviously
+  worse the moment anyone looked at a magnified mountain crop. A fill lamp
+  brightens exactly the shadows that CARRY the relief. Four configurations
+  rendered side by side (`SHEET_TAG`): no fill > 225°/0.18 > 135°/0.26, the last
+  being what shipped. A fill light is a technique for a 3-D scene with real
+  geometry; on a shaded DEM whose only signal IS the shadow it subtracts. The
+  lesson generalises past this constant: **a whole-world thumbnail is not enough
+  to judge shading** — `dump_natural_sheet` now also writes a 3× magnified crop of
+  the most mountainous window, because the regression was invisible at world zoom
+  and unmistakable at 3×.
+- **A per-cell detail dither was built here and REMOVED.** A tile is exactly one
+  pixel per cell, so there is no sub-cell space for synthetic detail to live in and
+  it resolves as film grain rather than as terrain. Recorded so it is not
+  attempted again: detail below the cell needs somewhere to be DRAWN — tiles
+  rendered at higher pixel density than cell density, i.e. an inverse LOD pyramid.
+  No shading trick substitutes for the missing raster.
+- **The bathymetry ramp's dark end was a void.** It fell to (5,15,46) by depth 0.65
+  and near-black at 1.0, while `compute_sea_depth` saturates about 20 cells from
+  any coast — so on a full-size world essentially ALL open water sat in the black
+  tail, and the new seafloor shading had nothing to modulate. Rebalanced to keep
+  tone all the way down, still strictly monotone in luminance.
+
+**`NATURAL_SHEET_DIR=/tmp/n cargo test --lib dump_natural_sheet -- --ignored
+--nocapture`** builds a REAL world (plates through biomes, mirroring `sim_run_all`
+— rule 11) and renders it through the real `render_tile` path, writing
+`world_natural.png` and `world_terrain.png` plus a per-biome census. Use it to look
+at a palette or shading change instead of arguing about it — it is what caught both
+the AO grain and the black ocean, neither of which any assertion would have found.
+
+What it also makes unmissable is that the remaining problems are in the SIM, not
+the renderer: land relief is texturally uniform because `generate_elevation`
+uses one global noise recipe (`f_base`/`f_range`/`f_hill`, `RIDGE_AMP`,
+`HILL_AMP`) for every continent. (The coastline-follows-Voronoi-edge and
+straight-plate-boundary-ridge defects this paragraph used to name here were
+Terrain 2.0's own slices 3-4 — see `TERRAIN_2_PLAN.md` in §9 — fixed and gated
+by `coastline_departs_from_the_plate_boundary`.)
+
+---
+
+### 8.22 Elevation styles (`render/tile_image.rs`)
+
+The default "elevation" layer is a flat, UNSHADED hypsometric tint and
+"terrain" is the one shaded hillshade — two names for what an atlas treats as
+one decision (how to paint height) times two independent axes (which palette,
+how much relief). A STYLE is that pair, selected in the layer key exactly like
+class isolation (`split_isolate`, `"biomes#iso=12"`):
+`"elevation#style=alpine"` rides the same string the frontend's tile cache
+already keys on, so a styled request caches, invalidates and degrades (an
+unknown style name falls back to the plain layer) with zero cache-layer
+change. Parsed by `split_style`, dispatched by `render_elevation_styled` —
+ONE function for every style, keyed entirely off a `StyleParams` struct (land
++ sea ramp, classed-vs-smooth, climate-tint strength, real-`snow_frac` blend
+strength, AO/contrast/shadow-floor/light-altitude, warm-vs-cool shadow tint,
+sea relief amplitude), so a new style is DATA, not a new render function.
+
+Seven ship, each a real cartographic convention rather than a colour
+experiment: **Layer Colouring** (classed Bartholomew/Times hypsometric bands —
+also what `mapThemes.ts`'s "Relief & Height" plate now uses, giving it a real
+identity distinct from "Physical" instead of reusing the flat unshaded
+default); **Alpine** (Imhof's neutral Swiss relief-forward palette, reading
+the world's own per-cell `snow_frac` field for its snowcap rather than
+inferring it from height alone); **Arid** (warm sand/canyon palette, a lower
+key-light altitude for longer raking desert shadows, a sepia shadow tint);
+**Polar** (cool ice-blue palette, a very low key-light altitude, strong
+`snow_frac` blending); **Analytical** (monochrome — colour carries ZERO
+elevation information, relief alone does, maximum AO for a scientific
+hillshade); **Antique Plate** (sepia/parchment engraved-atlas look, classed
+bands, a warm shadow tint); **Abyssal** (a bathymetry SHOWCASE — land muted
+to a low-contrast neutral so it recedes, `sea_relief_amp` boosted well past
+the default so Terrain 2.0 slice 5's ridges/trenches/seamounts read as the
+map's actual subject).
+
+Two rules:
+
+- **Served, not copied** (§8.18 applies here exactly as it does to every other
+  ramp). `elevation_style_palettes()` exposes each style's own land+sea stops;
+  `get_render_palettes()` serves them as `elevation_styles` so
+  `LayerLegend.tsx`'s elevation legend swaps to the ACTIVE style's real ramp
+  (and its `classed` flag, so a stepped style draws a stepped legend) rather
+  than guessing a second copy.
+- **A style is a VIEW, exactly like a map plate** (rule 14/§8.17) — it changes
+  what the elevation/terrain layers look like, never what the world IS.
+  `elevationStyle` lives in `uiStore` beside `isolateClass`, rides the layer
+  key the same way, and is cleared by any manual change (§8.17's third rule)
+  so a picked style can't silently survive switching to an unrelated plate.
+
+`cargo test --release --lib dump_elevation_style_sheet -- --ignored
+--nocapture` (env `ELEVATION_STYLE_SHEET_DIR`, `ELEVATION_STYLE_SEED`) builds
+one real generated world and renders it through EVERY style via the real
+`render_tile_full` dispatch — one full-world PNG per style plus the two
+default baselines, and a numbered contact-sheet montage — the same
+"render it for real, don't argue about it" discipline `dump_natural_sheet`
+and `dump_biome_swatch_sheet` already established.
+
+---
+
+### 8.23 No valley carving — and why three attempts at it failed
+
+**Phase 2 does not carve valleys. In any generator, by any mechanism.** Three
+separate attempts to make channel-carving look right on an Earth-sized world all
+failed, and the record of them is the point of this section — the fourth attempt
+should not start from scratch.
+
+What was removed, and what each drew on the map:
+
+- **`carve` / `fine_carve`** — an INVERTED ridged-multifractal field subtracted
+  from the elevation. An inverted ridged field is a **dendritic tree by
+  construction**, so this drew a branching dark scratch network across every
+  continent. `fine_carve` was the worst because it was an ABSOLUTE subtraction:
+  full strength on flat plains, which is exactly where a drainage tree painted
+  over an otherwise smooth interior is most obvious.
+- **`stream_power_erosion`** — priority-flood + flow accumulation + `K·A^m·S^n`
+  (Whipple & Tucker 1999). Correct landscape-evolution physics at the resolution
+  it is meant for, and wrong here: a cell is `KM_EQUATOR / w` wide (11 km on the
+  default grid), so the valley it models is SUB-GRID — the Grand Canyon is 16 km
+  across and would not fill one cell. At cell resolution it cut one-cell trenches
+  down every D8 path plus the parallel single-cell rills D8 routing always makes
+  on a planar slope.
+
+**The three attempts, in order, so the pattern is visible:**
+
+| | what it changed | why it failed |
+|---|---|---|
+| `3943136` | noise `carve` 0.16 → 0.05, thermal slump strengthened | aimed at the wrong term — measured per stage, the noise carve leaves notch density at 0.05% of land |
+| `e66dc9f` | stream power scaled + spread to its physical scale; thermal scan-order fixed; a grid-scale relief budget | cut grid-scale texture 82–93% **and the map still showed the tree** — subtler lines are still lines |
+| *this* | every carving mechanism deleted | — |
+
+The lesson the second attempt paid for: **the STRUCTURE is what reads as wrong,
+not the amplitude.** A dendritic pattern at 40 m is still a dendritic pattern.
+Damping it is not the same as not drawing it.
+
+**A measurement caveat that matters more than the fix**, because it is why the
+statistics said "fixed" while the map plainly was not: `notch_metrics`'s 120 m
+threshold is calibrated to the HILLSHADE (half of `AO_REF`), but the flat
+`elevation` tint has no shading at all, and a systematic pattern shows there at a
+far shallower amplitude. **Judge a tint layer on a tint render, not on a
+hillshade statistic.** `dump_erosion_sheet` now writes `elevation` alongside the
+analytical hillshade, and takes `EROSION_MODEL=shape` for the TEMPLATE path —
+which is what anyone who imported a real-world coastline is actually running, a
+different generator with its own carve terms.
+
+**A second negative result, recorded so it is not built into a gate:**
+`largest_notch_component` (the largest 8-connected chain of notch cells — meant
+to separate "rough" from "a drawn tree") **does not discriminate on the plate
+model**. Re-adding `fine_carve` to a clean build measures 0.110 / 0.177 / 0.287%
+at 60 / 25 / 12 m thresholds against a clean 0.122 / 0.186 / 0.299% — carved
+reads *lower* at every threshold. `limit_grid_scale_relief` normalises the
+one-cell band to a fixed RMS, so no amplitude statistic downstream of it can see
+structure. There is therefore **no cheap statistical gate for this**, and none
+was shipped: a gate that passes either way is worse than none.
+
+**What remains** is `thermal_erosion` — hillslope slumping, which only ROUNDS and
+never incises, and whose scan-order fix and gate from the second attempt are kept
+— plus `limit_grid_scale_relief` (below). Relief comes from the noise stack and
+the tectonic terms.
+
+**Rivers are unaffected.** Phase 5 runs its own priority-flood fill and derives
+channels from the finished surface; it never needed pre-cut channels to bed into.
+`priority_flood_flow` in `elevation.rs` is now `#[cfg(test)]`, kept only so
+`terrain_metrics` can still report drainage density.
+
+---
+
+### 8.23b The grid-scale relief budget — relief at the scale a cell can hold
 
 Every world's grid spans Earth's equator, so a cell is `KM_EQUATOR / w` wide: 11 km
 on the default 3600×1800 grid. **Fluvial dissection is therefore SUB-GRID** — the
@@ -2678,8 +3435,6 @@ Grid-scale texture down 82–93%; **landform relief moves under 2% on every mode
 That pair is the whole claim — a limiter that also flattened the mountains would
 "succeed" on the first number and ruin the map.
 
-Five rules for anyone changing this:
-
 - **Look at it.** `EROSION_SHEET_DIR=/tmp/e cargo test --release --lib
   dump_erosion_sheet -- --ignored --nocapture` renders a real world through the
   REAL hillshade in the monochrome `analytical` style (colour carries zero
@@ -2695,10 +3450,9 @@ Five rules for anyone changing this:
   one pass aimed at 16 m settled at **41 m** on a real world. `limit_grid_scale_relief`
   iterates to its fixed point; the pass cap is a termination guarantee, not the
   mechanism.
-- **A gate needs a fixture that can fail.** `fluvial_incision_is_spread_not_slotted`
-  first used a tilted plane and **passed on the unfixed code** — a uniform slope
-  drains every cell alike, so its carve is broad however it is applied. It only
-  discriminates on a real generated landscape (0.409 sharp vs 0.189 spread). The
+- **A gate needs a fixture that can fail.** The (now removed) fluvial gate first
+  used a tilted plane and **passed on the unfixed code** — a uniform slope drains
+  every cell alike, so its carve is broad however it is applied. The surviving
   scan-order gate was verified the same way: revert the fix, watch it fail.
 - **The budget is set below what the variance argument alone allows, deliberately.**
   Scaling real continental relief to a 22 km cell suggests a legitimate one-cell
