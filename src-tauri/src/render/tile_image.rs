@@ -1088,10 +1088,12 @@ fn thematic_relief(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, x: usize
     let (lx, ly, lz) = (az.sin() * alt.cos(), -az.cos() * alt.cos(), alt.sin());
 
     let (xi, yi) = (x as isize, y as isize);
-    let left = halo_elev(tile, n, xi - 1, yi);
-    let right = halo_elev(tile, n, xi + 1, yi);
-    let up = halo_elev(tile, n, xi, yi - 1);
-    let down = halo_elev(tile, n, xi, yi + 1);
+    // Sea neighbours read as this cell's own height -- see `halo_terrain`.
+    let here = halo_elev(tile, n, xi, yi);
+    let left = land_elev_at(tile, n, xi, yi, -1, 0, here);
+    let right = land_elev_at(tile, n, xi, yi, 1, 0, here);
+    let up = land_elev_at(tile, n, xi, yi, 0, -1, here);
+    let down = land_elev_at(tile, n, xi, yi, 0, 1, here);
 
     let z = ctx.z_factor();
     let dzdx = (right - left) * z * ctx.lat_stretch(y);
@@ -1697,6 +1699,51 @@ pub struct TileNeighbors<'a> {
 /// edge line so the slope is continuous across tile boundaries; if the neighbour
 /// is absent the value replicates the tile's own edge (old behaviour).
 #[inline]
+/// `halo_elev`'s companion, returning the TERRAIN flag at the same position.
+///
+/// THE SHORELINE IS NOT A CLIFF. A sea cell stores `elevation = 0`, so a coastal
+/// land cell shaded against its raw neighbours sees a drop of its own full
+/// height over one cell -- 8848 m at the extreme -- and every coastline on the
+/// map gets ringed with a hard bright/dark rim that has nothing to do with the
+/// land's actual slope. It also swamps the ambient-occlusion term, which reads
+/// that same step as extreme convexity. Both shading paths substitute the centre
+/// cell's own height for a sea neighbour, so coastal land shades by the LAND's
+/// gradient and the water is left to `sea_shade`, which carries its own,
+/// correctly-scaled seafloor relief.
+fn halo_terrain(tile: &TileData, n: &TileNeighbors, x: isize, y: isize) -> u8 {
+    let sz = SIZE as isize;
+    if x < 0 {
+        let yy = y.clamp(0, sz - 1) as usize;
+        return n.west.map(|t| t.terrain[yy * SIZE + (SIZE - 1)]).unwrap_or(tile.terrain[yy * SIZE]);
+    }
+    if x >= sz {
+        let yy = y.clamp(0, sz - 1) as usize;
+        return n.east.map(|t| t.terrain[yy * SIZE]).unwrap_or(tile.terrain[yy * SIZE + (SIZE - 1)]);
+    }
+    if y < 0 {
+        let xx = x as usize;
+        return n.north.map(|t| t.terrain[(SIZE - 1) * SIZE + xx]).unwrap_or(tile.terrain[xx]);
+    }
+    if y >= sz {
+        let xx = x as usize;
+        return n.south.map(|t| t.terrain[xx]).unwrap_or(tile.terrain[(SIZE - 1) * SIZE + xx]);
+    }
+    tile.terrain[y as usize * SIZE + x as usize]
+}
+
+/// Land-masked neighbour height: a sea neighbour reads as `here`, so the
+/// shoreline step never enters a slope or curvature calculation. See
+/// `halo_terrain`.
+fn land_elev_at(
+    tile: &TileData, n: &TileNeighbors, xi: isize, yi: isize, dx: isize, dy: isize, here: f32,
+) -> f32 {
+    if halo_terrain(tile, n, xi + dx, yi + dy) == 1 {
+        halo_elev(tile, n, xi + dx, yi + dy)
+    } else {
+        here
+    }
+}
+
 fn halo_elev(tile: &TileData, n: &TileNeighbors, x: isize, y: isize) -> f32 {
     let sz = SIZE as isize;
     if x < 0 {
@@ -1969,10 +2016,11 @@ fn relief_at_params(
     alt_deg: f32,
 ) -> Relief {
     let (xi, yi) = (x as isize, y as isize);
-    let left = halo_elev(tile, n, xi - 1, yi);
-    let right = halo_elev(tile, n, xi + 1, yi);
-    let up = halo_elev(tile, n, xi, yi - 1);
-    let down = halo_elev(tile, n, xi, yi + 1);
+    // Sea neighbours read as this cell's own height -- see `halo_terrain`.
+    let left = land_elev_at(tile, n, xi, yi, -1, 0, e);
+    let right = land_elev_at(tile, n, xi, yi, 1, 0, e);
+    let up = land_elev_at(tile, n, xi, yi, 0, -1, e);
+    let down = land_elev_at(tile, n, xi, yi, 0, 1, e);
 
     let z = ctx.z_factor();
     let dzdx = (right - left) * z * ctx.lat_stretch(y);
@@ -1992,10 +2040,10 @@ fn relief_at_params(
     // AMBIENT OCCLUSION from concavity against the 8-neighbour mean. Positive =
     // convex (a ridge, more sky) → brighter; negative = concave (a valley, less
     // sky) → darker. Independent of light direction, which is the whole point.
-    let ul = halo_elev(tile, n, xi - 1, yi - 1);
-    let ur = halo_elev(tile, n, xi + 1, yi - 1);
-    let bl = halo_elev(tile, n, xi - 1, yi + 1);
-    let br = halo_elev(tile, n, xi + 1, yi + 1);
+    let ul = land_elev_at(tile, n, xi, yi, -1, -1, e);
+    let ur = land_elev_at(tile, n, xi, yi, 1, -1, e);
+    let bl = land_elev_at(tile, n, xi, yi, -1, 1, e);
+    let br = land_elev_at(tile, n, xi, yi, 1, 1, e);
     let mean8 = (left + right + up + down + ul + ur + bl + br) / 8.0;
     let concavity = (e - mean8) / AO_REF;
     // Texture-shading follow-up (see `TEXTURE_SHADOW_BOOST`): widen the AO

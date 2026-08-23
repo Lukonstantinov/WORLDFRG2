@@ -2,6 +2,7 @@
 use std::collections::VecDeque;
 use crate::sim::world_buffer::WorldBuffer;
 use super::geology;
+use super::landform;
 
 // â”€â”€ Seeded noise helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
@@ -294,7 +295,7 @@ const ROOT_BUOYANCY: f32 = 0.12;
 const ROOT_REACH: u16 = 8;
 
 /// Separable box blur with cylindrical X wrap and clamped Y (poles). Radius in cells.
-fn box_blur_wrap(src: &[f32], w: u32, h: u32, radius: i32) -> Vec<f32> {
+pub(super) fn box_blur_wrap(src: &[f32], w: u32, h: u32, radius: i32) -> Vec<f32> {
     use rayon::prelude::*;
     let wi = w as i32;
     let hi = h as i32;
@@ -496,6 +497,40 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     let oro_warp_strength = belt_reach * 0.9;
     let oro_warp_freq = 1.0 / (belt_reach * 2.6);
 
+    // -- Distance-from-coast (full flood) for the coastal falloff --
+    let mut coast_dist = vec![0u16; n];
+    {
+        let mut visited = vec![false; n];
+        let mut queue = VecDeque::new();
+        for i in 0..n {
+            if terrain[i] != 1 { visited[i] = true; queue.push_back(i); }
+        }
+        while let Some(ci) = queue.pop_front() {
+            let cx = (ci % w as usize) as i32;
+            let cy = (ci / w as usize) as i32;
+            let d = coast_dist[ci];
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
+                let ny = cy + dy;
+                if ny < 0 || ny >= h as i32 { continue; }
+                let ni = (ny as u32 * w + nx as u32) as usize;
+                if visited[ni] { continue; }
+                visited[ni] = true;
+                coast_dist[ni] = d.saturating_add(1);
+                queue.push_back(ni);
+            }
+        }
+    }
+
+    // Physiographic provinces (see `landform.rs`): the per-cell relief
+    // amplitude, roughness and feature scale that make one continent a mosaic
+    // of different country instead of one global noise recipe repeated
+    // everywhere. Built BEFORE the noise loop because the noise reads it.
+    let lf = landform::build_landform_field(
+        &terrain, w, h, seed.wrapping_add(0x1A4D), &coast_dist, &vec![0.0f32; n],
+        orogeny.as_ref().map(|o| o.dist.as_slice()), belt_reach,
+    );
+
     let mut elevation = vec![0.0f32; n];
     for y in 0..h {
         for x in 0..w {
@@ -544,11 +579,38 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             // straight off the age this belt cell inherited in the BFS.
             let age_amp = if od != u16::MAX { 1.25 - oage * 0.5 } else { 1.0 };
 
+            // Province character (landform.rs). `inv_scale` retunes the
+            // WAVELENGTH of the local terms, `rugged` sets how much of the local
+            // relief is ridge-like versus billowy, and `amp` its strength -- so
+            // a shield province comes out as broad smooth swells and a massif
+            // beside it as tight ridges, from the same three noise fields.
+            //
+            // `base` is deliberately NOT modulated: it carries the
+            // continental-scale form (where the land is high at all), and a
+            // province decides how rugged its ground is, not where the
+            // continent stands.
+            let lf_amp = lf.amp[idx];
+            let lf_rug = lf.rugged[idx];
+            let lf_detail = lf.detail[idx];
+
             let base = fbm_noise(ax * f_base + 3.1, ay * f_base + 7.7, seed, 5, 2.0, 0.5);
             let (rx, ry) = warped_coords(ax * f_range, ay * f_range, seed.wrapping_add(0x9E37), warp);
             let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 7, 2.1, 2.0);
+            // A SWELL field at the same wavelength as the ridges: smooth, rounded
+            // relief, so "not rugged" is a real landform rather than merely less
+            // ridge. Blending the two by the province's `rugged` gives a massif
+            // sharp ridges and the shield beside it broad domes, out of the same
+            // wavelength -- and unlike retuning the FREQUENCY per cell, blending
+            // two fixed-frequency fields introduces no sampling artefacts (see
+            // `Character::detail`).
+            let swell = fbm_noise(rx * 0.85 + 2.3, ry * 0.85 + 6.1,
+                                  seed.wrapping_add(0x5EED), 4, 2.0, 0.5);
             let hill = fbm_noise(ax * f_hill, ay * f_hill, seed.wrapping_add(0xFEED), 3, 2.0, 0.45);
-            let mut e = base * 0.42 + ridge * belt * RIDGE_AMP * setting_amp * age_amp + hill * HILL_AMP;
+
+            let shape = ridge * lf_rug + swell * (1.0 - lf_rug);
+            let local = shape * belt * RIDGE_AMP * setting_amp * age_amp
+                + hill * HILL_AMP * lf_detail;
+            let mut e = base * 0.42 + local * lf_amp;
 
             // Divergent boundaries are rifts (continental rift valleys / nascent
             // ocean) -- pull the surface DOWN a little where crust is
@@ -577,30 +639,6 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     }
 
 
-    // -- Distance-from-coast (full flood) for the coastal falloff --
-    let mut coast_dist = vec![0u16; n];
-    {
-        let mut visited = vec![false; n];
-        let mut queue = VecDeque::new();
-        for i in 0..n {
-            if terrain[i] != 1 { visited[i] = true; queue.push_back(i); }
-        }
-        while let Some(ci) = queue.pop_front() {
-            let cx = (ci % w as usize) as i32;
-            let cy = (ci / w as usize) as i32;
-            let d = coast_dist[ci];
-            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32;
-                let ny = cy + dy;
-                if ny < 0 || ny >= h as i32 { continue; }
-                let ni = (ny as u32 * w + nx as u32) as usize;
-                if visited[ni] { continue; }
-                visited[ni] = true;
-                coast_dist[ni] = d.saturating_add(1);
-                queue.push_back(ni);
-            }
-        }
-    }
     // Coastal taper that KEEPS coastal mountains (an active margin where a
     // cordillera meets the sea): only the plain component is pulled toward the
     // shore, a genuine coastal ridge holds most of its height.
@@ -655,6 +693,11 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         let target = build_target_histogram(height, density);
         redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
     }
+
+    // Plateau rims and closed basins. AFTER the rank-based redistribution, which
+    // would otherwise fan a flat plateau's tied cells back out across a band --
+    // see `landform::apply_landform_shaping`.
+    landform::apply_landform_shaping(&mut elevation, &terrain, &lf);
 
     // Terrain-aware micro-relief so no land area is ever a perfectly flat, mono
     // plateau (plateaus stay smooth, hillsides roll, floodplains stay flat).
@@ -1065,6 +1108,14 @@ pub fn generate_elevation_from_terrain(
     // through histogram redistribution rather than a synthetic dome.
     let _ = inland_ref;
 
+    // Physiographic provinces (landform.rs) -- the same regional mosaic the
+    // plate model gets. No plate data on this path, so the archetype picker
+    // falls back to local relief as an orogeny stand-in (its documented
+    // fiction, never dressed up as real tectonics).
+    let lf = landform::build_landform_field(
+        &terrain, w, h, seed.wrapping_add(0x1A4D), &coast_dist, &vec![0.0f32; n], None, 0.0,
+    );
+
     let mut elevation = vec![0.0f32; n];
 
     for y in 0..h {
@@ -1119,8 +1170,26 @@ pub fn generate_elevation_from_terrain(
             // redistribution downstream only care about the RELATIVE pattern, so this
             // injects real rank variation into interiors â†’ visible relief after
             // redistribution instead of one flat band.
-            let combined = large * n_large + medium * n_medium + small * n_small
-                + ridge * n_ridge + abs_relief * 0.55;
+            // Province character. `large` is left alone -- it carries the
+            // continental form (where the land is high at all); the province
+            // decides how RUGGED its ground is and at what scale, not where the
+            // continent stands. `swell` is the smooth companion at the ridge
+            // wavelength, so "not rugged" is a real landform and not merely less
+            // ridge; blending two FIXED-frequency fields avoids the sampling
+            // artefacts a per-cell frequency multiplier produces (see
+            // `landform::Character::detail`).
+            let lf_amp = lf.amp[idx];
+            let lf_rug = lf.rugged[idx];
+            let lf_detail = lf.detail[idx];
+            let swell = fbm_noise(wnx * ridge_scale * 0.85 + 4.1, wny * ridge_scale * 0.85 + 2.7,
+                                  seed.wrapping_add(0x5EED), 4, 2.0, 0.5);
+            let shaped_ridge = ridge * lf_rug + swell * (1.0 - lf_rug);
+
+            let combined = large * n_large
+                + (medium * n_medium
+                   + small * n_small * lf_detail
+                   + shaped_ridge * n_ridge
+                   + abs_relief * 0.55) * lf_amp;
 
             // â”€â”€ Valley incision â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
             // A second ridged field at higher frequency, INVERTED, carves
@@ -1215,6 +1284,10 @@ pub fn generate_elevation_from_terrain(
         let target = build_target_histogram(height, density);
         redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
     }
+
+    // Plateau rims and closed basins -- AFTER the rank remap, which would
+    // otherwise fan a flat plateau back out across a band.
+    landform::apply_landform_shaping(&mut elevation, &terrain, &lf);
 
     // â”€â”€ Step 6: Terrain-aware micro-relief, then write back to buffer â”€â”€â”€â”€
     limit_grid_scale_relief(&mut elevation, &terrain, w, h);
@@ -2190,22 +2263,50 @@ fn apply_micro_relief(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32, see
     }
 }
 
-/// Build a 9-band target elevation histogram (% of land per 1000 m band).
-/// `height` interpolates between a low coastal world and a dramatic alpine one;
-/// `density` shifts a little extra mass into the highland bands.
+/// The TARGET HYPSOMETRIC CURVE: what share of land sits in each 1000 m band.
+///
+/// These anchors were measurably wrong, and the error dominated every map's
+/// appearance. At the default `height` = 0.5 the old pair produced **~21% of
+/// land above 4000 m and only ~38% below 1000 m**, so nearly every world came
+/// out a pale high plateau with the hypsometric tint saturated at its top end --
+/// which hid all the relief underneath it, landform variety included.
+///
+/// Real Earth land, for comparison (ETOPO/Amante & Eakins, rounded):
+///
+/// | band | 0-1 km | 1-2 | 2-3 | 3-4 | 4-5 | 5-6 | 6-7 | 7-8 | 8+ |
+/// |---|---|---|---|---|---|---|---|---|---|
+/// | % of land | **71** | 18 | 6 | 3 | 1.3 | 0.5 | 0.15 | 0.04 | 0.01 |
+///
+/// The anchors below are set so the MIDPOINT (`height` = 0.5, the plate model's
+/// own default and the middle of the slider) lands on that row. `LOW` is a
+/// genuinely flat, coastal world; `HIGH` is a dramatic alpine one -- and even
+/// `HIGH` keeps 56% of its land under 1000 m, because a world where a quarter of
+/// the land is above 4 km is not "alpine", it is not a planet.
+///
+/// Note what this does NOT change: the Earth climate gate scores against the
+/// baked GMT DEM and never calls this (section 2.3), so the 70.2 / 39.0 figures
+/// are untouched by construction. What it does change is every GENERATED world's
+/// temperature (lapse rate), biomes, habitability and settlement placement --
+/// all of which were being computed on land that averaged nearly 3x too high.
 fn build_target_histogram(height: f32, density: f32) -> [f32; 9] {
-    // Anchors (must each sum to ~100). LOW = flat/coastal, HIGH = alpine.
-    const LOW:  [f32; 9] = [62.0, 20.0, 9.0, 4.0, 2.5, 1.5, 0.6, 0.3, 0.1];
-    const HIGH: [f32; 9] = [22.0, 14.0, 14.0, 13.0, 12.0, 10.0, 8.0, 4.5, 2.5];
+    // Anchors (each sums to ~100). LOW = flat/coastal, HIGH = alpine.
+    const LOW:  [f32; 9] = [86.0, 10.0, 2.60, 0.90, 0.30, 0.15, 0.040, 0.008, 0.002];
+    const HIGH: [f32; 9] = [56.0, 26.0, 9.50, 5.00, 2.40, 0.90, 0.250, 0.070, 0.020];
     let t = height.clamp(0.0, 1.0);
     let mut out = [0.0f32; 9];
     for b in 0..9 {
         out[b] = LOW[b] * (1.0 - t) + HIGH[b] * t;
     }
-    // Density nudges mass from the lowest band into the mid/high bands.
-    let shift = density.clamp(0.0, 1.0) * out[0] * 0.20;
+    // Density nudges mass out of the lowest band and up the curve. The weights
+    // TAPER rather than spreading the mass evenly: an even split dumped as much
+    // into the 5-6 km band as into the 1-2 km band, which took the alpine end of
+    // the slider to 9.2% of land above 4 km -- more than fifteen times Earth's
+    // share, i.e. not a planet. Real orogeny raises a lot of hill country and
+    // very little summit.
+    const SHIFT_W: [f32; 4] = [0.45, 0.30, 0.18, 0.07]; // into bands 1..4
+    let shift = density.clamp(0.0, 1.0) * out[0] * 0.12;
     out[0] -= shift;
-    for b in 2..6 { out[b] += shift / 4.0; }
+    for (k, wgt) in SHIFT_W.iter().enumerate() { out[1 + k] += shift * wgt; }
     out
 }
 
@@ -3356,6 +3457,52 @@ mod tests {
     // Three claims, one per fix, each falsifiable on its own without rendering
     // anything. The instruments that motivated them are `erosion_texture_
     // metrics` and `dump_erosion_sheet` above; these are what keeps the result.
+
+    /// The default hypsometric target must resemble EARTH, not a plateau world.
+    ///
+    /// This is the regression that hid everything else: the old anchors put ~21%
+    /// of land above 4000 m and only ~38% below 1000 m at the default `height`,
+    /// so every generated world came out a pale high plateau with the tint ramp
+    /// saturated at its top end -- which buried whatever relief was underneath.
+    #[test]
+    fn the_default_hypsometry_resembles_earth() {
+        // ETOPO land hypsometry, % of land per 1000 m band.
+        const EARTH: [f32; 9] = [71.0, 18.0, 6.0, 3.0, 1.3, 0.5, 0.15, 0.04, 0.01];
+        let t = build_target_histogram(0.5, 0.0);
+        let total: f32 = t.iter().sum();
+        assert!((total - 100.0).abs() < 1.0, "target must sum to ~100%, got {total:.1}");
+
+        for b in 0..9 {
+            let tol = (EARTH[b] * 0.25).max(0.5);
+            assert!(
+                (t[b] - EARTH[b]).abs() <= tol,
+                "band {b} ({}-{} km): target {:.2}% vs Earth {:.2}% (tolerance {tol:.2})",
+                b, b + 1, t[b], EARTH[b],
+            );
+        }
+
+        // The headline claim, stated separately because it is the one that was
+        // wrong by a factor of forty.
+        let above_4km: f32 = t[4..].iter().sum();
+        let below_1km = t[0];
+        println!("default target: {below_1km:.1}% below 1 km, {above_4km:.2}% above 4 km");
+        assert!(below_1km > 65.0, "too little lowland: {below_1km:.1}%");
+        assert!(above_4km < 2.5, "too much land above 4 km: {above_4km:.2}%");
+
+        // The generators' REAL default is (0.5, 0.5), not (0.5, 0.0) -- assert
+        // the shipped setting, not just the one easiest to reason about.
+        let shipped = build_target_histogram(0.5, 0.5);
+        let shipped_high: f32 = shipped[4..].iter().sum();
+        println!("shipped default (0.5, 0.5): {:.1}% below 1 km, {shipped_high:.2}% above 4 km",
+                 shipped[0]);
+        assert!(shipped[0] > 63.0 && shipped_high < 3.0);
+
+        // Even the ALPINE end of the slider must stay a planet.
+        let alpine = build_target_histogram(1.0, 1.0);
+        let alpine_high: f32 = alpine[4..].iter().sum();
+        println!("alpine end (1.0, 1.0): {:.1}% below 1 km, {alpine_high:.2}% above 4 km", alpine[0]);
+        assert!(alpine_high < 8.0, "alpine preset is not a planet: {alpine_high:.1}% above 4 km");
+    }
 
     /// A relaxation pass's result must not depend on the order its cells happen
     /// to be stored in. `thermal_erosion` used to write both the donor and the

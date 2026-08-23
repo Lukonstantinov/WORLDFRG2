@@ -1034,6 +1034,10 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   and both noise `carve` terms are GONE — only
                                   `thermal_erosion` (rounds, never incises) and
                                   `limit_grid_scale_relief` remain
+  step2_terrain/landform.rs     ← PHYSIOGRAPHIC PROVINCES (§8.24): the regional
+                                  terrain-CHARACTER mosaic — relief amplitude,
+                                  ruggedness, fine-detail weight per cell, plus
+                                  plateau/basin shaping. Transient like geology.rs
   step2_terrain/geology.rs      ← TRANSIENT geology (Terrain 2.0 slices 2-3):
                                   recomputed from seed + persisted plate data every
                                   phase-2 run, used, discarded — no tile column.
@@ -3483,6 +3487,94 @@ after rayon-parallelising `box_blur_wrap`, which the new passes made hot.
 **The Earth fidelity gate cannot move here, by construction**: `earth_validation.rs`
 scores against the baked GMT DEM and never calls `generate_elevation`. Verified
 unchanged at 70.2 / 39.0 all the same.
+
+---
+
+### 8.24 Physiographic provinces & the hypsometric target
+
+Removing the drawn-in drainage texture (§8.23) exposed what was underneath it:
+**one mottled cloud over every continent** — no plains, no plateaus, no basins,
+no coherent ranges. Two separate causes, both measured.
+
+**1 · One noise recipe for the whole world.** `generate_elevation` used fixed
+frequencies and fixed amplitude weights in every cell. Real topography is a
+mosaic of PHYSIOGRAPHIC PROVINCES — the Great Plains, the Colorado Plateau, the
+Basin and Range, the Canadian Shield are adjacent, ~1000–3000 km across, and each
+has its own relief, roughness and characteristic wavelength.
+
+`landform.rs` supplies that mosaic: a jittered, domain-warped lattice of sites at
+`PROVINCE_KM` (1900 km, stated in km per rule 25), each assigned one of seven
+archetypes — plain · shield · hills · upland · massif · plateau · basin — and
+each archetype carrying `amp` (local relief), `rugged` (ridged vs smooth) and
+`detail` (weight on the short-wavelength term). Wired into the plate model and
+the template model, the two defaults; `ridged` and `cordillera` are deliberate
+stylistic models and are left alone.
+
+Four things that are easy to get wrong here, three of them found by rendering:
+
+- **The archetype comes from TECTONIC CONTEXT, not a die roll.** A massif sits
+  near an orogenic belt, a shield deep in a stable interior. A purely random
+  mosaic is varied and incoherent — mountains in the middle of cratons.
+- **`detail` is a WEIGHT, never a frequency multiplier.** Scaling a noise
+  function's coordinates by a spatially-varying factor is not a smooth
+  reparametrisation: the sample position jumps as the factor changes, and the
+  result is concentric moiré rings wherever it varies. In the hillshade they read
+  exactly like contour terracing. Blending two fields at FIXED frequencies gives
+  the same "broad versus busy" axis with no artefact. The smooth companion to the
+  ridged field is a `swell` fbm at the same wavelength, so "not rugged" is a real
+  landform rather than merely less ridge.
+- **Assign hard, then BLUR the parameter fields — do not blend the two nearest
+  sites.** A two-site blend still creases wherever the nearest-site IDENTITY
+  changes, and where three provinces meet it creases along every bisector at
+  once: the rendered map came out crazed with a polygonal crack network, like
+  dried mud. A box blur of a piecewise-constant field is continuous everywhere.
+  `amp`/`rugged`/`detail` blur over a quarter of a province; `terrace`/`bowl`
+  over a twentieth, which is what keeps an escarpment an escarpment.
+- **Shaping runs AFTER the hypsometric redistribution.** `redistribute_elevation`
+  is a rank remap, so a flat plateau built before it is simply un-flattened, its
+  tied cells fanned back across a band. Amplitude and roughness DO survive it
+  (they change which cells rank high); flattening and depressing do not.
+
+**2 · The hypsometric target was wrong by a factor of forty.** At the default
+`height`, the old anchors put **~21% of land above 4000 m** and only ~38% below
+1000 m. Earth is 0.5% and 71%. Every world came out a pale high plateau with the
+tint ramp saturated at its top end, which buried whatever relief was underneath —
+including all the province variety above. The anchors are now set so the midpoint
+lands on the real ETOPO row (**71% below 1 km, 2.1% above 4 km**), and the
+`density` shift TAPERS up the curve instead of spreading evenly, which had taken
+the alpine end to 9.2% above 4 km. Gated by `the_default_hypsometry_resembles_earth`,
+which asserts the shipped `(0.5, 0.5)` default, not just the tidy one.
+
+Mean landform relief on a plate world fell 2174 → 1291 m as a result — the land
+was averaging nearly 3× too high, and every downstream consumer (lapse-rate
+temperature, biomes, habitability, settlement placement) was reading it.
+
+**3 · The shoreline was being shaded as a cliff** (`render/tile_image.rs`). A sea
+cell stores `elevation = 0`, so a coastal land cell shaded against its raw
+neighbours saw a drop of its own full height over one cell — 8848 m at the
+extreme — and every coastline was ringed with a hard bright/dark rim unrelated to
+the land's slope. It also swamped the AO term, which read the same step as
+extreme convexity. `halo_terrain`/`land_elev_at` substitute the centre cell's own
+height for a sea neighbour in BOTH shading paths (`relief_at_params` and
+`thematic_relief`), so coastal land shades by the land's gradient and the water
+is left to `sea_shade`, which carries its own correctly-scaled seafloor relief.
+
+Gates: `provinces_give_a_world_genuinely_different_country` (relief amplitude and
+ruggedness must actually vary across a world — a neutral field scores exactly 0),
+`province_character_never_steps_between_neighbouring_cells` (the crack-network
+regression, bounded against the character table's own range rather than a bare
+number, since the gradient of a blurred field scales with cell size),
+`a_world_too_small_for_provinces_is_exactly_neutral`,
+`the_province_mosaic_is_deterministic`, `the_default_hypsometry_resembles_earth`.
+
+`bench_phase2` @3600×1800: plates 12.5 → 13.6 s, shape 14.5 → 14.8 s — one extra
+fbm field per cell plus the province build.
+
+**Still open, named rather than quietly fixed:** the 1–2 cell dark lineament of
+§8.23b survives (base tectonic/noise field, not erosion); short vertical hatch
+marks appear in shelf water near some coasts; and plateau/basin shaping is
+present but subtle — a plateau reads as a level, not yet as a landform you would
+name.
 
 ---
 
