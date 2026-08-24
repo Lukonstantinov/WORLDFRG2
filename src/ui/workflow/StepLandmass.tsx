@@ -6,7 +6,7 @@ import {
   renderWorldThumbnail, undoAction,
   type IslandKind,
 } from "@bridge";
-import { genBtn } from "@ui/workflow/WorkflowPanel";
+import { genBtn } from "@ui/workflow/workflowStyles";
 
 interface Props {
   seed: number;

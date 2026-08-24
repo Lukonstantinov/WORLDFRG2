@@ -5,6 +5,7 @@ import { useViewportStore } from "@state/viewportStore";
 import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta,
   computePolitical, computeEconomy, computeSettlementDevelopment } from "@bridge";
 import type { Settlement, RiverData } from "@types";
+import { genBtn } from "@ui/workflow/workflowStyles";
 import { StepLandmass } from "@ui/workflow/StepLandmass";
 import { StepElevation } from "@ui/workflow/StepElevation";
 import { StepOceanAtmo } from "@ui/workflow/StepOceanAtmo";
@@ -398,7 +399,7 @@ const navBtn: React.CSSProperties = {
   background: "#151d28", color: "#6a8aaa", cursor: "pointer", fontSize: 11,
 };
 
-export const genBtn: React.CSSProperties = {
-  width: "100%", padding: "6px 8px", borderRadius: 4, border: "1px solid #1a2a40",
-  background: "#151d28", color: "#7a98b8", cursor: "pointer", fontSize: 11, textAlign: "left" as const,
-};
+// genBtn now lives in a leaf module (workflowStyles) to break the WorkflowPanel↔Step*
+// import cycle; imported above for local use and re-exported here so existing
+// `import { genBtn } from "@ui/workflow/WorkflowPanel"` callers keep working.
+export { genBtn };
