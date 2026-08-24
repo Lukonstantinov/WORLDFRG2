@@ -3855,37 +3855,47 @@ TERRAIN_2_PLAN.md                 ← ⭐ ALL SIX SLICES BUILT. `hydraulic_erosi
                                     pre-existing `dyes` one). Slice 4's blast radius is real but scoped
                                     exactly as flagged: only NEW generation changes;
                                     a saved world's stored tiles are untouched
-ITCZ_AND_LAND_TOOLS_PLAN.md       ← ⭐ APPROVED, NOTHING BUILT. Three commits, in
-                                    order: stage-1 LASSO AREA TOOLS (smooth↔roughen
-                                    the coast, fjords, island/volcanic-arc chains,
-                                    bulk fill — each one `buf.save`d so undo and
-                                    re-roll come free), FOUR NEW ELEVATION
-                                    GENERATORS (rift/horst-graben · glaciated
+ITCZ_AND_LAND_TOOLS_PLAN.md       ← ⭐ COMMITS 1-2 BUILT, 3a ATTEMPTED AND
+                                    REVERTED (negative result), 3b-c NOT
+                                    ATTEMPTED. Stage-1 LASSO AREA TOOLS shipped
+                                    (smooth↔roughen the coast, fjords, island/
+                                    volcanic-arc chains, bulk fill — each one
+                                    `buf.save`d so undo and re-roll come free,
+                                    §8.25) and FOUR NEW ELEVATION GENERATORS
+                                    shipped (rift/horst-graben · glaciated
                                     fjordland · plateau & mesa · volcanic hotspot,
                                     all through `apply_elevation_model` so both
                                     run-alls honour them, and the >25%-disagreement
                                     gate extended from 4 models to 8 — `glaciated`
-                                    vs `shape` is the pair named as most likely to
-                                    fail, since glaciated starts FROM shape), then
-                                    the CLIMATE work. Carries the measured ITCZ
-                                    finding that motivated it: **there are TWO
+                                    vs `shape`, the pair named as most likely to
+                                    fail since glaciated starts FROM shape, passes).
+                                    Carries the measured ITCZ finding that
+                                    motivated the climate work: **there are TWO
                                     ITCZs**, `seasonal.rs::itcz_latitude` (8°, summer
                                     hemisphere 5-35°) for the WIND and
                                     `precipitation.rs::compute_itcz_shift_zonal`
                                     (±12° plus a ±10° migration, both hemispheres
                                     0-30°) for the RAIN — different amplitudes,
                                     different land measures, never reconciled, and
-                                    the overlay draws both. Unifying them is 3a;
-                                    FIX_PLAN A4's pressure field is 3b-c. Baseline
-                                    measured at `7786da8`: Mumbai 161 mm (real
-                                    ~2200), Bangladesh 84 mm at a **25% summer
-                                    fraction** — it rains more in winter there,
-                                    i.e. the monsoon runs backwards, not merely
-                                    weak. Adoption rule agreed up front: ship if
-                                    EXACT-ZONE rises, lowering `EARTH_MAIN_FLOOR`
-                                    deliberately as A14 already did once, and a
-                                    negative result is the deliverable if it comes
-                                    to that
+                                    the overlay draws both. **Unifying them (3a) was
+                                    tried both directions and both regress a
+                                    hard-asserted Earth-gate floor** — wind-adopts-
+                                    rain costs exact-zone (39.0%→38.1%, floor 38.8%),
+                                    rain-adopts-wind costs BOTH main-class (70.2%→
+                                    68.4%, floor 70.2%) and exact-zone (→38.5%) —
+                                    because both formulas were independently already
+                                    tuned to the Earth gate, so a straight swap only
+                                    discards whichever side's tuning gets overridden.
+                                    Both reverted; the two-formula status quo ships
+                                    unchanged. Full table in `docs/FIX_PLAN.md` A4.
+                                    FIX_PLAN A4's pressure field (3b-c) was never
+                                    attempted, since the plan built it to depend on
+                                    3a landing first. Baseline measured at `7786da8`:
+                                    Mumbai 161 mm (real ~2200), Bangladesh 84 mm at a
+                                    **25% summer fraction** — it rains more in winter
+                                    there, i.e. the monsoon runs backwards, not
+                                    merely weak — STILL UNFIXED, since the
+                                    prerequisite unification did not land.
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
                                     the settlement panel rework · provinces (enclave fix,
                                     sizing, real-terrain view, goods & exploitation) ·

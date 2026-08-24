@@ -1,10 +1,17 @@
 # ITCZ physics + stage-1 land drawing + four new terrain generators
 
-> **STATUS: APPROVED, NOTHING BUILT.** This is a plan, not a record of work.
-> Read `docs/FIX_PLAN.md` for what is prioritised across the whole project and
-> `docs/SCOREBOARD.md` for what is actually measured. The measured baseline in
-> §Context below was taken on `7786da8` and is real; everything after it is
-> intent.
+> **STATUS (2026-08-24): Commits 1 and 2 BUILT and shipped** (the lasso area
+> tools + `Lasso` type, and the four new elevation generators — rift, glaciated,
+> plateau, volcanic — all wired into `apply_elevation_model`). **Commit 3a
+> (ITCZ unification) was ATTEMPTED AND REVERTED** — both natural unification
+> directions regress the Earth fidelity gate's hard-asserted floor; see
+> `docs/FIX_PLAN.md` A4 for the measured negative result. **Commit 3b/3c (the A4
+> pressure field) was NOT attempted**, since the plan built it to depend on 3a
+> landing first. Read `docs/FIX_PLAN.md` for what is prioritised across the
+> whole project and `docs/SCOREBOARD.md` for what is actually measured. The
+> measured baseline in §Context below was taken on `7786da8` and is real; the
+> rest of this document is the original plan text, kept for the record of what
+> was intended and why — treat the status line above as authoritative over it.
 
 ## Context
 
