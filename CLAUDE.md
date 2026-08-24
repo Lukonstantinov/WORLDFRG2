@@ -196,6 +196,30 @@ in-memory on open (`legacy=true` → the app offers to split). `import_world_lay
 copies layer groups (terrain/climate/hydrology/soil/hazards/goods) from another
 world of the same grid size via `TileData::merge_columns`.
 
+**Save mid-generation, reopen, resume from there.** A `.worldforge` file saved
+after only SOME pipeline steps have run (e.g. Landmass + Elevation, nothing
+past it) is a completely ordinary save — `save_world_as` is a raw backup of
+whatever tile columns and metadata exist, with no full-pipeline assumption —
+and reopening it correctly restores the wizard's step-completion state so the
+next step is ready to run. Two real bugs in that path, both fixed:
+- **`App.tsx`'s `NewWorldDialog`** (the modal shown on a fresh launch, before
+  any world is loaded) used to offer ONLY "Create World" — no way to open an
+  existing file, and the modal has no cancel, so a brand-new session could not
+  reach the header's "Open" button at all. It now also carries an "Open
+  Existing World..." button wired to the same `handleOpen` the header uses.
+- **The step-7-10 completion inference never ran once steps 1-6 had anything
+  to restore.** `world_progress` (steps 1-6) ships inside every `.worldforge`
+  file, but `campaign_progress` (steps 7-10) is a `CAMPAIGN_RUN_KEY` and is
+  deliberately stripped by `save_world_as` (rule 28) — so on a plain
+  save-mid-generation → reopen round trip, `world_progress` restores something
+  while `campaign_progress` never does. The two halves were gated behind ONE
+  combined "did anything restore" check, so the steps-7-10 fallback (infer
+  from whether settlements/economy data is actually present) silently never
+  fired. Restoring/inferring the two halves independently is what makes
+  reopening a world that already has settlements or an economy show those
+  steps as done, rather than stranding the user re-clicking "Generate
+  Settlements" on data that's already there.
+
 > **The interface is a ONE-WAY SNAPSHOT.** `campaign_start_sim` reads an
 > `EconomySnapshot` out of `metadata` and from that moment **the campaign never
 > touches a tile again**. This is deliberate (it's why 500-year runs are fast), but it

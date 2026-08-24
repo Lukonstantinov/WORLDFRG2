@@ -174,7 +174,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
   );
 }
 
-function NewWorldDialog({ onCreated }: { onCreated: () => void }) {
+function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; onOpenExisting: () => void }) {
   const [name, setName] = useState("My World");
   const [width, setWidth] = useState(3600);
   const [height, setHeight] = useState(1800);
@@ -275,6 +275,30 @@ function NewWorldDialog({ onCreated }: { onCreated: () => void }) {
         >
           {creating ? "Creating..." : "Create World"}
         </button>
+
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0" }}>
+          <div style={{ flex: 1, height: 1, background: "#1e2e42" }} />
+          <span style={{ color: "#3a5070", fontSize: 10 }}>or</span>
+          <div style={{ flex: 1, height: 1, background: "#1e2e42" }} />
+        </div>
+
+        <button
+          onClick={onOpenExisting}
+          disabled={creating}
+          style={{
+            width: "100%", padding: "9px 0", borderRadius: 6,
+            border: "1px solid #2a3a50", cursor: creating ? "wait" : "pointer",
+            background: "transparent", color: "#8ab0d0",
+            fontSize: 13, fontWeight: 500,
+          }}
+        >
+          📂 Open Existing World...
+        </button>
+        <div style={{ color: "#3a5070", fontSize: 10, marginTop: 8, lineHeight: 1.4 }}>
+          Upload a .worldforge file saved at ANY point mid-generation — the
+          Workflow panel picks up right where it left off, with completed
+          steps checked and the rest ready to continue.
+        </div>
       </div>
     </div>
   );
@@ -382,7 +406,6 @@ export default function App() {
   const showToolbar = useUIStore((s) => s.showToolbar);
   const appMode = useUIStore((s) => s.appMode);
   const setAppMode = useUIStore((s) => s.setAppMode);
-  const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const setStepsCompleted = useUIStore((s) => s.setStepsCompleted);
   const setWorkflowStep = useUIStore((s) => s.setWorkflowStep);
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
@@ -439,18 +462,29 @@ export default function App() {
           }
         } catch { /* none saved */ }
         // Restore the persisted wizard progress; older saves never wrote it, so
-        // fall back to inferring completion from which data is present.
-        const restored = [
-          ...parseProgress(res.world_progress),
-          ...parseProgress(res.campaign_progress),
-        ];
-        if (restored.length > 0) {
-          setStepsCompleted(restored);
-        } else {
-          if (ov.rivers?.length) [1, 2, 3, 4, 5, 6].forEach(markStepCompleted);
-          if (ov.settlements?.length) markStepCompleted(7);
-          if (ov.economy && ov.economy.hubs.length) [8, 9, 10].forEach(markStepCompleted);
-        }
+        // fall back to inferring completion from which data is present. The two
+        // halves are restored/inferred INDEPENDENTLY: `world_progress` (steps
+        // 1-6) ships inside every .worldforge file, but `campaign_progress`
+        // (steps 7-10) is deliberately a CAMPAIGN_RUN_KEY and is stripped by
+        // `save_world_as` (rule 28) — so on a plain save-mid-generation →
+        // reopen round trip, `world_progress` almost always restores something
+        // while `campaign_progress` never does. A single combined
+        // "restored.length > 0" gate meant the steps-7-10 inference never ran
+        // once steps 1-6 had anything to restore, so reopening a world whose
+        // settlements/economy WERE already generated silently showed those
+        // steps as not done.
+        const worldRestored = parseProgress(res.world_progress);
+        const campaignRestored = parseProgress(res.campaign_progress);
+        const worldSteps = worldRestored.length > 0
+          ? worldRestored
+          : (ov.rivers?.length ? [1, 2, 3, 4, 5, 6] : []);
+        const campaignSteps = campaignRestored.length > 0
+          ? campaignRestored
+          : [
+              ...(ov.settlements?.length ? [7] : []),
+              ...((ov.economy && ov.economy.hubs.length) ? [8, 9, 10] : []),
+            ];
+        setStepsCompleted([...worldSteps, ...campaignSteps]);
         // A finalized (locked) world is read-only — jump straight to the campaign
         // side, but ONLY if it can actually start one. Landing in Chronicle with no
         // economy used to strand the user: Chronicle renders ChroniclePanel, not the
@@ -776,7 +810,7 @@ export default function App() {
       <GoodsEditor />
       <GoodsChainReview />
       <GoodDetailPanel />
-      {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} />}
+      {showDialog && <NewWorldDialog onCreated={() => setShowDialog(false)} onOpenExisting={handleOpen} />}
       {showCampaignDialog && (
         <NewCampaignDialog
           worldName={meta?.name || "world"}

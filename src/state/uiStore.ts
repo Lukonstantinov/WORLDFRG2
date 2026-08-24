@@ -31,11 +31,14 @@ export interface TerrainParams {
    *  data, so it is offered only on a plate-derived world); "shape" =
    *  coast-distance + noise ridges; "cordillera" = continuous coast-parallel
    *  chains with a divide and asymmetric flanks; "ridged" = scattered
-   *  ridged-multifractal belts.
+   *  ridged-multifractal belts; "rift" = horst/graben fault blocks; "glaciated"
+   *  = the shape model + glacial modification (U-valleys, cirques, fjords);
+   *  "plateau" = sharp quantised escarpments + buttes; "volcanic" = shield
+   *  cones + calderas + hotspot trails (ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2).
    *
    *  Read by BOTH run-alls as well as the step-2 button — before that they
    *  hardcoded a generator and silently discarded this and all four sliders. */
-  mode: "plates" | "shape" | "cordillera" | "ridged";
+  mode: "plates" | "shape" | "cordillera" | "ridged" | "rift" | "glaciated" | "plateau" | "volcanic";
 }
 
 export interface RiverParamsState {
