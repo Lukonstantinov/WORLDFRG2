@@ -591,6 +591,20 @@ pub fn compute_economy(
     // production BEFORE the market solves, so manufactured goods flow as exports
     // from populous hubs that hold the inputs.
     let hub_pop: Vec<f32> = (0..nn).map(|hh| nodes[hh].population.max(1) as f32).collect();
+    // Preserve the EXTRACTED raw production before manufacturing consumes it. The
+    // `produces` list emitted below seeds the campaign's per-capita output, and this
+    // static pass CONSUMES a hub's raw inputs in place (`&mut prod`) to make finished
+    // goods. A scarce, seeded raw whose whole output feeds an enabled manufacture —
+    // wine→brandy, sugar→refined_sugar/citrus_liqueur — was therefore eaten down below
+    // the emit gate and recorded as if the hub produced NONE of it, so the campaign
+    // seeded `base_per_capita[wine]=0` and never produced or traded wine at all, and no
+    // city could plant a vineyard for a good the snapshot said it could not make (the
+    // reported "wine/sugar provinces produce nothing" case). Emitting the raw output
+    // for extractive goods (via `raw_prod.max(prod)` below) records the RAW producer;
+    // the campaign's own per-tick `manufacture_pass` then does the conversion from live
+    // stock, which is where it belongs. Unlimited raws (iron) were never hit because a
+    // large surplus survived the pass; this makes every raw robust to it.
+    let raw_prod = prod.clone();
     let _manu_warnings =
         crate::sim::manufacture::apply_manufacturing(&mut prod, &specs, &hub_pop);
     let mhubs: Vec<market::MarketHub> = (0..nn)
@@ -977,14 +991,18 @@ pub fn compute_economy(
         let p = power[hh] / pmax;
         let stars = if p >= 0.80 { 5 } else if p >= 0.60 { 4 }
             else if p >= 0.42 { 3 } else if p >= 0.25 { 2 } else { 1 };
+        // Report the RAW extracted output where manufacturing consumed it (a raw good
+        // has `raw_prod >= prod`); a manufactured good has `raw_prod == 0 < prod` (its
+        // made amount), so `max` reports the right figure for both without branching.
+        let reported = |g: usize| raw_prod[hh][g].max(prod[hh][g]);
         let mut produces: Vec<EconHubGood> = (0..gc)
-            .filter(|&g| prod[hh][g] > 0.05)
+            .filter(|&g| reported(g) > 0.05)
             .map(|g| {
                 let q = quality[hh][g];
                 let id = goods_names.get(g).cloned().unwrap_or_default();
                 let flavor = good_flavor(&id, q);
                 EconHubGood {
-                    good: g, good_name: id, amount: prod[hh][g], quality: q,
+                    good: g, good_name: id, amount: reported(g), quality: q,
                     grade: grade_name(q).to_string(), flavor,
                     // Local equilibrium price in grain-equivalent (quality
                     // nudges the realized sale price a little).
