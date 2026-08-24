@@ -4,6 +4,7 @@ pub mod world_buffer;
 // ── Step 1 · Tectonic Plates ─────────────────────────────────────────────────
 pub mod step1_plates;
 pub use step1_plates::plates;
+pub use step1_plates::landmass_ops;
 
 // ── Step 2 · Terrain / Elevation ─────────────────────────────────────────────
 pub mod step2_terrain;

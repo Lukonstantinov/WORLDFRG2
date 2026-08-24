@@ -260,6 +260,65 @@ export async function simGenerateTerrainCordillera(
   });
 }
 
+/** Elevation model: parallel fault blocks — a tilted, asymmetric horst-and-graben
+ *  rift system. Strike follows the world's own divergent-boundary trend where
+ *  plate data exists, a seeded regional strike otherwise. */
+export async function simGenerateTerrainRift(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_rift", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: the shape model, then glacial modification — U-valley
+ *  broadening, cirque hollows, over-deepened troughs that breach the coast (real
+ *  fjords, carved rather than notched). May turn a little land into sea near the
+ *  coast. */
+export async function simGenerateTerrainGlaciated(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_glaciated", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: quantised levels with sharp escarpment rims + outlying
+ *  buttes. */
+export async function simGenerateTerrainPlateau(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_plateau", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: shield cones on volcanic cells, summit calderas on the
+ *  densest clusters, hotspot trails from isolated seeds. */
+export async function simGenerateTerrainVolcanic(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_volcanic", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
 /** The planetary settings a preview runs against. Passed explicitly (not read
  *  from the world) so the UI can preview values mid-drag, before they commit. */
 export interface PreviewSettings {
@@ -313,6 +372,53 @@ export async function simGenerateRidges(
   seed: number,
 ): Promise<[number, number][]> {
   return invoke("sim_generate_ridges", { linesJson: JSON.stringify(lines), seed });
+}
+
+// ── Landmass step lasso area tools (ITCZ_AND_LAND_TOOLS_PLAN.md Commit 1) ──
+// Each takes the lasso polygon (world-cell coords, may straddle the
+// antimeridian — the backend unwraps it) and returns the modified tile coords.
+
+export async function landOpSmoothRoughen(
+  lasso: import("@types").LassoPolygon,
+  amount: number,
+  seed: number,
+): Promise<[number, number][]> {
+  return invoke("land_op_smooth_roughen", { lassoJson: JSON.stringify(lasso), amount, seed });
+}
+
+export async function landOpFjords(
+  lasso: import("@types").LassoPolygon,
+  count: number,
+  lengthKm: number,
+  width: number,
+  seed: number,
+): Promise<[number, number][]> {
+  return invoke("land_op_fjords", { lassoJson: JSON.stringify(lasso), count, lengthKm, width, seed });
+}
+
+export type IslandKind = "arc" | "scatter" | "single";
+
+export async function landOpIslands(
+  lasso: import("@types").LassoPolygon,
+  count: number,
+  kind: IslandKind,
+  size: number,
+  seed: number,
+): Promise<[number, number][]> {
+  return invoke("land_op_islands", { lassoJson: JSON.stringify(lasso), count, kind, size, seed });
+}
+
+export async function landOpFill(
+  lasso: import("@types").LassoPolygon,
+  land: boolean,
+): Promise<[number, number][]> {
+  return invoke("land_op_fill", { lassoJson: JSON.stringify(lasso), land });
+}
+
+/** A read-only downsampled thumbnail of the current world (land/sea + elevation),
+ *  used by the landmass variant compare — never read through the tile/LOD cache. */
+export async function renderWorldThumbnail(maxPx: number): Promise<import("@types").WorldThumbnail> {
+  return invoke("render_world_thumbnail", { maxPx });
 }
 
 // ── #26 · Geographic toponyms (gated, editable) ──

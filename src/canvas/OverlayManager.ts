@@ -258,9 +258,17 @@ const COLD_CURRENT = "#3399ee";
 const NEUTRAL_CURRENT = "#9bb0c0";
 const WIND_COLOR = "#aaccee";
 const LAT_LINE_COLOR = "#cccc66";
-// Climate-band overlay colours: ITCZ rain line (cyan), subtropical-high dry belts
-// (amber), polar-front storm tracks (blue).
-const ITCZ_COLOR = "#39d6e0";
+// Climate-band overlay colours: ITCZ rain BELT (per season), subtropical-high dry
+// belts (amber), polar-front storm tracks (blue).
+const ITCZ_COLOR = "#39d6e0"; // annual-mean fallback (old saves with no seasonal ITCZ)
+// The seasonal ITCZ is drawn as a broad feathered SWATH in the real convention —
+// boreal-summer (July) red, austral-summer (January) blue — because the convergence
+// zone is a belt several degrees of latitude wide, not a hairline.
+const ITCZ_JULY_COLOR = "#e8556e";
+const ITCZ_JAN_COLOR = "#4f9bea";
+// Half-width of the drawn convergence belt, in degrees of latitude (±, so the core
+// band is twice this). The real ITCZ rain belt is ~5-10° wide.
+const ITCZ_BAND_HALF_DEG = 6;
 const SUBTROPICAL_COLOR = "#e0a83a";
 const POLAR_FRONT_COLOR = "#6a9cf0";
 const FISHERY_BANK = "#39d3c0"; // grand-bank fishing ground (teal)
@@ -497,6 +505,8 @@ export class OverlayManager {
   private travelRoute: [number, number][] = [];
   /** Ridge-drawing tool: transient drawn/in-progress ridge lines to sketch on the map. */
   private ridgeSketch: RidgeLine[] = [];
+  /** Landmass step: the in-progress/drawn lasso polygon (world cells), or empty. */
+  private lassoSketch: [number, number][] = [];
   /** 🌊 Hydrology · indices (into `rivers`) of the selected system's subtree to
    *  glow on the map; empty = no selection (all rivers drawn normally). */
   private riverHighlight: Set<number> = new Set();
@@ -1102,6 +1112,10 @@ export class OverlayManager {
   }
 
   /** Set (or clear with []) the hand-drawn ridge lines to sketch on the map. */
+  setLassoSketch(points: [number, number][]) {
+    this.lassoSketch = points;
+  }
+
   setRidgeSketch(lines: RidgeLine[]) {
     this.ridgeSketch = lines;
   }
@@ -2354,11 +2368,12 @@ export class OverlayManager {
         ctx.globalAlpha = 1;
       }
 
-      // ITCZ — the convergence / heavy-rain line, drawn at BOTH seasonal extremes
-      // with the migration belt shaded between them. Each line is per-column, so it
-      // bows poleward over the continents and equatorward over the oceans; the band
-      // between them is the land that changes circulation regime between January
-      // and July, which is the definition of a monsoon climate.
+      // ITCZ — the convergence / heavy-rain BELT, drawn at BOTH seasonal extremes as
+      // a broad feathered swath (July red, January blue), the way the real ITCZ is
+      // mapped. Each swath is per-column, so it bows poleward over the continents and
+      // equatorward over the oceans; where the two overlap near the equator is the
+      // land that stays convergent year-round, and the gap a column sweeps between
+      // them is the definition of a monsoon climate.
       if (this.visibility.itcz && cb.itcz.length > 0) {
         const step = Math.max(1, Math.floor(cb.width / 720));
         const yAt = (latDeg: number) =>
@@ -2370,7 +2385,32 @@ export class OverlayManager {
         const julLats = hasSeasons ? cb.itcz_july : cb.itcz;
         const janLats = hasSeasons ? cb.itcz_january : cb.itcz;
 
-        const trace = (lats: number[]) => {
+        // A filled ribbon ±halfDeg of latitude around each column's centre line:
+        // top edge traced forward, bottom edge traced back, then filled. This is what
+        // gives the ITCZ its real WIDTH instead of a hairline.
+        const ribbon = (lats: number[], halfDeg: number, alpha: number, color: string) => {
+          ctx.beginPath();
+          let started = false;
+          for (let x = 0; x < cb.width; x += step) {
+            const y = yAt(lats[x] + halfDeg);
+            if (!started) { ctx.moveTo(x + 0.5, y); started = true; }
+            else { ctx.lineTo(x + 0.5, y); }
+          }
+          for (let x = cb.width - 1 - ((cb.width - 1) % step); x >= 0; x -= step) {
+            ctx.lineTo(x + 0.5, yAt(lats[x] - halfDeg));
+          }
+          ctx.closePath();
+          ctx.globalAlpha = alpha;
+          ctx.fillStyle = color;
+          ctx.fill();
+        };
+
+        // A thin centre line for definition, in the swath's own colour.
+        const trace = (lats: number[], color: string, dash: number[]) => {
+          ctx.globalAlpha = 0.85;
+          ctx.strokeStyle = color;
+          ctx.lineWidth = Math.max(0.6, 1.2 / this.currentScale);
+          ctx.setLineDash(dash);
           ctx.beginPath();
           let started = false;
           for (let x = 0; x < cb.width; x += step) {
@@ -2379,68 +2419,40 @@ export class OverlayManager {
             else { ctx.lineTo(x + 0.5, y); }
           }
           ctx.stroke();
+          ctx.setLineDash([]);
         };
 
-        if (hasSeasons) {
-          // The migration band: a low-opacity fill between the two lines, hatched
-          // with diagonal dashes so it reads as "this belt sweeps" rather than as a
-          // solid climate region of its own.
-          ctx.save();
-          ctx.beginPath();
-          let started = false;
-          for (let x = 0; x < cb.width; x += step) {
-            const y = yAt(julLats[x]);
-            if (!started) { ctx.moveTo(x + 0.5, y); started = true; }
-            else { ctx.lineTo(x + 0.5, y); }
-          }
-          for (let x = cb.width - 1 - ((cb.width - 1) % step); x >= 0; x -= step) {
-            ctx.lineTo(x + 0.5, yAt(janLats[x]));
-          }
-          ctx.closePath();
-          ctx.globalAlpha = 0.10;
-          ctx.fillStyle = ITCZ_COLOR;
-          ctx.fill();
-          // Diagonal hatch inside the band only.
-          ctx.clip();
-          ctx.globalAlpha = 0.22;
-          ctx.strokeStyle = ITCZ_COLOR;
-          ctx.lineWidth = Math.max(0.4, 0.9 / this.currentScale);
-          const hatch = Math.max(6, 14 / Math.sqrt(this.currentScale));
-          const yTop = yAt(90), yBot = yAt(-90);
-          const span = Math.abs(yBot - yTop) + cb.width;
-          ctx.beginPath();
-          for (let d = -span; d < cb.width + span; d += hatch) {
-            ctx.moveTo(d, Math.min(yTop, yBot));
-            ctx.lineTo(d + Math.abs(yBot - yTop), Math.max(yTop, yBot));
-          }
-          ctx.stroke();
-          ctx.restore();
-        }
+        const julColor = hasSeasons ? ITCZ_JULY_COLOR : ITCZ_COLOR;
+        const janColor = hasSeasons ? ITCZ_JAN_COLOR : ITCZ_COLOR;
+        const halo = ITCZ_BAND_HALF_DEG * 1.7;
 
-        // July line — solid; January — dashed, so the pair reads without colour.
-        ctx.globalAlpha = 0.92;
-        ctx.strokeStyle = ITCZ_COLOR;
-        ctx.lineWidth = Math.max(0.8, 1.8 / this.currentScale);
-        ctx.setLineDash([]);
-        trace(julLats);
-        if (hasSeasons) {
-          ctx.setLineDash([
-            Math.max(3, 7 / Math.sqrt(this.currentScale)),
-            Math.max(2, 5 / Math.sqrt(this.currentScale)),
-          ]);
-          trace(janLats);
-          ctx.setLineDash([]);
-        }
+        // Two passes per season — a wide faint halo (feathered edge) then a denser
+        // core — so each belt reads as a soft-edged swath. Halos first so the cores
+        // and centre lines sit crisply on top; January under July, since the
+        // boreal-summer belt is the more prominent one over the continents.
+        ribbon(janLats, halo, 0.11, janColor);
+        ribbon(julLats, halo, 0.11, julColor);
+        ribbon(janLats, ITCZ_BAND_HALF_DEG, 0.28, janColor);
+        ribbon(julLats, ITCZ_BAND_HALF_DEG, 0.28, julColor);
+
+        trace(janLats, janColor, hasSeasons ? [
+          Math.max(3, 7 / Math.sqrt(this.currentScale)),
+          Math.max(2, 5 / Math.sqrt(this.currentScale)),
+        ] : []);
+        trace(julLats, julColor, []);
 
         ctx.globalAlpha = 1;
-        ctx.fillStyle = ITCZ_COLOR;
         if (hasSeasons) {
           // Plain fillText, like the other band annotations: these are overlay
           // legends, not place names, so they stay out of the label registry
-          // (§8.11) exactly as road names and river-break markers do.
-          ctx.fillText("ITCZ July (summer rains)", 4, yAt(julLats[0]) - 2);
-          ctx.fillText("ITCZ January", 4, yAt(janLats[0]) - 2);
+          // (§8.11) exactly as road names and river-break markers do. Coloured to
+          // match each swath.
+          ctx.fillStyle = ITCZ_JULY_COLOR;
+          ctx.fillText("ITCZ July (summer rains)", 4, yAt(julLats[0] + ITCZ_BAND_HALF_DEG) - 2);
+          ctx.fillStyle = ITCZ_JAN_COLOR;
+          ctx.fillText("ITCZ January", 4, yAt(janLats[0] - ITCZ_BAND_HALF_DEG) + fontSize + 2);
         } else {
+          ctx.fillStyle = ITCZ_COLOR;
           ctx.fillText("ITCZ (convergence / rains)", 4, yAt(cb.itcz[0]) - 2);
         }
       }
@@ -2639,6 +2651,11 @@ export class OverlayManager {
     // opacity ∝ peak height). Always shown while lines exist (no visibility gate).
     if (this.ridgeSketch.length > 0) {
       this.renderRidgeSketch(ctx);
+    }
+
+    // Landmass lasso: the freehand selection polygon the area tools operate on.
+    if (this.lassoSketch.length > 0) {
+      this.renderLassoSketch(ctx);
     }
 
     // #37 · per-good scarcity: graduated discs at each hub, green where the good
@@ -3216,6 +3233,36 @@ export class OverlayManager {
       draw(spine, Math.min(1, alpha + 0.15));
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** Landmass lasso: a dashed, unclosed-until-committed selection outline plus a
+   *  light fill so the area the ops will touch is legible while drawing. Seam
+   *  handling mirrors the ridge sketch — a jump bigger than `seamGap` starts a
+   *  new subpath rather than drawing a line straight across the map. */
+  private renderLassoSketch(ctx: CanvasRenderingContext2D) {
+    const pts = this.lassoSketch;
+    if (pts.length < 1) return;
+    const seamGap = 20;
+    ctx.save();
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < pts.length; i++) {
+      const [x, y] = pts[i];
+      if (i > 0 && Math.abs(x - pts[i - 1][0]) > seamGap) started = false;
+      if (!started) { ctx.moveTo(x + 0.5, y + 0.5); started = true; }
+      else ctx.lineTo(x + 0.5, y + 0.5);
+    }
+    if (pts.length > 2) ctx.closePath();
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = "#4ad0e0";
+    ctx.fill();
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = Math.max(0.6, 1.4 / Math.sqrt(this.currentScale));
+    ctx.setLineDash([Math.max(1, 3 / Math.sqrt(this.currentScale)), Math.max(1, 2 / Math.sqrt(this.currentScale))]);
+    ctx.strokeStyle = "#4ad0e0";
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   /** #37 · scarcity discs. Premium (local price ÷ world base value) maps green
@@ -5413,6 +5460,7 @@ export class OverlayManager {
     this.tradeRoutes = [];
     this.travelRoute = [];
     this.ridgeSketch = [];
+    this.lassoSketch = [];
     this.riverHighlight = new Set();
     this.riverHighlightColors = {};
     this.lakeHighlight = -1;

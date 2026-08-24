@@ -89,7 +89,7 @@ export type PaintValue =
   | { type: "shelf"; value: number }
   | { type: "volcanic"; value: number };
 
-export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge";
+export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge" | "lasso";
 
 /** A hand-drawn mountain-ridge line: a polyline spine (world cells) whose stroke
  *  width encodes the range's footprint width, opacity encodes peak height, and a
@@ -102,6 +102,11 @@ export interface RidgeLine {
   erase: boolean;
   noise: number;
 }
+/** A freehand-drawn selection polygon for the Landmass step's area tools
+ *  (`ITCZ_AND_LAND_TOOLS_PLAN.md` Commit 1) — world-cell coordinates, may
+ *  straddle the antimeridian (the backend's `Lasso::new` unwraps it). */
+export type LassoPolygon = [number, number][];
+
 export type ActiveLayer =
   | "land" | "elevation" | "climate" | "temperature" | "precipitation"
   | "sst" | "snow"
@@ -203,6 +208,15 @@ export interface CoarsePreview {
    *  thumbnail pixel coords — drawn over the Köppen thumbnail. `ctype`:
    *  0 = neutral, 1 = warm, 2 = cold. Same shape as `Streamline`. */
   streamlines: Streamline[];
+}
+
+/** A read-only downsampled land/sea + elevation thumbnail of the current world,
+ *  used by the landmass variant compare. Mirrors Rust `WorldThumbnail`. */
+export interface WorldThumbnail {
+  width: number;
+  height: number;
+  /** Base64-encoded RGBA pixels, width × height × 4. */
+  rgba: string;
 }
 
 /** RENDER PALETTES — served by `get_render_palettes` straight out of the Rust

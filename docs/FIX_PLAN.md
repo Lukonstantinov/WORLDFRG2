@@ -205,6 +205,48 @@ A single-layer pressure solve would make the winter monsoon, the Mediterranean r
 and the subtropical highs emerge from one mechanism. Large; only worth it if A1–A3
 leave the remaining error concentrated in monsoon/continental regimes.
 
+**Prerequisite attempted and REVERTED (negative result, 2026-08-24,
+`ITCZ_AND_LAND_TOOLS_PLAN.md` Commit 3a).** Before building the pressure field itself,
+`docs/ITCZ_AND_LAND_TOOLS_PLAN.md` called for unifying the two independently-computed
+ITCZs first — the WIND field (`seasonal::itcz_latitude`/`itcz_land_pull`: 8° amplitude,
+a summer-hemisphere-only land measure over 5–35°) and the RAIN band
+(`precipitation::compute_itcz_shift_zonal`: ±12° clamp, a both-hemisphere land measure
+over 0–30°, smoothed over ±30° longitude, plus a separate ±10° `ITCZ_SEASONAL_MIGRATE`)
+— on the reasoning that "A4 needs a single ITCZ to be about."
+
+Baseline: **main-class 70.2%, exact-zone 39.0%** (this branch, prior to any Commit 3
+change).
+
+Both natural unification directions were tried and both regress a HARD-asserted floor:
+
+| config | change | main-class | exact-zone |
+|---|---|---|---|
+| baseline | (neither touched) | 70.2% | 39.0% |
+| A — wind adopts rain's shift | `compute_seasonal_wind` reads `itcz_shift_by_column` (the rain formula) instead of `itcz_land_pull`/`itcz_latitude` | 70.2% | **38.1%** (floor 38.8%) |
+| B — rain adopts wind's shift | `season_precip` reads `itcz_land_pull`/`itcz_latitude` (the wind formula) instead of `compute_itcz_shift_zonal` | **68.4%** (floor 70.2%) | **38.5%** (floor 38.8%) |
+
+**Both configurations were reverted**; the two-formula status quo ships unchanged.
+
+**The finding is that both formulas were independently already tuned to the Earth
+gate**, not that either is arbitrary. The rain formula's own doc comment records why
+its constants sit where they do (`ITCZ_SEASONAL_MIGRATE = 10°`: "8° left the SH-summer
+ITCZ too close to the equator... 12° pushed the SH-summer ITCZ past the equatorial
+Amazon"); the wind formula's `MONSOON_BELT_MIGRATE = 8°` was chosen for the same
+reason (`earth_diagnose_seasonal_wind_reversal` — "all seven of the real Earth's
+monsoon sites changed heading by at most 8° between January and July" before it
+existed). Handing one mechanism the other's already-tuned constants doesn't unify
+them, it just discards whichever side's tuning gets overridden — config B, which
+overrides the more heavily-calibrated rain formula, costs nearly two full main-class
+points, the worse of the two.
+
+**A real unification is therefore a re-tuning exercise, not a substitution, and per
+§2.4 ("never tune a constant without a gate that isn't the target") it needs its own
+session with its own gate — not folded into this one under time pressure alongside
+five other changes.** Do not re-attempt a straight swap in either direction; both
+directions are now recorded as tried. The pressure field itself (3b/3c) was not
+attempted this session, since it was explicitly built to depend on 3a's unification
+landing first.
+
 ---
 
 ### A5. Interannual variability ⭐ high value, low cost

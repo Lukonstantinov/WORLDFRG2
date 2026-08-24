@@ -196,6 +196,30 @@ in-memory on open (`legacy=true` → the app offers to split). `import_world_lay
 copies layer groups (terrain/climate/hydrology/soil/hazards/goods) from another
 world of the same grid size via `TileData::merge_columns`.
 
+**Save mid-generation, reopen, resume from there.** A `.worldforge` file saved
+after only SOME pipeline steps have run (e.g. Landmass + Elevation, nothing
+past it) is a completely ordinary save — `save_world_as` is a raw backup of
+whatever tile columns and metadata exist, with no full-pipeline assumption —
+and reopening it correctly restores the wizard's step-completion state so the
+next step is ready to run. Two real bugs in that path, both fixed:
+- **`App.tsx`'s `NewWorldDialog`** (the modal shown on a fresh launch, before
+  any world is loaded) used to offer ONLY "Create World" — no way to open an
+  existing file, and the modal has no cancel, so a brand-new session could not
+  reach the header's "Open" button at all. It now also carries an "Open
+  Existing World..." button wired to the same `handleOpen` the header uses.
+- **The step-7-10 completion inference never ran once steps 1-6 had anything
+  to restore.** `world_progress` (steps 1-6) ships inside every `.worldforge`
+  file, but `campaign_progress` (steps 7-10) is a `CAMPAIGN_RUN_KEY` and is
+  deliberately stripped by `save_world_as` (rule 28) — so on a plain
+  save-mid-generation → reopen round trip, `world_progress` restores something
+  while `campaign_progress` never does. The two halves were gated behind ONE
+  combined "did anything restore" check, so the steps-7-10 fallback (infer
+  from whether settlements/economy data is actually present) silently never
+  fired. Restoring/inferring the two halves independently is what makes
+  reopening a world that already has settlements or an economy show those
+  steps as done, rather than stranding the user re-clicking "Generate
+  Settlements" on data that's already there.
+
 > **The interface is a ONE-WAY SNAPSHOT.** `campaign_start_sim` reads an
 > `EconomySnapshot` out of `metadata` and from that moment **the campaign never
 > touches a tile again**. This is deliberate (it's why 500-year runs are fast), but it
@@ -259,18 +283,75 @@ Run in order. Each phase depends on previous phases' data.
 | All | `sim_run_all` | Phases 1-8 from plates |
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
 
-**FOUR elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
+**EIGHT elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
 the single place a mode string picks a generator — `plates` (the tectonic model,
 `generate_elevation`, the ONLY one that reads `boundary_type`) · `shape` ·
-`cordillera` (§8.13) · `ridged`. Both run-alls used to HARDCODE a generator and
-silently discard the user's pick and all four sliders, so "Generate Full World"
-produced the same relief however `StepElevation`'s picker was set; the models were
-reachable only from step 2's own button. Two rules: the tectonic model is offered
-only where plate data exists (`landmassSource === "plates"`) and degrades to the
-shape model otherwise, and an UNRECOGNISED mode must still build terrain — a bad
-string may never leave a world with no elevation. Gated by
-`elevation_model_tests`, which asserts the four disagree on >25% of land (a
-picker that does not reach the generator makes them identical).
+`cordillera` (§8.13) · `ridged` · `rift` · `glaciated` · `plateau` · `volcanic`
+(the last four, ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2). Both run-alls used to
+HARDCODE a generator and silently discard the user's pick and all four sliders, so
+"Generate Full World" produced the same relief however `StepElevation`'s picker was
+set; the models were reachable only from step 2's own button. Two rules: the
+tectonic model is offered only where plate data exists (`landmassSource ===
+"plates"`) and degrades to the shape model otherwise, and an UNRECOGNISED mode must
+still build terrain — a bad string may never leave a world with no elevation.
+Gated by `elevation_model_tests`, which asserts all 28 pairs among the eight
+disagree on >25% of land (a picker that does not reach the generator makes them
+identical) — extended from four models/6 pairs in Commit 2 without weakening the
+bar; `glaciated` vs `shape` was the pair flagged most likely to fail (glaciated
+*starts from* shape) and it does not.
+
+**The four new models** (`step2_terrain/elevation.rs`), each sharing a tail —
+coastal taper → thermal + isostatic erosion → the shared hypsometric
+redistribution → grid-scale relief limit → micro relief (`finish_elevation_field`,
+the same tail `generate_elevation_cordillera` uses) — and differing only in how
+the pre-erosion field is built:
+- **`rift`** (`generate_elevation_rift`) — parallel fault blocks: a tilted,
+  asymmetric HORST (steep scarp on one side, a gentle back-slope) alternating with
+  a flat-floored GRABEN, banded along a strike direction. `divergent_strike_angle`
+  takes the PCA principal axis of the world's own divergent-boundary cells where
+  plate data exists (real, not decorative); a template/painted world with no
+  plate data falls back to a seeded regional strike, the same "no better data"
+  convention `geology.rs`'s phase-2 climate proxy already uses.
+- **`glaciated`** (`generate_elevation_glaciated`) — the shape model, then glacial
+  modification gated by `glacial_ice_mask`, a latitude+altitude PROXY (phase 2 has
+  no climate, documented as a proxy exactly like `geology.rs`'s own): U-valley
+  broadening (extra thermal-erosion rounding blended in by ice presence), cirque
+  hollows carved just below ice-zone summits, and over-deepened troughs walked
+  steepest-descent from the strongest summits that BREACH the coast — the one
+  non-cordillera/ridged/rift model allowed to turn a little land into sea, and the
+  honest way to draw a fjord (§8.23: notching a coastline with noise draws a
+  scratch, not a landform).
+- **`plateau`** (`generate_elevation_plateau`) — the shape model, then quantised
+  into a handful of SHARP levels (a step function IS the escarpment; never
+  blurred, unlike the subtle `terrace` blend `landform.rs`'s `plateau` archetype
+  already applies more broadly) plus scattered outlying buttes.
+- **`volcanic`** (`generate_elevation_volcanic`) — a gentle low backdrop, shield
+  cones max-blended onto every `is_volcanic` land cell (so overlapping cones merge
+  into ranges rather than cancelling), summit calderas on the densest clusters,
+  hotspot trails of shrinking cones from isolated seeds — confined to EXISTING
+  land, since an elevation generator never creates new land (only phase 1 or the
+  lasso tools do that, rule 6/§8.23's discipline). Local density is read from a
+  spatial bucket grid, never an O(n²) pairwise scan (§8.9 rule 1's spirit — a
+  world can carry thousands of volcanic cells). Needs `is_volcanic` actually
+  loaded: `ColumnSet::PHASE_ELEVATION` now carries `VOLCANIC` too, which it did
+  not before this model needed to read it.
+
+**Chains that die into their surroundings.** Both `walk_spine` (the cordillera
+spine tracer, unchanged) and `generate_ridges` (the hand-drawn ridge tool) now
+taper along-strike to nothing at both ends with a noise-modulated falloff — before
+this, a drawn ridge line held its FULL peak height right up to the cursor's last
+position and stopped dead. `generate_ridges` tracks each rasterized spine cell's
+`t_along` (0..1 position along the whole drawn polyline, accumulated across
+segments, carried through the same BFS that already propagates `peak`/`half_w`)
+and multiplies the peak by a `sin(t_along·π)^0.45` envelope — the identical
+along-strike taper `generate_elevation_cordillera`'s own spines use — times a
+small per-line noise modulation so the two ends don't taper symmetrically.
+
+**Randomise-by-default.** Both `StepLandmass` and `StepElevation` now roll a
+fresh seed on every Generate press (an explicit "Lock seed" checkbox pins it for
+iterating sliders against one fixed world) — pressing "Generate from Plates"
+twice used to give the identical landmass, which is the wrong default for
+brainstorming.
 
 **Phase 3 runs this exact sequence** (`sim_commands.rs`; `earth_validation.rs` mirrors
 it — keep the two in sync):
@@ -1024,6 +1105,8 @@ sim/                            ← organised into per-phase step folders; mod.r
   step1_plates/plates.rs        ← Ph1: Voronoi plate tectonics; terrain is a warped
                                   "crust thickness" threshold, not the raw Voronoi
                                   edge (Terrain 2.0 slice 4)
+  step1_plates/landmass_ops.rs  ← Stage-1 freehand AREA TOOLS (§8.25) — Lasso +
+                                  smooth_roughen/fjords/island_chain/fill
   step2_terrain/elevation.rs    ← Ph2: plate-based + template-based elevation.
                                   `stream_power_erosion` (priority-flood + flow
                                   accumulation + K·A^m·S^n incision) replaced the old
@@ -3578,6 +3661,80 @@ name.
 
 ---
 
+### 8.25 Stage-1 freehand area tools (`step1_plates/landmass_ops.rs`)
+
+The Landmass step used to be three buttons and a circle brush — no area
+marking, no coastline shaping, no islands, and "Generate from Plates" repeated
+the identical world on every press (`ITCZ_AND_LAND_TOOLS_PLAN.md` Commit 1). A
+`Lasso` (a freehand-drawn polygon in world-cell coordinates) plus four ops —
+`smooth_roughen`, `fjords`, `island_chain`, `fill` — mutate
+`terrain`/`elevation`/`is_volcanic` only within it. Each op loads
+`ColumnSet::PHASE_PLATES` and the caller calls `buf.save`, which already
+pushes exactly one `undo_journal` entry, so every op is undoable and
+re-rollable for free — no new history code.
+
+Four rules this module holds, each gated by its own test:
+
+- **The lasso is UNWRAPPED, not clamped** (rule 6). A polygon drawn across the
+  antimeridian arrives with points on both edges; a naive point-in-polygon
+  test selects the *complement* of what the user circled. `Lasso::new`
+  re-expresses every vertex in one continuous frame anchored on the first
+  point; the hit test then tries the polygon at `x`, `x−w` and `x+w` so a
+  query cell hits whichever wrapped copy actually contains it. Gated by
+  `lasso_across_antimeridian_selects_what_was_drawn`.
+- **Every op FEATHERS to the lasso edge.** A hard clip prints the user's
+  selection gesture onto the map as a straight coastline. `Lasso::blend`
+  gives a soft 0..1 membership (a smoothstep ramp over `FEATHER_CELLS`), and a
+  feathered cell's fate is decided by a deterministic per-cell hash against
+  that blend — soft at the edge, but bit-reproducible for a given seed rather
+  than a fresh RNG draw each run. Gated by `op_feathers_to_lasso_edge`.
+- **Roughening is a LEVEL SET, never a per-cell dice roll**: a signed
+  distance-to-coast field — `local_coast_field`, a multi-source BFS scoped to
+  the lasso's own padded bounding box, never the whole world — perturbed by
+  fbm and re-thresholded at zero, bounded by a `reach`. A per-cell noise
+  threshold scatters speckle islands across deep ocean by construction; a
+  level set can only ever move a coastline that is already there. Gated by
+  `roughening_is_bounded_by_reach_not_scattered`.
+- **Ops iterate the selection, never the world** (§8.9 rule 1's spirit).
+  `Lasso::candidate_cells` scans only the polygon's own padded bounding box, so
+  reshaping one bay on a 26M-cell world costs a few hundred cells, not a
+  full-grid sweep. Gated by `ops_iterate_selection_not_world` (a lasso op on a
+  4000×2000 world must complete in well under the time a whole-grid scan
+  would take).
+
+`fjords` walks inland from a selected coastal sea cell — sinuous, tapering to
+the head — carving a real channel, which is the honest way to draw a fjord as
+opposed to notching a coastline with noise (see §8.23's record of why
+noise-carved channels read as a drawn scratch rather than a landform).
+`island_chain` supports `Arc`/`Scatter`/`Single`; only `Arc` islands are
+marked `is_volcanic`, which is real data — `deposits.rs`'s `VolcanicArc` model
+scores off that exact column (§8.16), so a planted arc can carry a genuine ore
+province later. `fill` is the decisive bulk-set op, still feathered at the
+edge like every other op here, just committing only past the blend midline
+rather than by a stochastic draw.
+
+Commands: `land_op_smooth_roughen`/`land_op_fjords`/`land_op_islands`/
+`land_op_fill` (`commands/sim_commands.rs`), each taking the lasso polygon as
+JSON (the same shape `sim_generate_ridges` already uses for `linesJson`).
+`preview_commands::render_world_thumbnail(max_px)` is a read-only, downsampled
+land/sea + elevation thumbnail sampled directly from the `WorldBuffer` —
+deliberately NOT read back through the tile/LOD cache, whose invalidation
+timing after a generate would make a thumbnail silently stale — used by the
+Landmass step's 2-variant compare (generate A → thumbnail → undo → generate B
+→ thumbnail → show both, keep one or restore the other from its own seed).
+
+Frontend: `uiStore.activeTool` gains `"lasso"`; `lassoPolygon` is a single
+transient selection (mirrors `ridgeLines`'s draft/commit plumbing exactly —
+`MapCanvas`'s lasso pointer handlers accumulate a draft polygon and commit it
+on pointer-up, `OverlayManager.setLassoSketch` draws it). `StepLandmass.tsx`
+carries the Area Tools panel (draw/clear, the four ops with their own
+params + a Re-roll button that undoes and re-applies with a fresh seed
+against the same polygon), a Randomise-landmass button (fresh seed → generate,
+where "Generate from Plates" used to always repeat the stored seed), and the
+2-variant compare.
+
+---
+
 ## 9. Docs (`docs/`)
 
 **START HERE — the current plan**
@@ -3722,6 +3879,47 @@ TERRAIN_2_PLAN.md                 ← ⭐ ALL SIX SLICES BUILT. `hydraulic_erosi
                                     pre-existing `dyes` one). Slice 4's blast radius is real but scoped
                                     exactly as flagged: only NEW generation changes;
                                     a saved world's stored tiles are untouched
+ITCZ_AND_LAND_TOOLS_PLAN.md       ← ⭐ COMMITS 1-2 BUILT, 3a ATTEMPTED AND
+                                    REVERTED (negative result), 3b-c NOT
+                                    ATTEMPTED. Stage-1 LASSO AREA TOOLS shipped
+                                    (smooth↔roughen the coast, fjords, island/
+                                    volcanic-arc chains, bulk fill — each one
+                                    `buf.save`d so undo and re-roll come free,
+                                    §8.25) and FOUR NEW ELEVATION GENERATORS
+                                    shipped (rift/horst-graben · glaciated
+                                    fjordland · plateau & mesa · volcanic hotspot,
+                                    all through `apply_elevation_model` so both
+                                    run-alls honour them, and the >25%-disagreement
+                                    gate extended from 4 models to 8 — `glaciated`
+                                    vs `shape`, the pair named as most likely to
+                                    fail since glaciated starts FROM shape, passes).
+                                    Carries the measured ITCZ finding that
+                                    motivated the climate work: **there are TWO
+                                    ITCZs**, `seasonal.rs::itcz_latitude` (8°, summer
+                                    hemisphere 5-35°) for the WIND and
+                                    `precipitation.rs::compute_itcz_shift_zonal`
+                                    (±12° plus a ±10° migration, both hemispheres
+                                    0-30°) for the RAIN — different amplitudes,
+                                    different land measures, never reconciled, and
+                                    the overlay draws both. **Unifying them (3a) was
+                                    tried both directions and both regress a
+                                    hard-asserted Earth-gate floor** — wind-adopts-
+                                    rain costs exact-zone (39.0%→38.1%, floor 38.8%),
+                                    rain-adopts-wind costs BOTH main-class (70.2%→
+                                    68.4%, floor 70.2%) and exact-zone (→38.5%) —
+                                    because both formulas were independently already
+                                    tuned to the Earth gate, so a straight swap only
+                                    discards whichever side's tuning gets overridden.
+                                    Both reverted; the two-formula status quo ships
+                                    unchanged. Full table in `docs/FIX_PLAN.md` A4.
+                                    FIX_PLAN A4's pressure field (3b-c) was never
+                                    attempted, since the plan built it to depend on
+                                    3a landing first. Baseline measured at `7786da8`:
+                                    Mumbai 161 mm (real ~2200), Bangladesh 84 mm at a
+                                    **25% summer fraction** — it rains more in winter
+                                    there, i.e. the monsoon runs backwards, not
+                                    merely weak — STILL UNFIXED, since the
+                                    prerequisite unification did not land.
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
                                     the settlement panel rework · provinces (enclave fix,
                                     sizing, real-terrain view, goods & exploitation) ·

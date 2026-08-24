@@ -15,7 +15,7 @@ function persistProgress(stepCompleted: Record<number, boolean>) {
   setProgress("world", JSON.stringify(world)).catch(() => {});
   setProgress("campaign", JSON.stringify(campaign)).catch(() => {});
 }
-import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine } from "@types";
+import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine, LassoPolygon } from "@types";
 import { GOOD_DEFS, goodOverlayKey } from "@goods";
 
 type LandmassSource = "none" | "plates" | "template" | "painted";
@@ -31,11 +31,14 @@ export interface TerrainParams {
    *  data, so it is offered only on a plate-derived world); "shape" =
    *  coast-distance + noise ridges; "cordillera" = continuous coast-parallel
    *  chains with a divide and asymmetric flanks; "ridged" = scattered
-   *  ridged-multifractal belts.
+   *  ridged-multifractal belts; "rift" = horst/graben fault blocks; "glaciated"
+   *  = the shape model + glacial modification (U-valleys, cirques, fjords);
+   *  "plateau" = sharp quantised escarpments + buttes; "volcanic" = shield
+   *  cones + calderas + hotspot trails (ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2).
    *
    *  Read by BOTH run-alls as well as the step-2 button — before that they
    *  hardcoded a generator and silently discarded this and all four sliders. */
-  mode: "plates" | "shape" | "cordillera" | "ridged";
+  mode: "plates" | "shape" | "cordillera" | "ridged" | "rift" | "glaciated" | "plateau" | "volcanic";
 }
 
 export interface RiverParamsState {
@@ -123,6 +126,9 @@ interface UIStore {
    *  current pen settings (footprint width · peak height/opacity · ruggedness). */
   ridgeLines: RidgeLine[];
   ridgeParams: { width: number; height: number; character: number; noise: number };
+  /** Landmass step lasso: the transient (unsaved, single) selection polygon the
+   *  area tools operate on. Cleared after each op re-rolls the world. */
+  lassoPolygon: LassoPolygon;
   riverParams: RiverParamsState;
   bioParams: BioParamsState;
   showTradeMatrix: boolean;
@@ -320,6 +326,8 @@ interface UIStore {
   setTerrainParams: (p: Partial<TerrainParams>) => void;
   addRidgeLine: (line: RidgeLine) => void;
   clearRidgeLines: () => void;
+  setLassoPolygon: (poly: LassoPolygon) => void;
+  clearLasso: () => void;
   setRidgeParams: (p: Partial<{ width: number; height: number; character: number; noise: number }>) => void;
   setRiverParams: (p: Partial<RiverParamsState>) => void;
   setBioParams: (p: Partial<BioParamsState>) => void;
@@ -461,6 +469,7 @@ export const useUIStore = create<UIStore>((set) => ({
   landmassSource: "none",
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "plates" },
   ridgeLines: [],
+  lassoPolygon: [],
   ridgeParams: { width: 8, height: 0.7, character: 0.5, noise: 0.4 },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.006, lakeMaxFraction: 0.0001 },
   bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.12, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
@@ -605,6 +614,8 @@ export const useUIStore = create<UIStore>((set) => ({
   addRidgeLine: (line) =>
     set((state) => ({ ridgeLines: [...state.ridgeLines, line] })),
   clearRidgeLines: () => set({ ridgeLines: [] }),
+  setLassoPolygon: (poly) => set({ lassoPolygon: poly }),
+  clearLasso: () => set({ lassoPolygon: [] }),
   setRidgeParams: (p) =>
     set((state) => ({ ridgeParams: { ...state.ridgeParams, ...p } })),
 

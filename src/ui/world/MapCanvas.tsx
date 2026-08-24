@@ -112,6 +112,8 @@ export function MapCanvas() {
   const ridgeParams = useUIStore((s) => s.ridgeParams);
   const ridgeLines = useUIStore((s) => s.ridgeLines);
   const addRidgeLine = useUIStore((s) => s.addRidgeLine);
+  // Landmass lasso: the committer for a finished freehand selection polygon.
+  const setLassoPolygon = useUIStore((s) => s.setLassoPolygon);
 
   // Stable identity for the loaded world. Heavy effects (tile reloads + sim IPC)
   // key off this string rather than the `meta` object, so latitude-slider edits
@@ -163,6 +165,9 @@ export function MapCanvas() {
   const ridgeLinesRef = useRef(ridgeLines);
   ridgeLinesRef.current = ridgeLines;
   const ridgeDraftRef = useRef<[number, number][]>([]);
+  // Landmass lasso: the in-progress polygon being dragged (world cells),
+  // committed to the store on pointer-up. Mirrors ridgeDraftRef exactly.
+  const lassoDraftRef = useRef<[number, number][]>([]);
   // Good regions kept for click hit-testing (click a good belt → good-flow panel).
   const goodRegionsRef = useRef<import("@types").GoodRegion[]>([]);
   const overlayVisibilityRef = useRef(overlayVisibility);
@@ -1235,6 +1240,17 @@ export function MapCanvas() {
     requestRender();
   }, [ridgeLines, requestRender]);
 
+  // Landmass lasso: sync the committed selection polygon onto the overlay (the
+  // in-progress polygon is pushed directly during a drag). Clearing the store
+  // value (an op consumed it, or the user pressed Clear) hides the sketch.
+  const lassoPolygon = useUIStore((s) => s.lassoPolygon);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setLassoSketch(lassoPolygon);
+    requestRender();
+  }, [lassoPolygon, requestRender]);
+
   // 🌊 Hydrology · the selected river system's subtree glows on the map, each
   // tributary in its own colour (branch / order scheme).
   const riverHighlight = useUIStore((s) => s.riverHighlight);
@@ -1722,7 +1738,7 @@ export function MapCanvas() {
     const tool = activeToolRef.current;
     // A finalized (locked) map is read-only — geography edits are disabled in the
     // UI (the backend also rejects them via ensure_unfrozen).
-    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano" || tool === "ridge")) {
+    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano" || tool === "ridge" || tool === "lasso")) {
       return;
     }
     if (tool === "paint" || tool === "elevation" || tool === "shelf") {
@@ -1757,6 +1773,16 @@ export function MapCanvas() {
       const p = ridgeParamsRef.current;
       const draft = { points: [[wx, wy]] as [number, number][], width: p.width, height: p.height, character: p.character, noise: p.noise, erase: e.shiftKey };
       overlayManagerRef.current?.setRidgeSketch([...ridgeLinesRef.current, draft]);
+      requestRender();
+    } else if (tool === "lasso") {
+      // Start a new freehand selection polygon. Points accumulate on
+      // pointer-move and commit to the store on pointer-up.
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      isPaintingRef.current = true;
+      lassoDraftRef.current = [[wx, wy]];
+      overlayManagerRef.current?.setLassoSketch(lassoDraftRef.current);
       requestRender();
     }
   }, [applyBrush, setInspectedCell, setSelectedHub, setSelectedGood, refreshTiles, requestRender]);
@@ -1861,6 +1887,15 @@ export function MapCanvas() {
           overlayManagerRef.current?.setRidgeSketch([...ridgeLinesRef.current, line]);
           requestRender();
         }
+      } else if (activeToolRef.current === "lasso") {
+        // Extend the in-progress lasso polygon (throttle by ~1 cell of movement).
+        const draft = lassoDraftRef.current;
+        const last = draft[draft.length - 1];
+        if (!last || Math.abs(last[0] - wx) + Math.abs(last[1] - wy) >= 1) {
+          draft.push([wx, wy]);
+          overlayManagerRef.current?.setLassoSketch([...draft]);
+          requestRender();
+        }
       } else {
         applyBrush(e);
       }
@@ -1885,6 +1920,21 @@ export function MapCanvas() {
         requestRender();
       }
       isErasingRef.current = false;
+      return;
+    }
+
+    // Lasso tool: commit the drawn polygon to the store (transient — replaces
+    // any previous lasso; the area-tools panel reads it and clears it after use).
+    if (isPaintingRef.current && activeToolRef.current === "lasso") {
+      isPaintingRef.current = false;
+      const draft = lassoDraftRef.current;
+      lassoDraftRef.current = [];
+      if (draft.length >= 3) {
+        setLassoPolygon(draft);
+      } else {
+        overlayManagerRef.current?.setLassoSketch([]);
+        requestRender();
+      }
       return;
     }
 
@@ -1921,13 +1971,13 @@ export function MapCanvas() {
 
     isPaintingRef.current = false;
     isErasingRef.current = false;
-  }, [refreshTiles, addRidgeLine, requestRender]);
+  }, [refreshTiles, addRidgeLine, setLassoPolygon, requestRender]);
 
   const getCursor = (): string => {
     if (activeTool === "pan") return "grab";
     if (activeTool === "select") return "pointer";
     if (activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf") return "none";
-    if (activeTool === "ridge") return "crosshair";
+    if (activeTool === "ridge" || activeTool === "lasso") return "crosshair";
     return "crosshair";
   };
 

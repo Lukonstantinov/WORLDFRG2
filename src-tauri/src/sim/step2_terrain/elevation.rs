@@ -1938,6 +1938,13 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
     let mut noise_amt = vec![0.0f32; n];
     let mut src_x = vec![0i32; n]; // nearest spine cell position (for Euclidean dist)
     let mut src_y = vec![0i32; n];
+    // Along-strike position, 0 at one end of the drawn polyline to 1 at the
+    // other -- feeds the same "taper to nothing at both ends" treatment
+    // generate_elevation_cordillera's spines already get (ITCZ_AND_LAND_
+    // TOOLS_PLAN.md Commit 2: "chains that die into their surroundings"), so a
+    // hand-drawn range ends in foothills instead of stopping dead at the
+    // cursor's last position.
+    let mut t_along = vec![0.5f32; n];
     let mut queue: VecDeque<usize> = VecDeque::new();
 
     // â”€â”€ 1. Rasterize every polyline into spine cells (BFS seeds) â”€â”€
@@ -1951,11 +1958,23 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         let pts = &line.points;
         if pts.is_empty() { continue; }
         let nseg = if pts.len() == 1 { 1 } else { pts.len() - 1 };
+        // Total polyline length, so each rasterized point's along-strike
+        // fraction is measured against the WHOLE drawn line, not its own segment.
+        let mut seg_lens = vec![0.0f32; nseg];
+        let mut total_len = 0.0f32;
+        for seg in 0..nseg {
+            let (x0, y0) = pts[seg];
+            let (x1, y1) = if pts.len() == 1 { pts[0] } else { pts[seg + 1] };
+            let l = ((x1 - x0).powi(2) + (y1 - y0).powi(2)).sqrt();
+            seg_lens[seg] = l;
+            total_len += l;
+        }
+        let mut len_so_far = 0.0f32;
         for seg in 0..nseg {
             let (x0, y0) = pts[seg];
             let (x1, y1) = if pts.len() == 1 { pts[0] } else { pts[seg + 1] };
             let (dx, dy) = (x1 - x0, y1 - y0);
-            let len = (dx * dx + dy * dy).sqrt();
+            let len = seg_lens[seg];
             let steps = ((len * 2.0).ceil() as i32).max(1); // ~0.5-cell increments
             for s in 0..=steps {
                 let t = s as f32 / steps as f32;
@@ -1965,6 +1984,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
                 let nx = buf.wrap_x(cx);
                 let i = buf.idx(nx, cy as u32);
                 if terrain[i] != 1 { continue; } // land only
+                let along = if total_len > 1e-3 { ((len_so_far + len * t) / total_len).clamp(0.0, 1.0) } else { 0.5 };
                 if dist[i] == 0 {
                     // Overlapping spine: keep the taller peak / wider footprint.
                     if half > half_w[i] { half_w[i] = half; }
@@ -1973,6 +1993,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
                 }
                 dist[i] = 0;
                 half_w[i] = half;
+                t_along[i] = along;
                 peak[i] = pk;
                 charc[i] = ch;
                 erase[i] = er;
@@ -1981,6 +2002,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
                 src_y[i] = cy;
                 queue.push_back(i);
             }
+            len_so_far += len;
         }
     }
     if queue.is_empty() { return; }
@@ -2002,6 +2024,7 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
             if dist[ni] > d + 1 {
                 dist[ni] = d + 1;
                 half_w[ni] = half_w[ci];
+                t_along[ni] = t_along[ci];
                 peak[ni] = peak[ci];
                 charc[ni] = charc[ci];
                 erase[ni] = erase[ci];
@@ -2051,7 +2074,15 @@ pub fn generate_ridges(buf: &mut WorldBuffer, seed: u64, lines: &[RidgeLine]) {
         let (rx, ry) = warped_coords(x * f, y * f, seed.wrapping_add(0x81DE), 1.2 + charc[i]);
         let ridge = ridged_multifractal(rx, ry, seed.wrapping_add(0x48271), 6, 2.1, 2.0);
         let noise_factor = (1.0 - charc[i] * 0.55) + charc[i] * 1.1 * ridge;
-        let target = (peak[i] * profile * noise_factor).clamp(0.0, 1.0);
+        // Along-strike taper: full height mid-line, tapering to nothing at both
+        // drawn ends (the SAME sin^0.45 envelope generate_elevation_cordillera's
+        // spines use), so a hand-drawn range ends in foothills instead of
+        // stopping dead at the cursor's last position -- a noise-modulated
+        // falloff, not a symmetric one, so the two ends taper at slightly
+        // different rates.
+        let along_noise = 0.75 + 0.25 * fbm_noise(t_along[i] * 9.0 + 3.0, charc[i] * 5.0, seed.wrapping_add(0x7A9E), 3, 2.0, 0.5);
+        let along_taper = (t_along[i] * std::f32::consts::PI).sin().max(0.0).powf(0.45) * along_noise;
+        let target = (peak[i] * profile * noise_factor * along_taper.min(1.0)).clamp(0.0, 1.0);
         // Screen blend: full peak on flat ground, saturates â‰¤1 over existing peaks.
         elevation[i] = (elevation[i] + target * (1.0 - elevation[i])).clamp(0.01, 1.0);
     }
@@ -2402,6 +2433,573 @@ fn redistribute_elevation_regional(
         if bias == 0.0 { continue; }
         elevation[i] = (elevation[i] + bias * REGION_CONTRAST).clamp(0.01, 1.0);
     }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2 — four new elevation models, each
+// registered in `apply_elevation_model` (`commands/sim_commands.rs`) so both
+// run-alls honour them. All four share the base model's final pipeline
+// (coastal taper → thermal + isostatic erosion → the shared hypsometric
+// redistribution → grid-scale relief limit → micro relief) and differ only in
+// how the pre-erosion elevation field is built — the part that gives each its
+// name.
+// ═══════════════════════════════════════════════════════════════════════
+
+/// The dominant strike direction of the world's divergent plate boundaries, as
+/// the principal axis (PCA) of their cell positions — real data where plate
+/// data exists. `None` when there is no plate data or too few divergent cells
+/// to fix a direction (a template world, or one with no rifting at all); the
+/// caller then falls back to a seeded regional strike, exactly the convention
+/// `geology.rs`'s phase-2 climate proxy already uses for "no better data".
+fn divergent_strike_angle(buf: &WorldBuffer) -> Option<f32> {
+    if buf.boundary_type.is_empty() {
+        return None;
+    }
+    let mut pts: Vec<(f32, f32)> = Vec::new();
+    for y in 0..buf.height {
+        for x in 0..buf.width {
+            let i = buf.idx(x, y);
+            if buf.boundary_type[i] == crate::sim::plates::BOUNDARY_DIVERGENT {
+                pts.push((x as f32, y as f32));
+            }
+        }
+    }
+    if pts.len() < 8 {
+        return None;
+    }
+    let n = pts.len() as f32;
+    let mx = pts.iter().map(|p| p.0).sum::<f32>() / n;
+    let my = pts.iter().map(|p| p.1).sum::<f32>() / n;
+    let (mut sxx, mut syy, mut sxy) = (0.0f32, 0.0f32, 0.0f32);
+    for &(x, y) in &pts {
+        let (dx, dy) = (x - mx, y - my);
+        sxx += dx * dx;
+        syy += dy * dy;
+        sxy += dx * dy;
+    }
+    sxx /= n;
+    syy /= n;
+    sxy /= n;
+    Some(0.5 * (2.0 * sxy).atan2(sxx - syy))
+}
+
+/// Shared tail: coastal taper (keeps a coastal range from flattening into a
+/// plain), erosion, the hypsometric redistribution, and the final grid-scale
+/// relief + micro-relief passes. Every one of the four new models below funnels
+/// through this — it is the same tail `generate_elevation_cordillera` uses.
+fn finish_elevation_field(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    height: f32,
+    density: f32,
+    terrain: &[u8],
+    coast_dist: &[u16],
+    mut elevation: Vec<f32>,
+    thermal_passes: u32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    const COAST_D: u16 = 3;
+    for i in 0..n {
+        if terrain[i] != 1 || coast_dist[i] >= COAST_D {
+            continue;
+        }
+        let ratio = coast_dist[i] as f32 / COAST_D as f32;
+        let taper = 0.5 + 0.5 * ratio;
+        let ridge_keep = ((elevation[i] - 0.35) / 0.65).clamp(0.0, 1.0);
+        elevation[i] *= taper.max(ridge_keep);
+    }
+    let pre_erosion = elevation.clone();
+    let geo = geology::build_geo_context(buf, seed, &pre_erosion, coast_dist, None);
+    thermal_erosion(&mut elevation, terrain, w, h, thermal_passes);
+    isostatic_adjust(&mut elevation, terrain, &buf.boundary_type, &pre_erosion, w, h);
+    normalize_and_redistribute(&mut elevation, terrain, n, height, density, &geo.region_id, geo.region_count);
+    limit_grid_scale_relief(&mut elevation, terrain, w, h);
+    apply_micro_relief(&mut elevation, terrain, w, h, seed.wrapping_add(0x31C7));
+    for i in 0..n {
+        buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
+    }
+}
+
+/// Rift/horst-graben elevation: parallel fault blocks — a tilted, asymmetric
+/// HORST (steep scarp on one side, a gentle back-slope down to the next
+/// graben) alternating with a flat-floored GRABEN. Strike follows the world's
+/// own divergent-boundary trend where plate data exists, a seeded regional
+/// strike otherwise.
+pub fn generate_elevation_rift(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let density = mountain_density.clamp(0.0, 1.0);
+    let height = mountain_height.clamp(0.0, 1.0);
+    let spread = mountain_spread.clamp(0.0, 1.0);
+    let roughness = noise_roughness.clamp(0.0, 1.0);
+    let terrain = buf.terrain.clone();
+    let coast_dist = coast_distance(&terrain, w, h);
+
+    let theta = divergent_strike_angle(buf)
+        .unwrap_or_else(|| hash_grid(0, 0, seed.wrapping_add(0x5717)) * std::f32::consts::PI);
+    let (cos_a, sin_a) = (theta.cos(), theta.sin());
+    let (cos_p, sin_p) = ((theta + std::f32::consts::FRAC_PI_2).cos(), (theta + std::f32::consts::FRAC_PI_2).sin());
+    // A period covers one horst+graben pair; wider at high `spread` (broad rift
+    // valleys) and narrower at low `spread` (tight fault-block terrain).
+    let period = 34.0 + spread * 150.0;
+    let f_serr = 1.0 / (16.0 + spread * 20.0);
+
+    let mut elevation = vec![0.0f32; n];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize;
+            if terrain[idx] != 1 {
+                continue;
+            }
+            let (ax, ay) = (x as f32, y as f32);
+            let base = fbm_noise(ax / 640.0 + 2.0, ay / 640.0 + 9.0, seed, 4, 2.0, 0.5) * 0.14;
+
+            let u = ax * cos_p + ay * sin_p;
+            let v = ax * cos_a + ay * sin_a;
+            // Domain-warp the cross-strike coordinate so fault traces aren't
+            // perfectly straight lines.
+            let warp = (fbm_noise(u / 90.0 + 4.0, v / 240.0 + 1.0, seed.wrapping_add(0x9A17), 3, 2.0, 0.5) - 0.5)
+                * period * 0.35;
+            let uw = u + warp;
+            let cell = (uw / period).floor();
+            let t = uw / period - cell; // 0..1 within this horst+graben pair
+
+            let block = if t < 0.5 {
+                let tb = t / 0.5;
+                let peak = 0.14;
+                if tb < peak {
+                    (tb / peak).powf(0.6)
+                } else {
+                    let tt = (tb - peak) / (1.0 - peak);
+                    1.0 - tt * 0.68 // gentle dip-slope back down to the next graben
+                }
+            } else {
+                // Flat graben floor, only textured — the down-dropped basin.
+                0.06
+            };
+            let serr = ridged_multifractal(ax * f_serr, ay * f_serr, seed.wrapping_add(0x4171), 4, 2.0, 2.0);
+            let texture = 0.04 + roughness * 0.10;
+
+            elevation[idx] = (base + block * (0.55 + density * 0.45) + serr * texture).max(0.01);
+        }
+    }
+
+    finish_elevation_field(buf, seed, height, density, &terrain, &coast_dist, elevation, 1 + (roughness * 2.0) as u32);
+}
+
+/// Latitude+altitude "ice mask" proxy (phase 2 has no climate — documented as a
+/// proxy, same convention `geology.rs`'s phase-2 climate stand-in already uses).
+fn glacial_ice_mask(buf: &WorldBuffer, terrain: &[u8], elevation: &[f32]) -> Vec<f32> {
+    let n = terrain.len();
+    let mut ice = vec![0.0f32; n];
+    for y in 0..buf.height {
+        for x in 0..buf.width {
+            let i = buf.idx(x, y);
+            if terrain[i] != 1 {
+                continue;
+            }
+            let lat = crate::sim::world_buffer::lat_from_y(
+                y as f32, buf.height as f32, buf.equator_offset, buf.lat_scale, buf.lat_ratio,
+            ).abs();
+            let lat_score = ((lat - 45.0) / 30.0).clamp(0.0, 1.0);
+            let alt_score = ((elevation[i] - 0.45) / 0.35).clamp(0.0, 1.0);
+            ice[i] = (lat_score + alt_score * 0.7).clamp(0.0, 1.0);
+        }
+    }
+    ice
+}
+
+/// Glaciated / fjordland elevation: the shape model, then glacial modification
+/// gated by the ice mask — U-valley broadening (extra rounding blended in by ice
+/// presence), cirque hollows carved just below ice-zone summits, and
+/// over-deepened troughs walked downhill from the strongest summits that BREACH
+/// the coast (turn their final stretch to sea). This is the honest way to get
+/// fjords, as opposed to notching a coastline with noise (§8.23).
+pub fn generate_elevation_glaciated(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    generate_elevation_from_terrain(buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let roughness = noise_roughness.clamp(0.0, 1.0);
+    let mut terrain = buf.terrain.clone();
+    let mut elevation = buf.elevation.clone();
+
+    let ice = glacial_ice_mask(buf, &terrain, &elevation);
+
+    // U-valley broadening: extra thermal-erosion rounding, blended in by ice
+    // presence so only the glaciated zone is affected.
+    let mut eroded = elevation.clone();
+    thermal_erosion(&mut eroded, &terrain, w, h, 5);
+    for i in 0..n {
+        if terrain[i] == 1 {
+            elevation[i] = elevation[i] * (1.0 - ice[i]) + eroded[i] * ice[i];
+        }
+    }
+
+    // Cirque hollows: a small bowl carved just below (not at) a local summit
+    // that sits well inside the ice zone.
+    let seeded = seed.wrapping_add(0xC12C);
+    let mut cirque_seeds: Vec<usize> = Vec::new();
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            if terrain[i] != 1 || ice[i] < 0.55 {
+                continue;
+            }
+            let mut is_max = true;
+            for dy in -1i32..=1 {
+                for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 {
+                        continue;
+                    }
+                    let nx = buf.wrap_x(x as i32 + dx);
+                    let ny_i = y as i32 + dy;
+                    if ny_i < 0 || ny_i >= h as i32 {
+                        continue;
+                    }
+                    let ni = buf.idx(nx, ny_i as u32);
+                    if terrain[ni] == 1 && elevation[ni] > elevation[i] {
+                        is_max = false;
+                    }
+                }
+            }
+            if !is_max || hash_grid(x as i32, y as i32, seeded) > 0.35 {
+                continue;
+            }
+            cirque_seeds.push(i);
+            let ang = hash_grid(x as i32, y as i32, seeded.wrapping_add(1)) * std::f32::consts::TAU;
+            let (ox, oy) = (ang.cos() * 2.0, ang.sin() * 2.0);
+            let (cx, cy) = (x as f32 + ox, y as f32 + oy);
+            let r = 2.0 + roughness * 2.0;
+            let ri = r.ceil() as i32;
+            for dy in -ri..=ri {
+                for dx in -ri..=ri {
+                    let d = ((dx * dx + dy * dy) as f32).sqrt();
+                    if d > r {
+                        continue;
+                    }
+                    let nx = buf.wrap_x(cx as i32 + dx);
+                    let ny_i = cy as i32 + dy;
+                    if ny_i < 0 || ny_i >= h as i32 {
+                        continue;
+                    }
+                    let ni = buf.idx(nx, ny_i as u32);
+                    if terrain[ni] != 1 {
+                        continue;
+                    }
+                    let bowl = (1.0 - d / r) * 0.10 * ice[ni];
+                    elevation[ni] = (elevation[ni] - bowl).max(0.01);
+                }
+            }
+        }
+    }
+
+    // Over-deepened troughs: walk steepest-descent from the strongest ice-zone
+    // summits toward the coast, carving a valley and breaching the final stretch
+    // into the sea (a real fjord mouth), bounded to a handful of trails so this
+    // stays a local, selection-sized cost rather than a full-grid search.
+    cirque_seeds.sort_by(|&a, &b| (ice[b] * elevation[b]).partial_cmp(&(ice[a] * elevation[a])).unwrap());
+    let trough_count = cirque_seeds.len().min(6);
+    for &start in cirque_seeds.iter().take(trough_count) {
+        let mut x = (start % w as usize) as f32;
+        let mut y = (start / w as usize) as f32;
+        let mut path = Vec::new();
+        for _ in 0..(w.max(h) as usize) {
+            let ix = x.round() as i32;
+            let iy = y.round() as i32;
+            if iy < 0 || iy >= h as i32 {
+                break;
+            }
+            let wx = buf.wrap_x(ix);
+            let i = buf.idx(wx, iy as u32);
+            if terrain[i] != 1 {
+                break; // reached the coast
+            }
+            path.push(i);
+            // Steepest descent among the 8 neighbours.
+            let mut best_e = elevation[i];
+            let mut best_dir = None;
+            for (dx, dy) in [(-1i32, 0i32), (1, 0), (0, -1), (0, 1), (-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                let nx = buf.wrap_x(ix + dx);
+                let ny_i = iy + dy;
+                if ny_i < 0 || ny_i >= h as i32 {
+                    continue;
+                }
+                let ni = buf.idx(nx, ny_i as u32);
+                if elevation[ni] < best_e {
+                    best_e = elevation[ni];
+                    best_dir = Some((dx, dy));
+                }
+            }
+            let Some((dx, dy)) = best_dir else { break };
+            x = (ix + dx) as f32;
+            y = (iy + dy) as f32;
+        }
+        let plen = path.len();
+        if plen < 6 {
+            continue; // never reached the coast — no honest fjord to draw
+        }
+        // Carve the trough, then breach the final ~20% into the sea.
+        let breach_from = (plen as f32 * 0.8) as usize;
+        for (k, &ci) in path.iter().enumerate() {
+            let depth = ice[ci] * 0.18 * (k as f32 / plen as f32).min(1.0);
+            elevation[ci] = (elevation[ci] - depth).max(0.01);
+            if k >= breach_from {
+                terrain[ci] = 0;
+                elevation[ci] = 0.0;
+            }
+        }
+    }
+
+    buf.terrain = terrain.clone();
+    for i in 0..n {
+        buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
+    }
+}
+
+/// Plateau & mesa elevation: quantised levels with SHARP escarpment rims (never
+/// blurred, unlike the subtle `terrace` blend `landform.rs` already applies) plus
+/// outlying buttes scattered near the plateau's own margins.
+pub fn generate_elevation_plateau(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    generate_elevation_from_terrain(buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let density = mountain_density.clamp(0.0, 1.0);
+    let terrain = buf.terrain.clone();
+    let mut elevation = buf.elevation.clone();
+
+    // Quantise into sharp levels — a step function IS the escarpment; no blur.
+    let levels = (4.0 + density * 4.0).round().max(3.0);
+    for i in 0..n {
+        if terrain[i] != 1 {
+            continue;
+        }
+        elevation[i] = ((elevation[i] * levels).round() / levels).clamp(0.02, 1.0);
+    }
+
+    // Outlying buttes: small isolated hills standing one level above their
+    // surroundings, scattered across the plateau.
+    let bseed = seed.wrapping_add(0xBE77E);
+    let butte_count = (8.0 + density * 24.0) as usize;
+    for k in 0..butte_count {
+        let idx = ((hash_grid(k as i32, 17, bseed) * n as f32) as usize).min(n - 1);
+        if terrain[idx] != 1 {
+            continue;
+        }
+        let x = (idx % w as usize) as i32;
+        let y = (idx / w as usize) as i32;
+        let base_level = elevation[idx];
+        let r = 1.5 + hash_grid(k as i32, 3, bseed) * 2.5;
+        let ri = r.ceil() as i32;
+        for dy in -ri..=ri {
+            for dx in -ri..=ri {
+                let d = ((dx * dx + dy * dy) as f32).sqrt();
+                if d > r {
+                    continue;
+                }
+                let nx = buf.wrap_x(x + dx);
+                let ny_i = y + dy;
+                if ny_i < 0 || ny_i >= h as i32 {
+                    continue;
+                }
+                let ni = buf.idx(nx, ny_i as u32);
+                if terrain[ni] != 1 {
+                    continue;
+                }
+                let bump = (1.0 - d / r) * (1.0 / levels) * 1.3;
+                elevation[ni] = elevation[ni].max((base_level + bump).min(1.0));
+            }
+        }
+    }
+
+    apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
+    for i in 0..n {
+        buf.elevation[i] = if terrain[i] == 1 { elevation[i] } else { 0.0 };
+    }
+}
+
+/// Volcanic hotspot elevation: a gentle low backdrop, shield cones stamped
+/// (max-blended, so overlapping cones merge into ranges) on every `is_volcanic`
+/// land cell, summit calderas on the densest clusters, and hotspot trails —
+/// decreasing-height cones extending from an isolated seed across whatever
+/// existing land lies in one seeded direction (an elevation generator never
+/// creates new land, per rule 6/§8.23's discipline — only phase 1 or the
+/// lasso tools do that).
+pub fn generate_elevation_volcanic(
+    buf: &mut WorldBuffer,
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+) {
+    let w = buf.width;
+    let h = buf.height;
+    let n = buf.total();
+    let density = mountain_density.clamp(0.0, 1.0);
+    let height = mountain_height.clamp(0.0, 1.0);
+    let spread = mountain_spread.clamp(0.0, 1.0);
+    let terrain = buf.terrain.clone();
+    let coast_dist = coast_distance(&terrain, w, h);
+
+    let scale = w.max(h) as f32 / 10.0;
+    let mut elevation = vec![0.0f32; n];
+    for y in 0..h {
+        for x in 0..w {
+            let idx = (y * w + x) as usize;
+            if terrain[idx] != 1 {
+                continue;
+            }
+            let base = fbm_noise(x as f32 / scale, y as f32 / scale, seed, 5, 2.0, 0.5);
+            elevation[idx] = (base * 0.22).clamp(0.0, 0.5);
+        }
+    }
+
+    let volc: Vec<(i32, i32, usize)> = (0..n)
+        .filter(|&i| terrain[i] == 1 && buf.is_volcanic[i] == 1)
+        .map(|i| ((i % w as usize) as i32, (i / w as usize) as i32, i))
+        .collect();
+
+    let base_r = 3.0 + spread * 7.0;
+    // Bucket the volcanic points so local-density lookups are O(volc), never
+    // O(volc²) (§8.9 rule 1's spirit — a world can carry thousands of these).
+    let bucket_size = (base_r * 3.0).max(4.0);
+    let mut buckets: std::collections::HashMap<(i32, i32), Vec<usize>> = std::collections::HashMap::new();
+    for (vi, &(vx, vy, _)) in volc.iter().enumerate() {
+        let bx = (vx as f32 / bucket_size).floor() as i32;
+        let by = (vy as f32 / bucket_size).floor() as i32;
+        buckets.entry((bx, by)).or_default().push(vi);
+    }
+    let neighbours_within = |vx: i32, vy: i32, r: f32| -> u32 {
+        let bx = (vx as f32 / bucket_size).floor() as i32;
+        let by = (vy as f32 / bucket_size).floor() as i32;
+        let mut count = 0u32;
+        for obx in bx - 1..=bx + 1 {
+            for oby in by - 1..=by + 1 {
+                let Some(list) = buckets.get(&(obx, oby)) else { continue };
+                for &oi in list {
+                    let (ox, oy, _) = volc[oi];
+                    if ox == vx && oy == vy {
+                        continue;
+                    }
+                    let mut dx = (vx - ox).abs();
+                    if dx > w as i32 / 2 {
+                        dx = w as i32 - dx;
+                    }
+                    let dy = vy - oy;
+                    if (dx * dx + dy * dy) as f32 <= r * r {
+                        count += 1;
+                    }
+                }
+            }
+        }
+        count
+    };
+
+    for &(vx, vy, _) in &volc {
+        let neighbours = neighbours_within(vx, vy, base_r * 3.0);
+        let r = base_r * (1.0 + (neighbours.min(6) as f32) * 0.15);
+        let hh = (0.35 + height * 0.55) * (0.5 + 0.5 * (neighbours.min(8) as f32) / 8.0);
+        let ri = r.ceil() as i32;
+        let is_caldera = neighbours >= 4;
+        for dy in -ri..=ri {
+            for dx in -ri..=ri {
+                let d = ((dx * dx + dy * dy) as f32).sqrt();
+                if d > r {
+                    continue;
+                }
+                let nx = buf.wrap_x(vx + dx);
+                let ny_i = vy + dy;
+                if ny_i < 0 || ny_i >= h as i32 {
+                    continue;
+                }
+                let ni = buf.idx(nx, ny_i as u32);
+                if terrain[ni] != 1 {
+                    continue;
+                }
+                let mut cone = (1.0 - d / r).powf(1.6) * hh;
+                if is_caldera && d < r * 0.22 {
+                    cone -= (1.0 - d / (r * 0.22)) * hh * 0.35;
+                }
+                elevation[ni] = elevation[ni].max(cone.max(0.0));
+            }
+        }
+
+        // Hotspot trail: isolated seeds (no other volcano nearby) extend a chain
+        // of shrinking cones in one seeded direction, across whatever land is
+        // actually there.
+        if neighbours == 0 {
+            let ang = hash_grid(vx, vy, seed.wrapping_add(0x07A1)) * std::f32::consts::TAU;
+            let (dirx, diry) = (ang.cos(), ang.sin());
+            let mut tx = vx as f32;
+            let mut ty = vy as f32;
+            let mut tr = r;
+            let mut thh = hh;
+            for _ in 0..5 {
+                tx += dirx * (base_r * 2.2);
+                ty += diry * (base_r * 2.2);
+                let ix = tx.round() as i32;
+                let iy = ty.round() as i32;
+                if iy < 0 || iy >= h as i32 {
+                    break;
+                }
+                let wxi = buf.wrap_x(ix);
+                let i = buf.idx(wxi, iy as u32);
+                if terrain[i] != 1 {
+                    break; // trail runs off the existing landmass — stop, don't invent land
+                }
+                tr *= 0.75;
+                thh *= 0.65;
+                let tri = tr.ceil() as i32;
+                for dy in -tri..=tri {
+                    for dx in -tri..=tri {
+                        let d = ((dx * dx + dy * dy) as f32).sqrt();
+                        if d > tr {
+                            continue;
+                        }
+                        let nx = buf.wrap_x(ix + dx);
+                        let ny_i = iy + dy;
+                        if ny_i < 0 || ny_i >= h as i32 {
+                            continue;
+                        }
+                        let ni = buf.idx(nx, ny_i as u32);
+                        if terrain[ni] != 1 {
+                            continue;
+                        }
+                        let cone = (1.0 - d / tr).powf(1.6) * thh;
+                        elevation[ni] = elevation[ni].max(cone.max(0.0));
+                    }
+                }
+            }
+        }
+    }
+
+    finish_elevation_field(buf, seed, height, density, &terrain, &coast_dist, elevation, 1);
 }
 
 #[cfg(test)]
