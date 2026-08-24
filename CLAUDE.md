@@ -3722,6 +3722,37 @@ TERRAIN_2_PLAN.md                 ← ⭐ ALL SIX SLICES BUILT. `hydraulic_erosi
                                     pre-existing `dyes` one). Slice 4's blast radius is real but scoped
                                     exactly as flagged: only NEW generation changes;
                                     a saved world's stored tiles are untouched
+ITCZ_AND_LAND_TOOLS_PLAN.md       ← ⭐ APPROVED, NOTHING BUILT. Three commits, in
+                                    order: stage-1 LASSO AREA TOOLS (smooth↔roughen
+                                    the coast, fjords, island/volcanic-arc chains,
+                                    bulk fill — each one `buf.save`d so undo and
+                                    re-roll come free), FOUR NEW ELEVATION
+                                    GENERATORS (rift/horst-graben · glaciated
+                                    fjordland · plateau & mesa · volcanic hotspot,
+                                    all through `apply_elevation_model` so both
+                                    run-alls honour them, and the >25%-disagreement
+                                    gate extended from 4 models to 8 — `glaciated`
+                                    vs `shape` is the pair named as most likely to
+                                    fail, since glaciated starts FROM shape), then
+                                    the CLIMATE work. Carries the measured ITCZ
+                                    finding that motivated it: **there are TWO
+                                    ITCZs**, `seasonal.rs::itcz_latitude` (8°, summer
+                                    hemisphere 5-35°) for the WIND and
+                                    `precipitation.rs::compute_itcz_shift_zonal`
+                                    (±12° plus a ±10° migration, both hemispheres
+                                    0-30°) for the RAIN — different amplitudes,
+                                    different land measures, never reconciled, and
+                                    the overlay draws both. Unifying them is 3a;
+                                    FIX_PLAN A4's pressure field is 3b-c. Baseline
+                                    measured at `7786da8`: Mumbai 161 mm (real
+                                    ~2200), Bangladesh 84 mm at a **25% summer
+                                    fraction** — it rains more in winter there,
+                                    i.e. the monsoon runs backwards, not merely
+                                    weak. Adoption rule agreed up front: ship if
+                                    EXACT-ZONE rises, lowering `EARTH_MAIN_FLOOR`
+                                    deliberately as A14 already did once, and a
+                                    negative result is the deliverable if it comes
+                                    to that
 CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next three workstreams:
                                     the settlement panel rework · provinces (enclave fix,
                                     sizing, real-terrain view, goods & exploitation) ·
