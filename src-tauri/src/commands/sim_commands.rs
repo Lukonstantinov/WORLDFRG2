@@ -1,7 +1,7 @@
 use tauri::State;
 use crate::db::WorldDb;
 use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
-use crate::sim::{plates, elevation, ocean, temperature, jets, precipitation, koppen, rivers, soil, fertility, settlements, biological, toponyms};
+use crate::sim::{plates, elevation, ocean, temperature, jets, precipitation, koppen, rivers, soil, fertility, settlements, biological, toponyms, landmass_ops};
 use crate::db::metadata;
 use crate::tile::coords::{TileCoord, TILE_SIZE};
 
@@ -618,6 +618,87 @@ pub fn sim_generate_ridges(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_ridges(&mut buf, seed, &lines);
     buf.save(&conn, "Generate ridges")
+}
+
+/// Freehand area tools for the Landmass step (`ITCZ_AND_LAND_TOOLS_PLAN.md`
+/// Commit 1). Each takes the lasso polygon as JSON — the same shape
+/// `sim_generate_ridges` already uses for `linesJson` — mutates only the cells
+/// inside it (feathered at the edge), and returns the modified tile coords for
+/// invalidation. Every op loads `PHASE_PLATES`, so they run at the Landmass
+/// step, before elevation/ocean/climate exist.
+fn parse_lasso(lasso_json: &str, world_w: u32) -> Result<landmass_ops::Lasso, String> {
+    let points: Vec<(f32, f32)> = serde_json::from_str(lasso_json)
+        .map_err(|e| format!("Invalid lasso polygon: {e}"))?;
+    Ok(landmass_ops::Lasso::new(points, world_w))
+}
+
+#[tauri::command]
+pub fn land_op_smooth_roughen(
+    lasso_json: String,
+    amount: f32,
+    seed: u64,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let lasso = parse_lasso(&lasso_json, buf.width)?;
+    landmass_ops::smooth_roughen(&mut buf, &lasso, amount, seed);
+    buf.save(&conn, if amount < 0.0 { "Smooth coastline" } else { "Roughen coastline" })
+}
+
+#[tauri::command]
+pub fn land_op_fjords(
+    lasso_json: String,
+    count: u32,
+    length_km: f32,
+    width: f32,
+    seed: u64,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let lasso = parse_lasso(&lasso_json, buf.width)?;
+    landmass_ops::fjords(&mut buf, &lasso, count, length_km, width, seed);
+    buf.save(&conn, "Carve fjords")
+}
+
+#[tauri::command]
+pub fn land_op_islands(
+    lasso_json: String,
+    count: u32,
+    kind: String,
+    size: f32,
+    seed: u64,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let lasso = parse_lasso(&lasso_json, buf.width)?;
+    let kind: landmass_ops::IslandKind = serde_json::from_str(&format!("\"{kind}\""))
+        .map_err(|e| format!("Invalid island kind: {e}"))?;
+    landmass_ops::island_chain(&mut buf, &lasso, count, kind, size, seed);
+    buf.save(&conn, "Place islands")
+}
+
+#[tauri::command]
+pub fn land_op_fill(
+    lasso_json: String,
+    land: bool,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let lasso = parse_lasso(&lasso_json, buf.width)?;
+    landmass_ops::fill(&mut buf, &lasso, land);
+    buf.save(&conn, if land { "Fill land" } else { "Fill sea" })
 }
 
 /// Run full simulation pipeline while preserving existing terrain.

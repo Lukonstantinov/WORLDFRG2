@@ -1024,6 +1024,8 @@ sim/                            ← organised into per-phase step folders; mod.r
   step1_plates/plates.rs        ← Ph1: Voronoi plate tectonics; terrain is a warped
                                   "crust thickness" threshold, not the raw Voronoi
                                   edge (Terrain 2.0 slice 4)
+  step1_plates/landmass_ops.rs  ← Stage-1 freehand AREA TOOLS (§8.25) — Lasso +
+                                  smooth_roughen/fjords/island_chain/fill
   step2_terrain/elevation.rs    ← Ph2: plate-based + template-based elevation.
                                   `stream_power_erosion` (priority-flood + flow
                                   accumulation + K·A^m·S^n incision) replaced the old
@@ -3575,6 +3577,80 @@ fbm field per cell plus the province build.
 marks appear in shelf water near some coasts; and plateau/basin shaping is
 present but subtle — a plateau reads as a level, not yet as a landform you would
 name.
+
+---
+
+### 8.25 Stage-1 freehand area tools (`step1_plates/landmass_ops.rs`)
+
+The Landmass step used to be three buttons and a circle brush — no area
+marking, no coastline shaping, no islands, and "Generate from Plates" repeated
+the identical world on every press (`ITCZ_AND_LAND_TOOLS_PLAN.md` Commit 1). A
+`Lasso` (a freehand-drawn polygon in world-cell coordinates) plus four ops —
+`smooth_roughen`, `fjords`, `island_chain`, `fill` — mutate
+`terrain`/`elevation`/`is_volcanic` only within it. Each op loads
+`ColumnSet::PHASE_PLATES` and the caller calls `buf.save`, which already
+pushes exactly one `undo_journal` entry, so every op is undoable and
+re-rollable for free — no new history code.
+
+Four rules this module holds, each gated by its own test:
+
+- **The lasso is UNWRAPPED, not clamped** (rule 6). A polygon drawn across the
+  antimeridian arrives with points on both edges; a naive point-in-polygon
+  test selects the *complement* of what the user circled. `Lasso::new`
+  re-expresses every vertex in one continuous frame anchored on the first
+  point; the hit test then tries the polygon at `x`, `x−w` and `x+w` so a
+  query cell hits whichever wrapped copy actually contains it. Gated by
+  `lasso_across_antimeridian_selects_what_was_drawn`.
+- **Every op FEATHERS to the lasso edge.** A hard clip prints the user's
+  selection gesture onto the map as a straight coastline. `Lasso::blend`
+  gives a soft 0..1 membership (a smoothstep ramp over `FEATHER_CELLS`), and a
+  feathered cell's fate is decided by a deterministic per-cell hash against
+  that blend — soft at the edge, but bit-reproducible for a given seed rather
+  than a fresh RNG draw each run. Gated by `op_feathers_to_lasso_edge`.
+- **Roughening is a LEVEL SET, never a per-cell dice roll**: a signed
+  distance-to-coast field — `local_coast_field`, a multi-source BFS scoped to
+  the lasso's own padded bounding box, never the whole world — perturbed by
+  fbm and re-thresholded at zero, bounded by a `reach`. A per-cell noise
+  threshold scatters speckle islands across deep ocean by construction; a
+  level set can only ever move a coastline that is already there. Gated by
+  `roughening_is_bounded_by_reach_not_scattered`.
+- **Ops iterate the selection, never the world** (§8.9 rule 1's spirit).
+  `Lasso::candidate_cells` scans only the polygon's own padded bounding box, so
+  reshaping one bay on a 26M-cell world costs a few hundred cells, not a
+  full-grid sweep. Gated by `ops_iterate_selection_not_world` (a lasso op on a
+  4000×2000 world must complete in well under the time a whole-grid scan
+  would take).
+
+`fjords` walks inland from a selected coastal sea cell — sinuous, tapering to
+the head — carving a real channel, which is the honest way to draw a fjord as
+opposed to notching a coastline with noise (see §8.23's record of why
+noise-carved channels read as a drawn scratch rather than a landform).
+`island_chain` supports `Arc`/`Scatter`/`Single`; only `Arc` islands are
+marked `is_volcanic`, which is real data — `deposits.rs`'s `VolcanicArc` model
+scores off that exact column (§8.16), so a planted arc can carry a genuine ore
+province later. `fill` is the decisive bulk-set op, still feathered at the
+edge like every other op here, just committing only past the blend midline
+rather than by a stochastic draw.
+
+Commands: `land_op_smooth_roughen`/`land_op_fjords`/`land_op_islands`/
+`land_op_fill` (`commands/sim_commands.rs`), each taking the lasso polygon as
+JSON (the same shape `sim_generate_ridges` already uses for `linesJson`).
+`preview_commands::render_world_thumbnail(max_px)` is a read-only, downsampled
+land/sea + elevation thumbnail sampled directly from the `WorldBuffer` —
+deliberately NOT read back through the tile/LOD cache, whose invalidation
+timing after a generate would make a thumbnail silently stale — used by the
+Landmass step's 2-variant compare (generate A → thumbnail → undo → generate B
+→ thumbnail → show both, keep one or restore the other from its own seed).
+
+Frontend: `uiStore.activeTool` gains `"lasso"`; `lassoPolygon` is a single
+transient selection (mirrors `ridgeLines`'s draft/commit plumbing exactly —
+`MapCanvas`'s lasso pointer handlers accumulate a draft polygon and commit it
+on pointer-up, `OverlayManager.setLassoSketch` draws it). `StepLandmass.tsx`
+carries the Area Tools panel (draw/clear, the four ops with their own
+params + a Re-roll button that undoes and re-applies with a fresh seed
+against the same polygon), a Randomise-landmass button (fresh seed → generate,
+where "Generate from Plates" used to always repeat the stored seed), and the
+2-variant compare.
 
 ---
 

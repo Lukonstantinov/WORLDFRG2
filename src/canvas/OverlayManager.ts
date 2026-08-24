@@ -497,6 +497,8 @@ export class OverlayManager {
   private travelRoute: [number, number][] = [];
   /** Ridge-drawing tool: transient drawn/in-progress ridge lines to sketch on the map. */
   private ridgeSketch: RidgeLine[] = [];
+  /** Landmass step: the in-progress/drawn lasso polygon (world cells), or empty. */
+  private lassoSketch: [number, number][] = [];
   /** 🌊 Hydrology · indices (into `rivers`) of the selected system's subtree to
    *  glow on the map; empty = no selection (all rivers drawn normally). */
   private riverHighlight: Set<number> = new Set();
@@ -1102,6 +1104,10 @@ export class OverlayManager {
   }
 
   /** Set (or clear with []) the hand-drawn ridge lines to sketch on the map. */
+  setLassoSketch(points: [number, number][]) {
+    this.lassoSketch = points;
+  }
+
   setRidgeSketch(lines: RidgeLine[]) {
     this.ridgeSketch = lines;
   }
@@ -2641,6 +2647,11 @@ export class OverlayManager {
       this.renderRidgeSketch(ctx);
     }
 
+    // Landmass lasso: the freehand selection polygon the area tools operate on.
+    if (this.lassoSketch.length > 0) {
+      this.renderLassoSketch(ctx);
+    }
+
     // #37 · per-good scarcity: graduated discs at each hub, green where the good
     // is cheap/abundant through to red where it is dear/scarce.
     if (this.visibility.goodScarcity && this.goodScarcity.length > 0) {
@@ -3216,6 +3227,36 @@ export class OverlayManager {
       draw(spine, Math.min(1, alpha + 0.15));
     }
     ctx.globalAlpha = 1;
+  }
+
+  /** Landmass lasso: a dashed, unclosed-until-committed selection outline plus a
+   *  light fill so the area the ops will touch is legible while drawing. Seam
+   *  handling mirrors the ridge sketch — a jump bigger than `seamGap` starts a
+   *  new subpath rather than drawing a line straight across the map. */
+  private renderLassoSketch(ctx: CanvasRenderingContext2D) {
+    const pts = this.lassoSketch;
+    if (pts.length < 1) return;
+    const seamGap = 20;
+    ctx.save();
+    ctx.beginPath();
+    let started = false;
+    for (let i = 0; i < pts.length; i++) {
+      const [x, y] = pts[i];
+      if (i > 0 && Math.abs(x - pts[i - 1][0]) > seamGap) started = false;
+      if (!started) { ctx.moveTo(x + 0.5, y + 0.5); started = true; }
+      else ctx.lineTo(x + 0.5, y + 0.5);
+    }
+    if (pts.length > 2) ctx.closePath();
+    ctx.globalAlpha = 0.12;
+    ctx.fillStyle = "#4ad0e0";
+    ctx.fill();
+    ctx.globalAlpha = 0.9;
+    ctx.lineWidth = Math.max(0.6, 1.4 / Math.sqrt(this.currentScale));
+    ctx.setLineDash([Math.max(1, 3 / Math.sqrt(this.currentScale)), Math.max(1, 2 / Math.sqrt(this.currentScale))]);
+    ctx.strokeStyle = "#4ad0e0";
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
   }
 
   /** #37 · scarcity discs. Premium (local price ÷ world base value) maps green
@@ -5413,6 +5454,7 @@ export class OverlayManager {
     this.tradeRoutes = [];
     this.travelRoute = [];
     this.ridgeSketch = [];
+    this.lassoSketch = [];
     this.riverHighlight = new Set();
     this.riverHighlightColors = {};
     this.lakeHighlight = -1;
