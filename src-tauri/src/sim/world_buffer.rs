@@ -188,9 +188,13 @@ impl ColumnSet {
     /// plates.rs: generate_plates_and_landmass / invert_terrain
     pub const PHASE_PLATES: ColumnSet =
         ColumnSet(Self::TERRAIN.0 | Self::ELEVATION.0 | Self::PLATES.0 | Self::VOLCANIC.0);
-    /// elevation.rs: all elevation/sea-depth/shelf functions
+    /// elevation.rs: all elevation/sea-depth/shelf functions. Carries VOLCANIC
+    /// too — the `volcanic` elevation model (ITCZ_AND_LAND_TOOLS_PLAN.md Commit
+    /// 2) reads `is_volcanic` (phase-1-authored or lasso-placed) to seed shield
+    /// cones, so it must actually be loaded here rather than left empty.
     pub const PHASE_ELEVATION: ColumnSet = ColumnSet(
-        Self::TERRAIN.0 | Self::ELEVATION.0 | Self::PLATES.0 | Self::SEA_DEPTH.0 | Self::SHELF.0,
+        Self::TERRAIN.0 | Self::ELEVATION.0 | Self::PLATES.0 | Self::SEA_DEPTH.0 | Self::SHELF.0
+            | Self::VOLCANIC.0,
     );
     /// ocean.rs + temperature.rs + precipitation.rs (phase 3 chain)
     pub const PHASE_OCEAN_ATMOSPHERE: ColumnSet = ColumnSet(

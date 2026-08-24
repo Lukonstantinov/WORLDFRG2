@@ -259,18 +259,75 @@ Run in order. Each phase depends on previous phases' data.
 | All | `sim_run_all` | Phases 1-8 from plates |
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
 
-**FOUR elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
+**EIGHT elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
 the single place a mode string picks a generator — `plates` (the tectonic model,
 `generate_elevation`, the ONLY one that reads `boundary_type`) · `shape` ·
-`cordillera` (§8.13) · `ridged`. Both run-alls used to HARDCODE a generator and
-silently discard the user's pick and all four sliders, so "Generate Full World"
-produced the same relief however `StepElevation`'s picker was set; the models were
-reachable only from step 2's own button. Two rules: the tectonic model is offered
-only where plate data exists (`landmassSource === "plates"`) and degrades to the
-shape model otherwise, and an UNRECOGNISED mode must still build terrain — a bad
-string may never leave a world with no elevation. Gated by
-`elevation_model_tests`, which asserts the four disagree on >25% of land (a
-picker that does not reach the generator makes them identical).
+`cordillera` (§8.13) · `ridged` · `rift` · `glaciated` · `plateau` · `volcanic`
+(the last four, ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2). Both run-alls used to
+HARDCODE a generator and silently discard the user's pick and all four sliders, so
+"Generate Full World" produced the same relief however `StepElevation`'s picker was
+set; the models were reachable only from step 2's own button. Two rules: the
+tectonic model is offered only where plate data exists (`landmassSource ===
+"plates"`) and degrades to the shape model otherwise, and an UNRECOGNISED mode must
+still build terrain — a bad string may never leave a world with no elevation.
+Gated by `elevation_model_tests`, which asserts all 28 pairs among the eight
+disagree on >25% of land (a picker that does not reach the generator makes them
+identical) — extended from four models/6 pairs in Commit 2 without weakening the
+bar; `glaciated` vs `shape` was the pair flagged most likely to fail (glaciated
+*starts from* shape) and it does not.
+
+**The four new models** (`step2_terrain/elevation.rs`), each sharing a tail —
+coastal taper → thermal + isostatic erosion → the shared hypsometric
+redistribution → grid-scale relief limit → micro relief (`finish_elevation_field`,
+the same tail `generate_elevation_cordillera` uses) — and differing only in how
+the pre-erosion field is built:
+- **`rift`** (`generate_elevation_rift`) — parallel fault blocks: a tilted,
+  asymmetric HORST (steep scarp on one side, a gentle back-slope) alternating with
+  a flat-floored GRABEN, banded along a strike direction. `divergent_strike_angle`
+  takes the PCA principal axis of the world's own divergent-boundary cells where
+  plate data exists (real, not decorative); a template/painted world with no
+  plate data falls back to a seeded regional strike, the same "no better data"
+  convention `geology.rs`'s phase-2 climate proxy already uses.
+- **`glaciated`** (`generate_elevation_glaciated`) — the shape model, then glacial
+  modification gated by `glacial_ice_mask`, a latitude+altitude PROXY (phase 2 has
+  no climate, documented as a proxy exactly like `geology.rs`'s own): U-valley
+  broadening (extra thermal-erosion rounding blended in by ice presence), cirque
+  hollows carved just below ice-zone summits, and over-deepened troughs walked
+  steepest-descent from the strongest summits that BREACH the coast — the one
+  non-cordillera/ridged/rift model allowed to turn a little land into sea, and the
+  honest way to draw a fjord (§8.23: notching a coastline with noise draws a
+  scratch, not a landform).
+- **`plateau`** (`generate_elevation_plateau`) — the shape model, then quantised
+  into a handful of SHARP levels (a step function IS the escarpment; never
+  blurred, unlike the subtle `terrace` blend `landform.rs`'s `plateau` archetype
+  already applies more broadly) plus scattered outlying buttes.
+- **`volcanic`** (`generate_elevation_volcanic`) — a gentle low backdrop, shield
+  cones max-blended onto every `is_volcanic` land cell (so overlapping cones merge
+  into ranges rather than cancelling), summit calderas on the densest clusters,
+  hotspot trails of shrinking cones from isolated seeds — confined to EXISTING
+  land, since an elevation generator never creates new land (only phase 1 or the
+  lasso tools do that, rule 6/§8.23's discipline). Local density is read from a
+  spatial bucket grid, never an O(n²) pairwise scan (§8.9 rule 1's spirit — a
+  world can carry thousands of volcanic cells). Needs `is_volcanic` actually
+  loaded: `ColumnSet::PHASE_ELEVATION` now carries `VOLCANIC` too, which it did
+  not before this model needed to read it.
+
+**Chains that die into their surroundings.** Both `walk_spine` (the cordillera
+spine tracer, unchanged) and `generate_ridges` (the hand-drawn ridge tool) now
+taper along-strike to nothing at both ends with a noise-modulated falloff — before
+this, a drawn ridge line held its FULL peak height right up to the cursor's last
+position and stopped dead. `generate_ridges` tracks each rasterized spine cell's
+`t_along` (0..1 position along the whole drawn polyline, accumulated across
+segments, carried through the same BFS that already propagates `peak`/`half_w`)
+and multiplies the peak by a `sin(t_along·π)^0.45` envelope — the identical
+along-strike taper `generate_elevation_cordillera`'s own spines use — times a
+small per-line noise modulation so the two ends don't taper symmetrically.
+
+**Randomise-by-default.** Both `StepLandmass` and `StepElevation` now roll a
+fresh seed on every Generate press (an explicit "Lock seed" checkbox pins it for
+iterating sliders against one fixed world) — pressing "Generate from Plates"
+twice used to give the identical landmass, which is the wrong default for
+brainstorming.
 
 **Phase 3 runs this exact sequence** (`sim_commands.rs`; `earth_validation.rs` mirrors
 it — keep the two in sync):

@@ -48,6 +48,11 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
   const [islandKind, setIslandKind] = useState<IslandKind>("arc");
   const [islandSize, setIslandSize] = useState(3);
   const [lastOpSeed, setLastOpSeed] = useState<number>(randomSeed());
+  // Rolling a fresh seed on every Generate press is the right default for
+  // brainstorming (ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2) — pressing "Generate
+  // from Plates" twice used to give the IDENTICAL world. Lock it to iterate
+  // sliders against one fixed landmass instead.
+  const [lockSeed, setLockSeed] = useState(false);
 
   const [variants, setVariants] = useState<
     { a: { seed: number; thumb: string; w: number; h: number }; b: { seed: number; thumb: string; w: number; h: number } } | null
@@ -221,11 +226,15 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
       <button onClick={handleImageTemplate} disabled={simRunning} style={genBtn}>
         Load Image Template
       </button>
-      <button onClick={() => handleGeneratePlates()} disabled={simRunning} style={genBtn}>
+      <button onClick={() => handleGeneratePlates(lockSeed ? seed : randomSeed())} disabled={simRunning} style={genBtn}>
         Generate from Plates
       </button>
+      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6a8aaa" }}>
+        <input type="checkbox" checked={lockSeed} onChange={(e) => setLockSeed(e.target.checked)} />
+        Lock seed (iterate settings on this same landmass)
+      </label>
       <button onClick={handleRandomise} disabled={simRunning} style={genBtn}>
-        🎲 Randomise landmass (new seed)
+        🎲 Randomise landmass (new seed, ignores lock)
       </button>
       <button onClick={handleInvert} disabled={simRunning} style={genBtn}>
         Invert Land / Sea

@@ -402,6 +402,10 @@ fn apply_elevation_model(
         "cordillera" => elevation::generate_elevation_cordillera(buf, seed, density, height, spread, roughness),
         "ridged" => elevation::generate_elevation_ridged(buf, seed, density, height, spread, roughness),
         "shape" => elevation::generate_elevation_from_terrain(buf, seed, density, height, spread, roughness),
+        "rift" => elevation::generate_elevation_rift(buf, seed, density, height, spread, roughness),
+        "glaciated" => elevation::generate_elevation_glaciated(buf, seed, density, height, spread, roughness),
+        "plateau" => elevation::generate_elevation_plateau(buf, seed, density, height, spread, roughness),
+        "volcanic" => elevation::generate_elevation_volcanic(buf, seed, density, height, spread, roughness),
         // "plates" and anything unrecognised: the tectonic model where it can be
         // used, the shape model where it cannot. An unknown string must never
         // leave a world with no elevation at all.
@@ -594,6 +598,95 @@ pub fn sim_generate_terrain_cordillera(
     elevation::compute_sea_depth(&mut buf);
     elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
     buf.save(&conn, "Generate cordillera elevation")
+}
+
+/// Elevation model: parallel fault blocks — a tilted, asymmetric horst-and-graben
+/// rift system. Strike follows the world's own divergent-boundary trend where
+/// plate data exists. See `elevation::generate_elevation_rift`.
+#[tauri::command]
+pub fn sim_generate_terrain_rift(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    elevation::generate_elevation_rift(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate rift elevation")
+}
+
+/// Elevation model: the shape model, then glacial modification — U-valley
+/// broadening, cirque hollows, over-deepened troughs that breach the coast (real
+/// fjords, carved rather than notched). May turn some land cells to sea near the
+/// coast, so this is the one non-cordillera/ridged/rift model that can change the
+/// coastline. See `elevation::generate_elevation_glaciated`.
+#[tauri::command]
+pub fn sim_generate_terrain_glaciated(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    elevation::generate_elevation_glaciated(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate glaciated elevation")
+}
+
+/// Elevation model: quantised levels with sharp escarpment rims + outlying
+/// buttes. See `elevation::generate_elevation_plateau`.
+#[tauri::command]
+pub fn sim_generate_terrain_plateau(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    elevation::generate_elevation_plateau(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate plateau elevation")
+}
+
+/// Elevation model: shield cones on `is_volcanic` cells, summit calderas on the
+/// densest clusters, hotspot trails from isolated seeds. See
+/// `elevation::generate_elevation_volcanic`.
+#[tauri::command]
+pub fn sim_generate_terrain_volcanic(
+    seed: u64,
+    mountain_density: f32,
+    mountain_height: f32,
+    mountain_spread: f32,
+    noise_roughness: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
+    elevation::generate_elevation_volcanic(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
+    elevation::compute_sea_depth(&mut buf);
+    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    buf.save(&conn, "Generate volcanic elevation")
 }
 
 /// Generate mountain ridges from hand-drawn ridge lines.
@@ -1751,7 +1844,7 @@ mod elevation_model_tests {
     #[test]
     fn every_elevation_model_builds_a_different_world() {
         let seed = 4242u64;
-        let modes = ["plates", "shape", "cordillera", "ridged"];
+        let modes = ["plates", "shape", "cordillera", "ridged", "rift", "glaciated", "plateau", "volcanic"];
         let fields: Vec<(&str, Vec<f32>)> = modes.iter().map(|&m| {
             let mut buf = plate_world(seed);
             apply_elevation_model(&mut buf, seed, m, 0.5, 0.5, 0.5, 0.4, true);

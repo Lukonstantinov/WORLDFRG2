@@ -1,42 +1,73 @@
 import { useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { simGenerateShelves, simGenerateTerrain, simGenerateTerrainFromTemplate, simGenerateTerrainRidged,
-  simGenerateTerrainCordillera, simScaleElevation, simGenerateRidges, undoAction } from "@bridge";
+  simGenerateTerrainCordillera, simGenerateTerrainRift, simGenerateTerrainGlaciated,
+  simGenerateTerrainPlateau, simGenerateTerrainVolcanic,
+  simScaleElevation, simGenerateRidges, undoAction } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
 
-/** The four elevation MODELS. Each builds relief a fundamentally different way,
- *  so the choice belongs up front rather than buried in a row of buttons.
+/** Eight elevation MODELS, grouped by family (ITCZ_AND_LAND_TOOLS_PLAN.md
+ *  Commit 2). Each builds relief a fundamentally different way, so the choice
+ *  belongs up front rather than buried in a row of buttons.
  *
- *  All four are now honoured by BOTH run-all buttons as well as this step. They
- *  used to be reachable only from here: `sim_run_all` hardcoded the tectonic
- *  model and `sim_run_all_from_terrain` the shape model, each silently
- *  discarding this picker AND all four sliders — so "Generate Full World"
- *  produced the same relief however it was set. */
-type ElevMode = "plates" | "shape" | "cordillera" | "ridged";
+ *  All eight are honoured by BOTH run-all buttons as well as this step, via
+ *  the single `apply_elevation_model` selector — no generator is reachable
+ *  only from its own button here. */
+type ElevMode = "plates" | "shape" | "cordillera" | "ridged" | "rift" | "glaciated" | "plateau" | "volcanic";
+type ElevFamily = "Tectonic" | "Shape" | "Chains" | "Landform types";
 
-const ELEV_MODES: { id: ElevMode; label: string; blurb: string; needsPlates?: boolean }[] = [
+const ELEV_MODES: { id: ElevMode; label: string; family: ElevFamily; blurb: string; needsPlates?: boolean }[] = [
   {
     id: "plates",
+    family: "Tectonic",
     label: "Tectonic",
     blurb: "Uplift bloomed off the CONVERGENT plate boundaries, broken into segments by noise, then eroded and isostatically rebounded. The only model that reads the tectonic map, so ranges land where the plates actually collide — and the only one unavailable on a painted or imported landmass.",
     needsPlates: true,
   },
   {
+    id: "rift",
+    family: "Tectonic",
+    label: "Rift / Horst-Graben",
+    blurb: "Parallel fault blocks — a tilted, asymmetric horst (steep scarp on one side, a gentle back-slope) alternating with a flat-floored graben. Strike follows the world's own divergent-boundary trend where plate data exists, a seeded regional strike otherwise. Think the East African Rift or the Basin and Range.",
+  },
+  {
     id: "shape",
+    family: "Shape",
     label: "Shape-based",
     blurb: "Relief derived from the landmass itself — distance from the coast plus noise ridges. Broad continental swells, mountains wherever the shape suggests them. The safe general-purpose choice.",
   },
   {
+    id: "glaciated",
+    family: "Shape",
+    label: "Glaciated / Fjordland",
+    blurb: "The shape model, then glacial modification: broadened U-shaped valleys, cirque hollows below the crests, and over-deepened troughs that BREACH the coast — real carved fjords, not a notched coastline. Norway, Chile, British Columbia.",
+  },
+  {
     id: "cordillera",
+    family: "Chains",
     label: "Cordillera",
     blurb: "Long continuous chains traced ALONG the coastline, like the Andes or the Rockies: an unbroken continental divide, a steep seaward scarp, a broad inland piedmont of foothills, and parallel sub-ranges with high basins between them. Gives the map a clear grain and a real rain-shadow side.",
   },
   {
     id: "ridged",
+    family: "Chains",
     label: "Ridged (scattered)",
     blurb: "Ridged multifractal inside noise-defined orogenic belts. Many separate ranges with no shared strike — good for broken, tectonically chaotic worlds. Range count scales with map size.",
   },
+  {
+    id: "plateau",
+    family: "Landform types",
+    label: "Plateau & Mesa",
+    blurb: "Quantised elevation levels with SHARP escarpment rims (a real step, never blurred) plus outlying buttes scattered near the plateau's own margins. The Colorado Plateau, the Deccan.",
+  },
+  {
+    id: "volcanic",
+    family: "Landform types",
+    label: "Volcanic Hotspot",
+    blurb: "A gentle low backdrop with shield cones stamped on every volcanic-marked cell (overlapping cones merge into ranges), summit calderas on the densest clusters, and hotspot trails of shrinking cones extending from isolated seeds — Hawaii, Iceland, the Galápagos.",
+  },
 ];
+const ELEV_FAMILIES: ElevFamily[] = ["Tectonic", "Shape", "Chains", "Landform types"];
 
 interface Props {
   seed: number;
@@ -94,6 +125,14 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
   const shownModes = ELEV_MODES.filter((m) => !m.needsPlates || havePlates);
   const setElevMode = (m: ElevMode) => setTerrainParams({ mode: m });
   const activeMode = ELEV_MODES.find((m) => m.id === elevMode)!;
+  // Which family's button row is expanded — the family holding the active
+  // mode is always open; the rest collapse to save space (StepElevation went
+  // from 4 to 8 models in ITCZ_AND_LAND_TOOLS_PLAN.md Commit 2).
+  const [openFamily, setOpenFamily] = useState<ElevFamily | null>(null);
+  // Rolling a fresh seed on every Generate press is the right default for
+  // brainstorming (Commit 2) — an explicit lock is for iterating sliders
+  // against one fixed relief instead.
+  const [lockSeed, setLockSeed] = useState(false);
 
   // Ridge-drawing tool: draw lines → generate eroded ranges that follow them.
   const activeTool = useUIStore((s) => s.activeTool);
@@ -139,6 +178,10 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
       if (mode === "plates") await simGenerateTerrain(useSeed);
       else if (mode === "ridged") await simGenerateTerrainRidged(...args);
       else if (mode === "cordillera") await simGenerateTerrainCordillera(...args);
+      else if (mode === "rift") await simGenerateTerrainRift(...args);
+      else if (mode === "glaciated") await simGenerateTerrainGlaciated(...args);
+      else if (mode === "plateau") await simGenerateTerrainPlateau(...args);
+      else if (mode === "volcanic") await simGenerateTerrainVolcanic(...args);
       else await simGenerateTerrainFromTemplate(...args);
       invalidateTiles();
       markStepCompleted(2);
@@ -147,7 +190,15 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
     setSimRunning(false);
   };
 
-  const handleGenerateElevation = () => runElevation(terrainSeed);
+  const handleGenerateElevation = () => {
+    if (lockSeed) {
+      runElevation(terrainSeed);
+    } else {
+      const newSeed = Math.floor(Math.random() * 0xffffffff);
+      setTerrainSeed(newSeed);
+      runElevation(newSeed);
+    }
+  };
 
   const handleGenerateRidges = async () => {
     if (simRunning) return;
@@ -234,22 +285,43 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
         <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           Generation Mode
         </div>
-        <div style={{ display: "flex", gap: 3, marginBottom: 4 }}>
-          {shownModes.map((m) => (
-            <button key={m.id} onClick={() => setElevMode(m.id)} title={m.blurb}
-              style={{
-                flex: 1, padding: "4px 2px", borderRadius: 3, cursor: "pointer", fontSize: 9,
-                lineHeight: 1.15,
-                border: elevMode === m.id ? "1px solid #3a7ac0" : "1px solid #1e2e42",
-                background: elevMode === m.id ? "#1a3a5a" : "#0d1219",
-                color: elevMode === m.id ? "#c0ddf0" : "#6a8aaa",
-                fontWeight: elevMode === m.id ? 600 : 400,
-              }}>
-              {m.label}
-            </button>
-          ))}
-        </div>
-        <div style={{ color: "#5a7390", fontSize: 9, lineHeight: 1.4, marginBottom: 6 }}>
+        {ELEV_FAMILIES.map((fam) => {
+          const famModes = shownModes.filter((m) => m.family === fam);
+          if (famModes.length === 0) return null;
+          const famHasActive = famModes.some((m) => m.id === elevMode);
+          const isOpen = openFamily === fam || famHasActive;
+          return (
+            <div key={fam} style={{ marginBottom: 3 }}>
+              <button
+                onClick={() => setOpenFamily(isOpen && !famHasActive ? null : fam)}
+                style={{
+                  width: "100%", textAlign: "left", padding: "3px 4px", fontSize: 9.5,
+                  background: "transparent", border: "none", color: famHasActive ? "#8ab0d0" : "#5a7390",
+                  cursor: "pointer", fontWeight: famHasActive ? 600 : 400,
+                }}>
+                {isOpen ? "▾" : "▸"} {fam}
+              </button>
+              {isOpen && (
+                <div style={{ display: "flex", gap: 3, marginBottom: 2 }}>
+                  {famModes.map((m) => (
+                    <button key={m.id} onClick={() => setElevMode(m.id)} title={m.blurb}
+                      style={{
+                        flex: 1, padding: "4px 2px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                        lineHeight: 1.15,
+                        border: elevMode === m.id ? "1px solid #3a7ac0" : "1px solid #1e2e42",
+                        background: elevMode === m.id ? "#1a3a5a" : "#0d1219",
+                        color: elevMode === m.id ? "#c0ddf0" : "#6a8aaa",
+                        fontWeight: elevMode === m.id ? 600 : 400,
+                      }}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div style={{ color: "#5a7390", fontSize: 9, lineHeight: 1.4, marginBottom: 6, marginTop: 3 }}>
           {activeMode.blurb}
         </div>
 
@@ -288,9 +360,13 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
         style={{ ...genBtn, background: "#16324a", color: "#c8e2f8" }}>
         ⛰️ Generate Elevation — {activeMode.label}
       </button>
+      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6a8aaa" }}>
+        <input type="checkbox" checked={lockSeed} onChange={(e) => setLockSeed(e.target.checked)} />
+        Lock seed (iterate sliders on this same relief)
+      </label>
       <button onClick={handleRandomizeTerrain} disabled={simRunning || !step1Done}
         style={{ ...genBtn, background: "#1a2e1a", color: "#9cd09c" }}>
-        🎲 Randomize Terrain (new seed)
+        🎲 Randomize Terrain (new seed, ignores lock)
       </button>
 
       <div style={{ background: "#0a1018", border: "1px solid #3a2e20", borderRadius: 4, padding: 6, marginTop: 2 }}>

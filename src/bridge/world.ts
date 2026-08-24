@@ -260,6 +260,65 @@ export async function simGenerateTerrainCordillera(
   });
 }
 
+/** Elevation model: parallel fault blocks — a tilted, asymmetric horst-and-graben
+ *  rift system. Strike follows the world's own divergent-boundary trend where
+ *  plate data exists, a seeded regional strike otherwise. */
+export async function simGenerateTerrainRift(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_rift", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: the shape model, then glacial modification — U-valley
+ *  broadening, cirque hollows, over-deepened troughs that breach the coast (real
+ *  fjords, carved rather than notched). May turn a little land into sea near the
+ *  coast. */
+export async function simGenerateTerrainGlaciated(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_glaciated", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: quantised levels with sharp escarpment rims + outlying
+ *  buttes. */
+export async function simGenerateTerrainPlateau(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_plateau", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
+/** Elevation model: shield cones on volcanic cells, summit calderas on the
+ *  densest clusters, hotspot trails from isolated seeds. */
+export async function simGenerateTerrainVolcanic(
+  seed: number,
+  mountainDensity: number,
+  mountainHeight: number,
+  mountainSpread: number,
+  noiseRoughness: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain_volcanic", {
+    seed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness,
+  });
+}
+
 /** The planetary settings a preview runs against. Passed explicitly (not read
  *  from the world) so the UI can preview values mid-drag, before they commit. */
 export interface PreviewSettings {
