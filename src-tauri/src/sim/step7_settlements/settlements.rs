@@ -30,7 +30,7 @@ fn site_label(buf: &WorldBuffer, idx: usize, is_river: bool) -> &'static str {
 }
 
 /// The habitability field PLUS the trade field it already computes internally and
-/// used to throw away (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md F2 / slice 3a).
+/// used to throw away (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) F2 / slice 3a).
 /// `trade` is the ladder value already multiplied by the SAME four viability gates
 /// `hab` uses (`temp_gate × winter_gate × cryo_gate × disease_gate`) — the gates are
 /// deliberately not the climate/fertility terms, so a hot barren desert port (Hormuz
@@ -791,7 +791,7 @@ pub fn generate_settlements(
     settlements
 }
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 8 â€” cost-grid BETWEENNESS: a
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 8 â€” cost-grid BETWEENNESS: a
 /// real, settlement-independent measure of which land actually sits on the paths
 /// people would take, found the way the Gotthard and the Khyber are found â€” by
 /// where routes squeeze through, not by knowing anything about cities or goods.
@@ -913,7 +913,7 @@ pub fn compute_betweenness(buf: &WorldBuffer) -> Vec<f32> {
     out
 }
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3d â€” step 7a: the settlement-
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3d â€” step 7a: the settlement-
 /// independent JUNCTION sites `compute_habitability_fields`'s trade ladder can now
 /// name (straits, isthmuses, mountain passes, great river mouths) but which the BASE
 /// pass (`generate_settlements`, local maxima of the full `hab` blend) can miss

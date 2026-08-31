@@ -1,4 +1,4 @@
-//! GOODS_LOCALITIES_PLAN.md Slice 0 — the coverage diagnostic.
+//! CLAUDE.md §8.19 (goods localities, shipped) Slice 0 — the coverage diagnostic.
 //!
 //! The gate every later slice is measured against, built before anything moves
 //! (§2.4: "commission measurement explicitly"). Runs the real world-generation
@@ -182,7 +182,7 @@ pub fn coverage_report(
 mod tests {
     use super::*;
 
-    /// GOODS_LOCALITIES_PLAN.md itself (F2) draws the scope line: `Distribution::
+    /// CLAUDE.md §8.19 (goods localities, shipped) itself (F2) draws the scope line: `Distribution::
     /// Deposits` goods already have their own hierarchy and their own coverage
     /// guarantee (`deposits::tests::no_shipped_mineral_places_nothing` — "places
     /// something somewhere", not "reaches a settlement"). At this diagnostic's
@@ -206,7 +206,7 @@ mod tests {
     /// catchment on a modest test world. A real fix belongs to `docs/FIX_PLAN.md`,
     /// not to this diagnostic's floor.
     ///
-    /// `pearls` is a DIFFERENT case, added by `TERRAIN_2_PLAN.md` slice 4: an
+    /// `pearls` is a DIFFERENT case, added by CLAUDE.md §8.23b (Terrain 2.0, shipped) slice 4: an
     /// inshore marine good whose homeland is scored off `terrain`/coastline
     /// geometry, which slice 4 deliberately changed (the coastline no longer
     /// traces the plate Voronoi edge). On this fixed-seed 300×150 reference

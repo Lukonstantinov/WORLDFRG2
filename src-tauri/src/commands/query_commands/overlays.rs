@@ -947,7 +947,7 @@ pub fn compute_good_regions(db: State<'_, WorldDb>) -> Result<Vec<GoodRegion>, S
 
 
 // ═════════════════════════════════════════════════════════════════════════════════
-//  GOODS_LOCALITIES_PLAN.md Slice 5 — THE TWO-LAYER, FULL-RESOLUTION BELT MASK
+//  CLAUDE.md §8.19 (goods localities, shipped) Slice 5 — THE TWO-LAYER, FULL-RESOLUTION BELT MASK
 //  (D3 · D9 · D10)
 //
 //  `compute_good_regions` above rasterises a belt onto a COARSE grid (`f =
@@ -1215,7 +1215,7 @@ pub fn compute_good_belt_masks(
 }
 
 /// One good's belt SAMPLED to a province, at the SAME resolution the relief plate
-/// crops at (`get_province_terrain_crop`) — PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md
+/// crops at (`get_province_terrain_crop`) — CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped)
 /// slice 1 / F1. The old version read the province RASTER (~56 km blocks, capped
 /// 768 across the whole world) and centre-sampled ONE world cell per block, so a
 /// 200–400 km province drew its goods 4–7 blocks wide under a relief plate sampling
@@ -1635,7 +1635,7 @@ pub fn compute_climate_bands(db: State<'_, WorldDb>) -> Result<ClimateBands, Str
     })
 }
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 1 — `a_province_goods_mask_
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 1 — `a_province_goods_mask_
 /// matches_the_world_belt`: the province goods plate must sample the world's real
 /// belt column at the SAME fidelity the relief crop uses, and every covered sampled
 /// cell must genuinely be province land with a belt value at/above `COVERAGE_MIN_U8`.

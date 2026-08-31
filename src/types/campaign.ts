@@ -1307,7 +1307,7 @@ export interface GoodRegion {
   sublabel: string;          // specific gemstone (Ruby/Sapphire/…); else ""
 }
 
-/** GOODS_LOCALITIES_PLAN.md Slice 5 (D3 · D9 · D10) · ONE good's belt as a
+/** CLAUDE.md §8.19 (goods localities, shipped) Slice 5 (D3 · D9 · D10) · ONE good's belt as a
  *  FULL-RESOLUTION mask, which is what lets the overlay stop drawing the coarse
  *  blocks of `GoodRegion` that spill past the coastline (F4).
  *
@@ -1354,7 +1354,7 @@ export interface GoodBeltMask {
  *  counterpart of `GoodBeltMask`. Read from the goods tile column (so it works on
  *  any world, no localities/campaign needed), it lets `ProvinceMiniMap` draw belt
  *  AREAS + a QUALITY wash at the same fidelity as the ground under them (F1 /
- *  PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 1 — the old version sampled the
+ *  CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 1 — the old version sampled the
  *  province RASTER, ~24× coarser than the relief plate it was drawn over). */
 export interface ProvinceGoodMask {
   good: string;
@@ -2554,7 +2554,7 @@ export interface ProvinceGoodPotential {
   mean_grade: number;    // deposit goods: mean working grade 0..1
   workings: number;      // deposit goods: number of ore workings in the province
   best_depth: number;    // deposit goods: deepest present (0 surface … 3 flooded)
-  /** GOODS_LOCALITIES_PLAN.md Slice 7 — the non-mineral counterpart of mean_grade/
+  /** CLAUDE.md §8.19 (goods localities, shipped) Slice 7 — the non-mineral counterpart of mean_grade/
    *  workings: this good has at least one terroir LOCALITY in the province. */
   has_locality: boolean;
   mean_locality_grade: number; // 0..1, when has_locality
@@ -2571,7 +2571,7 @@ export interface ProvinceDepositDot {
   depth: number;
 }
 
-/** GOODS_LOCALITIES_PLAN.md Slice 6 · one terroir locality located in a province
+/** CLAUDE.md §8.19 (goods localities, shipped) Slice 6 · one terroir locality located in a province
  *  (real cell coords), for the survey-plate goods layer — the non-mineral
  *  counterpart of `ProvinceDepositDot`. */
 export interface ProvinceLocalityDot {

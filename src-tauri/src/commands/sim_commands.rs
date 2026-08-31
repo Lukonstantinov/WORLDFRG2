@@ -6,7 +6,7 @@ use crate::db::metadata;
 use crate::tile::coords::{TileCoord, TILE_SIZE};
 
 /// Persist the two placement records `compute_trade_goods` returns — the ORE
-/// WORKINGS (`sim::deposits`, §8.16) and, since GOODS_LOCALITIES_PLAN.md, every
+/// WORKINGS (`sim::deposits`, §8.16) and, since CLAUDE.md §8.19 (goods localities, shipped), every
 /// non-mineral good's LOCALITIES (`sim::localities`, Slice 3) — to world metadata
 /// exactly as before, just from one shared helper instead of four duplicated
 /// call sites.
@@ -508,7 +508,7 @@ pub fn sim_run_all(
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
     let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
-    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
     // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
     // maxima-of-habitability search structurally cannot find, since a great port need
     // not sit on the best farmland. Runs after the base pass (so it can respect
@@ -518,7 +518,7 @@ pub fn sim_run_all(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 7b (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3): partition into
+    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3): partition into
     // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
     // run-all called this before — "Generate Full World" ended at phase 8 and left
     // the province layer unreachable except from the standalone Settlements/
@@ -900,7 +900,7 @@ pub fn sim_run_all_from_terrain(
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
     let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
-    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
     // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
     // maxima-of-habitability search structurally cannot find, since a great port need
     // not sit on the best farmland. Runs after the base pass (so it can respect
@@ -910,7 +910,7 @@ pub fn sim_run_all_from_terrain(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 7b (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3) — see the identical
+    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
     // call in `sim_run_all`; this path was missing it too.
     generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
 
@@ -1006,7 +1006,7 @@ pub fn sim_generate_settlements(
     let mut result = settlements::generate_settlements(
         &buf, &hab_fields.hab, &river_data, seed, realism.unwrap_or(0.55),
         max_settlements.map(|c| c as usize));
-    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — see the run-all
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — see the run-all
     // call sites for the full rationale.
     result.extend(settlements::generate_trade_sites(
         &buf, &hab_fields.trade, &result, realism.unwrap_or(0.55),
@@ -1131,7 +1131,7 @@ fn rle_encode_provinces(ids: &[u32]) -> Vec<u32> {
     out
 }
 
-/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3: any province below this km² floor
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3: any province below this km² floor
 /// is folded into its largest-shared-border neighbour by the automatic merge every
 /// province-generating path now runs — "this is a generation artefact, not a
 /// province" (~8,000 km²). Stated in km², not cells (CLAUDE.md rule 25): a cell is

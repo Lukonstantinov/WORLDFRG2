@@ -173,7 +173,7 @@ pub fn migrate_raster_sentinel(vals: &mut [u32]) {
 
 /// Shared province-raster → world-cell sample geometry — the bounding box + stride
 /// both `get_province_terrain_crop` (relief) and `province_good_belt_masks` (goods)
-/// build their sampled grid from. PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 1 /
+/// build their sampled grid from. CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 1 /
 /// F1: the two plates used to sample at wildly different resolutions (a raster block
 /// vs a real world-cell stride), so a belt read ~24× coarser than the relief under
 /// it. Routing BOTH through this one function is what makes them structurally unable

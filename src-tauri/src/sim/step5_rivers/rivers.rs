@@ -271,7 +271,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     // dendritic drainage. Deterministic (fixed seed) so a given world is stable.
     const MICRO_RELIEF: f32 = 0.0006;   // â‰ˆ5 m; < 0.002 (~18 m) lake threshold
     const MICRO_FREQ: f32 = 0.05;       // base feature â‰ˆ 20 cells (finer octaves nest)
-    // TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 2 (F2): the seed used to be the
+    // WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 2 (F2): the seed used to be the
     // literal 0x5CA1_AB1E, not derived from the world at all -- so the field that
     // decides where every flat-plain river goes was byte-identical in every world
     // this app has ever generated. `world_micro_relief_seed` hashes the world's own
@@ -1216,7 +1216,7 @@ mod tests {
         }
     }
 
-    /// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 2 gate (F2): a long flat-ground
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 2 gate (F2): a long flat-ground
     /// reach must NOT read as a textbook sine -- successive bend amplitudes must
     /// vary meaningfully (the per-bend `bend_mod` term), not repeat one constant
     /// amplitude the way the pre-Slice-2 code did.

@@ -1109,7 +1109,7 @@ export function MapCanvas() {
     requestRender();
   }, [overlayVisibility, requestRender]);
 
-  // GOODS_LOCALITIES_PLAN.md Slice 5 · the FULL-RESOLUTION belt masks, fetched for
+  // CLAUDE.md §8.19 (goods localities, shipped) Slice 5 · the FULL-RESOLUTION belt masks, fetched for
   // the goods actually toggled on. They are a real payload (a full-resolution
   // coverage mask per good), which is exactly why the command takes a list rather
   // than returning every good the way `compute_overlays` does — and why this effect

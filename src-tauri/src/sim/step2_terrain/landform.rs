@@ -32,7 +32,7 @@
 //!    middle of cratons. Context makes the variety mean something.
 //!
 //!  * **Province borders are DOMAIN-WARPED before the site lookup**, so they are
-//!    organic curves rather than Voronoi polygon edges. `TERRAIN_2_PLAN.md`
+//!    organic curves rather than Voronoi polygon edges. CLAUDE.md §8.23b (Terrain 2.0, shipped)
 //!    slice 4 spent three passes learning that a straight geometric edge reads as
 //!    an artefact however good the numbers behind it are; that lesson is imported
 //!    here rather than re-paid for.
@@ -335,7 +335,7 @@ pub fn build_landform_field(
             let idx = (y * w + x) as usize;
 
             // Domain-warp the lookup so borders are organic curves rather than
-            // Voronoi polygon edges (TERRAIN_2_PLAN slice 4's lesson, imported
+            // Voronoi polygon edges (CLAUDE.md §8.23b's slice-4 lesson, imported
             // rather than re-paid for).
             let fx = x as f32;
             let fy = y as f32;

@@ -556,7 +556,7 @@ export class OverlayManager {
   private monsoonZones: SharkZone[] = [];
   private reefZones: SharkZone[] = [];
   private goodRegions: GoodRegion[] = [];
-  // ── GOODS_LOCALITIES_PLAN.md Slice 5 · the full-resolution belt masks (D3/D9/D10).
+  // ── CLAUDE.md §8.19 (goods localities, shipped) Slice 5 · the full-resolution belt masks (D3/D9/D10).
   //    `goodRegions` above still supplies each belt's LABEL — the medallion, the
   //    centroid, the gemstone sublabel — and, for a good whose mask hasn't arrived,
   //    the old coarse fill as a fallback. The masks supply the FILL, which is the

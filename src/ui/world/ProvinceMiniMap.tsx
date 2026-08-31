@@ -107,7 +107,7 @@ export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | 
 export const PLATE_LABEL: Record<PlateKey, string> = {
   relief: "relief", water: "water", landuse: "land use",
   tenure: "tenure", holdings: "holdings", borders: "borders",
-  // F5 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 2) merged the old separate
+  // F5 (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 2) merged the old separate
   // "goods"/"quality" toggles into one plate — coverage AND the belt's own absolute
   // value shaded into it are the same layer now, so there is nothing left to toggle
   // independently. `deposits` stays its own plate: different geology, different symbol.
@@ -217,7 +217,7 @@ export function ProvinceMiniMap({
    *  a quality wash — the same reading the main map gives — on ANY world, since it
    *  reads the goods tile column rather than needing per-locality positions. */
   goodMasks?: ProvinceGoodMask[];
-  /** GOODS_LOCALITIES_PLAN.md Slice 6 (F3 · D4) · the REAL terroir localities inside
+  /** CLAUDE.md §8.19 (goods localities, shipped) Slice 6 (F3 · D4) · the REAL terroir localities inside
    *  (or, for a marine good, in the water off) this province, at their own cell
    *  coordinates. This is the data F3 said the "squares of goods" feature was blocked
    *  on: unlike land use and tenure — which are SHARES with no spatial extent and so
@@ -598,7 +598,7 @@ export function ProvinceMiniMap({
         {on("goods") && localities.length > 0 && raster && (() => {
           const clipId = `pmm-prov-${province.id}`;
           // F5 (slice 2) · the true-to-scale LAND square is gone. The size ladder is
-          // in km (a staple region is 900 km, GOODS_LOCALITIES_PLAN §2.1) while a
+          // in km (a staple region is 900 km, CLAUDE.md §8.19) while a
           // province is 200-400 km across, so a land square always covered the whole
           // plate and the province read as one flat block. Every land locality is now
           // a CORE marker at its real cell, plus its name — the same reduction slice 6

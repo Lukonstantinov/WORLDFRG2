@@ -3478,7 +3478,7 @@ pub struct ColonizeSite {
     /// worlds without a province layer read as "unknown", never "empty", so they
     /// can't accidentally win the empty-province founding bonus below).
     #[serde(default = "neg_one_i32")] pub province: i32,
-    /// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6 (F6) — the site's OWN
+    /// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 6 (F6) — the site's OWN
     /// per-good belt strength (0..1, same index space as `self.goods`), read at the
     /// site's coarse cell. `trade_value` above is one VALUE-weighted scalar
     /// ("how rich is this site"); this is the physical PRODUCT MIX ("rich in

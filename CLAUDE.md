@@ -82,7 +82,7 @@ It prints a scorecard + confusion matrix and HARD-ASSERTS a floor
 **Raise the floor after an improvement** so it always guards the current best.
 
 Measured baseline: **main-class 70.2%**, **exact-zone 39.0%** (was 66.2 / 29.0 at
-`d53fdc9`; main-class was 70.1 before `TERRAIN_2_PLAN.md` slice 5's seafloor
+`d53fdc9`; main-class was 70.1 before Terrain 2.0 slice 5's seafloor
 structure — the one part of that plan touching `compute_sea_depth`/`generate_shelves`
 — nudged it to 70.2, floor raised to 70.15). BOTH are now asserted — `EARTH_MAIN_FLOOR`
 **and** `EARTH_EXACT_FLOOR`.
@@ -146,6 +146,45 @@ a scoreboard whose history is rewritten cannot show a regression.
 change adds a module, a render layer, a sim phase or a tile column, update the
 relevant map in §4/§6/§7/§8 **in the same commit**. If you find a section that no
 longer matches the tree, fix it rather than working around it.
+
+---
+---
+
+### 2.8 Test what you changed — a routing table, not the whole suite
+
+The gates in §2.1/§2.3/§2.5 are mandatory **for the code they guard**, not for every
+commit. A full `cargo test --lib` run is roughly an hour; almost every change can
+only affect a slice of it. Pick rows by the paths in your diff, run the union, and
+**say in the commit which gates you ran and why those**.
+
+| You changed | Run |
+|---|---|
+| `docs/**`, `README`, `CLAUDE.md` | nothing |
+| a `#[cfg(test)]` block / a diagnostic only | `cargo check --lib --tests`, then that test by name |
+| `sim/campaign/tick/**` | `cargo test --lib tick::tests` + `econ_` (§2.1, §2.5) |
+| `sim/step3_ocean_atmo/**`, `sim/step4_climate/**` | `earth_` (§2.3) + re-read §8.9 |
+| `sim/step2_terrain/**` | `elevation::tests`, `landform`, `terrain_metrics`; **not** `earth_` — `earth_validation.rs` scores a baked DEM and never calls a generator (§8.23b) |
+| `sim/step1_plates/**` | `plates`, `elevation::tests`, `coastline_departs_from_the_plate_boundary` |
+| `sim/step5_rivers/**`, `step6_soil_fertility/**` | those modules' own tests + `goods_` if belts move |
+| `sim/step8_biological_goods/**` | `goods_` (rule 26) |
+| `sim/shared/provinces.rs` | `provinces::tests` |
+| `render/**`, `commands/palette_commands.rs` | `render::tile_image::tests` (+ the relevant `dump_*` sheet — §8.21's rule: look at it) |
+| `commands/**` (wiring only) | `cargo check --lib --tests` |
+| `src/**` (frontend) | `npx tsc --noEmit` |
+
+Three rules:
+
+- **Run the narrowest thing that could fail, then widen if it does.** `cargo test
+  --lib <substring>` filters by name; use it. A named test is seconds, the suite is
+  an hour.
+- **`--release` only when the test needs it** (the `#[ignore]`d benches and world
+  builders). A debug build of a small unit test is far quicker than a release
+  rebuild, and switching profiles invalidates the build cache — so do not alternate
+  `cargo check` and `cargo test --release` in one session for no reason.
+- **A cross-cutting change still owes the union of its rows, not the suite.** If you
+  genuinely cannot tell which rows a change touches, that is a signal the change is
+  too broad, not a reason to run everything. CI (rule 16) is the backstop that runs
+  the full set; it exists so a local session does not have to.
 
 ---
 
@@ -275,7 +314,7 @@ Run in order. Each phase depends on previous phases' data.
 | 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
 | 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
 | 6b | `sim_classify_biomes` | **41 ecological biomes** (needs rivers+lakes) — see §8.12 |
-| 7 | `sim_generate_settlements` | Habitability scoring → city placement, then step 7a: bounded junction sites (straits/isthmuses/passes/great river mouths) the base local-maxima pass structurally cannot reach — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md` slice 3 |
+| 7 | `sim_generate_settlements` | Habitability scoring → city placement, then step 7a: bounded junction sites (straits/isthmuses/passes/great river mouths) the base local-maxima pass structurally cannot reach — the ports/junctions work (shipped) |
 | 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements, incl. step 7a's junction sites) |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts + ORE DEPOSITS (§8.16; `gem_deposits` now means ORE DISTRICTS) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
@@ -1248,7 +1287,7 @@ canvas/
                                   each. Also holds the two live appearance registries the
                                   Settings store drives: `lineColors` (overlay lines) and
                                   `labelStyles` (map label typography — see §8.11).
-                                  GOODS_LOCALITIES_PLAN.md Slice 5 · a trade-good belt's
+                                  §8.19 Slice 5 · a trade-good belt's
                                   FILL now comes from a FULL-RESOLUTION mask
                                   (`drawGoodBeltMasks`/`buildGoodMaskRender`), not the
                                   coarse ~8-cell blocks `GoodRegion` carries — see §8.19.
@@ -1349,7 +1388,7 @@ ui/world/  — map & world
                                   as a hatch rather than as false precision. Never
                                   invent a spatial layout the model does not hold.
                                   The GOODS plate is the exception that proves it
-                                  (GOODS_LOCALITIES_PLAN.md Slice 6): a `GoodLocality`
+                                  (§8.19 Slice 6): a `GoodLocality`
                                   is NOT a share — it has a real cell and a real
                                   `radius_km` — so it draws as a real SQUARE at its
                                   real position, clipped to the province footprint,
@@ -2304,7 +2343,7 @@ and `temperature_ramp_pivots_on_freezing`.
 
 ---
 
-### 8.19 Goods localities — the agricultural/biological hierarchy (`docs/GOODS_LOCALITIES_PLAN.md`)
+### 8.19 Goods localities — the agricultural/biological hierarchy
 
 Trade goods get what minerals already had (§8.16): belt → LOCALITY → cell, the
 same two-level structure `deposits.rs` uses, for every enabled `Global`/`Local`
@@ -2650,7 +2689,7 @@ the renderer: land relief is texturally uniform because `generate_elevation`
 uses one global noise recipe (`f_base`/`f_range`/`f_hill`, `RIDGE_AMP`,
 `HILL_AMP`) for every continent. (The coastline-follows-Voronoi-edge and
 straight-plate-boundary-ridge defects this paragraph used to name here were
-Terrain 2.0's own slices 3-4 — see `TERRAIN_2_PLAN.md` in §9 — fixed and gated
+Terrain 2.0's own slices 3-4 (shipped; §8.23b) — fixed and gated
 by `coastline_departs_from_the_plate_boundary`.)
 
 ---
@@ -2995,7 +3034,7 @@ and `temperature_ramp_pivots_on_freezing`.
 
 ---
 
-### 8.19 Goods localities — the agricultural/biological hierarchy (`docs/GOODS_LOCALITIES_PLAN.md`)
+### 8.19 Goods localities — the agricultural/biological hierarchy
 
 Trade goods get what minerals already had (§8.16): belt → LOCALITY → cell, the
 same two-level structure `deposits.rs` uses, for every enabled `Global`/`Local`
@@ -3341,7 +3380,7 @@ the renderer: land relief is texturally uniform because `generate_elevation`
 uses one global noise recipe (`f_base`/`f_range`/`f_hill`, `RIDGE_AMP`,
 `HILL_AMP`) for every continent. (The coastline-follows-Voronoi-edge and
 straight-plate-boundary-ridge defects this paragraph used to name here were
-Terrain 2.0's own slices 3-4 — see `TERRAIN_2_PLAN.md` in §9 — fixed and gated
+Terrain 2.0's own slices 3-4 (shipped; §8.23b) — fixed and gated
 by `coastline_departs_from_the_plate_boundary`.)
 
 ---
@@ -3760,125 +3799,22 @@ DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geolog
                                     unbuilt). Carries the
                                     measured findings that motivated it and its own
                                     "deliberately not built" list
-TERRAIN_2_PLAN.md                 ← ⭐ ALL SIX SLICES BUILT. `hydraulic_erosion`
-                                    (droplets, ~1.4 visits/land cell measured) is
-                                    replaced by `stream_power_erosion` — priority-
-                                    flood fill + flow accumulation + `K·A^m·S^n`
-                                    incision (`step2_terrain/elevation.rs`), touching
-                                    every land cell's real flow path every outer
-                                    pass instead of sampling a fraction of them.
-                                    New transient module `step2_terrain/geology.rs`
-                                    (§2's "transient first" — recomputed from seed +
-                                    persisted plate data every phase-2 run, zero tile-
-                                    format change) supplies: LITHOLOGY (independent
-                                    noise bands so resistant rock holds ridges),
-                                    OROGENY setting+age (real, from `density`'s
-                                    oceanic/continental split reconstructed via
-                                    majority-vote terrain per plate — active-margin
-                                    arc-offset-from-trench / collision / island-arc,
-                                    inherited outward through a belt by the same BFS
-                                    that measures distance from it, so an old worn
-                                    range sits beside a young sharp one), a phase-2
-                                    CLIMATE PROXY (latitude + continentality — an
-                                    explicit stand-in for phase-3 precipitation,
-                                    documented to disagree with it), and REGIONALISED
-                                    hypsometric redistribution (D9 — a region's own
-                                    pre-redistribution character survives the global
-                                    rank-squeeze instead of being erased by it).
-                                    `plates.rs`'s boundary classification is fixed
-                                    (D3): the normal is now the true Voronoi-bisector
-                                    direction between two plates' seed points, not
-                                    one plate's centre to the cell, and a triple
-                                    junction classifies by strongest signal across
-                                    every differing neighbour instead of scan order.
-                                    Coastlines are DECOUPLED from the Voronoi edge
-                                    (D1/T1) by a LEVEL SET, the third pass at this
-                                    (see `docs/SCOREBOARD.md`'s 2026-08-19e entry):
-                                    a signed distance-to-nearest-boundary field
-                                    (BFS; positive on the land side, negative on
-                                    the sea side) perturbed by noise and re-
-                                    thresholded at zero, so only cells within
-                                    `reach` (~0.55×plate-size) of a real boundary
-                                    can ever flip — no far-flung speckle islands by
-                                    construction. The first two passes each
-                                    measured a real number (90%, then 62.5% coast-
-                                    on-boundary) that still looked, in
-                                    `dump_natural_sheet`, like an unmodified
-                                    Voronoi edge or a scatter of dots bolted onto
-                                    one — a plain 2-D noise threshold has no notion
-                                    of "near the true 1-D boundary curve", so
-                                    wherever it flipped a cell, the flip was
-                                    uncorrelated with where the coastline actually
-                                    needed to bend. The level set fixes this by
-                                    construction rather than by amplitude tuning:
-                                    measured coast-on-plate-boundary 6-7% (both the
-                                    `terrain_metrics` config and the exact
-                                    `dump_natural_sheet` world a maintainer
-                                    screenshot came from), gated permanently by
-                                    `coastline_departs_from_the_plate_boundary`. A
-                                    despeckle pass (component flood-fill, now
-                                    `DESPECKLE_MIN`=14 cells) is a safety net, not
-                                    the mechanism. The SAME screenshot also showed
-                                    straight diagonal "scar" lines across
-                                    continental interiors — a SEPARATE bug, the
-                                    divergent-boundary rift pulldown reading
-                                    `boundary_type[idx]` at the cell's own unwarped
-                                    position; fixed the same way as the D4 orogeny
-                                    belt (read at the warped position, fade
-                                    smoothly with distance). A percentile threshold
-                                    (not a fixed cutoff) still holds the total land
-                                    fraction exactly what the plate mix implied
-                                    throughout. Seafloor gets ridges/trenches/abyssal
-                                    hills/scattered seamounts in `generate_shelves`
-                                    (measured sea_depth↔distance-to-coast r ≈
-                                    0.66-0.74, down from ~1.0 — a real decorrelation,
-                                    §2's ONE slice that touches the Earth gate, which
-                                    HELD: 70.1%→70.2% main-class, floor raised to
-                                    70.15). Render follow-up: a bounded, honest
-                                    approximation of texture shading (widens the
-                                    existing direction-independent AO term
-                                    specifically on the lee/shadowed side, never a
-                                    second light — a true multi-scale fractional-
-                                    Laplacian transform needs a wider cross-tile halo
-                                    this renderer doesn't carry) plus the elevation
-                                    ramp's white blow-out softened. `terrain_metrics`
-                                    (§3's harness) prints RMS slope / slope spread /
-                                    drainage density / hypsometric integral / coast-
-                                    on-boundary / sea_depth-correlation per model —
-                                    the FIRST measurement of these, so it establishes
-                                    the baseline rather than clearing a pre-set floor.
-                                    NEGATIVE RESULT kept as a record, not chased
-                                    further: stream-power's outer-pass count had to
-                                    be decoupled from the old `iterations` (droplet-
-                                    budget) knob and keyed to GRID SIZE instead —
-                                    keying it to `iterations` gave a SMALL world
-                                    fewer passes than a large one, which is backwards
-                                    for performance AND broke
-                                    `cordillera_crest_runs_parallel_to_the_coast`
-                                    (a real world's stream-power run stays at 4-6
-                                    outer passes for the plan's own perf budget, but
-                                    every unit-test-sized fixture gets 8 for free).
-                                    Even so, phase-2 cost real time — `bench_phase2`
-                                    @ 3600×1800: plates 8.5s→11.4s, shape
-                                    11.4s→13.9s (rayon-parallelised where a pass has
-                                    no cross-cell dependency: the Voronoi assignment,
-                                    boundary classification and lithology/climate-
-                                    proxy maps all moved to `into_par_iter`, but the
-                                    priority-flood queue itself is inherently
-                                    sequential and stayed the dominant cost) — short
-                                    of the "no slower" target, recorded rather than
-                                    hidden. A downstream consequence also recorded
-                                    rather than hidden: the fixed-seed 300×150 goods-
-                                    coverage reference world now places `pearls`'
-                                    inshore homeland outside every settlement's
-                                    catchment at that seed/scale — real generation
-                                    regenerates settlements FROM the decoupled
-                                    coastline, so this is a fixed-fixture sampling
-                                    artefact (a second, honestly-labelled exception
-                                    in `goods_validation.rs`, not folded into the
-                                    pre-existing `dyes` one). Slice 4's blast radius is real but scoped
-                                    exactly as flagged: only NEW generation changes;
-                                    a saved world's stored tiles are untouched
+WORLD_AND_TRADE_MASTER_PLAN.md    ← ⭐ THE ACTIVE PLAN. Three parts, one
+                                    dependency chain (the land decides where
+                                    trade can go). Part I tectonics/rivers/
+                                    provinces/shelves — slices 1,2,3,5,7,8 BUILT
+                                    and gated, 4 shipped scoped-down (no
+                                    per-plate Euler-pole identity), 6 not
+                                    attempted. Part II outpost connectivity &
+                                    the entrepôt — measured, NOT built. Part III
+                                    exploration / the known world / transport
+                                    modes — decided, NOT built. Read its build
+                                    order first: transport modes lead, because
+                                    they are the biggest lever on the measured
+                                    −0.064 price/distance gradient, have an
+                                    instrument that already exists
+                                    (`econ_fidelity_scorecard`), and may make
+                                    the entrepôt and siting rules unnecessary
 ITCZ_AND_LAND_TOOLS_PLAN.md       ← ⭐ COMMITS 1-2 BUILT, 3a ATTEMPTED AND
                                     REVERTED (negative result), 3b-c NOT
                                     ATTEMPTED. Stage-1 LASSO AREA TOOLS shipped
@@ -3964,28 +3900,6 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md
                                     design decisions are recorded at the top
                                     (individual vessels · houses+guilds only ·
                                     privilege staged as terms-then-price · no code yet)
-GOODS_LOCALITIES_PLAN.md          ← ⭐ ALL 8 SLICES BUILT. Trade goods got what
-                                    minerals already had (§8.16): belt → LOCALITY →
-                                    cell, persisted to `metadata["good_localities"]`
-                                    like `deposits`, with a size ladder in km (a
-                                    staple region is 900 km — the chernozem case —
-                                    against a 45 km ore district). Fixed the three
-                                    things the measured findings turned up: placement
-                                    now reads rivers (floodplain/irrigation/riverbank/
-                                    float_out, §8.19), marine goods split into
-                                    Inshore/Bank bands, and the overlay draws a
-                                    FULL-RESOLUTION mask instead of coarse 8-cell
-                                    blocks that spilled past the coast. Two layers per
-                                    good — coverage ("can it grow here") and quality
-                                    ("is it fine here") — off one u8 column, on one
-                                    absolute ramp shared by every good (§8.19). Slice 0
-                                    is the COVERAGE DIAGNOSTIC every later slice is
-                                    measured against; Slice 7 (economy wiring) went
-                                    last, gated on `econ_`/dynamics. See §8.19 for the
-                                    full account, including its own risks (§5 of the
-                                    plan — full modulation vs "goods must keep
-                                    reaching settlements") and "deliberately not
-                                    built" list (§6)
 REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     COUNTRIES: a merchant house takes a city
                                     (`captor_house`), PROCLAIMS sovereignty after a
@@ -4283,10 +4197,11 @@ Three rules:
 11. **Phase 3's order is duplicated** in `sim_commands.rs`, `earth_validation.rs` AND
     `step3_ocean_atmo/preview.rs` — change one, change all three, or the fidelity gate
     and the settings preview stop testing/showing the real pipeline.
-12. **After any `tick/` change** → run the dynamics test (§2.1). **After any
-    `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3)
-    and re-read §8.9 (no per-cell outward scans; keep the row loops parallel).
-    **After any verified change** → push to `main` (§2.2), and keep this file true (§2.7).
+12. **Run the gates your change actually touches — see §2.8. Never the whole suite
+    by default.** A full `cargo test --lib` is ~an hour and most changes cannot
+    affect most of it; running everything is not caution, it is a way of learning
+    nothing slowly. **After any verified change** → push to `main` (§2.2), and keep
+    this file true (§2.7).
 13. **`biome` is descriptive** — nothing downstream may score off it (§8.12), and the
     render palette has a twin in the legend that must move with it.
 14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0,
@@ -4395,7 +4310,7 @@ Three rules:
     reading the code: every cause found in §8.23 was invisible in review and
     obvious in a 4× hillshade crop. Corollary: a local mean taken near a coast is
     LAND-ONLY, or the coastline itself is measured as detail and planed down.
-31. **A clamp is not a landform** (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 1). Any
+31. **A clamp is not a landform** (WORLD_AND_TRADE_MASTER_PLAN.md (Part I) Slice 1). Any
     pass that writes elevation must not leave a large area at exactly its floor or
     ceiling. A rank remap, a bias offset and a range clamp compose into a plateau
     at the boundary value, and that plateau then silently propagates: no gradient

@@ -30,7 +30,7 @@ pub enum Domain {
     Island,
 }
 
-/// GOODS_LOCALITIES_PLAN.md Slice 2 — which part of the shelf a marine good may
+/// CLAUDE.md §8.19 (goods localities, shipped) Slice 2 — which part of the shelf a marine good may
 /// occupy. `Either` (the default, and what every pre-existing save carries via
 /// serde) reproduces the old undifferentiated `sea_coastal` gate exactly: F5 found
 /// that gate served pearls and stockfish alike, so a fishing bank sat on the beach
@@ -152,7 +152,7 @@ pub struct Envelope {
     /// Bonus for being near a coast (land) / on the shelf (marine).
     #[serde(default)]
     pub coast_bonus: f32,
-    // ── GOODS_LOCALITIES_PLAN.md Slice 1 (F6) — river placement factors. Each is a
+    // ── CLAUDE.md §8.19 (goods localities, shipped) Slice 1 (F6) — river placement factors. Each is a
     // 0..1 weight; 0 (the serde default, so every pre-existing custom good is
     // untouched) means the factor contributes nothing. Every factor is a
     // MULTIPLIER on the score above, never a replacement (§5.4) — a floodplain
@@ -195,7 +195,7 @@ pub struct GoodSpec {
     pub deposit: Option<DepositSpec>,
     #[serde(default)]
     pub scoring: Option<Envelope>,
-    /// GOODS_LOCALITIES_PLAN.md Slice 2 (F5) — which part of the shelf this marine
+    /// CLAUDE.md §8.19 (goods localities, shipped) Slice 2 (F5) — which part of the shelf this marine
     /// good may occupy. `Either` (serde default) reproduces the old undifferentiated
     /// gate exactly, so every save predating this field is unaffected.
     #[serde(default)]
@@ -844,7 +844,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
     ]
 }
 
-/// GOODS_LOCALITIES_PLAN.md §2.1's default table. Every other marine/coastal good
+/// CLAUDE.md §8.19 (goods localities, shipped) §2.1's default table. Every other marine/coastal good
 /// stays `Either` — the pre-existing, undifferentiated `sea_coastal` gate.
 pub fn default_marine_band_for(id: &str) -> MarineBand {
     match id {

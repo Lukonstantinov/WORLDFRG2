@@ -415,7 +415,7 @@ impl CampaignSim {
                 && !self.houses[house_holder as usize].defunct;
             if !house_holds && house_holder >= 0 { self.prov_holder_house[p] = -1; }
             if let Some(seat) = holder {
-                // F7 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 7) · a young
+                // F7 (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 7) · a young
                 // colony should not inherit a full province's harvest on its FIRST
                 // land pass: `province_demography_pass` fills an unsettled province's
                 // rural pool to carrying capacity with no member check, so a colony
@@ -892,7 +892,7 @@ impl CampaignSim {
         best.map(|(h, _)| h)
     }
 
-    /// F7 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 7) · what share of a
+    /// F7 (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 7) · what share of a
     /// province's surplus/dues actually reaches hub `seat`, once colony maturity is
     /// accounted for. 1.0 for any ordinary hub (`colony_kind != 1`) — this only ever
     /// throttles a genuine settlement colony, never touches an established city.

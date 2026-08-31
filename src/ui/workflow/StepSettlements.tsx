@@ -66,7 +66,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       const cities = result.settlements.filter((s) => s.size === "city").length;
       const towns = result.settlements.filter((s) => s.size === "town").length;
       const villages = result.settlements.filter((s) => s.size === "village").length;
-      // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+      // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
       // (straits, isthmuses, passes, great river mouths) the base pass can't reach,
       // reported separately so a handful of new ports is visible, not silent.
       const ports = result.settlements.filter((s) => s.site === "port").length;

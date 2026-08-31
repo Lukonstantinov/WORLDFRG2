@@ -614,7 +614,7 @@ export function Toolbar() {
             borderRadius: 4, cursor: "pointer" }}>
           📖 Browse goods by origin
         </button>
-        {/* GOODS_LOCALITIES_PLAN.md D9 · the TWO layers a belt carries, switched
+        {/* CLAUDE.md §8.19 (goods localities, shipped) D9 · the TWO layers a belt carries, switched
             independently of each other and of WHICH goods are shown below. Coverage
             = "can it grow here" (the belt's honest extent + its outline, so a belt
             thinned by the locality pass is visible on the map rather than buried in

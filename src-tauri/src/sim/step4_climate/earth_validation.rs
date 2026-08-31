@@ -254,7 +254,7 @@ fn earth_diagnose_upwelling_reachability() {
 /// subtropical basin-position asymmetry, and confining the snow-albedo cooling to
 /// the cold season); bump it up as the model improves so it always guards the
 /// current fidelity.
-/// Bumped 70.1 -> 70.15 after `TERRAIN_2_PLAN.md` slice 5 (seafloor structure)
+/// Bumped 70.1 -> 70.15 after CLAUDE.md §8.23b (Terrain 2.0, shipped) slice 5 (seafloor structure)
 /// measured 70.2% -- `compute_sea_depth`/`generate_shelves` are the one part of
 /// Terrain 2.0 that feeds this gate (see that plan's own "one piece of good
 /// news"), and the ridge/trench/abyssal-hill terms nudged distance_to_ocean/
