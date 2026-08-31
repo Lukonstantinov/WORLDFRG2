@@ -4395,3 +4395,13 @@ Three rules:
     reading the code: every cause found in §8.23 was invisible in review and
     obvious in a 4× hillshade crop. Corollary: a local mean taken near a coast is
     LAND-ONLY, or the coastline itself is measured as detail and planed down.
+31. **A clamp is not a landform** (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 1). Any
+    pass that writes elevation must not leave a large area at exactly its floor or
+    ceiling. A rank remap, a bias offset and a range clamp compose into a plateau
+    at the boundary value, and that plateau then silently propagates: no gradient
+    means no drainage direction, which means the meander model saturates and every
+    river on it comes out the same shape. Where a pass needs a bound, scale into
+    the range rather than clamping onto it (`MIN_LAND_ELEV`'s scale-about-floor is
+    the pattern) — and check the result with a histogram/diagnostic, not by
+    reading the code, since this cause was invisible in review and obvious in one
+    histogram.

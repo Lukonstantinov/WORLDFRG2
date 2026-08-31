@@ -518,6 +518,13 @@ pub fn sim_run_all(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
+    // Phase 7b (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3): partition into
+    // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
+    // run-all called this before — "Generate Full World" ended at phase 8 and left
+    // the province layer unreachable except from the standalone Settlements/
+    // Provinces step panels.
+    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
+
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
@@ -903,6 +910,10 @@ pub fn sim_run_all_from_terrain(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
+    // Phase 7b (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3) — see the identical
+    // call in `sim_run_all`; this path was missing it too.
+    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
+
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
@@ -1120,40 +1131,45 @@ fn rle_encode_provinces(ids: &[u32]) -> Vec<u32> {
     out
 }
 
-/// Partition all land into provinces (watershed / cost-flood). Seeds from the
-/// settlements passed in, so this MUST run after the settlement step. Persists the
-/// province list to `metadata["provinces"]` and returns it plus a downsampled id
-/// raster for rendering. `granularity` 0..1: coarse (few large) → fine (many).
-#[tauri::command]
-pub fn sim_generate_provinces(
-    settlements_json: String,
-    rivers_json: String,
-    granularity: Option<f32>,
-    db: State<'_, WorldDb>,
+/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3: any province below this km² floor
+/// is folded into its largest-shared-border neighbour by the automatic merge every
+/// province-generating path now runs — "this is a generation artefact, not a
+/// province" (~8,000 km²). Stated in km², not cells (CLAUDE.md rule 25): a cell is
+/// `KM_EQUATOR / w` km wide, so a fixed cell count means a different real area on
+/// every world size.
+const AUTO_MERGE_FLOOR_KM2: f32 = 8000.0;
+
+/// Partition all land into provinces (watershed / cost-flood), then auto-merge
+/// slivers below `AUTO_MERGE_FLOOR_KM2`, and persist the three metadata keys
+/// (`provinces` / `province_raster` / `province_raster_rle`). Shared by the
+/// standalone `sim_generate_provinces` command and both run-alls (Slice 3) so the
+/// two paths cannot drift. `granularity` 0..1: coarse (few large) → fine (many).
+fn generate_and_persist_provinces(
+    conn: &rusqlite::Connection,
+    buf: &WorldBuffer,
+    river_data: &[rivers::River],
+    settle: &[settlements::Settlement],
+    granularity: f32,
 ) -> Result<SimProvincesResult, String> {
-    db.clear_caches();
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    // Provinces are a FROZEN world layer (phase 7b). Regenerating them mid-campaign
-    // recompacts every province id and rewrites the raster the campaign's hub_province /
-    // prov_* / realm state was seeded from — so it is blocked once a campaign is running.
-    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
-    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PROVINCES)?;
     let w = buf.width; let h = buf.height;
     if w == 0 || h == 0 { return Err("world grid not initialised".into()); }
 
-    let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
-    let settle: Vec<settlements::Settlement> = serde_json::from_str(&settlements_json).unwrap_or_default();
-
     // Lakes (overlay data, recomputed) — used as impassable divides in the flood.
-    let hydro = rivers::compute_hydrology(&buf);
+    let hydro = rivers::compute_hydrology(buf);
     let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let lakes = rivers::detect_lakes(buf, &hydro.filled, 0.004, lake_max);
 
     let (provinces, province_id) = crate::sim::provinces::generate_provinces(
-        &buf, &river_data, &lakes, &settle, granularity.unwrap_or(0.5));
+        buf, river_data, &lakes, settle, granularity);
+
+    const KM_EQUATOR: f32 = 40075.0;
+    let km_per_cell = KM_EQUATOR / w.max(1) as f32;
+    let min_cells = ((AUTO_MERGE_FLOOR_KM2 / (km_per_cell * km_per_cell)).round() as u32).max(4);
+    let (provinces, province_id) = crate::sim::provinces::merge_small_provinces_wh(
+        &province_id, &provinces, min_cells, w, h, None);
 
     // Persist the province list (frozen partition; campaign state layers on top later).
-    metadata::set_meta(&conn, "provinces",
+    metadata::set_meta(conn, "provinces",
         &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
 
@@ -1175,14 +1191,39 @@ pub fn sim_generate_provinces(
     // Persist the downsampled raster too, so the layer survives a reload and the
     // campaign can map hubs → provinces (read-only foundation).
     let raster_blob = serde_json::to_string(&(rw, rh, w, h, &raster)).map_err(|e| e.to_string())?;
-    metadata::set_meta(&conn, "province_raster", &raster_blob).map_err(|e| e.to_string())?;
+    metadata::set_meta(conn, "province_raster", &raster_blob).map_err(|e| e.to_string())?;
 
     // Full-resolution RLE for the pixel-exact map overlay (survives reload).
     let raster_rle = rle_encode_provinces(&province_id);
     let rle_blob = serde_json::to_string(&(w, h, &raster_rle)).map_err(|e| e.to_string())?;
-    metadata::set_meta(&conn, "province_raster_rle", &rle_blob).map_err(|e| e.to_string())?;
+    metadata::set_meta(conn, "province_raster_rle", &rle_blob).map_err(|e| e.to_string())?;
 
     Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h, raster_rle })
+}
+
+/// Partition all land into provinces (watershed / cost-flood). Seeds from the
+/// settlements passed in, so this MUST run after the settlement step. Persists the
+/// province list to `metadata["provinces"]` and returns it plus a downsampled id
+/// raster for rendering. `granularity` 0..1: coarse (few large) → fine (many).
+#[tauri::command]
+pub fn sim_generate_provinces(
+    settlements_json: String,
+    rivers_json: String,
+    granularity: Option<f32>,
+    db: State<'_, WorldDb>,
+) -> Result<SimProvincesResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    // Provinces are a FROZEN world layer (phase 7b). Regenerating them mid-campaign
+    // recompacts every province id and rewrites the raster the campaign's hub_province /
+    // prov_* / realm state was seeded from — so it is blocked once a campaign is running.
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PROVINCES)?;
+
+    let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
+    let settle: Vec<settlements::Settlement> = serde_json::from_str(&settlements_json).unwrap_or_default();
+
+    generate_and_persist_provinces(&conn, &buf, &river_data, &settle, granularity.unwrap_or(0.5))
 }
 
 /// Read back the stored province list (for reopening a world / panel refresh).

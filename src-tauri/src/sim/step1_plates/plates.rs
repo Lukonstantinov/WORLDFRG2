@@ -21,13 +21,34 @@ struct Plate {
     vy: f32,
 }
 
+/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 5 (F3, D1): the target fraction of
+/// the globe that ends up OCEAN. The old per-plate `is_oceanic = rng < 0.4` coin
+/// flip converged on ~60% land whatever the plate count, and was *worse* at low
+/// plate counts (71.8% at 6 plates) because the expected 2.4 oceanic plates has
+/// real binomial variance — an unlucky draw easily yields one or zero. This
+/// constant is hit BY CONSTRUCTION instead: plates are sorted by their actual
+/// Voronoi cell count and marked oceanic until the target ocean AREA is met, so
+/// the result is close to 70% ocean (Earth is ~71%) regardless of plate count or
+/// the luck of one coin-flip sequence.
+pub const DEFAULT_OCEAN_FRACTION: f32 = 0.70;
+
 /// Generate tectonic plates and derive landmass from plate types.
 /// Matches WF1 plate-generator.ts algorithm.
 pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_count: u32) {
+    generate_plates_and_landmass_with_target(buf, seed, plate_count, DEFAULT_OCEAN_FRACTION);
+}
+
+/// As `generate_plates_and_landmass`, but with an explicit ocean-area target
+/// (Slice 5). `ocean_fraction` is clamped to a sane range so a pathological
+/// input can never empty the world of land or of sea entirely.
+pub fn generate_plates_and_landmass_with_target(
+    buf: &mut WorldBuffer, seed: u64, plate_count: u32, ocean_fraction: f32,
+) {
     let mut rng = StdRng::seed_from_u64(seed);
     let w = buf.width as f32;
     let h = buf.height as f32;
     let count = plate_count.max(2) as usize;
+    let ocean_fraction = ocean_fraction.clamp(0.05, 0.95);
 
     // Generate plate seeds with grid-jittered distribution
     let cols = (count as f32).sqrt().ceil() as usize;
@@ -41,6 +62,9 @@ pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_coun
         let row = i / cols;
         let cx = (col as f32 + rng.gen::<f32>()) * cell_w;
         let cy = (row as f32 + rng.gen::<f32>()) * cell_h;
+        // is_oceanic is decided BELOW, once each plate's real Voronoi area is
+        // known (Slice 5) -- this coin flip only seeds the density jitter, which
+        // reads independently of the final oceanic/continental assignment.
         let is_oceanic = rng.gen::<f32>() < 0.4;
         let density = if is_oceanic {
             0.7 + rng.gen::<f32>() * 0.3
@@ -80,6 +104,31 @@ pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_coun
             best_plate
         })
         .collect();
+
+    // Slice 5: reassign is_oceanic to hit `ocean_fraction` BY CONSTRUCTION, from
+    // each plate's REAL cell count (measured from the Voronoi assignment just
+    // computed, not an area estimate) — shuffled first so the greedy fill order
+    // isn't "biggest plates always become ocean", then accumulated until the
+    // target ocean area is met.
+    let mut plate_cells = vec![0u32; plates.len()];
+    for &pi in &buf.plate_index { plate_cells[pi as usize] += 1; }
+    let mut order: Vec<usize> = (0..plates.len()).collect();
+    order.shuffle(&mut rng);
+    let target_ocean_cells = (ocean_fraction as f64 * buf.total() as f64).round() as i64;
+    let mut ocean_cells_so_far: i64 = 0;
+    for &pi in &order {
+        let cells = plate_cells[pi] as i64;
+        // Take this plate as oceanic if doing so gets closer to the target than
+        // leaving it continental would.
+        let with = (ocean_cells_so_far + cells - target_ocean_cells).abs();
+        let without = (ocean_cells_so_far - target_ocean_cells).abs();
+        if with <= without {
+            plates[pi].is_oceanic = true;
+            ocean_cells_so_far += cells;
+        } else {
+            plates[pi].is_oceanic = false;
+        }
+    }
 
     // Provisional terrain straight from plate identity -- needed below to
     // know which SIDE of a boundary a cell started on before slice 4 bends
@@ -263,7 +312,16 @@ pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_coun
     // Flip anything under `DESPECKLE_MIN` back to its surroundings.
     despeckle_terrain(buf, DESPECKLE_MIN);
 
-    // Generate volcanic zones at divergent boundaries
+    // Generate volcanic zones at divergent boundaries, and at convergent ones
+    // by COLLISION TYPE (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 4, scoped-down:
+    // real collision-type differentiation, without the full persisted per-plate
+    // identity / Euler-pole rewrite the plan's F5 root cause needs -- that is a
+    // much larger change, deliberately not attempted this session). A
+    // continent-continent collision (Himalaya-style) raises a broad plateau with
+    // essentially NO volcanism; ocean-ocean (island arc) and ocean-continent
+    // (arc + trench) margins are exactly where real subduction volcanism
+    // concentrates. Before this every convergent cell got the identical flat 8%
+    // roll regardless of what was actually colliding.
     for y in 0..buf.height {
         for x in 0..buf.width {
             let idx = buf.idx(x, y);
@@ -272,9 +330,26 @@ pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_coun
                     buf.is_volcanic[idx] = 1;
                 }
             }
-            // Subduction volcanism near convergent boundaries
             if buf.boundary_type[idx] == BOUNDARY_CONVERGENT {
-                if rng.gen::<f32>() < 0.08 {
+                let my_plate = buf.plate_index[idx] as usize;
+                let my_oceanic = plates.get(my_plate).map(|p| p.is_oceanic).unwrap_or(false);
+                let mut touches_oceanic = my_oceanic;
+                let mut touches_continental = !my_oceanic;
+                for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                    let nx = buf.wrap_x(x as i32 + dx);
+                    let ny = (y as i32 + dy).clamp(0, buf.height as i32 - 1) as u32;
+                    let np = buf.plate_index[buf.idx(nx, ny)] as usize;
+                    if np == my_plate || np >= plates.len() { continue; }
+                    if plates[np].is_oceanic { touches_oceanic = true; } else { touches_continental = true; }
+                }
+                let chance = if touches_continental && !touches_oceanic {
+                    0.01 // continent-continent: broad collisional plateau, ~no volcanism
+                } else if touches_oceanic {
+                    0.14 // ocean-ocean island arc / ocean-continent arc+trench
+                } else {
+                    0.08
+                };
+                if rng.gen::<f32>() < chance {
                     buf.is_volcanic[idx] = 1;
                 }
             }

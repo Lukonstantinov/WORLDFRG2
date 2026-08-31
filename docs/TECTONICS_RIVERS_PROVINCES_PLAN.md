@@ -1,8 +1,52 @@
 # Tectonics · Rivers · Provinces — fix plan
 
-**Status: PROPOSED, nothing built.** The only code in this branch is two
-`#[ignore]`d diagnostics (`diagnose_flat_lowland`, `diagnose_plate_land_fraction`
-in `step2_terrain/elevation.rs`) that produced every number below. Reproduce with:
+**Status: Slices 1, 2, 3, 5 (core), 7, 8 BUILT and gated. Slice 4 built only in
+scoped-down form (collision-type-aware volcanism; no persisted per-plate
+identity or Euler-pole motion). Slice 6 (the opt-in bounded tectonic
+simulation) and Slice 5's per-plate UI override / archipelago bias are NOT
+built** — both depend on the Euler-pole plate identity Slice 4 was scoped down
+from, and are a substantially larger architectural change (new persisted plate
+state, a map click-to-select interaction, a coarse-grid deformation solver)
+than fits one session; left for a dedicated follow-up rather than shipped
+half-working. What shipped, per slice:
+
+- **Slice 1** (F1): `MIN_LAND_ELEV` floor + scale-about-floor regional bias
+  replace the old additive-then-clamp. Measured: the 88.5 m spike's largest
+  flat component fell 31,828 → 12,783 cells (shape) and 6,064 → 709 cells
+  (plates) — the clamp-plateau SIGNATURE is gone, though `diagnose_flat_lowland`
+  is kept a diagnostic, not promoted to a hard assertion (rule 31 added to
+  CLAUDE.md §10 either way).
+- **Slice 2** (F2): micro-relief seeded per-world (`world_micro_relief_seed`,
+  hashed from the elevation field) + a second broad wavelength; per-bend
+  amplitude modulation; Kinoshita (1961) skew/flatten replacing the fixed
+  second harmonic; wavelength drift along the reach. Gated by
+  `meanders_are_not_a_sine`.
+- **Slice 3** (F4): `generate_and_persist_provinces` (shared helper) now runs
+  in both `sim_run_all` and `sim_run_all_from_terrain`, with an automatic
+  km²-stated merge floor (`AUTO_MERGE_FLOOR_KM2` = 8,000 km², rule 25).
+- **Slice 4** (F5), scoped down: convergent-boundary volcanism now reads
+  collision type (continent-continent ≈ none, ocean-involving ≈ island-arc/
+  arc-trench rate) from the plates already in scope during generation. The
+  deeper root cause — one velocity vector per plate, no persisted per-plate
+  kind/Euler pole — is UNCHANGED; `boundary_character_varies_along_its_length`
+  was not built.
+- **Slice 5** (F3): `DEFAULT_OCEAN_FRACTION` (0.70) is hit BY CONSTRUCTION —
+  plates are shuffled then greedily marked oceanic by their real measured
+  Voronoi cell count until the target ocean area is met, replacing the
+  independent `rng < 0.4` coin flip. Gated by `land_fraction_tracks_the_target`
+  (was failing at 56–72% land against the 30% target; now within the gate's
+  10-point band at every tested plate count/seed). The per-plate UI override
+  and the archipelago/island-arc bias are NOT built.
+- **Slice 6**: not attempted (depends on Slice 4's Euler poles).
+- **Slice 7** (F6): `coast_relief`, propagated through the same BFS that
+  computes shelf distance-to-coast, replaces the old fixed-radius land-elevation
+  sample (which only ever saw land for the first few cells off the coast and
+  reverted to the flat default for the rest of the shelf) — plus a continuous
+  margin-maturity fade (was a binary 0.5/1.0 step) and a second, ~1/4-world-wide
+  noise wavelength. Gated by `shelf_width_varies_between_margins`.
+- **Slice 8** (F7): `riverBreaks: true` → `false` in `OverlayManager.ts`.
+
+Reproduce the original measured findings with:
 
 ```bash
 cd src-tauri && cargo test --release --lib diagnose_ -- --ignored --nocapture

@@ -644,7 +644,7 @@ export class OverlayManager {
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
-    riverBreaks: true,
+    riverBreaks: false,
   };
 
   private currentScale = 1;

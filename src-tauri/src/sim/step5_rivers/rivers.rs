@@ -228,6 +228,23 @@ const FILL_EPS: f32 = 1e-6;
 /// lowest of the eight filled neighbours, so on genuine slopes it tracks the
 /// real gradient and across former flats it points down the Îµ-tilt toward the
 /// outlet.
+/// A cheap, deterministic per-world seed for the flat-plain micro-relief field
+/// (Slice 2), derived from the elevation field itself rather than threading a
+/// `seed` parameter through `compute_hydrology`'s many call sites. Sampled at a
+/// stride so it stays O(n/32), not a full-grid pass; two worlds with different
+/// terrain hash to different seeds, and the same world always hashes the same way.
+fn world_micro_relief_seed(elevation: &[f32]) -> u64 {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325; // FNV-1a offset basis
+    let stride = (elevation.len() / 4096).max(1);
+    let mut i = 0usize;
+    while i < elevation.len() {
+        h ^= elevation[i].to_bits() as u64;
+        h = h.wrapping_mul(0x0000_0100_0000_01B3); // FNV-1a prime
+        i += stride;
+    }
+    h
+}
+
 pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     let w = buf.width;
     let h = buf.height;
@@ -254,13 +271,26 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
     // dendritic drainage. Deterministic (fixed seed) so a given world is stable.
     const MICRO_RELIEF: f32 = 0.0006;   // â‰ˆ5 m; < 0.002 (~18 m) lake threshold
     const MICRO_FREQ: f32 = 0.05;       // base feature â‰ˆ 20 cells (finer octaves nest)
+    // TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 2 (F2): the seed used to be the
+    // literal 0x5CA1_AB1E, not derived from the world at all -- so the field that
+    // decides where every flat-plain river goes was byte-identical in every world
+    // this app has ever generated. `world_micro_relief_seed` hashes the world's own
+    // elevation field, so the seed is deterministic per world and different between
+    // worlds. A second, much broader wavelength (~90 cells vs ~20) is blended in so
+    // one plain's drainage tree reads at a different scale from another's, rather
+    // than every plain growing the identical size of tributary tree.
+    let world_seed = world_micro_relief_seed(&buf.elevation);
+    const MICRO_FREQ_BROAD: f32 = 0.011; // base feature â‰ˆ 90 cells
     let elev: Vec<f32> = (0..total)
         .map(|i| {
             if buf.terrain[i] != 1 { return buf.elevation[i]; } // perturb land only
             let x = (i % w as usize) as f32;
             let y = (i / w as usize) as f32;
-            let n = crate::sim::elevation::fbm_noise(
-                x * MICRO_FREQ, y * MICRO_FREQ, 0x5CA1_AB1E, 4, 2.0, 0.5);
+            let n_fine = crate::sim::elevation::fbm_noise(
+                x * MICRO_FREQ, y * MICRO_FREQ, world_seed, 4, 2.0, 0.5);
+            let n_broad = crate::sim::elevation::fbm_noise(
+                x * MICRO_FREQ_BROAD, y * MICRO_FREQ_BROAD, world_seed ^ 0x9E37_79B9_7F4A_7C15, 3, 2.0, 0.5);
+            let n = n_fine * 0.65 + n_broad * 0.35;
             buf.elevation[i] + (n - 0.5) * 2.0 * MICRO_RELIEF
         })
         .collect();
@@ -712,7 +742,11 @@ fn build_meander_path(
         // so no two bends share a period — a regular sine reads as mechanical, an
         // irregular one as a real river.
         let jit = fbm_noise(x * 0.05 + 3.1, y * 0.05 + 7.7, seed ^ 0xA53F, 3, 2.0, 0.5);
-        let wav = base_wav * (0.6 + 0.85 * jit);
+        // A slow drift over the whole reach (long wavelength noise), on top of the
+        // per-bend jitter above, so a river's characteristic bend length itself
+        // wanders along its course rather than jittering around one fixed constant.
+        let drift = fbm_noise(x * 0.006 + 101.0, y * 0.006 + 203.0, seed ^ 0x0D71F7, 3, 2.0, 0.5);
+        let wav = base_wav * (0.6 + 0.85 * jit) * (0.85 + 0.3 * drift);
         let seg = ((x - px).powi(2) + (y - py).powi(2)).sqrt();
         phase += seg * (std::f32::consts::TAU / wav);
 
@@ -746,9 +780,28 @@ fn build_meander_path(
             // size), never more than ~0.5 of the flat half-width. Raised from 0.11 for
             // deeper, more obvious bends, still corridor-clamped so adjacent rivers
             // keep their own valley and can't weave together.
-            let amp = slow * (base_wav * 0.16).min(half * 0.5);
-            // Primary bend + weak second harmonic â†’ asymmetric, non-sinusoidal.
-            let bend = amp * (phase.sin() + 0.25 * (2.0 * phase + 0.7).sin());
+            //
+            // Slice 2 (F2): the base amplitude was ONE number for the whole river,
+            // so every bend on every lowland reach came out the same size -- the
+            // "textbook sine, same on every world" complaint. `bend_mod` scales it
+            // per-bend from a noise field a few bends long, squared so bends are
+            // usually modest and occasionally large (real meander trains alternate
+            // tight and broad loops, not a uniform train).
+            let bend_n = fbm_noise(x * (0.9 / base_wav.max(1.0)) + 41.0,
+                y * (0.9 / base_wav.max(1.0)) + 23.0, seed ^ 0x5EED, 3, 2.0, 0.5);
+            let bend_mod = 0.25 + 1.45 * bend_n * bend_n;
+            let amp = slow * bend_mod * (base_wav * 0.16).min(half * 0.5);
+            // Kinoshita (1961) skewed/flattened correction, replacing the plain
+            // `sin Ï† + 0.25Â·sin(2Ï†+0.7)` second harmonic. `sin Ï†` alone (or with a
+            // fixed second harmonic) is still a regular wave; the Kinoshita terms
+            // `flat Â·cos 3Ï†` and `-skew Â·sin 3Ï†` are what give a real meander its
+            // asymmetric goose-neck shape (steep on the downstream limb, shallow on
+            // the upstream one) rather than a symmetric ripple. `skew`/`flat` drift
+            // slowly along the reach (their own low-frequency noise) so no two
+            // bends share the identical shape either.
+            let skew = 0.15 + 0.35 * fbm_noise(x * 0.02 + 61.0, y * 0.02 + 17.0, seed ^ 0x51EE, 3, 2.0, 0.5);
+            let flat = 0.10 + 0.30 * fbm_noise(x * 0.02 + 5.0, y * 0.02 + 91.0, seed ^ 0x91A5, 3, 2.0, 0.5);
+            let bend = amp * (phase.sin() + flat * (3.0 * phase).cos() - skew * (3.0 * phase).sin());
             // Low-frequency WANDER: a slow, noise-driven lateral drift over ~80-cell
             // scales, independent of the meander period, so the channel strays
             // unpredictably across its floodplain (diagonal reaches, no two bends
@@ -1161,6 +1214,45 @@ mod tests {
             assert!(x.is_finite() && y.is_finite() && x >= 0.0 && x < w as f32 && y >= 0.0 && y < h as f32,
                 "render vertex in bounds: ({x},{y})");
         }
+    }
+
+    /// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 2 gate (F2): a long flat-ground
+    /// reach must NOT read as a textbook sine -- successive bend amplitudes must
+    /// vary meaningfully (the per-bend `bend_mod` term), not repeat one constant
+    /// amplitude the way the pre-Slice-2 code did.
+    #[test]
+    fn meanders_are_not_a_sine() {
+        let (w, h) = (400u32, 80u32);
+        let n = (w * h) as usize;
+        let buf = synth(w, h, vec![1u8; n], vec![0.1f32; n]); // all land, dead flat
+        let pts: Vec<(u32, u32)> = (5..380).map(|x| (x, 40)).collect();
+        let render = build_meander_path(&buf, &pts, 3.0, 4000.0, 20.0, 999, &[], &[]);
+
+        // Local extrema of the lateral offset from the centreline (y=40) are the
+        // bend peaks/troughs; collect their absolute amplitudes.
+        let offsets: Vec<f32> = render.iter().map(|&(_, y)| y - 40.0).collect();
+        let mut amps: Vec<f32> = Vec::new();
+        for k in 1..offsets.len() - 1 {
+            let (a, b, c) = (offsets[k - 1], offsets[k], offsets[k + 1]);
+            if (b - a).signum() != (c - b).signum() && b.abs() > 0.15 {
+                amps.push(b.abs());
+            }
+        }
+        assert!(amps.len() >= 6, "expected several bends on a 375-cell flat reach, got {}", amps.len());
+        let mean: f32 = amps.iter().sum::<f32>() / amps.len() as f32;
+        let var: f32 = amps.iter().map(|a| (a - mean).powi(2)).sum::<f32>() / amps.len() as f32;
+        let cv = var.sqrt() / mean.max(1e-6);
+        assert!(cv > 0.15, "bend amplitudes read as one constant size (CV={cv:.3}, amps={amps:?})");
+
+        // Two different world elevation fields must seed different flat-plain
+        // micro-relief -- the old hard-coded 0x5CA1_AB1E seed made every world's
+        // flat drainage byte-identical.
+        let elev_a = vec![0.1f32; n];
+        let mut elev_b = vec![0.1f32; n];
+        elev_b[7] = 0.100001; // a different world, negligible physically
+        let seed_a = world_micro_relief_seed(&elev_a);
+        let seed_b = world_micro_relief_seed(&elev_b);
+        assert_ne!(seed_a, seed_b, "different worlds must hash to different micro-relief seeds");
     }
 
     /// A steep headwater reach must NOT meander (channel pinned to the fall line).

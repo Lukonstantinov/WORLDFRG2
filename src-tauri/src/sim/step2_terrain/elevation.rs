@@ -849,12 +849,23 @@ pub fn generate_shelves(
     let drop_w = dropoff_width.clamp(1.0, 20.0);
 
     let mut dist = vec![u32::MAX; buf.total()];
+    // Slice 7's relief-proxy signal (below): each SEA cell inherits, from the
+    // BFS that finds its nearest coast, the RELIEF of the land it drains from --
+    // not just whatever land happens to sit in a fixed small window around the
+    // sea cell itself. A per-sea-cell fixed-radius scan only ever "sees" land for
+    // the first few cells off the coast, so a shelf's outer half always fell back
+    // to the same default regardless of which margin it belonged to. Propagating
+    // the value outward through the same BFS that computes `dist` fixes that by
+    // construction: every sea cell all the way to the shelf edge carries the
+    // relief of the actual coast it came from.
+    let mut coast_relief = vec![-1.0f32; buf.total()];
     let mut queue = VecDeque::new();
     for y in 0..h {
         for x in 0..w {
             let idx = buf.idx(x, y);
             if buf.terrain[idx] == 1 {
                 dist[idx] = 0;
+                coast_relief[idx] = buf.elevation[idx];
                 queue.push_back((x, y));
             }
         }
@@ -863,12 +874,14 @@ pub fn generate_shelves(
         let idx = buf.idx(x, y);
         let d = dist[idx];
         if d >= 100 { continue; }
+        let relief = coast_relief[idx];
         for &(dx, dy) in &[(-1i32, 0), (1, 0), (0, -1i32), (0, 1)] {
             let nx = buf.wrap_x(x as i32 + dx);
             let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
             let ni = buf.idx(nx, ny);
             if dist[ni] > d + 1 {
                 dist[ni] = d + 1;
+                coast_relief[ni] = relief;
                 queue.push_back((nx, ny));
             }
         }
@@ -891,6 +904,12 @@ pub fn generate_shelves(
     let trench_dist = ocean_distance_from_boundary(buf, &[1], ar, 16);
 
     let noise_scale = w.max(h) as f32 / 20.0;
+    // TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 7 (F6): a second, much longer
+    // wavelength noise term (~1/4 the world, i.e. thousands of km) so shelf width
+    // varies at a continental scale too, not just the single ~1/20-world field
+    // above -- before this every shelf on a world varied only around one narrow
+    // band, which is why margins came out near-uniform width.
+    let noise_scale_broad = w.max(h) as f32 / 4.0;
     for y in 0..h {
         for x in 0..w {
             let idx = buf.idx(x, y);
@@ -908,7 +927,9 @@ pub fn generate_shelves(
                 continue;
             }
             let noise = fbm_noise(x as f32 / noise_scale, y as f32 / noise_scale, seed, 3, 2.0, 0.5);
-            let local_width = (base_width * (1.0 + (noise - 0.5) * 2.0 * noise_amount)).max(1.0);
+            let noise_broad = fbm_noise(x as f32 / noise_scale_broad, y as f32 / noise_scale_broad, seed ^ 0x0FEE_7B0A, 3, 2.0, 0.5);
+            let combined_noise = noise * 0.55 + noise_broad * 0.45;
+            let local_width = (base_width * (1.0 + (combined_noise - 0.5) * 2.0 * noise_amount)).max(1.0);
 
             let mut land_count = 0u32;
             for dy in -3i32..=3 {
@@ -918,13 +939,35 @@ pub fn generate_shelves(
                 }
             }
             let gentle_factor = 1.0 + (land_count as f32 / 49.0) * 0.5;
-            // Active margin (nearest coast is on a plate boundary): pinch the
-            // shelf to a narrow, steep apron. Passive margin keeps the broad shelf.
-            let margin_factor = if !active_dist.is_empty()
-                && active_dist[idx] != u16::MAX
-                && (active_dist[idx] as f32) <= d + 1.5
-            {
-                0.5
+            // Slice 7: a CONTINUOUS margin maturity, not the old binary 0.5/1.0
+            // step. A margin's true "age" (how long it has been passive,
+            // accumulating sediment) isn't tracked yet, so this reads it off two
+            // proxies instead, exactly the "documented proxy" convention
+            // `geology.rs`'s phase-2 climate term already uses:
+            //  - with plate data: how close the coast sits to an active boundary,
+            //    smoothly faded over the active-margin reach rather than a hard cut;
+            //  - without plate data (a template/painted world, `active_dist` empty):
+            //    nearby land RELIEF stands in for tectonic activity -- a mountainous
+            //    coast reads as an active, scraped margin (narrow shelf), a low flat
+            //    coastal plain as a mature passive one (broad shelf). This is what
+            //    stops the from-landmass path giving every coast the identical shelf.
+            let margin_factor = if !active_dist.is_empty() && active_dist[idx] != u16::MAX {
+                let ad = active_dist[idx] as f32;
+                let t = ((ad - d) / (ar as f32).max(1.0)).clamp(0.0, 1.0);
+                // t=0 (right at the boundary) -> 0.35 (steep, pinched shelf);
+                // t=1 (far from any boundary) -> 1.0 (full passive-margin width).
+                0.35 + 0.65 * (t * t * (3.0 - 2.0 * t))
+            } else if coast_relief[idx] >= 0.0 {
+                // `coast_relief[idx]` is the elevation of the SPECIFIC coastal
+                // land cell this sea cell's nearest-coast BFS came from -- valid
+                // all the way to the shelf edge, unlike the small fixed-radius
+                // `land_elev_sum` window above (which only sees land for the
+                // first few cells off the coast and reverts to the flat default
+                // for the rest of the shelf).
+                // ~0 (flat coastal plain) -> 1.0; ~0.35 normalized elev (mountainous
+                // coast) or higher -> 0.5. Clamped so a small local peak can't pinch
+                // an otherwise broad passive shelf to nothing.
+                (1.0 - (coast_relief[idx] / 0.35).clamp(0.0, 1.0) * 0.5).clamp(0.5, 1.0)
             } else {
                 1.0
             };
@@ -2341,6 +2384,20 @@ fn build_target_histogram(height: f32, density: f32) -> [f32; 9] {
     out
 }
 
+/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 1 (rule 31 -- "a clamp is not a
+/// landform"): the lowest-ranked ~9% of band 0 used to be pinned to the
+/// identical `0.01` clamp floor (88.5 m of the 8848 m range), which measured
+/// as 16% of ALL land sitting at one exact elevation in one contiguous
+/// component -- and because a clamp plateau has zero gradient, every river
+/// crossing it saturated the meander model's `slow` term identically,
+/// which is F2's root cause as much as F1's own. `MIN_LAND_ELEV` (~5 m, a
+/// real floodplain height) replaces the clamp: land is bounded BELOW at this
+/// floor instead of AT it, so the lowest-ranked cells still rise
+/// monotonically from a plausible delta height rather than piling up on one
+/// value. It must stay strictly above 0.0 -- 0.0 means "sea" to
+/// `plates::invert_terrain` and to this function's own land filter.
+const MIN_LAND_ELEV: f32 = 0.0006;
+
 /// Redistribute land elevations to match a target per-1000 m-band histogram,
 /// preserving relative ordering (peaks stay peaks). Port of WF1
 /// `redistributeElevation`.
@@ -2360,18 +2417,21 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
     let mut cell_idx = 0usize;
     for band in 0..9 {
         let band_count = ((target_pcts[band] / total_pct) * total_land as f32).round() as usize;
-        let band_min = (band as f32 * 1000.0) / MAX_ELEV;
+        // Band 0 starts at MIN_LAND_ELEV rather than 0.0, so the lowest-ranked
+        // cell in the lowest band lands at a real floodplain height instead of
+        // the old clamp floor -- see MIN_LAND_ELEV's own doc comment.
+        let band_min = if band == 0 { MIN_LAND_ELEV } else { (band as f32 * 1000.0) / MAX_ELEV };
         let band_max = ((band as f32 + 1.0) * 1000.0) / MAX_ELEV;
         let mut j = 0usize;
         while j < band_count && cell_idx < total_land {
             let idx = land_indices[cell_idx];
             let t = if band_count > 1 { j as f32 / (band_count - 1) as f32 } else { 0.5 };
-            elevation[idx] = (band_min + t * (band_max - band_min)).clamp(0.01, 1.0);
+            elevation[idx] = (band_min + t * (band_max - band_min)).clamp(MIN_LAND_ELEV, 1.0);
             j += 1;
             cell_idx += 1;
         }
     }
-    // Any leftover cells (rounding) â†’ top band.
+    // Any leftover cells (rounding) -> top band.
     let last_min = (8.0 * 1000.0) / MAX_ELEV;
     while cell_idx < total_land {
         elevation[land_indices[cell_idx]] = (last_min + 0.01).min(1.0);
@@ -2425,13 +2485,25 @@ fn redistribute_elevation_regional(
     redistribute_elevation(elevation, terrain, n, target_pcts);
 
     const REGION_CONTRAST: f32 = 0.35;
+    // Slice 1: a bounded SCALE about MIN_LAND_ELEV, not an additive offset
+    // followed by a clamp. The old `(elev + bias*CONTRAST).clamp(0.01, 1.0)`
+    // pushed an entire negative-bias region's low end under the clamp floor at
+    // once -- a whole physiographic region collapsing to one elevation, which
+    // is why the flat component was tens of thousands of cells rather than
+    // scattered floodplain. Scaling keeps every cell strictly ordered and
+    // strictly above the floor: a region still reads higher or lower by the
+    // same intent, but it can never flatten.
+    let land_mean = land_mean.max(1e-6);
     for i in 0..n {
         if terrain[i] != 1 { continue; }
         let r = region_id[i] as usize;
         if r >= rc { continue; }
         let bias = region_bias[r];
         if bias == 0.0 { continue; }
-        elevation[i] = (elevation[i] + bias * REGION_CONTRAST).clamp(0.01, 1.0);
+        let factor = (1.0 + bias as f64 * REGION_CONTRAST as f64 / land_mean)
+            .clamp(0.25, 4.0) as f32;
+        elevation[i] = (MIN_LAND_ELEV + (elevation[i] - MIN_LAND_ELEV) * factor)
+            .clamp(MIN_LAND_ELEV, 1.0);
     }
 }
 
@@ -4222,6 +4294,63 @@ mod tests {
         limit_grid_scale_relief(&mut smooth_copy, &terrain, w, h);
         assert_eq!(smooth_copy, smooth_field, "a world inside budget must be returned untouched");
     }
+
+    /// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 7 gate (F6): on a world with NO
+    /// plate data (the from-landmass path), every margin used to read as
+    /// "passive" and get the identical shelf width. Two coasts on the same
+    /// world -- one backed by a tall mountain range close to shore, one backed
+    /// by a flat coastal plain -- must now come out with visibly different
+    /// shelf widths (the relief-proxy margin maturity), not a near-1.0 ratio.
+    #[test]
+    fn shelf_width_varies_between_margins() {
+        let (w, h) = (200u32, 100u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![0u8; n];
+        let mut elevation = vec![0.0f32; n];
+        // Two separate rectangular continents, side by side, both far enough
+        // apart that their shelves can't interact.
+        for y in 20..80u32 {
+            for x in 10..80u32 {
+                let i = (y * w + x) as usize;
+                terrain[i] = 1;
+                // A steep range right at the coast (x in 10..20) then flat interior.
+                elevation[i] = if x < 20 { 0.55 } else { 0.15 };
+            }
+            for x in 120..190u32 {
+                let i = (y * w + x) as usize;
+                terrain[i] = 1;
+                elevation[i] = 0.08; // flat coastal plain throughout
+            }
+        }
+        let mut buf = continent(w, h, 0);
+        buf.terrain = terrain;
+        buf.elevation = elevation;
+        buf.boundary_type = Vec::new(); // no plate data -> relief-proxy path
+        buf.plate_index = Vec::new();
+
+        generate_shelves(&mut buf, 42, 12.0, 0.4, 0.3, 8.0);
+
+        let shelf_width_at = |cx: u32, cy: u32, dir: i32| -> u32 {
+            let mut d = 0u32;
+            let mut x = cx as i32;
+            loop {
+                x += dir;
+                if x < 0 || x >= w as i32 { break; }
+                let idx = buf.idx(x as u32, cy);
+                if buf.terrain[idx] != 0 { break; }
+                if buf.is_shelf[idx] == 1 { d += 1; } else { break; }
+            }
+            d
+        };
+        // West coast of the mountainous continent (x=10) vs west coast of the
+        // flat continent (x=120): sample a few rows and average.
+        let mountain_shelf: f32 = (30..70).step_by(10)
+            .map(|y| shelf_width_at(10, y, -1) as f32).sum::<f32>() / 4.0;
+        let flat_shelf: f32 = (30..70).step_by(10)
+            .map(|y| shelf_width_at(120, y, -1) as f32).sum::<f32>() / 4.0;
+        assert!(flat_shelf > mountain_shelf * 1.15,
+            "flat-backed shelf ({flat_shelf}) should be visibly wider than the mountain-backed one ({mountain_shelf})");
+    }
 }
 
 #[cfg(test)]
@@ -4384,6 +4513,35 @@ mod plate_diagnostic {
                 mean * 100.0, main_share * 100.0,
                 isl.0 as f32 / 3.0, isl.1 as f32 / 3.0, isl.2 as f32 / 3.0,
             );
+        }
+    }
+
+    /// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 5 gate (F3): across plate counts
+    /// and several seeds, measured land fraction must stay within a few points of
+    /// `DEFAULT_OCEAN_FRACTION`'s target (30% land) -- this is
+    /// `diagnose_plate_land_fraction` promoted from a diagnostic into an
+    /// assertion, per the plan. It failed at 56-72% land against a 30% intent
+    /// before Slice 5's construction-based oceanic/continental assignment.
+    #[test]
+    fn land_fraction_tracks_the_target() {
+        let target_land = 1.0 - crate::sim::plates::DEFAULT_OCEAN_FRACTION;
+        for &count in &[6u32, 10, 16, 24, 40] {
+            for seed in [1u64, 2, 3] {
+                let (w, h) = (600u32, 300u32);
+                let mut buf = continent(w, h, 0);
+                let n = buf.total();
+                buf.plate_index = vec![0u16; n];
+                buf.boundary_type = vec![0u8; n];
+                buf.is_volcanic = vec![0u8; n];
+                crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, count);
+                let land = buf.terrain.iter().filter(|&&t| t == 1).count();
+                let frac = land as f32 / n as f32;
+                assert!(
+                    (frac - target_land).abs() < 0.10,
+                    "plates={count} seed={seed}: land={:.1}% vs target {:.1}% (>10pt off)",
+                    frac * 100.0, target_land * 100.0,
+                );
+            }
         }
     }
 }
