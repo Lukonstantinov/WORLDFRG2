@@ -148,6 +148,45 @@ relevant map in §4/§6/§7/§8 **in the same commit**. If you find a section th
 longer matches the tree, fix it rather than working around it.
 
 ---
+---
+
+### 2.8 Test what you changed — a routing table, not the whole suite
+
+The gates in §2.1/§2.3/§2.5 are mandatory **for the code they guard**, not for every
+commit. A full `cargo test --lib` run is roughly an hour; almost every change can
+only affect a slice of it. Pick rows by the paths in your diff, run the union, and
+**say in the commit which gates you ran and why those**.
+
+| You changed | Run |
+|---|---|
+| `docs/**`, `README`, `CLAUDE.md` | nothing |
+| a `#[cfg(test)]` block / a diagnostic only | `cargo check --lib --tests`, then that test by name |
+| `sim/campaign/tick/**` | `cargo test --lib tick::tests` + `econ_` (§2.1, §2.5) |
+| `sim/step3_ocean_atmo/**`, `sim/step4_climate/**` | `earth_` (§2.3) + re-read §8.9 |
+| `sim/step2_terrain/**` | `elevation::tests`, `landform`, `terrain_metrics`; **not** `earth_` — `earth_validation.rs` scores a baked DEM and never calls a generator (§8.23b) |
+| `sim/step1_plates/**` | `plates`, `elevation::tests`, `coastline_departs_from_the_plate_boundary` |
+| `sim/step5_rivers/**`, `step6_soil_fertility/**` | those modules' own tests + `goods_` if belts move |
+| `sim/step8_biological_goods/**` | `goods_` (rule 26) |
+| `sim/shared/provinces.rs` | `provinces::tests` |
+| `render/**`, `commands/palette_commands.rs` | `render::tile_image::tests` (+ the relevant `dump_*` sheet — §8.21's rule: look at it) |
+| `commands/**` (wiring only) | `cargo check --lib --tests` |
+| `src/**` (frontend) | `npx tsc --noEmit` |
+
+Three rules:
+
+- **Run the narrowest thing that could fail, then widen if it does.** `cargo test
+  --lib <substring>` filters by name; use it. A named test is seconds, the suite is
+  an hour.
+- **`--release` only when the test needs it** (the `#[ignore]`d benches and world
+  builders). A debug build of a small unit test is far quicker than a release
+  rebuild, and switching profiles invalidates the build cache — so do not alternate
+  `cargo check` and `cargo test --release` in one session for no reason.
+- **A cross-cutting change still owes the union of its rows, not the suite.** If you
+  genuinely cannot tell which rows a change touches, that is a signal the change is
+  too broad, not a reason to run everything. CI (rule 16) is the backstop that runs
+  the full set; it exists so a local session does not have to.
+
+---
 
 ## 3. Core Architecture
 
@@ -4283,10 +4322,11 @@ Three rules:
 11. **Phase 3's order is duplicated** in `sim_commands.rs`, `earth_validation.rs` AND
     `step3_ocean_atmo/preview.rs` — change one, change all three, or the fidelity gate
     and the settings preview stop testing/showing the real pipeline.
-12. **After any `tick/` change** → run the dynamics test (§2.1). **After any
-    `step3_ocean_atmo/` or `step4_climate/` change** → run the Earth fidelity gate (§2.3)
-    and re-read §8.9 (no per-cell outward scans; keep the row loops parallel).
-    **After any verified change** → push to `main` (§2.2), and keep this file true (§2.7).
+12. **Run the gates your change actually touches — see §2.8. Never the whole suite
+    by default.** A full `cargo test --lib` is ~an hour and most changes cannot
+    affect most of it; running everything is not caution, it is a way of learning
+    nothing slowly. **After any verified change** → push to `main` (§2.2), and keep
+    this file true (§2.7).
 13. **`biome` is descriptive** — nothing downstream may score off it (§8.12), and the
     render palette has a twin in the legend that must move with it.
 14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0,
