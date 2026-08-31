@@ -2832,7 +2832,7 @@ mod river_system_tests {
         }
         let buf = synth(w, h, terrain, elev);
         let hy = crate::sim::rivers::compute_hydrology(&buf);
-        let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0, &[]);
+        let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &[]);
         assert!(!rivers.is_empty(), "the valley world should produce rivers");
 
         // Put a settlement right on the main valley floor near the coast.

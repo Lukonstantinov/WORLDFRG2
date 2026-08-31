@@ -691,7 +691,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
             }
         }
         let target = build_target_histogram(height, density);
-        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
+        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count, w, h);
     }
 
     // Plateau rims and closed basins. AFTER the rank-based redistribution, which
@@ -1325,7 +1325,7 @@ pub fn generate_elevation_from_terrain(
         // The `height` slider interpolates the target between a low, coastal
         // world and a dramatic alpine one; `density` biases toward more highland.
         let target = build_target_histogram(height, density);
-        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
+        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count, w, h);
     }
 
     // Plateau rims and closed basins -- AFTER the rank remap, which would
@@ -1472,7 +1472,7 @@ pub fn generate_elevation_ridged(
             }
         }
         let target = build_target_histogram(height, density);
-        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count);
+        redistribute_elevation_regional(&mut elevation, &terrain, n, &target, &geo.region_id, geo.region_count, w, h);
     }
 
     // Terrain-aware micro-relief (plateaus smooth, hillsides roll, flats flat).
@@ -1689,7 +1689,7 @@ pub fn generate_elevation_cordillera(
     thermal_erosion(&mut elevation, &terrain, w, h, 2 + (roughness * 2.0) as u32);
     isostatic_adjust(&mut elevation, &terrain, &buf.boundary_type, &pre_erosion, w, h);
 
-    normalize_and_redistribute(&mut elevation, &terrain, n, height, density, &geo.region_id, geo.region_count);
+    normalize_and_redistribute(&mut elevation, &terrain, n, height, density, &geo.region_id, geo.region_count, w, h);
     limit_grid_scale_relief(&mut elevation, &terrain, w, h);
     apply_micro_relief(&mut elevation, &terrain, w, h, seed.wrapping_add(0x31C7));
 
@@ -1884,7 +1884,7 @@ fn walk_spine(
 /// path cannot drift apart in how they set final altitudes.
 fn normalize_and_redistribute(
     elevation: &mut [f32], terrain: &[u8], n: usize, height: f32, density: f32,
-    region_id: &[u32], region_count: u32,
+    region_id: &[u32], region_count: u32, w: u32, h_cells: u32,
 ) {
     let mut max_h = 0.0f32;
     for i in 0..n {
@@ -1919,7 +1919,7 @@ fn normalize_and_redistribute(
         }
     }
     let target = build_target_histogram(height, density);
-    redistribute_elevation_regional(elevation, terrain, n, &target, region_id, region_count);
+    redistribute_elevation_regional(elevation, terrain, n, &target, region_id, region_count, w, h_cells);
 }
 
 /// Scale every land cell's elevation by `scale` (0.5 = halve heights, 1.5 =
@@ -2455,9 +2455,9 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
 /// from is left alone.
 fn redistribute_elevation_regional(
     elevation: &mut [f32], terrain: &[u8], n: usize, target_pcts: &[f32; 9],
-    region_id: &[u32], region_count: u32,
+    region_id: &[u32], region_count: u32, w: u32, h: u32,
 ) {
-    if region_count == 0 || region_id.len() != n {
+    if region_count == 0 || region_id.len() != n || (w as usize) * (h as usize) != n {
         redistribute_elevation(elevation, terrain, n, target_pcts);
         return;
     }
@@ -2493,17 +2493,71 @@ fn redistribute_elevation_regional(
     // scattered floodplain. Scaling keeps every cell strictly ordered and
     // strictly above the floor: a region still reads higher or lower by the
     // same intent, but it can never flatten.
-    let land_mean = land_mean.max(1e-6);
+    //
+    // Three properties have to hold at once here, and the first two attempts each
+    // bought one by losing another -- both priced by ablation on the same
+    // 900x500 world, not by argument:
+    //
+    //  * the offset must be ADDITIVE, not a scale. Shipped briefly as a bounded
+    //    scale about the floor (`MIN + (e-MIN)*factor`), it multiplied each
+    //    region's RELIEF as well as its level: river steps rising against the raw
+    //    elevation field went 17.3% -> 22.7% and the p99.9 neighbour step
+    //    547m -> 590m, i.e. rougher ground, more closed basins, rivers reading as
+    //    climbing.
+    //  * nothing may pile onto the floor. The original `.clamp(0.01, ..)` put 16%
+    //    of ALL land on one exact value in a single 31,828-cell blob (F1) -- and a
+    //    soft knee that merely COMPRESSES the bottom band instead is no better:
+    //    tried, and it put the blob straight back (15.8% of land within 1 m of all
+    //    eight neighbours), because compressing a region's whole low end into a
+    //    hair-wide band is a flat plateau by another name.
+    //  * a region edge must not be a cliff (§8.24's own assign-hard-then-BLUR rule).
+    //
+    // All three hold if the offset is capped by each region's OWN HEADROOM before
+    // it is applied: a region may only be pushed down as far as its lowest land
+    // cell can go without reaching the floor, and up only as far as its highest
+    // can go without reaching 1.0. Within that cap the shift is a pure
+    // translation -- every cell keeps its exact spacing from its neighbours, so
+    // relief, drainage and the river gradient are untouched -- and outside it the
+    // intent is simply reduced rather than clipped into a plateau.
+    let mut region_min = vec![f32::MAX; rc];
+    let mut region_max = vec![f32::MIN; rc];
     for i in 0..n {
         if terrain[i] != 1 { continue; }
         let r = region_id[i] as usize;
         if r >= rc { continue; }
-        let bias = region_bias[r];
+        if elevation[i] < region_min[r] { region_min[r] = elevation[i]; }
+        if elevation[i] > region_max[r] { region_max[r] = elevation[i]; }
+    }
+    let capped_bias: Vec<f32> = (0..rc)
+        .map(|r| {
+            if region_cnt[r] < 8 || region_min[r] > region_max[r] { return 0.0; }
+            let want = region_bias[r] * REGION_CONTRAST;
+            if want < 0.0 {
+                -want.abs().min((region_min[r] - MIN_LAND_ELEV).max(0.0))
+            } else {
+                want.min((1.0 - region_max[r]).max(0.0))
+            }
+        })
+        .collect();
+
+    let mut bias_field: Vec<f32> = (0..n)
+        .map(|i| {
+            let r = region_id[i] as usize;
+            if r >= rc { 0.0 } else { capped_bias[r] }
+        })
+        .collect();
+    let region_w = ((n as f32) / (rc as f32)).sqrt();
+    let blur_r = ((region_w * 0.18).round() as i32).clamp(2, 24);
+    bias_field = box_blur_wrap(&bias_field, w, h, blur_r);
+
+    for i in 0..n {
+        if terrain[i] != 1 { continue; }
+        let bias = bias_field[i];
         if bias == 0.0 { continue; }
-        let factor = (1.0 + bias as f64 * REGION_CONTRAST as f64 / land_mean)
-            .clamp(0.25, 4.0) as f32;
-        elevation[i] = (MIN_LAND_ELEV + (elevation[i] - MIN_LAND_ELEV) * factor)
-            .clamp(MIN_LAND_ELEV, 1.0);
+        // The clamp is a float-safety net, not the mechanism: the per-region cap
+        // above is what keeps cells off the bounds, and the blur can only move a
+        // cell's offset toward a NEIGHBOURING region's (also capped) value.
+        elevation[i] = (elevation[i] + bias).clamp(MIN_LAND_ELEV, 1.0);
     }
 }
 
@@ -2586,7 +2640,7 @@ fn finish_elevation_field(
     let geo = geology::build_geo_context(buf, seed, &pre_erosion, coast_dist, None);
     thermal_erosion(&mut elevation, terrain, w, h, thermal_passes);
     isostatic_adjust(&mut elevation, terrain, &buf.boundary_type, &pre_erosion, w, h);
-    normalize_and_redistribute(&mut elevation, terrain, n, height, density, &geo.region_id, geo.region_count);
+    normalize_and_redistribute(&mut elevation, terrain, n, height, density, &geo.region_id, geo.region_count, w, h);
     limit_grid_scale_relief(&mut elevation, terrain, w, h);
     apply_micro_relief(&mut elevation, terrain, w, h, seed.wrapping_add(0x31C7));
     for i in 0..n {
@@ -4357,6 +4411,113 @@ mod tests {
 mod flat_diagnostic {
     use super::*;
     use super::tests::continent;
+
+    /// DIAGNOSTIC (not a gate): does a river's extracted channel actually go
+    /// DOWNHILL on the true (unfilled) elevation field, and how hard are the
+    /// elevation STEPS between neighbouring land cells?
+    ///
+    /// Two user-reported symptoms are measured here rather than argued about:
+    /// "rivers climb the hill ignoring elevation", and hard straight lineaments
+    /// on the map. A river is routed on the priority-flood FILLED surface, so it
+    /// is monotone there by construction -- but across a filled depression, or
+    /// across a hard step in the raw field, it can still read as climbing. The
+    /// step statistic is the companion: a piecewise-constant per-region bias
+    /// applied without blurring leaves a discontinuity at every region edge,
+    /// which is exactly what a straight dark line on a hillshade looks like.
+    #[test]
+    #[ignore]
+    fn diagnose_river_descent() {
+        for (name, mut buf) in [
+            ("shape", continent(900, 500, 75)),
+            ("plates", continent(900, 500, 75)),
+        ] {
+            let (w, h) = (buf.width, buf.height);
+            if name == "plates" {
+                let n = buf.total();
+                buf.plate_index = vec![0u16; n];
+                buf.boundary_type = vec![0u8; n];
+                buf.is_volcanic = vec![0u8; n];
+                crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 14);
+                generate_elevation(&mut buf, 7);
+            } else {
+                generate_elevation_from_terrain(&mut buf, 7, 0.5, 0.5, 0.5, 0.4);
+            }
+            buf.precipitation = vec![1200.0f32; buf.total()];
+            buf.koppen = vec![crate::sim::koppen::CFB; buf.total()];
+
+            let hy = crate::sim::rivers::compute_hydrology(&buf);
+            let lakes = crate::sim::rivers::detect_lakes(&buf, &hy.filled, 0.004, (buf.total() / 2000).max(20));
+            let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 0.5, 1.0, &lakes);
+
+            // How often does a river's CELL path rise on the RAW elevation field?
+            // Split by WHERE: inside a filled depression (the priority-flood raised
+            // this cell above its true height, so the surface the river was routed
+            // on is not the surface the map draws) vs on open ground, which would
+            // be a real routing fault. Also the figure a viewer actually sees: how
+            // much a single river CLIMBS in total over its course.
+            let (mut steps, mut ascents, mut ascent_m_sum, mut worst_m) = (0usize, 0usize, 0.0f64, 0.0f32);
+            let (mut asc_in_fill, mut asc_open) = (0usize, 0usize);
+            let mut climb_per_river: Vec<f32> = Vec::new();
+            const FILL_MARK: f32 = 2.0 / 8848.0; // >2 m above true height = filled
+            for r in &rivers {
+                let mut climb = 0.0f32;
+                for pair in r.points.windows(2) {
+                    let ia = buf.idx(pair[0].0, pair[0].1);
+                    let ib = buf.idx(pair[1].0, pair[1].1);
+                    let a = buf.elevation[ia];
+                    let b = buf.elevation[ib];
+                    steps += 1;
+                    let rise = (b - a) * 8848.0;
+                    if rise > 0.0 {
+                        ascents += 1;
+                        ascent_m_sum += rise as f64;
+                        climb += rise;
+                        if rise > worst_m { worst_m = rise; }
+                        let in_fill = (hy.filled[ia] - a) > FILL_MARK || (hy.filled[ib] - b) > FILL_MARK;
+                        if in_fill { asc_in_fill += 1; } else { asc_open += 1; }
+                    }
+                }
+                climb_per_river.push(climb);
+            }
+            climb_per_river.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let cp = |q: f32| climb_per_river[((climb_per_river.len() as f32 * q) as usize).min(climb_per_river.len().saturating_sub(1))];
+            println!(
+                "{name:<7} ascending steps: {} in FILLED depressions ({:.0}%), {} on OPEN ground ({:.0}%)                    per-river total climb: p50={:.0}m p90={:.0}m max={:.0}m   rivers climbing >100m: {}",
+                asc_in_fill, asc_in_fill as f32 * 100.0 / ascents.max(1) as f32,
+                asc_open, asc_open as f32 * 100.0 / ascents.max(1) as f32,
+                cp(0.50), cp(0.90), climb_per_river.last().copied().unwrap_or(0.0),
+                climb_per_river.iter().filter(|&&c| c > 100.0).count(),
+            );
+
+            // Hard steps between neighbouring LAND cells (the lineament signature).
+            let mut diffs: Vec<f32> = Vec::new();
+            for y in 0..h {
+                for x in 0..w {
+                    let i = buf.idx(x, y);
+                    if buf.terrain[i] != 1 { continue; }
+                    for &(dx, dy) in &[(1i32, 0i32), (0, 1)] {
+                        let nx = buf.wrap_x(x as i32 + dx);
+                        let ny = (y as i32 + dy).clamp(0, h as i32 - 1) as u32;
+                        let ni = buf.idx(nx, ny);
+                        if buf.terrain[ni] != 1 { continue; }
+                        diffs.push((buf.elevation[ni] - buf.elevation[i]).abs() * 8848.0);
+                    }
+                }
+            }
+            diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let pct = |p: f32| diffs[((diffs.len() as f32 * p) as usize).min(diffs.len() - 1)];
+
+            println!(
+                "{name:<7} rivers={:<5} steps={steps:<7} ascending={:.2}%  mean_ascent={:.1}m  worst={:.0}m   \
+                 neighbour step p50={:.0}m p99={:.0}m p99.9={:.0}m max={:.0}m",
+                rivers.len(),
+                ascents as f32 * 100.0 / steps.max(1) as f32,
+                ascent_m_sum / ascents.max(1) as f64,
+                worst_m,
+                pct(0.50), pct(0.99), pct(0.999), diffs[diffs.len() - 1],
+            );
+        }
+    }
 
     /// DIAGNOSTIC (not a gate): how much of the land comes out at EXACTLY the
     /// 0.01 clamp floor (= 88.5 m of the 8848 m range), and how much of it is

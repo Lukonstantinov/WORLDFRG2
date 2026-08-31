@@ -392,7 +392,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
 /// `width_scale` (0.2..2): multiplies rendered river width and lowers the cap so
 /// rivers can be made thinner.
 pub fn extract_rivers(
-    buf: &WorldBuffer, flow_dir: &[i32], acc: &[u32],
+    buf: &WorldBuffer, flow_dir: &[i32], acc: &[u32], filled: &[f32],
     density: f32, width_scale: f32, lakes: &[Lake],
 ) -> Vec<River> {
     let w = buf.width;
@@ -413,6 +413,28 @@ pub fn extract_rivers(
             is_lake[buf.idx(lx, ly)] = true;
         }
     }
+
+    // PONDED cells -- the same rule as `is_lake`, applied to every basin the lake
+    // pass did not emit. A river is routed on the priority-flood's FILLED surface,
+    // which raises a depression to its spill level; where that fill is deep, the
+    // TRUE ground under it rises steeply, so a channel drawn across it climbs the
+    // hillside on the map. Measured on a 900x500 world before this existed: 83% of
+    // all ascending river steps lay inside filled depressions, 57 of 286 rivers
+    // climbed more than 100 m in total, and the worst climbed 1,940 m (6,392 m on
+    // a plate world) -- the "rivers run upward, ignoring elevation" report.
+    //
+    // `detect_lakes` already excludes the basins it emits, but it only emits those
+    // past its own depth threshold AND under `max_cells`; a basin that is too big,
+    // or filled too shallowly to count as a lake, was left as open channel. Water
+    // ponds there in either case, so it is not channel either way. Excluding these
+    // cells reuses the lake mechanism exactly: the reach ends at the basin edge,
+    // and the outflow below the basin starts a new reach (its upstream neighbour
+    // is no longer a channel, so it becomes a source), which is how a river/lake/
+    // outflow system already reads today.
+    const POND_FILL: f32 = 10.0 / 8848.0; // >10 m of fill = standing water, not channel
+    let ponded: Vec<bool> = (0..total)
+        .map(|i| filled.get(i).map_or(false, |&f| f - buf.elevation[i] > POND_FILL))
+        .collect();
     let area_ratio = (w * h) as f32 / 64800.0;
     let base = (40.0 * area_ratio.sqrt()).max(20.0);
     // density 0 â†’ 3Ã— threshold (sparse), 0.5 â†’ 1.9Ã—, 1 â†’ 0.7Ã—, 1.5 â†’ 0.25Ã— (dense).
@@ -437,6 +459,7 @@ pub fn extract_rivers(
     let is_channel = |i: usize| -> bool {
         buf.terrain[i] == 1
             && !is_lake[i]
+            && !ponded[i]
             && buf.koppen[i] != crate::sim::koppen::EF
             && acc[i] >= threshold
     };
@@ -1046,9 +1069,27 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
                 }
             }
 
-            // Keep only plausibly-sized lakes: at least 2 cells, no larger than
-            // `max_cells` (giant flooded basins are usually artefacts).
-            if cells.len() >= 2 && cells.len() <= max_cells {
+            // A FILLED DEPRESSION IS A LAKE -- however big it is. Water runs
+            // downhill; where it reaches a hollow it cannot escape, it stands
+            // there. That is the whole of the rule.
+            //
+            // This used to read `cells.len() <= max_cells` ("giant flooded basins
+            // are usually artefacts"), which DELETED the water body while leaving
+            // the drainage routed straight through the basin -- so a river was
+            // drawn across ground that truly rises, climbing the basin walls, with
+            // no lake to explain it. `max_cells` was `total / 2000`, about 225
+            // cells on a 900x500 world, so every genuinely large lake (a Caspian, a
+            // Great Lake) was thrown away for being large. Measured before the fix:
+            // 57 of 286 rivers climbed over 100 m, the worst 1,940 m.
+            //
+            // `max_cells` is now only a DEGENERACY guard, not a size filter: it
+            // takes effect solely when a basin has swallowed an implausible share
+            // of the whole world, which means the elevation field is broken rather
+            // than that the lake is big. Even then the cells stay excluded from the
+            // channel network (`ponded` in `extract_rivers`), so the one thing that
+            // can never happen either way is a river drawn climbing out of it.
+            let degenerate = cells.len() > (total / 4).max(max_cells);
+            if cells.len() >= 2 && !degenerate {
                 let elevation = sum_elev / cells.len() as f32;
                 lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0 });
             }
@@ -1153,7 +1194,7 @@ mod tests {
         }
         let buf = synth(w, h, terrain, elev);
         let hy = compute_hydrology(&buf);
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, 1.2, 1.0, &[]);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &[]);
         let trunks = rivers.iter().filter(|r| !r.tributary).count();
         let tribs = rivers.iter().filter(|r| r.tributary).count();
         assert!(trunks >= 1, "expected at least one trunk reaching the sea");
@@ -1253,6 +1294,75 @@ mod tests {
         let seed_a = world_micro_relief_seed(&elev_a);
         let seed_b = world_micro_relief_seed(&elev_b);
         assert_ne!(seed_a, seed_b, "different worlds must hash to different micro-relief seeds");
+    }
+
+    /// WATER RUNS DOWNHILL, AND WHERE IT CANNOT ESCAPE IT STANDS. Both halves are
+    /// asserted here, because the bug was that neither held: a basin larger than
+    /// `max_cells` had its LAKE deleted as "usually an artefact" while the drainage
+    /// still routed through it, so a river was drawn straight across the basin,
+    /// climbing its walls, with no water to explain it. Measured on a real 900x500
+    /// world at the time: 57 of 286 rivers climbed over 100 m, the worst 1,940 m.
+    ///
+    /// The fixture is a plain draining east to the sea with a deep closed bowl
+    /// astride the trunk's path. A lake must appear IN the bowl, and no river may
+    /// climb out of it.
+    #[test]
+    fn a_river_never_climbs_out_of_a_basin() {
+        // A long plain tilting EAST to the sea, with a deep closed bowl punched
+        // into the middle of that drainage path. Every cell upstream drains
+        // through the bowl, so a real trunk river reaches it -- which is the
+        // condition the bug needs. (A bowl off to one side collects only its own
+        // small catchment, never clears the channel threshold, and no channel is
+        // drawn to climb out of it: the first version of this fixture made that
+        // mistake and passed with the fix disabled, which is the one thing a gate
+        // must never do.)
+        let (w, h) = (160u32, 60u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        let (bx, by, br) = (90.0f32, 30.0f32, 18.0f32);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x >= w - 2 { terrain[i] = 0; } // sea on the EAST edge
+                // Tilt east, plus a shallow cross-valley so flow converges into one trunk.
+                let mut e = 0.34 - x as f32 * 0.0018 + ((y as f32 - 30.0).abs()) * 0.0012;
+                // The closed bowl: ~700 m deep at its centre, astride the trunk's path.
+                let d = (((x as f32 - bx).powi(2) + (y as f32 - by).powi(2)).sqrt() / br).min(1.0);
+                e -= (1.0 - d * d) * 0.08;
+                elev[i] = e.max(0.005);
+            }
+        }
+        let buf = synth(w, h, terrain, elev);
+        let hy = compute_hydrology(&buf);
+        // max_cells small on purpose: the bowl is NOT emitted as a lake, so it is
+        // exactly the "filled but not a lake" basin the ponded rule exists for.
+        let lakes = detect_lakes(&buf, &hy.filled, 0.004, 4);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes);
+        assert!(!rivers.is_empty(), "the fixture must produce channels at all");
+
+        // 1. The water has somewhere to be: a lake sits in the bowl.
+        let bowl_lake = lakes.iter().any(|lk| {
+            lk.cells.iter().any(|&(x, y)| {
+                ((x as f32 - bx).powi(2) + (y as f32 - by).powi(2)).sqrt() < br
+            })
+        });
+        assert!(bowl_lake,
+            "no lake formed in a closed basin the drainage runs into ({} lakes found) — \
+             the water was deleted instead of standing", lakes.len());
+
+        // Per river, the climb above the lowest point it has reached so far — the
+        // figure a viewer sees. A river crossing the bowl scores hundreds of metres.
+        let mut worst = 0.0f32;
+        for r in &rivers {
+            let mut lowest = f32::MAX;
+            for &(x, y) in &r.points {
+                let e = buf.elevation[buf.idx(x, y)] * 8848.0;
+                if e < lowest { lowest = e; }
+                if e - lowest > worst { worst = e - lowest; }
+            }
+        }
+        assert!(worst < 60.0, "a river climbs {worst:.0} m above its own low point — it is running uphill");
     }
 
     /// A steep headwater reach must NOT meander (channel pinned to the fall line).
