@@ -702,9 +702,18 @@ pub(crate) fn compute_route_days_matrix(
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Err("no grid".into()); }
     let world = db.cached_tiles_with_conn(conn)?;
+    // WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 — river geometry, so a navigable
+    // river's real cost discount (§7's sea:river:road ≈ 1:4:8 ratio) actually
+    // reaches the campaign's pathfound `base_days`. Previously hardcoded to `""`
+    // ("campaign has no overlay JSON"), which was true only in the sense that
+    // nobody had wired it up — `sim_commands::persist_rivers` now keeps the
+    // `rivers` metadata key in sync with the world's own hydrology the moment it
+    // is computed, so it is available here without requiring a manual save first.
+    // Best-effort: missing/unparseable metadata degrades to the old empty string.
+    let rivers_json = metadata::get_meta(conn, "rivers").ok().flatten().unwrap_or_default();
     // Allow sea crossings (block_sea=false) and desert routes so islands/continents in one
-    // component connect; no seasonal closure. Rivers omitted (campaign has no overlay JSON).
-    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h, "", false, true, 0.0, -1, 12)?;
+    // component connect; no seasonal closure.
+    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, false, true, 0.0, -1, 12)?;
     let cell = |x: f32, y: f32| -> usize {
         let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
         let cy = ((y / cc.f as f32) as i32).clamp(0, cc.ch - 1);

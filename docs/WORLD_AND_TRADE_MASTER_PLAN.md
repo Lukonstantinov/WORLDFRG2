@@ -8,7 +8,7 @@ Parts II and III (the campaign's trade and knowledge).
 |---|---|---|
 | **I** | Tectonics · rivers · provinces · shelves | Slices 1, 2, 3, 5, 7, 8 **BUILT**; 4 scoped down; 6 not built |
 | **II** | Outpost connectivity & the entrepôt | Slices A, B built (fixes G1-G3); E1 built (fixes G6); Slices C (entrepôt) and D (transport modes) **not built** |
-| **III** | Exploration, the known world, transport modes | §8.1 (manufactured-goods bug) built; transport modes, knowledge/fog, exploration **not built** |
+| **III** | Exploration, the known world, transport modes | §8.1/§8.2 built; §4 transport modes built IN PART (river data now reaches `base_days`; mode/capacity split not built); knowledge/fog, exploration **not built** |
 
 **Read the build order first (Part III §7).** It is not the order these parts are
 written in: transport modes (III §4) come first because they are the biggest
@@ -484,9 +484,10 @@ already exists and is unchanged.
 # Part II · Outpost connectivity & the entrepôt
 
 **Status: Slices A and B BUILT (fix G1/G2/G3); E1 BUILT (fixes G6, folded into
-`try_found_house_outpost` rather than shipped as a separate slice). Slice C (the
-entrepôt) and Slice D (transport modes, decided in Part III §4) are NOT built** —
-both are substantially larger and are left for a dedicated follow-up. What
+`try_found_house_outpost` rather than shipped as a separate slice). Slice D
+(transport modes, Part III §4) is BUILT IN PART — the river-data plumbing gap
+that made it a no-op; the mode/capacity split is not. Slice C (the entrepôt) is
+NOT built** — substantially larger and left for a dedicated follow-up. What
 shipped:
 
 - **Slice A** (G1): the Dynamic Trade Flow overlay (`commands/query_commands/
@@ -954,8 +955,9 @@ separate `campaign_province_goods` exploitation query) — so the only genuine
 gap was the served `grade_label` WORD alongside the star rating; added as
 `ProvinceGoodPotential.grade_word` (backend) and wired into the stars' tooltip
 (frontend), both read-only over existing state, no new persisted field.
-Everything else in this Part — transport modes (§4) and knowledge/fog/
-exploration (§1-§3) — is NOT built.** All open questions are decided (§6);
+§4 (transport modes) is BUILT IN PART — see its own section for what and why.
+Everything else in this Part — knowledge/fog/exploration (§1-§3) — is NOT
+built.** All open questions are decided (§6);
 this is buildable as written. Companion to
 `OUTPOST_CONNECTIVITY_AND_ENTREPOT_PLAN.md`, which measured the problems it
 answers.
@@ -1150,23 +1152,82 @@ collapse — governs.
 
 Restated from the companion plan because everything above is easier with it.
 
-Give a route a **mode** with its own per-day cost, capacity and risk — sea ≪
-river < road < track — and split `cap_land` back into `fleet_river` and
-`fleet_caravan` so a barge is not an ox-cart. Per the brief all three axes
-differ, and water wins on all three, which is what makes it preferable with no
-special case. Worldgen already knows which rivers are navigable
-(`River.navigable`); that flag needs carrying into the campaign snapshot.
+**Status: the river-plumbing HALF of this is BUILT; the mode/capacity split is
+NOT.** Measured before touching anything: the cost DIFFERENTIATION this section
+asks for (sea ≪ river < road, priced ≈1:4:8 per Masschaele) already existed —
+`commands/query_commands/mod.rs::build_coarse_cost` has carried it since an
+earlier, undocumented-here session (CLAUDE.md §7's own comment cites "slice 5"
+of the ports/junctions work). What was actually missing was much narrower and
+entirely mechanical: `compute_route_days_matrix` — the function that builds the
+campaign's real pathfound `base_days` at `campaign_start_sim` — passed
+`rivers_json = ""` unconditionally, with a comment claiming "campaign has no
+overlay JSON". River geometry (`sim::rivers::River`, incl. `.navigable`) was
+never persisted to the world's `metadata["rivers"]` key by any WORLDGEN code
+path — only `persist_overlays`, called by the frontend right before a manual
+save, ever wrote it. So on the single most common flow — generate a world,
+start the campaign, never having saved and reloaded first — the campaign's real
+day-cost matrix had zero river data to read, and the sea:river:road
+differentiation that already existed in the cost grid fired for sea vs. land
+but **never once for a navigable river**, however genuinely navigable it was.
 
-**Why first:** it is the biggest lever on the known market-integration defect
-(basket price/distance gradient **−0.064**, 0 of 6 goods showing any gradient,
-where the correct sign is positive); it is testable against an instrument that
-already exists; and **it may make later work unnecessary** — if water carriage is
-genuinely cheap, a site near navigable water becomes valuable through ordinary
-route cost, with no bespoke entrepôt rule and no siting special case.
+Fixed with no new mechanism: `sim_commands::persist_rivers` (called from all
+four sites that compute `extracted_rivers` — `sim_rivers_hydrology`,
+`sim_refresh_hydrology_biology`, `sim_run_all`, `sim_run_all_from_terrain`) now
+writes the just-extracted river geometry straight to `metadata["rivers"]` the
+moment it exists, rather than only on an explicit save; `compute_route_days_
+matrix` reads that key (best-effort — a missing/unparseable value degrades to
+the old empty string, so an unusual world is never worse off) instead of the
+hardcoded `""`. `cached_coarse_cost`'s cache key already hashes `rivers_json`,
+so this cannot collide with any other caller's grid.
 
-**Gate:** the `econ_fidelity_scorecard` gradient. If differentiating transport
-cost does not move it off −0.064, the hypothesis is wrong and that is a **negative
-result to record**, per §2.4 — not something to quietly keep.
+**NOT built:** splitting `cap_land` into `fleet_river`/`fleet_caravan` for
+CAPACITY purposes (G8's other half — "river barges and ox-carts pooled into one
+interchangeable land capacity"). Doing that honestly needs a per-route MODE
+signal (is this hub pair's real pathfound route river-dominant?), which nothing
+currently records — `base_days` carries only a cost, not a mode — and deriving
+one would mean either persisting a `route_mode` matrix alongside `base_days` or
+re-deriving it per dispatch from the coarse-cost grid, either a real addition
+beyond the plumbing fix above. Left for the same follow-up as Slice C.
+
+**Not validated against `econ_fidelity_scorecard`, and here is why that's not a
+gap to paper over:** the gate's own reference world (`economy_validation.rs`)
+constructs a synthetic in-memory `CampaignSim` directly (hand-built hubs,
+straight-line `days`) — it never calls `campaign_start_sim`, never touches
+`WorldDb`/tiles/metadata, and so cannot exercise `compute_route_days_matrix` at
+all. Running the full `econ_` suite before and after this change produced
+BYTE-IDENTICAL numbers end to end (including the already-known-fragile
+`econ_inheritance_rules_fragment_differently` failure, confirmed unrelated for
+a second time), which is the expected — and reassuring — result: it means nothing
+already gated could have regressed, but it also means the plan's own gate
+(§4's original text below, kept for the record) has NOT actually measured
+whether this fix moves the price/distance gradient on a REAL generated world.
+That measurement needs the real `campaign_start_sim` path, i.e. the desktop
+app or a dedicated integration test that builds an actual `WorldDb` — neither
+available in this headless session. Whoever picks this up next: build that
+harness before claiming the gradient moved, and record the result whichever
+way it goes (§2.4).
+
+Original ask, unchanged: give a route a full **mode** with its own per-day
+cost, capacity and risk — sea ≪ river < road < track. Per the brief all three
+axes differ, and water wins on all three, which is what makes it preferable
+with no special case.
+
+**Why this was picked first:** it is the biggest lever on the known
+market-integration defect (basket price/distance gradient **−0.064**, 0 of 6
+goods showing any gradient, where the correct sign is positive — though this
+session's own `econ_` run against the current tree read **+0.139** basket /
+**+0.114** price with 5 of 6 goods showing a positive gradient, on the
+synthetic reference world unaffected by anything here, meaning the −0.064
+figure itself is now stale and should be re-measured before being cited
+again); it is testable against an instrument that already exists; and **it may
+make later work unnecessary** — if water carriage is genuinely cheap, a site
+near navigable water becomes valuable through ordinary route cost, with no
+bespoke entrepôt rule and no siting special case.
+
+**Gate:** the `econ_fidelity_scorecard` gradient — on a REAL generated world,
+per the caveat above. If differentiating transport cost does not move it, the
+hypothesis is wrong and that is a **negative result to record**, per §2.4 —
+not something to quietly keep.
 
 ---
 

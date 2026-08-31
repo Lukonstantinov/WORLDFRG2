@@ -155,6 +155,7 @@ pub fn sim_rivers_hydrology(
     // so channel extraction needs to know which cells are open lake water.
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    persist_rivers(&conn, &extracted_rivers);
     // Oxbow backwaters cut off from the meandering lowland reaches (real lakes).
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
@@ -344,6 +345,7 @@ pub fn sim_refresh_hydrology_biology(
     let max_cells = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4);
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
@@ -484,6 +486,7 @@ pub fn sim_run_all(
     let lake_max = (buf.total() / 2000).max(20);
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
@@ -876,6 +879,7 @@ pub fn sim_run_all_from_terrain(
     let lake_max = (buf.total() / 2000).max(20);
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
@@ -1137,6 +1141,27 @@ fn rle_encode_provinces(ids: &[u32]) -> Vec<u32> {
 /// province" (~8,000 km²). Stated in km², not cells (CLAUDE.md rule 25): a cell is
 /// `KM_EQUATOR / w` km wide, so a fixed cell count means a different real area on
 /// every world size.
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 (transport modes) — persist the
+/// just-extracted river geometry to metadata the moment it is computed, rather
+/// than only when the frontend happens to save the world. Before this, the
+/// `rivers` metadata key was written ONLY by `persist_overlays` (called right
+/// before a manual save), so `commands::query_commands::compute_route_days_
+/// matrix` — which builds the campaign's real pathfound `base_days` at
+/// `campaign_start_sim` — had NO river data to work with on the single most
+/// common flow (generate a world, start the campaign, never having saved and
+/// reloaded first): `is_river`/`is_nav_river` were always empty there, so a
+/// navigable river's `build_coarse_cost` discount (sea:river:road ≈ 1:4:8,
+/// §7's own Masschaele-calibrated ratio) never fired for a single founding-hub
+/// route, however navigable the river actually was. Called at every one of the
+/// four sites that computes `extracted_rivers`, so the metadata key is always
+/// in sync with the world's current hydrology; a later manual save's own
+/// `persist_overlays` call just overwrites it with the identical JSON.
+fn persist_rivers(conn: &rusqlite::Connection, rivers: &[rivers::River]) {
+    if let Ok(json) = serde_json::to_string(rivers) {
+        let _ = metadata::set_meta(conn, "rivers", &json);
+    }
+}
+
 const AUTO_MERGE_FLOOR_KM2: f32 = 8000.0;
 
 /// Partition all land into provinces (watershed / cost-flood), then auto-merge
