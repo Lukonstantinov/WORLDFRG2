@@ -518,7 +518,7 @@ pub fn sim_run_all(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 7b (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3): partition into
+    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3): partition into
     // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
     // run-all called this before — "Generate Full World" ended at phase 8 and left
     // the province layer unreachable except from the standalone Settlements/
@@ -910,7 +910,7 @@ pub fn sim_run_all_from_terrain(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 7b (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3) — see the identical
+    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
     // call in `sim_run_all`; this path was missing it too.
     generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
 
@@ -1131,7 +1131,7 @@ fn rle_encode_provinces(ids: &[u32]) -> Vec<u32> {
     out
 }
 
-/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 3: any province below this km² floor
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3: any province below this km² floor
 /// is folded into its largest-shared-border neighbour by the automatic merge every
 /// province-generating path now runs — "this is a generation artefact, not a
 /// province" (~8,000 km²). Stated in km², not cells (CLAUDE.md rule 25): a cell is

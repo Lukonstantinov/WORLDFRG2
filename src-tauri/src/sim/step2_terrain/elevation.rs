@@ -904,7 +904,7 @@ pub fn generate_shelves(
     let trench_dist = ocean_distance_from_boundary(buf, &[1], ar, 16);
 
     let noise_scale = w.max(h) as f32 / 20.0;
-    // TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 7 (F6): a second, much longer
+    // WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 7 (F6): a second, much longer
     // wavelength noise term (~1/4 the world, i.e. thousands of km) so shelf width
     // varies at a continental scale too, not just the single ~1/20-world field
     // above -- before this every shelf on a world varied only around one narrow
@@ -2384,7 +2384,7 @@ fn build_target_histogram(height: f32, density: f32) -> [f32; 9] {
     out
 }
 
-/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 1 (rule 31 -- "a clamp is not a
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 1 (rule 31 -- "a clamp is not a
 /// landform"): the lowest-ranked ~9% of band 0 used to be pinned to the
 /// identical `0.01` clamp floor (88.5 m of the 8848 m range), which measured
 /// as 16% of ALL land sitting at one exact elevation in one contiguous
@@ -4295,7 +4295,7 @@ mod tests {
         assert_eq!(smooth_copy, smooth_field, "a world inside budget must be returned untouched");
     }
 
-    /// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 7 gate (F6): on a world with NO
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 7 gate (F6): on a world with NO
     /// plate data (the from-landmass path), every margin used to read as
     /// "passive" and get the identical shelf width. Two coasts on the same
     /// world -- one backed by a tall mountain range close to shore, one backed
@@ -4516,7 +4516,7 @@ mod plate_diagnostic {
         }
     }
 
-    /// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 5 gate (F3): across plate counts
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 5 gate (F3): across plate counts
     /// and several seeds, measured land fraction must stay within a few points of
     /// `DEFAULT_OCEAN_FRACTION`'s target (30% land) -- this is
     /// `diagnose_plate_land_fraction` promoted from a diagnostic into an

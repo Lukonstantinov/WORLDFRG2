@@ -21,7 +21,7 @@ struct Plate {
     vy: f32,
 }
 
-/// TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 5 (F3, D1): the target fraction of
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 5 (F3, D1): the target fraction of
 /// the globe that ends up OCEAN. The old per-plate `is_oceanic = rng < 0.4` coin
 /// flip converged on ~60% land whatever the plate count, and was *worse* at low
 /// plate counts (71.8% at 6 plates) because the expected 2.4 oceanic plates has
@@ -313,7 +313,7 @@ pub fn generate_plates_and_landmass_with_target(
     despeckle_terrain(buf, DESPECKLE_MIN);
 
     // Generate volcanic zones at divergent boundaries, and at convergent ones
-    // by COLLISION TYPE (TECTONICS_RIVERS_PROVINCES_PLAN.md Slice 4, scoped-down:
+    // by COLLISION TYPE (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 4, scoped-down:
     // real collision-type differentiation, without the full persisted per-plate
     // identity / Euler-pole rewrite the plan's F5 root cause needs -- that is a
     // much larger change, deliberately not attempted this session). A
