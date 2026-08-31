@@ -1655,6 +1655,12 @@ pub(crate) fn compute_colonizable_sites(
         (vec![false; cn], vec![0.0f32; cn], vec![0u8; cn], vec![0.0f32; cn]);
     // Raw trade-good richness per coarse cell: Σ (belt strength × good base_value).
     let mut traw = vec![0.0f32; cn];
+    // F6 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6) — the site's own
+    // per-good belt strength (0..1), so a chosen site can seed a colony from what it
+    // actually grows rather than a 60%-scaled photocopy of its founder. `ng` goods
+    // per coarse cell; cheap even on a large world (a few hundred KB at most).
+    let ng = base_value.len();
+    let mut belt_field = vec![0.0f32; cn * ng];
     for cy in 0..ch {
         for cx in 0..cw {
             let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
@@ -1667,8 +1673,10 @@ pub(crate) fn compute_colonizable_sites(
             koppen[ci] = tile.koppen[ti];
             elev[ci] = tile.elevation[ti];
             let mut tv = 0.0f32;
-            for g in 0..base_value.len().min(tile.goods.len()) {
-                tv += tile.goods[g][ti] as f32 / 255.0 * base_value[g];
+            for g in 0..ng.min(tile.goods.len()) {
+                let bv = tile.goods[g][ti] as f32 / 255.0;
+                tv += bv * base_value[g];
+                belt_field[ci * ng + g] = bv;
             }
             traw[ci] = tv;
         }
@@ -1743,6 +1751,7 @@ pub(crate) fn compute_colonizable_sites(
                 x: wx, y: wy, koppen: koppen[ci], elevation: elev[ci],
                 fertility: fert[ci], coastal: cst, kind_hint, trade_value: tval[ci],
                 delta, chokepoint: choke, province: province_at(wx, wy),
+                belt: belt_field[ci * ng..(ci + 1) * ng].to_vec(),
             }));
         }
     }
@@ -1827,6 +1836,7 @@ pub(crate) fn compute_satellite_sites(
                 x: wx as f32, y: wy as f32, koppen: tile.koppen[ti], elevation: elev,
                 fertility: fert, coastal, kind_hint, trade_value: tv.min(1.0),
                 delta: false, chokepoint: false, province: -1, // always near an existing city
+                belt: vec![], // satellite founding doesn't read it (F6 is about `create_market_colony`)
             }));
         }
     }

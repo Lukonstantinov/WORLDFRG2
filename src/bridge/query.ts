@@ -94,15 +94,17 @@ export async function computeGoodBeltMasks(goods: string[]): Promise<GoodBeltMas
   return invoke("compute_good_belt_masks", { goods });
 }
 
-/** One good's belt SAMPLED to a single province, at the province raster's resolution —
- *  the province-plate counterpart of {@link computeGoodBeltMasks}. Reads the goods TILE
- *  column directly, so it works on any world (no localities, no running campaign) and
- *  lets the province survey plate draw belt AREAS + a QUALITY wash exactly as the main
- *  map does, instead of falling back to emoji symbols. */
+/** One good's belt SAMPLED to a single province, at the SAME resolution the relief
+ *  plate crops at — the province-plate counterpart of {@link computeGoodBeltMasks}.
+ *  Reads the goods TILE column directly, so it works on any world (no localities, no
+ *  running campaign) and lets the province survey plate draw belt AREAS + a QUALITY
+ *  wash at the fidelity the ground under them is drawn at (F1 · slice 1). `maxDim`
+ *  defaults to 130 server-side — pass the same value `getProvinceTerrainCrop` uses so
+ *  the two plates line up. */
 export async function provinceGoodBeltMasks(
-  provinceId: number, goods: string[],
+  provinceId: number, goods: string[], maxDim?: number,
 ): Promise<ProvinceGoodMask[]> {
-  return invoke("province_good_belt_masks", { provinceId, goods });
+  return invoke("province_good_belt_masks", { provinceId, goods, maxDim });
 }
 
 /** Latitude bands of the general circulation for the Climate Bands overlay: the

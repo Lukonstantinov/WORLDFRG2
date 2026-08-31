@@ -1349,22 +1349,33 @@ export interface GoodBeltMask {
   cells: number;
 }
 
-/** One good's belt SAMPLED to a single province, at the PROVINCE-RASTER resolution the
- *  survey plate renders on — the province-plate counterpart of `GoodBeltMask`. Read from
- *  the goods tile column (so it works on any world, no localities/campaign needed), it
- *  lets `ProvinceMiniMap` draw belt AREAS + a QUALITY wash like the main map. */
+/** One good's belt SAMPLED to a single province, at the SAME resolution
+ *  `ProvinceTerrainCrop` (the relief plate) samples at — the province-plate
+ *  counterpart of `GoodBeltMask`. Read from the goods tile column (so it works on
+ *  any world, no localities/campaign needed), it lets `ProvinceMiniMap` draw belt
+ *  AREAS + a QUALITY wash at the same fidelity as the ground under them (F1 /
+ *  PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 1 — the old version sampled the
+ *  province RASTER, ~24× coarser than the relief plate it was drawn over). */
 export interface ProvinceGoodMask {
   good: string;
-  /** Bounding box in PROVINCE-RASTER cells. */
-  rx0: number;
-  ry0: number;
-  /** Box dims in raster cells; `q` is row-major over `rw × rh`. */
-  rw: number;
-  rh: number;
-  /** Belt value 0..255 at each raster cell (0 = not covered). Absolute scale (D10). */
+  /** World-cell origin of the sample grid — same coordinate system as
+   *  `ProvinceTerrainCrop.ox/oy`, so both plates position through one transform. */
+  ox: number;
+  oy: number;
+  /** World cells between samples. */
+  stride: number;
+  cols: number;
+  rows: number;
+  /** Belt value 0..255 at each SAMPLED world cell, row-major over `cols × rows`
+   *  (0 = not covered). Absolute scale (D10), never per-good normalised. */
   q: number[];
-  /** Covered raster cells. */
+  /** Sampled cells covered (`q >= COVERAGE_MIN`). */
   cells: number;
+  /** F1 · the good's real extent within this province — a latitude-aware km² sum
+   *  over the FULL-RESOLUTION belt, not the sampled grid above. */
+  area_km2: number;
+  /** Fraction of the province's own land the belt reaches. */
+  land_share: number;
 }
 
 /** GOODS ATLAS (`campaign_good_atlas`) — everything about one good for the Atlas panel
@@ -2052,7 +2063,7 @@ export interface Settlement {
   score: number;
   culture?: string; // people/culture governing the site ("Norse", …)
   region?: string;  // region / homeland name ("Vexillia")
-  site?: string;    // "coast" | "river" | "hills" | "plain"
+  site?: string;    // "coast" | "river" | "hills" | "plain" | "port" (step 7a junction site)
   dead?: boolean;   // abandoned/collapsed → drawn as a † ruin cross, not a dot
   isNew?: boolean;  // founded this campaign, still young → gold founding star
   hubClass?: number; // 0 ordinary · 1 trade hub · 2 entrepôt (campaign, earned live)

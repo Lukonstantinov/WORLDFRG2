@@ -1691,7 +1691,7 @@
                 y: (k / 4) as f32 * 12.0 + 4.0,
                 koppen: 11, elevation: 0.2, fertility: 0.5, coastal: k % 2 == 0,
                 kind_hint: ((k % 5) + 1) as u8, trade_value: 0.4 + (k as f32 % 3.0) * 0.2,
-                delta: false, chokepoint: false, province: -1,
+                delta: false, chokepoint: false, province: -1, belt: vec![],
             });
         }
         // A bank so settlement colonies (which need a same-continent bank) can form too.
@@ -1829,7 +1829,7 @@
                 fertility: 0.45 + (i % 3) as f32 * 0.15,
                 coastal: i % 2 == 0, kind_hint: 1,
                 trade_value: 0.2 + (i % 4) as f32 * 0.1,
-                delta: false, chokepoint: false, province: -1,
+                delta: false, chokepoint: false, province: -1, belt: vec![],
             });
         }
         s.rebuild_routes();
@@ -1955,7 +1955,7 @@
         s.colonizable.push(ColonizeSite {
             x: 16.0, y: 10.0, koppen: 8, elevation: 0.1, fertility: 0.8,
             coastal: false, kind_hint: 1, trade_value: 0.3,
-            delta: false, chokepoint: false, province: -1,
+            delta: false, chokepoint: false, province: -1, belt: vec![],
         });
         // The swarm preconditions: crowded (2× founding), content, fed.
         s.hubs[0].population = s.hubs[0].founding_pop * 2.0;
@@ -2187,8 +2187,8 @@
         // Empty land near the cluster: a fertile site (→ settlement colony) and a
         // trade-rich poor coastal site (→ house outpost), both within the hop-reach cap.
         s.colonizable = vec![
-            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10, delta: false, chokepoint: false, province: -1 },
-            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60, delta: false, chokepoint: false, province: -1 },
+            ColonizeSite { x: 3.0, y: 3.0, koppen: 0, elevation: 0.2, fertility: 0.80, coastal: false, kind_hint: 1, trade_value: 0.10, delta: false, chokepoint: false, province: -1, belt: vec![] },
+            ColonizeSite { x: 5.0, y: 2.0, koppen: 0, elevation: 0.1, fertility: 0.18, coastal: true, kind_hint: 4, trade_value: 0.60, delta: false, chokepoint: false, province: -1, belt: vec![] },
         ];
         s.rebuild_routes();
         s.tick = COLONY_START_TICK; // open the age of colonisation
@@ -2323,6 +2323,93 @@
         s.colony_pass();
         assert!(s.hubs[1].colony_kind == 0 && s.hubs[1].population <= 1.0, "starved colony collapsed");
         assert!(s.banks[0].losses > 0.0 && s.banks[0].loans.is_empty(), "bank wrote off the defaulted colony loan");
+    }
+
+    /// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6 (F6) — a colony founded on
+    /// a site whose dominant belt differs from its founder's must produce that good
+    /// within a year (immediately, in fact — `create_market_colony` seeds it at
+    /// founding). Before this a settlement colony always inherited a flat 60% of its
+    /// METROPOLIS's own basket regardless of what the chosen site actually carried.
+    #[test]
+    fn a_colony_produces_what_its_site_carries() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+        // A wheat-heavy metropolis (200 wheat : 2 silk).
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![200.0, 2.0], 0)];
+        let mut s = sim(hubs, goods);
+        let site = ColonizeSite {
+            x: 10.0, y: 0.0, koppen: 8, elevation: 0.1, fertility: 0.4, coastal: true,
+            kind_hint: 1, trade_value: 0.5, delta: false, chokepoint: false, province: -1,
+            belt: vec![0.05, 0.95], // this site is silk country, not wheat
+        };
+        let ci = s.create_market_colony(0, &site, vec![(2, 0, 1.0)], 500.0);
+
+        let share = |bpc: &[f32], g: usize| bpc[g] / bpc.iter().sum::<f32>().max(1e-6);
+        let founder_silk_share = share(&s.hubs[0].base_per_capita, 1);
+        let colony_silk_share = share(&s.hubs[ci].base_per_capita, 1);
+        assert!(
+            colony_silk_share > founder_silk_share * 2.0,
+            "a colony founded on a silk-rich site should produce far more silk \
+             (share {colony_silk_share:.3}) than a photocopy of its wheat-heavy \
+             founder (share {founder_silk_share:.3})"
+        );
+
+        // An empty `belt` (a save from before this slice) must reproduce the OLD
+        // flat-60%-of-founder behaviour exactly — a true no-op.
+        let old_site = ColonizeSite { belt: vec![], ..site };
+        let ci2 = s.create_market_colony(0, &old_site, vec![(2, 0, 1.0)], 500.0);
+        for g in 0..2 {
+            let expected = s.hubs[0].base_per_capita[g] * 0.6;
+            assert!(
+                (s.hubs[ci2].base_per_capita[g] - expected).abs() < 1e-6,
+                "an empty belt must fall back to the old founder×0.6 seeding exactly"
+            );
+        }
+    }
+
+    /// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 7 (F7) — a stage-1 colony,
+    /// alone in a province whose rural pool is already at carrying capacity, must
+    /// receive only a FRACTION of `prov_surplus`/dues on its first land pass — not
+    /// the whole province's harvest, which is what happened before: an unsettled
+    /// province fills to capacity with no member check, and the colony becomes the
+    /// province's only administering hub (`province_seat_hub`) the moment it exists.
+    #[test]
+    fn a_young_colony_does_not_inherit_a_full_province() {
+        let build = |stage: u8| -> CampaignSim {
+            let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+            let mut hubs = vec![hub(0, 0.0, 0.0, 500.0, vec![50.0], 0)];
+            hubs[0].colony_kind = 1;
+            hubs[0].colony_stage = stage;
+            let mut s = sim(hubs, goods);
+            s.hub_province = vec![0];
+            s.hub_culture = vec![String::new()];
+            s.hub_minorities = vec![Vec::new()];
+            s.prov_cap = vec![10_000.0];
+            s.prov_rural = vec![10_000.0]; // already at capacity — the F7 scenario exactly
+            s.prov_holder = vec![-1];
+            s
+        };
+
+        let mut young = build(1); // outpost stage — 0.25 maturity
+        let mut mature = build(4); // city stage — full maturity
+        assert_eq!(young.colony_delivery_maturity(0), 0.25);
+        assert_eq!(mature.colony_delivery_maturity(0), 1.0);
+
+        young.province_land_pass(1);
+        mature.province_land_pass(1);
+
+        let stock_young = stock_of(&young.hubs[0].stock, 0);
+        let stock_mature = stock_of(&mature.hubs[0].stock, 0);
+        assert!(stock_mature > 0.0, "the mature colony should have received a real surplus at all");
+        assert!(
+            stock_young > 0.0 && stock_young < stock_mature * 0.35,
+            "a stage-1 colony received {stock_young} against a mature stage-4 colony's \
+             {stock_mature} — expected roughly a quarter, not the whole harvest"
+        );
+
+        // Ordinary cities (never a colony) are entirely unaffected — maturity 1.0.
+        let mut ordinary = build(0);
+        ordinary.hubs[0].colony_kind = 0;
+        assert_eq!(ordinary.colony_delivery_maturity(0), 1.0);
     }
 
     /// Manual benchmark for the per-day campaign tick. Run explicitly:

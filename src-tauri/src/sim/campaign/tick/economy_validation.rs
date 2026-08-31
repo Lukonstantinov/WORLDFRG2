@@ -277,6 +277,7 @@ fn reference_world() -> CampaignSim {
             delta: false,
             chokepoint: false,
             province: -1,
+            belt: vec![],
         });
     }
 
@@ -782,6 +783,203 @@ fn econ_fidelity_scorecard() {
         (0.0..=1.0).contains(&card.urban_share),
         "urban share out of range: {:.3}", card.urban_share
     );
+}
+
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 4 — F4 measured that the compact
+/// reference world above cannot show a distance/price gradient even if the model
+/// has one: its trade horizon is `0.24 × world_w(100) = 24 units ≈ 4.8 days`, its
+/// longest rescued route is ~11.5 days, and at the harness's borrowed
+/// `freight_per_day: 0.01` that caps transport cost at ~11% of grain's base value
+/// over the LONGEST route in the fixture — nowhere close to Masschaele's measured
+/// ~0.25%/km, which would put grain up ~150% over a comparable real distance. "The
+/// shipped constant may be sound and the instrument may be blind" (F4) — this is
+/// the wider instrument, built to find out.
+///
+/// Same 30-hub economy as `reference_world`, but spread across a world wide enough
+/// that its trade horizon is genuinely thousands of kilometres, and the shipped
+/// `freight_per_day: 0.018` in place of the harness's borrowed 0.01. `base_days`
+/// (the pathfound-route matrix `rebuild_routes` prefers over a straight line) is
+/// populated with a real DETOUR rather than a flat multiplier on the whole world:
+/// crossing from the western half of the map to the eastern half costs 2.5× the
+/// straight-line estimate (a mountain range down the middle), while a hub pair that
+/// BOTH sit on the map's own "coast" (the sixth column of the grid) travels at
+/// 0.4× — a cheap coastal shipping lane. `CampaignSim` has no tile access (§5: a
+/// tick is hub-level math only), so `base_days` is the only place geography like
+/// this can be expressed at all.
+fn reference_world_large() -> CampaignSim {
+    let goods = vec![
+        good("wheat", 0, 0, 1.0, 0.85, true),
+        good("fish", 0, 0, 1.2, 0.7, true),
+        good("olives", 0, 0, 1.6, 0.6, true),
+        good("silk", 1, 2, 20.0, 0.35, false),
+        good("iron", 2, 1, 5.0, 0.45, false),
+        good("wine", 3, 2, 8.0, 0.4, false),
+    ];
+    let ng = goods.len();
+    const SPACING: f32 = 100.0; // world cells between hubs — a real regional grid
+    let mut hubs = Vec::new();
+    for i in 0..30u32 {
+        let x = (i % 6) as f32 * SPACING;
+        let y = (i / 6) as f32 * SPACING;
+        let pop = 8000.0 + (i as f32 * 911.0) % 26000.0;
+        let prod: Vec<f32> = (0..ng)
+            .map(|g| if (g + i as usize) % 3 == 0 { pop * 0.012 } else { pop * 0.0015 })
+            .collect();
+        hubs.push(hub(i, x, y, pop, prod, 0));
+    }
+    let n = hubs.len();
+    let mut s = sim(hubs, goods);
+    s.world_w = 3600.0; // Earth-scale grid width, the shipped default
+    s.world_h = 1800.0;
+    s.days_per_cell = (40075.0 / s.world_w / 55.0).max(0.02); // ~55 km/day blended (matches campaign_start_sim)
+    s.freight_per_day = 0.018; // the SHIPPED value, not the harness's borrowed 0.01
+
+    for i in 0..10u32 {
+        let seat = (i * 3) % 30;
+        let mut h = house_at(seat, vec![3 + (i as usize % 3)], 3);
+        h.archetype = (i % 4) as u8;
+        h.wealth = 40.0 + (i as f32) * 8.0;
+        h.prestige = 0.5;
+        h.dominant_seat = i % 2 == 0;
+        s.houses.push(h);
+    }
+    s.seed_house_count = s.houses.len() as u32;
+
+    for i in 0..12u32 {
+        s.colonizable.push(ColonizeSite {
+            x: 50.0 + (i % 4) as f32 * SPACING * 1.3,
+            y: 4.0 * SPACING + (i / 4) as f32 * SPACING * 0.9,
+            koppen: 8,
+            elevation: 0.1,
+            fertility: 0.45 + (i % 3) as f32 * 0.15,
+            coastal: i % 2 == 0,
+            kind_hint: 1,
+            trade_value: 0.2 + (i % 4) as f32 * 0.1,
+            delta: false,
+            chokepoint: false,
+            province: -1,
+            belt: vec![],
+        });
+    }
+
+    // Same province-layer shape as `reference_world`, seats scaled to the wider map.
+    let nprov = 5usize;
+    let urban_seed: f32 = s.hubs.iter().map(|h| h.population).sum();
+    let rural_each = (urban_seed * 9.0 / nprov as f32).max(1.0);
+    let cap_mult: [f32; 5] = [2.6, 1.5, 0.6, 1.8, 1.5];
+    let fill_frac: [f32; 5] = [0.75, 0.55, 0.35, 0.60, 0.30];
+    let forest: [f32; 5] = [0.15, 0.70, 0.05, 0.40, 0.25];
+    let arable: [f32; 5] = [0.55, 0.12, 0.10, 0.30, 0.06];
+    let soil: [f32; 5] = [0.85, 0.65, 0.35, 0.60, 0.32];
+    let irrigated: [f32; 5] = [0.10, 0.0, 0.0, 0.05, 0.0];
+    let tenure: [[f32; 4]; 5] = [
+        [0.24, 0.16, 0.09, 0.51],
+        [0.16, 0.08, 0.09, 0.67],
+        [0.10, 0.04, 0.06, 0.80],
+        [0.18, 0.10, 0.09, 0.63],
+        [0.12, 0.05, 0.07, 0.76],
+    ];
+    let seats: [[f32; 2]; 5] = [
+        [SPACING * 2.2, SPACING * 0.2],
+        [SPACING * 0.9, SPACING * 1.2],
+        [SPACING * 3.9, SPACING * 2.1],
+        [SPACING * 1.6, SPACING * 3.2],
+        [SPACING * 3.3, SPACING * 4.2],
+    ];
+    s.prov_cap = (0..nprov).map(|i| rural_each * cap_mult[i]).collect();
+    s.prov_rural = (0..nprov).map(|i| rural_each * cap_mult[i] * fill_frac[i]).collect();
+    s.prov_culture = (0..nprov).map(|i| format!("Culture{i}")).collect();
+    s.prov_seat = seats.to_vec();
+    s.prov_net_mig = vec![0.0; nprov];
+    s.hub_province = (0..30).map(|i| (i / 6) as i32).collect();
+    s.hub_culture = (0..30).map(|i| format!("Culture{}", i / 6)).collect();
+    s.hub_minorities = vec![Vec::new(); 30];
+    s.prov_forest = forest.to_vec();
+    s.prov_arable = arable.to_vec();
+    s.prov_pasture = (0..nprov)
+        .map(|i| ((1.0 - forest[i] - arable[i]).max(0.0) * 0.55).clamp(0.0, 1.0))
+        .collect();
+    s.prov_irrigated = irrigated.to_vec();
+    s.prov_soil = soil.to_vec();
+    s.prov_tenure = tenure.to_vec();
+    s.prov_tax = vec![0.12; nprov];
+    s.prov_arrears = vec![0.0; nprov];
+    s.prov_unrest = vec![0.0; nprov];
+    s.prov_surplus = vec![0.0; nprov];
+    s.prov_revenue = vec![0.0; nprov];
+    s.prov_holder = vec![-1; nprov];
+
+    calibrate_like_campaign_start(&mut s);
+
+    // The sea + mountain barrier — see the doc comment above.
+    let mut base_days = vec![f32::INFINITY; n * n];
+    for a in 0..n {
+        base_days[a * n + a] = 0.0;
+        for b in (a + 1)..n {
+            let dx = s.hubs[a].x - s.hubs[b].x;
+            let dy = s.hubs[a].y - s.hubs[b].y;
+            let straight = (dx * dx + dy * dy).sqrt();
+            let col_a = (a as u32 % 6) as i32;
+            let col_b = (b as u32 % 6) as i32;
+            let mut mult = 1.0f32;
+            if (col_a <= 2) != (col_b <= 2) { mult *= 2.5; } // crosses the mountain range
+            if col_a == 5 && col_b == 5 { mult *= 0.4; }     // both on the coastal lane
+            let d = (straight * s.days_per_cell * mult).max(1.0);
+            base_days[a * n + b] = d;
+            base_days[b * n + a] = d;
+        }
+    }
+    s.base_days = base_days;
+    s.base_n = n;
+
+    s.rebuild_routes();
+    s
+}
+
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 4 — an INSTRUMENT, not a gate:
+/// per the module's own rule, this test asserts only that every metric is a real
+/// number, exactly like `econ_fidelity_scorecard` does for the compact world. The
+/// integration/basket gradients and the longest-route freight ratio are PRINTED —
+/// read them to judge whether F4's diagnosis holds (a blind instrument) or the
+/// compact world's flat gradient is real (a genuinely unintegrated market).
+#[test]
+fn econ_fidelity_scorecard_large_world() {
+    let mut s = reference_world_large();
+    let n = s.hubs.len();
+
+    // The longest LIVE route and what it would cost to freight one unit of wheat
+    // over it — F4's own headline number, computed the same way `good_freight`
+    // computes it inside the tick.
+    let wheat_base_value = s.goods[0].base_value.max(1e-6);
+    let mut longest_days = 0.0f32;
+    for a in 0..n {
+        for b in (a + 1)..n {
+            let d = s.days.get(a * n + b).copied().unwrap_or(f32::INFINITY);
+            if d.is_finite() { longest_days = longest_days.max(d); }
+        }
+    }
+    let freight_rate = s.freight_per_day; // no discount, matching F4's own headline calc
+    let longest_freight = s.good_freight(0, freight_rate, longest_days);
+    let freight_frac_of_value = longest_freight / wheat_base_value;
+
+    let card = measure(&mut s);
+    print_scorecard(&card);
+    println!("═══ Large-world instrument (slice 4) ═══");
+    println!("  world_w                          {:>9.0}  cells ≈ {:>7.0} km",
+             3600.0f32, 40075.0);
+    println!("  longest live route                {:>8.1}  days", longest_days);
+    println!("  freight over that route           {:>8.3}  (× wheat base value)",
+             freight_frac_of_value);
+    println!("    Masschaele target: ≥ 1.0 (real overland carting ~doubled grain's");
+    println!("    price over 150–300 km — 0.25%/km compounded over a long haul)");
+    println!("════════════════════════════════════════════════════════════════════════════");
+    println!();
+
+    assert!(card.integration_gradient.is_finite(), "large-world integration gradient not finite");
+    assert!(card.basket_gradient.is_finite(), "large-world basket gradient not finite");
+    assert!(card.spatial_cv.is_finite(), "large-world spatial CV not finite");
+    assert!(longest_days.is_finite() && longest_days > 0.0, "no live long-haul route was found at all");
+    assert!(freight_frac_of_value.is_finite(), "freight fraction not finite");
 }
 
 /// **KNOWN FAILING — an open defect, not a flaky test. See docs/SCOREBOARD.md.**

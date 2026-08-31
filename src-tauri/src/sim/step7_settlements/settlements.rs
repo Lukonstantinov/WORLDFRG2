@@ -27,11 +27,49 @@ fn site_label(buf: &WorldBuffer, idx: usize, is_river: bool) -> &'static str {
     else { "plain" }
 }
 
+/// The habitability field PLUS the trade field it already computes internally and
+/// used to throw away (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md F2 / slice 3a).
+/// `trade` is the ladder value already multiplied by the SAME four viability gates
+/// `hab` uses (`temp_gate × winter_gate × cryo_gate × disease_gate`) — the gates are
+/// deliberately not the climate/fertility terms, so a hot barren desert port (Hormuz
+/// had no fresh water and no vegetation and was the richest port on earth) survives
+/// while nothing is ever planted on the ice.
+pub struct HabFields {
+    pub hab: Vec<f32>,
+    pub trade: Vec<f32>,
+}
+
 /// Compute habitability score for every land cell.
 /// score = climate(0.40) + fertility(0.20) + water(0.20) + terrain(0.10) + trade(0.10)
+///
+/// Thin wrapper over `compute_habitability_fields` (slice 3a) — kept so the pre-
+/// existing call sites that only ever wanted `hab` stay untouched. It passes no flow-
+/// accumulation array, so slice 3c's mouth-scaling degrades to its own no-scaling
+/// default (`mouth_mult = 1.0`) here; the pipeline's own settlement-generation call
+/// sites call `compute_habitability_fields` directly with the real accumulation field.
 pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> Vec<f32> {
+    compute_habitability_fields(buf, rivers, lakes, None).hab
+}
+
+/// See `compute_habitability`. `acc` is `Hydrology.acc` (flow accumulation per cell,
+/// already computed by phase 5) — `None` when unavailable (e.g. a caller with no
+/// hydrology in scope), in which case slice 3c's river-mouth scaling is a no-op.
+pub fn compute_habitability_fields(
+    buf: &WorldBuffer, rivers: &[River], lakes: &[Lake], acc: Option<&[u32]>,
+) -> HabFields {
     let total = buf.total();
     let mut hab = vec![0.0f32; total];
+    let mut trade = vec![0.0f32; total];
+    let max_acc = acc.map(|a| a.iter().copied().max().unwrap_or(1).max(1)).unwrap_or(1);
+
+    // 3b · strait/isthmus and mountain-pass/saddle radii, in WORLD cells, scaled to
+    // match the physical granularity `build_coarse_cost`'s own chokepoint/pass
+    // detectors use on the coarse route-cost grid (`f = grid_w / 700`) — the same
+    // real-world scale, just read straight off the fine buffer instead of a
+    // resampled grid, since worldgen has no settlements yet to drive a route grid.
+    let choke_r = (3 * (buf.width / 700).max(1)) as i32;
+    let pass_r = (buf.width / 700).max(3) as i32;
+    let smoothstep = |t: f32| { let t = t.clamp(0.0, 1.0); t * t * (3.0 - 2.0 * t) };
 
     // Pre-compute river cell set and coast proximity
     let mut is_river_cell = vec![false; total];
@@ -251,11 +289,24 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             // navigation is a natural entrepÃ´t where river and overland trade meet.
             let mut near_river_mouth = false;
             let mut near_estuary = false;
+            // 3c · the hinterland a river mouth drains, read straight off the flow-
+            // accumulation field (no distance scan needed — `acc[idx]` at the mouth
+            // cell already integrates its whole upstream basin). The MAX over every
+            // mouth found in the window, so a candidate a couple of cells off the
+            // exact mouth still reads that mouth's real size, not its own (near-zero,
+            // off-channel) accumulation.
+            let mut mouth_acc = 0u32;
             for dy in -3i32..=3 {
                 for dx in -3i32..=3 {
                     let ni = buf.widx(x as i32 + dx, y as i32 + dy);
-                    if is_river_mouth[ni] { near_river_mouth = true; }
-                    if is_estuary_mouth[ni] { near_estuary = true; }
+                    if is_river_mouth[ni] {
+                        near_river_mouth = true;
+                        if let Some(a) = acc { mouth_acc = mouth_acc.max(a[ni]); }
+                    }
+                    if is_estuary_mouth[ni] {
+                        near_estuary = true;
+                        if let Some(a) = acc { mouth_acc = mouth_acc.max(a[ni]); }
+                    }
                 }
             }
             let near_head_nav = (-2i32..=2).any(|dy| {
@@ -266,12 +317,53 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
                 (-3i32..=3).any(|dx| is_salt_lake_cell[buf.widx(x as i32 + dx, y as i32 + dy)])
             });
 
-            let trade_score = if near_estuary { 1.0 }        // drowned tidal port / delta entrepÃ´t
-                else if near_river_mouth { 0.92 }
-                else if near_coast && on_navigable { 0.90 }  // river port at the sea
+            // 3b Â· strait / isthmus â€” open sea on TWO OPPOSITE sides within
+            // `choke_r` cells (Constantinople, Malacca, Hormuz, Copenhagen). Pure
+            // local geometry, no routes or settlements needed, so it is available
+            // this early in the pipeline.
+            let sea_within = |dx: i32, dy: i32, r: i32| -> bool {
+                (1..=r).any(|k| {
+                    let ny = y as i32 + dy * k;
+                    if ny < 0 || ny >= buf.height as i32 { return false; }
+                    buf.terrain[buf.widx(x as i32 + dx * k, ny)] == 0
+                })
+            };
+            let is_strait = (sea_within(-1, 0, choke_r) && sea_within(1, 0, choke_r))
+                || (sea_within(0, -1, choke_r) && sea_within(0, 1, choke_r));
+
+            // 3b Â· mountain pass / saddle â€” a moderately high cell that is a local
+            // LOW along one axis between higher flanks (the Gotthard's economic
+            // history is one bridge relocating European trade). Sampled at `pass_r`
+            // world cells so the gap reads at the physical scale of a real pass
+            // rather than the ±14 m micro-relief dither every land cell carries.
+            let is_pass = if elev < 0.33 { false } else {
+                let elev_at = |wx: i32, wy: i32| -> f32 {
+                    let wy = wy.clamp(0, buf.height as i32 - 1);
+                    buf.elevation[buf.widx(wx, wy)]
+                };
+                let l = elev_at(x as i32 - pass_r, y as i32);
+                let r = elev_at(x as i32 + pass_r, y as i32);
+                let up = elev_at(x as i32, y as i32 - pass_r);
+                let dn = elev_at(x as i32, y as i32 + pass_r);
+                (elev < l && elev < r && (l.min(r) - elev) > 0.04)
+                    || (elev < up && elev < dn && (up.min(dn) - elev) > 0.04)
+            };
+
+            // 3c Â· scale the water-mouth rungs by the hinterland they drain: a river
+            // mouth draining a continent is Rotterdam, one draining 20 km of hillside
+            // is a fishing village. Floored at 0.5 so a genuinely small mouth still
+            // reads as SOME port rather than vanishing â€” only the top end (a world's
+            // largest basins) reaches the full rung.
+            let mouth_mult = 0.5 + 0.5 * smoothstep(mouth_acc as f32 / max_acc as f32);
+
+            let trade_score = if near_estuary { 1.0 * mouth_mult }   // drowned tidal port / delta entrepÃ´t
+                else if is_strait { 0.95 }                            // strait / isthmus chokepoint
+                else if near_river_mouth { 0.92 * mouth_mult }
+                else if near_coast && on_navigable { 0.90 * mouth_mult } // river port at the sea
                 else if near_coast && has_river { 0.85 }
-                else if near_confluence { 0.80 }             // confluence trade node
-                else if near_head_nav { 0.78 }               // fall-line entrepÃ´t
+                else if is_pass { 0.82 }                               // mountain pass / saddle
+                else if near_confluence { 0.80 }                       // confluence trade node
+                else if near_head_nav { 0.78 }                         // fall-line entrepÃ´t
                 else if near_salt { 0.76 }   // salt-lake shore: salt-trade town
                 else if on_navigable { 0.70 }                // navigable inland highway
                 else if near_coast { 0.6 }   // natural harbour / port
@@ -284,16 +376,19 @@ pub fn compute_habitability(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake])
             // sparsely and in smaller numbers (a multiplicative drag, not a wall).
             let disease_gate = 1.0 - 0.55 * (buf.disease_risk[idx] as f32 / 255.0);
 
+            let gates = temp_gate * winter_gate * cryo_gate * disease_gate;
+
             // --- Final score (gated by temperature viability) ---
             hab[idx] = ((climate_score * 0.40
                 + fertility_score * 0.20
                 + water_score * 0.20
                 + terrain_score * 0.10
-                + trade_score * 0.10) * temp_gate * winter_gate * cryo_gate * disease_gate).clamp(0.0, 1.0);
+                + trade_score * 0.10) * gates).clamp(0.0, 1.0);
+            trade[idx] = (trade_score * gates).clamp(0.0, 1.0);
         }
     }
 
-    hab
+    HabFields { hab, trade }
 }
 
 /// Copy a habitability score field into the world buffer (for the heatmap layer).
@@ -694,6 +789,276 @@ pub fn generate_settlements(
     settlements
 }
 
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3d â€” step 7a: the settlement-
+/// independent JUNCTION sites `compute_habitability_fields`'s trade ladder can now
+/// name (straits, isthmuses, mountain passes, great river mouths) but which the BASE
+/// pass (`generate_settlements`, local maxima of the full `hab` blend) can miss
+/// entirely â€” a river mouth beside better farmland is not a local maximum of `hab`,
+/// so it is discarded before the trade weight or the spacing rule are ever consulted
+/// (F2). Hormuz had no fresh water and no farmland at all; nothing in the base pass
+/// could ever place it.
+///
+/// Runs AFTER `generate_settlements` (so `existing` can be skipped) and BEFORE
+/// `sim_generate_provinces` (so the province partition seeds from the complete set,
+/// not twice). Additive and BOUNDED (`TRADE_SITES_MAX`) â€” the safety property that
+/// keeps this a handful of towns, not a flood along every coastline. Every site is
+/// sized modestly from the junction alone, never a food catchment â€” these sites
+/// exist because traffic passes, not because the land feeds them;
+/// `compute_political` (step 9) re-ranks by 0.30 route-centrality once real routes
+/// exist and gives them their real standing.
+pub fn generate_trade_sites(
+    buf: &WorldBuffer,
+    trade: &[f32],
+    existing: &[Settlement],
+    realism: f32,
+) -> Vec<Settlement> {
+    let w = buf.width;
+    let h = buf.height;
+    let d = realism.clamp(0.0, 1.0);
+    // Mirrors `generate_settlements`' own spacing/cap formula exactly, so a trade
+    // site's "close to its market town" distance is stated relative to the SAME base
+    // spacing the ordinary pass used, not a second, independent number.
+    let min_dist = ((w as f32 / (95.0 + 90.0 * (1.0 - d))) as u32).max(3) as i32;
+    let max_settlements = (180.0 + 820.0 * d) as usize;
+
+    // A port sits close to its market town â€” Ostia/Rome, Piraeus/Athens â€” precedent:
+    // `generate_settlements`' own `river_min_dist = min_dist * 0.5`.
+    let port_min_dist = ((min_dist as f32 * 0.6) as i32).max(2);
+    // A handful, not a flood â€” the bound that makes this slice additive.
+    let trade_sites_max = 24usize.min((max_settlements / 20).max(1));
+
+    const TRADE_SITE_MIN: f32 = 0.75;
+
+    let mut candidates: Vec<(usize, f32)> = Vec::new();
+    for y in 1..h - 1 {
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 1 { continue; }
+            // Belt-and-braces: `compute_habitability_fields`'s own `cryo_gate` already
+            // zeroes `trade` on an EF ice cap, but state the rule explicitly so it
+            // can never regress silently if the gate weighting ever changes.
+            if buf.koppen[idx] == 22 { continue; }
+            let score = trade[idx];
+            if score < TRADE_SITE_MIN { continue; }
+            let is_max = [(-1i32, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
+                .iter()
+                .all(|&(dx, dy)| {
+                    let ni = buf.widx(x as i32 + dx, y as i32 + dy);
+                    score >= trade[ni]
+                });
+            if is_max { candidates.push((idx, score)); }
+        }
+    }
+    candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+
+    let port_min_dist2 = port_min_dist * port_min_dist;
+    let mut placed: Vec<(u32, u32)> = existing.iter().map(|s| (s.x, s.y)).collect();
+    let mut out: Vec<Settlement> = Vec::new();
+    'outer: for (idx, score) in &candidates {
+        if out.len() >= trade_sites_max { break; }
+        let sx = (*idx % w as usize) as u32;
+        let sy = (*idx / w as usize) as u32;
+        for &(ex, ey) in &placed {
+            let mut dx = (sx as i32 - ex as i32).abs();
+            if dx > w as i32 / 2 { dx = w as i32 - dx; }
+            let dy = sy as i32 - ey as i32;
+            if dx * dx + dy * dy < port_min_dist2 { continue 'outer; }
+        }
+        placed.push((sx, sy));
+        // Seeded modestly from the junction alone â€” size comes later, from routes.
+        let population = (300.0 + 4200.0 * score.clamp(0.0, 1.0)) as u32;
+        let size = if population >= 5_000 { "town" } else { "village" };
+        let name = crate::sim::names::gen_name_epithet(sx, sy, w, h, 0);
+        out.push(Settlement {
+            id: format!("t-{}", out.len()),
+            x: sx, y: sy, name,
+            size: size.to_string(),
+            population,
+            score: *score,
+            culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
+            region: crate::sim::names::region_name(sx, sy, w, h),
+            site: "port".to_string(),
+        });
+    }
+    out
+}
+
+#[cfg(test)]
+mod trade_site_tests {
+    use super::*;
+    use crate::sim::world_buffer::ColumnSet;
+    use crate::db::schema;
+    use rusqlite::Connection;
+
+    fn tiny_buf(w: u32, h: u32) -> WorldBuffer {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap()
+    }
+
+    /// A synthetic world: a narrow desert isthmus of land between two open seas,
+    /// far from any farmland. The BASE pass must place nothing on it (no climate,
+    /// fertility or water score to speak of); the TRADE pass must place exactly one
+    /// town there, because it is a strait/isthmus chokepoint by pure geometry.
+    #[test]
+    fn a_strait_town_appears_where_no_farm_would() {
+        // A wide world so `generate_trade_sites`' own spacing (derived from world
+        // width) comfortably exceeds the isthmus's own footprint below — otherwise
+        // the spacing rule (correctly) tiles a long plateau of tied maxima into
+        // several sites instead of collapsing it to one, which is a property of
+        // the greedy spacing, not of the strait detector this test targets.
+        let w = 1200u32;
+        let h = 200u32;
+        let mut buf = tiny_buf(w, h);
+        // All sea, except a single-row land isthmus at x in [598,602), y = 100 —
+        // narrow enough that sea sits within `choke_r` on both north AND south —
+        // and a chunk of ordinary land far to the west (so the base pass has SOME
+        // farmland to place towns on, ruling out "no land generated at all").
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                buf.terrain[idx] = 0;
+                buf.elevation[idx] = 0.05;
+                buf.koppen[idx] = 4; // BWh hot desert everywhere (no farmland draw)
+                buf.temperature[idx] = 25.0;
+                buf.precipitation[idx] = 30.0;
+                buf.fertility[idx] = 0.02;
+                buf.distance_to_ocean[idx] = 0.5;
+                buf.disease_risk[idx] = 0;
+            }
+        }
+        let isthmus_y = h / 2;
+        for x in 598..602u32 {
+            let idx = buf.idx(x, isthmus_y);
+            buf.terrain[idx] = 1;
+            buf.distance_to_ocean[idx] = 0.0;
+        }
+        let rivers: Vec<River> = Vec::new();
+        let lakes: Vec<Lake> = Vec::new();
+        let base_hab = compute_habitability(&buf, &rivers, &lakes);
+        let base = generate_settlements(&buf, &base_hab, &rivers, 1, 0.55, None);
+        assert!(
+            base.iter().all(|s| !(598..602).contains(&s.x)),
+            "the base pass placed a settlement on bare desert isthmus land"
+        );
+
+        let fields = compute_habitability_fields(&buf, &rivers, &lakes, None);
+        let trade_sites = generate_trade_sites(&buf, &fields.trade, &base, 0.55);
+        let on_isthmus: Vec<_> = trade_sites.iter().filter(|s| (598..602).contains(&s.x)).collect();
+        assert_eq!(on_isthmus.len(), 1, "expected exactly one strait town on the isthmus, got {}", on_isthmus.len());
+        assert_eq!(on_isthmus[0].site, "port");
+    }
+
+    /// No trade site may ever land on Köppen EF (ice cap), on any world â€” the same
+    /// discipline `cryo_gate` already enforces for ordinary settlements.
+    #[test]
+    fn trade_sites_respect_the_cryosphere() {
+        let w = 200u32;
+        let h = 100u32;
+        let mut buf = tiny_buf(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                // A narrow polar isthmus (would otherwise register as a strait) sitting
+                // entirely on an EF ice cap.
+                let on_isthmus = (98..102).contains(&x);
+                buf.terrain[idx] = if on_isthmus { 1 } else { 0 };
+                buf.koppen[idx] = 22; // EF ice cap
+                buf.temperature[idx] = -35.0;
+                buf.elevation[idx] = 0.4;
+                buf.distance_to_ocean[idx] = if on_isthmus { 0.0 } else { 0.5 };
+                buf.fertility[idx] = 0.0;
+            }
+        }
+        let rivers: Vec<River> = Vec::new();
+        let lakes: Vec<Lake> = Vec::new();
+        let fields = compute_habitability_fields(&buf, &rivers, &lakes, None);
+        assert!(fields.trade.iter().all(|&t| t == 0.0), "trade must be zero everywhere on an EF world");
+        let trade_sites = generate_trade_sites(&buf, &fields.trade, &[], 0.55);
+        assert!(trade_sites.is_empty(), "a trade site was placed on Köppen EF ice cap");
+    }
+
+    /// The count must stay bounded even on a world RICH in candidates — a handful of
+    /// towns, never a flood along every coastline. A comb of dozens of narrow land
+    /// segments (each independently a strait/isthmus by the same geometry test the
+    /// first gate exercises) manufactures far more raw candidates than
+    /// `TRADE_SITES_MAX` allows, so the cap is exercised, not merely unreached.
+    #[test]
+    fn trade_sites_are_bounded() {
+        let w = 900u32;
+        let h = 60u32;
+        let mut buf = tiny_buf(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                // 4-wide land segments separated by 4-wide sea gaps, the whole way
+                // around the world — a comb of ~110 independent strait candidates.
+                let land = (x % 8) < 4;
+                buf.terrain[idx] = if land { 1 } else { 0 };
+                buf.koppen[idx] = 6; // BSh steppe: some trade draw, little farmland pull
+                buf.temperature[idx] = 20.0;
+                buf.precipitation[idx] = 200.0;
+                buf.fertility[idx] = 0.05;
+                buf.elevation[idx] = 0.05;
+                buf.distance_to_ocean[idx] = if land { 0.02 } else { 0.5 };
+                buf.disease_risk[idx] = 0;
+            }
+        }
+        let rivers: Vec<River> = Vec::new();
+        let lakes: Vec<Lake> = Vec::new();
+        let fields = compute_habitability_fields(&buf, &rivers, &lakes, None);
+        let base = generate_settlements(&buf, &fields.hab, &rivers, 1, 0.55, None);
+        let trade_sites = generate_trade_sites(&buf, &fields.trade, &base, 0.55);
+        let max_settlements = (180.0 + 820.0 * 0.55) as usize;
+        let cap = 24usize.min((max_settlements / 20).max(1));
+        assert!(trade_sites.len() <= cap, "{} trade sites exceeds the bound {cap}", trade_sites.len());
+        assert_eq!(trade_sites.len(), cap, "a candidate-rich world should actually bind the cap, not merely satisfy it");
+    }
+
+    /// The slice is additive: `generate_settlements`' own output must be bit-
+    /// identical whether or not the trade pass runs afterward.
+    #[test]
+    fn the_base_settlement_set_is_unchanged() {
+        let w = 200u32;
+        let h = 100u32;
+        let mut buf = tiny_buf(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                buf.terrain[idx] = if (20..180).contains(&x) { 1 } else { 0 };
+                buf.koppen[idx] = 8; // Csa Mediterranean, the cradle climate
+                buf.temperature[idx] = 18.0;
+                buf.precipitation[idx] = 700.0;
+                buf.fertility[idx] = 0.6;
+                buf.elevation[idx] = 0.15;
+                buf.distance_to_ocean[idx] = if (20..180).contains(&x) { 0.2 } else { 0.0 };
+            }
+        }
+        let rivers: Vec<River> = Vec::new();
+        let lakes: Vec<Lake> = Vec::new();
+        let hab_before = compute_habitability(&buf, &rivers, &lakes);
+        let base_before = generate_settlements(&buf, &hab_before, &rivers, 42, 0.55, None);
+
+        // Run the trade pass — must not read back into `buf` or mutate it.
+        let fields = compute_habitability_fields(&buf, &rivers, &lakes, None);
+        let _ = generate_trade_sites(&buf, &fields.trade, &base_before, 0.55);
+
+        let hab_after = compute_habitability(&buf, &rivers, &lakes);
+        let base_after = generate_settlements(&buf, &hab_after, &rivers, 42, 0.55, None);
+        assert_eq!(base_before.len(), base_after.len());
+        for (a, b) in base_before.iter().zip(base_after.iter()) {
+            assert_eq!(a.x, b.x);
+            assert_eq!(a.y, b.y);
+            assert_eq!(a.population, b.population);
+        }
+    }
+}
 
 
 

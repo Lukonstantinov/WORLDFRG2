@@ -9,6 +9,65 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-31 — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md`: slices 1-4, 6-7 built; 5 and 8 deliberately not
+
+Six of the plan's eight slices, all gated, `cargo test --lib` **369 pass, 0 fail** (30
+ignored), `earth_` unmoved (70.2%/39.0%, untouched by construction — none of this
+touches `step3_ocean_atmo/`/`step4_climate/`), dynamics healthy, `npx tsc --noEmit`
+clean.
+
+**Group A · province view.** Slice 1: `province_good_belt_masks` now shares one
+function (`sim::provinces::province_sample_geom`) with `get_province_terrain_crop`
+for its bounding box AND its world-cell sample stride, instead of centre-sampling the
+coarse province raster — the goods plate was ~24× coarser than the relief it sat over
+(F1). Also reports each good's real `area_km2`/`land_share` (nothing did before).
+Slice 2: merged the old separate "goods"/"quality" toggles into one plate (coverage
+already implied by a nonzero shaded value), dropped the true-to-scale locality square
+in favour of a core diamond everywhere (F5 — a 900 km staple region drawn true-to-scale
+over a 300 km province was reading as one flat block), deleted "Currently worked" (a
+strict subset of "Goods of the region"), and promoted a good's world rank out of small
+grey text into a `Badge`.
+
+**Group B · worldgen placement (slice 3, F2/F8).** `compute_habitability_fields`
+(3a) returns the trade ladder alongside habitability instead of discarding it, gains
+strait/isthmus (0.95) and mountain-pass/saddle (0.82) rungs (3b) ported from the
+existing coarse route-cost detectors at matching physical scale, and scales the three
+river-mouth rungs by flow accumulation at the mouth, floored at 0.5× so a small mouth
+still reads as *some* port (3c). Step 7a (`generate_trade_sites`, 3d) then places a
+BOUNDED (≤24), spaced set of junction sites the base local-maxima-of-habitability pass
+structurally cannot reach — a great port need not sit on the best farmland. Four gates,
+including a bit-identical check that the base settlement set is untouched. Slice 8
+(cost-grid betweenness) is explicitly **not built** — the plan's own instruction was to
+build it only if a rendered world shows the cheap detectors missing real junctions, and
+this session has no way to render one.
+
+**Group C · campaign trade cost (slice 4 only, F4).** A second reference world,
+`reference_world_large`, at the shipped `freight_per_day: 0.018` and a real trade
+horizon (world_w 3600, longest live route 324 days) instead of the harness's borrowed
+`0.01` over a ~630 km compact fixture. **Confirms F4's diagnosis was right**: freight
+over the large world's longest route comes to **5.83× wheat's base value** — well past
+Masschaele's ≥1.0 target — where the compact fixture could only ever show ~11%. The
+compact fixture's flat price/distance gradient is a blind instrument, not (necessarily)
+proof the model has none; slice 5 (repricing route-days by cost instead of path length,
+the plan's own "high risk" item) needs this instrument first and real tuning work this
+session did not attempt — deliberately deferred, not silently dropped.
+
+**Group D · colonies.** Slice 6 (F6): `ColonizeSite.belt` (serde-default empty, a true
+no-op for a pre-slice save) carries the site's own per-good physical yield potential;
+`create_market_colony` blends 65% site-belt / 35% founder-basket instead of a flat 60%
+photocopy of the metropolis. Slice 7 (F7): `colony_delivery_maturity` scales what a
+colony's seat actually receives from `province_land_pass`'s feedback edge by
+`colony_stage` (0.25 at stage 1 → 1.0 at stage 4, ordinary cities unaffected) — a
+stage-1 colony no longer inherits a full province's harvest the moment it exists; the
+undelivered share is a real administrative loss, never quietly retained.
+
+Deliberately not touched: slice 5 (route-days by cost — needs slice 4's instrument
+plus real freight-curve tuning, `econ_inheritance_rules_fragment_differently` has
+flipped on tuning like this before) and slice 8 (only build if 3's cheap detectors
+measure short on a rendered world).
+
+---
+
 ## 2026-08-20d — The two gates disagree about `COMFORT_IMPORT_FRAC`, and the one that won isn't about trade
 
 Follow-up to 20c, which closed by flagging that `COMFORT_IMPORT_FRAC` = 0.30 had no

@@ -1,7 +1,9 @@
 # Ports, Junctions, Provinces & Trade — fix plan
 
-**Status: proposed, nothing built.** Eight slices in four groups, ordered so each
-one's gate can be read before the next is written.
+**Status: slices 1-4 and 6-7 built (2026-08-31), gated, `cargo test --lib` clean.
+Slice 5 and slice 8 deliberately not built — see the end of this file and
+`docs/SCOREBOARD.md`'s 2026-08-31 entry.** Eight slices in four groups, ordered so
+each one's gate can be read before the next is written.
 
 | Group | Slices | Touches |
 |---|---|---|
@@ -525,3 +527,45 @@ Every slice from 3 down touches generation or the tick: run the dynamics test an
 placement (3) — per §8.23's rule that every cause found there was invisible in
 review and obvious in a hillshade crop. None of these touch `step3_ocean_atmo/` or
 `step4_climate/`, so the Earth gate cannot move; verify it anyway.
+
+---
+
+## Built (2026-08-31)
+
+Slices 1-4 and 6-7. Full account in `docs/SCOREBOARD.md`'s dated entry; the short
+version:
+
+- **1** — `province_good_belt_masks` and `get_province_terrain_crop` now share one
+  geometry function (`sim::provinces::province_sample_geom`), so the goods plate
+  samples at the relief plate's own world-cell fidelity instead of the coarse
+  province raster. Reports each good's `area_km2`/`land_share`.
+- **2** — merged "goods"/"quality" into one plate, dropped the true-to-scale
+  land-locality square (always a core diamond now), deleted "Currently worked",
+  promoted a good's world rank to a `Badge`.
+- **3** — `compute_habitability_fields` returns the trade ladder (3a), adds
+  strait/isthmus and mountain-pass/saddle rungs (3b), scales river-mouth rungs by
+  flow accumulation (3c); `generate_trade_sites` (step 7a, 3d) places a bounded,
+  spaced set of junction sites the base pass cannot reach. Four gates, run
+  `cargo test --lib settlements::` / `trade_site_tests`.
+- **4** — `reference_world_large` (a real trade horizon, the shipped
+  `freight_per_day`) confirmed F4's own diagnosis: freight over its longest route
+  is 5.83× wheat's base value, where the compact fixture could only ever show
+  ~11%. Printed only, no assertion changed, per the slice's own instruction.
+- **6** — `ColonizeSite.belt` (serde-default empty = old behaviour exactly);
+  `create_market_colony` blends 65% site-belt / 35% founder-basket.
+- **7** — `colony_delivery_maturity` scales `province_land_pass`'s delivery to a
+  colony seat by `colony_stage` (0.25 → 1.0); ordinary cities are maturity 1.0,
+  untouched.
+
+**Not built, on purpose:**
+
+- **5** (route-days by cost) — the plan's own "high risk" item, and it explicitly
+  wants slice 4 landed first as an honest instrument before any freight retuning.
+  Slice 4 is landed; the retuning itself — recalibrating `days_per_cell` from
+  Dijkstra cost instead of path length, and the F3 mid-campaign fallback fix — is
+  real follow-up work this session did not attempt. `econ_inheritance_rules_
+  fragment_differently` has flipped on tuning changes shaped exactly like this one
+  before (§8.15); do not tune it against the compact world.
+- **8** (cost-grid betweenness) — the plan says build it only if 3b's cheap local
+  detectors miss real junctions on a **rendered** world. This session has no way to
+  render one; leave it for a session that can look at the map.

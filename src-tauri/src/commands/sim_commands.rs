@@ -506,9 +506,17 @@ pub fn sim_run_all(
         .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
-    let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55, None);
-    settlements::write_habitability(&mut buf, &habitability);
+    let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
+    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
+    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+    // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
+    // maxima-of-habitability search structurally cannot find, since a great port need
+    // not sit on the best farmland. Runs after the base pass (so it can respect
+    // spacing from it) and before province generation.
+    generated_settlements.extend(settlements::generate_trade_sites(
+        &buf, &hab_fields.trade, &generated_settlements, 0.55,
+    ));
+    settlements::write_habitability(&mut buf, &hab_fields.hab);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
@@ -883,9 +891,17 @@ pub fn sim_run_all_from_terrain(
         .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
-    let habitability = settlements::compute_habitability(&buf, &extracted_rivers, &lakes);
-    let generated_settlements = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.55, None);
-    settlements::write_habitability(&mut buf, &habitability);
+    let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
+    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
+    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+    // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
+    // maxima-of-habitability search structurally cannot find, since a great port need
+    // not sit on the best farmland. Runs after the base pass (so it can respect
+    // spacing from it) and before province generation.
+    generated_settlements.extend(settlements::generate_trade_sites(
+        &buf, &hab_fields.trade, &generated_settlements, 0.55,
+    ));
+    settlements::write_habitability(&mut buf, &hab_fields.hab);
 
     // Phase 8: Biological — shark + shipworm waters + trade-good belts.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
@@ -975,13 +991,18 @@ pub fn sim_generate_settlements(
         .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
-    let habitability = settlements::compute_habitability(&buf, &river_data, &lakes);
-    let result = settlements::generate_settlements(
-        &buf, &habitability, &river_data, seed, realism.unwrap_or(0.55),
+    let hab_fields = settlements::compute_habitability_fields(&buf, &river_data, &lakes, Some(&hydro.acc));
+    let mut result = settlements::generate_settlements(
+        &buf, &hab_fields.hab, &river_data, seed, realism.unwrap_or(0.55),
         max_settlements.map(|c| c as usize));
+    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — see the run-all
+    // call sites for the full rationale.
+    result.extend(settlements::generate_trade_sites(
+        &buf, &hab_fields.trade, &result, realism.unwrap_or(0.55),
+    ));
 
     // Persist the habitability field so the Habitability heatmap layer can render.
-    settlements::write_habitability(&mut buf, &habitability);
+    settlements::write_habitability(&mut buf, &hab_fields.hab);
     let modified = buf.save(&conn, "Settlements & habitability")?;
 
     // Record the exact inputs this settlement set was generated from, in WORLD
@@ -1693,37 +1714,12 @@ pub fn get_province_terrain_crop(
     crate::sim::provinces::migrate_raster_sentinel(&mut raster);
     if raster.is_empty() || gw == 0 || gh == 0 || rw == 0 || rh == 0 { return Ok(None); }
 
-    // Bounding box in RASTER cells. The raster is already a small downsample
-    // (capped ~384 cells across in `sim_generate_provinces`), so a full scan for
-    // one province's footprint is cheap — no need for the two-pass coarse/fine
-    // search the frontend uses on the full-resolution province-ID mask.
-    let (mut minx, mut miny, mut maxx, mut maxy) = (rw as i64, rh as i64, -1i64, -1i64);
-    for ry in 0..rh {
-        for rx in 0..rw {
-            if raster[(ry * rw + rx) as usize] != province_id { continue; }
-            let (rxi, ryi) = (rx as i64, ry as i64);
-            if rxi < minx { minx = rxi; }
-            if ryi < miny { miny = ryi; }
-            if rxi > maxx { maxx = rxi; }
-            if ryi > maxy { maxy = ryi; }
-        }
-    }
-    if maxx < 0 { return Ok(None); }
-
-    // Raster bbox → world-cell bbox, padded a raster cell on each side so the crop
-    // doesn't clip the province's own edge.
-    let to_world_x = |rx: i64| -> i64 { (rx * gw as i64) / rw as i64 };
-    let to_world_y = |ry: i64| -> i64 { (ry * gh as i64) / rh as i64 };
-    let ox = to_world_x((minx - 1).max(0));
-    let oy = to_world_y((miny - 1).max(0));
-    let ex = (to_world_x((maxx + 2).min(rw as i64)) - 1).clamp(ox, gw as i64 - 1);
-    let ey = (to_world_y((maxy + 2).min(rh as i64)) - 1).clamp(oy, gh as i64 - 1);
-    let bw = (ex - ox + 1).max(1);
-    let bh = (ey - oy + 1).max(1);
-
-    let stride = (bw.max(bh) / (max_dim.max(1) as i64)).max(1) as i32;
-    let cols = (((bw - 1) / stride as i64) + 1).max(1) as u32;
-    let rows = (((bh - 1) / stride as i64) + 1).max(1) as u32;
+    // Bounding box + sample stride — shared with `province_good_belt_masks` (§F1 /
+    // slice 1) so the relief and goods plates can never independently drift apart.
+    let Some(geom) = crate::sim::provinces::province_sample_geom(
+        province_id, rw, rh, gw, gh, &raster, max_dim,
+    ) else { return Ok(None); };
+    let (ox, oy, stride, cols, rows) = (geom.ox as i64, geom.oy as i64, geom.stride, geom.cols, geom.rows);
 
     let world = db.cached_tiles_with_conn(&conn)?;
     let n = (cols * rows) as usize;

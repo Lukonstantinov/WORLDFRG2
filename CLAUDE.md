@@ -275,8 +275,8 @@ Run in order. Each phase depends on previous phases' data.
 | 5 | `sim_rivers_hydrology` | Priority-flood (Barnes et al. + ε) → rivers → lakes → aquatic ecology |
 | 6 | `sim_soil_fertility` | Soil types (12) → fertility → fisheries |
 | 6b | `sim_classify_biomes` | **41 ecological biomes** (needs rivers+lakes) — see §8.12 |
-| 7 | `sim_generate_settlements` | Habitability scoring → city placement |
-| 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements) |
+| 7 | `sim_generate_settlements` | Habitability scoring → city placement, then step 7a: bounded junction sites (straits/isthmuses/passes/great river mouths) the base local-maxima pass structurally cannot reach — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md` slice 3 |
+| 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements, incl. step 7a's junction sites) |
 | 8 | `sim_biological` | Shark + shipworm risk + trade-good belts + ORE DEPOSITS (§8.16; `gem_deposits` now means ORE DISTRICTS) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |

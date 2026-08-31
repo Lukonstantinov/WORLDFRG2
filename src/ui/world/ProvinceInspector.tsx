@@ -157,6 +157,10 @@ export function ProvinceInspector() {
   // §2.5 · the live exploitation reading per good (utilisation % + market share +
   // depletion), so the full goods list can show how hard each good is worked inline.
   const exploitMap = useMemo(() => new Map(exploit.map((g) => [g.good, g])), [exploit]);
+  // F1 (slice 1) · real extent per good — nothing reported this before. Keyed off
+  // the FULL fetched set (`goodMasks`), not the legend-filtered `shownMasks`, so a
+  // good's own row always states its own area regardless of what's toggled on the map.
+  const goodAreaMap = useMemo(() => new Map(goodMasks.map((m) => [m.good, m])), [goodMasks]);
   // Real quality (0..1): the province's full per-good grade (`good_quality`, best-patch
   // suitability) is the primary source — it differentiates every good; the top-6
   // shortlist rank and belt coverage are only fallbacks for pre-#9 worlds.
@@ -310,12 +314,11 @@ export function ProvinceInspector() {
             disabled={[
               ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
-              // "goods" (coverage areas) is live as soon as the belt masks have any
-              // covered cell; localities/beltGoods keep it live on worlds that carry them.
+              // "goods" (F5 · merged coverage + quality) is live as soon as the belt
+              // masks have any covered cell; localities/beltGoods keep it live on
+              // worlds that carry them.
               ...(goodMasks.length > 0 || beltGoods.length > 0 || (potential?.localities.length ?? 0) > 0
                 ? [] : (["goods"] as PlateKey[])),
-              // "quality" needs the belt values, i.e. the masks specifically.
-              ...(goodMasks.length > 0 ? [] : (["quality"] as PlateKey[])),
               ...((potential?.deposits.length ?? 0) > 0 ? [] : (["deposits"] as PlateKey[])),
             ]} />
         </div>
@@ -323,7 +326,7 @@ export function ProvinceInspector() {
         {/* #9 · goods legend + filter — the colour code of each surface good, click ONE
             to ISOLATE it (see only that good's best-quality area); click it again to show
             all. Only when the "goods" plate is on and there are belt goods. */}
-        {(plates.includes("goods") || plates.includes("quality")) && beltGoods.length > 0 && (
+        {plates.includes("goods") && beltGoods.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5, alignItems: "center" }}>
             <span style={{ fontSize: 10, color: T.inkFaint, marginRight: 2 }}>Goods:</span>
             {beltGoods.map((g) => {
@@ -480,26 +483,10 @@ export function ProvinceInspector() {
               )}
             </Section>
 
-            {/* Currently worked — the LIVE production (§2.5), if any. */}
-            {land && exploit.length > 0 && (
-              <Section title="Currently worked">
-                {exploit.map((g) => (
-                  <div key={g.good} style={{ marginBottom: 5 }}>
-                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <span style={{ width: 132, color: T.ink }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
-                      <span style={{ color: T.inkMid, fontSize: 12 }}>{fmt(g.actual)}/yr</span>
-                      <span style={{ flex: 1 }} />
-                      <span style={{ color: T.inkDim, fontSize: 12 }} title="share leaving the province via trade">
-                        {Math.round(g.market_share * 100)}% to market
-                      </span>
-                    </div>
-                    <MeterLabel frac={Math.min(1, g.exploitation)} warn={g.exploitation > 1}
-                      label={`${Math.round(g.exploitation * 100)}% worked` +
-                        (g.depletion > 0.02 ? ` · ${Math.round(g.depletion * 100)}% depleted` : "")} />
-                  </div>
-                ))}
-              </Section>
-            )}
+            {/* F5 (slice 2) · "Currently worked" is deleted — it was a strict subset
+                of "Goods of the region" below, which already prints
+                `{actual}/yr of ~{potential}/yr · {exploitation}% worked ·
+                {market_share}% to market` per good, plus potential and world rank. */}
 
             {/* #9 · POTENTIAL & DEPOSITS — every good the land could yield (richest
                 first), so a province producing nothing still shows what's there. */}
@@ -549,6 +536,7 @@ export function ProvinceInspector() {
                   {sorted.map((g) => {
                     const q = qualOf(g);
                     const pg = goodQ.get(g.good);
+                    const area = goodAreaMap.get(g.name);
                     return (
                       <div key={g.good} style={{ marginBottom: 4, opacity: g.actual > 1e-4 ? 1 : 0.94 }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -558,9 +546,12 @@ export function ProvinceInspector() {
                           {g.is_deposit && g.workings > 0 ? (
                             <span style={{ color: T.inkDim, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
                           ) : pg?.rank ? (
-                            <span style={{ color: T.inkDim, fontSize: 11 }}>
-                              {pg.rank === 1 ? <b style={{ color: T.gold }}>finest in the world</b> : `#${pg.rank} of ${pg.of}`}
-                            </span>
+                            // F5 (slice 2) · promoted out of small grey text — a
+                            // province's world rank in a good is the single most
+                            // legible economic fact it carries.
+                            pg.rank === 1
+                              ? <Badge tone="gold">finest in the world</Badge>
+                              : <Badge tone="neutral">#{pg.rank} of {pg.of}</Badge>
                           ) : null}
                           <span style={{ flex: 1 }} />
                           <span style={{ color: T.inkFaint, fontSize: 11 }}>
@@ -573,6 +564,14 @@ export function ProvinceInspector() {
                             })()}
                           </span>
                         </div>
+                        {/* F1 (slice 1) · the good's real extent — nothing reported
+                            this before. Only for a belt good (a deposit's extent is
+                            already stated as its own workings ×/depth above). */}
+                        {!g.is_deposit && area && area.cells > 0 && (
+                          <div style={{ color: T.inkFaint, fontSize: 11, marginBottom: 1 }}>
+                            {fmt(area.area_km2)} km² · {Math.round(area.land_share * 100)}% of the province's land
+                          </div>
+                        )}
                         {(() => {
                           const ex = exploitMap.get(g.good);
                           // For a WORKED good, the meter reads utilisation (how hard the

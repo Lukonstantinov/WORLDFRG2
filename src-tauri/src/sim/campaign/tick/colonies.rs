@@ -1480,7 +1480,40 @@ impl CampaignSim {
     pub(crate) fn create_market_colony(&mut self, founder: usize, site: &ColonizeSite,
                             backers: Vec<(u8, u32, f32)>, seed_pop: f32) -> usize {
         let ng = self.goods.len();
-        let base_per_capita: Vec<f32> = self.hubs[founder].base_per_capita.iter().map(|v| v * 0.6).collect();
+        // F6 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6) — the site was
+        // CHOSEN for its resources (`trade_value` dominates the scoring in
+        // `compute_colonizable_sites`); a colony that then produces a flat 60% of
+        // whatever the METROPOLIS produced ignores the very reason the spot was
+        // picked. `site.belt` is a real per-good 0..1 physical yield potential at
+        // the site itself (empty on a pre-slice-6 save — a true no-op, the founder-
+        // basket fallback below is exactly the old behaviour). Blended, not a
+        // straight replacement: a colony still needs SOME of everything a
+        // settlement needs (a smith, a weaver) even on a site whose belt names only
+        // one or two goods — `try_found_house_outpost`'s single-commodity Kontor is
+        // the correct model for a post that exists to work ONE cargo; a settlement
+        // colony is a town, not a factory.
+        let base_per_capita: Vec<f32> = if site.belt.len() == ng {
+            let founder_bpc = &self.hubs[founder].base_per_capita;
+            let belt_sum: f32 = site.belt.iter().sum();
+            (0..ng).map(|g| {
+                let from_founder = founder_bpc[g] * 0.6;
+                if belt_sum > 1e-3 {
+                    // Reallocate the SAME total output the founder-basket approach
+                    // would seed, but toward the goods this site's own belt names —
+                    // the site's product mix, not its production LEVEL (which the
+                    // founder's own basket scale still anchors).
+                    let total: f32 = founder_bpc.iter().map(|v| v * 0.6).sum();
+                    let from_site = total * (site.belt[g] / belt_sum);
+                    // Blend rather than replace: a colony still needs a little of
+                    // everything a town needs, not only its named export.
+                    from_founder * 0.35 + from_site * 0.65
+                } else {
+                    from_founder
+                }
+            }).collect()
+        } else {
+            self.hubs[founder].base_per_capita.iter().map(|v| v * 0.6).collect()
+        };
         let pop = seed_pop.max(1.0);
         let production: Vec<f32> = base_per_capita.iter().map(|v| v * pop).collect();
         let id = 100_000 + self.hubs.len() as u32;

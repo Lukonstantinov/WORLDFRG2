@@ -171,6 +171,80 @@ pub fn migrate_raster_sentinel(vals: &mut [u32]) {
     for v in vals.iter_mut() { if *v == 65535 { *v = NO_PROVINCE; } }
 }
 
+/// Shared province-raster → world-cell sample geometry — the bounding box + stride
+/// both `get_province_terrain_crop` (relief) and `province_good_belt_masks` (goods)
+/// build their sampled grid from. PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 1 /
+/// F1: the two plates used to sample at wildly different resolutions (a raster block
+/// vs a real world-cell stride), so a belt read ~24× coarser than the relief under
+/// it. Routing BOTH through this one function is what makes them structurally unable
+/// to drift apart again, rather than merely copy-pasted to agree today.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct ProvinceSampleGeom {
+    pub ox: i32,
+    pub oy: i32,
+    pub stride: i32,
+    pub cols: u32,
+    pub rows: u32,
+    /// The padded world-cell bounding box's inclusive far corner — `ox+bw-1` /
+    /// `oy+bh-1`. Exposed so a full-resolution scan of the same box (as opposed to
+    /// the strided sample grid `cols × rows` covers) can share this exact box too.
+    pub ex: i32,
+    pub ey: i32,
+}
+
+pub fn province_sample_geom(
+    province_id: u32,
+    rw: u32, rh: u32, gw: u32, gh: u32, raster: &[u32],
+    max_dim: u32,
+) -> Option<ProvinceSampleGeom> {
+    if raster.is_empty() || rw == 0 || rh == 0 || gw == 0 || gh == 0 { return None; }
+
+    // Bounding box in RASTER cells.
+    let (mut minx, mut miny, mut maxx, mut maxy) = (rw as i64, rh as i64, -1i64, -1i64);
+    for ry in 0..rh {
+        let row = (ry * rw) as usize;
+        for rx in 0..rw {
+            if raster[row + rx as usize] != province_id { continue; }
+            let (rxi, ryi) = (rx as i64, ry as i64);
+            if rxi < minx { minx = rxi; }
+            if ryi < miny { miny = ryi; }
+            if rxi > maxx { maxx = rxi; }
+            if ryi > maxy { maxy = ryi; }
+        }
+    }
+    if maxx < 0 { return None; }
+
+    // Raster bbox → world-cell bbox, padded a raster cell on each side so the crop
+    // doesn't clip the province's own edge.
+    let to_world_x = |rx: i64| -> i64 { (rx * gw as i64) / rw as i64 };
+    let to_world_y = |ry: i64| -> i64 { (ry * gh as i64) / rh as i64 };
+    let ox = to_world_x((minx - 1).max(0));
+    let oy = to_world_y((miny - 1).max(0));
+    let ex = (to_world_x((maxx + 2).min(rw as i64)) - 1).clamp(ox, gw as i64 - 1);
+    let ey = (to_world_y((maxy + 2).min(rh as i64)) - 1).clamp(oy, gh as i64 - 1);
+    let bw = (ex - ox + 1).max(1);
+    let bh = (ey - oy + 1).max(1);
+
+    let stride = (bw.max(bh) / (max_dim.max(1) as i64)).max(1) as i32;
+    let cols = (((bw - 1) / stride as i64) + 1).max(1) as u32;
+    let rows = (((bh - 1) / stride as i64) + 1).max(1) as u32;
+
+    Some(ProvinceSampleGeom { ox: ox as i32, oy: oy as i32, stride, cols, rows, ex: ex as i32, ey: ey as i32 })
+}
+
+/// The province-raster membership test shared by every consumer of
+/// `province_sample_geom`: does WORLD cell `(wx, wy)` belong to `province_id`,
+/// mapped back through the same fractional raster scaling the geometry itself uses.
+#[inline]
+pub fn province_raster_contains(
+    wx: u32, wy: u32, province_id: u32,
+    rw: u32, rh: u32, gw: u32, gh: u32, raster: &[u32],
+) -> bool {
+    let rx = ((wx as u64 * rw as u64) / gw as u64).min(rw as u64 - 1) as u32;
+    let ry = ((wy as u64 * rh as u64) / gh as u64).min(rh as u64 - 1) as u32;
+    raster[(ry * rw + rx) as usize] == province_id
+}
+
 /// Same, for the RLE `[val, count, val, count, …]` list — only the even (value) slots
 /// are ids, so a run length that happens to equal 65535 is left alone.
 pub fn migrate_rle_sentinel(rle: &mut [u32]) {

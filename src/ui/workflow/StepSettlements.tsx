@@ -66,7 +66,12 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       const cities = result.settlements.filter((s) => s.size === "city").length;
       const towns = result.settlements.filter((s) => s.size === "town").length;
       const villages = result.settlements.filter((s) => s.size === "village").length;
-      setStatus(`${result.settlements.length} sites: ${capitals} capitals, ${cities} cities, ${towns} towns, ${villages} villages`);
+      // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+      // (straits, isthmuses, passes, great river mouths) the base pass can't reach,
+      // reported separately so a handful of new ports is visible, not silent.
+      const ports = result.settlements.filter((s) => s.site === "port").length;
+      setStatus(`${result.settlements.length} sites: ${capitals} capitals, ${cities} cities, ${towns} towns, ${villages} villages`
+        + (ports > 0 ? ` (incl. ${ports} trade junction${ports === 1 ? "" : "s"})` : ""));
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };

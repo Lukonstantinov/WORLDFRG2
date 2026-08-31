@@ -415,14 +415,26 @@ impl CampaignSim {
                 && !self.houses[house_holder as usize].defunct;
             if !house_holds && house_holder >= 0 { self.prov_holder_house[p] = -1; }
             if let Some(seat) = holder {
+                // F7 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 7) · a young
+                // colony should not inherit a full province's harvest on its FIRST
+                // land pass: `province_demography_pass` fills an unsettled province's
+                // rural pool to carrying capacity with no member check, so a colony
+                // founded there becomes the province's only administering hub and
+                // drew the whole thing in immediately. Scale what actually reaches
+                // the seat by colony maturity — a quarter at stage 1, the full share
+                // by stage 4 — continuous, so no special case anywhere else touches
+                // `province_seat_hub`. Ordinary cities (`colony_kind != 1`) are
+                // maturity 1.0, unaffected.
+                let maturity = self.colony_delivery_maturity(seat);
                 // The land still physically feeds the seat city either way — only the
                 // MONETARY dues redirect to a house holder.
-                let to_market = (surplus - collected).max(0.0);
+                let to_market = (surplus - collected).max(0.0) * maturity;
                 if let Some(fg) = food_good {
                     if fg < self.goods.len() {
                         stock_add_ungraded(&mut self.hubs[seat].stock, fg, to_market);
                     }
                 }
+                let collected = collected * maturity;
                 if house_holds {
                     self.houses[house_holder as usize].wealth += collected;
                 } else {
@@ -878,6 +890,21 @@ impl CampaignSim {
             if best.map(|(_, bp)| pop > bp).unwrap_or(true) { best = Some((h, pop)); }
         }
         best.map(|(h, _)| h)
+    }
+
+    /// F7 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 7) · what share of a
+    /// province's surplus/dues actually reaches hub `seat`, once colony maturity is
+    /// accounted for. 1.0 for any ordinary hub (`colony_kind != 1`) — this only ever
+    /// throttles a genuine settlement colony, never touches an established city.
+    pub(crate) fn colony_delivery_maturity(&self, seat: usize) -> f32 {
+        let Some(h) = self.hubs.get(seat) else { return 1.0 };
+        if h.colony_kind != 1 { return 1.0; }
+        match h.colony_stage {
+            0 | 1 => 0.25,
+            2 => 0.50,
+            3 => 0.75,
+            _ => 1.0,
+        }
     }
 
     /// A province's display name — its seat city's, falling back to its culture. The

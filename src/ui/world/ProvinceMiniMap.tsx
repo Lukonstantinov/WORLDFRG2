@@ -103,16 +103,17 @@ function BuildingGlyph({ kind, s }: { kind: number; s: number }) {
 }
 
 /** The plates, bottom-up. `relief` is the ground everything else reads against. */
-export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods" | "quality" | "deposits";
+export type PlateKey = "relief" | "water" | "landuse" | "tenure" | "holdings" | "borders" | "goods" | "deposits";
 export const PLATE_LABEL: Record<PlateKey, string> = {
   relief: "relief", water: "water", landuse: "land use",
   tenure: "tenure", holdings: "holdings", borders: "borders",
-  // Three DISTINCT goods plates, mirroring the main map (§8.19): "goods" = the belt
-  // COVERAGE as areas (where a good can grow), "quality" = the belt's absolute value
-  // shaded as a wash, "deposits" = the ore/mineral workings where they actually sit.
-  goods: "goods", quality: "quality", deposits: "deposits",
+  // F5 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 2) merged the old separate
+  // "goods"/"quality" toggles into one plate — coverage AND the belt's own absolute
+  // value shaded into it are the same layer now, so there is nothing left to toggle
+  // independently. `deposits` stays its own plate: different geology, different symbol.
+  goods: "goods", deposits: "deposits",
 };
-export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders"];
+export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders", "goods"];
 
 /** Land-use classes, with the colour each dithered cell takes. */
 const LANDUSE = [
@@ -498,45 +499,37 @@ export function ProvinceMiniMap({
               fill="#4a90c4" opacity={0.8} />
           ) : null)}
 
-        {/* 6a · GOODS COVERAGE — the belt as AREAS, clipped to the province footprint,
-               sampled from the SAME goods tile column the main map draws (§8.19). One
-               filled cell per sampled footprint cell the good's belt reaches — so a
-               world with no localities still shows real areas, not emoji. Drawn UNDER
-               the borders/holdings so the survey marks stay legible on top. */}
-        {on("goods") && goodMasks.map((m) => {
+        {/* 6a · GOODS — coverage AND quality as ONE plate (F5 / slice 2 merged the old
+               separate toggles: the belt's own absolute value already carries "can it
+               grow here" at v=0 and "is it fine here" at v>0, so shading by it is
+               strictly more informative than a flat coverage fill on its own).
+               F1 / slice 1: sampled at the SAME world-cell fidelity the relief crop
+               uses (`m.ox/oy/stride/cols/rows`), not the coarse province raster, so a
+               belt's edge reads against the real coastline under it instead of a
+               24×-coarser block grid. Drawn UNDER the borders/holdings so the survey
+               marks stay legible on top. */}
+        {on("goods") && geo && goodMasks.map((m) => {
           const col = GOOD_DEFS.find((d) => d.name === m.good)?.color ?? "#56c8d8";
+          const rectSize = raster
+            ? Math.max((m.stride * raster.w) / raster.gridW, (m.stride * raster.h) / raster.gridH)
+            : 0;
+          const pts: { lx: number; ly: number; v: number }[] = [];
+          for (let r = 0; r < m.rows; r++) {
+            for (let c = 0; c < m.cols; c++) {
+              const v = m.q[r * m.cols + c];
+              if (v < GOODS_COVERAGE_MIN) continue;
+              const wx = m.ox + c * m.stride, wy = m.oy + r * m.stride;
+              const [lx, ly] = geo.toLocal(wx, wy);
+              pts.push({ lx, ly, v });
+            }
+          }
           return (
             <g key={`gc-${m.good}`}>
-              {cells.map(([rx, ry], i) => {
-                const bx = rx - m.rx0, by = ry - m.ry0;
-                if (bx < 0 || by < 0 || bx >= m.rw || by >= m.rh) return null;
-                if (m.q[by * m.rw + bx] < GOODS_COVERAGE_MIN) return null;
-                return (
-                  <rect key={`gc${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
-                    fill={col} opacity={0.42} />
-                );
-              })}
-            </g>
-          );
-        })}
-        {/* 6a-q · GOODS QUALITY — the same cells shaded by the belt's own ABSOLUTE value
-               (never per-good normalised, D10): the province-plate twin of the main map's
-               quality wash. A separate plate so "can it grow here" and "is it fine here"
-               read independently. */}
-        {on("quality") && goodMasks.map((m) => {
-          const col = GOOD_DEFS.find((d) => d.name === m.good)?.color ?? "#56c8d8";
-          return (
-            <g key={`gq-${m.good}`}>
-              {cells.map(([rx, ry], i) => {
-                const bx = rx - m.rx0, by = ry - m.ry0;
-                if (bx < 0 || by < 0 || bx >= m.rw || by >= m.rh) return null;
-                const v = m.q[by * m.rw + bx];
-                if (v < GOODS_COVERAGE_MIN) return null;
-                return (
-                  <rect key={`gq${i}`} x={rx - ox} y={ry - oy} width={stride * 1.05} height={stride * 1.05}
-                    fill={col} opacity={0.15 + 0.55 * (v / 255)} />
-                );
-              })}
+              {pts.map((p, i) => (
+                <rect key={`gc${i}`} x={p.lx - rectSize / 2} y={p.ly - rectSize / 2}
+                  width={rectSize * 1.05} height={rectSize * 1.05}
+                  fill={col} opacity={0.18 + 0.55 * (p.v / 255)} />
+              ))}
             </g>
           );
         })}
@@ -604,35 +597,28 @@ export function ProvinceMiniMap({
             colour language the rest of the app already uses for a good. */}
         {on("goods") && localities.length > 0 && raster && (() => {
           const clipId = `pmm-prov-${province.id}`;
-          // A good whose BELT MASK is present already has its area drawn, cell by
-          // cell, by plate 6a above. Drawing its locality as a true-to-scale square
-          // on top is then both redundant and actively misleading: the size ladder
-          // is in km (a staple region is 900 km, GOODS_LOCALITIES_PLAN §2.1) while a
-          // province is 200-400 km across, so the square covered the entire plate
-          // and the province read as one flat block — the "large squares" the belt
-          // mask was introduced to replace. Where a mask exists the locality is
-          // reduced to what only it can say: a CORE marker at the real cell, plus
-          // its name. Where no mask exists (a world generated before the belt
-          // column, or a good with no belt here) the full square is still the
-          // honest reading and is kept.
-          const masked = new Set(goodMasks.filter((m) => m.cells > 0).map((m) => m.good));
-          // A land square's true span is safe to draw whole — the footprint clip
-          // bounds it. A SEA one has no clip (it is outside the province by
-          // definition, D4), and a 400 km bank drawn true-to-scale would wash over
-          // the whole plate, so the offshore mark is capped to read as an annotation.
-          // The real span is never hidden: the tooltip states it in km.
+          // F5 (slice 2) · the true-to-scale LAND square is gone. The size ladder is
+          // in km (a staple region is 900 km, GOODS_LOCALITIES_PLAN §2.1) while a
+          // province is 200-400 km across, so a land square always covered the whole
+          // plate and the province read as one flat block. Every land locality is now
+          // a CORE marker at its real cell, plus its name — the same reduction slice 6
+          // already applied wherever a belt mask happened to be present; F1's fix
+          // (masks now sample at real world-cell fidelity) makes that the honest
+          // reading everywhere, not just when a mask query happened to return one.
+          // A SEA one has no province footprint to clip to (it is outside the
+          // province by definition, D4), so it stays a small dashed annotation,
+          // capped well below its true span — the real span is stated in the tooltip.
           const half = (l: ProvinceLocalityDot) => {
             const s = Math.max(stride * 0.7, (l.radius_km * raster.w) / KM_EQUATOR);
-            return l.sea ? Math.min(s, stride * 4) : s;
+            return Math.min(s, stride * 4);
           };
           const colorOf = (good: string) =>
             GOOD_DEFS.find((d) => d.name === good)?.color ?? "#56c8d8";
-          const land = localities.filter((l) => !l.sea && !masked.has(l.good));
           const sea = localities.filter((l) => l.sea);
-          // Cores: the locality's real position for a good whose area plate 6a has
-          // already drawn. Small, fixed-size and unclipped-by-scale, so it reads as
-          // a survey mark on the belt rather than as a second area.
-          const cores = localities.filter((l) => !l.sea && masked.has(l.good));
+          // Cores: the locality's real position, drawn on top of plate 6a's belt
+          // area. Small, fixed-size and unclipped-by-scale, so it reads as a survey
+          // mark on the belt rather than as a second area.
+          const cores = localities.filter((l) => !l.sea);
           const square = (l: ProvinceLocalityDot, key: string, dashed: boolean) => {
             const [lx, ly] = toLocal(l.x, l.y);
             const s = half(l);
@@ -666,7 +652,6 @@ export function ProvinceMiniMap({
                 ))}
               </clipPath>
               <g clipPath={`url(#${clipId})`}>
-                {land.map((l, i) => square(l, `ll${i}`, false))}
                 {cores.map((l, i) => {
                   const [lx, ly] = toLocal(l.x, l.y);
                   const r = stride * 0.9;
@@ -816,7 +801,7 @@ export function PlateToggles({ plates, setPlates, disabled = [] }: {
   /** Plates with no data behind them, shown greyed rather than hidden. */
   disabled?: PlateKey[];
 }) {
-  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods", "quality", "deposits"];
+  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods", "deposits"];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
       {keys.map((k) => {

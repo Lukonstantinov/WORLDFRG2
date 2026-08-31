@@ -1214,110 +1214,176 @@ pub fn compute_good_belt_masks(
     Ok(out)
 }
 
-/// One good's belt SAMPLED to a province, at the province raster's own resolution —
-/// the province-plate counterpart of `compute_good_belt_masks`. The province survey
-/// plate (`ProvinceMiniMap`) draws its layers cell-by-cell over the province RASTER
-/// (not the full grid), so the mask is returned at that resolution: for each raster
-/// cell of this province, the belt value at that cell's world position. The plate then
-/// fills the cell for COVERAGE (value ≥ `COVERAGE_MIN_U8`) and shades it for QUALITY.
+/// One good's belt SAMPLED to a province, at the SAME resolution the relief plate
+/// crops at (`get_province_terrain_crop`) — PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md
+/// slice 1 / F1. The old version read the province RASTER (~56 km blocks, capped
+/// 768 across the whole world) and centre-sampled ONE world cell per block, so a
+/// 200–400 km province drew its goods 4–7 blocks wide under a relief plate sampling
+/// the same box at up to 130 world cells across — the goods layer was ~24× coarser
+/// than the ground it sat on. This now uses the province raster ONLY to find the
+/// bounding box (exactly as the terrain crop does), then reads real WORLD cells at a
+/// `max_dim` stride inside it, so the two plates share one fidelity.
 ///
 /// Unlike the localities/emoji path this reads the `goods` TILE COLUMN directly, so it
 /// works on EVERY world — including one generated before goods-localities existed — and
 /// needs no running campaign (it is a pure world query, like `get_province_terrain_crop`).
-/// That is the whole point: the belt is the same data the MAIN MAP draws as areas, so
-/// the province view can show the same areas rather than falling back to symbols.
 #[derive(Debug, Serialize)]
 pub struct ProvinceGoodMask {
     pub good: String,
-    /// Bounding box in PROVINCE-RASTER cells (the `ProvinceRaster` the plate holds).
-    pub rx0: u32,
-    pub ry0: u32,
-    /// Box dimensions in raster cells; `q` is row-major over `rw × rh`.
-    pub rw: u32,
-    pub rh: u32,
-    /// Belt value 0..255 at each raster cell (0 = not covered / not in the province).
-    /// Never per-good normalised — the same absolute scale the main map's quality wash
-    /// uses (§8.19 D10), so a good's colour means the same here as there.
+    /// World-cell origin of the sample grid (matches `ProvinceTerrainCrop.ox/oy`, so
+    /// the frontend can position both plates through the same world→local transform).
+    pub ox: i32,
+    pub oy: i32,
+    /// World cells between samples.
+    pub stride: i32,
+    pub cols: u32,
+    pub rows: u32,
+    /// Belt value 0..255 at each SAMPLED world cell, row-major over `cols × rows`
+    /// (0 = not covered / not in the province). Never per-good normalised — the same
+    /// absolute scale the main map's quality wash uses (§8.19 D10).
     pub q: Vec<u8>,
-    /// Covered raster cells, so the caller can tell an empty mask from a present one.
+    /// Sampled cells covered (`q >= COVERAGE_MIN_U8`), so the caller can tell an
+    /// empty mask from a present one.
     pub cells: u32,
+    /// F1 · the good's real extent within this province — nothing reported this
+    /// before. A latitude-aware km² sum over every FULL-RESOLUTION world cell
+    /// (not the sampled grid above) whose belt clears `COVERAGE_MIN_U8` and whose
+    /// world cell falls inside the province's own raster footprint.
+    pub area_km2: u32,
+    /// Fraction of the province's own land (full-resolution cell count inside the
+    /// raster footprint) the belt reaches.
+    pub land_share: f32,
 }
 
 #[tauri::command]
 pub fn province_good_belt_masks(
     province_id: u32,
     goods: Vec<String>,
+    max_dim: Option<u32>,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<ProvinceGoodMask>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+    province_good_belt_masks_impl(&conn, &db, province_id, &goods, max_dim)
+}
+
+/// The pure body of `province_good_belt_masks`, split out so it can be exercised in a
+/// test against a `WorldDb::in_memory()` fixture without a Tauri `State` (which has no
+/// public constructor outside the app runtime).
+pub(crate) fn province_good_belt_masks_impl(
+    conn: &rusqlite::Connection,
+    db: &WorldDb,
+    province_id: u32,
+    goods: &[String],
+    max_dim: Option<u32>,
+) -> Result<Vec<ProvinceGoodMask>, String> {
+    let grid_w: u32 = metadata::get_meta(conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+    let grid_h: u32 = metadata::get_meta(conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 || goods.is_empty() { return Ok(vec![]); }
 
-    // The province raster — the same downsampled partition the plate renders on.
+    // The province raster — used ONLY for the bounding box and the membership test,
+    // exactly as `get_province_terrain_crop` uses it. Real sampling below is at the
+    // WORLD grid's own resolution.
     let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
-        metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
+        metadata::get_meta(conn, "province_raster").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or((0, 0, 0, 0, Vec::new()));
     crate::sim::provinces::migrate_raster_sentinel(&mut raster);
     if raster.is_empty() || rw == 0 || rh == 0 || gw == 0 || gh == 0 { return Ok(vec![]); }
 
-    // Province bounding box in raster cells.
-    let (mut rx0, mut ry0, mut rx1, mut ry1) = (rw, rh, 0u32, 0u32);
-    let mut any = false;
-    for ry in 0..rh {
-        let row = (ry * rw) as usize;
-        for rx in 0..rw {
-            if raster[row + rx as usize] == province_id {
-                any = true;
-                rx0 = rx0.min(rx); rx1 = rx1.max(rx);
-                ry0 = ry0.min(ry); ry1 = ry1.max(ry);
-            }
-        }
-    }
-    if !any { return Ok(vec![]); }
-    let box_w = rx1 - rx0 + 1;
-    let box_h = ry1 - ry0 + 1;
+    // Bounding box + sample stride — the SAME shared geometry `get_province_terrain_
+    // crop` builds (§F1 / slice 1), so the goods and relief plates cannot drift apart.
+    let max_dim = max_dim.unwrap_or(130).max(1);
+    let Some(geom) = crate::sim::provinces::province_sample_geom(
+        province_id, rw, rh, gw, gh, &raster, max_dim,
+    ) else { return Ok(vec![]); };
+    let (ox, oy, stride, cols, rows) = (geom.ox as i64, geom.oy as i64, geom.stride, geom.cols, geom.rows);
 
-    let world = db.cached_tiles_with_conn(&conn)?;
-    let specs = crate::commands::goods_commands::load_world_goods(&conn);
+    // Membership test: map a WORLD cell back to the raster it was built from.
+    let in_province = |wx: u32, wy: u32| -> bool {
+        crate::sim::provinces::province_raster_contains(wx, wy, province_id, rw, rh, gw, gh, &raster)
+    };
+
+    let world = db.cached_tiles_with_conn(conn)?;
+    let specs = crate::commands::goods_commands::load_world_goods(conn);
     use crate::sim::goods_spec::Distribution;
 
-    // The world cell at the CENTRE of a raster cell's block — one belt read per member
-    // cell (the plate is a coarse survey sketch, so centre-sampling is adequate and
-    // matches how `prov_at` attributes a cell elsewhere).
-    let belt_at = |g: usize, rx: u32, ry: u32| -> u8 {
-        let wx = ((rx as u64 * gw as u64 + gw as u64 / 2) / rw as u64).min(grid_w as u64 - 1) as u32;
-        let wy = ((ry as u64 * gh as u64 + gh as u64 / 2) / rh as u64).min(grid_h as u64 - 1) as u32;
+    let belt_at = |g: usize, wx: u32, wy: u32| -> u8 {
         let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
         if g >= tile.goods.len() { return 0; }
         let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
         tile.goods[g].get(ti).copied().unwrap_or(0)
     };
 
+    // Latitude-aware km² per world cell — the same formula `provinces.rs` sums for
+    // `Province.area_km2`, so a good's reported area is directly comparable to it.
+    let (equator_offset, lat_scale, lat_ratio): (f32, f32, f32) = (
+        metadata::get_meta(conn, "equator_offset").ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(0.5),
+        metadata::get_meta(conn, "lat_scale").ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(1.0),
+        metadata::get_meta(conn, "lat_ratio").ok().flatten().and_then(|s| s.parse().ok()).unwrap_or(1.0),
+    );
+    let cell_km = 40075.0f64 / grid_w as f64;
+    let cell_area_km2 = |wy: u32| -> f64 {
+        let lat = crate::sim::world_buffer::lat_from_y(
+            wy as f32, grid_h as f32, equator_offset, lat_scale, lat_ratio,
+        ) as f64;
+        cell_km * cell_km * lat.to_radians().cos().max(0.05)
+    };
+
+    let bx0 = ox.max(0) as u32;
+    let by0 = oy.max(0) as u32;
+    let bx1 = (geom.ex as i64).min(grid_w as i64 - 1) as u32;
+    let by1 = (geom.ey as i64).min(grid_h as i64 - 1) as u32;
+
     let mut out: Vec<ProvinceGoodMask> = Vec::new();
-    for name in &goods {
+    for name in goods {
         let Some((g, spec)) = specs.iter().enumerate().find(|(_, s)| &s.id == name) else { continue };
         if !spec.enabled || matches!(spec.distribution, Distribution::Manufactured) { continue; }
-        let mut q = vec![0u8; (box_w * box_h) as usize];
-        let mut covered = 0u32;
-        for by in 0..box_h {
-            let ry = ry0 + by;
-            for bx in 0..box_w {
-                let rx = rx0 + bx;
-                if raster[(ry * rw + rx) as usize] != province_id { continue; } // clip to footprint
-                let v = belt_at(g, rx, ry);
+
+        // Full-resolution pass over the bbox: the province's real land total and the
+        // real area this good's belt covers within it (F1's "no per-good area is
+        // reported anywhere").
+        let mut land_total = 0u32;
+        let mut land_covered = 0u32;
+        let mut area_km2 = 0.0f64;
+        for wy in by0..=by1 {
+            let a = cell_area_km2(wy);
+            for wx in bx0..=bx1 {
+                if !in_province(wx, wy) { continue; }
+                land_total += 1;
+                let v = belt_at(g, wx, wy);
                 if v >= COVERAGE_MIN_U8 {
-                    q[(by * box_w + bx) as usize] = v;
-                    covered += 1;
+                    land_covered += 1;
+                    area_km2 += a;
                 }
             }
         }
-        if covered > 0 {
-            out.push(ProvinceGoodMask { good: spec.id.clone(), rx0, ry0, rw: box_w, rh: box_h, q, cells: covered });
+        if land_covered == 0 { continue; }
+
+        // The sampled grid actually drawn — same fidelity as the relief crop.
+        let mut q = vec![0u8; (cols * rows) as usize];
+        let mut sampled_covered = 0u32;
+        for r in 0..rows {
+            let wy = (oy + r as i64 * stride as i64).clamp(0, grid_h as i64 - 1) as u32;
+            for c in 0..cols {
+                let wx = (ox + c as i64 * stride as i64).clamp(0, grid_w as i64 - 1) as u32;
+                if !in_province(wx, wy) { continue; }
+                let v = belt_at(g, wx, wy);
+                if v >= COVERAGE_MIN_U8 {
+                    q[(r * cols + c) as usize] = v;
+                    sampled_covered += 1;
+                }
+            }
         }
+
+        out.push(ProvinceGoodMask {
+            good: spec.id.clone(),
+            ox: ox as i32, oy: oy as i32, stride, cols, rows,
+            q, cells: sampled_covered,
+            area_km2: area_km2.round().max(0.0) as u32,
+            land_share: if land_total > 0 { land_covered as f32 / land_total as f32 } else { 0.0 },
+        });
     }
     Ok(out)
 }
@@ -1567,4 +1633,133 @@ pub fn compute_climate_bands(db: State<'_, WorldDb>) -> Result<ClimateBands, Str
         polar_front: circ.polar_front,
         cells: circ.cells,
     })
+}
+
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 1 — `a_province_goods_mask_
+/// matches_the_world_belt`: the province goods plate must sample the world's real
+/// belt column at the SAME fidelity the relief crop uses, and every covered sampled
+/// cell must genuinely be province land with a belt value at/above `COVERAGE_MIN_U8`.
+#[cfg(test)]
+mod province_goods_mask_tests {
+    use super::*;
+    use crate::db::schema;
+    use crate::db::tile_store;
+    use crate::sim::goods_spec::default_list;
+    use crate::tile::cell::TileData;
+    use rusqlite::Connection;
+
+    /// A one-tile (128×128) world split in half by the province raster: world x < 64
+    /// is province 0, x >= 64 is unowned (`NO_PROVINCE`). Raster resolution (64×64)
+    /// is deliberately coarser than the world grid so the test can tell "sampled at
+    /// world resolution" from "sampled at raster resolution" apart.
+    fn small_world_with_split_province(wheat_g: usize) -> WorldDb {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", "128"), ("grid_height", "128")] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let (rw, rh, gw, gh) = (64u32, 64u32, 128u32, 128u32);
+        let mut raster = vec![crate::sim::provinces::NO_PROVINCE; (rw * rh) as usize];
+        for ry in 0..rh {
+            for rx in 0..(rw / 2) {
+                raster[(ry * rw + rx) as usize] = 0;
+            }
+        }
+        metadata::set_meta(
+            &conn, "province_raster",
+            &serde_json::to_string(&(rw, rh, gw, gh, raster)).unwrap(),
+        ).unwrap();
+
+        // One belt patch, entirely inside the province (x in [10,30), y in [10,30)),
+        // well clear of COVERAGE_MIN_U8, plus a second patch on the UNOWNED half
+        // (x in [80,90)) that must never be attributed to province 0.
+        let mut tile = TileData::new_sea();
+        for y in 0..128u32 {
+            for x in 0..128u32 {
+                let i = (y * 128 + x) as usize;
+                tile.terrain[i] = 1; // all land, so belt/habitability gates don't matter
+                if (10..30).contains(&x) && (10..30).contains(&y) {
+                    tile.goods[wheat_g][i] = 200;
+                }
+                if (80..90).contains(&x) && (10..20).contains(&y) {
+                    tile.goods[wheat_g][i] = 200;
+                }
+            }
+        }
+        tile_store::save_tile(&conn, 0, 0, 0, &tile).unwrap();
+
+        WorldDb::new(conn)
+    }
+
+    #[test]
+    fn a_province_goods_mask_matches_the_world_belt() {
+        let specs = default_list();
+        let wheat_g = specs.iter().position(|s| s.id == "wheat").expect("wheat ships by default");
+        assert!(specs[wheat_g].enabled, "wheat must be enabled for this fixture to mean anything");
+
+        let db = small_world_with_split_province(wheat_g);
+        let conn = db.conn.lock().unwrap();
+
+        let masks = province_good_belt_masks_impl(&conn, &db, 0, &["wheat".to_string()], Some(130))
+            .expect("query failed");
+        let wheat = masks.iter().find(|m| m.good == "wheat").expect("wheat mask present");
+
+        // Every SAMPLED covered cell really is province land with a belt value at or
+        // above COVERAGE_MIN_U8, read straight off the tile — never off the raster.
+        assert!(wheat.cells > 0, "the in-province patch produced no covered samples");
+        let world = db.cached_tiles_with_conn(&conn).unwrap();
+        let mut any_checked = false;
+        for r in 0..wheat.rows {
+            let wy = (wheat.oy + r as i32 * wheat.stride).clamp(0, 127) as u32;
+            for c in 0..wheat.cols {
+                let wx = (wheat.ox + c as i32 * wheat.stride).clamp(0, 127) as u32;
+                let v = wheat.q[(r * wheat.cols + c) as usize];
+                if v == 0 { continue; }
+                any_checked = true;
+                assert!(v >= COVERAGE_MIN_U8, "a covered cell read below the coverage floor");
+                assert!(wx < 64, "a cell from the unowned half ({wx},{wy}) leaked into province 0's mask");
+                let tile = world.tile(0, 0);
+                let raw = tile.goods[wheat_g][(wy * 128 + wx) as usize];
+                assert_eq!(raw, v, "the mask's value at ({wx},{wy}) disagrees with the real belt column");
+            }
+        }
+        assert!(any_checked, "no covered sample cell was actually checked");
+
+        // The unowned-half patch must never contribute to province 0's reported area.
+        assert!(wheat.area_km2 > 0, "no area reported for a belt that genuinely covers land");
+        assert!(wheat.land_share > 0.0 && wheat.land_share <= 1.0);
+
+        // The goods plate's sample grid must match the relief crop's OWN geometry —
+        // the whole point of routing both through `province_sample_geom` — so the two
+        // plates can never independently drift back apart (F1).
+        let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+            serde_json::from_str(&metadata::get_meta(&conn, "province_raster").unwrap().unwrap()).unwrap();
+        crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+        let geom = crate::sim::provinces::province_sample_geom(0, rw, rh, gw, gh, &raster, 130)
+            .expect("geometry must exist for a real province");
+        assert_eq!(wheat.ox, geom.ox);
+        assert_eq!(wheat.oy, geom.oy);
+        assert_eq!(wheat.stride, geom.stride);
+        assert_eq!(wheat.cols, geom.cols);
+        assert_eq!(wheat.rows, geom.rows);
+    }
+
+    /// A good with no coverage in the province (e.g. a good that never places here)
+    /// must be silently absent from the result, not an empty/zeroed entry — the same
+    /// "don't invent a mask" discipline the world-scale `compute_good_belt_masks`
+    /// already follows.
+    #[test]
+    fn an_uncovered_good_is_absent_not_empty() {
+        let specs = default_list();
+        let wheat_g = specs.iter().position(|s| s.id == "wheat").unwrap();
+        let db = small_world_with_split_province(wheat_g);
+        let conn = db.conn.lock().unwrap();
+        // Province 0 owns none of the belt patch we placed if we query a good that
+        // was never written — pick any other enabled Global/Local good.
+        let other = specs.iter().find(|s| s.id != "wheat" && s.enabled
+            && !matches!(s.distribution, crate::sim::goods_spec::Distribution::Manufactured))
+            .expect("at least one other enabled good ships by default");
+        let masks = province_good_belt_masks_impl(&conn, &db, 0, &[other.id.clone()], Some(130)).unwrap();
+        assert!(masks.is_empty(), "an uncovered good must not appear in the result at all");
+    }
 }
