@@ -690,6 +690,17 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
     let is_deposit: std::collections::HashMap<String, bool> = specs.iter()
         .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits)))
         .collect();
+    // WORLD_AND_TRADE_MASTER_PLAN.md Part III §8 — a manufactured good has no belt
+    // and no deposit; it is made in cities from a recipe, not grown on this land.
+    // Nothing upstream ever filtered `Distribution::Manufactured` out of this list
+    // (only `is_deposit` existed), so a world whose `books`/etc. tile-column slot
+    // carries a stray non-zero byte (a stale index from before the good was added
+    // to the spec, or a spec edited after generation — CLAUDE.md §8.20's "fixed
+    // indices" hazard) listed it as a province good. Filtering by distribution
+    // fixes the whole class rather than one world's data.
+    let is_manufactured: std::collections::HashMap<String, bool> = specs.iter()
+        .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Manufactured)))
+        .collect();
     // Sea/coast goods — placed on the province coast, not its interior.
     use crate::sim::goods_spec::Domain;
     let is_marine: std::collections::HashMap<String, bool> = specs.iter()
@@ -776,6 +787,7 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
 
     let mut goods: Vec<ProvinceGoodPotential> = Vec::new();
     for g in 0..ng {
+        if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
         let idx = p * ng + g;
         let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
         // A good ABSENT from the whole province sits at the exact belt-histogram bin-0

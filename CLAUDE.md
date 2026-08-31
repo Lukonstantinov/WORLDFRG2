@@ -4320,3 +4320,16 @@ Three rules:
     the pattern) — and check the result with a histogram/diagnostic, not by
     reading the code, since this cause was invisible in review and obvious in one
     histogram.
+32. **`is_estate` is an OWNERSHIP flag, not a geography flag** (WORLD_AND_TRADE_
+    MASTER_PLAN.md Part II, Slices A/B). An estate with `parent >= 0` is co-located
+    inside its parent city and collapses to it for display and routing; an estate
+    with `parent < 0` is a REMOTE SITE standing on its own ground (today exactly a
+    house trade outpost) and must be routed, drawn and rescued like any settlement
+    — `CampaignSim::is_remote_site` is the one predicate for this, and any new pass
+    that branches on `is_estate` alone should ask whether it means "co-located" or
+    "not a real place", because those are different questions and a remote site
+    answers them differently. The failure is silent in both directions: a
+    co-located estate given its own routing draws a zero-length route into itself,
+    and a remote outpost denied it is dropped from the map/lifelines entirely — the
+    Dynamic Trade Flow overlay and `rebuild_routes`' three no-dead-city guarantees
+    both did the latter until this rule was written.

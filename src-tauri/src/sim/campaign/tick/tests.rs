@@ -2167,6 +2167,11 @@
         s.hubs[0].starving = 0.0;
         s.hubs[0].sent_prosperity = 0.8;
         s.hubs[0].treasury = 40.0;
+        // WORLD_AND_TRADE_MASTER_PLAN.md Part II E1 (G6): a house with no coastal
+        // foothold anywhere in its network cannot plant a coastal outpost — mirrors
+        // `maybe_found_settlement_colony`'s own "no fleet tradition" rule. The test's
+        // trade-rich site is coastal, so the founder needs one too.
+        s.hubs[0].coastal = true;
         // A GREAT house seated at hub 0 → funds the venture + plants outposts. Must
         // clear the heavy outpost wealth bar (OUTPOST_FOUND_WEALTH).
         let mut rich = house_at(0, vec![2], 5);

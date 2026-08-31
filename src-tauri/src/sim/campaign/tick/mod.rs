@@ -6043,11 +6043,20 @@ impl CampaignSim {
             if let Some(j) = bj { reassign.push((i, self.hubs[j].component)); }
         }
         for (i, comp) in reassign { self.hubs[i].component = comp; }
-        // Estates ride their parent hub's (possibly new) component.
+        // Estates ride their parent hub's (possibly new) component. A REMOTE trade
+        // outpost (`parent < 0` by design — CLAUDE.md rule 32 / WORLD_AND_TRADE_
+        // MASTER_PLAN.md Part II G3) has no parent to ride, so it falls back to its
+        // `founder_hub` instead; before this it was never re-synced by this pass at
+        // all, a live trap for any future reassignment.
         for i in 0..n {
             if self.hubs[i].is_estate {
                 let p = self.hubs[i].parent;
-                if p >= 0 && (p as usize) < n { self.hubs[i].component = self.hubs[p as usize].component; }
+                if p >= 0 && (p as usize) < n {
+                    self.hubs[i].component = self.hubs[p as usize].component;
+                } else {
+                    let f = self.hubs[i].founder_hub;
+                    if f >= 0 && (f as usize) < n { self.hubs[i].component = self.hubs[f as usize].component; }
+                }
             }
         }
     }

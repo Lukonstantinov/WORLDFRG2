@@ -26,6 +26,19 @@ pub(crate) fn terrain_route_mult(koppen: u8) -> f32 {
 
 impl CampaignSim {
 
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part II Slice B (G2/G3) / CLAUDE.md rule 32 —
+    /// a production site that stands on its own ground rather than inside a parent
+    /// city: today exactly the house trade outposts (`colony_kind == 2`, `parent <
+    /// 0`). It is an estate for OWNERSHIP purposes (still excluded from city
+    /// rankings, society, government) but a real PLACE for ROUTING — the class of
+    /// hub most likely to be stranded (remote, tiny, newly founded) was, until this,
+    /// the only class denied every one of `rebuild_routes`' anti-stranding
+    /// guarantees (#6 nearest partners, #6b market lifeline, #6c cabotage).
+    #[inline]
+    pub(crate) fn is_remote_site(&self, i: usize) -> bool {
+        self.hubs.get(i).map_or(false, |h| h.is_estate && h.parent < 0 && !h.abandoned)
+    }
+
     // ───────────────────────── DLC 3.5 · Coin, Credit & Crashes ──────────────
 
     /// DLC 3.5 · accrue shipped volume on a hub-pair for the yearly Dynamic Trade
@@ -239,7 +252,7 @@ impl CampaignSim {
         // allowed (a far-inland town reaching its own component's coast overland), the
         // OCEAN is not.
         let real: Vec<usize> = (0..n)
-            .filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned)
+            .filter(|&i| (!self.hubs[i].is_estate || self.is_remote_site(i)) && !self.hubs[i].abandoned)
             .collect();
         for &a in &real {
             let have = real.iter().filter(|&&b| b != a && days[a * n + b].is_finite()).count();

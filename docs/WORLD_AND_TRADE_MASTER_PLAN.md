@@ -7,8 +7,8 @@ Parts II and III (the campaign's trade and knowledge).
 | Part | Subject | Status |
 |---|---|---|
 | **I** | Tectonics · rivers · provinces · shelves | Slices 1, 2, 3, 5, 7, 8 **BUILT**; 4 scoped down; 6 not built |
-| **II** | Outpost connectivity & the entrepôt | Measured; **nothing built** |
-| **III** | Exploration, the known world, transport modes | Decided; **nothing built** |
+| **II** | Outpost connectivity & the entrepôt | Slices A, B built (fixes G1-G3); E1 built (fixes G6); Slices C (entrepôt) and D (transport modes) **not built** |
+| **III** | Exploration, the known world, transport modes | §8.1 (manufactured-goods bug) built; transport modes, knowledge/fog, exploration **not built** |
 
 **Read the build order first (Part III §7).** It is not the order these parts are
 written in: transport modes (III §4) come first because they are the biggest
@@ -483,7 +483,42 @@ already exists and is unchanged.
 
 # Part II · Outpost connectivity & the entrepôt
 
-**Status: PROPOSED, nothing built.** Read alongside
+**Status: Slices A and B BUILT (fix G1/G2/G3); E1 BUILT (fixes G6, folded into
+`try_found_house_outpost` rather than shipped as a separate slice). Slice C (the
+entrepôt) and Slice D (transport modes, decided in Part III §4) are NOT built** —
+both are substantially larger and are left for a dedicated follow-up. What
+shipped:
+
+- **Slice A** (G1): the Dynamic Trade Flow overlay (`commands/query_commands/
+  flow.rs`) no longer drops every hub with `is_estate == true`. A co-located
+  estate (`parent >= 0`) now resolves to its parent's coarse node (its flow
+  is credited to the parent city, as `read_trade.rs`'s own `city_of` already
+  did); a remote outpost (`parent < 0`) keeps its own node instead of being
+  skipped outright. Applied to both `campaign_get_trade_flow` and
+  `campaign_get_corridors`, which shared the same anti-pattern.
+- **Slice B** (G2/G3): `CampaignSim::is_remote_site` (`tick/production.rs`) is
+  the one predicate — an estate with no parent, not abandoned. `rebuild_routes`'
+  `real` set (feeding all three no-dead-city guarantees: `MIN_GUARANTEED_
+  PARTNERS`, the market lifeline, and coastal cabotage) now includes remote
+  sites alongside ordinary settlements. `rescue_tiny_components`'s estate
+  component-fixup now falls back to `founder_hub` when `parent < 0`, closing
+  G3's latent trap. City rankings, society/pops and government are
+  deliberately untouched — the predicate is about ROUTING, not promotion.
+  Codified as CLAUDE.md rule 32.
+- **E1** (G6): `try_found_house_outpost` now reads `delta`/`chokepoint` with
+  the same premiums (`+0.60`/`+0.80`) `maybe_found_settlement_colony` already
+  prices, and refuses a coastal site when the founding house's whole network
+  (home + offices + own estates) has no coastal foothold — the same "no fleet
+  tradition" rule the city-founded colony path already applies.
+
+Not built from this Part: E2 (gate outpost founding on a prior expedition —
+depends on Part III's knowledge/exploration state, not built), E3 (relay
+outposts, deliberately sequenced after Slice D), and Slice C (two-leg routing
+through an outlet + autonomous port founding) — the "real feature" of this
+part, left for a dedicated session given its algorithmic and performance risk
+(§4 of this Part).
+
+Read alongside
 `TECTONICS_RIVERS_PROVINCES_PLAN.md` (the world half); this is the campaign half.
 
 Reported: outposts are not connected to their founding capital, no
@@ -907,7 +942,14 @@ value, never create it (the same zero-sum discipline as
 
 # Part III · Exploration, the known world, transport modes
 
-**Status: DESIGN COMPLETE, nothing built.** All open questions are decided (§6);
+**Status: §8.1 (the manufactured-goods province-list bug) BUILT — a
+`Distribution::Manufactured` good is now excluded from `campaign_province_
+potential`'s goods list by construction (an `is_manufactured` map alongside the
+existing `is_deposit` one), fixing books/etc. appearing as a province product
+regardless of what put a stray non-zero byte in that good's belt slot.
+Everything else in this Part — transport modes (§4), knowledge/fog/exploration
+(§1-§3), and §8.2's richer province detail — is NOT built.** All open questions
+are decided (§6);
 this is buildable as written. Companion to
 `OUTPOST_CONNECTIVITY_AND_ENTREPOT_PLAN.md`, which measured the problems it
 answers.

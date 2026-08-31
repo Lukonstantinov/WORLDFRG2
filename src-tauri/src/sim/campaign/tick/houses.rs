@@ -1046,13 +1046,21 @@ impl CampaignSim {
         // frontier site its own estates already border — "the same region" the user
         // wants outposts to cluster in IS the region a house's estates already work.
         let mut nodes = vec![(self.hubs[home].x, self.hubs[home].y)];
+        // WORLD_AND_TRADE_MASTER_PLAN.md Part II E1 (G6) — an inland founder has no
+        // fleet tradition, mirroring `maybe_found_settlement_colony`'s own rule; a
+        // house with no coastal foothold anywhere in its network cannot plant a
+        // coastal post. Tracked alongside `nodes` rather than re-derived from
+        // coordinates.
+        let mut network_coastal = self.hubs[home].coastal;
         for &off in &self.houses[hi].offices {
             if (off as usize) < self.hubs.len() {
                 nodes.push((self.hubs[off as usize].x, self.hubs[off as usize].y));
+                network_coastal |= self.hubs[off as usize].coastal;
             }
         }
         for h in self.hubs.iter().filter(|h| h.is_estate && h.owner_house == hi as i32) {
             nodes.push((h.x, h.y));
+            network_coastal |= h.coastal;
         }
         let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
         // Per-good world output — the proxy for deciding a valuable good is still
@@ -1066,9 +1074,17 @@ impl CampaignSim {
         // new, valuable trade the world lacks (the wine/cotton/sugar-country gap).
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
+            if !network_coastal && s.coastal { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
-            let trade_score = s.trade_value + if s.coastal { 0.30 } else { 0.0 };
+            // Site premiums (G6): a delta or a land→sea chokepoint is exactly where
+            // cargo transships, and the colony-founding path already prices both
+            // heavily — the house outpost path used to read neither, so an outpost
+            // was sited on what the ground yields with almost no weight on whether
+            // the cargo could ever leave. Same weights as `maybe_found_settlement_colony`.
+            let trade_score = s.trade_value + if s.coastal { 0.30 } else { 0.0 }
+                + if s.delta { 0.60 } else { 0.0 }
+                + if s.chokepoint { 0.80 } else { 0.0 };
             let exploit_bonus = self.prov_best_unexploited_good(s.province, &world_out)
                 .map(|(_, v)| v * OUTPOST_EXPLOIT_SITE_BONUS).unwrap_or(0.0);
             let score = (trade_score + exploit_bonus) * (1.0 - d / cap);

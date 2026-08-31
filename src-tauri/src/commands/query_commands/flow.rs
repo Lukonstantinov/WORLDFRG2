@@ -30,12 +30,23 @@ pub fn campaign_get_trade_flow(
     let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h,
         &rivers_json, reach == 2, true, 0.0, -1, 12)?;
 
-    // Map each real hub (by stable id) to its coarse node.
+    // Map each real hub (by stable id) to its coarse node. WORLD_AND_TRADE_MASTER_PLAN.md
+    // Part II Slice A / CLAUDE.md rule 32: `is_estate` is an ownership flag, not a
+    // geography flag — a co-located estate (parent >= 0) collapses to its PARENT's
+    // node so its flow is credited to the parent city instead of being dropped; a
+    // remote trade outpost (parent < 0, e.g. a house's overseas post) has no parent
+    // to collapse to and keeps its own node. Previously every estate — outposts
+    // included — was skipped outright, silently discarding every `flow_year` entry
+    // with an outpost at either end and under-reporting every other trunk's width
+    // by whatever volume those outposts carried.
     let mut node_of: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     for h in &sim.hubs {
-        if h.is_estate { continue; }
-        let cx = ((h.x.max(0.0) as u32) / cc.f).min(cc.cw as u32 - 1) as i32;
-        let cy = ((h.y.max(0.0) as u32) / cc.f).min(cc.ch as u32 - 1) as i32;
+        let (hx, hy) = match h.is_estate && h.parent >= 0 {
+            true => match sim.hubs.get(h.parent as usize) { Some(p) => (p.x, p.y), None => (h.x, h.y) },
+            false => (h.x, h.y),
+        };
+        let cx = ((hx.max(0.0) as u32) / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = ((hy.max(0.0) as u32) / cc.f).min(cc.ch as u32 - 1) as i32;
         node_of.insert(h.id, cc.cidx(cx, cy));
     }
     // Route each pair and bundle its volume onto every coarse edge it traverses.
@@ -91,14 +102,19 @@ pub fn campaign_get_corridors(
         &rivers_json, reach == 2, true, 0.0, -1, 12)?;
     let km_per_cell = KM_EQUATOR / grid_w as f32;
 
-    // Hub id → (index, coarse node).
+    // Hub id → (index, coarse node). Same estate-collapse rule as the flow overlay
+    // above (Part II Slice A / rule 32) — a co-located estate routes through its
+    // parent's node, a remote outpost keeps its own.
     let mut idx_of_id: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     let mut node_of: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
     for (i, h) in sim.hubs.iter().enumerate() {
-        if h.is_estate { continue; }
         idx_of_id.insert(h.id, i);
-        let cx = ((h.x.max(0.0) as u32) / cc.f).min(cc.cw as u32 - 1) as i32;
-        let cy = ((h.y.max(0.0) as u32) / cc.f).min(cc.ch as u32 - 1) as i32;
+        let (hx, hy) = match h.is_estate && h.parent >= 0 {
+            true => match sim.hubs.get(h.parent as usize) { Some(p) => (p.x, p.y), None => (h.x, h.y) },
+            false => (h.x, h.y),
+        };
+        let cx = ((hx.max(0.0) as u32) / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = ((hy.max(0.0) as u32) / cc.f).min(cc.ch as u32 - 1) as i32;
         node_of.insert(h.id, cc.cidx(cx, cy));
     }
     // Strongest resident house per hub INDEX — the corridor's owner-from-home.
