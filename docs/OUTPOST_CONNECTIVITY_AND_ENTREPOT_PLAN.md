@@ -146,6 +146,153 @@ farmland". The campaign never reads that idea.
 
 ---
 
+## 1b · Is the outpost logic "explore, then site for movement, then relay"?
+
+Asked directly: does the model explore first, site outposts where goods can
+actually move, and chain several posts so cargo gets from cart to river boat to
+ship? **Measured answer: no, on all four counts.** Each is a separate finding.
+
+### G5 — There is no exploration. Houses are omniscient from day one.
+
+There is no `explored` / `discovered` / `surveyed` state anywhere in the tick.
+`colonizable` is a **whole-world list snapshotted at campaign start**, and
+`try_found_house_outpost` scans *all of it* on every call, taking the best-scoring
+site within `COLONY_MAX_KM` of the founder's network. A house in year 1 already
+knows the trade value of every site on the planet.
+
+Expeditions do exist (`expedition_launch_pass`, `route_prospects`,
+`envoys.rs`) — but they are a **parallel, ornamental system**: a prospect feeds
+the overlay and a goal check, and gates nothing. Nothing an expedition discovers
+is required before an outpost is planted there.
+
+So an outpost is not a venture into the unknown; it is an optimal pick off a
+complete map. That is the opposite of the intended fiction, and it is also why
+outposts appear in surprising places — nothing stops a house reaching past
+everything it knows.
+
+### G6 — Outpost siting ignores the very flags that mark a transshipment point
+
+`ColonizeSite` already carries exactly the right data:
+
+```rust
+/// River-mouth / DELTA (fertile coastal alluvium — a natural port + granary).
+pub delta: bool,
+/// Land→sea CHOKEPOINT (strait / isthmus / portage where cargo transships and
+/// tolls can be levied — Venice/Bruges/Constantinople-style prize sites).
+pub chokepoint: bool,
+```
+
+`maybe_found_settlement_colony` (the **city**-founded path) reads both and prices
+them heavily — `delta +0.60`, `chokepoint +0.80`, against `coastal +0.35`.
+
+`try_found_house_outpost` (the **house** path — the outposts in question) scores:
+
+```rust
+let trade_score = s.trade_value + if s.coastal { 0.30 } else { 0.0 };
+```
+
+**Neither `delta` nor `chokepoint` is read.** A river mouth and a strait — the two
+site kinds that exist in the data *precisely because* cargo transships there —
+carry no weight at all when a merchant house picks where to trade from. The
+outpost is sited on what the ground yields, with almost no weight on whether the
+cargo can leave. That is the direct cause of the reported "hard-access" posts.
+
+The city path also refuses to let an inland founder plant a coastal colony ("no
+fleet tradition"); the house path has no equivalent rule.
+
+### G7 — No relay. Outposts are picked independently, never as a chain.
+
+`maybe_found_house_outpost` takes the richest houses (`OUTPOST_MAX_PER_CALL` = 3)
+and each independently scores its own best site. **No pass anywhere considers two
+posts together**, or plants one *because* another needs an outlet. There is no
+staging, no relay and no notion of a corridor of posts. The "several outposts, at
+greater cost, so cargo can reach the water" pattern is not implemented in any
+form.
+
+### G8 — Water is not cheaper than land, and rivers are not a mode at all
+
+This is the deepest of the four, and it reaches well past outposts.
+
+```rust
+// Route mode: a sea voyage when both ends are coastal, else overland.
+let sea = self.hubs[a].coastal && self.hubs[b].coastal;
+```
+
+Mode is decided solely by whether *both* endpoints are coastal, and all it does is
+choose which fleet counter to decrement (`cap_sea` vs `cap_land`). The cost is
+untouched: `days` comes from `rebuild_routes` as `dist · days_per_cell` with a
+single global `days_per_cell` and **no land/sea/river distinction anywhere**.
+`good_freight` then multiplies those same days by the good's `bulk`.
+
+So a ton of stone crosses 500 km of mountain for exactly what it costs to sail it
+500 km along a calm coast.
+
+And rivers are not a mode at all:
+
+```rust
+cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
+```
+
+**River barges and ox-carts are pooled into one interchangeable "land" capacity.**
+A river confers no cost advantage, so nothing in the economy has any reason to
+follow one.
+
+That water carriage was roughly an order of magnitude cheaper than overland haulage
+is arguably *the* organising economic fact of the pre-modern world — it is why
+cities sit on rivers and estuaries at all. Its absence is very likely a major
+contributor to the market-integration failure CLAUDE.md already names as the
+largest known economy defect (the basket price/distance gradient reading **−0.064**,
+with 0 of 6 goods showing any gradient, where the historically correct sign is
+positive). If distance costs the same whatever the terrain, no trade concentrates
+on water and no economic geography forms.
+
+**This should be tested before it is designed around.** The claim "differentiated
+transport cost is a main cause of the flat gradient" is a hypothesis with a clear
+instrument — `econ_fidelity_scorecard` already measures the gradient — and
+CLAUDE.md §8.15's cautionary tale is precisely about concluding from an untested
+mechanism inside an already-distorted economy. Measure first.
+
+### Slice D — Transport modes with real relative costs *(G8; the largest lever)*
+
+Give a route a **mode** with its own per-day cost: sea ≪ river < road < track.
+Concretely: keep one `days_per_cell` but attach a per-mode multiplier, and split
+`cap_land` back into `fleet_river` and `fleet_caravan` so a river barge is not an
+ox-cart. A route is river-borne where both endpoints sit on the same navigable
+system — worldgen already knows which rivers are navigable (`River.navigable`,
+used by the province partition), so the data exists and only needs carrying into
+the campaign snapshot.
+
+**Gate:** the existing `econ_fidelity_scorecard` price/distance gradient. This is
+the honest test of whether G8 is the cause: if differentiating transport cost does
+not move the gradient off −0.064, the hypothesis is wrong and should be recorded
+as a negative result rather than quietly kept.
+
+**Order note:** Slice D plausibly subsumes much of Slice C. If water carriage is
+genuinely cheap, an outpost near navigable water becomes valuable *automatically*
+through the ordinary route cost, without a bespoke entrepôt rule. **Build D before
+C2**, and re-measure whether C2 is still needed.
+
+### Slice E — Site outposts for movement, and explore first *(G5/G6/G7)*
+
+- **E1 (small):** read `delta` and `chokepoint` in `try_found_house_outpost` with
+  the same premiums the colony path already uses, and add the inland-founder rule.
+  A few lines, and it directly targets the reported problem.
+- **E2:** gate outpost founding on a prior expedition or route prospect reaching
+  that region, turning the existing ornamental expedition system into the real
+  precondition it was written to be. This is also `MERCHANT_VESSELS_AND_
+  INFORMATION_PLAN.md` stages 5-6, which already own the survey-agent design —
+  **coordinate rather than duplicate.**
+- **E3 (only after D):** a relay pass — a house with a productive post whose
+  outlet is poor plants an intermediate post toward navigable water, at a premium.
+  This is the user's "several outposts at bigger price" and it is deliberately
+  last: with Slice D in place the ordinary site scorer may already produce it.
+
+**Gate:** `an_outpost_prefers_a_site_its_cargo_can_leave` — given two sites of
+equal `trade_value`, one on a delta and one landlocked, the delta must win. Fails
+today (the flags are not read).
+
+---
+
 ## 2 · The slices
 
 ### Slice A — Draw outpost trade *(fixes G1; smallest, most visible)*
