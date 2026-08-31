@@ -612,6 +612,13 @@ pub struct ProvinceGoodPotential {
     /// Count of localities of this good inside the province.
     #[serde(default)]
     pub locality_count: u32,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part III §8.2 — the served
+    /// `deposits::grade_label` vocabulary (coarse/ordinary/good/fine/exquisite),
+    /// read off whichever richness this good actually carries here: a deposit
+    /// good's own `mean_grade`, else a locality's `mean_locality_grade`, else the
+    /// belt value itself. Empty when the good is absent from this province.
+    #[serde(default)]
+    pub grade_word: String,
 }
 
 /// #9 · One ore working located in a province, for the survey-plate goods layer.
@@ -805,6 +812,12 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         let (has_locality, mean_locality_grade, locality_count) = loc_agg.get(&name)
             .map(|&(s, n)| (n > 0, if n > 0 { s / n as f32 } else { 0.0 }, n))
             .unwrap_or((false, 0.0, 0));
+        // §8.2 — the richness this good's word should read off: a deposit's own
+        // worked grade, else a locality's grade, else the belt itself (a purely
+        // climatic/terroir good has no "grade" of its own — the belt IS its quality).
+        let grade_for_word = if dep && workings > 0 { mean_grade }
+            else if has_locality { mean_locality_grade }
+            else { belt };
         goods.push(ProvinceGoodPotential {
             good: g as u8,
             name,
@@ -815,6 +828,7 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
             is_marine: mar,
             mean_grade, workings, best_depth,
             has_locality, mean_locality_grade, locality_count,
+            grade_word: crate::sim::deposits::grade_label(grade_for_word).to_string(),
         });
     }
     // Richest potential first (a deposit good's richness is reflected in its belt).

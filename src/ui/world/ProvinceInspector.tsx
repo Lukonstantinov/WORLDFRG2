@@ -542,7 +542,7 @@ export function ProvinceInspector() {
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                           <span style={{ width: 132, color: T.ink }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
                           <span style={{ color: T.gold, letterSpacing: 1 }}
-                            title={g.is_deposit ? `mean ore grade ${(q * 100).toFixed(0)}%` : `land quality ${(q * 100).toFixed(0)}%`}>{stars(q)}</span>
+                            title={`${g.grade_word} — ${g.is_deposit ? "mean ore grade" : "land quality"} ${(q * 100).toFixed(0)}%`}>{stars(q)}</span>
                           {g.is_deposit && g.workings > 0 ? (
                             <span style={{ color: T.inkDim, fontSize: 11 }}>{g.workings}× · {depthWord(g.best_depth)}</span>
                           ) : pg?.rank ? (

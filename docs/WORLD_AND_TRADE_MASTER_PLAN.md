@@ -946,10 +946,16 @@ value, never create it (the same zero-sum discipline as
 `Distribution::Manufactured` good is now excluded from `campaign_province_
 potential`'s goods list by construction (an `is_manufactured` map alongside the
 existing `is_deposit` one), fixing books/etc. appearing as a province product
-regardless of what put a stray non-zero byte in that good's belt slot.
-Everything else in this Part — transport modes (§4), knowledge/fog/exploration
-(§1-§3), and §8.2's richer province detail — is NOT built.** All open questions
-are decided (§6);
+regardless of what put a stray non-zero byte in that good's belt slot. §8.2's
+richer detail turned out to be MOSTLY already shipped by the time this plan was
+written — `ProvinceInspector.tsx` already showed mean ore grade/workings/depth,
+locality presence, potential vs actual exploitation and market share (via the
+separate `campaign_province_goods` exploitation query) — so the only genuine
+gap was the served `grade_label` WORD alongside the star rating; added as
+`ProvinceGoodPotential.grade_word` (backend) and wired into the stars' tooltip
+(frontend), both read-only over existing state, no new persisted field.
+Everything else in this Part — transport modes (§4) and knowledge/fog/
+exploration (§1-§3) — is NOT built.** All open questions are decided (§6);
 this is buildable as written. Companion to
 `OUTPOST_CONNECTIVITY_AND_ENTREPOT_PLAN.md`, which measured the problems it
 answers.

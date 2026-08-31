@@ -2559,6 +2559,10 @@ export interface ProvinceGoodPotential {
   has_locality: boolean;
   mean_locality_grade: number; // 0..1, when has_locality
   locality_count: number;
+  /** WORLD_AND_TRADE_MASTER_PLAN.md Part III §8.2 — the served `grade_label`
+   *  vocabulary (coarse/ordinary/good/fine/exquisite), off whichever richness
+   *  this good actually carries here. Empty when absent. */
+  grade_word: string;
 }
 
 /** #9 · One ore working located in a province (real cell coords) for the minimap. */
