@@ -180,7 +180,7 @@ export function ProvinceInspector() {
   const shownBeltGoods = useMemo(() =>
     goodFilter ? beltGoods.filter((g) => goodFilter.has(g.name)) : beltGoods,
     [beltGoods, goodFilter]);
-  // GOODS_LOCALITIES_PLAN.md Slice 6 · the REAL terroir localities, filtered by the
+  // CLAUDE.md §8.19 (goods localities, shipped) Slice 6 · the REAL terroir localities, filtered by the
   // same goods legend as the symbols they replace. Only what the query actually
   // returned for this province is drawn — a good with no locality here gets no
   // square, and nothing is invented to fill the gap.

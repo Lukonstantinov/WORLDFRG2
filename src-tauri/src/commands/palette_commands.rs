@@ -32,7 +32,7 @@ pub struct ClassColor {
     pub color: String,
 }
 
-/// GOODS_LOCALITIES_PLAN.md D10 — ONE ABSOLUTE QUALITY SCALE, SHARED BY EVERY GOOD.
+/// CLAUDE.md §8.19 (goods localities, shipped) D10 — ONE ABSOLUTE QUALITY SCALE, SHARED BY EVERY GOOD.
 ///
 /// A goods overlay carries two facts at once: WHICH good (the hue, from the good's
 /// own spec colour) and HOW GOOD the land is for it (this scale). D10 settles the

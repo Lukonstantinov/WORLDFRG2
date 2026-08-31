@@ -83,7 +83,7 @@ export async function computeMonsoonZones(): Promise<SharkZone[]> {
   return invoke("compute_monsoon_zones");
 }
 
-/** GOODS_LOCALITIES_PLAN.md Slice 5 · the FULL-RESOLUTION belt mask for each named
+/** CLAUDE.md §8.19 (goods localities, shipped) Slice 5 · the FULL-RESOLUTION belt mask for each named
  *  good — the payload that replaces `GoodRegion`'s coarse blocks for the FILL, so a
  *  belt meeting the sea ends on the coastline instead of spilling into it (F4/D3).
  *

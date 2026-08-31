@@ -369,7 +369,7 @@ pub struct GeoContext {
 }
 
 /// Multi-source BFS over land+sea with cylindrical X wrap and clamped Y (rule 6).
-/// `pub(crate)` so `localities.rs` (GOODS_LOCALITIES_PLAN.md) reuses the same
+/// `pub(crate)` so `localities.rs` (CLAUDE.md §8.19 (goods localities, shipped)) reuses the same
 /// linear-sweep primitive rather than a second per-cell outward scan (§8.9 rule 1).
 pub(crate) fn bfs_dist(seeds: &[usize], w: u32, h: u32) -> Vec<u16> {
     let n = (w as usize) * (h as usize);

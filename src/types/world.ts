@@ -232,7 +232,7 @@ export interface ClassColor {
   code: number;
   color: string;
 }
-/** GOODS_LOCALITIES_PLAN.md D10 · one stop on the ONE absolute belt-quality scale
+/** CLAUDE.md §8.19 (goods localities, shipped) D10 · one stop on the ONE absolute belt-quality scale
  *  every good's quality layer shades on. The colour is the good's own; this carries
  *  only how strongly it is drawn at a given belt value — so a thin wine fringe and a
  *  thin wheat fringe read alike, and no good is ever renormalised against its own

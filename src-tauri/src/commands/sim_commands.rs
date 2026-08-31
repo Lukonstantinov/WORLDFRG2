@@ -6,7 +6,7 @@ use crate::db::metadata;
 use crate::tile::coords::{TileCoord, TILE_SIZE};
 
 /// Persist the two placement records `compute_trade_goods` returns — the ORE
-/// WORKINGS (`sim::deposits`, §8.16) and, since GOODS_LOCALITIES_PLAN.md, every
+/// WORKINGS (`sim::deposits`, §8.16) and, since CLAUDE.md §8.19 (goods localities, shipped), every
 /// non-mineral good's LOCALITIES (`sim::localities`, Slice 3) — to world metadata
 /// exactly as before, just from one shared helper instead of four duplicated
 /// call sites.
@@ -508,7 +508,7 @@ pub fn sim_run_all(
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
     let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
-    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
     // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
     // maxima-of-habitability search structurally cannot find, since a great port need
     // not sit on the best farmland. Runs after the base pass (so it can respect
@@ -900,7 +900,7 @@ pub fn sim_run_all_from_terrain(
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
     let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
-    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — junction sites
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
     // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
     // maxima-of-habitability search structurally cannot find, since a great port need
     // not sit on the best farmland. Runs after the base pass (so it can respect
@@ -1006,7 +1006,7 @@ pub fn sim_generate_settlements(
     let mut result = settlements::generate_settlements(
         &buf, &hab_fields.hab, &river_data, seed, realism.unwrap_or(0.55),
         max_settlements.map(|c| c as usize));
-    // Step 7a (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3) — see the run-all
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — see the run-all
     // call sites for the full rationale.
     result.extend(settlements::generate_trade_sites(
         &buf, &hab_fields.trade, &result, realism.unwrap_or(0.55),

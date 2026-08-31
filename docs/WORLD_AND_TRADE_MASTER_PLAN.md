@@ -457,7 +457,7 @@ already exists and is unchanged.
   green, and the collision-type field should be *added* alongside the existing
   encoding rather than replacing it, so old saves keep loading.
 - **Slices 4–6 change worldgen only for NEW worlds.** A saved world's stored
-  tiles are untouched — the same scoped blast radius TERRAIN_2_PLAN slice 4 had.
+  tiles are untouched — the same scoped blast radius Terrain 2.0 slice 4 had (CLAUDE.md §8.23b).
 - **Slice 6 is the one with real cost risk.** Phase 2 is already 11–14 s at
   3600×1800 (`bench_phase2`). N simulation steps over a full grid could dominate
   it. Mitigation: run the deformation accumulation on a **coarse grid** (plates

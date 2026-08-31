@@ -104,7 +104,7 @@ interface UIStore {
    *  `isolateClass`, so the tile cache keys and invalidates for free. `null` =
    *  the plain default rendering for that layer. */
   elevationStyle: string | null;
-  /** GOODS_LOCALITIES_PLAN.md D10 · how the "quality" belt layer paints a cell's
+  /** CLAUDE.md §8.19 (goods localities, shipped) D10 · how the "quality" belt layer paints a cell's
    *  absolute 0..1 value. false (default) = mix toward the good's own hue; true =
    *  a heat ramp (dark blue → red) shared by every good, added because the hue-mix
    *  reading is subtle for a muted/dark good and the user could not see quality
@@ -447,7 +447,7 @@ export const useUIStore = create<UIStore>((set) => ({
     toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
     toponymsDesert: true, toponymsForest: true, toponymsTundra: true,
     plagueZones: false, guildCities: false, figureMarks: false, landmarks: false, dynastyLinks: false, states: false,
-    // GOODS_LOCALITIES_PLAN.md D9 · the TWO layers a goods belt carries, toggled
+    // CLAUDE.md §8.19 (goods localities, shipped) D9 · the TWO layers a goods belt carries, toggled
     // independently of each other and of WHICH goods are shown. Coverage answers
     // "can it grow here" (the belt's honest extent, so a belt thinned by Slice 3's
     // modulation is visible on the map rather than buried in a diagnostic, §5.1);

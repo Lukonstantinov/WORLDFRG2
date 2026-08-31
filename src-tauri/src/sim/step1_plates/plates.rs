@@ -211,7 +211,7 @@ pub fn generate_plates_and_landmass_with_target(
         })
         .collect();
 
-    // ── Terrain 2.0 slice 4 (docs/TERRAIN_2_PLAN.md D1/T1): decouple the
+    // ── Terrain 2.0 slice 4 (docs/CLAUDE.md §8.23b (Terrain 2.0, shipped) D1/T1): decouple the
     // coastline from the plate Voronoi edge. Two earlier passes on this
     // measured wrong: the first found the crust field genuinely differed but
     // the percentile threshold kept selecting the identical `terrain` (the

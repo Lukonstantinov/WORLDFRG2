@@ -185,7 +185,7 @@ pub const ELEVATION_STOPS: [(f32, (u8, u8, u8)); 8] = [
     (2000.0, (219, 200, 155)),
     (3000.0, (231, 210, 186)),
     (5000.0, (241, 231, 222)),
-    // Terrain 2.0 slice 6 (docs/TERRAIN_2_PLAN.md section 6): the top stop used
+    // Terrain 2.0 slice 6 (docs/CLAUDE.md §8.23b (Terrain 2.0, shipped) section 6): the top stop used
     // to be pure white, which blows every summit out to one flat colour with no
     // headroom left for the hillshade to darken it back down into — a snow cap
     // reads as a featureless white blob instead of a shaded one. Still strictly
@@ -1949,7 +1949,7 @@ const AO_AMP: f32 = 0.16;
 /// at the scale of a real landform. Anything below ~150 m re-admits the grain.
 const AO_REF: f32 = 240.0 / 8848.0;
 
-/// Terrain 2.0 slice 6 (docs/TERRAIN_2_PLAN.md section 6, "texture shading" —
+/// Terrain 2.0 slice 6 (docs/CLAUDE.md §8.23b (Terrain 2.0, shipped) section 6, "texture shading" —
 /// the honest answer to the lee-slope flatness the reverted fill light failed
 /// to fix, see section 8.21). A single directional light collapses a slope
 /// facing AWAY from it to `SHADOW_FLOOR` regardless of how textured that slope

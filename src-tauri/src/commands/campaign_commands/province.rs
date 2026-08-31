@@ -602,7 +602,7 @@ pub struct ProvinceGoodPotential {
     pub workings: u32,
     /// For a deposit good: the deepest/least-workable depth present (0 surface … 3 flooded).
     pub best_depth: u8,
-    /// GOODS_LOCALITIES_PLAN.md Slice 7 — this good has at least one locality
+    /// CLAUDE.md §8.19 (goods localities, shipped) Slice 7 — this good has at least one locality
     /// (terroir patch) inside the province.
     #[serde(default)]
     pub has_locality: bool,
@@ -625,7 +625,7 @@ pub struct ProvinceDepositDot {
     pub depth: u8,
 }
 
-/// GOODS_LOCALITIES_PLAN.md Slice 6 — one terroir locality located in a province,
+/// CLAUDE.md §8.19 (goods localities, shipped) Slice 6 — one terroir locality located in a province,
 /// for the survey-plate goods layer. Deliberately the same shape as
 /// `ProvinceDepositDot` (Slice 3's own design note: `GoodLocality` mirrors
 /// `deposits::Deposit` for exactly this reuse).
@@ -724,7 +724,7 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         e.0 += d.grade; e.1 += 1; e.2 = e.2.max(d.depth);
     }
 
-    // GOODS_LOCALITIES_PLAN.md Slice 6 — the non-mineral counterpart of the
+    // CLAUDE.md §8.19 (goods localities, shipped) Slice 6 — the non-mineral counterpart of the
     // deposit aggregation above, same province-attribution helper (`prov_at`).
     let localities: Vec<crate::sim::localities::GoodLocality> = metadata::get_meta(&conn, "good_localities")
         .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();

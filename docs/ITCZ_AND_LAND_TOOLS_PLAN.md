@@ -111,7 +111,7 @@ Four rules this module must hold, each with a test:
    tell §8.24 spent a session removing from the province mosaic.
 3. **Roughening is a LEVEL SET, never a per-cell dice roll**: signed
    distance-to-coast, perturbed by fbm, re-thresholded at zero, bounded by a
-   reach. This is the same mechanism and the same reasoning as `TERRAIN_2_PLAN`'s
+   reach. This is the same mechanism and the same reasoning as Terrain 2.0's (CLAUDE.md §8.23b)
    D1/T1 coastline decoupling — the attempt that worked did so because it was
    structural, not because it was tuned. A per-cell threshold scatters speckle
    islands across deep ocean by construction.

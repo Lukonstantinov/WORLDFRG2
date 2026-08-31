@@ -87,7 +87,7 @@ fn warped_coords(x: f32, y: f32, seed: u64, strength: f32) -> (f32, f32) {
 /// Priority-flood over LAND only, seeded from every ocean cell at fixed sea
 /// level (Barnes et al. 2014 depression-filling, the same family phase 5's
 /// rivers already use -- kept as a separate implementation here rather than
-/// shared, per TERRAIN_2_PLAN.md section 4 slice 1 risk 2: phase 2 runs long
+/// shared, per CLAUDE.md §8.23b (Terrain 2.0, shipped) section 4 slice 1 risk 2: phase 2 runs long
 /// before rivers exist and unifying the two would be its own, separately
 /// gated change). Returns, per land cell: `flow_to` (the neighbour it drains
 /// toward -- itself for an outlet cell directly on the coast) and `order`
@@ -437,7 +437,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     let terrain = buf.terrain.clone();
     let have_boundary = !buf.boundary_type.is_empty();
 
-    // Real orogeny field (TERRAIN_2_PLAN.md section 4 slice 3): BFS distance
+    // Real orogeny field (CLAUDE.md §8.23b (Terrain 2.0, shipped) section 4 slice 3): BFS distance
     // from, and setting/age inherited from, the nearest convergent/transform
     // boundary land cell. `None` when there is no plate data at all (should
     // not happen on this path, but stay defensive).
@@ -490,7 +490,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     // of this belt read `orogeny.dist` at the cell's OWN position, so however
     // much `belt_noise` below varies the belt's STRENGTH, its CREST still
     // traced that literal straight line -- the diagonal-line artefact named in
-    // TERRAIN_2_PLAN.md's own evidence column. So belt cells instead sample the
+    // CLAUDE.md §8.23b (Terrain 2.0, shipped)'s own evidence column. So belt cells instead sample the
     // orogeny field at a WARPED position: which boundary point "nearest" means
     // wanders smoothly rather than being the true nearest, bending the belt's
     // geometry the way a real orogen curves along an irregular margin.
@@ -653,7 +653,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
     }
 
-    // Transient geology (TERRAIN_2_PLAN.md section 4 slices 1-2): lithology +
+    // Transient geology (CLAUDE.md §8.23b (Terrain 2.0, shipped) section 4 slices 1-2): lithology +
     // tectonic-setting/age erodibility, the phase-2 climate proxy, and the
     // per-plate region id used to regionalise the hypsometric redistribution.
     let geo = geology::build_geo_context(buf, seed, &elevation, &coast_dist, orogeny.as_ref());
@@ -994,7 +994,7 @@ pub fn generate_shelves(
         }
     }
 
-    // â”€â”€ Terrain 2.0 slice 5 (docs/TERRAIN_2_PLAN.md D11): seafloor structure.
+    // â”€â”€ Terrain 2.0 slice 5 (docs/CLAUDE.md §8.23b (Terrain 2.0, shipped) D11): seafloor structure.
     // Everything above is a pure function of distance-to-coast; real ocean
     // floor also carries a mid-ocean ridge along a divergent boundary, a
     // trench at a subducting convergent one, abyssal-hill texture in the deep,
@@ -1271,7 +1271,7 @@ pub fn generate_elevation_from_terrain(
     // Scale iterations with world size (small worlds ~15K, large ~100K)
     let pre_erosion = elevation.clone();
     // No real plate data on this path -- the relief pseudo-setting only
-    // (TERRAIN_2_PLAN.md section 2's documented fiction, never real polarity/age).
+    // (CLAUDE.md §8.23b (Terrain 2.0, shipped) section 2's documented fiction, never real polarity/age).
     let geo = geology::build_geo_context(buf, seed, &pre_erosion, &coast_dist, None);
 
     // â”€â”€ Step 4: Thermal erosion â€” smooth sharp ridges â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -2439,7 +2439,7 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
     }
 }
 
-/// `redistribute_elevation`, then a REGIONALISED correction (TERRAIN_2_PLAN.md
+/// `redistribute_elevation`, then a REGIONALISED correction (CLAUDE.md §8.23b (Terrain 2.0, shipped)
 /// section 4 slice 2, D9). The plain global version squeezes every region's
 /// land into one rank histogram, which sets a plausible overall hypsometric
 /// curve but ACTIVELY ERASES between-region contrast: a region the erosion
@@ -3533,7 +3533,7 @@ mod tests {
         }
     }
 
-    /// TERRAIN 2.0 INSTRUMENTATION (`TERRAIN_2_PLAN.md` section 3, "to build").
+    /// TERRAIN 2.0 INSTRUMENTATION (CLAUDE.md §8.23b (Terrain 2.0, shipped) section 3, "to build").
     /// One table per elevation model of the metrics the plan's own gates are
     /// stated in: RMS slope, slope SPREAD across windows (the headline gate —
     /// a world where every range shades alike scores near zero on this),
@@ -3694,7 +3694,7 @@ mod tests {
         }
 
         let (w, h) = (900u32, 500u32);
-        println!("\n== TERRAIN 2.0 metrics @ {w}x{h} (docs/TERRAIN_2_PLAN.md section 3) ==");
+        println!("\n== TERRAIN 2.0 metrics @ {w}x{h} (docs/CLAUDE.md §8.23b (Terrain 2.0, shipped) section 3) ==");
 
         let mut plate_buf = continent(w, h, w / 12);
         let n = plate_buf.total();

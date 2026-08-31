@@ -2,7 +2,7 @@
 //! `use super::*` brings the struct, its fields, tuning consts and free helpers into scope.
 use super::*;
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 / F3 — the terrain-penalty
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 5 / F3 — the terrain-penalty
 /// proxy `rebuild_routes` applies to a hub founded DURING the campaign (a colony, a
 /// satellite), whose `koppen` is the only terrain signal a tick carries with no tile
 /// access (`TickHub.koppen` is copied straight from the `ColonizeSite` that founded

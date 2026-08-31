@@ -744,7 +744,7 @@ pub fn apply_salt_pans(buf: &mut WorldBuffer, lakes: &[crate::sim::rivers::Lake]
     }
 }
 
-// ── River placement factors (GOODS_LOCALITIES_PLAN.md Slice 1, F6) ─────────────
+// ── River placement factors (CLAUDE.md §8.19 (goods localities, shipped) Slice 1, F6) ─────────────
 //
 // `good_score`/`envelope_score` never read rivers at all before this — the only
 // river influence on goods placement was fertility's single 0.20 proximity
@@ -830,7 +830,7 @@ fn river_multiplier(
     m.max(0.0)
 }
 
-/// GOODS_LOCALITIES_PLAN.md Slice 2 (F5) — the marine-band gate. `Either`
+/// CLAUDE.md §8.19 (goods localities, shipped) Slice 2 (F5) — the marine-band gate. `Either`
 /// reproduces the caller's own gate unchanged (the historical undifferentiated
 /// `sea_coastal` test); `Inshore`/`Bank` narrow it to a strict SUBSET of that same
 /// footprint, so an `Either` good's placement is byte-identical to before this
@@ -920,7 +920,7 @@ const SOIL_UNLISTED: f32 = 0.25;
 /// `saffron` — whose climates were already marginal on the diagnostic world —
 /// under `localize_good`'s seed threshold, so both placed literally nothing. That
 /// is the same failure mode the locality pass already guards with its own FRINGE
-/// and FLOOR (GOODS_LOCALITIES_PLAN D5), and it gets the same answer here: the
+/// and FLOOR (CLAUDE.md §8.19 D5), and it gets the same answer here: the
 /// multiplier is remapped into `[TERROIR_FLOOR, 1.0]`, which still gives roughly a
 /// 2x contrast between preferred and indifferent ground — plenty for visible
 /// patchiness — while never being able to delete a good from a world.
@@ -932,7 +932,7 @@ const SMALLEST_LANDMASS_FALLBACK: usize = 6;
 
 /// The largest a landmass may be and still count as an ISLAND, in km². Stated in
 /// km² and converted per world, never in cells, for the same reason the locality
-/// size ladder is (§8.19 / GOODS_LOCALITIES_PLAN §2.1): a cell is ~11 km across
+/// size ladder is (CLAUDE.md §8.19, the size ladder): a cell is ~11 km across
 /// at 3600x1800 but ~133 km at the sizes the test worlds use, so a fixed CELL
 /// count would mean "Great Britain" on one world and "most of Eurasia" on
 /// another. ~250,000 km² is roughly Great Britain plus Ireland — generous on
@@ -1098,7 +1098,7 @@ pub fn compute_trade_goods(
     let h = buf.height;
     let n = buf.total();
 
-    // GOODS_LOCALITIES_PLAN.md Slice 1 (F6) — built ONCE for the whole world, the
+    // CLAUDE.md §8.19 (goods localities, shipped) Slice 1 (F6) — built ONCE for the whole world, the
     // same discipline `GeoContext` already applies for deposit goods. `None` for
     // every OTHER caller of `good_score`/`envelope_score` (the Goods Editor's live
     // preview, which has no rivers to hand) — see `river_multiplier`'s neutral
@@ -1108,7 +1108,7 @@ pub fn compute_trade_goods(
     // (same discipline as `RiverContext`/`GeoContext`). Needed by `Domain::Island`
     // and by every `Distribution::Endemic` good.
     let land_ctx = LandmassContext::build(buf);
-    // GOODS_LOCALITIES_PLAN.md Slice 3 — every locality placed this run, across
+    // CLAUDE.md §8.19 (goods localities, shipped) Slice 3 — every locality placed this run, across
     // every good, flattened for persistence exactly as the ore workings are.
     let mut all_localities: Vec<super::localities::GoodLocality> = Vec::new();
 
@@ -1252,7 +1252,7 @@ pub fn compute_trade_goods(
                 if !unlimited && !seed_cells.is_empty() && best_score < seed_thresh {
                     fallback_seeded.insert(spec.id.clone());
                 }
-                // GOODS_LOCALITIES_PLAN.md Slice 3 (D1/D5/D6) — cluster the belt into
+                // CLAUDE.md §8.19 (goods localities, shipped) Slice 3 (D1/D5/D6) — cluster the belt into
                 // real terroir patches and thin it between them (full modulation, with
                 // a floor so a producing cell never reaches literal zero). Runs BEFORE
                 // dilation so the trade-reach rings spread from the already-modulated
@@ -1315,7 +1315,7 @@ pub fn compute_trade_goods(
         all.extend(v);
     }
 
-    // GOODS_LOCALITIES_PLAN.md Slice 4 (D8) — name the notable localities, now that
+    // CLAUDE.md §8.19 (goods localities, shipped) Slice 4 (D8) — name the notable localities, now that
     // Phase 7's culture map is active (see `sim_run_all`'s ordering).
     super::localities::name_notable_localities(buf, &mut all_localities);
 
@@ -2306,7 +2306,7 @@ mod tests {
         assert_eq!(buf.salinity[fi], 0, "no brine at a freshwater lake");
     }
 
-    /// GOODS_LOCALITIES_PLAN.md Slice 2 (F5) — a Bank good may never place a cell
+    /// CLAUDE.md §8.19 (goods localities, shipped) Slice 2 (F5) — a Bank good may never place a cell
     /// adjacent to land, and an Inshore good may never place a cell that isn't
     /// adjacent to land. `Either` is untouched (reproduces the old undifferentiated
     /// `sea_coastal` gate) on both a shore cell and a bank cell.

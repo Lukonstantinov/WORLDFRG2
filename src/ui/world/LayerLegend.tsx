@@ -257,7 +257,7 @@ export function LayerLegend() {
 
 const box2: React.CSSProperties = { ...box, left: "auto", right: 8 };
 
-/** GOODS_LOCALITIES_PLAN.md D10 · the trade-good QUALITY key. Independent of
+/** CLAUDE.md §8.19 (goods localities, shipped) D10 · the trade-good QUALITY key. Independent of
  *  `LayerLegend` above (it keys off the ACTIVE base layer; this keys off the
  *  `goodQuality` OVERLAY, which can be switched on over any base layer at all), so
  *  it is its own small component, docked to the opposite corner so the two never

@@ -1,4 +1,4 @@
-//! Terrain 2.0 — transient geology fields (docs/TERRAIN_2_PLAN.md §2, §4 slices 2-3).
+//! Terrain 2.0 — transient geology fields (docs/CLAUDE.md §8.23b (Terrain 2.0, shipped) §2, §4 slices 2-3).
 //!
 //! Everything here is recomputed from `seed` + whatever phase 1 already persisted
 //! (`plate_index`, `boundary_type`, `terrain`) every time phase 2 runs, used by the

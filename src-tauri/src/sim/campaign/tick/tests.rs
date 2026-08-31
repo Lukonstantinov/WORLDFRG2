@@ -2325,7 +2325,7 @@
         assert!(s.banks[0].losses > 0.0 && s.banks[0].loans.is_empty(), "bank wrote off the defaulted colony loan");
     }
 
-    /// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6 (F6) — a colony founded on
+    /// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 6 (F6) — a colony founded on
     /// a site whose dominant belt differs from its founder's must produce that good
     /// within a year (immediately, in fact — `create_market_colony` seeds it at
     /// founding). Before this a settlement colony always inherited a flat 60% of its
@@ -2366,7 +2366,7 @@
         }
     }
 
-    /// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 7 (F7) — a stage-1 colony,
+    /// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 7 (F7) — a stage-1 colony,
     /// alone in a province whose rural pool is already at carrying capacity, must
     /// receive only a FRACTION of `prov_surplus`/dues on its first land pass — not
     /// the whole province's harvest, which is what happened before: an unsettled

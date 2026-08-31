@@ -398,7 +398,7 @@ fn build_coarse_cost(
                 };
                 // Navigable trunk = a fast inland highway (cheapest overland
                 // corridor); a minor river is still a cheap valley route.
-                // PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 — raised from
+                // CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 5 — raised from
                 // 0.8 (a sea:river:road ratio of 1:1.6:8) toward Masschaele's
                 // measured 1:4:8 (EcHR 46, 1993, 266–79): coastal sea is 0.5, so
                 // 2.0 lands the navigable-river rung at exactly 4×.
@@ -636,7 +636,7 @@ fn coarse_dijkstra(cc: &CoarseCost, start: usize, goal: usize) -> Option<Vec<usi
 /// Single-source Dijkstra over the coarse cost grid returning the accumulated COST
 /// to reach every node (fixed-point, ×100) alongside the predecessor array, so many
 /// goals can be reconstructed from ONE run (the campaign route-days matrix) — slice 5
-/// (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md): `compute_route_days_matrix` used to
+/// (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped)): `compute_route_days_matrix` used to
 /// price a route by its geometric cell length alone, discarding the very cost the
 /// pathfinder used to CHOOSE that route, so a detour was billed for being longer
 /// while the mode (sea vs river vs road) that made it worth taking was invisible to
@@ -671,7 +671,7 @@ fn coarse_dijkstra_dist_prev(cc: &CoarseCost, start: usize) -> (Vec<i64>, Vec<us
 /// grid: mountain passes, rivers, coast-hugging and sea crossings are all priced in, so
 /// campaign trade/migration follow real lanes and NEVER draw a straight line.
 ///
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 — days are now priced from the
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 5 — days are now priced from the
 /// pathfinder's own accumulated COST (`dist[goal]`, already computed to CHOOSE the
 /// route), not merely the geometric cell length of the path it picked. Pricing by
 /// length alone (the old behaviour) billed a detour for being longer while the MODE
@@ -1659,7 +1659,7 @@ pub(crate) fn compute_colonizable_sites(
         (vec![false; cn], vec![0.0f32; cn], vec![0u8; cn], vec![0.0f32; cn]);
     // Raw trade-good richness per coarse cell: Σ (belt strength × good base_value).
     let mut traw = vec![0.0f32; cn];
-    // F6 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6) — the site's own
+    // F6 (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 6) — the site's own
     // per-good belt strength (0..1), so a chosen site can seed a colony from what it
     // actually grows rather than a 60%-scaled photocopy of its founder. `ng` goods
     // per coarse cell; cheap even on a large world (a few hundred KB at most).
@@ -2870,7 +2870,7 @@ mod river_system_tests {
     }
 }
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 — route-days priced by the
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 5 — route-days priced by the
 /// pathfinder's own accumulated cost, not by the geometric length of the path it
 /// picked (F3). Two claims to gate: an all-sea route keeps roughly its OLD travel
 /// time (the calibration target `compute_route_days_matrix`'s own doc comment

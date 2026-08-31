@@ -1480,7 +1480,7 @@ impl CampaignSim {
     pub(crate) fn create_market_colony(&mut self, founder: usize, site: &ColonizeSite,
                             backers: Vec<(u8, u32, f32)>, seed_pop: f32) -> usize {
         let ng = self.goods.len();
-        // F6 (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 6) — the site was
+        // F6 (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 6) — the site was
         // CHOSEN for its resources (`trade_value` dominates the scoring in
         // `compute_colonizable_sites`); a colony that then produces a flat 60% of
         // whatever the METROPOLIS produced ignores the very reason the spot was

@@ -1,5 +1,5 @@
 //! Trade-good localities — the agricultural/biological counterpart of
-//! `deposits.rs`. See `docs/GOODS_LOCALITIES_PLAN.md`.
+//! `deposits.rs`. See `docs/CLAUDE.md §8.19 (goods localities, shipped).
 //!
 //! # Why this module exists
 //!
@@ -238,7 +238,7 @@ fn place_localities_inner(
     out
 }
 
-/// GOODS_LOCALITIES_PLAN.md Slice 4 (D8) — name every locality whose grade clears
+/// CLAUDE.md §8.19 (goods localities, shipped) Slice 4 (D8) — name every locality whose grade clears
 /// the notable threshold, deterministically, in the LOCAL culture (the same
 /// per-cell hearth lookup `names::gen_name` already uses for settlements). Must
 /// run after Phase 7's culture map is active (`sim_run_all`'s own ordering already

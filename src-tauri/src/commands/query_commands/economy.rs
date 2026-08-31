@@ -398,7 +398,7 @@ pub fn compute_economy(
         }
     }
 
-    // GOODS_LOCALITIES_PLAN.md Slice 7 (D2) — the non-mineral counterpart of the
+    // CLAUDE.md §8.19 (goods localities, shipped) Slice 7 (D2) — the non-mineral counterpart of the
     // deposit-grade read above. A locality's `grade` is a direct terroir-quality
     // number (Slice 3), so a hub whose catchment holds a fine locality of a good
     // should read finer than one that merely produces a lot of it.

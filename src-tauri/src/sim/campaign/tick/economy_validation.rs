@@ -785,7 +785,7 @@ fn econ_fidelity_scorecard() {
     );
 }
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 4 — F4 measured that the compact
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 4 — F4 measured that the compact
 /// reference world above cannot show a distance/price gradient even if the model
 /// has one: its trade horizon is `0.24 × world_w(100) = 24 units ≈ 4.8 days`, its
 /// longest rescued route is ~11.5 days, and at the harness's borrowed
@@ -936,7 +936,7 @@ fn reference_world_large() -> CampaignSim {
     s
 }
 
-/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 4 — an INSTRUMENT, not a gate:
+/// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 4 — an INSTRUMENT, not a gate:
 /// per the module's own rule, this test asserts only that every metric is a real
 /// number, exactly like `econ_fidelity_scorecard` does for the compact world. The
 /// integration/basket gradients and the longest-route freight ratio are PRINTED —
