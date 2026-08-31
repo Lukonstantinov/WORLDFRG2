@@ -3009,7 +3009,7 @@ mod tests {
     use crate::sim::world_buffer::ColumnSet;
 
     /// A rectangular continent inside a sea frame, for the coast-relative tests.
-    fn continent(w: u32, h: u32, margin: u32) -> WorldBuffer {
+    pub fn continent(w: u32, h: u32, margin: u32) -> WorldBuffer {
         let n = (w * h) as usize;
         let mut terrain = vec![1u8; n];
         for y in 0..h {
@@ -4221,5 +4221,169 @@ mod tests {
         let mut smooth_copy = smooth_field.clone();
         limit_grid_scale_relief(&mut smooth_copy, &terrain, w, h);
         assert_eq!(smooth_copy, smooth_field, "a world inside budget must be returned untouched");
+    }
+}
+
+#[cfg(test)]
+mod flat_diagnostic {
+    use super::*;
+    use super::tests::continent;
+
+    /// DIAGNOSTIC (not a gate): how much of the land comes out at EXACTLY the
+    /// 0.01 clamp floor (= 88.5 m of the 8848 m range), and how much of it is
+    /// flat enough that a river running over it has no gradient to follow.
+    ///
+    /// The 0.01 floor is applied inside `redistribute_elevation`'s own band
+    /// loop: band 0 spans 0..1000 m and assigns `t * 0.113` across its ranked
+    /// cells, so every cell with `t < 0.0885` is clamped to the identical
+    /// value. Those are by construction the LOWEST-lying land cells -- i.e.
+    /// exactly the floodplains every river drains across.
+    #[test]
+    #[ignore]
+    fn diagnose_flat_lowland() {
+        for (name, mut buf) in [
+            ("shape", continent(900, 500, 75)),
+            ("plates", continent(900, 500, 75)),
+        ] {
+            let (w, h) = (buf.width, buf.height);
+            if name == "plates" {
+                let n = buf.total();
+                buf.plate_index = vec![0u16; n];
+                buf.boundary_type = vec![0u8; n];
+                buf.is_volcanic = vec![0u8; n];
+                crate::sim::plates::generate_plates_and_landmass(&mut buf, 7, 14);
+                generate_elevation(&mut buf, 7);
+            } else {
+                generate_elevation_from_terrain(&mut buf, 7, 0.5, 0.5, 0.5, 0.4);
+            }
+
+            let land: Vec<usize> = (0..buf.total()).filter(|&i| buf.terrain[i] == 1).collect();
+            let nl = land.len().max(1);
+            let at_floor = land.iter().filter(|&&i| buf.elevation[i] <= 0.0100001).count();
+            let under_1pct = land.iter().filter(|&&i| buf.elevation[i] <= 0.0102).count();
+
+            // How many land cells have ALL 8 neighbours within 1 m of themselves
+            // -- "no gradient for a river to follow".
+            const ONE_M: f32 = 1.0 / 8848.0;
+            let mut flat = 0usize;
+            for &i in &land {
+                let x = (i % w as usize) as i32;
+                let y = (i / w as usize) as i32;
+                let e = buf.elevation[i];
+                let mut all_flat = true;
+                for &(dx, dy) in &[(-1i32,-1i32),(0,-1),(1,-1),(-1,0),(1,0),(-1,1),(0,1),(1,1)] {
+                    let nx = buf.wrap_x(x + dx);
+                    let ny = (y + dy).clamp(0, h as i32 - 1) as u32;
+                    let ni = buf.idx(nx, ny);
+                    if buf.terrain[ni] == 1 && (buf.elevation[ni] - e).abs() > ONE_M {
+                        all_flat = false;
+                        break;
+                    }
+                }
+                if all_flat { flat += 1; }
+            }
+
+            // Largest 4-connected component of floor-valued cells.
+            let mut seen = vec![false; buf.total()];
+            let mut biggest = 0usize;
+            for &s in &land {
+                if seen[s] || buf.elevation[s] > 0.0100001 { continue; }
+                let mut q = std::collections::VecDeque::new();
+                q.push_back(s); seen[s] = true;
+                let mut sz = 0usize;
+                while let Some(c) = q.pop_front() {
+                    sz += 1;
+                    let x = (c % w as usize) as i32;
+                    let y = (c / w as usize) as i32;
+                    for &(dx, dy) in &[(-1i32,0i32),(1,0),(0,-1),(0,1)] {
+                        let nx = buf.wrap_x(x + dx);
+                        let ny = (y + dy).clamp(0, h as i32 - 1) as u32;
+                        let ni = buf.idx(nx, ny);
+                        if !seen[ni] && buf.terrain[ni] == 1 && buf.elevation[ni] <= 0.0100001 {
+                            seen[ni] = true; q.push_back(ni);
+                        }
+                    }
+                }
+                if sz > biggest { biggest = sz; }
+            }
+
+            println!(
+                "{name:<8} land={nl}  at_floor(88.5m exactly)={:.2}%  <=90m={:.2}%  \
+                 no-gradient(<1m to all 8 nbrs)={:.2}%  largest_flat_component={} cells",
+                at_floor as f32 * 100.0 / nl as f32,
+                under_1pct as f32 * 100.0 / nl as f32,
+                flat as f32 * 100.0 / nl as f32,
+                biggest,
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod plate_diagnostic {
+    use super::tests::continent;
+
+    /// DIAGNOSTIC (not a gate): the land/sea split the plate model actually
+    /// produces, and how much of it is ISLAND rather than main continent.
+    /// `is_oceanic = rng < 0.4` over roughly equal-area Voronoi plates means
+    /// land converges on ~60% of the globe whatever the plate count; Earth is
+    /// 29%. Also counts landmass components by size, because "too few islands"
+    /// is a claim about the component-size distribution, not about land area.
+    #[test]
+    #[ignore]
+    fn diagnose_plate_land_fraction() {
+        for &count in &[6u32, 10, 16, 24, 40] {
+            let mut land_fracs = Vec::new();
+            let mut isl = (0usize, 0usize, 0usize); // small, medium, large-but-not-main
+            let mut main_share = 0.0f32;
+            for seed in [1u64, 2, 3] {
+                let (w, h) = (600u32, 300u32);
+                let mut buf = continent(w, h, 0);
+                let n = buf.total();
+                buf.plate_index = vec![0u16; n];
+                buf.boundary_type = vec![0u8; n];
+                buf.is_volcanic = vec![0u8; n];
+                crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, count);
+                let land = buf.terrain.iter().filter(|&&t| t == 1).count();
+                land_fracs.push(land as f32 / n as f32);
+
+                // Landmass components (4-connected, wrap-aware).
+                let mut seen = vec![false; n];
+                let mut sizes = Vec::new();
+                for s in 0..n {
+                    if seen[s] || buf.terrain[s] != 1 { continue; }
+                    let mut q = std::collections::VecDeque::new();
+                    q.push_back(s); seen[s] = true;
+                    let mut sz = 0usize;
+                    while let Some(c) = q.pop_front() {
+                        sz += 1;
+                        let x = (c % w as usize) as i32;
+                        let y = (c / w as usize) as i32;
+                        for &(dx, dy) in &[(-1i32,0i32),(1,0),(0,-1),(0,1)] {
+                            let nx = buf.wrap_x(x + dx);
+                            let ny = (y + dy).clamp(0, h as i32 - 1) as u32;
+                            let ni = buf.idx(nx, ny);
+                            if !seen[ni] && buf.terrain[ni] == 1 { seen[ni] = true; q.push_back(ni); }
+                        }
+                    }
+                    sizes.push(sz);
+                }
+                sizes.sort_unstable_by(|a, b| b.cmp(a));
+                if let Some(&biggest) = sizes.first() {
+                    main_share += biggest as f32 / land.max(1) as f32 / 3.0;
+                }
+                for (k, &sz) in sizes.iter().enumerate() {
+                    if k == 0 { continue; }
+                    if sz < 100 { isl.0 += 1; } else if sz < 2000 { isl.1 += 1; } else { isl.2 += 1; }
+                }
+            }
+            let mean = land_fracs.iter().sum::<f32>() / land_fracs.len() as f32;
+            println!(
+                "plates={count:<3} land={:.1}% of globe (Earth 29.2%)  \
+                 largest_landmass={:.0}% of all land  islands/world: tiny(<100c)={:.1} small={:.1} large={:.1}",
+                mean * 100.0, main_share * 100.0,
+                isl.0 as f32 / 3.0, isl.1 as f32 / 3.0, isl.2 as f32 / 3.0,
+            );
+        }
     }
 }
