@@ -3000,7 +3000,7 @@ mod tests {
         let hydro = rivers::compute_hydrology(&buf);
         let lake_max = (buf.total() / 2000).max(20);
         let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
-        let rv = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+        let rv = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes);
         rivers::classify_salt_lakes(&buf, &mut lakes, &rv);
         soil::classify_soil(&mut buf);
         fertility::compute_fertility(&mut buf, &rv);

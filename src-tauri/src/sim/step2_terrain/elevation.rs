@@ -4447,23 +4447,47 @@ mod flat_diagnostic {
 
             let hy = crate::sim::rivers::compute_hydrology(&buf);
             let lakes = crate::sim::rivers::detect_lakes(&buf, &hy.filled, 0.004, (buf.total() / 2000).max(20));
-            let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, 0.5, 1.0, &lakes);
+            let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 0.5, 1.0, &lakes);
 
             // How often does a river's CELL path rise on the RAW elevation field?
+            // Split by WHERE: inside a filled depression (the priority-flood raised
+            // this cell above its true height, so the surface the river was routed
+            // on is not the surface the map draws) vs on open ground, which would
+            // be a real routing fault. Also the figure a viewer actually sees: how
+            // much a single river CLIMBS in total over its course.
             let (mut steps, mut ascents, mut ascent_m_sum, mut worst_m) = (0usize, 0usize, 0.0f64, 0.0f32);
+            let (mut asc_in_fill, mut asc_open) = (0usize, 0usize);
+            let mut climb_per_river: Vec<f32> = Vec::new();
+            const FILL_MARK: f32 = 2.0 / 8848.0; // >2 m above true height = filled
             for r in &rivers {
+                let mut climb = 0.0f32;
                 for pair in r.points.windows(2) {
-                    let a = buf.elevation[buf.idx(pair[0].0, pair[0].1)];
-                    let b = buf.elevation[buf.idx(pair[1].0, pair[1].1)];
+                    let ia = buf.idx(pair[0].0, pair[0].1);
+                    let ib = buf.idx(pair[1].0, pair[1].1);
+                    let a = buf.elevation[ia];
+                    let b = buf.elevation[ib];
                     steps += 1;
                     let rise = (b - a) * 8848.0;
                     if rise > 0.0 {
                         ascents += 1;
                         ascent_m_sum += rise as f64;
+                        climb += rise;
                         if rise > worst_m { worst_m = rise; }
+                        let in_fill = (hy.filled[ia] - a) > FILL_MARK || (hy.filled[ib] - b) > FILL_MARK;
+                        if in_fill { asc_in_fill += 1; } else { asc_open += 1; }
                     }
                 }
+                climb_per_river.push(climb);
             }
+            climb_per_river.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            let cp = |q: f32| climb_per_river[((climb_per_river.len() as f32 * q) as usize).min(climb_per_river.len().saturating_sub(1))];
+            println!(
+                "{name:<7} ascending steps: {} in FILLED depressions ({:.0}%), {} on OPEN ground ({:.0}%)                    per-river total climb: p50={:.0}m p90={:.0}m max={:.0}m   rivers climbing >100m: {}",
+                asc_in_fill, asc_in_fill as f32 * 100.0 / ascents.max(1) as f32,
+                asc_open, asc_open as f32 * 100.0 / ascents.max(1) as f32,
+                cp(0.50), cp(0.90), climb_per_river.last().copied().unwrap_or(0.0),
+                climb_per_river.iter().filter(|&&c| c > 100.0).count(),
+            );
 
             // Hard steps between neighbouring LAND cells (the lineament signature).
             let mut diffs: Vec<f32> = Vec::new();

@@ -154,7 +154,7 @@ pub fn sim_rivers_hydrology(
     // Lakes first: rivers must terminate at lake shores (not draw across them),
     // so channel extraction needs to know which cells are open lake water.
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes);
     // Oxbow backwaters cut off from the meandering lowland reaches (real lakes).
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
@@ -343,7 +343,7 @@ pub fn sim_refresh_hydrology_biology(
     let hydro = rivers::compute_hydrology(&buf);
     let max_cells = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4);
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, river_density, river_width, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
@@ -483,7 +483,7 @@ pub fn sim_run_all(
     let hydro = rivers::compute_hydrology(&buf);
     let lake_max = (buf.total() / 2000).max(20);
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
@@ -875,7 +875,7 @@ pub fn sim_run_all_from_terrain(
     let hydro = rivers::compute_hydrology(&buf);
     let lake_max = (buf.total() / 2000).max(20);
     let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, 0.5, 1.0, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
