@@ -270,7 +270,17 @@ const ITCZ_JAN_COLOR = "#4f9bea";
 // band is twice this). The real ITCZ rain belt is ~5-10° wide.
 const ITCZ_BAND_HALF_DEG = 6;
 const SUBTROPICAL_COLOR = "#e0a83a";
-const POLAR_FRONT_COLOR = "#6a9cf0";
+// The polar front used to be "#6a9cf0" — a mid blue within a few percent of the
+// river stroke. Drawn as a DEAD-STRAIGHT full-width line at a fixed latitude, it
+// read on any non-climate layer as a river running perfectly horizontally across
+// the whole world (a real, reported confusion at the Rivers step, where the
+// Climate map plate leaves this overlay on). A wind belt is an ANNOTATION about
+// the atmosphere, not a feature on the ground, so it is now a violet no water
+// feature uses, and both belts are drawn with a long annotation dash.
+const POLAR_FRONT_COLOR = "#b07cf0";
+/** Wind-belt lines are annotations: a long dash reads as a drawn reference line,
+ *  where the old short [6,4] read as a solid stroke once zoomed in. */
+const BELT_DASH: [number, number] = [16, 10];
 const FISHERY_BANK = "#39d3c0"; // grand-bank fishing ground (teal)
 
 /** Adjustable trade/connection-line colours — seeded with the historical defaults
@@ -2360,11 +2370,11 @@ export class OverlayManager {
         ctx.globalAlpha = 0.75;
         const he = cb.hadley_edge, pf = cb.polar_front;
         // Subtropical highs (the dry / desert belts) — warm amber.
-        belt(he, SUBTROPICAL_COLOR, `Subtropical High ${he.toFixed(0)}° (dry)`, [6, 4]);
-        belt(-he, SUBTROPICAL_COLOR, `Subtropical High ${he.toFixed(0)}° (dry)`, [6, 4]);
-        // Polar fronts (the storm tracks) — cool blue.
-        belt(pf, POLAR_FRONT_COLOR, `Polar Front ${pf.toFixed(0)}° (storms)`, [6, 4]);
-        belt(-pf, POLAR_FRONT_COLOR, `Polar Front ${pf.toFixed(0)}° (storms)`, [6, 4]);
+        belt(he, SUBTROPICAL_COLOR, `Subtropical High ${he.toFixed(0)}° (dry)`, BELT_DASH);
+        belt(-he, SUBTROPICAL_COLOR, `Subtropical High ${he.toFixed(0)}° (dry)`, BELT_DASH);
+        // Polar fronts (the storm tracks) — violet, deliberately not a water hue.
+        belt(pf, POLAR_FRONT_COLOR, `Polar Front ${pf.toFixed(0)}° (storms)`, BELT_DASH);
+        belt(-pf, POLAR_FRONT_COLOR, `Polar Front ${pf.toFixed(0)}° (storms)`, BELT_DASH);
         ctx.globalAlpha = 1;
       }
 

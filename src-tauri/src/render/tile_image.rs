@@ -1032,11 +1032,46 @@ fn render_fertility(tile: &TileData, n: &TileNeighbors, ctx: &RenderCtx, rgba: &
     }
 }
 
+/// The colour a plate BOUNDARY is drawn in, by its type. Served to the legend by
+/// `palette_commands::get_render_palettes` (§8.18: one copy, never a second one
+/// in the frontend), so the key cannot drift from the map.
+///
+/// Until this existed the Plates layer painted flat per-plate colour and NOTHING
+/// anywhere -- no layer, no overlay, no query -- ever read `boundary_type`, so
+/// the app could not show how its plates actually met, even though phase 1 has
+/// classified every boundary cell convergent / divergent / transform all along.
+pub const PLATE_BOUNDARY_COLORS: [(&str, (u8, u8, u8)); 3] = [
+    ("Convergent (collision / subduction)", (214, 58, 44)),
+    ("Divergent (rift / spreading)", (58, 190, 140)),
+    ("Transform (shear)", (240, 196, 58)),
+];
+
 fn render_plates(tile: &TileData, rgba: &mut [u8]) {
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         let plate = tile.plate_index[i];
-        let (r, g, b) = plate_color(plate);
+        let (mut r, mut g, mut b) = plate_color(plate);
+        // Mute the plate field so the boundaries drawn over it are the figure and
+        // the plates are the ground -- a tectonic map is read for its margins.
+        let sea = tile.terrain.get(i).copied().unwrap_or(1) == 0;
+        let mute = if sea { 0.55 } else { 0.78 };
+        r = (r as f32 * mute) as u8;
+        g = (g as f32 * mute) as u8;
+        b = (b as f32 * mute) as u8;
+
+        // The boundary itself, by collision type.
+        match tile.boundary_type.get(i).copied().unwrap_or(0) {
+            1 => { let c = PLATE_BOUNDARY_COLORS[0].1; r = c.0; g = c.1; b = c.2; }
+            2 => { let c = PLATE_BOUNDARY_COLORS[1].1; r = c.0; g = c.1; b = c.2; }
+            3 => { let c = PLATE_BOUNDARY_COLORS[2].1; r = c.0; g = c.1; b = c.2; }
+            _ => {}
+        }
+        // Volcanism reads as a bright stipple on top -- an arc/rift is where the
+        // volcanoes are, and seeing them ON the boundary is the whole point.
+        if tile.is_volcanic.get(i).copied().unwrap_or(0) == 1 {
+            r = 255; g = (g as u16 + 120).min(255) as u8; b = (b / 2).max(30);
+        }
+
         rgba[offset] = r;
         rgba[offset + 1] = g;
         rgba[offset + 2] = b;

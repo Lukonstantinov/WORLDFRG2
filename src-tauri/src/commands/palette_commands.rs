@@ -169,6 +169,17 @@ pub struct RenderPalettes {
     pub good_quality_grades: Vec<GradeStop>,
     /// Every named elevation style's own land+sea palette (§ elevation styles).
     pub elevation_styles: Vec<StylePaletteOut>,
+    /// The Plates layer's boundary key: how two plates MEET (convergent /
+    /// divergent / transform), served from the renderer's own table so the
+    /// legend cannot drift from the map.
+    pub plate_boundaries: Vec<LabelledColor>,
+}
+
+/// A named class colour (a legend row that carries its own words).
+#[derive(serde::Serialize)]
+pub struct LabelledColor {
+    pub label: String,
+    pub color: String,
 }
 
 fn hex(c: (u8, u8, u8)) -> String {
@@ -208,6 +219,10 @@ pub fn get_render_palettes() -> RenderPalettes {
                 label: grade_label(at).to_string(),
                 color: hex(heatmap_at(at)),
             })
+            .collect(),
+        plate_boundaries: crate::render::tile_image::PLATE_BOUNDARY_COLORS
+            .iter()
+            .map(|&(label, c)| LabelledColor { label: label.to_string(), color: hex(c) })
             .collect(),
         elevation_styles: elevation_style_palettes()
             .into_iter()
