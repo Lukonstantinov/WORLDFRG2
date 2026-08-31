@@ -3864,6 +3864,36 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own "deliberately not built" list (§6)
+TRADE_STAGING_AND_POSTS_PLAN.md   ← ⭐ APPROVED, NOTHING BUILT. Seven slices that
+                                    make a long lane a RELAY instead of a teleport.
+                                    Premise: a 7,000 km lane is historically ordinary;
+                                    one with no stops, no middleman and no city grown
+                                    along it is not. Carries the measured findings that
+                                    motivated it — the trade HORIZON is 0.24×world_w
+                                    (**9,617 km** on a 3600 grid, so the reported
+                                    7,000 km lanes are legal by design), the three
+                                    horizon-bypassing rescue passes price their lanes at
+                                    FLAT 55 km/day with no terrain multiplier (so an
+                                    absurd long lane is the CHEAPEST on the map), travel
+                                    mode is `coastal_a && coastal_b` alone (a river or
+                                    lake city is never "sea", so all its trade reads as
+                                    overland), the campaign route matrix is built with
+                                    `rivers_json = ""` so `is_river` is ALL FALSE and the
+                                    river cost rungs are never reached, `hub_pull` is
+                                    applied TWICE on the same axis, and loss is a flat
+                                    per-shipment roll independent of distance. Also the
+                                    three things that already exist and make the plan
+                                    cheap: `house_barred` + `pay_to_regain_markets` (the
+                                    embargo weapon, 70% built), the full
+                                    outpost→colony→free-city ladder incl. a shipped
+                                    `age>=50 && pop>=15_000` independence gate, and
+                                    `neighbor_path` — the sim ALREADY moves people in
+                                    legs; cargo is the only thing that teleports. Its
+                                    own risk register names the one likely to bite:
+                                    embargo as a WEALTH-CONCENTRATION SPIRAL against the
+                                    hard-won top-10% share. Companion UI schematics
+                                    ("Break of Bulk", 8 plates) are an artifact, not a
+                                    repo file (§2.2)
 MERCHANT_VESSELS_AND_INFORMATION_PLAN.md
                                   ← ⭐ DESIGN, NOT APPROVED, NOTHING BUILT. Six
                                     staged changes to the trade mechanism, built on
