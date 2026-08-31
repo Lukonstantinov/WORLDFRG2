@@ -1,5 +1,7 @@
 ﻿use crate::sim::world_buffer::WorldBuffer;
 use crate::sim::rivers::{River, Lake};
+use std::cmp::Reverse;
+use std::collections::BinaryHeap;
 
 #[derive(Clone, serde::Serialize, serde::Deserialize)]
 pub struct Settlement {
@@ -789,6 +791,128 @@ pub fn generate_settlements(
     settlements
 }
 
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 8 â€” cost-grid BETWEENNESS: a
+/// real, settlement-independent measure of which land actually sits on the paths
+/// people would take, found the way the Gotthard and the Khyber are found â€” by
+/// where routes squeeze through, not by knowing anything about cities or goods.
+/// Sample K seed cells spread over the land, run Dijkstra from each over a coarse
+/// cost grid, and accumulate how often a cell lies on the shortest path between two
+/// seeds. High traversal = a genuine junction, independent of 3b's local saddle/
+/// strait geometry tests â€” it catches a pinch point those miss (a chain of modest
+/// saddles that is nonetheless the only way through) and confirms the ones they do.
+///
+/// Deliberately a SEPARATE, simpler cost grid from the campaign's own
+/// `build_coarse_cost` (`query_commands/mod.rs`) â€” worldgen has no settlements yet
+/// to route between and no rivers-as-JSON, and this only needs to rank land by
+/// "does traffic squeeze through here", not price a real trade lane. Coarsened to
+/// the same ~700-cell-wide grid the campaign's own route cost grid targets, which is
+/// what keeps K=64 seeds a few seconds' work rather than a per-cell full-resolution
+/// scan (Â§8.9 rule 1's spirit â€” this runs once per world, but a world can be 26M
+/// cells on "Large").
+///
+/// Deterministic (no RNG): the K seeds are a stratified scatter over the land cells
+/// in INDEX order, not a random sample, so the same world always yields the same
+/// betweenness field.
+pub fn compute_betweenness(buf: &WorldBuffer) -> Vec<f32> {
+    let w = buf.width;
+    let h = buf.height;
+    let f = (w / 700).max(1);
+    let cw = ((w + f - 1) / f) as i32;
+    let ch = ((h + f - 1) / f) as i32;
+    let cn = (cw * ch) as usize;
+    let total = buf.total();
+    if cn == 0 { return vec![0.0; total]; }
+
+    let mut is_land = vec![false; cn];
+    let mut cost = vec![1.0f32; cn];
+    for cy in 0..ch {
+        for cx in 0..cw {
+            let wx = (cx as u32 * f + f / 2).min(w - 1);
+            let wy = (cy as u32 * f + f / 2).min(h - 1);
+            let idx = buf.idx(wx, wy);
+            let ci = (cy * cw + cx) as usize;
+            let land = buf.terrain[idx] == 1;
+            is_land[ci] = land;
+            // Only LAND cost matters — the Dijkstra below never expands into a sea
+            // cell at all (see `DIRS` relaxation), so this value is never read for
+            // a sea cell. "Where does traffic squeeze through" is a question about
+            // a continuous landmass (the Gotthard, the Khyber); letting paths cut
+            // across open water between two blobs of the same coastline would
+            // route straight past the land corridor connecting them, which is
+            // exactly backwards for what this measure exists to find.
+            cost[ci] = 4.0 + buf.elevation[idx] * 14.0;
+        }
+    }
+    let wrap_cx = |x: i32| -> i32 { ((x % cw) + cw) % cw };
+    let cidx = |cx: i32, cy: i32| -> usize { (cy * cw + wrap_cx(cx)) as usize };
+
+    const K: usize = 64;
+    let land_cells: Vec<usize> = (0..cn).filter(|&i| is_land[i]).collect();
+    if land_cells.len() < 4 { return vec![0.0; total]; } // too little land to mean anything
+    let k = K.min(land_cells.len());
+    let seeds: Vec<usize> = (0..k).map(|i| land_cells[(i * land_cells.len()) / k]).collect();
+
+    const DIRS: [(i32, i32, f32); 8] = [
+        (-1, 0, 1.0), (1, 0, 1.0), (0, -1, 1.0), (0, 1, 1.0),
+        (-1, -1, 1.4142), (1, -1, 1.4142), (-1, 1, 1.4142), (1, 1, 1.4142),
+    ];
+
+    let mut traversal = vec![0u32; cn];
+    for &s in &seeds {
+        // Single-source Dijkstra â†’ predecessor array (one run serves every OTHER
+        // seed as a destination), mirroring `coarse_dijkstra_prev`'s own shape in
+        // `query_commands/mod.rs` â€” fixed-point (Ă—100) integer costs on a binary
+        // heap, not floats, for the same determinism reason that code uses them.
+        let mut dist = vec![i64::MAX; cn];
+        let mut prev = vec![usize::MAX; cn];
+        let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+        dist[s] = 0;
+        heap.push(Reverse((0, s)));
+        while let Some(Reverse((d, u))) = heap.pop() {
+            if d > dist[u] { continue; }
+            let ux = (u as i32) % cw;
+            let uy = (u as i32) / cw;
+            for &(dx, dy, mult) in &DIRS {
+                let ny = uy + dy;
+                if ny < 0 || ny >= ch { continue; }
+                let v = cidx(ux + dx, ny);
+                if !is_land[v] { continue; } // land-only graph — see the cost comment above
+                let step = ((cost[u] + cost[v]) * 0.5 * mult * 100.0) as i64;
+                let nd = d.saturating_add(step.max(1));
+                if nd < dist[v] { dist[v] = nd; prev[v] = u; heap.push(Reverse((nd, v))); }
+            }
+        }
+        // Trace the shortest path from every OTHER seed back to this one, marking
+        // every coarse cell it crosses â€” the traversal count IS the betweenness.
+        for &t in &seeds {
+            if t == s || prev[t] == usize::MAX { continue; }
+            let mut cur = t;
+            let mut guard = 0usize;
+            while cur != s && guard < cn {
+                traversal[cur] += 1;
+                cur = prev[cur];
+                guard += 1;
+            }
+        }
+    }
+
+    let tmax = (traversal.iter().copied().max().unwrap_or(0)).max(1) as f32;
+    let coarse_norm: Vec<f32> = traversal.iter().map(|&t| t as f32 / tmax).collect();
+
+    // Upsample coarse â†’ world resolution (nearest coarse cell), land only.
+    let mut out = vec![0.0f32; total];
+    for y in 0..h {
+        let cy = ((y / f) as i32).min(ch - 1);
+        for x in 0..w {
+            let idx = buf.idx(x, y);
+            if buf.terrain[idx] != 1 { continue; }
+            let cx = ((x / f) as i32).min(cw - 1);
+            out[idx] = coarse_norm[cidx(cx, cy)];
+        }
+    }
+    out
+}
+
 /// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 3d â€” step 7a: the settlement-
 /// independent JUNCTION sites `compute_habitability_fields`'s trade ladder can now
 /// name (straits, isthmuses, mountain passes, great river mouths) but which the BASE
@@ -806,6 +930,12 @@ pub fn generate_settlements(
 /// exist because traffic passes, not because the land feeds them;
 /// `compute_political` (step 9) re-ranks by 0.30 route-centrality once real routes
 /// exist and gives them their real standing.
+///
+/// Slice 8 folds `compute_betweenness` into the candidate SCORE, with no reordering
+/// of the algorithm above: a cell still needs to be a local maximum of the combined
+/// score and clear the same kind of threshold, but the combined score can now also
+/// admit a real geographic pinch point 3b's local saddle/strait tests miss â€” a chain
+/// of only-moderate saddles that is nonetheless the sole way through a range.
 pub fn generate_trade_sites(
     buf: &WorldBuffer,
     trade: &[f32],
@@ -828,6 +958,19 @@ pub fn generate_trade_sites(
     let trade_sites_max = 24usize.min((max_settlements / 20).max(1));
 
     const TRADE_SITE_MIN: f32 = 0.75;
+    // Slice 8 â€” a pure geographic pinch point (no coastal/river trade value of its
+    // own) still needs to stand well clear of ordinary land to qualify on
+    // betweenness alone; the weight then nudges ranking among cells that already
+    // clear `TRADE_SITE_MIN` on the ladder, without ever being able to promote
+    // ordinary land past it by itself (weight â‰¤ the gap between an ordinary
+    // harbour's 0.60 rung and the 0.75 floor).
+    const BETWEENNESS_SITE_MIN: f32 = 0.85;
+    const BETWEENNESS_WEIGHT: f32 = 0.12;
+
+    let betweenness = compute_betweenness(buf);
+    let combined: Vec<f32> = (0..trade.len())
+        .map(|i| trade[i] + BETWEENNESS_WEIGHT * betweenness.get(i).copied().unwrap_or(0.0))
+        .collect();
 
     let mut candidates: Vec<(usize, f32)> = Vec::new();
     for y in 1..h - 1 {
@@ -838,13 +981,13 @@ pub fn generate_trade_sites(
             // zeroes `trade` on an EF ice cap, but state the rule explicitly so it
             // can never regress silently if the gate weighting ever changes.
             if buf.koppen[idx] == 22 { continue; }
-            let score = trade[idx];
-            if score < TRADE_SITE_MIN { continue; }
+            if trade[idx] < TRADE_SITE_MIN && betweenness[idx] < BETWEENNESS_SITE_MIN { continue; }
+            let score = combined[idx];
             let is_max = [(-1i32, -1), (0, -1), (1, -1), (-1, 0), (1, 0), (-1, 1), (0, 1), (1, 1)]
                 .iter()
                 .all(|&(dx, dy)| {
                     let ni = buf.widx(x as i32 + dx, y as i32 + dy);
-                    score >= trade[ni]
+                    score >= combined[ni]
                 });
             if is_max { candidates.push((idx, score)); }
         }
@@ -1057,6 +1200,91 @@ mod trade_site_tests {
             assert_eq!(a.y, b.y);
             assert_eq!(a.population, b.population);
         }
+    }
+
+    /// Slice 8 — a "dumbbell": two large landmasses joined by one thin corridor, all
+    /// at IDENTICAL flat climate/fertility/elevation and far from any coast, river or
+    /// lake, so `compute_habitability_fields`'s trade ladder scores every cell the
+    /// same (the default 0.1 rung — no water feature anywhere to distinguish them)
+    /// and 3b's local strait/pass tests never fire (the corridor is flat, and its
+    /// middle sits well outside `choke_r` of the open sea at its short ends). The
+    /// corridor is nonetheless the ONLY way between the two landmasses — exactly
+    /// the "chain of only-moderate saddles" case the ladder cannot see and
+    /// betweenness is built to catch.
+    #[test]
+    fn betweenness_finds_a_pinch_point_the_ladder_missed() {
+        let w = 1500u32;
+        let h = 150u32;
+        let mut buf = tiny_buf(w, h);
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                buf.terrain[idx] = 0;
+                buf.elevation[idx] = 0.10; // flat — never clears the pass threshold (0.33)
+                buf.koppen[idx] = 8; // Csa — a comfortable, unremarkable climate
+                buf.temperature[idx] = 18.0;
+                buf.precipitation[idx] = 700.0;
+                buf.fertility[idx] = 0.30;
+                // Uniformly "not near a coast" so `near_coast`/`is_strait` can't
+                // distinguish a blob cell that happens to touch real sea from a
+                // corridor cell that doesn't — the ladder must be genuinely blind.
+                buf.distance_to_ocean[idx] = 0.30;
+                buf.disease_risk[idx] = 0;
+            }
+        }
+        let land = |buf: &mut WorldBuffer, x0: u32, x1: u32, y0: u32, y1: u32| {
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    let idx = buf.idx(x, y);
+                    buf.terrain[idx] = 1;
+                }
+            }
+        };
+        land(&mut buf, 0, 600, 0, h);         // blob A
+        land(&mut buf, 600, 800, 65, 85);     // the one corridor (20 cells tall)
+        land(&mut buf, 800, 1400, 0, h);      // blob B
+        // x in [1400,1500) stays sea — a buffer so the cylindrical wrap doesn't
+        // silently rejoin blob B to blob A around the back of the world.
+
+        let rivers: Vec<River> = Vec::new();
+        let lakes: Vec<Lake> = Vec::new();
+        let fields = compute_habitability_fields(&buf, &rivers, &lakes, None);
+
+        // The ladder really is blind: no cell in the corridor scores higher than a
+        // cell deep in either blob.
+        let corridor_trade = fields.trade[buf.idx(700, 74)];
+        let blob_trade = fields.trade[buf.idx(300, 74)];
+        assert!(
+            (corridor_trade - blob_trade).abs() < 1e-6,
+            "the trade ladder should score the corridor and the open blob identically \
+             (corridor {corridor_trade}, blob {blob_trade}) — otherwise this isn't testing \
+             what betweenness adds"
+        );
+
+        let betweenness = compute_betweenness(&buf);
+        // The PEAK anywhere in the corridor (traffic may spread across its several
+        // parallel rows) against a point deep in a blob's own far corner — clear of
+        // any natural convergence toward the corridor mouth, so it reads as ordinary
+        // open interior rather than as a second bottleneck of the blob's own making.
+        let corridor_btw = (600..800).flat_map(|x| (65..85).map(move |y| (x, y)))
+            .map(|(x, y)| betweenness[buf.idx(x, y)])
+            .fold(0.0f32, f32::max);
+        let blob_btw = betweenness[buf.idx(50, 10)];
+        assert!(
+            corridor_btw > blob_btw * 3.0 && corridor_btw > 0.05,
+            "the corridor should read as far higher betweenness than a blob's own open \
+             interior (corridor peak {corridor_btw}, blob corner {blob_btw})"
+        );
+
+        let base = generate_settlements(&buf, &fields.hab, &rivers, 1, 0.55, None);
+        let trade_sites = generate_trade_sites(&buf, &fields.trade, &base, 0.55);
+        assert!(
+            trade_sites.iter().any(|s| (600..800).contains(&s.x)),
+            "betweenness should have placed a trade site in the corridor — none of \
+             {} sites did: {:?}",
+            trade_sites.len(),
+            trade_sites.iter().map(|s| (s.x, s.y)).collect::<Vec<_>>()
+        );
     }
 }
 

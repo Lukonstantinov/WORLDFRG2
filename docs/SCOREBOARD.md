@@ -9,6 +9,55 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-08-31b — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md`: slices 5 and 8, asked for by name
+
+Follow-up to the same day's earlier entry, which built six of eight slices and held
+5 (its own "high risk") and 8 (its own "only if 3 measures short") back on purpose.
+Asked explicitly to finish the plan, both are now built. `cargo test --lib` **373
+pass, 0 fail** (30 ignored, three more tests than the morning's entry); `earth_`
+gate unmoved (70.2%/39.0%); `npx tsc --noEmit` clean.
+
+**Slice 5 (route-days by cost, F3).** `compute_route_days_matrix` now prices a route
+from the pathfinder's own accumulated Dijkstra cost (`dist[goal]`) instead of the
+geometric length of the path it picked, calibrated so a pure open-sea route keeps
+its old travel time (`cost_to_days = days_per_cell·f / (OPEN_SEA_COST·100)`); the
+navigable-river discount in `build_coarse_cost` moved 0.8 → 2.0 (sea:river now ≈1:4,
+matching Masschaele's measured ratio rather than the old 1:1.6); the F3 mid-campaign
+fallback (a colony/satellite founded during play, which never gets a real pathfound
+route) is now terrain-penalised by climate (`terrain_route_mult`, keyed off the
+`koppen` a `TickHub` already carries) rather than a flat, terrain-blind straight
+line. Three new `query_commands::route_pricing_tests` exercise the real production
+functions directly: an all-sea route lands within 15% of its old price; the same
+distance over flat land now costs 1.9×+ that; a navigable river prices at 3-5×
+coastal sea.
+
+**Measured, not assumed: the plan's own stated gate (the `econ_` integration
+gradient on slice 4's large-world fixture) cannot actually move from this change.**
+`reference_world_large` is a synthetic `CampaignSim` built from a hand-set
+`base_days` matrix — by design (a tick has no tile access) it never calls
+`compute_route_days_matrix` at all, and re-running `econ_fidelity_scorecard_
+large_world` after slice 5 landed shows it byte-for-byte unchanged (grain gradient
+still +0.062, still 3/6 goods positive — identical to slice 4 alone). The new unit
+tests above are the closest substitute the existing harness can run; confirming the
+repricing moves a REAL generated world's economy needs an end-to-end
+`campaign_start_sim`→`campaign_advance` run this session did not build. Recorded as
+a real gap, not glossed over — see the plan doc's own "Built (2026-08-31b)" section
+for the full account.
+
+**Slice 8 (cost-grid betweenness, F8).** `compute_betweenness` runs a land-only
+coarse Dijkstra from 64 seed cells over the land, and `generate_trade_sites` folds
+the resulting traversal-count field into its candidate score (`trade + 0.12 ×
+betweenness`) with its own higher admission threshold, so a real geographic pinch
+point 3b's local saddle/strait tests miss can still qualify. New gate: a "dumbbell"
+world (two landmasses on one thin corridor, uniform climate everywhere so the trade
+ladder cannot tell corridor from open interior) shows betweenness peaking over 3×
+higher in the corridor and a trade site landing in it. Built on request, not on the
+plan's own precondition (a rendered world showing 3b coming up short) — there is
+still no way to render a world in this session; a future session with eyes on the
+map should check whether it earns its keep on a real generated world.
+
+---
+
 ## 2026-08-31 — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md`: slices 1-4, 6-7 built; 5 and 8 deliberately not
 
 Six of the plan's eight slices, all gated, `cargo test --lib` **369 pass, 0 fail** (30

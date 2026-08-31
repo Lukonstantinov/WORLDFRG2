@@ -398,7 +398,11 @@ fn build_coarse_cost(
                 };
                 // Navigable trunk = a fast inland highway (cheapest overland
                 // corridor); a minor river is still a cheap valley route.
-                if is_nav_river[ci] { c = c.min(0.8); }
+                // PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 — raised from
+                // 0.8 (a sea:river:road ratio of 1:1.6:8) toward Masschaele's
+                // measured 1:4:8 (EcHR 46, 1993, 266–79): coastal sea is 0.5, so
+                // 2.0 lands the navigable-river rung at exactly 4×.
+                if is_nav_river[ci] { c = c.min(2.0); }
                 else if is_river[ci] { c = c.min(1.4); }
                 // Ice-sheet land (EF ice cap or a deeply frozen interior) is
                 // near-impassable — caravans don't road across a glacier.
@@ -629,16 +633,22 @@ fn coarse_dijkstra(cc: &CoarseCost, start: usize, goal: usize) -> Option<Vec<usi
     if path.len() < 2 { None } else { Some(path) }
 }
 
-/// Single-source Dijkstra over the coarse cost grid returning the predecessor array,
-/// so many goals can be reconstructed from ONE run (the campaign route-days matrix).
-fn coarse_dijkstra_prev(cc: &CoarseCost, start: usize) -> Vec<usize> {
+/// Single-source Dijkstra over the coarse cost grid returning the accumulated COST
+/// to reach every node (fixed-point, ×100) alongside the predecessor array, so many
+/// goals can be reconstructed from ONE run (the campaign route-days matrix) — slice 5
+/// (PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md): `compute_route_days_matrix` used to
+/// price a route by its geometric cell length alone, discarding the very cost the
+/// pathfinder used to CHOOSE that route, so a detour was billed for being longer
+/// while the mode (sea vs river vs road) that made it worth taking was invisible to
+/// the price (F3).
+fn coarse_dijkstra_dist_prev(cc: &CoarseCost, start: usize) -> (Vec<i64>, Vec<usize>) {
     let cw = cc.cw;
     let ch = cc.ch;
     let cn = (cw * ch) as usize;
     let mut dist = vec![i64::MAX; cn];
     let mut prev = vec![usize::MAX; cn];
     let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
-    if start >= cn { return prev; }
+    if start >= cn { return (dist, prev); }
     dist[start] = 0;
     heap.push(Reverse((0, start)));
     while let Some(Reverse((d, u))) = heap.pop() {
@@ -654,42 +664,29 @@ fn coarse_dijkstra_prev(cc: &CoarseCost, start: usize) -> Vec<usize> {
             if nd < dist[v] { dist[v] = nd; prev[v] = u; heap.push(Reverse((nd, v))); }
         }
     }
-    prev
-}
-
-/// Geometric length (in FINE cells) of the reconstructed least-cost path start→goal,
-/// or None if goal is unreachable. Used to convert a routed path into travel-days at the
-/// sim's own `days_per_cell` scale (so detours around mountains/seas lengthen a leg while
-/// open routes stay ≈ the straight-line time — economic calibration is preserved).
-fn coarse_path_len_cells(cc: &CoarseCost, prev: &[usize], start: usize, goal: usize) -> Option<f32> {
-    if goal == start { return Some(0.0); }
-    if goal >= prev.len() || prev[goal] == usize::MAX { return None; }
-    let cw = cc.cw;
-    let mut len = 0.0f32;
-    let mut cur = goal;
-    let mut guard = 0usize;
-    while cur != start {
-        let p = prev[cur];
-        if p == usize::MAX { return None; }
-        let (cx, cy) = ((cur as i32) % cw, (cur as i32) / cw);
-        let (px, py) = ((p as i32) % cw, (p as i32) / cw);
-        let mut dx = (cx - px).abs();
-        if dx > cw / 2 { dx = cw - dx; } // cylindrical wrap on X
-        let dy = cy - py;
-        len += ((dx * dx + dy * dy) as f32).sqrt();
-        cur = p;
-        guard += 1;
-        if guard > (cc.cw * cc.ch) as usize { return None; } // safety
-    }
-    Some(len * cc.f as f32)
+    (dist, prev)
 }
 
 /// Precompute the campaign's REAL pathfound route-days matrix (n·n) over the coarse cost
 /// grid: mountain passes, rivers, coast-hugging and sea crossings are all priced in, so
-/// campaign trade/migration follow real lanes and NEVER draw a straight line. Days are the
-/// routed path's cell-length × `days_per_cell` (the sim's own scale). Only same-`component`
-/// pairs are filled; everything else is `INFINITY` (matches the sim's trade regions). On
-/// any failure the caller falls back to the old Euclidean matrix.
+/// campaign trade/migration follow real lanes and NEVER draw a straight line.
+///
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 — days are now priced from the
+/// pathfinder's own accumulated COST (`dist[goal]`, already computed to CHOOSE the
+/// route), not merely the geometric cell length of the path it picked. Pricing by
+/// length alone (the old behaviour) billed a detour for being longer while the MODE
+/// that made the detour worth taking — cheap open sea vs dear mountain relief — was
+/// invisible to the price; a correctly-chosen coastal route could even be billed
+/// MORE than the overland route it beat, because it was usually the longer path in
+/// raw cells (F3). `COST_TO_DAYS` is calibrated so a PURE OPEN-SEA route of a given
+/// physical length keeps roughly its OLD travel time (open sea's own cost,
+/// `OPEN_SEA_COST`, maps back to exactly `days_per_cell` per cell) — so this change
+/// makes land routes dearer, not sea routes cheaper, preserving the colony
+/// food-lifeline timings that depend on current sea-lane speeds.
+///
+/// Only same-`component` pairs are filled; everything else is `INFINITY` (matches
+/// the sim's trade regions). On any failure the caller falls back to the old
+/// Euclidean matrix.
 pub(crate) fn compute_route_days_matrix(
     db: &WorldDb,
     conn: &rusqlite::Connection,
@@ -714,6 +711,12 @@ pub(crate) fn compute_route_days_matrix(
         (cy * cc.cw + cx) as usize
     };
     let nodes: Vec<usize> = hub_xy.iter().map(|&(x, y)| cell(x, y)).collect();
+    // `dist[goal]` accumulates in coarse-grid COST units (fixed-point ×100), one
+    // unit per coarse cell crossed at `OPEN_SEA_COST`. Scaled by `cc.f` (fine cells
+    // per coarse cell) so this lines up with the OLD length-based days, which were
+    // always in FINE cells — a route's price must not silently change with the
+    // world's own coarsening factor.
+    let cost_to_days = (days_per_cell * cc.f as f32) / (OPEN_SEA_COST * 100.0);
     let mut days = vec![f32::INFINITY; n * n];
     for a in 0..n {
         days[a * n + a] = 0.0;
@@ -721,11 +724,12 @@ pub(crate) fn compute_route_days_matrix(
         // connect cities on different geographic components (separate continents).
         // The component filter was the reason isolated continents could never trade
         // even when the sea cost grid had a viable route between them.
-        let prev = coarse_dijkstra_prev(&cc, nodes[a]);
+        let (dist, _prev) = coarse_dijkstra_dist_prev(&cc, nodes[a]);
         for b in 0..n {
             if b == a { continue; }
-            if let Some(len) = coarse_path_len_cells(&cc, &prev, nodes[a], nodes[b]) {
-                days[a * n + b] = (len * days_per_cell).max(1.0);
+            let d = dist.get(nodes[b]).copied().unwrap_or(i64::MAX);
+            if d != i64::MAX {
+                days[a * n + b] = (d as f32 * cost_to_days).max(1.0);
             }
         }
     }
@@ -2863,6 +2867,158 @@ mod river_system_tests {
         let amazon = (0.62f32 * 209000.0f32.powf(0.43)).clamp(0.3, 230.0);
         assert!(amazon > 90.0, "a great river should be very deep, got {amazon}");
         assert!(amazon > shallow * 15.0, "great rivers dwarf creeks in depth");
+    }
+}
+
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 — route-days priced by the
+/// pathfinder's own accumulated cost, not by the geometric length of the path it
+/// picked (F3). Two claims to gate: an all-sea route keeps roughly its OLD travel
+/// time (the calibration target `compute_route_days_matrix`'s own doc comment
+/// states), and a same-distance LAND route now costs meaningfully more per cell —
+/// the whole point being that a detour is billed for the ground it actually
+/// crosses, not merely for being longer.
+#[cfg(test)]
+mod route_pricing_tests {
+    use super::*;
+    use crate::db::{schema, WorldDb};
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use rusqlite::Connection;
+
+    /// A uniform world (all one terrain) big enough that `f` (the coarse-grid
+    /// downsample) stays 1, so coarse and fine cells line up exactly and the
+    /// arithmetic in the assertions below is exact, not approximate.
+    fn uniform_world(w: u32, h: u32, land: bool, koppen: u8, elev: f32) -> WorldDb {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        for i in 0..buf.total() {
+            buf.terrain[i] = if land { 1 } else { 0 };
+            buf.elevation[i] = elev;
+            buf.koppen[i] = koppen;
+            buf.temperature[i] = 18.0; // above every freeze/ice-land threshold
+        }
+        buf.save(&conn, "test").unwrap();
+        WorldDb::new(conn)
+    }
+
+    /// An all-open-sea world of the same size as `uniform_world`'s land case —
+    /// far enough from land that the coastal-shipping discount never applies, so
+    /// every sea cell prices at exactly `OPEN_SEA_COST`, the value the calibration
+    /// is anchored to.
+    #[test]
+    fn an_all_sea_route_keeps_roughly_its_old_travel_time() {
+        let w = 200u32;
+        let h = 100u32;
+        let db = uniform_world(w, h, false, 12, 0.0); // Cfb, all sea
+        let conn = db.conn.lock().unwrap();
+        let days_per_cell = 0.2f32;
+        // Well under half the world's width apart, so the cylindrical X-wrap can
+        // never make "the other way around" the shorter path — this test wants the
+        // ordinary straight route, not a wraparound shortcut.
+        let hub_xy = vec![(20.0f32, 50.0f32), (60.0f32, 50.0f32)];
+        let components = vec![0u32, 0u32];
+        let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
+            .expect("route matrix build failed");
+        let dist = (hub_xy[1].0 - hub_xy[0].0).abs();
+        let old_days = dist * days_per_cell;
+        let new_days = days[1]; // (0,1) — n=2, so index 1 is hub 0 → hub 1
+        assert!(new_days.is_finite() && new_days > 0.0, "no route found over open sea");
+        let ratio = new_days / old_days;
+        assert!(
+            (0.85..=1.15).contains(&ratio),
+            "an all-sea route should keep roughly its old travel time (old {old_days}, \
+             new {new_days}, ratio {ratio}) — the calibration target this slice states"
+        );
+    }
+
+    /// The same physical distance, but entirely over FLAT LAND with no sea
+    /// shortcut available (land fills the whole world), must now cost distinctly
+    /// more per cell than the sea route above did — proving the repricing moved
+    /// real weight from length onto mode, not merely renamed the same number.
+    #[test]
+    fn a_land_route_costs_more_than_the_same_distance_at_sea() {
+        let w = 200u32;
+        let h = 100u32;
+        // Flat land, an ordinary climate with no koppen surcharge (12 = Cfb).
+        let db = uniform_world(w, h, true, 12, 0.05);
+        let conn = db.conn.lock().unwrap();
+        let days_per_cell = 0.2f32;
+        // Well under half the world's width apart, so the cylindrical X-wrap can
+        // never make "the other way around" the shorter path — this test wants the
+        // ordinary straight route, not a wraparound shortcut.
+        let hub_xy = vec![(20.0f32, 50.0f32), (60.0f32, 50.0f32)];
+        let components = vec![0u32, 0u32];
+        let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
+            .expect("route matrix build failed");
+        let dist = (hub_xy[1].0 - hub_xy[0].0).abs();
+        let old_days = dist * days_per_cell; // what BOTH routes cost under the old, length-only pricing
+        let land_days = days[1];
+        assert!(land_days.is_finite() && land_days > 0.0, "no land route found");
+        assert!(
+            land_days > old_days * 1.8,
+            "a flat-land route should now cost distinctly more than the old length-only \
+             price (old {old_days}, new {land_days}) — land routes are supposed to have \
+             become dearer, not sea routes cheaper"
+        );
+    }
+
+    /// The navigable-river rung, priced through the WORLDGEN cost grid directly
+    /// (`build_coarse_cost`, which — unlike the campaign's own route matrix — does
+    /// receive real river geometry): raised from 0.8 toward Masschaele's measured
+    /// sea:river:road ≈ 1:4:8, so a navigable river should now price at roughly 4×
+    /// coastal sea (0.5), not 1.6×.
+    #[test]
+    fn navigable_river_prices_near_the_masschaele_ratio() {
+        let w = 100u32;
+        let h = 20u32;
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        // A single flat land row down the middle of an otherwise all-sea world —
+        // land on that row is coastal (sea immediately north/south), and a river
+        // runs the length of it.
+        let land_y = h / 2;
+        for i in 0..buf.total() {
+            buf.terrain[i] = 0;
+            buf.temperature[i] = 18.0;
+            buf.koppen[i] = 12; // Cfb — no koppen surcharge
+        }
+        for x in 0..w {
+            let idx = buf.idx(x, land_y);
+            buf.terrain[idx] = 1;
+            buf.elevation[idx] = 0.05;
+        }
+        buf.save(&conn, "test").unwrap();
+        let db = WorldDb::new(conn);
+        let conn = db.conn.lock().unwrap();
+        let world = db.cached_tiles_with_conn(&conn).unwrap();
+
+        // `RouteRiver` only derives `Deserialize` (it's parsed FROM the frontend,
+        // never sent back), so build the JSON by hand rather than adding a
+        // production-only `Serialize` derive just for this test.
+        let points: Vec<String> = (0..w).map(|x| format!("[{x},{land_y}]")).collect();
+        let rivers_json = format!(r#"[{{"points":[{}],"navigable":true}}]"#, points.join(","));
+        let cc = build_coarse_cost(&world, w, h, &rivers_json, false, false, 0.0, -1, 12).unwrap();
+
+        // Sample a river cell well clear of either end (avoid edge effects).
+        let river_cost = cc.cost[(land_y as i32 / cc.f as i32 * cc.cw + (w as i32 / cc.f as i32) / 2) as usize];
+        // A pure open-sea cell, far from the land row (avoids the coastal discount).
+        let open_sea_cost = cc.cost[(0 * cc.cw + cc.cw / 2) as usize];
+        assert!(
+            (open_sea_cost - OPEN_SEA_COST).abs() < 0.05,
+            "expected a far cell to read as plain open sea, got {open_sea_cost}"
+        );
+        let ratio = river_cost / 0.5; // 0.5 = the coastal-sea cost Masschaele's ratio is stated against
+        assert!(
+            (3.0..=5.0).contains(&ratio),
+            "navigable river should price near 4× coastal sea (got river={river_cost}, ratio={ratio})"
+        );
     }
 }
 

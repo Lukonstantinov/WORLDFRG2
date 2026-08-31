@@ -2,6 +2,28 @@
 //! `use super::*` brings the struct, its fields, tuning consts and free helpers into scope.
 use super::*;
 
+/// PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md slice 5 / F3 — the terrain-penalty
+/// proxy `rebuild_routes` applies to a hub founded DURING the campaign (a colony, a
+/// satellite), whose `koppen` is the only terrain signal a tick carries with no tile
+/// access (`TickHub.koppen` is copied straight from the `ColonizeSite` that founded
+/// it). Mirrors, in shape, the koppen surcharge `build_coarse_cost` prices into the
+/// REAL worldgen route grid for a founding hub — not a substitute for it (no
+/// elevation here, so it cannot see a mountain range specifically), only the
+/// difference between "a straight line that knows nothing about terrain" and "a
+/// straight line billed for the climate it actually crosses".
+pub(crate) fn terrain_route_mult(koppen: u8) -> f32 {
+    match koppen {
+        4 | 5 => 1.8,           // BWh/BWk hot & cold desert
+        6 | 7 => 1.3,           // BSh/BSk steppe
+        21 => 1.6,              // ET tundra
+        22 => 2.2,              // EF ice cap
+        1 => 1.3,               // Af tropical rainforest (tsetse belt)
+        2 | 3 | 23 => 1.2,      // Am/Aw/As savanna-woodland (tsetse belt)
+        32 => 1.5,              // H highland
+        _ => 1.0,
+    }
+}
+
 impl CampaignSim {
 
     // ───────────────────────── DLC 3.5 · Coin, Credit & Crashes ──────────────
@@ -178,8 +200,23 @@ impl CampaignSim {
                     // Pathfinder found a real regional route (within the horizon above).
                     self.base_days[a * bn + b]
                 } else if self.hubs[a].component == self.hubs[b].component {
-                    // Same geographic component but no pathfound route: straight-line fallback.
-                    (dist * self.days_per_cell).max(1.0)
+                    // Same geographic component but no pathfound route (every hub
+                    // founded DURING the campaign — a colony, a satellite — falls
+                    // here, since `base_days` only ever covers the founding set):
+                    // straight-line fallback. PORTS_JUNCTIONS_AND_PROVINCE_VIEW_
+                    // PLAN.md slice 5 / F3 — a tick has no tile access to pathfind a
+                    // real lane for a newly founded hub, so this is TERRAIN-
+                    // PENALISED instead: the harder of the two endpoints' own
+                    // climate (already carried on `TickHub.koppen` from the site
+                    // that founded them) scales the straight line up, so a colony
+                    // behind a desert or a highland no longer costs what one down
+                    // an ordinary temperate coast costs. Not a real path — it has
+                    // no elevation to read a mountain range from — but it is no
+                    // longer blind to terrain at all, which the flat straight line
+                    // was.
+                    let mult = terrain_route_mult(self.hubs[a].koppen)
+                        .max(terrain_route_mult(self.hubs[b].koppen));
+                    (dist * self.days_per_cell * mult).max(1.0)
                 } else {
                     // Different components AND no pathfound sea route: unreachable.
                     continue;

@@ -1,9 +1,9 @@
 # Ports, Junctions, Provinces & Trade — fix plan
 
-**Status: slices 1-4 and 6-7 built (2026-08-31), gated, `cargo test --lib` clean.
-Slice 5 and slice 8 deliberately not built — see the end of this file and
-`docs/SCOREBOARD.md`'s 2026-08-31 entry.** Eight slices in four groups, ordered so
-each one's gate can be read before the next is written.
+**Status: all eight slices built (2026-08-31), gated, `cargo test --lib` clean.**
+See the end of this file and `docs/SCOREBOARD.md`'s 2026-08-31/2026-08-31b entries.
+Eight slices in four groups, ordered so each one's gate can be read before the next
+is written.
 
 | Group | Slices | Touches |
 |---|---|---|
@@ -557,15 +557,68 @@ version:
   colony seat by `colony_stage` (0.25 → 1.0); ordinary cities are maturity 1.0,
   untouched.
 
-**Not built, on purpose:**
+## Built (2026-08-31b) — slices 5 and 8, on request
 
-- **5** (route-days by cost) — the plan's own "high risk" item, and it explicitly
-  wants slice 4 landed first as an honest instrument before any freight retuning.
-  Slice 4 is landed; the retuning itself — recalibrating `days_per_cell` from
-  Dijkstra cost instead of path length, and the F3 mid-campaign fallback fix — is
-  real follow-up work this session did not attempt. `econ_inheritance_rules_
-  fragment_differently` has flipped on tuning changes shaped exactly like this one
-  before (§8.15); do not tune it against the compact world.
-- **8** (cost-grid betweenness) — the plan says build it only if 3b's cheap local
-  detectors miss real junctions on a **rendered** world. This session has no way to
-  render one; leave it for a session that can look at the map.
+The two slices above were held back deliberately (5 for its own stated risk, 8 for
+its own "only if 3 measures short" instruction). Asked to finish the plan anyway,
+both are now built, gated as tightly as the available harness allows, and recorded
+honestly where that harness falls short of the plan's own stated gate.
+
+- **5 (route-days by cost, F3).** `coarse_dijkstra_prev` → `coarse_dijkstra_dist_prev`
+  now returns the accumulated Dijkstra COST alongside the predecessor array;
+  `compute_route_days_matrix` prices every route from `dist[goal]` instead of the
+  path's geometric cell count, via `cost_to_days = (days_per_cell × f) / (OPEN_SEA_
+  COST × 100)` — calibrated so a PURE OPEN-SEA route keeps its old travel time
+  exactly (three new unit tests in `query_commands::route_pricing_tests` measure
+  this directly: an all-sea route lands within 15% of the old length-only price,
+  ~1.0×; a same-distance flat-land route now costs 1.9×+ that; a navigable river
+  prices at 3-5× coastal sea, matching Masschaele's ~4× rather than the old 1.6×).
+  The navigable-river rung itself moved from 0.8 to 2.0 in `build_coarse_cost`. The
+  F3 mid-campaign fallback (a colony/satellite founded during play has no pathfound
+  `base_days` row at all) is TERRAIN-PENALISED via a new `terrain_route_mult(koppen)`
+  in `rebuild_routes`'s straight-line branch — not a real path (a tick has no
+  elevation, only the `koppen` a `ColonizeSite` already copies onto its `TickHub`),
+  but no longer blind to climate at all.
+
+  **What the plan's own gate asks for and what actually ran.** The gate reads "the
+  `econ_` integration gradient must turn positive on slice 4's large-world fixture."
+  That fixture (`reference_world_large`) is a synthetic `CampaignSim` built directly
+  from hand-set hub coordinates and a hand-set `base_days` matrix — by design (§5 of
+  CLAUDE.md: a tick has no tile access) it never calls `compute_route_days_matrix` or
+  `build_coarse_cost` at all, so slice 5's actual code change cannot move that
+  fixture's gradient one way or the other, and re-running `econ_fidelity_scorecard_
+  large_world` after slice 5 landed shows it byte-for-byte unchanged from slice 4
+  alone (grain gradient +0.062, 3/6 goods positive) — which is why the three
+  `route_pricing_tests` above exist: they are the closest thing to that gate this
+  codebase's test harness can actually run, exercising the real production
+  functions directly rather than a synthetic stand-in. Confirming the repricing
+  moves a REAL generated world's own economy gradient needs an end-to-end run
+  (`campaign_start_sim` → `campaign_advance` → `econ_`-style measurement) that no
+  existing test harness performs and this session did not build — named here rather
+  than quietly claimed. `simulate_decades_reports_dynamics` and the full `econ_`
+  suite (incl. `econ_inheritance_rules_fragment_differently`, which has flipped on
+  tuning changes shaped like this one before) all still pass unchanged, because
+  none of their fixtures exercise this code path either — a real, not a
+  reassuring, silence.
+- **8 (cost-grid betweenness, F8).** `compute_betweenness` (in `settlements.rs`) runs
+  its own simplified, LAND-ONLY coarse Dijkstra from K=64 seed cells spread over the
+  land, accumulating how often a cell lies on the shortest path between two seeds.
+  `generate_trade_sites` folds it into the candidate score (`trade + 0.12 ×
+  betweenness`, both the gating and the local-maxima test use the combined field,
+  per the plan's own "no reordering" instruction) with its own, higher, threshold
+  (`BETWEENNESS_SITE_MIN = 0.85`) so it can admit a real geographic pinch point 3b's
+  local saddle/strait tests miss without ever letting ordinary land past
+  `TRADE_SITE_MIN` on its own. New gate: `betweenness_finds_a_pinch_point_the_ladder_
+  missed` — a "dumbbell" world (two large landmasses on one thin corridor, all at
+  identical climate/fertility/elevation so the trade ladder scores every cell
+  identically) proves the ladder is genuinely blind to the corridor while
+  betweenness peaks there at over 3× a blob's own open interior, and a trade site
+  lands in it. The one thing NOT done is the plan's own precondition (build this
+  only if a rendered world shows 3b coming up short) — there is still no way to
+  render a world in this session, so this was built on request rather than on that
+  evidence; watch a real generated world for whether it actually adds real
+  junctions 3b was already finding, or just costs the extra Dijkstra passes for
+  nothing.
+
+`cargo test --lib`: 373 pass, 0 fail (30 ignored). `earth_` gate unmoved (70.2%/
+39.0%, untouched by construction). `npx tsc --noEmit` clean.
