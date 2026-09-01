@@ -1336,7 +1336,24 @@ ui/world/  — map & world
   ElevationHistogram.tsx        ← Elevation distribution chart
   (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
-  HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
+  HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology).
+                                  A river/lake detail is an ENCYCLOPEDIA ENTRY, not
+                                  one long scroll: an always-pinned identity line
+                                  (classification in words + the real-world
+                                  counterpart, which used to sit in its own boxed
+                                  strip halfway down) over a vital-statistics tile
+                                  block, then leaves — Overview · Course · Life ·
+                                  Network for a river, Overview · Life for a lake.
+                                  The leaves exist because showing all eight
+                                  sections at once effectively showed none: the
+                                  reader scrolled past the long profile to reach the
+                                  cities, and the FISH appeared TWICE on one screen
+                                  (grouped under each reach AND again as their own
+                                  list). Course keeps the by-reach grouping, Life is
+                                  the flat source→mouth list — the duplication is
+                                  removed, not hidden. A leaf that has no data is
+                                  not rendered at all (a tributary has no reaches),
+                                  rather than rendering empty
   ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate).
                                   v2.0 · its "Goods produced" block reads REAL yield
                                   (`campaign_province_goods` + `_potential`) — actual/yr
@@ -1521,7 +1538,28 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
   FuturesPanel/FuturesLanePanel.tsx ← Futures contracts + lanes
   EconomyDashboardPanel.tsx     ← #30/#29 Price Index (CPI) + Inequality (Gini/mobility) tabs
   CityRankingPanel.tsx          ← Richest/busiest cities
-  FlowsView.tsx                 ← Realized trade at a settlement (post-campaign)
+  FlowsView.tsx                 ← Realized trade at a settlement (post-campaign),
+                                  rebuilt on `@ui/kit` + `chronicleTheme` so it
+                                  matches `CityMarketView` (the Market half of the
+                                  same tab). Four things from TRADE_AND_MARKET_
+                                  REVIEW.md Part 3's own discipline, which Flows
+                                  had none of: a BALANCE header naming the city's
+                                  trading position (net exporter / import-dependent
+                                  / balanced entrepôt) over in/out/net; rows sorted
+                                  by what is UNUSUAL (the in-out IMBALANCE, weighted
+                                  by volume) rather than by size, since a large
+                                  BALANCED staple always tops a volume ordering and
+                                  is rarely the row worth reading; a VERDICT PHRASE
+                                  per good instead of a raw number (`collapsed` /
+                                  `import-dependent` / `we export`), with an
+                                  unremarkable good left deliberately QUIET so a
+                                  coloured badge still means something; and a
+                                  CONCENTRATION warning when one partner carries a
+                                  large share of all trade — a share is on screen
+                                  today, but the real question is whether losing
+                                  that partner would hurt. The two-tone in/out bar
+                                  replaces the single-colour volume bar, so a good's
+                                  DIRECTION reads without expanding its row
   ColonialPanel.tsx             ← Colonies / colony gates / lifelines
   ImmigrationPanel.tsx          ← Route-bound migration corridors
   SatelliteConstructionPanel.tsx← Satellite (suburb) construction projects
