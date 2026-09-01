@@ -726,12 +726,17 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
 
-    // ── Routes (per good, ranked; pct of that good's total flow) ──
-    let mut good_total: HashMap<u32, f32> = HashMap::new();
-    for (&(g, _, _), &amt) in &route_amt { *good_total.entry(g).or_insert(0.0) += amt; }
+    // ── Routes (per good, ranked; pct of that good's total flow IN ITS OWN
+    // DIRECTION) ── TRADE_STAGING_AND_POSTS_PLAN.md Slice 1 "fix the percentage":
+    // this used to divide by the good's COMBINED in+out volume, so an export
+    // route's share was diluted by that same good's imports (and vice versa) —
+    // a good bought from nobody but sold to three cities in equal thirds read as
+    // "~17%" per route instead of the true 33%.
+    let mut good_total: HashMap<(u32, u8), f32> = HashMap::new();
+    for (&(g, _, dir), &amt) in &route_amt { *good_total.entry((g, dir)).or_insert(0.0) += amt; }
     let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
         let (pname, px, py) = pos(partner)?;
-        let tot = good_total.get(&g).copied().unwrap_or(0.0).max(1e-6);
+        let tot = good_total.get(&(g, dir)).copied().unwrap_or(0.0).max(1e-6);
         Some(TradeRouteFlow {
             good: g, partner, partner_name: pname, px, py, dir, amount,
             pct: amount / tot * 100.0,

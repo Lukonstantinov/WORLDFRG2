@@ -883,6 +883,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         dev_tier: vec![],
         dev_momentum: vec![],
         base_days: vec![],
+        base_mode: vec![],
         base_n: 0,
         hub_culture: vec![],
         hub_minorities: vec![],
@@ -1013,9 +1014,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         match crate::commands::query_commands::compute_route_days_matrix(
             &db, &conn, &hub_xy, &comps, sim.days_per_cell,
         ) {
-            Ok(bd) if bd.len() == hub_xy.len() * hub_xy.len() => {
+            Ok((bd, bm)) if bd.len() == hub_xy.len() * hub_xy.len() => {
                 sim.base_n = hub_xy.len();
                 sim.base_days = bd;
+                sim.base_mode = bm;
             }
             _ => { /* keep Euclidean fallback */ }
         }

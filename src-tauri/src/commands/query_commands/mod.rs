@@ -693,9 +693,9 @@ pub(crate) fn compute_route_days_matrix(
     hub_xy: &[(f32, f32)],
     components: &[u32],
     days_per_cell: f32,
-) -> Result<Vec<f32>, String> {
+) -> Result<(Vec<f32>, Vec<u8>), String> {
     let n = hub_xy.len();
-    if n == 0 { return Ok(vec![]); }
+    if n == 0 { return Ok((vec![], vec![])); }
     let grid_w: u32 = metadata::get_meta(conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let grid_h: u32 = metadata::get_meta(conn, "grid_height")
@@ -727,22 +727,43 @@ pub(crate) fn compute_route_days_matrix(
     // world's own coarsening factor.
     let cost_to_days = (days_per_cell * cc.f as f32) / (OPEN_SEA_COST * 100.0);
     let mut days = vec![f32::INFINITY; n * n];
+    // TRADE_STAGING_AND_POSTS_PLAN.md Slice 2 item 4 — the dominant travel mode of
+    // the path the pathfinder actually chose (0=land · 1=sea · 2=river), read off
+    // the SAME predecessor tree the cost already came from, at no extra Dijkstra
+    // cost. Classification mirrors `compute_trade_routes`'s own `kind` (sea/river
+    // majority by cell count) so the campaign's notion of "this is a sea route"
+    // agrees with the overlay's.
+    let mut mode = vec![0u8; n * n];
     for a in 0..n {
         days[a * n + a] = 0.0;
         // Run Dijkstra for every hub regardless of component so that sea lanes
         // connect cities on different geographic components (separate continents).
         // The component filter was the reason isolated continents could never trade
         // even when the sea cost grid had a viable route between them.
-        let (dist, _prev) = coarse_dijkstra_dist_prev(&cc, nodes[a]);
+        let (dist, prev) = coarse_dijkstra_dist_prev(&cc, nodes[a]);
         for b in 0..n {
             if b == a { continue; }
             let d = dist.get(nodes[b]).copied().unwrap_or(i64::MAX);
             if d != i64::MAX {
                 days[a * n + b] = (d as f32 * cost_to_days).max(1.0);
+                let (mut sea_cells, mut river_cells, mut total) = (0u32, 0u32, 0u32);
+                let mut cur = nodes[b];
+                loop {
+                    total += 1;
+                    if !cc.is_land[cur] { sea_cells += 1; }
+                    if cc.is_land[cur] && cc.is_river[cur] { river_cells += 1; }
+                    if cur == nodes[a] { break; }
+                    let p = prev.get(cur).copied().unwrap_or(usize::MAX);
+                    if p == usize::MAX || total > (cc.cw * cc.ch) as u32 { break; }
+                    cur = p;
+                }
+                mode[a * n + b] = if sea_cells * 3 >= total { 1 }
+                    else if river_cells * 4 >= total { 2 }
+                    else { 0 };
             }
         }
     }
-    Ok(days)
+    Ok((days, mode))
 }
 
 /// Is a path acceptable under the chosen trade reach?
@@ -2929,7 +2950,7 @@ mod route_pricing_tests {
         // ordinary straight route, not a wraparound shortcut.
         let hub_xy = vec![(20.0f32, 50.0f32), (60.0f32, 50.0f32)];
         let components = vec![0u32, 0u32];
-        let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
+        let (days, _mode) = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
             .expect("route matrix build failed");
         let dist = (hub_xy[1].0 - hub_xy[0].0).abs();
         let old_days = dist * days_per_cell;
@@ -2960,7 +2981,7 @@ mod route_pricing_tests {
         // ordinary straight route, not a wraparound shortcut.
         let hub_xy = vec![(20.0f32, 50.0f32), (60.0f32, 50.0f32)];
         let components = vec![0u32, 0u32];
-        let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
+        let (days, _mode) = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
             .expect("route matrix build failed");
         let dist = (hub_xy[1].0 - hub_xy[0].0).abs();
         let old_days = dist * days_per_cell; // what BOTH routes cost under the old, length-only pricing

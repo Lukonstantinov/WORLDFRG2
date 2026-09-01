@@ -4775,6 +4775,16 @@ pub struct CampaignSim {
     /// routes follow real lanes and never a straight line. Serialized (survives save/load);
     /// hubs added later (colonies, index ≥ `base_n`) fall back to Euclidean via `rebuild_routes`.
     #[serde(default)] pub base_days: Vec<f32>,
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 2 item 4 — the travel MODE the
+    /// pathfinder actually used for each `base_days` pair (0=land · 1=sea ·
+    /// 2=river), reconstructed once from the same Dijkstra predecessor tree at
+    /// zero extra pathfinding cost. `dispatch`/`deploy_return_leg` prefer this
+    /// over the old `coastal_a && coastal_b` boolean — a river/lake hub whose
+    /// real route to its partner runs down a navigable river no longer reads as
+    /// an overland shipment just because neither end sits on open ocean. Parallel
+    /// to `base_days`, same `base_n`×`base_n` shape, empty on an older save
+    /// (falls back to the boolean).
+    #[serde(default)] pub base_mode: Vec<u8>,
     #[serde(default)] pub base_n: usize,
     /// Per-hub nearest reachable trade partners (hub indices), sorted nearest
     /// first, capped to `NEIGHBOR_K`. Dispatch only ever ships to the few

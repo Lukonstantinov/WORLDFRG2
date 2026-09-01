@@ -267,7 +267,14 @@ impl CampaignSim {
             cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
             for &(dist, b) in cand.iter().take(MIN_GUARANTEED_PARTNERS) {
                 if days[a * n + b].is_finite() { continue; }
-                let d = (dist * self.days_per_cell).max(1.0);
+                // TRADE_STAGING_AND_POSTS_PLAN.md Slice 2 item 3 — price the rescue
+                // lane with the same terrain surcharge the main pass uses, instead
+                // of flat 55 km/day. Without this a straight-line rescue lane was
+                // CHEAPER per km than any real pathfound route on the map, which
+                // made the implausibly long lane the most attractive one available.
+                let mult = terrain_route_mult(self.hubs[a].koppen)
+                    .max(terrain_route_mult(self.hubs[b].koppen));
+                let d = (dist * self.days_per_cell * mult).max(1.0);
                 days[a * n + b] = d;
                 days[b * n + a] = d;
             }
@@ -307,7 +314,10 @@ impl CampaignSim {
             cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
             for &(dist, m) in cand.iter().take(MARKET_LINKS) {
                 if days[a * n + m].is_finite() { continue; }
-                let d = (dist * self.days_per_cell).max(1.0);
+                // Slice 2 item 3 — same terrain surcharge as #6 above.
+                let mult = terrain_route_mult(self.hubs[a].koppen)
+                    .max(terrain_route_mult(self.hubs[m].koppen));
+                let d = (dist * self.days_per_cell * mult).max(1.0);
                 days[a * n + m] = d;
                 days[m * n + a] = d;
             }
@@ -339,7 +349,14 @@ impl CampaignSim {
                 cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
                 for &(dist, b) in cand.iter().take(CABOTAGE_LINKS) {
                     if days[a * n + b].is_finite() { continue; }
-                    let d = (dist * self.days_per_cell).max(1.0);
+                    // Slice 2 item 3 — same terrain surcharge as #6/#6b, for the same
+                    // reason: a flat-priced rescue lane must never undercut a real
+                    // pathfound route. Both ends are coastal, so this is usually a
+                    // no-op (temperate coasts default to ×1.0) and only bites where
+                    // the coast itself is desert/ice.
+                    let mult = terrain_route_mult(self.hubs[a].koppen)
+                        .max(terrain_route_mult(self.hubs[b].koppen));
+                    let d = (dist * self.days_per_cell * mult).max(1.0);
                     days[a * n + b] = d;
                     days[b * n + a] = d;
                 }
@@ -370,6 +387,23 @@ impl CampaignSim {
         (1.0 + by_class + by_pop).clamp(1.0, HUB_PULL_MAX)
     }
 
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 2 item 4 — a route's travel mode,
+    /// preferring the pathfinder's own verdict (`base_mode`, reconstructed from the
+    /// same Dijkstra tree that priced `base_days`) over the naive
+    /// `coastal_a && coastal_b` boolean. That boolean misclassified any river/lake/
+    /// estuary hub as overland even where its real pathfound route runs down a
+    /// navigable river to the sea (§1.3) — `distance_to_ocean < 0.06` never fires
+    /// for one. Falls back to the boolean for a pair with no `base_mode` entry: a
+    /// hub founded during the campaign (index ≥ `base_n`), or a rescue-lane pair
+    /// (#6/#6b/#6c) that was never pathfound at all.
+    #[inline]
+    pub(crate) fn route_is_sea(&self, a: usize, b: usize) -> bool {
+        if a < self.base_n && b < self.base_n && self.base_mode.len() == self.base_n * self.base_n {
+            return self.base_mode[a * self.base_n + b] == 1;
+        }
+        self.hubs[a].coastal && self.hubs[b].coastal
+    }
 
     #[inline]
     pub(crate) fn live_price(&self, stock: f32, need: f32, base: f32) -> f32 {
@@ -959,10 +993,20 @@ impl CampaignSim {
                     let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
-                        // GRAVITY: weight the profit by the destination's trade pull so
-                        // merchants prefer to supply the great markets (big entrepôts) —
-                        // they clear more volume and pay reliably. The real `gap`/`days`
-                        // still govern the actual sale; pull only orders the shortlist.
+                        // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 / Slice 2 item 2 names this as
+                        // `hub_pull` applied twice on the same axis — once ranking candidacy
+                        // in `self.neighbors[a]` (`rebuild_neighbors`, `days / hub_pull(b)`),
+                        // again here. TRIED dropping the second multiplication (sort by raw
+                        // `gap` alone): `simulate_decades_reports_dynamics`'s hard-asserted
+                        // ceiling (`late_max < 1_000_000.0`) broke — sustained richest rose to
+                        // ~1.7M (was ~270k). Ungated by pull, merchants lock onto the single
+                        // highest-real-profit destination consistently rather than being
+                        // nudged toward diversified big markets, and one house rides that to a
+                        // runaway. REVERTED — kept double-weighted, per CLAUDE.md §2.4: a
+                        // spot-check "fix" (the doubling is real) that regresses a
+                        // hard-asserted gate is a revert, not a judgement call. If this is
+                        // revisited, it needs its own brake (e.g. diminishing the SECOND
+                        // application rather than removing it), not a bare removal.
                         targets.push((b, gap * self.hub_pull(b), days));
                     }
                 }
@@ -984,8 +1028,8 @@ impl CampaignSim {
                     if amount <= EPS {
                         continue;
                     }
-                    // Route mode: a sea voyage when both ends are coastal, else overland.
-                    let sea = self.hubs[a].coastal && self.hubs[b].coastal;
+                    // Route mode — see `route_is_sea`.
+                    let sea = self.route_is_sea(a, b);
                     // ── Who carries it ──────────────────────────────────────────
                     // Prefer the SELLER's house (the exporter organizes the sale);
                     // if it has no free vessel / no capital, fall back to the
@@ -1342,7 +1386,7 @@ impl CampaignSim {
         }
         let Some((g, amount, pb_buy, pa_sell)) = best else { return };
         let freight = self.good_freight(g, freight_rate, days);
-        let sea = self.hubs[b].coastal && self.hubs[a].coastal;
+        let sea = self.route_is_sea(a, b);
         // Buy at b (goods leave b's stock), sell on arrival at a.
         stock_take(&mut self.hubs[b].stock, g, amount);
         self.hubs[b].export_earn += amount * pb_buy;
