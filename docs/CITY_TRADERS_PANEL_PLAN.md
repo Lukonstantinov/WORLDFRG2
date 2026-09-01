@@ -1,7 +1,7 @@
 # The city Traders panel — who trades here, and who is established here
 
 **Status: AGREED (the five design questions are answered below), BACKEND
-GROUNDWORK BUILT AND INERT, UI NOT BUILT.**
+GROUNDWORK BUILT, UI BUILT — see `ui/campaign/TradersView.tsx`.**
 
 A third tab beside `Market | Flows` on a settlement's Trade view, answering two
 questions the app cannot currently answer at all:
@@ -170,7 +170,16 @@ attributed **pro rata** from the aggregate row rather than per shipment, because
 one row shares it — inventing a per-carrier flag the sim never recorded would be a
 fabrication.
 
-**UI — NOT BUILT.** That is the next step, and this document is its contract.
+**UI — BUILT.** `ui/campaign/TradersView.tsx` is the third `Market │ Flows │
+Traders` sub-tab on a settlement's Trade view (wired in `HubPanel.tsx`), reading
+the same `campaignTradeFlows` query FlowsView already uses. It opens with the
+residual finding (never hidden, §0) plus the four capacity tiles (carried in/out,
+re-exported, made here); ranks by volume/standing/route length/carriage and
+filters by direction/carriage (§3) without fabricating a per-direction sea split
+that the backend does not record; lists WHO TRADES HERE and WHO IS ESTABLISHED
+HERE as two separate lists (§2); and folds the world-wide "why" diagnostic away
+by default (§4/decision 4), labelled world-wide rather than implying a per-city
+attribution the sim never measured.
 
 ---
 
@@ -185,7 +194,12 @@ fabrication.
 * **A gate this panel needs and does not yet have:** an assertion that the
   traders' shares sum to the city's total trade. A carrier breakdown that quietly
   loses volume would be invisible on screen and wrong in exactly the way this
-  panel exists to prevent. To be written with the UI.
+  panel exists to prevent. Still not written — `campaign_trade_flows` needs a
+  `WorldDb`/`State` test harness no existing `campaign_commands` test builds yet;
+  by construction each `CityTrader.pct` is `a.vol / trade_total * 100.0` where
+  `trade_total = Σ a.vol`, so the shares sum to 100% today, but nothing guards a
+  future refactor from breaking that. Left for the session that builds that
+  harness rather than adding a one-off fixture here.
 
 ---
 
