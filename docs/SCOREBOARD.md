@@ -9,6 +9,76 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-01 — 96% of the world's trade is carried by nobody
+
+`ACTORS_AND_CARRIAGE_PLAN.md`. New diagnostic `econ_measure_carrier_mix`
+(`economy_validation.rs`, `#[ignore]`d, ~90s). `dispatch` decides a shipment from
+the arbitrage gap alone and then *attaches* a carrier — seller's house, else
+buyer's house, else `owner = -1`. `diag_by_house`/`diag_by_guild` have existed for
+a long time; nothing had ever aggregated them over a run. 60 years, two worlds:
+
+| | reference | large |
+|---|---|---|
+| shipments | 15,504,097 | 17,018,623 |
+| financed by a house | 668,212 · **4.3%** | 685,535 · **4.0%** |
+| **ownerless residual** | 14,835,885 · **95.7%** | 16,333,088 · **96.0%** |
+| live houses / fleet slots | 71 / 178 | 81 / 972 |
+
+Why the residual took it — reference / large: no house at either end 54.6 / 36.6%,
+house had **no free vessel** 41.0 / 59.2%, house **could not afford** it 0.1 / 0.1%,
+house was **barred** 0.1 / 0.0%.
+
+**Three asymmetries produce it.** The house branch needs a free vessel slot, has
+its quantity clamped by `amount.min(afford)`, and rolls for voyage loss. The
+ownerless branch meets none of them — the guard is literal, `let lost = if owner
+>= 0 { .. } else { false }`, so ownerless cargo *never sinks*. And the transfer
+(`surplus -= amount; stock_take(..)`) sits OUTSIDE the carrier resolution, so the
+goods move either way. Fleet, capital and storm exposure govern who PROFITS, never
+what MOVES.
+
+**House carriage cannot scale** — the large world carries 5.5× the fleet and a
+*lower* house share, because arbitrage opportunities grow with hubs × goods while
+fleets grow with house wealth. "Give houses more ships" is a treadmill.
+
+**Named hypothesis for F2**, the largest market failure this project has named: the
+grain price/distance gradient reads −0.064 against an `ECON_INTEGRATION_FLOOR` of
++0.05. If 96% of cargo moves with no capital cost, no capacity limit and no risk,
+distance costs only freight. Testable via N1 (make `LOCAL_HAUL_DAYS` bind); not
+built.
+
+**A wrong turn, recorded (rule §2.4).** The first version of this analysis proposed
+as its keystone giving more actors the right to write into `house_barred`. At 0.1%
+of shipments that is a rounding error — the residual absorbs whatever a barred
+house drops, exactly as `dispatch`'s own comment already admitted. The proposal was
+aimed at the wrong layer, not too small. Superseded by N2 (ban the lane and good
+before the arbitrage decision, the `food_export_lock` shape) before any code.
+
+**Also found, not fixed:** `SUPPLY_LOCAL` is never written — one of the five seller
+classes the City Market view shows is structurally always zero, and every arrival
+books as `SUPPLY_FOREIGN` regardless of carrier. A guild is founded with
+`spec: vec![]` and nothing ever fills it, while `house_for`'s guild arm has no
+specialisation check and sits *above* the private-house arms — so a guild
+specialises in nothing and is preferred for everything at its home city. And
+`house_for` picks with `.position()`, giving the lowest-indexed (oldest) house at a
+hub permanent first refusal on its city's trade.
+
+**REGRESSION, pre-existing, not caused by this work:**
+`econ_inheritance_rules_fragment_differently` is **RED on `main`** at `fe9db2b`,
+verified on a clean tree by stashing all local changes — *"partible must leave the
+average house poorer than primogeniture (177581 vs 168513)"*. Partible is coming
+out richer: the same inversion recorded in the 2026-08-20d `COMFORT_IMPORT_FRAC`
+entry (193,720 vs 164,858 at the bad dose); last healthy figures 149,925 vs
+174,496. Sixth flip of this gate. Four of the five outcome columns for the plan
+above are wealth-sensitive, so no dose can be tuned until it is green. Needs its
+own bisect.
+
+Gates run (rule §2.8 routing: `sim/campaign/tick/**` → `tick::tests` + `econ_`):
+`tick::tests` **162 passed**; `econ_` 4 passed, 1 failed (the pre-existing failure
+above). Instrumentation is four counters in the ownerless branch only — no RNG
+draws, no control-flow change, serde-defaulted.
+
+---
+
 ## 2026-08-31b — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md`: slices 5 and 8, asked for by name
 
 Follow-up to the same day's earlier entry, which built six of eight slices and held

@@ -904,6 +904,35 @@ serde-defaulted so old saves load). Grouped by theme:
   stock or price), it cannot move the `econ_` bands or the dynamics test by construction —
   verified, not just argued: both are bit-identical/unchanged with this pass wired in.
 
+- **The flavour layer, and what it is NOT** (`houses.rs`, all doc-labelled "Phase 4/5
+  (flavour)" in their own source): `CraftGuild` (`seed_craft_guilds`/`run_craft_guilds`
+  — hub · good · strength · hall, capped at `GUILD_MAX`=12; lifts one good's local
+  quality by `GUILD_QUALITY_STEP` to a `GUILD_QUALITY_CAP`, a `GUILD_STRIKE_CHANCE`
+  strike halving that good's manufacture for 20-60 days, and one guildhall granting
+  +0.05 civic stability). `Fair` (`seed_trade_fairs`/`run_trade_fairs` — one per large
+  component, a spring or autumn sentiment + overlay-flow burst). `HolySite`
+  (`seed_holy_sites`/`run_pilgrimages` — a pilgrimage season, sentiment, and a
+  transient price bump on one patron ritual good). `run_piracy` (a yearly world roll
+  deleting one `fleet_sea` from a random house — **there is no pirate**, no patron and
+  nobody to pay off). `run_diaspora` (a yearly roll adding +0.05 influence at one
+  distant office). None of these can restrict entry, set a price, enforce a mark or
+  exclude anyone — see `docs/ACTORS_AND_CARRIAGE_PLAN.md` §2.
+- **Public debt is real** (`money.rs::update_public_debt`): a council with a seat
+  issues bonds against throughput, services a `DEBT_COUPON` out of treasury, and pays
+  holders (houses and banks) pro-rata — a working *Monte*, not flavour.
+- **Two different things are called "guild"** — `House{is_guild}` (a CIVIC MERCHANT
+  body: the same struct with a flag, a civic subsidy, bankruptcy immunity, and
+  strictly FEWER organs than a private house — no tier, kin, goals, crisis or
+  succession) and `CraftGuild` (the producers' body above). A guild is founded with
+  `spec: vec![]` and **nothing ever fills it**, while `house_for`'s guild arm carries
+  no `spec.contains(&good)` check and sits ABOVE the unspecialised private-house arm —
+  so a guild specialises in nothing and is preferred for everything at its home city.
+  That is a bug, not a balance choice; the fix and the proposed rename to **Company**
+  are `ACTORS_AND_CARRIAGE_PLAN.md` §3.3.
+- **`SUPPLY_LOCAL` is never written.** One of the five `supply_accum` seller classes
+  the City Market view shows is structurally always zero, and every ARRIVAL books as
+  `SUPPLY_FOREIGN` regardless of who carried it. Fix: same plan, §3.8.
+
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
 in §9 for design detail.
@@ -923,6 +952,16 @@ Three facts about the campaign that are easy to miss and shape any change here:
   `campaign_set_province_tax` is still reachable by a player. That is a deliberate
   narrowing of agency, not an oversight; re-exposing the work verbs is a UI change
   alone, no backend work needed.
+- **96% of shipments are carried by NOBODY.** `dispatch` decides a shipment from the
+  arbitrage gap alone and then *attaches* a carrier: the seller's house, else the
+  buyer's, else `owner = -1`. Measured over 60 years (`econ_measure_carrier_mix`):
+  houses finance **4.3%**, the ownerless residual **95.7%**. That residual consumes no
+  vessel slot, is not clamped by capital, and never sinks — and `surplus -= amount;
+  stock_take(..)` sits OUTSIDE the carrier resolution, so the cargo moves either way.
+  **A house's fleet, capital and voyage risk therefore govern who PROFITS, not what
+  MOVES**, and any embargo built on `house_barred` touches 0.1% of trade. Do not
+  reason about trade volume, fleet economics or exclusion without reading
+  `docs/ACTORS_AND_CARRIAGE_PLAN.md` §1 first.
 - **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the
@@ -3788,6 +3827,31 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
+ACTORS_AND_CARRIAGE_PLAN.md       ← ⭐ MEASURED + PLANNED, one diagnostic built,
+                                    no proposal implemented. WHO MOVES THE CARGO:
+                                    `econ_measure_carrier_mix` finds **95.7% of all
+                                    shipments are carried by nobody** (`owner = -1`)
+                                    against 4.3% by the entire merchant-house layer.
+                                    The ownerless branch needs no vessel slot, is not
+                                    clamped by capital, and NEVER SINKS (`let lost =
+                                    if owner >= 0 {..} else { false }`); the transfer
+                                    itself sits outside the carrier resolution, so
+                                    fleet/capital/risk govern who PROFITS, never what
+                                    MOVES. House carriage cannot scale (5.5× the
+                                    fleet on the large world → a LOWER house share).
+                                    Names the frictionless residual as the likely
+                                    cause of F2's −0.064 price/distance gradient.
+                                    Eight gated proposals (N1 make LOCAL_HAUL_DAYS
+                                    bind · N2 ban the lane+good not the carrier ·
+                                    N3 the Company's chartered staple vs
+                                    opportunistic venture + the guild→Company rename ·
+                                    N4 kill `house_for`'s `.position()` incumbency
+                                    bias · N5 the sailing window · N6 price-elastic
+                                    demand · N7 the League · N8 make the market book
+                                    honest). Carries its own recorded WRONG TURN
+                                    (§5.1) and the blocking note that
+                                    `econ_inheritance_rules_fragment_differently` is
+                                    RED on main (§5.2)
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
 DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geology
