@@ -50,6 +50,27 @@ export interface CampaignHubBrief {
   /** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.11: 0 content · 1 short · 2 starving. */
   pop_status?: number;
 }
+/** TRADE_STAGING_AND_POSTS_PLAN.md Slice 7 — one Trading Posts roster row
+ *  (campaign_get_trading_posts). */
+export interface TradingPost {
+  hub: number;
+  name: string;
+  x: number;
+  y: number;
+  /** 2 = resource outpost, 4 = route post. */
+  motive: number;
+  owner_house: string;
+  population: number;
+  /** hub_class: 0 ordinary · 1 trade hub · 2 entrepôt. */
+  rung: number;
+  transit_year: number;
+  forgone_transit: number;
+  writ_holder: string;
+  graduated: boolean;
+  decline_years: number;
+  age_years: number;
+  barred_houses: string[];
+}
 /** Atlas 2.0 · one named trade basin (campaign_get_trade_basins). */
 export interface TradeBasin {
   name: string;
@@ -588,6 +609,10 @@ export interface TradeFlowGood {
   out_volume: number;
   route_count: number;
   history: number[];
+  /** TRADE_STAGING_AND_POSTS_PLAN.md Slice 1 — this city's own yearly output of
+   *  the good. `transit = max(0, out - own_production)`, `own_export = out -
+   *  transit`, `for_us = in - transit`. */
+  own_production: number;
 }
 /** One good's flow along one partner route (per-good route list + map highlight). */
 export interface TradeRouteFlow {
@@ -599,6 +624,10 @@ export interface TradeRouteFlow {
   dir: number;   // 0 inbound, 1 outbound
   amount: number;
   pct: number;
+  km: number;
+  days: number;
+  /** 0 land, 1 sea, 2 river. */
+  mode: number;
 }
 /** A top partner city: share of all this city's trade + goods exchanged. */
 export interface TradePartner {

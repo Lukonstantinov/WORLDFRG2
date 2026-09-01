@@ -52,6 +52,7 @@ export function CampaignTopBar() {
       key: "economy", label: "📦 Economy",
       items: [
         { label: "⚖ Markets", on: ui.showMarkets, set: ui.setShowMarkets },
+        { label: "🐫 Trading Posts", on: ui.showTradingPosts, set: ui.setShowTradingPosts },
         { label: "📦 Goods & Quality", on: ui.showGoodsWindow, set: ui.setShowGoodsWindow },
         { label: "📊 Economy Dashboard", on: ui.showEconomyDashboard, set: ui.setShowEconomyDashboard },
         { label: "📖 Goods Codex", on: ui.showGoodsCodex, set: ui.setShowGoodsCodex },

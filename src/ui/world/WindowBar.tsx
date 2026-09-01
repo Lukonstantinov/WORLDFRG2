@@ -11,6 +11,7 @@ export function WindowBar() {
     { label: "🏦 Banks", on: s.showBank, set: s.setShowBank },
     { label: "🏛 Colonies", on: s.showColonial, set: s.setShowColonial },
     { label: "⚖ Markets", on: s.showMarkets, set: s.setShowMarkets },
+    { label: "🐫 Posts", on: s.showTradingPosts, set: s.setShowTradingPosts },
     { label: "📦 Goods", on: s.showGoodsWindow, set: s.setShowGoodsWindow },
     { label: "🏆 Cities", on: s.showCityRanking, set: s.setShowCityRanking },
     { label: "🗞 News", on: s.showNews, set: s.setShowNews },

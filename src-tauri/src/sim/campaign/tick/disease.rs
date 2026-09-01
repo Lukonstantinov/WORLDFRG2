@@ -667,6 +667,10 @@ impl CampaignSim {
             if expansion_ok && self.tick >= OUTPOST_START_TICK {
                 self.maybe_found_house_outpost();
                 self.maybe_graduate_outpost(); // a thriving old outpost matures into a colony
+                // TRADE_STAGING_AND_POSTS_PLAN.md Slice 5 — a ROUTE post, sited
+                // where a stranded lane needs one rather than where a resource is.
+                self.maybe_found_route_post();
+                self.route_post_growth_pass();
             }
             if expansion_ok && self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();

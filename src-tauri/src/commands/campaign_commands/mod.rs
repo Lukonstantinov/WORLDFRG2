@@ -1047,6 +1047,34 @@ fn inactive_snapshot() -> CampaignSnapshot {
     }
 }
 
+/// TRADE_STAGING_AND_POSTS_PLAN.md Slice 7 — one row of the Trading Posts
+/// roster: owner, founding motive, writ, rung, traffic, trend. A scoped-down
+/// reading of §5 Slice 7's window (roster only — "who calls here" / ban list /
+/// trajectory / map symbology are not built here, see the plan's own §6-style
+/// deliberate-omission discipline).
+#[derive(Serialize, Clone)]
+pub struct TradingPost {
+    pub hub: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    /// 2 = resource outpost, 4 = route post (`TickHub.colony_kind`).
+    pub motive: u8,
+    pub owner_house: String,
+    pub population: f32,
+    /// `hub_class`: 0 ordinary, 1 trade hub, 2 entrepôt.
+    pub rung: u8,
+    pub transit_year: f32,
+    pub forgone_transit: f32,
+    /// Whoever currently holds this post's province writ (rule 24) — a city
+    /// name, a house name, or "" if the province is free / has no writ.
+    pub writ_holder: String,
+    pub graduated: bool,
+    pub decline_years: f32,
+    pub age_years: u32,
+    pub barred_houses: Vec<String>,
+}
+
 /// Atlas 2.0 · one NAMED TRADE BASIN — a cluster of living market towns whose
 /// strongest trade ties bind them together: "the regions where trade happens".
 #[derive(Serialize, Clone)]
@@ -2660,6 +2688,12 @@ pub struct TradeFlowGood {
     pub out_volume: f32,
     pub route_count: u32,
     pub history: Vec<f32>,
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 1 — this city's OWN yearly output
+    /// of the good (already computed, just not surfaced here before). Lets the
+    /// frontend derive the three-segment bar with no new sim state:
+    /// `transit = max(0, out − own_production)`, `own_export = out − transit`,
+    /// `for_us = in − transit`.
+    pub own_production: f32,
 }
 /// One good's flow along one partner route (for the per-good route list + map).
 #[derive(Serialize, Clone)]
@@ -2671,7 +2705,13 @@ pub struct TradeRouteFlow {
     pub py: f32,
     pub dir: u8,        // 0 = inbound to this city, 1 = outbound
     pub amount: f32,
-    pub pct: f32,       // share of this good's flow at this city
+    pub pct: f32,       // share of this good's flow at this city, in ITS OWN direction
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 1 — distance/days/mode/gap, all
+    /// already computed elsewhere and simply not carried to this row before.
+    pub km: f32,
+    pub days: f32,
+    /// 0 = land, 1 = sea, 2 = river — see `CampaignSim::route_is_sea`/`base_mode`.
+    pub mode: u8,
 }
 /// A top partner city: its share of ALL this city's trade + the goods exchanged.
 #[derive(Serialize, Clone)]

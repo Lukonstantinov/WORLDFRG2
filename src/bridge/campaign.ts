@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
+import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, TradingPost, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -80,6 +80,11 @@ export async function campaignGetJournal(hub: number, good: number): Promise<Jou
 /** Atlas 2.0 · named trade basins clustered from the yearly flow ledger. */
 export async function campaignGetTradeBasins(): Promise<TradeBasin[]> {
   return invoke("campaign_get_trade_basins");
+}
+
+/** TRADE_STAGING_AND_POSTS_PLAN.md Slice 7 — the Trading Posts roster. */
+export async function campaignGetTradingPosts(): Promise<TradingPost[]> {
+  return invoke("campaign_get_trading_posts");
 }
 
 /** Batch 1 · per-good Trade Heat points [x, y, volume] (good by name). */

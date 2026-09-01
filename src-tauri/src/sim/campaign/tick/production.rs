@@ -405,6 +405,72 @@ impl CampaignSim {
         self.hubs[a].coastal && self.hubs[b].coastal
     }
 
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 3 — is a single leg `x`→`y` within
+    /// its mode's unprovisioned range? Sea and caravan are capped
+    /// (`SEA_RANGE_DAYS`/`CARAVAN_RANGE_DAYS`); a leg the pathfinder's own
+    /// verdict (`base_mode`) marks as river is exempt — "range without a
+    /// friendly port" (§5 Slice 3) names sea and caravan only, never a river.
+    #[inline]
+    fn leg_within_range(&self, x: usize, y: usize, days: f32) -> bool {
+        if self.route_is_sea(x, y) { return days <= SEA_RANGE_DAYS; }
+        if x < self.base_n && y < self.base_n && self.base_mode.len() == self.base_n * self.base_n
+            && self.base_mode[x * self.base_n + y] == 2 {
+            return true; // river — never range-limited
+        }
+        days <= CARAVAN_RANGE_DAYS
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 4 (the keystone) — break `a`→`b`'s
+    /// flat point-to-point entry in `self.days` into a chain of REAL hops, each
+    /// within `leg_within_range`. A direct leg already in range short-circuits
+    /// immediately (the overwhelming majority of ordinary trade — zero behaviour
+    /// change there). Otherwise, greedy stepping-stone search: from the current
+    /// hub, among its own `self.neighbors` shortlist, pick the in-range candidate
+    /// that makes the most progress toward `b` (lowest `days[candidate][b]`), up
+    /// to `MAX_LEG_HOPS` hops. Returns the hub chain `[a, …, b]` and the chain's
+    /// TOTAL days, or `None` if no such chain exists within the hop budget — the
+    /// shipment is refused outright (§1.2's "nothing resembling distance
+    /// exhaustion", now real: the *hydreumata* rule). This is a greedy nearest-
+    /// progress search over the existing trade-partner graph, not a true
+    /// shortest-path decomposition — a real waypoint (a founded post, a growing
+    /// entrepôt) is found because it is REACHABLE and near-linear on the way,
+    /// which is what the historical relay actually needed.
+    pub(crate) fn decompose_route(&self, a: usize, b: usize) -> Option<(Vec<usize>, f32)> {
+        let n = self.hubs.len();
+        if a >= n || b >= n || a == b { return None; }
+        let mut chain = vec![a];
+        let mut total = 0.0f32;
+        let mut cur = a;
+        let mut visited: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        visited.insert(a);
+        for _ in 0..=MAX_LEG_HOPS {
+            let direct = self.days.get(cur * n + b).copied().unwrap_or(f32::INFINITY);
+            if direct.is_finite() && self.leg_within_range(cur, b, direct) {
+                chain.push(b);
+                total += direct;
+                return Some((chain, total));
+            }
+            let mut best: Option<(usize, f32, f32)> = None; // (m, leg_days, days[m][b])
+            if let Some(nbrs) = self.neighbors.get(cur) {
+                for &bn in nbrs {
+                    let m = bn as usize;
+                    if visited.contains(&m) { continue; }
+                    let leg = self.days.get(cur * n + m).copied().unwrap_or(f32::INFINITY);
+                    if !leg.is_finite() || !self.leg_within_range(cur, m, leg) { continue; }
+                    let md = self.days.get(m * n + b).copied().unwrap_or(f32::INFINITY);
+                    if !md.is_finite() { continue; }
+                    if best.map_or(true, |(_, _, bd)| md < bd) { best = Some((m, leg, md)); }
+                }
+            }
+            let Some((m, leg, _)) = best else { return None; };
+            chain.push(m);
+            total += leg;
+            visited.insert(m);
+            cur = m;
+        }
+        None
+    }
+
     #[inline]
     pub(crate) fn live_price(&self, stock: f32, need: f32, base: f32) -> f32 {
         (base * ((need + EPS) / (stock + EPS)).powf(self.k))
@@ -737,10 +803,19 @@ impl CampaignSim {
                 Some(c) => c,
                 None => continue,
             };
+            // TRADE_STAGING_AND_POSTS_PLAN.md Slice 6 — "buy-back scales with the
+            // POST'S TRAFFIC, not its population — the leverage is the road, not
+            // the town." A resource/route post (`colony_kind` 2 or 4) prices its
+            // buy-back off `transit_year`; an ordinary city keeps the old
+            // population-based fee (its leverage genuinely IS being the town).
             let fee = self
                 .hubs
                 .get(city as usize)
-                .map(|h| (h.population / 5000.0).clamp(2.0, 40.0))
+                .map(|h| if h.colony_kind == 2 || h.colony_kind == 4 {
+                    (h.transit_year / 200.0).clamp(2.0, 60.0)
+                } else {
+                    (h.population / 5000.0).clamp(2.0, 40.0)
+                })
                 .unwrap_or(5.0);
             if self.houses[hi].wealth > fee * 2.0 {
                 self.houses[hi].wealth -= fee;
@@ -1019,6 +1094,15 @@ impl CampaignSim {
                     if surplus <= EPS {
                         break;
                     }
+                    // TRADE_STAGING_AND_POSTS_PLAN.md Slice 4 — decompose into real
+                    // legs BEFORE any cost/settlement math, so everything downstream
+                    // (freight, room, loss probability, provisioning) is priced off
+                    // the REAL route, not the flat point-to-point estimate. `chain`
+                    // is `[a, …, b]`; a chain longer than 2 hops means a multi-leg
+                    // relay that must stop at real waypoints along the way. `days`
+                    // is shadowed with the chain's total (identical to the old flat
+                    // value for the overwhelming majority of in-range direct pairs).
+                    let Some((chain, days)) = self.decompose_route(a, b) else { continue; };
                     // Don't overfill b past delivered-cost parity.
                     let delivered = pa + self.good_freight(g, freight_rate, days);
                     let max_stock =
@@ -1039,14 +1123,33 @@ impl CampaignSim {
                     // in importing capitals never grew. Only if NEITHER can carry it
                     // does it fall to independent local merchants & guilds.
                     let mut owner = -1i32;
+                    // TRADE_STAGING_AND_POSTS_PLAN.md Slice 6 — `bypass` records
+                    // whether the CHOSEN owner is barred at a WAYPOINT (a stop along
+                    // `chain` that is neither endpoint), not the market it's actually
+                    // trading at. §4.1 Brake 2: bypass is real, priced risk (an
+                    // inflated voyage-loss probability, see the loss calc below),
+                    // never a free pass around the ban.
+                    let mut bypass = false;
                     for cand in [self.house_for(a, g), self.house_for(b, g)] {
                         if cand < 0 { continue; }
                         let oi = cand as usize;
-                        // Trade war: a house barred from either market cannot run this
-                        // leg — the trade falls to a rival or independent merchants.
-                        if self.house_barred.get(oi).is_some_and(|v| v.contains(&(a as u32)) || v.contains(&(b as u32))) {
-                            continue;
-                        }
+                        // Trade war: a house barred from either MARKET cannot run this
+                        // leg at all — the trade falls to a rival or independent
+                        // merchants. A bar on the ROUTE BETWEEN them (a waypoint) is
+                        // survivable, at risk, below — extending `house_barred` from
+                        // "may not trade here" to "may not PASS here" (§5 Slice 6).
+                        let barred_here = self.house_barred.get(oi)
+                            .is_some_and(|v| v.contains(&(a as u32)) || v.contains(&(b as u32)));
+                        if barred_here { continue; }
+                        let cand_bypass = chain.len() > 2 && chain[1..chain.len() - 1].iter().any(|&w| {
+                            let barred = self.house_barred.get(oi).is_some_and(|v| v.contains(&(w as u32)));
+                            if barred {
+                                // The closer's own forgone transit — the cost of the
+                                // weapon, surfaced (§5 Slice 6's last bullet).
+                                if let Some(hb) = self.hubs.get_mut(w) { hb.forgone_transit += amount * pa; }
+                            }
+                            barred
+                        });
                         let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
                         // Merchant-banker houses can finance cargo beyond their cash.
                         let credit = if self.houses[oi].archetype == ARCH_BANKING { BANK_CREDIT_MULT } else { 1.0 };
@@ -1055,6 +1158,7 @@ impl CampaignSim {
                             amount = amount.min(afford);
                             if sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; }
                             owner = cand;
+                            bypass = cand_bypass;
                             break;
                         }
                     }
@@ -1165,6 +1269,14 @@ impl CampaignSim {
                         }
                     }
                     // ── Voyage loss: storms at sea, ambush/wreck overland ──
+                    // TRADE_STAGING_AND_POSTS_PLAN.md Slice 3 — DISTANCE-SCALED, not
+                    // a flat per-shipment roll (§1.2: "a 9,000 km crossing is exactly
+                    // as safe as a 200 km one"). `SEA_LOSS`/`CARAVAN_LOSS`/`RIVER_LOSS`
+                    // are calibrated as the risk over `LOSS_REF_DAYS`; a genuinely
+                    // long relay compounds that risk leg over leg
+                    // (`1 − (1 − p)^(days / LOSS_REF_DAYS)`), rolled ONCE here — before
+                    // settlement — rather than per-leg at arrival, so a lost shipment
+                    // never leaves a false sale already booked to the seller's wealth.
                     let lost = if owner >= 0 {
                         let oi = owner as usize;
                         let mut p = if sea {
@@ -1178,6 +1290,10 @@ impl CampaignSim {
                         };
                         // A shipping dynasty loses fewer cargoes (skilled crews).
                         if self.houses[oi].archetype == ARCH_FLEET { p *= FLEET_LOSS_MULT; }
+                        p = 1.0 - (1.0 - p).powf((days / LOSS_REF_DAYS).max(0.05));
+                        // Slice 6 §4.1 Brake 2 — bypassing a barred waypoint runs that
+                        // leg unprovisioned; real, priced risk, never a free pass.
+                        if bypass { p = (p * BYPASS_LOSS_MULT).min(0.95); }
                         hash01(self.seed,
                             (tick as u64) ^ 0x5EA10 ^ ((a as u64) << 8) ^ (b as u64),
                             g as u64) < p
@@ -1302,12 +1418,34 @@ impl CampaignSim {
                         self.bump_trade_at(oi, b, amount);
                     }
                     self.accrue_flow(a, b, g, amount);
+                    // TRADE_STAGING_AND_POSTS_PLAN.md Slice 3 — outfitting + victualling,
+                    // charged once against the carrying house's wealth (never the local-
+                    // merchant/guild pool, which has no wealth ledger of its own — a
+                    // documented simplification). Kept OUT of the freight/tax pipeline
+                    // above deliberately: that pipeline is tuned against `econ_` and
+                    // adding a per-unit term there would move every margin/tax figure
+                    // it computes; a flat wealth debit after settlement is a much
+                    // smaller, isolated lever.
+                    if owner >= 0 {
+                        let oi = owner as usize;
+                        self.houses[oi].wealth =
+                            (self.houses[oi].wealth - (OUTFIT_COST + VICTUAL_RATE_PER_DAY * days)).max(0.0);
+                    }
+                    // Slice 4 — the FIRST leg only; `route_rest`/`dest` carry the rest.
+                    let first_to = chain.get(1).copied().unwrap_or(b);
+                    let leg0_days = self.days.get(a * n + first_to).copied()
+                        .filter(|d| d.is_finite()).unwrap_or(days).max(0.1);
+                    let (leg_dest, leg_rest): (i32, Vec<u32>) = if chain.len() <= 2 {
+                        (-1, Vec::new())
+                    } else {
+                        (b as i32, chain[2..].iter().map(|&x| x as u32).collect())
+                    };
                     self.in_transit.push(InTransit {
                         from: a as u32,
-                        to: b as u32,
+                        to: first_to as u32,
                         good: g,
                         amount,
-                        eta_tick: tick + (days.ceil() as u32).max(1),
+                        eta_tick: tick + (leg0_days.ceil() as u32).max(1),
                         owner,
                         sea,
                         // A house voyage is a ROUND TRIP: on arrival at b it tries to
@@ -1317,6 +1455,8 @@ impl CampaignSim {
                         home: if owner >= 0 { a as i32 } else { -1 },
                         contract: false,
                         price: pa,
+                        route_rest: leg_rest,
+                        dest: leg_dest,
                     });
                     self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
@@ -1339,10 +1479,10 @@ impl CampaignSim {
         if b >= n || a >= n || owner >= self.houses.len() || self.houses[owner].defunct {
             return;
         }
-        let days = self.days[b * n + a];
-        if !days.is_finite() {
-            return;
-        }
+        // Slice 4 — same real-leg decomposition as the outbound leg in `dispatch`;
+        // `chain` is `[b, …, a]`. A route beyond `MAX_LEG_HOPS`/range with no
+        // waypoint simply never returns.
+        let Some((chain, days)) = self.decompose_route(b, a) else { return; };
         // Freight home (a Guildhall at b lowers it); per-good weight/spoilage is
         // folded in per candidate good below via `good_freight`. A trusted reserve
         // coin at the destination `a` shaves transaction cost (DLC 3.5 coinage).
@@ -1423,20 +1563,116 @@ impl CampaignSim {
         // The same vessel carries it home (occupies the owner's slot until it lands).
         // No fresh voyage-loss roll here — the return is the trip's bonus leg.
         self.accrue_flow(b, a, g, amount);
+        // Slice 3 — outfitting is already paid on the outbound leg; the return only
+        // pays victualling for its own (possibly re-routed) length.
+        self.houses[owner].wealth = (self.houses[owner].wealth - VICTUAL_RATE_PER_DAY * days).max(0.0);
+        let first_to = chain.get(1).copied().unwrap_or(a);
+        let leg0_days = self.days.get(b * n + first_to).copied()
+            .filter(|d| d.is_finite()).unwrap_or(days).max(0.1);
+        let (leg_dest, leg_rest): (i32, Vec<u32>) = if chain.len() <= 2 {
+            (-1, Vec::new())
+        } else {
+            (a as i32, chain[2..].iter().map(|&x| x as u32).collect())
+        };
         self.in_transit.push(InTransit {
             from: b as u32,
-            to: a as u32,
+            to: first_to as u32,
             good: g,
             amount,
-            eta_tick: self.tick + (days.ceil() as u32).max(1),
+            eta_tick: self.tick + (leg0_days.ceil() as u32).max(1),
             owner: owner as i32,
             sea,
             phase: 1,
             home: -1,
             contract: false,
             price: pb_buy,
+            route_rest: leg_rest,
+            dest: leg_dest,
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 4 — a cargo has landed at a WAYPOINT
+    /// (`c.dest >= 0` and `c.to != c.dest`), not its financially-settled
+    /// destination. No stock is deposited here — the sale was already struck once
+    /// at dispatch. What a real relay stop DOES do: it charges a small
+    /// provisioning fee (crew/animals refreshed mid-journey) and it earns real
+    /// TRANSIT throughput (`accrue_flow` between the two real hops either side of
+    /// this stop), which is what lets `hub_class` promote a genuine waypoint to a
+    /// trade hub / entrepôt on the strength of traffic passing THROUGH it, not
+    /// traffic of its own — the Palmyra loop (§5 Slice 4).
+    pub(crate) fn arrive_at_waypoint(&mut self, mut c: InTransit, needs: &[Vec<f32>]) {
+        let n = self.hubs.len();
+        let prev = c.to as usize;
+        if c.owner >= 0 {
+            let oi = c.owner as usize;
+            if oi < self.houses.len() {
+                self.houses[oi].wealth = (self.houses[oi].wealth - TRANSIT_PROVISION_COST).max(0.0);
+            }
+        }
+        // TRADE_STAGING_AND_POSTS_PLAN.md Slice 7 — USURPATION rides the province
+        // writ (rule 24): whoever holds `prev`'s province — a house (`prov_holder_
+        // house`) or a city (`prov_holder`) — takes the toll instead of the
+        // waypoint's own treasury; a war goal, a grant or a realm annexation
+        // already flips the writ, so this needs no new mechanism of its own.
+        let prov = self.hub_province.get(prev).copied().unwrap_or(-1);
+        let mut credited = false;
+        if prov >= 0 {
+            if let Some(hh) = self.prov_holder_house.get(prov as usize).copied() {
+                if hh >= 0 && (hh as usize) < self.houses.len() && !self.houses[hh as usize].defunct {
+                    self.houses[hh as usize].wealth += TRANSIT_PROVISION_COST;
+                    credited = true;
+                }
+            }
+            if !credited {
+                if let Some(hb) = self.prov_holder.get(prov as usize).copied() {
+                    if hb >= 0 && (hb as usize) < self.hubs.len() {
+                        self.hubs[hb as usize].treasury += TRANSIT_PROVISION_COST;
+                        credited = true;
+                    }
+                }
+            }
+        }
+        if !credited && prev < self.hubs.len() { self.hubs[prev].treasury += TRANSIT_PROVISION_COST; }
+        let Some(&next) = c.route_rest.first() else {
+            // route_rest empty but dest != to: shouldn't normally happen (every
+            // multi-hop chain's last waypoint hop lands exactly on dest), but
+            // deliver the cargo right here rather than losing it silently.
+            self.finalize_arrival(c, needs);
+            return;
+        };
+        let leg = self.days.get(prev * n + next as usize).copied().filter(|d| d.is_finite());
+        let Some(leg_days) = leg else {
+            // The route died under us (a hub abandoned, a component split since
+            // dispatch). Deliver wherever the cargo currently sits rather than
+            // stranding it in `in_transit` forever.
+            self.finalize_arrival(c, needs);
+            return;
+        };
+        self.accrue_flow(prev, next as usize, c.good, c.amount);
+        c.route_rest.remove(0);
+        c.to = next;
+        c.eta_tick = self.tick + (leg_days.ceil() as u32).max(1);
+        self.in_transit.push(c);
+    }
+
+    /// The shared FINAL-arrival logic (deposit stock, tag supply attribution,
+    /// maybe spawn a house's return leg) — used both by the ordinary one-hop
+    /// arrival and by `arrive_at_waypoint`'s stranded-route fallback.
+    pub(crate) fn finalize_arrival(&mut self, c: InTransit, needs: &[Vec<f32>]) {
+        let ng = self.goods.len();
+        let to = c.to as usize;
+        if to < self.hubs.len() {
+            stock_add_ungraded(&mut self.hubs[to].stock, c.good, c.amount);
+            if self.hubs[to].supply_accum.len() != ng * SUPPLY_CLASSES {
+                self.hubs[to].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
+            }
+            supply_add(&mut self.hubs[to].supply_accum, c.good, SUPPLY_FOREIGN, c.amount);
+            if c.sea { self.hubs[to].in_by_sea += c.amount; } else { self.hubs[to].in_by_land += c.amount; }
+        }
+        if c.phase == 0 && c.owner >= 0 && c.home >= 0 {
+            self.deploy_return_leg(c.owner as usize, to, c.home as usize, needs);
+        }
     }
 
 

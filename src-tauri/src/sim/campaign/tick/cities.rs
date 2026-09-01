@@ -1552,8 +1552,20 @@ impl CampaignSim {
                 continue; // dependent colonies die by their own lifeline rules
             }
             if hub.population < 1.0 { continue; }
-            let terminal = hub.population < hub.founding_pop * ABANDON_POP_FRAC
-                && hub.starving > 0.5;
+            // TRADE_STAGING_AND_POSTS_PLAN.md Slice 5 §4.4 — "a post whose lane
+            // dies must die with it." A route post rarely starves (it imports its
+            // keep like any hub, and starves by the same rule below), so it needs
+            // its OWN terminal condition tied to the traffic it exists for: past
+            // a grace period to let a young post find its feet, transit below the
+            // floor counts as terminal exactly like starvation does elsewhere.
+            // St Helena's case — a post whose site carries no belt but still sees
+            // SOME traffic — stays above the floor and never triggers this.
+            let route_dead = hub.colony_kind == 4
+                && self.tick.saturating_sub(hub.colony_founded_tick)
+                    >= ROUTE_POST_TRANSIT_GRACE_YEARS * TICKS_PER_YEAR
+                && hub.transit_year < ROUTE_POST_MIN_TRANSIT;
+            let terminal = (hub.population < hub.founding_pop * ABANDON_POP_FRAC
+                && hub.starving > 0.5) || route_dead;
             if terminal {
                 self.hubs[h].decline_years += 1.0;
             } else {
@@ -1699,7 +1711,7 @@ impl CampaignSim {
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, forgone_transit: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,

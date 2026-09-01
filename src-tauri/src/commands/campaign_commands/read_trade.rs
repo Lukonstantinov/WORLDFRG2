@@ -3,6 +3,50 @@
 use super::*;
 
 
+/// TRADE_STAGING_AND_POSTS_PLAN.md Slice 7 — the Trading Posts roster: every
+/// live resource outpost (`colony_kind == 2`) and route post (`colony_kind ==
+/// 4`), owner, motive, writ, rung, traffic, trend.
+#[tauri::command]
+pub fn campaign_get_trading_posts(db: State<'_, WorldDb>) -> Result<Vec<TradingPost>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out = Vec::new();
+    for (hi, h) in sim.hubs.iter().enumerate() {
+        if h.abandoned || (h.colony_kind != 2 && h.colony_kind != 4) { continue; }
+        let owner_house = if h.owner_house >= 0 && (h.owner_house as usize) < sim.houses.len() {
+            sim.houses[h.owner_house as usize].name.clone()
+        } else if h.council_house >= 0 && (h.council_house as usize) < sim.houses.len() {
+            sim.houses[h.council_house as usize].name.clone()
+        } else { String::new() };
+        // Writ holder — rule 24: a house's dues-holding writ takes precedence in
+        // display over a city seat, since that's the "who actually profits" answer.
+        let prov = sim.hub_province.get(hi).copied().unwrap_or(-1);
+        let writ_holder = if prov >= 0 {
+            sim.prov_holder_house.get(prov as usize).copied().filter(|&hh| hh >= 0)
+                .and_then(|hh| sim.houses.get(hh as usize)).map(|hh| hh.name.clone())
+                .or_else(|| sim.prov_holder.get(prov as usize).copied().filter(|&hb| hb >= 0)
+                    .and_then(|hb| sim.hubs.get(hb as usize)).map(|hb| hb.name.clone()))
+                .unwrap_or_default()
+        } else { String::new() };
+        let barred_houses: Vec<String> = sim.houses.iter()
+            .filter(|hh| !hh.defunct)
+            .enumerate()
+            .filter(|(oi, _)| sim.house_barred.get(*oi).is_some_and(|v| v.contains(&(hi as u32))))
+            .map(|(_, hh)| hh.name.clone())
+            .collect();
+        out.push(TradingPost {
+            hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
+            motive: h.colony_kind, owner_house, population: h.population,
+            rung: h.hub_class, transit_year: h.transit_year, forgone_transit: h.forgone_transit,
+            writ_holder, graduated: !h.is_estate, decline_years: h.decline_years,
+            age_years: sim.tick.saturating_sub(h.colony_founded_tick) / 365,
+            barred_houses,
+        });
+    }
+    out.sort_by(|a, b| b.transit_year.partial_cmp(&a.transit_year).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
 #[tauri::command]
 pub fn campaign_get_trade_basins(db: State<'_, WorldDb>) -> Result<Vec<TradeBasin>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
@@ -722,6 +766,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             in_volume: iv, out_volume: ov,
             route_count: g_partners.get(&g).map(|s| s.len() as u32).unwrap_or(0),
             history,
+            own_production: sim.hubs[hi].production.get(g as usize).copied().unwrap_or(0.0),
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
@@ -734,12 +779,25 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     // "~17%" per route instead of the true 33%.
     let mut good_total: HashMap<(u32, u8), f32> = HashMap::new();
     for (&(g, _, dir), &amt) in &route_amt { *good_total.entry((g, dir)).or_insert(0.0) += amt; }
+    const KM_EQUATOR: f32 = 40075.0;
     let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
         let (pname, px, py) = pos(partner)?;
         let tot = good_total.get(&(g, dir)).copied().unwrap_or(0.0).max(1e-6);
+        // Slice 1 — distance/days/mode, all already computed elsewhere (the
+        // pathfound route-days matrix, `route_is_sea`/`base_mode`), just not
+        // carried to this row before.
+        let pidx = city_of(partner) as usize;
+        let cells = sim.hub_cell_dist(hi, pidx);
+        let km = if sim.world_w > 1.0 { cells * KM_EQUATOR / sim.world_w } else { cells };
+        let days = sim.days.get(hi * sim.hubs.len() + pidx).copied().unwrap_or(0.0);
+        let mode: u8 = if sim.route_is_sea(hi, pidx) { 1 }
+            else if hi < sim.base_n && pidx < sim.base_n && sim.base_mode.len() == sim.base_n * sim.base_n
+                && sim.base_mode[hi * sim.base_n + pidx] == 2 { 2 }
+            else { 0 };
         Some(TradeRouteFlow {
             good: g, partner, partner_name: pname, px, py, dir, amount,
             pct: amount / tot * 100.0,
+            km, days: if days.is_finite() { days } else { 0.0 }, mode,
         })
     }).collect();
     routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));

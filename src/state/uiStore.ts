@@ -277,6 +277,9 @@ interface UIStore {
   /** The city the Markets window is showing. Seeded from `selectedHub` on open,
    *  then independent of it. */
   marketsHub: number | null;
+  /** TRADE_STAGING_AND_POSTS_PLAN.md Slice 7 — the floating Trading Posts window
+   *  (roster of resource outposts + route posts). */
+  showTradingPosts: boolean;
   /** Chrome visibility — lets the user hide the left workflow panel and the right
    *  toolbar to get a clean map with just the floating window bar. */
   showWorkflow: boolean;
@@ -392,6 +395,7 @@ interface UIStore {
   setShowGoodsWindow: (v: boolean) => void;
   setShowMarkets: (v: boolean) => void;
   setMarketsHub: (id: number | null) => void;
+  setShowTradingPosts: (v: boolean) => void;
   setShowWorkflow: (v: boolean) => void;
   setShowToolbar: (v: boolean) => void;
   setCoinOverlayHub: (v: number | null) => void;
@@ -537,6 +541,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showGoodsWindow: false,
   showMarkets: false,
   marketsHub: null,
+  showTradingPosts: false,
   showWorkflow: true,
   showToolbar: true,
   coinOverlayHub: null,
@@ -703,6 +708,7 @@ export const useUIStore = create<UIStore>((set) => ({
     marketsHub: v && s.marketsHub === null ? s.selectedHub : s.marketsHub,
   })),
   setMarketsHub: (id) => set({ marketsHub: id }),
+  setShowTradingPosts: (v) => set({ showTradingPosts: v }),
   setShowWorkflow: (v) => set({ showWorkflow: v }),
   setShowToolbar: (v) => set({ showToolbar: v }),
   setCoinOverlayHub: (v) => set({ coinOverlayHub: v }),

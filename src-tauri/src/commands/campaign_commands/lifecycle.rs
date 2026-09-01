@@ -557,6 +557,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 supply_source: -1,
                 supply_delivered: 0.0,
                 transit_year: 0.0,
+                forgone_transit: 0.0,
                 hub_class: 0,
                 class_momentum: 0,
                 build_stage: 0,

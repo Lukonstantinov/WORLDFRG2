@@ -264,6 +264,10 @@ impl CampaignSim {
                 owner: seller as i32, sea, phase: 1, home: -1, // one-way: no return leg
                 contract: true, // its vessel is held by the standing contract reservation
                 price: pt,
+                // A contract delivery is a fixed standing commitment, not spot
+                // arbitrage — left as a direct one-hop leg (Slice 4 legs/Slice 3
+                // range apply to `dispatch`/`deploy_return_leg` only).
+                route_rest: Vec::new(), dest: -1,
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
@@ -552,7 +556,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, forgone_transit: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -980,9 +984,16 @@ impl CampaignSim {
         // rather than the whole world waiting on a single wealthiest house whose
         // home network may not even reach whatever sites remain. Capped per call
         // so a rich crop of houses can't empty the colonizable pool in one year.
+        // TRADE_STAGING_AND_POSTS_PLAN.md Slice 6 — "a ban feeds the victim's
+        // site-search": a house currently barred somewhere is prioritised in this
+        // sort (though never made rich enough to afford what it couldn't already
+        // afford — the bonus is priority, not cash).
         let mut candidates: Vec<(usize, f32)> = self.houses.iter().enumerate()
             .filter(|(_, hh)| !hh.defunct && hh.wealth > OUTPOST_FOUND_WEALTH)
-            .map(|(hi, hh)| (hi, hh.wealth))
+            .map(|(hi, hh)| {
+                let barred = self.house_barred.get(hi).is_some_and(|v| !v.is_empty());
+                (hi, hh.wealth * if barred { BARRED_PROSPECT_BONUS } else { 1.0 })
+            })
             .collect();
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
         let mut founded = 0usize;
@@ -991,6 +1002,106 @@ impl CampaignSim {
             if self.colonizable.is_empty() { break; }
             if self.estate_count() >= MAX_TOTAL_ESTATES { break; }
             if self.try_found_house_outpost(hi) { founded += 1; }
+        }
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 5 — a ROUTE post, `colony_kind = 4`.
+    /// Where `try_found_house_outpost` sites by RESOURCE (a rich province the
+    /// world hasn't opened), this sites by GEOGRAPHY: it scans every live hub's
+    /// own trade-partner shortlist (`self.neighbors`) for a pair the pathfinder
+    /// still ranks as a real economic partnership (a finite `self.days` entry —
+    /// it's IN the shortlist) but that `decompose_route` can no longer relay
+    /// within range — a genuinely stranded gap on what would otherwise be a live
+    /// lane. §1.6 named this precisely: "nothing can site a post WHERE A ROUTE
+    /// NEEDS one." The post sites at the pair's cylindrical-aware MIDPOINT — the
+    /// *hydreumata* rule read backwards: found the well where the desert
+    /// crossing needs one.
+    ///
+    /// Unlike a resource outpost, a route post is a REAL HUB from the moment it
+    /// is founded (`is_estate = false`), never an estate that later graduates —
+    /// its entire purpose is to be FOUND and scored by `hub_class`/`hub_pull`,
+    /// and an estate is invisible to both (`cities.rs`'s tier/class order
+    /// filters `!is_estate`). This is the "real blast radius" change §5 Slice 5
+    /// names: a founded route post immediately enters the partner graph exactly
+    /// like an ordinary town.
+    pub(crate) fn maybe_found_route_post(&mut self) {
+        if self.hubs.is_empty() || self.houses.is_empty() { return; }
+        if self.estate_count() >= MAX_TOTAL_ESTATES.saturating_sub(OUTPOST_RESERVED_ESTATES) { return; }
+        let n = self.hubs.len();
+        let mut best: Option<(usize, usize, f32)> = None; // (a, b, prize)
+        for a in 0..n {
+            if self.hubs[a].is_estate || self.hubs[a].abandoned || self.hubs[a].population < 1.0 { continue; }
+            let Some(nbrs) = self.neighbors.get(a) else { continue };
+            for &bn in nbrs {
+                let b = bn as usize;
+                if b == a || b >= n { continue; }
+                if self.hubs[b].is_estate || self.hubs[b].abandoned || self.hubs[b].population < 1.0 { continue; }
+                let direct = self.days.get(a * n + b).copied().unwrap_or(f32::INFINITY);
+                if !direct.is_finite() { continue; }
+                if self.decompose_route(a, b).is_some() { continue; } // already relayable
+                let prize = (self.hubs[a].population.max(1.0) * self.hubs[b].population.max(1.0)).sqrt();
+                if best.map_or(true, |(_, _, bp)| prize > bp) { best = Some((a, b, prize)); }
+            }
+        }
+        let Some((a, b, _)) = best else { return; };
+        // Slice 6 — same barred-prospecting priority as `maybe_found_house_outpost`.
+        let Some(hi) = self.houses.iter().enumerate()
+            .filter(|(_, hh)| !hh.defunct && hh.wealth > ROUTE_POST_FOUND_COST)
+            .map(|(i, hh)| {
+                let barred = self.house_barred.get(i).is_some_and(|v| !v.is_empty());
+                (i, hh.wealth * if barred { BARRED_PROSPECT_BONUS } else { 1.0 })
+            })
+            .max_by(|x, y| x.1.partial_cmp(&y.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(i, _)| i) else { return; };
+        let (ax, ay) = (self.hubs[a].x, self.hubs[a].y);
+        let (bx, by) = (self.hubs[b].x, self.hubs[b].y);
+        let mut dx = bx - ax;
+        if self.world_w > 1.0 && dx.abs() > self.world_w / 2.0 { dx -= dx.signum() * self.world_w; }
+        let mut mx = ax + dx * 0.5;
+        if self.world_w > 1.0 { mx = mx.rem_euclid(self.world_w); }
+        let my = (ay + by) * 0.5;
+        let koppen = self.hubs[a].koppen; // a coarse proxy — no tile access at tick granularity
+        let coastal = self.hubs[a].coastal || self.hubs[b].coastal;
+        let component = self.hubs[a].component;
+        let aname = self.hubs[a].name.clone();
+        let bname = self.hubs[b].name.clone();
+        self.houses[hi].wealth -= ROUTE_POST_FOUND_COST;
+        self.create_estate(-1, mx, my, 0, 0, hi as i32, koppen, coastal, component,
+            ROUTE_POST_STARTING_POP, 0.05);
+        let new = self.hubs.len() - 1;
+        self.hubs[new].is_estate = false; // real hub from birth — see doc comment above
+        self.hubs[new].colony_kind = 4;
+        self.hubs[new].colony_stage = 1;
+        self.hubs[new].founder_hub = self.houses[hi].hub as i32;
+        self.hubs[new].backers = vec![(1, hi as u32, 1.0)];
+        self.hubs[new].council_house = hi as i32;
+        self.hubs[new].colony_founded_tick = self.tick;
+        self.hubs[new].founding_pop = ROUTE_POST_STARTING_POP;
+        let place = crate::sim::names::gen_name(
+            mx.max(0.0) as u32, my.max(0.0) as u32, self.world_w as u32, self.world_h());
+        self.hubs[new].name = format!("{} (waystation)", place);
+        self.routes_dirty = true; // the new hub must enter the days/neighbors graph
+        self.total_foundings += 1;
+        let hn = self.houses[hi].name.clone();
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 4.0,
+            text: format!("{} founds a waystation on the long road between {} and {}", hn, aname, bname),
+        });
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 5 §4.3 — a route post's growth
+    /// source is its OWN traffic, not a rural hinterland it doesn't have (a post
+    /// on an empty coast has no countryside to draw settlers from). A scoped-
+    /// down stand-in for the plan's full route-bound-migration mechanism
+    /// (`neighbor_path`-driven corridor migration): a direct population credit
+    /// proportional to `transit_year`, capped, rather than modelling the actual
+    /// migrating households. Yearly.
+    pub(crate) fn route_post_growth_pass(&mut self) {
+        for h in &mut self.hubs {
+            if h.is_estate || h.abandoned || h.colony_kind != 4 { continue; }
+            if h.population >= ROUTE_POST_MAX_POP { continue; }
+            let gain = h.transit_year.max(0.0) * ROUTE_POST_GROWTH_PER_TRANSIT;
+            h.population = (h.population + gain).min(ROUTE_POST_MAX_POP);
         }
     }
 
@@ -1184,6 +1295,12 @@ impl CampaignSim {
             let age = tick.saturating_sub(hub.colony_founded_tick);
             if age < OUTPOST_GRADUATE_YEARS * TICKS_PER_YEAR { continue; }
             if hub.population < OUTPOST_MAX_POP * 0.9 { continue; }
+            // TRADE_STAGING_AND_POSTS_PLAN.md Slice 5 — "a post on a busy lane
+            // graduates in a generation and one on a dead lane never does": age +
+            // population + wealth alone used to be sufficient, so a well-off
+            // house's outpost graduated on schedule however little actually
+            // passed through it. Real transit is now required too.
+            if hub.transit_year < OUTPOST_GRADUATE_TRANSIT_MIN { continue; }
             let wealth = self.houses[owner as usize].wealth;
             if wealth < OUTPOST_GRADUATE_WEALTH { continue; }
             if wealth > best.1 { best = (h, wealth); }

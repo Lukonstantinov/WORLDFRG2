@@ -113,6 +113,37 @@ const RIVER_LOSS: f32 = 0.015;
 /// Independent trade shorter than this (travel-days) is "local merchants";
 /// anything longer is organized "guild" long-haul. Splits the non-house carry.
 const LOCAL_HAUL_DAYS: f32 = 8.0;
+
+// ── TRADE_STAGING_AND_POSTS_PLAN.md Slice 3/4 — provisioning, range & legs ──
+/// Unprovisioned range: a leg longer than this, with no in-range waypoint to
+/// break it at, is refused outright (`decompose_route`) — the *hydreumata*
+/// rule (§3 of the plan: the Coptos–Berenike desert road carried fortified
+/// cisterns because the leg exceeded a caravan's unprovisioned range). A river
+/// leg is exempt (§5 Slice 3: "range without a friendly port" names sea and
+/// caravan only — a river never runs dry).
+pub(crate) const SEA_RANGE_DAYS: f32 = 30.0;
+pub(crate) const CARAVAN_RANGE_DAYS: f32 = 20.0;
+/// Cap on how many stepping-stone hops `decompose_route`'s greedy search will
+/// walk before giving up. A real multi-leg relay (Alexandria→Coptos→Berenike→
+/// Aden→Muziris) is a handful of hops, not dozens.
+pub(crate) const MAX_LEG_HOPS: usize = 6;
+/// Fixed per-voyage outfitting charge (grain-eq wealth), independent of cargo
+/// size — "so long hauls need scale": a trivial shipment cannot amortise it.
+/// Charged once, at dispatch, to a house-owned shipment's owner.
+pub(crate) const OUTFIT_COST: f32 = 60.0;
+/// Crew/animal subsistence, per day of the WHOLE voyage (grain-eq wealth) —
+/// this is where distance finally costs something NON-linear on top of plain
+/// freight-per-day.
+pub(crate) const VICTUAL_RATE_PER_DAY: f32 = 1.5;
+/// A SECOND, smaller provisioning charge at every intermediate waypoint a
+/// multi-leg shipment stops at (refreshing crew/animals mid-relay) — distinct
+/// from `OUTFIT_COST`, which is the one-time cost of setting out at all.
+pub(crate) const TRANSIT_PROVISION_COST: f32 = 20.0;
+/// `SEA_LOSS`/`CARAVAN_LOSS`/`RIVER_LOSS` are calibrated as the risk over
+/// roughly this many days; `dispatch` scales them to the shipment's REAL total
+/// route length via `1 − (1 − p)^(days / LOSS_REF_DAYS)` instead of rolling
+/// the same flat probability for a 200 km hop and a 9,000 km relay (§1.2).
+pub(crate) const LOSS_REF_DAYS: f32 = 15.0;
 /// Share of a settlement's population engaged in merchant trade — split across
 /// houses / local merchants / guilds by their recent throughput at the hub.
 const MERCHANT_POP_FRACTION: f32 = 0.12;
@@ -666,6 +697,50 @@ const OUTPOST_MAX_POP: f32 = 800.0;          // a trade post stays small (hard p
 /// own region rather than the whole world waiting on a single richest house whose
 /// network may not even border whatever colonizable sites remain.
 const OUTPOST_MAX_PER_CALL: usize = 3;
+
+// ── TRADE_STAGING_AND_POSTS_PLAN.md Slice 5 — route posts (`colony_kind = 4`) ──
+/// Cheaper than a resource outpost's `OUTPOST_FOUND_COST` — a relay stop, not a
+/// factory; its whole value is being FOUND (real hub, real `hub_class`), not
+/// what it produces.
+pub(crate) const ROUTE_POST_FOUND_COST: f32 = 30_000.0;
+pub(crate) const ROUTE_POST_STARTING_POP: f32 = 300.0;
+/// A route post whose lane never developed real transit within this many years
+/// starts counting toward abandonment exactly like an ordinary starving city
+/// (`lifecycle_pass`) — "a post whose lane dies must die with it" (§4.4). St
+/// Helena — a post whose site carries no belt — must be able to stay a rock
+/// FOREVER if it still has minimal transit; this only bites a post with
+/// genuinely nothing passing through it.
+pub(crate) const ROUTE_POST_MIN_TRANSIT: f32 = 5.0;
+pub(crate) const ROUTE_POST_TRANSIT_GRACE_YEARS: u32 = 15;
+/// An existing resource outpost's promotion (`maybe_graduate_outpost`) now ALSO
+/// requires real transit, so "a post on a dead lane never graduates" (§5 Slice
+/// 5) — age + population + wealth alone used to be sufficient.
+pub(crate) const OUTPOST_GRADUATE_TRANSIT_MIN: f32 = 40.0;
+/// Yearly population a route post gains per unit of its own `transit_year`
+/// throughput (`route_post_growth_pass`) — the honest source is the traffic
+/// itself (§4.3), since a post on an empty coast has no rural pool to draw on.
+/// A scoped-down stand-in for the plan's full route-bound-migration mechanism
+/// (§4.3 names `neighbor_path`-driven corridor migration specifically); this
+/// is a direct population credit instead, deliberately simpler.
+pub(crate) const ROUTE_POST_GROWTH_PER_TRANSIT: f32 = 0.6;
+pub(crate) const ROUTE_POST_MAX_POP: f32 = 20_000.0;
+
+// ── TRADE_STAGING_AND_POSTS_PLAN.md Slice 6 — embargo & bypass ──
+/// §4.1 Brake 2 — bypassing a barred waypoint unprovisioned multiplies the
+/// already distance-scaled voyage-loss probability. Between the plan's own
+/// "~1.3× a gamble worth taking, ~2.1× ruinous" — a single flat multiplier
+/// (not scaled to how far past range the specific gap runs, which would need
+/// per-leg range accounting `decompose_route` doesn't currently expose) is a
+/// deliberately scoped-down reading of that range.
+pub(crate) const BYPASS_LOSS_MULT: f32 = 1.8;
+/// §5 Slice 6 — a barred house's outpost/route-post site search is biased
+/// toward founding SOMEWHERE while it is shut out of a market, rather than
+/// literally toward the one site that would restore its specific lost lane
+/// (which would need per-house route-feasibility scoring `try_found_house_
+/// outpost`/`maybe_found_route_post` don't currently do) — "a ban feeds the
+/// victim's site-search," scoped down to a flat prospecting bonus.
+pub(crate) const BARRED_PROSPECT_BONUS: f32 = 1.35;
+
 /// Score bonus that biases a house trade-outpost toward yielding a SCARCE manufacturing
 /// input its own workshops lack — turning the outpost into a raw-materials RESOURCE
 /// COLONY. Large enough to dominate the base per-capita score (which sits in 0..1).
@@ -2290,6 +2365,14 @@ pub struct TickHub {
     /// Realized trade throughput touching this hub in the LAST year (imports+exports
     /// from `flow_year`). Drives `hub_class`. Display + classification signal.
     #[serde(default)] pub transit_year: f32,
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 6 — a decaying (×0.98/tick, same
+    /// idiom as `in_by_sea`/`in_by_land`) estimate of the trade VALUE this hub
+    /// is turning away by barring a house here: the closer's own forgone
+    /// revenue, "so the cost of the weapon is visible to the player." Credited
+    /// whenever a shipment bypasses this hub (a barred waypoint) or is refused
+    /// here outright (a barred endpoint costing the trade to a rival/
+    /// independent carrier instead of this hub's own tariff take).
+    #[serde(default)] pub forgone_transit: f32,
     /// Commercial rank earned LIVE from trade: 0 = ordinary · 1 = trade hub · 2 =
     /// entrepôt (a great sea pass-through market — Venice/Bruges). Rises and falls with
     /// the trade that actually flows through the city.
@@ -2538,6 +2621,24 @@ pub struct InTransit {
     /// the city it was sailing towards — see `docs/TRADE_AND_MARKET_REVIEW.md`
     /// Part 3. Written here, read only by the query layer.
     #[serde(default)] pub price: f32,
+    /// TRADE_STAGING_AND_POSTS_PLAN.md Slice 4 (the keystone) — the remaining
+    /// WAYPOINTS between the physical "next stop" (`to`) and the
+    /// financially-settled destination (`dest`), in order, NOT including `to`
+    /// itself. Empty + `dest < 0` (the default) means `to` IS the destination —
+    /// today's one-hop behaviour, unchanged for the overwhelming majority of
+    /// ordinary trade. When `dest >= 0` and `to != dest`, arrival at `to` is a
+    /// WAYPOINT, not a delivery: the a→b sale, taxes and margin were already
+    /// struck ONCE at dispatch (using the whole route's cost — see
+    /// `decompose_route`), so a waypoint charges a small provisioning fee,
+    /// credits real transit throughput at that hub (feeding `hub_class` — the
+    /// Palmyra loop), and reschedules the next hop. No stock is deposited at a
+    /// waypoint. Full economic BREAK OF BULK (re-pricing / reselling the cargo
+    /// AT the waypoint against a different buyer) is deliberately NOT built —
+    /// it would mean unwinding the already-struck a→b settlement mid-flight,
+    /// which risks the tuned trade/tax pipeline for a benefit no `econ_` gate
+    /// yet measures; see `docs/TRADE_STAGING_AND_POSTS_PLAN.md` §6.
+    #[serde(default)] pub route_rest: Vec<u32>,
+    #[serde(default = "neg_one_i32")] pub dest: i32,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -6729,32 +6830,36 @@ impl CampaignSim {
             for hb in &mut self.hubs {
                 hb.in_by_sea *= 0.98;
                 hb.in_by_land *= 0.98;
+                hb.forgone_transit *= 0.98;
                 for v in hb.supply_accum.iter_mut() { *v *= 0.98; }
             }
-            // (to, good, amount, sea, phase, home, owner) — phase/home/owner let an
-            // arriving OUTBOUND house cargo spawn its return leg from the dest hub.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32)> = Vec::new();
+            // TRADE_STAGING_AND_POSTS_PLAN.md Slice 4 — a landed cargo is either a
+            // FINAL arrival (today's behaviour, unchanged: deposit stock, maybe
+            // spawn the return leg) or a WAYPOINT on a longer relay (`dest >= 0` and
+            // `to != dest`), which reschedules the next hop instead — see
+            // `arrive_at_waypoint`.
+            let mut landed: Vec<InTransit> = Vec::new();
             self.in_transit.retain(|c| {
-                if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner));
-                    false
-                } else {
-                    true
-                }
+                if c.eta_tick <= tick { landed.push(c.clone()); false } else { true }
             });
-            for (to, g, amt, sea, phase, home, owner) in landed {
+            for c in landed {
+                let to = c.to as usize;
+                if c.dest >= 0 && c.dest as usize != to {
+                    self.arrive_at_waypoint(c, &needs);
+                    continue;
+                }
                 if to < self.hubs.len() {
-                    stock_add_ungraded(&mut self.hubs[to].stock, g, amt);
+                    stock_add_ungraded(&mut self.hubs[to].stock, c.good, c.amount);
                     if self.hubs[to].supply_accum.len() != ng * SUPPLY_CLASSES {
                         self.hubs[to].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
                     }
-                    supply_add(&mut self.hubs[to].supply_accum, g, SUPPLY_FOREIGN, amt);
-                    if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
+                    supply_add(&mut self.hubs[to].supply_accum, c.good, SUPPLY_FOREIGN, c.amount);
+                    if c.sea { self.hubs[to].in_by_sea += c.amount; } else { self.hubs[to].in_by_land += c.amount; }
                 }
                 // Round trip: an OUTBOUND (phase 0) house cargo that just sold at `to`
                 // now buys `to`'s surplus and carries it home for a second profit.
-                if phase == 0 && owner >= 0 && home >= 0 {
-                    self.deploy_return_leg(owner as usize, to, home as usize, &needs);
+                if c.phase == 0 && c.owner >= 0 && c.home >= 0 {
+                    self.deploy_return_leg(c.owner as usize, to, c.home as usize, &needs);
                 }
             }
 
