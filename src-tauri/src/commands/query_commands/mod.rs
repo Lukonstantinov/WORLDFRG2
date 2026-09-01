@@ -2084,9 +2084,21 @@ fn build_river_systems(
         let mut psum = 0.0f32;
         for &(px, py) in pts { psum += buf.precipitation[idx(px, py)]; }
         let mean_p = psum / m.max(1) as f32;
-        let runoff_m = (mean_p / 1000.0 * 0.35).clamp(0.01, 1.2);
         let area_km2 = outlet_acc * cell_area_km2;
-        let q = (area_km2 * 1.0e6 * runoff_m / 3.15576e7).clamp(0.3, 300000.0);
+        // THE RIVER'S OWN STORED DISCHARGE (`River::discharge_m3s`), not a second
+        // calculation. This query used to re-derive Q with its own runoff model
+        // while `extract_rivers` used a different one for the render width, so
+        // the flow reported here and the width drawn on the map were answers to
+        // two different questions — the "output and width don't match" report.
+        // The fallback recomputes only for a world generated before the field
+        // existed (it serde-defaults to 0.0), so an old save still reads sensibly
+        // rather than reporting every river as having no flow.
+        let q = if r.discharge_m3s > 0.0 {
+            r.discharge_m3s
+        } else {
+            let runoff_m = (mean_p / 1000.0 * 0.35).clamp(0.01, 1.2);
+            (area_km2 * 1.0e6 * runoff_m / 3.15576e7).clamp(0.3, 300000.0)
+        };
         let width_m = (6.0 * q.sqrt()).clamp(1.0, 4000.0);
         // Max (thalweg) depth — great rivers run VERY deep: the Amazon reaches
         // ~100 m and the Congo deeper still. This is the DEEPEST point, not the

@@ -1582,6 +1582,16 @@ const MARKET_REACH_FRAC: f32 = 0.5;
 const CABOTAGE_SEA_FRAC: f32 = 0.08;
 /// How many nearest cross-component coastal partners a coastal hub gains by cabotage.
 const CABOTAGE_LINKS: usize = 2;
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part II Slice C1 (the entrepôt) — the real cost
+/// (in days) of breaking bulk at an outlet: unloading, warehousing, re-loading.
+/// A composed two-leg route must clear this before it can ever beat a direct one,
+/// which is what keeps the outlet a genuine shortcut rather than a free relabel.
+pub(crate) const ENTREPOT_DWELL_DAYS: f32 = 3.0;
+/// Share of a settled trade's PROFIT (never the gross value — rule 18's "never
+/// added on top") the outlet port earns for having made the cheaper route
+/// possible, credited to its treasury. Kept modest: this is a toll on passing
+/// trade, not a second sale.
+pub(crate) const ENTREPOT_FEE_FRAC: f32 = 0.08;
 /// Terroir estates (wine country, silk hills, spice coast…): the estate founder used
 /// to pick a good ONLY from what the frozen worldgen snapshot credited the CITY hub
 /// with producing (`base_per_capita > 0`), so a province rich in a good the snapshot
@@ -2067,6 +2077,18 @@ pub struct TickHub {
     pub parent: i32,
     pub koppen: u8,
     pub coastal: bool,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 (transport modes, capacity half)
+    /// — this hub sits on (or very near) a NAVIGABLE river. Seeded once at
+    /// campaign start from the world's real river geometry (`sim::rivers::River`,
+    /// same source `compute_route_days_matrix` now reads — CLAUDE.md rule 11:
+    /// one source of truth); `#[serde(default)]` so an old save's hubs simply
+    /// read false everywhere, the same as never having a river fleet advantage.
+    #[serde(default)]
+    pub river: bool,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part III §1 — a CITY is a knower too
+    /// (forced by §0: cities found colonies, so they must know things). Same
+    /// shape and seeding discipline as `House.known`.
+    #[serde(default)] pub known: std::collections::HashMap<u32, Known>,
     /// Connectivity component — goods move only within a component.
     pub component: u32,
     /// Cumulative export earnings (grain-eq) — for trade wealth & houses.
@@ -2517,6 +2539,13 @@ pub struct InTransit {
     pub owner: i32,
     /// True = a sea voyage (occupies a sea-ship slot); false = overland.
     #[serde(default)] pub sea: bool,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 (transport modes, capacity
+    /// half) — true when this OVERLAND leg is river-borne (both ends `TickHub.
+    /// river`), so it occupies a river-BARGE slot rather than a caravan one.
+    /// Meaningless when `sea` is true. `#[serde(default)]` — an old save's
+    /// in-flight cargo simply reads false and falls to the caravan pool, same
+    /// as before this field existed.
+    #[serde(default)] pub river: bool,
     /// Round-trip phase: 0 = OUTBOUND (on arrival it may spawn a return leg that
     /// buys the destination's surplus and carries it home), 1 = RETURN / terminal.
     #[serde(default)] pub phase: u8,
@@ -2944,6 +2973,34 @@ pub const FOREIGN_HAND_DECAY_RATE: f32 = 0.01;
 /// loyalty decay) is unconditional regardless of whether this roll fires.
 pub const FOREIGN_HAND_DISCLOSE_CHANCE: f32 = 0.06;
 
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part III §1.1 — what one knower knows about
+/// one province. Held sparsely (a `HashMap<province_id, Known>` on the knower,
+/// not a dense per-province array) since most knowers know almost nothing
+/// about most of the world; an absent entry means level 0 (unknown), which is
+/// also what an old save's empty map means — no migration needed for THIS
+/// field, only for the map being empty at all (§5, `seed_knowledge`).
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, Default)]
+pub struct Known {
+    /// 0 unknown · 1 reported (contact, or a partial report from a lost
+    /// expedition) · 2 surveyed (an expedition returned — the founding gate) ·
+    /// 3 established (we hold or trade there).
+    pub level: u8,
+    /// When this level was last reached. Map knowledge never uses this (a
+    /// charted coast stays charted); it exists for the market-knowledge half
+    /// `MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` stage 4 owns, which is not
+    /// built here — this field is what that stage will read.
+    #[serde(default)] pub since_tick: u32,
+    /// Who told us. -1 = our own expedition / presence.
+    #[serde(default = "neg_one_i32")] pub source: i32,
+}
+
+/// WORLD_AND_TRADE_MASTER_PLAN.md Part III §1.2 — level 2, the founding gate.
+pub(crate) const KNOWN_SURVEYED: u8 = 2;
+/// §1.2 — level 1, contact or a partial report.
+pub(crate) const KNOWN_REPORTED: u8 = 1;
+/// §1.2 — level 3, established presence (holds or trades there).
+pub(crate) const KNOWN_ESTABLISHED: u8 = 3;
+
 /// A merchant family / trading house, with a named head of family who ages, dies
 /// and is succeeded by an heir. Houses compete for trade, hold monopolies, feud
 /// with rivals, and wield political power in their home city.
@@ -2953,6 +3010,13 @@ pub struct House {
     pub hub: u32,      // home hub index
     pub wealth: f32,
     pub prestige: f32,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part III §1 — this house's MAP knowledge,
+    /// per province. Gates founding (`try_found_house_outpost` et al. need
+    /// `>= KNOWN_SURVEYED` at the target site's province). Seeded once at
+    /// campaign start / on first load of an older save (`seed_knowledge`) from
+    /// the house's own holdings and trade partners, so day-one founding is
+    /// unconstrained — the fog only ever bites into FUTURE expansion (§3.1).
+    #[serde(default)] pub known: std::collections::HashMap<u32, Known>,
     /// Goods this house specializes in.
     pub spec: Vec<usize>,
     /// good → monopoly share 0..1 (computed each month).
@@ -4425,8 +4489,11 @@ impl CityFinance {
 // expedition toward a distant, unconnected, valuable city; hazards cull it; only
 // after several successful round-trips does the route become an established
 // corridor, at which point port / caravanserai villages are founded along it.
-/// Expeditions open from ~year 15 (the world has matured enough for reach).
-const EXP_START_TICK: u32 = 15 * TICKS_PER_YEAR;
+/// Expeditions open from ~year 25 — WORLD_AND_TRADE_MASTER_PLAN.md Part III §6
+/// decision 7: five years of exploration before COLONY_START_TICK's year-30
+/// founding passes open, now that expeditions gate founding (§1.2) rather than
+/// running in parallel with it. Was year 15.
+const EXP_START_TICK: u32 = 25 * TICKS_PER_YEAR;
 /// A house needs this much wealth to bankroll a venture (they are expensive).
 const EXP_MIN_HOUSE_WEALTH: f32 = 60.0;
 /// Max simultaneously-active ventures (keeps the tick + overlay bounded).
@@ -4774,6 +4841,14 @@ pub struct CampaignSim {
     /// serialized — rebuilt from positions + components after load.
     #[serde(skip)]
     pub days: Vec<f32>,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part II Slice C1 (the entrepôt) — parallel
+    /// to `days` (n·n), naming the OUTLET hub a same-component pair's route was
+    /// composed through, or -1 when the direct/fallback route already won. Built
+    /// alongside `days` in `rebuild_routes`, never serialized for the same reason.
+    /// Dispatch reads it to route a small cut of a settled trade's profit to the
+    /// outlet — a pure redistribution (rule 18), never added on top.
+    #[serde(skip)]
+    pub route_outlet: Vec<i32>,
     /// PATHFOUND base route-days for the founding hubs (`base_n` × `base_n`), computed once
     /// at campaign start over the SAME coarse cost grid the trade-route LAYER uses (passes,
     /// rivers, coast-hugging, sea crossings — the trade-route generation rules), so campaign

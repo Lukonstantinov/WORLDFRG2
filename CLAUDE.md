@@ -1375,7 +1375,24 @@ ui/world/  — map & world
   ElevationHistogram.tsx        ← Elevation distribution chart
   (LatitudeControl.tsx removed — see ui/workflow/PlanetControls.tsx)
   climate.ts                    ← Köppen → human phrase helpers
-  HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology)
+  HydrologyPanel.tsx            ← Rivers/lakes + aquatic (fish assemblage, limnology).
+                                  A river/lake detail is an ENCYCLOPEDIA ENTRY, not
+                                  one long scroll: an always-pinned identity line
+                                  (classification in words + the real-world
+                                  counterpart, which used to sit in its own boxed
+                                  strip halfway down) over a vital-statistics tile
+                                  block, then leaves — Overview · Course · Life ·
+                                  Network for a river, Overview · Life for a lake.
+                                  The leaves exist because showing all eight
+                                  sections at once effectively showed none: the
+                                  reader scrolled past the long profile to reach the
+                                  cities, and the FISH appeared TWICE on one screen
+                                  (grouped under each reach AND again as their own
+                                  list). Course keeps the by-reach grouping, Life is
+                                  the flat source→mouth list — the duplication is
+                                  removed, not hidden. A leaf that has no data is
+                                  not rendered at all (a tributary has no reaches),
+                                  rather than rendering empty
   ProvincePanel.tsx             ← 🗺 Provinces BROWSER (sort/filter/compare + generate).
                                   v2.0 · its "Goods produced" block reads REAL yield
                                   (`campaign_province_goods` + `_potential`) — actual/yr
@@ -1560,7 +1577,28 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
   FuturesPanel/FuturesLanePanel.tsx ← Futures contracts + lanes
   EconomyDashboardPanel.tsx     ← #30/#29 Price Index (CPI) + Inequality (Gini/mobility) tabs
   CityRankingPanel.tsx          ← Richest/busiest cities
-  FlowsView.tsx                 ← Realized trade at a settlement (post-campaign)
+  FlowsView.tsx                 ← Realized trade at a settlement (post-campaign),
+                                  rebuilt on `@ui/kit` + `chronicleTheme` so it
+                                  matches `CityMarketView` (the Market half of the
+                                  same tab). Four things from TRADE_AND_MARKET_
+                                  REVIEW.md Part 3's own discipline, which Flows
+                                  had none of: a BALANCE header naming the city's
+                                  trading position (net exporter / import-dependent
+                                  / balanced entrepôt) over in/out/net; rows sorted
+                                  by what is UNUSUAL (the in-out IMBALANCE, weighted
+                                  by volume) rather than by size, since a large
+                                  BALANCED staple always tops a volume ordering and
+                                  is rarely the row worth reading; a VERDICT PHRASE
+                                  per good instead of a raw number (`collapsed` /
+                                  `import-dependent` / `we export`), with an
+                                  unremarkable good left deliberately QUIET so a
+                                  coloured badge still means something; and a
+                                  CONCENTRATION warning when one partner carries a
+                                  large share of all trade — a share is on screen
+                                  today, but the real question is whether losing
+                                  that partner would hurt. The two-tone in/out bar
+                                  replaces the single-colour volume bar, so a good's
+                                  DIRECTION reads without expanding its row
   ColonialPanel.tsx             ← Colonies / colony gates / lifelines
   ImmigrationPanel.tsx          ← Route-bound migration corridors
   SatelliteConstructionPanel.tsx← Satellite (suburb) construction projects
@@ -3739,6 +3777,154 @@ name.
 
 ---
 
+### 8.24b Plate margins are warped at the SOURCE
+
+`plate_index` was a plain Voronoi partition — every plate boundary was the exact
+perpendicular bisector of two seed points, i.e. a straight line. Everything
+downstream is derived from it: `boundary_type` is read off `plate_index`, the
+orogeny belt is a distance field from `boundary_type`, `deposits.rs` reads the
+same column as tectonic setting, and the coastline is a threshold on plate crust.
+So one straight partition drew a straight mountain range, a straight rift, a
+straight ore belt and a straight margin, all at once — the "mountains are straight
+lines" report.
+
+Downstream passes had each grown their OWN warp to hide it (`elevation.rs`'s
+`oro_warp_*` warps the orogeny LOOKUP; `warp_terrain_boundary` warps the
+coastline). **Warping a lookup only bends where a straight line is SAMPLED
+FROM.** The line is still there, and each pass bends it differently, so the range,
+the rift and the coast stop agreeing about where the margin runs.
+
+`warped_voronoi` warps the PARTITION instead: the nearest-seed scan is done at a
+multi-octave domain-warped sample position, so there is no straight line left
+anywhere downstream to bend. `warp_frac = 0.0` reproduces the plain Voronoi
+partition exactly, which is what lets the gate use the function as its own control.
+
+Three things measured here, all of which look like tuning and are not:
+
+- **`fbm_noise` does NOT return 0..1.** It averages its octaves (`val / max_amp`),
+  so it concentrates about its own mean with much-reduced variance — measured,
+  ~0.11..0.40, mean ≈ 0.28. The first cut used `fbm_noise(..) - 0.5` inline, which
+  is therefore an almost constant NEGATIVE offset: it TRANSLATED the sample field
+  instead of bending it. 10% of cells flipped (all near a margin) and straightness
+  moved 0.504 → 0.498. **A displaced straight line is a straight line.** The field
+  is now centred and scaled on its own MEASURED spread.
+- **The metric has to be local, and at the right scale.** The first metric was
+  total boundary LENGTH, on the reasoning that a straight bisector is the shortest
+  curve between two triple junctions. True of one segment, false of a partition:
+  bowing one margin out bows its neighbour in, so the total is conserved — measured
+  1.00× (5682 vs 5672 cells) on a visibly curved partition. The second metric was
+  local straightness at a 6-cell radius, against an ~80-cell plate spacing, where a
+  margin curving over its whole length still looks locally straight. Only the third
+  (local straightness at R=20) sees it.
+- **The constants come from `diag_sweep_plate_warp`, not from eye.** It maximises
+  the straightness drop subject to worst-plate connectivity > 0.90 — the constraint
+  being that a large warp lands samples inside a NEIGHBOURING plate and the
+  partition sheds detached specks, which `boundary_type` then reads as phantom
+  plate boundaries scattering ore districts through plate interiors. The usable
+  region is a SHORT wavelength at a modest, tightly-clamped amplitude; a long
+  wavelength translates whole plates instead of curving them. Shipped
+  0.25 / 0.80 / 0.80 → straightness 0.449 → 0.368.
+
+Gates: `plate_margins_are_not_straight_bisectors`, `plate_territory_stays_connected`.
+
+---
+
+### 8.24c Lakes have a WATER BALANCE, not just a fill
+
+A priority-flood answers one question — "from which cells can water not escape
+downhill?" — and its answer is a BASIN, every cell below the spill point however
+vast. `detect_lakes` emitted that basin verbatim, guarded only by "is it more than
+a QUARTER of the world", so a broad continental interior sagging a few tens of
+metres below its rim came out as one water body of millions of km², larger than
+some seas, standing on ground that is merely low.
+
+The missing question is the water balance. A closed lake is in steady state when
+inflow equals evaporation off its surface, so its equilibrium AREA is
+`inflow ÷ evaporation_depth` and nothing about the basin's shape can make it
+bigger. That is why the Caspian sits far below its own rim, why the Aral shrank
+when its inflow was diverted, and why the Sahara's deep basins are dry — one
+equation, three cases. `trim_basin_to_water_balance` computes it and LOWERS THE
+WATER LEVEL of an over-large basin, keeping the deepest cells.
+
+Four rules:
+
+- **Lower the level; never delete the lake.** The pre-2026 code deleted an
+  over-large basin outright, which left the drainage still routed through a dry
+  hollow so rivers were drawn climbing the basin walls — which is why the size
+  filter was removed and replaced by the quarter-of-the-world guard in the first
+  place. Above that guard the map had giant lakes; below it, dry basins with rivers
+  running uphill out of them. Lowering gives every closed basin a real water body
+  for a river to end in, at a size its climate sustains.
+- **An ice sheet holds no lake.** A basin under a permanent ice cap (Köppen `EF`,
+  or perennial `snow_frac`) is full of ice; drawing open water there is wrong on
+  the map and feeds a fish assemblage into `aquatic.rs` for a glacier.
+- **`LAKE_MAX_KM2` is stated in km²** (rule 25) — the Caspian, the largest lake
+  that exists, is 371,000 km².
+- **A world-sized test basin cannot test the climate term.** Its catchment is so
+  large that BOTH a wet and an arid climate clear the absolute cap and clamp to the
+  same answer (measured: wet 6 cells, arid 6 cells — a gate that would have passed
+  on a water balance wired to nothing). `hollow_world` exists for that contrast.
+
+Gates: `no_lake_is_larger_than_the_largest_real_lake`,
+`an_over_large_basin_is_lowered_not_deleted`, `an_ice_cap_basin_holds_no_lake`,
+`an_arid_basin_holds_less_water_than_a_wet_one`.
+
+**Lakes are now PERSISTED** (`persist_lakes`/`load_lakes`, `metadata["lakes"]`).
+They used to be the one hydrology product with no stored copy: every consumer
+called `detect_lakes` again with its own hard-coded `fill_depth` of 0.004, while
+the set the user sees was built from the `lakeFillDepth` SLIDER. Those disagree the
+moment anyone moves the slider — and settlement placement was a consumer, so towns
+were sited to avoid one set of lakes and drawn under a different, larger one. Same
+class of bug as §8.18's hand-copied colour tables, same fix: keep one copy.
+
+**A lake cell is UNDER WATER.** `buf.terrain` calls it land (a lake is a filled
+depression on land, not sea), so every settlement gate passed — and then the
+lakeshore bonus's ±2 window includes the cell itself, so a lake cell was not merely
+allowed as a town site but actively attractive. `compute_habitability_fields` now
+zeroes `hab`/`trade` on lake cells, at the source rather than in one call site, so
+the rule reaches city placement, the habitability layer, junction sites and colony
+siting alike. The shore keeps its bonus.
+
+---
+
+### 8.24d River discharge is computed ONCE
+
+`River.discharge_m3s` is the river's real mean annual flow, derived in
+`extract_rivers` from catchment area × runoff depth in honest units.
+
+It exists because there were TWO discharge calculations that did not agree:
+`extract_rivers` derived a unitless proxy for the render width with
+`runoff = mean_precip / 700` clamped to 0.2..2.2, while the river-systems query
+behind the Hydrology panel independently used `mean_precip / 1000 × 0.35` clamped
+to 0.01..1.2. Same river, two runoff models — so the flow on the panel and the
+width on the map answered different questions.
+
+**Render width now comes from hydraulic geometry** (Leopold & Maddock: `w ≈ 6·√Q`).
+What it replaces saturated: `ln_1p(discharge/threshold)·0.62 + 0.7 + len_term`
+clamped to `(0.6, 2.6)` reaches its ceiling at roughly twenty times the channel
+threshold and stays there, so every river above a fairly ordinary size drew at
+EXACTLY the same width and a 50,000 m³/s trunk was indistinguishable from a
+5,000 m³/s one. That is the "rivers don't get wider with a large flow" report, and
+it was a clamp, not a modelling subtlety.
+
+Two rules: a **unit** gate must be scale-free (`discharge_is_in_plausible_cubic_
+metres_per_second` backs the implied runoff depth out of each river's own Q and
+catchment, because a plain "is Q between 1 and 300,000" assertion measures the
+FIXTURE — a 300-cell-wide test grid has 134 km cells); and the panel reads the
+STORED value, falling back to its own estimate only for a world generated before
+the field existed. Gates: that one plus
+`river_width_tracks_discharge_instead_of_saturating`.
+
+**Delta fans need the seam guard too** (rule 6). Every river stroke in
+`OverlayManager` goes through `strokeSmoothPath`, which breaks a path wherever two
+points jump more than `seamGap` — but the distributary fan drew mouth→cell
+directly with no guard, so a delta whose mouth sits near the antimeridian had cells
+on both sides of the seam and the segment joining them ran the full width of the
+world at near-constant y. That is the "straight line across the map on the rivers
+layer": not a latitude line, not a river — one unguarded delta spoke.
+
+---
+
 ### 8.25 Stage-1 freehand area tools (`step1_plates/landmass_ops.rs`)
 
 The Landmass step used to be three buttons and a circle brush — no area
@@ -4396,6 +4582,21 @@ Three rules:
     must zip from the END. Never back-fill to make the lengths match — a
     fabricated price history is worse than a short one. (Rules are APPENDED here,
     never renumbered: code comments cite them by number — `git grep "rule 25"`.)
+33. **A manufactured good has no ground.** `Distribution::Manufactured` goods are
+    made in cities from a recipe — no belt, no deposit, no land they grow on — so
+    they must never appear in a province's goods list or on a goods overlay.
+    `Province.goods` is built from tile `goods` columns, which cannot tell a belt
+    good from a manufactured one (it sees only bytes), and good indices are FIXED
+    positions (rule 7), so a spec edited after generation leaves stray non-zero
+    bytes in a now-manufactured good's column. Filter by DISTRIBUTION at the
+    serving layer (`strip_manufactured_from_province_goods`), which fixes worlds
+    that already exist and uses the only thing that actually knows.
+34. **Generating data is not loading it.** Both run-alls call
+    `generate_and_persist_provinces`, but neither run-all HANDLER loaded the result
+    into the frontend store — so a fully generated world reported "No provinces
+    yet" while 900-odd provinces sat persisted in metadata. Any run-all that
+    produces a new artefact must also read it back into the store, the same way
+    `App.tsx` does on world open, or the user cannot tell it from a failure.
 30. **Relief must be stated at a scale the grid can hold** (§8.23). A cell is
     `KM_EQUATOR / w` km wide — 11 km on the default world — so fluvial incision is
     SUB-GRID and one-cell content is capped (`limit_grid_scale_relief`). Any new

@@ -162,6 +162,7 @@ pub fn sim_rivers_hydrology(
     // Tag terminal salt lakes (endorheic + arid) so the overlay tints them and the
     // Hydrology panel, goods and settlements agree on the brine.
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
+    persist_lakes(&conn, &lakes);
 
     // Store rivers as serialized state for rendering
     // (Rivers are overlays, not per-cell data stored in tiles)
@@ -309,8 +310,7 @@ pub fn sim_biological(
     // Terminal salt lakes → brine into the salinity column + inland salt-pan
     // production. Lakes are re-derived here (this phase does not receive them).
     let hydro = rivers::compute_hydrology(&buf);
-    let lake_max = (buf.total() / 2000).max(20);
-    let mut salt_lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let mut salt_lakes = load_lakes(&conn, &buf, &hydro.filled);
     rivers::classify_salt_lakes(&buf, &mut salt_lakes, &river_data);
     biological::apply_salt_pans(&mut buf, &salt_lakes, &goods);
 
@@ -490,6 +490,7 @@ pub fn sim_run_all(
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
+    persist_lakes(&conn, &lakes);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -883,6 +884,7 @@ pub fn sim_run_all_from_terrain(
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
+    persist_lakes(&conn, &lakes);
 
     // Phase 6: Soil & fertility
     soil::classify_soil(&mut buf);
@@ -992,11 +994,11 @@ pub fn sim_generate_settlements(
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
 
-    // Recompute lakes from the depression-filled surface (lakes are overlay data,
-    // not persisted in tiles) so lakeshore sites count in habitability.
+    // The world's OWN stored lake set (persist_lakes/load_lakes) — never a fresh
+    // detect_lakes at a hard-coded depth. Settlement placement must avoid exactly
+    // the lakes that get drawn, or towns end up under water (see `persist_lakes`).
     let hydro = rivers::compute_hydrology(&buf);
-    let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+    let lakes = load_lakes(&conn, &buf, &hydro.filled);
 
     // Malaria/fever (needed before habitability so disease suppresses settlement).
     biological::compute_disease_risk(&mut buf, &river_data);
@@ -1162,6 +1164,77 @@ fn persist_rivers(conn: &rusqlite::Connection, rivers: &[rivers::River]) {
     }
 }
 
+/// Drop `Distribution::Manufactured` goods from every province's goods
+/// shortlist before it reaches the frontend.
+///
+/// A manufactured good is MADE IN A CITY from a recipe (`GoodSpec.inputs`) — it
+/// has no belt, no deposit and no ground it grows on, so listing it among a
+/// province's land goods is a category error: the Province Inspector was showing
+/// "Books & Manuscripts" and "Incense" beside grain and timber, with quality
+/// stars, as though the countryside produced them.
+///
+/// `Province.goods` is built in `generate_provinces` from the tile `goods`
+/// columns, which has no access to the goods SPEC and so cannot tell a belt good
+/// from a manufactured one — it only sees bytes. A manufactured good's column
+/// should be all zeros and drop out at the quality floor, but does not always:
+/// good indices are FIXED positions in `TileData.goods` (rule 7), so a spec
+/// edited after generation, or a retired good's slot, leaves stray non-zero
+/// bytes in a column whose good is now manufactured.
+///
+/// Filtering HERE rather than at generation is deliberate: it fixes worlds that
+/// already exist, with no regeneration, and it uses the spec — the only thing
+/// that actually knows a good's distribution.
+fn strip_manufactured_from_province_goods(
+    conn: &rusqlite::Connection,
+    mut provinces: Vec<crate::sim::provinces::Province>,
+) -> Vec<crate::sim::provinces::Province> {
+    let specs = crate::commands::goods_commands::load_world_goods(conn);
+    let manufactured: Vec<bool> = specs.iter()
+        .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Manufactured))
+        .collect();
+    if manufactured.iter().all(|&m| !m) { return provinces; }
+    for p in &mut provinces {
+        p.goods.retain(|g| !manufactured.get(g.good as usize).copied().unwrap_or(false));
+        // `rank`/`of` describe a good's standing among provinces and are set in a
+        // later pass over the whole list; leaving them is correct here because
+        // removing an entry cannot change another entry's rank.
+    }
+    provinces
+}
+
+/// Persist the lake set beside the rivers, under `metadata["lakes"]`.
+///
+/// Lakes used to be the ONE hydrology product with no stored copy: every
+/// consumer that needed them called `detect_lakes` again with its own
+/// hard-coded `fill_depth` of 0.004, while the set the user actually sees was
+/// built in `sim_rivers_hydrology` from the `lakeFillDepth` SLIDER. Those two
+/// disagree the moment anyone touches the slider — and settlement placement was
+/// one of the consumers, so towns were sited to avoid one set of lakes and then
+/// drawn under a different, larger one. Same class of bug as the hand-copied
+/// colour tables in §8.18, and the same fix: keep one copy, so there is nothing
+/// to drift.
+fn persist_lakes(conn: &rusqlite::Connection, lakes: &[rivers::Lake]) {
+    if let Ok(json) = serde_json::to_string(lakes) {
+        let _ = metadata::set_meta(conn, "lakes", &json);
+    }
+}
+
+/// The world's stored lake set. Falls back to recomputing at the old hard-coded
+/// depth ONLY for a world generated before lakes were persisted — a fallback,
+/// never the normal path, so an old save still places settlements sensibly
+/// instead of behaving as though the world had no lakes at all.
+fn load_lakes(
+    conn: &rusqlite::Connection, buf: &WorldBuffer, filled: &[f32],
+) -> Vec<rivers::Lake> {
+    if let Ok(Some(json)) = metadata::get_meta(conn, "lakes") {
+        if let Ok(lakes) = serde_json::from_str::<Vec<rivers::Lake>>(&json) {
+            if !lakes.is_empty() { return lakes; }
+        }
+    }
+    let lake_max = (buf.total() / 2000).max(20);
+    rivers::detect_lakes(buf, filled, 0.004, lake_max)
+}
+
 const AUTO_MERGE_FLOOR_KM2: f32 = 8000.0;
 
 /// Partition all land into provinces (watershed / cost-flood), then auto-merge
@@ -1181,8 +1254,8 @@ fn generate_and_persist_provinces(
 
     // Lakes (overlay data, recomputed) — used as impassable divides in the flood.
     let hydro = rivers::compute_hydrology(buf);
-    let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(buf, &hydro.filled, 0.004, lake_max);
+
+    let lakes = load_lakes(conn, buf, &hydro.filled);
 
     let (provinces, province_id) = crate::sim::provinces::generate_provinces(
         buf, river_data, &lakes, settle, granularity);
@@ -1278,6 +1351,7 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or((0, 0, Vec::new()));
     crate::sim::provinces::migrate_rle_sentinel(&mut raster_rle);
+    let provinces = strip_manufactured_from_province_goods(&conn, provinces);
     Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle })
 }
 
@@ -1511,8 +1585,8 @@ pub fn sim_split_large_provinces(
     let river_data: Vec<rivers::River> =
         rivers_json.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let hydro = rivers::compute_hydrology(&buf);
-    let lake_max = (buf.total() / 2000).max(20);
-    let lakes = rivers::detect_lakes(&buf, &hydro.filled, 0.004, lake_max);
+
+    let lakes = load_lakes(&conn, &buf, &hydro.filled);
     let (w, h, mut rle): (u32, u32, Vec<u32>) =
         metadata::get_meta(&conn, "province_raster_rle").map_err(|e| e.to_string())?
             .and_then(|s| serde_json::from_str(&s).ok())

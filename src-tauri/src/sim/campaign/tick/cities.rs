@@ -1679,6 +1679,7 @@ impl CampaignSim {
             self.world_w as u32, self.world_h());
         let component = self.hubs[mother].component;
         self.hubs.push(TickHub {
+            known: std::collections::HashMap::new(),
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
             stock: {
                 let mut s = vec![0.0f32; ng * GRADE_BANDS];
@@ -1687,7 +1688,7 @@ impl CampaignSim {
             },
             price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
-            is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
+            is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, river: false, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.62, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),

@@ -385,8 +385,16 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     let p = id as usize;
     if p >= np { return Ok(vec![]); }
     let actual_all = sim.province_good_actual();
+    // A manufactured good is made in a city from a recipe, not grown on this
+    // land — it has no belt and no deposit, so it must never appear among a
+    // province's goods (see `strip_manufactured_from_province_goods`).
+    let mspecs = crate::commands::goods_commands::load_world_goods(&conn);
+    let is_manufactured: std::collections::HashMap<String, bool> = mspecs.iter()
+        .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Manufactured)))
+        .collect();
     let mut out = Vec::new();
     for g in 0..ng {
+        if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
         let idx = p * ng + g;
         let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
         // A good ABSENT from the whole province sits at the exact belt-histogram bin-0

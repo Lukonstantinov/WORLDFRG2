@@ -832,6 +832,15 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
             let mut sim = decode_campaign_blob(&s)?;
             sim.migrate_stock_bands(); // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.1
             sim.rebuild_routes(); // `days` / `neighbors` are not serialized
+            // WORLD_AND_TRADE_MASTER_PLAN.md Part III §5 — a pre-knowledge save
+            // (every `known` map empty) is seeded from current holdings/trade the
+            // same way a fresh campaign is, rather than starting every house and
+            // city totally blind. Same seeding path as `campaign_start_sim`, so
+            // there is one code path, not two.
+            if !sim.houses.is_empty() && sim.houses.iter().all(|h| h.known.is_empty())
+                && sim.hubs.iter().filter(|h| !h.is_estate).all(|h| h.known.is_empty()) {
+                sim.seed_knowledge();
+            }
             Some(std::sync::Arc::new(sim))
         }
         _ => None,

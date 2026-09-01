@@ -2259,6 +2259,16 @@ export class OverlayManager {
           ctx.strokeStyle = "rgba(90,180,210,0.7)";
           ctx.lineWidth = Math.max(0.4, river.width * 0.3 * inv);
           for (const [dx, dy] of river.delta) {
+            // SEAM GUARD (rule 6). Every other river stroke here goes through
+            // `strokeSmoothPath`, which breaks a path wherever two consecutive
+            // points jump further than `seamGap` — but this distributary fan
+            // drew mouth→cell directly and so had no guard at all. A delta whose
+            // mouth sits near the antimeridian has cells on BOTH sides of the
+            // seam, and the segment joining them ran the full width of the world
+            // at a near-constant y: the "straight line across the map on the
+            // rivers layer" report. It is not a latitude line and not a river —
+            // it is one unguarded delta spoke.
+            if (Math.abs(dx - mx) > seamGap || Math.abs(dy - my) > seamGap) continue;
             ctx.beginPath();
             ctx.moveTo(mx + 0.5, my + 0.5);
             ctx.lineTo(dx + 0.5, dy + 0.5);

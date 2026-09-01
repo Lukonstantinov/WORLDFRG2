@@ -6,9 +6,9 @@ Parts II and III (the campaign's trade and knowledge).
 
 | Part | Subject | Status |
 |---|---|---|
-| **I** | Tectonics · rivers · provinces · shelves | Slices 1, 2, 3, 5, 7, 8 **BUILT**; 4 scoped down; 6 not built |
-| **II** | Outpost connectivity & the entrepôt | Slices A, B built (fixes G1-G3); E1 built (fixes G6); Slices C (entrepôt) and D (transport modes) **not built** |
-| **III** | Exploration, the known world, transport modes | §8.1/§8.2 built; §4 built IN PART (river data reaches `base_days`; validated positive on a real world, r=0.092 — mode/capacity split not built); knowledge/fog, exploration **not built** |
+| **I** | Tectonics · rivers · provinces · shelves | Slices 1, 2, 3, 5, 7, 8 **BUILT**; 4 built IN PART (Euler-pole velocity field, gated — see its own section); Slice 5's per-plate UI + Slice 6 (tectonic sim) not built |
+| **II** | Outpost connectivity & the entrepôt | Slices A, B, C1 built (fixes G1-G3, the entrepôt's routing+treasury half); E1 built (fixes G6); Slice C2 (autonomous port founding) and the transport-mode capacity split **not built** (capacity split attempted and reverted — see Part III §4) |
+| **III** | Exploration, the known world, transport modes | §8.1/§8.2 built; §4 built IN PART (river data reaches `base_days`, validated positive on a real world r=0.092; the capacity/mode split attempted and reverted); knowledge/fog (§1-§3) BUILT IN PART — `Known` state, seeding, founding gates (houses+cities), expedition knowledge-raising, hostility hazard, EXP_START_TICK→year 25; trade-partner pruning deliberately NOT built (the plan's own flagged economic risk) |
 
 **Read the build order first (Part III §7).** It is not the order these parts are
 written in: transport modes (III §4) come first because they are the biggest
@@ -30,15 +30,33 @@ refer to Part I, II and III of this document respectively.
 
 # Part I · Tectonics, rivers, provinces, shelves
 
-**Status: Slices 1, 2, 3, 5 (core), 7, 8 BUILT and gated. Slice 4 built only in
-scoped-down form (collision-type-aware volcanism; no persisted per-plate
-identity or Euler-pole motion). Slice 6 (the opt-in bounded tectonic
-simulation) and Slice 5's per-plate UI override / archipelago bias are NOT
-built** — both depend on the Euler-pole plate identity Slice 4 was scoped down
-from, and are a substantially larger architectural change (new persisted plate
-state, a map click-to-select interaction, a coarse-grid deformation solver)
-than fits one session; left for a dedicated follow-up rather than shipped
-half-working. What shipped, per slice:
+**Status: Slices 1, 2, 3, 5 (core), 7, 8 BUILT and gated. Slice 4's PHYSICS is
+now built (an Euler-pole velocity field, gated and passing — see below); the
+PERSISTENCE half (promoting `Plate` to persisted world data, for a per-plate
+UI override) is still not built. Slice 6 (the opt-in bounded tectonic
+simulation) and Slice 5's per-plate UI override / archipelago bias remain NOT
+built** — both need that persistence layer plus a map click-to-select
+interaction and (for Slice 6) a coarse-grid deformation solver, substantially
+larger than fits alongside everything else this session; left for a dedicated
+follow-up rather than shipped half-working. What shipped, per slice:
+
+- **Slice 4 update** — `step1_plates::plates::Plate` now carries an Euler
+  pole (`pole_x, pole_y`) and a signed angular rate (`omega`) instead of a
+  flat `(vx, vy)` translation; `plate_velocity_at(plate, x, y, w)` evaluates
+  real rigid-rotation velocity (`v = ω × r`) AT THE CELL'S OWN POSITION rather
+  than at the plate centroid, so the SAME shared boundary is strongly
+  convergent near one bearing from the pole and transform/divergent
+  elsewhere along its length — the actual physics F5 named as the root
+  cause, not just the collision-type volcanism dressing that shipped before.
+  Still fully TRANSIENT (never persisted, never reachable from the frontend)
+  — the same "recomputed from seed every phase-1 run, used, discarded"
+  discipline `geology.rs` already uses, deliberately short of the larger
+  persisted-plate-identity change Slice 5's UI override needs. Gated by two
+  new tests in `plates.rs`: `boundary_character_varies_along_its_length`
+  (across 8 seeds, at least one plate pair's shared boundary shows more than
+  one `boundary_type` along it — impossible by construction under the old
+  flat-vector model, since a single relative-velocity vector classifies an
+  entire shared boundary uniformly) and `plate_generation_is_deterministic`.
 
 - **Slice 1** (F1): `MIN_LAND_ELEV` floor + scale-about-floor regional bias
   replace the old additive-then-clamp. Measured: the 88.5 m spike's largest
@@ -486,9 +504,10 @@ already exists and is unchanged.
 **Status: Slices A and B BUILT (fix G1/G2/G3); E1 BUILT (fixes G6, folded into
 `try_found_house_outpost` rather than shipped as a separate slice). Slice D
 (transport modes, Part III §4) is BUILT IN PART — the river-data plumbing gap
-that made it a no-op; the mode/capacity split is not. Slice C (the entrepôt) is
-NOT built** — substantially larger and left for a dedicated follow-up. What
-shipped:
+that made it a no-op; the mode/capacity split was attempted and reverted (a
+negative result — see Part III §4). Slice C1 (two-leg outlet routing +
+treasury crediting) is now BUILT; Slice C2 (autonomous port founding) is NOT.
+What shipped:
 
 - **Slice A** (G1): the Dynamic Trade Flow overlay (`commands/query_commands/
   flow.rs`) no longer drops every hub with `is_estate == true`. A co-located
@@ -861,7 +880,33 @@ trades, so it is *not* a bit-identical change and should not be claimed as one.
 
 #### Slice C — The entrepôt *(G4 — the real feature)*
 
-Two parts, in order. **C1 is worth building alone**; C2 only makes sense after it.
+**C1 is BUILT.** `rebuild_routes`' new pass #6d composes `days[a][b] = min(days
+[a][b], days[a][p] + ENTREPOT_DWELL_DAYS + days[p][b])` for each hub `a`
+through its own nearest same-component COASTAL outlet `p` (scoped to coastal
+hubs only, not the plan's fuller "coastal, navigable-river or lake port" —
+river/lake outlets are deferred alongside the reverted capacity split, which
+is what would have made a river hub a meaningful outlet distinct from an
+ordinary inland one). A MIN over the pair's own existing cost, computed from a
+SNAPSHOT of `days` taken before the pass starts (so a composed route can never
+itself feed a later pair's outlet leg, keeping the one-transshipment cap
+real), it can only ever find a cheaper real route, never invent a worse one.
+`route_outlet: Vec<i32>` (n·n, parallel to `days`, `#[serde(skip)]` and
+rebuilt alongside it) names the outlet used, or -1. The dwell cost
+(`ENTREPOT_DWELL_DAYS` = 3.0 days) and the treasury fee
+(`ENTREPOT_FEE_FRAC` = 8%, taken from the trading house's PROFIT — never
+added on top, rule 18) are both real. Gated by `entrepot_composes_a_cheaper_
+route_through_a_real_outlet` (`tick/tests.rs`), built with a hand-set
+`base_days` matrix (the way `compute_route_days_matrix` would populate one
+from a real pathfound coarse-cost grid) since `rebuild_routes`' straight-line
+fallback can never benefit from a detour by construction (triangle
+inequality) — every OTHER synthetic fixture in this test suite is coastless
+and geometry-only for exactly that reason, which is why this mechanism had no
+test until this session went looking for one. Asserts both directions: a
+genuinely cheaper composed route replaces the expensive direct one and is
+recorded in `route_outlet`, and a direct route that is ALREADY cheap is never
+replaced (the MIN discipline, `route_outlet` staying -1). Two parts in
+the original plan, in order — C1 above; C2 below only makes sense after it and
+remains **NOT built**.
 
 **C1 · Two-leg routing through an outlet.** For a hub with poor direct
 connectivity, allow one intermediate leg: `days[a][b]` may be composed as
@@ -1180,14 +1225,36 @@ the old empty string, so an unusual world is never worse off) instead of the
 hardcoded `""`. `cached_coarse_cost`'s cache key already hashes `rivers_json`,
 so this cannot collide with any other caller's grid.
 
-**NOT built:** splitting `cap_land` into `fleet_river`/`fleet_caravan` for
-CAPACITY purposes (G8's other half — "river barges and ox-carts pooled into one
-interchangeable land capacity"). Doing that honestly needs a per-route MODE
-signal (is this hub pair's real pathfound route river-dominant?), which nothing
-currently records — `base_days` carries only a cost, not a mode — and deriving
-one would mean either persisting a `route_mode` matrix alongside `base_days` or
-re-deriving it per dispatch from the coarse-cost grid, either a real addition
-beyond the plumbing fix above. Left for the same follow-up as Slice C.
+**NOT built — ATTEMPTED AND REVERTED, a real negative result (§2.4).**
+Splitting `cap_land` into two real `cap_river`/`cap_caravan` pools (G8's other
+half — "river barges and ox-carts pooled into one interchangeable land
+capacity") was built in full: a `TickHub.river` flag (seeded from real
+navigable-river geometry at campaign start, same source as the plumbing fix
+above), an `InTransit.river` flag recording which pool an in-flight shipment
+occupies, and a `take_land` helper that prefers the mode-matching pool but
+FALLS BACK to the other when it runs dry — algebraically conserving the
+COMBINED total at every call site (verified by hand, several times over: the
+sum of both pools' deltas equals the old single pool's delta in every branch,
+so it can only match or exceed the old pooled behaviour, never fall short).
+
+Despite that, it measurably changed `a_house_records_every_head_it_has_had`'s
+outcome — a house that survived 90 years under the old pooled `cap_land` went
+bankrupt under the split, provided the house actually had a nonzero fleet (at
+zero fleet, both versions are identical, which is why an early isolation test
+against a fleet-less fixture wrongly cleared this code — always test a
+capacity change against a fixture that actually has capacity). The exact
+causal path was not found in-session: the per-call arithmetic checks out, so
+if there is a real bug it is subtle (candidate selection order, or a
+second-order interaction between the in-transit/contract-reservation/spot-
+dispatch call sites rather than any single call's own math). Rather than ship
+an economically-significant change with an unexplained regression, it was
+reverted in full — `cap_land` is pooled again, exactly as before this session
+— and `TickHub.river`/`InTransit.river` are left in place, inert (harmless
+dead fields, matching this codebase's own `#[serde(default)]` discipline for
+a feature not yet wired up), so a future attempt has the plumbing without
+having to re-derive it. Whoever picks this up: reproduce the regression first
+(the test fixture needs `fleet_caravan > 0` to exercise it) before trusting
+the arithmetic argument that it "can't" happen.
 
 **UPDATE — now validated.** `commands/real_world_diagnostics.rs` (test-only,
 `#[ignore]`d) is the harness this section originally said was missing: it

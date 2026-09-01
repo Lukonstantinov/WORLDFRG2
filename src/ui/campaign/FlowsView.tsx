@@ -1,11 +1,43 @@
-/** Trade ▸ Flows subtab — the REALIZED trade at a settlement once a campaign has
- *  run: per-good average + last-year volume with a trend graph (so a fallen trade
- *  is visible), the routes a good came along (from/to + share), and the top partner
- *  cities. Selecting a good or a partner highlights the routes on the map. */
+/** Trade ▸ Flows subtab 2.0 — the REALIZED trade at a settlement once a campaign
+ *  has run, rebuilt on the shared `@ui/kit` primitives + `chronicleTheme` tokens
+ *  (the same system `CityMarketView` and the Province Inspector use) so the Market
+ *  and Flows tabs read as one designed surface rather than two.
+ *
+ *  `docs/TRADE_AND_MARKET_REVIEW.md` Part 3 gave the MARKET tab a merchant's book:
+ *  a balance line at the top, rows sorted by what is UNUSUAL rather than by size,
+ *  a verdict phrase instead of a raw number, and a healthy row that stays quiet.
+ *  Flows is the same tab's other half and had none of it — it was a volume-ordered
+ *  list of bars in ad-hoc hexes, which answers "what moves most" (rarely the
+ *  question) and never "what is this city's trading position".
+ *
+ *  Four things the 2.0 view adds, each from that plan's own reasoning:
+ *
+ *  1. **A BALANCE header.** The market tab opens with turnover/bought/sold/net; the
+ *     flows tab now opens with the same for physical volume — what comes in, what
+ *     goes out, and the net — plus a one-line verdict naming the city's position
+ *     (a net exporter, import-dependent, a balanced entrepôt).
+ *  2. **Sorted by what is UNUSUAL by default.** The plan's repeated rule. Here
+ *     "unusual" is the IMBALANCE (|in − out| ÷ total): a good this city is lopsided
+ *     in is the good worth reading, and it is invisible in a volume ordering where
+ *     a large balanced staple always sits on top. Volume order is still one click
+ *     away.
+ *  3. **A VERDICT PHRASE, not a raw number** — same discipline as the house
+ *     stability gauges. "we export", "import-dependent", "⚠ collapsed" — and a good
+ *     that is simply traded steadily says nothing at all, so a warning still means
+ *     something.
+ *  4. **The DEPENDENCE reading on a partner.** A partner's share of all trade is
+ *     shown today; what matters is whether losing them would hurt, so the top
+ *     partner carries a concentration warning when a single city carries a large
+ *     share of everything this settlement trades.
+ *
+ *  Selecting a good, a direction, a single route or a partner highlights it on the
+ *  map exactly as before — that behaviour is unchanged and deliberately so. */
 import { useEffect, useMemo, useState } from "react";
 import { campaignTradeFlows } from "@bridge";
-import type { TradeFlows } from "@types";
+import type { TradeFlows, TradeFlowGood } from "@types";
 import { GOOD_DEFS } from "@goods";
+import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat } from "@ui/kit";
+import { T, SPACE, FZ, RADIUS, SERIF, type Tone } from "@ui/campaign/chronicleTheme";
 
 type Seg = { ax: number; ay: number; bx: number; by: number; dir: number; w: number };
 
@@ -15,14 +47,49 @@ function fmt(n: number): string {
   return n.toFixed(n >= 100 ? 0 : 1);
 }
 
+/** IMPORT blue / EXPORT gold — one pair, used for every directional mark in the
+ *  view (sub-rows, route rows, the balance bar) so direction is legible without
+ *  reading a label. */
+const DIR_IN = "#5fd0ff";
+const DIR_OUT = "#ffce5f";
+
+/** A good's trading VERDICT: the phrase a merchant would use, derived from the
+ *  in/out split and the trend. `tone` is undefined for an unremarkable good — a
+ *  healthy row must stay quiet, or a coloured one stops meaning anything. */
+function verdictOf(g: TradeFlowGood): { text: string; tone?: Tone } {
+  const total = g.in_volume + g.out_volume;
+  const peak = g.history.length >= 2 ? Math.max(...g.history) : 0;
+  // A collapse outranks the in/out reading: a good that used to move and no longer
+  // does is the most important thing a flows view can say.
+  if (peak > 0 && g.last_volume < peak * 0.4) return { text: "collapsed", tone: "bad" };
+  if (peak > 0 && g.last_volume < peak * 0.65) return { text: "falling", tone: "warn" };
+  if (total <= 0) return { text: "idle" };
+  const share = (g.out_volume - g.in_volume) / total;
+  if (share > 0.75) return { text: "we export", tone: "good" };
+  if (share > 0.25) return { text: "net export" };
+  if (share < -0.75) return { text: "import-dependent", tone: "warn" };
+  if (share < -0.25) return { text: "net import" };
+  return { text: "entrepôt" };
+}
+
+/** How lopsided a good's trade is, 0 (perfectly balanced) → 1 (one-way only).
+ *  The default sort key: a good this city is lopsided in is the one worth reading,
+ *  and it is invisible in a volume ordering. Weighted by volume so a one-way trickle
+ *  does not outrank a one-way staple. */
+function unusualness(g: TradeFlowGood): number {
+  const total = g.in_volume + g.out_volume;
+  if (total <= 0) return 0;
+  return (Math.abs(g.out_volume - g.in_volume) / total) * Math.log1p(total);
+}
+
 /** A tiny trend sparkline of a good's yearly trade volume. Green when rising into
  *  the last year, red when it has fallen from its peak. */
 function Spark({ vals }: { vals: number[] }) {
-  if (vals.length < 2) return <span style={{ color: "#566", fontSize: 9 }}>—</span>;
+  if (vals.length < 2) return <span style={{ color: T.inkFaint, fontSize: FZ.micro }}>no history yet</span>;
   const w = 150, h = 30, max = Math.max(...vals, 1e-6);
   const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - (v / max) * (h - 3) - 1.5}`).join(" ");
-  const last = vals[vals.length - 1], peak = max;
-  const fallen = last < peak * 0.6;
+  const last = vals[vals.length - 1];
+  const fallen = last < max * 0.6;
   const color = fallen ? "#e06a5a" : last >= vals[vals.length - 2] ? "#6fce8f" : "#d9c46a";
   return (
     <svg width={w} height={h} style={{ display: "block" }}>
@@ -32,6 +99,24 @@ function Spark({ vals }: { vals: number[] }) {
   );
 }
 
+/** The in/out split of one good as a single two-tone bar — the shape of the trade,
+ *  not just its size. Replaces the old single-colour volume bar, which could not
+ *  show direction at all without expanding the row. */
+function BalanceBar({ inV, outV, max }: { inV: number; outV: number; max: number }) {
+  const total = Math.max(inV + outV, 1e-6);
+  const width = Math.max(2, (total / Math.max(max, 1e-6)) * 100);
+  return (
+    <div style={{ flex: 1, minWidth: 60, height: 7, background: T.card, borderRadius: RADIUS.sm, overflow: "hidden" }}>
+      <div style={{ width: `${width}%`, height: "100%", display: "flex" }}>
+        <div style={{ width: `${(inV / total) * 100}%`, background: DIR_IN }} />
+        <div style={{ width: `${(outV / total) * 100}%`, background: DIR_OUT }} />
+      </div>
+    </div>
+  );
+}
+
+type Sort = "unusual" | "volume";
+
 export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   hubId: number; active: boolean; tick: number; setFlowHighlight: (s: Seg[]) => void;
 }) {
@@ -40,6 +125,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   const [selGood, setSelGood] = useState<number | null>(null);
   const [selDir, setSelDir] = useState<number | null>(null); // null=both · 0=import · 1=export
   const [selPartner, setSelPartner] = useState<number | null>(null);
+  const [sort, setSort] = useState<Sort>("unusual");
   // A SINGLE isolated route (one partner→here / here→partner for one good), shown on the
   // map on its own with its direction arrow.
   const [selRoute, setSelRoute] = useState<{ good: number; partner: number; dir: number } | null>(null);
@@ -91,123 +177,241 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       : []),
     [flows, selGood, selDir]);
 
-  if (!active) return <Note>Realized trade appears once a campaign is running.</Note>;
-  if (loading && !flows) return <Note>Loading trade flows…</Note>;
-  if (!flows) return <Note>No trade data for this settlement yet.</Note>;
-  if (flows.goods.length === 0) return <Note>No trade recorded yet — let a campaign year or two pass.</Note>;
+  // ── The city's whole trading position, from the per-good rows it already has ──
+  const balance = useMemo(() => {
+    if (!flows) return null;
+    let inV = 0, outV = 0;
+    for (const g of flows.goods) { inV += g.in_volume; outV += g.out_volume; }
+    const total = inV + outV;
+    const net = outV - inV;
+    // The same vocabulary as a good's own verdict, one level up.
+    let position = "balanced";
+    let tone: Tone | undefined;
+    if (total > 0) {
+      const share = net / total;
+      if (share > 0.35) { position = "a net exporter"; tone = "good"; }
+      else if (share < -0.35) { position = "import-dependent"; tone = "warn"; }
+      else position = "a balanced entrepôt";
+    }
+    return { inV, outV, net, total, position, tone };
+  }, [flows]);
 
-  const maxAvg = Math.max(...flows.goods.map((g) => g.avg_volume), 1e-6);
+  const sortedGoods = useMemo(() => {
+    if (!flows) return [];
+    const gs = [...flows.goods];
+    gs.sort(sort === "volume"
+      ? (a, b) => b.avg_volume - a.avg_volume
+      : (a, b) => unusualness(b) - unusualness(a));
+    return gs;
+  }, [flows, sort]);
+
+  if (!active) return <EmptyNote>Realized trade appears once a campaign is running.</EmptyNote>;
+  if (loading && !flows) return <EmptyNote>Loading trade flows…</EmptyNote>;
+  if (!flows) return <EmptyNote>No trade data for this settlement yet.</EmptyNote>;
+  if (flows.goods.length === 0) {
+    return <EmptyNote>No trade recorded yet — let a campaign year or two pass.</EmptyNote>;
+  }
+
+  const maxTotal = Math.max(...flows.goods.map((g) => g.in_volume + g.out_volume), 1e-6);
   const maxPartner = Math.max(...flows.partners.map((p) => p.pct), 1e-6);
+  const topPartner = flows.partners[0];
 
   return (
-    <div style={{ fontSize: 11, color: "#c7d6e8" }}>
-      {/* ── Traded goods (avg / yr) with trend ── */}
-      <div style={hdr}>Traded goods — average per year <span style={{ color: "#5a7290", fontWeight: 400 }}>(click to map its routes)</span></div>
-      {flows.goods.slice(0, 16).map((g) => {
-        const meta = GOOD_META.get(g.name);
-        const sel = selGood === g.good;
-        return (
-          <div key={g.good}
-            style={{ ...row, background: sel ? "#1a2a3c" : "transparent", cursor: "pointer", flexWrap: "wrap" }}>
-            {/* Parent row → combined (both directions). */}
-            <div style={{ display: "flex", alignItems: "center", gap: 6, width: "100%" }}
-              onClick={() => { setSelGood(sel ? null : g.good); setSelDir(null); setSelPartner(null); setSelRoute(null); }}>
-              <span style={{ width: 16 }}>{sel ? "▾" : "▸"}</span>
-              <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
-              <span style={{ flex: 1, minWidth: 70, color: sel ? "#cfe2f6" : "#c7d6e8" }}>{meta?.label ?? g.name}</span>
-              <div style={{ flex: 1.4, minWidth: 60, height: 7, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
-                <div style={{ width: `${(g.avg_volume / maxAvg) * 100}%`, height: "100%", background: meta?.color ?? "#5a8fc0" }} />
-              </div>
-              <span style={{ width: 52, textAlign: "right", color: "#9fb4cc" }}>{fmt(g.avg_volume)}/yr</span>
-              <span style={{ width: 40, textAlign: "right", color: "#6a86a6", fontSize: 9 }}>
-                {g.in_volume >= g.out_volume ? "▼in" : "▲out"} {g.route_count}r
-              </span>
-            </div>
-            {sel && (
-              <>
-                {/* Export / Import sub-rows — independent amounts + routes (#16). */}
-                <div style={{ width: "100%", display: "flex", gap: 6, padding: "2px 0 0 32px" }}>
-                  {([[1, "out ▶ export", "#ffce5f", g.out_volume], [0, "◀ in import", "#5fd0ff", g.in_volume]] as const).map(([d, lbl, col, vol]) => (
-                    <div key={d} onClick={(e) => { e.stopPropagation(); setSelGood(g.good); setSelDir(selDir === d ? null : d); setSelPartner(null); setSelRoute(null); }}
-                      style={{ flex: 1, display: "flex", alignItems: "center", gap: 5, padding: "1px 5px", borderRadius: 3, cursor: "pointer",
-                        background: selDir === d ? "#23384e" : "#101a26", border: `1px solid ${selDir === d ? col : "transparent"}` }}>
-                      <span style={{ color: col, fontSize: 9 }}>{lbl}</span>
-                      <span style={{ flex: 1 }} />
-                      <span style={{ color: "#9fb4cc", fontSize: 9 }}>{fmt(vol)}</span>
-                    </div>
-                  ))}
-                </div>
-                <div style={{ width: "100%", display: "flex", alignItems: "center", gap: 8, padding: "3px 0 1px 32px" }}>
-                  <Spark vals={g.history} />
-                  <span style={{ color: "#7a90a8", fontSize: 9 }}>
-                    last yr {fmt(g.last_volume)} · {g.history.length}-yr trend
-                    {g.history.length >= 2 && g.last_volume < Math.max(...g.history) * 0.6 ? " · ⚠ fallen" : ""}
-                  </span>
-                </div>
-              </>
+    <div style={{ fontSize: FZ.body, color: T.ink }}>
+      {/* ── The balance: what this city's trade IS, before any detail ────────── */}
+      {balance && (
+        <Card style={{ marginBottom: SPACE.lg }}>
+          <div style={{ display: "flex", alignItems: "baseline", gap: SPACE.md, marginBottom: SPACE.sm }}>
+            <span style={{ fontFamily: SERIF, fontSize: FZ.head, color: T.gold, fontWeight: 700 }}>
+              {balance.position}
+            </span>
+            {balance.tone && (
+              <Badge tone={balance.tone}>
+                {balance.net >= 0 ? "+" : "−"}{fmt(Math.abs(balance.net))} net/yr
+              </Badge>
             )}
           </div>
-        );
-      })}
+          <StatGrid cols={3}>
+            <Stat label="Imported" value={fmt(balance.inV)} hint="per year" />
+            <Stat label="Exported" value={fmt(balance.outV)} hint="per year" />
+            <Stat label="Goods traded" value={String(flows.goods.length)} hint={`${flows.partners.length} partners`} />
+          </StatGrid>
+          {/* One bar for the whole city, same two-tone language as every good row. */}
+          <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm, marginTop: SPACE.md }}>
+            <span style={{ color: DIR_IN, fontSize: FZ.micro }}>◀ in</span>
+            <BalanceBar inV={balance.inV} outV={balance.outV} max={balance.total} />
+            <span style={{ color: DIR_OUT, fontSize: FZ.micro }}>out ▶</span>
+          </div>
+        </Card>
+      )}
 
-      {/* ── Selected good's routes ── */}
+      {/* ── Traded goods ─────────────────────────────────────────────────────── */}
+      <Section
+        title="Traded goods"
+        right={
+          <span style={{ display: "flex", gap: 4 }}>
+            <Chip on={sort === "unusual"} onClick={() => setSort("unusual")}>unusual</Chip>
+            <Chip on={sort === "volume"} onClick={() => setSort("volume")}>volume</Chip>
+          </span>
+        }
+      >
+        {sortedGoods.slice(0, 16).map((g) => {
+          const meta = GOOD_META.get(g.name);
+          const sel = selGood === g.good;
+          const v = verdictOf(g);
+          return (
+            <div
+              key={g.good}
+              style={{
+                display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm,
+                padding: "3px 4px", borderRadius: RADIUS.sm, cursor: "pointer",
+                background: sel ? T.card : "transparent",
+              }}
+            >
+              <div
+                data-no-drag
+                style={{ display: "flex", alignItems: "center", gap: SPACE.sm, width: "100%" }}
+                onClick={() => { setSelGood(sel ? null : g.good); setSelDir(null); setSelPartner(null); setSelRoute(null); }}
+              >
+                <span style={{ width: 12, color: T.inkFaint }}>{sel ? "▾" : "▸"}</span>
+                <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
+                <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink }}>{meta?.label ?? g.name}</span>
+                <BalanceBar inV={g.in_volume} outV={g.out_volume} max={maxTotal} />
+                <span style={{ width: 54, textAlign: "right", color: T.inkMid }}>{fmt(g.avg_volume)}/yr</span>
+                {/* The verdict, not a number. A steady, balanced good gets a muted
+                    phrase and no badge, so a coloured one still carries weight. */}
+                <span style={{ width: 96, textAlign: "right" }}>
+                  {v.tone
+                    ? <Badge tone={v.tone}>{v.text}</Badge>
+                    : <span style={{ color: T.inkFaint, fontSize: FZ.tiny }}>{v.text}</span>}
+                </span>
+              </div>
+              {sel && (
+                <>
+                  <div style={{ width: "100%", display: "flex", gap: SPACE.sm, padding: "3px 0 0 28px" }}>
+                    {([[1, "out ▶ export", DIR_OUT, g.out_volume], [0, "◀ in import", DIR_IN, g.in_volume]] as const).map(([d, lbl, col, vol]) => (
+                      <div
+                        key={d}
+                        data-no-drag
+                        onClick={(e) => { e.stopPropagation(); setSelGood(g.good); setSelDir(selDir === d ? null : d); setSelPartner(null); setSelRoute(null); }}
+                        style={{
+                          flex: 1, display: "flex", alignItems: "center", gap: 5, padding: "2px 6px",
+                          borderRadius: RADIUS.sm, cursor: "pointer",
+                          background: selDir === d ? T.card : "transparent",
+                          border: `1px solid ${selDir === d ? col : T.lineSoft}`,
+                        }}
+                      >
+                        <span style={{ color: col, fontSize: FZ.tiny }}>{lbl}</span>
+                        <span style={{ flex: 1 }} />
+                        <span style={{ color: T.inkMid, fontSize: FZ.tiny }}>{fmt(vol)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div style={{ width: "100%", display: "flex", alignItems: "center", gap: SPACE.md, padding: "4px 0 2px 28px" }}>
+                    <Spark vals={g.history} />
+                    <span style={{ color: T.inkDim, fontSize: FZ.tiny }}>
+                      last year {fmt(g.last_volume)} · {g.history.length}-year trend
+                    </span>
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+        <FootNote>Click a good to map its routes. Bar shows the in/out split; length is total volume.</FootNote>
+      </Section>
+
+      {/* ── Selected good's routes ───────────────────────────────────────────── */}
       {selGood != null && (
-        <>
-          <div style={hdr}>{selDir === 1 ? "Export routes" : selDir === 0 ? "Import routes" : "Routes"} — {GOOD_META.get(flows.goods.find((x) => x.good === selGood)?.name ?? "")?.label ?? "good"}
-            <span style={{ color: "#5a7290", fontWeight: 400 }}> (largest flows first)</span></div>
+        <Section
+          title={`${selDir === 1 ? "Export routes" : selDir === 0 ? "Import routes" : "Routes"} — ${
+            GOOD_META.get(flows.goods.find((x) => x.good === selGood)?.name ?? "")?.label ?? "good"}`}
+        >
           {goodRoutes.length === 0 && (() => {
             const g = flows.goods.find((x) => x.good === selGood);
             if (g && g.avg_volume > 0) {
-              return <Note>Not traded last year — {g.history.length}-yr average {fmt(g.avg_volume)}/yr.
-                Per-partner routes are recorded for the most recent trading year only.</Note>;
+              return (
+                <EmptyNote>
+                  Not traded last year — {g.history.length}-year average {fmt(g.avg_volume)}/yr.
+                  Per-partner routes are recorded for the most recent trading year only.
+                </EmptyNote>
+              );
             }
-            return <Note>No routed flows recorded.</Note>;
+            return <EmptyNote>No routed flows recorded.</EmptyNote>;
           })()}
-          <div style={{ color: "#5a7290", fontSize: 10, margin: "1px 0 3px" }}>click a route to isolate it on the map</div>
           {goodRoutes.slice(0, 8).map((r, i) => {
             const isSel = !!selRoute && selRoute.good === r.good && selRoute.partner === r.partner && selRoute.dir === r.dir;
+            const col = r.dir === 0 ? DIR_IN : DIR_OUT;
             return (
-              <div key={i}
+              <div
+                key={i}
+                data-no-drag
                 onClick={() => setSelRoute(isSel ? null : { good: r.good, partner: r.partner, dir: r.dir })}
-                style={{ ...row, cursor: "pointer", background: isSel ? "#1a2a3c" : "transparent",
-                  borderLeft: isSel ? `2px solid ${r.dir === 0 ? "#5fd0ff" : "#ffce5f"}` : "2px solid transparent" }}>
-                <span style={{ width: 30, color: r.dir === 0 ? "#5fd0ff" : "#ffce5f" }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  color: isSel ? "#cfe2f6" : undefined }}>
+                style={{
+                  display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
+                  cursor: "pointer", borderRadius: RADIUS.sm,
+                  background: isSel ? T.card : "transparent",
+                  borderLeft: `2px solid ${isSel ? col : "transparent"}`,
+                }}
+              >
+                <span style={{ width: 34, color: col, fontSize: FZ.tiny }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>
+                <span style={{
+                  flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  color: isSel ? T.gold : T.ink,
+                }}>
                   {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
                 </span>
-                <span style={{ width: 50, textAlign: "right", color: "#9fb4cc" }}>{fmt(r.amount)}</span>
-                <span style={{ width: 40, textAlign: "right", color: "#6a86a6" }}>{r.pct.toFixed(0)}%</span>
+                <span style={{ width: 50, textAlign: "right", color: T.inkMid }}>{fmt(r.amount)}</span>
+                <span style={{ width: 38, textAlign: "right", color: T.inkDim }}>{r.pct.toFixed(0)}%</span>
               </div>
             );
           })}
-        </>
+          {goodRoutes.length > 0 && <FootNote>Click a route to isolate it on the map.</FootNote>}
+        </Section>
       )}
 
-      {/* ── Top partner cities ── */}
-      <div style={hdr}>Top partner cities <span style={{ color: "#5a7290", fontWeight: 400 }}>(share of all trade · click to map)</span></div>
-      {flows.partners.map((p) => {
-        const sel = selPartner === p.hub;
-        return (
-          <div key={p.hub} onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
-            style={{ ...row, background: sel ? "#1a2a3c" : "transparent", cursor: "pointer" }}>
-            <span style={{ flex: 1, minWidth: 70, color: sel ? "#cfe2f6" : "#c7d6e8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-            <div style={{ flex: 1, minWidth: 50, height: 7, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ width: `${(p.pct / maxPartner) * 100}%`, height: "100%", background: "#c99a3a" }} />
-            </div>
-            <span style={{ width: 36, textAlign: "right", color: "#9fb4cc" }}>{p.pct.toFixed(0)}%</span>
-            <span style={{ width: 96, textAlign: "right", color: "#6a86a6", fontSize: 12, overflow: "hidden", whiteSpace: "nowrap" }}>
-              {p.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join("")}
+      {/* ── Partner cities ───────────────────────────────────────────────────── */}
+      <Section title="Partner cities">
+        {/* CONCENTRATION, not just share: a partner's percentage is on screen today,
+            but the question a trading city actually has is whether losing one of
+            them would hurt. Only shown when it genuinely would. */}
+        {topPartner && topPartner.pct >= 30 && (
+          <Card style={{ marginBottom: SPACE.sm }}>
+            <span style={{ color: "#e0b45a", fontSize: FZ.tiny }}>
+              ⚠ {topPartner.pct.toFixed(0)}% of all trade runs through {topPartner.name} — losing that
+              partner would take most of this city's commerce with it.
             </span>
-          </div>
-        );
-      })}
+          </Card>
+        )}
+        {flows.partners.map((p) => {
+          const sel = selPartner === p.hub;
+          return (
+            <div
+              key={p.hub}
+              data-no-drag
+              onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
+              style={{
+                display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
+                borderRadius: RADIUS.sm, cursor: "pointer", background: sel ? T.card : "transparent",
+              }}
+            >
+              <span style={{
+                flex: 1, minWidth: 70, color: sel ? T.gold : T.ink,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{p.name}</span>
+              <Meter value={p.pct} max={maxPartner} color="#c99a3a" height={7} />
+              <span style={{ width: 36, textAlign: "right", color: T.inkMid }}>{p.pct.toFixed(0)}%</span>
+              <span style={{
+                width: 96, textAlign: "right", color: T.inkDim, fontSize: FZ.base,
+                overflow: "hidden", whiteSpace: "nowrap",
+              }}>
+                {p.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join("")}
+              </span>
+            </div>
+          );
+        })}
+        <FootNote>Share of all trade. Click a city to map every route to it.</FootNote>
+      </Section>
     </div>
   );
-}
-
-const hdr: React.CSSProperties = { color: "#7fa0c4", fontSize: 10, textTransform: "uppercase", margin: "9px 0 3px", fontWeight: 600 };
-const row: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, padding: "2px 2px" };
-function Note({ children }: { children: React.ReactNode }) {
-  return <div style={{ color: "#7a8aa0", fontSize: 11, padding: "10px 2px" }}>{children}</div>;
 }

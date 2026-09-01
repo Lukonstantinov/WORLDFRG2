@@ -387,6 +387,26 @@ pub fn compute_habitability_fields(
                 + terrain_score * 0.10
                 + trade_score * 0.10) * gates).clamp(0.0, 1.0);
             trade[idx] = (trade_score * gates).clamp(0.0, 1.0);
+
+            // ── A LAKE CELL IS UNDER WATER ──────────────────────────────────
+            // `buf.terrain` calls a lake cell LAND (a lake is a filled
+            // depression on land, not sea), so every gate above passes and the
+            // cell scores like any other — and then scores WELL, because the
+            // lakeshore bonus at `has_lake` uses a ±2 window that includes the
+            // cell itself. A lake cell was therefore not merely allowed as a
+            // town site, it was actively attractive: the "settlements are
+            // submerged" report. Nothing else in the pipeline excluded them —
+            // `generate_settlements` only checks `terrain == 1`.
+            //
+            // Zeroed HERE rather than filtered in `generate_settlements` so the
+            // rule reaches every consumer of habitability (city placement, the
+            // habitability layer, junction sites, colony siting) instead of one
+            // call site. The shore keeps its bonus: an adjacent land cell is
+            // still within the ±2 window of the water.
+            if is_lake_cell[idx] || is_salt_lake_cell[idx] {
+                hab[idx] = 0.0;
+                trade[idx] = 0.0;
+            }
         }
     }
 

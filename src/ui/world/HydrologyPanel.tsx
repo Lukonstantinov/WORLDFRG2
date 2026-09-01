@@ -5,6 +5,8 @@ import { useViewportStore } from "@state/viewportStore";
 import { getRiverSystems, getLakeSystems, renderWorldCrop } from "@bridge";
 import type { RiverNode, RiverData, LakeNode, FishSpecies, Toponym } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
+import { Section, StatGrid, Stat as KStat, Tabs, Button, FootNote } from "@ui/kit";
+import { T, SPACE, FZ } from "@ui/campaign/chronicleTheme";
 
 /** 🌊 Hydrology dashboard — every river system with full hydrological stats.
  *  Main list is an accordion of river SYSTEMS (trunks); expanding one opens the
@@ -162,94 +164,20 @@ export function HydrologyPanel() {
                 </span>
               </div>
 
-              {/* Expanded snip-hero detail */}
+              {/* Expanded detail — an ENCYCLOPEDIA ENTRY, not one long scroll.
+                  It used to stack eight sections (snip, chips, six stat tiles,
+                  the real-world counterpart, five ecology rows, the three-reach
+                  course, a long profile, cities, the whole tributary tree) in a
+                  single column, so reading a river's fish meant scrolling past
+                  its gradient and finding the fish twice — once under each reach
+                  and once in its own list. Four leaves group them the way a
+                  hydrographic reference actually divides a river, and each is
+                  short enough to read without scrolling. */}
               {isOpen && (
-                <div style={{ padding: "2px 9px 10px" }}>
-                  <Snip node={sel} byId={byId} names={names} colors={colorMap} onLocate={() => focusOn(sel.mouth_x, sel.mouth_y)} />
-
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "9px 0 8px" }}>
-                    {sel.navigable && <span style={chip}>⚓ navigable {fmt(sel.navigable_km)} km</span>}
-                    <span style={{ ...chip, ...srcChip }}>⛰ {sourceLabel(sel.source_kind)} · {fmt(sel.source_elev_m)} m</span>
-                    <span style={chip}>{mouthLabel(sel.mouth_kind)}</span>
-                    <button data-no-drag onClick={() => focusOn(sel.mouth_x, sel.mouth_y)} style={locateBtn}>📍 Locate</button>
-                  </div>
-
-                  <div style={statsGrid}>
-                    <Stat k="Length" v={fmt(sel.length_km)} u="km" />
-                    <Stat k="Elev. drop" v={fmt(sel.drop_m)} u="m" />
-                    <Stat k="Avg. gradient" v={sel.avg_slope_m_per_km.toFixed(1)} u="m/km" />
-                    <Stat k="Discharge" v={fmt(sel.discharge_m3s)} u="m³/s" />
-                    <Stat k="Max width" v={`≈${fmt(sel.max_width_m)}`} u="m" />
-                    <Stat k="Max depth" v={`≈${fmt(sel.max_depth_m)}`} u="m" />
-                  </div>
-
-                  {/* Real-world counterpart — the comparable river */}
-                  <div style={counter}>
-                    Comparable real-world river · <b>{sel.counterpart}</b>
-                    <span style={{ color: "#5f7a95", marginLeft: 6 }}>(by discharge)</span>
-                  </div>
-
-                  {/* Freshwater ecology — regime, water, fish, wildlife, banks */}
-                  {sel.regime && <div style={{ marginTop: 8 }}>
-                    <div style={subLabel}>Ecology &amp; character</div>
-                    <EcoRow icon="🌦" label="Regime" text={sel.regime} />
-                    <EcoRow icon="💧" label="Water" text={sel.water} />
-                    <EcoRow icon="🐟" label="Fish" text={sel.fish} />
-                    <EcoRow icon="🦦" label="Wildlife" text={sel.wildlife} />
-                    <EcoRow icon="🌿" label="Banks" text={sel.riparian} />
-                    {sel.story && <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>}
-                  </div>}
-
-                  {/* The river's course, told in three reaches (trunks only). */}
-                  {sel.zones && sel.zones.length > 0 && (
-                    <div style={{ marginTop: 10 }}>
-                      <div style={subLabel}>The river's course · source → sea</div>
-                      {sel.climate_journey && (
-                        <div style={{ fontSize: 11, color: "#93a9be", margin: "1px 0 8px", lineHeight: 1.5 }}>
-                          🌍 <b style={{ color: "#9fc0da", fontWeight: 600 }}>Through the climates: </b>
-                          <Hl text={sel.climate_journey} names={[]} />
-                        </div>
-                      )}
-                      <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
-                        {sel.zones.map((z) => <ZoneCard key={z.kind} z={z} names={[sel.name, sel.counterpart]} focusOn={focusOn} />)}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Trunks show their fish grouped under each reach (above); a
-                      tributary has no reaches, so list its fish here instead. */}
-                  {(!sel.zones || sel.zones.length === 0) && sel.species && sel.species.length > 0 && (
-                    <div style={{ marginTop: 9 }}>
-                      <div style={subLabel}>🐟 Fish of this river · source → mouth</div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                        {[...sel.species].sort((a, b) => a.zone - b.zone).map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={subLabel}>Long profile · source → mouth</div>
-                  <Profile node={sel} names={names} />
-
-                  {sel.cities.length > 0 && (
-                    <div style={{ marginTop: 8 }}>
-                      <div style={subLabel}>Cities on this reach</div>
-                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-                        {sel.cities.map((c, i) => (
-                          <span key={i} onClick={() => focusOn(c.x, c.y)} data-no-drag
-                            style={cityChip} title={`${fmt(c.dist_from_mouth_km)} km from the mouth`}>
-                            ⛆ {c.name} <span style={{ color: "#8a7a4a" }}>{fmt(c.dist_from_mouth_km)}km</span>
-                          </span>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  <div style={{ ...subLabel, marginTop: 10 }}>Tributaries · full network</div>
-                  <div style={{ fontSize: 12 }}>
-                    <TreeRow node={sys} names={names} colors={colorMap} selId={sel.id}
-                      onSelect={(id, mx, my) => { setSelId(id); focusOn(mx, my); }} depth={0} isRoot />
-                  </div>
-                </div>
+                <RiverEntry
+                  sel={sel} sys={sys} byId={byId} names={names} colorMap={colorMap}
+                  focusOn={focusOn} setSelId={setSelId}
+                />
               )}
             </div>
           );
@@ -259,6 +187,155 @@ export function HydrologyPanel() {
 
       {tab === "lakes" && <LakesTab lakes={lakes} rivers={rivers2} focusOn={focusOn} />}
       {tab === "legend" && <LegendTab />}
+    </div>
+  );
+}
+
+
+/** ── ONE RIVER, AS AN ENCYCLOPEDIA ENTRY ─────────────────────────────────────
+ *  An identity line and a vital-statistics box that are always visible (the way a
+ *  reference entry leads with classification and measurements), then four leaves.
+ *
+ *  The leaves exist because the old single column showed EVERYTHING at once and so
+ *  effectively showed nothing: the reader had to scroll past the long profile to
+ *  reach the cities, and the fish appeared twice — grouped under each reach AND
+ *  again in their own list. Splitting by what a reader is actually asking
+ *  ("how big is it" / "where does it go" / "what lives in it" / "what feeds it")
+ *  removes the duplication rather than hiding it.
+ */
+function RiverEntry({ sel, sys, byId, names, colorMap, focusOn, setSelId }: {
+  sel: RiverNode; sys: RiverNode; byId: Map<number, RiverData>;
+  names: Map<number, string>; colorMap: Record<number, string>;
+  focusOn: (x: number, y: number) => void; setSelId: (id: number) => void;
+}) {
+  type Leaf = "overview" | "course" | "life" | "network";
+  const [leaf, setLeaf] = useState<Leaf>("overview");
+  const hasCourse = !!(sel.zones && sel.zones.length > 0);
+  const hasLife = !!sel.regime || (sel.species?.length ?? 0) > 0;
+
+  // A one-line CLASSIFICATION, the way a species entry opens: what kind of river
+  // this is, in words, from the fields that already describe it. Built here rather
+  // than shown as four separate chips because a sentence is read once and four
+  // chips are read four times.
+  const classification = [
+    `order ${sel.order}`,
+    sel.navigable ? "navigable" : null,
+    sourceLabel(sel.source_kind).toLowerCase(),
+    mouthLabel(sel.mouth_kind).replace(/^[^ ]+ /, "").toLowerCase(),
+  ].filter(Boolean).join(" · ");
+
+  return (
+    <div style={{ padding: "2px 9px 10px" }}>
+      <Snip node={sel} byId={byId} names={names} colors={colorMap} onLocate={() => focusOn(sel.mouth_x, sel.mouth_y)} />
+
+      {/* Identity line — classification + the real-world counterpart, which used
+          to sit in its own boxed row halfway down the entry. It belongs here: it
+          is how a reader calibrates every number that follows. */}
+      <div style={{ margin: "9px 0 7px", lineHeight: 1.55 }}>
+        <div style={{ color: T.inkMid, fontSize: FZ.small }}>{classification}</div>
+        <div style={{ color: T.inkDim, fontSize: FZ.small }}>
+          comparable to the <b style={{ color: "#b9d4e6", fontWeight: 600 }}>{sel.counterpart}</b> by discharge
+        </div>
+      </div>
+
+      {/* Vital statistics — always visible, because they are what the entry is
+          FOR. Six tiles, unchanged in content, now in the shared tile style. */}
+      <StatGrid cols={3} style={{ marginBottom: SPACE.md }}>
+        <KStat label="Length" value={`${fmt(sel.length_km)} km`} />
+        <KStat label="Discharge" value={`${fmt(sel.discharge_m3s)} m³/s`} />
+        <KStat label="Drop" value={`${fmt(sel.drop_m)} m`} hint={`${sel.avg_slope_m_per_km.toFixed(1)} m/km`} />
+        <KStat label="Max width" value={`≈${fmt(sel.max_width_m)} m`} />
+        <KStat label="Max depth" value={`≈${fmt(sel.max_depth_m)} m`} />
+        <KStat label="Navigable" value={sel.navigable ? `${fmt(sel.navigable_km)} km` : "—"} />
+      </StatGrid>
+
+      <Tabs<Leaf>
+        active={leaf}
+        onSelect={setLeaf}
+        tabs={[
+          ["overview", "Overview"],
+          ...(hasCourse ? [["course", "Course"] as const] : []),
+          ...(hasLife ? [["life", "Life"] as const] : []),
+          ["network", "Network"],
+        ]}
+        style={{ marginBottom: SPACE.md }}
+      />
+
+      {leaf === "overview" && (
+        <>
+          <Section title="Long profile · source → mouth">
+            <Profile node={sel} names={names} />
+          </Section>
+          {sel.story && (
+            <Section title="Character">
+              <div style={storyBox}><Hl text={sel.story} names={[sel.name, sel.counterpart]} /></div>
+            </Section>
+          )}
+          <Section title="Settlements on this reach">
+            {sel.cities.length === 0
+              ? <FootNote>No towns stand on this reach.</FootNote>
+              : (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                  {sel.cities.map((c, i) => (
+                    <span key={i} onClick={() => focusOn(c.x, c.y)} data-no-drag
+                      style={cityChip} title={`${fmt(c.dist_from_mouth_km)} km from the mouth`}>
+                      ⛆ {c.name} <span style={{ color: "#8a7a4a" }}>{fmt(c.dist_from_mouth_km)}km</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+          </Section>
+          <Button variant="ghost" onClick={() => focusOn(sel.mouth_x, sel.mouth_y)}>📍 Locate on map</Button>
+        </>
+      )}
+
+      {leaf === "course" && hasCourse && (
+        <>
+          {sel.climate_journey && (
+            <div style={{ fontSize: FZ.body, color: T.inkMid, margin: "0 0 8px", lineHeight: 1.5 }}>
+              🌍 <b style={{ color: "#9fc0da", fontWeight: 600 }}>Through the climates: </b>
+              <Hl text={sel.climate_journey} names={[]} />
+            </div>
+          )}
+          <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
+            {sel.zones!.map((z) => <ZoneCard key={z.kind} z={z} names={[sel.name, sel.counterpart]} focusOn={focusOn} />)}
+          </div>
+        </>
+      )}
+
+      {leaf === "life" && hasLife && (
+        <>
+          {sel.regime && (
+            <Section title="Regime & character">
+              <EcoRow icon="🌦" label="Regime" text={sel.regime} />
+              <EcoRow icon="💧" label="Water" text={sel.water} />
+              <EcoRow icon="🐟" label="Fish" text={sel.fish} />
+              <EcoRow icon="🦦" label="Wildlife" text={sel.wildlife} />
+              <EcoRow icon="🌿" label="Banks" text={sel.riparian} />
+            </Section>
+          )}
+          {/* The fish list is shown ONCE, here. On a trunk the reaches also group
+              their own species, so the old layout printed every species twice on
+              the same screen; the Course leaf keeps the by-reach grouping and this
+              leaf is the flat source→mouth list. */}
+          {sel.species && sel.species.length > 0 && (
+            <Section title="Fish · source → mouth">
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {[...sel.species].sort((a, b) => a.zone - b.zone).map((sp) => <FishPlate key={sp.slug} sp={sp} />)}
+              </div>
+            </Section>
+          )}
+        </>
+      )}
+
+      {leaf === "network" && (
+        <Section title="Tributaries · full network">
+          <div style={{ fontSize: 12 }}>
+            <TreeRow node={sys} names={names} colors={colorMap} selId={sel.id}
+              onSelect={(id, mx, my) => { setSelId(id); focusOn(mx, my); }} depth={0} isRoot />
+          </div>
+        </Section>
+      )}
     </div>
   );
 }
@@ -413,42 +490,74 @@ const LAKE_ICON: Record<string, string> = {
   rift: "🏔", crater: "🌋", salt: "🧂", glacial: "❄", tropical: "🌴", lowland: "🌾", tarn: "⛰",
 };
 
+/** ── ONE LAKE, AS AN ENCYCLOPEDIA ENTRY ──────────────────────────────────────
+ *  The river entry's structure applied to a lake, for the same reason: this used
+ *  to be a flat stack of chips, six tiles, a comparable, five ecology rows, a fish
+ *  list, a drainage line and a story paragraph — every one of them always open, so
+ *  the entry was long and nothing in it was emphasised. Identity and vital
+ *  statistics stay pinned; the rest goes behind two leaves. */
 function LakeDetail({ lk, focusOn }: { lk: LakeNode; focusOn: (x: number, y: number) => void }) {
+  type Leaf = "overview" | "life";
+  const [leaf, setLeaf] = useState<Leaf>("overview");
+  const drainage = `${lk.inflows.length > 0 ? `fed by ${lk.inflows.slice(0, 4).join(", ")}` : "no named inflows"}${
+    lk.outflow ? ` · drains via the ${lk.outflow}` : lk.endorheic ? " · no outlet (terminal)" : ""}`;
   return (
     <div style={{ padding: "2px 9px 10px" }}>
-      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "4px 0 8px" }}>
-        <span style={{ ...chip, ...srcChip }}>{LAKE_ICON[lk.kind]} {lk.kind_label}</span>
-        {lk.endorheic && <span style={{ ...chip, color: "#e0b24a", borderColor: "#45402a", background: "#1c1a12" }}>🧂 terminal · {fmt(lk.salinity_ppt)} ppt</span>}
-        <button data-no-drag onClick={() => focusOn(lk.cx, lk.cy)} style={locateBtn}>📍 Locate</button>
-      </div>
-      <div style={statsGrid}>
-        <Stat k="Area" v={fmt(lk.area_km2)} u="km²" />
-        <Stat k="Max depth" v={`≈${fmt(lk.max_depth_m)}`} u="m" />
-        <Stat k="Mean depth" v={`≈${fmt(lk.mean_depth_m)}`} u="m" />
-        <Stat k="Elevation" v={fmt(lk.elev_m)} u="m" />
-        <Stat k="Volume" v={`≈${fmt(lk.volume_km3)}`} u="km³" />
-        <Stat k="Salinity" v={lk.salinity_ppt < 1 ? "fresh" : fmt(lk.salinity_ppt)} u={lk.salinity_ppt < 1 ? "" : "ppt"} />
-      </div>
-      <div style={counter}>🌍 Comparable · <b>{lk.analog}</b></div>
-      <EcoRow icon="🌡" label="Thermal" text={lk.thermal} />
-      <EcoRow icon="💧" label="Water" text={lk.water} />
-      <EcoRow icon="🐟" label="Fish" text={lk.fish} />
-      <EcoRow icon="🦩" label="Wildlife" text={lk.wildlife} />
-      <EcoRow icon="🧬" label="Endemism" text={lk.endemism} />
-      {lk.species && lk.species.length > 0 && (
-        <div style={{ marginTop: 9 }}>
-          <div style={subLabel}>🐟 Signature fish of this lake</div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {lk.species.map((sp) => <LakeFishPlate key={sp.slug} sp={sp} />)}
-          </div>
+      {/* Identity — kind, brine, and the real-world comparable in one line each,
+          rather than a chip row above and a boxed "comparable" strip below. */}
+      <div style={{ margin: "4px 0 8px", lineHeight: 1.55 }}>
+        <div style={{ color: T.inkMid, fontSize: FZ.small }}>
+          {LAKE_ICON[lk.kind]} {lk.kind_label}
+          {lk.endorheic && <span style={{ color: "#e0b24a" }}> · terminal, {fmt(lk.salinity_ppt)} ppt</span>}
         </div>
+        <div style={{ color: T.inkDim, fontSize: FZ.small }}>
+          comparable to <b style={{ color: "#b9d4e6", fontWeight: 600 }}>{lk.analog}</b>
+        </div>
+      </div>
+
+      <StatGrid cols={3} style={{ marginBottom: SPACE.md }}>
+        <KStat label="Area" value={`${fmt(lk.area_km2)} km²`} />
+        <KStat label="Volume" value={`≈${fmt(lk.volume_km3)} km³`} />
+        <KStat label="Elevation" value={`${fmt(lk.elev_m)} m`} />
+        <KStat label="Max depth" value={`≈${fmt(lk.max_depth_m)} m`} hint={`mean ≈${fmt(lk.mean_depth_m)} m`} />
+        <KStat label="Salinity" value={lk.salinity_ppt < 1 ? "fresh" : `${fmt(lk.salinity_ppt)} ppt`} />
+        <KStat label="Outflow" value={lk.outflow ? "yes" : lk.endorheic ? "none" : "—"}
+          hint={lk.outflow ? lk.outflow : lk.endorheic ? "terminal basin" : undefined} />
+      </StatGrid>
+
+      <Tabs<Leaf> active={leaf} onSelect={setLeaf}
+        tabs={[["overview", "Overview"], ["life", "Life"]]} style={{ marginBottom: SPACE.md }} />
+
+      {leaf === "overview" && (
+        <>
+          <Section title="Drainage">
+            <EcoRow icon="↳" label="Drainage" names={[...lk.inflows, lk.outflow]} text={drainage} />
+          </Section>
+          <Section title="Character">
+            <div style={storyBox}><Hl text={lk.story} names={[lk.name, lk.analog, lk.outflow, ...lk.inflows]} /></div>
+          </Section>
+          <Button variant="ghost" onClick={() => focusOn(lk.cx, lk.cy)}>📍 Locate on map</Button>
+        </>
       )}
-      {(lk.inflows.length > 0 || lk.outflow) && (
-        <EcoRow icon="↳" label="Drainage"
-          names={[...lk.inflows, lk.outflow]}
-          text={`${lk.inflows.length > 0 ? `fed by ${lk.inflows.slice(0, 4).join(", ")}` : "no named inflows"}${lk.outflow ? ` · drains via the ${lk.outflow}` : lk.endorheic ? " · no outlet (terminal)" : ""}`} />
+
+      {leaf === "life" && (
+        <>
+          <Section title="Limnology">
+            <EcoRow icon="🌡" label="Thermal" text={lk.thermal} />
+            <EcoRow icon="💧" label="Water" text={lk.water} />
+            <EcoRow icon="🐟" label="Fish" text={lk.fish} />
+            <EcoRow icon="🦩" label="Wildlife" text={lk.wildlife} />
+            <EcoRow icon="🧬" label="Endemism" text={lk.endemism} />
+          </Section>
+          {lk.species && lk.species.length > 0 && (
+            <Section title="Signature fish">
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {lk.species.map((sp) => <LakeFishPlate key={sp.slug} sp={sp} />)}
+              </div>
+            </Section>
+          )}
+        </>
       )}
-      <div style={storyBox}><Hl text={lk.story} names={[lk.name, lk.analog, lk.outflow, ...lk.inflows]} /></div>
     </div>
   );
 }
@@ -865,18 +974,6 @@ function Sparkline({ profile }: { profile: number[] }) {
   );
 }
 
-function Stat({ k, v, u }: { k: string; v: string; u?: string }) {
-  return (
-    <div style={{ background: "#10202e", border: "1px solid #16283a", borderRadius: 6, padding: "5px 7px" }}>
-      <div style={{ fontSize: 9, letterSpacing: "0.04em", textTransform: "uppercase", color: "#56708a" }}>{k}</div>
-      <div style={{ fontSize: 13.5, fontWeight: 650, fontVariantNumeric: "tabular-nums" }}>
-        {v}{u && <span style={{ fontSize: 9.5, color: "#7d94ab", fontWeight: 500 }}> {u}</span>}
-      </div>
-    </div>
-  );
-}
-
-// ── helpers ──
 function fmt(n: number): string {
   return Math.round(n).toLocaleString("en-US");
 }
@@ -975,19 +1072,14 @@ const ordBadge: React.CSSProperties = {
 };
 const ordBadgeSm: React.CSSProperties = { ...ordBadge, width: 15, height: 15, fontSize: 9 };
 const navTag: React.CSSProperties = { color: "#89cbe0", fontSize: 11 };
-const statsGrid: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 };
 const chip: React.CSSProperties = {
   fontSize: 10.5, padding: "2px 7px", borderRadius: 4, border: "1px solid #1d2f42", color: "#9fb6cc",
   background: "#0b161e", whiteSpace: "nowrap",
 };
-const srcChip: React.CSSProperties = { color: "#cbb682", borderColor: "#45402a", background: "#1c1a12" };
 const cityChip: React.CSSProperties = { ...chip, cursor: "pointer", color: "#e6cf95" };
 const locateBtn: React.CSSProperties = {
   fontSize: 10.5, padding: "2px 8px", borderRadius: 4, border: "1px solid #2a5a72",
   background: "#102735", color: "#a9d8ea", cursor: "pointer", marginLeft: "auto",
-};
-const counter: React.CSSProperties = {
-  fontSize: 11.5, color: "#8aa0b8", marginTop: 9, paddingTop: 8, borderTop: "1px dashed #1d2f42",
 };
 const subLabel: React.CSSProperties = {
   fontSize: 10, letterSpacing: "0.06em", textTransform: "uppercase", color: "#56708a", margin: "10px 0 5px",
