@@ -4403,6 +4403,48 @@ TWO_APPS_AND_FILE_UPLOAD_PLAN.md  ← ⭐ SLICES 1-2 BUILT + the campaign LIBRAR
                                     shipped, including what it does NOT fix — old world
                                     files still carry no economy, and nothing can
                                     retro-fit data a file never contained
+TECTONICS_AND_ISOLATION_PLAN.md   ← ⭐ AGREED, NOTHING BUILT. Two subjects.
+                                    PART A · an ocean is a barrier: the measured
+                                    cause of trans-oceanic lanes is
+                                    `rescue_tiny_components`, which folds any
+                                    <3-hub component into the nearest big one with
+                                    NO DISTANCE CAP — so a mid-ocean island is
+                                    relabelled part of a far continent and `#6`'s
+                                    same-component guard (which exists precisely to
+                                    stop "dishonest trans-oceanic arrows") is handed
+                                    a lie about what is connected. Cap it in km
+                                    (rule 25); beyond the cap a component trades
+                                    internally and a city that cannot get what it
+                                    needs starves and is abandoned — already a
+                                    modelled outcome (`abandon_hub` sets
+                                    `died_cause`), not something to invent. Also
+                                    unifies the Flows highlight onto the SAME coarse
+                                    grid + crossing rule the Dynamic Trade Flow
+                                    layer already uses, so the dashed direct-line
+                                    fallback (rule 35) becomes rare rather than
+                                    routine. PART B · tectonic character, appearance
+                                    level but DERIVED FROM the Euler-pole motion
+                                    field: power-law plate SIZES (today's jittered
+                                    grid makes them all alike; Earth spans three
+                                    orders of magnitude), a persisted MOTION layer
+                                    (plates are transient today, so the velocity
+                                    field that drives boundary classification cannot
+                                    be drawn), collision STYLE (`geology.rs` already
+                                    computes the setting and nothing uses it to shape
+                                    the belt PROFILE — continent-continent should be
+                                    broad and MULTI-RIDGE, ocean-continent narrow and
+                                    volcanic), and RELICT SUTURES. That last is the
+                                    believability item and exists in no form today:
+                                    `age` is `fbm_noise`, pure noise uncorrelated
+                                    with whether a boundary is active, and is only
+                                    ever assigned ON a belt that exists NOW — so
+                                    there can be no Ural, no Appalachian, no Scottish
+                                    Highland, all of which are former sutures inside
+                                    a plate. The plan's recommendation is to GENERATE
+                                    A PAST, not run a simulation: bake 2-4 former
+                                    sutures with ages, height falling with age. It
+                                    says plainly that this fakes the HISTORY rather
+                                    than the physics
 CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND INERT,
                                     UI NOT BUILT. A third tab beside Market/Flows:
                                     WHO TRADES HERE (carriers by volume/standing/
