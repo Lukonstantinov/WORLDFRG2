@@ -2358,3 +2358,51 @@ fn econ_measure_seed_variance() {
               fixed.len(), names.len(), fixed.join(", "));
     eprintln!("These are the outcomes a new seed cannot change — the ceiling on replay value.\n");
 }
+
+/// DIAGNOSTIC (not a gate) · **who actually carries the trade.**
+///
+/// `dispatch` decides a shipment happens from the arbitrage gap alone, then
+/// *attaches* a carrier: the seller's house, else the buyer's house, else
+/// `owner = -1` — "independent local merchants & guilds". The house paths are
+/// constrained (a free vessel slot AND `wealth/price` affordability, which also
+/// CLAMPS the quantity); the ownerless path is constrained by neither and clamps
+/// nothing. This measures how much of the world's commerce takes that
+/// unconstrained residual path, and how often a house was turned away by
+/// vessels versus by capital.
+#[test]
+#[ignore]
+fn econ_measure_carrier_mix() {
+    for (label, mut s) in [("reference", reference_world()), ("large", reference_world_large())] {
+        let years = 60u32;
+        let (mut ship, mut by_house, mut ownerless) = (0u64, 0u64, 0u64);
+        let (mut w_nohouse, mut w_slot, mut w_cash, mut w_bar) = (0u64, 0u64, 0u64, 0u64);
+        for _ in 0..years {
+            s.diag_shipments = 0; s.diag_by_house = 0; s.diag_by_guild = 0;
+            s.diag_why_nohouse = 0; s.diag_why_slot = 0; s.diag_why_cash = 0; s.diag_why_bar = 0;
+            s.advance(365);
+            ship += s.diag_shipments as u64;
+            by_house += s.diag_by_house as u64;
+            ownerless += s.diag_by_guild as u64;
+            w_nohouse += s.diag_why_nohouse as u64; w_slot += s.diag_why_slot as u64;
+            w_cash += s.diag_why_cash as u64; w_bar += s.diag_why_bar as u64;
+        }
+        let pct = |x: u64| if ship == 0 { 0.0 } else { 100.0 * x as f32 / ship as f32 };
+        // How many live houses even HAVE a vessel, and what their capital looks like.
+        let live: Vec<&House> = s.houses.iter().filter(|h| h.is_merchant()).collect();
+        let with_fleet = live.iter().filter(|h| h.fleet_sea + h.fleet_river + h.fleet_caravan > 0).count();
+        let fleet_total: u32 = live.iter().map(|h| h.fleet_sea + h.fleet_river + h.fleet_caravan).sum();
+        println!("\n── carrier mix · {label} · {years}y ─────────────────────────");
+        println!("  shipments          {ship}");
+        println!("  financed by house  {by_house:>10}  ({:.1}%)", pct(by_house));
+        println!("  OWNERLESS residual {ownerless:>10}  ({:.1}%)", pct(ownerless));
+        println!("  live houses {}  with any vessel {}  total fleet slots {}",
+                 live.len(), with_fleet, fleet_total);
+        println!("  why the residual took it:");
+        println!("    no house at either end   {w_nohouse:>10}  ({:.1}%)", pct(w_nohouse));
+        println!("    house had NO FREE VESSEL {w_slot:>10}  ({:.1}%)", pct(w_slot));
+        println!("    house COULD NOT AFFORD   {w_cash:>10}  ({:.1}%)", pct(w_cash));
+        println!("    house was BARRED         {w_bar:>10}  ({:.1}%)", pct(w_bar));
+        println!("  → the ownerless path consumes no vessel slot, is not clamped by capital,");
+        println!("    and `let lost = if owner >= 0 {{..}} else {{ false }}` — it never sinks.");
+    }
+}

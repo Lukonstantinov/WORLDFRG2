@@ -4734,6 +4734,11 @@ pub struct CampaignSim {
     #[serde(default)] pub diag_shipments: u32,   // shipments dispatched
     #[serde(default)] pub diag_by_house: u32,    // of those, financed by a house
     #[serde(default)] pub diag_by_guild: u32,    // carried by local merchants/guilds
+    /// DIAGNOSTIC · why the ownerless residual took a shipment.
+    #[serde(default)] pub diag_why_nohouse: u32,
+    #[serde(default)] pub diag_why_slot: u32,
+    #[serde(default)] pub diag_why_cash: u32,
+    #[serde(default)] pub diag_why_bar: u32,
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
