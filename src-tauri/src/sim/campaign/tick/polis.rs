@@ -37,6 +37,14 @@ pub(crate) struct ReliefChoice {
     pub announce: bool,
 }
 
+/// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) — one council's TRADE BAN decision this
+/// month: which non-food goods it is barring from export, and until when.
+pub(crate) struct TradeBanChoice {
+    pub hub: usize,
+    pub goods: Vec<usize>,
+    pub until: u32,
+}
+
 impl CampaignSim {
 
     /// DLC 3 · Phase 0 — the POLIS as an actor. Once a year each seat city's
@@ -428,5 +436,76 @@ impl CampaignSim {
     pub(crate) fn run_crisis_relief(&mut self) {
         let choices = self.decide_crisis_relief();
         self.apply_crisis_relief(choices);
+    }
+
+    /// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) · TRADE BANS — the general-purpose
+    /// counterpart of the famine export lock above, generalised to any non-food
+    /// good instead of hand-coded to grain. `food_export_lock` is precomputed once
+    /// per dispatch and consulted in the seller loop; this is the identical shape
+    /// with `export_ban_until` in place of the single scalar, one slot per good.
+    ///
+    /// The signal is the good's own EMA price against its base value —
+    /// `hub.price[g]` already reads `live_price(stock, need, base)`, so a price
+    /// that has spiked to several times base *is* the stock/need ratio the
+    /// council would otherwise have to recompute. A council forbidding the
+    /// export of a good its own market cannot spare is the *tratta* reflex real
+    /// polities reached for on more than grain (Venice barred timber and naval
+    /// stores in wartime, several Italian cities barred wool at points of
+    /// dearth) — this is that reflex, generalised rather than invented.
+    ///
+    /// Pure AI proposal — reads `&self` only.
+    pub(crate) fn decide_trade_bans(&self) -> Vec<TradeBanChoice> {
+        let ng = self.goods.len();
+        let tick = self.tick;
+        let mut out = Vec::new();
+        if ng == 0 || self.suppress_relief { return out; }
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }
+            if hub.price.len() < ng { continue; }
+            let mut bans = Vec::new();
+            for g in 0..ng {
+                // Food already has its own dedicated lever (the famine lock
+                // above) — this pass leaves it alone rather than doubling up.
+                if self.goods[g].food { continue; }
+                let base = self.goods[g].base_value;
+                if base <= EPS { continue; }
+                let already_banned = hub.export_ban_until.get(g).copied().unwrap_or(0) > tick;
+                if already_banned { continue; }
+                if hub.price[g] / base >= N2_BAN_PRICE_RATIO {
+                    bans.push(g);
+                }
+            }
+            if bans.is_empty() { continue; }
+            out.push(TradeBanChoice { hub: h, goods: bans, until: tick + N2_BAN_TICKS });
+        }
+        out
+    }
+
+    /// The only part that mutates.
+    pub(crate) fn apply_trade_bans(&mut self, choices: Vec<TradeBanChoice>) {
+        let ng = self.goods.len();
+        for c in choices {
+            let h = c.hub;
+            if self.hubs[h].export_ban_until.len() != ng {
+                self.hubs[h].export_ban_until.resize(ng, 0);
+            }
+            let city = self.hubs[h].name.clone();
+            for g in c.goods {
+                self.hubs[h].export_ban_until[g] = c.until;
+                let gn = self.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "trade_ban".into(), hub: h as i32, good: g as i32,
+                    value: 0.0,
+                    text: format!("Dearth at {city}: the council forbids the export of {gn}."),
+                });
+            }
+        }
+    }
+
+    /// Decide + apply, the entry point the monthly block calls.
+    pub(crate) fn run_trade_bans(&mut self) {
+        let choices = self.decide_trade_bans();
+        self.apply_trade_bans(choices);
     }
 }

@@ -977,6 +977,23 @@ Three facts about the campaign that are easy to miss and shape any change here:
   plan) and has NOT been done. `N1B_OWNERLESS_LOSS_RATE` (currently `0.0`) is the
   same shape for letting ownerless cargo sink — `let lost = if owner >= 0 {..}`
   above is no longer literal, but the roll never fires at zero dose.
+  **N2 (cargo bans, §3.2) is the same shape and for a sharper reason: a live
+  trial genuinely broke the hard-asserted wealth bound** (a sustained richest
+  house of 1,005,714) even after halving the dose once — a real structural
+  finding (an export-locked market's rent concentrates harder than the plan
+  anticipated), not a tuning miss. `TickHub.export_ban_until` and
+  `polis.rs::decide_trade_bans`/`apply_trade_bans` are real and enforced in
+  `dispatch`; `N2_BAN_PRICE_RATIO` sits at `INFINITY` until that mechanism is
+  understood well enough to dose. **N4 (carrier competition, §3.4) is shipped
+  live** — `house_for`'s `.position()` is now a uniform `hash01` draw within
+  each precedence tier. Its first cut weighted the draw by `political_power`
+  and measurably inverted `econ_inheritance_rules_fragment_differently`
+  (wealth grows political_power, so weighting by it just swapped one
+  founding-order-shaped bias for a wealth-shaped one) — caught by running the
+  gate, not by review, and shipped as an unweighted draw instead. **N3's
+  narrow fix (§3.3) is also shipped**: a founded guild now charters itself
+  with real goods and `house_for`'s guild arm requires a specialisation match,
+  so it no longer shadows an ordinary house at its own city.
 - **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the

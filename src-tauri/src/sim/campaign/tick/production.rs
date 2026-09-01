@@ -990,6 +990,9 @@ impl CampaignSim {
                 if quarantined[a] { continue; }
                 // …nor does a city whose council has barred the export of food.
                 if food_locked[a] && self.goods[g].food { continue; }
+                // N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) — nor a non-food good the
+                // council has barred under the same reflex, generalised.
+                if self.hubs[a].export_ban_until.get(g).copied().unwrap_or(0) > tick { continue; }
                 let pa = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
                 // A Guildhall at the SELLER's hub lowers freight on its exports.
                 let freight_rate = self.freight_per_day

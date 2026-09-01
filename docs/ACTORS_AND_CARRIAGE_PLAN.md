@@ -7,15 +7,23 @@ the campaign is a very good model of **accumulation** and a thin one of
 made every real trading institution rich — refusing, excluding, compelling — are
 either absent or wired to a rounding error.*
 
-**Status: measured and planned. One diagnostic built (`econ_measure_carrier_mix`).
-Two proposals shipped at ZERO DOSE — N8 (market book honesty, §3.8) is fully done;
-N1's mechanism (§3.1) is wired but its constant sits at `INFINITY`/`0.0`, so it is
-provably bit-identical and the dose walk itself has not started. N2–N7 remain
-planned only** — each needs its own multi-commit, iteratively-measured dose walk
-per §4.1, which is why they were not attempted in the same pass as N1's mechanism.
-The measurement is the load-bearing part of this document — it invalidated the
-first version of its own keystone proposal, which is recorded in §5.1 rather than
-quietly corrected.
+**Status: measured, and five of eight proposals now touched.** One diagnostic
+built (`econ_measure_carrier_mix`). **N8** (market book honesty, §3.8) fully
+shipped. **N1**'s mechanism (§3.1) and **N2**'s mechanism (§3.2) are both wired
+and enforced but ship at zero dose (`N1_LOCAL_HAUL_BIND_DAYS`/
+`N2_BAN_PRICE_RATIO` at `INFINITY`, `N1B_OWNERLESS_LOSS_RATE` at `0.0`) —
+provably bit-identical, dose walk not started; **N2's own first live trial
+broke the hard-asserted wealth bound**, a real structural finding recorded at
+§3.2 rather than a dose to quietly retry. **N3** (§3.3, the "stop it carrying
+everything" half only) and **N4** (§3.4, carrier pick by a uniform draw instead
+of array index) are both **shipped live** — N4's first cut (weighted by
+`political_power`) measurably inverted the inheritance gate and was corrected
+to a uniform draw before shipping; see §3.4. **N5–N7 remain planned only** —
+each needs its own multi-commit, iteratively-measured dose walk per §4.1, which
+this pass's two live regressions (N2, N4's first cut) are the concrete argument
+for, not just the stated policy. The measurement is the load-bearing part of
+this document — it invalidated the first version of its own keystone proposal,
+which is recorded in §5.1 rather than quietly corrected.
 
 Read `FIX_PLAN.md` for the wider prioritisation and `SCOREBOARD.md` for what is
 measured. This document is the campaign-side counterpart to
@@ -206,7 +214,7 @@ since nobody owns the cargo to be billed. **The dose walk itself — the volume/
 done.** That is deliberately its own, separately-measured, multi-commit exercise
 per §4.1, not something to rush inside the same change that built the mechanism.
 
-### 3.2 N2 · Ban the cargo, not the carrier
+### 3.2 N2 · Ban the cargo, not the carrier (mechanism shipped at zero dose — see the finding below)
 
 Exclusion must bind the **lane and the good**, before the arbitrage decision, not
 the carrier after it. The shape exists and is proven: `food_export_lock` is
@@ -223,7 +231,32 @@ in that city's share of its component's throughput, not as a wealth delta. Top-1
 share in band (a staple right is a rent, and rents concentrate). A food ban must
 stay bounded by the existing relief machinery.
 
-### 3.3 N3 · The Company: chartered staple, opportunistic venture
+**Shipped, then measured RED, then dosed back to zero.** The mechanism is real and
+enforced: `TickHub.export_ban_until` (one slot per good, `dispatch` consults it in
+the seller loop exactly where `food_export_lock` already is), authored monthly by
+`polis.rs::decide_trade_bans`/`apply_trade_bans`/`run_trade_bans` — a council bars
+export of any non-food good whose live price has spiked past `N2_BAN_PRICE_RATIO`
+× its base value, the same signal `food_export_lock`'s famine trigger already
+reads off `starving`/`lack_basic`, generalised to price. Tried live at a real dose
+(ratio 3.0, then halved to 6.0 with the ban shortened 60→30 ticks): both broke
+`simulate_decades_reports_dynamics`'s HARD-ASSERTED wealth bound — a sustained
+richest house of **1,005,714** (a genuine "100k blow-up", the exact failure mode
+§2.1 exists to catch) at the first dose, still broken at the second. **This is a
+structural finding, not a dose-tuning one**: an export-locked market hands its
+resident monopolist a rent stronger than the plan's own "a staple right is a rent,
+and rents concentrate" anticipated, strong enough to run away rather than merely
+concentrate. The stale binary from the FIRST (ratio 3.0) run also hung for 14+
+CPU-minutes on a test that normally completes in ~194s when re-checked after the
+fix — worth recording as a second, independent symptom of the same runaway.
+Reverted to `N2_BAN_PRICE_RATIO = f32::INFINITY` (provably dead code, gated by
+`n2_trade_ban_trigger_at_infinity_is_a_noop`), exactly `N1_LOCAL_HAUL_BIND_DAYS`'s
+pattern — the ENFORCEMENT half is separately gated live
+(`n2_export_ban_blocks_dispatch_when_set_directly`), so the moment a future dose
+is chosen carefully (with the concentration mechanism understood, not just a
+smaller number tried), the wiring is already there. Import bans (the other half
+of §3.2) were not attempted, for the same reason.
+
+### 3.3 N3 · The Company: chartered staple, opportunistic venture (the "not so strong" fix shipped; the rename/venture-trade/monopoly-price parts did not)
 
 Four changes, three of which make it **weaker**:
 
@@ -259,7 +292,24 @@ home-inbound — assert the direction, or "opportunistic" quietly becomes
 "everything". No city loses its company to the new subsidy cost in the first 50
 years; a company failing later is correct and should be chronicled.
 
-### 3.4 N4 · Carrier assignment by competition, not by array index
+**Shipped: bullet two only — "stop it carrying everything" — since the plan calls
+this alone the fix for the over-strong guild.** `found_guild` now charters a
+guild with the top 3 goods its city actually produces (mirroring
+`found_house_at`'s own top-2 pick for a private house), instead of `spec: vec![]`
+matching nothing; `house_for`'s guild arm gained the missing `h.spec.contains(&
+good)` check and moved BELOW the plain (unspecialised) private-house arm, not
+just below the two specialist arms it already sat under — the guild used to
+shadow an ordinary seated house at its own city with no specialisation check at
+all, which is the literal "specialises in nothing, preferred for everything" bug.
+Tested clean: `tick::tests` (167/167) and the dynamics gate stay healthy
+(sustained richest 278,201, in the same range as before this change — no
+concentration effect, consistent with this being a WEAKENING fix as the plan
+predicted). **Not shipped:** the charter/monopoly-price bullet (needs N2, which
+is itself at zero dose — see above), venture trade, and the Guild→Company
+rename (a real but purely cosmetic follow-up, deferred to keep this change to
+the mechanism only).
+
+### 3.4 N4 · Carrier assignment by competition, not by array index (shipped)
 
 Replace `house_for`'s `.position()` with a weighted pick over eligible houses
 (influence at the hub × free capacity × specialisation match). Matters much more
@@ -269,6 +319,31 @@ in the same phase.
 **Gate.** The correlation between house *founding order* and terminal wealth must
 fall — if it doesn't, the bias was not real and the change should be reverted. The
 pick must be a `hash01` draw, never an RNG or a `HashMap` order.
+
+**Shipped, with a real finding on the first attempt.** `house_for`'s five
+precedence tiers (specialist / specialist-via-office / any seated house /
+chartered guild / office-holder) are unchanged, but the winner WITHIN a tier is
+now `pick_weighted_house`, replacing `.position()`'s "lowest index (oldest-
+founded) always wins". Gated by
+`house_for_does_not_always_favour_the_lowest_index` (5 equally-weighted houses,
+200 ticks sampled, must not all resolve to the same index).
+
+The first cut weighted the draw by `political_power` (per the plan's own
+suggested "influence at the hub"), and measured LIVE it inverted
+`econ_inheritance_rules_fragment_differently` — partible came out RICHER than
+primogeniture (267,680 vs 214,427). Cause: `political_power` grows with a
+house's existing wealth/volume, so weighting the carrier pick by it opens a NEW
+rich-get-richer channel in place of the founding-order one just removed —
+trading one bias for a worse one, not removing a bias. **Shipped instead as a
+UNIFORM `hash01` draw** (no weighting term at all) — this still satisfies N4's
+actual gate (the founding-order/wealth correlation must fall, since the draw no
+longer depends on array position) without introducing a replacement channel.
+Re-verified after the fix: the inheritance gate passes with a wide margin
+(292,389 vs 353,582), `simulate_decades_reports_dynamics` stays healthy
+(sustained richest 278,201), and all 5 non-`#[ignore]`d `econ_` gates pass.
+Weighting the pick by real, uncorrelated capacity/influence (not a wealth-
+proxy) is real future work, not a default to reach for again without its own
+measurement.
 
 ### 3.5 N5 · The sailing window
 
@@ -452,8 +527,8 @@ it is.
 | 0 | Audit the roster and capability matrix | **done** (§2) |
 | 1 | Measure the carrier mix | **done** — `econ_measure_carrier_mix` |
 | 2 | ~~Bisect `econ_inheritance_rules_fragment_differently`~~ | **recovered on main** (§5.2) — re-check per dose step |
-| 3 | N8 market book | not started |
-| 4 | N1 at zero dose, then the dose walk | not started |
-| 5 | N2 · N4 | not started |
-| 6 | N3 · N7 | not started |
+| 3 | N8 market book | **done** |
+| 4 | N1 at zero dose, then the dose walk | mechanism **shipped at zero dose**; dose walk not started |
+| 5 | N2 · N4 | N2 mechanism **shipped at zero dose** (a live trial broke the wealth-bound gate — §3.2); N4 **shipped live** (uniform draw, after its first weighted cut inverted the inheritance gate) |
+| 6 | N3 · N7 | N3 **partially shipped** ("stop it carrying everything" only — §3.3); N7 not started |
 | — | N5 (parallel) · N6 (last, alone) | not started |

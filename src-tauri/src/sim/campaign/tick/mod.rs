@@ -586,6 +586,22 @@ const RELIEF_MIN_RELEASE: f32 = 1.0;
 /// How long the export bar stands once imposed — two months, re-imposed monthly
 /// while the famine lasts, so it lapses on its own when the crisis passes.
 const RELIEF_EXPORT_LOCK_TICKS: u32 = 60;
+/// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) · a non-food good's live price must
+/// reach this multiple of its own base value before a council bars its export.
+/// Shipped at `INFINITY` — provably dead code, exactly `N1_LOCAL_HAUL_BIND_DAYS`'s
+/// pattern. A trial dose (6.0, `N2_BAN_TICKS` 30) was measured, not guessed: it
+/// broke `simulate_decades_reports_dynamics`'s hard-asserted wealth bound (a
+/// sustained richest house of 1,005,714 — a real "100k blow-up") even after
+/// halving twice, which means the RENT a export-locked market hands its
+/// resident monopolist is stronger than the plan's own gate ("a staple right is
+/// a rent, and rents concentrate") anticipated — a structural finding, not a
+/// dose-tuning one. Left at zero dose until that interaction is properly
+/// measured; see `docs/ACTORS_AND_CARRIAGE_PLAN.md` §3.2 and `docs/SCOREBOARD.md`.
+const N2_BAN_PRICE_RATIO: f32 = f32::INFINITY;
+/// How long an N2 export ban stands once imposed, mirroring
+/// `RELIEF_EXPORT_LOCK_TICKS` — it re-imposes monthly while the scarcity lasts
+/// and lapses on its own once the price recovers.
+const N2_BAN_TICKS: u32 = 60;
                                                      // (or a captured govt) suspend first-buy
 
 /// Fraction of a hub's trade carried by merchant HOUSES (vs local traders + guilds).
@@ -2365,6 +2381,15 @@ pub struct TickHub {
     /// EPISODE rather than one per month. 0 = no relief. Serde-default → a save from
     /// before this loads with every city unrestricted.
     #[serde(default)] pub food_export_lock: u32,
+    /// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) — the general-purpose counterpart of
+    /// `food_export_lock`, one slot per good: while `export_ban_until[g]` exceeds
+    /// the current tick, this council forbids EXPORT of good `g` (an ordinary
+    /// `Local`/`Global` good's stock has spiked far above its base value — the
+    /// same "release the granary, bar the export" reflex food already gets,
+    /// generalised). Precomputed once per dispatch and consulted in the seller
+    /// loop, exactly the shape `food_export_lock` already proved. Resized to
+    /// `goods.len()` on first use; empty on an old save (no bans, bit-identical).
+    #[serde(default)] pub export_ban_until: Vec<u32>,
     /// Recently enacted laws/policies (capped log) — the government's decisions.
     #[serde(default)] pub laws: Vec<Law>,
     /// The house that currently CONTROLS this government (captured a majority of its
@@ -6888,6 +6913,7 @@ impl CampaignSim {
                 // Runs AFTER provisioning on purpose: a council in famine finds nothing
                 // left on its own market to pre-empt, so the two cannot chase each other.
                 self.run_crisis_relief();
+                self.run_trade_bans(); // N2 — the same reflex, generalised to any good
                 self.warehouse_and_spoilage_pass(); // size city warehouses, spoil what rots (§4.2)
                 self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay

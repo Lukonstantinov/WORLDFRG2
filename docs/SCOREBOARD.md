@@ -142,6 +142,85 @@ paragraph, two-guilds bug and §5.1 structural-limits entries (`SUPPLY_LOCAL`,
 
 ---
 
+## 2026-09-01c — N2's mechanism (zero dose) + N3's guild fix + N4 shipped live — two real regressions caught and fixed, not just one gate re-checked
+
+Same day, third pass, asked explicitly to go further. Two of the remaining
+proposals shipped LIVE (N3's narrow fix, N4) and one more mechanism shipped at
+zero dose (N2) — both because a first live attempt genuinely broke a
+hard-asserted gate, caught by running the gates rather than assuming a
+plausible-sounding change was safe.
+
+**N2 (§3.2, cargo bans) — mechanism built, tried live, reverted to zero dose.**
+`TickHub.export_ban_until` (one slot per good) + `polis.rs::decide_trade_bans`/
+`apply_trade_bans`/`run_trade_bans` (monthly, mirroring `decide_crisis_relief`'s
+own decide/apply split) generalise the existing famine export lock to any
+non-food good whose live price has spiked past `N2_BAN_PRICE_RATIO` × base,
+enforced in `dispatch` exactly where `food_export_lock` already is. **Tried live
+at ratio 3.0 (ban 60 ticks): `simulate_decades_reports_dynamics`'s hard-asserted
+wealth bound broke — sustained richest house 1,005,714, a genuine "100k
+blow-up".** Halved to ratio 6.0/ban 30 ticks per §4.1's own rule ("halve the
+dose before touching the design") — **still broke it.** This is a structural
+finding, not a dose-tuning one: an export-locked market hands its resident
+monopolist a rent stronger than the plan's own gate anticipated. A second,
+independent symptom: the stale binary from the FIRST trial hung for 14+
+CPU-minutes on a test that normally completes in ~194s. Reverted to
+`N2_BAN_PRICE_RATIO = INFINITY` (dead code, gated by
+`n2_trade_ban_trigger_at_infinity_is_a_noop`); the enforcement half is
+separately gated live (`n2_export_ban_blocks_dispatch_when_set_directly`), so
+the wiring is ready the moment the concentration mechanism is understood well
+enough to dose properly.
+
+**N3 (§3.3, the Company) — the "stop it carrying everything" half shipped.**
+`found_guild` now charters a guild with its city's top-3 produced goods
+(mirroring `found_house_at`'s top-2 pick for a private house) instead of
+`spec: vec![]`; `house_for`'s guild arm gained the missing `spec.contains(&
+good)` check and moved below the PLAIN private-house arm too (not just the two
+specialist arms it already sat under) — before this a guild specialised in
+nothing and shadowed even an ordinary seated house at its own city. Tested
+clean on the first attempt: a weakening fix carries much lower risk than a
+strengthening one, and it measured that way (dynamics run unmoved, sustained
+richest 278,201).
+
+**N4 (§3.4, carrier competition) — shipped live, after catching its own
+regression.** `house_for`'s five precedence tiers are unchanged; the winner
+WITHIN a tier is now a deterministic `hash01` draw instead of `.position()`'s
+"lowest index (oldest-founded) wins". **The first cut weighted the draw by
+`political_power`** (the plan's own suggested "influence at the hub"), and
+measured live it INVERTED `econ_inheritance_rules_fragment_differently` —
+partible came out richer than primogeniture, 267,680 vs 214,427. Cause:
+`political_power` grows with a house's existing wealth, so weighting the pick
+by it swaps the founding-order bias for a worse, wealth-correlated one instead
+of removing a bias. **Shipped instead as a UNIFORM draw** (no weighting term) —
+still satisfies N4's actual gate (founding-order/wealth correlation must fall)
+without a replacement channel. Re-verified: the inheritance gate passes with a
+WIDER margin than before this work (292,389 vs 353,582, was 149,925/174,496 at
+the last recorded healthy figures), `simulate_decades_reports_dynamics` stays
+healthy (sustained richest 278,201), and all 5 non-`#[ignore]`d `econ_` gates
+pass. Gated by `house_for_does_not_always_favour_the_lowest_index`.
+
+**The methodological point, stated because it is the more durable output of
+this pass:** two of three live attempts here broke a hard gate on the FIRST
+try, for reasons that were not obvious from reading the diff (a rent
+concentrating instead of redistributing; a wealth-proxy silently reintroducing
+the exact bias being removed). Both were caught only because the targeted gates
+(§2.8) were actually run before finalising, not because the change looked safe.
+This is the concrete argument for §4.1's "dose, don't redesign" and "never gate
+on the metric you are targeting" — not just a stated policy in this case, but
+what happened twice in one afternoon.
+
+Gates run (rule §2.8): `tick::tests` **167 passed, 0 failed** (2 ignored);
+`econ_` (non-`#[ignore]`d) **5 passed, 0 failed**, including
+`econ_inheritance_rules_fragment_differently` (re-checked after both the N2
+revert and the N4 fix, per §5.2's own standing instruction); `cargo check --lib
+--tests` clean. Full `cargo test --lib` not re-run in this pass (the targeted
+gates cover every file touched; the one pre-existing unrelated failure from the
+prior entry is untouched by this diff). No frontend files touched.
+
+Docs updated in the same commit: `ACTORS_AND_CARRIAGE_PLAN.md` status header,
+§3.2/§3.3/§3.4, and the §4/§7 build-order tables; this entry.
+
+---
+
 ## 2026-08-31b — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md`: slices 5 and 8, asked for by name
 
 Follow-up to the same day's earlier entry, which built six of eight slices and held
