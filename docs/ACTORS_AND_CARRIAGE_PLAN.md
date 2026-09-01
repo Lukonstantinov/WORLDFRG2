@@ -345,6 +345,16 @@ Weighting the pick by real, uncorrelated capacity/influence (not a wealth-
 proxy) is real future work, not a default to reach for again without its own
 measurement.
 
+> **N5, N6 and N7 are now DESIGNED IN FULL** — data structures, hook sites,
+> zero-dose settings, gates by name and non-goals — in
+> `docs/SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md`. Nothing is built. Three findings
+> from that design change these three sketches and are summarised at each one
+> below: **N5 is mostly already built world-side** (the campaign passes
+> `season = -1` to a cost-grid builder that already models seasonal closure),
+> **demand is not inelastic — only its AGGREGATE is** (category substitution
+> already reads price), and **N7's dependency here is wrong** (a boycott needs a
+> LANE-scoped ban, which N2 as built cannot express).
+
 ### 3.5 N5 · The sailing window
 
 Make `days[]` seasonal from fields phase 3 already computes — `storm_base`,
@@ -362,6 +372,22 @@ it does not delete them. Intra-year price volatility must rise at a seasonally-
 closed port and not at an all-season one. All-1.0 multipliers ⇒ bit-identical;
 `earth_` asserted unchanged.
 
+**Designed** (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1), and much cheaper than
+this sketch assumed: **`build_coarse_cost` ALREADY takes `season`/`months` and
+already closes snow-shut passes and stormy sailing windows** off real
+`storm_base`/`reef_risk`/elevation, `cached_coarse_cost` already caches per
+season — and the campaign's own `compute_route_days_matrix` calls it with
+`season = -1` and the comment *"no seasonal closure"*. N5 is largely calling that
+per season at campaign start, storing a **quantised u8 per-lane multiplier**
+(v=0 ⇒ exactly 1.0 ⇒ the bit-identical gate), and reading it through one
+`lane_days` accessor while `days` keeps holding the annual mean. Two corrections
+to the sketch: 4 slices beat 12 (the underlying curve is a smooth cosine and the
+build cost is linear in slices), and the dose must be a **delay, never a hard
+closure** — a closed lane starves a city, which is N1's own gate concern and N2's
+measured failure mode. Its real target is not the gradient but the scorecard's
+**within-city grain price CV of 0.000** (band 0.30–0.50), the largest
+proportional error in the economy oracle.
+
 ### 3.6 N6 · Price-elastic demand — *high risk, own track*
 
 Add a price term to `base_need`. Today a dearth is unconditional, substitution
@@ -376,6 +402,21 @@ at elasticity 0, walk up in small steps, expect to stop early.
 must still pass — a "no regression anywhere" change, not a "win one metric" change.
 Starvation must not rise: if elastic demand makes the poor stop eating, the term is
 in the wrong place.
+
+**Designed** (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2), and the premise above
+is **half wrong in a way that makes N6 much smaller**: category substitution
+already weights each member by `pref / rel` where `rel = price / base_value`, so
+**cross-price elasticity is live today** — only the category AGGREGATE is fixed.
+Three decisions carry the design: use the LAGGED EMA price (`hubs[h].price[g]`,
+updated after needs are assembled) so there is no simultaneity to solve; apply
+the term OUTSIDE `base_need`, because `need_scale`'s start-time calibration and
+the starvation/provisioning sums are its other callers; and keep a parallel
+STRUCTURAL need that every welfare signal reads — **elasticity belongs to the
+market, not to the ration**, or a council stops provisioning exactly when prices
+spike. Elasticity is per tier (staple grain is famously inelastic, which is
+*why* dearth prices spike), clamped, with a subsistence floor on tier 0. Also
+recorded there and NOT fixed: substitution is budget-neutral in *quantity*, not
+in value.
 
 ### 3.7 N7 · The League — *expensive*
 
@@ -393,6 +434,23 @@ must form **and dissolve** — a monotone member count is a failed build, the sa
 failure `realm_secession_pass` exists to prevent. A boycotted city's trade must
 visibly reroute. Realm formation must not collapse: a league is a rival to a crown,
 not a replacement.
+
+**Designed** (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §3–§4), and **this
+sketch's dependency is wrong**: N2 as built bans a hub × GOOD
+(`export_ban_until` — "this city bars iron, to anyone"). A boycott is "we bar
+trade with *that city*", which is a **lane**, and nothing in the tree expresses
+one. N7 depends on an N2 EXTENSION (a `Boycott { target, good, until_tick }`
+checked in dispatch's target loop beside `quarantined[b]`), not on N2 being
+dosed. Membership lives on `TickHub.league`, never in a `members` vec — the
+`Realm` doc records why its own list was removed. Formation reads state that
+exists (per-pair `flow_year` ties, a threat signal, `hub.realm`/`autonomy`) —
+and any pass reading `flow_accum` **must sort the HashMap first**, the defect
+this codebase already shipped once. Build order inside N7 is not negotiable:
+**the institution first, the weapon last** — a boycott is N2's market closure
+applied by every member at once, and N2's single-city version broke the
+hard-asserted wealth bound at two separate doses. Vote weight is one member one
+voice, deliberately, because N4's first cut proves a wealth-correlated weight is
+a rich-get-richer channel.
 
 ### 3.8 N8 · Make the market book honest — *free, do first* (SHIPPED)
 
