@@ -32,6 +32,14 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
+# WORLD_AND_TRADE_MASTER_PLAN.md Part III §4's own validation harness
+# (commands/real_world_diagnostics.rs, test-only) needs `tauri::test::mock_app`
+# for a real `State<WorldDb>` outside a running app — the "test" feature isn't
+# implied by cargo's own `cfg(test)` across a crate boundary, so it must be
+# turned on explicitly here.
+[dev-dependencies]
+tauri = { version = "2", features = ["test"] }
+
 # ── Keep the debug `target/` directory small ──────────────────────────────────
 # A Tauri dev build's `target/` routinely balloons to 20-40 GB, almost all of it
 # debug-symbol tables for the (many) dependencies. These two settings cut that by

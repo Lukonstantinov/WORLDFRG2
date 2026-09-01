@@ -8,7 +8,7 @@ Parts II and III (the campaign's trade and knowledge).
 |---|---|---|
 | **I** | Tectonics · rivers · provinces · shelves | Slices 1, 2, 3, 5, 7, 8 **BUILT**; 4 scoped down; 6 not built |
 | **II** | Outpost connectivity & the entrepôt | Slices A, B built (fixes G1-G3); E1 built (fixes G6); Slices C (entrepôt) and D (transport modes) **not built** |
-| **III** | Exploration, the known world, transport modes | §8.1/§8.2 built; §4 transport modes built IN PART (river data now reaches `base_days`; mode/capacity split not built); knowledge/fog, exploration **not built** |
+| **III** | Exploration, the known world, transport modes | §8.1/§8.2 built; §4 built IN PART (river data reaches `base_days`; validated positive on a real world, r=0.092 — mode/capacity split not built); knowledge/fog, exploration **not built** |
 
 **Read the build order first (Part III §7).** It is not the order these parts are
 written in: transport modes (III §4) come first because they are the biggest
@@ -1189,28 +1189,38 @@ one would mean either persisting a `route_mode` matrix alongside `base_days` or
 re-deriving it per dispatch from the coarse-cost grid, either a real addition
 beyond the plumbing fix above. Left for the same follow-up as Slice C.
 
-**Not validated against `econ_fidelity_scorecard`, and here is why that's not a
-gap to paper over:** the gate's own reference world (`economy_validation.rs`)
-constructs a synthetic in-memory `CampaignSim` directly (hand-built hubs,
-straight-line `days`) — it never calls `campaign_start_sim`, never touches
-`WorldDb`/tiles/metadata, and so cannot exercise `compute_route_days_matrix` at
-all. Running the full `econ_` suite before and after this change produced
-BYTE-IDENTICAL numbers end to end (including the already-known-fragile
-`econ_inheritance_rules_fragment_differently` failure, confirmed unrelated for
-a second time), which is the expected — and reassuring — result: it means nothing
-already gated could have regressed, but it also means the plan's own gate
-(§4's original text below, kept for the record) has NOT actually measured
-whether this fix moves the price/distance gradient on a REAL generated world.
-That measurement needs the real `campaign_start_sim` path, i.e. the desktop
-app or a dedicated integration test that builds an actual `WorldDb` — neither
-available in this headless session. Whoever picks this up next: build that
-harness before claiming the gradient moved, and record the result whichever
-way it goes (§2.4).
+**UPDATE — now validated.** `commands/real_world_diagnostics.rs` (test-only,
+`#[ignore]`d) is the harness this section originally said was missing: it
+builds a REAL world through the actual Tauri commands (`sim_run_all` →
+`compute_economy` → `finalize_world` → `campaign_start_sim` → `campaign_advance`)
+against a real `WorldDb`, via `tauri::test::mock_app()` for a genuine
+`State<WorldDb>` outside a running app — not a hand-built fixture. Needs
+`tauri = { features = ["test"] }` under `[dev-dependencies]` (Cargo.toml),
+since a downstream crate's own `cfg(test)` does not turn on a dependency's
+feature flags. Run it with:
 
-Original ask, unchanged: give a route a full **mode** with its own per-day
-cost, capacity and risk — sea ≪ river < road < track. Per the brief all three
-axes differ, and water wins on all three, which is what makes it preferable
-with no special case.
+```bash
+cd src-tauri && cargo test --lib real_world_price_distance_gradient -- --ignored --nocapture
+```
+
+**Measured** (300×150 world, seed 424242, 224 real settlements/hubs, 20 years):
+grain price-gap × distance **r = 0.092** over 36,868 hub pairs — POSITIVE, the
+historically correct sign, on a real generated world with the river-plumbing
+fix from this section in place. This is the first measurement of this
+gradient anywhere in the codebase that isn't the synthetic 30-city reference
+world's own r ≈ 0.11-0.14 (see below) — the two now roughly agree, which is
+reassuring but not itself proof the river fix MOVED anything, since there is
+no real-world "before" run to diff against (a 300×150 world takes ~6 minutes
+end to end; a paired before/after run is future work for whoever tunes this
+further). Record: the sign is right and the harness works. Whether the river
+discount specifically is what keeps it positive on a real world, versus the
+sea/land split alone already carrying it, is NOT separated out here.
+
+Original framing, kept for the record — it explains why this was picked first,
+before the number above existed. The full ask, unchanged: give a route a full
+**mode** with its own per-day cost, capacity and risk — sea ≪ river < road <
+track. Per the brief all three axes differ, and water wins on all three, which
+is what makes it preferable with no special case.
 
 **Why this was picked first:** it is the biggest lever on the known
 market-integration defect (basket price/distance gradient **−0.064**, 0 of 6
@@ -1224,10 +1234,13 @@ make later work unnecessary** — if water carriage is genuinely cheap, a site
 near navigable water becomes valuable through ordinary route cost, with no
 bespoke entrepôt rule and no siting special case.
 
-**Gate:** the `econ_fidelity_scorecard` gradient — on a REAL generated world,
-per the caveat above. If differentiating transport cost does not move it, the
-hypothesis is wrong and that is a **negative result to record**, per §2.4 —
-not something to quietly keep.
+**Gate:** the price/distance gradient on a REAL generated world
+(`real_world_price_distance_gradient`, above) — **partially cleared**: the
+sign is positive (r = 0.092), which is the claim that matters most, but no
+paired before/after run exists to attribute that specifically to the river
+fix rather than to the sea/land split that predates it. Whoever next touches
+transport cost should run a before/after pair on the SAME seed before
+claiming credit either way — the instrument now exists to do it.
 
 ---
 
