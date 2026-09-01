@@ -346,7 +346,49 @@ impl CampaignSim {
             }
         }
 
+        // #6d · WORLD_AND_TRADE_MASTER_PLAN.md Part II Slice C1 — THE ENTREPÔT.
+        // A hub with poor direct connectivity may route through an OUTLET (here:
+        // any real, non-estate COASTAL hub) instead of straight to its partner:
+        // `days[a][b] = min(days[a][b], days[a][p] + DWELL + days[p][b])`. This is
+        // a MIN over the pair's own existing cost, so it can only ever find a
+        // cheaper real route, never invent a worse one or remove an existing
+        // connection — the same "additive, never destructive" discipline #6/#6b/
+        // #6c already hold. Capped at exactly ONE transshipment (a pre-modern
+        // cargo was not containerised): each hub `a` composes through only its
+        // OWN nearest same-component outlet, read from a SNAPSHOT of `days` taken
+        // before this pass starts so a composed route can never itself become the
+        // next pair's outlet leg (which would silently chain transshipments).
+        let route_outlet = {
+            let mut route_outlet = vec![-1i32; n * n];
+            let outlets: Vec<usize> = real.iter().cloned().filter(|&i| self.hubs[i].coastal).collect();
+            if !outlets.is_empty() {
+                let days_before = days.clone();
+                for &a in &real {
+                    let mut best_out: Option<(usize, f32)> = None;
+                    for &p in &outlets {
+                        if p == a || self.hubs[p].component != self.hubs[a].component { continue; }
+                        let d = days_before[a * n + p];
+                        if !d.is_finite() { continue; }
+                        if best_out.map_or(true, |(_, bd)| d < bd) { best_out = Some((p, d)); }
+                    }
+                    let Some((p, d_ap)) = best_out else { continue };
+                    for &b in &real {
+                        if b == a || b == p { continue; }
+                        let d_pb = days_before[p * n + b];
+                        if !d_pb.is_finite() { continue; }
+                        let composed = d_ap + ENTREPOT_DWELL_DAYS + d_pb;
+                        if composed < days[a * n + b] {
+                            days[a * n + b] = composed;
+                            route_outlet[a * n + b] = p as i32;
+                        }
+                    }
+                }
+            }
+            route_outlet
+        };
+
         self.days = days;
+        self.route_outlet = route_outlet;
         self.rebuild_neighbors();
         self.routes_dirty = false;
     }
@@ -874,6 +916,19 @@ impl CampaignSim {
         // trade it can't carry falls to the independent local merchants/guilds.
         let nh = self.houses.len();
         let mut cap_sea: Vec<i32> = vec![0; nh];
+        // WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 (transport modes, capacity
+        // half) — ATTEMPTED and REVERTED this session. Splitting `fleet_river`/
+        // `fleet_caravan` into two real pools (with a mode-matching-preferred,
+        // fallback-to-the-other decrement, algebraically conserving the total
+        // vs. the old pooled `cap_land`) measurably changed this economy's
+        // trajectory on `a_house_records_every_head_it_has_had` (a fleet-heavy
+        // house went bankrupt where the pooled version did not), and the exact
+        // mechanism could not be pinned down in-session despite the per-call
+        // math checking out. Recorded as a negative result per CLAUDE.md §2.4
+        // rather than shipped unexplained: `cap_land` stays pooled. The
+        // `TickHub.river`/`InTransit.river` plumbing and the real river-cost
+        // data reaching `base_days` (this section's OTHER half) are unaffected
+        // and stay in place — only the CAPACITY split reverts.
         let mut cap_land: Vec<i32> = vec![0; nh];
         for (i, h) in self.houses.iter().enumerate() {
             if h.defunct { continue; }
@@ -1204,7 +1259,22 @@ impl CampaignSim {
                                 .find(|(c, _)| *c == a as u32).map(|(_, v)| *v).unwrap_or(0.0);
                             if ctrl >= MONOPOLY_CONTROL { mult *= 1.0 + MONOPOLY_EXPORT_RENT; }
                         }
-                        let profit = margin * mult;
+                        let mut profit = margin * mult;
+                        // Part II Slice C1 (the entrepôt) — if this leg's route was
+                        // cheapened by composing through an outlet port, that port
+                        // earns a cut of the profit it made possible: taken FROM the
+                        // trading house's profit before it is credited (a
+                        // redistribution, never added on top — rule 18), and only
+                        // when the outlet is a real, still-standing hub.
+                        if let Some(&p) = self.route_outlet.get(a * n + b) {
+                            if p >= 0 && (p as usize) < self.hubs.len() && p as usize != a && p as usize != b {
+                                let fee = profit * ENTREPOT_FEE_FRAC;
+                                if fee > 0.0 {
+                                    profit -= fee;
+                                    self.hubs[p as usize].treasury += fee;
+                                }
+                            }
+                        }
                         self.houses[oi].wealth += profit;
                         self.houses[oi].volume += amount;
                         // Phase G: civic taxes on this trade (export at origin a,
@@ -1266,6 +1336,7 @@ impl CampaignSim {
                         eta_tick: tick + (days.ceil() as u32).max(1),
                         owner,
                         sea,
+                        river: false, // capacity split reverted (see the cap_land comment above)
                         // A house voyage is a ROUND TRIP: on arrival at b it tries to
                         // buy b's surplus and carry it home to a (sold there for a
                         // second profit). Guild/local one-way trips spawn no return.
@@ -1343,6 +1414,7 @@ impl CampaignSim {
         let Some((g, amount, pb_buy, pa_sell)) = best else { return };
         let freight = self.good_freight(g, freight_rate, days);
         let sea = self.hubs[b].coastal && self.hubs[a].coastal;
+        let river = !sea && self.hubs[b].river && self.hubs[a].river;
         // Buy at b (goods leave b's stock), sell on arrival at a.
         stock_take(&mut self.hubs[b].stock, g, amount);
         self.hubs[b].export_earn += amount * pb_buy;
@@ -1387,6 +1459,7 @@ impl CampaignSim {
             eta_tick: self.tick + (days.ceil() as u32).max(1),
             owner: owner as i32,
             sea,
+            river,
             phase: 1,
             home: -1,
             contract: false,

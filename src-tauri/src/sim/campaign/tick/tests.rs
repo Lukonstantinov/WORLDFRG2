@@ -10,10 +10,11 @@
         let ng = prod.len();
         let base_per_capita: Vec<f32> = prod.iter().map(|&p| p / pop.max(1.0)).collect();
         TickHub {
+            known: std::collections::HashMap::new(),
             id, x, y, name: format!("H{id}"), population: pop, founding_pop: pop,
             stock: vec![0.0; ng * GRADE_BANDS], price: vec![1.0; ng], production: prod,
             grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
-            is_estate: false, parent: -1, koppen: 0, coastal: false, component: comp,
+            is_estate: false, parent: -1, koppen: 0, coastal: false, river: false, component: comp,
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
@@ -35,6 +36,7 @@
 
     pub(super) fn house_at(hub: u32, spec: Vec<usize>, fleet_sea: u32) -> House {
         House {
+            known: std::collections::HashMap::new(),
             name: format!("House{hub}"), hub, wealth: 50.0, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1, events: vec![],
             good_profit: vec![], good_volume: vec![], mono50: vec![], mono_ever: vec![], dominant_seat: false,
@@ -71,6 +73,7 @@
             records: WorldRecords::default(),
             quality_migrated: false,
             days: vec![],
+            route_outlet: vec![],
             neighbors: vec![],
             routes_dirty: false,
             warehouses: vec![],
@@ -3668,10 +3671,16 @@
         s.hub_minorities = vec![Vec::new(); 3];
         // Primogeniture: the house stays whole, so the line is one unbroken sequence.
         s.culture_rules = vec![CultureRule { culture: "Aiora".into(), line: 0, rule: 1 }];
-        // No fleet and deep pockets: this test is about the succession RECORD, and a
-        // house that goes bankrupt in year 20 (fleet upkeep on a three-city world) never
-        // reaches a second head to record.
+        // Deep pockets AND a small ordinary caravan: this test is about the succession
+        // RECORD, and a house that goes bankrupt never reaches a second head to record.
+        // A fleet-LESS house on this 3-hub (none coastal) world has NO income except
+        // expeditions, making survival a bet on expedition luck/timing — this test
+        // started failing once WORLD_AND_TRADE_MASTER_PLAN.md Part III §6 decision 7
+        // moved EXP_START_TICK from year 15 to year 25, purely because it had been
+        // quietly depending on the earlier date. A caravan slot gives it ordinary,
+        // low-risk trade income instead.
         let mut h = house_at(0, vec![1], 0);
+        h.fleet_caravan = 3;
         h.wealth = 200_000.0;
         s.houses.push(h);
         s.seed_house_lines();
@@ -5745,5 +5754,93 @@
         }
         assert_eq!(s.realms[id].fallen_tick, 0, "a republic dissolved itself by having no dynasty");
         assert!(s.realms[id].cohesion > 0.0);
+    }
+
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part III §1/§3.1 — knowledge is seeded
+    /// from day-one holdings (never stranding an existing house), and the
+    /// founding gate genuinely bites once a house looks at somewhere it was
+    /// never seeded near.
+    #[test]
+    fn knowledge_seeds_from_holdings_and_gates_founding() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // 4 hubs, 4 provinces (one per hub): 0-1 and 2-3 are neighbour pairs;
+        // province 3 is NOT a neighbour of province 0's home.
+        let hubs = (0..4u32).map(|i| hub(i, i as f32 * 10.0, 0.0, 2000.0, vec![10.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![0, 1, 2, 3];
+        s.prov_neighbors = vec![vec![1], vec![0], vec![3], vec![2]];
+        let mut h = house_at(0, vec![0], 0);
+        h.known = std::collections::HashMap::new();
+        s.houses.push(h);
+        s.seed_knowledge();
+
+        assert_eq!(s.houses[0].known.get(&0).map(|k| k.level), Some(KNOWN_ESTABLISHED),
+            "the house's own home province must be established on day one");
+        assert_eq!(s.houses[0].known.get(&1).map(|k| k.level), Some(KNOWN_REPORTED),
+            "a neighbouring province must be at least reported");
+        assert!(s.houses[0].known.get(&3).is_none(), "a non-adjacent province must stay unknown");
+
+        assert!(s.house_knows(0, 0), "day-one founding at home must be unconstrained");
+        assert!(!s.house_knows(0, 3), "founding at an unsurveyed, non-adjacent province must be gated");
+
+        // A city (TickHub) is a knower too, seeded the same way.
+        assert_eq!(s.hubs[2].known.get(&2).map(|k| k.level), Some(KNOWN_ESTABLISHED));
+        assert!(s.hub_knows(2, 2));
+        assert!(!s.hub_knows(2, 0), "a city's own gate must also bite outside its seeded neighbourhood");
+
+        // Provinceless world: the gate degrades to permissive (rule: fog layers
+        // on top of a province system that exists, never blocks one that doesn't).
+        let mut s2 = sim(vec![hub(0, 0.0, 0.0, 2000.0, vec![10.0], 0)], vec![good("wheat", 0, 0, 1.0, 0.85, true)]);
+        s2.houses.push(house_at(0, vec![0], 0));
+        assert!(s2.house_knows(0, 5), "no province layer at all must never gate founding");
+    }
+
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part II Slice C1 — the entrepôt actually
+    /// composes a cheaper two-leg route through a coastal outlet when one
+    /// exists, and only when it is genuinely cheaper (never worse than direct).
+    /// `rebuild_routes`' fallback pass is straight-line-distance-based, where a
+    /// composed route can never beat the direct one (triangle inequality) — so
+    /// this exercises the mechanism the honest way: a real PATHFOUND `base_days`
+    /// matrix (as `compute_route_days_matrix` would build from the coarse-cost
+    /// grid, where an expensive direct overland leg can genuinely lose to a
+    /// cheap coastal route via an intermediate port), set up by hand.
+    #[test]
+    fn entrepot_composes_a_cheaper_route_through_a_real_outlet() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0),   // a: inland
+            hub(1, 50.0, 0.0, 5000.0, vec![10.0], 0),  // p: coastal outlet
+            hub(2, 100.0, 0.0, 5000.0, vec![10.0], 0), // b: inland
+        ];
+        hubs[1].coastal = true;
+        let mut s = sim(hubs, goods);
+        s.world_w = 1000.0; // keep every pair well inside the trade horizon
+        // A real pathfound matrix: direct a↔b is expensive (a mountain range,
+        // say); a↔p and p↔b are each cheap (a coastal lane).
+        s.base_n = 3;
+        s.base_days = vec![
+            0.0, 5.0, 100.0,
+            5.0, 0.0, 5.0,
+            100.0, 5.0, 0.0,
+        ];
+        s.rebuild_routes();
+
+        let n = s.hubs.len();
+        let direct_before = 100.0;
+        let composed = 5.0 + ENTREPOT_DWELL_DAYS + 5.0;
+        assert!(composed < direct_before, "test setup must make the outlet genuinely cheaper");
+        assert_eq!(s.route_outlet[0 * n + 2], 1, "hub 1 (the only coastal hub) should be the recorded outlet");
+        assert!((s.days[0 * n + 2] - composed).abs() < 0.01,
+            "days[a][b] should be the composed cost, got {}", s.days[0 * n + 2]);
+
+        // And the MIN discipline: when the direct route is already cheap, the
+        // outlet must never make it worse.
+        s.base_days[0 * 3 + 2] = 1.0;
+        s.base_days[2 * 3 + 0] = 1.0;
+        s.rebuild_routes();
+        assert!((s.days[0 * n + 2] - 1.0).abs() < 0.01,
+            "a cheap direct route must never be replaced by a more expensive composed one, got {}",
+            s.days[0 * n + 2]);
+        assert_eq!(s.route_outlet[0 * n + 2], -1, "no outlet should be recorded when direct already wins");
     }
 

@@ -1062,7 +1062,34 @@ impl CampaignSim {
             let (cx, cy) = (sx + (gx - sx) * t, sy + (gy - sy) * t);
             // hazard roll
             let climate = (Self::koppen_peril(ko) + Self::koppen_peril(kd)) * 0.5;
-            let peril = EXP_HAZARD_BASE * (0.7 + 1.3 * climate + if sea { 0.5 } else { 0.3 });
+            // Part III §2.1 — a HOSTILITY proxy, not a native faction (the model
+            // has no unincorporated population to draw one from honestly — see
+            // the plan's own "explicitly a hazard field" framing). A tick has no
+            // per-cell geography to test "which province is this expedition in
+            // right now", so the proxy is coarser than the plan's ask: venturing
+            // toward a destination the backer has never even heard reported of
+            // is riskier than a return trip to a province it already knows
+            // something about. Falls to zero once the destination is at least
+            // `KNOWN_REPORTED` — contact (or conquest) lowering hostility, per
+            // the plan, without the model having to say which.
+            // An EMPTY `known` map means "never seeded" (a hand-built fixture, or
+            // a save mid-migration before `seed_knowledge` has run) — read as
+            // KNOWN_ESTABLISHED here, the same permissive default `house_knows`/
+            // `hub_knows` already use for the founding gate. Without this, every
+            // expedition from a house whose knowledge was never seeded suffered
+            // the worst-case hostility penalty for its entire existence — caught
+            // by `a_house_records_every_head_it_has_had` going bankrupt on
+            // repeated doomed expeditions.
+            let dest_level = if e.dest_province < 0 || self.houses.get(owner).is_some_and(|h| h.known.is_empty()) {
+                KNOWN_ESTABLISHED
+            } else {
+                self.houses.get(owner)
+                    .and_then(|h| h.known.get(&(e.dest_province as u32)))
+                    .map_or(0, |k| k.level)
+            };
+            let hostility = if dest_level >= KNOWN_SURVEYED { 0.0 }
+                else if dest_level >= KNOWN_REPORTED { 0.15 } else { 0.35 };
+            let peril = EXP_HAZARD_BASE * (0.7 + 1.3 * climate + hostility + if sea { 0.5 } else { 0.3 });
             let roll = hash01(seed, (tick as u64) ^ (e.id as u64).wrapping_mul(0x2545F4914F6CDD1D),
                 (e.pos * 997.0) as u64);
             if roll < peril {
@@ -1074,6 +1101,15 @@ impl CampaignSim {
                 if e.arrived_frac <= 0.0 {
                     e.arrived_frac = 0.0;
                     e.status = 4;
+                    // WORLD_AND_TRADE_MASTER_PLAN.md Part III §2.1 — a lost
+                    // expedition still teaches its backer SOMETHING: the
+                    // destination province is now `KNOWN_REPORTED` (never
+                    // downgrading a level it already held).
+                    if e.dest_province >= 0 {
+                        let e2 = self.houses[owner].known.entry(e.dest_province as u32)
+                            .or_insert(Known { level: KNOWN_REPORTED, since_tick: tick, source: -1 });
+                        if e2.level < KNOWN_REPORTED { e2.level = KNOWN_REPORTED; e2.since_tick = tick; }
+                    }
                     self.failed_expeditions.push(HazardEvent { tick, x: cx, y: cy, kind, losses: 1.0 });
                     if self.failed_expeditions.len() > EXP_FAILED_CAP {
                         let ov = self.failed_expeditions.len() - EXP_FAILED_CAP;
@@ -1106,6 +1142,19 @@ impl CampaignSim {
                     let profit = e.revenue - e.cost;
                     if owner < self.houses.len() && !self.houses[owner].defunct {
                         self.houses[owner].wealth += e.revenue;
+                        // Part III §1.2/§2 — a RETURNED expedition surveys its
+                        // destination (the founding gate) and reports its
+                        // neighbours, exactly `seed_knowledge`'s own `establish`.
+                        if e.dest_province >= 0 {
+                            let dp = e.dest_province as u32;
+                            self.houses[owner].known.insert(dp,
+                                Known { level: KNOWN_SURVEYED, since_tick: tick, source: -1 });
+                            for &np in self.prov_neighbors.get(dp as usize).map(|v| v.as_slice()).unwrap_or(&[]) {
+                                let e2 = self.houses[owner].known.entry(np)
+                                    .or_insert(Known { level: KNOWN_REPORTED, since_tick: tick, source: -1 });
+                                if e2.level < KNOWN_REPORTED { e2.level = KNOWN_REPORTED; e2.since_tick = tick; }
+                            }
+                        }
                         // Phase 3.1 · a GOAL_REACH_PROVINCE goal succeeds when a
                         // BACKED expedition completes its round trip to the target
                         // province. `update_house_goal`'s yearly pass reads this state
@@ -1299,6 +1348,9 @@ impl CampaignSim {
             // INLAND cities have no fleet tradition — they can only found INLAND
             // colonies; only a coastal metropolis colonizes the sea (user rule).
             if !founder_coastal && s.coastal { continue; }
+            // WORLD_AND_TRADE_MASTER_PLAN.md Part III §1.2/§3 — a city cannot
+            // found a colony in a province it has never surveyed.
+            if !self.hub_knows(founder, s.province) { continue; }
             // Skip only the genuinely worthless: too lean to part-feed itself AND
             // poor in trade goods. Otherwise a colony may settle less-fertile land —
             // a trade-rich frontier is worth founding even on lean soil (its food
@@ -1421,6 +1473,8 @@ impl CampaignSim {
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
             if s.fertility < COLONY_MIN_FERTILE { continue; } // must be farmable
+            // WORLD_AND_TRADE_MASTER_PLAN.md Part III §1.2/§3 — same survey gate.
+            if !self.hub_knows(founder, s.province) { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
             let score = (0.2 + 1.6 * s.fertility) * (1.0 - d / cap);
@@ -1525,6 +1579,7 @@ impl CampaignSim {
             self.world_w as u32, self.world_h());
         let component = self.hubs[founder].component;
         self.hubs.push(TickHub {
+            known: std::collections::HashMap::new(),
             id, x: site.x, y: site.y, name, population: pop, founding_pop: pop,
             stock: {
                 let mut s = vec![0.0f32; ng * GRADE_BANDS];
@@ -1533,7 +1588,7 @@ impl CampaignSim {
             },
             price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
-            is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, component,
+            is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, river: false, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),

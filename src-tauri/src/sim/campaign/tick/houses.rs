@@ -261,7 +261,7 @@ impl CampaignSim {
             self.in_transit.push(InTransit {
                 from: src as u32, to: buyer as u32, good: g, amount: delivered_qty,
                 eta_tick: tick + (days.ceil() as u32).max(1),
-                owner: seller as i32, sea, phase: 1, home: -1, // one-way: no return leg
+                owner: seller as i32, sea, river: false, phase: 1, home: -1, // one-way: no return leg
                 contract: true, // its vessel is held by the standing contract reservation
                 price: pt,
             });
@@ -534,10 +534,11 @@ impl CampaignSim {
             text: format!("{} establishes {} ({})", owner_label, name, self.goods[g0].name),
         });
         self.hubs.push(TickHub {
+            known: std::collections::HashMap::new(),
             id, x, y, name, population: est_pop, founding_pop: est_pop,
             stock: vec![0.0; ng * GRADE_BANDS], price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
-            is_estate: true, parent, koppen, coastal, component,
+            is_estate: true, parent, koppen, coastal, river: false, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
@@ -1075,6 +1076,10 @@ impl CampaignSim {
         let mut bi = (usize::MAX, 0.0f32);
         for (i, s) in self.colonizable.iter().enumerate() {
             if !network_coastal && s.coastal { continue; }
+            // WORLD_AND_TRADE_MASTER_PLAN.md Part III §1.2/§3 — a house cannot
+            // plant an outpost in a province it has never surveyed. Seeded from
+            // day-one holdings (§3.1), so this constrains expansion only.
+            if !self.house_knows(hi, s.province) { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
             // Site premiums (G6): a delta or a land→sea chokepoint is exactly where
@@ -1602,6 +1607,7 @@ impl CampaignSim {
         let (fleet_sea, fleet_river, fleet_caravan) = Self::initial_fleet(self.hubs[h].coastal, false);
         let idx = self.houses.len();
         self.houses.push(House {
+            known: std::collections::HashMap::new(),
             name, hub: h as u32, wealth: 5.0, prestige: 0.2, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
@@ -2502,6 +2508,7 @@ impl CampaignSim {
             text: format!("{} is chartered in {}", name, self.hubs[h].name),
         });
         self.houses.push(House {
+            known: std::collections::HashMap::new(),
             name, hub: h as u32, wealth: (pop / 1000.0).max(1.0), prestige: 0.2,
             spec: vec![], monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
@@ -2940,6 +2947,89 @@ impl CampaignSim {
         } else {
             by_rank
         }
+    }
+
+    // ── WORLD_AND_TRADE_MASTER_PLAN.md Part III §1/§3.1 · knowledge seeding ──────
+
+    /// Seed every house's and every city's MAP knowledge from what it already
+    /// holds or is home to, so the fog constrains only FUTURE expansion — day-one
+    /// founding is unconstrained, exactly §3.1's mitigation. Every province
+    /// containing a house's home/offices/estates (or a city's own seat) starts at
+    /// `KNOWN_ESTABLISHED`; `prov_neighbors` of each such province starts at
+    /// `KNOWN_REPORTED` (never downgrading an already-established neighbour).
+    /// Called once at `campaign_start_sim` and once more, identically, on load of
+    /// any save whose `known` maps are still empty (§5 migration) — one code
+    /// path, not two. A no-op on a provinceless world (`hub_province` empty),
+    /// matching every other province-layer feature's own discipline.
+    pub(crate) fn seed_knowledge(&mut self) {
+        if self.hub_province.is_empty() { return; }
+        let np = self.hub_province.iter().copied().filter(|&p| p >= 0).map(|p| p as usize + 1)
+            .max().unwrap_or(0);
+        if np == 0 { return; }
+        let neighbor_of = |p: usize| -> Vec<u32> {
+            self.prov_neighbors.get(p).cloned().unwrap_or_default()
+        };
+        let establish = |known: &mut std::collections::HashMap<u32, Known>, p: i32, neighbors: &[u32]| {
+            if p < 0 { return; }
+            known.insert(p as u32, Known { level: KNOWN_ESTABLISHED, since_tick: 0, source: -1 });
+            for &np in neighbors {
+                let e = known.entry(np).or_insert(Known { level: KNOWN_REPORTED, since_tick: 0, source: -1 });
+                if e.level < KNOWN_REPORTED { e.level = KNOWN_REPORTED; }
+            }
+        };
+        for hi in 0..self.houses.len() {
+            if self.houses[hi].defunct { continue; }
+            let mut sites: Vec<i32> = vec![];
+            let home = self.houses[hi].hub as usize;
+            if home < self.hubs.len() { sites.push(self.hub_province.get(home).copied().unwrap_or(-1)); }
+            for &off in &self.houses[hi].offices {
+                if (off as usize) < self.hub_province.len() {
+                    sites.push(self.hub_province[off as usize]);
+                }
+            }
+            for h in self.hubs.iter().filter(|h| h.is_estate && h.owner_house == hi as i32) {
+                // Estates carry no direct `hub_province` index of their own row
+                // (they're appended after `hub_province` was sized) — resolve by
+                // nearest founding hub instead isn't needed here since an estate's
+                // PARENT (when co-located) already contributes its own province;
+                // a remote outpost's site province was checked at founding time
+                // (rule 32) and doesn't need re-seeding.
+                let _ = h;
+            }
+            let mut known = std::mem::take(&mut self.houses[hi].known);
+            for p in sites { establish(&mut known, p, &neighbor_of(p.max(0) as usize)); }
+            self.houses[hi].known = known;
+        }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let p = self.hub_province.get(h).copied().unwrap_or(-1);
+            let mut known = std::mem::take(&mut self.hubs[h].known);
+            establish(&mut known, p, &neighbor_of(p.max(0) as usize));
+            self.hubs[h].known = known;
+        }
+    }
+
+    /// §1.2 — does `knower` (a house index) know `province` at least at
+    /// `KNOWN_SURVEYED`? A provinceless world (`province < 0`, or `known` never
+    /// seeded — an old save mid-migration, or `seed_knowledge` not yet run) reads
+    /// TRUE: the fog can only ever be a constraint layered on TOP of a province
+    /// layer that exists, never a silent block on a world/save that has none.
+    pub(crate) fn house_knows(&self, hi: usize, province: i32) -> bool {
+        if province < 0 || self.hub_province.is_empty() { return true; }
+        self.houses.get(hi).map_or(true, |h| {
+            if h.known.is_empty() { return true; }
+            h.known.get(&(province as u32)).is_some_and(|k| k.level >= KNOWN_SURVEYED)
+        })
+    }
+
+    /// §1.2 — the same test as `house_knows`, for a CITY founder (§0: both
+    /// houses and cities found things, so both are knowers).
+    pub(crate) fn hub_knows(&self, h: usize, province: i32) -> bool {
+        if province < 0 || self.hub_province.is_empty() { return true; }
+        self.hubs.get(h).map_or(true, |hub| {
+            if hub.known.is_empty() { return true; }
+            hub.known.get(&(province as u32)).is_some_and(|k| k.level >= KNOWN_SURVEYED)
+        })
     }
 
     // ── Phase 0.4 · the law of inheritance ──────────────────────────────────────
@@ -3538,6 +3628,7 @@ impl CampaignSim {
                     chead, parent),
             };
             self.houses.push(House {
+            known: std::collections::HashMap::new(),
                 name: cname.clone(), hub: hub as u32, wealth: share, prestige: 0.05,
                 spec: spec.clone(), monopoly: vec![], rivals: vec![], generation: gen,
                 events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
@@ -3617,6 +3708,7 @@ impl CampaignSim {
             text: format!("Founded by {} as a branch of {} in {}", bhead, parent, self.hubs[dest].name),
         };
         self.houses.push(House {
+            known: std::collections::HashMap::new(),
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.1,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
             events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
@@ -4065,6 +4157,7 @@ impl CampaignSim {
         let (fleet_sea, fleet_river, fleet_caravan) =
             Self::initial_fleet(self.hubs[hub].coastal, false);
         self.houses.push(House {
+            known: std::collections::HashMap::new(),
             name, hub: hub as u32, wealth: seed_cap, prestige: 0.0, spec,
             monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),

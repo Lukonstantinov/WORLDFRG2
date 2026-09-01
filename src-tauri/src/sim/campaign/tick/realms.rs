@@ -1706,6 +1706,7 @@ impl CampaignSim {
             let old_house = self.realms[ri].ruling_house as i32;
 
             let new_house = House {
+            known: std::collections::HashMap::new(),
                 name: format!("House {}", heir_person.name), hub: new_capital as u32,
                 wealth: new_wealth, prestige: 0.0, spec: Vec::new(), monopoly: Vec::new(), rivals: Vec::new(),
                 generation: 1, events: Vec::new(), good_profit: Vec::new(), good_volume: Vec::new(),

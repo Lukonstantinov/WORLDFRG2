@@ -99,6 +99,7 @@ impl CampaignSim {
             text: format!("{} departs {} and founds {} in {}", kin.name, parent, bname, self.hubs[dest].name),
         };
         self.houses.push(House {
+            known: std::collections::HashMap::new(),
             name: bname.clone(), hub: dest as u32, wealth: split, prestige: 0.05,
             spec, monopoly: vec![], rivals: vec![hi], generation: 1,
             events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),

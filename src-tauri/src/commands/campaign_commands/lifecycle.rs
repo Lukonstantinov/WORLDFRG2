@@ -428,6 +428,33 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         })
         .collect();
 
+    // WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 (transport modes, capacity half)
+    // — which founding hubs sit on a real NAVIGABLE river, read from the same
+    // `metadata["rivers"]` key `compute_route_days_matrix` now reliably reads
+    // (persisted the moment hydrology runs, not only on a manual save — see
+    // `sim_commands::persist_rivers`). A hub within 1% of world width of any
+    // navigable-river point counts as riverine; that threshold is the same
+    // "documented proxy" scale used elsewhere in this codebase (e.g. `geology.
+    // rs`'s phase-2 climate term) rather than an exact hydrological claim.
+    let river_hubs: std::collections::HashSet<u32> = {
+        let rivers_json = metadata::get_meta(&conn, "rivers").ok().flatten().unwrap_or_default();
+        let rivers: Vec<crate::sim::rivers::River> =
+            serde_json::from_str(&rivers_json).unwrap_or_default();
+        let nav_pts: Vec<(f32, f32)> = rivers.iter().filter(|r| r.navigable)
+            .flat_map(|r| r.points.iter().map(|&(x, y)| (x as f32, y as f32)))
+            .collect();
+        let max_d2 = (grid_w * 0.01).powi(2);
+        if nav_pts.is_empty() { std::collections::HashSet::new() } else {
+            order.iter().filter(|&&hi| {
+                let eh = &econ.hubs[hi];
+                nav_pts.iter().any(|&(rx, ry)| {
+                    let (dx, dy) = (eh.x - rx, eh.y - ry);
+                    dx * dx + dy * dy <= max_d2
+                })
+            }).map(|&hi| econ.hubs[hi].id).collect()
+        }
+    };
+
     let mut hubs: Vec<TickHub> = order
         .iter()
         .map(|&hi| {
@@ -457,6 +484,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             // population, so production = base_per_capita · population thereafter.
             let base_per_capita: Vec<f32> = production.iter().map(|&p| p / founding).collect();
             TickHub {
+            known: std::collections::HashMap::new(),
                 id: eh.id,
                 x: eh.x,
                 y: eh.y,
@@ -482,6 +510,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 parent: -1,
                 koppen: eh.koppen,
                 coastal: eh.coastal,
+                river: river_hubs.contains(&eh.id),
                 component: 0,
                 export_earn: 0.0,
                 import_spend: 0.0,
@@ -795,6 +824,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         let (fleet_sea, fleet_river, fleet_caravan) =
             if hubs[h].coastal { (2u32, 0u32, 1u32) } else { (0u32, 1u32, 2u32) };
         houses.push(House {
+            known: std::collections::HashMap::new(),
             name,
             hub: h as u32,
             wealth: 1.0,
@@ -918,6 +948,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         records: Default::default(),
         quality_migrated: false,
         days: vec![],
+        route_outlet: vec![],
         neighbors: vec![],
         routes_dirty: false,
         warehouses: vec![],
@@ -1031,6 +1062,10 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     // Provinces (Phase 2b): seed the rural reservoir from the stored partition so the
     // countryside can feed the cities. No-op when no province layer was generated.
     seed_campaign_provinces(&conn, &mut sim);
+    // WORLD_AND_TRADE_MASTER_PLAN.md Part III §1/§3.1 — every house's and city's
+    // MAP knowledge, from what it already holds. Must run AFTER `hub_province`/
+    // `prov_neighbors` exist (just above); a no-op on a provinceless world.
+    sim.seed_knowledge();
     // §2.5 · self-calibrate the goods-exploitation yield scalar against THIS world's
     // own starting production, so mean exploitation reads ≈1.0 on day one regardless
     // of world size or belt intensity (mirrors `need_scale`'s own calibration above).

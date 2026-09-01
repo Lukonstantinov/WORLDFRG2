@@ -17,8 +17,34 @@ struct Plate {
     cy: f32,
     is_oceanic: bool,
     density: f32,
-    vx: f32,
-    vy: f32,
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 4 (F5's real root cause) —
+    /// an Euler pole + angular rate REPLACES the old flat `(vx, vy)`
+    /// translation. A real plate rotates about a pole, so its velocity — and
+    /// therefore a boundary's convergence rate and character — varies ALONG
+    /// the boundary's length; a single translation vector makes an entire
+    /// boundary uniformly convergent/divergent/transform end to end, which is
+    /// what made it read as a drawn line rather than a margin. Still
+    /// TRANSIENT (never persisted, never exposed to the frontend) — the same
+    /// "recomputed from seed every phase-1 run, used, discarded" discipline
+    /// `geology.rs` already applies, and deliberately short of the larger
+    /// "promote Plate to persisted world data" architectural change (a
+    /// per-plate UI override, Slice 5) the plan scoped out of one session.
+    pole_x: f32,
+    pole_y: f32,
+    /// Signed angular rate. `velocity_at` turns this into a real (vx, vy) at
+    /// any cell position — never read directly elsewhere.
+    omega: f32,
+}
+
+/// Rigid-body rotation velocity at world position (x, y) for a plate rotating
+/// about its own Euler pole: v = ω × r, r = position − pole (cylindrical-X
+/// wrapped so a pole placed across the seam still gives a continuous field).
+fn plate_velocity_at(plate: &Plate, x: f32, y: f32, world_w: f32) -> (f32, f32) {
+    let mut rx = x - plate.pole_x;
+    if rx > world_w / 2.0 { rx -= world_w; }
+    if rx < -world_w / 2.0 { rx += world_w; }
+    let ry = y - plate.pole_y;
+    (-plate.omega * ry, plate.omega * rx)
 }
 
 /// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 5 (F3, D1): the target fraction of
@@ -71,12 +97,23 @@ pub fn generate_plates_and_landmass_with_target(
         } else {
             0.4 + rng.gen::<f32>() * 0.2
         };
-        let angle = rng.gen::<f32>() * std::f32::consts::TAU;
+        // Slice 4 — the pole sits well OFF the plate's own centroid (a real
+        // Euler pole commonly sits far from the plate it rotates), at a
+        // distance drawn from a real fraction of world width so the boundary
+        // this plate touches spans a genuinely varying distance-and-bearing
+        // from it. `omega` is picked so |v| at the CENTROID roughly matches
+        // the old model's 0.5..1.0 speed range — continuity of scale, not of
+        // mechanism — while cells elsewhere along a shared boundary see a
+        // different distance/angle from the pole and so a different velocity.
+        let pole_angle = rng.gen::<f32>() * std::f32::consts::TAU;
+        let pole_dist = (0.15 + rng.gen::<f32>() * 0.35) * w;
+        let pole_x = cx + pole_angle.cos() * pole_dist;
+        let pole_y = cy + pole_angle.sin() * pole_dist;
         let speed = 0.5 + rng.gen::<f32>() * 0.5;
+        let omega = (if rng.gen::<bool>() { 1.0 } else { -1.0 }) * speed / pole_dist.max(1.0);
         plates.push(Plate {
             cx, cy, is_oceanic, density,
-            vx: angle.cos() * speed,
-            vy: angle.sin() * speed,
+            pole_x, pole_y, omega,
         });
     }
 
@@ -188,8 +225,15 @@ pub fn generate_plates_and_landmass_with_target(
                 let bnx = bx / blen;
                 let bny = by / blen;
 
-                let rel_vx = p1.vx - p2.vx;
-                let rel_vy = p1.vy - p2.vy;
+                // Slice 4 — velocity evaluated AT THIS CELL's own position, not
+                // at the plate centroid: the same boundary is strongly
+                // convergent near one pole-relative bearing and obliquely
+                // transform or divergent elsewhere along its length, exactly
+                // how a real rotating margin varies.
+                let (p1vx, p1vy) = plate_velocity_at(p1, x as f32, y as f32, w);
+                let (p2vx, p2vy) = plate_velocity_at(p2, x as f32, y as f32, w);
+                let rel_vx = p1vx - p2vx;
+                let rel_vy = p1vy - p2vy;
                 let dot = rel_vx * bnx + rel_vy * bny;
                 let cross = (rel_vx * bny - rel_vy * bnx).abs();
 
@@ -412,5 +456,92 @@ pub fn invert_terrain(buf: &mut WorldBuffer) {
         } else if buf.elevation[i] == 0.0 {
             buf.elevation[i] = 0.05;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema;
+    use crate::sim::world_buffer::ColumnSet;
+    use rusqlite::Connection;
+
+    fn gen_world(w: u32, h: u32, seed: u64, plate_count: u32) -> WorldBuffer {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        generate_plates_and_landmass(&mut buf, seed, plate_count);
+        buf
+    }
+
+    /// WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 4 — the real claim: an Euler
+    /// pole makes a boundary's CHARACTER vary along its length, unlike a single
+    /// translation vector (which classifies an entire shared boundary as
+    /// uniformly convergent/divergent/transform, start to end, by construction —
+    /// `rel_vx`/`rel_vy` was one constant number for the whole pair). Measured
+    /// directly on `boundary_type`: for at least one plate pair with a real
+    /// multi-cell shared boundary, the classification is NOT the same at every
+    /// cell of it. A flat-vector model fails this by construction; it cannot
+    /// pass by accident, because a constant relative-velocity vector dotted
+    /// against a per-cell normal only changes classification where the BISECTOR
+    /// direction itself bends (rare on a Voronoi edge, and never the mechanism
+    /// this gate is checking for).
+    #[test]
+    fn boundary_character_varies_along_its_length() {
+        let mut found_varying_pair = false;
+        for seed in 0..8u64 {
+            let buf = gen_world(360, 180, seed, 10);
+            // (plate_a, plate_b) -> set of boundary types seen along their shared edge.
+            let mut pair_types: std::collections::HashMap<(u16, u16), std::collections::HashSet<u8>> =
+                std::collections::HashMap::new();
+            for y in 0..buf.height {
+                for x in 0..buf.width {
+                    let idx = buf.idx(x, y);
+                    let bt = buf.boundary_type[idx];
+                    if bt == BOUNDARY_NONE { continue; }
+                    let my_plate = buf.plate_index[idx];
+                    let nx = buf.wrap_x(x as i32 + 1);
+                    let np = buf.plate_index[buf.idx(nx, y)];
+                    if np != my_plate {
+                        let key = (my_plate.min(np), my_plate.max(np));
+                        pair_types.entry(key).or_default().insert(bt);
+                    }
+                    if y + 1 < buf.height {
+                        let np2 = buf.plate_index[buf.idx(x, y + 1)];
+                        if np2 != my_plate {
+                            let key = (my_plate.min(np2), my_plate.max(np2));
+                            pair_types.entry(key).or_default().insert(bt);
+                        }
+                    }
+                }
+            }
+            if pair_types.values().any(|types| types.len() >= 2) {
+                found_varying_pair = true;
+                break;
+            }
+        }
+        assert!(found_varying_pair,
+            "expected at least one plate pair, across 8 seeds, whose shared boundary \
+             shows more than one boundary_type along its length — an Euler-pole \
+             velocity field should produce this; a flat per-plate vector cannot");
+    }
+
+    /// The Earth-parameter no-op discipline (rule 10) doesn't apply to plate
+    /// generation directly, but DETERMINISM does: the same seed must reproduce
+    /// the identical plate layout and boundary classification (the pole/omega
+    /// draw uses the same seeded RNG stream as everything else here).
+    #[test]
+    fn plate_generation_is_deterministic() {
+        let a = gen_world(200, 100, 12345, 8);
+        let b = gen_world(200, 100, 12345, 8);
+        assert_eq!(a.terrain, b.terrain);
+        assert_eq!(a.boundary_type, b.boundary_type);
+        assert_eq!(a.plate_index, b.plate_index);
     }
 }
