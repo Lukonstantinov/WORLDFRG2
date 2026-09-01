@@ -1079,6 +1079,13 @@ impl CampaignSim {
                         else if _why_slot { self.diag_why_slot += 1; }
                         else if _why_cash { self.diag_why_cash += 1; }
                         else if _why_bar { self.diag_why_bar += 1; }
+                        // N1 (the keystone, ACTORS_AND_CARRIAGE_PLAN.md §3.1) — a long
+                        // haul with no house carrier does not sail at all rather than
+                        // moving for free. Dead at N1_LOCAL_HAUL_BIND_DAYS = INFINITY.
+                        if days > N1_LOCAL_HAUL_BIND_DAYS {
+                            self.diag_why_no_carrier_bind += 1;
+                            continue;
+                        }
                     }
                     surplus -= amount;
                     stock_take(&mut self.hubs[a].stock, g, amount);
@@ -1203,8 +1210,16 @@ impl CampaignSim {
                         hash01(self.seed,
                             (tick as u64) ^ 0x5EA10 ^ ((a as u64) << 8) ^ (b as u64),
                             g as u64) < p
-                    } else { false };
-                    if lost {
+                    } else {
+                        // N1b (ACTORS_AND_CARRIAGE_PLAN.md §3.1) — ownerless cargo can
+                        // sink too, dosed independently from the house rates above.
+                        // Shipped at N1B_OWNERLESS_LOSS_RATE = 0.0, so this roll never
+                        // fires and the branch is dead code today.
+                        N1B_OWNERLESS_LOSS_RATE > 0.0 && hash01(self.seed,
+                            (tick as u64) ^ 0x0E15E ^ ((a as u64) << 8) ^ (b as u64),
+                            g as u64) < N1B_OWNERLESS_LOSS_RATE
+                    };
+                    if lost && owner >= 0 {
                         let oi = owner as usize;
                         let invested = amount * pa;
                         self.houses[oi].wealth = (self.houses[oi].wealth - invested).max(0.0);
@@ -1230,6 +1245,11 @@ impl CampaignSim {
                         });
                         self.diag_lost += 1;
                         // Cargo is gone — never delivered (source already debited).
+                        continue;
+                    } else if lost {
+                        // Ownerless loss: nobody to charge, no fleet to damage, no
+                        // house event to chronicle — the cargo simply never arrives.
+                        self.diag_lost += 1;
                         continue;
                     }
                     self.diag_shipments += 1;
@@ -1355,6 +1375,7 @@ impl CampaignSim {
                         home: if owner >= 0 { a as i32 } else { -1 },
                         contract: false,
                         price: pa,
+                        local: owner < 0 && days <= LOCAL_HAUL_DAYS,
                     });
                     self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
                 }
@@ -1475,6 +1496,7 @@ impl CampaignSim {
             home: -1,
             contract: false,
             price: pb_buy,
+            local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
     }

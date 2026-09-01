@@ -7,10 +7,15 @@ the campaign is a very good model of **accumulation** and a thin one of
 made every real trading institution rich — refusing, excluding, compelling — are
 either absent or wired to a rounding error.*
 
-**Status: measured and planned. One diagnostic built (`econ_measure_carrier_mix`);
-no proposal implemented.** The measurement is the load-bearing part of this
-document — it invalidated the first version of its own keystone proposal, which is
-recorded in §5.1 rather than quietly corrected.
+**Status: measured and planned. One diagnostic built (`econ_measure_carrier_mix`).
+Two proposals shipped at ZERO DOSE — N8 (market book honesty, §3.8) is fully done;
+N1's mechanism (§3.1) is wired but its constant sits at `INFINITY`/`0.0`, so it is
+provably bit-identical and the dose walk itself has not started. N2–N7 remain
+planned only** — each needs its own multi-commit, iteratively-measured dose walk
+per §4.1, which is why they were not attempted in the same pass as N1's mechanism.
+The measurement is the load-bearing part of this document — it invalidated the
+first version of its own keystone proposal, which is recorded in §5.1 rather than
+quietly corrected.
 
 Read `FIX_PLAN.md` for the wider prioritisation and `SCOREBOARD.md` for what is
 measured. This document is the campaign-side counterpart to
@@ -162,7 +167,7 @@ written and the guild path routes around it.
 
 Each carries a gate that is **not** the metric it targets (§2.4 of `CLAUDE.md`).
 
-### 3.1 N1 · Make the local haul bind — *the keystone*
+### 3.1 N1 · Make the local haul bind — *the keystone* (mechanism shipped at zero dose)
 
 `LOCAL_HAUL_DAYS` already exists and currently only *labels*. Make it bind: the
 ownerless residual may carry a haul shorter than the threshold and nothing longer.
@@ -186,6 +191,20 @@ differently` holds at ≥1.05×; top-10 % share stays in 0.60–0.90. The win co
 is promoting `integration_gradient` from `is_finite()` to a real assertion against
 `ECON_INTEGRATION_FLOOR`, per §2.5's "promote a printed metric as the model earns
 it".
+
+**Shipped (this pass): the mechanism only, at zero dose.** `N1_LOCAL_HAUL_BIND_DAYS`
+(`tick/mod.rs`) is a real bind clause inside `dispatch`'s ownerless branch — a leg
+longer than the threshold `continue`s (does not sail) instead of moving for free.
+Set to `f32::INFINITY`, which is provably dead code (no finite `days` can exceed
+it) and gated bit-identical by `n1_and_n1b_ship_at_zero_dose_are_noops`
+(`economy_validation.rs`). `N1B_OWNERLESS_LOSS_RATE` (`0.0`) is the matching hook
+for N1b — the `lost` roll for an ownerless leg is now a real (dosed) roll rather
+than the literal `false` the plan measured, but at zero dose it never fires; an
+ownerless loss (when dosed above zero) charges no house and chronicles no event,
+since nobody owns the cargo to be billed. **The dose walk itself — the volume/
+`lack_basic`/inheritance/top-10% gates above, walked down from infinity — is NOT
+done.** That is deliberately its own, separately-measured, multi-commit exercise
+per §4.1, not something to rush inside the same change that built the mechanism.
 
 ### 3.2 N2 · Ban the cargo, not the carrier
 
@@ -300,7 +319,7 @@ failure `realm_secession_pass` exists to prevent. A boycotted city's trade must
 visibly reroute. Realm formation must not collapse: a league is a rival to a crown,
 not a replacement.
 
-### 3.8 N8 · Make the market book honest — *free, do first*
+### 3.8 N8 · Make the market book honest — *free, do first* (SHIPPED)
 
 Write `SUPPLY_LOCAL`; attribute arrivals by actual carrier instead of booking every
 arrival `SUPPLY_FOREIGN`; and stop splitting the residual into two invented classes
@@ -310,6 +329,20 @@ honest name is *the open market*.
 **Gate.** `cargo check --lib --tests` + `npx tsc --noEmit`. No sim gate — nothing in
 the tick reads these. The five class shares must sum to the hub's actual
 throughput; they currently do not.
+
+**Shipped: the supply-book half.** `InTransit.local` (serde-defaulted `false`)
+carries whether an ownerless leg cleared `LOCAL_HAUL_DAYS` at dispatch; the arrival
+pass in `mod.rs` now books `SUPPLY_HOUSE` / `SUPPLY_LOCAL` / `SUPPLY_FOREIGN` by
+the real carrier instead of always `SUPPLY_FOREIGN`. Gated by
+`n8_arrivals_attribute_supply_local_by_real_carrier` (`economy_validation.rs`).
+**Not shipped: the third part** — merging `tw_local`/`tw_guild` (the population-
+estimate split behind "local merchants" vs "guilds" in the UI, §2.2) into one
+honest "open market" class. That touches the frontend bridge/types and several
+`read_money.rs`/`read_colonies.rs` call sites for a class split that already sums
+correctly (unlike the supply-book bug above), so it carries real risk for no
+`econ_` gate to catch a mistake against — left for N1's own dose-walk pass, when
+the words `local`/`guild` will mean something again and the rename can be judged
+against real behaviour instead of done blind.
 
 ---
 

@@ -929,9 +929,15 @@ serde-defaulted so old saves load). Grouped by theme:
   so a guild specialises in nothing and is preferred for everything at its home city.
   That is a bug, not a balance choice; the fix and the proposed rename to **Company**
   are `ACTORS_AND_CARRIAGE_PLAN.md` §3.3.
-- **`SUPPLY_LOCAL` is never written.** One of the five `supply_accum` seller classes
-  the City Market view shows is structurally always zero, and every ARRIVAL books as
-  `SUPPLY_FOREIGN` regardless of who carried it. Fix: same plan, §3.8.
+- **`SUPPLY_LOCAL` is now written (N8, `docs/ACTORS_AND_CARRIAGE_PLAN.md` §3.8,
+  shipped).** Every arrival used to book `SUPPLY_FOREIGN` regardless of who carried
+  it — one of the five `supply_accum` seller classes the City Market view shows was
+  structurally always zero. `InTransit.local` (serde-defaulted false, so an
+  old save's in-flight cargo keeps booking `SUPPLY_FOREIGN` exactly as before)
+  carries whether an ownerless leg cleared `LOCAL_HAUL_DAYS` at dispatch, and the
+  arrival pass now books `SUPPLY_HOUSE` / `SUPPLY_LOCAL` / `SUPPLY_FOREIGN` by the
+  real carrier. No sim gate needed — nothing in the tick reads `supply_accum`, only
+  the query layer. Gate: `n8_arrivals_attribute_supply_local_by_real_carrier`.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
@@ -962,6 +968,15 @@ Three facts about the campaign that are easy to miss and shape any change here:
   MOVES**, and any embargo built on `house_barred` touches 0.1% of trade. Do not
   reason about trade volume, fleet economics or exclusion without reading
   `docs/ACTORS_AND_CARRIAGE_PLAN.md` §1 first.
+  **N1 (the plan's keystone) is now wired at zero dose.** `N1_LOCAL_HAUL_BIND_DAYS`
+  (currently `INFINITY`) is a real bind clause in `dispatch`: an ownerless leg
+  longer than the threshold does not sail at all, rather than moving for free. At
+  infinity the clause is provably dead code (`n1_and_n1b_ship_at_zero_dose_are_
+  noops`), so the 96%/4% split above is still exactly today's measured behaviour —
+  the dose walk down from infinity is separate, multi-commit, gated work (§4 of the
+  plan) and has NOT been done. `N1B_OWNERLESS_LOSS_RATE` (currently `0.0`) is the
+  same shape for letting ownerless cargo sink — `let lost = if owner >= 0 {..}`
+  above is no longer literal, but the roll never fires at zero dose.
 - **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the

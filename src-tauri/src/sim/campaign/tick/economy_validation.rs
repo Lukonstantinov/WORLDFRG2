@@ -2406,3 +2406,66 @@ fn econ_measure_carrier_mix() {
         println!("    and `let lost = if owner >= 0 {{..}} else {{ false }}` — it never sinks.");
     }
 }
+
+/// N1 · N1b (`ACTORS_AND_CARRIAGE_PLAN.md` §3.1) ship at zero dose and must
+/// prove bit-identical before any dose walk begins (§4.1 rule 1: "ship at zero
+/// dose and prove bit-identity first"). Cheap and NOT `#[ignore]`d — a real
+/// multi-house, multi-good world run for a season, asserting the bind clause
+/// never fires (no finite travel-days value can exceed `INFINITY`) and that an
+/// ownerless voyage never sinks on its own (`N1B_OWNERLESS_LOSS_RATE = 0.0`),
+/// exactly the pre-N1/N1b behaviour the plan measured. `econ_measure_carrier_
+/// mix` above already proves the world genuinely ships ownerless cargo, so this
+/// doesn't need its own 60-year run to be meaningful.
+#[test]
+fn n1_and_n1b_ship_at_zero_dose_are_noops() {
+    assert_eq!(N1_LOCAL_HAUL_BIND_DAYS, f32::INFINITY);
+    assert_eq!(N1B_OWNERLESS_LOSS_RATE, 0.0);
+    let mut s = reference_world();
+    let mut total_bind = 0u64;
+    let mut total_shipments = 0u64;
+    let mut ownerless_shipments = 0u64;
+    for _ in 0..3u32 {
+        s.diag_why_no_carrier_bind = 0;
+        s.diag_shipments = 0;
+        s.diag_by_guild = 0;
+        s.advance(90);
+        total_bind += s.diag_why_no_carrier_bind as u64;
+        total_shipments += s.diag_shipments as u64;
+        ownerless_shipments += s.diag_by_guild as u64;
+    }
+    assert!(total_shipments > 0, "the reference world must actually trade");
+    assert!(ownerless_shipments > 0, "the reference world must actually ship ownerless cargo");
+    assert_eq!(total_bind, 0,
+        "N1_LOCAL_HAUL_BIND_DAYS = INFINITY must make the bind clause dead code");
+}
+
+/// N8 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.8) · every arrival used to book
+/// `SUPPLY_FOREIGN` regardless of who carried it, so `SUPPLY_LOCAL` was
+/// structurally always zero — one of the five seller classes the City Market
+/// view shows could never be anything but empty. This is the gate the plan
+/// names: "the five class shares must sum to the hub's actual throughput; they
+/// currently do not." On a real world with genuine ownerless short-haul traffic
+/// (`econ_measure_carrier_mix` measures 58.6% "no house at either end" on this
+/// exact world), `SUPPLY_LOCAL` must now actually accrue.
+#[test]
+fn n8_arrivals_attribute_supply_local_by_real_carrier() {
+    let mut s = reference_world();
+    s.advance(365 * 2);
+    let ng = s.goods.len();
+    let mut local_total = 0.0f32;
+    let mut sum_all = 0.0f32;
+    for h in &s.hubs {
+        if h.supply_accum.len() != ng * SUPPLY_CLASSES { continue; }
+        for g in 0..ng {
+            let base = g * SUPPLY_CLASSES;
+            for c in 0..SUPPLY_CLASSES {
+                sum_all += h.supply_accum[base + c].max(0.0);
+            }
+            local_total += h.supply_accum[base + SUPPLY_LOCAL].max(0.0);
+        }
+    }
+    assert!(sum_all > 0.0, "the world must have some recent supply to attribute");
+    assert!(local_total > 0.0,
+        "an ownerless short-haul arrival must book SUPPLY_LOCAL — it was structurally \
+         always zero before this fix");
+}

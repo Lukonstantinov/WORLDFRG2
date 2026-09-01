@@ -264,6 +264,7 @@ impl CampaignSim {
                 owner: seller as i32, sea, river: false, phase: 1, home: -1, // one-way: no return leg
                 contract: true, // its vessel is held by the standing contract reservation
                 price: pt,
+                local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);

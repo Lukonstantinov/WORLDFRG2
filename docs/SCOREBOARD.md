@@ -83,6 +83,65 @@ draws, no control-flow change, serde-defaulted.
 
 ---
 
+## 2026-09-01b — N8 shipped; N1's mechanism wired at zero dose
+
+Follow-up to the measurement above, same day. Two of the plan's eight proposals
+acted on; the other six (N2–N7) deliberately left planned-only — each needs its
+own iteratively-dosed, multi-commit measurement pass per §4.1 of the plan, which
+is not something to rush inside the pass that built N1's mechanism.
+
+**N8 (§3.8, market book honesty) — done.** `InTransit` gains `local: bool`
+(serde-defaulted `false`, so an old save's in-flight cargo keeps booking exactly
+as before), set at dispatch time to `owner < 0 && days <= LOCAL_HAUL_DAYS`. The
+arrival pass in `mod.rs` now books `SUPPLY_HOUSE` / `SUPPLY_LOCAL` /
+`SUPPLY_FOREIGN` by the real carrier instead of always `SUPPLY_FOREIGN` — the
+concrete bug the plan named ("one of the five seller classes the City Market view
+shows is structurally always zero"). New gate
+`n8_arrivals_attribute_supply_local_by_real_carrier`: on the reference world,
+`SUPPLY_LOCAL` now genuinely accrues. No sim exposure — nothing in the tick reads
+`supply_accum`, only the query layer — so no `econ_`/dynamics move is expected or
+found. The plan's third part (merging `tw_local`/`tw_guild` into one "open
+market" class) is explicitly NOT done: it touches the frontend bridge/types for a
+class split that already sums correctly, with no `econ_` gate to catch a mistake,
+and reads better once N1 gives the words `local`/`guild` real meaning.
+
+**N1 (§3.1, the keystone) — mechanism only, shipped at zero dose.**
+`N1_LOCAL_HAUL_BIND_DAYS` (`tick/mod.rs`) is now a real bind clause inside
+`dispatch`'s ownerless branch: a leg longer than the threshold does not sail at
+all. Shipped at `f32::INFINITY` — provably dead code, since no finite `days`
+value can exceed it. `N1B_OWNERLESS_LOSS_RATE` is the matching hook for letting
+ownerless cargo sink (today `let lost = if owner >= 0 {..} else { false }` is no
+longer literally true, but the roll is gated `> 0.0 &&` and shipped at `0.0`, so
+it never fires); when dosed above zero the loss charges no house and chronicles
+no event, since an ownerless voyage has no owner to bill. New gate
+`n1_and_n1b_ship_at_zero_dose_are_noops` (not `#[ignore]`d, ~0.03s): asserts both
+constants at their zero-dose values and runs the reference world for a season,
+asserting the bind counter stays zero while the world genuinely ships both
+house-owned and ownerless cargo. **The dose walk itself — volume / `lack_basic` /
+`econ_inheritance_rules_fragment_differently` / top-10% share, walked down from
+infinity per the plan's own gate — has NOT been done**; that is its own
+separately-measured exercise, exactly as the plan's build order requires.
+
+Gates run (rule §2.8: `sim/campaign/tick/**` → `tick::tests` + `econ_`, plus the
+two new tests above): `tick::tests` **164 passed, 0 failed** (2 ignored);
+`econ_` (non-`#[ignore]`d) **5 passed, 0 failed**, including
+`econ_inheritance_rules_fragment_differently` (still green — re-checked per the
+entry above's own instruction to re-run it around every change in this area);
+`cargo check --lib --tests` clean. Full `cargo test --lib` (all non-ignored):
+**389 passed, 1 failed** (36 ignored) — the one failure
+(`elevation_model_tests::every_elevation_model_builds_a_different_world`,
+terrain/elevation code this change never touches) is **pre-existing on this
+branch with the diff stashed out** (fails identically, unrelated to N1/N8). No
+frontend files touched, so `npx tsc --noEmit` was not required by the §2.8
+routing table and was not run.
+
+Docs updated in the same commit: `ACTORS_AND_CARRIAGE_PLAN.md` §3.1/§3.8 marked
+with what shipped vs. what's still planned; `CLAUDE.md` §5's flavour-layer
+paragraph, two-guilds bug and §5.1 structural-limits entries (`SUPPLY_LOCAL`,
+"96% of shipments") updated to describe the current, not the pre-plan, state.
+
+---
+
 ## 2026-08-31b — `PORTS_JUNCTIONS_AND_PROVINCE_VIEW_PLAN.md`: slices 5 and 8, asked for by name
 
 Follow-up to the same day's earlier entry, which built six of eight slices and held
