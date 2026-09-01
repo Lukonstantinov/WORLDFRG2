@@ -58,6 +58,158 @@ fn plate_velocity_at(plate: &Plate, x: f32, y: f32, world_w: f32) -> (f32, f32) 
 /// the luck of one coin-flip sequence.
 pub const DEFAULT_OCEAN_FRACTION: f32 = 0.70;
 
+/// Domain-warp amplitude for the plate partition, as a fraction of the mean
+/// plate spacing (see the long note in `warped_voronoi`).
+///
+/// These three constants were set by `diag_sweep_plate_warp`, not by eye — the
+/// sweep maximises the fall in local margin straightness (the goal) subject to
+/// worst-plate connectivity staying above 0.90 (the constraint: warp a sample
+/// far enough and it lands inside a neighbouring plate, so the partition sheds
+/// detached specks that `boundary_type` then reads as phantom plate boundaries).
+/// Measured over 3 seeds at 360×180, 10 plates — plain Voronoi scores 0.449:
+///
+/// | amp | wav | clamp | straightness | worst conn |
+/// |----|----|----|----|----|
+/// | 0.25 | 2.50 | 0.80 | 0.424 | 1.000 |
+/// | 0.35 | 2.50 | 0.80 | 0.407 | 0.991 |
+/// | **0.25** | **0.80** | **0.80** | **0.357** | **0.942** | ← shipped
+/// | 0.25 | 0.80 | 1.20 | 0.339 | 0.908 | (too near the bar)
+/// | 0.35 | 0.80 | 0.80 | 0.307 | 0.518 | (shredded)
+///
+/// Note the shape of it: a LONG wavelength barely curves a margin at all (it
+/// translates whole plates instead), and a large amplitude shreds them. The
+/// usable region is a short wavelength at a modest, tightly-clamped amplitude.
+const PLATE_WARP_AMP_FRAC: f32 = 0.25;
+/// Wavelength of the warp's LOWEST octave, in plate spacings. See the table
+/// above `PLATE_WARP_AMP_FRAC`.
+const PLATE_WARP_WAVELENGTHS: f32 = 0.80;
+/// How many standard deviations of the normalized warp field a single cell may
+/// be displaced by. The field is near-gaussian, so without a clamp its tail
+/// cells travel several sigma — deep into a neighbouring plate — and the
+/// partition sheds detached specks. See the table above `PLATE_WARP_AMP_FRAC`.
+const PLATE_WARP_SIGMA_CLAMP: f32 = 0.80;
+
+/// Assign every cell to its nearest plate seed — the Voronoi partition — but at
+/// a DOMAIN-WARPED sample position rather than the cell's own.
+///
+/// `warp_frac` is the warp amplitude as a fraction of the mean plate spacing.
+/// **Zero reproduces the plain Voronoi partition exactly**, which is what makes
+/// this function its own control: `plate_margins_are_not_straight_bisectors`
+/// calls it twice on identical seeds, once at 0 and once at the shipped value,
+/// so the gate compares the warp against the real thing it replaced instead of
+/// against a reconstruction that could silently drift out of step.
+///
+/// Rayon-parallel: each cell's nearest-plate scan is independent of every
+/// other cell's (§8.9 rule 2).
+pub(crate) fn warped_voronoi(
+    seeds: &[(f32, f32)], width: u32, height: u32, count: usize, seed: u64, warp_frac: f32,
+) -> Vec<u16> {
+    warped_voronoi_tuned(seeds, width, height, count, seed, warp_frac,
+                         PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP)
+}
+
+/// `warped_voronoi` with its two shape knobs exposed, so `diag_sweep_plate_warp`
+/// can measure the (amplitude, wavelength, clamp) space instead of guessing at
+/// it. Production always goes through `warped_voronoi`, which pins them to the
+/// shipped constants.
+pub(crate) fn warped_voronoi_tuned(
+    seeds: &[(f32, f32)], width: u32, height: u32, count: usize, seed: u64, warp_frac: f32,
+    wavelengths: f32, sigma_clamp: f32,
+) -> Vec<u16> {
+    let w = width as f32;
+    let h = height as f32;
+    let total = (width as usize) * (height as usize);
+    // Amplitude is stated as a fraction of the mean PLATE SPACING, never in
+    // cells (rule 25's spirit): the warp has to scale with the feature it
+    // perturbs, or a 6-plate world is unrecognisably scrambled while a 40-plate
+    // world is untouched.
+    let plate_spacing = (w * h / count.max(1) as f32).sqrt();
+    let warp_amp = plate_spacing * warp_frac;
+    let warp_freq = 1.0 / (plate_spacing * wavelengths);
+
+    // ── The warp field, NORMALIZED EMPIRICALLY ──────────────────────────────
+    // NEGATIVE RESULT, recorded so it is not repeated (§2.4): the first version
+    // used `fbm_noise(..) - 0.5` inline, on the documented assumption that fbm
+    // returns 0..1 and so centres on 0.5. It does not. `fbm_noise` AVERAGES its
+    // octaves (`val / max_amp`), and an average of octaves concentrates hard
+    // about its own mean with much-reduced variance — measured on this world it
+    // spans about 0.11..0.40, mean ≈ 0.28. Subtracting 0.5 therefore yields an
+    // almost entirely NEGATIVE, nearly constant number, which TRANSLATES the
+    // sample field instead of bending it. The partition duly changed (10% of
+    // cells flipped, all of them near a margin) while the margins stayed exactly
+    // as straight as before — the gate measured 0.504 → 0.498 straightness and
+    // was right to fail. A displaced straight line is a straight line.
+    //
+    // So the field is centred and scaled on its OWN measured spread rather than
+    // an assumed range. This is robust to whatever distribution `fbm_noise`
+    // actually has, which is the property that was missing.
+    let raw: Vec<(f32, f32)> = (0..total)
+        .into_par_iter()
+        .map(|idx| {
+            let x = (idx as u32 % width) as f32;
+            let y = (idx as u32 / width) as f32;
+            // 4 octaves: the low ones give the margin its broad sweep (an arc, a
+            // re-entrant), the high ones its ragged detail. A single octave
+            // bends a margin into a plain sine; real plate margins are fractal.
+            (
+                fbm_noise(x * warp_freq + 13.0, y * warp_freq + 71.0,
+                          seed ^ 0x9E37_79B9_7F4A_7C15, 4, 2.0, 0.5),
+                fbm_noise(x * warp_freq + 157.0, y * warp_freq + 29.0,
+                          seed ^ 0xC2B2_AE3D_27D4_EB4F, 4, 2.0, 0.5),
+            )
+        })
+        .collect();
+    // Centre on the mean and scale by the standard deviation, so `warp_amp` is a
+    // real 1-sigma displacement in cells whatever fbm's own spread turns out to
+    // be. Scaling by min/max instead would let one outlier cell set the gain for
+    // the whole world.
+    let inv_n = 1.0 / total.max(1) as f32;
+    let (mx, my) = raw.iter().fold((0.0f32, 0.0f32), |a, r| (a.0 + r.0, a.1 + r.1));
+    let (mx, my) = (mx * inv_n, my * inv_n);
+    let (vx, vy) = raw.iter().fold((0.0f32, 0.0f32), |a, r| {
+        (a.0 + (r.0 - mx) * (r.0 - mx), a.1 + (r.1 - my) * (r.1 - my))
+    });
+    let sx_scale = (vx * inv_n).sqrt().max(1e-6);
+    let sy_scale = (vy * inv_n).sqrt().max(1e-6);
+
+    (0..total)
+        .into_par_iter()
+        .map(|idx| {
+            let x = (idx as u32 % width) as f32;
+            let y = (idx as u32 / width) as f32;
+            let (sx, sy) = if warp_amp > 0.0 {
+                // CLAMPED in sigma: the normalized field is roughly gaussian, so
+                // its tail cells would otherwise be displaced several sigma — far
+                // enough to land deep inside a neighbouring plate and shred the
+                // partition (`plate_territory_stays_connected`'s failure).
+                let wx = ((raw[idx].0 - mx) / sx_scale).clamp(-sigma_clamp, sigma_clamp);
+                let wy = ((raw[idx].1 - my) / sy_scale).clamp(-sigma_clamp, sigma_clamp);
+                // Y is CLAMPED, never wrapped (rule 6): a warp that pushed a
+                // polar sample past the pole and out the far side would tear
+                // the partition along the top and bottom rows.
+                (x + wx * warp_amp, (y + wy * warp_amp).clamp(0.0, h - 1.0))
+            } else {
+                (x, y)
+            };
+            let mut best_dist = f32::MAX;
+            let mut best_plate = 0u16;
+            for (pi, &(cx, cy)) in seeds.iter().enumerate() {
+                let mut dx = sx - cx;
+                // Wrap distance for cylindrical topology
+                if dx > w / 2.0 { dx -= w; }
+                if dx < -w / 2.0 { dx += w; }
+                let dy = sy - cy;
+                let dist = dx * dx + dy * dy;
+                if dist < best_dist {
+                    best_dist = dist;
+                    best_plate = pi as u16;
+                }
+            }
+            best_plate
+        })
+        .collect()
+}
+
 /// Generate tectonic plates and derive landmass from plate types.
 /// Matches WF1 plate-generator.ts algorithm.
 pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_count: u32) {
@@ -117,30 +269,38 @@ pub fn generate_plates_and_landmass_with_target(
         });
     }
 
-    // Assign cells to nearest plate (Voronoi). Rayon-parallel: each cell's
-    // nearest-plate scan is independent of every other cell's (§8.9 rule 2).
-    buf.plate_index = (0..buf.total())
-        .into_par_iter()
-        .map(|idx| {
-            let x = (idx as u32 % buf.width) as f32;
-            let y = (idx as u32 / buf.width) as f32;
-            let mut best_dist = f32::MAX;
-            let mut best_plate = 0u16;
-            for (pi, plate) in plates.iter().enumerate() {
-                let mut dx = x - plate.cx;
-                // Wrap distance for cylindrical topology
-                if dx > w / 2.0 { dx -= w; }
-                if dx < -w / 2.0 { dx += w; }
-                let dy = y - plate.cy;
-                let dist = dx * dx + dy * dy;
-                if dist < best_dist {
-                    best_dist = dist;
-                    best_plate = pi as u16;
-                }
-            }
-            best_plate
-        })
-        .collect();
+    // Assign cells to nearest plate (Voronoi) — but at a DOMAIN-WARPED sample
+    // position, not the cell's own. Rayon-parallel: each cell's nearest-plate
+    // scan is independent of every other cell's (§8.9 rule 2).
+    //
+    // ── WHY THE WARP IS HERE AND NOT DOWNSTREAM ──────────────────────────────
+    // A plain Voronoi partition's every boundary is a straight line — the
+    // perpendicular bisector of two seed points, exactly. `boundary_type` is
+    // read off `plate_index`, the orogeny belt is a distance field from
+    // `boundary_type`, and the coastline is a threshold on plate crust, so a
+    // straight partition makes a straight mountain range, a straight rift and a
+    // straight margin, all at once. Downstream passes each grew their OWN warp
+    // to hide this (`elevation.rs`'s `oro_warp_*` warps the orogeny LOOKUP;
+    // `warp_terrain_boundary` warps the coastline) — but warping a lookup only
+    // bends where a straight line is SAMPLED FROM. The line is still there, and
+    // each pass bends it differently, so the range, the rift and the coast stop
+    // agreeing with each other about where the margin runs.
+    //
+    // Warping the PARTITION fixes all of them at once and keeps them consistent:
+    // there is no straight line left anywhere downstream to bend, because the
+    // plate margin itself is now an irregular curve. Real plate boundaries are
+    // fractal at every scale (the Andean margin, the Mid-Atlantic Ridge's
+    // transform-offset staircase) — which is what a multi-octave warp draws and
+    // a single-octave one cannot.
+    //
+    // Amplitude is stated as a fraction of the mean PLATE SPACING, never in
+    // cells (rule 25's spirit): the warp has to scale with the feature it
+    // perturbs, or a 6-plate world is unrecognisably scrambled while a 40-plate
+    // world is untouched. Kept well under 0.5 so the warp bends a margin without
+    // detaching territory from its own plate.
+    let seeds: Vec<(f32, f32)> = plates.iter().map(|p| (p.cx, p.cy)).collect();
+    buf.plate_index = warped_voronoi(
+        &seeds, buf.width, buf.height, count, seed, PLATE_WARP_AMP_FRAC);
 
     // Slice 5: reassign is_oceanic to hit `ocean_fraction` BY CONSTRUCTION, from
     // each plate's REAL cell count (measured from the Voronoi assignment just
@@ -543,5 +703,223 @@ mod tests {
         assert_eq!(a.terrain, b.terrain);
         assert_eq!(a.boundary_type, b.boundary_type);
         assert_eq!(a.plate_index, b.plate_index);
+    }
+
+    /// LOCAL STRAIGHTNESS of a partition's margins, in 0..1 — the metric this
+    /// gate turns on, and the second one tried.
+    ///
+    /// NEGATIVE RESULT, recorded so it is not attempted again (§2.4): the first
+    /// version measured TOTAL BOUNDARY LENGTH, on the reasoning that a straight
+    /// bisector is the shortest curve between two triple junctions so curvature
+    /// can only lengthen it. That is true of one segment and false of a
+    /// partition: a warp that bows one margin outward bows its neighbour inward
+    /// by the same amount, so the total is very nearly conserved. Measured, the
+    /// warped partition came out at 1.00× the unwarped one (5682 vs 5672 cells)
+    /// while the margins were visibly, strongly curved. A global length metric
+    /// cannot see this; the question is local.
+    ///
+    /// So: for each boundary cell, take the boundary cells within a disc of
+    /// radius R and compare the SPAN (greatest distance between any two of them)
+    /// to how many there are. A straight margin puts ~2R+1 cells in the disc
+    /// spanning ~2R, scoring ~1.0. A margin that wanders inside the same disc
+    /// packs in more cells for the same span, scoring lower. Returns the mean
+    /// over a sample of boundary cells.
+    fn margin_straightness(index: &[u16], w: u32, h: u32, r: i32) -> f32 {
+        let R: i32 = r;
+        let idx = |x: u32, y: u32| (y * w + x) as usize;
+        let wrap = |x: i32| ((x % w as i32) + w as i32) % w as i32;
+        let is_boundary = |x: u32, y: u32| -> bool {
+            let me = index[idx(x, y)];
+            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                let nx = wrap(x as i32 + dx) as u32;
+                let ny = y as i32 + dy;
+                if ny < 0 || ny >= h as i32 { continue; }
+                if index[idx(nx, ny as u32)] != me { return true; }
+            }
+            false
+        };
+        let (mut sum, mut n) = (0.0f32, 0usize);
+        // Sample every 3rd row/col: the measure is a mean, and a full scan of a
+        // disc per boundary cell is O(area · R²) for no extra signal.
+        let mut y = R as u32;
+        while y + (R as u32) < h {
+            let mut x = 0u32;
+            while x < w {
+                if is_boundary(x, y) {
+                    let mut pts: Vec<(f32, f32)> = Vec::new();
+                    for dy in -R..=R {
+                        for dx in -R..=R {
+                            if dx * dx + dy * dy > R * R { continue; }
+                            let nx = wrap(x as i32 + dx) as u32;
+                            let ny = y as i32 + dy;
+                            if ny < 0 || ny >= h as i32 { continue; }
+                            if is_boundary(nx, ny as u32) {
+                                pts.push((dx as f32, dy as f32));
+                            }
+                        }
+                    }
+                    if pts.len() >= 4 {
+                        let mut span = 0.0f32;
+                        for i in 0..pts.len() {
+                            for j in (i + 1)..pts.len() {
+                                let d = ((pts[i].0 - pts[j].0).powi(2)
+                                    + (pts[i].1 - pts[j].1).powi(2)).sqrt();
+                                if d > span { span = d; }
+                            }
+                        }
+                        sum += span / pts.len() as f32;
+                        n += 1;
+                    }
+                }
+                x += 3;
+            }
+            y += 3;
+        }
+        if n == 0 { 0.0 } else { sum / n as f32 }
+    }
+
+    /// THE STRAIGHT-MOUNTAIN GATE. A plain Voronoi partition's boundaries are
+    /// straight bisectors BY CONSTRUCTION, and every downstream landform is
+    /// derived from them: `boundary_type` is read off `plate_index`, the orogeny
+    /// belt is a distance field from `boundary_type`, and `deposits.rs` reads the
+    /// same column as tectonic setting. A straight partition therefore draws a
+    /// straight mountain range, a straight rift and a straight ore belt at once —
+    /// the artefact this warp exists to remove.
+    ///
+    /// Compares the shipped warp against `warp_frac = 0.0` on the SAME plate
+    /// seeds — the genuine pre-warp behaviour, not a reconstruction — so the
+    /// gate cannot pass by drifting out of step with the generator.
+    #[test]
+    fn plate_margins_are_not_straight_bisectors() {
+        // Radius must be comparable to a PLATE, not to a cell. The first version
+        // used a fixed 6-cell disc and measured 0.504 → 0.484 on a warp that was
+        // plainly bending the margins: at 6 cells against an ~80-cell plate
+        // spacing, a margin curving over its whole length still looks locally
+        // straight. This is the same class of mistake as the boundary-length
+        // metric it replaced — measuring at the wrong scale, not measuring the
+        // wrong thing.
+        const R: i32 = 20;
+        const SEEDS: u64 = 4;
+        let (mut straight_sum, mut warped_sum) = (0.0f32, 0.0f32);
+        for seed in 0..SEEDS {
+            let (plain, w, h, _) = partition_for(seed, 10, 360, 180, 0.0, 1.0, 1.0);
+            let (warped, _, _, _) = partition_for(
+                seed, 10, 360, 180,
+                PLATE_WARP_AMP_FRAC, PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP);
+            straight_sum += margin_straightness(&plain, w, h, R);
+            warped_sum += margin_straightness(&warped, w, h, R);
+        }
+        let straight = straight_sum / SEEDS as f32;
+        let warped = warped_sum / SEEDS as f32;
+        println!("margin straightness @R={}: plain Voronoi {:.3} → warped {:.3}",
+                 R, straight, warped);
+        assert!(warped < straight * 0.93,
+            "plate margins are still essentially straight bisectors: local \
+             straightness only fell from {:.3} (plain Voronoi) to {:.3} (warped) \
+             over {} seeds. If the warp is not reaching plate_index, every \
+             downstream feature — orogeny belt, rift, coastline, ore setting — is \
+             still being drawn along a straight line.",
+            straight, warped, SEEDS);
+    }
+
+    /// THE SWEEP that set `PLATE_WARP_AMP_FRAC`, `PLATE_WARP_WAVELENGTHS` and
+    /// `PLATE_WARP_SIGMA_CLAMP` (§2.4: never tune a constant without a gate that
+    /// is not the target). Prints, for each candidate, how much local margin
+    /// straightness FALLS (the goal) against the worst plate connectivity it
+    /// leaves behind (the constraint). The shipped triple is the biggest
+    /// straightness drop whose connectivity still clears the 0.90 bar.
+    ///
+    /// `#[ignore]`d: it is a measurement instrument, not a gate.
+    #[test]
+    #[ignore]
+    fn diag_sweep_plate_warp() {
+        println!("{:>6} {:>6} {:>6}  {:>10} {:>10}", "amp", "wav", "clamp", "straight", "worst_conn");
+        for &amp in &[0.0f32, 0.25, 0.35, 0.45, 0.60, 0.80] {
+            for &wav in &[0.8f32, 1.2, 1.7, 2.5] {
+                for &clamp in &[0.8f32, 1.2, 2.0] {
+                    let (mut str_sum, mut worst_conn) = (0.0f32, 1.0f32);
+                    const SEEDS: u64 = 3;
+                    for seed in 0..SEEDS {
+                        let (idx, w, h, _) = partition_for(seed, 10, 360, 180, amp, wav, clamp);
+                        str_sum += margin_straightness(&idx, w, h, 20);
+                        let c = worst_plate_connectivity(&idx, w, h);
+                        if c < worst_conn { worst_conn = c; }
+                    }
+                    println!("{:>6.2} {:>6.2} {:>6.2}  {:>10.3} {:>10.3}",
+                             amp, wav, clamp, str_sum / SEEDS as f32, worst_conn);
+                }
+            }
+        }
+    }
+
+    /// Rebuild one world's plate SEED POINTS exactly as the generator draws them,
+    /// then partition at an arbitrary (amp, wavelength, clamp). Shared by the
+    /// sweep and by the straightness gate, so both measure the same thing.
+    fn partition_for(
+        seed: u64, count: usize, width: u32, height: u32,
+        amp: f32, wav: f32, clamp: f32,
+    ) -> (Vec<u16>, u32, u32, Vec<(f32, f32)>) {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let (w, h) = (width as f32, height as f32);
+        let cols = (count as f32).sqrt().ceil() as usize;
+        let rows = (count + cols - 1) / cols;
+        let (cell_w, cell_h) = (w / cols as f32, h / rows as f32);
+        let mut seeds: Vec<(f32, f32)> = Vec::with_capacity(count);
+        for i in 0..count {
+            let cx = ((i % cols) as f32 + rng.gen::<f32>()) * cell_w;
+            let cy = ((i / cols) as f32 + rng.gen::<f32>()) * cell_h;
+            // Consume exactly the draws the generator makes per plate so the
+            // seed positions match: is_oceanic, density, pole_angle, pole_dist,
+            // speed, omega sign.
+            let _ = rng.gen::<f32>();
+            let _ = rng.gen::<f32>();
+            let _ = rng.gen::<f32>();
+            let _ = rng.gen::<f32>();
+            let _ = rng.gen::<f32>();
+            let _ = rng.gen::<bool>();
+            seeds.push((cx, cy));
+        }
+        let idx = warped_voronoi_tuned(&seeds, width, height, count, seed, amp, wav, clamp);
+        (idx, width, height, seeds)
+    }
+
+    /// Smallest "largest connected component / total area" ratio over all plates
+    /// — the shredding measure `plate_territory_stays_connected` asserts on.
+    fn worst_plate_connectivity(index: &[u16], w: u32, h: u32) -> f32 {
+        let idx = |x: u32, y: u32| (y * w + x) as usize;
+        let wrap = |x: i32| ((x % w as i32) + w as i32) % w as i32;
+        let total = index.len();
+        let mut seen = vec![false; total];
+        let mut largest: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
+        let mut area: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
+        for &p in index { *area.entry(p).or_insert(0) += 1; }
+        for y in 0..h {
+            for x in 0..w {
+                let start = idx(x, y);
+                if seen[start] { continue; }
+                let plate = index[start];
+                let mut size = 0usize;
+                let mut q = VecDeque::new();
+                q.push_back((x, y));
+                seen[start] = true;
+                while let Some((cx, cy)) = q.pop_front() {
+                    size += 1;
+                    for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                        let nx = wrap(cx as i32 + dx) as u32;
+                        let ny = cy as i32 + dy;
+                        if ny < 0 || ny >= h as i32 { continue; }
+                        let ni = idx(nx, ny as u32);
+                        if seen[ni] || index[ni] != plate { continue; }
+                        seen[ni] = true;
+                        q.push_back((nx, ny as u32));
+                    }
+                }
+                let e = largest.entry(plate).or_insert(0);
+                if size > *e { *e = size; }
+            }
+        }
+        area.iter()
+            .map(|(p, &a)| largest[p] as f32 / a as f32)
+            .fold(1.0f32, f32::min)
     }
 }

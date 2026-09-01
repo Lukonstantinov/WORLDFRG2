@@ -8,6 +8,25 @@ use std::cmp::Ordering;
 pub struct River {
     pub points: Vec<(u32, u32)>,
     pub width: f32,
+    /// Mean annual DISCHARGE in m³/s — the river's real "output", computed once
+    /// here from catchment area × runoff and read by everything downstream.
+    ///
+    /// It exists because there were previously TWO discharge calculations that
+    /// did not agree. `extract_rivers` derived a unitless `discharge` for the
+    /// render width using `runoff = mean_precip / 700` clamped to 0.2..2.2, while
+    /// `query_commands`' river-systems query — the one the Hydrology panel shows
+    /// — independently derived `runoff_m = mean_precip / 1000 × 0.35` clamped to
+    /// 0.01..1.2. Same river, two different runoff models, so the number on the
+    /// panel and the width on the map were answers to different questions: a
+    /// river could report a huge flow and still draw thin. Serving one stored
+    /// value is the same discipline as §8.18's served palettes — a second copy
+    /// cannot drift if there is no second copy.
+    ///
+    /// `#[serde(default)]` (0.0) on a world generated before this field existed;
+    /// readers fall back to their own estimate in that case rather than reporting
+    /// a river with no flow.
+    #[serde(default)]
+    pub discharge_m3s: f32,
     /// True once the river has run far enough to count as a MAJOR river (a long
     /// continental trunk). Drives a darker render shade so the eye can pick out
     /// the great rivers from the thin headwater streams. Set purely from length,
@@ -558,12 +577,53 @@ pub fn extract_rivers(
             ) { arid += 1.0; }
         }
         let mean_p = psum / length.max(1.0);
-        let runoff = (mean_p / 700.0).clamp(0.2, 2.2);
         let arid_frac = arid / length.max(1.0);
-        let discharge = outlet_acc * runoff * (1.0 - 0.45 * arid_frac);
-        let len_term = (length / (220.0 * area_ratio.sqrt())).min(1.5) * 0.4;
-        let raw = (discharge / threshold as f32).max(0.0).ln_1p() * 0.62 + 0.7 + len_term;
-        let width = (raw * width_scale).clamp(0.6, 2.6);
+
+        // ── REAL DISCHARGE, in m³/s ──────────────────────────────────────────
+        // Catchment area × runoff depth, in honest units, computed ONCE here and
+        // stored on the river so the map and the Hydrology panel can no longer
+        // disagree about a river's flow (see `River::discharge_m3s`).
+        //
+        //   Q (m³/s) = area (km²) × 1e6 m²/km² × runoff (m/yr) ÷ seconds/yr
+        //
+        // `runoff_m` is the fraction of annual rainfall that actually reaches
+        // the channel: ~35% in a humid basin, far less in an arid one, where
+        // most of it evaporates or sinks before it ever gets there. This is the
+        // same model `query_commands` used for the panel — adopted here so there
+        // is one formula, not two.
+        let km_per_cell = 40075.0f32 / w as f32;
+        let cell_area_km2 = km_per_cell * km_per_cell;
+        let runoff_m = (mean_p / 1000.0 * 0.35).clamp(0.01, 1.2) * (1.0 - 0.45 * arid_frac);
+        let area_km2 = outlet_acc * cell_area_km2;
+        let discharge_m3s = (area_km2 * 1.0e6 * runoff_m / 3.15576e7).clamp(0.0, 300_000.0);
+        // The old unitless proxy, still used by the climate-density prune and the
+        // navigability test below so their tuned thresholds keep their meaning.
+        let discharge = outlet_acc * (mean_p / 700.0).clamp(0.2, 2.2) * (1.0 - 0.45 * arid_frac);
+
+        // ── RENDER WIDTH FROM HYDRAULIC GEOMETRY ─────────────────────────────
+        // Leopold & Maddock's downstream hydraulic geometry: channel width goes
+        // as a power of discharge, w ≈ 6·√Q for a natural alluvial channel — so
+        // width in METRES is a real physical quantity, converted to cells here.
+        //
+        // What this replaces: `ln_1p(discharge/threshold) · 0.62 + 0.7 + len_term`
+        // clamped to `(0.6, 2.6)`. That expression reaches the 2.6 ceiling at
+        // roughly twenty times the channel threshold and stays there — so every
+        // river above a quite ordinary size drew at EXACTLY the same width, and a
+        // 50,000 m³/s trunk was indistinguishable from a 5,000 m³/s one. That is
+        // the "rivers don't get wider even with a large flow" report, and it was
+        // a saturating clamp, not a modelling subtlety.
+        //
+        // The band is still bounded — a river a hundred cells wide would swamp
+        // the map — but the ceiling now sits far above any real river, so the
+        // clamp is a safety rail rather than the thing that decides the width.
+        let width_m = 6.0 * discharge_m3s.max(0.0).sqrt();
+        // Metres → cells, then a gentle root so the on-screen range stays
+        // legible: at 11 km/cell even the Amazon is a small fraction of a cell
+        // wide, so a river is drawn at a cartographic width (a symbol), scaled
+        // by the real number rather than equal to it.
+        let width_cells = (width_m / 1000.0).powf(0.42);
+        let len_term = (length / (220.0 * area_ratio.sqrt())).min(1.5) * 0.25;
+        let width = ((0.55 + width_cells * 1.30 + len_term) * width_scale).clamp(0.5, 7.0);
 
         // Strahler-ish order from discharge (1 = creek). Ranks branches for
         // rendering / settlement scoring without a full stream-order pass.
@@ -626,7 +686,7 @@ pub fn extract_rivers(
         // Braided anabranches on the widest, flattest reaches of a great river.
         let braids = build_braids(buf, &render, width, order, mseed ^ 0xB2A1);
 
-        rivers.push(River { points, width, major, navigable, mouth_kind, delta, tributary, order, meander, render, braids });
+        rivers.push(River { points, width, discharge_m3s, major, navigable, mouth_kind, delta, tributary, order, meander, render, braids });
     }
 
     rivers
@@ -1025,10 +1085,169 @@ pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) ->
 /// depression counts â€” raising it keeps only genuinely deep basins, shrinking
 /// the lake count/extent. `max_cells`: connected basins larger than this are
 /// dropped (run-away flooded interiors that read as implausible inland seas).
+/// The largest lake surface a real world sustains, in km². The Caspian — the
+/// biggest lake on Earth, and a genuine endorheic basin — is 371,000 km²;
+/// Superior, the biggest freshwater lake, is 82,000. Stated in km² and converted
+/// per world, never as a cell count (rule 25): a cell is ~11 km across at
+/// 3600×1800 and ~130 km on a test world, so a fixed cell budget means
+/// "a pond" on one world and "an ocean" on another.
+pub const LAKE_MAX_KM2: f32 = 400_000.0;
+
+/// Mean annual lake evaporation in metres of depth, as a function of the basin's
+/// own mean temperature. A cold boreal lake loses ~0.3 m/yr, a hot desert playa
+/// over 2 m/yr — the range that decides whether an endorheic basin holds a sea
+/// (Caspian) or a salt crust (Lop Nur).
+fn lake_evaporation_m(mean_temp_c: f32) -> f32 {
+    (0.25 + 0.075 * mean_temp_c.max(-10.0)).clamp(0.25, 2.4)
+}
+
+/// Decide how much of a filled depression actually HOLDS WATER, and at what
+/// level — the mechanism `detect_lakes` was missing entirely.
+///
+/// ── WHY THIS EXISTS ──────────────────────────────────────────────────────────
+/// A priority-flood fill answers one question: "from which cells can water not
+/// escape downhill?" That is a question about the SURFACE, and its answer is a
+/// basin — every cell below the spill point, however vast. `detect_lakes` used
+/// to emit that basin verbatim as a lake, guarded only by "is it more than a
+/// QUARTER of the world", so a broad continental interior sagging a few tens of
+/// metres below its rim came out as a single water body of millions of km² —
+/// larger than the Mediterranean, larger than some of the world's seas — sitting
+/// on ground that is merely low, not drowned.
+///
+/// The missing question is the water balance. A closed lake is in steady state
+/// when what flows in equals what evaporates off its surface:
+///
+/// ```text
+///     inflow (m³/yr)  =  evaporation_depth (m/yr) × lake_area (m²)
+/// ```
+///
+/// so the lake's equilibrium AREA is `inflow / evaporation_depth`, and nothing
+/// about the basin's shape can make it larger. That is why the Caspian sits far
+/// below its own basin rim, why the Aral shrank when its inflow was diverted,
+/// and why the Sahara's basins are dry despite being deep — the same physics,
+/// one equation. A basin bigger than its own equilibrium area is not a lake that
+/// size; it is a small lake in a large hollow.
+///
+/// So: estimate the catchment's inflow, compute the area it can sustain, and if
+/// the flooded basin exceeds that, LOWER THE WATER LEVEL until it doesn't —
+/// keeping the deepest cells, which is where water actually stands. Returns
+/// `None` when the basin sustains no lake at all.
+///
+/// **Lowering rather than deleting is the point.** The pre-2026 code deleted an
+/// over-large basin outright (`cells.len() <= max_cells`), which left the
+/// drainage still routed through the hollow with no water in it — so rivers were
+/// drawn climbing the basin walls, and that is exactly why the size filter was
+/// removed and replaced with the quarter-of-the-world guard. Lowering the level
+/// keeps a real water body at the bottom of every closed basin, so a river always
+/// has somewhere to end; it just stops the water body being absurd.
+fn trim_basin_to_water_balance(
+    buf: &WorldBuffer, filled: &[f32], cells: Vec<(u32, u32)>, cell_area_km2: f32,
+) -> Option<(Vec<(u32, u32)>, f32)> {
+    if cells.is_empty() { return None; }
+    let have_koppen = buf.koppen.len() == buf.total();
+    let have_precip = buf.precipitation.len() == buf.total();
+    let have_temp = buf.temperature.len() == buf.total();
+
+    // ── ICE SHEETS HOLD NO LAKES ────────────────────────────────────────────
+    // A basin under a permanent ice cap has no open water: the hollow is full of
+    // ice, and its "lake" is a glacier. Drawing an open-water lake there is
+    // simply wrong on the map, and it also feeds the wrong ecology downstream
+    // (`aquatic.rs` gives it a fish assemblage). Köppen EF is the ice cap itself;
+    // `snow_frac` catches a permanently-snow-covered cell on a world whose
+    // climate never ran.
+    if have_koppen {
+        let ice = cells.iter()
+            .filter(|&&(x, y)| buf.koppen[buf.idx(x, y)] == crate::sim::koppen::EF)
+            .count();
+        if ice * 2 > cells.len() { return None; }
+    }
+    if buf.snow_frac.len() == buf.total() {
+        let perennial = cells.iter()
+            .filter(|&&(x, y)| buf.snow_frac[buf.idx(x, y)] >= 250)
+            .count();
+        if perennial * 2 > cells.len() { return None; }
+    }
+
+    // ── EQUILIBRIUM AREA ────────────────────────────────────────────────────
+    // Inflow is estimated from precipitation falling on the basin and on a
+    // catchment ring around it. The true catchment is the full upstream area,
+    // which `compute_hydrology`'s accumulation knows — but `detect_lakes` runs
+    // over the filled surface without it, and the basin's own footprint plus a
+    // proportional allowance is enough to separate "a wet basin holds a great
+    // lake" from "an arid basin holds a puddle", which is the distinction that
+    // matters here. CATCHMENT_RATIO is that allowance: real closed basins drain
+    // several times their own lake area (the Caspian's catchment is ~10× its
+    // surface), so this is deliberately generous.
+    const CATCHMENT_RATIO: f32 = 8.0;
+    let n = cells.len() as f32;
+    let mean_precip_mm = if have_precip {
+        cells.iter().map(|&(x, y)| buf.precipitation[buf.idx(x, y)]).sum::<f32>() / n
+    } else { 800.0 };
+    let mean_temp_c = if have_temp {
+        cells.iter().map(|&(x, y)| buf.temperature[buf.idx(x, y)]).sum::<f32>() / n
+    } else { 10.0 };
+
+    // Runoff coefficient: only part of the rain reaches the lake, the rest is
+    // lost to soil and vegetation before it ever gets there. Arid basins lose
+    // proportionally more, which is why a desert basin's lake is far smaller
+    // than its rainfall alone suggests.
+    let arid = have_koppen && {
+        let dry = cells.iter().filter(|&&(x, y)| matches!(
+            buf.koppen[buf.idx(x, y)],
+            crate::sim::koppen::BWH | crate::sim::koppen::BWK
+                | crate::sim::koppen::BSH | crate::sim::koppen::BSK)).count();
+        dry * 2 > cells.len()
+    };
+    let runoff_coeff = if arid { 0.08 } else { 0.35 };
+    let basin_area_km2 = n * cell_area_km2;
+    let catchment_km2 = basin_area_km2 * CATCHMENT_RATIO;
+    // m³/yr = km² × 1e6 m²/km² × (mm/1000) m
+    let inflow_m3 = catchment_km2 * 1.0e6 * (mean_precip_mm / 1000.0) * runoff_coeff;
+    let evap_m = lake_evaporation_m(mean_temp_c);
+    let equilibrium_km2 = (inflow_m3 / evap_m / 1.0e6).min(LAKE_MAX_KM2);
+
+    if basin_area_km2 <= equilibrium_km2 {
+        // The basin is small enough that its own inflow fills it and spills over
+        // — an ordinary through-flowing lake. Keep it exactly as found.
+        let elevation = cells.iter().map(|&(x, y)| filled[buf.idx(x, y)]).sum::<f32>() / n;
+        return Some((cells, elevation));
+    }
+
+    // ── LOWER THE LEVEL ─────────────────────────────────────────────────────
+    // Keep the DEEPEST cells — the ones furthest below the fill surface — until
+    // the retained area matches what the water balance sustains. Sorting by
+    // depth is what makes the retained lake the true bottom of the hollow rather
+    // than an arbitrary slice of it, so the shoreline lands on a real contour.
+    let keep = ((equilibrium_km2 / cell_area_km2).floor() as usize).max(2);
+    if keep >= cells.len() {
+        let elevation = cells.iter().map(|&(x, y)| filled[buf.idx(x, y)]).sum::<f32>() / n;
+        return Some((cells, elevation));
+    }
+    let mut by_depth: Vec<((u32, u32), f32)> = cells.into_iter()
+        .map(|(x, y)| {
+            let i = buf.idx(x, y);
+            ((x, y), filled[i] - buf.elevation[i])
+        })
+        .collect();
+    by_depth.sort_by(|a, b| b.1.partial_cmp(&a.1)
+        // Ties broken on the cell's own position, never left to sort order:
+        // `detect_lakes` must stay deterministic (§8.10's own rule).
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then(a.0.cmp(&b.0)));
+    by_depth.truncate(keep);
+    let kept: Vec<(u32, u32)> = by_depth.into_iter().map(|(p, _)| p).collect();
+    if kept.len() < 2 { return None; }
+    let elevation = kept.iter().map(|&(x, y)| filled[buf.idx(x, y)]).sum::<f32>() / kept.len() as f32;
+    Some((kept, elevation))
+}
+
 pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cells: usize) -> Vec<Lake> {
     let w = buf.width;
     let h = buf.height;
     let total = buf.total();
+    // Real cell area, for every km²-stated threshold below (rule 25).
+    let km_per_cell = 40075.0f32 / w as f32;
+    let cell_area_km2 = km_per_cell * km_per_cell;
     // Default ~18 m (0.002) of fill; configurable so the user can suppress
     // shallow puddles or, conversely, allow more lakes.
     let eps = fill_depth.clamp(0.0005, 0.05);
@@ -1082,16 +1301,30 @@ pub fn detect_lakes(buf: &WorldBuffer, filled: &[f32], fill_depth: f32, max_cell
             // Great Lake) was thrown away for being large. Measured before the fix:
             // 57 of 286 rivers climbed over 100 m, the worst 1,940 m.
             //
-            // `max_cells` is now only a DEGENERACY guard, not a size filter: it
-            // takes effect solely when a basin has swallowed an implausible share
-            // of the whole world, which means the elevation field is broken rather
-            // than that the lake is big. Even then the cells stay excluded from the
-            // channel network (`ponded` in `extract_rivers`), so the one thing that
-            // can never happen either way is a river drawn climbing out of it.
-            let degenerate = cells.len() > (total / 4).max(max_cells);
-            if cells.len() >= 2 && !degenerate {
-                let elevation = sum_elev / cells.len() as f32;
-                lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0 });
+            // `max_cells` is now VESTIGIAL, kept only so existing callers keep
+            // compiling. The quarter-of-the-world degeneracy guard that used to
+            // sit here has been REMOVED, because it is the same mistake as the
+            // size filter before it, one order of magnitude up: it DELETED an
+            // over-large basin outright, leaving the drainage still routed
+            // through a hollow with no water in it, so every river ending there
+            // was drawn climbing the basin walls. Above the guard's threshold
+            // the map had giant lakes; below it, dry basins with rivers running
+            // uphill out of them. Neither is right.
+            //
+            // `trim_basin_to_water_balance` replaces both. It answers the
+            // question the fill cannot — how much water this basin's own climate
+            // actually sustains — and LOWERS THE LEVEL of an over-large basin
+            // rather than deleting it, so there is always a real water body at
+            // the bottom of a closed basin for a river to end in, and never one
+            // the size of a sea.
+            let _ = max_cells;
+            if cells.len() >= 2 {
+                if let Some((cells, elevation)) =
+                    trim_basin_to_water_balance(buf, filled, cells, cell_area_km2)
+                {
+                    let _ = sum_elev;
+                    lakes.push(Lake { cells, elevation, kind: 0, endorheic: false, salinity_ppt: 0.0 });
+                }
             }
         }
     }
@@ -1143,6 +1376,266 @@ mod tests {
             reef_risk: Vec::new(),
             disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
         }
+    }
+
+    /// Build a world that is ONE enormous shallow basin — a broad interior
+    /// sagging below its own rim, which is the elevation shape that produced the
+    /// million-km² lakes. `climate` sets the whole grid's Köppen/precip/temp so
+    /// the same basin can be run wet, arid or under an ice cap.
+    fn basin_world(w: u32, h: u32, koppen: u8, precip: f32, temp: f32) -> WorldBuffer {
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                // A one-cell sea rim so the fill has somewhere to spill to.
+                if x == 0 || y == 0 || x == w - 1 || y == h - 1 { terrain[i] = 0; continue; }
+                // Rim high, interior barely lower — a vast, shallow hollow.
+                let dx = (x as f32 / w as f32 - 0.5).abs() * 2.0;
+                let dy = (y as f32 / h as f32 - 0.5).abs() * 2.0;
+                let r = dx.max(dy);
+                elev[i] = 0.10 + 0.06 * r;
+            }
+        }
+        let mut buf = synth(w, h, terrain, elev);
+        buf.koppen = vec![koppen; n];
+        buf.precipitation = vec![precip; n];
+        buf.temperature = vec![temp; n];
+        buf
+    }
+
+    /// A flat plain draining to a sea edge, with ONE circular hollow of
+    /// `radius` cells in it. Unlike `basin_world`'s world-sized bowl, this
+    /// basin is small enough that its own climate — not the absolute
+    /// `LAKE_MAX_KM2` cap — decides how much water it holds, which is what the
+    /// arid/wet contrast has to isolate.
+    fn hollow_world(w: u32, h: u32, radius: f32, koppen: u8, precip: f32, temp: f32) -> WorldBuffer {
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x == 0 { terrain[i] = 0; continue; }
+                // Gentle slope down to the western sea, plus a round pit.
+                let mut e = 0.12 + x as f32 * 0.0008;
+                let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+                if d < radius { e -= 0.05 * (1.0 - d / radius); }
+                elev[i] = e;
+            }
+        }
+        let mut buf = synth(w, h, terrain, elev);
+        buf.koppen = vec![koppen; n];
+        buf.precipitation = vec![precip; n];
+        buf.temperature = vec![temp; n];
+        buf
+    }
+
+    /// THE MILLION-KM² LAKE GATE. A filled depression tells you only that water
+    /// cannot flow OUT; how much water actually stands there is a water-balance
+    /// question (inflow vs. evaporation off the lake surface), and `detect_lakes`
+    /// never asked it. Its only size guard was "more than a QUARTER of the whole
+    /// world", so a broad continental interior sagging below its rim was emitted
+    /// verbatim as one water body of millions of km² — bigger than some seas —
+    /// standing on ground that is merely low.
+    ///
+    /// Asserts no lake exceeds `LAKE_MAX_KM2` (the Caspian, the largest lake that
+    /// exists, is 371,000 km²).
+    #[test]
+    fn no_lake_is_larger_than_the_largest_real_lake() {
+        let (w, h) = (200u32, 100u32);
+        let buf = basin_world(w, h, crate::sim::koppen::CFB, 1200.0, 12.0);
+        let hy = compute_hydrology(&buf);
+        let lakes = detect_lakes(&buf, &hy.filled, 0.002, ((w * h) as usize / 2000).max(20));
+        let km_per_cell = 40075.0f32 / w as f32;
+        let cell_km2 = km_per_cell * km_per_cell;
+        let biggest = lakes.iter().map(|l| l.cells.len()).max().unwrap_or(0);
+        let biggest_km2 = biggest as f32 * cell_km2;
+        println!("largest lake: {} cells = {:.0} km² (cap {:.0})",
+                 biggest, biggest_km2, LAKE_MAX_KM2);
+        assert!(biggest_km2 <= LAKE_MAX_KM2 * 1.02,
+            "a lake of {:.0} km² formed — larger than the Caspian ({:.0} km² cap). \
+             The water balance in `trim_basin_to_water_balance` is not lowering \
+             the level of an over-large basin.",
+            biggest_km2, LAKE_MAX_KM2);
+    }
+
+    /// A closed basin must still hold SOME water however big the hollow is. This
+    /// is the invariant the pre-2026 size filter broke: deleting an over-large
+    /// basin left the drainage still routed through it with no water in it, so
+    /// rivers were drawn climbing the basin walls. Lowering the level (rather
+    /// than deleting the lake) is what keeps a river's end somewhere real.
+    #[test]
+    fn an_over_large_basin_is_lowered_not_deleted() {
+        let (w, h) = (200u32, 100u32);
+        let buf = basin_world(w, h, crate::sim::koppen::CFB, 1200.0, 12.0);
+        let hy = compute_hydrology(&buf);
+        let lakes = detect_lakes(&buf, &hy.filled, 0.002, ((w * h) as usize / 2000).max(20));
+        assert!(!lakes.is_empty(),
+            "an over-large basin was DELETED rather than lowered — the drainage \
+             still runs into this hollow, so every river ending here now climbs \
+             out of a dry basin. Lower the water level; never drop the lake.");
+    }
+
+    /// ICE SHEETS HOLD NO LAKES. A basin under a permanent ice cap is full of
+    /// ice, not open water; drawing a lake there is wrong on the map and feeds a
+    /// fish assemblage into `aquatic.rs` for a glacier.
+    #[test]
+    fn an_ice_cap_basin_holds_no_lake() {
+        let (w, h) = (120u32, 60u32);
+        let temperate = basin_world(w, h, crate::sim::koppen::CFB, 1200.0, 12.0);
+        let icy = basin_world(w, h, crate::sim::koppen::EF, 1200.0, -25.0);
+        let max_cells = ((w * h) as usize / 2000).max(20);
+        let hy_t = compute_hydrology(&temperate);
+        let hy_i = compute_hydrology(&icy);
+        let wet = detect_lakes(&temperate, &hy_t.filled, 0.002, max_cells);
+        let ice = detect_lakes(&icy, &hy_i.filled, 0.002, max_cells);
+        assert!(!wet.is_empty(), "the temperate control produced no lake at all — \
+             this fixture cannot tell us anything about the ice case");
+        assert!(ice.is_empty(),
+            "{} lake(s) formed under a permanent ice cap (Köppen EF). A basin \
+             under an ice sheet holds a glacier, not open water.", ice.len());
+    }
+
+    /// An ARID basin's lake is far smaller than the same basin's in a wet
+    /// climate — the MECHANISM (inflow ÷ evaporation) rather than a size cap.
+    /// This is what separates a Caspian from a salt crust, and it is why the fix
+    /// is a water balance and not simply a smaller `max_cells`.
+    ///
+    /// Uses `hollow_world`, not `basin_world`: a world-sized bowl has a
+    /// catchment so large that BOTH climates clear `LAKE_MAX_KM2` and clamp to
+    /// the same answer, so that fixture measures the cap and tells you nothing
+    /// about the climate term. (Measured: wet 6 cells, arid 6 cells — a gate
+    /// that would have passed on a water balance wired to nothing.)
+    #[test]
+    fn an_arid_basin_holds_less_water_than_a_wet_one() {
+        let (w, h) = (400u32, 200u32);
+        let max_cells = ((w * h) as usize / 2000).max(20);
+        let wet = hollow_world(w, h, 12.0, crate::sim::koppen::CFB, 1400.0, 12.0);
+        let dry = hollow_world(w, h, 12.0, crate::sim::koppen::BWH, 90.0, 30.0);
+        let hy_w = compute_hydrology(&wet);
+        let hy_d = compute_hydrology(&dry);
+        let wet_cells: usize = detect_lakes(&wet, &hy_w.filled, 0.002, max_cells)
+            .iter().map(|l| l.cells.len()).sum();
+        let dry_cells: usize = detect_lakes(&dry, &hy_d.filled, 0.002, max_cells)
+            .iter().map(|l| l.cells.len()).sum();
+        println!("lake water in one hollow: wet {} cells, arid {} cells", wet_cells, dry_cells);
+        assert!(wet_cells > 0, "the wet control held no water at all — this \
+             fixture cannot tell us anything about the arid case");
+        assert!(dry_cells < wet_cells,
+            "the same hollow holds as much water in a hot desert ({} cells) as in \
+             a wet temperate climate ({} cells) — the water balance is not reading \
+             climate at all.", dry_cells, wet_cells);
+    }
+
+    /// THE SATURATING-WIDTH GATE. Render width used to be
+    /// `ln_1p(discharge/threshold)·0.62 + 0.7 + len_term` clamped to
+    /// `(0.6, 2.6)`, which reaches its ceiling at roughly twenty times the
+    /// channel threshold and stays there — so every river above a fairly
+    /// ordinary size drew at EXACTLY the same width and a great trunk was
+    /// indistinguishable from a modest one ("rivers don't get wider even with a
+    /// large flow"). Asserts that a river carrying an order of magnitude more
+    /// water is actually drawn wider, and that width and discharge agree about
+    /// which river is bigger.
+    #[test]
+    fn river_width_tracks_discharge_instead_of_saturating() {
+        // One world, two basins of very different size draining to the same sea.
+        let (w, h) = (300u32, 150u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x == 0 { terrain[i] = 0; continue; }
+                // A long gentle ramp to the sea with a converging central valley,
+                // so accumulated flow spans orders of magnitude along the map.
+                elev[i] = 0.05 + x as f32 * 0.003
+                    + ((y as i32 - h as i32 / 2).abs() as f32) * 0.004;
+            }
+        }
+        let buf = synth(w, h, terrain, elev);
+        let hy = compute_hydrology(&buf);
+        let lakes: Vec<Lake> = Vec::new();
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes);
+        assert!(rivers.len() >= 4, "fixture produced too few rivers ({}) to compare", rivers.len());
+
+        let mut by_q: Vec<&River> = rivers.iter().filter(|r| r.discharge_m3s > 0.0).collect();
+        by_q.sort_by(|a, b| a.discharge_m3s.partial_cmp(&b.discharge_m3s).unwrap());
+        let small = by_q.first().unwrap();
+        let big = by_q.last().unwrap();
+        println!("smallest: Q={:.1} m³/s w={:.2}   largest: Q={:.1} m³/s w={:.2}",
+                 small.discharge_m3s, small.width, big.discharge_m3s, big.width);
+        assert!(big.discharge_m3s > small.discharge_m3s * 10.0,
+            "fixture did not produce an order-of-magnitude discharge spread \
+             ({:.1} vs {:.1} m³/s) — it cannot test saturation",
+            small.discharge_m3s, big.discharge_m3s);
+        assert!(big.width > small.width * 1.35,
+            "a river carrying {:.0}× the water is drawn only {:.2}× as wide \
+             ({:.2} vs {:.2} cells) — the width is saturating against its clamp \
+             instead of tracking discharge.",
+            big.discharge_m3s / small.discharge_m3s.max(0.001),
+            big.width / small.width.max(0.001), big.width, small.width);
+    }
+
+    /// Discharge must be a REAL m³/s figure, not a unitless proxy — the panel
+    /// prints it with that unit, so a dropped factor of 1e6 or 3.15e7 would
+    /// silently show every river as a trickle or as an ocean.
+    ///
+    /// Checks the CONVERSION rather than the magnitude: back out the implied
+    /// runoff depth from each river's own Q and catchment
+    /// (`runoff_m/yr = Q × seconds_per_year ÷ catchment_m²`) and require it to
+    /// land in the physically meaningful band the model uses (0.01–1.2 m/yr).
+    /// Doing it this way is deliberate — a plain "is Q between 1 and 300,000"
+    /// assertion measures the FIXTURE, not the code: a 300-cell-wide test grid
+    /// spans Earth's equator, so its cells are 134 km across and a large basin
+    /// on it covers hundreds of times Earth's land area, pinning Q to its clamp.
+    /// The ratio is scale-free and so tests what it claims to.
+    #[test]
+    fn discharge_is_in_plausible_cubic_metres_per_second() {
+        let (w, h) = (300u32, 150u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x == 0 { terrain[i] = 0; continue; }
+                elev[i] = 0.05 + x as f32 * 0.003
+                    + ((y as i32 - h as i32 / 2).abs() as f32) * 0.004;
+            }
+        }
+        let buf = synth(w, h, terrain, elev);
+        let hy = compute_hydrology(&buf);
+        let lakes: Vec<Lake> = Vec::new();
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes);
+        let km_per_cell = 40075.0f32 / w as f32;
+        let cell_area_km2 = km_per_cell * km_per_cell;
+        let mut checked = 0usize;
+        for r in &rivers {
+            // Skip anything sitting on the 300,000 m³/s safety clamp: a clamped
+            // value carries no information about the conversion.
+            if r.discharge_m3s >= 299_000.0 || r.discharge_m3s <= 0.0 { continue; }
+            let m = r.points.len();
+            let outlet = if r.tributary && m >= 2 { r.points[m - 2] } else { r.points[m - 1] };
+            let acc = hy.acc[buf.idx(outlet.0, outlet.1)] as f32;
+            if acc <= 0.0 { continue; }
+            let catchment_m2 = acc * cell_area_km2 * 1.0e6;
+            let implied_runoff_m = r.discharge_m3s * 3.15576e7 / catchment_m2;
+            assert!(implied_runoff_m > 0.005 && implied_runoff_m < 1.3,
+                "a river's discharge implies {:.4} m/yr of runoff over its own \
+                 catchment — outside the 0.01–1.2 m/yr the model uses, so the \
+                 km²→m² or per-year→per-second conversion has lost a factor. \
+                 (Q = {:.1} m³/s over {:.0} km².)",
+                implied_runoff_m, r.discharge_m3s, catchment_m2 / 1.0e6);
+            checked += 1;
+        }
+        assert!(checked >= 3,
+            "only {} unclamped rivers to check — the fixture cannot exercise the \
+             conversion", checked);
+        println!("checked the area→discharge conversion on {} rivers", checked);
     }
 
     /// Item 2: every drainage step must go DOWNHILL on the filled surface â€” the
@@ -1409,6 +1902,7 @@ mod tests {
         let pts: Vec<(u32, u32)> = (5..110).map(|x| (x, 30)).collect();
         let render = build_meander_path(&buf, &pts, 3.0, 8000.0, 20.0, 7, &[], &[]);
         let river = River {
+            discharge_m3s: 0.0,
             points: pts, width: 3.0, major: true, navigable: true, mouth_kind: 0,
             delta: vec![], tributary: false, order: 5, meander: 1.0, render, braids: vec![],
         };

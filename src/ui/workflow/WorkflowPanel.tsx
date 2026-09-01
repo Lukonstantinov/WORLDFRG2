@@ -1,8 +1,8 @@
 import { useState } from "react";
 import { useUIStore } from "@state/uiStore";
-import { useWorldStore } from "@state/worldStore";
+import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
-import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta,
+import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta, getProvinceLayer,
   computePolitical, computeEconomy, computeSettlementDevelopment } from "@bridge";
 import type { Settlement, RiverData } from "@types";
 import { genBtn } from "@ui/workflow/workflowStyles";
@@ -61,7 +61,7 @@ export function WorkflowPanel() {
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const terrainParams = useUIStore((s) => s.terrainParams);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
-  const { setRivers, setLakes, setSettlements, setEconomy, setSettlementsDeveloped, setMeta } = useWorldStore();
+  const { setRivers, setLakes, setSettlements, setEconomy, setSettlementsDeveloped, setMeta, setProvinces } = useWorldStore();
   const meta = useWorldStore((s) => s.meta);
   const setAppMode = useUIStore((s) => s.setAppMode);
   const bioParams = useUIStore((s) => s.bioParams);
@@ -166,6 +166,20 @@ export function WorkflowPanel() {
     if (i > 0) setWorkflowStep(stepOrder[i - 1] as any);
   };
 
+  /// Both run-alls generate provinces on the Rust side
+  /// (`generate_and_persist_provinces`, called from `sim_run_all` and
+  /// `sim_run_all_from_terrain`) — but neither handler ever loaded the result
+  /// into the store, so a fully generated world reported "No provinces yet" in
+  /// the Toolbar and the Provinces panel while 900-odd provinces sat persisted
+  /// in metadata. The data was there the whole time; only the frontend did not
+  /// know. Read it back exactly the way `App.tsx` does on world open.
+  const loadProvincesIntoStore = async () => {
+    try {
+      const pl = await getProvinceLayer();
+      if (pl.provinces?.length) setProvinces(pl.provinces, decodeProvinceRaster(pl));
+    } catch { /* province layer absent — leave the store as it was */ }
+  };
+
   const handleRunAll = async () => {
     if (simRunning) return;
     setSimRunning(true);
@@ -178,6 +192,7 @@ export function WorkflowPanel() {
       setRivers(result.rivers);
       setLakes(result.lakes);
       setSettlements(result.settlements);
+      await loadProvincesIntoStore();
       invalidateTiles();
       for (let i = 1; i <= 8; i++) markStepCompleted(i);
       setLandmassSource("plates");
@@ -210,6 +225,7 @@ export function WorkflowPanel() {
       setRivers(result.rivers);
       setLakes(result.lakes);
       setSettlements(result.settlements);
+      await loadProvincesIntoStore();
       invalidateTiles();
       for (let i = 2; i <= 8; i++) markStepCompleted(i);
       enableAllOverlays();
