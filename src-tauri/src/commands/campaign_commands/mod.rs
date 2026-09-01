@@ -2679,6 +2679,80 @@ pub struct TradeFlowGood {
     #[serde(default)]
     pub carriers: Vec<TradeCarrier>,
 }
+/// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
+/// that touched this city, by who financed it.
+///
+/// This is a BALANCE SHEET FOR THIS CITY, not a world view: it counts only trade
+/// that happened here, which is what makes a city's own numbers meaningful and
+/// comparable with its market.
+#[derive(Serialize, Clone)]
+pub struct CityTrader {
+    pub name: String,
+    /// A guild is a civic body; a house is a private family; `house < 0` is the
+    /// unnamed residual — ordinary local merchants on no house's account.
+    pub is_guild: bool,
+    pub house: i32,
+    pub volume: f32,
+    pub in_volume: f32,
+    pub out_volume: f32,
+    /// Of `volume`, how much moved by sea; the rest overland.
+    pub sea_volume: f32,
+    pub pct: f32,
+    /// RE-EXPORTED here: summed over goods, `min(brought in, sent out)` — cargo
+    /// this trader both landed and shipped onward, i.e. the city was a stop rather
+    /// than an origin or a destination.
+    ///
+    /// It is a PROXY and deliberately named "re-exported", not "transit". The sim
+    /// has no multi-leg voyage — a shipment goes from A to B in one hop
+    /// (TRADE_STAGING_AND_POSTS_PLAN.md's own central finding: "the sim ALREADY
+    /// moves people in legs; cargo is the only thing that teleports"). So there is
+    /// no cargo that literally passes through. What CAN be measured, and is real,
+    /// is a trader that buys a good here and sells the same good out of here.
+    pub reexport: f32,
+    /// Volume-weighted mean distance to this trader's partners, in km.
+    pub mean_route_km: f32,
+    pub goods: Vec<String>,
+    // ── standing at this city (independent of how much it carries) ──
+    pub has_office: bool,
+    pub has_bailo: bool,
+    pub seats_council: bool,
+    pub is_captor: bool,
+}
+
+/// A holder ESTABLISHED at this city — an office, a bailo, the council seat, or
+/// possession by force — listed whether or not it carried anything this year.
+/// Standing and carriage are different questions and routinely disagree: a house
+/// can seat the council and move no cargo at all, which is worth seeing.
+#[derive(Serialize, Clone)]
+pub struct CityEstablished {
+    pub name: String,
+    pub is_guild: bool,
+    pub house: i32,
+    pub has_office: bool,
+    pub has_bailo: bool,
+    pub seats_council: bool,
+    pub is_captor: bool,
+    /// What this holder actually moved here this year (0 if nothing).
+    pub volume: f32,
+}
+
+/// WORLD-WIDE carrier diagnostics, for the Traders tab's foldable "why" note.
+///
+/// These counters are GLOBAL and per-year (`diag_*` on the sim, reset each New
+/// Year) — they are NOT per city, and the UI labels them as world-wide rather
+/// than implying this city's houses declined these particular shipments. Saying
+/// otherwise would be attributing a number to a place it was never measured at.
+#[derive(Serialize, Clone, Default)]
+pub struct CarrierWhy {
+    pub shipments: u32,
+    pub by_house: u32,
+    pub ownerless: u32,
+    pub why_nohouse: u32,
+    pub why_slot: u32,
+    pub why_cash: u32,
+    pub why_barred: u32,
+}
+
 /// WHO carried a good — a house, a guild, or unnamed local merchants — and what
 /// share of this city's trade in it they moved. `log_trade` receives the owner on
 /// every shipment; before this the yearly fold discarded it, so "which house
@@ -2731,6 +2805,22 @@ pub struct TradeFlows {
     pub goods: Vec<TradeFlowGood>,
     pub routes: Vec<TradeRouteFlow>,
     pub partners: Vec<TradePartner>,
+    /// Traders tab · who moved cargo at this city, largest first.
+    #[serde(default)]
+    pub traders: Vec<CityTrader>,
+    /// Traders tab · who is established here, carrying cargo or not.
+    #[serde(default)]
+    pub established: Vec<CityEstablished>,
+    /// Traders tab · the world-wide carrier diagnostics behind the residual.
+    #[serde(default)]
+    pub carrier_why: CarrierWhy,
+    /// What this city PRODUCED and CONSUMED over the year (grain-equivalent
+    /// units), so trade volume can be read against the city's own capacity
+    /// rather than in isolation.
+    #[serde(default)]
+    pub produced_here: f32,
+    #[serde(default)]
+    pub consumed_here: f32,
 }
 
 /// One labelled money line in the Accountant view (a city's tax/profit, or a

@@ -782,7 +782,138 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     partners.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
     partners.truncate(12);
 
-    Ok(Some(TradeFlows { hub: id, hub_x, hub_y, goods, routes, partners }))
+    // ── TRADERS TAB ─────────────────────────────────────────────────────────
+    // Who moved cargo AT THIS CITY, and who is established here. Two different
+    // questions that routinely disagree — a house can seat the council and carry
+    // nothing — so they are built as two lists, not one.
+    //
+    // Everything here is scoped to this city's own trade (`trade_last` is already
+    // filtered to `hub == hidx`), which is what makes it a balance sheet rather
+    // than a world view.
+    let km_per_cell = if sim.world_w > 0.0 { 40075.0 / sim.world_w } else { 0.0 };
+    let dist_km = |px: f32, py: f32| -> f32 {
+        let mut dx = (px - hub_x).abs();
+        if sim.world_w > 0.0 && dx > sim.world_w / 2.0 { dx = sim.world_w - dx; }
+        let dy = py - hub_y;
+        (dx * dx + dy * dy).sqrt() * km_per_cell
+    };
+
+    #[derive(Default)]
+    struct Acc {
+        vol: f32, inv: f32, outv: f32, sea: f32,
+        dist_wsum: f32,
+        by_good_in: HashMap<u32, f32>,
+        by_good_out: HashMap<u32, f32>,
+    }
+    let mut acc: HashMap<u32, Acc> = HashMap::new();   // carrier key (u32::MAX = ownerless)
+    for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
+        let partner = city_of(f.partner);
+        if partner == hidx { continue; }
+        let Some((_, px, py)) = pos(partner) else { continue };
+        let d = dist_km(px, py);
+        // `sea` is a property of the ROUTE, so every shipment in one aggregate row
+        // shares it; attribute each carrier its pro-rata share of that row's sea
+        // volume rather than inventing a per-carrier flag the sim never recorded.
+        let sea_frac = if f.amount > 0.0 { (f.sea_amount / f.amount).clamp(0.0, 1.0) } else { 0.0 };
+        for &(who, amt) in &f.carriers {
+            let e = acc.entry(who).or_default();
+            e.vol += amt;
+            e.sea += amt * sea_frac;
+            e.dist_wsum += amt * d;
+            if f.dir == 0 { e.inv += amt; *e.by_good_in.entry(f.good).or_insert(0.0) += amt; }
+            else { e.outv += amt; *e.by_good_out.entry(f.good).or_insert(0.0) += amt; }
+        }
+    }
+    let trade_total: f32 = acc.values().map(|a| a.vol).sum::<f32>().max(1e-6);
+
+    // Standing at this city, independent of carriage.
+    let council = sim.hubs[hi].council_house;
+    let captor = sim.hubs[hi].captor_house;
+    let standing = |hidx_house: i32| -> (bool, bool, bool, bool) {
+        if hidx_house < 0 { return (false, false, false, false); }
+        let h = match sim.houses.get(hidx_house as usize) { Some(h) => h, None => return (false, false, false, false) };
+        (h.offices.contains(&hidx), h.bailos.contains(&hidx),
+         council == hidx_house, captor == hidx_house)
+    };
+
+    let mut traders: Vec<CityTrader> = acc.iter().map(|(&who, a)| {
+        let h = if who == u32::MAX { None } else { sim.houses.get(who as usize) };
+        let hi_i = if who == u32::MAX { -1 } else { who as i32 };
+        let (office, bailo, seats, capt) = standing(hi_i);
+        // RE-EXPORT: per good, the part this trader both landed here and shipped
+        // onward. See `CityTrader::reexport` for why it is not called "transit".
+        let mut reexport = 0.0f32;
+        for (g, &iv) in &a.by_good_in {
+            if let Some(&ov) = a.by_good_out.get(g) { reexport += iv.min(ov); }
+        }
+        // The goods this trader actually moved here, biggest first.
+        let mut gv: HashMap<u32, f32> = HashMap::new();
+        for (g, v) in a.by_good_in.iter().chain(a.by_good_out.iter()) { *gv.entry(*g).or_insert(0.0) += v; }
+        let mut gs: Vec<(u32, f32)> = gv.into_iter().collect();
+        gs.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal).then(x.0.cmp(&y.0)));
+        CityTrader {
+            name: h.map(|x| x.name.clone()).unwrap_or_else(|| "local merchants".into()),
+            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+            house: hi_i,
+            volume: a.vol, in_volume: a.inv, out_volume: a.outv, sea_volume: a.sea,
+            pct: a.vol / trade_total * 100.0,
+            reexport,
+            mean_route_km: if a.vol > 0.0 { a.dist_wsum / a.vol } else { 0.0 },
+            goods: gs.iter().take(5)
+                .filter_map(|(g, _)| sim.goods.get(*g as usize).map(|x| x.name.clone())).collect(),
+            has_office: office, has_bailo: bailo, seats_council: seats, is_captor: capt,
+        }
+    }).collect();
+    traders.sort_by(|a, b| b.volume.partial_cmp(&a.volume)
+        .unwrap_or(std::cmp::Ordering::Equal).then(a.name.cmp(&b.name)));
+
+    // Established here — every holder with an office/bailo/seat, carrying or not.
+    let mut established: Vec<CityEstablished> = sim.houses.iter().enumerate()
+        .filter_map(|(i, h)| {
+            let iu = i as u32;
+            let office = h.offices.contains(&hidx);
+            let bailo = h.bailos.contains(&hidx);
+            let seats = council == i as i32;
+            let capt = captor == i as i32;
+            if !(office || bailo || seats || capt) { return None; }
+            Some(CityEstablished {
+                name: h.name.clone(), is_guild: h.is_guild, house: i as i32,
+                has_office: office, has_bailo: bailo, seats_council: seats, is_captor: capt,
+                volume: acc.get(&iu).map(|a| a.vol).unwrap_or(0.0),
+            })
+        }).collect();
+    // A bailo outranks an office, a seat outranks both — sort by standing, then by
+    // what they actually move, so the list reads as a hierarchy.
+    established.sort_by(|a, b| {
+        let rank = |x: &CityEstablished| (x.is_captor as u8) * 8 + (x.seats_council as u8) * 4
+            + (x.has_bailo as u8) * 2 + (x.has_office as u8);
+        rank(b).cmp(&rank(a))
+            .then(b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal))
+            .then(a.name.cmp(&b.name))
+    });
+
+    // The city's own capacity, so trade reads against what this place makes and
+    // eats rather than in isolation. Yearly figures from the per-day rates the
+    // tick already keeps.
+    let produced_here: f32 = sim.hubs[hi].production.iter().sum::<f32>() * 365.0;
+    // `base_need` is the per-day demand the tick itself uses, so this is the city's
+    // own consumption on the model's terms rather than a second estimate.
+    let consumed_here: f32 = (0..sim.goods.len()).map(|g| sim.base_need(hi, g)).sum::<f32>() * 365.0;
+
+    let carrier_why = CarrierWhy {
+        shipments: sim.diag_shipments,
+        by_house: sim.diag_by_house,
+        ownerless: sim.diag_shipments.saturating_sub(sim.diag_by_house),
+        why_nohouse: sim.diag_why_nohouse,
+        why_slot: sim.diag_why_slot,
+        why_cash: sim.diag_why_cash,
+        why_barred: sim.diag_why_bar,
+    };
+
+    Ok(Some(TradeFlows {
+        hub: id, hub_x, hub_y, goods, routes, partners,
+        traders, established, carrier_why, produced_here, consumed_here,
+    }))
 }
 
 

@@ -4403,6 +4403,26 @@ TWO_APPS_AND_FILE_UPLOAD_PLAN.md  ← ⭐ SLICES 1-2 BUILT + the campaign LIBRAR
                                     shipped, including what it does NOT fix — old world
                                     files still carry no economy, and nothing can
                                     retro-fit data a file never contained
+CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND INERT,
+                                    UI NOT BUILT. A third tab beside Market/Flows:
+                                    WHO TRADES HERE (carriers by volume/standing/
+                                    route length/carriage, with an import-export
+                                    filter) over WHO IS ESTABLISHED HERE (offices,
+                                    bailos, the council seat, capture) — two lists
+                                    because they routinely disagree, a house can
+                                    seat a council and carry nothing. Carries the
+                                    measured finding that shapes every decision in
+                                    it: `econ_measure_carrier_mix` reports **96% of
+                                    shipments move on no house's account**, so the
+                                    panel will read "local merchants 96%" on nearly
+                                    every city — which is the finding, not a defect,
+                                    and must never be suppressed to flatter the
+                                    house list. Also records why the transit column
+                                    is called RE-EXPORT: the sim has no multi-leg
+                                    voyage (cargo teleports A→B), so what is
+                                    measurable is a trader landing and re-shipping
+                                    the same good, and the column must not claim
+                                    more than that
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
