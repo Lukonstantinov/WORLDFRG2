@@ -929,9 +929,15 @@ serde-defaulted so old saves load). Grouped by theme:
   so a guild specialises in nothing and is preferred for everything at its home city.
   That is a bug, not a balance choice; the fix and the proposed rename to **Company**
   are `ACTORS_AND_CARRIAGE_PLAN.md` §3.3.
-- **`SUPPLY_LOCAL` is never written.** One of the five `supply_accum` seller classes
-  the City Market view shows is structurally always zero, and every ARRIVAL books as
-  `SUPPLY_FOREIGN` regardless of who carried it. Fix: same plan, §3.8.
+- **`SUPPLY_LOCAL` is now written (N8, `docs/ACTORS_AND_CARRIAGE_PLAN.md` §3.8,
+  shipped).** Every arrival used to book `SUPPLY_FOREIGN` regardless of who carried
+  it — one of the five `supply_accum` seller classes the City Market view shows was
+  structurally always zero. `InTransit.local` (serde-defaulted false, so an
+  old save's in-flight cargo keeps booking `SUPPLY_FOREIGN` exactly as before)
+  carries whether an ownerless leg cleared `LOCAL_HAUL_DAYS` at dispatch, and the
+  arrival pass now books `SUPPLY_HOUSE` / `SUPPLY_LOCAL` / `SUPPLY_FOREIGN` by the
+  real carrier. No sim gate needed — nothing in the tick reads `supply_accum`, only
+  the query layer. Gate: `n8_arrivals_attribute_supply_local_by_real_carrier`.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
@@ -962,6 +968,32 @@ Three facts about the campaign that are easy to miss and shape any change here:
   MOVES**, and any embargo built on `house_barred` touches 0.1% of trade. Do not
   reason about trade volume, fleet economics or exclusion without reading
   `docs/ACTORS_AND_CARRIAGE_PLAN.md` §1 first.
+  **N1 (the plan's keystone) is now wired at zero dose.** `N1_LOCAL_HAUL_BIND_DAYS`
+  (currently `INFINITY`) is a real bind clause in `dispatch`: an ownerless leg
+  longer than the threshold does not sail at all, rather than moving for free. At
+  infinity the clause is provably dead code (`n1_and_n1b_ship_at_zero_dose_are_
+  noops`), so the 96%/4% split above is still exactly today's measured behaviour —
+  the dose walk down from infinity is separate, multi-commit, gated work (§4 of the
+  plan) and has NOT been done. `N1B_OWNERLESS_LOSS_RATE` (currently `0.0`) is the
+  same shape for letting ownerless cargo sink — `let lost = if owner >= 0 {..}`
+  above is no longer literal, but the roll never fires at zero dose.
+  **N2 (cargo bans, §3.2) is the same shape and for a sharper reason: a live
+  trial genuinely broke the hard-asserted wealth bound** (a sustained richest
+  house of 1,005,714) even after halving the dose once — a real structural
+  finding (an export-locked market's rent concentrates harder than the plan
+  anticipated), not a tuning miss. `TickHub.export_ban_until` and
+  `polis.rs::decide_trade_bans`/`apply_trade_bans` are real and enforced in
+  `dispatch`; `N2_BAN_PRICE_RATIO` sits at `INFINITY` until that mechanism is
+  understood well enough to dose. **N4 (carrier competition, §3.4) is shipped
+  live** — `house_for`'s `.position()` is now a uniform `hash01` draw within
+  each precedence tier. Its first cut weighted the draw by `political_power`
+  and measurably inverted `econ_inheritance_rules_fragment_differently`
+  (wealth grows political_power, so weighting by it just swapped one
+  founding-order-shaped bias for a wealth-shaped one) — caught by running the
+  gate, not by review, and shipped as an unweighted draw instead. **N3's
+  narrow fix (§3.3) is also shipped**: a founded guild now charters itself
+  with real goods and `house_for`'s guild arm requires a specialisation match,
+  so it no longer shadows an ordinary house at its own city.
 - **Growth is exogenous.** `tech_factor *= 1.015^(1/365)` per tick is the entire
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the
@@ -4056,6 +4088,50 @@ ACTORS_AND_CARRIAGE_PLAN.md       ← ⭐ MEASURED + PLANNED, one diagnostic bui
                                     `econ_inheritance_rules_fragment_differently`
                                     went RED then GREEN inside one day's commits —
                                     re-run it per DOSE STEP, not per phase
+SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md
+                                  ← ⭐ DESIGN, NOTHING BUILT. The full design for
+                                    the three proposals ACTORS_AND_CARRIAGE_PLAN
+                                    left as sketches — N5 sailing window · N6
+                                    price-elastic demand · N7 the League — each
+                                    with data structures, hook sites, a zero-dose
+                                    setting, gates by name and a not-built list.
+                                    **Three findings from writing it are worth
+                                    more than the designs.** (1) N5 is mostly
+                                    ALREADY BUILT world-side: `build_coarse_cost`
+                                    takes `season`/`months` and already closes
+                                    snow-shut passes and stormy sailing windows
+                                    off real `storm_base`/`reef_risk`/elevation,
+                                    and the campaign's own
+                                    `compute_route_days_matrix` calls it with
+                                    `season = -1` — "no seasonal closure". N5 is
+                                    calling that per season, storing a quantised
+                                    u8 per-lane multiplier (v=0 ⇒ exactly 1.0 ⇒
+                                    the bit-identical gate), read through one
+                                    `lane_days` accessor. Its real target is the
+                                    scorecard's within-city grain price CV of
+                                    **0.000** (band 0.30–0.50), not the gradient.
+                                    (2) Demand is NOT "perfectly price-inelastic"
+                                    — category substitution already weights by
+                                    `pref / rel` where `rel = price/base_value`,
+                                    so cross-price elasticity is live; only the
+                                    category AGGREGATE is fixed. The design's own
+                                    sharpest rule: **elasticity belongs to the
+                                    market, not to the ration** — it applies
+                                    OUTSIDE `base_need` (whose other callers are
+                                    `need_scale`'s calibration, the starvation
+                                    sums and civic provisioning), and every
+                                    welfare signal keeps reading a parallel
+                                    STRUCTURAL need, or a council stops
+                                    provisioning exactly when prices spike.
+                                    (3) N7's stated dependency is WRONG: N2 as
+                                    built bans a hub × GOOD, but a boycott is
+                                    lane-scoped ("we bar trade with that city"),
+                                    which nothing expresses — N7 needs an N2
+                                    EXTENSION, not N2 dosed. Build order inside
+                                    N7 is the institution first and the weapon
+                                    last, because a boycott is N2's market
+                                    closure × members and N2's single-city
+                                    version broke the hard wealth bound twice
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
 DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geology

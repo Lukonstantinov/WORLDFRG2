@@ -27,7 +27,7 @@
             quality: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -63,7 +63,7 @@
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
-            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0,
+            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
@@ -338,6 +338,78 @@
         s.run_crisis_relief();
         assert_eq!(s.journal.len(), journal0 + 1,
             "a standing bar is not re-announced every month");
+    }
+
+    /// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) · the AUTHOR (`decide_trade_bans`)
+    /// ships at zero dose — `N2_BAN_PRICE_RATIO = INFINITY` — exactly
+    /// `N1_LOCAL_HAUL_BIND_DAYS`'s pattern, and for the same kind of reason: a
+    /// trial dose (6.0, ban 30 ticks) broke `simulate_decades_reports_dynamics`'s
+    /// hard-asserted wealth bound even after halving twice (a sustained richest
+    /// house of 1,005,714 — see that constant's own doc comment), so the dose
+    /// walk is real future work, not something to guess at here. Even a
+    /// deliberately extreme price spike (25× base — far past any price this
+    /// engine's `PRICE_CEIL_MULT` of 12× can ever reach) must trigger nothing.
+    #[test]
+    fn n2_trade_ban_trigger_at_infinity_is_a_noop() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("iron", 2, 1, 5.0, 0.45, false),
+        ];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0, 500.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].price = vec![1.0, 125.0]; // 25× base(5.0) — an absurd, deliberately extreme spike
+        let journal0 = s.journal.len();
+        s.run_trade_bans();
+        assert!(s.hubs[0].export_ban_until.is_empty()
+            || s.hubs[0].export_ban_until.iter().all(|&t| t <= s.tick),
+            "N2_BAN_PRICE_RATIO = INFINITY must make the trigger dead code");
+        assert_eq!(s.journal.len(), journal0, "a dead trigger chronicles nothing");
+    }
+
+    /// N2 (§3.2) · the ENFORCEMENT half (unlike the author, this is wired live —
+    /// it is what `dispatch` will already respect the moment the author above is
+    /// dosed above zero). Setting `export_ban_until` directly — the same thing a
+    /// future dosed author would do — must stop that good leaving the hub, the
+    /// same discipline `production.rs` already applies to `food_export_lock`.
+    #[test]
+    fn n2_export_ban_blocks_dispatch_when_set_directly() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        s.hubs[0].export_ban_until = vec![s.tick + 1000];
+        // Hub 1 needs iron and has none — a genuine arbitrage gap dispatch would
+        // otherwise act on immediately.
+        let needs = vec![vec![0.0], vec![50.0]];
+        let stock0 = stock_of(&s.hubs[0].stock, 0);
+        s.dispatch(&needs);
+        assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0,
+            "a banned good's stock at the source must not move — nothing may ship");
+    }
+
+    /// N4 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.4) · `house_for`'s within-tier pick
+    /// must not always resolve to the lowest house index. Five equally-weighted
+    /// (`political_power: 0.0` for all — house_at's default) specialist houses at
+    /// one hub, sampled across many ticks: the old `.position()` pick would return
+    /// index 0 on every single sample.
+    #[test]
+    fn house_for_does_not_always_favour_the_lowest_index() {
+        let goods = vec![good("silk", 1, 2, 20.0, 0.35, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![100.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.houses = (0..5).map(|_| house_at(0, vec![0], 1)).collect();
+        let mut seen = std::collections::HashSet::new();
+        for t in 0..200u32 {
+            s.tick = t;
+            seen.insert(s.house_for(0, 0));
+        }
+        assert!(seen.len() > 1,
+            "with 5 equally-weighted candidates, 200 samples across ticks must not \
+             all resolve to the same house — the pick must be a real weighted draw, \
+             not a disguised .position()");
     }
 
     /// R1 · the realm layer must be structurally inert until a realm is proclaimed

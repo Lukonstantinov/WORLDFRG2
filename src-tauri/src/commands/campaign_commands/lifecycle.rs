@@ -599,6 +599,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 officials: Vec::new(),
                 civic_goods: Vec::new(),
                 food_export_lock: 0,
+                export_ban_until: Vec::new(),
                 laws: Vec::new(),
                 captor_house: -1,
                 // Atlas 2.0 lifecycle: primordial (worldgen) settlements.
@@ -925,6 +926,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         diag_why_slot: 0,
         diag_why_cash: 0,
         diag_why_bar: 0,
+        diag_why_no_carrier_bind: 0,
         diag_lost: 0,
         diag_volume: 0.0,
         recent_trades: vec![],
