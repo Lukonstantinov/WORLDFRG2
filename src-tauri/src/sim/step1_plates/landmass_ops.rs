@@ -606,6 +606,17 @@ pub fn island_chain(buf: &mut WorldBuffer, lasso: &Lasso, count: u32, kind: Isla
     let mut elevation = buf.elevation.clone();
     let mut volcanic = buf.is_volcanic.clone();
     for (ci, &(cx, cy)) in centers.iter().enumerate() {
+        // A center that landed OUTSIDE the selection (Scatter spreads them across the
+        // whole bounding box, and an irregular lasso leaves gaps) is pulled back toward
+        // the centroid until it's inside — otherwise most scattered islands were simply
+        // skipped and few or none appeared. The centroid of a drawn lasso is inside it.
+        let (mut cx, mut cy) = (cx, cy);
+        let mut tries = 0;
+        while lasso.blend(cx, cy, w) <= 0.0 && tries < 8 {
+            cx += (ccx - cx) * 0.4;
+            cy += (ccy - cy) * 0.4;
+            tries += 1;
+        }
         if lasso.blend(cx, cy, w) <= 0.0 {
             continue;
         }

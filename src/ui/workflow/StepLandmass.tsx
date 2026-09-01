@@ -18,7 +18,7 @@ const panelStyle: React.CSSProperties = {
   border: "1px solid #22384f", borderRadius: 4, padding: 6, marginTop: 6,
   display: "flex", flexDirection: "column", gap: 5,
 };
-const rowStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 6, fontSize: 11 };
+const rowStyle: React.CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 11 };
 const labelStyle: React.CSSProperties = { color: "#8ba3bd", minWidth: 60 };
 const smallBtn: React.CSSProperties = {
   ...genBtn, padding: "3px 8px", fontSize: 11, marginTop: 0,
