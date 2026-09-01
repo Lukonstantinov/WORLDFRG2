@@ -264,6 +264,7 @@ impl CampaignSim {
                 owner: seller as i32, sea, river: false, phase: 1, home: -1, // one-way: no return leg
                 contract: true, // its vessel is held by the standing contract reservation
                 price: pt,
+                local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
@@ -469,21 +470,66 @@ impl CampaignSim {
     }
 
 
+    /// N4 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.4) · a deterministic WEIGHTED pick
+    /// among a tier's eligible houses — a UNIFORM `hash01` draw keyed on `(seed,
+    /// tick, hub, good, tier)`, never an RNG or a `HashMap`/array-index order.
+    /// Replaces `.position()`'s "lowest index wins", which silently favoured
+    /// whichever house happened to be FOUNDED FIRST — a bias that compounds for
+    /// 500 years and was never a design decision. An empty/singleton candidate
+    /// set degenerates to the old behaviour for free (nothing to draw between).
+    ///
+    /// Deliberately NOT weighted by `political_power` (the plan's own "influence
+    /// at the hub × free capacity × specialisation match" suggestion): measured
+    /// live, that weighting flipped `econ_inheritance_rules_fragment_differently`
+    /// (partible came out RICHER than primogeniture, 267,680 vs 214,427 — the
+    /// gate's own inversion) — `political_power` grows with a house's existing
+    /// wealth/volume, so weighting the pick by it opens a NEW rich-get-richer
+    /// channel in place of the founding-order one just removed, rather than
+    /// simply removing a bias. A uniform draw still satisfies N4's actual gate
+    /// (the founding-order/wealth correlation must fall) without introducing a
+    /// replacement one; weighting by real capacity/influence is real future work
+    /// that needs its own dose walk, not a default.
+    fn pick_weighted_house(&self, candidates: impl Iterator<Item = usize>, hub: usize, good: usize, tier: u8) -> Option<usize> {
+        candidates
+            .map(|hi| {
+                let draw = hash01(self.seed,
+                    (self.tick as u64) ^ 0xCA4E1E9 ^ ((hub as u64) << 16) ^ ((good as u64) << 8) ^ (tier as u64),
+                    hi as u64);
+                (hi, draw)
+            })
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+            .map(|(hi, _)| hi)
+    }
+
     /// Index helper so the borrow checker is happy reading b's stock in dispatch.
     pub(crate) fn house_for(&self, hub: usize, good: usize) -> i32 {
         // Private merchant houses TAKE OVER a city's trade in their specialty: a
         // seated specialist wins its own good first, then a specialist that holds an
-        // OFFICE here (offices project real trading power into the city). Only then
-        // does the civic GUILD carry the rest (the city's general/needs trade), then
-        // any seated house, then any office-holder. This lets dynamic houses grow
-        // dominant instead of the guild monopolising everything at home.
+        // OFFICE here (offices project real trading power into the city). Then ANY
+        // other seated private house, THEN the civic GUILD if it is itself
+        // chartered in this good (N3, `ACTORS_AND_CARRIAGE_PLAN.md` §3.3 — a guild
+        // founded with `spec: vec![]` used to sit ABOVE the unspecialised
+        // private-house arm with no specialisation check at all, so it shadowed
+        // it at every city with a guild and "specialised in nothing, preferred
+        // for everything"), then any office-holder. WITHIN each tier the winner
+        // is a weighted draw (N4, `pick_weighted_house`), not the lowest array
+        // index.
         let off = hub as u32;
-        self.houses.iter()
-            .position(|h| !h.defunct && !h.is_guild && h.hub as usize == hub && h.spec.contains(&good))
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && !h.is_guild && h.offices.contains(&off) && h.spec.contains(&good)))
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.is_guild && h.hub as usize == hub))
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && !h.is_guild && h.hub as usize == hub))
-            .or_else(|| self.houses.iter().position(|h| !h.defunct && h.offices.contains(&off)))
+        self.pick_weighted_house(self.houses.iter().enumerate()
+            .filter(|(_, h)| !h.defunct && !h.is_guild && h.hub as usize == hub && h.spec.contains(&good))
+            .map(|(i, _)| i), hub, good, 0)
+            .or_else(|| self.pick_weighted_house(self.houses.iter().enumerate()
+                .filter(|(_, h)| !h.defunct && !h.is_guild && h.offices.contains(&off) && h.spec.contains(&good))
+                .map(|(i, _)| i), hub, good, 1))
+            .or_else(|| self.pick_weighted_house(self.houses.iter().enumerate()
+                .filter(|(_, h)| !h.defunct && !h.is_guild && h.hub as usize == hub)
+                .map(|(i, _)| i), hub, good, 2))
+            .or_else(|| self.pick_weighted_house(self.houses.iter().enumerate()
+                .filter(|(_, h)| !h.defunct && h.is_guild && h.hub as usize == hub && h.spec.contains(&good))
+                .map(|(i, _)| i), hub, good, 3))
+            .or_else(|| self.pick_weighted_house(self.houses.iter().enumerate()
+                .filter(|(_, h)| !h.defunct && h.offices.contains(&off))
+                .map(|(i, _)| i), hub, good, 4))
             .map(|i| i as i32)
             .unwrap_or(-1)
     }
@@ -553,7 +599,7 @@ impl CampaignSim {
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -2497,6 +2543,17 @@ impl CampaignSim {
         let (guild_age, guild_term) = self.roll_founder_tenure(h as u64 ^ 0x6111);
         let coastal = self.hubs[h].coastal;
         let pop = self.hubs[h].population.max(1.0);
+        // N3 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.3) — a CHARTER, mirroring how a
+        // private house is founded (`found_house_at`'s own top-N-by-production
+        // pick), so `house_for`'s guild arm has something real to specialise in
+        // instead of `spec: vec![]` matching nothing and nothing ever filling it.
+        let ng = self.goods.len();
+        let mut gi: Vec<usize> = (0..ng).collect();
+        gi.sort_by(|&a, &b| self.hubs[h].production[b]
+            .partial_cmp(&self.hubs[h].production[a]).unwrap_or(std::cmp::Ordering::Equal));
+        let mut spec: Vec<usize> = gi.into_iter()
+            .filter(|&g| self.hubs[h].production[g] > 0.0).take(3).collect();
+        if spec.is_empty() && ng > 0 { spec.push(0); }
         let name = self.guild_name_for(h);
         let (fleet_sea, fleet_river, fleet_caravan) = Self::initial_fleet(coastal, true);
         let founded = HouseEvent {
@@ -2510,7 +2567,7 @@ impl CampaignSim {
         self.houses.push(House {
             known: std::collections::HashMap::new(),
             name, hub: h as u32, wealth: (pop / 1000.0).max(1.0), prestige: 0.2,
-            spec: vec![], monopoly: vec![], rivals: vec![], generation: 1,
+            spec, monopoly: vec![], rivals: vec![], generation: 1,
             events: vec![founded], good_profit: Vec::new(), good_volume: Vec::new(), mono50: Vec::new(),
             mono_ever: Vec::new(), dominant_seat: false, prev_wealth: 0.0, worst_loss: 0.0,
             fleet_sea, fleet_river, fleet_caravan,

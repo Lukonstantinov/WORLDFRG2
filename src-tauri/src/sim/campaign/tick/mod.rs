@@ -113,6 +113,20 @@ const RIVER_LOSS: f32 = 0.015;
 /// Independent trade shorter than this (travel-days) is "local merchants";
 /// anything longer is organized "guild" long-haul. Splits the non-house carry.
 const LOCAL_HAUL_DAYS: f32 = 8.0;
+/// `ACTORS_AND_CARRIAGE_PLAN.md` N1 (the keystone) — make the local haul BIND:
+/// an ownerless leg (no house could carry it) longer than this many travel-days
+/// does not sail at all, rather than moving for free with no vessel, no capital
+/// clamp and no loss risk (§1 of the plan measured 96% of shipments moving this
+/// way). Shipped at `INFINITY`, which makes the bind clause dead code and the
+/// whole change bit-identical — `n1_local_haul_bind_at_infinity_is_a_noop`
+/// proves it. The dose walk down from infinity is its own, separately-gated,
+/// multi-commit exercise (§4 of the plan) and is deliberately NOT done here.
+const N1_LOCAL_HAUL_BIND_DAYS: f32 = f32::INFINITY;
+/// `ACTORS_AND_CARRIAGE_PLAN.md` N1b — let ownerless cargo sink too, at a rate
+/// independently dosed from the house loss rates above (today `owner < 0`
+/// cargo never sinks at all: "the guard is literal", §1.1 of the plan). Shipped
+/// at 0.0, so the roll below never fires and the change is bit-identical.
+const N1B_OWNERLESS_LOSS_RATE: f32 = 0.0;
 /// Share of a settlement's population engaged in merchant trade — split across
 /// houses / local merchants / guilds by their recent throughput at the hub.
 const MERCHANT_POP_FRACTION: f32 = 0.12;
@@ -572,6 +586,22 @@ const RELIEF_MIN_RELEASE: f32 = 1.0;
 /// How long the export bar stands once imposed — two months, re-imposed monthly
 /// while the famine lasts, so it lapses on its own when the crisis passes.
 const RELIEF_EXPORT_LOCK_TICKS: u32 = 60;
+/// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) · a non-food good's live price must
+/// reach this multiple of its own base value before a council bars its export.
+/// Shipped at `INFINITY` — provably dead code, exactly `N1_LOCAL_HAUL_BIND_DAYS`'s
+/// pattern. A trial dose (6.0, `N2_BAN_TICKS` 30) was measured, not guessed: it
+/// broke `simulate_decades_reports_dynamics`'s hard-asserted wealth bound (a
+/// sustained richest house of 1,005,714 — a real "100k blow-up") even after
+/// halving twice, which means the RENT a export-locked market hands its
+/// resident monopolist is stronger than the plan's own gate ("a staple right is
+/// a rent, and rents concentrate") anticipated — a structural finding, not a
+/// dose-tuning one. Left at zero dose until that interaction is properly
+/// measured; see `docs/ACTORS_AND_CARRIAGE_PLAN.md` §3.2 and `docs/SCOREBOARD.md`.
+const N2_BAN_PRICE_RATIO: f32 = f32::INFINITY;
+/// How long an N2 export ban stands once imposed, mirroring
+/// `RELIEF_EXPORT_LOCK_TICKS` — it re-imposes monthly while the scarcity lasts
+/// and lapses on its own once the price recovers.
+const N2_BAN_TICKS: u32 = 60;
                                                      // (or a captured govt) suspend first-buy
 
 /// Fraction of a hub's trade carried by merchant HOUSES (vs local traders + guilds).
@@ -2351,6 +2381,15 @@ pub struct TickHub {
     /// EPISODE rather than one per month. 0 = no relief. Serde-default → a save from
     /// before this loads with every city unrestricted.
     #[serde(default)] pub food_export_lock: u32,
+    /// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) — the general-purpose counterpart of
+    /// `food_export_lock`, one slot per good: while `export_ban_until[g]` exceeds
+    /// the current tick, this council forbids EXPORT of good `g` (an ordinary
+    /// `Local`/`Global` good's stock has spiked far above its base value — the
+    /// same "release the granary, bar the export" reflex food already gets,
+    /// generalised). Precomputed once per dispatch and consulted in the seller
+    /// loop, exactly the shape `food_export_lock` already proved. Resized to
+    /// `goods.len()` on first use; empty on an old save (no bans, bit-identical).
+    #[serde(default)] pub export_ban_until: Vec<u32>,
     /// Recently enacted laws/policies (capped log) — the government's decisions.
     #[serde(default)] pub laws: Vec<Law>,
     /// The house that currently CONTROLS this government (captured a majority of its
@@ -2567,6 +2606,13 @@ pub struct InTransit {
     /// the city it was sailing towards — see `docs/TRADE_AND_MARKET_REVIEW.md`
     /// Part 3. Written here, read only by the query layer.
     #[serde(default)] pub price: f32,
+    /// `ACTORS_AND_CARRIAGE_PLAN.md` N8 · true when this is an OWNERLESS leg
+    /// (`owner < 0`) that also cleared `LOCAL_HAUL_DAYS` at dispatch — i.e. the
+    /// carrier this arrival should book as at the destination is `SUPPLY_LOCAL`,
+    /// not `SUPPLY_FOREIGN`. Meaningless when `owner >= 0` (books `SUPPLY_HOUSE`
+    /// regardless). `#[serde(default)]` — an old save's in-flight cargo reads
+    /// false and books `SUPPLY_FOREIGN`, exactly its pre-N8 behaviour.
+    #[serde(default)] pub local: bool,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -4835,6 +4881,10 @@ pub struct CampaignSim {
     #[serde(default)] pub diag_why_slot: u32,
     #[serde(default)] pub diag_why_cash: u32,
     #[serde(default)] pub diag_why_bar: u32,
+    /// N1 (`ACTORS_AND_CARRIAGE_PLAN.md`) · a long haul with no house carrier that
+    /// the bind refused to let sail at all. Zero while `N1_LOCAL_HAUL_BIND_DAYS`
+    /// stays at infinity.
+    #[serde(default)] pub diag_why_no_carrier_bind: u32,
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
@@ -6830,24 +6880,32 @@ impl CampaignSim {
                 hb.in_by_land *= 0.98;
                 for v in hb.supply_accum.iter_mut() { *v *= 0.98; }
             }
-            // (to, good, amount, sea, phase, home, owner) — phase/home/owner let an
-            // arriving OUTBOUND house cargo spawn its return leg from the dest hub.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32)> = Vec::new();
+            // (to, good, amount, sea, phase, home, owner, local) — phase/home/owner let
+            // an arriving OUTBOUND house cargo spawn its return leg from the dest hub;
+            // `local` (N8) says whether an ownerless arrival was a short haul.
+            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt, sea, phase, home, owner) in landed {
+            for (to, g, amt, sea, phase, home, owner, local) in landed {
                 if to < self.hubs.len() {
                     stock_add_ungraded(&mut self.hubs[to].stock, g, amt);
                     if self.hubs[to].supply_accum.len() != ng * SUPPLY_CLASSES {
                         self.hubs[to].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
                     }
-                    supply_add(&mut self.hubs[to].supply_accum, g, SUPPLY_FOREIGN, amt);
+                    // N8: attribute the arrival to its actual carrier instead of
+                    // always booking SUPPLY_FOREIGN — a house-owned voyage books
+                    // SUPPLY_HOUSE, an ownerless short haul SUPPLY_LOCAL, and only an
+                    // ownerless long haul SUPPLY_FOREIGN.
+                    let sclass = if owner >= 0 { SUPPLY_HOUSE }
+                        else if local { SUPPLY_LOCAL }
+                        else { SUPPLY_FOREIGN };
+                    supply_add(&mut self.hubs[to].supply_accum, g, sclass, amt);
                     if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
                 }
                 // Round trip: an OUTBOUND (phase 0) house cargo that just sold at `to`
@@ -6884,6 +6942,7 @@ impl CampaignSim {
                 // Runs AFTER provisioning on purpose: a council in famine finds nothing
                 // left on its own market to pre-empt, so the two cannot chase each other.
                 self.run_crisis_relief();
+                self.run_trade_bans(); // N2 — the same reflex, generalised to any good
                 self.warehouse_and_spoilage_pass(); // size city warehouses, spoil what rots (§4.2)
                 self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
