@@ -1050,12 +1050,16 @@ impl CampaignSim {
                     // in importing capitals never grew. Only if NEITHER can carry it
                     // does it fall to independent local merchants & guilds.
                     let mut owner = -1i32;
+                    let mut _why_nohouse = true;
+                    let (mut _why_slot, mut _why_cash, mut _why_bar) = (false, false, false);
                     for cand in [self.house_for(a, g), self.house_for(b, g)] {
                         if cand < 0 { continue; }
+                        _why_nohouse = false;
                         let oi = cand as usize;
                         // Trade war: a house barred from either market cannot run this
                         // leg — the trade falls to a rival or independent merchants.
                         if self.house_barred.get(oi).is_some_and(|v| v.contains(&(a as u32)) || v.contains(&(b as u32))) {
+                            _why_bar = true;
                             continue;
                         }
                         let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
@@ -1068,6 +1072,13 @@ impl CampaignSim {
                             owner = cand;
                             break;
                         }
+                        if slots < 1 { _why_slot = true; } else { _why_cash = true; }
+                    }
+                    if owner < 0 {
+                        if _why_nohouse { self.diag_why_nohouse += 1; }
+                        else if _why_slot { self.diag_why_slot += 1; }
+                        else if _why_cash { self.diag_why_cash += 1; }
+                        else if _why_bar { self.diag_why_bar += 1; }
                     }
                     surplus -= amount;
                     stock_take(&mut self.hubs[a].stock, g, amount);

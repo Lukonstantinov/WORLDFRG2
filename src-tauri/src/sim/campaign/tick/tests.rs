@@ -63,6 +63,7 @@
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
+            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
