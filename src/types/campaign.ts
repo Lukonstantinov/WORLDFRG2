@@ -629,6 +629,59 @@ export interface TradePartner {
   pct: number;
   goods: string[];
 }
+/** Traders tab · one carrier's balance sheet at this city (docs/CITY_TRADERS_
+ *  PANEL_PLAN.md). `house < 0` is the unnamed residual — local merchants on
+ *  no house's account, which the plan's own measurement puts at ~96% of all
+ *  shipments and must never be hidden to flatter the house list. */
+export interface CityTrader {
+  name: string;
+  /** A guild is a civic body; a house is a private family. */
+  is_guild: boolean;
+  /** House index, or −1 for unnamed local merchants. */
+  house: number;
+  volume: number;
+  in_volume: number;
+  out_volume: number;
+  /** Of `volume`, how much moved by sea; the rest overland. */
+  sea_volume: number;
+  pct: number;
+  /** Summed over goods, `min(brought in, sent out)` — cargo this trader both
+   *  landed and shipped onward. A PROXY for entrepôt trade, deliberately
+   *  named "re-exported" not "transit": the sim has no multi-leg voyage. */
+  reexport: number;
+  /** Volume-weighted mean distance to this trader's partners, in km. */
+  mean_route_km: number;
+  goods: string[];
+  has_office: boolean;
+  has_bailo: boolean;
+  seats_council: boolean;
+  is_captor: boolean;
+}
+/** Traders tab · a holder ESTABLISHED at this city — office/bailo/council seat/
+ *  capture — listed whether or not it carried cargo this year. Standing and
+ *  carriage routinely disagree, which is the point of listing both. */
+export interface CityEstablished {
+  name: string;
+  is_guild: boolean;
+  house: number;
+  has_office: boolean;
+  has_bailo: boolean;
+  seats_council: boolean;
+  is_captor: boolean;
+  /** What this holder actually moved here this year (0 if nothing). */
+  volume: number;
+}
+/** Traders tab · WORLD-WIDE (not per-city) carrier diagnostics behind the
+ *  ownerless residual — the "why" note. Reset each New Year. */
+export interface CarrierWhy {
+  shipments: number;
+  by_house: number;
+  ownerless: number;
+  why_nohouse: number;
+  why_slot: number;
+  why_cash: number;
+  why_barred: number;
+}
 /** The settlement Trade-Flows payload. */
 export interface TradeFlows {
   hub: number;
@@ -637,6 +690,16 @@ export interface TradeFlows {
   goods: TradeFlowGood[];
   routes: TradeRouteFlow[];
   partners: TradePartner[];
+  /** Traders tab · who moved cargo at this city, largest first. */
+  traders: CityTrader[];
+  /** Traders tab · who is established here, carrying cargo or not. */
+  established: CityEstablished[];
+  /** Traders tab · the world-wide carrier diagnostics behind the residual. */
+  carrier_why: CarrierWhy;
+  /** What this city PRODUCED and CONSUMED over the year (grain-equivalent
+   *  units), so trade volume can be read against the city's own capacity. */
+  produced_here: number;
+  consumed_here: number;
 }
 /** One estate / manufactory in a settlement's hinterland. */
 export interface EstateRow {
