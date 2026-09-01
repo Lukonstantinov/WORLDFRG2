@@ -31,20 +31,23 @@ existed for a long time and nothing had ever aggregated them over a run.
 
 | | reference | large |
 |---|---|---|
-| shipments | 15,504,097 | 17,018,623 |
-| financed by a house | 668,212 · **4.3 %** | 685,535 · **4.0 %** |
-| **ownerless residual** | 14,835,885 · **95.7 %** | 16,333,088 · **96.0 %** |
-| live houses / with a vessel | 71 / 67 | 81 / 73 |
-| total fleet slots | 178 | 972 |
+| shipments | 15,241,919 | 15,075,023 |
+| financed by a house | 605,772 · **4.0 %** | 696,567 · **4.6 %** |
+| **ownerless residual** | 14,636,147 · **96.0 %** | 14,378,456 · **95.4 %** |
+| live houses / with a vessel | 64 / 57 | 83 / 77 |
+| total fleet slots | 152 | 905 |
+
+Re-measured at this branch's merge with `a7785e8`; first measured at `fe9db2b`
+as 4.3 % / 4.0 % house share. The mix is stable across both.
 
 Why the residual took it:
 
 | | reference | large |
 |---|---|---|
-| no house at either end | 54.6 % | 36.6 % |
-| house had **no free vessel** | 41.0 % | 59.2 % |
-| house **could not afford** it | **0.1 %** | **0.1 %** |
-| house was **barred** | **0.1 %** | **0.0 %** |
+| no house at either end | 58.6 % | 36.3 % |
+| house had **no free vessel** | 37.4 % | 58.8 % |
+| house **could not afford** it | **0.0 %** | **0.1 %** |
+| house was **barred** | **0.1 %** | **0.1 %** |
 
 ### 1.1 The three asymmetries that produce this
 
@@ -63,9 +66,12 @@ moves*.
 
 ### 1.2 Two consequences
 
-**House carriage cannot scale.** The large world carries 5.5× the fleet and a
-*lower* house share, because arbitrage opportunities grow with hubs × goods while
-fleets grow with house wealth. "Give houses more ships" is a treadmill, not a fix.
+**House carriage does not scale with fleet.** The large world carries ~6× the fleet
+slots for a house share within half a point of the reference world's, because
+arbitrage opportunities grow with hubs × goods while fleets grow with house wealth.
+"Give houses more ships" is a treadmill, not a fix. (At `fe9db2b` the large world's
+share was actually *lower*; post-merge it is marginally higher. Either way the fleet
+multiple buys nothing.)
 
 **Capital is never the constraint (0.1 %), and carrier-level bans touch a rounding
 error (0.1 %).** Every embargo, blockade and exclusion built on `house_barred` —
@@ -360,19 +366,22 @@ independent merchants"). The proposal was not too small; it was aimed at the wro
 layer. N2 is the correction. Recorded because a reverted approach that isn't written
 down will simply be attempted again (§2.4).
 
-### 5.2 The gate this must be measured against is currently red
+### 5.2 The inheritance gate was red, and recovered — check it before tuning
 
-`econ_inheritance_rules_fragment_differently` **fails on `main`** at `fe9db2b`,
-verified on a clean tree by stashing all local changes: *"partible must leave the
-average house poorer than primogeniture (177581 vs 168513)"*. Partible is coming out
-**richer** — the same inversion `CLAUDE.md` records from the `COMFORT_IMPORT_FRAC`
-episode (193,720 vs 164,858 at the bad dose); last recorded healthy figures were
-149,925 vs 174,496. This is the sixth perturbation of a gate that file already
-describes as having flipped inside its own noise band five times.
+Measured at `fe9db2b`, `econ_inheritance_rules_fragment_differently` **failed** on a
+clean tree: *"partible must leave the average house poorer than primogeniture
+(177581 vs 168513)"* — partible coming out **richer**, the same inversion `CLAUDE.md`
+records from the `COMFORT_IMPORT_FRAC` episode, and the sixth flip of a gate that
+file already describes as having flipped five times.
 
-Four of the five outcome columns for these proposals are wealth-sensitive. **No dose
-above can be tuned until that gate is green.** The mechanisms hold regardless — they
-are structure, not calibration — but the tuning cannot start. Needs its own bisect.
+**It passes again after merging `a7785e8`** (verified at this branch's merge commit).
+Whatever landed on `main` between those two points fixed it; this document did not.
+
+Recorded rather than deleted because it is the fastest available reminder of why
+§4.1's rules exist: four of the five outcome columns for these proposals are
+wealth-sensitive, this gate flips inside its own noise band, and it flipped twice
+within a single day's commits. **Re-run it immediately before and after every dose
+step below**, not just at the end of a phase.
 
 ### 5.3 The 96 % may be load-bearing in ways not yet found
 
@@ -409,7 +418,7 @@ it is.
 |---|---|---|
 | 0 | Audit the roster and capability matrix | **done** (§2) |
 | 1 | Measure the carrier mix | **done** — `econ_measure_carrier_mix` |
-| 2 | Bisect and fix `econ_inheritance_rules_fragment_differently` | **blocking, not started** (§5.2) |
+| 2 | ~~Bisect `econ_inheritance_rules_fragment_differently`~~ | **recovered on main** (§5.2) — re-check per dose step |
 | 3 | N8 market book | not started |
 | 4 | N1 at zero dose, then the dose walk | not started |
 | 5 | N2 · N4 | not started |

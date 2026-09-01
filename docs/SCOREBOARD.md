@@ -19,14 +19,15 @@ a long time; nothing had ever aggregated them over a run. 60 years, two worlds:
 
 | | reference | large |
 |---|---|---|
-| shipments | 15,504,097 | 17,018,623 |
-| financed by a house | 668,212 · **4.3%** | 685,535 · **4.0%** |
-| **ownerless residual** | 14,835,885 · **95.7%** | 16,333,088 · **96.0%** |
-| live houses / fleet slots | 71 / 178 | 81 / 972 |
+| shipments | 15,241,919 | 15,075,023 |
+| financed by a house | 605,772 · **4.0%** | 696,567 · **4.6%** |
+| **ownerless residual** | 14,636,147 · **96.0%** | 14,378,456 · **95.4%** |
+| live houses / fleet slots | 64 / 152 | 83 / 905 |
 
-Why the residual took it — reference / large: no house at either end 54.6 / 36.6%,
-house had **no free vessel** 41.0 / 59.2%, house **could not afford** it 0.1 / 0.1%,
-house was **barred** 0.1 / 0.0%.
+Why the residual took it — reference / large: no house at either end 58.6 / 36.3%,
+house had **no free vessel** 37.4 / 58.8%, house **could not afford** it 0.0 / 0.1%,
+house was **barred** 0.1 / 0.1%. (First measured at `fe9db2b` as 4.3 / 4.0% house
+share; re-measured after merging `a7785e8`. Stable across both.)
 
 **Three asymmetries produce it.** The house branch needs a free vessel slot, has
 its quantity clamped by `amount.min(afford)`, and rolls for voyage loss. The
@@ -62,19 +63,22 @@ specialises in nothing and is preferred for everything at its home city. And
 `house_for` picks with `.position()`, giving the lowest-indexed (oldest) house at a
 hub permanent first refusal on its city's trade.
 
-**REGRESSION, pre-existing, not caused by this work:**
-`econ_inheritance_rules_fragment_differently` is **RED on `main`** at `fe9db2b`,
+**A gate flipped twice in one day, and both flips are the finding:**
+`econ_inheritance_rules_fragment_differently` was **RED on `main` at `fe9db2b`**,
 verified on a clean tree by stashing all local changes — *"partible must leave the
-average house poorer than primogeniture (177581 vs 168513)"*. Partible is coming
-out richer: the same inversion recorded in the 2026-08-20d `COMFORT_IMPORT_FRAC`
-entry (193,720 vs 164,858 at the bad dose); last healthy figures 149,925 vs
-174,496. Sixth flip of this gate. Four of the five outcome columns for the plan
-above are wealth-sensitive, so no dose can be tuned until it is green. Needs its
-own bisect.
+average house poorer than primogeniture (177581 vs 168513)"*, partible coming out
+richer, the same inversion as the 2026-08-20d `COMFORT_IMPORT_FRAC` entry (193,720
+vs 164,858 at the bad dose); last healthy figures 149,925 vs 174,496. **It passes
+again after merging `a7785e8`** — something in that day's own commits fixed it, not
+this work. Sixth and seventh movements of a gate this file already describes as
+flipping inside its own noise band five times. Four of five outcome columns for the
+plan above are wealth-sensitive, so it must be re-run immediately before and after
+EVERY dose step, not once per phase.
 
 Gates run (rule §2.8 routing: `sim/campaign/tick/**` → `tick::tests` + `econ_`):
-`tick::tests` **162 passed**; `econ_` 4 passed, 1 failed (the pre-existing failure
-above). Instrumentation is four counters in the ownerless branch only — no RNG
+at `fe9db2b`, `tick::tests` **162 passed**, `econ_` 4 passed / 1 failed (the
+pre-existing failure above); after merging `a7785e8`,
+`econ_inheritance_rules_fragment_differently` **passes**. Instrumentation is four counters in the ownerless branch only — no RNG
 draws, no control-flow change, serde-defaulted.
 
 ---

@@ -4035,9 +4035,10 @@ ACTORS_AND_CARRIAGE_PLAN.md       ← ⭐ MEASURED + PLANNED, one diagnostic bui
                                     bias · N5 the sailing window · N6 price-elastic
                                     demand · N7 the League · N8 make the market book
                                     honest). Carries its own recorded WRONG TURN
-                                    (§5.1) and the blocking note that
-                                    `econ_inheritance_rules_fragment_differently` is
-                                    RED on main (§5.2)
+                                    (§5.1) and the note (§5.2) that
+                                    `econ_inheritance_rules_fragment_differently`
+                                    went RED then GREEN inside one day's commits —
+                                    re-run it per DOSE STEP, not per phase
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
 DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geology
