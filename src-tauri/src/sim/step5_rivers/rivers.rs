@@ -265,6 +265,21 @@ fn world_micro_relief_seed(elevation: &[f32]) -> u64 {
 }
 
 pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
+    compute_hydrology_with_sinks(buf, None)
+}
+
+/// `compute_hydrology`, with an optional set of extra DRAINAGE SINKS — land cells
+/// that absorb flow exactly as the sea does.
+///
+/// This exists for the second hydrology pass (`reflood_around_lakes`). After the
+/// water balance lowers an over-large basin's level, the exposed basin floor is
+/// dry land that drains INWARD to the remaining lake. The first pass cannot know
+/// that: it fills the whole basin to its spill level, so its ε-tilted surface
+/// descends toward the SPILL, and a river routed on it would head for the rim and
+/// climb out. Re-flooding with the lake cells as sinks makes the exposed floor
+/// drain to the water, which is both what really happens and what the map has to
+/// show.
+pub fn compute_hydrology_with_sinks(buf: &WorldBuffer, sinks: Option<&[bool]>) -> Hydrology {
     let w = buf.width;
     let h = buf.height;
     let total = buf.total();
@@ -314,10 +329,12 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
         })
         .collect();
 
-    // Seed the flood with every sea cell â€” these are the drainage outlets.
+    // Seed the flood with every sea cell â€” these are the drainage outlets — plus
+    // any extra sink (a lake surface, on the second pass).
+    let is_sink = |i: usize| buf.terrain[i] == 0 || sinks.map_or(false, |s| s[i]);
     for i in 0..total {
         filled[i] = elev[i];
-        if buf.terrain[i] == 0 {
+        if is_sink(i) {
             visited[i] = true;
             flow_dir[i] = FLOW_SEA;
             heap.push(FloodCell { elev: filled[i], seq, idx: i });
@@ -329,7 +346,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
         order.push(idx);
         let cx = (idx % w as usize) as i32;
         let cy = (idx / w as usize) as i32;
-        let c_is_sea = buf.terrain[idx] == 0;
+        let c_is_sea = is_sink(idx);
         let c_filled = filled[idx];
 
         for &(dx, dy) in &D8 {
@@ -339,6 +356,7 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
             let ni = buf.idx(nx, ny as u32);
             if visited[ni] { continue; }
             if buf.terrain[ni] != 1 { continue; } // only land drains
+            if is_sink(ni) { continue; }          // a lake surface is an outlet, not a cell to fill
 
             visited[ni] = true;
             // Raise to just above the spill level (Îµ-tilt) so the filled surface
@@ -372,9 +390,17 @@ pub fn compute_hydrology(buf: &WorldBuffer) -> Hydrology {
             let ny = cy + dy;
             if ny < 0 || ny >= h as i32 { continue; }
             let ni = buf.idx(nx, ny as u32);
+            if is_sink(ni) {
+                // A lake (or the sea) is a terminal outlet: a channel that reaches
+                // one ENDS there. Taking it unconditionally is what stops a river
+                // being drawn past a shoreline it has already reached.
+                best_filled = f32::MIN;
+                best_dir = FLOW_SEA;
+                continue;
+            }
             if filled[ni] < best_filled {
                 best_filled = filled[ni];
-                best_dir = if buf.terrain[ni] == 0 { FLOW_SEA } else { ni as i32 };
+                best_dir = ni as i32;
             }
         }
         flow_dir[idx] = best_dir;
@@ -1085,6 +1111,64 @@ pub fn extract_oxbows(rivers: &[River], buf: &WorldBuffer, existing: &[Lake]) ->
 /// depression counts â€” raising it keeps only genuinely deep basins, shrinking
 /// the lake count/extent. `max_cells`: connected basins larger than this are
 /// dropped (run-away flooded interiors that read as implausible inland seas).
+/// The COMPLETE hydrology of a world: flow field, lakes, and a flow field that
+/// agrees with those lakes. Use this rather than calling `compute_hydrology` and
+/// `detect_lakes` separately — keeping the two consistent is the whole point.
+///
+/// ── WHY TWO PASSES ──────────────────────────────────────────────────────────
+/// A priority flood fills every closed basin to its spill level, and
+/// `extract_rivers` refuses to draw a channel across a filled basin (`ponded`,
+/// >10 m of fill): water stands there, so it is not channel, and a line drawn
+/// across it climbs the true ground underneath — the 1,940 m "rivers run upward"
+/// artefact that rule exists to prevent.
+///
+/// That was consistent while every filled basin became a drawn lake. The water
+/// balance (`trim_basin_to_water_balance`) broke the consistency: it lowers an
+/// over-large basin's level, so the basin is still ponded end to end while only
+/// its deepest part is drawn as water. Measured on an endorheic fixture, 53,998
+/// cells were treated as standing water and 22 were drawn as lake — and every one
+/// of the 12 rivers stopped at that INVISIBLE shoreline, in open land. That is
+/// the "rivers end to nowhere / are truncated" report, and it is a straight
+/// consequence of two extents disagreeing.
+///
+/// So the second pass re-floods with the LAKE SURFACES as drainage sinks. The
+/// exposed basin floor is then what it physically is — dry land draining inward
+/// to the water — its fill drops to nothing, it stops being `ponded`, and rivers
+/// run across it and END AT THE SHORE. No river climbs, because the flood now
+/// descends toward the lake rather than toward the spill.
+///
+/// The second pass is skipped when nothing was trimmed (every ponded cell is
+/// already a lake cell), so an ordinary world pays for one flood, not two.
+pub struct WorldHydrology {
+    pub hydro: Hydrology,
+    pub lakes: Vec<Lake>,
+}
+
+pub fn compute_world_hydrology(
+    buf: &WorldBuffer, fill_depth: f32, max_cells: usize,
+) -> WorldHydrology {
+    let hydro = compute_hydrology(buf);
+    let lakes = detect_lakes(buf, &hydro.filled, fill_depth, max_cells);
+    if lakes.is_empty() {
+        return WorldHydrology { hydro, lakes };
+    }
+    let total = buf.total();
+    let mut is_lake = vec![false; total];
+    for lk in &lakes { for &(x, y) in &lk.cells { is_lake[buf.idx(x, y)] = true; } }
+    // Was anything trimmed? A ponded cell outside every lake is exactly a cell the
+    // router treats as water and the renderer draws nothing on.
+    const POND_FILL: f32 = 10.0 / 8848.0;
+    let orphaned = (0..total).any(|i| {
+        buf.terrain[i] == 1 && !is_lake[i]
+            && hydro.filled[i] - buf.elevation[i] > POND_FILL
+    });
+    if !orphaned {
+        return WorldHydrology { hydro, lakes };
+    }
+    let hydro = compute_hydrology_with_sinks(buf, Some(&is_lake));
+    WorldHydrology { hydro, lakes }
+}
+
 /// The largest lake surface a real world sustains, in km². The Caspian — the
 /// biggest lake on Earth, and a genuine endorheic basin — is 371,000 km²;
 /// Superior, the biggest freshwater lake, is 82,000. Stated in km² and converted
@@ -1431,6 +1515,97 @@ mod tests {
         buf.precipitation = vec![precip; n];
         buf.temperature = vec![temp; n];
         buf
+    }
+
+    /// Count river reaches that end at a DANGLING STUB — a last point that is not
+    /// the sea, not a lake cell, and not a confluence with another reach. A stub is
+    /// a river drawn stopping in the middle of open land, which is the "rivers end
+    /// to nowhere / are truncated" report.
+    fn dangling_stubs(buf: &WorldBuffer, rivers: &[River], lakes: &[Lake]) -> (usize, usize) {
+        let mut lake_cell = std::collections::HashSet::new();
+        for lk in lakes { for &(x, y) in &lk.cells { lake_cell.insert(buf.idx(x, y)); } }
+        // Every cell any reach passes through, so a tributary ending on a trunk counts
+        // as a confluence rather than a stub.
+        let mut on_channel: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        for (ri, r) in rivers.iter().enumerate() {
+            for &(x, y) in &r.points { on_channel.entry(buf.idx(x, y)).or_insert(ri); }
+        }
+        let mut stubs = 0usize;
+        for (ri, r) in rivers.iter().enumerate() {
+            let Some(&(mx, my)) = r.points.last() else { continue };
+            let i = buf.idx(mx, my);
+            if buf.terrain[i] == 0 { continue; }               // reached the sea
+            if lake_cell.contains(&i) { continue; }            // reached a lake
+            // Touching another reach's cell = a confluence.
+            let mut joins = false;
+            for dy in -1i32..=1 { for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let ni = buf.widx(mx as i32 + dx, my as i32 + dy);
+                if let Some(&o) = on_channel.get(&ni) { if o != ri { joins = true; } }
+                if buf.terrain[ni] == 0 || lake_cell.contains(&ni) { joins = true; }
+            }}
+            if !joins { stubs += 1; }
+        }
+        (stubs, rivers.len())
+    }
+
+    /// THE DANGLING-STUB GATE. A river must end somewhere: the sea, a lake, or
+    /// another river. Ending in open land is the "rivers end to nowhere" artefact.
+    ///
+    /// This is a REGRESSION GATE for the water balance. Before it, a large basin
+    /// became one drawn lake and a river visibly ended at water. The water balance
+    /// keeps only the deepest cells as lake, but `extract_rivers` treats the WHOLE
+    /// filled basin as `ponded` (>10 m of fill ⇒ not a channel), so a river stopped
+    /// at the old basin edge with nothing drawn there. The lake extent the renderer
+    /// draws and the ponded extent the router stops at have to be the SAME set.
+    #[test]
+    fn a_river_always_ends_at_water_or_another_river() {
+        let (w, h) = (300u32, 200u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        // An ENDORHEIC world: the land tilts inward to one broad interior basin, so
+        // essentially every river drains into it. That is the configuration the
+        // water balance actually bites on, and the one a fixture that drains to the
+        // sea cannot exercise — a basin off to one side of a seaward slope catches
+        // one river, and one river cannot show a systematic truncation.
+        let (cx, cy) = (w as f32 * 0.5, h as f32 * 0.5);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x < 2 { terrain[i] = 0; continue; }   // a strip of sea to drain the rim
+                let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+                // Rises away from the centre → all drainage converges on the middle.
+                elev[i] = 0.06 + d * 0.0016;
+            }
+        }
+        let mut buf = synth(w, h, terrain, elev);
+        // Semi-arid: where the water balance trims hard, and so where the regression
+        // showed. A humid basin is not trimmed at all and proves nothing here.
+        buf.koppen = vec![crate::sim::koppen::BSK; n];
+        buf.precipitation = vec![300.0; n];
+        buf.temperature = vec![18.0; n];
+        let wh = compute_world_hydrology(&buf, 0.002, ((w * h) as usize / 2000).max(20));
+        let (hy, lakes) = (&wh.hydro, &wh.lakes);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.0, 1.0, lakes);
+        let (stubs, total) = dangling_stubs(&buf, &rivers, lakes);
+        let lake_cells: usize = lakes.iter().map(|l| l.cells.len()).sum();
+        // How much of the basin the router treats as standing water but the
+        // renderer draws nothing on — the discrepancy that IS the bug.
+        const POND_FILL: f32 = 10.0 / 8848.0;
+        let ponded = (0..n).filter(|&i| buf.terrain[i] == 1
+            && hy.filled[i] - buf.elevation[i] > POND_FILL).count();
+        println!("rivers {} · dangling stubs {} · lakes {} ({} cells) · ponded {} cells",
+                 total, stubs, lakes.len(), lake_cells, ponded);
+        assert!(total >= 8, "fixture produced too few rivers ({}) to measure", total);
+        let frac = stubs as f32 / total as f32;
+        assert!(frac <= 0.10,
+            "{} of {} river reaches ({:.0}%) end in open land — not at the sea, not \
+             at a lake, not at a confluence. {} cells are treated as ponded (no \
+             channel) while only {} are drawn as lake, so rivers stop at an \
+             INVISIBLE shoreline. The extent the renderer draws and the extent the \
+             router stops at have to be the same set.",
+            stubs, total, frac * 100.0, ponded, lake_cells);
     }
 
     /// THE MILLION-KM² LAKE GATE. A filled depression tells you only that water

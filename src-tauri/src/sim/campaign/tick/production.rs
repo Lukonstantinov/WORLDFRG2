@@ -1870,8 +1870,17 @@ impl CampaignSim {
         // INBOUND flow at `to` (from `from`) and an OUTBOUND flow at `from` (to `to`).
         if amount > 0.0 {
             let g = good as u32;
-            *self.trade_cur.entry((to, g, from, 0)).or_insert(0.0) += amount;
-            *self.trade_cur.entry((from, g, to, 1)).or_insert(0.0) += amount;
+            // Carry the shipment's TRANSPORT MODE and its CARRIER into the yearly
+            // aggregate. Both arrive on every call and were previously dropped on
+            // the floor here, so "how did this reach us" and "who brought it" were
+            // unanswerable a year later even though the tick knew both.
+            let carrier = if owner >= 0 { owner as u32 } else { u32::MAX };
+            for key in [(to, g, from, 0u8), (from, g, to, 1u8)] {
+                let e = self.trade_cur.entry(key).or_default();
+                e.amount += amount;
+                if sea { e.sea_amount += amount; }
+                *e.carriers.entry(carrier).or_insert(0.0) += amount;
+            }
         }
     }
 
@@ -1882,7 +1891,18 @@ impl CampaignSim {
     /// decline), then clear the accumulator for the new year.
     pub(crate) fn fold_trade_year(&mut self) {
         let mut last: Vec<TradeFlowAgg> = self.trade_cur.iter()
-            .map(|(&(hub, good, partner, dir), &amount)| TradeFlowAgg { hub, good, partner, dir, amount })
+            .map(|(&(hub, good, partner, dir), cur)| {
+                // Carriers, largest first, so the panel's "who supplies this" reads
+                // in order without re-sorting; ties break on the index so the fold
+                // stays deterministic.
+                let mut carriers: Vec<(u32, f32)> = cur.carriers.iter().map(|(&k, &v)| (k, v)).collect();
+                carriers.sort_by(|a, b| b.1.partial_cmp(&a.1)
+                    .unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+                TradeFlowAgg {
+                    hub, good, partner, dir,
+                    amount: cur.amount, sea_amount: cur.sea_amount, carriers,
+                }
+            })
             .collect();
         // Deterministic order (the panel re-sorts by volume anyway).
         last.sort_by(|a, b| (a.hub, a.good, a.dir, a.partner).cmp(&(b.hub, b.good, b.dir, b.partner)));

@@ -2669,7 +2669,32 @@ pub struct TradeFlowGood {
     pub out_volume: f32,
     pub route_count: u32,
     pub history: Vec<f32>,
+    /// How much of `last_volume` came or went BY SEA; the rest moved overland by
+    /// caravan. See `TradeFlowAgg::sea_amount` for why there is no separate river
+    /// mode — the sim's travel test is `coastal_a && coastal_b`, so a river city's
+    /// trade genuinely reads as overland and claiming otherwise would be a lie.
+    #[serde(default)]
+    pub sea_volume: f32,
+    /// Who moved it — houses, guilds, or unnamed local merchants — largest first.
+    #[serde(default)]
+    pub carriers: Vec<TradeCarrier>,
 }
+/// WHO carried a good — a house, a guild, or unnamed local merchants — and what
+/// share of this city's trade in it they moved. `log_trade` receives the owner on
+/// every shipment; before this the yearly fold discarded it, so "which house
+/// supplies our grain" had no answer a year later.
+#[derive(Serialize, Clone)]
+pub struct TradeCarrier {
+    pub name: String,
+    /// A GUILD is a civic body, a house is a private family — the distinction the
+    /// panel needs to say "supplied by the guild" rather than name a family.
+    pub is_guild: bool,
+    /// House index, or −1 for unnamed local merchants.
+    pub house: i32,
+    pub amount: f32,
+    pub pct: f32,
+}
+
 /// One good's flow along one partner route (for the per-good route list + map).
 #[derive(Serialize, Clone)]
 pub struct TradeRouteFlow {
@@ -2681,6 +2706,10 @@ pub struct TradeRouteFlow {
     pub dir: u8,        // 0 = inbound to this city, 1 = outbound
     pub amount: f32,
     pub pct: f32,       // share of this good's flow at this city
+    /// Of `amount`, how much came by SEA — so a lane reads as a sea crossing or an
+    /// overland haul without the reader guessing from the map.
+    #[serde(default)]
+    pub sea_amount: f32,
 }
 /// A top partner city: its share of ALL this city's trade + the goods exchanged.
 #[derive(Serialize, Clone)]

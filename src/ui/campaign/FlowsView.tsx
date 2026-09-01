@@ -72,6 +72,23 @@ function verdictOf(g: TradeFlowGood): { text: string; tone?: Tone } {
   return { text: "entrepôt" };
 }
 
+/** HOW A GOOD TRAVELS — the sea/overland split, as a phrase plus the share.
+ *  `log_trade` is handed each shipment's `sea` flag and the yearly fold used to
+ *  discard it, so "did this come by ship or by caravan" was unanswerable a year
+ *  later even though the tick knew it every day.
+ *
+ *  Only TWO modes are offered, deliberately. The sim decides sea travel by
+ *  `coastal_a && coastal_b` alone, so a river or lake city's trade reads as
+ *  overland however it really moved; a third "river" chip would be inventing a
+ *  distinction the model does not make. */
+function transportOf(seaVol: number, total: number): { label: string; icon: string; seaPct: number } | null {
+  if (total <= 0) return null;
+  const seaPct = Math.max(0, Math.min(1, seaVol / total)) * 100;
+  if (seaPct >= 85) return { label: "by sea", icon: "⛵", seaPct };
+  if (seaPct <= 15) return { label: "overland", icon: "🐫", seaPct };
+  return { label: `${seaPct.toFixed(0)}% by sea`, icon: "⛵🐫", seaPct };
+}
+
 /** How lopsided a good's trade is, 0 (perfectly balanced) → 1 (one-way only).
  *  The default sort key: a good this city is lopsided in is the one worth reading,
  *  and it is invisible in a volume ordering. Weighted by volume so a one-way trickle
@@ -313,6 +330,56 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                       last year {fmt(g.last_volume)} · {g.history.length}-year trend
                     </span>
                   </div>
+                  {/* HOW IT TRAVELS + WHO CARRIES IT. Both are read straight off
+                      state the tick already had per shipment. "Who carries it" is
+                      the monopoly question: one house moving nearly all of a good
+                      IS a monopoly on it, whatever the charter says, and that is
+                      worth flagging rather than leaving to be read off a list. */}
+                  <div style={{ width: "100%", padding: "2px 0 4px 28px" }}>
+                    {(() => {
+                      const tr = transportOf(g.sea_volume ?? 0, g.last_volume);
+                      const top = g.carriers?.[0];
+                      return (
+                        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>
+                          {tr && (
+                            <Badge tone="neutral">{tr.icon} {tr.label}</Badge>
+                          )}
+                          {top && top.pct >= 60 && (
+                            <Badge tone={top.house < 0 ? "neutral" : "warn"}>
+                              {top.is_guild ? "🏛" : "⚜"} {top.name} carries {top.pct.toFixed(0)}%
+                            </Badge>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {g.carriers && g.carriers.length > 0 && (
+                      <div style={{ marginTop: SPACE.sm }}>
+                        <div style={{ color: T.inkFaint, fontSize: FZ.micro, marginBottom: 2 }}>
+                          WHO CARRIES IT
+                        </div>
+                        {g.carriers.map((c) => (
+                          <div key={`${c.house}:${c.name}`}
+                            style={{ display: "flex", alignItems: "center", gap: SPACE.sm, padding: "1px 0" }}>
+                            <span style={{ width: 14, fontSize: FZ.tiny }}>
+                              {c.house < 0 ? "·" : c.is_guild ? "🏛" : "⚜"}
+                            </span>
+                            <span style={{
+                              flex: 1, minWidth: 60, color: c.house < 0 ? T.inkDim : T.ink,
+                              fontSize: FZ.tiny, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                            }}>{c.name}</span>
+                            <Meter value={c.pct} max={100} color={c.is_guild ? "#7fb2d8" : "#c99a3a"} height={5} />
+                            <span style={{ width: 34, textAlign: "right", color: T.inkMid, fontSize: FZ.tiny }}>
+                              {c.pct.toFixed(0)}%
+                            </span>
+                          </div>
+                        ))}
+                        <FootNote>
+                          ⚜ house · 🏛 guild · · unnamed local merchants. A single carrier
+                          above 60% is an effective monopoly on this good here.
+                        </FootNote>
+                      </div>
+                    )}
+                  </div>
                 </>
               )}
             </div>
@@ -360,6 +427,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                   color: isSel ? T.gold : T.ink,
                 }}>
                   {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
+                </span>
+                <span style={{ width: 20, textAlign: "center", fontSize: FZ.tiny }}
+                  title={(r.sea_amount ?? 0) > r.amount * 0.5 ? "carried by sea" : "carried overland"}>
+                  {(r.sea_amount ?? 0) > r.amount * 0.5 ? "⛵" : "🐫"}
                 </span>
                 <span style={{ width: 50, textAlign: "right", color: T.inkMid }}>{fmt(r.amount)}</span>
                 <span style={{ width: 38, textAlign: "right", color: T.inkDim }}>{r.pct.toFixed(0)}%</span>

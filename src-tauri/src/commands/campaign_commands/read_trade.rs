@@ -688,6 +688,10 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut route_amt: HashMap<(u32, u32, u8), f32> = HashMap::new(); // (good,partner,dir)→amt
     let mut partner_vol: HashMap<u32, f32> = HashMap::new();
     let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
+    // Transport split + carrier breakdown, per good and for the city as a whole.
+    let mut g_sea: HashMap<u32, f32> = HashMap::new();
+    let mut g_carriers: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // good→carrier→amt
+    let mut route_sea: HashMap<(u32, u32, u8), f32> = HashMap::new();
     for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
         let partner = city_of(f.partner); // fold estates/manufactories into their settlement
         if partner == hidx { continue; }  // skip self-trade after folding (own estate)
@@ -697,6 +701,10 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         *route_amt.entry((f.good, partner, f.dir)).or_insert(0.0) += f.amount;
         *partner_vol.entry(partner).or_insert(0.0) += f.amount;
         *partner_goods.entry(partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
+        *g_sea.entry(f.good).or_insert(0.0) += f.sea_amount;
+        *route_sea.entry((f.good, partner, f.dir)).or_insert(0.0) += f.sea_amount;
+        let cg = g_carriers.entry(f.good).or_default();
+        for &(who, amt) in &f.carriers { *cg.entry(who).or_insert(0.0) += amt; }
     }
 
     // ── Goods list: union of last-year flows + historical series ──
@@ -722,6 +730,28 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             in_volume: iv, out_volume: ov,
             route_count: g_partners.get(&g).map(|s| s.len() as u32).unwrap_or(0),
             history,
+            sea_volume: g_sea.get(&g).copied().unwrap_or(0.0),
+            carriers: {
+                // Who actually moved this good, largest share first. A house index
+                // resolves to its name and whether it is a GUILD (a civic body) or a
+                // private HOUSE; `u32::MAX` is the residual — shipments with no named
+                // owner, i.e. ordinary local merchants.
+                let total = iv + ov;
+                let mut v: Vec<TradeCarrier> = g_carriers.get(&g).map(|m| m.iter().map(|(&who, &amt)| {
+                    let h = if who == u32::MAX { None } else { sim.houses.get(who as usize) };
+                    TradeCarrier {
+                        name: h.map(|x| x.name.clone()).unwrap_or_else(|| "local merchants".into()),
+                        is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+                        house: if who == u32::MAX { -1 } else { who as i32 },
+                        amount: amt,
+                        pct: if total > 0.0 { amt / total * 100.0 } else { 0.0 },
+                    }
+                }).collect()).unwrap_or_default();
+                v.sort_by(|a, b| b.amount.partial_cmp(&a.amount)
+                    .unwrap_or(std::cmp::Ordering::Equal).then(a.name.cmp(&b.name)));
+                v.truncate(6);
+                v
+            },
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
@@ -735,6 +765,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         Some(TradeRouteFlow {
             good: g, partner, partner_name: pname, px, py, dir, amount,
             pct: amount / tot * 100.0,
+            sea_amount: route_sea.get(&(g, partner, dir)).copied().unwrap_or(0.0),
         })
     }).collect();
     routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));

@@ -551,7 +551,16 @@ export function MapCanvas() {
     const seen = new Set<string>();
     if (campaignSnapshot?.active) {
       for (const h of campaignSnapshot.hubs) {
-        if (h.is_estate) continue;
+        // `is_estate` is an OWNERSHIP flag, not a geography flag (CLAUDE.md rule
+        // 32). Most estates are CO-LOCATED inside their parent city and must not
+        // be separate click targets — a click there belongs to the city. But a
+        // HOUSE TRADE OUTPOST (`colony_kind === 2`) is a REMOTE SITE standing on
+        // its own ground, often hundreds of km from any city: the sim's own
+        // `is_remote_site` predicate. Excluding every estate made those outposts
+        // unclickable — drawn on the map, named on the map, listed in the Colonial
+        // Office, and impossible to open. Same failure the rule already records
+        // for routing and lifelines, at a call site the rule had not reached.
+        if (h.is_estate && (h.colony_kind ?? 0) !== 2) continue;
         list.push({ x: h.x, y: h.y, id: h.id, colony: h.colony_kind ?? 0 });
         seen.add(posKey(h.x, h.y));
       }

@@ -3830,6 +3830,23 @@ Gates: `no_lake_is_larger_than_the_largest_real_lake`,
 `an_over_large_basin_is_lowered_not_deleted`, `an_ice_cap_basin_holds_no_lake`,
 `an_arid_basin_holds_less_water_than_a_wet_one`.
 
+**FLOW AND LAKES ARE ONE PASS** (`compute_world_hydrology`). A priority flood
+fills every closed basin to its spill level, and `extract_rivers` refuses to draw a
+channel across a filled basin (`ponded`, >10 m of fill) because water stands there
+and a line across it climbs the true ground beneath. That was consistent while
+every filled basin became a drawn lake — and the water balance broke it: the basin
+is still ponded end to end while only its deepest part is drawn as water. Measured
+on an endorheic fixture, **53,998 cells were treated as standing water and 22 were
+drawn as lake, and all 12 rivers stopped at that invisible shoreline** — the
+"rivers end to nowhere / are truncated" report, a straight consequence of two
+extents disagreeing. The second pass re-floods with the LAKE SURFACES as drainage
+sinks (`compute_hydrology_with_sinks`), so the exposed basin floor becomes what it
+physically is — dry land draining inward — stops being ponded, and rivers run
+across it and end AT THE SHORE. No river climbs, because the flood now descends
+toward the lake rather than toward the spill. Skipped when nothing was trimmed, so
+an ordinary world pays for one flood. Gate:
+`a_river_always_ends_at_water_or_another_river` (0 stubs, was 12 of 12).
+
 **Lakes are now PERSISTED** (`persist_lakes`/`load_lakes`, `metadata["lakes"]`).
 They used to be the one hydrology product with no stored copy: every consumer
 called `detect_lakes` again with its own hard-coded `fill_depth` of 0.004, while
@@ -4527,6 +4544,17 @@ Three rules:
     bytes in a now-manufactured good's column. Filter by DISTRIBUTION at the
     serving layer (`strip_manufactured_from_province_goods`), which fixes worlds
     that already exist and uses the only thing that actually knows.
+35. **A flow that exists must be VISIBLE.** `renderFlowHighlight` traced every
+    trade flow along the WORLDGEN trade-route graph and `continue`d when Dijkstra
+    found no path — on the rule "never draw a straight slash". That rule is right
+    about not faking a road and wrong about what to do when there isn't one: it
+    DROPPED the flow, so a real trade the panel listed had nothing on the map. It
+    is not rare — the worldgen graph is bounded by its own max open-water crossing
+    while a campaign flow has its own route matrix with sea lanes and rescue
+    passes, so every inter-landmass flow vanished. Where no corridor exists the
+    lane is now drawn DASHED and direct (the atlas convention for an open-water
+    shipping lane, honest about being a crossing), taking the shorter way round
+    the cylinder. Never silently drop a datum the UI is simultaneously listing.
 34. **Generating data is not loading it.** Both run-alls call
     `generate_and_persist_provinces`, but neither run-all HANDLER loaded the result
     into the frontend store — so a fully generated world reported "No provinces

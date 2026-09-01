@@ -1251,6 +1251,37 @@ export class OverlayManager {
   /** Shortest path from `a` to `b` ALONG the existing trade-route graph (Dijkstra by
    *  road length), returned as one concatenated world-cell polyline. Null if either
    *  end can't be attached to the network or no road path exists. */
+  /** THE ONE WAY TO TURN A TRADE LINK INTO A DRAWN LANE (rule 35).
+   *
+   *  `routeAlongTradeRoutes` returns null whenever Dijkstra cannot connect two
+   *  points over the WORLDGEN trade-route graph — and that graph is bounded by its
+   *  own maximum open-water crossing, while a campaign flow has its own route
+   *  matrix with sea lanes and long-haul rescue passes. So every link between two
+   *  landmasses the worldgen layer never joined comes back null.
+   *
+   *  Five separate call sites each handled that null by SKIPPING the lane (the
+   *  house network, futures lanes, merchant routes, the Goods Atlas flows, and the
+   *  flow highlight), on the shared rule "never draw a straight slash". The rule is
+   *  right that we must not draw a fake ROAD; it is wrong that the answer is to
+   *  draw nothing, because the panel beside the map is listing that very trade. The
+   *  result was trades you could read in a list and could not find on the map — and
+   *  systematically the LONG ones, which are the interesting ones.
+   *
+   *  So: a corridor when one exists (`openWater: false`, drawn solid), otherwise a
+   *  direct lane (`openWater: true`, drawn DASHED — the atlas convention for an
+   *  open-water shipping lane, which claims a crossing rather than a road). The
+   *  direct lane takes the shorter way round the cylinder (rule 6); callers break
+   *  the stroke at the seam as they already do. */
+  private laneBetween(a: [number, number], b: [number, number]):
+      { pts: [number, number][]; openWater: boolean } {
+    const path = this.routeAlongTradeRoutes(a, b);
+    if (path && path.length >= 2) return { pts: path, openWater: false };
+    const W = this.worldW;
+    let bx = b[0];
+    if (W > 0 && Math.abs(bx - a[0]) > W / 2) bx += a[0] > bx ? W : -W;
+    return { pts: [[a[0], a[1]], [bx, b[1]]], openWater: true };
+  }
+
   private routeAlongTradeRoutes(a: [number, number], b: [number, number]): [number, number][] | null {
     this.ensureTradeGraph();
     const n = this.tgNodes.length;
@@ -1338,8 +1369,9 @@ export class OverlayManager {
     const net: [number, number][][] = [];
     for (const c of cities) {
       if (c[0] === sel.seat[0] && c[1] === sel.seat[1]) continue;
-      const path = this.routeAlongTradeRoutes(sel.seat, c);
-      if (path && path.length >= 2) net.push(path); // corridor only — never a straight line
+      // Rule 35: a link that exists must be visible. Off-corridor legs come back
+      // as a direct open-water lane rather than being dropped.
+      net.push(this.laneBetween(sel.seat, c).pts);
     }
     this.houseNetwork = net;
   }
@@ -1347,8 +1379,8 @@ export class OverlayManager {
   /** Snap every futures lane onto the existing trade routes (source→buyer). */
   private routeFuturesLanes() {
     for (const r of this.futuresLanes) {
-      const path = this.routeAlongTradeRoutes(r.a, r.b);
-      r.path = path && path.length >= 2 ? path : undefined;
+      // Rule 35 — an off-corridor lane is drawn direct, never dropped.
+      r.path = this.laneBetween(r.a, r.b).pts;
     }
   }
 
@@ -1358,8 +1390,8 @@ export class OverlayManager {
    *  and SKIPPED at draw time (we never bridge with a straight slash). */
   private routeMerchantRoutes() {
     for (const r of this.merchantRoutes) {
-      const path = this.routeAlongTradeRoutes(r.a, r.b);
-      r.path = path && path.length >= 2 ? path : undefined;
+      // Rule 35 — an off-corridor route is drawn direct, never dropped.
+      r.path = this.laneBetween(r.a, r.b).pts;
     }
   }
 
@@ -1413,8 +1445,10 @@ export class OverlayManager {
     const out: { path: [number, number][]; amount: number }[] = [];
     let max = 0;
     for (const f of flows) {
-      const path = this.routeAlongTradeRoutes([f.from_x, f.from_y], [f.to_x, f.to_y]);
-      if (!path || path.length < 2) continue;
+      // Rule 35 — an off-corridor flow is drawn direct, never dropped. This one
+      // was the most visibly wrong: the Goods Atlas would show a good's world
+      // trade with every sea leg missing.
+      const { pts: path } = this.laneBetween([f.from_x, f.from_y], [f.to_x, f.to_y]);
       out.push({ path, amount: f.amount });
       if (f.amount > max) max = f.amount;
     }
@@ -4023,13 +4057,34 @@ export class OverlayManager {
       const inbound = s.dir === 0;
       const color = inbound ? lineColors.merchantIn : lineColors.merchantOut; // cyan in · gold out
       const w = Math.max(1.2, s.w * inv);
-      // Trace the ACTUAL merchant path along the trade-routes layer (roads/sea-lanes).
-      // NEVER draw a straight slash: if no corridor path can be found at all (the
-      // routes layer isn't computed yet), skip this segment rather than drawing a
-      // straight line.
-      const path = this.routeAlongTradeRoutes([s.ax, s.ay], [s.bx, s.by]);
-      if (!path || path.length < 2) continue;
-      const pts: [number, number][] = path;
+      // Trace the ACTUAL merchant path along the trade-routes layer (roads/sea-lanes)
+      // where one exists, so a flow rides the roads already drawn on the map.
+      //
+      // ── WHY THERE IS A FALLBACK, AND WHY IT IS DASHED ────────────────────────
+      // This used to `continue` when no corridor could be traced, on the rule
+      // "never draw a straight slash". That rule is right about not faking a ROAD,
+      // and wrong about what to do when there isn't one: it DROPPED the flow
+      // entirely, so a real trade the panel was listing had nothing on the map.
+      //
+      // It is not a rare case. `routeAlongTradeRoutes` runs Dijkstra over the
+      // WORLDGEN trade-route graph, which is bounded by that layer's maximum
+      // open-water crossing — while a campaign flow has its own route matrix with
+      // sea lanes and long-haul rescue passes. So any flow between two landmasses
+      // the worldgen layer never connected has no path in this graph, and every
+      // one of them silently vanished: the "trunks are not shown, it's the
+      // settlements far away, maybe because it crosses oceans" report, which is
+      // exactly what it was.
+      //
+      // A flow that exists must be visible. Where there is no corridor the lane is
+      // drawn DASHED and direct — the cartographic convention for an open-water
+      // shipping lane, which is honest about being a crossing rather than a road,
+      // instead of asserting a road that isn't there or hiding the trade.
+      const lane = this.laneBetween([s.ax, s.ay], [s.bx, s.by]);
+      const openWater = lane.openWater;
+      // The direct lane takes the SHORTEST way round a cylindrical world (rule 6):
+      // a partner 20 cells east across the antimeridian is 20 cells away, not
+      // worldW − 20 the other way. `drawPolyline` breaks the stroke at the seam.
+      const pts: [number, number][] = lane.pts;
       const drawPolyline = () => {
         ctx.beginPath();
         let started = false;
@@ -4044,8 +4099,11 @@ export class OverlayManager {
         ctx.stroke();
       };
       ctx.strokeStyle = color;
-      ctx.globalAlpha = 0.22; ctx.lineWidth = w * 3; drawPolyline();
-      ctx.globalAlpha = 0.95; ctx.lineWidth = w; drawPolyline();
+      // Dashed for an open-water lane, solid where the flow rides a real corridor.
+      ctx.setLineDash(openWater ? [Math.max(3, 6 * inv), Math.max(3, 5 * inv)] : []);
+      ctx.globalAlpha = openWater ? 0.14 : 0.22; ctx.lineWidth = w * 3; drawPolyline();
+      ctx.globalAlpha = openWater ? 0.85 : 0.95; ctx.lineWidth = w; drawPolyline();
+      ctx.setLineDash([]);
       // Directional chevrons ALONG the line (-->-- inbound · --<-- outbound) so the
       // flow direction reads at a glance, not just at the endpoint.
       {

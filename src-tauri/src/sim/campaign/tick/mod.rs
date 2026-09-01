@@ -2584,6 +2584,17 @@ pub struct RecentTrade {
     pub tick: u32,
 }
 
+/// The running per-(hub, good, partner, direction) accumulator behind
+/// `TradeFlowAgg`, carrying the transport split and the carrier breakdown the
+/// fold used to throw away.
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct TradeCur {
+    pub amount: f32,
+    pub sea_amount: f32,
+    /// house index (u32::MAX = no named owner) → volume carried.
+    pub carriers: std::collections::HashMap<u32, f32>,
+}
+
 /// One aggregated trade flow for the settlement "Flows" subtab: how much of `good`
 /// moved between `hub` and `partner` in a direction (`dir` 0 = inbound to `hub`,
 /// 1 = outbound from `hub`) over a year. Sparse — only pairs that actually traded.
@@ -2594,6 +2605,24 @@ pub struct TradeFlowAgg {
     pub partner: u32,
     pub dir: u8,
     pub amount: f32,
+    /// How much of `amount` moved BY SEA. The rest went overland by caravan.
+    ///
+    /// `log_trade` has always been handed the shipment's `sea` flag, and the
+    /// yearly fold discarded it — the same shape as every other number the plan
+    /// notes is "computed inside `dispatch()` and then thrown away". Nothing but
+    /// this display reads it, so it cannot move a simulated figure.
+    ///
+    /// Note the honest limit: the sim's travel mode is `coastal_a && coastal_b`
+    /// alone, so a river or lake city's trade reads as OVERLAND however it really
+    /// moved. Reporting sea-vs-overland is therefore truthful; reporting a
+    /// separate "river" mode would not be, and is deliberately not offered
+    /// (TRADE_STAGING_AND_POSTS_PLAN.md names the same gap).
+    #[serde(default)]
+    pub sea_amount: f32,
+    /// Who carried it: house index → volume. `-1` is the residual (local
+    /// merchants / no named owner) and is stored as `u32::MAX`.
+    #[serde(default)]
+    pub carriers: Vec<(u32, f32)>,
 }
 
 /// Per-(hub, good) yearly trade-volume series (in + out), so the Flows subtab can
@@ -4880,7 +4909,7 @@ pub struct CampaignSim {
     /// `trade_hist`. Observability only; never feeds back into the simulation, so it
     /// has no bearing on determinism.
     #[serde(skip)]
-    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8), f32>,
+    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8), TradeCur>,
     /// Per-hub trade DOMINATOR (house index, −1 = none), recomputed monthly from
     /// `House.influence`. Derived → not serialized. Drives the dominance trade edge.
     #[serde(skip)]

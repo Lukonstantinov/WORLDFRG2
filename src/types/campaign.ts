@@ -588,6 +588,23 @@ export interface TradeFlowGood {
   out_volume: number;
   route_count: number;
   history: number[];
+  /** Of `last_volume`, how much moved BY SEA; the rest went overland by caravan.
+   *  There is deliberately no separate "river" mode — the sim's travel test is
+   *  `coastal_a && coastal_b`, so a river city's trade genuinely reads as
+   *  overland and claiming a river mode would be a lie. */
+  sea_volume: number;
+  /** Who moved it — houses, guilds, or unnamed local merchants — largest first. */
+  carriers: TradeCarrier[];
+}
+/** WHO carried a good and what share of this city's trade in it they moved. */
+export interface TradeCarrier {
+  name: string;
+  /** A guild is a civic body; a house is a private family. */
+  is_guild: boolean;
+  /** House index, or −1 for unnamed local merchants. */
+  house: number;
+  amount: number;
+  pct: number;
 }
 /** One good's flow along one partner route (per-good route list + map highlight). */
 export interface TradeRouteFlow {
@@ -596,6 +613,8 @@ export interface TradeRouteFlow {
   partner_name: string;
   px: number;
   py: number;
+  /** Of `amount`, how much came by sea. */
+  sea_amount?: number;
   dir: number;   // 0 inbound, 1 outbound
   amount: number;
   pct: number;
