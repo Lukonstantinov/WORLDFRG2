@@ -342,14 +342,22 @@ pub fn sim_refresh_hydrology_biology(
     let mut buf = WorldBuffer::load(&conn)?; // ALL columns (writes soil/fert/goods/salinity/…)
 
     // Phase 5: rivers → lakes → oxbows → salt classification.
-    let hydro = rivers::compute_hydrology(&buf);
+    // ONE call for flow + lakes: the two must agree or a river ends at a shoreline
+    // the renderer never draws (`compute_world_hydrology`). This site was missed in
+    // the first pass of that fix, so every REFRESH regenerated the truncated rivers
+    // the generate path had just stopped producing.
     let max_cells = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4);
-    let mut lakes = rivers::detect_lakes(&buf, &hydro.filled, lake_fill_depth, max_cells);
+    let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, max_cells);
+    let hydro = wh.hydro;
+    let mut lakes = wh.lakes;
     let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes);
     persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
+    // Keep the STORED lake set in step with the refreshed rivers — otherwise a
+    // refresh leaves settlement placement and the map reading a stale set.
+    persist_lakes(&conn, &lakes);
 
     // Phase 6: soil & fertility (incl. delta floodplain abundance + delta fisheries).
     soil::classify_soil(&mut buf);

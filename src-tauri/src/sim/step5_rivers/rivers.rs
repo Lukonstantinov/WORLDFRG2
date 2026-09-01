@@ -1608,6 +1608,52 @@ mod tests {
             stubs, total, frac * 100.0, ponded, lake_cells);
     }
 
+    /// THE REAL-WORLD stub count. The synthetic endorheic fixture proves the
+    /// MECHANISM; this proves it on a world built by the actual generator, with
+    /// real plates, real elevation, real climate and real basins — which is what
+    /// the user is looking at. `#[ignore]`d: it builds a whole world.
+    #[test]
+    #[ignore]
+    fn diag_real_world_river_stubs() {
+        use crate::sim::world_buffer::{WorldBuffer, ColumnSet};
+        use crate::db::schema;
+        use rusqlite::Connection;
+        for &(w, h) in &[(600u32, 300u32)] {
+            let conn = Connection::open_in_memory().unwrap();
+            schema::create_tables(&conn).unwrap();
+            for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+                conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![k, v]).unwrap();
+            }
+            let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+            crate::sim::plates::generate_plates_and_landmass(&mut buf, 4242, 14);
+            crate::sim::elevation::generate_elevation(&mut buf, 4242);
+            // No climate chain: `detect_lakes` falls back to sane defaults when
+            // koppen/precip/temp are absent. A uniform SEMI-ARID climate is set
+            // instead, because that is where the water balance actually trims and
+            // so where truncation showed — a humid world trims nothing and would
+            // prove nothing.
+            let n = buf.total();
+            buf.koppen = vec![crate::sim::koppen::BSK; n];
+            buf.precipitation = vec![340.0; n];
+            buf.temperature = vec![17.0; n];
+
+            let max_cells = ((w * h) as usize / 2000).max(20);
+            // BEFORE: the two computed separately (the shape that truncates).
+            let hy1 = compute_hydrology(&buf);
+            let lakes1 = detect_lakes(&buf, &hy1.filled, 0.004, max_cells);
+            let riv1 = extract_rivers(&buf, &hy1.flow_dir, &hy1.acc, &hy1.filled, 0.5, 1.0, &lakes1);
+            let (s1, t1) = dangling_stubs(&buf, &riv1, &lakes1);
+            // AFTER: the consistent two-pass helper.
+            let wh = compute_world_hydrology(&buf, 0.004, max_cells);
+            let riv2 = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc, &wh.hydro.filled, 0.5, 1.0, &wh.lakes);
+            let (s2, t2) = dangling_stubs(&buf, &riv2, &wh.lakes);
+            println!("REAL WORLD {}x{} · separate: {}/{} stubs ({:.1}%) · two-pass: {}/{} stubs ({:.1}%)",
+                     w, h, s1, t1, 100.0 * s1 as f32 / t1.max(1) as f32,
+                     s2, t2, 100.0 * s2 as f32 / t2.max(1) as f32);
+        }
+    }
+
     /// THE MILLION-KM² LAKE GATE. A filled depression tells you only that water
     /// cannot flow OUT; how much water actually stands there is a water-balance
     /// question (inflow vs. evaporation off the lake surface), and `detect_lakes`

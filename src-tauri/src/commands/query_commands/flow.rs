@@ -50,18 +50,53 @@ pub fn campaign_get_trade_flow(
         node_of.insert(h.id, cc.cidx(cx, cy));
     }
     // Route each pair and bundle its volume onto every coarse edge it traverses.
-    let mut edge: std::collections::HashMap<(usize, usize), f32> = std::collections::HashMap::new();
+    //
+    // ── ONE DIJKSTRA PER SOURCE, NOT PER PAIR ────────────────────────────────
+    // This ran a full point-to-point `coarse_dijkstra` for EVERY entry in
+    // `flow_year`. That list is per (origin, destination) pair, so a world of a
+    // few hundred trading cities produces thousands of entries and this loop ran
+    // thousands of whole-grid searches on every refresh of the Dynamic Trade Flow
+    // layer — which is why the layer took so long to appear.
+    //
+    // Almost all of that work was redundant: every flow leaving the same city
+    // re-explored the identical grid. Grouping by SOURCE and running the
+    // single-source variant that already exists (`coarse_dijkstra_dist_prev`,
+    // added for the campaign route-days matrix and never adopted here) collapses
+    // it to one search per distinct origin NODE — hundreds at most, and usually
+    // far fewer, since cities sharing a coarse cell share a node. The routes are
+    // identical: a point-to-point Dijkstra and a single-source one return the same
+    // shortest path over the same graph.
+    let mut by_source: std::collections::HashMap<usize, Vec<(usize, f32)>> =
+        std::collections::HashMap::new();
     for &(a_id, b_id, vol) in &sim.flow_year {
         if vol <= 0.0 { continue; }
         let (s, g) = match (node_of.get(&a_id), node_of.get(&b_id)) {
             (Some(&s), Some(&g)) if s != g => (s, g),
             _ => continue,
         };
-        let path = match coarse_dijkstra(&cc, s, g) { Some(p) => p, None => continue };
-        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
-        for w in path.windows(2) {
-            let e = (w[0].min(w[1]), w[0].max(w[1]));
-            *edge.entry(e).or_insert(0.0) += vol;
+        by_source.entry(s).or_default().push((g, vol));
+    }
+    let mut edge: std::collections::HashMap<(usize, usize), f32> = std::collections::HashMap::new();
+    for (s, goals) in &by_source {
+        let (dist, prev) = coarse_dijkstra_dist_prev(&cc, *s);
+        for &(g, vol) in goals {
+            if dist.get(g).copied().unwrap_or(i64::MAX) == i64::MAX { continue; }
+            // Walk the predecessor tree back from the goal — the same path the
+            // point-to-point search produced, without re-searching the grid.
+            let mut path = Vec::new();
+            let mut cur = g;
+            while cur != usize::MAX {
+                path.push(cur);
+                if cur == *s { break; }
+                cur = prev[cur];
+            }
+            if path.len() < 2 || *path.last().unwrap() != *s { continue; }
+            path.reverse();
+            if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+            for w in path.windows(2) {
+                let e = (w[0].min(w[1]), w[0].max(w[1]));
+                *edge.entry(e).or_insert(0.0) += vol;
+            }
         }
     }
     let mut trunks: Vec<TradeTrunk> = edge.into_iter()
