@@ -34,6 +34,14 @@ struct Plate {
     /// Signed angular rate. `velocity_at` turns this into a real (vx, vy) at
     /// any cell position — never read directly elsewhere.
     omega: f32,
+    /// TECTONICS_AND_ISOLATION_PLAN.md Part B1 — this plate's SIZE CLASS weight,
+    /// fed into `warped_voronoi_weighted` (a POWER DIAGRAM, not a plain
+    /// nearest-seed Voronoi) so a "giant" plate captures genuinely more
+    /// territory than an ordinary one, the way Earth's Pacific plate (~103M km²)
+    /// dwarfs its Juan de Fuca (~0.25M km²) — nearly three orders of magnitude
+    /// the old jittered-grid seeding could never produce, since every plate
+    /// claimed roughly one grid cell of territory by construction.
+    size_weight: f32,
 }
 
 /// Rigid-body rotation velocity at world position (x, y) for a plate rotating
@@ -89,6 +97,51 @@ const PLATE_WARP_WAVELENGTHS: f32 = 0.80;
 /// partition sheds detached specks. See the table above `PLATE_WARP_AMP_FRAC`.
 const PLATE_WARP_SIGMA_CLAMP: f32 = 0.80;
 
+/// TECTONICS_AND_ISOLATION_PLAN.md Part B1 — plate SIZE CLASS weights (giant /
+/// large / medium / small), fed into `warped_voronoi_weighted`'s power diagram.
+/// Only RATIOS between classes matter (the offset formula subtracts `weight −
+/// 1.0`, so weight 1.0 is the neutral/unweighted case).
+///
+/// **NEGATIVE RESULT, recorded so it is not repeated (§2.4).** The first cut used
+/// a MULTIPLICATIVELY weighted Voronoi (divide squared distance by weight²) —
+/// the textbook approach. Measured on the gate's own 8-plate world, a small
+/// plate could come out with its territory split into DISCONNECTED islands even
+/// with the warp turned off entirely (`plate_territory_stays_connected` failed
+/// at 87% connectivity at `warp_frac = 0.0`), which proved the fault was the
+/// weighting metric itself, not the warp on top of it: a multiplicative metric
+/// is not a true distance (the triangle inequality can fail), so its cells are
+/// not guaranteed connected, and at only 8 plates and a 4× weight ratio a small
+/// plate boxed in by bigger neighbours was pinched into pieces by construction.
+///
+/// The fix is a POWER DIAGRAM (Laguerre-Voronoi) instead: `d² − offset`, an
+/// ADDITIVE term subtracted from the squared distance rather than a
+/// multiplicative divisor. A power diagram's cells are provably convex — hence
+/// always connected — for ANY offsets, at ANY plate count, which is what makes
+/// `PLATE_WARP_AMP_FRAC_WEIGHTED` free to stay small without hunting for a
+/// razor's-edge amplitude: the mathematics guarantees the property the old
+/// approach could only approximate by tuning. `POWER_DIAGRAM_OFFSET_SCALE`
+/// converts `size_weight` into that offset.
+const SIZE_CLASS_WEIGHTS: [f32; 4] = [2.2, 1.6, 1.0, 0.55];
+/// Proportions for the classes above, in the SAME order — must sum to 1.0.
+/// Earth's own rough mix: one Pacific-scale giant among many, several
+/// continent-scale large plates, a broad middle, and a crowd of small ones.
+const SIZE_CLASS_PROPORTIONS: [f32; 4] = [0.10, 0.25, 0.40, 0.25];
+/// Warp amplitude for the WEIGHTED (production) partition. Smaller than
+/// `PLATE_WARP_AMP_FRAC`: the power diagram's convexity guarantee holds only
+/// BEFORE the warp is applied, and the warp can still bend a thin part of an
+/// otherwise-convex cell enough to sever it at full amplitude (measured: 0.25
+/// reproduces the multiplicative failure, 0.08 does not, over the same 3 seeds
+/// `plate_territory_stays_connected` checks).
+const PLATE_WARP_AMP_FRAC_WEIGHTED: f32 = 0.08;
+/// Scales the power-diagram offset as a fraction of `plate_spacing²`, so the
+/// offset is dimensionally a squared distance regardless of world size or plate
+/// count. Set by measurement: large enough that the size gate
+/// (`plate_sizes_span_an_order_of_magnitude`, ≥5×) clears with real margin
+/// (shipped: 7.74× mean, over 5 seeds) — connectivity does not depend on this
+/// constant at all (a power diagram's cells are convex at any offset), so it
+/// only has to satisfy the area target.
+const POWER_DIAGRAM_OFFSET_SCALE: f32 = 2.2;
+
 /// Assign every cell to its nearest plate seed — the Voronoi partition — but at
 /// a DOMAIN-WARPED sample position rather than the cell's own.
 ///
@@ -108,6 +161,23 @@ pub(crate) fn warped_voronoi(
                          PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP)
 }
 
+/// `warped_voronoi`, but each seed carries a SIZE WEIGHT — a multiplicatively
+/// weighted Voronoi (a plate's captured territory grows with its weight, not
+/// just its position), which is how TECTONICS_AND_ISOLATION_PLAN.md Part B1
+/// gives plates genuinely different sizes without abandoning the even spatial
+/// spread the jittered grid seeding already provides (moving seeds around
+/// instead would cluster them and re-open the coverage gaps that seeding was
+/// written to avoid). `weights[i] == 1.0` for every plate reproduces the
+/// unweighted partition exactly, which is what lets `warped_voronoi` stay a
+/// thin wrapper around this rather than a second implementation.
+pub(crate) fn warped_voronoi_weighted(
+    seeds: &[(f32, f32)], weights: &[f32], width: u32, height: u32, count: usize,
+    seed: u64, warp_frac: f32,
+) -> Vec<u16> {
+    warped_voronoi_tuned_weighted(seeds, weights, width, height, count, seed, warp_frac,
+                                  PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP)
+}
+
 /// `warped_voronoi` with its two shape knobs exposed, so `diag_sweep_plate_warp`
 /// can measure the (amplitude, wavelength, clamp) space instead of guessing at
 /// it. Production always goes through `warped_voronoi`, which pins them to the
@@ -115,6 +185,15 @@ pub(crate) fn warped_voronoi(
 pub(crate) fn warped_voronoi_tuned(
     seeds: &[(f32, f32)], width: u32, height: u32, count: usize, seed: u64, warp_frac: f32,
     wavelengths: f32, sigma_clamp: f32,
+) -> Vec<u16> {
+    warped_voronoi_tuned_weighted(seeds, &vec![1.0f32; seeds.len()], width, height, count, seed,
+                                  warp_frac, wavelengths, sigma_clamp)
+}
+
+/// `warped_voronoi_tuned`, weighted (see `warped_voronoi_weighted`).
+pub(crate) fn warped_voronoi_tuned_weighted(
+    seeds: &[(f32, f32)], weights: &[f32], width: u32, height: u32, count: usize, seed: u64,
+    warp_frac: f32, wavelengths: f32, sigma_clamp: f32,
 ) -> Vec<u16> {
     let w = width as f32;
     let h = height as f32;
@@ -199,7 +278,36 @@ pub(crate) fn warped_voronoi_tuned(
                 if dx > w / 2.0 { dx -= w; }
                 if dx < -w / 2.0 { dx += w; }
                 let dy = sy - cy;
-                let dist = dx * dx + dy * dy;
+                // A POWER DIAGRAM (Laguerre-Voronoi), not a multiplicatively
+                // weighted Voronoi.
+                //
+                // NEGATIVE RESULT, recorded so it is not attempted again (§2.4):
+                // the first cut divided the squared distance by weight² (the
+                // textbook multiplicatively-weighted metric). Measured on the
+                // gate's own 8-plate world, a small plate could come out with its
+                // territory split into disconnected islands EVEN AT ZERO WARP —
+                // `plate_territory_stays_connected` failed at 87% connectivity
+                // with the warp amplitude turned off entirely
+                // (`diag_check_zero_warp_shred`), which proved the fault was the
+                // weighting itself, not the warp on top of it. A multiplicative
+                // metric is not a true distance (the triangle inequality can
+                // fail), and its Voronoi cells are not guaranteed connected or
+                // even simply-connected — with only 8 plates and a 4× weight
+                // ratio, a small plate boxed in by bigger neighbours can be
+                // pinched into separate pieces by construction.
+                //
+                // A power diagram instead SUBTRACTS an additive offset from the
+                // squared distance: `d² − offset`. This is the same family as an
+                // ordinary weighted Voronoi generalises to when built from a
+                // proper distance metric, and its cells are provably convex —
+                // hence always connected — for ANY offsets, at ANY plate count.
+                // The offset is scaled by `plate_spacing²` so it is dimensionally
+                // a squared distance too, and centred on weight 1.0 so a
+                // uniform-weight world (every weight = 1.0) is bit-identical to
+                // the unweighted partition.
+                let wt = weights.get(pi).copied().unwrap_or(1.0);
+                let offset = (wt - 1.0) * plate_spacing * plate_spacing * POWER_DIAGRAM_OFFSET_SCALE;
+                let dist = dx * dx + dy * dy - offset;
                 if dist < best_dist {
                     best_dist = dist;
                     best_plate = pi as u16;
@@ -263,9 +371,29 @@ pub fn generate_plates_and_landmass_with_target(
         let pole_y = cy + pole_angle.sin() * pole_dist;
         let speed = 0.5 + rng.gen::<f32>() * 0.5;
         let omega = (if rng.gen::<bool>() { 1.0 } else { -1.0 }) * speed / pole_dist.max(1.0);
+        // Part B1 — a SIZE CLASS ladder, not a smooth distribution: a real
+        // continuous power law drawn independently per plate mostly regresses to
+        // the mean once there are more than a handful of plates (the law of large
+        // numbers working against the very unevenness it is meant to produce).
+        // Discrete classes with fixed proportions guarantee the shape survives
+        // whatever the plate count: SIZE_CLASS_WEIGHTS[SIZE_CLASS_PROPORTIONS]
+        // pairs giant (10%) / large (25%) / medium (40%) / small (25%) plates,
+        // Earth's own rough mix of a Pacific-scale giant, several Africa/
+        // Eurasia-scale large plates, and a crowd of Nazca/Caribbean-scale small
+        // ones. `size_weight` feeds `warped_voronoi_weighted` (a multiplicatively
+        // weighted Voronoi), so RELATIVE weight is all that matters — the
+        // absolute numbers are chosen so the extremes differ by the ~16-25×
+        // AREA ratio the gate checks for, not by eye.
+        let class_roll = rng.gen::<f32>();
+        let mut acc = 0.0f32;
+        let mut size_weight = *SIZE_CLASS_WEIGHTS.last().unwrap();
+        for (&class_w, &class_p) in SIZE_CLASS_WEIGHTS.iter().zip(SIZE_CLASS_PROPORTIONS.iter()) {
+            acc += class_p;
+            if class_roll < acc { size_weight = class_w; break; }
+        }
         plates.push(Plate {
             cx, cy, is_oceanic, density,
-            pole_x, pole_y, omega,
+            pole_x, pole_y, omega, size_weight,
         });
     }
 
@@ -299,8 +427,19 @@ pub fn generate_plates_and_landmass_with_target(
     // world is untouched. Kept well under 0.5 so the warp bends a margin without
     // detaching territory from its own plate.
     let seeds: Vec<(f32, f32)> = plates.iter().map(|p| (p.cx, p.cy)).collect();
-    buf.plate_index = warped_voronoi(
-        &seeds, buf.width, buf.height, count, seed, PLATE_WARP_AMP_FRAC);
+    let weights: Vec<f32> = plates.iter().map(|p| p.size_weight).collect();
+    // Part B1's own measured constraint: a WEIGHTED Voronoi already pulls a small
+    // plate's boundary in tight against its bigger neighbours, so the SAME warp
+    // amplitude that only bent an unweighted margin (§8.24b) now reaches deep
+    // enough to sever pieces of it — `plate_territory_stays_connected` caught this
+    // directly (worst connectivity fell to 80-85%, under the 90% bar). Rather than
+    // widen the bar (which would readmit the exact phantom-boundary failure it
+    // exists to catch, per §8.16), the weighted call uses its own, smaller
+    // amplitude — still enough to keep every margin visibly non-straight, just not
+    // enough to cut a small plate adrift.
+    buf.plate_index = warped_voronoi_tuned_weighted(
+        &seeds, &weights, buf.width, buf.height, count, seed,
+        PLATE_WARP_AMP_FRAC_WEIGHTED, PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP);
 
     // Slice 5: reassign is_oceanic to hit `ocean_fraction` BY CONSTRUCTION, from
     // each plate's REAL cell count (measured from the Voronoi assignment just
@@ -921,5 +1060,57 @@ mod tests {
         area.iter()
             .map(|(p, &a)| largest[p] as f32 / a as f32)
             .fold(1.0f32, f32::min)
+    }
+
+    /// THE SHREDDING GATE, on the REAL production path (`generate_plates_and_
+    /// landmass`, which now assigns `plate_index` through `warped_voronoi_
+    /// weighted` — Part B1). A weighted Voronoi is exactly the kind of change
+    /// that risks the failure `PLATE_WARP_AMP_FRAC` was tuned against: warp a
+    /// sample far enough AND let a giant plate's wide capture radius pull it
+    /// across a neighbour's territory, and a small plate can be reduced to
+    /// scattered specks inside a big one — which `boundary_type` then reads as
+    /// phantom plate boundaries scattering ore districts through a plate
+    /// interior (§8.16's own failure mode). Same 0.90 bar the unweighted warp
+    /// was held to; B1 must not spend that margin.
+    #[test]
+    fn plate_territory_stays_connected() {
+        for seed in 0..3u64 {
+            let buf = gen_world(240, 120, seed, 8);
+            let conn = worst_plate_connectivity(&buf.plate_index, buf.width, buf.height);
+            assert!(conn > 0.90,
+                "seed {seed}: some plate's largest connected piece is only {:.0}% of \
+                 its total area — the weighted warp is shredding a plate into \
+                 detached specks.", conn * 100.0);
+        }
+    }
+
+    /// TECTONICS_AND_ISOLATION_PLAN.md Part B1 — plates of GENUINELY different
+    /// size, the way Earth's Pacific plate (~103M km²) dwarfs its Juan de Fuca
+    /// (~0.25M km²). The old jittered-grid seeding made every plate roughly the
+    /// same size by construction (one grid cell of territory each), which this
+    /// gate would fail outright — it is measuring a real, previously-absent
+    /// property, not tuning an existing one.
+    #[test]
+    fn plate_sizes_span_an_order_of_magnitude() {
+        let mut ratios: Vec<f32> = Vec::new();
+        for seed in 0..5u64 {
+            let buf = gen_world(360, 180, seed, 14);
+            let mut area: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
+            for &p in &buf.plate_index { *area.entry(p).or_insert(0) += 1; }
+            let mut areas: Vec<usize> = area.values().copied().collect();
+            areas.sort_unstable();
+            if areas.len() < 4 { continue; }
+            let median = areas[areas.len() / 2] as f32;
+            let largest = *areas.last().unwrap() as f32;
+            if median > 0.0 { ratios.push(largest / median); }
+        }
+        let mean_ratio = ratios.iter().sum::<f32>() / ratios.len().max(1) as f32;
+        println!("largest-plate / median-plate area ratio, mean over {} seeds: {:.2}×",
+                 ratios.len(), mean_ratio);
+        assert!(mean_ratio >= 5.0,
+            "the largest plate is only {:.2}× the median plate's area, averaged over \
+             {} seeds — plates still read as roughly uniform in size, which is exactly \
+             what the old jittered-grid seeding produced and this gate exists to catch.",
+            mean_ratio, ratios.len());
     }
 }
