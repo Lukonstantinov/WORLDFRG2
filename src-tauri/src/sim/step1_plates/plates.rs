@@ -491,25 +491,44 @@ pub fn generate_plates_and_landmass_with_target(
     // computed, not an area estimate) — shuffled first so the greedy fill order
     // isn't "biggest plates always become ocean", then accumulated until the
     // target ocean area is met.
+    //
+    // B1's power-law size classes made a single greedy pass unreliable: this is
+    // really a subset-sum/partition problem, and one shuffle order can get stuck
+    // far from the target when a handful of plates carry very unequal weight
+    // (`land_fraction_tracks_the_target` caught a 6-plate world landing at 52%
+    // land against a 30% target — a >20pt miss). Trying several shuffle orders
+    // and keeping the closest is the same greedy step, just no longer betting
+    // the whole result on the first random order — still deterministic per seed
+    // since every trial draws from the same seeded `rng` in sequence.
     let mut plate_cells = vec![0u32; plates.len()];
     for &pi in &buf.plate_index { plate_cells[pi as usize] += 1; }
-    let mut order: Vec<usize> = (0..plates.len()).collect();
-    order.shuffle(&mut rng);
     let target_ocean_cells = (ocean_fraction as f64 * buf.total() as f64).round() as i64;
-    let mut ocean_cells_so_far: i64 = 0;
-    for &pi in &order {
-        let cells = plate_cells[pi] as i64;
-        // Take this plate as oceanic if doing so gets closer to the target than
-        // leaving it continental would.
-        let with = (ocean_cells_so_far + cells - target_ocean_cells).abs();
-        let without = (ocean_cells_so_far - target_ocean_cells).abs();
-        if with <= without {
-            plates[pi].is_oceanic = true;
-            ocean_cells_so_far += cells;
-        } else {
-            plates[pi].is_oceanic = false;
+    let mut best_oceanic = vec![false; plates.len()];
+    let mut best_err = i64::MAX;
+    const OCEAN_FILL_TRIALS: usize = 24;
+    for _ in 0..OCEAN_FILL_TRIALS {
+        let mut order: Vec<usize> = (0..plates.len()).collect();
+        order.shuffle(&mut rng);
+        let mut oceanic = vec![false; plates.len()];
+        let mut ocean_cells_so_far: i64 = 0;
+        for &pi in &order {
+            let cells = plate_cells[pi] as i64;
+            // Take this plate as oceanic if doing so gets closer to the target
+            // than leaving it continental would.
+            let with = (ocean_cells_so_far + cells - target_ocean_cells).abs();
+            let without = (ocean_cells_so_far - target_ocean_cells).abs();
+            if with <= without {
+                oceanic[pi] = true;
+                ocean_cells_so_far += cells;
+            }
+        }
+        let err = (ocean_cells_so_far - target_ocean_cells).abs();
+        if err < best_err {
+            best_err = err;
+            best_oceanic = oceanic;
         }
     }
+    for (pi, p) in plates.iter_mut().enumerate() { p.is_oceanic = best_oceanic[pi]; }
 
     // Provisional terrain straight from plate identity -- needed below to
     // know which SIDE of a boundary a cell started on before slice 4 bends

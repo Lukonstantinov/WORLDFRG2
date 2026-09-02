@@ -282,11 +282,45 @@ pub fn compute_orogeny_field(buf: &WorldBuffer, seed: u64, max_reach: u16) -> Op
     Some(OrogenyField { dist, setting, age })
 }
 
+/// TECTONICS_AND_ISOLATION_PLAN.md Part B3 — why a collision belt is BROAD and
+/// MULTI-RIDGE (Himalaya + Trans-Himalaya + the Tibetan plateau behind it)
+/// while an active margin is narrow and single-crested (Andes). Real belts
+/// differ by what's colliding: continent-continent thickens crust over a wide
+/// front with several parallel sub-ranges and an elevated plateau between
+/// them; ocean-continent concentrates uplift into one arc-parallel crest.
+///
+/// A single decay envelope (however modulated) cannot GUARANTEE two separate
+/// crests — a cosine-lobed envelope was tried first and measured to fail:
+/// multiplying a decaying envelope by an oscillation just gives one crest with
+/// ripples on its downslope, never a genuine second local maximum, because the
+/// envelope's own decay dominates the lobe amplitude by the time the second
+/// lobe would peak. **Negative result, kept as the reason the shipped form
+/// looks like this** (§2.4's own discipline). The fix is to stop multiplying
+/// and instead take the MAX of two independent bump profiles — a main crest
+/// right on the suture and a second, lower, offset crest (the Trans-Himalaya
+/// beyond the Himalaya proper) — plus a broad low plateau floor between/behind
+/// them (Tibet) so a trough reads as elevated tableland, never a valley cut
+/// back toward zero (§8.23's own lesson about what carving looks like).
+const COLLISION_REACH_MULT: f32 = 2.4;
+/// Main-crest half-width, as a fraction of the collision reach.
+const COLLISION_RIDGE1_WIDTH_FRAC: f32 = 0.42;
+/// Second crest's distance from the boundary and its own half-width, both as a
+/// fraction of the collision reach.
+const COLLISION_RIDGE2_OFFSET_FRAC: f32 = 0.55;
+const COLLISION_RIDGE2_WIDTH_FRAC: f32 = 0.30;
+/// The second crest stands lower than the main range.
+const COLLISION_RIDGE2_AMP: f32 = 0.72;
+/// The plateau floor's peak strength (at d=0, decaying linearly to 0 at the
+/// collision reach) — keeps the trough between the two crests an elevated
+/// tableland rather than falling toward bare ground.
+const COLLISION_PLATEAU_FLOOR: f32 = 0.35;
+
 /// Belt strength (0..1) at a given distance from the boundary, shaped by
 /// setting (D4: no longer a single symmetric smoothstep for every geometry).
 /// An active margin's arc crest sits OFFSET inland of the trench with a narrow
-/// seaward scarp and a broad inland piedmont; a collision is broad and roughly
-/// symmetric; an island arc is narrow and close to the boundary.
+/// seaward scarp and a broad inland piedmont; a collision is broad, MULTI-
+/// RIDGE and roughly symmetric (Part B3); an island arc is narrow and close
+/// to the boundary.
 pub fn belt_profile(dist: u16, setting: u8, belt_reach: f32) -> f32 {
     let d = dist as f32;
     let raw = match setting {
@@ -299,7 +333,19 @@ pub fn belt_profile(dist: u16, setting: u8, belt_reach: f32) -> f32 {
                 1.0 - (d - arc_offset) / inland_w
             }
         }
-        SETTING_COLLISION => 1.0 - d / (belt_reach * 1.5),
+        SETTING_COLLISION => {
+            let reach = belt_reach * COLLISION_REACH_MULT;
+            if d >= reach {
+                0.0
+            } else {
+                let ridge1 = (1.0 - d / (reach * COLLISION_RIDGE1_WIDTH_FRAC)).max(0.0);
+                let offset2 = reach * COLLISION_RIDGE2_OFFSET_FRAC;
+                let ridge2 = COLLISION_RIDGE2_AMP
+                    * (1.0 - (d - offset2).abs() / (reach * COLLISION_RIDGE2_WIDTH_FRAC)).max(0.0);
+                let plateau = COLLISION_PLATEAU_FLOOR * (1.0 - d / reach).max(0.0);
+                ridge1.max(ridge2).max(plateau)
+            }
+        }
         SETTING_SUBDUCTING_SIDE => 1.0 - d / (belt_reach * 0.45),
         SETTING_ISLAND_ARC => 1.0 - d / (belt_reach * 0.55),
         _ => 1.0 - d / belt_reach,
@@ -640,5 +686,65 @@ mod tests {
         }
         assert!(seen_old_or_ancient,
             "never observed a suture cell surviving into the orogeny field across 6 seeds");
+    }
+
+    /// Part B3's own required claim: a continent-continent collision belt must
+    /// reach measurably FARTHER from the boundary than an ocean-continent
+    /// active margin at the same `belt_reach` — the "broad" half of "broad,
+    /// multi-ridge".
+    #[test]
+    fn collision_belt_is_wider_than_active_margin() {
+        const EPS: f32 = 0.02;
+        for belt_reach in [14.0f32, 30.0, 60.0, 90.0] {
+            let last_active = (0..2000u16)
+                .filter(|&d| belt_profile(d, SETTING_ACTIVE_MARGIN, belt_reach) > EPS)
+                .last().unwrap_or(0);
+            let last_collision = (0..2000u16)
+                .filter(|&d| belt_profile(d, SETTING_COLLISION, belt_reach) > EPS)
+                .last().unwrap_or(0);
+            assert!(last_collision > last_active,
+                "belt_reach={belt_reach}: collision belt (extends to {last_collision}) must reach \
+                 farther than an active margin (extends to {last_active})");
+        }
+    }
+
+    /// Part B3's other required claim: a collision belt's cross-section must be
+    /// MULTI-CRESTED (a main range + at least one parallel sub-range, Himalaya +
+    /// Trans-Himalaya), not one smooth decay — while an active margin stays
+    /// single-crested (one arc, Andes-style). A flat single-ridge model fails
+    /// this by construction, which is the property a real gate needs.
+    #[test]
+    fn collision_belt_is_multi_crested() {
+        fn local_maxima(setting: u8, belt_reach: f32) -> usize {
+            let samples: Vec<f32> = (0..=400)
+                .map(|i| belt_profile((i as f32 * belt_reach * 1.2 / 400.0) as u16, setting, belt_reach))
+                .collect();
+            // `dist` is a u16 cell count, so at fine sub-cell sampling this
+            // staircases into flat plateaus — a naive `>= next` test counts the
+            // FIRST cell of every rising plateau as its own "peak". Treat each
+            // plateau as one unit instead: only a run strictly higher than the
+            // run before AND after it is a genuine local maximum.
+            let mut peaks = 0;
+            let mut i = 0;
+            while i < samples.len() {
+                let mut j = i;
+                while j + 1 < samples.len() && samples[j + 1] == samples[i] { j += 1; }
+                let higher_than_prev = i == 0 || samples[i] > samples[i - 1];
+                let higher_than_next = j + 1 >= samples.len() || samples[i] > samples[j + 1];
+                if samples[i] > 0.05 && higher_than_prev && higher_than_next {
+                    peaks += 1;
+                }
+                i = j + 1;
+            }
+            peaks
+        }
+        for belt_reach in [14.0f32, 30.0, 60.0, 90.0] {
+            let collision_peaks = local_maxima(SETTING_COLLISION, belt_reach);
+            let margin_peaks = local_maxima(SETTING_ACTIVE_MARGIN, belt_reach);
+            assert!(collision_peaks >= 2,
+                "belt_reach={belt_reach}: a collision belt must be multi-crested, found {collision_peaks} peak(s)");
+            assert!(margin_peaks <= 1,
+                "belt_reach={belt_reach}: an active margin must stay single-crested, found {margin_peaks} peak(s)");
+        }
     }
 }

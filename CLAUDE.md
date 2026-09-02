@@ -3809,9 +3809,9 @@ name.
 
 ---
 
-### 8.24a2 Plates of genuinely different size, a motion layer, and relict sutures
+### 8.24a2 Plates of genuinely different size, a motion layer, collision style, and relict sutures
 
-Three Part B pieces of `TECTONICS_AND_ISOLATION_PLAN.md`, all landed.
+Four Part B pieces of `TECTONICS_AND_ISOLATION_PLAN.md`, all landed.
 
 **B1 — plate SIZE CLASSES.** The jittered-grid seeding made every plate roughly
 the same size by construction (one grid cell of territory each), unlike Earth's
@@ -3838,6 +3838,24 @@ reproduces the old failure, 0.08 does not). Gated by `plate_territory_stays_
 connected` (reinstated on the real `generate_plates_and_landmass` path) and
 `plate_sizes_span_an_order_of_magnitude` (≥5× largest/median area, shipped
 mean 7.74×).
+
+**A regression B1 caused and a broader test sweep caught, not the routing
+table.** The oceanic/continental fill (Terrain 2.0 slice 5) picks plates as
+oceanic to hit `ocean_fraction` BY CONSTRUCTION, from one shuffled greedy pass
+over real per-plate cell counts. That was reliable when plates were all
+roughly the same size; once B1 made sizes span an order of magnitude, a
+single shuffle order could get stuck far from the target — measured at 6
+plates, one seed, 52% land against a 30% target, a >20pt miss
+(`land_fraction_tracks_the_target`, Part I Slice 5's own gate). It lives in
+`elevation::plate_diagnostic`, not `plates::tests`, so B1's own verification
+pass never ran it. Fixed by running `OCEAN_FILL_TRIALS` (24) independent
+shuffle orders — still the same greedy step, still deterministic per seed —
+and keeping whichever came closest to the target ocean-cell count, rather
+than betting the whole result on the first random order. The lesson: a
+change that widens the INPUT distribution to an existing mechanism can break
+that mechanism even when the mechanism's own code is untouched — worth
+re-running the wider `elevation::`/`plates::` sweep, not just the module a
+change appears to touch, after any plate-size or plate-count change.
 
 **B4 — RELICT SUTURES**, the believability item: a former collision belt baked
 into a plate's present-day *interior*, nowhere near an active boundary — the
@@ -3906,6 +3924,61 @@ caller) replaces the wind layer's `renderArrow`, whose 12-cell cap would be
 invisible at plate scale. Oceanic and continental plates get distinct arrow
 hues (`PLATE_MOTION_OCEANIC_COLOR`/`_CONTINENTAL_COLOR`) since they move at
 genuinely different real rates.
+
+**B3 — collision STYLE, why the Himalaya and the Andes look different.**
+Before this every orogenic belt shared one cross-section: `belt_profile`
+was a single decay from the boundary, shaped only by width and offset per
+setting. Real belts differ by what's colliding — continent-continent
+(`SETTING_COLLISION`) thickens crust over a wide front with several parallel
+sub-ranges and an elevated plateau behind them (Himalaya + Trans-Himalaya +
+Tibet); ocean-continent (`SETTING_ACTIVE_MARGIN`) concentrates uplift into
+one arc-parallel crest offset inland of the trench (Andes).
+
+**NEGATIVE RESULT, kept as the reason the shipped form looks like this**
+(§2.4): the first cut cosine-LOBED the existing decay envelope — multiply a
+linearly-decaying envelope by an oscillating term and hope for two crests.
+Measured directly (sampling `belt_profile` across `dist` and counting local
+maxima), it never produced a genuine second peak at any tested `belt_reach`:
+the envelope's own decay dominates the lobe amplitude by the time the second
+lobe would crest, so the result is one crest with ripples on its downslope,
+not two crests. Multiplying a decay by an oscillation cannot guarantee a
+second local maximum; only summing (or maxing) independent bumps can. The
+fix takes the MAX of three profiles: a main crest right on the suture
+(`COLLISION_RIDGE1_WIDTH_FRAC`), a second, lower, offset crest
+(`COLLISION_RIDGE2_OFFSET_FRAC`/`_WIDTH_FRAC`/`_AMP` — the Trans-Himalaya),
+and a broad, low plateau floor across the whole reach
+(`COLLISION_PLATEAU_FLOOR`) so the trough between the two crests reads as
+elevated tableland, never a valley carved back toward zero (§8.23's own
+lesson about what carving looks like). The collision reach itself widened
+(`COLLISION_REACH_MULT` = 2.4× `belt_reach`, up from the old 1.5×) so a
+collision belt is measurably WIDER than an active margin at every tested
+`belt_reach`, not just multi-crested — the plan's own two-part B3 claim.
+
+No `elevation.rs` change was needed, same as B4: `belt_profile` is consumed
+generically by distance from the boundary, so the new shape flows straight
+through to the ridge/swell noise it already modulates. Gated:
+`collision_belt_is_wider_than_active_margin`,
+`collision_belt_is_multi_crested` (both in `geology.rs`, sampling
+`belt_profile` directly across `belt_reach` ∈ {14, 30, 60, 90} — the real
+production range — rather than rendering a world, since the claim is about
+the profile FUNCTION's shape). The multi-crested gate's own peak-counting
+helper had to treat a run of equal-valued samples as ONE unit (`dist` is a
+`u16` cell count, so fine sampling staircases into flat plateaus, and a naive
+"≥ next sample" test double-counts the first cell of every rising plateau as
+its own peak) — caught by the gate itself reporting 10 spurious peaks on a
+genuinely single-crested active margin before the fix.
+
+Deliberately NOT wired: convergence RATE (from B2's `PlateMotion`) does not
+yet modulate ridge count or belt width, though the plan's own text asks for
+it ("a fast collision builds a wider, higher belt than a slow one"). `Plate`
+velocities are gone by the time phase 2 runs (transient, discarded after
+phase 1) and B2 only persists them to `metadata`, which `compute_orogeny_
+field` has no connection to read (it takes `&WorldBuffer` alone) — threading
+that through is real future work, not silently assumed done. What shipped is
+appearance-level and DERIVED from real tectonic classification (the setting
+itself comes from real plate velocities, B2/§8.24b), which satisfies the
+plan's own "appearance-level, but derived from tectonic motion" decision
+even without the rate-modulation refinement.
 
 ---
 
