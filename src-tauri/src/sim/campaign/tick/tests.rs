@@ -6192,3 +6192,46 @@
             "the boycotted lane being the only target, the seller's stock must not move either");
     }
 
+    /// TECTONICS_AND_ISOLATION_PLAN.md Part A — the guard against a trans-oceanic
+    /// rescue. `rescue_tiny_components` used to fold ANY <3-hub component into the
+    /// nearest big one with no distance limit at all, which is what let a
+    /// mid-ocean island get labelled part of a distant continent and traded with
+    /// it via straight-line lanes. Three cases, one call:
+    ///   - a tiny (2-hub) component WITHIN the cap merges into the big one, same
+    ///     as before — a real regional sea crossing is still rescued;
+    ///   - a tiny (2-hub) component BEYOND the cap stays its own component, so its
+    ///     two hubs trade only with each other via the ordinary same-component
+    ///     passes — real internal trade, per the user's own design;
+    ///   - a SINGLE-hub component beyond the cap is left alone too — no special
+    ///     "lifeline" exception. A lone city with no reachable partner is true
+    ///     isolation, and whether it survives is the economy's question, not a
+    ///     router special case.
+    #[test]
+    fn rescue_tiny_components_never_crosses_an_ocean() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs = Vec::new();
+        // A "big" component (id 0): 3 hubs clustered near the origin.
+        for i in 0..3u32 {
+            hubs.push(hub(i, i as f32 * 2.0, 0.0, 5000.0, vec![10.0], 0));
+        }
+        // A tiny component (id 1), 2 hubs, WITHIN the cap of the big cluster.
+        // world_w=100 (the test default) -> km_per_cell = 40075/100 ≈ 400.75, so
+        // ISOLATION_RESCUE_MAX_KM=1800 is ≈4.5 cells; 3 cells is comfortably inside.
+        hubs.push(hub(10, 3.0, 3.0, 3000.0, vec![10.0], 1));
+        hubs.push(hub(11, 3.5, 3.0, 3000.0, vec![10.0], 1));
+        // A tiny component (id 2), 2 hubs, FAR beyond the cap — a separate island
+        // with its own real trade partner.
+        hubs.push(hub(20, 60.0, 60.0, 3000.0, vec![10.0], 2));
+        hubs.push(hub(21, 60.5, 60.0, 3000.0, vec![10.0], 2));
+        // A single-hub component (id 3), also far beyond the cap — total isolation.
+        hubs.push(hub(30, 90.0, 10.0, 3000.0, vec![10.0], 3));
+        let mut s = sim(hubs, goods);
+        s.rescue_tiny_components();
+
+        assert_eq!(s.hubs[3].component, 0, "the near tiny component should still be rescued into the big one");
+        assert_eq!(s.hubs[4].component, 0, "the near tiny component should still be rescued into the big one");
+        assert_eq!(s.hubs[5].component, 2, "a far 2-hub component must stay its own — it has real internal trade");
+        assert_eq!(s.hubs[6].component, 2, "a far 2-hub component must stay its own — it has real internal trade");
+        assert_eq!(s.hubs[7].component, 3,
+            "a far SINGLE-hub component must stay isolated — no distance-unlimited lifeline");
+    }

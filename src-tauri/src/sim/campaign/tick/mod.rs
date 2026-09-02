@@ -1662,6 +1662,12 @@ const MARKET_REACH_FRAC: f32 = 0.5;
 /// trade while two continents an ocean apart still do not. Cross-component only, so on a
 /// single-component world (the econ-fidelity reference) it is a strict no-op.
 const CABOTAGE_SEA_FRAC: f32 = 0.08;
+/// TECTONICS_AND_ISOLATION_PLAN.md Part A — the maximum distance `rescue_tiny_
+/// components` may fold a tiny (<3-hub) component into a substantial one. Set
+/// well above `CABOTAGE_SEA_FRAC`'s short hop (that pass already covers near-shore
+/// islands) but nowhere near an ocean crossing: a regional sea, not a crossing
+/// between continents. Stated in km (rule 25), converted per world.
+const ISOLATION_RESCUE_MAX_KM: f32 = 1800.0;
 /// How many nearest cross-component coastal partners a coastal hub gains by cabotage.
 const CABOTAGE_LINKS: usize = 2;
 /// WORLD_AND_TRADE_MASTER_PLAN.md Part II Slice C1 (the entrepôt) — the real cost
@@ -6324,6 +6330,28 @@ impl CampaignSim {
     /// Fuse tiny/lone trade components (< 3 real hubs) into the nearest substantial
     /// market's component, so no settlement is a dead "cosmetic" dot that can never
     /// trade. Estates follow their parent hub. Caller sets `routes_dirty`.
+    /// TECTONICS_AND_ISOLATION_PLAN.md Part A — an ocean is a real barrier.
+    ///
+    /// This used to fold ANY component with fewer than 3 real hubs into the
+    /// nearest "big" (≥3-hub) component with NO DISTANCE LIMIT — `bd` started at
+    /// `f32::INFINITY`, so a two-hub mid-ocean island was relabelled as part of a
+    /// continent thousands of km away. `#6`'s own same-component partner
+    /// guarantee (`rebuild_routes`) then drew straight-line trans-oceanic trade
+    /// lanes between them — exactly the "dishonest arrow between two separate
+    /// continents" its own comment says it exists to prevent. The guard was never
+    /// wrong; it was being handed a lie about which cells were connected.
+    ///
+    /// `ISOLATION_RESCUE_MAX_KM` bounds the rescue to a plausible regional sea
+    /// crossing (stated in km, converted per world — rule 25). Beyond it, a tiny
+    /// component is left on its own: it trades only among its own hubs (if it has
+    /// more than one) via the ordinary same-component passes below, and a city
+    /// that cannot obtain what it needs starves and is abandoned exactly as any
+    /// other shortage does (`abandon_hub` already records `died_cause`) — the
+    /// user's own stated design: "if there are not enough goods to sustain the
+    /// civilisation, the city becomes dead." No separate "lifeline" exception is
+    /// added for a lone-hub island: a single city with no reachable partner at
+    /// all is the honest reading of true isolation, and its survival or death is
+    /// the economy's answer, not a router special case.
     fn rescue_tiny_components(&mut self) {
         let n = self.hubs.len();
         if n == 0 { return; }
@@ -6340,12 +6368,18 @@ impl CampaignSim {
             let dy = hubs[a].y - hubs[b].y;
             dx * dx + dy * dy
         };
+        // Cap in CELLS² (avoids a sqrt per candidate pair): a cell is
+        // `EARTH_EQUATOR_KM / world_w` km wide, so `cap_km * world_w /
+        // EARTH_EQUATOR_KM` is the same cap in cells — the identical conversion
+        // every other km-stated reach in this file already uses.
+        let cap_cells = ISOLATION_RESCUE_MAX_KM * world_w.max(1.0) / EARTH_EQUATOR_KM;
+        let cap_cells2 = cap_cells * cap_cells;
         let mut reassign: Vec<(usize, u32)> = Vec::new();
         for &i in &real {
             if size.get(&self.hubs[i].component).copied().unwrap_or(0) >= 3 { continue; }
             let mut bj = None; let mut bd = f32::INFINITY;
             for &j in &big { let d = d2(i, j, &self.hubs); if d < bd { bd = d; bj = Some(j); } }
-            if let Some(j) = bj { reassign.push((i, self.hubs[j].component)); }
+            if let (Some(j), true) = (bj, bd <= cap_cells2) { reassign.push((i, self.hubs[j].component)); }
         }
         for (i, comp) in reassign { self.hubs[i].component = comp; }
         // Estates ride their parent hub's (possibly new) component. A REMOTE trade

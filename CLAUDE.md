@@ -3809,6 +3809,74 @@ name.
 
 ---
 
+### 8.24a2 Plates of genuinely different size, and relict sutures
+
+Two Part B pieces of `TECTONICS_AND_ISOLATION_PLAN.md`, both landed.
+
+**B1 — plate SIZE CLASSES.** The jittered-grid seeding made every plate roughly
+the same size by construction (one grid cell of territory each), unlike Earth's
+own three-orders-of-magnitude spread (Pacific ~103M km² vs Juan de Fuca ~0.25M
+km²). Plates now draw from a four-class ladder (giant/large/medium/small,
+`SIZE_CLASS_WEIGHTS`/`SIZE_CLASS_PROPORTIONS`, Earth's rough 10/25/40/25 mix)
+feeding a **power diagram**, not a plain nearest-seed Voronoi.
+
+**NEGATIVE RESULT** (§2.4): the first cut used a textbook *multiplicatively*
+weighted Voronoi (divide squared distance by weight²). Measured on the gate's
+own 8-plate world, a small plate's territory could come out split into
+DISCONNECTED islands even with the domain warp turned OFF entirely — proving
+the fault was the weighting metric itself, not the warp on top of it. A
+multiplicative metric is not a true distance (the triangle inequality can
+fail), so its cells are not guaranteed connected; at a modest plate count and
+weight ratio, a small plate boxed in by bigger neighbours was pinched apart by
+construction. The fix: `d² − offset`, an ADDITIVE term (a real power diagram /
+Laguerre-Voronoi), whose cells are provably convex — hence always connected —
+for ANY offset at ANY plate count, a mathematical guarantee rather than a tuned
+approximation. `PLATE_WARP_AMP_FRAC_WEIGHTED` still trims the warp specifically
+for the weighted case, since convexity holds only *before* the warp bends a
+cell, and full amplitude can still sever a thin part of one (measured: 0.25
+reproduces the old failure, 0.08 does not). Gated by `plate_territory_stays_
+connected` (reinstated on the real `generate_plates_and_landmass` path) and
+`plate_sizes_span_an_order_of_magnitude` (≥5× largest/median area, shipped
+mean 7.74×).
+
+**B4 — RELICT SUTURES**, the believability item: a former collision belt baked
+into a plate's present-day *interior*, nowhere near an active boundary — the
+Urals, the Appalachians, the Scottish Highlands, the Scandinavian Caledonides
+are all exactly this, a healed collision the map still remembers. Before this
+there was no mechanism for one at all: `age` (`geology.rs`) was pure per-cell
+`fbm_noise`, uncorrelated with anything, and only ever assigned on a belt that
+exists *now*.
+
+The plan's own decision: **generate a past, not a simulation** — a time-stepped
+tectonic model is Part I Slice 6, already deferred once, and its output for
+this purpose would be almost exactly what can be stated directly.
+`generate_relict_sutures` (`geology.rs`) bakes 2–4 spines per world,
+deterministic from seed: a rejection-sampled start point at least
+`SUTURE_MIN_DIST_FROM_ACTIVE_FRAC` (6% of world width) from any active
+convergent/transform land cell, walked as a gently drifting line (never a hard
+random turn — that draws a scratch, not a range) that also stops if the drift
+carries it back toward an active margin. Each suture carries **one uniform
+age** for its whole spine, drawn from an OLD (Urals/Appalachians tier) or
+ANCIENT (Highlands tier) bucket — never noise — which is the point: a whole
+range reads as one coherent age instead of dithering young/old along its own
+strike the way a real boundary's noise term does.
+
+The spines are fed as EXTRA SEED CELLS into the exact same multi-source BFS
+`compute_orogeny_field` already runs from active boundaries. Downstream code
+cannot tell a suture seed from a real one, so a relict range gets its width
+(`belt_profile`), its ridge amplitude (`setting_ridge_amp`) and its
+erodibility term for free — and critically, **no elevation.rs change was
+needed**: `age_amp = 1.25 − age·0.5` (§8.24, already shipped) already turns a
+high age into a lower ridge amplitude; B4 just needed to feed it a real age
+instead of noise. Every suture is scored `SETTING_COLLISION` (every attested
+real relict suture is a healed continent-continent collision). Gated:
+`relict_sutures_form_away_from_active_boundaries`,
+`a_suture_carries_one_uniform_age`, `relict_sutures_are_deterministic`,
+`plate_free_world_gets_no_sutures`, `orogeny_field_carries_the_suture_age_
+through`.
+
+---
+
 ### 8.24b Plate margins are warped at the SOURCE
 
 `plate_index` was a plain Voronoi partition — every plate boundary was the exact
