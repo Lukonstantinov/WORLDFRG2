@@ -493,6 +493,10 @@ export async function getOverlayVectors(): Promise<OverlayVectors> {
   return invoke("get_overlay_vectors");
 }
 
+export async function getPlateMotion(): Promise<import("@types").PlateMotionArrow[]> {
+  return invoke("get_plate_motion");
+}
+
 export async function getCurrentStreamlines(): Promise<Streamline[]> {
   return invoke("get_current_streamlines");
 }

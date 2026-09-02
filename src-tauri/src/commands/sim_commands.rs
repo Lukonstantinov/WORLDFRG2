@@ -44,7 +44,8 @@ pub fn sim_generate_plates(
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
-    plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    let motion = plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    persist_plate_motion(&conn, &motion);
     buf.save(&conn, "Generate plates & landmass")
 }
 
@@ -442,7 +443,8 @@ pub fn sim_run_all(
     let mut buf = WorldBuffer::load(&conn)?;
 
     // Phase 1: Plates & landmass
-    plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    let motion = plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    persist_plate_motion(&conn, &motion);
 
     // Phase 2: Elevation & depth. Plates exist on this path, so every model is
     // available and "plates" is the default.
@@ -1227,6 +1229,17 @@ fn strip_manufactured_from_province_goods(
 fn persist_lakes(conn: &rusqlite::Connection, lakes: &[rivers::Lake]) {
     if let Ok(json) = serde_json::to_string(lakes) {
         let _ = metadata::set_meta(conn, "lakes", &json);
+    }
+}
+
+/// TECTONICS_AND_ISOLATION_PLAN.md Part B2 — persist each plate's Euler-pole
+/// motion under `metadata["plate_motion"]`, the same one-shot-generator-output
+/// pattern `deposits`/`good_localities`/`lakes` already use. Called from every
+/// site that runs phase 1, so a re-generated world always has a fresh motion
+/// layer rather than one left over from a previous plate count or seed.
+fn persist_plate_motion(conn: &rusqlite::Connection, motion: &[plates::PlateMotion]) {
+    if let Ok(json) = serde_json::to_string(motion) {
+        let _ = metadata::set_meta(conn, "plate_motion", &json);
     }
 }
 

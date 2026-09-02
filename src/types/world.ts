@@ -122,6 +122,18 @@ export interface VectorSample {
   type?: number; // 0=none, 1=warm, 2=cold (for currents)
 }
 
+// One plate's Euler-pole motion arrow (§8.24 B2). vx/vy/speed are relative
+// units (the rotation rate has no real-world calibration) — only direction
+// and relative magnitude are meaningful, so the renderer normalizes length.
+export interface PlateMotionArrow {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  speed: number;
+  is_oceanic: boolean;
+}
+
 export interface Streamline {
   points: [number, number][];
   ctype: number; // 0=neutral (equatorial/counter-current/gyre), 1=warm, 2=cold/ACC

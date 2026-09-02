@@ -39,6 +39,7 @@ pub fn run() {
             paint_commands::redo,
             query_commands::get_cell_info,
             query_commands::get_overlay_vectors,
+            query_commands::get_plate_motion,
             query_commands::get_current_streamlines,
             query_commands::compute_trade_routes,
             query_commands::compute_itinerary,

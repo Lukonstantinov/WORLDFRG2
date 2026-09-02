@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow } from "@types";
 import type { ClimateBands } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
@@ -257,6 +257,11 @@ const WARM_CURRENT = "#ee5533";
 const COLD_CURRENT = "#3399ee";
 const NEUTRAL_CURRENT = "#9bb0c0";
 const WIND_COLOR = "#aaccee";
+// Plate motion arrows (§8.24 B2): oceanic vs continental plates read differently
+// on a real tectonic map (oceanic plates move faster and subduct), so the two
+// get distinct hues rather than one undifferentiated arrow colour.
+const PLATE_MOTION_OCEANIC_COLOR = "#ffb347";
+const PLATE_MOTION_CONTINENTAL_COLOR = "#f0f0f0";
 const LAT_LINE_COLOR = "#cccc66";
 // Climate-band overlay colours: ITCZ rain BELT (per season), subtropical-high dry
 // belts (amber), polar-front storm tracks (blue).
@@ -509,6 +514,7 @@ export class OverlayManager {
   private colonyLink: { ax: number; ay: number; bx: number; by: number } | null = null;
   setColonyLink(l: { ax: number; ay: number; bx: number; by: number } | null) { this.colonyLink = l; }
   private windData: { samples: VectorSample[]; gridW: number; gridH: number } | null = null;
+  private plateMotionData: { arrows: PlateMotionArrow[]; gridW: number } | null = null;
   private currentLines: Streamline[] = [];
   private tradeRoutes: TradeRoute[] = [];
   /** #23 · the single highlighted itinerary route (world cells), or empty. */
@@ -647,7 +653,7 @@ export class OverlayManager {
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
     markers: false, wind: false, currents: false, latLines: false,
-    itcz: false, windBelts: false,
+    itcz: false, windBelts: false, plateMotion: false,
     tradeRoutes: false, fisheryBanks: false,
     sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
@@ -1110,6 +1116,10 @@ export class OverlayManager {
 
   drawWindArrows(data: VectorSample[], gridW: number, gridH: number) {
     this.windData = { samples: data, gridW, gridH };
+  }
+
+  drawPlateMotion(arrows: PlateMotionArrow[], gridW: number) {
+    this.plateMotionData = { arrows, gridW };
   }
 
   drawCurrentStreamlines(lines: Streamline[]) {
@@ -2340,6 +2350,23 @@ export class OverlayManager {
       for (const v of this.windData.samples) {
         if (v.vx === 0 && v.vy === 0) continue;
         this.renderArrow(ctx, v.x, v.y, v.vx, v.vy, WIND_COLOR, 0.5);
+      }
+    }
+
+    if (this.visibility.plateMotion && this.plateMotionData && this.plateMotionData.arrows.length > 0) {
+      const { arrows, gridW } = this.plateMotionData;
+      const maxSpeed = arrows.reduce((m, a) => Math.max(m, a.speed), 0);
+      // Plate-scale arrows (§8.24 B2): far longer than a wind arrow — one per
+      // plate, anchored at its centroid — since a wind arrow's 12-cell cap would
+      // be invisible at world zoom. Length is RELATIVE speed (the Euler-pole
+      // rate has no real-world calibration), never absolute.
+      const baseLen = gridW * 0.035;
+      for (const a of arrows) {
+        if (a.speed < 1e-6) continue;
+        const rel = maxSpeed > 1e-6 ? a.speed / maxSpeed : 1;
+        const len = baseLen * (0.35 + 0.65 * rel);
+        const color = a.is_oceanic ? PLATE_MOTION_OCEANIC_COLOR : PLATE_MOTION_CONTINENTAL_COLOR;
+        this.renderPlateArrow(ctx, a.x, a.y, a.vx, a.vy, len, color);
       }
     }
 
@@ -5529,11 +5556,47 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** Plate-scale motion arrow (§8.24 B2) — a fixed LENGTH already scaled by
+   *  relative speed by the caller, unlike `renderArrow`'s magnitude-derived
+   *  short vectors, and thicker/filled so it reads at world zoom. */
+  private renderPlateArrow(ctx: CanvasRenderingContext2D, x: number, y: number, vx: number, vy: number, len: number, color: string) {
+    const mag = Math.sqrt(vx * vx + vy * vy);
+    if (mag < 1e-6) return;
+    const nx = vx / mag;
+    const ny = vy / mag;
+    const x1 = x - nx * len * 0.5;
+    const y1 = y - ny * len * 0.5;
+    const x2 = x + nx * len * 0.5;
+    const y2 = y + ny * len * 0.5;
+
+    ctx.save();
+    ctx.globalAlpha = 0.88;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = Math.max(1.2, len * 0.05);
+    ctx.beginPath();
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
+    ctx.stroke();
+
+    const headLen = len * 0.28;
+    const perpX = -ny;
+    const perpY = nx;
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.moveTo(x2 + nx * headLen * 0.4, y2 + ny * headLen * 0.4);
+    ctx.lineTo(x2 - nx * headLen + perpX * headLen * 0.5, y2 - ny * headLen + perpY * headLen * 0.5);
+    ctx.lineTo(x2 - nx * headLen - perpX * headLen * 0.5, y2 - ny * headLen - perpY * headLen * 0.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
   clear() {
     this.rivers = [];
     this.lakes = [];
     this.settlements = [];
     this.windData = null;
+    this.plateMotionData = null;
     this.currentLines = [];
     this.tradeRoutes = [];
     this.travelRoute = [];

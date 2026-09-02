@@ -407,6 +407,26 @@ export function Toolbar() {
         </div>
       )}
 
+      {/* Plate motion arrows (§8.24 B2) — the Euler-pole velocity field that
+          already drives boundary classification, made visible for the first
+          time. Only appears while the Plates layer is active, since the arrows
+          are meaningless without the boundary tinting under them. */}
+      {activeLayer === "plates" && (
+        <div style={section}>
+          <label style={checkboxRow}>
+            <input
+              type="checkbox"
+              checked={!!overlayVisibility.plateMotion}
+              onChange={() => toggleOverlay("plateMotion")}
+              style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+            />
+            <span style={{ color: overlayVisibility.plateMotion ? "#b0c8e0" : "#5a6a80" }}>
+              {"➤"} Plate Motion
+            </span>
+          </label>
+        </div>
+      )}
+
       {/* SWIPE COMPARE — every causal chain here is a two-layer question
           (precipitation vs elevation for rain shadow, currents vs temperature,
           biomes vs Köppen), and they used to be answered by flipping back and

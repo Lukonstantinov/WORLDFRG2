@@ -4,13 +4,13 @@ Two independent subjects that arrived from the same session of feedback, kept in
 one file because they share nothing technically and everything in intent: making
 the world **believable** rather than merely generated.
 
-**Status: AGREED, PART A BUILT, PART B1/B4 BUILT, B2/B3 NOT BUILT.**
+**Status: AGREED, PART A/B1/B2/B4 BUILT, B3/A3 NOT BUILT.**
 
 | Part | Subject | Status |
 |---|---|---|
 | **A** | Trade isolation — an ocean is a real barrier | **built** — `ISOLATION_RESCUE_MAX_KM` caps `rescue_tiny_components`; §A3 (unify Flows highlight onto the coarse grid) not yet built |
 | **B1** | Plate sizes | **built** — power-diagram weighted partition, see CLAUDE.md §8.24a2 |
-| **B2** | A motion layer you can read | not built |
+| **B2** | A motion layer you can read | **built** — persisted `PlateMotion` + `get_plate_motion` + arrow render on the `plates` layer, see CLAUDE.md §8.24a2 |
 | **B3** | Collision style (multi-ridge belts) | not built |
 | **B4** | Relict sutures | **built** — see CLAUDE.md §8.24a2 |
 

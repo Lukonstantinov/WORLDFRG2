@@ -3809,9 +3809,9 @@ name.
 
 ---
 
-### 8.24a2 Plates of genuinely different size, and relict sutures
+### 8.24a2 Plates of genuinely different size, a motion layer, and relict sutures
 
-Two Part B pieces of `TECTONICS_AND_ISOLATION_PLAN.md`, both landed.
+Three Part B pieces of `TECTONICS_AND_ISOLATION_PLAN.md`, all landed.
 
 **B1 — plate SIZE CLASSES.** The jittered-grid seeding made every plate roughly
 the same size by construction (one grid cell of territory each), unlike Earth's
@@ -3874,6 +3874,38 @@ real relict suture is a healed continent-continent collision). Gated:
 `a_suture_carries_one_uniform_age`, `relict_sutures_are_deterministic`,
 `plate_free_world_gets_no_sutures`, `orogeny_field_carries_the_suture_age_
 through`.
+
+**B2 — a motion layer you can read.** `Plate` stays fully transient (§8.24b's
+own discipline — recomputed from seed every phase-1 run, never persisted), so
+the Euler-pole velocity field that already drives boundary classification
+could never be drawn. `PlateMotion` (public, plain-data — `centroid_x/y`,
+`pole_x/y`, `omega`, `is_oceanic`, with its own `velocity_at(x, y, world_w)`
+duplicating `Plate`'s private rotation formula rather than exposing `Plate`
+itself) is what leaves the generator: `generate_plates_and_landmass`/
+`generate_plates_and_landmass_with_target` now return `Vec<PlateMotion>`
+alongside their existing `WorldBuffer` mutation, and `sim_commands.rs`
+persists it to `metadata["plate_motion"]` (JSON, the same one-shot-generator-
+output convention `deposits`/`good_localities`/`lakes` already use — no tile
+column) from both `sim_generate_plates` and `sim_run_all`. Changing a
+generator's return type from `()` to a `Vec` breaks no existing call site —
+verified across all of them, since a value ignored in statement position was
+never checked by the type system either way.
+
+Boundary-type tinting (convergent/divergent/transform) already existed in
+`render_plates` before this — B2 needed no render-layer change there, only a
+way to serve and draw the arrows. `get_plate_motion` (query command,
+`overlays.rs`) reads the persisted motion and returns one `PlateMotionArrow`
+per plate, anchored at its own centroid, with `speed` precomputed
+server-side. The frontend (`OverlayManager.drawPlateMotion`, gated by
+`overlayVisibility.plateMotion`, shown only while the `plates` layer is
+active — the arrows are meaningless without the boundary tinting under them)
+normalizes arrow LENGTH by the fastest plate on screen, since `omega` has no
+real-world calibration and only relative speed/direction are meaningful; a
+dedicated `renderPlateArrow` (filled head, thicker stroke, length set by the
+caller) replaces the wind layer's `renderArrow`, whose 12-cell cap would be
+invisible at plate scale. Oceanic and continental plates get distinct arrow
+hues (`PLATE_MOTION_OCEANIC_COLOR`/`_CONTINENTAL_COLOR`) since they move at
+genuinely different real rates.
 
 ---
 

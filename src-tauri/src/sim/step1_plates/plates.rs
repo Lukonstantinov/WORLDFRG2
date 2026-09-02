@@ -23,12 +23,15 @@ struct Plate {
     /// therefore a boundary's convergence rate and character — varies ALONG
     /// the boundary's length; a single translation vector makes an entire
     /// boundary uniformly convergent/divergent/transform end to end, which is
-    /// what made it read as a drawn line rather than a margin. Still
-    /// TRANSIENT (never persisted, never exposed to the frontend) — the same
-    /// "recomputed from seed every phase-1 run, used, discarded" discipline
-    /// `geology.rs` already applies, and deliberately short of the larger
-    /// "promote Plate to persisted world data" architectural change (a
-    /// per-plate UI override, Slice 5) the plan scoped out of one session.
+    /// what made it read as a drawn line rather than a margin.
+    /// TECTONICS_AND_ISOLATION_PLAN.md Part B2 — the `Plate` struct itself is
+    /// still transient (recomputed from seed every phase-1 run, `geology.rs`'s
+    /// own "used, then discarded" discipline), but the field VALUES now leave
+    /// this function via `PlateMotion` (below) and are persisted to
+    /// `metadata["plate_motion"]` by the caller — the "promote to persisted
+    /// world data" step the doc comment used to say was out of scope, done at
+    /// the minimum needed for a read-only motion layer rather than the full
+    /// per-plate UI override (Slice 5) the plan still defers.
     pole_x: f32,
     pole_y: f32,
     /// Signed angular rate. `velocity_at` turns this into a real (vx, vy) at
@@ -42,6 +45,45 @@ struct Plate {
     /// the old jittered-grid seeding could never produce, since every plate
     /// claimed roughly one grid cell of territory by construction.
     size_weight: f32,
+}
+
+/// TECTONICS_AND_ISOLATION_PLAN.md Part B2 — the PERSISTED, PUBLIC form of one
+/// plate's motion, returned by `generate_plates_and_landmass[_with_target]` and
+/// written by the caller to `metadata["plate_motion"]` (the same pattern
+/// `deposits`/`good_localities` already use for a generator's other one-shot
+/// outputs — a JSON blob under a metadata key, not a new tile column).
+///
+/// This is the FIRST time any plate data has left `plates.rs` — before B2,
+/// `Plate` was fully transient and the Euler-pole velocity field that already
+/// drives boundary classification (Slice 4) could never be drawn. `centroid_*`
+/// is stated separately from the pole: the pole is what physics needs (`v = ω
+/// × r`), the centroid is what a renderer needs (where to plant an arrow so it
+/// reads as "this plate", not "this point in space").
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+pub struct PlateMotion {
+    pub centroid_x: f32,
+    pub centroid_y: f32,
+    pub pole_x: f32,
+    pub pole_y: f32,
+    pub omega: f32,
+    pub is_oceanic: bool,
+}
+
+impl PlateMotion {
+    /// The same `v = ω × r` rigid-body rotation `plate_velocity_at` computes for
+    /// the private `Plate` — duplicated rather than shared, because `Plate`
+    /// itself stays private (only its VALUES are public, via this struct) and a
+    /// public function taking a private type is the wrong shape for a query
+    /// command outside this module to call.
+    pub fn velocity_at(&self, x: f32, y: f32, world_w: f32) -> (f32, f32) {
+        let mut rx = x - self.pole_x;
+        if world_w > 1.0 {
+            if rx > world_w / 2.0 { rx -= world_w; }
+            if rx < -world_w / 2.0 { rx += world_w; }
+        }
+        let ry = y - self.pole_y;
+        (-self.omega * ry, self.omega * rx)
+    }
 }
 
 /// Rigid-body rotation velocity at world position (x, y) for a plate rotating
@@ -318,10 +360,13 @@ pub(crate) fn warped_voronoi_tuned_weighted(
         .collect()
 }
 
-/// Generate tectonic plates and derive landmass from plate types.
+/// Generate tectonic plates and derive landmass from plate types. Returns each
+/// plate's motion (Part B2) so the caller can persist it — existing callers
+/// that only want the side effect on `buf` are unaffected, since ignoring a
+/// non-`#[must_use]` return value in statement position is not an error.
 /// Matches WF1 plate-generator.ts algorithm.
-pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_count: u32) {
-    generate_plates_and_landmass_with_target(buf, seed, plate_count, DEFAULT_OCEAN_FRACTION);
+pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_count: u32) -> Vec<PlateMotion> {
+    generate_plates_and_landmass_with_target(buf, seed, plate_count, DEFAULT_OCEAN_FRACTION)
 }
 
 /// As `generate_plates_and_landmass`, but with an explicit ocean-area target
@@ -329,7 +374,7 @@ pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_coun
 /// input can never empty the world of land or of sea entirely.
 pub fn generate_plates_and_landmass_with_target(
     buf: &mut WorldBuffer, seed: u64, plate_count: u32, ocean_fraction: f32,
-) {
+) -> Vec<PlateMotion> {
     let mut rng = StdRng::seed_from_u64(seed);
     let w = buf.width as f32;
     let h = buf.height as f32;
@@ -698,6 +743,12 @@ pub fn generate_plates_and_landmass_with_target(
             }
         }
     }
+
+    plates.iter().map(|p| PlateMotion {
+        centroid_x: p.cx, centroid_y: p.cy,
+        pole_x: p.pole_x, pole_y: p.pole_y, omega: p.omega,
+        is_oceanic: p.is_oceanic,
+    }).collect()
 }
 
 /// Below this many connected cells, a land or sea patch reads as noise dust

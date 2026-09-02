@@ -1509,6 +1509,50 @@ pub fn get_overlays(db: State<'_, WorldDb>) -> Result<OverlaysState, String> {
 }
 
 
+/// One plate's motion arrow for the `plates` layer (§8.24 B2 — a motion layer you
+/// can read). `speed`/`vx`/`vy` are cells/Myr-scale relative units (the Euler-pole
+/// rate itself has no real-world calibration), so the frontend normalizes length —
+/// only relative speed and direction are meaningful.
+#[derive(Serialize)]
+pub struct PlateMotionArrow {
+    pub x: f32,
+    pub y: f32,
+    pub vx: f32,
+    pub vy: f32,
+    pub speed: f32,
+    pub is_oceanic: bool,
+}
+
+/// Read the plate motion persisted at generation (`metadata["plate_motion"]`,
+/// written by `sim_generate_plates`/`sim_run_all`) and return one arrow per plate,
+/// anchored at its centroid. Empty on a world with no plate data (a template/painted
+/// world, or one generated before B2) — the frontend simply draws nothing then,
+/// same discipline as an old save's empty `lakes`/`deposits`.
+#[tauri::command]
+pub fn get_plate_motion(db: State<'_, WorldDb>) -> Result<Vec<PlateMotionArrow>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: f32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0.0);
+    let json = metadata::get_meta(&conn, "plate_motion")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    let motion: Vec<crate::sim::plates::PlateMotion> =
+        serde_json::from_str(&json).unwrap_or_default();
+    Ok(motion.iter().map(|p| {
+        let (vx, vy) = p.velocity_at(p.centroid_x, p.centroid_y, grid_w);
+        PlateMotionArrow {
+            x: p.centroid_x,
+            y: p.centroid_y,
+            vx, vy,
+            speed: (vx * vx + vy * vy).sqrt(),
+            is_oceanic: p.is_oceanic,
+        }
+    }).collect())
+}
+
+
 /// Build the river-system tree with full hydrological stats for the Hydrology
 /// dashboard. Takes the world's rivers + settlements (from the frontend store),
 /// loads the elevation/precip columns and recomputes flow accumulation to size
