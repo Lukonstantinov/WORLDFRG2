@@ -486,6 +486,43 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     const RIDGE_AMP: f32 = 0.95;
     const HILL_AMP: f32 = 0.07;
 
+    // ── NEGATIVE RESULT: a CONTINENTAL SLOPE does not fix interior ponding ───
+    // The complaint this was built for: "the world generates these low ground
+    // zones where rivers go to — make it so there are almost none, so rivers
+    // follow to the sea like on Earth."
+    //
+    // First, the measurement that reframed it (`diag_endorheic_fraction`,
+    // rivers.rs). On a real 600×300 plate world, **100% of land already drains
+    // to the sea** and 0% dead-ends inland — the priority flood routes every
+    // basin's overflow out. What is actually wrong is that **6–20% of all land
+    // is PONDED**: sitting more than 10 m below its own spill level, i.e. flat
+    // filled hollow. That is the low ground the player sees, and `extract_rivers`
+    // correctly refuses to draw a channel across standing water, so rivers stop
+    // at its edge. The complaint is real; its cause is not the one it sounds like.
+    //
+    // The obvious fix — give the land a systematic seaward gradient, since an
+    // fbm field has as many local minima as maxima while real continents stand
+    // higher inland — was built and MEASURED, and it does not work:
+    //
+    //   ponded % of land   seed 4242   seed 7   seed 99   mean
+    //   before                  20.3     14.8       6.2   13.8
+    //   with a 1500 km slope    20.9     10.4      14.9   15.4
+    //
+    // It reshuffled which seeds were worst and left the mean slightly WORSE.
+    // The reason is a scale mismatch, and it generalises: ponding is a LOCAL
+    // property (hollows a few cells across, made by the `hill` term and the
+    // micro-relief dither) while a continental ramp is a gradient of ~0.006 per
+    // cell. A large-scale tilt moves hollows around; it cannot fill them. Tilting
+    // the table does not empty the dimples in it.
+    //
+    // So the instrument has to match the scale. What would actually work is a
+    // depression-removal pass on the FINISHED field — and note it must not be a
+    // carve/breach of an outlet channel, which §8.23 spent three attempts
+    // establishing draws a dendritic scratch rather than a landform. Not built;
+    // named here so the next attempt starts from this measurement instead of
+    // re-deriving it. Do not re-add a continental slope for this purpose without
+    // re-running `diag_endorheic_fraction` first.
+
     // D4: a plate boundary is a straight Voronoi edge, and every prior version
     // of this belt read `orogeny.dist` at the cell's OWN position, so however
     // much `belt_noise` below varies the belt's STRENGTH, its CREST still
@@ -570,9 +607,32 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
                 (0.0, 1.0)
             };
             belt = belt * belt * (3.0 - 2.0 * belt); // smoothstep
+            // ALONG-STRIKE VARIATION — why a range is not a wall.
+            //
+            // `belt_profile` is a pure function of DISTANCE from the boundary, so
+            // it contributes nothing along a belt's own strike: every point at the
+            // same cross-belt offset gets the identical value. All of a range's
+            // variation along its length therefore has to come from this one noise
+            // term — and it was not supplying any.
+            //
+            // Same trap §8.24b already recorded once, live in a second place:
+            // `fbm_noise` AVERAGES its octaves, so it does not span 0..1. Measured,
+            // it spans about 0.11..0.40. `0.35 + 0.65 * belt_noise` therefore
+            // spanned 0.42..0.61 — a near-constant ~0.5 with an 18% ripple, not the
+            // 0.35..1.0 swing the expression reads as intending. A belt of
+            // essentially uniform strength for its whole length is a WALL: no
+            // massifs, no saddles, no gaps where the range breaks down and lets a
+            // river through. That is the "too clean mountains" report.
+            //
+            // Normalised on the measured spread first (as `plates.rs` does), the
+            // intended swing is real: some stretches stand at full height, others
+            // fall to a third of it, and the range reads as a range.
+            const FBM_LO: f32 = 0.11;
+            const FBM_HI: f32 = 0.40;
             let belt_noise = fbm_noise(ax * f_base * 2.3 + 19.0, ay * f_base * 2.3 + 5.0,
                                        seed.wrapping_add(0xB317), 4, 2.0, 0.5);
-            belt *= 0.35 + 0.65 * belt_noise;
+            let belt_n01 = ((belt_noise - FBM_LO) / (FBM_HI - FBM_LO)).clamp(0.0, 1.0);
+            belt *= 0.35 + 0.65 * belt_n01;
             // Age modulates amplitude: a young orogen stands sharper/taller,
             // an old one is already worn down -- an old range beside a young
             // one is the plan's own "single biggest visual win", read
@@ -4293,6 +4353,50 @@ mod tests {
     /// All three halves matter: a limiter that also flattens the mountains
     /// would "pass" the first claim and ruin the map.
     #[test]
+    /// A mountain BELT must vary along its own strike, or it is a wall.
+    ///
+    /// `belt_profile` is a pure function of distance from the boundary, so it
+    /// contributes exactly zero along-strike variation by construction — every
+    /// point at the same cross-belt offset gets the same value. All of it comes
+    /// from the `belt_noise` term, which was applying an un-normalised `fbm_noise`
+    /// (measured range ~0.11..0.40, §8.24b) through `0.35 + 0.65 * n`: a spread of
+    /// 0.42..0.61 where the expression reads as meaning 0.35..1.00. This asserts
+    /// the multiplier's realised spread covers most of its intended range, which a
+    /// near-constant modulation fails by construction.
+    #[test]
+    fn a_mountain_belt_varies_along_its_own_strike() {
+        const FBM_LO: f32 = 0.11;
+        const FBM_HI: f32 = 0.40;
+        let (w, h) = (600u32, 300u32);
+        let f_base = 1.0 / 760.0;
+        let (mut lo, mut hi) = (f32::MAX, f32::MIN);
+        let mut sum = 0.0f64;
+        let mut cnt = 0usize;
+        for y in (0..h).step_by(3) {
+            for x in (0..w).step_by(3) {
+                let n = fbm_noise(x as f32 * f_base * 2.3 + 19.0, y as f32 * f_base * 2.3 + 5.0,
+                                  0xB317, 4, 2.0, 0.5);
+                let n01 = ((n - FBM_LO) / (FBM_HI - FBM_LO)).clamp(0.0, 1.0);
+                let mult = 0.35 + 0.65 * n01;
+                lo = lo.min(mult); hi = hi.max(mult);
+                sum += mult as f64; cnt += 1;
+            }
+        }
+        let mean = (sum / cnt as f64) as f32;
+        println!("belt-strength multiplier: {lo:.3}..{hi:.3} (mean {mean:.3}), intended 0.35..1.00");
+        // The un-normalised form measured 0.42..0.61 — a 0.19 spread. Anything
+        // under half the intended 0.65 range is a wall, not a range.
+        assert!(hi - lo > 0.45,
+            "belt strength varies only {:.3} along strike ({lo:.3}..{hi:.3}) — a belt of \
+             near-constant strength has no massifs, no saddles and no gaps, so it renders \
+             as a uniform wall. `fbm_noise` does not span 0..1 (§8.24b); normalise it on \
+             its measured spread before applying an intended 0.35..1.00 swing.",
+            hi - lo);
+        // And it must actually reach high strength somewhere, or the belts are
+        // uniformly weak instead of uniformly strong — the same defect inverted.
+        assert!(hi > 0.90, "no stretch of any belt reaches full strength (max {hi:.3})");
+    }
+
     fn the_grid_scale_budget_caps_texture_without_flattening_landforms() {
         let (w, h) = (128u32, 96u32);
         let n = (w * h) as usize;

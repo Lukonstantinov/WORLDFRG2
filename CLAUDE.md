@@ -3982,6 +3982,70 @@ even without the rate-modulation refinement.
 
 ---
 
+### 8.24a3 A belt varies along its strike; ponding is not a slope problem
+
+Two user reports from one screenshot pair — "too clean mountains are forming"
+and "rivers get truncated and the world generates these low ground zones where
+rivers go to". One was a real bug with a one-line cause; the other was a
+misdiagnosis on both our parts, and the measurement is the deliverable.
+
+**THE WALL — `fbm_noise` does not span 0..1, in a second place.**
+`belt_profile` is a pure function of DISTANCE from the boundary, so it
+contributes exactly zero variation along a belt's own strike: every point at
+the same cross-belt offset gets the identical value. All of a range's
+along-strike character therefore comes from one term in `elevation.rs`:
+
+```rust
+belt *= 0.35 + 0.65 * belt_noise;   // reads as a 0.35..1.00 swing
+```
+
+`fbm_noise` AVERAGES its octaves, so it spans ~**0.11..0.40**, not 0..1 —
+the exact fact §8.24b already measured and recorded for the plate warp. So
+the realised multiplier spanned **0.42..0.61**: a near-constant ~0.5 with an
+18% ripple where the code reads as meaning a 3× swing. A belt of uniform
+strength for its whole length has no massifs, no saddles and no gaps — it is
+a WALL, which is precisely what the screenshot showed. Normalising on the
+measured spread first restores the intended swing (measured 0.350..1.000,
+mean 0.653). Gate: `a_mountain_belt_varies_along_its_own_strike`, which
+asserts the realised spread exceeds 0.45 and that some stretch reaches full
+strength — the un-normalised form fails both by construction.
+
+**The general lesson, now twice paid for: never feed `fbm_noise` into an
+expression that assumes a 0..1 range.** Normalise on its measured spread at
+every call site that cares about the range rather than just the shape.
+
+**THE PONDING — measured, and the obvious fix does not work.**
+`diag_endorheic_fraction` (`rivers.rs`, `#[ignore]`d) walks every land cell's
+drainage to its terminus on a real generated world. It reframes the report:
+**100% of land already drains to the sea**, 0% dead-ends inland — the
+priority flood routes every basin's overflow out. What is actually wrong is
+that **6–20% of land is PONDED**, sitting >10 m below its own spill level,
+i.e. flat filled hollow. That is the low ground the player sees, and
+`extract_rivers` correctly refuses to draw a channel across standing water,
+so rivers stop at its edge.
+
+**NEGATIVE RESULT** (§2.4): the obvious cure — give the land a systematic
+seaward gradient, since an fbm field has as many local minima as maxima while
+real continents stand higher inland — was built and measured, and does not
+work:
+
+| ponded % of land | seed 4242 | seed 7 | seed 99 | mean |
+|---|---|---|---|---|
+| before | 20.3 | 14.8 | 6.2 | **13.8** |
+| with a 1500 km continental slope | 20.9 | 10.4 | 14.9 | **15.4** |
+
+It reshuffled which seed was worst and left the mean slightly worse, so it
+was reverted. The reason generalises: **ponding is a LOCAL property** (hollows
+a few cells across, from the `hill` term and the micro-relief dither) while a
+continental ramp is a gradient of ~0.006 per cell. Tilting the table does not
+empty the dimples in it. The instrument has to match the scale — a
+depression-removal pass on the FINISHED field, which must not be an outlet
+carve/breach (§8.23 spent three attempts establishing that draws a dendritic
+scratch, not a landform). Not built; named so the next attempt starts from
+this measurement. Re-run `diag_endorheic_fraction` before trying anything here.
+
+---
+
 ### 8.24b Plate margins are warped at the SOURCE
 
 `plate_index` was a plain Voronoi partition — every plate boundary was the exact

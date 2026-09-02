@@ -1654,6 +1654,88 @@ mod tests {
         }
     }
 
+    /// DIAGNOSTIC · how much of a real world's land drains to the SEA, and how
+    /// much dead-ends in an interior sink. This is the user-visible complaint
+    /// ("rivers get truncated and the world generates these low ground zones
+    /// where rivers go to") stated as a number instead of an impression.
+    ///
+    /// On Earth roughly 13% of land is endorheic (the Caspian/Aral basin, the
+    /// Great Basin, the Sahara's chotts, the Tarim, Lake Eyre) and the other 87%
+    /// reaches an ocean. A generator with no continental-scale slope has no
+    /// reason to land anywhere near that: an fbm field has about as many local
+    /// minima as maxima, so interior basins are as common as hills and rivers
+    /// end in them.
+    #[test]
+    #[ignore]
+    fn diag_endorheic_fraction() {
+        use crate::sim::world_buffer::{WorldBuffer, ColumnSet};
+        use crate::db::schema;
+        use rusqlite::Connection;
+        let (w, h) = (600u32, 300u32);
+        for seed in [4242u64, 7, 99] {
+            let conn = Connection::open_in_memory().unwrap();
+            schema::create_tables(&conn).unwrap();
+            for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+                conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![k, v]).unwrap();
+            }
+            let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+            crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, 14);
+            crate::sim::elevation::generate_elevation(&mut buf, seed);
+            let (sea, sink, ponded, land) = endorheic_stats(&buf);
+            println!("seed {seed}: land {land} · drains to sea {:.1}% · dead-ends inland {:.1}% \
+                      · ponded (standing water / flat sink) {:.1}%",
+                100.0 * sea as f32 / land.max(1) as f32,
+                100.0 * sink as f32 / land.max(1) as f32,
+                100.0 * ponded as f32 / land.max(1) as f32);
+        }
+    }
+
+    /// Walk every land cell's drainage to its terminus on the RAW (unfilled)
+    /// surface and classify it. Returns (to_sea, to_inland_sink, ponded, land).
+    /// Deliberately measured before depression filling: the filled surface
+    /// routes a sink's overflow onward, which is exactly the information this
+    /// wants to keep — a basin that only drains because the flood filled it is
+    /// still a basin on the ground the player sees.
+    #[cfg(test)]
+    pub(crate) fn endorheic_stats(buf: &WorldBuffer) -> (usize, usize, usize, usize) {
+        let n = buf.total();
+        let hy = compute_hydrology(buf);
+        const POND_FILL: f32 = 10.0 / 8848.0;
+        let (mut sea, mut sink, mut ponded, mut land) = (0usize, 0usize, 0usize, 0usize);
+        // Terminus per cell, memoised down each chain so this stays linear.
+        let mut term = vec![0u8; n]; // 0 unknown, 1 sea, 2 sink
+        for start in 0..n {
+            if buf.terrain[start] != 1 { continue; }
+            land += 1;
+            if hy.filled[start] - buf.elevation[start] > POND_FILL { ponded += 1; }
+            if term[start] != 0 {
+                if term[start] == 1 { sea += 1; } else { sink += 1; }
+                continue;
+            }
+            let mut chain = Vec::new();
+            let mut cur = start;
+            let verdict = loop {
+                if term[cur] != 0 { break term[cur]; }
+                chain.push(cur);
+                match hy.flow_dir[cur] {
+                    FLOW_SEA => break 1,
+                    FLOW_SINK => break 2,
+                    nxt => {
+                        let nxt = nxt as usize;
+                        // A cycle cannot happen on a filled surface, but never
+                        // trust that in a diagnostic that walks user data.
+                        if chain.len() > n { break 2; }
+                        cur = nxt;
+                    }
+                }
+            };
+            for &c in &chain { term[c] = verdict; }
+            if verdict == 1 { sea += 1; } else { sink += 1; }
+        }
+        (sea, sink, ponded, land)
+    }
+
     /// THE MILLION-KM² LAKE GATE. A filled depression tells you only that water
     /// cannot flow OUT; how much water actually stands there is a water-balance
     /// question (inflow vs. evaporation off the lake surface), and `detect_lakes`
