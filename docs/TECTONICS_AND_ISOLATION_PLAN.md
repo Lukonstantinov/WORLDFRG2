@@ -4,11 +4,12 @@ Two independent subjects that arrived from the same session of feedback, kept in
 one file because they share nothing technically and everything in intent: making
 the world **believable** rather than merely generated.
 
-**Status: AGREED, PART A/B1/B2/B3/B4 BUILT, A3 NOT BUILT.**
+**Status: AGREED, ALL PARTS BUILT (A/A3/B1/B2/B3/B4).**
 
 | Part | Subject | Status |
 |---|---|---|
-| **A** | Trade isolation — an ocean is a real barrier | **built** — `ISOLATION_RESCUE_MAX_KM` caps `rescue_tiny_components`; §A3 (unify Flows highlight onto the coarse grid) not yet built |
+| **A** | Trade isolation — an ocean is a real barrier | **built** — `ISOLATION_RESCUE_MAX_KM` caps `rescue_tiny_components`; §A3 built too, see below |
+| **A3** | One routing system, not two | **built** — `compute_coarse_route` + async per-segment fetch in `MapCanvas`, see below |
 | **B1** | Plate sizes | **built** — power-diagram weighted partition, see CLAUDE.md §8.24a2 |
 | **B2** | A motion layer you can read | **built** — persisted `PlateMotion` + `get_plate_motion` + arrow render on the `plates` layer, see CLAUDE.md §8.24a2 |
 | **B3** | Collision style (multi-ridge belts) | **built** — max-of-bumps collision profile (a cosine-lobed envelope was tried first and measured to fail), wider + multi-crested than an active margin; convergence-rate modulation deliberately not wired, see CLAUDE.md §8.24a2 |
@@ -97,6 +98,27 @@ the trade lines dynamic trade on the same layer"* — is to route the highlight
 through the **same coarse grid with the same crossing rule**. Then every drawn lane
 is a legal route, the dashed fallback becomes rare rather than routine, and the two
 layers stop disagreeing about where trade can go.
+
+**Built.** A new query command, `compute_coarse_route(ax, ay, bx, by, rivers_json,
+reach, max_crossing)` (`flow.rs`), routes ONE point-to-point link over the exact
+same `cached_coarse_cost` grid + `coarse_dijkstra` + `path_allowed` the Dynamic
+Trade Flow layer already uses (`campaign_get_trade_flow`), returning the resolved
+world-coordinate polyline or an empty array when no legal route exists. It reuses
+the memoized grid cache, so repeated calls (a user clicking through several routes
+in the Flows panel) pay the grid build only once.
+
+The frontend keeps the Flows highlight's existing shape (`FlowsView` still emits
+plain `{ax,ay,bx,by,dir,w}` segments — no change there) and adds a SEPARATE async
+effect in `MapCanvas.tsx` that fetches a coarse route per segment whenever the
+selection changes, storing the results in `OverlayManager.flowHighlightPaths` (a
+parallel array by index, via the new `setFlowHighlightPaths`).
+`renderFlowHighlight` now tries, in order: the resolved coarse-grid path (solid,
+real route) → the worldgen trade-route graph via the existing `laneBetween` →
+a dashed direct line. Only the last is the old "no path found at all" case; a
+campaign sea lane the worldgen graph never joined now draws as a real routed line
+instead of always falling back. Rule 35 (a flow that exists must stay visible) is
+preserved exactly — the dashed fallback still fires whenever NEITHER graph finds a
+route, so nothing regresses; it should simply fire less often now.
 
 ## A4. Gates
 

@@ -4981,6 +4981,20 @@ Three rules:
     lane is now drawn DASHED and direct (the atlas convention for an open-water
     shipping lane, honest about being a crossing), taking the shorter way round
     the cylinder. Never silently drop a datum the UI is simultaneously listing.
+    **TECTONICS_AND_ISOLATION_PLAN.md Part A3 narrowed how often the dashed
+    fallback fires**, rather than replacing it: a new `compute_coarse_route`
+    query command (`flow.rs`) routes one point-to-point link over the SAME
+    coarse cost grid + `path_allowed` crossing rule the Dynamic Trade Flow layer
+    (`campaign_get_trade_flow`) already uses — the Flows highlight and the
+    Dynamic Trade Flow layer used to disagree about where trade could go,
+    since one read the campaign's own route matrix and the other only the
+    worldgen graph. `MapCanvas.tsx` fetches a route per highlighted segment
+    async into `OverlayManager.flowHighlightPaths` (a parallel array by index,
+    `setFlowHighlightPaths`); `renderFlowHighlight` now tries the resolved
+    coarse-grid path FIRST, `laneBetween`'s worldgen graph second, and only
+    falls to the dashed direct line when neither finds a route — a campaign
+    sea lane the worldgen graph never joined now draws as a real routed line
+    instead of always falling back.
 34. **Generating data is not loading it.** Both run-alls call
     `generate_and_persist_provinces`, but neither run-all HANDLER loaded the result
     into the frontend store — so a fully generated world reported "No provinces

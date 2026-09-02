@@ -110,6 +110,51 @@ pub fn campaign_get_trade_flow(
 }
 
 
+/// TECTONICS_AND_ISOLATION_PLAN.md Part A3 — route a SINGLE point-to-point link
+/// over the exact same coarse cost grid + `path_allowed` crossing rule the
+/// Dynamic Trade Flow layer (`campaign_get_trade_flow`, above) already uses,
+/// instead of the worldgen trade-route graph the frontend's Flows highlight
+/// used to fall back to a dashed direct line against. `cached_coarse_cost` is
+/// memoized by (fingerprint, rivers, reach), so repeated calls from the same
+/// panel session (a user clicking through several routes) pay the grid build
+/// only once. Empty when the two points land in the same coarse cell, no path
+/// exists, or the path would cross more open water than `max_crossing` allows
+/// — the frontend's own existing dashed-direct fallback (rule 35: a flow that
+/// exists must stay visible) covers all three the same way it always has.
+#[tauri::command]
+pub fn compute_coarse_route(
+    ax: f32,
+    ay: f32,
+    bx: f32,
+    by: f32,
+    rivers_json: String,
+    reach: u8,
+    max_crossing: f32,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<[f32; 2]>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    let world = db.cached_tiles_with_conn(&conn)?;
+    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h,
+        &rivers_json, reach == 2, true, 0.0, -1, 12)?;
+    let node_at = |x: f32, y: f32| -> usize {
+        let cx = ((x.max(0.0) as u32) / cc.f).min(cc.cw as u32 - 1) as i32;
+        let cy = ((y.max(0.0) as u32) / cc.f).min(cc.ch as u32 - 1) as i32;
+        cc.cidx(cx, cy)
+    };
+    let (s, g) = (node_at(ax, ay), node_at(bx, by));
+    if s == g { return Ok(vec![]); }
+    let path = match coarse_dijkstra(&cc, s, g) { Some(p) => p, None => return Ok(vec![]) };
+    if path.len() < 2 { return Ok(vec![]); }
+    if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { return Ok(vec![]); }
+    Ok(path.iter().map(|&c| cc.world_of(c)).collect())
+}
+
+
 #[tauri::command]
 pub fn campaign_get_corridors(
     rivers_json: String,

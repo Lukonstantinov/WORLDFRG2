@@ -16,6 +16,27 @@ export async function campaignGetTradeFlow(
   });
 }
 
+/** TECTONICS_AND_ISOLATION_PLAN.md Part A3 — route ONE point-to-point link over
+ *  the same coarse cost grid + crossing rule `campaignGetTradeFlow` uses, so the
+ *  Flows highlight can ride a real legal route instead of falling back to a
+ *  dashed direct line for every campaign sea lane the worldgen trade-route graph
+ *  never joined. Empty array = no route within the crossing rule (caller keeps
+ *  its existing dashed-direct fallback, rule 35). */
+export async function computeCoarseRoute(
+  a: [number, number],
+  b: [number, number],
+  rivers: { points: [number, number][] }[],
+  reach: number,
+  maxCrossing: number,
+): Promise<[number, number][]> {
+  return invoke("compute_coarse_route", {
+    ax: a[0], ay: a[1], bx: b[0], by: b[1],
+    riversJson: JSON.stringify(rivers),
+    reach,
+    maxCrossing,
+  });
+}
+
 export async function campaignGetCorridors(
   rivers: { points: [number, number][] }[],
   reach: number,

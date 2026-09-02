@@ -59,6 +59,7 @@ pub fn run() {
             query_commands::compute_overlays,
             query_commands::compute_trade_matrix,
             query_commands::campaign_get_trade_flow,
+            query_commands::compute_coarse_route,
             query_commands::campaign_get_corridors,
             query_commands::campaign_get_expeditions,
             query_commands::compute_political,

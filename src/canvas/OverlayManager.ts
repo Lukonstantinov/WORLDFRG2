@@ -1841,6 +1841,15 @@ export class OverlayManager {
     this.flowHighlight = segs;
     if (gridW > 0) this.worldW = gridW;
   }
+  /** TECTONICS_AND_ISOLATION_PLAN.md Part A3 — a resolved coarse-grid route per
+   *  `flowHighlight` segment (same index, parallel array), fetched async by
+   *  MapCanvas via `compute_coarse_route`. Empty/missing entry = no legal route
+   *  found (or still pending) — `renderFlowHighlight` falls back to
+   *  `laneBetween`'s worldgen-graph-or-dashed-direct behaviour for that segment. */
+  private flowHighlightPaths: [number, number][][] = [];
+  setFlowHighlightPaths(paths: [number, number][][]) {
+    this.flowHighlightPaths = paths;
+  }
 
   /** Nearest active merchant route to a world point, within `thresh` cells (for
    *  click-to-inspect). Returns null if none close. */
@@ -4080,38 +4089,43 @@ export class OverlayManager {
     const W = this.worldW;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    for (const s of this.flowHighlight) {
+    for (let idx = 0; idx < this.flowHighlight.length; idx++) {
+      const s = this.flowHighlight[idx];
       const inbound = s.dir === 0;
       const color = inbound ? lineColors.merchantIn : lineColors.merchantOut; // cyan in · gold out
       const w = Math.max(1.2, s.w * inv);
-      // Trace the ACTUAL merchant path along the trade-routes layer (roads/sea-lanes)
-      // where one exists, so a flow rides the roads already drawn on the map.
+      // Trace the ACTUAL merchant path where one exists, so a flow rides the
+      // roads/sea-lanes already drawn on the map.
       //
-      // ── WHY THERE IS A FALLBACK, AND WHY IT IS DASHED ────────────────────────
-      // This used to `continue` when no corridor could be traced, on the rule
-      // "never draw a straight slash". That rule is right about not faking a ROAD,
-      // and wrong about what to do when there isn't one: it DROPPED the flow
-      // entirely, so a real trade the panel was listing had nothing on the map.
-      //
-      // It is not a rare case. `routeAlongTradeRoutes` runs Dijkstra over the
-      // WORLDGEN trade-route graph, which is bounded by that layer's maximum
-      // open-water crossing — while a campaign flow has its own route matrix with
-      // sea lanes and long-haul rescue passes. So any flow between two landmasses
-      // the worldgen layer never connected has no path in this graph, and every
-      // one of them silently vanished: the "trunks are not shown, it's the
-      // settlements far away, maybe because it crosses oceans" report, which is
-      // exactly what it was.
-      //
-      // A flow that exists must be visible. Where there is no corridor the lane is
-      // drawn DASHED and direct — the cartographic convention for an open-water
-      // shipping lane, which is honest about being a crossing rather than a road,
-      // instead of asserting a road that isn't there or hiding the trade.
-      const lane = this.laneBetween([s.ax, s.ay], [s.bx, s.by]);
-      const openWater = lane.openWater;
-      // The direct lane takes the SHORTEST way round a cylindrical world (rule 6):
-      // a partner 20 cells east across the antimeridian is 20 cells away, not
-      // worldW − 20 the other way. `drawPolyline` breaks the stroke at the seam.
-      const pts: [number, number][] = lane.pts;
+      // ── THREE SOURCES, IN ORDER, AND WHY THE LAST ONE IS DASHED ──────────────
+      // Part A3: prefer a route over the SAME coarse cost grid + crossing rule
+      // the Dynamic Trade Flow layer uses (`compute_coarse_route`, fetched async
+      // by MapCanvas into `flowHighlightPaths`) — this is what lets a real
+      // campaign sea lane draw as an actual routed line instead of falling back.
+      // Failing that, fall back to the worldgen trade-route graph
+      // (`laneBetween`/`routeAlongTradeRoutes`), which still catches plenty of
+      // ordinary land routes the coarse fetch hasn't resolved yet. Only when
+      // NEITHER finds a path is the flow drawn as a dashed direct line — the
+      // cartographic convention for an open-water crossing, honest about not
+      // being a road, and still better than the old behaviour of silently
+      // dropping the flow entirely (rule 35: a flow that exists must be visible
+      // — the "trunks are not shown, it's the settlements far away, maybe
+      // because it crosses oceans" report this fallback itself was built to fix).
+      const coarsePath = this.flowHighlightPaths[idx];
+      let pts: [number, number][];
+      let openWater: boolean;
+      if (coarsePath && coarsePath.length >= 2) {
+        pts = coarsePath;
+        openWater = false;
+      } else {
+        // The direct lane takes the SHORTEST way round a cylindrical world
+        // (rule 6): a partner 20 cells east across the antimeridian is 20
+        // cells away, not worldW − 20 the other way. `drawPolyline` breaks
+        // the stroke at the seam.
+        const lane = this.laneBetween([s.ax, s.ay], [s.bx, s.by]);
+        pts = lane.pts;
+        openWater = lane.openWater;
+      }
       const drawPolyline = () => {
         ctx.beginPath();
         let started = false;

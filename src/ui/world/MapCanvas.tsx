@@ -11,7 +11,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -904,8 +904,32 @@ export function MapCanvas() {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
     om.setFlowHighlight(flowHighlight, meta.grid_width);
+    om.setFlowHighlightPaths([]); // clear stale routes from the previous selection
     requestRender();
   }, [flowHighlight, meta, requestRender]);
+
+  // TECTONICS_AND_ISOLATION_PLAN.md Part A3 — route each highlighted flow
+  // segment over the SAME coarse cost grid + crossing rule the Dynamic Trade
+  // Flow layer uses, instead of the worldgen trade-route graph
+  // `renderFlowHighlight`'s own `laneBetween` fallback is bounded by. A
+  // campaign sea lane the worldgen layer never joined used to always fall back
+  // to a dashed direct line; now it routes legally whenever the coarse grid
+  // actually connects the two points within `maxCrossing` — the dashed
+  // fallback (rule 35) only fires for the genuinely unroutable remainder.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta || flowHighlight.length === 0 || !campaignSnapshot?.active) return;
+    let alive = true;
+    Promise.all(flowHighlight.map((s) =>
+      computeCoarseRoute([s.ax, s.ay], [s.bx, s.by], rivers.map((r) => ({ points: r.points })),
+        bioParams.tradeReach, bioParams.maxCrossing).catch(() => [] as [number, number][]),
+    )).then((paths) => {
+      if (!alive) return;
+      om.setFlowHighlightPaths(paths);
+      requestRender();
+    });
+    return () => { alive = false; };
+  }, [flowHighlight, meta, campaignSnapshot?.active, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Futures layer — contractual supply lanes from the running campaign.
   useEffect(() => {
