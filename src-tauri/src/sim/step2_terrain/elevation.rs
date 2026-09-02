@@ -759,6 +759,12 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
     // see `landform::apply_landform_shaping`.
     landform::apply_landform_shaping(&mut elevation, &terrain, &lf);
 
+    // Sediment fills the small hollows so rivers run to the sea. AFTER the rank
+    // remap for the same reason the shaping above is (a remap re-fans anything
+    // levelled before it), and BEFORE `apply_micro_relief`, which re-roughens
+    // whatever flat a fill leaves — rule 31's answer, applied here.
+    deposit_into_closed_basins(&mut elevation, &terrain, w, h);
+
     // Terrain-aware micro-relief so no land area is ever a perfectly flat, mono
     // plateau (plateaus stay smooth, hillsides roll, floodplains stay flat).
     limit_grid_scale_relief(&mut elevation, &terrain, w, h);
@@ -2281,6 +2287,161 @@ const GRID_RELIEF_BUDGET_M: f32 = 16.0;
 /// `GRID_RELIEF_BUDGET_M`, leaving everything at landform scale alone. Returns
 /// the (before, after) grid-scale RMS in metres so callers and tests can report
 /// it. A no-op (and bit-identical) on a world already inside the budget.
+/// A minimal priority flood (Barnes, Lehman & Mulla 2014) returning ONLY the
+/// depression-filled surface: `filled[i] >= elevation[i]`, equal wherever water
+/// can already leave, higher inside a closed basin (its spill level).
+///
+/// This is deliberately NOT shared with `rivers.rs`'s flood, which answers a
+/// different question on a different field: phase 5 perturbs the elevation with
+/// a few metres of micro-relief FIRST, precisely so a dead-flat plain breaks
+/// into a dendritic tributary tree instead of a parallel fan. That perturbation
+/// is right there and wrong here — this pass has to see the depressions the
+/// generator actually built, not depressions with tie-breaking noise added.
+fn depression_fill_surface(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> Vec<f32> {
+    use std::collections::BinaryHeap;
+    let n = (w * h) as usize;
+
+    /// Min-heap entry: `BinaryHeap` is a max-heap, so `Ord` is inverted.
+    struct FillCell { elev: f32, idx: usize }
+    impl PartialEq for FillCell { fn eq(&self, o: &Self) -> bool { self.elev == o.elev } }
+    impl Eq for FillCell {}
+    impl PartialOrd for FillCell { fn partial_cmp(&self, o: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(o)) } }
+    impl Ord for FillCell {
+        fn cmp(&self, o: &Self) -> std::cmp::Ordering {
+            o.elev.partial_cmp(&self.elev).unwrap_or(std::cmp::Ordering::Equal)
+        }
+    }
+
+    let mut filled = elevation.to_vec();
+    let mut visited = vec![false; n];
+    let mut heap: BinaryHeap<FillCell> = BinaryHeap::new();
+    // Every sea cell is an outlet. A world with no sea at all seeds nothing, the
+    // loop does not run, and the surface comes back unchanged — a no-op, not a
+    // panic.
+    for i in 0..n {
+        if terrain[i] != 1 {
+            visited[i] = true;
+            heap.push(FillCell { elev: filled[i], idx: i });
+        }
+    }
+    while let Some(FillCell { idx, .. }) = heap.pop() {
+        let cx = (idx % w as usize) as i32;
+        let cy = (idx / w as usize) as i32;
+        for dy in -1i32..=1 {
+            for dx in -1i32..=1 {
+                if dx == 0 && dy == 0 { continue; }
+                let ny = cy + dy;
+                if ny < 0 || ny >= h as i32 { continue; }           // Y clamps (rule 6)
+                let nx = ((cx + dx) % w as i32 + w as i32) % w as i32; // X wraps
+                let ni = (ny as u32 * w + nx as u32) as usize;
+                if visited[ni] { continue; }
+                visited[ni] = true;
+                // The spill level: a cell can be no lower than the lowest rim it
+                // must cross to get out.
+                if filled[ni] < filled[idx] { filled[ni] = filled[idx]; }
+                heap.push(FillCell { elev: filled[ni], idx: ni });
+            }
+        }
+    }
+    filled
+}
+
+/// SEDIMENT DEPOSITION into closed basins — the answer to "the world generates
+/// these low ground zones where rivers go to; make it so there are almost none".
+///
+/// ── WHY DEPOSITION AND NOT AN OUTLET BREACH ─────────────────────────────────
+/// There are two ways a real closed basin stops being one: its outlet erodes
+/// down, or sediment fills it up. The first is forbidden here and the ban is
+/// hard-won — §8.23 records three separate attempts to cut channels at this grid
+/// scale, all of which drew a dendritic scratch network rather than a landform,
+/// because a cell is ~11 km wide and the channel being modelled is sub-grid.
+/// The second has none of that problem: it RAISES an area, and an area fill
+/// leaves no line to read as a scratch. It is also what actually dominates on
+/// Earth — real endorheic basins are depositional, flat-floored, sediment-filled
+/// (the Tarim, Lake Eyre, Death Valley's floor).
+///
+/// ── WHY IT IS PARTIAL, AND WHY THE CURVE HAS THIS SHAPE ─────────────────────
+/// Filling every basin flush to its spill level is exactly rule 31's forbidden
+/// move: it would leave a large area at precisely one value — a flat plateau
+/// with no gradient, hence no drainage direction, which is the defect that rule
+/// exists to prevent. So the fill keeps a FRACTION of the basin's own shape:
+///
+/// ```text
+/// residual(d) = d · max(MIN_KEEP, smoothstep(d; KEEP_LO, KEEP_HI))
+/// ```
+///
+/// Two regimes, and the shape of the curve is the whole design:
+///  * Below `KEEP_LO` the basin keeps only `MIN_KEEP` of itself — a 100 m hollow
+///    keeps 6 m and stops counting as ponded, a 20 m dimple keeps 1 m and is
+///    gone. These are the hollows that swallow rivers, and they are the ones
+///    sediment really does fill within a landscape's lifetime.
+///  * Above `KEEP_HI` a basin is untouched. The Caspian and the Tarim are not
+///    going to fill; §8.24c REQUIRES deep basins to survive, because a pass that
+///    removed every closed basin would delete every lake in the world with them.
+///
+/// `MIN_KEEP` is deliberately not zero, and that is rule 31's answer in the
+/// formula rather than in a later pass: the residual always preserves a few per
+/// cent of the basin's own relief, so a filled basin floor keeps a gentle
+/// gradient toward its sump and never becomes a dead-flat pan at exactly the
+/// spill value. (An alluvial plain IS flat — but flat with a direction, which is
+/// what lets a river cross it.)
+///
+/// NEGATIVE RESULT, recorded so the curve is not "simplified" back: the first
+/// version used `residual(d) = d²/(d + HALF)`, a smooth saturating curve with
+/// HALF = 300 m. It is well-behaved and it does not do enough — measured, it
+/// moved ponded land only 13.8% → 11.5%, because that form can only fully drain
+/// a hollow shallower than ~60 m, and the surviving ponded area is dominated by
+/// deeper basins. No value of HALF fixes it: to drain a 500 m basin the same
+/// formula needs HALF ≈ 24 km, which would flatten everything else. The shape
+/// was wrong, not the constant.
+///
+/// Two structural guarantees hold in both versions, and both matter:
+///  * `residual(d) <= d`, so the surface only ever RISES. It cannot create a new
+///    depression, and it cannot lower land.
+///  * `residual(d) >= 0`, so no cell is raised ABOVE its spill point. Every
+///    basin's outlet and the drainage topology through it are untouched.
+///
+/// Returns (ponded fraction before, after) for the gate and the diagnostic.
+fn deposit_into_closed_basins(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32) -> (f32, f32) {
+    const MAX_ELEV: f32 = 8848.0;
+    /// Below this depth a basin is treated as fillable within a landscape's
+    /// lifetime and keeps only `MIN_KEEP` of itself. Stated in METRES and
+    /// converted, never in normalized units, so it means the same landform on
+    /// every world.
+    const KEEP_LO_M: f32 = 130.0;
+    /// Above this depth a basin is left alone — the Caspian/Tarim tier, and the
+    /// reservoir the world's lakes live in.
+    const KEEP_HI_M: f32 = 480.0;
+    /// The floor on how much of its own shape a basin keeps. Never zero: this is
+    /// what stops a filled basin becoming a dead-flat pan (rule 31).
+    const MIN_KEEP: f32 = 0.05;
+    /// The depth below which ground reads as "ponded" — matched to `rivers.rs`'s
+    /// own `POND_FILL`, since that is the threshold that decides whether phase 5
+    /// will refuse to draw a channel there.
+    const POND_M: f32 = 10.0;
+
+    let n = (w * h) as usize;
+    let (lo, hi) = (KEEP_LO_M / MAX_ELEV, KEEP_HI_M / MAX_ELEV);
+    let pond = POND_M / MAX_ELEV;
+
+    let filled = depression_fill_surface(elevation, terrain, w, h);
+    let land = terrain.iter().filter(|&&t| t == 1).count().max(1);
+    let before = (0..n).filter(|&i| terrain[i] == 1 && filled[i] - elevation[i] > pond).count();
+
+    let mut after = 0usize;
+    for i in 0..n {
+        if terrain[i] != 1 { continue; }
+        let d = filled[i] - elevation[i];
+        if d <= 0.0 { continue; }
+        let t = ((d - lo) / (hi - lo)).clamp(0.0, 1.0);
+        let keep = (t * t * (3.0 - 2.0 * t)).max(MIN_KEEP);
+        let residual = d * keep;
+        elevation[i] = filled[i] - residual;
+        if residual > pond { after += 1; }
+    }
+    (before as f32 / land as f32, after as f32 / land as f32)
+}
+
 fn limit_grid_scale_relief(elevation: &mut [f32], terrain: &[u8], w: u32, h: u32) -> (f32, f32) {
     const MAX_ELEV: f32 = 8848.0;
     /// Correction passes. Scaling the detail band is NOT idempotent: writing
@@ -2701,6 +2862,9 @@ fn finish_elevation_field(
     thermal_erosion(&mut elevation, terrain, w, h, thermal_passes);
     isostatic_adjust(&mut elevation, terrain, &buf.boundary_type, &pre_erosion, w, h);
     normalize_and_redistribute(&mut elevation, terrain, n, height, density, &geo.region_id, geo.region_count, w, h);
+    // Same placement and same reason as the plate path: after the rank remap,
+    // before the micro-relief that re-roughens a filled flat.
+    deposit_into_closed_basins(&mut elevation, terrain, w, h);
     limit_grid_scale_relief(&mut elevation, terrain, w, h);
     apply_micro_relief(&mut elevation, terrain, w, h, seed.wrapping_add(0x31C7));
     for i in 0..n {
@@ -4353,6 +4517,75 @@ mod tests {
     /// All three halves matter: a limiter that also flattens the mountains
     /// would "pass" the first claim and ruin the map.
     #[test]
+    /// Sediment deposition fills SHALLOW hollows and leaves DEEP basins alone —
+    /// the two halves of the claim, on one fixture where both depths are known.
+    ///
+    /// A pass that filled everything would "fix" the ponding by deleting every
+    /// lake in the world (§8.24c requires closed basins to survive to hold them);
+    /// a pass that filled nothing would leave the hollows that truncate rivers.
+    /// Both failure modes are asserted against here, plus the two structural
+    /// guarantees that make the pass safe to run anywhere: it only ever RAISES
+    /// land, and it never raises a cell above its own spill level.
+    #[test]
+    fn deposition_fills_shallow_hollows_and_spares_deep_basins() {
+        const MAX_ELEV: f32 = 8848.0;
+        let (w, h) = (120u32, 60u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.30f32; n];
+        for y in 0..h {                                  // a sea margin to drain to
+            for x in 0..4 { terrain[(y * w + x) as usize] = 0; elev[(y * w + x) as usize] = 0.0; }
+        }
+        // Two round hollows of known depth, well apart: one shallow (40 m), one
+        // deep (900 m). Depth is dug BELOW the surrounding plain, so each one's
+        // spill level is the plain and its depth is exactly what we dug.
+        let dig = |elev: &mut Vec<f32>, cx: i32, cy: i32, r: i32, depth_m: f32| {
+            for dy in -r..=r { for dx in -r..=r {
+                let (x, y) = (cx + dx, cy + dy);
+                if x < 5 || x >= w as i32 || y < 0 || y >= h as i32 { continue; }
+                let d = ((dx * dx + dy * dy) as f32).sqrt();
+                if d > r as f32 { continue; }
+                let bowl = (1.0 - d / r as f32) * depth_m / MAX_ELEV;
+                elev[(y as u32 * w + x as u32) as usize] -= bowl;
+            }}
+        };
+        dig(&mut elev, 30, 30, 8, 40.0);
+        dig(&mut elev, 85, 30, 8, 900.0);
+        let shallow = (30u32 + 30 * w) as usize;
+        let deep = (85u32 + 30 * w) as usize;
+        let (shallow_before, deep_before) = (elev[shallow], elev[deep]);
+
+        let before_surface = elev.clone();
+        let (pond_before, pond_after) = deposit_into_closed_basins(&mut elev, &terrain, w, h);
+        let filled = depression_fill_surface(&before_surface, &terrain, w, h);
+
+        let shallow_depth_after = (filled[shallow] - elev[shallow]) * MAX_ELEV;
+        let deep_depth_after = (filled[deep] - elev[deep]) * MAX_ELEV;
+        println!("shallow hollow 40 m → {shallow_depth_after:.1} m · deep basin 900 m → \
+                  {deep_depth_after:.1} m · ponded {:.1}% → {:.1}%",
+                 pond_before * 100.0, pond_after * 100.0);
+
+        assert!(shallow_depth_after < 10.0,
+            "a 40 m hollow kept {shallow_depth_after:.1} m — shallow hollows are what \
+             truncate rivers and are exactly what sediment fills; it must come out below \
+             the 10 m ponding threshold");
+        assert!(deep_depth_after > 500.0,
+            "a 900 m basin kept only {deep_depth_after:.1} m — deep basins must survive, \
+             or the pass has removed the closed basins every lake in the world needs \
+             (§8.24c)");
+        assert!(pond_after < pond_before, "the pass did not reduce ponding at all");
+        // The two structural guarantees.
+        for i in 0..n {
+            if terrain[i] != 1 { continue; }
+            assert!(elev[i] >= before_surface[i] - 1e-6,
+                "cell {i} was LOWERED — deposition may only ever raise land");
+            assert!(elev[i] <= filled[i] + 1e-6,
+                "cell {i} was raised ABOVE its spill level, which would move the basin's \
+                 outlet and change the drainage topology");
+        }
+        assert!(shallow_before < 0.30 && deep_before < 0.30, "fixture did not dig its hollows");
+    }
+
     /// A mountain BELT must vary along its own strike, or it is a wall.
     ///
     /// `belt_profile` is a pure function of distance from the boundary, so it

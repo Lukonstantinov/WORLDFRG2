@@ -1284,12 +1284,70 @@ export class OverlayManager {
    *  the stroke at the seam as they already do. */
   private laneBetween(a: [number, number], b: [number, number]):
       { pts: [number, number][]; openWater: boolean } {
+    // Part A3, extended to every lane: a route over the SAME coarse cost grid the
+    // Dynamic Trade Flow layer uses, when one has been resolved for this pair.
+    // The worldgen trade-route graph below cannot express a campaign sea lane, so
+    // without this a merchant route, a house's trading web, a futures lane and a
+    // Goods Atlas flow all fell straight through to the dashed direct line —
+    // which is the "merchant/guild spread is using a direct-to-city approach, not
+    // the trade routes" report. Populated asynchronously by MapCanvas; a miss is
+    // recorded so it can be fetched and this lane redrawn.
+    const key = this.laneKey(a, b);
+    const cached = this.laneRoutes.get(key);
+    if (cached && cached.length >= 2) return { pts: cached, openWater: false };
+    if (!this.laneRoutes.has(key)) this.laneWanted.add(key);
+
     const path = this.routeAlongTradeRoutes(a, b);
     if (path && path.length >= 2) return { pts: path, openWater: false };
     const W = this.worldW;
     let bx = b[0];
     if (W > 0 && Math.abs(bx - a[0]) > W / 2) bx += a[0] > bx ? W : -W;
     return { pts: [[a[0], a[1]], [bx, b[1]]], openWater: true };
+  }
+
+  /** Endpoint-pair key for the coarse-route cache. Rounded to whole cells: the
+   *  coarse grid is far coarser than one cell, so sub-cell precision would only
+   *  fragment the cache and re-fetch the same route. */
+  private laneKey(a: [number, number], b: [number, number]): string {
+    return `${Math.round(a[0])},${Math.round(a[1])}>${Math.round(b[0])},${Math.round(b[1])}`;
+  }
+  /** Resolved coarse-grid routes, keyed by endpoint pair. An entry present but
+   *  EMPTY means "asked, and there is genuinely no legal route" — cached exactly
+   *  so it is not re-fetched every redraw; that lane keeps the dashed fallback. */
+  private laneRoutes = new Map<string, [number, number][]>();
+  private laneWanted = new Set<string>();
+
+  /** Drain the pairs `laneBetween` wanted and could not serve from cache, for
+   *  MapCanvas to resolve via `compute_coarse_route`. */
+  takeWantedLanes(): { key: string; a: [number, number]; b: [number, number] }[] {
+    const out: { key: string; a: [number, number]; b: [number, number] }[] = [];
+    for (const key of this.laneWanted) {
+      const [ap, bp] = key.split(">");
+      const [ax, ay] = ap.split(",").map(Number);
+      const [bx, by] = bp.split(",").map(Number);
+      out.push({ key, a: [ax, ay], b: [bx, by] });
+    }
+    this.laneWanted.clear();
+    return out;
+  }
+
+  /** Fill the cache with resolved routes and re-snap everything drawn from it.
+   *  Returns true when anything actually changed, so the caller can skip a
+   *  redraw it does not need. */
+  setLaneRoutes(entries: { key: string; path: [number, number][] }[]): boolean {
+    let changed = false;
+    for (const e of entries) {
+      if (!this.laneRoutes.has(e.key)) changed = true;
+      this.laneRoutes.set(e.key, e.path);
+    }
+    if (changed) {
+      // The same three re-snaps `drawTradeRoutes` does when the road network
+      // changes — a resolved route is the same kind of event.
+      this.recomputeHouseNetwork();
+      this.routeFuturesLanes();
+      this.routeMerchantRoutes();
+    }
+    return changed;
   }
 
   private routeAlongTradeRoutes(a: [number, number], b: [number, number]): [number, number][] | null {

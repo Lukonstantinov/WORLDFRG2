@@ -4038,11 +4038,47 @@ It reshuffled which seed was worst and left the mean slightly worse, so it
 was reverted. The reason generalises: **ponding is a LOCAL property** (hollows
 a few cells across, from the `hill` term and the micro-relief dither) while a
 continental ramp is a gradient of ~0.006 per cell. Tilting the table does not
-empty the dimples in it. The instrument has to match the scale — a
-depression-removal pass on the FINISHED field, which must not be an outlet
-carve/breach (§8.23 spent three attempts establishing that draws a dendritic
-scratch, not a landform). Not built; named so the next attempt starts from
-this measurement. Re-run `diag_endorheic_fraction` before trying anything here.
+empty the dimples in it.
+
+**WHAT DID WORK: sediment deposition** (`deposit_into_closed_basins`).
+There are exactly two ways a real closed basin stops being one — its outlet
+erodes down, or sediment fills it up. The first is forbidden and the ban is
+hard-won (§8.23's three failed carving attempts: at 11 km cells the channel
+is sub-grid and what gets drawn is a dendritic scratch). The second has no
+such problem, because it RAISES AN AREA and an area fill leaves no line to
+read as a scratch — and it is what actually dominates on Earth, where
+endorheic basins are depositional and flat-floored (the Tarim, Lake Eyre,
+Death Valley). A priority flood gives each basin's spill level; each cell is
+raised toward it by `residual(d) = d · max(MIN_KEEP, smoothstep(d; LO, HI))`.
+Two structural guarantees fall out and both matter: the surface only ever
+RISES (so it cannot create a new depression), and no cell is raised above its
+own spill level (so every outlet and the drainage topology through it are
+untouched). It runs after the rank remap — which would otherwise re-fan
+anything levelled before it (§8.24) — and before `apply_micro_relief`.
+
+**The tuning is a real frontier, not a free win, and the shape of it is the
+finding.** `POND_FILL` is 10 m and `detect_lakes`' threshold is ~35 m, so the
+window between "stops truncating rivers" and "stops being a lake" is narrow:
+fill hard enough to clear the ponded plains and you start deleting the
+world's lakes, which §8.24c forbids. Measured across 3 seeds
+(`diag_endorheic_fraction`):
+
+| KEEP_LO / KEEP_HI | mean ponded land | lakes (3 seeds) |
+|---|---|---|
+| — (before the pass) | 13.8% | 28 |
+| 60 m / 200 m | 11.6% | 29 |
+| **130 m / 480 m (shipped)** | **9.4%** | **24** |
+| 220 m / 1100 m | 8.3% | 17 — lakes gutted |
+
+So ponded land is down about a third and the deep basins survive. It is
+**not** "almost none", and driving it there means giving up the lakes; that
+trade is the honest limit of this mechanism, not a tuning oversight. A first
+attempt used `residual = d²/(d + HALF)`, which reached only 11.5% and cannot
+do better at any HALF — draining a 500 m basin with that form needs HALF ≈ 24
+km, which would flatten everything else. The shape was wrong, not the
+constant. Gate: `deposition_fills_shallow_hollows_and_spares_deep_basins`
+(a 40 m hollow must come out under 10 m, a 900 m basin must keep over 500 m,
+plus both structural guarantees).
 
 ---
 
@@ -5059,6 +5095,19 @@ Three rules:
     falls to the dashed direct line when neither finds a route — a campaign
     sea lane the worldgen graph never joined now draws as a real routed line
     instead of always falling back.
+    **Then extended to EVERY lane, because the flow highlight was only one of
+    five callers.** Merchant routes, a house's seat→city trading web, futures
+    lanes and the Goods Atlas flows all go through the same `laneBetween`, so
+    all of them were still drawing dashed straight spokes to their partner
+    cities ("merchant/guild spread is using a direct-to-city approach, not the
+    trade routes"). Rather than wire four more call sites, `laneBetween` now
+    consults a coarse-route CACHE first and RECORDS the pairs it could not
+    serve; `takeWantedLanes`/`setLaneRoutes` let MapCanvas drain those, resolve
+    them through `compute_coarse_route`, and hand them back — which re-runs the
+    same three re-snaps `drawTradeRoutes` already did when the road network
+    changed. One mechanism, all five callers, no per-caller plumbing. An
+    unroutable pair caches an EMPTY path deliberately, so it is not re-fetched
+    on every poll and keeps its dashed fallback.
 34. **Generating data is not loading it.** Both run-alls call
     `generate_and_persist_provinces`, but neither run-all HANDLER loaded the result
     into the frontend store — so a fully generated world reported "No provinces

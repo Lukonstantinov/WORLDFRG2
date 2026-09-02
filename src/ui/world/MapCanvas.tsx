@@ -931,6 +931,42 @@ export function MapCanvas() {
     return () => { alive = false; };
   }, [flowHighlight, meta, campaignSnapshot?.active, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Every OTHER lane the map draws — merchant routes, a house's trading web,
+  // futures lanes, Goods Atlas flows — goes through `laneBetween` too, and so
+  // fell through to the same dashed direct line whenever the worldgen
+  // trade-route graph could not join two cities ("merchant/guild spread is using
+  // a direct-to-city approach, not the trade routes"). `laneBetween` now records
+  // the pairs it could not serve; this drains them, routes each over the coarse
+  // cost grid, and hands them back — which re-snaps all of those layers at once.
+  //
+  // A poll rather than a dependency list: wants are produced by whichever
+  // overlay setter last ran, and there are five of them across four effects, so
+  // enumerating the triggers would be a list that silently goes stale. The check
+  // itself is a Set size test and costs nothing when there is nothing to do.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om || !meta) return;
+    let alive = true;
+    const tick = async () => {
+      const wanted = om.takeWantedLanes();
+      if (wanted.length === 0) return;
+      const rv = rivers.map((r) => ({ points: r.points }));
+      const resolved = await Promise.all(wanted.map(async (want) => ({
+        key: want.key,
+        // An empty path is cached deliberately: it means "asked, no legal route",
+        // and caching it is what stops this re-fetching the same dead pair on
+        // every poll. That lane keeps the dashed fallback (rule 35).
+        path: await computeCoarseRoute(want.a, want.b, rv,
+          bioParams.tradeReach, bioParams.maxCrossing).catch(() => [] as [number, number][]),
+      })));
+      if (!alive) return;
+      if (om.setLaneRoutes(resolved)) requestRender();
+    };
+    const id = window.setInterval(() => { void tick(); }, 600);
+    void tick();
+    return () => { alive = false; window.clearInterval(id); };
+  }, [meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]);
+
   // Futures layer — contractual supply lanes from the running campaign.
   useEffect(() => {
     const om = overlayManagerRef.current;

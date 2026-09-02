@@ -1683,11 +1683,21 @@ mod tests {
             crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, 14);
             crate::sim::elevation::generate_elevation(&mut buf, seed);
             let (sea, sink, ponded, land) = endorheic_stats(&buf);
+            // Lakes too: a pass that removed every closed basin would "fix" the
+            // ponding by deleting the world's lakes, which §8.24c forbids. The
+            // lake count is the guard against declaring that a success.
+            let n = buf.total();
+            buf.koppen = vec![crate::sim::koppen::CFB; n];
+            buf.precipitation = vec![800.0; n];
+            buf.temperature = vec![12.0; n];
+            let wh = compute_world_hydrology(&buf, 0.004, ((w * h) as usize / 2000).max(20));
+            let lake_cells: usize = wh.lakes.iter().map(|l| l.cells.len()).sum();
             println!("seed {seed}: land {land} · drains to sea {:.1}% · dead-ends inland {:.1}% \
-                      · ponded (standing water / flat sink) {:.1}%",
+                      · ponded (standing water / flat sink) {:.1}% · lakes {} ({} cells)",
                 100.0 * sea as f32 / land.max(1) as f32,
                 100.0 * sink as f32 / land.max(1) as f32,
-                100.0 * ponded as f32 / land.max(1) as f32);
+                100.0 * ponded as f32 / land.max(1) as f32,
+                wh.lakes.len(), lake_cells);
         }
     }
 
