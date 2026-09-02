@@ -620,6 +620,12 @@ impl CampaignSim {
             self.collect_realm_levies();
             for ri in 0..self.realms.len() { self.decide_realm_taxes(ri, self.tick / TICKS_PER_YEAR); }
             self.assign_realm_ranks();
+            // N7 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §3) · leagues form
+            // AFTER realm ranks (a "shared threat" candidate signal reads
+            // rank ≥ 2) and dissolve/collect dues at the same yearly diet.
+            // No-op before `LEAGUE_YEAR_FLOOR` or with no eligible seats.
+            self.maybe_form_leagues(yr_now);
+            self.run_league_diet();
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

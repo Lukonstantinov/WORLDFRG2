@@ -71,6 +71,42 @@ const LUX_IMPORT_DESIRE: f32 = 0.7;
 const COMFORT_IMPORT_FRAC: f32 = 0.30;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
+/// N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2) · own-price elasticity of a
+/// need CATEGORY's aggregate, by need tier [basic, comfort, luxury]. Shipped a
+/// true no-op — the historical shape (grain ≈ −0.1…−0.3, comfort moderate,
+/// luxury elastic) is the target once dosed; see the dose-walk note in
+/// `docs/SCOREBOARD.md`. Cross-price elasticity WITHIN a category (a dearer
+/// member losing share to a cheaper one) is separate, already live, and
+/// unaffected by this constant.
+const DEMAND_ELASTICITY: [f32; 3] = [0.0, 0.0, 0.0];
+/// Elasticity may never move the category aggregate outside this band,
+/// whatever the price does. At e = 1.0 an unclamped `rel.powf(-e)` would
+/// collapse demand ~12× on a `PRICE_CEIL_MULT`-sized spike, emptying a market
+/// on price alone.
+const ELASTIC_CLAMP: (f32, f32) = (0.55, 1.45);
+/// Tier-0 (basic/food) floor. A starving population's grain demand is nearly
+/// perfectly inelastic in reality, and the model has no "the poor go without
+/// and live" pathway — only `starving` — so this floor is the mechanism the
+/// "starvation must not rise" gate is enforced BY, not merely hoped for.
+const SUBSISTENCE_FLOOR: f32 = 0.85;
+
+/// N6 §2.3's own-price elasticity multiplier, parametrized on `e` rather than
+/// reading `DEMAND_ELASTICITY` directly — a pure function, testable in
+/// isolation from the tick's giant `advance()` loop, and the same shape a
+/// future dose walk (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2.5's table)
+/// will exercise without touching this arithmetic.
+fn elastic_aggregate_mult_e(e: f32, tier: usize, rel: f32) -> f32 {
+    if e <= 0.0 { return 1.0; }
+    let mut m = rel.max(PRICE_FLOOR_MULT).powf(-e).clamp(ELASTIC_CLAMP.0, ELASTIC_CLAMP.1);
+    if tier == 0 { m = m.max(SUBSISTENCE_FLOOR); }
+    m
+}
+
+/// The shipped dose — reads `DEMAND_ELASTICITY[tier]` (`[0,0,0]` today, a
+/// true no-op: see `elastic_aggregate_mult_e`).
+fn elastic_aggregate_mult(tier: usize, rel: f32) -> f32 {
+    elastic_aggregate_mult_e(DEMAND_ELASTICITY[tier.min(2)], tier, rel)
+}
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
 /// need is comparable to total production (an average good ~ slight shortage).
 pub const DEMAND_PRESSURE: f32 = 1.15;
@@ -602,6 +638,22 @@ const N2_BAN_PRICE_RATIO: f32 = f32::INFINITY;
 /// `RELIEF_EXPORT_LOCK_TICKS` — it re-imposes monthly while the scarcity lasts
 /// and lapses on its own once the price recovers.
 const N2_BAN_TICKS: u32 = 60;
+
+/// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) · seasonal sailing/pass
+/// closures as a per-lane travel-time MULTIPLIER, never a wall (§1.5 — a hard
+/// closure can starve a city with no mechanism but `starving` to respond).
+/// Four slices, not twelve: the mechanism is seasonal (a hemisphere's winter,
+/// a monsoon reversal), not monthly, and `storm_season_phase` is a smooth
+/// cosine that monthly sampling would not resolve any better (§1.2).
+pub(crate) const SEASON_SLICES: u8 = 4;
+/// `mult = 1.0 + v as f32 * SEASON_MULT_STEP`, so `v=0` is EXACTLY 1.0 — the
+/// zero-dose gate — and the u8 range covers 1.00..4.98 at ~1.6% steps, finer
+/// than a whole-day travel time can resolve.
+pub(crate) const SEASON_MULT_STEP: f32 = 1.0 / 64.0;
+/// A quantised multiplier may never exceed this — the delay-not-a-wall
+/// discipline stated as a number: even the stormiest lane in its worst season
+/// is a triple travel time, not an impassable one.
+pub(crate) const SEASON_MAX_MULT: f32 = 3.0;
                                                      // (or a captured govt) suspend first-buy
 
 /// Fraction of a hub's trade carried by merchant HOUSES (vs local traders + guilds).
@@ -2438,6 +2490,12 @@ pub struct TickHub {
     /// `REALM_ROLE_*` — this city's standing inside `realm`. Meaningless when
     /// `realm < 0`.
     #[serde(default)] pub realm_role: u8,
+    /// N7 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §3.1) — the League this hub
+    /// belongs to, or −1 (none). Authoritative, exactly as `realm` is: no
+    /// second `members` list on `League` itself, per that struct's own doc.
+    /// A league is NOT sovereignty (rule 27/§3.1) — this is independent of
+    /// `realm`/`realm_role`, and a hub may hold both at once.
+    #[serde(default = "neg_one_i32")] pub league: i32,
     /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.2 (D17/F6) · the city's OWN
     /// warehouse capacity — population + Granary/Warehouse structures — kept
     /// separate from the per-house `Warehouse.capacity`. 0 = not yet sized (a
@@ -4935,6 +4993,17 @@ pub struct CampaignSim {
     /// hubs added later (colonies, index ≥ `base_n`) fall back to Euclidean via `rebuild_routes`.
     #[serde(default)] pub base_days: Vec<f32>,
     #[serde(default)] pub base_n: usize,
+    /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1.2) · per-lane seasonal
+    /// travel-time multiplier, quantised to a `u8` — flat
+    /// `season_slices × base_n × base_n`. `base_days` itself keeps holding the
+    /// ANNUAL MEAN unchanged; this is read only through `lane_days`. Empty on
+    /// an old save (or when `season_slices == 0`) ⇒ every slice reads 1.0,
+    /// which is the zero-dose/bit-identical gate (`n5_season_multipliers_at_
+    /// unity_are_a_noop`).
+    #[serde(default)] pub base_days_season: Vec<u8>,
+    /// How many slices `base_days_season` carries this campaign (0 = none).
+    /// Stored rather than hard-coded so a future finer split is a data change.
+    #[serde(default)] pub season_slices: u8,
     /// Per-hub nearest reachable trade partners (hub indices), sorted nearest
     /// first, capped to `NEIGHBOR_K`. Dispatch only ever ships to the few
     /// hungriest of these, so scanning the full `n` per seller is pure waste —
@@ -5206,6 +5275,10 @@ pub struct CampaignSim {
     /// Every realm ever founded, live and fallen. Empty until the first
     /// proclamation, which cannot happen before year 50 (R1b).
     #[serde(default)] pub realms: Vec<Realm>,
+    /// N7 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §3) — every League ever
+    /// founded, dissolved ones kept (`dissolved_tick != 0`) exactly as a
+    /// fallen `Realm` is. Membership lives on `TickHub.league`, never here.
+    #[serde(default)] pub leagues: Vec<League>,
     /// Per-province sovereignty: an index into `realms`, or −1 for free land.
     /// Sized alongside the rest of the land layer by `ensure_province_land`.
     #[serde(default)] pub prov_realm: Vec<i32>,
@@ -5672,6 +5745,45 @@ pub struct TaxFarm {
     pub years: u32,
 }
 
+/// N7 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §4.1) — a LANE-scoped ban:
+/// the boycotting hub will not trade with `target` (optionally only in
+/// `good`, −1 = all) until `until_tick`. The N2 extension the League needed:
+/// `TickHub.export_ban_until` bans a GOOD to everyone, this bans a PARTNER.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Boycott {
+    pub target: u32,
+    pub good: i32,
+    pub until_tick: u32,
+}
+
+/// N7 · a VOLUNTARY association of hubs that stay independent. NOT a realm
+/// (§3.1): no provinces, no capital, no succession, no writ. The one
+/// collective verb is the boycott. Membership lives on `TickHub.league`,
+/// never in a `members` list here — see `Realm`'s own doc for why a second
+/// copy of the same fact was removed on purpose.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct League {
+    pub id: u32,
+    pub name: String,
+    /// Where the diet MEETS. Deliberately not called a capital: it holds no
+    /// writ, no province, and carries no authority over any member.
+    pub seat_hub: u32,
+    /// Dues, and the only pot. Spent on the collective act (the boycott, once
+    /// walked above zero dose); never taxed from a member's own provinces —
+    /// that would be sovereignty.
+    pub purse: f32,
+    pub founded_tick: u32,
+    #[serde(default)] pub dissolved_tick: u32,
+    /// The tick a shared-threat signal was last present. Drives §3.3 exit 2
+    /// (drift): no threat for `LEAGUE_DRIFT_YEARS` and members leave one at a
+    /// time — the mechanism that keeps the member count non-monotone in a
+    /// quiet world, mirroring `realm_secession_pass`'s own discipline.
+    pub last_threat_tick: u32,
+    #[serde(default)] pub boycotts: Vec<Boycott>,
+    /// Reuses `RealmEvent`'s exact shape — same cap discipline (rule 20).
+    #[serde(default)] pub events: Vec<RealmEvent>,
+}
+
 /// R2 · one member of a realm's dynasty. Distinct from `Kin` (a merchant house's
 /// roster, regenerated wholesale at every succession) on purpose: a realm's
 /// genealogy is the point of R2, so it must persist, not snapshot.
@@ -5909,6 +6021,40 @@ impl CampaignSim {
 
     pub fn day_of_year(&self) -> u32 {
         self.tick % TICKS_PER_YEAR
+    }
+
+    /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1.2) — which seasonal slice
+    /// `base_days_season` is in effect RIGHT NOW.
+    #[inline]
+    fn season_slice_now(&self) -> usize {
+        (self.day_of_year() as usize * self.season_slices as usize) / TICKS_PER_YEAR as usize
+    }
+
+    /// N5 §1.2 — the stored multiplier for lane `a→b` in slice `s`, or exactly
+    /// 1.0 when nothing was ever quantised there (an old save, or a hub pair
+    /// added after `base_n`, both index out of range).
+    #[inline]
+    fn season_mult(&self, a: usize, b: usize, s: usize) -> f32 {
+        if self.base_n == 0 || a >= self.base_n || b >= self.base_n { return 1.0; }
+        let idx = s * self.base_n * self.base_n + a * self.base_n + b;
+        match self.base_days_season.get(idx) {
+            Some(&v) => (1.0 + v as f32 * SEASON_MULT_STEP).min(SEASON_MAX_MULT),
+            None => 1.0,
+        }
+    }
+
+    /// N5 §1.3 — travel days for lane `a→b` RIGHT NOW: the annual mean
+    /// (`base_days`/`days` — unchanged, so any caller not yet converted to
+    /// this accessor keeps reading exactly what it reads today) times this
+    /// lane's seasonal multiplier for the current slice. `season_slices == 0`
+    /// (no seasonal data, e.g. an old save) is a true no-op.
+    #[inline]
+    pub(crate) fn lane_days(&self, a: usize, b: usize) -> f32 {
+        let n = self.hubs.len();
+        if a >= n || b >= n { return f32::INFINITY; }
+        let d = self.days[a * n + b];
+        if self.season_slices == 0 || !d.is_finite() { return d; }
+        d * self.season_mult(a, b, self.season_slice_now())
     }
 
     /// Yearly GOVERNMENT pass: seed each city's regime + key figures, let houses bribe /
@@ -6477,6 +6623,13 @@ impl CampaignSim {
         // Per-tick scratch matrices (n×ng), reused across the whole advance so a long
         // run doesn't reallocate them every tick. Resized/cleared inside the loop.
         let mut needs: Vec<Vec<f32>> = Vec::new();
+        // N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2) — the STRUCTURAL
+        // twin of `needs`: what people NEED, never discounted by price. Every
+        // welfare reader (lack_basic/comfort/luxury, hence
+        // `decide_crisis_relief`) reads this; only price-setting and dispatch
+        // read the elastic `needs`. At `DEMAND_ELASTICITY == [0,0,0]` the two
+        // are built identically and stay element-wise equal (the no-op gate).
+        let mut needs_struct: Vec<Vec<f32>> = Vec::new();
         let mut prod_mult: Vec<Vec<f32>> = Vec::new();
 
         for _ in 0..n_ticks {
@@ -6742,6 +6895,11 @@ impl CampaignSim {
                 row.clear();
                 row.resize(ng, 0.0);
             }
+            needs_struct.resize(n, Vec::new());
+            for row in needs_struct.iter_mut() {
+                row.clear();
+                row.resize(ng, 0.0);
+            }
             // Phase 5 (flavour) · fashion demand multipliers per good (1.0 = not in
             // vogue), from active "fashion" events — a capped, transient demand lift.
             let mut fashion_mult = vec![1.0f32; ng];
@@ -6789,7 +6947,9 @@ impl CampaignSim {
             }
             for h in 0..n {
                 for g in 0..ng {
-                    needs[h][g] = self.base_need(h, g);
+                    let b = self.base_need(h, g);
+                    needs[h][g] = b;
+                    needs_struct[h][g] = b;
                 }
                 for members in &cat_goods {
                     if members.len() < 2 {
@@ -6809,25 +6969,53 @@ impl CampaignSim {
                         })
                         .collect();
                     let wsum: f32 = weights.iter().sum::<f32>().max(EPS);
+                    // N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2.3) · own-price
+                    // elasticity of the AGGREGATE, using the LAGGED (EMA) price —
+                    // the same `rel` vocabulary substitution already uses one line
+                    // above, read a tick stale, which is what turns this into a
+                    // damped response instead of a simultaneous equation. Applied
+                    // OUTSIDE `base_need`, so `needs_struct` (below) stays exactly
+                    // today's structural aggregate — the ration, not the market.
+                    let tier = members.first().map(|&g| self.goods[g].need_tier.min(2) as usize).unwrap_or(0);
+                    let agg_price: f32 = members.iter().map(|&g| self.hubs[h].price[g]).sum::<f32>()
+                        / members.len().max(1) as f32;
+                    let agg_base: f32 = members.iter().map(|&g| self.goods[g].base_value).sum::<f32>()
+                        / members.len().max(1) as f32;
+                    let rel = (agg_price / agg_base.max(EPS)).max(PRICE_FLOOR_MULT);
+                    let elastic_total = total * elastic_aggregate_mult(tier, rel);
                     for (mi, &g) in members.iter().enumerate() {
-                        needs[h][g] = total * weights[mi] / wsum;
+                        needs_struct[h][g] = total * weights[mi] / wsum;
+                        needs[h][g] = elastic_total * weights[mi] / wsum;
                     }
                 }
                 // Phase 5 (flavour) · a good in vogue is consumed more keenly
                 // (post-substitution, so fashion draws real extra demand → price rises).
+                // Mirrored onto `needs_struct` too — a taste/fashion shift changes
+                // what people want, not how they respond to price, so it belongs on
+                // both the elastic and the structural aggregate alike.
                 if any_fashion {
                     for g in 0..ng {
-                        if fashion_mult[g] != 1.0 { needs[h][g] *= fashion_mult[g]; }
+                        if fashion_mult[g] != 1.0 {
+                            needs[h][g] *= fashion_mult[g];
+                            needs_struct[h][g] *= fashion_mult[g];
+                        }
                     }
                 }
                 // Cultural taste: the resident peoples' prized goods pull extra demand.
-                for &(gi, b) in &hub_desire[h] { needs[h][gi] *= 1.0 + b; }
+                for &(gi, b) in &hub_desire[h] {
+                    needs[h][gi] *= 1.0 + b;
+                    needs_struct[h][gi] *= 1.0 + b;
+                }
                 // Eat down stock; track unmet demand per need-tier for the
                 // "% population lacking goods" graph (basic / comfort / luxury).
+                // N6 · reads `needs_struct` (the ration), never the elastic
+                // `needs` — "elasticity belongs to the market, not the ration"
+                // (§2.2). `lack_basic`/`lack_comfort`/`lack_luxury`, and so
+                // `decide_crisis_relief`, all trace back to this loop.
                 let mut tier_need = [0.0f32; 3];
                 let mut tier_unmet = [0.0f32; 3];
                 for g in 0..ng {
-                    let need = needs[h][g];
+                    let need = needs_struct[h][g];
                     let eat = need.min(stock_of(&self.hubs[h].stock, g));
                     stock_take(&mut self.hubs[h].stock, g, eat);
                     let t = self.goods[g].need_tier.min(2) as usize;
@@ -6923,7 +7111,10 @@ impl CampaignSim {
             t_events += _s_ev.elapsed().as_secs_f32() * 1000.0;
 
             // 7) Food balance, estates & starvation.
-            self.update_food_and_starvation(&needs);
+            // N6 §2.2 — food balance/starvation reads the STRUCTURAL need, never
+            // the price-elastic one: a population must not read as fed merely
+            // because dear grain "discouraged" its demand.
+            self.update_food_and_starvation(&needs_struct);
 
             // 8) Houses.
             let _s_h = std::time::Instant::now();
@@ -7695,6 +7886,12 @@ mod realms;
 mod envoys;
 mod offtake;
 mod certification;
+mod league;
+pub(crate) use league::{
+    LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
+    LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,
+    LEAGUE_BOYCOTT_TICKS,
+};
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the
 /// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"
