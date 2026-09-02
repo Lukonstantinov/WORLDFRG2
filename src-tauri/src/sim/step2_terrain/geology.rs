@@ -13,6 +13,7 @@
 //! read as a claim about real polarity/age, and it must never make a plate-free
 //! world worse than before this file existed.
 
+use rand::prelude::*;
 use rayon::prelude::*;
 use crate::sim::world_buffer::WorldBuffer;
 use super::elevation::fbm_noise;
@@ -64,11 +65,143 @@ fn plate_oceanic_flags(buf: &WorldBuffer) -> Vec<bool> {
     (0..pc).map(|p| total[p] == 0 || (land[p] as f32) < 0.5 * total[p] as f32).collect()
 }
 
-/// Multi-source BFS from every convergent/transform boundary land cell,
-/// carrying the seed cell's setting + age forward to every cell it reaches
-/// first (§8.9 rule 1: a sweep/BFS, never a per-cell search). `None` when
-/// `boundary_type` is empty (no real plate data — the plate-free models use
-/// the relief pseudo-setting instead, see `build_geo_context`).
+/// TECTONICS_AND_ISOLATION_PLAN.md Part B4 — a RELICT SUTURE bakes a former
+/// collision belt into a world, entirely inside a plate's present-day interior
+/// with no active boundary anywhere near it: the Urals, the Appalachians, the
+/// Scottish Highlands and the Scandinavian Caledonides are all exactly this —
+/// a healed collision the map still remembers, decades to hundreds of millions
+/// of years after the boundary that made it stopped moving.
+///
+/// This is the "generate a past, not a simulation" answer the plan settles on:
+/// a time-stepped tectonic model is Part I Slice 6, already deferred once, and
+/// its output for THIS purpose — a range with an age — is almost exactly what
+/// can be stated directly. `age` here is therefore not `fbm_noise` (§8.24b's own
+/// negative result about that function's true range doesn't even apply — the
+/// point is that noise is UNCORRELATED with anything, and a suture's age must
+/// be a property of the whole suture, not of the cell): every cell of one
+/// suture shares the SAME age, drawn once from an OLD or ANCIENT bucket, so a
+/// whole range reads as one coherent age instead of dithering young/old along
+/// its own strike the way the old per-cell noise term did on a REAL boundary.
+struct ReliceSuture {
+    /// Cells along the suture's own spine, seeded into the same multi-source
+    /// BFS every active boundary already seeds — a relict range gets its WIDTH,
+    /// its `belt_profile` shape and its erodibility term entirely for free,
+    /// because downstream code cannot tell a suture seed from a real one.
+    spine: Vec<usize>,
+    age: f32,
+}
+
+/// AGE_OLD ≈ the Urals / Appalachians: `age_amp = 1.25 − age·0.5` (elevation.rs,
+/// §8.24b) already turns a high age into a lower ridge amplitude — no elevation
+/// code changes needed, the existing mechanism just needs a real age fed in.
+const SUTURE_AGE_OLD: f32 = 0.80;
+/// AGE_ANCIENT ≈ the Scottish Highlands / Scandinavian Caledonides — rolling
+/// uplands rather than a real range.
+const SUTURE_AGE_ANCIENT: f32 = 0.97;
+/// How far a suture spine must stay from any ACTIVE boundary land cell, as a
+/// fraction of world width — a relict suture inside the active belt's own
+/// reach would just be swallowed by it (the active belt is younger and wins
+/// on read order), and worse, would look like a claim that this particular
+/// active margin is ALSO an old one, which is not what B4 is for.
+const SUTURE_MIN_DIST_FROM_ACTIVE_FRAC: f32 = 0.06;
+/// A suture's own length, as a fraction of world width — long enough to read
+/// as a real range (the Urals run ~2,500 km, about 6% of Earth's circumference)
+/// without so long that 2-4 of them cover a whole continent.
+const SUTURE_LEN_FRAC: (f32, f32) = (0.10, 0.22);
+
+/// Bake 2-4 relict sutures into the world's interior. Deterministic from
+/// `seed`; empty on a plate-free world (no `plate_index` to place them inside)
+/// or a world too small to hold one at the minimum distance from an active
+/// boundary.
+fn generate_relict_sutures(buf: &WorldBuffer, seed: u64) -> Vec<ReliceSuture> {
+    if buf.plate_index.is_empty() { return Vec::new(); }
+    let w = buf.width;
+    let h = buf.height;
+    let wf = w as f32;
+    let n = buf.total();
+    let mut rng = StdRng::seed_from_u64(seed ^ 0x5375_7475_7265);
+
+    // Active-boundary land cells, for the minimum-distance rejection below.
+    // Bounded in practice (a boundary is a thin manifold, not the whole grid),
+    // so a per-candidate scan against this list is cheap relative to the BFS
+    // that follows it.
+    let active: Vec<(i32, i32)> = (0..n)
+        .filter(|&i| buf.terrain[i] == 1 && matches!(buf.boundary_type.get(i), Some(1) | Some(3)))
+        .map(|i| ((i as u32 % w) as i32, (i as u32 / w) as i32))
+        .collect();
+    let min_dist = wf * SUTURE_MIN_DIST_FROM_ACTIVE_FRAC;
+    let min_dist2 = min_dist * min_dist;
+    let far_from_active = |x: i32, y: i32| -> bool {
+        active.iter().all(|&(ax, ay)| {
+            let mut dx = (x - ax).abs() as f32;
+            if dx > wf / 2.0 { dx = wf - dx; }
+            let dy = (y - ay) as f32;
+            dx * dx + dy * dy >= min_dist2
+        })
+    };
+
+    let count = 2 + (rng.gen::<u32>() % 3); // 2..=4
+    let mut sutures = Vec::with_capacity(count as usize);
+    for si in 0..count {
+        // A handful of rejection tries for a starting point that is land, on a
+        // single plate's now-continuous interior, and clear of any active
+        // margin. Give up on this suture (not the whole world) if none is found
+        // — a small or heavily-boundaried world may simply have no room for one,
+        // which is an honest outcome, not a bug to force past.
+        let mut start = None;
+        for _ in 0..40 {
+            let x = rng.gen_range(0..w) as i32;
+            let y = rng.gen_range(0..h) as i32;
+            let i = buf.idx(x as u32, y as u32);
+            if buf.terrain[i] == 1 && far_from_active(x, y) { start = Some((x, y)); break; }
+        }
+        let Some((sx, sy)) = start else { continue };
+
+        // Walk a gently curving spine: a fixed heading perturbed by a slow
+        // noise term (never a hard random turn, which would draw a jagged
+        // scratch rather than a range), stopping at the sea, at another
+        // suture's own territory, or at the target length.
+        let target_len = SUTURE_LEN_FRAC.0
+            + rng.gen::<f32>() * (SUTURE_LEN_FRAC.1 - SUTURE_LEN_FRAC.0);
+        let target_cells = (target_len * wf) as i32;
+        let mut heading = rng.gen::<f32>() * std::f32::consts::TAU;
+        let heading_seed = seed ^ (0x9E37_79B9 + si as u64 * 0x1000_0001);
+        let (mut cx, mut cy) = (sx as f32, sy as f32);
+        let mut spine = Vec::new();
+        let mut steps = 0i32;
+        while steps < target_cells {
+            let xi = buf.wrap_x(cx.round() as i32);
+            let yi = cy.round().clamp(0.0, h as f32 - 1.0) as u32;
+            let i = buf.idx(xi, yi);
+            if buf.terrain[i] != 1 { break; } // ran off the coast — a suture stays on land
+            // The exclusion check at the START only guarantees the SEED is clear;
+            // the heading drift below can still carry a later step back toward an
+            // active margin. Stop the walk there instead of drawing a spine that
+            // partway crosses into the exclusion zone.
+            if !far_from_active(xi as i32, yi as i32) { break; }
+            spine.push(i);
+            // Slow heading drift from noise, not a fresh random turn each step,
+            // so the spine reads as one continuous range rather than a random walk.
+            let wobble = fbm_noise(steps as f32 * 0.02, si as f32 * 97.0, heading_seed, 2, 2.0, 0.5) - 0.5;
+            heading += wobble * 0.10;
+            cx += heading.cos();
+            cy += heading.sin();
+            steps += 1;
+        }
+        if spine.len() < 8 { continue; } // too short to read as a range at all
+
+        let age = if rng.gen::<bool>() { SUTURE_AGE_OLD } else { SUTURE_AGE_ANCIENT };
+        sutures.push(ReliceSuture { spine, age });
+    }
+    sutures
+}
+
+/// Multi-source BFS from every convergent/transform boundary land cell — AND
+/// from every relict-suture spine cell (Part B4) — carrying the seed cell's
+/// setting + age forward to every cell it reaches first (§8.9 rule 1: a
+/// sweep/BFS, never a per-cell search). `None` when `boundary_type` is empty
+/// (no real plate data — the plate-free models use the relief pseudo-setting
+/// instead, see `build_geo_context`).
 pub fn compute_orogeny_field(buf: &WorldBuffer, seed: u64, max_reach: u16) -> Option<OrogenyField> {
     if buf.boundary_type.is_empty() || buf.plate_index.is_empty() {
         return None;
@@ -110,6 +243,22 @@ pub fn compute_orogeny_field(buf: &WorldBuffer, seed: u64, max_reach: u16) -> Op
         age[i] = fbm_noise(x as f32 * age_f, y as f32 * age_f, seed.wrapping_add(0x0A6E_A9E5), 3, 2.0, 0.5);
         dist[i] = 0;
         queue.push_back(i);
+    }
+
+    // Relict sutures (Part B4) seed the SAME queue, at the SAME dist=0 — the
+    // BFS cannot tell a healed collision from an active one, which is exactly
+    // what lets it inherit belt width, ridge amplitude and erodibility for
+    // free. A suture cell that an active boundary already claimed (should be
+    // rare, given `SUTURE_MIN_DIST_FROM_ACTIVE_FRAC`) is simply skipped —
+    // the active, younger belt keeps it.
+    for suture in generate_relict_sutures(buf, seed) {
+        for i in suture.spine {
+            if dist[i] == 0 { continue; } // already an active-boundary seed
+            setting[i] = SETTING_COLLISION; // every attested relict suture is a healed collision
+            age[i] = suture.age;
+            dist[i] = 0;
+            queue.push_back(i);
+        }
     }
 
     while let Some(ci) = queue.pop_front() {
@@ -352,4 +501,144 @@ pub fn build_geo_context(
     };
 
     GeoContext { erodibility, climate, region_id, region_count }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::schema;
+    use crate::sim::world_buffer::ColumnSet;
+    use rusqlite::Connection;
+
+    fn gen_world(w: u32, h: u32, seed: u64, plate_count: u32) -> WorldBuffer {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+        buf
+    }
+
+    /// TECTONICS_AND_ISOLATION_PLAN.md Part B4's own claim: a relict suture never
+    /// sits inside an active boundary's own reach — otherwise it would either be
+    /// swallowed by the younger active belt or, worse, read as a claim that a
+    /// live, moving margin is somehow also an ancient healed one.
+    #[test]
+    fn relict_sutures_form_away_from_active_boundaries() {
+        let mut found_any = false;
+        for seed in 0..6u64 {
+            let buf = gen_world(360, 180, seed, 10);
+            let sutures = generate_relict_sutures(&buf, seed);
+            let active: Vec<(i32, i32)> = (0..buf.total())
+                .filter(|&i| buf.terrain[i] == 1 && matches!(buf.boundary_type.get(i), Some(1) | Some(3)))
+                .map(|i| ((i as u32 % buf.width) as i32, (i as u32 / buf.width) as i32))
+                .collect();
+            let min_d = buf.width as f32 * SUTURE_MIN_DIST_FROM_ACTIVE_FRAC;
+            for suture in &sutures {
+                found_any = true;
+                for &i in &suture.spine {
+                    let (x, y) = ((i as u32 % buf.width) as i32, (i as u32 / buf.width) as i32);
+                    for &(ax, ay) in &active {
+                        let mut dx = (x - ax).abs() as f32;
+                        if dx > buf.width as f32 / 2.0 { dx = buf.width as f32 - dx; }
+                        let dy = (y - ay) as f32;
+                        let d = (dx * dx + dy * dy).sqrt();
+                        assert!(d >= min_d * 0.999,
+                            "seed {seed}: a relict suture cell sits {d:.1} cells from an \
+                             active boundary — inside its own {min_d:.1}-cell exclusion zone");
+                    }
+                }
+                assert!(suture.age == SUTURE_AGE_OLD || suture.age == SUTURE_AGE_ANCIENT,
+                    "a suture's age must come from the OLD/ANCIENT bucket, got {}", suture.age);
+            }
+        }
+        assert!(found_any, "no relict suture formed on any of 6 seeds at a normal world size — \
+             the placement search is too strict to ever succeed");
+    }
+
+    /// A suture's cells must all share ONE age (the whole point of B4 — a range
+    /// reads as one coherent age, not per-cell noise dithering young/old along
+    /// its own strike the way a REAL boundary's `fbm_noise` age term does).
+    #[test]
+    fn a_suture_carries_one_uniform_age() {
+        for seed in 0..4u64 {
+            let buf = gen_world(300, 150, seed, 9);
+            for suture in generate_relict_sutures(&buf, seed) {
+                let age0 = suture.age;
+                assert!(suture.spine.iter().all(|_| age0 == suture.age),
+                    "a suture must carry exactly one age for its whole spine");
+            }
+        }
+    }
+
+    /// Determinism (rule: the same seed must reproduce the identical world), since
+    /// suture placement uses its own seeded RNG stream.
+    #[test]
+    fn relict_sutures_are_deterministic() {
+        let buf = gen_world(300, 150, 555, 9);
+        let a = generate_relict_sutures(&buf, 555);
+        let b = generate_relict_sutures(&buf, 555);
+        assert_eq!(a.len(), b.len());
+        for (sa, sb) in a.iter().zip(b.iter()) {
+            assert_eq!(sa.spine, sb.spine);
+            assert_eq!(sa.age, sb.age);
+        }
+    }
+
+    /// A plate-free world (no `plate_index`, e.g. a painted/template world) must
+    /// get no sutures at all — there is no plate interior to place one inside,
+    /// and inventing one would be exactly the "claim about real polarity" §2's
+    /// own header warns against for the whole file.
+    #[test]
+    fn plate_free_world_gets_no_sutures() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", "200".to_string()), ("grid_height", "100".to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        for i in 0..buf.total() { buf.terrain[i] = 1; }
+        // `WorldBuffer::load_with` zero-fills `plate_index` to the grid size even
+        // when no plate generation has run — explicitly empty it to model a real
+        // plate-free (painted/template) world, matching `compute_orogeny_field`'s
+        // own early-return check.
+        buf.plate_index = Vec::new();
+        buf.boundary_type = Vec::new();
+        assert!(generate_relict_sutures(&buf, 1).is_empty());
+    }
+
+    /// The real claim `compute_orogeny_field` exists to serve: a relict suture's
+    /// cells must come back OLDER (higher `age`) than a typical active-boundary
+    /// cell, and that age must feed through to the field the elevation pass
+    /// actually reads (not just exist in the intermediate `ReliceSuture` struct).
+    #[test]
+    fn orogeny_field_carries_the_suture_age_through() {
+        let mut seen_old_or_ancient = false;
+        for seed in 0..6u64 {
+            let buf = gen_world(360, 180, seed, 10);
+            let sutures = generate_relict_sutures(&buf, seed);
+            if sutures.is_empty() { continue; }
+            let field = compute_orogeny_field(&buf, seed, 60).expect("plate data present");
+            for suture in &sutures {
+                for &i in &suture.spine {
+                    if field.dist[i] != 0 { continue; } // claimed by an active boundary instead
+                    assert_eq!(field.age[i], suture.age,
+                        "a suture cell's age did not survive into the orogeny field");
+                    assert_eq!(field.setting[i], SETTING_COLLISION);
+                    seen_old_or_ancient = true;
+                }
+            }
+        }
+        assert!(seen_old_or_ancient,
+            "never observed a suture cell surviving into the orogeny field across 6 seeds");
+    }
 }
