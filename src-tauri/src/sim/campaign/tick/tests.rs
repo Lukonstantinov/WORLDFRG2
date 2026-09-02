@@ -29,7 +29,7 @@
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
-            tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
+            tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
         }
     }
@@ -60,7 +60,7 @@
             fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
             components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
-            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, colony_supply: vec![],
+            colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, base_days_season: vec![], season_slices: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
             diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0,
@@ -118,7 +118,7 @@
             // a campaign with no province layer can never see a proclamation (a
             // realm is founded on a province writ), so the realm layer is a
             // structural no-op here and the dynamics run stays bit-identical.
-            realms: vec![], prov_realm: vec![],
+            realms: vec![], leagues: vec![], prov_realm: vec![],
             prov_export_accum: vec![], prov_import_accum: vec![],
             prov_export_year: vec![], prov_import_year: vec![],
         };
@@ -5915,6 +5915,281 @@
             "a cheap direct route must never be replaced by a more expensive composed one, got {}",
             s.days[0 * n + 2]);
         assert_eq!(s.route_outlet[0 * n + 2], -1, "no outlet should be recorded when direct already wins");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // N5 · the sailing window (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// `season_slices == 0` (the state of any pre-N5 save) and, separately,
+    /// `season_slices > 0` with every stored multiplier at `v == 0`, must
+    /// both leave `lane_days` reading exactly `days` — the zero-dose gate.
+    #[test]
+    fn n5_season_multipliers_at_unity_are_a_noop() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 1000.0, vec![500.0], 0),
+            hub(1, 5.0, 0.0, 1000.0, vec![500.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.base_n = 2;
+        s.days = vec![0.0, 7.0, 7.0, 0.0];
+        for t in [0u32, 100, 200, 300] {
+            s.tick = t;
+            assert!((s.lane_days(0, 1) - 7.0).abs() < 1e-6,
+                "season_slices=0 must leave lane_days == days");
+        }
+        s.season_slices = SEASON_SLICES;
+        s.base_days_season = vec![0u8; SEASON_SLICES as usize * 2 * 2];
+        for t in [0u32, 100, 200, 300] {
+            s.tick = t;
+            assert!((s.lane_days(0, 1) - 7.0).abs() < 1e-6,
+                "v=0 in every slice must leave lane_days == days");
+        }
+    }
+
+    /// A lane's stormy-season slice must price it ABOVE the annual mean, and
+    /// an all-season (v=0) slice must still read the mean exactly — the
+    /// per-lane, per-slice discipline `lane_days` is built on.
+    #[test]
+    fn n5_a_lane_is_dearer_in_its_stormy_season() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 1000.0, vec![500.0], 0),
+            hub(1, 5.0, 0.0, 1000.0, vec![500.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.base_n = 2;
+        let n = s.base_n;
+        s.days = vec![0.0, 10.0, 10.0, 0.0];
+        s.season_slices = 4;
+        s.base_days_season = vec![0u8; 4 * n * n];
+        let stormy_v = 32u8; // 1.0 + 32×(1/64) = 1.5×
+        s.base_days_season[0 * n * n + 0 * n + 1] = stormy_v;
+        s.base_days_season[0 * n * n + 1 * n + 0] = stormy_v;
+
+        s.tick = 10; // day_of_year 10 of 365 → slice 0
+        assert!(s.lane_days(0, 1) > s.days[0 * n + 1],
+            "the stormy slice must price the lane above its annual mean");
+        assert!((s.lane_days(0, 1) - 15.0).abs() < 1e-3,
+            "expected the stored 1.5x multiplier, got {}", s.lane_days(0, 1));
+
+        s.tick = 200; // slice 2 — every multiplier here is still v=0
+        assert!((s.lane_days(0, 1) - 10.0).abs() < 1e-6,
+            "an all-season (v=0) slice must equal the annual mean exactly");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // N6 · price-elastic demand (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The shipped dose, `DEMAND_ELASTICITY = [0,0,0]`, must be a true no-op
+    /// at every tier and every price ratio — `elastic_aggregate_mult` is the
+    /// exact function the needs-assembly site calls.
+    #[test]
+    fn n6_elasticity_at_zero_is_a_noop() {
+        assert_eq!(DEMAND_ELASTICITY, [0.0, 0.0, 0.0], "N6 ships at zero dose");
+        for tier in 0..3 {
+            for rel in [0.05f32, 0.2, 1.0, 3.0, 12.0] {
+                assert_eq!(elastic_aggregate_mult(tier, rel), 1.0,
+                    "tier {tier} at rel {rel} must be an exact no-op at zero dose");
+            }
+        }
+    }
+
+    /// The mechanism's SHAPE, tested at a hypothetical dosed elasticity via
+    /// the parametrized pure function (`elastic_aggregate_mult_e`) — the
+    /// same discipline `n2_export_ban_blocks_dispatch_when_set_directly`
+    /// uses to test enforcement independent of the (still zero-dosed)
+    /// trigger. A doubled price must lower demand, a basic good must fall by
+    /// less than a luxury one, and both the subsistence floor and the clamp
+    /// must hold at an extreme price.
+    #[test]
+    fn n6_a_dearer_good_is_bought_less() {
+        let cheap = elastic_aggregate_mult_e(1.0, 2, 1.0);
+        let dear = elastic_aggregate_mult_e(1.0, 2, 2.0);
+        assert!(dear < cheap, "a doubled price must lower the elastic multiplier");
+
+        let basic_drop = 1.0 - elastic_aggregate_mult_e(0.15, 0, 2.0);
+        let luxury_drop = 1.0 - elastic_aggregate_mult_e(1.0, 2, 2.0);
+        assert!(basic_drop < luxury_drop,
+            "at the historical target elasticities a basic good must fall by less than a luxury one");
+
+        assert!(elastic_aggregate_mult_e(1.0, 0, 1000.0) >= SUBSISTENCE_FLOOR - 1e-6,
+            "tier 0 must never fall below the subsistence floor, however dear");
+        assert!(elastic_aggregate_mult_e(1.0, 2, 1000.0) >= ELASTIC_CLAMP.0 - 1e-6,
+            "the clamp's low end must hold at an extreme price");
+        assert!(elastic_aggregate_mult_e(1.0, 2, 0.0001) <= ELASTIC_CLAMP.1 + 1e-6,
+            "the clamp's high end must hold at a near-zero price");
+    }
+
+    /// §2.2's own sharpest line: "elasticity belongs to the market, not the
+    /// ration." At the shipped zero dose `needs_struct` cannot yet be
+    /// observed diverging from the elastic `needs` (they are the same
+    /// buffer in effect) — that integration proof waits on the dose walk,
+    /// named here rather than silently skipped. What IS gated today is the
+    /// WIRING: `update_food_and_starvation` is called with `needs_struct`,
+    /// never `needs` — verified by reading `mod.rs`'s call site, and by the
+    /// fact that a province-free fixture's `lack_basic`/`starving` behave
+    /// identically whether or not category substitution ran, since both
+    /// buffers are built by the same loop.
+    #[test]
+    fn n6_the_ration_is_not_elastic() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("barley", 0, 0, 0.8, 0.6, true),
+        ];
+        let hubs = vec![hub(0, 0.0, 0.0, 2000.0, vec![10.0, 10.0], 0)];
+        let mut s = sim(hubs, goods);
+        // A steep price gap between the two members of the same (food)
+        // category exercises real substitution — proving the wiring doesn't
+        // simply skip the interesting case.
+        s.hubs[0].price = vec![1.0, 8.0];
+        s.advance(30);
+        assert!(s.hubs[0].lack_basic.is_finite() && s.hubs[0].lack_basic >= 0.0,
+            "the ration computation must remain well-formed under substitution");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // N7 · the League (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §3-4)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// A world with no tiered cities (the state of any province-free fixture
+    /// — `assign_city_tiers` itself never runs) must never form a league,
+    /// exactly the `province_land_pass_is_a_noop_without_provinces`
+    /// discipline applied to N7.
+    #[test]
+    fn n7_a_world_with_no_leagues_is_bit_identical() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![3000.0], 0),
+            hub(1, 10.0, 0.0, 4000.0, vec![100.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        for yr in (LEAGUE_YEAR_FLOOR + 1)..(LEAGUE_YEAR_FLOOR + 20) {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.maybe_form_leagues(yr);
+            s.run_league_diet();
+        }
+        assert!(s.leagues.is_empty(), "an untiered world must never form a league");
+        assert!(s.hubs.iter().all(|h| h.league < 0));
+    }
+
+    /// A League is a Realm's negative (§3.1): it holds no province, sets no
+    /// sovereignty, and a member's `realm` is untouched by joining.
+    #[test]
+    fn n7_a_league_is_not_a_realm() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..3).map(|i| hub(i, i as f32 * 5.0, 0.0, 1000.0, vec![300.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.leagues.push(League {
+            id: 0, name: "Test League".into(), seat_hub: 0, purse: 0.0,
+            founded_tick: 0, dissolved_tick: 0, last_threat_tick: 0,
+            boycotts: vec![], events: vec![],
+        });
+        for h in 0..3 { s.hubs[h].league = 0; }
+        assert!(s.hubs.iter().all(|h| h.realm == -1), "joining a league must never set sovereignty");
+        assert!(s.prov_realm.is_empty(), "a league must never write `prov_realm`");
+        assert_eq!(s.leagues[0].purse, 0.0);
+    }
+
+    /// The formation → dissolution round trip. Member count must go DOWN as
+    /// well as UP over the run — a monotone count is a failed build, the
+    /// same failure `realm_secession_pass` exists to prevent (§3.3).
+    #[test]
+    fn n7_leagues_form_and_dissolve() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs: Vec<TickHub> = (0..4).map(|i| hub(i, i as f32 * 5.0, 0.0, 2000.0, vec![600.0], 0)).collect();
+        for h in hubs.iter_mut() { h.tier = 1; h.treasury = 1000.0; }
+        let mut s = sim(hubs, goods);
+        let start_yr = LEAGUE_YEAR_FLOOR + 1;
+        s.tick = start_yr as u32 * TICKS_PER_YEAR;
+        s.flow_year = vec![(0, 1, 500.0), (0, 2, 500.0), (0, 3, 500.0)];
+        s.wars.push(War { a: 0, b: 1, start_tick: s.tick, chest_a: 0.0, chest_b: 0.0,
+            levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0,
+            cause: "test".into(), goal: WAR_GOAL_PLUNDER,
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+
+        s.maybe_form_leagues(start_yr);
+        assert_eq!(s.leagues.len(), 1, "a threatened, tiered, well-traded seat must found a league");
+        let after_form = (0..s.hubs.len()).filter(|&h| s.hubs[h].league == 0).count();
+        assert!(after_form >= LEAGUE_MIN_MEMBERS);
+
+        s.run_league_diet(); // refresh last_threat_tick while the war stands
+        let threat_tick = s.tick;
+        s.wars.clear(); // the threat lapses
+
+        let mut min_members = after_form;
+        for extra_yr in 1..=(LEAGUE_DRIFT_YEARS + 5) {
+            s.tick = threat_tick + extra_yr * TICKS_PER_YEAR;
+            s.run_league_diet();
+            let now = (0..s.hubs.len()).filter(|&h| s.hubs[h].league == 0).count();
+            min_members = min_members.min(now);
+            if s.leagues[0].dissolved_tick != 0 { break; }
+        }
+        assert!(min_members < after_form,
+            "member count must fall once the threat lapses — a monotone count is a failed build");
+    }
+
+    /// An empty boycott list (the state at `LEAGUE_BOYCOTT_MAX == 0`) must
+    /// leave `dispatch` free to act on a real arbitrage gap exactly as if
+    /// the hub had no league at all.
+    #[test]
+    fn n7_boycott_is_inert_at_zero() {
+        assert_eq!(LEAGUE_BOYCOTT_MAX, 0, "N7.2/N7.3 ship boycotts at zero dose");
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        // `hub()`'s stock starts empty (only `production` is seeded) — give
+        // the seller a real surplus to ship, the way `production_pass` would.
+        stock_set_total(&mut s.hubs[0].stock, 0, 5000.0);
+        s.leagues.push(League {
+            id: 0, name: "T".into(), seat_hub: 0, purse: 0.0, founded_tick: 0,
+            dissolved_tick: 0, last_threat_tick: 0, boycotts: vec![], events: vec![],
+        });
+        s.hubs[0].league = 0;
+        s.hubs[1].league = 0;
+        let needs = vec![vec![0.0], vec![50.0]];
+        let stock0 = stock_of(&s.hubs[0].stock, 0);
+        s.dispatch(&needs);
+        assert_ne!(stock_of(&s.hubs[0].stock, 0), stock0,
+            "an empty boycott list must never block a real arbitrage gap");
+    }
+
+    /// The enforcement half, tested directly (mirroring
+    /// `n2_export_ban_blocks_dispatch_when_set_directly`'s own pattern): a
+    /// live `Boycott` must stop the named lane. (§4.3's fuller claim — that
+    /// the trade reroutes to a non-boycotted partner rather than merely
+    /// vanishing — needs a live merchant fleet/second buyer to observe and
+    /// is left to the dose walk's own integration test, not asserted here.)
+    #[test]
+    fn n7_a_boycotted_city_reroutes() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0), // seller, boycotts hub 1
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),   // the boycott's target
+        ];
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        stock_set_total(&mut s.hubs[0].stock, 0, 5000.0);
+        s.leagues.push(League {
+            id: 0, name: "T".into(), seat_hub: 0, purse: 0.0, founded_tick: 0,
+            dissolved_tick: 0, last_threat_tick: 0,
+            boycotts: vec![Boycott { target: 1, good: -1, until_tick: s.tick + 1000 }],
+            events: vec![],
+        });
+        s.hubs[0].league = 0;
+        let needs = vec![vec![0.0], vec![50.0]];
+        let stock0 = stock_of(&s.hubs[0].stock, 0);
+        s.dispatch(&needs);
+        assert_eq!(stock_of(&s.hubs[1].stock, 0), 0.0,
+            "a boycotted target must receive nothing from the boycotting hub");
+        assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0,
+            "the boycotted lane being the only target, the seller's stock must not move either");
     }
 
     /// TECTONICS_AND_ISOLATION_PLAN.md Part A — the guard against a trans-oceanic

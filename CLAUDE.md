@@ -4189,12 +4189,62 @@ ACTORS_AND_CARRIAGE_PLAN.md       ← ⭐ MEASURED + PLANNED, one diagnostic bui
                                     went RED then GREEN inside one day's commits —
                                     re-run it per DOSE STEP, not per phase
 SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md
-                                  ← ⭐ DESIGN, NOTHING BUILT. The full design for
-                                    the three proposals ACTORS_AND_CARRIAGE_PLAN
-                                    left as sketches — N5 sailing window · N6
-                                    price-elastic demand · N7 the League — each
-                                    with data structures, hook sites, a zero-dose
-                                    setting, gates by name and a not-built list.
+                                  ← ⭐ N5/N6/N7.1-7.2 BUILT, gated, zero/low dose.
+                                    The design for the three proposals
+                                    ACTORS_AND_CARRIAGE_PLAN left as sketches —
+                                    N5 sailing window · N6 price-elastic demand ·
+                                    N7 the League — each with data structures,
+                                    hook sites, a zero-dose setting, gates by
+                                    name and a not-built list.
+                                    **Shipped this session**: N5 — `CampaignSim.
+                                    base_days_season`/`season_slices` (a
+                                    quantised per-lane u8 multiplier,
+                                    `SEASON_SLICES = 4`, `SEASON_MULT_STEP =
+                                    1/64`, capped at `SEASON_MAX_MULT = 3.0`),
+                                    built at campaign start via
+                                    `compute_route_days_matrix_for_season` and
+                                    read through one `lane_days(a,b)` accessor
+                                    wired into dispatch, the return leg and
+                                    contract delivery — real live dose (not
+                                    zero), since it carries no wealth-
+                                    concentration risk per §5's build order.
+                                    N6 — `DEMAND_ELASTICITY = [0,0,0]` (true
+                                    no-op, `elastic_aggregate_mult`/`_e` split
+                                    pure/parametrized for testing), applied to
+                                    the category AGGREGATE outside `base_need`;
+                                    a twin `needs_struct` buffer carries the
+                                    STRUCTURAL need and `update_food_and_
+                                    starvation` now reads it instead of the
+                                    (elastic) `needs` — the one real behaviour
+                                    change at zero dose, since food/starvation
+                                    used to read the same buffer prices clear
+                                    on. N7.1/7.2 — `League`/`Boycott` structs,
+                                    `TickHub.league`, yearly formation
+                                    (`maybe_form_leagues`, gated on tier +
+                                    a shared trade tie + a shared threat) and
+                                    the diet (`run_league_diet`, dues/drift/
+                                    annexation-exit/seat-succession), a lane-
+                                    scoped `Boycott` enforced in `dispatch`
+                                    beside `quarantined`/`export_ban_until` —
+                                    `LEAGUE_BOYCOTT_MAX = 0` (N7.3, the diet
+                                    voting one, stays unbuilt/zero-dosed).
+                                    Gates: `n5_season_multipliers_at_unity_
+                                    are_a_noop`, `n5_a_lane_is_dearer_in_its_
+                                    stormy_season`, `n6_elasticity_at_zero_
+                                    is_a_noop`, `n6_a_dearer_good_is_bought_
+                                    less`, `n6_the_ration_is_not_elastic`,
+                                    `n7_a_world_with_no_leagues_is_bit_
+                                    identical`, `n7_a_league_is_not_a_realm`,
+                                    `n7_leagues_form_and_dissolve`, `n7_
+                                    boycott_is_inert_at_zero`, `n7_a_
+                                    boycotted_city_reroutes` — all in `tick::
+                                    tests`, plus `simulate_decades_reports_
+                                    dynamics` re-verified (wealth bounded,
+                                    richest 278,201 over 50y). `econ_
+                                    measure_league_formation` (§4.3's own
+                                    named instrument) is NOT yet built — the
+                                    unit-level formation/dissolution gate
+                                    above stands in for it this session.
                                     **Three findings from writing it are worth
                                     more than the designs.** (1) N5 is mostly
                                     ALREADY BUILT world-side: `build_coarse_cost`

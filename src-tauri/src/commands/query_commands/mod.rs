@@ -694,6 +694,26 @@ pub(crate) fn compute_route_days_matrix(
     components: &[u32],
     days_per_cell: f32,
 ) -> Result<Vec<f32>, String> {
+    compute_route_days_matrix_for_season(db, conn, hub_xy, components, days_per_cell, -1, 12)
+}
+
+/// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) — the same pathfound matrix,
+/// but over a coarse-cost grid built for one SLICE of the year (`season`
+/// 1..=`months`) rather than the annual mean. `season <= 0` reproduces
+/// `compute_route_days_matrix` exactly (`cached_coarse_cost` keys its cache by
+/// `season`/`months`, so the annual grid and every seasonal grid coexist).
+/// Used only to derive the per-lane seasonal MULTIPLIER
+/// (`CampaignSim::base_days_season`) — this function's own output is never
+/// stored, only the ratio against the annual matrix.
+pub(crate) fn compute_route_days_matrix_for_season(
+    db: &WorldDb,
+    conn: &rusqlite::Connection,
+    hub_xy: &[(f32, f32)],
+    components: &[u32],
+    days_per_cell: f32,
+    season: i32,
+    months: u32,
+) -> Result<Vec<f32>, String> {
     let n = hub_xy.len();
     if n == 0 { return Ok(vec![]); }
     let grid_w: u32 = metadata::get_meta(conn, "grid_width")
@@ -712,8 +732,9 @@ pub(crate) fn compute_route_days_matrix(
     // Best-effort: missing/unparseable metadata degrades to the old empty string.
     let rivers_json = metadata::get_meta(conn, "rivers").ok().flatten().unwrap_or_default();
     // Allow sea crossings (block_sea=false) and desert routes so islands/continents in one
-    // component connect; no seasonal closure.
-    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, false, true, 0.0, -1, 12)?;
+    // component connect. `season`/`months` select the annual-mean grid (season <= 0)
+    // or one seasonal slice (N5).
+    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, false, true, 0.0, season, months)?;
     let cell = |x: f32, y: f32| -> usize {
         let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
         let cy = ((y / cc.f as f32) as i32).clamp(0, cc.ch - 1);

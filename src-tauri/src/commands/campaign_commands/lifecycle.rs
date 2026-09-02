@@ -611,7 +611,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 died_cause: String::new(),
                 tier: 0,
                 standing: 0.0,
-                war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0,
+                war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
                 wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             }
         })
@@ -915,6 +915,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         dev_momentum: vec![],
         base_days: vec![],
         base_n: 0,
+        base_days_season: vec![],
+        season_slices: 0,
         hub_culture: vec![],
         hub_minorities: vec![],
         estate_idle_years: vec![],
@@ -1017,6 +1019,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // `prov_realm` is sized alongside the rest of the land layer by
         // `ensure_province_land`, so it stays −1 (free) for every province here.
         realms: vec![],
+        leagues: vec![],
         prov_realm: vec![],
         // Province trade flow — accumulated in play (`accrue_flow`), snapshotted
         // yearly; empty at start like every other in-year accumulator.
@@ -1053,6 +1056,48 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             Ok(bd) if bd.len() == hub_xy.len() * hub_xy.len() => {
                 sim.base_n = hub_xy.len();
                 sim.base_days = bd;
+                // N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) — one more
+                // pathfound matrix per seasonal slice, over the SAME coarse
+                // grid the world's own seasonal-closure overlay uses
+                // (`build_coarse_cost`'s snow-shut-pass / monsoon-window
+                // terms), stored as a quantised MULTIPLIER against the
+                // annual mean above rather than as its own matrix (§1.2).
+                // Best-effort: any failure leaves `season_slices == 0`, which
+                // `lane_days` reads as a true no-op.
+                let slices = crate::sim::tick::SEASON_SLICES;
+                let n = hub_xy.len();
+                if slices > 0 && n > 0 {
+                    let mut mults = vec![0u8; slices as usize * n * n];
+                    let mut ok = true;
+                    for s in 0..slices {
+                        let season = s as i32 + 1;
+                        match crate::commands::query_commands::compute_route_days_matrix_for_season(
+                            &db, &conn, &hub_xy, &comps, sim.days_per_cell, season, slices as u32,
+                        ) {
+                            Ok(sd) if sd.len() == n * n => {
+                                for a in 0..n {
+                                    for b in 0..n {
+                                        let base = sim.base_days[a * n + b];
+                                        let seas = sd[a * n + b];
+                                        let mult = if base.is_finite() && base > 0.0 && seas.is_finite() {
+                                            (seas / base).clamp(1.0, crate::sim::tick::SEASON_MAX_MULT)
+                                        } else {
+                                            1.0
+                                        };
+                                        let v = ((mult - 1.0) / crate::sim::tick::SEASON_MULT_STEP)
+                                            .round().clamp(0.0, 255.0) as u8;
+                                        mults[s as usize * n * n + a * n + b] = v;
+                                    }
+                                }
+                            }
+                            _ => { ok = false; break; }
+                        }
+                    }
+                    if ok {
+                        sim.base_days_season = mults;
+                        sim.season_slices = slices;
+                    }
+                }
             }
             _ => { /* keep Euclidean fallback */ }
         }

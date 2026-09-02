@@ -906,6 +906,17 @@ impl CampaignSim {
         // bar stands. Precomputed once per dispatch for the same reason `quarantined`
         // is — it is read inside the seller × target × good loop.
         let food_locked: Vec<bool> = self.hubs.iter().map(|h| h.food_export_lock > tick).collect();
+        // N7.2 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §4.1) — each hub's
+        // active boycotts, inherited from its League (a lane-scoped ban, the
+        // N2 extension the League needed: `export_ban_until` bans a GOOD to
+        // everyone, this bans a PARTNER). Precomputed once per dispatch for
+        // the same reason `quarantined`/`food_locked` are; empty at zero
+        // dose (`LEAGUE_BOYCOTT_MAX == 0`), so this is a true no-op today.
+        let hub_boycotts: Vec<Vec<Boycott>> = (0..n).map(|h| {
+            let lg = self.hubs[h].league;
+            if lg < 0 { return Vec::new(); }
+            self.leagues.get(lg as usize).map(|l| l.boycotts.clone()).unwrap_or_default()
+        }).collect();
         // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
         // (it's constant across this dispatch round and read in the hot inner loop).
         let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
@@ -1008,7 +1019,16 @@ impl CampaignSim {
                     }
                     // A quarantined city takes no imports either.
                     if quarantined[b] { continue; }
-                    let days = self.days[a * n + b];
+                    // N7.2 — a boycotting seller (or buyer, checked symmetrically
+                    // since a boycott is mutual non-trade) will not ship this lane.
+                    if hub_boycotts[a].iter().any(|bo| bo.until_tick > tick && bo.target == b as u32 && (bo.good < 0 || bo.good as usize == g))
+                        || hub_boycotts[b].iter().any(|bo| bo.until_tick > tick && bo.target == a as u32 && (bo.good < 0 || bo.good as usize == g)) {
+                        continue;
+                    }
+                    // N5 — the annual mean scaled by this lane's seasonal
+                    // multiplier RIGHT NOW (a true no-op while no seasonal
+                    // data is stored).
+                    let days = self.lane_days(a, b);
                     if !days.is_finite() {
                         continue;
                     }
@@ -1401,7 +1421,8 @@ impl CampaignSim {
         if b >= n || a >= n || owner >= self.houses.len() || self.houses[owner].defunct {
             return;
         }
-        let days = self.days[b * n + a];
+        // N5 — same seasonal accessor as the outbound leg.
+        let days = self.lane_days(b, a);
         if !days.is_finite() {
             return;
         }

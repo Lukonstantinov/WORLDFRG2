@@ -9,6 +9,67 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-02 — N5/N6/N7.1-7.2 shipped: seasons, elasticity, the League
+
+`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md`, all three built in build order (§5):
+N5 first (no wealth-concentration risk, fixes a named number), then N6 (self-
+contained), then N7's institution before its weapon.
+
+**N5 — the sailing window is real, not zero-dosed.** `SEASON_SLICES = 4`
+quantised u8 multipliers per lane (`SEASON_MULT_STEP = 1/64`, capped
+`SEASON_MAX_MULT = 3.0`), built once at campaign start over the world's own
+seasonal coarse-cost grid (`build_coarse_cost`'s existing snow-shut-pass /
+monsoon-window terms, previously called only with `season = -1`) and read
+through `lane_days(a,b)`, wired into `dispatch`, the return leg and contract
+delivery. Targets the scorecard's within-city grain price CV (0.000 against a
+0.30–0.50 band) — not measured this session; that read is the natural next
+diagnostic once a full campaign run is available.
+
+**N6 — the aggregate is elastic, the ration is not.** `DEMAND_ELASTICITY =
+[0,0,0]` ships as a true no-op (`elastic_aggregate_mult`), but the WIRING
+changed at zero dose: a new `needs_struct` buffer carries the structural
+(inelastic) need, and `update_food_and_starvation` now reads it instead of the
+same `needs` buffer price-clearing uses — previously the same array served
+both jobs, which is exactly the coupling §2.4 of the plan warned would bite
+once elasticity was dosed. `elastic_aggregate_mult_e(e, tier, rel)` is a pure,
+parametrized function so the mechanism's shape (direction, tier ordering, the
+subsistence floor, the clamp) is gated today even though the shipped dose is
+zero.
+
+**N7.1/7.2 — the institution, and the weapon at zero dose.** `League`
+(id/name/seat/purse/dues/events, no province, no succession) +
+`TickHub.league`, formed yearly from a tier-1/2 seat with a real trade tie
+(`flow_year`) and a shared threat (an active war in the component, or any
+realm of rank ≥ 2), dissolved by drift (`LEAGUE_DRIFT_YEARS = 20`, no threat),
+unpaid dues, or the seat falling. A lane-scoped `Boycott { target, good,
+until_tick }` — the N2 extension the plan's own §4.1 found was missing (N2 as
+built bans a hub × good, never a partner) — is enforced in `dispatch` beside
+`quarantined`/`export_ban_until`; `LEAGUE_BOYCOTT_MAX = 0` keeps the diet from
+ever voting one (N7.3, unbuilt). `econ_measure_league_formation` (the plan's
+own named instrument, meant to run on `realm_reference_world`) was NOT built
+this session — coverage today is the unit-level `n7_leagues_form_and_dissolve`
+gate on a synthetic fixture, not a measured century-scale formation rate.
+
+**Gates run**: 9 new `tick::tests` (`n5_*` ×2, `n6_*` ×3, `n7_*` ×4, plus a
+pure-function elasticity test), all passing; `simulate_decades_reports_
+dynamics` re-verified unchanged in kind (sustained richest 278,201 over 50y,
+wealth bounded). `earth_` untouched by this change (no `step3_ocean_atmo`/
+`step4_climate` edits) and not re-run. `econ_` (the fidelity scorecard) was
+NOT re-run this session — all three mechanisms are zero-dosed or newly-wired
+enough that the scorecard's headline bands should be unaffected, but that is
+an expectation, not a measurement; the next session touching `tick/` should
+run it.
+
+**Left for the next session, named rather than silently skipped**: (1) N5's
+own performance caution (§1.4 — "measure it before dosing it") was not
+measured; campaign start now pays `1 + SEASON_SLICES` route-matrix builds
+instead of 1, and a large-world timing has not been taken. (2) N6's dose walk
+(§2.5's `[0.05,0.15,0.30]` → …) has not been started. (3) N7.3 (the diet
+voting a boycott) and `econ_measure_league_formation` remain unbuilt, per the
+plan's own explicit build order (ship the institution, dose the weapon last).
+
+---
+
 ## 2026-09-01 — 96% of the world's trade is carried by nobody
 
 `ACTORS_AND_CARRIAGE_PLAN.md`. New diagnostic `econ_measure_carrier_mix`
