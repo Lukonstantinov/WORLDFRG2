@@ -4784,7 +4784,7 @@ mod flat_diagnostic {
 
             let hy = crate::sim::rivers::compute_hydrology(&buf);
             let lakes = crate::sim::rivers::detect_lakes(&buf, &hy.filled, 0.004, (buf.total() / 2000).max(20));
-            let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 0.5, 1.0, &lakes);
+            let rivers = crate::sim::rivers::extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 0.5, 1.0, &lakes, 0.004);
 
             // How often does a river's CELL path rise on the RAW elevation field?
             // Split by WHERE: inside a filled depression (the priority-flood raised

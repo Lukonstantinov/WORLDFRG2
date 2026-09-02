@@ -852,7 +852,7 @@ mod tests {
         let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS).unwrap();
         let hydro = crate::sim::rivers::compute_hydrology(&buf);
         let lakes = crate::sim::rivers::detect_lakes(&buf, &hydro.filled, 0.004, 20);
-        let rivers = crate::sim::rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes);
+        let rivers = crate::sim::rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes, 0.004);
 
         let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SOIL_FERTILITY).unwrap();
         crate::sim::soil::classify_soil(&mut buf);

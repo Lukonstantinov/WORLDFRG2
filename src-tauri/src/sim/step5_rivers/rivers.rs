@@ -436,9 +436,23 @@ pub fn compute_hydrology_with_sinks(buf: &WorldBuffer, sinks: Option<&[bool]>) -
 /// trunk rivers (high accumulation threshold), high = many small tributaries.
 /// `width_scale` (0.2..2): multiplies rendered river width and lowers the cap so
 /// rivers can be made thinner.
+/// Cells the router must treat as standing water rather than channel. Shared by
+/// `extract_rivers` and by the gate that asserts this set agrees with the lake
+/// set, so the two can never drift apart again (§8.24c's own invariant: the
+/// extent the renderer DRAWS and the extent the router STOPS at are one set).
+pub(crate) fn ponded_mask(buf: &WorldBuffer, filled: &[f32], fill_depth: f32) -> Vec<bool> {
+    let pond_fill = fill_depth.max(10.0 / 8848.0);
+    (0..buf.total())
+        .map(|i| filled.get(i).map_or(false, |&f| f - buf.elevation[i] > pond_fill))
+        .collect()
+}
+
+/// `fill_depth` must be the SAME value handed to `detect_lakes` for the `lakes`
+/// passed here. It is what makes the blocked extent and the drawn extent one set
+/// — see the `ponded` note below, which is where the two used to disagree.
 pub fn extract_rivers(
     buf: &WorldBuffer, flow_dir: &[i32], acc: &[u32], filled: &[f32],
-    density: f32, width_scale: f32, lakes: &[Lake],
+    density: f32, width_scale: f32, lakes: &[Lake], fill_depth: f32,
 ) -> Vec<River> {
     let w = buf.width;
     let h = buf.height;
@@ -468,18 +482,27 @@ pub fn extract_rivers(
     // climbed more than 100 m in total, and the worst climbed 1,940 m (6,392 m on
     // a plate world) -- the "rivers run upward, ignoring elevation" report.
     //
-    // `detect_lakes` already excludes the basins it emits, but it only emits those
-    // past its own depth threshold AND under `max_cells`; a basin that is too big,
-    // or filled too shallowly to count as a lake, was left as open channel. Water
-    // ponds there in either case, so it is not channel either way. Excluding these
-    // cells reuses the lake mechanism exactly: the reach ends at the basin edge,
-    // and the outflow below the basin starts a new reach (its upstream neighbour
-    // is no longer a channel, so it becomes a source), which is how a river/lake/
-    // outflow system already reads today.
-    const POND_FILL: f32 = 10.0 / 8848.0; // >10 m of fill = standing water, not channel
-    let ponded: Vec<bool> = (0..total)
-        .map(|i| filled.get(i).map_or(false, |&f| f - buf.elevation[i] > POND_FILL))
-        .collect();
+    // ── THE THRESHOLD MUST MATCH THE LAKE DETECTOR'S, AND IT DID NOT ─────────
+    // This used a hardcoded 10 m while `detect_lakes` emits a lake only past its
+    // own `fill_depth` (~35 m by default). Every basin whose fill landed BETWEEN
+    // the two was blocked as "standing water" and drawn as nothing at all — so a
+    // river stopped dead in open ground with no lake, no sea and no confluence at
+    // its end. That is the "still truncated rivers" report, and it is the very
+    // invariant §8.24c states in its own words: the lake extent the renderer
+    // draws and the ponded extent the router stops at have to be the SAME set.
+    //
+    // Using the caller's `fill_depth` makes them the same set by construction.
+    // The deep-basin protection this rule exists for is NOT weakened: a basin
+    // deep enough to matter becomes a lake, and lake cells are already excluded
+    // above by `is_lake`. What changes is only the shallow band, where the fill
+    // is a metre-scale veneer over nearly flat ground — an alluvial flat, which
+    // a real river crosses rather than stopping at. At most `fill_depth` of
+    // climb spread over cells ~11 km wide is a grade of ~0.3%, nothing like the
+    // 1,940 m ascents through deep basins that motivated the rule.
+    //
+    // A floor keeps it honest if a caller passes a very small `fill_depth`:
+    // never block on less than 10 m, which is what it always was.
+    let ponded = ponded_mask(buf, filled, fill_depth);
     let area_ratio = (w * h) as f32 / 64800.0;
     let base = (40.0 * area_ratio.sqrt()).max(20.0);
     // density 0 â†’ 3Ã— threshold (sparse), 0.5 â†’ 1.9Ã—, 1 â†’ 0.7Ã—, 1.5 â†’ 0.25Ã— (dense).
@@ -1587,7 +1610,7 @@ mod tests {
         buf.temperature = vec![18.0; n];
         let wh = compute_world_hydrology(&buf, 0.002, ((w * h) as usize / 2000).max(20));
         let (hy, lakes) = (&wh.hydro, &wh.lakes);
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.0, 1.0, lakes);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.0, 1.0, lakes, 0.002);
         let (stubs, total) = dangling_stubs(&buf, &rivers, lakes);
         let lake_cells: usize = lakes.iter().map(|l| l.cells.len()).sum();
         // How much of the basin the router treats as standing water but the
@@ -1606,6 +1629,75 @@ mod tests {
              INVISIBLE shoreline. The extent the renderer draws and the extent the \
              router stops at have to be the same set.",
             stubs, total, frac * 100.0, ponded, lake_cells);
+    }
+
+    /// A basin too shallow to be drawn as a lake must not STOP a river.
+    ///
+    /// The gap this closes: `extract_rivers` blocked channels on a hardcoded
+    /// 10 m of fill while `detect_lakes` only emits a lake past its own
+    /// `fill_depth` (~35 m). A basin landing between the two was blocked as
+    /// "standing water" and drawn as nothing, so a river ended in open ground
+    /// with no lake, no sea and no confluence — an invisible shoreline, and
+    /// the "still truncated rivers" report. §8.24c states the invariant this
+    /// asserts: the extent the renderer draws and the extent the router stops
+    /// at have to be the same set.
+    #[test]
+    fn a_basin_too_shallow_to_be_a_lake_does_not_stop_a_river() {
+        const MAX_ELEV: f32 = 8848.0;
+        let (w, h) = (200u32, 120u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        // A plain sloping gently to a sea strip on the left, with one broad
+        // shallow bowl dug into it — 22 m deep, i.e. deeper than the 10 m pond
+        // threshold and shallower than the 35 m lake threshold. Exactly the band.
+        const BOWL_M: f32 = 22.0;
+        let (cx, cy, r) = (120.0f32, 60.0f32, 34.0f32);
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x < 3 { terrain[i] = 0; elev[i] = 0.0; continue; }
+                // The regional slope must be GENTLE relative to the bowl, or the
+                // bowl is not a closed depression at all and the fixture proves
+                // nothing. At 0.18 m/cell the plain rises ~6 m across the bowl's
+                // radius — well under its 22 m depth, so it genuinely closes.
+                elev[i] = 0.05 + x as f32 * (0.18 / MAX_ELEV);
+                let d = ((x as f32 - cx).powi(2) + (y as f32 - cy).powi(2)).sqrt();
+                if d < r { elev[i] -= (1.0 - d / r) * BOWL_M / MAX_ELEV; }
+            }
+        }
+        let mut buf = synth(w, h, terrain, elev);
+        buf.koppen = vec![crate::sim::koppen::CFB; n];
+        buf.precipitation = vec![900.0; n];
+        buf.temperature = vec![12.0; n];
+
+        const FILL_DEPTH: f32 = 0.004;   // ~35 m — the lake detector's own threshold
+        let wh = compute_world_hydrology(&buf, FILL_DEPTH, ((w * h) as usize / 2000).max(20));
+
+        // The premise: this bowl must NOT be a lake, or the fixture is not
+        // testing the band it was built for.
+        assert!(wh.lakes.is_empty(),
+            "fixture invalid — a {BOWL_M} m bowl became a lake, so it is not in the \
+             'ponded but never drawn' band this gate exists to cover");
+
+        // THE INVARIANT, asserted directly rather than inferred from stub counts:
+        // every cell the router refuses to draw a channel through must be a cell
+        // the renderer actually draws water on. A cell in neither set is an
+        // invisible shoreline — a river stops there and nothing explains why.
+        //
+        // Asserted on the shared `ponded_mask` rather than a copy of the rule, so
+        // this cannot pass while `extract_rivers` uses different arithmetic.
+        let ponded = ponded_mask(&buf, &wh.hydro.filled, FILL_DEPTH);
+        let mut is_lake = vec![false; n];
+        for lk in &wh.lakes { for &(x, y) in &lk.cells { is_lake[buf.idx(x, y)] = true; } }
+        let invisible = (0..n).filter(|&i| ponded[i] && !is_lake[i]).count();
+        println!("shallow-bowl fixture: {} lakes · {} cells blocked but never drawn",
+                 wh.lakes.len(), invisible);
+        assert_eq!(invisible, 0,
+            "{invisible} cells are treated as standing water by the router and drawn as \
+             nothing by the renderer. A river reaching one of them stops at an invisible \
+             shoreline — the 'truncated rivers' artefact. `extract_rivers`' pond threshold \
+             has to be the same `fill_depth` the lakes were detected with.");
     }
 
     /// THE REAL-WORLD stub count. The synthetic endorheic fixture proves the
@@ -1642,11 +1734,11 @@ mod tests {
             // BEFORE: the two computed separately (the shape that truncates).
             let hy1 = compute_hydrology(&buf);
             let lakes1 = detect_lakes(&buf, &hy1.filled, 0.004, max_cells);
-            let riv1 = extract_rivers(&buf, &hy1.flow_dir, &hy1.acc, &hy1.filled, 0.5, 1.0, &lakes1);
+            let riv1 = extract_rivers(&buf, &hy1.flow_dir, &hy1.acc, &hy1.filled, 0.5, 1.0, &lakes1, 0.004);
             let (s1, t1) = dangling_stubs(&buf, &riv1, &lakes1);
             // AFTER: the consistent two-pass helper.
             let wh = compute_world_hydrology(&buf, 0.004, max_cells);
-            let riv2 = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc, &wh.hydro.filled, 0.5, 1.0, &wh.lakes);
+            let riv2 = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc, &wh.hydro.filled, 0.5, 1.0, &wh.lakes, 0.004);
             let (s2, t2) = dangling_stubs(&buf, &riv2, &wh.lakes);
             println!("REAL WORLD {}x{} · separate: {}/{} stubs ({:.1}%) · two-pass: {}/{} stubs ({:.1}%)",
                      w, h, s1, t1, 100.0 * s1 as f32 / t1.max(1) as f32,
@@ -1872,7 +1964,7 @@ mod tests {
         let buf = synth(w, h, terrain, elev);
         let hy = compute_hydrology(&buf);
         let lakes: Vec<Lake> = Vec::new();
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes, 0.004);
         assert!(rivers.len() >= 4, "fixture produced too few rivers ({}) to compare", rivers.len());
 
         let mut by_q: Vec<&River> = rivers.iter().filter(|r| r.discharge_m3s > 0.0).collect();
@@ -1923,7 +2015,7 @@ mod tests {
         let buf = synth(w, h, terrain, elev);
         let hy = compute_hydrology(&buf);
         let lakes: Vec<Lake> = Vec::new();
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes, 0.004);
         let km_per_cell = 40075.0f32 / w as f32;
         let cell_area_km2 = km_per_cell * km_per_cell;
         let mut checked = 0usize;
@@ -2000,7 +2092,7 @@ mod tests {
         }
         let buf = synth(w, h, terrain, elev);
         let hy = compute_hydrology(&buf);
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &[]);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &[], 0.004);
         let trunks = rivers.iter().filter(|r| !r.tributary).count();
         let tribs = rivers.iter().filter(|r| r.tributary).count();
         assert!(trunks >= 1, "expected at least one trunk reaching the sea");
@@ -2144,7 +2236,7 @@ mod tests {
         // max_cells small on purpose: the bowl is NOT emitted as a lake, so it is
         // exactly the "filled but not a lake" basin the ponded rule exists for.
         let lakes = detect_lakes(&buf, &hy.filled, 0.004, 4);
-        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes);
+        let rivers = extract_rivers(&buf, &hy.flow_dir, &hy.acc, &hy.filled, 1.2, 1.0, &lakes, 0.004);
         assert!(!rivers.is_empty(), "the fixture must produce channels at all");
 
         // 1. The water has somewhere to be: a lake sits in the bowl.

@@ -156,7 +156,7 @@ pub fn sim_rivers_hydrology(
     let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, max_cells);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes, lake_fill_depth);
     persist_rivers(&conn, &extracted_rivers);
     // Oxbow backwaters cut off from the meandering lowland reaches (real lakes).
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
@@ -351,7 +351,7 @@ pub fn sim_refresh_hydrology_biology(
     let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, max_cells);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes, lake_fill_depth);
     persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
@@ -497,7 +497,7 @@ pub fn sim_run_all(
     let wh = rivers::compute_world_hydrology(&buf, 0.004, lake_max);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes, 0.004);
     persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
@@ -892,7 +892,7 @@ pub fn sim_run_all_from_terrain(
     let wh = rivers::compute_world_hydrology(&buf, 0.004, lake_max);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes, 0.004);
     persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);

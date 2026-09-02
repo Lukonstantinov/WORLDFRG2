@@ -4080,6 +4080,40 @@ constant. Gate: `deposition_fills_shallow_hollows_and_spares_deep_basins`
 (a 40 m hollow must come out under 10 m, a 900 m basin must keep over 500 m,
 plus both structural guarantees).
 
+**AND THE ONE THAT ACTUALLY CAUSED THE VISIBLE TRUNCATION: two thresholds
+that did not match.** After all of the above the user still reported cut-off
+rivers, and the cause was not the terrain at all. `extract_rivers` blocked
+channels on a hardcoded **10 m** of fill; `detect_lakes` emits a lake only
+past its own `fill_depth`, **~35 m**. Every basin landing between the two was
+blocked as "standing water" *and drawn as nothing* — so a river stopped dead
+in open ground with no lake, no sea and no confluence at its mouth. §8.24c
+states the invariant in its own words ("the lake extent the renderer draws
+and the ponded extent the router stops at have to be the SAME set") and this
+line quietly violated it. Deposition made it *more* visible, by moving basins
+into that band.
+
+`extract_rivers` now takes the caller's `fill_depth` and uses it as the pond
+threshold, so the two sets agree by construction. The deep-basin protection
+the rule exists for is untouched: a basin deep enough to matter becomes a
+lake, and lake cells are already excluded separately. What changes is only
+the shallow band — a metre-scale veneer over nearly flat ground, i.e. an
+alluvial flat, which a real river crosses. Measured on a real world:
+**dangling stubs 10/27 (37%) → 0/49 (0%)**, the river count rising because
+channels that used to be cut short now run their full length.
+
+Gate: `a_basin_too_shallow_to_be_a_lake_does_not_stop_a_river`, which asserts
+the invariant DIRECTLY (no cell may be ponded-but-not-lake) via the shared
+`ponded_mask`, rather than inferring it from stub counts.
+
+**Two lessons about the gate itself, both worth more than the fix.** The
+first version asserted stub counts and passed with the bug still in — 1090
+rivers on a dense fixture always find *something* adjacent to join. The
+second version asserted the right thing but the FIXTURE was wrong: its
+regional slope was 14 m per cell against a 22 m bowl, so no closed basin ever
+formed and it passed either way. **Always verify a new gate fails on the
+unfixed code** (§8.23b's own rule): reverted, it reports 104 invisible cells
+and fails loudly; restored, 0.
+
 ---
 
 ### 8.24b Plate margins are warped at the SOURCE
