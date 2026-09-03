@@ -899,6 +899,17 @@ impl CampaignSim {
     }
 
 
+    /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`), factored out as a pure
+    /// decision so it is testable independent of `dispatch`'s own machinery —
+    /// the same discipline `capacity_bind_extra_slots` (S4) already applies.
+    /// `charter_here` is the house index that holds hub b's charter on this
+    /// good (-1 = no charter); `owner` is the leg's resolved carrier (-1 =
+    /// ownerless). Blocks unless the carrier IS the charter holder, or the
+    /// smuggling roll clears the dose (0.0 = never blocks, 1.0 = never clears).
+    pub(crate) fn charter_bars_sale(charter_here: i32, owner: i32, dose: f32, roll01: f32) -> bool {
+        charter_here >= 0 && owner != charter_here && roll01 < dose
+    }
+
     /// Arbitrage one round: each surplus hub ships toward the best reachable
     /// deficit hubs, creating in-transit cargo with an ETA. Bounded per hub.
     pub(crate) fn dispatch(&mut self, needs: &[Vec<f32>]) {
@@ -933,6 +944,20 @@ impl CampaignSim {
         // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
         // (it's constant across this dispatch round and read in the hot inner loop).
         let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
+        // Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — which house, if any,
+        // holds a charter on good g at hub h, precomputed once for the same
+        // reason `quarantined`/`food_locked` are (read inside the hot loop).
+        // `House.charters` is implicitly at the house's OWN seat (`h.hub`), so
+        // this is a cheap O(houses × charters-per-house) build, not O(n·ng).
+        let mut charter_owner: Vec<Vec<i32>> = vec![vec![-1; ng]; n];
+        for (hi, h) in self.houses.iter().enumerate() {
+            if h.defunct || h.charters.is_empty() { continue; }
+            let hub = h.hub as usize;
+            if hub >= n { continue; }
+            for &g in &h.charters {
+                if g < ng { charter_owner[hub][g] = hi as i32; }
+            }
+        }
         // ── Merchant fleet capacity (concurrent shipment slots) for this round ──
         // Each house has fleet_sea sea-slots and (fleet_river + fleet_caravan)
         // land-slots. Slots already busy with in-flight cargo are subtracted, so a
@@ -1141,6 +1166,18 @@ impl CampaignSim {
                             self.diag_why_no_carrier_bind += 1;
                             continue;
                         }
+                    }
+                    // Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — hub `b` has
+                    // chartered this good to a house that isn't the resolved carrier
+                    // (a rival house, or the ownerless residual): the sale is barred
+                    // here unless a "smuggling" roll clears the dose. True no-op at
+                    // dose 0.0, since `hash01(..) >= 0.0` always holds.
+                    let charter_here = charter_owner[b][g];
+                    let roll = hash01(self.seed,
+                        (tick as u64) ^ 0xC4A47E5 ^ ((a as u64) << 8) ^ (b as u64), g as u64);
+                    if Self::charter_bars_sale(charter_here, owner, CHARTER_EXCLUSIVE_DOSE, roll) {
+                        self.diag_why_charter_bar += 1;
+                        continue;
                     }
                     surplus -= amount;
                     stock_take(&mut self.hubs[a].stock, g, amount);

@@ -64,7 +64,7 @@
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, base_days_season: vec![], season_slices: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
-            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0,
+            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0, diag_why_charter_bar: 0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
@@ -390,6 +390,68 @@
         s.dispatch(&needs);
         assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0,
             "a banned good's stock at the source must not move — nothing may ship");
+    }
+
+    /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) · at the shipped dose of
+    /// 0.0 a charter earns its holder rent only (`CHARTER_RENT`, unchanged) —
+    /// it must not block a rival or ownerless leg from completing an ordinary
+    /// sale in the chartered city, so the whole mechanism is a true no-op.
+    /// Mirrors `n_yards_s4_capacity_bind_at_zero_is_a_noop`'s two-part
+    /// pattern: the pure decision function first, then `dispatch` itself.
+    #[test]
+    fn charter_exclusive_dose_zero_is_a_noop() {
+        assert_eq!(CHARTER_EXCLUSIVE_DOSE, 0.0);
+        // The pure decision must refuse to block for EVERY roll in [0, 1) —
+        // `roll01 < 0.0` can never hold.
+        for i in 0..20 {
+            let roll = i as f32 / 20.0;
+            assert!(!CampaignSim::charter_bars_sale(5, 2, CHARTER_EXCLUSIVE_DOSE, roll),
+                "dose 0.0 must never block, whatever the smuggling roll");
+        }
+        // End to end: a charter on the buyer's own good must not stop an
+        // ownerless leg from delivering it there.
+        let goods = vec![good("silk", 1, 2, 20.0, 0.35, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].stock[0] = 500.0; // real stock, not just `production` — dispatch reads stock
+        s.houses.push(house_at(1, vec![0], 0));
+        s.houses[0].charters = vec![0];
+        let needs = vec![vec![0.0], vec![50.0]];
+        let stock0 = stock_of(&s.hubs[0].stock, 0);
+        s.dispatch(&needs);
+        assert!(stock_of(&s.hubs[0].stock, 0) < stock0,
+            "a charter at zero dose must not stop the sale — the good must still move");
+    }
+
+    /// Charter exclusivity, the pure decision at full dose — the charter
+    /// holder itself is never blocked from its own market; anyone else
+    /// (a rival house, or the ownerless residual) always is.
+    #[test]
+    fn charter_bars_a_non_holder_sale_at_full_dose() {
+        assert!(CampaignSim::charter_bars_sale(3, 7, 1.0, 0.0), "a rival house is blocked");
+        assert!(CampaignSim::charter_bars_sale(3, -1, 1.0, 0.0), "the ownerless residual is blocked");
+        assert!(!CampaignSim::charter_bars_sale(3, 3, 1.0, 0.0), "the charter holder itself is never blocked");
+        assert!(!CampaignSim::charter_bars_sale(-1, -1, 1.0, 0.0), "no charter here ⇒ never blocked");
+    }
+
+    /// `decide_fleets`' one-hull-a-month ceiling, generalised into a real cap
+    /// (`FLEET_BUY_MAX_PER_MONTH`, shipped at 1 — see its own doc comment for
+    /// what a higher dose broke). A very wealthy house buys up to but never
+    /// past the shipped cap in one call, however much capital it has to spare.
+    #[test]
+    fn fleet_buy_cap_bounds_a_wealthy_house_at_the_shipped_dose() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].coastal = true;
+        s.houses.push(house_at(0, vec![0], 0));
+        s.houses[0].wealth = SHIP_COST * 500.0; // capital enough for many dozen hulls
+        s.manage_fleets();
+        assert_eq!(s.houses[0].fleet_sea, FLEET_BUY_MAX_PER_MONTH,
+            "a flush house must buy exactly the shipped cap, never fewer, never more");
     }
 
     /// N4 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.4) · `house_for`'s within-tier pick

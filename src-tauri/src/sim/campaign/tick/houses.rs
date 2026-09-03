@@ -3938,15 +3938,28 @@ impl CampaignSim {
             // cautious one waits for a fatter cushion — axis 0, ±15% capped.
             let buy_mult = 2.5 * self.head_character_factor(hi, 0).recip();
             if coastal && sea_busy && w > SHIP_COST * buy_mult {
-                wealth -= SHIP_COST * disc;
-                fleet_sea += 1;
+                // `FLEET_BUY_MAX_PER_MONTH` lets a flush house buy more than the
+                // structural one-hull-a-month ceiling — each purchase re-checks
+                // `wealth` (already reduced by this call's own upkeep AND every
+                // prior purchase this same call), so a house can never spend past
+                // what it can actually afford. Shipped at 1 == today's ceiling.
+                let mut bought = 0u32;
+                while bought < FLEET_BUY_MAX_PER_MONTH && wealth > SHIP_COST * buy_mult {
+                    wealth -= SHIP_COST * disc;
+                    fleet_sea += 1;
+                    bought += 1;
+                }
             } else if !coastal && land_busy && w > CARAVAN_COST * buy_mult {
-                if hash01(self.seed, tick as u64 ^ 0x21B0, hi as u64) < 0.30 {
-                    wealth -= RIVER_COST * disc;
-                    fleet_river += 1;
-                } else {
-                    wealth -= CARAVAN_COST * disc;
-                    fleet_caravan += 1;
+                let mut bought = 0u32;
+                while bought < FLEET_BUY_MAX_PER_MONTH && wealth > CARAVAN_COST * buy_mult {
+                    if hash01(self.seed, tick as u64 ^ 0x21B0 ^ (bought as u64), hi as u64) < 0.30 {
+                        wealth -= RIVER_COST * disc;
+                        fleet_river += 1;
+                    } else {
+                        wealth -= CARAVAN_COST * disc;
+                        fleet_caravan += 1;
+                    }
+                    bought += 1;
                 }
             } else if w < HOUSE_BRANCH_WEALTH * 0.15 {
                 // SELL: a struggling house with an idle vessel scraps it for cash.
@@ -4086,8 +4099,15 @@ impl CampaignSim {
                 self.houses[hi].dominant_seat = now_dom;
             }
             // Settlement grant: a POLITICAL house that controls its seat is granted a
-            // city CHARTER on its specialty goods — a standing rent monopoly.
-            if now_dom && self.houses[hi].archetype == ARCH_POLITICAL {
+            // city CHARTER on its specialty goods — a standing rent monopoly, now
+            // enforced as a real staple right (`CHARTER_EXCLUSIVE_DOSE`, dispatch()).
+            // `CHARTER_GUILDS_TOO` extends the SAME grant to a civic guild that
+            // dominates its own seat — a chartered guild enforcing its own staple
+            // is exactly as historical as a merchant house doing the same (the
+            // Hanseatic Kontor, a Zunft's guildhall monopoly), and `is_guild`
+            // houses already carry a real, non-empty `spec` since N3 (§5.1).
+            if now_dom && (self.houses[hi].archetype == ARCH_POLITICAL
+                || (CHARTER_GUILDS_TOO && self.houses[hi].is_guild)) {
                 let spec = self.houses[hi].spec.clone();
                 let cn = self.hubs.get(hub).map(|x| x.name.clone()).unwrap_or_default();
                 for g in spec {

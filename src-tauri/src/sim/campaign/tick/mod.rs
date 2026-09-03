@@ -163,6 +163,39 @@ const N1_LOCAL_HAUL_BIND_DAYS: f32 = f32::INFINITY;
 /// cargo never sinks at all: "the guard is literal", §1.1 of the plan). Shipped
 /// at 0.0, so the roll below never fires and the change is bit-identical.
 const N1B_OWNERLESS_LOSS_RATE: f32 = 0.0;
+/// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
+/// (`House.charters`, already granted to a POLITICAL house or a chartered guild
+/// that dominates its own seat, on its own specialty goods) today only earns the
+/// holder extra RENT (`CHARTER_RENT`) — a rival house or the ownerless residual
+/// can still sell the identical good in that same city freely, so "the city
+/// doesn't impose it" and the charter is a tax, not a monopoly. This turns it
+/// into a real staple right: at a hub that has chartered a good, a leg
+/// delivering that good there is barred from completing the sale unless it is
+/// carried by the charter holder itself. `CHARTER_EXCLUSIVE_DOSE` is the chance
+/// (0..1) such a leg still gets through anyway ("smuggling") — dose 0.0 lets
+/// every non-holder trade exactly as before (a true no-op,
+/// `charter_exclusive_dose_zero_is_a_noop`), dose 1.0 is an absolute staple.
+/// Measured exactly like N2 (`N2_BAN_PRICE_RATIO`'s own doc comment) and hit
+/// the SAME wall: both 0.3 and 1.0 held `simulate_decades_reports_dynamics`'s
+/// wealth bound (richest 236,749–398,853 over 50y, no blow-up), but both broke
+/// the hard-asserted `econ_inheritance_rules_fragment_differently` — at 1.0,
+/// partible's mean wealth per house came out ABOVE primogeniture's
+/// (284,238 vs 245,817; the assertion requires partible strictly poorer,
+/// since a division must leave the average house smaller). A staple-right
+/// closure evidently redistributes capital toward whichever houses already
+/// hold a charter regardless of which inheritance law is running, swamping
+/// the signal the gate measures — the same failure mode §8.15's "read this
+/// before fixing this gate again" catalogue already names five times over.
+/// Shipped at 0.0: real, wired, dead code today. The dose walk down from 1.0
+/// (rather than guessing a value that merely stops panicking) is real future
+/// work, not attempted further in this session — see `docs/SCOREBOARD.md`.
+const CHARTER_EXCLUSIVE_DOSE: f32 = 0.0;
+/// Guilds gain a charter the same way a political house does (dominates its own
+/// seat) — Slice 2 of the same change (`now_dom && (ARCH_POLITICAL || is_guild)`
+/// at the grant site in `houses.rs`), since a chartered civic Merchant Guild
+/// enforcing its own staple is exactly as historical as a merchant house doing
+/// the same (the Hanseatic Kontor, a Zunft's guildhall monopoly).
+const CHARTER_GUILDS_TOO: bool = true;
 /// Share of a settlement's population engaged in merchant trade — split across
 /// houses / local merchants / guilds by their recent throughput at the hub.
 const MERCHANT_POP_FRACTION: f32 = 0.12;
@@ -1789,6 +1822,25 @@ const OUTPOST_EXPLOIT_SITE_BONUS: f32 = 0.8;
 pub const SHIP_COST: f32 = 7.0;
 const RIVER_COST: f32 = 4.5;
 const CARAVAN_COST: f32 = 4.0;
+/// `decide_fleets` only ever executes ONE branch of its buy/sell if-else chain a
+/// month, so a house with capital to spare for ten hulls still buys exactly one —
+/// a structural ceiling of ~12 hulls/year however rich the house
+/// (`ACTORS_AND_CARRIAGE_PLAN.md` §1: measured 2.4 hulls/house on the reference
+/// world). `FLEET_BUY_MAX_PER_MONTH` lets a house buy MORE THAN ONE in the same
+/// month when its idle capital (after this month's purchases) still clears the
+/// buy threshold — each purchase re-checks affordability against the wealth
+/// already spent this call, so a house can never buy past what it can actually
+/// afford. `simulate_decades_reports_dynamics` and `econ_inheritance_rules_
+/// fragment_differently` both held at 3 (a higher buy rate alone does not
+/// invert the inheritance gate the way `CHARTER_EXCLUSIVE_DOSE` beside it
+/// does), but 3 broke two smaller, exact fixtures elsewhere in the suite
+/// (`coinage_runs_yearly_finite_and_deterministic`,
+/// `a_house_records_every_head_it_has_had`) whose specific expected outcome
+/// this session had no time left to re-derive or re-tune for. Shipped at 1,
+/// which reproduces the exact one-hull ceiling above
+/// (`fleet_buy_cap_bounds_a_wealthy_house_at_the_shipped_dose`) — real, wired,
+/// dead code today; the dose walk up is real future work.
+const FLEET_BUY_MAX_PER_MONTH: u32 = 1;
 
 // ── DLC 3.5 · Coinage (the "Venice ducat") ──────────────────────────────────
 // A council-led polis issues a NAMED coin whose acceptance ("trust") is sticky
@@ -5103,6 +5155,10 @@ pub struct CampaignSim {
     /// the bind refused to let sail at all. Zero while `N1_LOCAL_HAUL_BIND_DAYS`
     /// stays at infinity.
     #[serde(default)] pub diag_why_no_carrier_bind: u32,
+    /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — a leg barred because the
+    /// destination hub has chartered this good to a house that isn't the carrier.
+    /// Zero while the dose stays at 0.0.
+    #[serde(default)] pub diag_why_charter_bar: u32,
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
