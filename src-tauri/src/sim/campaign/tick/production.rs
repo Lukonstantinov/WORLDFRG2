@@ -533,10 +533,26 @@ impl CampaignSim {
     /// Freight to haul one unit of good `g` over `days` at an already-discounted
     /// per-day `rate`: bulky goods cost more, perishable goods accrue spoilage.
     /// A 0 bulk (old saves) is treated as 1.0, so freight is unchanged for them.
+    /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 adds `VICTUAL_PER_DAY` —
+    /// crew/animal subsistence, the same shape as the perishable term (a flat
+    /// per-unit-day add, not a rate), so a long voyage costs non-linearly more
+    /// than a short one on TOP of the existing linear freight rate.
     #[inline]
     pub(crate) fn good_freight(&self, g: usize, rate: f32, days: f32) -> f32 {
         let bulk = { let b = self.goods[g].bulk; if b <= 0.0 { 1.0 } else { b } };
-        rate * days * bulk + self.goods[g].perishable.max(0.0) * days
+        rate * days * bulk + self.goods[g].perishable.max(0.0) * days + VICTUAL_PER_DAY * days
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — scale a REFERENCE loss
+    /// probability (calibrated for a `LOSS_REFERENCE_DAYS`-long voyage) to an
+    /// actual voyage of `days`, so a 9,000 km crossing is no longer exactly as
+    /// safe as a 200 km one (§1.2). `1 - (1-p)^n` composes `n` independent
+    /// per-reference-leg rolls into one probability; `n` need not be an
+    /// integer since we only need the resulting probability, not a leg count.
+    #[inline]
+    pub(crate) fn distance_scaled_loss(p: f32, days: f32) -> f32 {
+        let n = (days / LOSS_REFERENCE_DAYS).max(0.0);
+        1.0 - (1.0 - p).powf(n)
     }
 
 
@@ -1218,6 +1234,15 @@ impl CampaignSim {
                     stock_take(&mut self.hubs[a].stock, g, amount);
                     let sale = amount * pa;
                     self.hubs[a].export_earn += sale;
+                    // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — the fixed
+                    // outfitting charge, independent of cargo size. Only a real
+                    // house pays it (limited liability floors it at 0, same
+                    // discipline as the loss write-off below); the ownerless
+                    // residual has no crew to victual and no vessel to outfit.
+                    if owner >= 0 {
+                        let oi = owner as usize;
+                        self.houses[oi].wealth = (self.houses[oi].wealth - OUTFIT_COST).max(0.0);
+                    }
                     // An ESTATE's sales pay rent to its OWNER: a share to the owning
                     // house's wealth (the engine of house growth), or to the parent
                     // city's prosperity if the estate is city-owned.
@@ -1334,9 +1359,12 @@ impl CampaignSim {
                         };
                         // A shipping dynasty loses fewer cargoes (skilled crews).
                         if self.houses[oi].archetype == ARCH_FLEET { p *= FLEET_LOSS_MULT; }
+                        // Scale the per-reference-leg rate to this voyage's real
+                        // length (slice 3, §1.2) instead of rolling the flat rate
+                        // regardless of distance.
                         hash01(self.seed,
                             (tick as u64) ^ 0x5EA10 ^ ((a as u64) << 8) ^ (b as u64),
-                            g as u64) < p
+                            g as u64) < Self::distance_scaled_loss(p, days)
                     } else {
                         // N1b (ACTORS_AND_CARRIAGE_PLAN.md §3.1) — ownerless cargo can
                         // sink too, dosed independently from the house rates above.

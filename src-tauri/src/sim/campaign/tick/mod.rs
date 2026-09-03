@@ -146,6 +146,30 @@ const HOUSE_BRANCH_WEALTH: f32 = 12.0;
 const SEA_LOSS: f32 = 0.05;
 const CARAVAN_LOSS: f32 = 0.03;
 const RIVER_LOSS: f32 = 0.015;
+/// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — `SEA_LOSS`/`CARAVAN_LOSS`/
+/// `RIVER_LOSS` above are the loss PROBABILITY for a voyage of this many days;
+/// a longer or shorter leg scales via `1 - (1 - p)^(days / LOSS_REFERENCE_DAYS)`
+/// (`CampaignSim::distance_scaled_loss`) rather than the old flat per-shipment
+/// roll, which made a 9,000 km crossing exactly as safe as a 200 km one (§1.2).
+const LOSS_REFERENCE_DAYS: f32 = 20.0;
+/// A per-voyage subsistence cost (crew wages, draft-animal fodder, harbour
+/// dues) on top of the existing per-unit freight rate — "victualling"
+/// (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3). Folded into `good_freight`,
+/// which every caller (dispatch, `deploy_return_leg`, futures delivery)
+/// already reads, so a long haul costs non-linearly more than a short one
+/// even before the freight rate itself is applied. Kept small relative to
+/// `freight_per_day` (0.018 shipped) since it is a flat add per unit-day,
+/// not a rate — see `good_freight`'s own doc comment.
+const VICTUAL_PER_DAY: f32 = 0.001;
+/// A fixed per-voyage outfitting charge (crew wages up front, harbour dues,
+/// loading) independent of how much cargo the voyage carries — "so long hauls
+/// need scale" (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3): a tiny shipment
+/// barely amortises this, a large one absorbs it easily. Charged once per
+/// dispatched (house-owned) shipment in `production.rs::dispatch`, deducted
+/// from the carrying house directly rather than folded into the per-unit
+/// price gap, so it does not distort the arbitrage math that decides WHICH
+/// market gets the cargo — only whether running the voyage at all was worth it.
+const OUTFIT_COST: f32 = 0.05;
 /// Independent trade shorter than this (travel-days) is "local merchants";
 /// anything longer is organized "guild" long-haul. Splits the non-house carry.
 const LOCAL_HAUL_DAYS: f32 = 8.0;

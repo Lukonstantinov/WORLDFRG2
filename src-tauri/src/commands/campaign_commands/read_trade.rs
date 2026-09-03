@@ -734,6 +734,12 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
         let iv = g_in.get(&g).copied().unwrap_or(0.0);
         let ov = g_out.get(&g).copied().unwrap_or(0.0);
+        // TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — `production[g]` is the
+        // hub's current daily output rate; annualise it against the same
+        // TICKS_PER_YEAR the yearly trade folds themselves use, so it is
+        // comparable to `in_volume`/`out_volume`.
+        let own_production = sim.hubs.get(hi).and_then(|h| h.production.get(g as usize))
+            .copied().unwrap_or(0.0).max(0.0) * crate::sim::tick::TICKS_PER_YEAR as f32;
         TradeFlowGood {
             good: g,
             name: sim.goods.get(g as usize).map(|x| x.name.clone()).unwrap_or_default(),
@@ -766,6 +772,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
                 v.truncate(6);
                 v
             },
+            own_production,
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));

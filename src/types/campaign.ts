@@ -633,6 +633,12 @@ export interface TradeFlowGood {
   river_volume?: number;
   /** Who moved it — houses, guilds, or unnamed local merchants — largest first. */
   carriers: TradeCarrier[];
+  /** This city's own yearly output of this good (annualised production), so
+   *  the three-way split "own produce · passing through · bought for itself"
+   *  can be derived client-side:
+   *  `transit = max(0, out_volume - own_production)`,
+   *  `own_export = out_volume - transit`, `for_us = in_volume - transit`. */
+  own_production?: number;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {

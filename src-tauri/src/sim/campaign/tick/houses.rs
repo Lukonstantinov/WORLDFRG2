@@ -197,7 +197,10 @@ impl CampaignSim {
                 let base = CARAVAN_LOSS * (cv / tot) + RIVER_LOSS * (rv / tot);
                 if self.houses[seller].archetype == ARCH_FLEET { base * FLEET_LOSS_MULT } else { base }
             } else { 0.0 };
-            let route_loss = 1.0 - (1.0 - sea_p) * (1.0 - land_p);
+            // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — scale the per-reference-
+            // leg rate to this contract route's real length, same as ordinary
+            // dispatch (`production.rs::distance_scaled_loss`).
+            let route_loss = Self::distance_scaled_loss(1.0 - (1.0 - sea_p) * (1.0 - land_p), days);
             let vessels = ships_used.max(landv_used).max(1);
             let per = loadable / vessels as f32;
             let mut delivered_qty = 0.0;
