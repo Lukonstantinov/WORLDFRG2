@@ -508,18 +508,35 @@ export function ProvinceMiniMap({
                belt's edge reads against the real coastline under it instead of a
                24×-coarser block grid. Drawn UNDER the borders/holdings so the survey
                marks stay legible on top. */}
-        {on("goods") && geo && goodMasks.map((m) => {
+        {on("goods") && goodMasks.map((m) => {
           const col = GOOD_DEFS.find((d) => d.name === m.good)?.color ?? "#56c8d8";
-          const rectSize = raster
+          // THREE WAYS THIS LAYER USED TO DISAPPEAR WITHOUT SAYING SO, all fixed
+          // here — together they are the reported "province no longer shows areas
+          // of goods, only small dots":
+          //   · it was gated on `geo` (the terrain crop). A crop that has not
+          //     arrived, or a province the crop query declines, dropped every belt
+          //     area while the locality cores below still drew — dots, no areas.
+          //     `toLocal` works without it, so the gate bought nothing.
+          //   · `rectSize` fell back to **0** when `raster` was absent, so every
+          //     cell drew as a 0×0 rect: present in the DOM, invisible on screen.
+          //   · a zero/NaN `raster.gridW` produced the same, via a divide.
+          // The fallback is now the plate's own cell size, which is the honest
+          // reading when the raster's scale is unknown.
+          const scale = raster && raster.gridW > 0 && raster.gridH > 0
             ? Math.max((m.stride * raster.w) / raster.gridW, (m.stride * raster.h) / raster.gridH)
             : 0;
+          const rectSize = Number.isFinite(scale) && scale > 0.05 ? scale : stride;
           const pts: { lx: number; ly: number; v: number }[] = [];
           for (let r = 0; r < m.rows; r++) {
             for (let c = 0; c < m.cols; c++) {
               const v = m.q[r * m.cols + c];
               if (v < GOODS_COVERAGE_MIN) continue;
               const wx = m.ox + c * m.stride, wy = m.oy + r * m.stride;
-              const [lx, ly] = geo.toLocal(wx, wy);
+              // `geo.toLocal` when the crop is loaded (it matches the relief plate's
+              // own sampling exactly); the plate's own `toLocal` otherwise, which is
+              // the same projection at slightly coarser fidelity — a belt drawn a
+              // little coarsely beats a belt not drawn at all.
+              const [lx, ly] = geo ? geo.toLocal(wx, wy) : toLocal(wx, wy);
               pts.push({ lx, ly, v });
             }
           }
@@ -614,6 +631,17 @@ export function ProvinceMiniMap({
           };
           const colorOf = (good: string) =>
             GOOD_DEFS.find((d) => d.name === good)?.color ?? "#56c8d8";
+          // WHICH GOODS ACTUALLY GOT AN AREA DRAWN ABOVE. Reducing a locality to a
+          // small core marker is only honest when plate 6a really drew the belt
+          // underneath it; the reduction was made UNCONDITIONAL on the premise that
+          // it always would, and when the mask is absent — a deposit good (they are
+          // filtered out of the mask fetch by design), a good whose province belt
+          // sits at the absent floor, an older world, or a fetch that has not landed
+          // — the result is a bare dot standing for a whole region, with no area at
+          // all. That is the regression this restores: no mask ⇒ draw the square.
+          const covered = new Set(goodMasks
+            .filter((m) => m.q.some((v) => v >= GOODS_COVERAGE_MIN))
+            .map((m) => m.good));
           const sea = localities.filter((l) => l.sea);
           // Cores: the locality's real position, drawn on top of plate 6a's belt
           // area. Small, fixed-size and unclipped-by-scale, so it reads as a survey
@@ -652,6 +680,11 @@ export function ProvinceMiniMap({
                 ))}
               </clipPath>
               <g clipPath={`url(#${clipId})`}>
+                {/* No belt area for this good ⇒ its locality carries the area, as it
+                    did before the core-marker reduction. Clipped to the province, so
+                    the km-scale square can never flood the plate the way the old
+                    unclipped one did. */}
+                {cores.filter((l) => !covered.has(l.good)).map((l, i) => square(l, `la${i}`, false))}
                 {cores.map((l, i) => {
                   const [lx, ly] = toLocal(l.x, l.y);
                   const r = stride * 0.9;
@@ -666,7 +699,9 @@ export function ProvinceMiniMap({
                           ["span", `${Math.round(l.radius_km)} km`],
                           ["extent", ["a pocket", "small", "broad", "a great homeland"][Math.max(0, Math.min(3, l.extent))]],
                           ...(l.river_fed ? [["watered", "river-fed"] as [string, string]] : []),
-                          ["note", "core of the belt drawn above"] as [string, string],
+                          [covered.has(l.good) ? "note" : "shown as",
+                           covered.has(l.good) ? "core of the belt drawn above"
+                                               : "its own area — no belt mask for this good"] as [string, string],
                         ],
                       })}
                       onMouseLeave={() => setHover(null)}>
