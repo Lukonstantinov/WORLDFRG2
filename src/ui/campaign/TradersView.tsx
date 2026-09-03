@@ -22,6 +22,19 @@ function fmt(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return n.toFixed(n >= 100 ? 0 : 1);
 }
+/** A house's own share, at real precision. Against a 90%+ ownerless residual
+ *  (the panel's own deliberate headline stat — never suppressed, see the
+ *  file doc comment) every individual house routinely holds under 1%, and
+ *  `toFixed(0)` flattened every one of them to a misleading "0%" — a wall of
+ *  zeroes that reads as "this house trades nothing" when it may carry real,
+ *  measurable volume. One decimal below 10%, and "<0.1%" rather than a false
+ *  "0.0%" for a share too small for even that digit to show. */
+function fmtPct(pct: number): string {
+  if (pct <= 0) return "0%";
+  if (pct < 0.1) return "<0.1%";
+  if (pct < 10) return `${pct.toFixed(1)}%`;
+  return `${pct.toFixed(0)}%`;
+}
 
 type Rank = "volume" | "standing" | "route" | "carriage";
 type Dir = "all" | "import" | "export";
@@ -199,7 +212,7 @@ export function TradersView({ hubId, active, tick }: { hubId: number; active: bo
                     single-colour volume bar cannot. */}
                 <SplitBar inV={t.in_volume} outV={t.out_volume} max={maxVol} width={90} height={7} />
                 <span style={{ width: 40, textAlign: "right", color: T.inkMid,
-                  fontVariantNumeric: "tabular-nums" }}>{t.pct.toFixed(0)}%</span>
+                  fontVariantNumeric: "tabular-nums" }}>{fmtPct(t.pct)}</span>
                 <span style={{ width: 28, textAlign: "center", fontSize: FZ.tiny }} title={c.label}>{c.icon}</span>
                 <span style={{ width: 70, textAlign: "right", color: T.inkDim, fontSize: FZ.tiny }}>
                   {t.mean_route_km > 0 ? `${fmt(t.mean_route_km)} km` : ""}
