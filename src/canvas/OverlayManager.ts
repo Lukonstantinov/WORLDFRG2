@@ -2880,11 +2880,6 @@ export class OverlayManager {
       this.renderGoodScarcity(ctx);
     }
 
-    // #26 · geographic toponyms: culture-styled labels for rivers/peaks/lakes/regions.
-    if (this.visibility.toponyms && this.toponyms.length > 0) {
-      this.renderToponyms(ctx);
-    }
-
     // 🌊 Reach breaks: where a trunk river turns upper→middle→delta.
     if (this.visibility.riverBreaks !== false && this.riverBreaks.length > 0) {
       this.renderRiverBreaks(ctx);
@@ -3219,11 +3214,23 @@ export class OverlayManager {
     }
 
     // Name labels (opt-in overlays). Drawn last so they sit on top of markers.
+    // Settlements are drawn (and so reserve their label space) BEFORE toponyms
+    // (rivers/peaks/lakes/regions, below): `reserveLabel` silently skips a
+    // label the instant it collides with anything already reserved, with no
+    // fallback and no cross-category priority, so whichever category draws
+    // first always wins a contested space. A settlement name is the more
+    // important navigational fact of the two, so it goes first — before this,
+    // a low-priority toponym (a minor river/peak name) drawn earlier in the
+    // frame could permanently claim a coastal town's label space.
     if (this.visibility.settlementNames && this.settlements.length > 0) {
       this.renderSettlementNames(ctx);
     }
     if (this.visibility.hubNames && this.politicalCenters.length > 0) {
       this.renderHubNames(ctx);
+    }
+    // #26 · geographic toponyms: culture-styled labels for rivers/peaks/lakes/regions.
+    if (this.visibility.toponyms && this.toponyms.length > 0) {
+      this.renderToponyms(ctx);
     }
 
     // Search highlight pin: a bright double ring + dot on the searched settlement,

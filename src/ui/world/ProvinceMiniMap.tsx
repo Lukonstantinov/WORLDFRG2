@@ -113,7 +113,7 @@ export const PLATE_LABEL: Record<PlateKey, string> = {
   // independently. `deposits` stays its own plate: different geology, different symbol.
   goods: "goods", deposits: "deposits",
 };
-export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "landuse", "holdings", "borders", "goods"];
+export const DEFAULT_PLATES: PlateKey[] = ["relief", "water", "holdings", "borders", "goods"];
 
 /** Land-use classes, with the colour each dithered cell takes. */
 const LANDUSE = [
@@ -836,7 +836,7 @@ export function PlateToggles({ plates, setPlates, disabled = [] }: {
   /** Plates with no data behind them, shown greyed rather than hidden. */
   disabled?: PlateKey[];
 }) {
-  const keys: PlateKey[] = ["relief", "water", "landuse", "tenure", "holdings", "borders", "goods", "deposits"];
+  const keys: PlateKey[] = ["relief", "water", "holdings", "borders", "goods", "deposits"];
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
       {keys.map((k) => {

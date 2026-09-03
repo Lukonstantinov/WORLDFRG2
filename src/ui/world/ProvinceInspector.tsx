@@ -312,7 +312,6 @@ export function ProvinceInspector() {
         <div style={{ marginTop: 5 }}>
           <PlateToggles plates={plates} setPlates={setPlates}
             disabled={[
-              ...(land ? [] : (["landuse", "tenure"] as PlateKey[])),
               ...((p.river_cells ?? 0) > 0 ? [] : (["water"] as PlateKey[])),
               // "goods" (F5 · merged coverage + quality) is live as soon as the belt
               // masks have any covered cell; localities/beltGoods keep it live on

@@ -5,14 +5,14 @@ import { useCampaignStore } from "@state/campaignStore";
 import {
   simGenerateProvinces, simMergeSmallProvinces, simSplitLargeProvinces, campaignProvinceState,
   campaignProvinceDetail, campaignProvinceLandAll, getProvinceTerrainCrop,
-  campaignProvinceGoods, campaignProvincePotential,
+  campaignProvinceGoods, campaignProvincePotential, provinceGoodBeltMasks,
 } from "@bridge";
 import { GOOD_DEFS } from "@goods";
 import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
 import type {
   Province, ProvinceLive, ProvinceDetail, ProvinceLand, ProvinceTerrainCrop, PSettlement,
-  ProvinceGoodExploit, ProvincePotential,
+  ProvinceGoodExploit, ProvincePotential, ProvinceGoodMask,
 } from "@types";
 
 import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
@@ -169,6 +169,22 @@ export function ProvincePanel() {
       .catch(() => { if (!stale) setPotential(null); });
     return () => { stale = true; };
   }, [open, selected?.id]);
+
+  // The minimap's goods plate (belt coverage + quality wash) — the browser's
+  // ProvinceMiniMap call never fetched this, so the plate toggled on but drew
+  // nothing. Same fetch ProvinceInspector.tsx already makes for its own copy
+  // of the survey plate; the two are separate minimap instances.
+  const [goodMasks, setGoodMasks] = useState<ProvinceGoodMask[]>([]);
+  const beltGoodNames = (potential?.goods ?? []).filter((g) => !g.is_deposit)
+    .map((g) => g.name).join(",");
+  useEffect(() => {
+    if (!open || !selected || beltGoodNames === "") { setGoodMasks([]); return; }
+    let stale = false;
+    provinceGoodBeltMasks(selected.id, beltGoodNames.split(","))
+      .then((m) => { if (!stale) setGoodMasks(m); })
+      .catch(() => { if (!stale) setGoodMasks([]); });
+    return () => { stale = true; };
+  }, [open, selected?.id, beltGoodNames]);
 
   // The survey plate's real terrain crop (§2.3) — world geography, independent of
   // the campaign join above.
@@ -452,6 +468,9 @@ export function ProvincePanel() {
                       riverCells={selected.river_cells}
                       terrain={terrain}
                       rivers={rivers}
+                      deposits={potential?.deposits ?? []}
+                      localities={potential?.localities ?? []}
+                      goodMasks={goodMasks}
                     />
 
                     <div style={{ marginTop: 10, marginBottom: 4, opacity: 0.8, fontWeight: 600 }}>

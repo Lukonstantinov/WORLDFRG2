@@ -1119,6 +1119,25 @@ impl CampaignSim {
                         // merchants prefer to supply the great markets (big entrepôts) —
                         // they clear more volume and pay reliably. The real `gap`/`days`
                         // still govern the actual sale; pull only orders the shortlist.
+                        //
+                        // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 names this a bug (gravity
+                        // is ALSO applied once already, in `rebuild_neighbors`, to build
+                        // `self.neighbors[a]`) and its own gate ("expect movement, don't
+                        // tune it away") assumed removing the second weighting here would
+                        // just shift trade toward small nearby towns. Measured instead:
+                        // removing it — or even halving it to `hub_pull(b).sqrt()` —
+                        // breaks `simulate_decades_reports_dynamics`'s hard-asserted
+                        // wealth bound (a sustained richest house of 1,700,557, vs the
+                        // 278,201 baseline). The second weighting is evidently doing real
+                        // wealth-DISPERSION work this plan didn't anticipate: without it,
+                        // pure profit-maximization lets one house's best-found arbitrage
+                        // gap dominate every tick instead of spreading trade (and so
+                        // profit) across whichever big markets are currently short.
+                        // Reverted to the shipped double-weighted form — a spot fix that
+                        // breaks the aggregate gate is a revert, not a judgement call
+                        // (CLAUDE.md §2.4). The small-city exclusion this was meant to
+                        // fix is real (§1.4) but needs a mechanism that doesn't touch
+                        // this wealth-dispersion effect — real future work.
                         targets.push((b, gap * self.hub_pull(b), days));
                     }
                 }
