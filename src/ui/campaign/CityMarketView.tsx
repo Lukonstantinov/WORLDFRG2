@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { HubDetail, HubGoodDetail, ShipmentRow } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
+import { MarketSquare } from "@ui/campaign/MarketSquare";
 
 /** ─────────────────────────────────────────────────────────────────────────────
  *  CITY MARKET — VARIANT C, "the quay" (`docs/TRADE_AND_MARKET_REVIEW.md` Part 3,
@@ -516,6 +517,8 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
 
   return (
     <>
+      {/* ── the square itself: the stalls, their keepers and the crowd ─────── */}
+      {!compact && <MarketSquare detail={detail} />}
       {/* ── the market's vital line ─────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap",
         padding: "3px 0 5px", borderBottom: `1px solid ${C.line}`, fontSize: 10 }}>

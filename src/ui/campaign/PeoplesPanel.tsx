@@ -182,13 +182,12 @@ export function PeoplesPanel() {
                     ))}
                   </div>
                 )}
-                {/* Full-body figures in national dress (man + woman; creole blends parents). */}
-                {sel.kit != null && sel.kit >= 0 && (
-                  <div style={{ marginBottom: 12 }}>
-                    <div style={sectionHdr}>In national dress</div>
-                    <CultureFigures name={sel.name} kit={sel.kit} kit2={sel.kit2} color={sel.color} />
-                  </div>
-                )}
+                {/* Dress plate: portrait bust + full costume figure. A hearth with no
+                    preset kit gets a derived one, so this is never gated away. */}
+                <div style={{ marginBottom: 12 }}>
+                  <div style={sectionHdr}>In national dress</div>
+                  <CultureFigures name={sel.name} kit={sel.kit} kit2={sel.kit2} color={sel.color} />
+                </div>
                 <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                   <Tile label="People" value={fmtNum(sel.population)} />
                   <Tile label="Homelands" value={String(sel.towns)} color="#7fd0a0" />

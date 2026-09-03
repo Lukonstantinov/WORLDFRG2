@@ -50,6 +50,19 @@ pub struct River {
     /// paler render shade for the branches.
     #[serde(default)]
     pub tributary: bool,
+    /// The river ENDS BY EVAPORATION — an ephemeral desert watercourse whose
+    /// channel loses more to its bed and the air than its catchment supplies, so
+    /// it simply stops in open ground (a wadi, an inland creek petering out).
+    ///
+    /// This is the ONE legitimate way for a river to end nowhere. Every other
+    /// river must reach the sea, a lake, or a confluence — the rule
+    /// `every_river_ends_somewhere_or_dries_in_a_desert` asserts exactly that,
+    /// and this flag is what distinguishes a modelled terminus from the "river
+    /// truncated for no reason" artefact it would otherwise be indistinguishable
+    /// from. It is also what lets the renderer draw the last stretch DASHED, the
+    /// atlas convention for an intermittent watercourse.
+    #[serde(default)]
+    pub ends_dry: bool,
     /// Strahler stream order (1 = headwater creek, higher = larger trunk). Lets
     /// downstream systems (rendering, settlement scoring) rank branches by size
     /// without re-deriving the drainage tree.
@@ -578,6 +591,10 @@ pub fn extract_rivers(
     // stream (a tributary â€” the junction cell is appended so the line connects).
     let mut rivers = Vec::new();
     let major_len = (w as f32 * 0.10).max(60.0);
+    // World scale, hoisted: both the transmission-loss walk and the discharge
+    // calculation below need it, and it is a world constant, not a per-river one.
+    let km_per_cell = 40075.0f32 / w as f32;
+    let cell_area_km2 = km_per_cell * km_per_cell;
     for s in 0..total {
         if !is_channel(s) || up_count[s] != 0 { continue; }
 
@@ -599,6 +616,83 @@ pub fn extract_rivers(
             cur = nxt;
         }
         if points.len() < 3 { continue; }
+
+        // ── EPHEMERAL DESERT RIVERS: TRANSMISSION LOSS ───────────────────────
+        // A channel in a dry climate LOSES water as it runs — into its own bed
+        // and to evaporation off the wetted channel. Where that loss outruns
+        // what the catchment supplies, the river simply stops: the Sahara wadi,
+        // the Australian creek, the Tarim petering out into the sand.
+        //
+        // Before this, a desert stream was ALL OR NOTHING. Discharge was one
+        // scalar computed at the outlet, so flow could never decline along a
+        // course, and the only dry-climate handling was the whole-river prune
+        // below (`order <= 2 && arid_frac > 0.55`) which deletes a stream
+        // outright. So the commonest thing a desert river does — run for a
+        // while and then dry up — could not be expressed at all, and every
+        // river that survived the prune was obliged to reach the sea or a lake.
+        //
+        // The budget walks downstream in m³/yr:
+        //   GAIN  the NEW catchment joining at this cell × its own runoff depth
+        //   LOSS  the wetted channel strip × the local evaporative EXCESS (PET−P)
+        //
+        // The Nile case falls out of the model rather than being special-cased:
+        // a river fed from wet uplands arrives at the desert carrying a volume
+        // that dwarfs the per-cell loss, so it crosses and reaches the sea,
+        // while a stream raised IN the desert dies within a few cells.
+        let mut ends_dry = false;
+        if use_koppen && !buf.temperature.is_empty() {
+            // The wetted channel + its riparian margin, as a strip. Stated in km
+            // and converted per world (rule 25) — a cell is ~11 km at 3600×1800
+            // and ~130 km on a test grid, so a fixed per-cell loss would mean
+            // completely different physics on different worlds.
+            const CHANNEL_LOSS_WIDTH_KM: f32 = 0.5;
+            // Runoff coefficients, matching `lake_water_balance`'s own split so
+            // the two water budgets in this file agree about what a dry basin does.
+            const RUNOFF_HUMID: f32 = 0.35;
+            const RUNOFF_ARID: f32 = 0.08;
+            let loss_area_m2 = CHANNEL_LOSS_WIDTH_KM * km_per_cell * 1.0e6;
+
+            let mut vol_m3_yr: f64 = 0.0;
+            let mut prev_acc = 0.0f32;
+            let mut dry_at: Option<usize> = None;
+            for (k, &(px, py)) in points.iter().enumerate() {
+                let pi = buf.idx(px, py);
+                let arid_here = matches!(
+                    buf.koppen[pi],
+                    crate::sim::koppen::BWH | crate::sim::koppen::BWK
+                        | crate::sim::koppen::BSH | crate::sim::koppen::BSK
+                );
+                let p_m = buf.precipitation[pi] / 1000.0;
+                // GAIN: only the catchment that JOINS at this cell, so the reach
+                // is not credited with its upstream area over and over.
+                let a = acc[pi] as f32;
+                let d_area_m2 = (a - prev_acc).max(0.0) * cell_area_km2 * 1.0e6;
+                prev_acc = a;
+                let coeff = if arid_here { RUNOFF_ARID } else { RUNOFF_HUMID };
+                vol_m3_yr += (d_area_m2 * p_m * coeff) as f64;
+                // LOSS: potential evaporation over what precipitation supplies.
+                // A crude temperature proxy for PET is the honest instrument here
+                // — phase 5 has no radiation budget — and it is only ever used to
+                // decide whether a dry channel survives, never to size a river.
+                let pet_m = (buf.temperature[pi].max(0.0) * 0.06).min(3.0);
+                let excess_m = (pet_m - p_m).max(0.0);
+                vol_m3_yr -= (loss_area_m2 * excess_m) as f64;
+                // A river may only DIE OF THIRST in a genuinely dry place. In a
+                // humid cell the gain dominates and this cannot trigger anyway;
+                // the guard is what stops a modelling slip from silently cutting
+                // rivers in a rainforest.
+                if vol_m3_yr <= 0.0 && arid_here { dry_at = Some(k); break; }
+            }
+            if let Some(k) = dry_at {
+                // Dried before it was ever a river: that is not a watercourse at
+                // all, it is a dry valley. The arid prune below already removes
+                // these; dropping it here keeps a 1-2 cell stub off the map.
+                if k < 3 { continue; }
+                points.truncate(k + 1);
+                is_mouth = false;   // it no longer reaches the sea
+                ends_dry = true;
+            }
+        }
 
         // Outlet = this segment's own downstream-most channel cell (the mouth for
         // a trunk, or the cell just before the confluence for a tributary), so a
@@ -685,7 +779,19 @@ pub fn extract_rivers(
         // regions keep their fine drainage. Never touches a river that reaches the
         // sea, nor any sizeable (order â‰¥ 3) river â€” trunks fed from wet uplands still
         // cross the desert to the coast (the Nile), so nothing is cut mid-course.
-        if !is_mouth && order <= 2 && arid_frac > 0.55 { continue; }
+        //
+        // A river the WATER BUDGET already truncated is exempt above order 1.
+        // This rule and the transmission-loss walk are the same physics stated
+        // twice — "an arid basin swallows its runoff" is precisely what the
+        // budget now computes — so applying both deletes exactly the wadis the
+        // budget just modelled, which is what it did on first measurement: a
+        // dried reach has `is_mouth == false`, low order and a ~100% arid course,
+        // so it matched this rule every time and the desert came out with no
+        // watercourses at all. The budget is the better instrument (it says WHERE
+        // the water runs out, not merely that it does), so it wins; order-1 rills
+        // are still dropped so a desert reads sparse rather than veined.
+        let pruned_as_arid = !is_mouth && order <= 2 && arid_frac > 0.55;
+        if pruned_as_arid && !(ends_dry && order >= 2) { continue; }
 
         // â”€â”€ Meander scale (gradient-gated) â”€â”€ mean channel gradient over the reach
         // in normalized-elevation units per cell: steep headwaters run straight
@@ -702,7 +808,10 @@ pub fn extract_rivers(
         let major = length >= major_len || order >= 4;
         // Navigable = enough discharge to float a barge (a real inland highway).
         let navigable = discharge >= threshold as f32 * 5.0 && width >= 1.8;
-        let tributary = !is_mouth;
+        // A river that dried up joins NOTHING — it is neither a trunk reaching
+        // the sea nor a tributary meeting a larger stream, so it must not be
+        // labelled one (confluence detection seeds settlement magnets off this).
+        let tributary = !is_mouth && !ends_dry;
 
         // â”€â”€ Mouth landform (trunks only): depositional DELTA on a flat shallow
         // coast vs drowned ESTUARY on a steeper one. â”€â”€
@@ -735,7 +844,7 @@ pub fn extract_rivers(
         // Braided anabranches on the widest, flattest reaches of a great river.
         let braids = build_braids(buf, &render, width, order, mseed ^ 0xB2A1);
 
-        rivers.push(River { points, width, discharge_m3s, major, navigable, mouth_kind, delta, tributary, order, meander, render, braids });
+        rivers.push(River { points, width, discharge_m3s, major, navigable, mouth_kind, delta, tributary, ends_dry, order, meander, render, braids });
     }
 
     rivers
@@ -1700,6 +1809,242 @@ mod tests {
              has to be the same `fill_depth` the lakes were detected with.");
     }
 
+    /// THE RULE, stated as a gate: **every river ends at the sea, at a lake, or
+    /// at a confluence — unless it EVAPORATES, which may only happen in a
+    /// genuinely dry climate.** A river stopping in open ground anywhere else is
+    /// the truncation artefact and must not exist.
+    ///
+    /// The fixture is a BANDED climate — a wet upland in the east draining west
+    /// across a hot desert belt to a coast — rather than the real phase-3 chain
+    /// (which is duplicated in three places already, rule 11, and must not gain a
+    /// fourth copy in a test) and rather than the uniform-BSK fixture the older
+    /// diagnostics use (on which every terminus is trivially "in a desert", so
+    /// the gate would assert nothing). Desert and humid side by side is what
+    /// makes the claim falsifiable.
+    ///
+    /// Grid size matters here and is not arbitrary: catchment gain scales with
+    /// cell AREA (cell²) while channel loss scales with cell LENGTH (cell¹), so a
+    /// coarse test grid makes one cell a 40,000 km² catchment and no stream can
+    /// ever dry. 600×300 keeps a cell near 67 km, which is coarse but still lets
+    /// a small desert catchment lose the argument.
+    fn banded_desert_world(w: u32, h: u32) -> WorldBuffer {
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x < 3 { terrain[i] = 0; elev[i] = 0.0; continue; }
+                // Slopes down to the western sea, so every river runs west and
+                // must cross the desert belt to reach it.
+                elev[i] = 0.05 + x as f32 * (0.9 / w as f32);
+            }
+        }
+        let mut buf = synth(w, h, terrain, elev);
+        let (mut kop, mut precip, mut temp) = (vec![0u8; n], vec![0.0f32; n], vec![0.0f32; n]);
+        let desert_lo = (w as f32 * 0.10) as u32;
+        let desert_hi = (w as f32 * 0.55) as u32;
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x >= desert_lo && x < desert_hi {
+                    kop[i] = crate::sim::koppen::BWH; precip[i] = 25.0; temp[i] = 33.0;
+                } else {
+                    kop[i] = crate::sim::koppen::CFB; precip[i] = 1400.0; temp[i] = 13.0;
+                }
+            }
+        }
+        buf.koppen = kop; buf.precipitation = precip; buf.temperature = temp;
+        buf
+    }
+
+    #[test]
+    fn every_river_ends_somewhere_or_dries_in_a_desert() {
+        let (w, h) = (600u32, 300u32);
+        let buf = banded_desert_world(w, h);
+        let wh = compute_world_hydrology(&buf, 0.004, ((w * h) as usize / 2000).max(20));
+        let rivers = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc,
+                                    &wh.hydro.filled, 0.8, 1.0, &wh.lakes, 0.004);
+        let (stubs, total) = dangling_stubs(&buf, &rivers, &wh.lakes);
+        let dry: Vec<&River> = rivers.iter().filter(|r| r.ends_dry).collect();
+
+        // A dried river must actually die in a DRY place — the flag may never
+        // become a licence to truncate a river anywhere else.
+        for r in &dry {
+            let &(mx, my) = r.points.last().unwrap();
+            let k = buf.koppen[buf.idx(mx, my)];
+            assert!(matches!(k, crate::sim::koppen::BWH | crate::sim::koppen::BWK
+                               | crate::sim::koppen::BSH | crate::sim::koppen::BSK),
+                "a river flagged `ends_dry` ended at Köppen {k} — evaporation is only \
+                 a legitimate terminus in an arid climate");
+        }
+        // `dangling_stubs` counts a dried river as a stub (it ends in open
+        // ground, which is the whole point), so the unexplained ones are what is
+        // left after accounting for them.
+        let stubs_not_dry = stubs.saturating_sub(dry.len());
+        println!("banded world: {total} rivers · {} end dry (desert) · {stubs} stub(s), \
+                  {stubs_not_dry} unexplained", dry.len());
+        assert!(!dry.is_empty(),
+            "no river dried up on a world with a hot desert belt across every \
+             drainage — the fixture cannot fail, so it proves nothing");
+        assert_eq!(stubs_not_dry, 0,
+            "{stubs_not_dry} river(s) end in open ground without evaporating. Every \
+             river must reach the sea, a lake or a confluence unless its channel \
+             genuinely dries up in a desert.");
+    }
+
+    /// THE NILE PROPERTY, and the reason this is a water budget rather than a
+    /// rule about deserts: a river fed by a large wet catchment CROSSES the same
+    /// desert that kills a small one, because it arrives carrying more than the
+    /// channel can lose. A blanket "delete rivers in deserts" rule passes the
+    /// gate above and fails this one.
+    #[test]
+    fn a_great_river_crosses_the_desert_that_kills_a_small_one() {
+        let (w, h) = (600u32, 300u32);
+        let buf = banded_desert_world(w, h);
+        let wh = compute_world_hydrology(&buf, 0.004, ((w * h) as usize / 2000).max(20));
+        let rivers = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc,
+                                    &wh.hydro.filled, 0.8, 1.0, &wh.lakes, 0.004);
+        // Upstream catchment carried at each river's own outlet, for the two groups.
+        let acc_of = |r: &River| -> f32 {
+            let &(x, y) = r.points.last().unwrap();
+            wh.hydro.acc[buf.idx(x, y)] as f32
+        };
+        let dried: Vec<f32> = rivers.iter().filter(|r| r.ends_dry).map(acc_of).collect();
+        let crossed: Vec<f32> = rivers.iter()
+            .filter(|r| !r.ends_dry && !r.tributary).map(acc_of).collect();
+        assert!(!dried.is_empty() && !crossed.is_empty(),
+            "need both a river that died and one that got through to compare \
+             (dried {}, crossed {})", dried.len(), crossed.len());
+        let mean = |v: &[f32]| v.iter().sum::<f32>() / v.len() as f32;
+        let (md, mc) = (mean(&dried), mean(&crossed));
+        println!("desert crossing: {} died (mean catchment {md:.0} cells) · \
+                  {} crossed (mean {mc:.0} cells)", dried.len(), crossed.len());
+        assert!(mc > md * 2.0,
+            "rivers that crossed the desert carry a mean catchment of {mc:.0} cells \
+             against {md:.0} for those that died — the survivors must be \
+             substantially larger, or the model is deleting rivers by climate \
+             rather than by water budget");
+    }
+
+    /// A HUMID world must never dry a river up — the desert mechanism has to be
+    /// inert where there is no desert, or it is just a licence to truncate.
+    #[test]
+    fn a_humid_world_never_dries_a_river_up() {
+        let (w, h) = (200u32, 120u32);
+        let n = (w * h) as usize;
+        let mut terrain = vec![1u8; n];
+        let mut elev = vec![0.0f32; n];
+        for y in 0..h {
+            for x in 0..w {
+                let i = (y * w + x) as usize;
+                if x < 3 { terrain[i] = 0; elev[i] = 0.0; continue; }
+                elev[i] = 0.05 + x as f32 * 0.0016;
+            }
+        }
+        let mut buf = synth(w, h, terrain, elev);
+        // Wet temperate everywhere: no cell can be arid, so nothing may dry.
+        buf.koppen = vec![crate::sim::koppen::CFB; n];
+        buf.precipitation = vec![1200.0; n];
+        buf.temperature = vec![12.0; n];
+        let wh = compute_world_hydrology(&buf, 0.004, ((w * h) as usize / 2000).max(20));
+        let rivers = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc,
+                                    &wh.hydro.filled, 1.2, 1.0, &wh.lakes, 0.004);
+        let dried = rivers.iter().filter(|r| r.ends_dry).count();
+        println!("humid world: {} rivers, {dried} dried", rivers.len());
+        assert!(rivers.len() > 5, "fixture produced too few rivers to measure");
+        assert_eq!(dried, 0,
+            "{dried} rivers dried up on a world with no arid cell anywhere — the \
+             transmission-loss model must be inert outside dry climates");
+    }
+
+    /// WHAT A RIVER ACTUALLY ENDS AT, by how VISIBLE that terminus is.
+    ///
+    /// `dangling_stubs` accepts a mouth at a lake of ANY size, so a river ending
+    /// at a one-cell lake satisfies the gate — and at world zoom a one-cell lake
+    /// is invisible, so the reader sees a river stopping in open ground. That is
+    /// the same invisible-shoreline failure as the pond/lake threshold mismatch,
+    /// moved into the lake's SIZE. This classifies every mouth so the question
+    /// "why does that river stop" is answered with a measurement instead of a
+    /// guess.
+    #[test]
+    #[ignore]
+    fn diag_river_mouth_visibility() {
+        use crate::sim::world_buffer::{WorldBuffer, ColumnSet};
+        use crate::db::schema;
+        use rusqlite::Connection;
+        for seed in [4242u64, 7, 99] {
+            let (w, h) = (600u32, 300u32);
+            let conn = Connection::open_in_memory().unwrap();
+            schema::create_tables(&conn).unwrap();
+            for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+                conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![k, v]).unwrap();
+            }
+            let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+            crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, 14);
+            crate::sim::elevation::generate_elevation(&mut buf, seed);
+            let n = buf.total();
+            buf.koppen = vec![crate::sim::koppen::BSK; n];
+            buf.precipitation = vec![340.0; n];
+            buf.temperature = vec![17.0; n];
+
+            let max_cells = ((w * h) as usize / 2000).max(20);
+            let wh = compute_world_hydrology(&buf, 0.004, max_cells);
+            let rivers = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc,
+                                        &wh.hydro.filled, 0.5, 1.0, &wh.lakes, 0.004);
+
+            // Lake cell -> that lake's own cell count, so a mouth can be classified
+            // by how big the water it reaches actually is.
+            let mut lake_size: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for lk in &wh.lakes {
+                for &(x, y) in &lk.cells { lake_size.insert(buf.idx(x, y), lk.cells.len()); }
+            }
+            let mut on_channel: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for (ri, r) in rivers.iter().enumerate() {
+                for &(x, y) in &r.points { on_channel.entry(buf.idx(x, y)).or_insert(ri); }
+            }
+
+            let (mut sea, mut big_lake, mut tiny_lake, mut confluence, mut nothing) = (0, 0, 0, 0, 0);
+            // A lake under this many cells cannot be seen at world zoom, so a river
+            // ending in one reads to the eye exactly like a river ending nowhere.
+            const VISIBLE_LAKE_CELLS: usize = 4;
+            for (ri, r) in rivers.iter().enumerate() {
+                let Some(&(mx, my)) = r.points.last() else { continue };
+                let i = buf.idx(mx, my);
+                if buf.terrain[i] == 0 { sea += 1; continue; }
+                if let Some(&sz) = lake_size.get(&i) {
+                    if sz >= VISIBLE_LAKE_CELLS { big_lake += 1 } else { tiny_lake += 1 }
+                    continue;
+                }
+                // A channel cell is always LAND (`is_channel` requires it), so a
+                // river that reaches the coast has its last point on the land side
+                // and is only recognisable by a SEA NEIGHBOUR. Counting that as a
+                // "confluence" is what made an earlier cut of this diagnostic
+                // report `sea 0` on every world — the classes have to be separated.
+                let (mut at_sea, mut joins, mut touches_tiny) = (false, false, false);
+                for dy in -1i32..=1 { for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 { continue; }
+                    let ni = buf.widx(mx as i32 + dx, my as i32 + dy);
+                    if let Some(&o) = on_channel.get(&ni) { if o != ri { joins = true; } }
+                    if buf.terrain[ni] == 0 { at_sea = true; }
+                    if let Some(&sz) = lake_size.get(&ni) {
+                        if sz >= VISIBLE_LAKE_CELLS { joins = true } else { touches_tiny = true }
+                    }
+                }}
+                if at_sea { sea += 1 }
+                else if joins { confluence += 1 }
+                else if touches_tiny { tiny_lake += 1 }
+                else { nothing += 1 }
+            }
+            let invisible = tiny_lake + nothing;
+            println!("seed {seed}: {} rivers · sea {sea} · lake(visible) {big_lake} · \
+                      confluence {confluence} || LOOKS TRUNCATED: tiny-lake {tiny_lake} + nowhere \
+                      {nothing} = {invisible} ({:.1}%)",
+                     rivers.len(), 100.0 * invisible as f32 / rivers.len().max(1) as f32);
+        }
+    }
+
     /// THE REAL-WORLD stub count. The synthetic endorheic fixture proves the
     /// MECHANISM; this proves it on a world built by the actual generator, with
     /// real plates, real elevation, real climate and real basins — which is what
@@ -2309,7 +2654,7 @@ mod tests {
         let river = River {
             discharge_m3s: 0.0,
             points: pts, width: 3.0, major: true, navigable: true, mouth_kind: 0,
-            delta: vec![], tributary: false, order: 5, meander: 1.0, render, braids: vec![],
+            delta: vec![], tributary: false, ends_dry: false, order: 5, meander: 1.0, render, braids: vec![],
         };
         let oxbows = extract_oxbows(&[river], &buf, &[]);
         for lk in &oxbows {

@@ -9,6 +9,7 @@ import type { EconChain, WorldGoodPrice, GoodAtlas, AtlasHub } from "@types";
 import { commodityHistory } from "@app/commodityHistory";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
+import { GoodIcon } from "./GoodIcon";
 
 /** 📖 Goods Codex — redesigned (UI/UX pass).
  *
@@ -146,7 +147,9 @@ export function GoodsCodexPanel() {
 
       {/* Identity */}
       <div style={{ padding: "2px 12px 6px", display: "flex", alignItems: "center", gap: 10 }}>
-        <span style={{ fontSize: 30, lineHeight: 1 }}>{m?.icon ?? "📦"}</span>
+        {codexGood
+          ? <GoodIcon name={codexGood} size={48} treatment="victorian" title={m?.name} />
+          : <span style={{ fontSize: 30, lineHeight: 1 }}>📦</span>}
         <div style={{ minWidth: 0 }}>
           <div style={{ color: "#eaf2fb", fontWeight: 700, fontSize: 15 }}>{m?.name ?? "—"}</div>
           <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "capitalize" }}>{subtitle}</div>
@@ -454,8 +457,10 @@ function ChipRow({ label, items, meta, onPick }: {
       {label && <span style={{ color: "#6a86a6", fontSize: 9, marginRight: 6 }}>{label}</span>}
       <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }}>
         {items.map((it) => (
-          <button key={it.id} data-no-drag onClick={() => onPick(it.id)} style={tag} title="Trace this good">
-            {meta(it.id).icon} {meta(it.id).name}{it.qty != null ? <span style={{ color: "#7fa0c0", marginLeft: 3 }}>×{it.qty}</span> : null}
+          <button key={it.id} data-no-drag onClick={() => onPick(it.id)}
+            style={{ ...tag, display: "inline-flex", alignItems: "center", gap: 4 }} title="Trace this good">
+            <GoodIcon name={it.id} size={16} />
+            {meta(it.id).name}{it.qty != null ? <span style={{ color: "#7fa0c0", marginLeft: 3 }}>×{it.qty}</span> : null}
           </button>
         ))}
       </span>

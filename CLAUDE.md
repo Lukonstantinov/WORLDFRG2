@@ -1367,7 +1367,24 @@ canvas/
                                   mask hasn't arrived
   PaintOverlay.ts               ← Brush preview, paint stamps
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
-  goodIcons.ts                  ← good → emoji/texture for overlays
+  goodIcons.ts                  ← EU4-style medallion for MAP overlays (`drawGoodIcon`,
+                                  radius-based, world-space) — untouched by the art pass below
+  goodArt.ts                    ← the 85-recipe illustration set (art redesign): `drawIcon`
+                                  (pixel treatment) / `drawIconVictorian` (ledger card) /
+                                  `drawGood` / `pixelize` / `drawMedallion`, one shape family
+                                  per good, no two goods share a picture. Separate from
+                                  `goodIcons.ts` because the two serve different contexts
+                                  (panel/ledger icons vs. a map medallion at arbitrary zoom)
+  goodIconCache.ts               ← offscreen-canvas cache for `goodArt.ts`, keyed
+                                  `${name}:${size}:${treatment}:${color}:${scale}` — `drawIcon`
+                                  allocates several offscreen canvases per call, too costly
+                                  for a list of 85
+  buildingArt.ts                 ← the 15 `SPRITE_MAP` building types, procedural
+                                  (`drawProcedural`), differentiated by architectural form
+                                  rather than palette — the art redesign's building pass
+  marketSquareArt.ts             ← the city MARKET SQUARE scene (`marketSquare`): stalls,
+                                  a culturally-mixed crowd, price chips — pure canvas,
+                                  driven by real hub state (see `ui/campaign/MarketSquare.tsx`)
 
 ui/SettingsPanel.tsx            ← ⚙ Appearance modal, THREE tabs: Map plates (the
                                   atlas-plate picker, §8.17 — the default tab),
@@ -1495,6 +1512,10 @@ ui/world/  — map & world
   useFloatingWindow.ts          ← Floating/dockable window hook
 
 ui/goods/  — goods
+  GoodIcon.tsx                   ← React wrapper over `canvas/goodArt.ts` (authored 2×,
+                                  displayed at half) — pixel treatment for inline list
+                                  icons, Victorian ledger treatment for hero/identity
+                                  icons ≥40px; never mixed within one screen
   GoodsEditor.tsx               ← Goods builder (distribution/value/bulk/perish + recipes)
   GoodsChainReview.tsx          ← Pre-generation planted-vs-manufactured review + recipe DAG
   GoodsBrowserPanel/GoodDetailPanel/GoodFlowPanel.tsx ← browser/detail/flow views
@@ -1546,7 +1567,13 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   frozen worldgen snapshot cannot do). Seeded from
                                   `selectedHub` on open, then never re-bound to it, so
                                   two markets can be read side by side
-  CityView.tsx · SettlementScene.tsx ← Isometric city view + scene
+  CityView.tsx · SettlementScene.tsx ← Isometric city view + scene, buildings drawn via
+                                  `canvas/buildingArt.ts`'s 15-type procedural set
+  MarketSquare.tsx               ← The market-square scene (`canvas/marketSquareArt.ts`)
+                                  mounted at the head of `CityMarketView` — stall keepers
+                                  from `detail.culture`/`.minorities`, wares ranked by
+                                  value on hand, chip prices from `price/base_value`, no
+                                  new IPC
   HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
                                   HousesPanel has a world ⚔ Feuds tab; the list is
                                   GROUPED BY TIER (Phase 1.1, Tier 3/4 collapsed by
@@ -1653,7 +1680,16 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   Change folder. A save whose world does not match the
                                   one open is shown but marked, never hidden
   YearChronicle.tsx             ← SHARED year-grouped expandable chronicle
-  cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art
+  cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art.
+                                  `cultureFigure.ts` draws an INDIVIDUAL (a `sex` axis,
+                                  per-person seed) — still the renderer for House
+                                  portraits/`HouseCompare`, deliberately NOT replaced by
+                                  the dress-plate art below, which has no sex axis
+  cultureDress.ts                ← the art redesign's per-PEOPLE bust + costume figure
+                                  (18 preset kits index-aligned to `cultureFigure.ts`
+                                  KITS, plus `deriveKit`/`creoleKit`/`resolveKit`/
+                                  `REGISTERS`/`kitForCulture`) — renders `PeoplesPanel`,
+                                  where there is no one head to draw as a person
 
 ui/heraldry/  — heraldry
   CoatOfArms.tsx                ← Deterministic house heraldry (houseColor + shield SVG)
@@ -4113,6 +4149,110 @@ regional slope was 14 m per cell against a 22 m bowl, so no closed basin ever
 formed and it passed either way. **Always verify a new gate fails on the
 unfixed code** (§8.23b's own rule): reverted, it reports 104 invisible cells
 and fails loudly; restored, 0.
+
+**AND A THIRD TIME, in the lake's SIZE — the gate was honest and measuring
+the wrong thing.** The user reported truncated rivers again with the stub
+count at a genuine 0/49, so the gate's definition of "ends properly" had to
+be wrong rather than the count. It was: `dangling_stubs` accepts a mouth at a
+lake of ANY size, so a river ending at a ONE-CELL lake satisfies it — and a
+one-cell lake is smaller than a pixel at world zoom. Worse, the asymmetry was
+built in on purpose: river widths are explicitly zoom-compensated so "even
+small streams stay visible", while a lake draws as bare `fillRect(x, y, 1, 1)`
+per cell with no minimum. So the river was widened to stay visible and its own
+terminus was allowed to vanish. `diag_river_mouth_visibility` classifies every
+mouth by how visible its terminus actually is and measures **6-9% of all
+rivers ending at something the reader cannot see** (3 per world across 3
+seeds).
+
+The fix is cartographic and belongs in the renderer, because the DATA was
+right all along — the lake exists, it is in the list, the panel will list it.
+A lake at or under `MIN_LAKE_SYMBOL_CELLS` also draws a disc of at least
+`MIN_LAKE_SYMBOL_R` scaled by the same `1/sqrt(zoom)` the rivers use, so a
+pond and the stream feeding it stay in proportion; the true per-cell footprint
+is still filled underneath, and zooming in hands the drawing back to the real
+cells the moment they are bigger than the minimum. Every atlas draws a small
+water body at a minimum symbol size for exactly this reason.
+
+**The generalisation, now paid for three times in one sitting:** each of these
+was the model holding a fact and the RENDER dropping it — a ponded cell no
+lake represents, a basin between two thresholds, a lake below one pixel. When
+a user reports something missing from the map and the data gate says it is
+present, suspect the render before re-tuning the generator, and **measure the
+symptom the user can actually see rather than the invariant that is
+convenient to assert.** Note also what has NO automated gate here: this
+codebase has no frontend rendering test beyond `tsc`, so the minimum-symbol
+rule is guarded by the diagnostic plus looking at it — stated plainly rather
+than dressed up with an assertion that would not exercise the canvas.
+
+---
+
+### 8.24a4 A river ends at the sea, a lake, a confluence — or it evaporates
+
+The rule, and the ONE legitimate exception, now stated in the code rather than
+implied: **every river must reach the sea, a lake or a confluence, unless its
+channel genuinely dries up in a desert** — the Sahara wadi, the Australian
+creek, the Tarim petering out into sand.
+
+Before this that exception could not be expressed. Discharge is ONE SCALAR per
+reach computed at the outlet (§8.24d), so flow could never decline along a
+course, and the only dry-climate handling was a whole-river prune
+(`!is_mouth && order <= 2 && arid_frac > 0.55 → continue`) that deletes a
+stream outright. So a desert river was ALL OR NOTHING: it either ran its full
+length to the sea or vanished entirely, and the commonest thing a desert river
+actually does — run a while, then dry up — had no representation at all.
+
+**The mechanism is a water budget, not a rule about deserts.** A per-reach walk
+from source to outlet in m³/yr: GAIN is the NEW catchment joining at each cell
+× its own runoff depth (`RUNOFF_ARID` 0.08 vs `RUNOFF_HUMID` 0.35, matching the
+lake balance's own split); LOSS is the wetted channel strip
+(`CHANNEL_LOSS_WIDTH_KM`, stated in km and converted per world per rule 25) ×
+the local evaporative excess `PET − P`, with PET a documented temperature proxy
+(phase 5 has no radiation budget, and it is only ever used to decide whether a
+dry channel survives, never to size a river). Where the budget goes negative
+**in an arid cell**, the reach is truncated there and flagged `River.ends_dry`.
+
+**The Nile falls out of the model instead of being special-cased**, which is the
+strongest evidence it is the right mechanism: a river fed from wet uplands
+arrives carrying a volume that dwarfs the per-cell loss and crosses the desert,
+while a stream raised IN the desert dies within a few cells. Measured on the
+banded fixture: 3 rivers died with a mean catchment of 199 cells, 22 crossed
+with a mean of 8,033 — a 40× separation. `a_great_river_crosses_the_desert_
+that_kills_a_small_one` asserts exactly that, and a blanket "delete rivers in
+deserts" rule passes the ends-somewhere gate while failing this one.
+
+**THE OLD PRUNE AND THE NEW BUDGET ARE THE SAME PHYSICS STATED TWICE, and
+applying both deleted every wadi the budget had just modelled.** First
+measurement after wiring the budget in: **0 rivers ended dry** on a world with
+a hot desert belt across every drainage. A dried reach has `is_mouth == false`,
+low order and a ~100% arid course, so it matched the arid prune every time.
+"An arid basin swallows its runoff" is precisely what the budget now computes,
+and the budget is the better instrument because it says WHERE the water runs
+out rather than merely that it does — so it wins, and the prune keeps only
+order-1 rills so a desert still reads sparse rather than veined. The gate
+caught this rather than passing vacuously, which is what the `!dry.is_empty()`
+assertion inside it exists for.
+
+**Two consequences that are easy to miss.** A dried river joins nothing, so it
+is neither a trunk nor a `tributary` (confluence detection seeds settlement
+magnets off that flag). And it needs its own RENDER: drawn as a plain solid
+line, a modelled terminus is pixel-for-pixel identical to the truncation
+artefact, so the lower course is drawn DASHED and fading — the atlas convention
+for an intermittent watercourse — and the reader can tell "this evaporates
+here" from "this was cut off for no reason". No playa symbol is drawn: the sim
+models no playa, and inventing one would be a claim the data cannot support.
+
+**Grid size is load-bearing in the fixture and is not arbitrary.** Catchment
+gain scales with cell AREA (cell²) while channel loss scales with cell LENGTH
+(cell¹), so on a coarse test grid one cell is a 40,000 km² catchment and no
+stream can ever dry — the mechanism is inherently weaker on coarse grids and
+stronger at real resolution. The banded fixture runs at 600×300 (~67 km/cell)
+for that reason; at 200 wide it would have passed while testing nothing.
+
+Gates: `every_river_ends_somewhere_or_dries_in_a_desert` (no unexplained stub;
+every `ends_dry` terminus is in a Köppen B cell), `a_great_river_crosses_the_
+desert_that_kills_a_small_one`, `a_humid_world_never_dries_a_river_up` (the
+mechanism must be INERT where there is no desert, or it is just a licence to
+truncate). All three verified failing before the fix.
 
 ---
 

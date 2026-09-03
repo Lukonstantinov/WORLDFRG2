@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useGoodsStore } from "@state/goodsStore";
 import { useUIStore } from "@state/uiStore";
+import { GoodIcon } from "./GoodIcon";
 import { goodCategory, CATEGORY_ORDER } from "@goods";
 import type { GoodSpec } from "@types";
 
@@ -102,7 +103,7 @@ function Column({ title, note, goods }: { title: string; note: string; goods: Go
               <span key={g.id} onClick={() => useUIStore.getState().setGoodDetail(g.id)}
                 style={{ ...chip(g.color), cursor: "pointer" }}
                 title={`${g.id} · value ${g.base_value} · bulk ${g.bulk ?? 1} — click for climates & heatmap`}>
-                <span>{g.icon}</span><span>{g.name}</span>
+                <GoodIcon name={g.id} color={g.color} size={16} /><span>{g.name}</span>
               </span>
             ))}
           </div>
@@ -154,7 +155,7 @@ function RecipeRow({ product, byId }: { product: GoodSpec; byId: Map<string, Goo
           <span key={inp.good} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
             {k > 0 && <span style={{ color: "#5a6a80", margin: "0 1px" }}>+</span>}
             <span style={chip(s?.color ?? "#c06060")} title={bad ? `${inp.good} — disabled or missing!` : inp.good}>
-              <span>{s?.icon ?? "❔"}</span>
+              <GoodIcon name={inp.good} color={s?.color} size={15} />
               <span style={{ color: bad ? "#e08080" : undefined }}>{trim(s?.name ?? inp.good)}</span>
               {inp.qty !== 1 && <span style={{ color: "#6a7a90", fontSize: 10 }}>×{round(inp.qty)}</span>}
             </span>
@@ -163,7 +164,7 @@ function RecipeRow({ product, byId }: { product: GoodSpec; byId: Map<string, Goo
       })}
       <span style={{ color: "#7a8aa0", margin: "0 4px", fontWeight: 700 }}>→</span>
       <span style={chip(product.color)} title={`${product.id} · value ${round(product.base_value)} · bulk ${round(product.bulk ?? 1)}`}>
-        <span>{product.icon}</span><span style={{ fontWeight: 600 }}>{trim(product.name)}</span>
+        <GoodIcon name={product.id} color={product.color} size={15} /><span style={{ fontWeight: 600 }}>{trim(product.name)}</span>
       </span>
       <span style={{ color: tierColor, fontSize: 10, marginLeft: 2 }}>· {tier}</span>
     </div>

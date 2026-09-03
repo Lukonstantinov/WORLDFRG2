@@ -176,6 +176,14 @@ function meanderPath(pts: [number, number][], seed: number, order: number, world
 // open water reads as clean, glinting water rather than a pale wash of the land
 // showing through (the "make lakes shinier" note).
 const LAKE_COLOR = "rgba(58, 176, 238, 0.86)";
+// A lake at or under this many cells gets a minimum drawn symbol (see the lake
+// render), because at world zoom its true footprint is smaller than a pixel and
+// the river ending in it then reads as a river ending nowhere. Above this size a
+// lake is always big enough to draw itself.
+const MIN_LAKE_SYMBOL_CELLS = 6;
+// Minimum drawn radius in world cells at scale 1, scaled by 1/sqrt(zoom) exactly
+// as the river widths are, so a pond and the stream feeding it stay in proportion.
+const MIN_LAKE_SYMBOL_R = 1.1;
 /** Oxbow / backwater lake — a stiller, weedier green-blue than open lake water. */
 const OXBOW_COLOR = "rgba(64, 150, 150, 0.72)";
 /** Lake fill by character: oxbow backwater, then a brine ramp toward the vivid
@@ -2281,6 +2289,38 @@ export class OverlayManager {
         ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
         ctx.fillStyle = lakeFill(lake);
         for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+        // ── A SMALL LAKE STILL HAS TO BE VISIBLE ─────────────────────────────
+        // A lake is drawn at its true footprint, one cell per fillRect — so a
+        // one-to-three-cell lake is at most a few pixels at world zoom, i.e.
+        // nothing. The river FEEDING it is zoom-compensated (see the width
+        // calculation below, which deliberately keeps small streams visible), so
+        // the reader gets a river that runs to a terminus that isn't drawn: it
+        // reads as a river stopping dead in open ground. That is the same
+        // invisible-shoreline failure as the pond/lake threshold mismatch
+        // (§8.24a3), moved into the lake's SIZE — measured at 6-9% of all rivers
+        // on real worlds (`diag_river_mouth_visibility`).
+        //
+        // Every real atlas draws a small water body at a MINIMUM SYMBOL SIZE for
+        // exactly this reason. The true footprint is still filled above, so this
+        // only ever ADDS the mark that scale would otherwise erase, and it uses
+        // the same `1/sqrt(scale)` compensation the rivers use so the two stay
+        // consistent with each other as the map zooms.
+        if (lake.cells.length <= MIN_LAKE_SYMBOL_CELLS) {
+          const lakeInv = 1 / Math.sqrt(this.currentScale);
+          // The footprint's own radius, so zooming IN hands the drawing back to
+          // the real cells rather than pinning a fixed blob over them.
+          const trueR = Math.sqrt(lake.cells.length / Math.PI);
+          const r = Math.max(trueR, MIN_LAKE_SYMBOL_R * lakeInv);
+          if (r > trueR) {
+            let sx = 0, sy = 0;
+            for (const [x, y] of lake.cells) { sx += x; sy += y; }
+            const cx = sx / lake.cells.length + 0.5;
+            const cy = sy / lake.cells.length + 0.5;
+            ctx.beginPath();
+            ctx.arc(cx, cy, r, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
         // SHEEN: a faint light-blue glint across the upper third of the basin so
         // open water reads as glossy/reflective rather than a flat blue slab.
         // Skip oxbows (weedy backwaters) — only open freshwater lakes glint.
@@ -2345,7 +2385,29 @@ export class OverlayManager {
         // winding channels rather than the straight diagonal grid-lines the
         // steepest-descent flow produces on flats.
         const mainPath = this.riverPath(river, i, ord);
-        strokeSmoothPath(ctx, mainPath, seamGap);
+        // ── AN EPHEMERAL DESERT RIVER IS DRAWN DASHED ────────────────────────
+        // `ends_dry` marks a watercourse whose channel loses more to its bed and
+        // the air than its catchment supplies, so it stops in open ground: a
+        // wadi. That is a MODELLED terminus, but drawn as a plain solid line it
+        // is pixel-for-pixel identical to the truncation artefact — the reader
+        // has no way to tell "this river evaporates here" from "this river was
+        // cut off for no reason". Dashing the lower course is the atlas
+        // convention for an intermittent stream and makes the difference
+        // legible; the fade carries the sense of a channel running out of water
+        // rather than ending at something.
+        if (river.ends_dry && mainPath.length >= 4) {
+          const cut = Math.floor(mainPath.length * 0.55);
+          strokeSmoothPath(ctx, mainPath.slice(0, cut + 1), seamGap);
+          ctx.save();
+          // Dash lengths are zoom-compensated like the width, so the pattern
+          // stays readable instead of collapsing to a solid line when zoomed out.
+          ctx.setLineDash([1.6 * inv, 1.3 * inv]);
+          ctx.globalAlpha *= 0.55;
+          strokeSmoothPath(ctx, mainPath.slice(cut), seamGap);
+          ctx.restore();
+        } else {
+          strokeSmoothPath(ctx, mainPath, seamGap);
+        }
         // MOUTH WIDENING: a river reaching the sea flares toward its outlet like a
         // real estuary. Draw the lower reach as nested, progressively wider (and
         // shorter, so closer to the mouth) sub-strokes — round caps blend them into a

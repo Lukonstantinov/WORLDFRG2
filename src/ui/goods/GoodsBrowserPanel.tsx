@@ -4,6 +4,7 @@ import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useViewportStore } from "@state/viewportStore";
 import { goodCategory, CATEGORY_ORDER } from "@goods";
+import { GoodIcon } from "./GoodIcon";
 
 /** Browsable catalogue of EVERY trade good, opened from the toolbar (independent
  *  of clicking the map). Pick a good → every place it originates (each producing
@@ -90,7 +91,7 @@ export function GoodsBrowserPanel() {
                     {items.map((g) => (
                       <div key={g} onClick={() => { setGood(g); setOrigin(null); setSelectedGood(g); }}
                         style={{ ...goodRow, background: good === g ? "#1a2c40" : "transparent" }}>
-                        <span>{goodMeta(g).icon}</span>
+                        <GoodIcon name={g} size={20} title={goodMeta(g).name} />
                         <span style={{ flex: 1, color: good === g ? "#e8d8b0" : "#c0d0e0",
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goodMeta(g).name}</span>
                       </div>
@@ -106,7 +107,10 @@ export function GoodsBrowserPanel() {
             {!good && <div style={emptyTxt}>Pick a good to see every place it comes from.</div>}
             {good && (
               <>
-                <div style={sectionHdr}>{goodMeta(good).icon} {goodMeta(good).name} — origins ({origins.length})</div>
+                <div style={{ ...sectionHdr, display: "flex", alignItems: "center", gap: 6 }}>
+                  <GoodIcon name={good} size={22} />
+                  <span>{goodMeta(good).name} — origins ({origins.length})</span>
+                </div>
                 {origins.length === 0 && <div style={emptyTxt}>Not produced anywhere in this world.</div>}
                 <div style={{ maxHeight: origin !== null ? 130 : 300, overflowY: "auto" }}>
                   {origins.map(({ hub, p }) => (
