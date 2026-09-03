@@ -1410,6 +1410,49 @@ pub(crate) const CAPACITY_BIND_DOSE: f32 = 0.0;
 /// the shipped, no-op setting — a guild is unbounded exactly as before this
 /// change, verified by `n_yards_guild_axis_at_infinity_is_a_noop`.
 pub(crate) const GUILD_CHARTER_RANGE_DAYS: f32 = f32::INFINITY;
+/// Small-city trade rescue, DOSE-WALKED (§2.4/§2.8). `dispatch`'s target
+/// shortlist is ranked by `gap * hub_pull(b)`, and `hub_pull` alone spans
+/// 1.0..HUB_PULL_MAX — so a small town (hub_pull ~1) can hold the single
+/// BEST raw arbitrage gap on a lane and still never place in gravity's top
+/// 3 on any seller's list, ever ("the cities are just dead on the map").
+/// Two direct fixes were tried and reverted first: removing the second
+/// `hub_pull` weighting entirely, and halving it via `.sqrt()` — both broke
+/// `simulate_decades_reports_dynamics`'s hard-asserted wealth bound (see the
+/// doc comment at the `targets.push` call site in `production.rs::dispatch`),
+/// because that weighting is real wealth-DISPERSION machinery, not a pure
+/// bug. This is the "genuinely different mechanism" instead: an ADDED 4th
+/// target slot carrying whichever reachable market held the single best
+/// UNWEIGHTED gap, fired probabilistically (`hash01(a, g, tick) < DOSE`) so
+/// it never replaces or reweights the existing gravity-ranked top 3 — pure
+/// addition, not substitution. At `DOSE = 1.0` (always fire) this measurably
+/// broke a SECOND, different gate: `econ_inheritance_rules_fragment_
+/// differently` inverted (partible's mean wealth per house rose ABOVE
+/// primogeniture's), because uniformly raising the trade floor for small
+/// towns lifts partible's many small firms' mean more than primogeniture's
+/// few large firms' — a structural tension with that gate's own premise, not
+/// a tuning miss. Measured dose walk (`econ_inheritance_rules_fragment_
+/// differently`'s partible-vs-primogeniture mean wealth, must stay
+/// partible < primogeniture):
+///
+///   dose 1.00  177444 vs 124510  INVERTED (fails)
+///   dose 0.30  237464 vs 200738  INVERTED (fails)
+///   dose 0.05  275001 vs 290246  correct order (passes)
+///
+/// `simulate_decades_reports_dynamics`'s sustained-richest figure stayed
+/// bit-identical to the pre-rescue baseline (278201) at 0.05 on the
+/// dynamics test's own reference world — this dose is low enough that it
+/// never actually fires there, and only engages on the larger/longer-run
+/// world `econ_inheritance...` exercises. Shipped at `0.05`: low enough to
+/// hold both gates, high enough to give an excluded small city a real
+/// (if infrequent) chance at every seller's dispatch rather than zero
+/// chance forever. Also moved `econ_fidelity_scorecard`'s price-gap ×
+/// distance from -0.061 to -0.064 (noise) and its large-world sibling from
+/// -0.061 to +0.031 (an improvement toward the historically-expected
+/// positive sign) — plausible, since routing SOME trade to small,
+/// out-of-the-way markets is closer to how real distance-decay integration
+/// works than gravity's winner-take-most shortlist. Raising the dose
+/// further, re-measuring both gates at each step, is real future work.
+pub(crate) const SMALL_CITY_RESCUE_DOSE: f32 = 0.05;
 /// W2, DOSE-WALKED: the fraction of landed cargo that goes to the carrying
 /// house's OWN depot at the destination (room permitting) instead of the
 /// undifferentiated city pool (F8). `0.0` ships as a true no-op — every

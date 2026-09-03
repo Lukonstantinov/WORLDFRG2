@@ -261,22 +261,57 @@ pub fn compute_orogeny_field(buf: &WorldBuffer, seed: u64, max_reach: u16) -> Op
         }
     }
 
-    while let Some(ci) = queue.pop_front() {
-        let d = dist[ci];
-        if d >= max_reach { continue; }
+    // A plain 4-connected BFS propagates in unit hops along only the axis
+    // directions, so its iso-distance contours are DIAMONDS (Manhattan
+    // distance), not circles — visible directly wherever `belt_profile`
+    // shades a compact, roughly-isolated source (a short relict-suture spine,
+    // a small island-arc segment) into sharp geometric rings instead of an
+    // organic massif. Fixed with a chamfer (3-4) distance transform: 8-
+    // connected propagation with orthogonal steps costing 3 and diagonal
+    // steps costing 4 (the classic cheap Euclidean approximation, ratio
+    // 4/3 ≈ 1.333 against √2 ≈ 1.414, ~6% worst-case error) via a bounded
+    // Dijkstra instead of a plain BFS queue — still linear in the reached
+    // cell count, not the whole grid, since propagation still stops at
+    // `max_reach` exactly as the BFS did. The scaled distance is divided
+    // back down by the orthogonal weight before being returned, so `dist`
+    // stays in the same CELL units `belt_profile`/`max_reach` already
+    // expect and every existing caller is unaffected — only the CONTOUR
+    // SHAPE changes, not the unit.
+    const ORTHO: u32 = 3;
+    const DIAG: u32 = 4;
+    let mut dist_scaled: Vec<u32> = vec![u32::MAX; n];
+    let mut heap: std::collections::BinaryHeap<std::cmp::Reverse<(u32, usize)>> =
+        std::collections::BinaryHeap::new();
+    for &ci in &queue {
+        dist_scaled[ci] = 0;
+        heap.push(std::cmp::Reverse((0, ci)));
+    }
+    let max_reach_scaled = max_reach as u32 * ORTHO;
+    while let Some(std::cmp::Reverse((d, ci))) = heap.pop() {
+        if d > dist_scaled[ci] || d >= max_reach_scaled { continue; }
         let cx = (ci % w as usize) as i32;
         let cy = (ci / w as usize) as i32;
-        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+        for &(dx, dy, step) in &[
+            (-1i32, 0i32, ORTHO), (1, 0, ORTHO), (0, -1, ORTHO), (0, 1, ORTHO),
+            (-1, -1, DIAG), (-1, 1, DIAG), (1, -1, DIAG), (1, 1, DIAG),
+        ] {
+            let ny = cy + dy;
+            if ny < 0 || ny >= h as i32 { continue; }
             let nx = buf.wrap_x(cx + dx);
-            let ny = (cy + dy).clamp(0, h as i32 - 1) as u32;
-            let ni = buf.idx(nx, ny);
-            if buf.terrain[ni] == 1 && dist[ni] > d + 1 {
-                dist[ni] = d + 1;
+            let ni = buf.idx(nx, ny as u32);
+            if buf.terrain[ni] != 1 { continue; }
+            let nd = d + step;
+            if nd < dist_scaled[ni] {
+                dist_scaled[ni] = nd;
                 setting[ni] = setting[ci];
                 age[ni] = age[ci];
-                queue.push_back(ni);
+                heap.push(std::cmp::Reverse((nd, ni)));
             }
         }
+    }
+    for i in 0..n {
+        dist[i] = if dist_scaled[i] == u32::MAX { u16::MAX }
+                  else { ((dist_scaled[i] + ORTHO / 2) / ORTHO).min(u16::MAX as u32) as u16 };
     }
 
     Some(OrogenyField { dist, setting, age })
@@ -569,6 +604,51 @@ mod tests {
         let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
         crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
         buf
+    }
+
+    /// The chamfer-distance fix's own gate: a plain 4-connected BFS propagates
+    /// distance only along the axis directions, so a compact point source's
+    /// iso-distance contour is a DIAMOND (Manhattan distance) — a diagonal cell
+    /// reads roughly 1.4x farther than an axis cell at the same real distance
+    /// (12 vs 8 cells here). The chamfer (3-4) transform brings that back in
+    /// line with the true Euclidean distance. Built on a hand-crafted buffer
+    /// with exactly ONE active-boundary seed cell (a real generated world's
+    /// boundary is a whole curve, whose own contour shape this test cannot
+    /// isolate) so the field is a clean point source.
+    #[test]
+    fn orogeny_distance_field_approximates_euclidean_not_manhattan() {
+        let w = 200u32;
+        let h = 100u32;
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        for t in buf.terrain.iter_mut() { *t = 1; }
+        let sx = 100u32;
+        let sy = 50u32;
+        let seed_idx = buf.idx(sx, sy);
+        let nb_idx = buf.idx(sx + 1, sy);
+        buf.plate_index[nb_idx] = 1; // gives the seed cell a differing neighbour plate
+        buf.boundary_type[seed_idx] = 1; // convergent — qualifies it as the one active seed
+
+        let field = compute_orogeny_field(&buf, 42, 60).expect("plate data is present");
+        let dist_at = |x: u32, y: u32| field.dist[buf.idx(x, y)];
+
+        let axis = dist_at(sx + 8, sy); // real distance 8
+        let diag = dist_at(sx + 6, sy + 6); // real distance 6*sqrt(2) ~= 8.49
+
+        assert!(axis <= 9, "axis-direction distance should read close to the real 8 cells, got {axis}");
+        assert!(diag <= axis + 2,
+            "diagonal distance {diag} strayed far from the axis distance {axis} at the same \
+             real distance — the iso-distance contour is diamond-shaped again, not round");
+        assert!(diag < 12,
+            "diagonal distance {diag} reached the OLD Manhattan-BFS value (12) the chamfer \
+             fix exists to avoid");
     }
 
     /// TECTONICS_AND_ISOLATION_PLAN.md Part B4's own claim: a relict suture never
