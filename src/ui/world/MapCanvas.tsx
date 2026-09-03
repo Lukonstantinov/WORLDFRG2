@@ -16,6 +16,27 @@ import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
 
+/** Route resolution for CAMPAIGN trade layers (Dynamic Trade Flow, Corridors,
+ *  and every `laneBetween`-fed overlay — merchant routes, futures lanes, the
+ *  Goods Atlas/Codex flow lines) used to reuse `bioParams.tradeReach`/
+ *  `maxCrossing` — the WORLDGEN Biological-step crossing preference (default
+ *  reach=1 "coastal+short", maxCrossing=0.12 of the map width), meant to
+ *  bound how many sea lanes worldgen's OWN trade-route graph synthesizes.
+ *  A campaign's own trade horizon is much wider (`TRADE_STAGING_AND_POSTS_
+ *  PLAN.md` §1.1 measures it at 0.24×world_w), so a real, already-realized
+ *  campaign flow longer than the worldgen bound could never resolve a route
+ *  here and always fell back to the dashed direct line — "trade routes read
+ *  as straight lines instead of following the coastline/rivers" for exactly
+ *  the longest, most interesting flows. This is a DISPLAY-ONLY lookup (it
+ *  finds the best physical path for a trade the sim already decided
+ *  happened; it creates no new trade and changes no economics), so it asks
+ *  unrestricted: reach 0 ("global" — no open-water-crossing cap) with a
+ *  maxCrossing that's moot at reach 0. Worldgen's own trade-route graph
+ *  (Toolbar → Trade Goods → routes) still honours `bioParams` — this only
+ *  changes how a campaign's own realized flows are drawn. */
+const CAMPAIGN_ROUTE_REACH = 0;
+const CAMPAIGN_ROUTE_MAX_CROSSING = 1.0;
+
 /** Largest box with the world's aspect ratio that fits inside the pane. */
 function fitBox(paneW: number, paneH: number, gridW: number, gridH: number) {
   if (paneW <= 0 || paneH <= 0 || gridW <= 0 || gridH <= 0) {
@@ -243,16 +264,22 @@ export function MapCanvas() {
       }
     }
 
-    // Clip to the logical world bounds (widened to the full visible span of
-    // copies). Tiles are 128×128, so the world grid (e.g. 3600×1800) is
-    // covered by tiles that extend past the edges (29×15 → 3712×1920); the
-    // last partial tile row/column is default-sea and otherwise bleeds in as
-    // a thin ocean strip at the edge of EVERY copy. Clipping hides that
-    // padding so the map ends precisely at the template each time it wraps.
+    // Clip to the logical world bounds — PER COPY, not one rect spanning the
+    // whole kMin..kMax range. Tiles are 128×128, so the world grid (e.g.
+    // 3600×1800) is covered by tiles that extend past the edges (29×15 →
+    // 3712×1920); the last partial tile row/column is default-sea and
+    // otherwise bleeds in as a thin ocean strip at the edge of EVERY copy —
+    // including the INTERNAL seams between adjacent copies, which a single
+    // wide rect only ever excludes at its own two outer edges. One rect per
+    // copy in the same path unions correctly under the canvas's default
+    // nonzero winding rule (all rects wind the same way), so this is the
+    // one-line difference from the old single-rect clip.
     ctx.save();
     if (m) {
       ctx.beginPath();
-      ctx.rect(kMin * m.grid_width, 0, (kMax - kMin + 1) * m.grid_width, m.grid_height);
+      for (let k = kMin; k <= kMax; k++) {
+        ctx.rect(k * m.grid_width, 0, m.grid_width, m.grid_height);
+      }
       ctx.clip();
     }
 
@@ -964,14 +991,14 @@ export function MapCanvas() {
     let alive = true;
     Promise.all(flowHighlight.map((s) =>
       computeCoarseRoute([s.ax, s.ay], [s.bx, s.by], rivers.map((r) => ({ points: r.points })),
-        bioParams.tradeReach, bioParams.maxCrossing).catch(() => [] as [number, number][]),
+        CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING).catch(() => [] as [number, number][]),
     )).then((paths) => {
       if (!alive) return;
       om.setFlowHighlightPaths(paths);
       requestRender();
     });
     return () => { alive = false; };
-  }, [flowHighlight, meta, campaignSnapshot?.active, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [flowHighlight, meta, campaignSnapshot?.active, rivers, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Every OTHER lane the map draws — merchant routes, a house's trading web,
   // futures lanes, Goods Atlas flows — goes through `laneBetween` too, and so
@@ -999,7 +1026,7 @@ export function MapCanvas() {
         // and caching it is what stops this re-fetching the same dead pair on
         // every poll. That lane keeps the dashed fallback (rule 35).
         path: await computeCoarseRoute(want.a, want.b, rv,
-          bioParams.tradeReach, bioParams.maxCrossing).catch(() => [] as [number, number][]),
+          CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING).catch(() => [] as [number, number][]),
       })));
       if (!alive) return;
       if (om.setLaneRoutes(resolved)) requestRender();
@@ -1042,14 +1069,14 @@ export function MapCanvas() {
     // burst into ONE fetch after the year settles, so it never stalls the year-tick
     // frame (the year-start lag). ~400 ms is imperceptible when you pause to look.
     const t = window.setTimeout(() => {
-      campaignGetTradeFlow(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
+      campaignGetTradeFlow(rivers.map((r) => ({ points: r.points })), CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING)
         .then((trunks) => {
           om.drawDynamicFlow(trunks, meta.grid_width);
           requestRender();
         }).catch(() => {});
     }, 400);
     return () => window.clearTimeout(t);
-  }, [overlayVisibility.dynamicFlow, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [overlayVisibility.dynamicFlow, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Caravan corridors — long river/terrain-routed hauls owned by houses, strung
   // with waystations. Recomputed on the year tick (like the dynamic flow).
@@ -1066,14 +1093,14 @@ export function MapCanvas() {
     // A trailing debounce collapses a fast-forward burst into one recompute so it
     // stops stuttering every year. (Superseded later by the event-driven corridor cache.)
     const t = window.setTimeout(() => {
-      campaignGetCorridors(rivers.map((r) => ({ points: r.points })), bioParams.tradeReach, bioParams.maxCrossing)
+      campaignGetCorridors(rivers.map((r) => ({ points: r.points })), CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING)
         .then((corridors) => {
           om.drawTradeCorridors(corridors, meta.grid_width);
           requestRender();
         }).catch(() => {});
     }, 400);
     return () => window.clearTimeout(t);
-  }, [overlayVisibility.campaignCorridors, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, bioParams.tradeReach, bioParams.maxCrossing, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [overlayVisibility.campaignCorridors, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, rivers, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // States (§3.3) — a tier 1-2 city's own writ, redrawn on year boundaries. City
   // tier moves monthly and province holders move yearly, so a year-granularity
