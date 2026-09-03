@@ -143,11 +143,15 @@ export class TileManager {
     gridWidth: number, gridHeight: number,
     scale = 1,
   ): Promise<void> {
-    const maxTx = Math.ceil(gridWidth / TILE_SIZE) - 1;
     const maxTy = Math.ceil(gridHeight / TILE_SIZE) - 1;
-    const cTxMin = Math.max(0, txMin);
+    // X is NOT clamped — the world is cylindrical (rule 6) and the backend
+    // (`get_tiles_packed`) now wraps an out-of-range tx onto its real column,
+    // so a viewport panned past either edge keeps fetching real tiles instead
+    // of hitting a void (EU4-style infinite horizontal scroll). Y still
+    // clamps: the sim clamps Y at the poles, there is nothing to wrap onto.
+    const cTxMin = txMin;
+    const cTxMax = txMax;
     const cTyMin = Math.max(0, tyMin);
-    const cTxMax = Math.min(maxTx, txMax);
     const cTyMax = Math.min(maxTy, tyMax);
 
     if (cTxMin > cTxMax || cTyMin > cTyMax) return;

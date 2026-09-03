@@ -290,7 +290,7 @@ function QuayColumn({ quays, side, openCity, setOpenCity, icon, label, focus, la
               <span style={{ flex: 1, color: "#cfe0f4", fontWeight: 600, overflow: "hidden",
                 textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{q.city}</span>
               {q.eta !== null && <span style={{ color: C.inkDim, fontSize: 8 }}>{"\u23F3"}{q.eta}d</span>}
-              <span style={{ fontSize: 9 }}>{q.sea ? "\u26F5" : "\u{1F42B}"}</span>
+              <span style={{ fontSize: 9 }}>{q.sea ? "\u26F5" : q.river ? "\u{1F6F6}" : "\u{1F42B}"}</span>
               {q.inflight > 0 && (
                 <span style={{ color: C.inkDim, fontSize: 8 }} title="cargoes in flight on this lane">
                   ×{q.inflight}
@@ -363,7 +363,7 @@ function DealRow({ s, side, icon, label }: {
           </span>
         )}
         <span style={{ flex: 1 }} />
-        <span>{s.sea ? "⛵" : "🐫"}</span>
+        <span>{s.sea ? "⛵" : s.river ? "\u{1F6F6}" : "🐫"}</span>
         <span style={{ color: C.faint }}>{fmt(s.value)}</span>
       </div>
     </div>
@@ -391,6 +391,7 @@ type Quay = {
   /** Soonest ETA among in-flight cargoes, or null when everything here has landed. */
   eta: number | null;
   sea: boolean;
+  river: boolean;
   /** Distinct in-flight CARGOES on this lane. Deliberately not called vessels — one
    *  shipment consumes one fleet slot whatever its size, so a cargo count is the only
    *  honest figure until vessels are real. */
@@ -402,11 +403,12 @@ function quaysOf(rows: ShipmentRow[], focus: string | null): Quay[] {
   const m = new Map<string, Quay>();
   for (const r of rows) {
     if (focus && r.good !== focus) continue;
-    const q = m.get(r.other) ?? { city: r.other, lines: [], units: 0, value: 0, eta: null, sea: false, inflight: 0 };
+    const q = m.get(r.other) ?? { city: r.other, lines: [], units: 0, value: 0, eta: null, sea: false, river: false, inflight: 0 };
     q.lines.push(r);
     q.units += r.amount;
     q.value += r.value;
     q.sea = q.sea || r.sea;
+    q.river = q.river || !!r.river;
     if (r.eta_days && r.eta_days > 0) {
       q.inflight += 1;
       q.eta = q.eta === null ? r.eta_days : Math.min(q.eta, r.eta_days);

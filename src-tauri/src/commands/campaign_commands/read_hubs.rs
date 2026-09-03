@@ -158,7 +158,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         ShipmentRow {
             owner: owner_name(s.owner), color: owner_color(s.owner), is_guild: owner_is_guild(s.owner),
             other: cname(other), good: sim.goods[g].name.clone(), amount: s.amount,
-            price: hub.price[g] / base, value: s.amount * hub.price[g], sea: s.sea,
+            price: hub.price[g] / base, value: s.amount * hub.price[g], sea: s.sea, river: s.river,
             returning_home: s.phase == 1,
             // The price the cargo actually left at — 0 on a pre-existing save whose
             // in-flight legs predate the field, which the view renders as "—" rather
@@ -186,7 +186,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         ShipmentRow {
             owner: owner_name(r.owner), color: owner_color(r.owner), is_guild: owner_is_guild(r.owner),
             other: cname(other), good: sim.goods[g].name.clone(), amount: r.amount,
-            price: hub.price[g] / base, value: r.amount * r.price, sea: r.sea, returning_home: false,
+            price: hub.price[g] / base, value: r.amount * r.price, sea: r.sea, river: r.river, returning_home: false,
             deal_price: r.price / base,
             eta_days: 0,
             age_days: sim.tick.saturating_sub(r.tick),

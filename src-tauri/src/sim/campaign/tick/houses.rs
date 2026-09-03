@@ -217,6 +217,9 @@ impl CampaignSim {
             }
             self.contracts[ci].last_fulfilled = tick;
             let sea = need_sea; // tag the in-transit leg as a sea voyage when one exists
+            // DISPLAY-only (see production.rs's own doc comment on this same split):
+            // a land leg between two river-connected hubs travelled by river barge.
+            let river = need_land && !sea && self.hubs[src].river && self.hubs[buyer].river;
             if sunk > 0 {
                 let gn = self.goods[g].name.clone();
                 let txt = format!("{} of {} {} convoys carrying {} are lost en route to {}",
@@ -262,14 +265,14 @@ impl CampaignSim {
             self.in_transit.push(InTransit {
                 from: src as u32, to: buyer as u32, good: g, amount: delivered_qty,
                 eta_tick: tick + (days.ceil() as u32).max(1),
-                owner: seller as i32, sea, river: false, phase: 1, home: -1, // one-way: no return leg
+                owner: seller as i32, sea, river, phase: 1, home: -1, // one-way: no return leg
                 contract: true, // its vessel is held by the standing contract reservation
                 price: pt,
                 local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
-            self.log_trade(src as u32, buyer as u32, g, delivered_qty, seller as i32, sea, pt);
+            self.log_trade(src as u32, buyer as u32, g, delivered_qty, seller as i32, sea, river, pt);
             self.contracts[ci].delivered += delivered_qty;
         }
         for &ci in remove.iter().rev() { self.contracts.remove(ci); }

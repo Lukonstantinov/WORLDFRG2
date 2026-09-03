@@ -149,94 +149,109 @@ export function HousesPanel() {
   const nHouses = active.filter((h) => !h.is_guild).length;
   const nGuilds = active.filter((h) => h.is_guild).length;
 
-  const renderHouseCard = (h: HouseBrief, i: number) => (
-    <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)} title="Open this family's detail">
-      <CoatOfArms name={h.name} size={30} guild={h.is_guild} />
+  const fmtWealth = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+
+  const renderHouseCard = (h: HouseBrief, i: number) => {
+    const accent = h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888");
+    const sea = h.fleet_sea ?? 0, river = h.fleet_river ?? 0, car = h.fleet_caravan ?? 0;
+    const fleetTotal = sea + river + car;
+    return (
+    <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)}
+      onMouseEnter={(e) => { e.currentTarget.style.background = "#152234"; e.currentTarget.style.borderColor = "#2a3f5a"; }}
+      onMouseLeave={(e) => { e.currentTarget.style.background = "#101a26"; e.currentTarget.style.borderColor = "#1c2c3f"; }}
+      title="Open this family's detail">
+      {/* A left accent bar carries the house's own colour the instant the eye lands
+          on the card — identity before the reader even reaches the coat of arms. */}
+      <span style={{ position: "absolute", left: 0, top: 6, bottom: 6, width: 3, borderRadius: 2, background: accent }} />
+      <CoatOfArms name={h.name} size={32} guild={h.is_guild} />
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-          {/* Colour chip — vivid for private houses, dull for civic guilds */}
-          <span style={{ width: 9, height: 9, borderRadius: 2, background: h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888"), flex: "0 0 auto", alignSelf: "center" }} />
-          {h.owns_bank && <span title="Owns a chartered bank" style={{ fontSize: 10 }}>🏦</span>}
+        {/* ── IDENTITY ROW: name is the loudest thing on the card ── */}
+        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
           {!h.is_guild && h.tier ? (
             <span title={`${TIER_META[tierOf(h)].name} · standing ${((h.standing ?? 0) * 100).toFixed(0)}%`}
-              style={{ fontSize: 10, color: "#c9a227" }}>{TIER_META[tierOf(h)].glyph}</span>
+              style={{ fontSize: 11, color: "#c9a227", flex: "0 0 auto" }}>{TIER_META[tierOf(h)].glyph}</span>
           ) : null}
-          <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12,
-            textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227" }}>{h.name}</span>
-          {h.coin_name && <CoinIcon issuer={h.name} value={h.coin_value} size={14} title={`Mints the ${h.coin_name}`} />}
-          {h.is_guild && <span title="A civic Merchant Guild — acts in its home city's interest" style={{ fontSize: 9, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px" }}>GUILD</span>}
-          <span style={{ color: "#6a86a6", fontSize: 9 }}>· {h.home_name}</span>
+          <span style={{ color: "#f0e4c8", fontWeight: 700, fontSize: 13, lineHeight: 1.2,
+            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+            textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227", textUnderlineOffset: 2 }}>
+            {h.name}
+          </span>
+          {h.owns_bank && <span title="Owns a chartered bank" style={{ fontSize: 10.5, flex: "0 0 auto" }}>🏦</span>}
+          {h.coin_name && <CoinIcon issuer={h.name} value={h.coin_value} size={13} title={`Mints the ${h.coin_name}`} />}
+          {h.is_guild && <span title="A civic Merchant Guild — acts in its home city's interest"
+            style={{ fontSize: 8.5, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px", flex: "0 0 auto" }}>GUILD</span>}
           <span style={{ flex: 1 }} />
-          {h.dominant && <span title="Controls its seat city (>=50% of its trade)" style={{ fontSize: 10 }}>⚖</span>}
-          {h.political_power > 0.5 && <span title="A leading political power" style={{ fontSize: 10 }}>👑</span>}
+          {h.dominant && <span title="Controls its seat city (>=50% of its trade)" style={{ fontSize: 10.5, flex: "0 0 auto" }}>⚖</span>}
+          {h.political_power > 0.5 && <span title="A leading political power" style={{ fontSize: 10.5, flex: "0 0 auto" }}>👑</span>}
         </div>
-        <div style={{ color: "#9ab0c8", fontSize: 10 }}>
-          {h.head_name} · gen. {h.generation} · led {h.head_age}y
+        {/* ── META ROW: who leads it, where, wealth — the second-loudest facts ── */}
+        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 2, fontSize: 10.5 }}>
+          <span style={{ color: "#8fa6be" }}>{h.head_name}</span>
+          <span style={{ color: "#465870" }}>gen.{h.generation} · led {h.head_age}y</span>
+          <span style={{ color: "#3e5068" }}>·</span>
+          <span style={{ color: "#7a90a8" }}>{h.home_name}</span>
+          <span style={{ flex: 1 }} />
+          <span style={{ color: "#e0c060", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtWealth(h.wealth)}</span>
         </div>
-        {/* Trades the house controls — with good icons */}
-        {h.specialties.length > 0 && (
-          <div style={{ color: "#cdbb88", fontSize: 10, marginTop: 1, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
-            {h.specialties.map((g) => (
-              <span key={g} title={g} style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
-                <span style={{ fontSize: 11 }}>{goodIcon(g)}</span>{clarifyGemLabel(g, h.gem_variety)}
+        {/* Wealth bar — a background-weight cue under the meta row, not the very
+            last, easiest-to-miss line of a six-line stack. */}
+        <div style={{ height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
+          <div style={{ width: `${(h.wealth / maxWealth) * 100}%`, height: "100%",
+            background: `linear-gradient(90deg, ${accent}99, #c9a227)` }} />
+        </div>
+        {/* ── FACTS: every "known for / carries / holds" line collapsed into one
+            wrapping row of chips, instead of five separate stacked sentences ── */}
+        {(h.top_goods?.length || h.specialties.length || h.monopolies.length || fleetTotal > 0
+          || h.offices?.length || h.rivals.length) ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
+            {h.top_goods && h.top_goods.length > 0 && (
+              <span style={{ ...chip, color: "#a8dcb4", borderColor: "#1e3a2a" }}
+                title="Top goods this family is known for exporting (by profit)">
+                {h.top_goods.slice(0, 3).map((g) => `${goodIcon(g)} ${clarifyGemLabel(g, h.gem_variety)}`).join("  ")}
+              </span>
+            )}
+            {h.specialties.filter((g) => !h.top_goods?.includes(g)).slice(0, 3).map((g) => (
+              <span key={g} style={{ ...chip, color: "#d8c896" }} title={`Specialises in ${g}`}>
+                {goodIcon(g)} {clarifyGemLabel(g, h.gem_variety)}
               </span>
             ))}
+            {h.monopolies.map(([g, s]) => (
+              <span key={g} style={{ ...chip, color: "#f0c878", borderColor: "#3a2e14", background: "#180f06" }}
+                title={`Holds ${Math.round(s * 100)}% of the world's ${g} trade`}>
+                {goodIcon(g)} {Math.round(s * 100)}% {g}
+              </span>
+            ))}
+            {fleetTotal > 0 && (
+              <span style={chip} title="Transport capital — each vessel carries one shipment at a time">
+                {sea > 0 && `🚢${sea} `}{river > 0 && `🛶${river} `}{car > 0 && `🐫${car}`}
+              </span>
+            )}
+            {h.offices && h.offices.length > 0 && (
+              <span style={{ ...chip, color: "#c8a8e0", borderColor: "#2e2244" }}
+                title={`Offices abroad: ${h.offices.map(([nm]) => nm).join(", ")}`}>
+                🏢 {h.offices.length} office{h.offices.length > 1 ? "s" : ""}
+              </span>
+            )}
+            {h.rivals.length > 0 && (
+              <span style={{ ...chip, color: "#e0a89a", borderColor: "#3a2420" }}
+                title={`Feuding: ${h.rivals.join(", ")}`}>
+                ⚔ {h.rivals.length} rival{h.rivals.length > 1 ? "s" : ""}
+              </span>
+            )}
           </div>
-        )}
-        {h.top_goods && h.top_goods.length > 0 && (
-          <div style={{ color: "#8fbf9a", fontSize: 10, marginTop: 1 }} title="Top goods this family is known for exporting (by profit)">
-            known for {h.top_goods.map((g) => `${goodIcon(g)} ${clarifyGemLabel(g, h.gem_variety)}`).join(" · ")}
-          </div>
-        )}
-        {h.monopolies.length > 0 && (
-          <div style={{ color: "#e0b060", fontSize: 10 }}>
-            {h.monopolies.map(([g, s]) => `${goodIcon(g)} ${g} ${Math.round(s * 100)}%`).join(" · ")} of the trade
-          </div>
-        )}
-        {/* Cities this house trades with (seat first) */}
+        ) : null}
+        {/* Cities traded with — kept as its own quiet line (a list of place names
+            reads better unwrapped than squeezed into a chip). */}
         {h.cities && h.cities.length > 0 && (
-          <div style={{ color: "#88a8c8", fontSize: 9, marginTop: 1 }}>
+          <div style={{ color: "#5e7692", fontSize: 9, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+            title={h.cities.join(", ")}>
             🏙 {h.cities.slice(0, 6).join(", ")}{h.cities.length > 6 ? ` +${h.cities.length - 6}` : ""}
           </div>
         )}
-        {/* Fleet — each vessel is one concurrent shipment the house can run */}
-        {(() => {
-          const sea = h.fleet_sea ?? 0, river = h.fleet_river ?? 0, car = h.fleet_caravan ?? 0;
-          if (sea + river + car === 0) return null;
-          const parts: string[] = [];
-          if (sea) parts.push(`🚢 ${sea} ship${sea > 1 ? "s" : ""}`);
-          if (river) parts.push(`🛶 ${river} boat${river > 1 ? "s" : ""}`);
-          if (car) parts.push(`🐫 ${car} caravan${car > 1 ? "s" : ""}`);
-          return (
-            <div style={{ color: "#a0b8c8", fontSize: 9, marginTop: 1 }}
-              title="Transport capital — each vessel carries one shipment at a time">
-              {parts.join(" · ")}
-            </div>
-          );
-        })()}
-        {/* Foreign offices — footholds in other cities (−5% on goods bought there) */}
-        {h.offices && h.offices.length > 0 && (
-          <div style={{ color: "#c8a8e0", fontSize: 9, marginTop: 1 }}
-            title="Offices abroad — each gives −5% on goods bought there and a base to trade from">
-            🏢 offices: {h.offices.map(([nm]) => nm).slice(0, 6).join(", ")}
-            {h.offices.length > 6 ? ` +${h.offices.length - 6}` : ""}
-          </div>
-        )}
-        {h.rivals.length > 0 && (
-          <div style={{ color: "#c98", fontSize: 9 }}>⚔ rivals: {h.rivals.slice(0, 3).join(", ")}</div>
-        )}
-        {/* Wealth bar */}
-        <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
-          <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden" }}>
-            <div style={{ width: `${(h.wealth / maxWealth) * 100}%`, height: "100%", background: "#c9a227" }} />
-          </div>
-          <span style={{ color: "#c9a227", fontSize: 9, minWidth: 40, textAlign: "right" }}>
-            {h.wealth >= 1000 ? `${(h.wealth / 1000).toFixed(1)}k` : h.wealth.toFixed(0)}
-          </span>
-        </div>
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
@@ -248,20 +263,20 @@ export function HousesPanel() {
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
       {/* Houses vs Guilds tabs */}
-      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 2, padding: "0 10px", borderBottom: "1px solid #1e2e42" }}>
         {([["houses", `👑 Houses (${nHouses})`], ["guilds", `🏛 Guilds (${nGuilds})`],
            ["feuds", "⚔ Feuds"]] as const).map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
-            style={{ padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: tab === id ? 700 : 400,
-              color: tab === id ? "#cfe2f6" : "#6a86a6",
-              borderBottom: tab === id ? "2px solid #3a80c0" : "2px solid transparent" }}>
+            style={{ padding: "6px 10px", cursor: "pointer", fontSize: 11.5, fontWeight: tab === id ? 700 : 400,
+              color: tab === id ? "#f0e4c8" : "#6a86a6", transition: "color 0.12s",
+              borderBottom: tab === id ? "2px solid #c9a227" : "2px solid transparent" }}>
             {lbl}
           </div>
         ))}
         <span style={{ flex: 1 }} />
         <div data-no-drag onClick={() => setCompareOpen(true)} title="Compare two houses side by side"
-          style={{ padding: "3px 8px", cursor: "pointer", fontSize: 11, color: "#cfe2f6",
-            border: "1px solid #2e4864", borderRadius: 4, marginBottom: 3 }}>
+          style={{ padding: "3px 9px", cursor: "pointer", fontSize: 10.5, color: "#cfe2f6",
+            border: "1px solid #2e4864", borderRadius: 5, marginBottom: 4, background: "#101c28" }}>
           ⚖ Compare
         </div>
       </div>
@@ -290,13 +305,19 @@ export function HousesPanel() {
             const collapsed = collapsedTiers[t];
             return (
               <div key={`tier-${t}`}>
+                {/* A filled bar, not a thin bottom-rule — the section that answers
+                    "who has the power at a glance" deserves more weight than the
+                    cards it groups, not less. */}
                 <div data-no-drag onClick={() => toggleTier(t)} title={meta.band}
-                  style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-                    margin: "8px 0 3px", padding: "2px 4px", borderBottom: "1px solid #1e2e42" }}>
-                  <span style={{ color: "#c9a227", fontSize: 11 }}>{meta.glyph}</span>
-                  <span style={{ color: "#9ab0c8", fontSize: 10, fontWeight: 700, letterSpacing: 0.3 }}>
-                    TIER {t} · {meta.name.toUpperCase()} ({group.length})
+                  style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
+                    margin: "10px 0 6px", padding: "5px 9px", borderRadius: 6,
+                    background: t === 1 ? "linear-gradient(90deg, #1c1608, #120e06)" : "#0e1622",
+                    border: `1px solid ${t === 1 ? "#3a2e10" : "#1a2838"}` }}>
+                  <span style={{ color: "#c9a227", fontSize: 12 }}>{meta.glyph}</span>
+                  <span style={{ color: t === 1 ? "#e8d090" : "#9ab0c8", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>
+                    {meta.name.toUpperCase()}
                   </span>
+                  <span style={{ color: "#4e6480", fontSize: 9.5, fontWeight: 400 }}>({group.length})</span>
                   <span style={{ flex: 1 }} />
                   <span style={{ color: "#5a6a7e", fontSize: 9 }}>{meta.band}</span>
                   <span style={{ color: "#5a6a7e", fontSize: 9 }}>{collapsed ? "▸" : "▾"}</span>
@@ -310,15 +331,16 @@ export function HousesPanel() {
         )}
         {gone.length > 0 && (
           <>
-            <div style={{ color: "#5a6a7e", fontSize: 9, margin: "8px 0 2px", textTransform: "uppercase" }}>
-              Fallen houses ({gone.length})
+            <div style={{ color: "#5a6a7e", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4,
+              margin: "12px 0 6px", padding: "0 2px", textTransform: "uppercase" }}>
+              🪦 Fallen houses ({gone.length})
             </div>
             {gone.map((h, i) => (
-              <div key={"d" + i} style={{ ...card, opacity: 0.55, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
+              <div key={"d" + i} style={{ ...card, padding: "6px 10px", opacity: 0.6, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
                 <CoatOfArms name={h.name} size={22} guild={h.is_guild} />
-                <div style={{ flex: 1 }}>
-                  <span style={{ color: "#9aa6b4", fontSize: 11, textDecoration: "line-through" }}>{h.name}</span>
-                  <span style={{ color: "#566", fontSize: 9 }}> · once of {h.home_name}</span>
+                <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 6 }}>
+                  <span style={{ color: "#9aa6b4", fontSize: 11.5, textDecoration: "line-through" }}>{h.name}</span>
+                  <span style={{ color: "#4a5c72", fontSize: 9.5 }}>once of {h.home_name}</span>
                 </div>
               </div>
             ))}
@@ -1285,27 +1307,41 @@ const detailPanel: React.CSSProperties = {
 };
 
 const panel: React.CSSProperties = {
-  position: "absolute", top: 60, right: 360, width: 320, maxHeight: "78vh",
+  position: "absolute", top: 60, right: 360, width: 396, maxHeight: "80vh",
   display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
-  boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
+  background: "#0c141e", border: "1px solid #24364e", borderRadius: 10,
+  boxShadow: "0 12px 36px rgba(0,0,0,0.55)", zIndex: 40,
 };
 const header: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
-  color: "#cfe0f4", fontWeight: 700, fontSize: 12,
+  padding: "10px 12px", borderBottom: "1px solid #1a2a3e",
+  color: "#e8dcc0", fontWeight: 700, fontSize: 13, letterSpacing: 0.2,
 };
+/** One house's card: a raised tile (not just a bottom-rule row) so a dense list of
+ *  36 families still reads as distinct entries rather than one long scroll of text.
+ *  A left accent bar in the house's own colour carries identity even before the
+ *  reader reaches the coat of arms — the same trick a kanban/ticket card uses. */
 const card: React.CSSProperties = {
-  display: "flex", gap: 8, alignItems: "flex-start", padding: "6px 4px",
-  borderBottom: "1px solid #131e2a", cursor: "default",
+  display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 10px 9px 12px",
+  margin: "0 0 6px", borderRadius: 7, background: "#101a26",
+  border: "1px solid #1c2c3f", position: "relative", cursor: "default",
+  transition: "background 0.12s, border-color 0.12s",
 };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "10px 4px" };
+/** A small rounded label — the unit every "fact" (fleet count, office count, a
+ *  monopoly share) renders as, instead of a bare run of icon+text on its own line.
+ *  Consistent chip styling is what turns six stacked sentences into one scannable row. */
+const chip: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5,
+  padding: "1.5px 6px", borderRadius: 9, background: "#0a1420",
+  border: "1px solid #1e3048", color: "#9ab0c8", lineHeight: 1.5, whiteSpace: "nowrap",
+};
+const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "14px 6px", textAlign: "center" };
 const diagBar: React.CSSProperties = {
-  padding: "6px 10px", borderBottom: "1px solid #1a2a3e", background: "#0a1119",
+  padding: "8px 10px", borderBottom: "1px solid #1a2a3e", background: "#0a1119",
 };
 const diagCell: React.CSSProperties = {
-  flex: 1, textAlign: "center", padding: "3px 2px", borderRadius: 4,
-  background: "#101c28",
+  flex: 1, textAlign: "center", padding: "4px 2px", borderRadius: 5,
+  background: "#101c28", border: "1px solid #16222e",
 };
 
 const EVENT_ICON: Record<string, string> = {

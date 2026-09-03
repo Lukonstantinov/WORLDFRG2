@@ -350,6 +350,9 @@ export interface ShipmentRow {
   price: number;          // ×-world price
   value: number;          // amount × local price (ranking key)
   sea: boolean;
+  /** True when this leg is a non-sea route between two river-connected hubs —
+   *  a river barge, not a caravan (mutually exclusive with `sea`). */
+  river?: boolean;
   returning_home: boolean;
   /** The price the DEAL was struck at (×-world), as distinct from `price`, which
    *  is the viewing city's own local quote. 0 = unknown (a pre-existing save). */
@@ -622,11 +625,12 @@ export interface TradeFlowGood {
   out_volume: number;
   route_count: number;
   history: number[];
-  /** Of `last_volume`, how much moved BY SEA; the rest went overland by caravan.
-   *  There is deliberately no separate "river" mode — the sim's travel test is
-   *  `coastal_a && coastal_b`, so a river city's trade genuinely reads as
-   *  overland and claiming a river mode would be a lie. */
+  /** Of `last_volume`, how much moved BY SEA; the rest went overland — by
+   *  river barge (`river_volume`) or caravan (the true residual). */
   sea_volume: number;
+  /** Of `last_volume`, how much moved BY RIVER BARGE (a non-sea leg between
+   *  two river-connected hubs). */
+  river_volume?: number;
   /** Who moved it — houses, guilds, or unnamed local merchants — largest first. */
   carriers: TradeCarrier[];
 }
@@ -653,6 +657,9 @@ export interface TradeRouteFlow {
   py: number;
   /** Of `amount`, how much came by sea. */
   sea_amount?: number;
+  /** Of `amount`, how much came by river barge (the rest, after `sea_amount`,
+   *  is caravan). */
+  river_amount?: number;
   dir: number;   // 0 inbound, 1 outbound
   amount: number;
   pct: number;
@@ -694,8 +701,11 @@ export interface CityTrader {
   volume: number;
   in_volume: number;
   out_volume: number;
-  /** Of `volume`, how much moved by sea; the rest overland. */
+  /** Of `volume`, how much moved by sea; the rest overland — by river barge
+   *  (`river_volume`) or caravan. */
   sea_volume: number;
+  /** Of `volume`, how much moved by river barge. */
+  river_volume?: number;
   pct: number;
   /** Summed over goods, `min(brought in, sent out)` — cargo this trader both
    *  landed and shipped onward. A PROXY for entrepôt trade, deliberately
@@ -798,6 +808,9 @@ export interface MerchantRoute {
   color: string;
   is_guild: boolean;
   sea: boolean;
+  /** True when this corridor travels by river barge, not caravan (mutually
+   *  exclusive with `sea`). */
+  river?: boolean;
   volume: number;
   out_goods: [string, number][]; // goods a→b
   ret_goods: [string, number][]; // goods b→a

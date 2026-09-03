@@ -73,21 +73,30 @@ function verdictOf(g: TradeFlowGood): { text: string; tone?: Tone } {
   return { text: "entrepôt" };
 }
 
-/** HOW A GOOD TRAVELS — the sea/overland split, as a phrase plus the share.
- *  `log_trade` is handed each shipment's `sea` flag and the yearly fold used to
- *  discard it, so "did this come by ship or by caravan" was unanswerable a year
- *  later even though the tick knew it every day.
+/** HOW A GOOD TRAVELS — sea / river / caravan, as a phrase plus the shares.
+ *  `log_trade` is handed each shipment's `sea`/`river` flags and the yearly
+ *  fold used to discard them, so "did this come by ship, barge, or caravan"
+ *  was unanswerable a year later even though the tick knew it every day.
  *
- *  Only TWO modes are offered, deliberately. The sim decides sea travel by
- *  `coastal_a && coastal_b` alone, so a river or lake city's trade reads as
- *  overland however it really moved; a third "river" chip would be inventing a
- *  distinction the model does not make. */
-function transportOf(seaVol: number, total: number): { label: string; icon: string; seaPct: number } | null {
+ *  Three modes, because the sim genuinely tracks three: a leg is a SEA voyage
+ *  when both ends are coastal, a RIVER voyage when neither is but both ends
+ *  are river-connected (`TickHub.river`), and caravan otherwise — the true
+ *  residual, `total - seaVol - riverVol`. */
+function transportOf(seaVol: number, riverVol: number, total: number):
+    { label: string; icon: string; seaPct: number; riverPct: number } | null {
   if (total <= 0) return null;
   const seaPct = Math.max(0, Math.min(1, seaVol / total)) * 100;
-  if (seaPct >= 85) return { label: "by sea", icon: "⛵", seaPct };
-  if (seaPct <= 15) return { label: "overland", icon: "🐫", seaPct };
-  return { label: `${seaPct.toFixed(0)}% by sea`, icon: "⛵🐫", seaPct };
+  const riverPct = Math.max(0, Math.min(1, riverVol / total)) * 100;
+  const landPct = Math.max(0, 100 - seaPct - riverPct);
+  if (seaPct >= 85) return { label: "by sea", icon: "⛵", seaPct, riverPct };
+  if (riverPct >= 85) return { label: "by river", icon: "\u{1F6F6}", seaPct, riverPct };
+  if (landPct >= 85) return { label: "overland", icon: "🐫", seaPct, riverPct };
+  const parts: string[] = [];
+  const icons: string[] = [];
+  if (seaPct >= 15) { parts.push(`${seaPct.toFixed(0)}% by sea`); icons.push("⛵"); }
+  if (riverPct >= 15) { parts.push(`${riverPct.toFixed(0)}% by river`); icons.push("\u{1F6F6}"); }
+  if (landPct >= 15) { icons.push("🐫"); }
+  return { label: parts.join(", ") || "mixed", icon: icons.join(""), seaPct, riverPct };
 }
 
 /** How lopsided a good's trade is, 0 (perfectly balanced) → 1 (one-way only).
@@ -400,7 +409,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                       worth flagging rather than leaving to be read off a list. */}
                   <div style={{ width: "100%", padding: "2px 0 4px 28px" }}>
                     {(() => {
-                      const tr = transportOf(g.sea_volume ?? 0, g.last_volume);
+                      const tr = transportOf(g.sea_volume ?? 0, g.river_volume ?? 0, g.last_volume);
                       const top = g.carriers?.[0];
                       return (
                         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm }}>
@@ -491,10 +500,15 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                 }}>
                   {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
                 </span>
-                <span style={{ width: 20, textAlign: "center", fontSize: FZ.tiny }}
-                  title={(r.sea_amount ?? 0) > r.amount * 0.5 ? "carried by sea" : "carried overland"}>
-                  {(r.sea_amount ?? 0) > r.amount * 0.5 ? "⛵" : "🐫"}
-                </span>
+                {(() => {
+                  const routeTr = transportOf(r.sea_amount ?? 0, r.river_amount ?? 0, r.amount);
+                  return (
+                    <span style={{ width: 20, textAlign: "center", fontSize: FZ.tiny }}
+                      title={routeTr ? `carried ${routeTr.label}` : "carried overland"}>
+                      {routeTr?.icon || "🐫"}
+                    </span>
+                  );
+                })()}
                 <span style={{ width: 50, textAlign: "right", color: T.inkMid }}>{fmt(r.amount)}</span>
                 <span style={{ width: 38, textAlign: "right", color: T.inkDim }}>{r.pct.toFixed(0)}%</span>
               </div>

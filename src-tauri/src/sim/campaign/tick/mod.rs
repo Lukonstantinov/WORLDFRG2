@@ -2757,6 +2757,12 @@ pub struct RecentTrade {
     pub amount: f32,
     pub owner: i32,
     pub sea: bool,
+    /// True when this leg is a non-sea route between two river-connected hubs
+    /// (`TickHub.river` at both ends) — a river-barge voyage, not a caravan
+    /// one. Mutually exclusive with `sea`. Display-only: see the `cap_land`
+    /// doc comment in `production.rs::dispatch` for why the fleet-capacity
+    /// pool itself stays a plain sea/land split.
+    #[serde(default)] pub river: bool,
     pub price: f32,
     pub tick: u32,
 }
@@ -2768,6 +2774,10 @@ pub struct RecentTrade {
 pub struct TradeCur {
     pub amount: f32,
     pub sea_amount: f32,
+    /// How much of `amount` moved by RIVER BARGE (a non-sea leg between two
+    /// `TickHub.river` hubs) — the rest, `amount - sea_amount - river_amount`,
+    /// went by caravan. See `RecentTrade.river`'s own doc comment.
+    #[serde(default)] pub river_amount: f32,
     /// house index (u32::MAX = no named owner) → volume carried.
     pub carriers: std::collections::HashMap<u32, f32>,
 }
@@ -2782,20 +2792,27 @@ pub struct TradeFlowAgg {
     pub partner: u32,
     pub dir: u8,
     pub amount: f32,
-    /// How much of `amount` moved BY SEA. The rest went overland by caravan.
+    /// How much of `amount` moved BY SEA (both ends coastal). The rest went
+    /// overland — by river barge (`river_amount`) or by caravan (the residual,
+    /// `amount - sea_amount - river_amount`).
     ///
     /// `log_trade` has always been handed the shipment's `sea` flag, and the
     /// yearly fold discarded it — the same shape as every other number the plan
     /// notes is "computed inside `dispatch()` and then thrown away". Nothing but
     /// this display reads it, so it cannot move a simulated figure.
-    ///
-    /// Note the honest limit: the sim's travel mode is `coastal_a && coastal_b`
-    /// alone, so a river or lake city's trade reads as OVERLAND however it really
-    /// moved. Reporting sea-vs-overland is therefore truthful; reporting a
-    /// separate "river" mode would not be, and is deliberately not offered
-    /// (TRADE_STAGING_AND_POSTS_PLAN.md names the same gap).
     #[serde(default)]
     pub sea_amount: f32,
+    /// How much of `amount` moved BY RIVER BARGE — a non-sea leg between two
+    /// `TickHub.river` hubs. `InTransit.river`/`RecentTrade.river` were being
+    /// computed correctly for a shipment's return leg but hardcoded false for
+    /// its outbound leg (a residual of reverting the fleet-CAPACITY split,
+    /// which is a different question from whether the mode is worth
+    /// reporting — see `production.rs::dispatch`'s doc comment), so a river
+    /// city's trade always read as pure caravan overland however it actually
+    /// moved. Fixed at the source; this field simply carries the real number
+    /// through instead of discarding it a second time.
+    #[serde(default)]
+    pub river_amount: f32,
     /// Who carried it: house index → volume. `-1` is the residual (local
     /// merchants / no named owner) and is stored as `u32::MAX`.
     #[serde(default)]

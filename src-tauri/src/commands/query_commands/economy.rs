@@ -274,6 +274,28 @@ pub fn compute_economy(
             }
         }
     }
+    // A `Deposits`-distribution good's byte is the METALLOGENIC BELT (§8.16 — 100
+    // to 1000 km, a broad geological province), not a mine. It is written as
+    // `grade × depth_workability` across the whole belt so a rich body stays
+    // visible before any mining industry exists to work it — but crediting that
+    // raw byte to every settlement whose catchment merely OVERLAPS the belt was
+    // reading "there is ore under this whole province" as "this city extracts
+    // ore", so a town could show as the world's leading gold supplier while its
+    // own province carried no deposit at all. Ore/gem/stone goods are credited
+    // here from the actual discrete WORKINGS (`deposits.rs`'s district/working
+    // tier) instead — the same real per-working `grade`/`extent`/`depth` the
+    // Deposits panel and `campaign_province_potential` already read — so a city
+    // only ever "makes" a mineral its own territory genuinely contains a mine
+    // for. Every other good keeps reading its belt directly, unchanged.
+    let is_deposit_good: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g)
+            .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits))
+            .unwrap_or(false))
+        .collect();
+    let deposits_early: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
+        .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let good_slot_early: std::collections::HashMap<&str, usize> =
+        specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
     let mut prod = vec![vec![0.0f32; gc]; nn];
     for (&key, &(_, hh)) in claim.iter() {
         if hh == u32::MAX { continue; }
@@ -282,7 +304,23 @@ pub fn compute_economy(
         let tile = world.tile((wx / TILE_SIZE) as i32, (wy / TILE_SIZE) as i32);
         let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
         for g in 0..gc.min(tile.goods.len()) {
+            if is_deposit_good[g] { continue; }
             prod[hh as usize][g] += tile.goods[g][ti] as f32 / 255.0;
+        }
+    }
+    // Credit each discrete working to whichever hub's catchment actually claims
+    // its cell — `extent` (weak…world-class, EXTENT_WEAK=0..EXTENT_WORLD_CLASS=3)
+    // scales how much a working is worth, `workable_intensity()` is the same
+    // grade × depth term the belt byte itself is built from.
+    const EXTENT_MULT: [f32; 4] = [0.5, 1.0, 2.0, 4.0];
+    for d in &deposits_early {
+        let Some(&g) = good_slot_early.get(d.good.as_str()) else { continue };
+        let key = (d.y as u64) * (grid_w as u64) + d.x as u64;
+        if let Some(&(_, hh)) = claim.get(&key) {
+            if hh != u32::MAX {
+                let mult = EXTENT_MULT[(d.extent as usize).min(3)];
+                prod[hh as usize][g] += d.workable_intensity() * mult;
+            }
         }
     }
 
@@ -351,11 +389,8 @@ pub fn compute_economy(
     const NONDEPOSIT_ABUNDANCE_FLOOR: f32 = 0.15;
     let raw_total: Vec<f32> = (0..gc).map(|g| prod.iter().map(|p| p[g]).sum::<f32>()).collect();
     let raw_total_max = raw_total.iter().cloned().fold(0.0f32, f32::max).max(1e-6);
-    let is_deposit: Vec<bool> = (0..gc)
-        .map(|g| specs.get(g)
-            .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits))
-            .unwrap_or(false))
-        .collect();
+    // Same mask computed earlier for the production-crediting split above.
+    let is_deposit = &is_deposit_good;
     let abundance: Vec<f32> = (0..gc).map(|g| {
         let a = (raw_total[g] / raw_total_max).sqrt();
         // A FLOOR so a good that exists ANYWHERE stays visibly produced. The rescale
@@ -378,16 +413,14 @@ pub fn compute_economy(
     // backwards: a big cheap deposit (many low-grade workings summing to a large
     // belt total) scored as fine stones. Grade already IS a 0..1 richness number
     // (`Deposit::grade`), so this is a direct read, not a proxy.
-    let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
-        .ok()
-        .flatten()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default();
-    let good_slot: std::collections::HashMap<&str, usize> =
-        specs.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
+    // Reuse the same load + index this function already built above (right
+    // before the production loop) to credit deposit workings — no need to
+    // parse `metadata["deposits"]` a second time.
+    let deposits = &deposits_early;
+    let good_slot = &good_slot_early;
     let mut grade_sum = vec![vec![0.0f32; gc]; nn];
     let mut grade_n = vec![vec![0u32; gc]; nn];
-    for d in &deposits {
+    for d in deposits.iter() {
         let Some(&g) = good_slot.get(d.good.as_str()) else { continue };
         let key = (d.y as u64) * (grid_w as u64) + d.x as u64;
         if let Some(&(_, hh)) = claim.get(&key) {

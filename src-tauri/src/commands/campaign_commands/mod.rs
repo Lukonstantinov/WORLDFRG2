@@ -445,6 +445,9 @@ pub struct ShipmentRow {
     pub price: f32,             // ×-world price
     pub value: f32,             // amount × local price (the ranking key)
     pub sea: bool,
+    /// True when this leg is a non-sea route between two river-connected
+    /// hubs — a river barge, not a caravan (mutually exclusive with `sea`).
+    #[serde(default)] pub river: bool,
     pub returning_home: bool,   // a round-trip RETURN leg (goods bought abroad, coming home)
     /// The price the DEAL was struck at when the cargo left, as a ×-world multiple
     /// — `InTransit.price` / `RecentTrade.price` over the good's base value.
@@ -2056,6 +2059,9 @@ pub struct MerchantRoute {
     pub color: String,
     pub is_guild: bool,
     pub sea: bool,
+    /// True when this corridor travels by river barge rather than caravan
+    /// (mutually exclusive with `sea`) — see `RecentTrade.river`'s doc comment.
+    #[serde(default)] pub river: bool,
     pub volume: f32,
     /// Goods flowing a→b and b→a (name, volume), each sorted by volume.
     pub out_goods: Vec<(String, f32)>,
@@ -2735,12 +2741,14 @@ pub struct TradeFlowGood {
     pub out_volume: f32,
     pub route_count: u32,
     pub history: Vec<f32>,
-    /// How much of `last_volume` came or went BY SEA; the rest moved overland by
-    /// caravan. See `TradeFlowAgg::sea_amount` for why there is no separate river
-    /// mode — the sim's travel test is `coastal_a && coastal_b`, so a river city's
-    /// trade genuinely reads as overland and claiming otherwise would be a lie.
+    /// How much of `last_volume` came or went BY SEA; the rest moved overland —
+    /// by river barge (`river_volume`) or caravan (the true residual).
     #[serde(default)]
     pub sea_volume: f32,
+    /// How much of `last_volume` moved BY RIVER BARGE — a non-sea leg between
+    /// two river-connected hubs (`TradeFlowAgg::river_amount`).
+    #[serde(default)]
+    pub river_volume: f32,
     /// Who moved it — houses, guilds, or unnamed local merchants — largest first.
     #[serde(default)]
     pub carriers: Vec<TradeCarrier>,
@@ -2761,8 +2769,11 @@ pub struct CityTrader {
     pub volume: f32,
     pub in_volume: f32,
     pub out_volume: f32,
-    /// Of `volume`, how much moved by sea; the rest overland.
+    /// Of `volume`, how much moved by sea; the rest overland — by river barge
+    /// (`river_volume`) or caravan.
     pub sea_volume: f32,
+    /// Of `volume`, how much moved by river barge.
+    #[serde(default)] pub river_volume: f32,
     pub pct: f32,
     /// RE-EXPORTED here: summed over goods, `min(brought in, sent out)` — cargo
     /// this trader both landed and shipped onward, i.e. the city was a stop rather
@@ -2878,6 +2889,11 @@ pub struct TradeRouteFlow {
     /// overland haul without the reader guessing from the map.
     #[serde(default)]
     pub sea_amount: f32,
+    /// Of `amount`, how much came by RIVER BARGE (a non-sea leg between two
+    /// river-connected hubs) — the rest, `amount - sea_amount - river_amount`,
+    /// went by caravan.
+    #[serde(default)]
+    pub river_amount: f32,
 }
 /// A top partner city: its share of ALL this city's trade + the goods exchanged.
 #[derive(Serialize, Clone)]

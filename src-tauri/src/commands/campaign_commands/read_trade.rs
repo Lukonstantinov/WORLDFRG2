@@ -203,16 +203,17 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
     use std::collections::HashMap;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
-    struct Agg { vol: f32, sea: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32> }
+    struct Agg { vol: f32, sea: bool, river: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32> }
     let mut groups: HashMap<(usize, u32, u32), Agg> = HashMap::new();
     for s in &sim.in_transit {
         if s.owner < 0 { continue; }
         let (lo, hi) = (s.from.min(s.to), s.from.max(s.to));
         let e = groups.entry((s.owner as usize, lo, hi))
-            .or_insert_with(|| Agg { vol: 0.0, sea: false, out: HashMap::new(), ret: HashMap::new() });
+            .or_insert_with(|| Agg { vol: 0.0, sea: false, river: false, out: HashMap::new(), ret: HashMap::new() });
         let amt = s.amount.max(0.0);
         e.vol += amt;
         e.sea |= s.sea;
+        e.river |= s.river;
         if s.from == lo { *e.out.entry(s.good).or_insert(0.0) += amt; }
         else { *e.ret.entry(s.good).or_insert(0.0) += amt; }
     }
@@ -239,7 +240,7 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
             holder: h.map(|x| x.name.clone()).unwrap_or_default(),
             color: distinct_color(owner),
             is_guild: h.map(|x| x.is_guild).unwrap_or(false),
-            sea: a.sea, volume: a.vol,
+            sea: a.sea, river: a.river, volume: a.vol,
             out_goods: sort_goods(a.out), ret_goods: sort_goods(a.ret),
         }
     }).collect();
@@ -695,8 +696,10 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
     // Transport split + carrier breakdown, per good and for the city as a whole.
     let mut g_sea: HashMap<u32, f32> = HashMap::new();
+    let mut g_river: HashMap<u32, f32> = HashMap::new();
     let mut g_carriers: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // good→carrier→amt
     let mut route_sea: HashMap<(u32, u32, u8), f32> = HashMap::new();
+    let mut route_river: HashMap<(u32, u32, u8), f32> = HashMap::new();
     for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
         let partner = city_of(f.partner); // fold estates/manufactories into their settlement
         if partner == hidx { continue; }  // skip self-trade after folding (own estate)
@@ -709,7 +712,9 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         else { *partner_out.entry(partner).or_insert(0.0) += f.amount; }
         *partner_goods.entry(partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
         *g_sea.entry(f.good).or_insert(0.0) += f.sea_amount;
+        *g_river.entry(f.good).or_insert(0.0) += f.river_amount;
         *route_sea.entry((f.good, partner, f.dir)).or_insert(0.0) += f.sea_amount;
+        *route_river.entry((f.good, partner, f.dir)).or_insert(0.0) += f.river_amount;
         let cg = g_carriers.entry(f.good).or_default();
         for &(who, amt) in &f.carriers { *cg.entry(who).or_insert(0.0) += amt; }
     }
@@ -738,6 +743,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             route_count: g_partners.get(&g).map(|s| s.len() as u32).unwrap_or(0),
             history,
             sea_volume: g_sea.get(&g).copied().unwrap_or(0.0),
+            river_volume: g_river.get(&g).copied().unwrap_or(0.0),
             carriers: {
                 // Who actually moved this good, largest share first. A house index
                 // resolves to its name and whether it is a GUILD (a civic body) or a
@@ -774,6 +780,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             good: g, partner, partner_name: pname, px, py, dir, amount,
             pct: amount / tot * 100.0,
             sea_amount: route_sea.get(&(g, partner, dir)).copied().unwrap_or(0.0),
+            river_amount: route_river.get(&(g, partner, dir)).copied().unwrap_or(0.0),
         })
     }).collect();
     routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
@@ -822,7 +829,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
 
     #[derive(Default)]
     struct Acc {
-        vol: f32, inv: f32, outv: f32, sea: f32,
+        vol: f32, inv: f32, outv: f32, sea: f32, river: f32,
         dist_wsum: f32,
         by_good_in: HashMap<u32, f32>,
         by_good_out: HashMap<u32, f32>,
@@ -833,14 +840,16 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         if partner == hidx { continue; }
         let Some((_, px, py)) = pos(partner) else { continue };
         let d = dist_km(px, py);
-        // `sea` is a property of the ROUTE, so every shipment in one aggregate row
-        // shares it; attribute each carrier its pro-rata share of that row's sea
-        // volume rather than inventing a per-carrier flag the sim never recorded.
+        // `sea`/`river` are properties of the ROUTE, so every shipment in one
+        // aggregate row shares them; attribute each carrier its pro-rata share
+        // rather than inventing a per-carrier flag the sim never recorded.
         let sea_frac = if f.amount > 0.0 { (f.sea_amount / f.amount).clamp(0.0, 1.0) } else { 0.0 };
+        let river_frac = if f.amount > 0.0 { (f.river_amount / f.amount).clamp(0.0, 1.0) } else { 0.0 };
         for &(who, amt) in &f.carriers {
             let e = acc.entry(who).or_default();
             e.vol += amt;
             e.sea += amt * sea_frac;
+            e.river += amt * river_frac;
             e.dist_wsum += amt * d;
             if f.dir == 0 { e.inv += amt; *e.by_good_in.entry(f.good).or_insert(0.0) += amt; }
             else { e.outv += amt; *e.by_good_out.entry(f.good).or_insert(0.0) += amt; }
@@ -877,7 +886,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             name: h.map(|x| x.name.clone()).unwrap_or_else(|| "local merchants".into()),
             is_guild: h.map(|x| x.is_guild).unwrap_or(false),
             house: hi_i,
-            volume: a.vol, in_volume: a.inv, out_volume: a.outv, sea_volume: a.sea,
+            volume: a.vol, in_volume: a.inv, out_volume: a.outv, sea_volume: a.sea, river_volume: a.river,
             pct: a.vol / trade_total * 100.0,
             reexport,
             mean_route_km: if a.vol > 0.0 { a.dist_wsum / a.vol } else { 0.0 },

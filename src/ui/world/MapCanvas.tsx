@@ -212,16 +212,47 @@ export function MapCanvas() {
     ctx.setTransform(dpr * viewport.scaleX, 0, 0, dpr * viewport.scaleY, dpr * viewport.x, dpr * viewport.y);
     ctx.imageSmoothingEnabled = false;
 
-    // Clip to the logical world bounds. Tiles are 128×128, so the world grid
-    // (e.g. 3600×1800) is covered by tiles that extend past the edges (29×15 →
-    // 3712×1920); the last partial tile row/column is default-sea and otherwise
-    // bleeds in as a thin ocean strip at the bottom/right edge. Clipping to the
-    // exact grid hides that padding so the map ends precisely at the template.
+    // The world is cylindrical (X wraps, rule 6) and the viewport is free to
+    // pan past either edge (TileViewport applies no X clamp) so the map
+    // scrolls infinitely like an EU4-style globe. `kMin..kMax` is which whole
+    // world-width COPIES are visible on screen right now — 0 unless the pan
+    // has actually crossed a seam. Tiles already resolve an out-of-range tx to
+    // its real wrapped content one screen position at a time (`get_tiles_
+    // packed`'s own wrap + `TileManager`'s now-unclamped fetch), so they need
+    // no extra pass here — only a wider clip so the sea-padding strip at each
+    // grid edge is hidden at every copy, not just the original one. OVERLAYS
+    // (rivers, settlements, routes, labels…) are vector data positioned once
+    // in canonical `[0, grid_width)` space, so making them reappear at a
+    // wrapped position needs `overlayManager.render` called again per visible
+    // copy, each time with the coordinate space shifted by `k * grid_width`.
     const m = metaRef.current;
+    let kMin = 0, kMax = 0;
+    if (m && m.grid_width > 0) {
+      const leftWorldX = (0 - viewport.x) / viewport.scaleX;
+      const rightWorldX = (w - viewport.x) / viewport.scaleX;
+      kMin = Math.floor(Math.min(leftWorldX, rightWorldX) / m.grid_width);
+      kMax = Math.floor(Math.max(leftWorldX, rightWorldX) / m.grid_width);
+      // A pathologically zoomed-out view could span many world-widths at
+      // once; cap how many overlay passes one frame pays for rather than let
+      // the render cost grow unbounded with how far the user scrolls out.
+      const MAX_COPIES = 6;
+      if (kMax - kMin + 1 > MAX_COPIES) {
+        const mid = Math.round((kMin + kMax) / 2);
+        kMin = mid - Math.floor(MAX_COPIES / 2);
+        kMax = kMin + MAX_COPIES - 1;
+      }
+    }
+
+    // Clip to the logical world bounds (widened to the full visible span of
+    // copies). Tiles are 128×128, so the world grid (e.g. 3600×1800) is
+    // covered by tiles that extend past the edges (29×15 → 3712×1920); the
+    // last partial tile row/column is default-sea and otherwise bleeds in as
+    // a thin ocean strip at the edge of EVERY copy. Clipping hides that
+    // padding so the map ends precisely at the template each time it wraps.
     ctx.save();
     if (m) {
       ctx.beginPath();
-      ctx.rect(0, 0, m.grid_width, m.grid_height);
+      ctx.rect(kMin * m.grid_width, 0, (kMax - kMin + 1) * m.grid_width, m.grid_height);
       ctx.clip();
     }
 
@@ -238,15 +269,26 @@ export function MapCanvas() {
       const dividerWorldX = (w * cmp.pos - viewport.x) / viewport.scaleX;
       ctx.save();
       ctx.beginPath();
-      ctx.rect(dividerWorldX, 0, m.grid_width - dividerWorldX, m.grid_height);
+      ctx.rect(dividerWorldX, 0, kMax * m.grid_width + m.grid_width - dividerWorldX, m.grid_height);
       ctx.clip();
       tileManager.draw(ctx, visible, cmp.layer);
       ctx.restore();
     }
 
-    // Draw overlays
+    // Draw overlays — once per visible world-copy, each shifted so canonical
+    // `[0, grid_width)` content lands at world position `[k*grid_width, …)`.
     if (overlayManager) {
-      overlayManager.render(ctx);
+      for (let k = kMin; k <= kMax; k++) {
+        ctx.save();
+        if (m) {
+          ctx.beginPath();
+          ctx.rect(k * m.grid_width, 0, m.grid_width, m.grid_height);
+          ctx.clip();
+        }
+        if (k !== 0) ctx.translate(k * (m?.grid_width ?? 0), 0);
+        overlayManager.render(ctx);
+        ctx.restore();
+      }
     }
 
     ctx.restore();

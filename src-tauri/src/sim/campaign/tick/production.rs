@@ -591,11 +591,20 @@ impl CampaignSim {
             m
         };
 
+        // Manufactured output was missing the one multiplier every EXTRACTED
+        // good's own production carries (`realized = percap * pop * … * tech *
+        // …` in the step-1 loop above): `self.tech_factor`, the sim's entire
+        // technology/growth model (`FIX_PLAN` Part C — "Growth is exogenous").
+        // Without it, a weaver's daily output never improved across a whole
+        // campaign while every farm and mine around it compounded at ~1.5%/yr,
+        // so manufactured goods fell further behind raw ones purely by neglect
+        // of this one term — not because the recipe/labor numbers were wrong.
+        let tech = self.tech_factor;
         for h in 0..self.hubs.len() {
             let pop = self.hubs[h].population.max(0.0);
             for &g in &order {
                 let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };
-                let labor_cap = (pop / median_pop) * labor;
+                let labor_cap = (pop / median_pop) * labor * tech;
                 if labor_cap <= 0.0 { continue; }
                 let mut by_inputs = f32::INFINITY;
                 for &(idx, qty) in &self.goods[g].inputs {
@@ -650,9 +659,13 @@ impl CampaignSim {
         let mut pops: Vec<f32> = self.hubs.iter().map(|h| h.population.max(0.0)).collect();
         pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median = pops.get(pops.len() / 2).copied().unwrap_or(1.0).max(1.0);
+        // Matches `manufacture_pass`'s own `* tech`, below — a manufactory that can
+        // work more (technology growth) must also PULL more raw material, or the
+        // higher labor cap goes unused against an input stock that never grew.
+        let tech = self.tech_factor;
         for h in 0..self.hubs.len() {
             if self.hubs[h].is_estate { continue; } // manufacturing happens in cities
-            let cap = (self.hubs[h].population.max(0.0) / median).min(8.0);
+            let cap = (self.hubs[h].population.max(0.0) / median).min(8.0) * tech;
             if cap <= 0.0 { continue; }
             for &g in &recipe_goods {
                 let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };
@@ -1062,7 +1075,13 @@ impl CampaignSim {
                     if amount <= EPS {
                         continue;
                     }
-                    // Route mode: a sea voyage when both ends are coastal, else overland.
+                    // Route mode: a sea voyage when both ends are coastal, else overland —
+                    // unless both ends are also river-connected, which is a DISPLAY-only
+                    // distinction (`river`, below): the capacity pool a leg draws from
+                    // stays the sea/land split alone (see the `cap_land` doc comment
+                    // above for why that split was tried and reverted), but which of
+                    // the two land-vessel kinds actually carried it is real data this
+                    // sim already has and was simply not writing out.
                     let sea = self.hubs[a].coastal && self.hubs[b].coastal;
                     // ── Who carries it ──────────────────────────────────────────
                     // Prefer the SELLER's house (the exporter organizes the sale);
@@ -1395,6 +1414,14 @@ impl CampaignSim {
                         self.bump_trade_at(oi, b, amount);
                     }
                     self.accrue_flow(a, b, g, amount);
+                    // DISPLAY-only mode split (capacity still draws from the pooled
+                    // sea/land slots above — see the `cap_land` doc comment): a
+                    // non-sea leg between two river-connected hubs travelled by
+                    // river barge, not by caravan. This is what `river` was always
+                    // meant to carry (`InTransit.river`'s own doc comment); it was
+                    // simply hardcoded false here when the CAPACITY split reverted,
+                    // silently reading every river leg as "overland" downstream.
+                    let river = !sea && self.hubs[a].river && self.hubs[b].river;
                     self.in_transit.push(InTransit {
                         from: a as u32,
                         to: b as u32,
@@ -1403,7 +1430,7 @@ impl CampaignSim {
                         eta_tick: tick + (days.ceil() as u32).max(1),
                         owner,
                         sea,
-                        river: false, // capacity split reverted (see the cap_land comment above)
+                        river,
                         // A house voyage is a ROUND TRIP: on arrival at b it tries to
                         // buy b's surplus and carry it home to a (sold there for a
                         // second profit). Guild/local one-way trips spawn no return.
@@ -1413,7 +1440,7 @@ impl CampaignSim {
                         price: pa,
                         local: owner < 0 && days <= LOCAL_HAUL_DAYS,
                     });
-                    self.log_trade(a as u32, b as u32, g, amount, owner, sea, pa);
+                    self.log_trade(a as u32, b as u32, g, amount, owner, sea, river, pa);
                 }
             }
         }
@@ -1535,7 +1562,7 @@ impl CampaignSim {
             price: pb_buy,
             local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
         });
-        self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, pb_buy);
+        self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, river, pb_buy);
     }
 
 
@@ -1932,8 +1959,8 @@ impl CampaignSim {
     /// The living merchant families: ageing heads, monopolies, feuds, founding,
     /// extinction and political power.
     /// Log a dispatched trade for the Market "recent deals" rows (rolling, capped).
-    pub(crate) fn log_trade(&mut self, from: u32, to: u32, good: usize, amount: f32, owner: i32, sea: bool, price: f32) {
-        self.recent_trades.push(RecentTrade { from, to, good, amount, owner, sea, price, tick: self.tick });
+    pub(crate) fn log_trade(&mut self, from: u32, to: u32, good: usize, amount: f32, owner: i32, sea: bool, river: bool, price: f32) {
+        self.recent_trades.push(RecentTrade { from, to, good, amount, owner, sea, river, price, tick: self.tick });
         let n = self.recent_trades.len();
         if n > 400 { self.recent_trades.drain(0..n - 400); }
         // Accumulate the year's trade flows for the Flows subtab: this shipment is an
@@ -1949,6 +1976,7 @@ impl CampaignSim {
                 let e = self.trade_cur.entry(key).or_default();
                 e.amount += amount;
                 if sea { e.sea_amount += amount; }
+                else if river { e.river_amount += amount; }
                 *e.carriers.entry(carrier).or_insert(0.0) += amount;
             }
         }
@@ -1970,7 +1998,7 @@ impl CampaignSim {
                     .unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
                 TradeFlowAgg {
                     hub, good, partner, dir,
-                    amount: cur.amount, sea_amount: cur.sea_amount, carriers,
+                    amount: cur.amount, sea_amount: cur.sea_amount, river_amount: cur.river_amount, carriers,
                 }
             })
             .collect();

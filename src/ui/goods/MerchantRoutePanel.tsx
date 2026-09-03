@@ -39,7 +39,7 @@ export function MerchantRoutePanel() {
         <span onClick={() => close(null)} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Close">×</span>
       </div>
       <div style={{ color: "#8aa0c0", fontSize: 10, marginBottom: 6 }}>
-        {route.sea ? "🚢 sea route" : "🐫 overland route"} · {route.a_name} ⇄ {route.b_name}
+        {route.sea ? "🚢 sea route" : route.river ? "\u{1F6F6} river route" : "🐫 overland route"} · {route.a_name} ⇄ {route.b_name}
         <span style={{ color: "#6a86a6" }}> · volume {fmt(route.volume)}</span>
       </div>
       <Leg title="Outbound" from={route.a_name} to={route.b_name} goods={route.out_goods} />

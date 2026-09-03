@@ -631,10 +631,14 @@ export class OverlayManager {
   /** Seat→city polylines for the focused house, snapped onto the EXISTING trade
    *  routes (`routeAlongTradeRoutes`). Empty inner paths are skipped. */
   private houseNetwork: [number, number][][] = [];
-  // Goods Atlas · one good's yearly trade flow, each lane SNAPPED onto the existing
-  // trade routes (`routeAlongTradeRoutes`) — never a straight slash. Off-network lanes
-  // are dropped. `amount` drives arrow width; `goodFlowMax` normalises it.
-  private goodFlows: { path: [number, number][]; amount: number }[] = [];
+  // Goods Atlas · one good's yearly trade flow, each lane routed via `laneBetween`
+  // (coarse cost grid → worldgen trade-route graph → dashed direct fallback, rule
+  // 35). `amount` drives arrow width; `goodFlowMax` normalises it. `openWater` is
+  // carried through so `renderGoodFlows` can draw a genuine corridor solid and an
+  // unroutable long haul dashed — the two used to be drawn identically, which was
+  // the "goods don't follow trade routes, direct city-to-city lines" report: a
+  // real route and a claimed open-water crossing were visually indistinguishable.
+  private goodFlows: { path: [number, number][]; amount: number; openWater: boolean }[] = [];
   private goodFlowColor = "#e0b24a";
   private goodFlowMax = 0;
   // ── Trade-route graph (lazily built from `this.tradeRoutes`) so house-network and
@@ -1518,14 +1522,16 @@ export class OverlayManager {
   drawGoodFlows(flows: AtlasFlow[], gridW: number, color: string) {
     if (gridW > 0) this.worldW = gridW;
     this.goodFlowColor = color || "#e0b24a";
-    const out: { path: [number, number][]; amount: number }[] = [];
+    const out: { path: [number, number][]; amount: number; openWater: boolean }[] = [];
     let max = 0;
     for (const f of flows) {
       // Rule 35 — an off-corridor flow is drawn direct, never dropped. This one
       // was the most visibly wrong: the Goods Atlas would show a good's world
-      // trade with every sea leg missing.
-      const { pts: path } = this.laneBetween([f.from_x, f.from_y], [f.to_x, f.to_y]);
-      out.push({ path, amount: f.amount });
+      // trade with every sea leg missing. `openWater` is kept (not discarded,
+      // as it used to be) so the render can tell a real corridor from a
+      // claimed direct crossing.
+      const { pts: path, openWater } = this.laneBetween([f.from_x, f.from_y], [f.to_x, f.to_y]);
+      out.push({ path, amount: f.amount, openWater });
       if (f.amount > max) max = f.amount;
     }
     this.goodFlows = out;
@@ -4351,8 +4357,15 @@ export class OverlayManager {
     ctx.setLineDash([]);
   }
 
-  /** Goods Atlas · the selected good's yearly flow, along the EXISTING trade routes,
-   *  width ∝ volume, with a directional arrowhead at the importer end. */
+  /** Goods Atlas · the selected good's yearly flow, width ∝ volume, with a
+   *  directional arrowhead at the importer end. A flow riding a REAL corridor
+   *  (`openWater: false`) draws the dash-dot "directed route" treatment; one
+   *  with no resolvable road/sea-lane (`openWater: true`) draws as a plain
+   *  dashed line instead — the cartographic convention for a claimed
+   *  open-water crossing, honest about not being a road, and visually
+   *  distinct from a genuine routed corridor (both used to render identically,
+   *  which is what made every long, off-network haul look like it was
+   *  slashing straight through the map "ignoring" the trade routes). */
   private renderGoodFlows(ctx: CanvasRenderingContext2D) {
     if (this.goodFlows.length === 0 || this.goodFlowMax <= 0) return;
     const W = this.worldW;
@@ -4361,9 +4374,11 @@ export class OverlayManager {
     ctx.lineJoin = "round";
     const col = this.goodFlowColor;
     const dash = Math.max(1.4, 3 * inv);
-    // A dash-DOT lane (long dash · gap · dot · gap) so the flow reads as a directed
-    // route rather than a plain line, at any good's colour.
+    // A dash-DOT lane (long dash · gap · dot · gap) for a real corridor, so the
+    // flow reads as a directed route rather than a plain line, at any good's
+    // colour. A plain dash for an open-water/off-network claim.
     const dashDot = [dash * 2.4, dash * 1.1, Math.max(0.4, dash * 0.14), dash * 1.1];
+    const openDash = [dash * 1.6, dash * 1.3];
     for (const fl of this.goodFlows) {
       const pts = fl.path;
       if (pts.length < 2) continue;
@@ -4372,21 +4387,25 @@ export class OverlayManager {
       // 1) A dark HALO (solid, slightly wider) under the lane — so a pale good colour
       //    (cotton, pearls, ivory) still reads against a light map, the user's
       //    "some colours are seen very faintly" report. Independent of the chosen hue.
+      //    Fainter for an unroutable claim, so it doesn't compete with real corridors.
       ctx.setLineDash([]);
-      ctx.globalAlpha = 0.4 + 0.25 * norm;
+      ctx.globalAlpha = (fl.openWater ? 0.22 : 0.4) + 0.25 * norm;
       ctx.strokeStyle = "rgba(0,0,0,0.85)";
       ctx.lineWidth = w + 2.4 * inv;
       this.strokeFlowPolyline(ctx, pts, W);
-      // 2) The coloured dash-dot lane on top.
-      ctx.setLineDash(dashDot);
-      ctx.globalAlpha = 0.8 + 0.2 * norm;
+      // 2) The coloured lane on top — dash-dot when it rides a real corridor,
+      //    a plain sparser dash when it is only a claimed crossing.
+      ctx.setLineDash(fl.openWater ? openDash : dashDot);
+      ctx.globalAlpha = (fl.openWater ? 0.5 : 0.8) + 0.2 * norm;
       ctx.strokeStyle = col;
-      ctx.lineWidth = w;
+      ctx.lineWidth = fl.openWater ? Math.max(0.6, w * 0.75) : w;
       this.strokeFlowPolyline(ctx, pts, W);
       ctx.setLineDash([]);
       // 3) PERIODIC direction arrows exporter → importer along the whole lane, so the
       //    trade DIRECTION is legible even on a long routed haul (not just one head).
-      this.drawFlowArrows(ctx, pts, W, col, Math.max(2.4, (3.2 + norm * 3.6) * inv));
+      //    Skipped for an open-water claim — a straight line with arrows every few
+      //    cells reads as a drawn road, which is exactly what it is not.
+      if (!fl.openWater) this.drawFlowArrows(ctx, pts, W, col, Math.max(2.4, (3.2 + norm * 3.6) * inv));
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);

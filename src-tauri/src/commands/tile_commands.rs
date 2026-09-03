@@ -94,11 +94,51 @@ fn render_tiles_raw(
     db: &State<'_, WorldDb>,
 ) -> Result<Vec<RawTileImage>, String> {
     let lod = lod.clamp(0, MAX_LOD);
-    if lod == 0 {
-        render_full_res(tiles, layers, db)
-    } else {
-        render_supertiles(tiles, layers, lod, db)
+    // Cylindrical world: X WRAPS (rule 6) — a viewport panned past either edge
+    // (EU4-style infinite horizontal scroll) is answered with the real tile
+    // data from the wrapped-around column, not a void. Y does NOT wrap (the
+    // sim clamps Y at the poles), so an out-of-range ty is left exactly as
+    // before (`load_blob_with_version` returns none → default sea).
+    let (gw, _gh) = grid_dims(db);
+    let tiles_x = if gw > 0 { ((gw + TILE_SIZE - 1) / TILE_SIZE) as i32 } else { 0 };
+    let needs_wrap = tiles_x > 0 && tiles.iter().any(|&(tx, _)| tx < 0 || tx >= tiles_x);
+    if !needs_wrap {
+        return if lod == 0 { render_full_res(tiles, layers, db) } else { render_supertiles(tiles, layers, lod, db) };
     }
+    // Dedupe the WRAPPED requests (several original columns can wrap onto the
+    // same real tile once a very-zoomed-out viewport spans more than one
+    // world-width), render each real tile once, then expand back out — one
+    // `RawTileImage` set per ORIGINALLY requested (tx, ty), re-tagged with
+    // that original coordinate so the frontend's cache — keyed by what it
+    // asked for, not by which real column answered it — still finds it.
+    let wrap_tx = |tx: i32| -> i32 { ((tx % tiles_x) + tiles_x) % tiles_x };
+    let orig = tiles.clone();
+    let mut wrapped_unique: Vec<(i32, i32)> = Vec::new();
+    let mut seen: HashSet<(i32, i32)> = HashSet::new();
+    for &(tx, ty) in &tiles {
+        let w = (wrap_tx(tx), ty);
+        if seen.insert(w) { wrapped_unique.push(w); }
+    }
+    let raw = if lod == 0 {
+        render_full_res(wrapped_unique, layers, db)
+    } else {
+        render_supertiles(wrapped_unique, layers, lod, db)
+    }?;
+    let mut by_coord: HashMap<(i32, i32), Vec<&RawTileImage>> = HashMap::new();
+    for img in &raw { by_coord.entry((img.tx, img.ty)).or_default().push(img); }
+    let mut out = Vec::with_capacity(orig.len() * layers.len());
+    for &(otx, oty) in &orig {
+        let w = (wrap_tx(otx), oty);
+        if let Some(imgs) = by_coord.get(&w) {
+            for img in imgs {
+                out.push(RawTileImage {
+                    tx: otx, ty: oty, layer_idx: img.layer_idx,
+                    version: img.version, rgba: img.rgba.clone(),
+                });
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// World grid dimensions, for the hillshade's z-factor and latitude correction
