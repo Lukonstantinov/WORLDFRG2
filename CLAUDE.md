@@ -4186,6 +4186,76 @@ than dressed up with an assertion that would not exercise the canvas.
 
 ---
 
+### 8.24a4 A river ends at the sea, a lake, a confluence — or it evaporates
+
+The rule, and the ONE legitimate exception, now stated in the code rather than
+implied: **every river must reach the sea, a lake or a confluence, unless its
+channel genuinely dries up in a desert** — the Sahara wadi, the Australian
+creek, the Tarim petering out into sand.
+
+Before this that exception could not be expressed. Discharge is ONE SCALAR per
+reach computed at the outlet (§8.24d), so flow could never decline along a
+course, and the only dry-climate handling was a whole-river prune
+(`!is_mouth && order <= 2 && arid_frac > 0.55 → continue`) that deletes a
+stream outright. So a desert river was ALL OR NOTHING: it either ran its full
+length to the sea or vanished entirely, and the commonest thing a desert river
+actually does — run a while, then dry up — had no representation at all.
+
+**The mechanism is a water budget, not a rule about deserts.** A per-reach walk
+from source to outlet in m³/yr: GAIN is the NEW catchment joining at each cell
+× its own runoff depth (`RUNOFF_ARID` 0.08 vs `RUNOFF_HUMID` 0.35, matching the
+lake balance's own split); LOSS is the wetted channel strip
+(`CHANNEL_LOSS_WIDTH_KM`, stated in km and converted per world per rule 25) ×
+the local evaporative excess `PET − P`, with PET a documented temperature proxy
+(phase 5 has no radiation budget, and it is only ever used to decide whether a
+dry channel survives, never to size a river). Where the budget goes negative
+**in an arid cell**, the reach is truncated there and flagged `River.ends_dry`.
+
+**The Nile falls out of the model instead of being special-cased**, which is the
+strongest evidence it is the right mechanism: a river fed from wet uplands
+arrives carrying a volume that dwarfs the per-cell loss and crosses the desert,
+while a stream raised IN the desert dies within a few cells. Measured on the
+banded fixture: 3 rivers died with a mean catchment of 199 cells, 22 crossed
+with a mean of 8,033 — a 40× separation. `a_great_river_crosses_the_desert_
+that_kills_a_small_one` asserts exactly that, and a blanket "delete rivers in
+deserts" rule passes the ends-somewhere gate while failing this one.
+
+**THE OLD PRUNE AND THE NEW BUDGET ARE THE SAME PHYSICS STATED TWICE, and
+applying both deleted every wadi the budget had just modelled.** First
+measurement after wiring the budget in: **0 rivers ended dry** on a world with
+a hot desert belt across every drainage. A dried reach has `is_mouth == false`,
+low order and a ~100% arid course, so it matched the arid prune every time.
+"An arid basin swallows its runoff" is precisely what the budget now computes,
+and the budget is the better instrument because it says WHERE the water runs
+out rather than merely that it does — so it wins, and the prune keeps only
+order-1 rills so a desert still reads sparse rather than veined. The gate
+caught this rather than passing vacuously, which is what the `!dry.is_empty()`
+assertion inside it exists for.
+
+**Two consequences that are easy to miss.** A dried river joins nothing, so it
+is neither a trunk nor a `tributary` (confluence detection seeds settlement
+magnets off that flag). And it needs its own RENDER: drawn as a plain solid
+line, a modelled terminus is pixel-for-pixel identical to the truncation
+artefact, so the lower course is drawn DASHED and fading — the atlas convention
+for an intermittent watercourse — and the reader can tell "this evaporates
+here" from "this was cut off for no reason". No playa symbol is drawn: the sim
+models no playa, and inventing one would be a claim the data cannot support.
+
+**Grid size is load-bearing in the fixture and is not arbitrary.** Catchment
+gain scales with cell AREA (cell²) while channel loss scales with cell LENGTH
+(cell¹), so on a coarse test grid one cell is a 40,000 km² catchment and no
+stream can ever dry — the mechanism is inherently weaker on coarse grids and
+stronger at real resolution. The banded fixture runs at 600×300 (~67 km/cell)
+for that reason; at 200 wide it would have passed while testing nothing.
+
+Gates: `every_river_ends_somewhere_or_dries_in_a_desert` (no unexplained stub;
+every `ends_dry` terminus is in a Köppen B cell), `a_great_river_crosses_the_
+desert_that_kills_a_small_one`, `a_humid_world_never_dries_a_river_up` (the
+mechanism must be INERT where there is no desert, or it is just a licence to
+truncate). All three verified failing before the fix.
+
+---
+
 ### 8.24b Plate margins are warped at the SOURCE
 
 `plate_index` was a plain Voronoi partition — every plate boundary was the exact

@@ -1998,6 +1998,13 @@ export interface RiverData {
   mouth_kind?: number; // 0 plain, 1 delta, 2 estuary
   delta?: [number, number][];
   tributary?: boolean; // ends at a confluence with a larger stream (not the sea)
+  /** The river ENDS BY EVAPORATION — an ephemeral desert watercourse (a wadi)
+   *  whose channel loses more to its bed and the air than its catchment
+   *  supplies. This is the one legitimate way for a river to end in open
+   *  ground; every other river reaches the sea, a lake or a confluence. Drawn
+   *  DASHED and fading, the atlas convention for an intermittent stream, so a
+   *  modelled terminus cannot be mistaken for a truncation bug. */
+  ends_dry?: boolean;
   order?: number; // Strahler-ish stream order (1 = headwater creek)
   meander?: number; // 0..1 render meander scale (0 = steep/straight, 1 = flat floodplain)
   /** True meander geometry — a smoothed, sub-cell render polyline (cell-index

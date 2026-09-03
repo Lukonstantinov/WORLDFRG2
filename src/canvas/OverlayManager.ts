@@ -2385,7 +2385,29 @@ export class OverlayManager {
         // winding channels rather than the straight diagonal grid-lines the
         // steepest-descent flow produces on flats.
         const mainPath = this.riverPath(river, i, ord);
-        strokeSmoothPath(ctx, mainPath, seamGap);
+        // ── AN EPHEMERAL DESERT RIVER IS DRAWN DASHED ────────────────────────
+        // `ends_dry` marks a watercourse whose channel loses more to its bed and
+        // the air than its catchment supplies, so it stops in open ground: a
+        // wadi. That is a MODELLED terminus, but drawn as a plain solid line it
+        // is pixel-for-pixel identical to the truncation artefact — the reader
+        // has no way to tell "this river evaporates here" from "this river was
+        // cut off for no reason". Dashing the lower course is the atlas
+        // convention for an intermittent stream and makes the difference
+        // legible; the fade carries the sense of a channel running out of water
+        // rather than ending at something.
+        if (river.ends_dry && mainPath.length >= 4) {
+          const cut = Math.floor(mainPath.length * 0.55);
+          strokeSmoothPath(ctx, mainPath.slice(0, cut + 1), seamGap);
+          ctx.save();
+          // Dash lengths are zoom-compensated like the width, so the pattern
+          // stays readable instead of collapsing to a solid line when zoomed out.
+          ctx.setLineDash([1.6 * inv, 1.3 * inv]);
+          ctx.globalAlpha *= 0.55;
+          strokeSmoothPath(ctx, mainPath.slice(cut), seamGap);
+          ctx.restore();
+        } else {
+          strokeSmoothPath(ctx, mainPath, seamGap);
+        }
         // MOUTH WIDENING: a river reaching the sea flares toward its outlet like a
         // real estuary. Draw the lower reach as nested, progressively wider (and
         // shorter, so closer to the mouth) sub-strokes — round caps blend them into a
