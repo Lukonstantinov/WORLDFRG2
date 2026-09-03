@@ -267,7 +267,12 @@ impl CampaignSim {
             cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
             for &(dist, b) in cand.iter().take(MIN_GUARANTEED_PARTNERS) {
                 if days[a * n + b].is_finite() { continue; }
-                let d = (dist * self.days_per_cell).max(1.0);
+                // TRADE_STAGING_AND_POSTS_PLAN.md slice 2 — terrain-penalise this
+                // rescue lane exactly like the pathfinder-miss fallback above (§1.1):
+                // priced flat, it undercuts every real pathfound route on the map and
+                // makes the least plausible lane the cheapest one.
+                let mult = terrain_route_mult(self.hubs[a].koppen).max(terrain_route_mult(self.hubs[b].koppen));
+                let d = (dist * self.days_per_cell * mult).max(1.0);
                 days[a * n + b] = d;
                 days[b * n + a] = d;
             }
@@ -307,7 +312,9 @@ impl CampaignSim {
             cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
             for &(dist, m) in cand.iter().take(MARKET_LINKS) {
                 if days[a * n + m].is_finite() { continue; }
-                let d = (dist * self.days_per_cell).max(1.0);
+                // Same terrain penalty as #4/#6 (TRADE_STAGING_AND_POSTS_PLAN.md slice 2).
+                let mult = terrain_route_mult(self.hubs[a].koppen).max(terrain_route_mult(self.hubs[m].koppen));
+                let d = (dist * self.days_per_cell * mult).max(1.0);
                 days[a * n + m] = d;
                 days[m * n + a] = d;
             }
@@ -1082,6 +1089,16 @@ impl CampaignSim {
                     let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
+                        // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 named this a double
+                        // application of `hub_pull` (once in `rebuild_neighbors` to
+                        // shortlist partners, again here to rank them) and proposed
+                        // dropping the second one. MEASURED, REVERTED: doing so pushes
+                        // the sustained-richest-house figure from ~1.0M to 1.70M,
+                        // breaking `simulate_decades_reports_dynamics`'s hard-asserted
+                        // wealth-concentration bound (CLAUDE.md §2.1) — removing the
+                        // second weighting does not spread trade more evenly, it lets
+                        // the AI chase the single highest-margin gap instead of the
+                        // gravity-favoured big markets, concentrating wealth harder.
                         // GRAVITY: weight the profit by the destination's trade pull so
                         // merchants prefer to supply the great markets (big entrepôts) —
                         // they clear more volume and pay reliably. The real `gap`/`days`
