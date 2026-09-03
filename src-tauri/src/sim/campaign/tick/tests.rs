@@ -64,7 +64,7 @@
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, base_days_season: vec![], season_slices: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
-            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0, diag_why_charter_bar: 0,
+            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0, diag_why_charter_bar: 0, diag_why_leg_range_bind: 0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
@@ -452,6 +452,57 @@
         s.manage_fleets();
         assert_eq!(s.houses[0].fleet_sea, FLEET_BUY_MAX_PER_MONTH,
             "a flush house must buy exactly the shipped cap, never fewer, never more");
+    }
+
+    /// N1c, the pure decision (illustrative literal caps, independent of the
+    /// shipped dose below) — a sea leg is judged against a ship cap, a land
+    /// leg against a shorter caravan cap, and a leg under either cap is never
+    /// blocked. The routing logic itself is scale-independent; the SEPARATE
+    /// no-op test below covers the shipped dose.
+    #[test]
+    fn leg_exceeds_range_uses_the_right_cap_per_mode() {
+        assert!(CampaignSim::leg_exceeds_range(4000.0, true, 3500.0, 800.0),
+            "a 4000km sea leg must exceed a 3500km ship cap");
+        assert!(CampaignSim::leg_exceeds_range(4000.0, false, 3500.0, 800.0),
+            "a 4000km land leg must exceed the (shorter) 800km caravan cap too");
+        assert!(!CampaignSim::leg_exceeds_range(500.0, false, 3500.0, 800.0),
+            "a 500km land leg clears an 800km caravan cap");
+        assert!(!CampaignSim::leg_exceeds_range(3000.0, true, 3500.0, 800.0),
+            "a 3000km sea leg clears a 3500km ship cap");
+    }
+
+    /// N1c, dose-walked · at `SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM ==
+    /// INFINITY` no finite distance can ever exceed either cap (mirrors
+    /// `n_yards_guild_axis_at_infinity_is_a_noop`'s pattern exactly), and an
+    /// ownerless leg that would be capped at the historically-motivated
+    /// 3500/800km dose must still sail — see the constants' own doc comment
+    /// for what that dose broke and why it isn't shipped yet.
+    #[test]
+    fn leg_range_cap_at_infinity_is_a_noop() {
+        assert_eq!(SHIP_LEG_MAX_KM, f32::INFINITY);
+        assert_eq!(CARAVAN_LEG_MAX_KM, f32::INFINITY);
+        assert!(!CampaignSim::leg_exceeds_range(1_000_000.0, true, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM),
+            "no finite sea distance exceeds INFINITY");
+        assert!(!CampaignSim::leg_exceeds_range(1_000_000.0, false, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM),
+            "no finite land distance exceeds INFINITY");
+
+        // End to end: a 1000km ownerless caravan leg — well past the
+        // historically-motivated 800km dose — must still sail at INFINITY.
+        let goods = vec![good("silk", 1, 2, 20.0, 0.35, false)];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 100.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        for h in &mut hubs { h.coastal = false; }
+        let mut s = sim(hubs, goods);
+        s.world_w = 4007.5; // ⇒ ~10 km/cell, so this 100-cell hop is ~1000km
+        s.rebuild_routes();
+        s.hubs[0].stock[0] = 500.0;
+        let needs = vec![vec![0.0], vec![50.0]];
+        let stock0 = stock_of(&s.hubs[0].stock, 0);
+        s.dispatch(&needs);
+        assert!(stock_of(&s.hubs[0].stock, 0) < stock0,
+            "a 1000km ownerless leg must not be capped while the dose is INFINITY");
     }
 
     /// N4 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.4) · `house_for`'s within-tier pick

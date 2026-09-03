@@ -163,6 +163,44 @@ const N1_LOCAL_HAUL_BIND_DAYS: f32 = f32::INFINITY;
 /// cargo never sinks at all: "the guard is literal", §1.1 of the plan). Shipped
 /// at 0.0, so the roll below never fires and the change is bit-identical.
 const N1B_OWNERLESS_LOSS_RATE: f32 = 0.0;
+/// A world's equatorial circumference in km — the same conversion every other
+/// module states locally per rule 25 (`localities.rs`, `deposits.rs`,
+/// `landform.rs`, `landmass_ops.rs`), so a cell-space distance can be read as
+/// real km whatever `world_w` the campaign was seeded from.
+const KM_EQUATOR: f32 = 40075.0;
+/// N1c — a per-mode geographic RANGE cap on the ownerless residual only (a
+/// house's own fleet keeps N1_LOCAL_HAUL_BIND_DAYS's day-based bind above;
+/// this is the companion the plan's own §1 measured but never dosed: "trade
+/// HORIZON is 0.24×world_w, i.e. 9,617 km on a 3600 grid" — a single
+/// ownerless leg can cross nearly a quarter of the planet in one hop, with no
+/// vessel, no capital and no relay, which is the literal "simple walk"
+/// complaint this constant answers). A real pre-modern SINGLE-LEG voyage
+/// rarely ran past a few thousand km before making port and re-provisioning
+/// (open-sea endurance) or past a few hundred km before a caravan changed
+/// hands at a caravanserai — `SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM` are that
+/// per-mode ceiling, read against the real cylindrical straight-line distance
+/// between the two hubs (not the routed/terrain-penalised `days`, which
+/// already blends in cost the raw geography doesn't carry). A HOUSE-carried
+/// leg (an established merchant network, the closest this sim has to a real
+/// relay) is untouched — only `owner < 0` is capped.
+/// Trial-measured at the historically-motivated 3500/800 km: it held
+/// `simulate_decades_reports_dynamics`'s wealth bound on that test's own
+/// (small, abstract-scale) 30-hub world, but broke three PRE-EXISTING unit
+/// fixtures (`a_house_records_every_head_it_has_had`, `big_city_is_a_net_
+/// importer`, `n7_boycott_is_inert_at_zero`) that place hubs on a `world_w:
+/// 100.0` grid never meant to carry real-km meaning — at that scale even two
+/// ADJACENT hubs sit ~3,600 km apart by this conversion, so ownerless trade
+/// collapsed almost everywhere in those fixtures, not just on genuine
+/// megateleports. The economy-fidelity reference world (`world_w: 3600`,
+/// real Earth scale — §2.5) was never re-measured against this dose this
+/// session, so whether 3500/800 is actually safe there is unconfirmed, not
+/// merely untested. Shipped at `INFINITY`, exactly `N1_LOCAL_HAUL_BIND_DAYS`'s
+/// own precedent: real, wired, `leg_exceeds_range` gated by
+/// `leg_exceeds_range_uses_the_right_cap_per_mode`, dead code at this dose.
+/// The dose walk down — on the Earth-scale reference world specifically, not
+/// the small unit fixtures — is real future work.
+const SHIP_LEG_MAX_KM: f32 = f32::INFINITY;
+const CARAVAN_LEG_MAX_KM: f32 = f32::INFINITY;
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
 /// (`House.charters`, already granted to a POLITICAL house or a chartered guild
 /// that dominates its own seat, on its own specialty goods) today only earns the
@@ -5159,6 +5197,9 @@ pub struct CampaignSim {
     /// destination hub has chartered this good to a house that isn't the carrier.
     /// Zero while the dose stays at 0.0.
     #[serde(default)] pub diag_why_charter_bar: u32,
+    /// N1c (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`) — an ownerless leg refused
+    /// because it exceeds its mode's real per-voyage range.
+    #[serde(default)] pub diag_why_leg_range_bind: u32,
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").

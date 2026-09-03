@@ -930,6 +930,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         diag_why_bar: 0,
         diag_why_no_carrier_bind: 0,
         diag_why_charter_bar: 0,
+        diag_why_leg_range_bind: 0,
         diag_lost: 0,
         diag_volume: 0.0,
         recent_trades: vec![],

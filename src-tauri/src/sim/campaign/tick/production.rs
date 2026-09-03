@@ -910,6 +910,13 @@ impl CampaignSim {
         charter_here >= 0 && owner != charter_here && roll01 < dose
     }
 
+    /// N1c, factored out the same way — a real geographic distance past its
+    /// mode's per-voyage range, the same discipline `charter_bars_sale` above
+    /// and `capacity_bind_extra_slots` (S4) already apply.
+    pub(crate) fn leg_exceeds_range(dist_km: f32, sea: bool, ship_cap_km: f32, caravan_cap_km: f32) -> bool {
+        dist_km > if sea { ship_cap_km } else { caravan_cap_km }
+    }
+
     /// Arbitrage one round: each surplus hub ships toward the best reachable
     /// deficit hubs, creating in-transit cargo with an ETA. Bounded per hub.
     pub(crate) fn dispatch(&mut self, needs: &[Vec<f32>]) {
@@ -1164,6 +1171,17 @@ impl CampaignSim {
                         // moving for free. Dead at N1_LOCAL_HAUL_BIND_DAYS = INFINITY.
                         if days > N1_LOCAL_HAUL_BIND_DAYS {
                             self.diag_why_no_carrier_bind += 1;
+                            continue;
+                        }
+                        // N1c — the same ownerless residual capped by real
+                        // per-mode geographic range rather than routed days
+                        // (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`).
+                        let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
+                        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                        let dy = self.hubs[a].y - self.hubs[b].y;
+                        let dist_km = (dx * dx + dy * dy).sqrt() * (KM_EQUATOR / self.world_w.max(1.0));
+                        if Self::leg_exceeds_range(dist_km, sea, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM) {
+                            self.diag_why_leg_range_bind += 1;
                             continue;
                         }
                     }
