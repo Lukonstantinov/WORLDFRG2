@@ -530,14 +530,6 @@ pub fn generate_plates_and_landmass_with_target(
     }
     for (pi, p) in plates.iter_mut().enumerate() { p.is_oceanic = best_oceanic[pi]; }
 
-    // Provisional terrain straight from plate identity -- needed below to
-    // know which SIDE of a boundary a cell started on before slice 4 bends
-    // the actual coastline away from it.
-    let orig_terrain: Vec<u8> = (0..buf.total())
-        .into_par_iter()
-        .map(|idx| if plates[buf.plate_index[idx] as usize].is_oceanic { 0u8 } else { 1u8 })
-        .collect();
-
     // Classify boundaries FIRST (needed by slice 4 below). Rayon-parallel:
     // each cell only reads plate_index (never boundary_type), so this map has
     // no cross-cell dependency.
@@ -615,6 +607,55 @@ pub fn generate_plates_and_landmass_with_target(
                 }
             }
             best_type
+        })
+        .collect();
+
+    // Terrain 2.0 slice 4 (coastline decoupled from the plate Voronoi edge) +
+    // volcanic-zone generation both live in `rasterize_landmass_and_volcanism`
+    // now, shared with the plate-inspector's click-to-flip rebuild
+    // (`rebuild_landmass_from_plate_types`) so the two can never drift apart —
+    // the same "one copy, not two" discipline §8.18 applies to a colour ramp.
+    let is_oceanic: Vec<bool> = plates.iter().map(|p| p.is_oceanic).collect();
+    rasterize_landmass_and_volcanism(buf, seed, &mut rng, &is_oceanic);
+
+    plates.iter().map(|p| PlateMotion {
+        centroid_x: p.cx, centroid_y: p.cy,
+        pole_x: p.pole_x, pole_y: p.pole_y, omega: p.omega,
+        is_oceanic: p.is_oceanic,
+    }).collect()
+}
+
+/// Re-rasterize landmass (terrain/elevation) and re-roll volcanic zones from a
+/// per-plate oceanic/continental assignment, given plate GEOMETRY that is
+/// already set (`buf.plate_index`/`buf.boundary_type`, persisted tile
+/// columns). Boundary classification (convergent/divergent/transform) depends
+/// only on the Euler-pole velocity field, never on which side is oceanic, so
+/// it is never recomputed here — only which SIDE of an already-classified
+/// boundary is land moves. Shared by initial generation
+/// (`generate_plates_and_landmass_with_target`) and by the plate inspector's
+/// click-to-flip rebuild (`rebuild_landmass_from_plate_types`), so the two
+/// can never drift apart — the same failure mode §8.18 warns about for a
+/// hand-copied colour table. `is_oceanic` is indexed by plate id exactly like
+/// `buf.plate_index`.
+fn rasterize_landmass_and_volcanism(
+    buf: &mut WorldBuffer, seed: u64, rng: &mut StdRng, is_oceanic: &[bool],
+) {
+    let count = is_oceanic.len().max(1);
+    let w = buf.width as f32;
+    let h = buf.height as f32;
+    let cols = (count as f32).sqrt().ceil() as usize;
+    let rows = (count + cols - 1) / cols.max(1);
+    let cell_w = w / cols.max(1) as f32;
+    let cell_h = h / rows.max(1) as f32;
+
+    // Provisional terrain straight from plate identity -- needed below to
+    // know which SIDE of a boundary a cell started on before the noise
+    // perturbation bends the actual coastline away from it.
+    let orig_terrain: Vec<u8> = (0..buf.total())
+        .into_par_iter()
+        .map(|idx| {
+            let pi = buf.plate_index[idx] as usize;
+            if is_oceanic.get(pi).copied().unwrap_or(false) { 0u8 } else { 1u8 }
         })
         .collect();
 
@@ -719,6 +760,18 @@ pub fn generate_plates_and_landmass_with_target(
     // Flip anything under `DESPECKLE_MIN` back to its surroundings.
     despeckle_terrain(buf, DESPECKLE_MIN);
 
+    // Reset volcanic flags on boundary cells before re-rolling, so a REBUILD
+    // (a plate flipped, this function run a second time on the same world) is
+    // idempotent rather than only ever accumulating more volcanic cells from
+    // stacked rolls under different assignments. Never touches a volcanic
+    // cell placed away from a plate margin (a lasso Arc island chain, §8.25),
+    // since those never carry a CONVERGENT/DIVERGENT boundary_type.
+    for i in 0..buf.total() {
+        if buf.boundary_type[i] == BOUNDARY_DIVERGENT || buf.boundary_type[i] == BOUNDARY_CONVERGENT {
+            buf.is_volcanic[i] = 0;
+        }
+    }
+
     // Generate volcanic zones at divergent boundaries, and at convergent ones
     // by COLLISION TYPE (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 4, scoped-down:
     // real collision-type differentiation, without the full persisted per-plate
@@ -739,15 +792,15 @@ pub fn generate_plates_and_landmass_with_target(
             }
             if buf.boundary_type[idx] == BOUNDARY_CONVERGENT {
                 let my_plate = buf.plate_index[idx] as usize;
-                let my_oceanic = plates.get(my_plate).map(|p| p.is_oceanic).unwrap_or(false);
+                let my_oceanic = is_oceanic.get(my_plate).copied().unwrap_or(false);
                 let mut touches_oceanic = my_oceanic;
                 let mut touches_continental = !my_oceanic;
                 for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
                     let nx = buf.wrap_x(x as i32 + dx);
                     let ny = (y as i32 + dy).clamp(0, buf.height as i32 - 1) as u32;
                     let np = buf.plate_index[buf.idx(nx, ny)] as usize;
-                    if np == my_plate || np >= plates.len() { continue; }
-                    if plates[np].is_oceanic { touches_oceanic = true; } else { touches_continental = true; }
+                    if np == my_plate || np >= is_oceanic.len() { continue; }
+                    if is_oceanic[np] { touches_oceanic = true; } else { touches_continental = true; }
                 }
                 let chance = if touches_continental && !touches_oceanic {
                     0.01 // continent-continent: broad collisional plateau, ~no volcanism
@@ -762,12 +815,26 @@ pub fn generate_plates_and_landmass_with_target(
             }
         }
     }
+}
 
-    plates.iter().map(|p| PlateMotion {
-        centroid_x: p.cx, centroid_y: p.cy,
-        pole_x: p.pole_x, pole_y: p.pole_y, omega: p.omega,
-        is_oceanic: p.is_oceanic,
-    }).collect()
+/// The plate inspector's click-to-flip rebuild (`sim_set_plate_oceanic`): keep
+/// the SAME plate geometry (`plate_index`/`boundary_type`, already persisted —
+/// no re-partition, no re-roll of plate poles/positions) and re-rasterize
+/// landmass from an EDITED per-plate oceanic/continental assignment.
+/// `generate_plates_and_landmass` already decides `is_oceanic` per plate to
+/// hit a target ocean fraction (Slice 5); this exposes that decision so a
+/// specific plate can override it after the fact. `is_oceanic` must be
+/// indexed the same way `buf.plate_index` is — i.e. the same order
+/// `PlateMotion` was returned in; the caller reads and rewrites the persisted
+/// `metadata["plate_motion"]` list to keep both in step.
+pub fn rebuild_landmass_from_plate_types(buf: &mut WorldBuffer, seed: u64, is_oceanic: &[bool]) {
+    // A fresh RNG stream, deliberately NOT a continuation of generation's own
+    // (that stream is long gone by the time a rebuild runs, and its position
+    // depended on plate_count/ocean-fill-trial draws a rebuild never repeats)
+    // — salted so it can never coincidentally replay the same draws generation
+    // made at some other offset.
+    let mut rng = StdRng::seed_from_u64(seed ^ 0xB1A5_5EED_u64);
+    rasterize_landmass_and_volcanism(buf, seed, &mut rng, is_oceanic);
 }
 
 /// Below this many connected cells, a land or sea patch reads as noise dust
@@ -1182,5 +1249,66 @@ mod tests {
              {} seeds — plates still read as roughly uniform in size, which is exactly \
              what the old jittered-grid seeding produced and this gate exists to catch.",
             mean_ratio, ratios.len());
+    }
+
+    /// The plate inspector's click-to-flip rebuild must be deterministic per
+    /// (seed, assignment) — the same "same seed, same result" discipline rule
+    /// 10 asks of every other world-mutating entry point.
+    #[test]
+    fn rebuild_landmass_is_deterministic() {
+        let mut buf_a = gen_world(240, 120, 55, 8);
+        let mut buf_b = gen_world(240, 120, 55, 8);
+        let oceanic = vec![true, false, true, false, true, false, true, false];
+        rebuild_landmass_from_plate_types(&mut buf_a, 55, &oceanic);
+        rebuild_landmass_from_plate_types(&mut buf_b, 55, &oceanic);
+        assert_eq!(buf_a.terrain, buf_b.terrain);
+        assert_eq!(buf_a.is_volcanic, buf_b.is_volcanic);
+    }
+
+    /// Flipping one plate's oceanic/continental assignment must actually move
+    /// the map by roughly that plate's own share, not just re-dress the noise
+    /// at existing boundaries. Measures the AGGREGATE land swing rather than
+    /// per-cell interior geometry (a small/oddly-shaped plate can sit entirely
+    /// inside the coastline noise band's `reach`, so "does every interior cell
+    /// flip" is not a robust per-plate claim — "does total land move by
+    /// roughly the flipped plate's cell count" is, and is exactly the
+    /// mechanism (`target_land` recomputed from the edited assignment)).
+    #[test]
+    fn flipping_a_plate_changes_the_land_area_it_should() {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", "240".to_string()), ("grid_height", "120".to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        let motion = generate_plates_and_landmass(&mut buf, 77, 8);
+
+        let mut counts: std::collections::HashMap<u16, usize> = std::collections::HashMap::new();
+        for &p in &buf.plate_index { *counts.entry(p).or_insert(0) += 1; }
+        let (&target, &target_cells) = counts.iter().max_by_key(|(_, &c)| c).unwrap();
+
+        let land_before: usize = buf.terrain.iter().filter(|&&t| t == 1).count();
+        let mut oceanic: Vec<bool> = motion.iter().map(|p| p.is_oceanic).collect();
+        oceanic[target as usize] = !oceanic[target as usize];
+
+        rebuild_landmass_from_plate_types(&mut buf, 77, &oceanic);
+        let land_after: usize = buf.terrain.iter().filter(|&&t| t == 1).count();
+
+        // `target_land` (the count `rasterize_landmass_and_volcanism` thresholds
+        // to) is a direct sum of each CONTINENTAL plate's own cell count, so
+        // flipping one plate moves it by exactly that plate's cell count —
+        // land does not also grow somewhere else to compensate, since "sea" is
+        // simply "not currently continental". The coastline noise band nudges
+        // the realised swing by a few cells either way at plate margins.
+        let expected_swing = target_cells as f64;
+        let actual_swing = (land_after as f64 - land_before as f64).abs();
+        assert!(actual_swing > expected_swing * 0.9,
+            "flipping plate {target} ({target_cells} cells, {:.1}% of the world) only \
+             moved total land by {actual_swing} cells (expected roughly {expected_swing:.0}) \
+             — the rebuild does not appear to be responding to the edited assignment",
+            target_cells as f32 / buf.total() as f32 * 100.0);
     }
 }

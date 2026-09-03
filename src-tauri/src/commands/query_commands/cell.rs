@@ -28,6 +28,16 @@ pub fn get_cell_info(
     let (lx, ly) = TileCoord::local(wx, wy);
     let idx = (ly * TILE_SIZE + lx) as usize;
 
+    // Plate inspector: this cell's plate's oceanic/continental flag, read from
+    // the persisted motion list rather than recomputed — `is_oceanic` is a
+    // per-PLATE fact decided once at generation (or overridden by a click-to-
+    // flip), never a per-cell one.
+    let plate_is_oceanic: Option<bool> = metadata::get_meta(&conn, "plate_motion")
+        .ok()
+        .flatten()
+        .and_then(|json| serde_json::from_str::<Vec<crate::sim::plates::PlateMotion>>(&json).ok())
+        .and_then(|motion| motion.get(tile.plate_index[idx] as usize).map(|p| p.is_oceanic));
+
     let koppen = tile.koppen[idx];
     let elevation = tile.elevation[idx];
     let is_land = tile.terrain[idx] == 1;
@@ -64,6 +74,7 @@ pub fn get_cell_info(
         fertility: tile.fertility[idx],
         fishery: tile.fishery[idx],
         plate_index: tile.plate_index[idx],
+        plate_is_oceanic,
         is_volcanic: tile.is_volcanic[idx] != 0,
         is_shelf: tile.is_shelf[idx] != 0,
         wind_vx: tile.wind_vx[idx],

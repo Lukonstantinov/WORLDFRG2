@@ -66,6 +66,10 @@ export interface CellInfo {
   fertility: number;
   fishery: number;
   plate_index: number;
+  /** This cell's plate's oceanic/continental assignment (the plate inspector's
+   *  data source); null on a world with no plate data (template/painted, or
+   *  generated before the motion layer shipped). */
+  plate_is_oceanic: boolean | null;
   is_volcanic: boolean;
   is_shelf: boolean;
   wind_vx: number;
@@ -125,13 +129,19 @@ export interface VectorSample {
 // One plate's Euler-pole motion arrow (§8.24 B2). vx/vy/speed are relative
 // units (the rotation rate has no real-world calibration) — only direction
 // and relative magnitude are meaningful, so the renderer normalizes length.
+// `id` is the plate's index (matches CellInfo.plate_index and the order
+// `sim_set_plate_oceanic` expects); `area_frac` is its real measured share of
+// the world's cells — the plate inspector's data source (StepLandmass's
+// Plates panel + InfoPanel's click-to-flip).
 export interface PlateMotionArrow {
+  id: number;
   x: number;
   y: number;
   vx: number;
   vy: number;
   speed: number;
   is_oceanic: boolean;
+  area_frac: number;
 }
 
 export interface Streamline {

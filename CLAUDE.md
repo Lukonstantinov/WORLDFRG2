@@ -4027,6 +4027,49 @@ invisible at plate scale. Oceanic and continental plates get distinct arrow
 hues (`PLATE_MOTION_OCEANIC_COLOR`/`_CONTINENTAL_COLOR`) since they move at
 genuinely different real rates.
 
+**The plate inspector — click-to-flip oceanic/continental (built on B2).** A
+motion layer you can read invited the obvious next question: can a specific
+plate's oceanic/continental assignment (decided automatically by Slice 5's
+ocean-fraction fill) be overridden? `sim_set_plate_oceanic(plate_id,
+is_oceanic)` does this without a re-partition — `plate_index`/`boundary_type`
+(persisted tile columns) are untouched; only which side of an
+already-classified boundary is land moves. `plates.rs` extracts the
+terrain-rasterization + volcanic-zone tail of
+`generate_plates_and_landmass_with_target` (Terrain 2.0 slice 4's level-set
+coastline noise, then the collision-style volcanic rolls) into a shared
+`rasterize_landmass_and_volcanism`, called both by initial generation and by
+the new `rebuild_landmass_from_plate_types` — one copy, so the two paths can
+never drift apart (§8.18's discipline applied to a generator, not a colour
+ramp). Volcanic flags on boundary cells are reset before every re-roll, which
+is what makes a rebuild idempotent rather than only ever accumulating more
+volcanic cells across repeated flips — cells placed away from a plate margin
+(a lasso Arc island chain, §8.25) are untouched, since those never carry a
+CONVERGENT/DIVERGENT `boundary_type`. The rebuild reads its seed from
+`metadata["plate_seed"]` (persisted alongside `plate_motion` by
+`persist_plate_motion`) rather than taking one as an argument — a rebuild
+must use the exact seed generation used (the coastline noise field is keyed
+directly off it), and the frontend's Seed field is a UI draft the user may
+have since re-rolled without ever pressing Generate again, so it cannot be
+trusted as "the seed this world was built with."
+
+Surfaced two ways, both reading the same `get_plate_motion` array (now
+carrying `id`/`area_frac` alongside the existing motion fields — a plate's
+REAL measured area, counted from `plate_index`, not its nominal size-class
+weight): a **Plates panel** in `StepLandmass.tsx` (collapsible, sorted by
+area, one row per plate with a swatch, its assignment, area%, and a Flip
+button) for browsing the whole set; and a **Flip button in `InfoPanel.tsx`**
+(right-click a cell → the existing `plate_index` row, now joined by a new
+`CellInfo.plate_is_oceanic` field read from the same persisted motion list)
+for flipping the one plate under the cursor. Both are `null`/empty on a world
+with no plate data (template/painted, or generated before B2) — same
+discipline as an old save's empty `lakes`. Gated:
+`rebuild_landmass_is_deterministic` (same seed + assignment ⇒ identical
+`terrain`/`is_volcanic`) and `flipping_a_plate_changes_the_land_area_it_should`
+(the aggregate land-area swing tracks the flipped plate's own cell count,
+within the coastline noise band's margin — not per-cell interior geometry,
+since a small or oddly-shaped plate can sit entirely inside the noise band's
+`reach` and so isn't a robust per-plate claim on its own).
+
 **B3 — collision STYLE, why the Himalaya and the Andes look different.**
 Before this every orogenic belt shared one cross-section: `belt_profile`
 was a single decay from the boundary, shaped only by width and offset per
