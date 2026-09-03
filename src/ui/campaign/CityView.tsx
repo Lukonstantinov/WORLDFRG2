@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { HubDetail, BuildingInfo } from "@types";
+import { building as drawBuilding, buildingPeakY, BUILDING_SPECS } from "@canvas/buildingArt";
 
 // ── Isometric city view ─────────────────────────────────────────────────────
 // Every settlement generates a bird's-eye ISOMETRIC plan of itself, deterministic
@@ -33,8 +34,11 @@ function tileDims(N: number) {
 // place of the procedural iso block; a missing sprite falls back to the drawn
 // building, so the view always renders. Owner colour keeps reading via the ground
 // wash + the heraldic flag, so fixed-palette sprites still show who controls what.
-const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.svg|png (like /fish/)
-const SPRITE_EXTS = [".svg", ".png"];  // shipped templates are SVG; a PNG pack also works
+const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.png (like /fish/)
+// PNG only. `public/city-sprites/*.svg` still holds the generated templates this
+// pack hook shipped with, and they would shadow the built-in building set that
+// replaced them — they are superseded, not the art.
+const SPRITE_EXTS = [".png"];
 // Uniform sprite CELL (shared with scripts/gen_city_sprites.mjs): a 128×220 canvas
 // whose footprint (width 100, base bottom-vertex at sprite y=185) maps onto exactly
 // ONE grid tile — so every building is the same footprint and tiles cleanly.
@@ -319,18 +323,6 @@ function poly(ctx: CanvasRenderingContext2D, pts: Pt[], fill: string) {
   ctx.closePath();
   ctx.fillStyle = fill; ctx.fill();
 }
-// Roof material palettes (silhouette + colour differ per building type).
-const ROOF_TILE: [number, number, number] = [156, 91, 69];   // terracotta pitch
-const ROOF_GOLD: [number, number, number] = [201, 162, 74];   // temple dome
-const ROOF_STONE: [number, number, number] = [112, 118, 124]; // citadel battlement
-const ROOF_SLATE: [number, number, number] = [92, 102, 112];  // flat storage roof
-type Arche = "pitch" | "dome" | "crenel" | "flat";
-function archetypeOf(label: string): Arche {
-  if (["Cathedral", "Temple", "Mint", "Bank"].includes(label)) return "dome";
-  if (["Citadel", "Palace", "Council Hall"].includes(label)) return "crenel";
-  if (["Granary", "Warehouse", "Harbor", "Shipyard"].includes(label)) return "flat";
-  return "pitch";
-}
 
 /** Draw ONE building: a PNG sprite from the pack if one is present, otherwise the
  *  procedural iso structure. Owner colour still reads via the ground wash + flag. */
@@ -372,73 +364,39 @@ function drawSprite(ctx: CanvasRenderingContext2D, img: HTMLImageElement, cx: nu
   }
 }
 
-/** The procedural iso building (fallback when no pack sprite is present) — walls in
- *  the owner's colour, a roof whose SHAPE reads the building type, and a flag. */
+/** The procedural iso building (drawn when no pack sprite is present) — the
+ *  design handoff's building set: form, roof shape and material read the TYPE,
+ *  while ownership reads from the ground wash and the heraldic flag on top. */
 function drawProcedural(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
   tw: number, th: number, wardCol: [number, number, number], building?: BuildingInfo) {
+  void h; void wardCol;
   const isLandmark = !!building;
-  const s = isLandmark ? 1.0 : 0.62;
-  const base = isLandmark ? toRgb(building!.color) : mix([120, 116, 108], wardCol, 0.3);
-  const leftC = shade(base, isLandmark ? 0.55 : 0.5);
-  const rightC = shade(base, isLandmark ? 0.78 : 0.66);
-  const hw = (tw / 2) * s, hh = (th / 2) * s;
-  // Eave corners (roof base at wall height h) + ground corners.
-  const T: Pt = [cx, cy - hh - h], R: Pt = [cx + hw, cy - h], B: Pt = [cx, cy + hh - h], L: Pt = [cx - hw, cy - h];
-  const Rg: Pt = [cx + hw, cy], Bg: Pt = [cx, cy + hh], Lg: Pt = [cx - hw, cy];
-  // Walls (the two front faces).
-  poly(ctx, [L, B, Bg, Lg], leftC);
-  poly(ctx, [R, B, Bg, Rg], rightC);
+  const stem = (building ? SPRITE_MAP[building.label] : SPRITE_MAP.house) ?? "house";
+  const spec = BUILDING_SPECS[stem] ?? BUILDING_SPECS.house;
+  // A great landmark stands a tier taller; common houses a tier shorter.
+  const tier = !isLandmark ? 0 : landmarkHeight(building!.label) >= 34 ? 2 : 1;
+  const s = tw * (isLandmark ? 1.02 : 0.7);
+  const by = cy + th / 2;
+  drawBuilding(ctx, cx, by, s, spec, tier);
+  if (!isLandmark) return;
 
-  const arche: Arche = isLandmark ? archetypeOf(building!.label) : "pitch";
-  const rh = Math.max(5, tw * 0.42);
-  let flagTopY = cy - hh - h; // where the flag pole roots (roof apex)
-  if (arche === "pitch") {
-    const A: Pt = [cx, cy - hh - h - rh];
-    const rl = shade(ROOF_TILE, 0.78), rr = shade(ROOF_TILE, 1.0);
-    poly(ctx, [A, T, L], rl); poly(ctx, [A, T, R], rr);   // back slopes
-    poly(ctx, [A, L, B], rl); poly(ctx, [A, R, B], rr);   // front slopes
-    flagTopY = A[1];
-  } else if (arche === "flat") {
-    poly(ctx, [T, R, B, L], shade(ROOF_SLATE, 1.0));
-    poly(ctx, [T, R, B, L], "rgba(0,0,0,0)");
-    ctx.strokeStyle = shade(ROOF_SLATE, 0.6); ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(T[0], T[1]); ctx.lineTo(R[0], R[1]); ctx.lineTo(B[0], B[1]); ctx.lineTo(L[0], L[1]); ctx.closePath(); ctx.stroke();
-  } else if (arche === "crenel") {
-    poly(ctx, [T, R, B, L], shade(ROOF_STONE, 1.0));
-    const m = Math.max(2.5, tw * 0.12), mh = rh * 0.55;
-    for (const c of [L, B, R] as Pt[]) {
-      const [x, y] = c;
-      poly(ctx, [[x - m, y - mh], [x + m, y - mh], [x + m, y], [x - m, y]], shade(ROOF_STONE, 1.15)); // merlon face
-      poly(ctx, [[x - m, y - mh], [x, y - mh - m * 0.5], [x + m, y - mh], [x, y - mh + m * 0.5]], shade(ROOF_STONE, 1.3)); // cap
-    }
-    flagTopY = cy - hh - h - rh * 0.55;
-  } else { // dome
-    poly(ctx, [T, R, B, L], shade(base, 0.9)); // drum
-    ctx.beginPath();
-    ctx.ellipse(cx, cy - h - hh * 0.1, hw * 0.82, hh + rh, 0, 0, Math.PI * 2);
-    ctx.fillStyle = shade(ROOF_GOLD, 1.0); ctx.fill();
-    ctx.strokeStyle = shade(ROOF_GOLD, 0.65); ctx.lineWidth = 1; ctx.stroke();
-    flagTopY = cy - h - hh * 0.1 - (hh + rh);
-  }
-
-  if (isLandmark) {
-    // Owner flag: a short pole + a pennant in the owner's heraldic colour.
-    const poleH = Math.max(7, tw * 0.32);
-    const pw = Math.max(5, tw * 0.22);
-    ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.moveTo(cx, flagTopY); ctx.lineTo(cx, flagTopY - poleH); ctx.stroke();
-    poly(ctx, [[cx, flagTopY - poleH], [cx + pw, flagTopY - poleH + 3], [cx, flagTopY - poleH + 6]], building!.color);
-    // Small emoji chip above the flag for at-a-glance identification.
-    const chipR = Math.max(6.5, Math.min(10, tw * 0.24));
-    const fontPx = Math.max(9, Math.min(14, Math.round(tw * 0.34)));
-    const ey = flagTopY - poleH - chipR - 1;
-    ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(9,14,20,0.85)"; ctx.fill();
-    ctx.strokeStyle = building!.color; ctx.lineWidth = 1.2; ctx.stroke();
-    ctx.font = `${fontPx}px system-ui, sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(building!.emoji || "🏛️", cx, ey + 0.5);
-  }
+  const flagTopY = buildingPeakY(by, s, spec, tier);
+  // Owner flag: a short pole + a pennant in the owner's heraldic colour.
+  const poleH = Math.max(7, tw * 0.32);
+  const pw = Math.max(5, tw * 0.22);
+  ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
+  ctx.beginPath(); ctx.moveTo(cx, flagTopY); ctx.lineTo(cx, flagTopY - poleH); ctx.stroke();
+  poly(ctx, [[cx, flagTopY - poleH], [cx + pw, flagTopY - poleH + 3], [cx, flagTopY - poleH + 6]], building!.color);
+  // Small emoji chip above the flag for at-a-glance identification.
+  const chipR = Math.max(6.5, Math.min(10, tw * 0.24));
+  const fontPx = Math.max(9, Math.min(14, Math.round(tw * 0.34)));
+  const ey = flagTopY - poleH - chipR - 1;
+  ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(9,14,20,0.85)"; ctx.fill();
+  ctx.strokeStyle = building!.color; ctx.lineWidth = 1.2; ctx.stroke();
+  ctx.font = `${fontPx}px system-ui, sans-serif`;
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(building!.emoji || "\u{1F3DB}\u{FE0F}", cx, ey + 0.5);
 }
 
 /** One-line lore/role for each building type — shown on hover + in the ward grid. */
