@@ -183,6 +183,74 @@ const PLATE_WARP_AMP_FRAC_WEIGHTED: f32 = 0.08;
 /// constant at all (a power diagram's cells are convex at any offset), so it
 /// only has to satisfy the area target.
 const POWER_DIAGRAM_OFFSET_SCALE: f32 = 2.2;
+/// The ocean-fill trial loop below already tries `OCEAN_FILL_TRIALS`
+/// independent shuffle orders and used to keep whichever came closest to the
+/// area target alone — which is blind to CONNECTIVITY: two large continental
+/// clusters that happen to sit Voronoi-adjacent fuse into one supercontinent
+/// with no mechanism ever preferring otherwise, however many separate
+/// landmasses the plate count could support. Among trials within
+/// `CONTINENT_AREA_TOLERANCE_FRAC` of the best-measured area error, the one
+/// with the MOST separate continental landmasses (by plate-adjacency
+/// connected components) now wins instead of the first one found — still one
+/// of the SAME already-computed trials, no extra RNG draws, so this changes
+/// nothing about determinism-per-seed or the ocean-fraction accuracy itself.
+const CONTINENT_AREA_TOLERANCE_FRAC: f64 = 0.02;
+
+/// Two plate ids are adjacent if any grid edge crosses between them — the
+/// TRUE Voronoi neighbour graph, built directly from `plate_index` rather
+/// than from `boundary_type` (a physics classification that reads NONE for
+/// two touching plates with near-zero relative velocity, so it would
+/// silently under-count adjacency). `count` is small (tens of plates), so a
+/// flat `count*count` matrix is cheaper and simpler than a set-per-plate.
+fn build_plate_adjacency(buf: &WorldBuffer, count: usize) -> Vec<bool> {
+    let mut adj = vec![false; count * count];
+    let w = buf.width;
+    let h = buf.height;
+    for y in 0..h {
+        for x in 0..w {
+            let i = buf.idx(x, y);
+            let pi = buf.plate_index[i] as usize;
+            let rx = buf.wrap_x(x as i32 + 1);
+            let pj = buf.plate_index[buf.idx(rx, y)] as usize;
+            if pi != pj && pi < count && pj < count {
+                adj[pi * count + pj] = true;
+                adj[pj * count + pi] = true;
+            }
+            if y + 1 < h {
+                let pk = buf.plate_index[buf.idx(x, y + 1)] as usize;
+                if pi != pk && pi < count && pk < count {
+                    adj[pi * count + pk] = true;
+                    adj[pk * count + pi] = true;
+                }
+            }
+        }
+    }
+    adj
+}
+
+/// Connected-component count of the CONTINENTAL subgraph (oceanic plates
+/// excluded) over the plate-adjacency graph above — the number of separate
+/// landmasses this oceanic/continental assignment will actually draw, since
+/// two Voronoi-adjacent continental plates always touch on the map.
+fn count_continental_components(adj: &[bool], count: usize, is_oceanic: &[bool]) -> usize {
+    let mut visited = vec![false; count];
+    let mut components = 0usize;
+    for start in 0..count {
+        if is_oceanic[start] || visited[start] { continue; }
+        components += 1;
+        let mut stack = vec![start];
+        visited[start] = true;
+        while let Some(p) = stack.pop() {
+            for q in 0..count {
+                if adj[p * count + q] && !is_oceanic[q] && !visited[q] {
+                    visited[q] = true;
+                    stack.push(q);
+                }
+            }
+        }
+    }
+    components
+}
 
 /// Assign every cell to its nearest plate seed — the Voronoi partition — but at
 /// a DOMAIN-WARPED sample position rather than the cell's own.
@@ -538,20 +606,42 @@ pub fn generate_plates_and_landmass_with_target(
     // territory grab. This can only ever GIVE a rescued plate its own
     // cells, taken from whichever plate(s) happened to have claimed that
     // patch — no other plate's own site is ever touched.
+    //
+    // The enclave's OUTLINE is warped, not a bare circle: a mathematically
+    // perfect disc reads as an obvious artefact next to every other plate's
+    // irregular, warped-Voronoi margin ("circular ones" — a real report). A
+    // small inner core (`ENCLAVE_CORE_FRAC`) is always filled unconditionally
+    // — that alone is what keeps the "never empty" guarantee — and an
+    // angle-keyed noise field (sampled on a fixed-radius ring so it varies
+    // smoothly by BEARING, not by distance from centre) extends a further,
+    // irregular penumbra out to the old full radius, so the enclave reads as
+    // a small organic blob like any other plate rather than a stamped circle.
     {
         let mut cells = vec![0u32; plates.len()];
         for &pi in &buf.plate_index { cells[pi as usize] += 1; }
         let h_i = buf.height as i32;
-        let radius = ((buf.width.min(buf.height) as f32) * 0.02).max(3.0) as i32;
+        const ENCLAVE_CORE_FRAC: f32 = 0.55;
+        let radius_max = ((buf.width.min(buf.height) as f32) * 0.02).max(3.0);
+        let radius_min = radius_max * ENCLAVE_CORE_FRAC;
+        let scan = radius_max.ceil() as i32 + 1;
         for (pi, &c) in cells.iter().enumerate() {
             if c > 0 { continue; }
             let ecx = plates[pi].cx.round() as i32;
             let ecy = plates[pi].cy.round() as i32;
-            for dy in -radius..=radius {
+            let salt = seed.wrapping_add((pi as u64).wrapping_mul(0x9E3779B97F4A7C15));
+            for dy in -scan..=scan {
                 let y = ecy + dy;
                 if y < 0 || y >= h_i { continue; }
-                for dx in -radius..=radius {
-                    if dx * dx + dy * dy > radius * radius { continue; }
+                for dx in -scan..=scan {
+                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
+                    if dist > radius_max { continue; }
+                    if dist > radius_min {
+                        let angle = (dy as f32).atan2(dx as f32);
+                        let raw = fbm_noise(angle.cos() * 3.0 + 100.0, angle.sin() * 3.0 + 100.0, salt, 3, 2.0, 0.5);
+                        let t = ((raw - FBM_MEASURED_MIN) / (FBM_MEASURED_MAX - FBM_MEASURED_MIN)).clamp(0.0, 1.0);
+                        let r_eff = radius_min + t * (radius_max - radius_min);
+                        if dist > r_eff { continue; }
+                    }
                     let x = buf.wrap_x(ecx + dx);
                     let idx = buf.idx(x, y as u32);
                     buf.plate_index[idx] = pi as u16;
@@ -577,8 +667,9 @@ pub fn generate_plates_and_landmass_with_target(
     let mut plate_cells = vec![0u32; plates.len()];
     for &pi in &buf.plate_index { plate_cells[pi as usize] += 1; }
     let target_ocean_cells = (ocean_fraction as f64 * buf.total() as f64).round() as i64;
-    let mut best_oceanic = vec![false; plates.len()];
-    let mut best_err = i64::MAX;
+    let adjacency = build_plate_adjacency(buf, plates.len());
+    let area_tolerance = (CONTINENT_AREA_TOLERANCE_FRAC * buf.total() as f64) as i64;
+    let mut trials: Vec<(i64, usize, Vec<bool>)> = Vec::with_capacity(24);
     const OCEAN_FILL_TRIALS: usize = 24;
     for _ in 0..OCEAN_FILL_TRIALS {
         let mut order: Vec<usize> = (0..plates.len()).collect();
@@ -597,12 +688,20 @@ pub fn generate_plates_and_landmass_with_target(
             }
         }
         let err = (ocean_cells_so_far - target_ocean_cells).abs();
-        if err < best_err {
-            best_err = err;
-            best_oceanic = oceanic;
-        }
+        let continents = count_continental_components(&adjacency, plates.len(), &oceanic);
+        trials.push((err, continents, oceanic));
     }
-    for (pi, p) in plates.iter_mut().enumerate() { p.is_oceanic = best_oceanic[pi]; }
+    // Among the trials closest to the ocean-fraction target, prefer the one
+    // that scatters the continental plates into the MOST separate landmasses
+    // — "more continents" — rather than always taking the single best area
+    // match regardless of whether it happens to fuse everything continental
+    // into one connected supercontinent (see CONTINENT_AREA_TOLERANCE_FRAC).
+    let min_err = trials.iter().map(|t| t.0).min().unwrap_or(0);
+    let best = trials.iter()
+        .filter(|t| t.0 <= min_err + area_tolerance)
+        .max_by_key(|t| (t.1, -(t.0)))
+        .expect("OCEAN_FILL_TRIALS > 0, so at least one trial exists");
+    for (pi, p) in plates.iter_mut().enumerate() { p.is_oceanic = best.2[pi]; }
 
     // Classify boundaries FIRST (needed by slice 4 below). Rayon-parallel:
     // each cell only reads plate_index (never boundary_type), so this map has
@@ -699,6 +798,31 @@ pub fn generate_plates_and_landmass_with_target(
     }).collect()
 }
 
+/// Coastline RUGOSITY range: the per-region multiplier on the coastline
+/// noise's own amplitude (see `rasterize_landmass_and_volcanism`). 1.0 would
+/// be the old, single global texture; the shipped range gives a smooth low
+/// stretch of coast roughly half the old wobble and a rugged stretch nearly
+/// double it, so the two read as genuinely different coastal CHARACTER
+/// rather than a subtle amplitude jitter.
+const RUGOSITY_MIN: f32 = 0.55;
+const RUGOSITY_MAX: f32 = 1.9;
+/// Wavelength of the rugosity field itself, as a fraction of the shorter
+/// grid dimension (rule 25's spirit — a real distance, not a cell count):
+/// large enough that a single stretch of coast (a bay, a headland run) sees
+/// one consistent character rather than flickering between smooth and
+/// rugged cell to cell, small enough that a world sees several distinct
+/// regions rather than one uniform tilt end to end.
+const RUGOSITY_WAVELENGTH_FRAC: f32 = 0.35;
+/// `fbm_noise` averages its octaves rather than spanning 0..1 (§8.24b's own
+/// measured lesson, restated here since a second call site now depends on
+/// it): at 3 octaves / lacunarity 2.0 / persistence 0.5 it concentrates near
+/// ~0.11..0.40. The rugosity read is remapped on that measured spread so it
+/// reliably swings its full designed range instead of sitting near its own
+/// mean — an un-remapped read would be a near-constant OFFSET, not a
+/// texture change, exactly the mistake §8.24b names and fixed once already.
+const FBM_MEASURED_MIN: f32 = 0.11;
+const FBM_MEASURED_MAX: f32 = 0.40;
+
 /// Re-rasterize landmass (terrain/elevation) and re-roll volcanic zones from a
 /// per-plate oceanic/continental assignment, given plate GEOMETRY that is
 /// already set (`buf.plate_index`/`buf.boundary_type`, persisted tile
@@ -790,6 +914,17 @@ fn rasterize_landmass_and_volcanism(
     let freq_a = 1.0 / (reach * 0.9);
     let freq_b = 1.0 / (reach * 0.28);
     let amp = reach * 1.7;
+    // Regional coastline CHARACTER (see RUGOSITY_* docs above): a single
+    // global (freq, amp) recipe drew every coast with matched texture — no
+    // smooth low-energy shelf beside a rugged fjord-dense highland run, the
+    // way real atlases show. A very-low-frequency field reads as a per-cell
+    // multiplier on both the amplitude and the short/long wavelength mix —
+    // rugged leans harder on the short (headland/inlet) term, smooth on the
+    // broad sweep alone — so the change is TEXTURE, not just amplitude. The
+    // level-set BFS above still guarantees each individual bulge/inlet is
+    // internally coherent; this only varies how aggressively that shaping
+    // reads from one stretch of coast to the next.
+    let rug_freq = 1.0 / (w.min(h) * RUGOSITY_WAVELENGTH_FRAC).max(24.0);
     let score: Vec<f32> = (0..buf.total())
         .into_par_iter()
         .map(|idx| {
@@ -804,8 +939,11 @@ fn rasterize_landmass_and_volcanism(
             let ay = (idx as u32 / buf.width) as f32;
             let a = fbm_noise(ax * freq_a + 11.0, ay * freq_a + 4.0, seed.wrapping_add(0x5A17_0001), 3, 2.0, 0.5);
             let b = fbm_noise(ax * freq_b + 71.0, ay * freq_b + 29.0, seed.wrapping_add(0x5A17_0002), 3, 2.0, 0.5);
-            let combined = a * 0.7 + b * 0.3;
-            signed + amp * (combined - 0.5) * 2.0
+            let rug_raw = fbm_noise(ax * rug_freq, ay * rug_freq, seed.wrapping_add(0x5A17_0003), 3, 2.0, 0.5);
+            let rug_t = ((rug_raw - FBM_MEASURED_MIN) / (FBM_MEASURED_MAX - FBM_MEASURED_MIN)).clamp(0.0, 1.0);
+            let rug_mult = RUGOSITY_MIN + rug_t * (RUGOSITY_MAX - RUGOSITY_MIN);
+            let combined = a * (0.7 - 0.25 * rug_t) + b * (0.3 + 0.25 * rug_t);
+            signed + amp * rug_mult * (combined - 0.5) * 2.0
         })
         .collect();
 
@@ -1323,6 +1461,66 @@ mod tests {
              {} seeds — plates still read as roughly uniform in size, which is exactly \
              what the old jittered-grid seeding produced and this gate exists to catch.",
             mean_ratio, ratios.len());
+    }
+
+    /// The ocean-fill trial selection (see CONTINENT_AREA_TOLERANCE_FRAC) now
+    /// prefers, among near-equal-area trials, whichever scatters continental
+    /// plates into the most separate landmasses — real land connected
+    /// components, 8-connected and cylinder-wrap-aware, not just plate count
+    /// (two adjacent continental PLATES are still one landmass on the map).
+    /// Before this change the selection was blind to connectivity and could
+    /// (and on a plain-Voronoi world with a few large plates, often did) fuse
+    /// every continental plate into one supercontinent even when the plate
+    /// layout had room to keep them apart. This measures the real, rendered
+    /// outcome — not the mechanism's own internal component count — the same
+    /// discipline `land_fraction_tracks_the_target` and
+    /// `every_requested_plate_gets_real_territory` already use for their own
+    /// claims.
+    #[test]
+    fn continents_scatter_when_the_plate_layout_allows_it() {
+        fn count_land_components(buf: &WorldBuffer) -> usize {
+            let w = buf.width as i32;
+            let h = buf.height as i32;
+            let mut visited = vec![false; buf.total()];
+            let mut components = 0usize;
+            for start in 0..buf.total() {
+                if buf.terrain[start] != 1 || visited[start] { continue; }
+                components += 1;
+                let mut stack = vec![start];
+                visited[start] = true;
+                while let Some(ci) = stack.pop() {
+                    let cx = (ci as u32 % buf.width) as i32;
+                    let cy = (ci as u32 / buf.width) as i32;
+                    for dy in -1..=1i32 {
+                        let ny = cy + dy;
+                        if ny < 0 || ny >= h { continue; }
+                        for dx in -1..=1i32 {
+                            if dx == 0 && dy == 0 { continue; }
+                            let nx = buf.wrap_x(cx + dx);
+                            let ni = buf.idx(nx, ny as u32);
+                            if buf.terrain[ni] == 1 && !visited[ni] {
+                                visited[ni] = true;
+                                stack.push(ni);
+                            }
+                        }
+                    }
+                }
+            }
+            components
+        }
+        let mut counts: Vec<usize> = Vec::new();
+        for seed in 0..8u64 {
+            let buf = gen_world(360, 180, seed, 16);
+            counts.push(count_land_components(&buf));
+        }
+        let mean = counts.iter().sum::<usize>() as f32 / counts.len() as f32;
+        let multi_continent_seeds = counts.iter().filter(|&&c| c >= 2).count();
+        println!("land components over {} seeds: {:?} (mean {:.2}, {} of {} seeds ≥2)",
+                 counts.len(), counts, mean, multi_continent_seeds, counts.len());
+        assert!(multi_continent_seeds * 2 >= counts.len(),
+            "only {multi_continent_seeds} of {} seeds produced more than one landmass at \
+             16 plates — the continent-scattering selection should make a single fused \
+             supercontinent the less common outcome, not the default one.", counts.len());
     }
 
     /// Every requested plate must actually exist. Measured directly before the
