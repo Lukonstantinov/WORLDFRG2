@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useCampaignStore } from "@state/campaignStore";
 import { useUIStore } from "@state/uiStore";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
@@ -6,7 +6,7 @@ import { CoinIcon } from "@ui/heraldry/CoinIcon";
 import { YearChronicle } from "@ui/campaign/YearChronicle";
 import { FeudsView, HouseStandingView } from "@ui/campaign/HouseDossier";
 import { HouseCompareWindow } from "@ui/campaign/HouseCompare";
-import { cultureFigureSVG, cultureSeed, type Occasion } from "@ui/campaign/cultureFigure";
+import { drawFigure, resolveKit, type Occasion } from "@ui/campaign/cultureDress";
 import { GOOD_DEFS, clarifyGemLabel } from "@goods";
 import { campaignGetHouseHistory, campaignMerchantRoutes, campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin, campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage } from "@bridge";
 import type { HouseHistory, CampaignDiagnostics, HouseBrief, MerchantRoute, HouseLedger, BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief } from "@types";
@@ -417,19 +417,34 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       <div style={{ color: "#bcd0e4" }}>{children}</div>
     </div>
   );
-  // Phase 1.2 · the culture-dress figure. Seeded on the HEAD's own name (so it
-  // re-rolls at every succession — a new head is visibly a different person), wearing
-  // the seat culture's kit and the head's own sex (the line rule may put a woman at
-  // the head of the house — see sim::inheritance). Register follows tier: Tier 1 reads
-  // as finery before you read a number, Tier 3/4 as plain working dress.
-  const figureSvg = useMemo(() => {
+  // The house portrait now wears the SAME pixel-treated dress-plate art the
+  // Peoples panel's culture figures use (`cultureDress.ts`, via `drawFigure` —
+  // the identical call `CultureFigures.tsx` makes), rather than the older
+  // SVG figure system. That system draws a PEOPLE, not a named individual —
+  // it carries no sex axis (see that file's own doc comment) — so a house's
+  // portrait is now its SEAT CULTURE's costume plate, not a likeness of the
+  // current head; the head's own name/sex/character still read from the text
+  // beside it. Register follows tier: Tier 1 reads as finery before you read
+  // a number, Tier 3/4 as plain working dress — the same mapping the old
+  // figure used.
+  const occasion: Occasion = (() => {
     const t = tierOf(h);
-    const occasion: Occasion = !h.tier ? "national" : t === 1 ? "ceremonial" : t >= 3 ? "everyday" : "national";
-    return cultureFigureSVG({
-      kit: h.kit ?? -1, sex: h.head_female ? "f" : "m",
-      seed: cultureSeed(h.head_name || h.name), occasion,
-    });
-  }, [h.kit, h.head_female, h.head_name, h.name, h.tier]);
+    return !h.tier ? "national" : t === 1 ? "ceremonial" : t >= 3 ? "everyday" : "national";
+  })();
+  const FIG_W = 118, FIG_SCALE = 2;
+  const figureRef = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const el = figureRef.current;
+    if (!el) return;
+    const K = resolveKit(h.kit != null && h.kit >= 0 ? h.kit : h.name, { region: "" });
+    const figH = Math.round(FIG_W * 2.1);
+    el.width = FIG_W * FIG_SCALE; el.height = figH * FIG_SCALE;
+    el.style.width = FIG_W + "px"; el.style.height = figH + "px";
+    const ctx = el.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, el.width, el.height);
+    drawFigure(ctx, 0, 0, FIG_W * FIG_SCALE, K, { occasion });
+  }, [h.kit, h.name, occasion]);
   // The ruler card that fills the header beside the figure: who leads, for how long,
   // their character read as coloured traits, and the family's two most recent deeds.
   const head = kin.find((k) => k.role === "head") ?? kin[0];
@@ -449,7 +464,10 @@ function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
             width: 130, height: 295, borderRadius: 6, overflow: "hidden", background: "#0a1119",
             border: `3px solid ${h.is_guild ? dull(h.color ?? "") : (h.color ?? "#3a5570")}`,
             boxShadow: h.tier === 1 ? "0 0 16px rgba(201,162,39,0.4)" : "none",
-          }} dangerouslySetInnerHTML={{ __html: figureSvg }} />
+            display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 6,
+          }}>
+            <canvas ref={figureRef} style={{ display: "block" }} />
+          </div>
           <div style={{ position: "absolute", top: -8, right: -8 }}>
             <CoatOfArms name={h.name} size={34} guild={h.is_guild} />
           </div>

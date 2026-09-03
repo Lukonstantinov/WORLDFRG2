@@ -2,17 +2,24 @@
 // drawn in the same pixel treatment as the goods set (coarse author grid, hard
 // dark edge, one-pixel bevel, nearest-neighbour upscale).
 //
-// `DRESS_KITS` is index-aligned to `cultureFigure.ts`'s KITS and therefore to
-// `sim/cultures.rs` — kit 7 is Indic in all three. It is a FLATTENED kit: the
-// SVG figure system picks one option per individual out of an array of hairs /
-// robes / trims, while a dress plate states the people's dress once, so each
-// entry carries a single colour per axis.
+// `DRESS_KITS` is index-aligned to the old `cultureFigure.ts`'s KITS (since
+// deleted) and therefore to `sim/cultures.rs` — kit 7 is Indic in both. It is
+// a FLATTENED kit: the old SVG figure system picked one option per individual
+// out of an array of hairs/robes/trims; a dress plate states the people's
+// dress once, so each entry carries a single colour per axis.
 //
-// This is deliberately NOT a replacement for `cultureFigure.ts`. That system
-// draws an INDIVIDUAL — a named house head, with a sex the sim actually models
-// (matrilineal succession, widow regents) and a per-person seed. These plates
-// draw a PEOPLE. Two different questions; the sex axis does not exist here and
-// inventing one would be a redesign, not a port.
+// `cultureFigure.ts` drew an INDIVIDUAL — a named house head, with a sex the
+// sim actually models (matrilineal succession, widow regents) and a
+// per-person seed — while these plates draw a PEOPLE and carry no sex axis.
+// That was real grounds to keep them separate, and this file's own history
+// records the tradeoff rather than hiding it: the maintainer chose the
+// unified look anyway (`HousesPanel.tsx`/`HouseCompare.tsx` now call
+// `drawFigure` directly, same as `CultureFigures.tsx`), so a house's portrait
+// is its seat culture's costume plate — not a likeness of the current head —
+// and every head of the same culture at the same tier renders identically.
+// The per-individual pose/build jitter `cultureFigure.ts` gave two heads is
+// gone with it; the head's own name/sex/character still read from the text
+// beside the portrait, not from the art.
 
 import { pixelize, shade } from "@canvas/goodArt";
 

@@ -4,9 +4,9 @@
  *  archetype), and a minimal operations map plotting where each actually holds
  *  seats, offices and controlled settlements — so a rivalry reads at a glance
  *  instead of needing two separate dossiers open side by side. */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
-import { cultureFigureSVG, cultureSeed } from "@ui/campaign/cultureFigure";
+import { drawFigure, resolveKit } from "@ui/campaign/cultureDress";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { GOOD_DEFS, clarifyGemLabel } from "@goods";
 import { useWorldStore } from "@state/worldStore";
@@ -266,17 +266,34 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
   const setB = (h: HouseBrief) => setBIdx(h.idx ?? null);
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.houses);
 
+  // Same pixel-treated dress-plate art the Peoples panel's culture figures and
+  // the House Dossier's own portrait use (`cultureDress.ts::drawFigure`) — a
+  // house's figure is its seat culture's costume plate, in ceremonial dress
+  // for this side-by-side view.
   const Figure = ({ h }: { h: HouseBrief }) => {
-    const svg = useMemo(() => cultureFigureSVG({
-      kit: h.kit ?? -1, sex: h.head_female ? "f" : "m",
-      seed: cultureSeed(h.head_name || h.name), occasion: "ceremonial",
-    }), [h.kit, h.head_female, h.head_name, h.name]);
+    const FIG_W = 96, FIG_SCALE = 2;
+    const ref = useRef<HTMLCanvasElement | null>(null);
+    useEffect(() => {
+      const el = ref.current;
+      if (!el) return;
+      const K = resolveKit(h.kit != null && h.kit >= 0 ? h.kit : h.name, { region: "" });
+      const figH = Math.round(FIG_W * 2.1);
+      el.width = FIG_W * FIG_SCALE; el.height = figH * FIG_SCALE;
+      el.style.width = FIG_W + "px"; el.style.height = figH + "px";
+      const ctx = el.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, el.width, el.height);
+      drawFigure(ctx, 0, 0, FIG_W * FIG_SCALE, K, { occasion: "ceremonial" });
+    }, [h.kit, h.name]);
     return (
       <div style={{ position: "relative", width: 96, height: 218, margin: "0 auto" }}>
         <div style={{
           width: 96, height: 218, borderRadius: 6, overflow: "hidden", background: "#0a1119",
           border: `3px solid ${h.color ?? "#3a5570"}`,
-        }} dangerouslySetInnerHTML={{ __html: svg }} />
+          display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 4,
+        }}>
+          <canvas ref={ref} style={{ display: "block" }} />
+        </div>
         <div style={{ position: "absolute", top: -6, right: -6 }}><CoatOfArms name={h.name} size={24} guild={h.is_guild} /></div>
       </div>
     );
