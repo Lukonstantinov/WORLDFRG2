@@ -1535,7 +1535,48 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   + the chain ladder) collapsed into one book
   CityMarketView.tsx            ← THE CITY MARKET — VARIANT C, "the quay" (see
                                   `docs/TRADE_AND_MARKET_REVIEW.md` Part 3 and
-                                  `MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
+                                  `YARDS_VESSELS_AND_DEPOTS_PLAN.md  ← ⭐ AGREED, only its two naval-stores goods built
+                                    (`d3bf2da`). WHERE CARRYING CAPACITY COMES FROM.
+                                    Extends MERCHANT_VESSELS_AND_INFORMATION_PLAN's
+                                    stage 1 with the SUPPLY side it never had: hulls
+                                    have to be built out of something, by someone,
+                                    somewhere. Eight measured findings, of which two
+                                    reframe everything: **ship PRICE is not the
+                                    constraint, the BUILD RATE is** (`SHIP_COST` 7.0
+                                    against a house holding 100-300k; `decide_fleets`
+                                    runs monthly and buys AT MOST ONE hull, so the
+                                    ceiling is 12/year however rich you are, while
+                                    `FLEET_DECAY_CHANCE * fleet_total` reaches
+                                    certainty at 83 — measured 2.4 hulls/house on the
+                                    reference world, and the large world carries 5.5x
+                                    the fleet with a LOWER house share); and **the
+                                    house depot is a ONE-WAY SINK** — goods enter by
+                                    monthly stocking and leave only by futures
+                                    delivery, a war sack, or the house dying, with no
+                                    ordinary sale verb at all, while `hub_stock`
+                                    counts depots but `dispatch` reads the raw pool,
+                                    so stored goods sit OFF the spot market and still
+                                    depress the price (merchant speculation with half
+                                    the mechanism missing). Six yard slices S0-S5
+                                    (measure -> yard -> Vessel -> shares -> capacity
+                                    binds -> charter, the last two dose-walked) and
+                                    five depot slices W1-W5. Its central DESIGN
+                                    DECISION is that a hull is built from a MATERIAL
+                                    POOL, never a recipe: on `timber`+`iron` a recipe
+                                    binds NOWHERE (both are `GOOD_UNLIMITED`), and on
+                                    scarce naval stores it locks the tropics and the
+                                    desert out of seafaring permanently — the inverse
+                                    of the history, where Arabia was a great maritime
+                                    culture BECAUSE it imported Malabar teak. Records
+                                    that most of the warehouse system the maintainer
+                                    described ALREADY EXISTS (offices already grant a
+                                    depot per office city, with per-city capacity,
+                                    5 tiers, upkeep, damage and war sacking), and that
+                                    the missing third ownership class is the FONDACO —
+                                    state-owned, foreigner-occupied, compulsory — which
+                                    is what would make an office or a bailo a building
+                                    the host city can close rather than a flag
+MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   organising unit is the PARTNER CITY: arrivals group
                                   under the city they came from, departures under the
                                   city they go to, cargo nested and collapsible — the
@@ -1816,8 +1857,15 @@ comes from hand-coded detectors rather than from monthly extremes.
 21 belts (`compute_trade_goods`). `good_score` = climate(Köppen) × temp/precip bands
 × elevation × fertility × coast × (fishery/salinity for marine). Distribution by
 `GOOD_UNLIMITED[g]`:
-- **UNLIMITED** (stockfish, furs, timber, salt, whaling, wheat, iron) — every
-  suitable cell produces.
+- **UNLIMITED** (stockfish, furs, timber, **hardwoods**, salt, whaling, wheat, iron,
+  and the two naval stores **pitch**/**hemp**) — every suitable cell produces.
+  `hardwoods` joined this list because it and `timber` are ONE ROLE — the wood a hull
+  is built from — split across climates, and they had opposite distributions: every
+  suitable boreal/temperate cell grew timber while the entire tropics shared a SINGLE
+  seeded hardwood homeland. That left a tropical or desert-coast city with no local
+  hull wood at all, which would make shipbuilding structurally impossible for exactly
+  the maritime cultures that were best at it (measured 311 cells / 11 settlements →
+  540 / 17). See `docs/YARDS_VESSELS_AND_DEPOTS_PLAN.md` D1.
 - **SEEDED** (rest) — `localize_good` picks ONE weighted seed + flood-fills one
   homeland, with ~4% map-width island-jump. Land goods stop at mountains ≥3000 m
   (`MOUNTAIN_NORM`≈0.339); marine goods stop where the score envelope drops.
@@ -2695,6 +2743,24 @@ Three rules learned by MEASUREMENT here, each a silent-vanish failure:
 - **The endemic home is chosen up front, not filtered per cell.** That is what
   makes the guarantee unconditional: if the climate exists anywhere, the good
   gets exactly one home; if it exists nowhere it is honestly absent.
+- **The chooser must REMEMBER what earlier endemics took.** It ranks candidates
+  "smallest scoring landmass, preferring a true island" — a pure function of the
+  world — and the six shipped endemics share a wet-tropical coastal envelope by
+  design, so every one of them returned the SAME answer and the whole spice-island
+  layer collapsed onto one rock. It now ranks `(claimed, island?, area)`: an island
+  another endemic holds is the LAST resort. Still a preference, never a filter, so
+  the coverage guarantee above is untouched. The EXCEPTION is the mechanism's point:
+  nutmeg and mace are the aril and the seed of ONE tree and ship sharing an envelope
+  deliberately, so `score_signature` (a fingerprint of the quantized suitability
+  field) tells "one plant sold as two products" from "a different plant that likes
+  the same weather" — no new spec field, no hard-coded pair table.
+  Gated at the CHOOSER (`biological::tests::endemic_goods_take_different_islands`),
+  not end-to-end: written against the 300×150 reference world the gate failed on the
+  FIXED code, because at that resolution `ISLAND_MAX_KM2` puts the island threshold
+  at 14 cells against a smallest landmass of 22, so the fixture qualifies ZERO
+  islands and offers one candidate. A gate that fails identically either way measures
+  the world, not the mechanism (§8.24c's own lesson). What remains in
+  `goods_validation` is an honest diagnostic, `endemic_homelands_diagnostic`.
 
 **`GoodSpec.soil` / `GoodSpec.relief` — the FINE-GRAIN terroir terms.** Every
 other scoring term varies over HUNDREDS of km (Köppen zone, temperature,
