@@ -3,6 +3,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useUIStore } from "@state/uiStore";
 import { previewGoodScore, importGoodsTxt } from "@bridge";
 import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput } from "@types";
+import { GoodIcon } from "./GoodIcon";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
 const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
@@ -142,7 +143,7 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
     <>
       <div style={row}>
         <input type="checkbox" checked={g.enabled} onChange={(e) => update(i, { enabled: e.target.checked })} />
-        <span title={g.id} style={{ fontSize: 14 }}>{g.icon}</span>
+        <GoodIcon name={g.id} color={g.color} size={20} title={g.id} />
         <input style={input} value={g.name} onChange={(e) => update(i, { name: e.target.value })} />
         <select style={input} value={g.domain} onChange={(e) => update(i, { domain: e.target.value as GoodDomain })}>
           {DOMAINS.map((d) => <option key={d} value={d}>{d}</option>)}

@@ -6,6 +6,7 @@ import { koppenName, koppenHex, koppenRgb } from "@ui/world/climate";
 import { goodCategory } from "@goods";
 import { commodityHistory } from "@app/commodityHistory";
 import type { GoodSpec } from "@types";
+import { GoodIcon } from "./GoodIcon";
 
 const panel: React.CSSProperties = {
   position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 1200,
@@ -117,8 +118,9 @@ export function GoodDetailPanel() {
     <div style={panel} onClick={() => close(null)}>
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <strong style={{ fontSize: 16 }}>
-            <span style={{ marginRight: 6 }}>{spec.icon}</span>{spec.name}
+          <strong style={{ fontSize: 16, display: "inline-flex", alignItems: "center", gap: 8 }}>
+            <GoodIcon name={spec.id} color={spec.color} size={40} treatment="victorian" />
+            {spec.name}
           </strong>
           <button onClick={() => close(null)} style={{ ...tag, cursor: "pointer", marginRight: 0 }}>✕ Close</button>
         </div>
@@ -155,15 +157,20 @@ export function GoodDetailPanel() {
                 return (
                   <span key={inp.good} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
                     {k > 0 && <span style={{ color: "#5a6a80" }}>+</span>}
-                    <span style={{ ...tag, marginRight: 0, cursor: s ? "pointer" : "default" }}
+                    <span style={{ ...tag, marginRight: 0, cursor: s ? "pointer" : "default",
+                      display: "inline-flex", alignItems: "center", gap: 4 }}
                       onClick={() => s && close(s.id)}>
-                      {s?.icon ?? "❔"} {s?.name ?? inp.good}{inp.qty !== 1 ? ` ×${inp.qty}` : ""}
+                      <GoodIcon name={inp.good} color={s?.color} size={18} />
+                      {s?.name ?? inp.good}{inp.qty !== 1 ? ` ×${inp.qty}` : ""}
                     </span>
                   </span>
                 );
               })}
               <span style={{ color: "#7a8aa0", margin: "0 4px", fontWeight: 700 }}>→</span>
-              <span style={{ ...tag, marginRight: 0, borderColor: spec.color }}>{spec.icon} {spec.name}</span>
+              <span style={{ ...tag, marginRight: 0, borderColor: spec.color,
+                display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <GoodIcon name={spec.id} color={spec.color} size={18} /> {spec.name}
+              </span>
             </div>
             <div style={{ color: "#5f7390", fontSize: 11 }}>
               A city's manufacture guild produces it wherever the inputs arrive — so it appears
