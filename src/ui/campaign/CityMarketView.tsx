@@ -633,8 +633,16 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
                     {/* UNITS — the quantity actually standing on the stall. It has
                         always been in `HubGoodDetail.stock` and was never shown. */}
                     <span style={{ width: 42, textAlign: "right", color: C.inkMid,
-                      fontVariantNumeric: "tabular-nums" }}>
+                      fontVariantNumeric: "tabular-nums" }}
+                      title={r.g.depot_stock && r.g.depot_stock > 0.5
+                        ? `${Math.round(r.g.depot_stock).toLocaleString()} more held off-market, in a house's own depot`
+                        : undefined}>
                       {r.g.stock > 0.5 ? Math.round(r.g.stock).toLocaleString() : "—"}
+                      {r.g.depot_stock && r.g.depot_stock > 0.5 && (
+                        <span style={{ color: C.faint, fontWeight: 400 }}>
+                          {" "}+{Math.round(r.g.depot_stock).toLocaleString()}
+                        </span>
+                      )}
                     </span>
                     <span style={{ width: 30, textAlign: "right", fontVariantNumeric: "tabular-nums",
                       color: coverColor(r.days, r.g.need) }}>

@@ -1,6 +1,18 @@
 # Yards, Vessels and Depots
 
-**Status: AGREED, NOTHING BUILT beyond the two naval-stores goods (`d3bf2da`).**
+**Status: S1-S4, the guild axis, and W2/W3/W4/W5 are BUILT — S1-S3 additive/inert
+(nothing downstream reads them yet, per S1's own "output is a hull-ready event
+only"), S4/guild-axis/W2/W3/W4 real but DOSE-WALKED at their zero/no-op setting
+(`CAPACITY_BIND_DOSE`, `GUILD_CHARTER_RANGE_DAYS = INFINITY`,
+`LANDED_CARGO_TO_DEPOT_DOSE`, `WH_RELEASE_DOSE`, `DEPOT_TO_DEPOT_TRANSFER_ENABLED`
+all `0`/no-op), W5 a structural stub only (`FONDACO_FORM_CHANCE = 0.0`, never
+fires) — per D5's own order and this plan's own §6 caveat that only the last
+two slices can move the fidelity numbers. Code: `sim/campaign/tick/yards.rs`.
+Naval-stores goods shipped earlier at `d3bf2da`. S0's `econ_measure_carriage_
+ceiling` diagnostic ships alongside. W1 ships as a real query-layer fold
+(`HubGoodDetail.depot_stock`/`depot_holders`) plus a minimal `CityMarketView`
+inline indicator — the fuller "beside the stall" book view is still frontend
+follow-up work.**
 
 Where carrying capacity comes from, who stores what, and why houses feel weak. Extends
 `MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` stage 1 (which named the problem — "a vessel

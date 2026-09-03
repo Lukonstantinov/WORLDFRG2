@@ -1275,6 +1275,67 @@ pub const FLEET_UPKEEP_FRAC: f32 = 0.05;
 /// Per-vessel monthly chance of being lost to wear (rot, storms, breakdown) — the
 /// slow decay of ships & caravans, so fleets must be continually replaced.
 const FLEET_DECAY_CHANCE: f32 = 0.012;
+
+// ── YARDS_VESSELS_AND_DEPOTS_PLAN.md · the yard, the vessel, and shares ──
+// D1: a hull is built from a MATERIAL POOL (whatever suitable construction
+// material reaches the city — grown locally or landed on the quay), never a
+// fixed recipe. D2: a ship is not a good — it is owned, never traded, so it
+// lives as a `Vessel`, not a `Distribution::Manufactured` good (rule 33 stays
+// clean). D3: fractional ownership (the Venetian *carati*), not one whole
+// hull per buyer.
+/// The estate kind for a shipyard (S1). Reuses `create_estate`'s existing
+/// lifecycle (ownership, damage/repair, the tier ladder) — no new machinery.
+pub(crate) const YARD_ESTATE_KIND: u8 = 7;
+/// A coastal/river city must clear this population before a yard is worth
+/// founding — the same shape `WORKSHOP_MIN_POP` gates a manufactory at.
+const YARD_MIN_POP: f32 = 8_000.0;
+/// How much of a yard's parent city's LOCAL SURPLUS of a hull material it may
+/// draw in one month — the same idiom `WH_STOCK_FRAC` uses for house
+/// stocking, so a yard competes for timber the way the plan's D2 says it
+/// should, never simply requisitions it.
+const YARD_MATERIAL_DRAW_FRAC: f32 = 0.35;
+/// Points of accumulated material needed to complete one hull. A yard drawing
+/// its full monthly allowance from a well-stocked city clears this in a few
+/// months to a couple of years — slower than `decide_fleets`' one-hull-a-month
+/// ceiling (F3), which is the point: the yard is a SECOND, independent source
+/// of capacity, not a faster version of the existing one.
+const HULL_BUILD_POINTS: f32 = 60.0;
+/// A `Vessel`'s ownership is split into this many parts (D3 — the Dutch
+/// standardised at 1/64 *paerten*; Venice's *carati* were 24ths, but a power
+/// of two keeps `parts_always_sum_to_64` exact under repeated integer splits).
+pub(crate) const VESSEL_PARTS_TOTAL: u8 = 64;
+/// S4, DOSE-WALKED (§2.8/D5): a shipment's cargo-space cost, as a fraction of
+/// `SHIP_CAPACITY`/`BOAT_CAPACITY`/`CARAVAN_CAPACITY` per unit shipped, on top
+/// of the existing one-slot-per-shipment rule. `0.0` is the shipped setting —
+/// a TRUE no-op (F4 stays exactly as measured) — proven by
+/// `n_yards_s4_capacity_bind_at_zero_is_a_noop` before any future dose walk.
+pub(crate) const CAPACITY_BIND_DOSE: f32 = 0.0;
+/// The guild axis (§2, "free"): a guild's charter is regional, a house's is
+/// not (F5 — nothing currently distinguishes a Zunft from a Fugger). A guild
+/// candidate in `house_for`'s dispatch is skipped past when the leg exceeds
+/// this many travel-days, letting the search fall through to the next
+/// candidate (another house, else the ownerless residual). `f32::INFINITY` is
+/// the shipped, no-op setting — a guild is unbounded exactly as before this
+/// change, verified by `n_yards_guild_axis_at_infinity_is_a_noop`.
+pub(crate) const GUILD_CHARTER_RANGE_DAYS: f32 = f32::INFINITY;
+/// W2, DOSE-WALKED: the fraction of landed cargo that goes to the carrying
+/// house's OWN depot at the destination (room permitting) instead of the
+/// undifferentiated city pool (F8). `0.0` ships as a true no-op — every
+/// arrival lands in the pool exactly as before — gated by
+/// `n_yards_w2_landed_cargo_to_depot_at_zero_is_a_noop`.
+pub(crate) const LANDED_CARGO_TO_DEPOT_DOSE: f32 = 0.0;
+/// W3, DOSE-WALKED: the fraction of a depot's stock released back to the pool
+/// in a month once the local price clears `WH_RELEASE_PRICE_MULT` (F6 — today
+/// there is no ordinary sale out of a depot at all). `0.0` ships inert.
+pub(crate) const WH_RELEASE_DOSE: f32 = 0.0;
+/// W3 · the price threshold (× the good's `base_value`) that counts as "dear
+/// enough to sell into" once `WH_RELEASE_DOSE` is raised above zero.
+const WH_RELEASE_PRICE_MULT: f32 = 1.6;
+/// W4, DOSE-WALKED: whether an office may ship stock from one of its OWN
+/// depots to another on its own account (needs S2's `Vessel`s to be more than
+/// bookkeeping, per the plan's own "the one dependency worth naming"). `false`
+/// ships inert.
+pub(crate) const DEPOT_TO_DEPOT_TRANSFER_ENABLED: bool = false;
 /// Civic taxes a city levies on a house's trade — export on goods leaving the
 /// origin, import on goods arriving at the destination. Paid by the house, funding
 /// the city (into its civic_pool → people). Guilds pay HEAVIER taxes (civic duty).
@@ -1349,7 +1410,7 @@ fn estate_kind_for_good(name: &str, food: bool) -> u8 {
 pub fn estate_kind_label(kind: u8) -> &'static str {
     match kind {
         1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard",
-        6 => "Manufactory", _ => "Estate",
+        6 => "Manufactory", 7 => "Yard", _ => "Estate",
     }
 }
 
@@ -1403,6 +1464,7 @@ fn disaster_table(kind: u8) -> &'static [(&'static str, f32, f32)] {
         4 => &[("storm wreck", 1.0, 1.3)],
         5 => &[("frost", 0.8, 0.25), ("hail", 0.5, 0.6)],
         6 => &[("fire", 1.0, 0.8)],
+        7 => &[("fire", 1.1, 0.7)], // a timber yard burns readily and rebuilds slowly
         1 | 3 => &[("murrain", 0.7, 0.6)],
         _ => &[("fire", 0.5, 1.0)],
     }
@@ -2556,6 +2618,11 @@ pub struct TickHub {
     /// read — see `bad_years`' own doc comment for why a per-kind repair pace
     /// was reverted.
     #[serde(default)] pub disaster_repair_mult: f32,
+    /// YARDS_VESSELS_AND_DEPOTS_PLAN.md S1 · a yard estate's (`estate_kind ==
+    /// YARD_ESTATE_KIND`) accumulated hull-construction points, drawn monthly
+    /// from its parent city's local material surplus. Resets to 0 once a hull
+    /// completes (`HULL_BUILD_POINTS`). Meaningless on any other estate kind.
+    #[serde(default)] pub yard_progress: f32,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -4107,6 +4174,76 @@ pub struct Warehouse {
     #[serde(default)] pub damage: f32,
 }
 
+/// YARDS_VESSELS_AND_DEPOTS_PLAN.md S2 — the vessel becomes a thing, instead of
+/// a bare counter (`House.fleet_sea`/`_river`). Seeded once at campaign start
+/// (one `Vessel` per pre-existing hull, wholly owned by its house — the
+/// bit-identical migration `seeding_one_whole_hull_per_counter_is_bit_
+/// identical` checks) and grown from then on by the yard (S1). Deliberately
+/// NOT yet read by `dispatch`/`decide_fleets`/war spoils/the crisis venture —
+/// per S1's own "output is a hull-ready event only; nothing consumes it yet"
+/// and S4's dose-walk, `fleet_sea`/`_river` stay the single source of truth
+/// for capacity until `CAPACITY_BIND_DOSE` is raised above zero. Caravans are
+/// deliberately excluded (D4 — overland capacity is HIRED, not built; the
+/// existing ownerless residual already models "hired carriage that happens to
+/// be free").
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Vessel {
+    pub id: u32,
+    pub name: String,
+    /// 0 = sea, 1 = river.
+    pub kind: u8,
+    /// Home hub — where the hull was built / is registered.
+    pub home_hub: u32,
+    /// Current location. Never moved yet (S2 is bookkeeping only); kept
+    /// distinct from `home_hub` so W4's future depot-to-depot transfer has
+    /// somewhere to write a real position without a second migration.
+    pub at_hub: u32,
+    pub capacity: f32,
+    /// 0..1, drawn from the yard's own material mix quality where it was
+    /// built (1.0 for a seeded legacy hull — "as good as it ever needed to
+    /// be" is the honest reading of a hull this system never watched built).
+    #[serde(default = "one_f32")] pub quality: f32,
+    /// 0..1 seaworthiness; damage/decay would drain it (unused until a future
+    /// slice wires wear into vessels instead of the bare fleet counters).
+    #[serde(default = "one_f32")] pub condition: f32,
+    /// D3 — fractional ownership. `(house_index, parts)`, `parts` summing to
+    /// `VESSEL_PARTS_TOTAL` across the whole vessel (`vessel_parts_always_
+    /// sum_to_64`). A seeded legacy hull is wholly owned by the one house
+    /// whose counter it came from.
+    pub parts: Vec<VesselShare>,
+    pub built_tick: u32,
+}
+
+/// One house's stake in a `Vessel` (D3's *carati*/*paerten*).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct VesselShare {
+    pub house: u32,
+    /// Out of `VESSEL_PARTS_TOTAL`.
+    pub parts: u8,
+}
+
+/// YARDS_VESSELS_AND_DEPOTS_PLAN.md W5 — the *fondaco*: state-owned,
+/// foreigner-occupied, compulsory (Venice's Fondaco dei Tedeschi; the
+/// Islamic *funduq*/*khan*; the Hanseatic Kontor). What makes an office or a
+/// bailo a BUILDING the host city can close, rather than a flag. Structural
+/// only — `maybe_found_fondaco` never runs (W5 ships "zero dose first", per
+/// the plan's own §3 risk note that `N2` broke the hard wealth bound twice on
+/// a market-closure mechanism of this exact shape) — so a world with no
+/// fondaco founded is bit-identical to one that never heard of this struct.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Fondaco {
+    /// The host city.
+    pub hub: u32,
+    /// The foreign house/guild compelled to lodge & trade here.
+    pub occupant: u32,
+    /// The host city's cut of the occupant's trade through this compound, 0..1.
+    pub cut: f32,
+    pub founded_tick: u32,
+    /// The city can close the door — a real, if rare, political act (unused
+    /// until W5 is dosed above zero).
+    #[serde(default)] pub closed: bool,
+}
+
 /// A FUTURES CONTRACT: a seated house/guild guarantees a settlement a fixed
 /// monthly quantity of one good, at a struck price (allowed to drift within a
 /// band), for a 1/3/5/7-year term. The supply is reserved from the seller's
@@ -5307,6 +5444,18 @@ pub struct CampaignSim {
     #[serde(default)] pub prov_export_year: Vec<f32>,
     /// Last full year's imports per (province, good).
     #[serde(default)] pub prov_import_year: Vec<f32>,
+
+    // ── YARDS_VESSELS_AND_DEPOTS_PLAN.md ──
+    /// S2/S3 · every vessel ever built or seeded, live or lost. Appended LAST →
+    /// `#[serde(default)]`, so a pre-yards save loads with none (and stays
+    /// bit-identical, since nothing yet reads this list for capacity).
+    #[serde(default)] pub vessels: Vec<Vessel>,
+    /// Running id counter for `vessels` (monotonic, never reused, so a lost
+    /// hull's id is never handed to a new one).
+    #[serde(default)] pub next_vessel_id: u32,
+    /// W5 · every fondaco ever founded. Empty until `maybe_found_fondaco` is
+    /// wired to actually run (it currently never is — see `Fondaco`'s own doc).
+    #[serde(default)] pub fondacos: Vec<Fondaco>,
 }
 
 fn one_f32() -> f32 { 1.0 }
@@ -7116,7 +7265,13 @@ impl CampaignSim {
             });
             for (to, g, amt, sea, phase, home, owner, local) in landed {
                 if to < self.hubs.len() {
-                    stock_add_ungraded(&mut self.hubs[to].stock, g, amt);
+                    // W2, dose-walked (`LANDED_CARGO_TO_DEPOT_DOSE`) · a slice of a
+                    // house-owned arrival goes straight into that carrier's own
+                    // depot at `to` (room permitting) instead of the pool (F8).
+                    // Zero dose today — `landed_cargo_to_depot` returns 0 and the
+                    // full amount lands in the pool exactly as before.
+                    let diverted = self.landed_cargo_to_depot(to, g, amt, owner);
+                    stock_add_ungraded(&mut self.hubs[to].stock, g, amt - diverted);
                     if self.hubs[to].supply_accum.len() != ng * SUPPLY_CLASSES {
                         self.hubs[to].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);
                     }
@@ -7921,6 +8076,7 @@ mod envoys;
 mod offtake;
 mod certification;
 mod league;
+mod yards;
 pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,

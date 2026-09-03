@@ -612,7 +612,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tier: 0,
                 standing: 0.0,
                 war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-                wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
+                wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
             }
         })
         .collect();
@@ -1025,6 +1025,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // yearly; empty at start like every other in-year accumulator.
         prov_export_accum: vec![], prov_import_accum: vec![],
         prov_export_year: vec![], prov_import_year: vec![],
+        // YARDS_VESSELS_AND_DEPOTS_PLAN.md · `seed_vessels_from_fleets` (called
+        // just below) populates `vessels` from the fresh fleet counters.
+        vessels: vec![], next_vessel_id: 0, fondacos: vec![],
     };
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
@@ -1110,6 +1113,11 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     sim.ensure_culture_rules();
     sim.seed_house_lines();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
+    // YARDS_VESSELS_AND_DEPOTS_PLAN.md S2 · one `Vessel` per pre-existing
+    // fleet_sea/fleet_river hull, wholly owned by its house — the
+    // bit-identical migration (see `seeding_one_whole_hull_per_counter_
+    // is_bit_identical`).
+    sim.seed_vessels_from_fleets();
     // Provinces (Phase 2b): seed the rural reservoir from the stored partition so the
     // countryside can feed the cities. No-op when no province layer was generated.
     seed_campaign_provinces(&conn, &mut sim);

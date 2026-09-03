@@ -2407,6 +2407,93 @@ fn econ_measure_carrier_mix() {
     }
 }
 
+/// `YARDS_VESSELS_AND_DEPOTS_PLAN.md` S0 · DIAGNOSTIC (not a gate) — makes F3
+/// ("ship PRICE is not the constraint, the BUILD RATE is") a measurement
+/// instead of an inference from reading `decide_fleets`. Reports the
+/// DISTRIBUTION of fleet size across live houses (not just the mean), how
+/// many house-months a house sat fully saturated with capital to spare (the
+/// state `decide_fleets` can only relieve one hull a month), and — split by
+/// house wealth quartile — how much of the ownerless residual was declined
+/// purely for want of a free vessel slot (`diag_why_slot`, already global;
+/// this is the per-wealth-quartile breakdown the plan's S0 asks for).
+#[test]
+#[ignore]
+fn econ_measure_carriage_ceiling() {
+    let mut s = reference_world();
+    let years = 30u32;
+    let mut saturated_months = 0u64;
+    let mut total_house_months = 0u64;
+    let mut slot_declines_by_quartile = [0u64; 4];
+    for _ in 0..years {
+        for _m in 0..12 {
+            s.diag_why_slot = 0;
+            s.advance(30);
+            // Saturation: every live house whose in-flight cargo already fills
+            // every vessel it owns, with capital left over to buy another —
+            // exactly the state `decide_fleets` can relieve at most ONE hull
+            // out of, per house, per month.
+            let mut used_sea = vec![0i32; s.houses.len()];
+            let mut used_land = vec![0i32; s.houses.len()];
+            for c in &s.in_transit {
+                if c.owner >= 0 {
+                    let oi = c.owner as usize;
+                    if oi < used_sea.len() {
+                        if c.sea { used_sea[oi] += 1; } else { used_land[oi] += 1; }
+                    }
+                }
+            }
+            let live: Vec<usize> = (0..s.houses.len()).filter(|&i| !s.houses[i].defunct).collect();
+            total_house_months += live.len() as u64;
+            let wealths: Vec<f32> = live.iter().map(|&i| s.houses[i].wealth.max(0.0)).collect();
+            let mut sorted = wealths.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+            let q = |p: f32| sorted.get(((sorted.len() as f32 * p) as usize).min(sorted.len().saturating_sub(1))).copied().unwrap_or(0.0);
+            let (q1, q2, q3) = (q(0.25), q(0.5), q(0.75));
+            for &hi in &live {
+                let h = &s.houses[hi];
+                let sea_slots = h.fleet_sea as i32;
+                let land_slots = (h.fleet_river + h.fleet_caravan) as i32;
+                let fleet_total = h.fleet_sea + h.fleet_river + h.fleet_caravan;
+                let saturated = fleet_total > 0
+                    && used_sea[hi] >= sea_slots && used_land[hi] >= land_slots
+                    && h.wealth > SHIP_COST * 2.5;
+                if saturated { saturated_months += 1; }
+            }
+            let bucket = |w: f32| if w <= q1 { 0 } else if w <= q2 { 1 } else if w <= q3 { 2 } else { 3 };
+            // Attribute this month's slot-declines evenly across the quartile
+            // of houses that were themselves saturated this month — a coarse
+            // but honest split (the sim doesn't record per-decline house id).
+            let saturated_this_month: Vec<usize> = live.iter().copied()
+                .filter(|&hi| {
+                    let h = &s.houses[hi];
+                    let sea_slots = h.fleet_sea as i32;
+                    let land_slots = (h.fleet_river + h.fleet_caravan) as i32;
+                    used_sea[hi] >= sea_slots && used_land[hi] >= land_slots && h.wealth > SHIP_COST * 2.5
+                }).collect();
+            if !saturated_this_month.is_empty() {
+                let share = s.diag_why_slot as u64 / saturated_this_month.len() as u64;
+                for &hi in &saturated_this_month {
+                    slot_declines_by_quartile[bucket(s.houses[hi].wealth.max(0.0))] += share;
+                }
+            }
+        }
+    }
+    let fleets: Vec<u32> = s.houses.iter().filter(|h| !h.defunct)
+        .map(|h| h.fleet_sea + h.fleet_river + h.fleet_caravan).collect();
+    let mut sorted_fleets = fleets.clone();
+    sorted_fleets.sort_unstable();
+    let mean = if fleets.is_empty() { 0.0 } else { fleets.iter().sum::<u32>() as f32 / fleets.len() as f32 };
+    let median = sorted_fleets.get(sorted_fleets.len() / 2).copied().unwrap_or(0);
+    let max = sorted_fleets.last().copied().unwrap_or(0);
+    println!("\n── carriage ceiling (S0) · reference · {years}y ─────────────────");
+    println!("  live houses {}  fleet mean {:.2}  median {}  max {}", fleets.len(), mean, median, max);
+    println!("  house-months saturated (busy + capital to spare) {saturated_months} / {total_house_months} \
+        ({:.1}%)", if total_house_months == 0 { 0.0 } else { 100.0 * saturated_months as f32 / total_house_months as f32 });
+    println!("  slot-declines by house wealth quartile (poorest→richest): {:?}", slot_declines_by_quartile);
+    println!("  → F3 ('the build rate, not the price, is the ceiling') is a claim this test");
+    println!("    makes MEASURABLE; five plan slices rest on it holding.");
+}
+
 /// N1 · N1b (`ACTORS_AND_CARRIAGE_PLAN.md` §3.1) ship at zero dose and must
 /// prove bit-identical before any dose walk begins (§4.1 rule 1: "ship at zero
 /// dose and prove bit-identity first"). Cheap and NOT `#[ignore]`d — a real

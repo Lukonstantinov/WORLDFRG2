@@ -123,6 +123,23 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                     let total: f32 = raw.iter().sum();
                     if total > 1e-3 { raw.map(|v| v / total) } else { [0.0; 5] }
                 },
+                depot_stock: sim.warehouses.iter()
+                    .filter(|w| w.owner >= 0 && w.hub as usize == hi)
+                    .map(|w| w.stock.get(g).copied().unwrap_or(0.0))
+                    .sum(),
+                depot_holders: {
+                    let mut rows: Vec<(String, bool, f32)> = sim.warehouses.iter()
+                        .filter(|w| w.owner >= 0 && w.hub as usize == hi)
+                        .filter_map(|w| {
+                            let amt = w.stock.get(g).copied().unwrap_or(0.0);
+                            if amt <= 0.01 { return None; }
+                            let h = sim.houses.get(w.owner as usize)?;
+                            Some((h.name.clone(), h.is_guild, amt))
+                        }).collect();
+                    rows.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+                    rows.truncate(6);
+                    rows
+                },
             }
         })
         .collect();

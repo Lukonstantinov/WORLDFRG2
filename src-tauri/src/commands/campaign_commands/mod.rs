@@ -412,6 +412,13 @@ pub struct HubGoodDetail {
     /// `sync_and_stock_warehouses` and daily consumption all draw from, so "who bought
     /// this cargo" would need new state — see `docs/TRADE_AND_MARKET_REVIEW.md`.
     #[serde(default)] pub supply_shares: [f32; 5],
+    /// YARDS_VESSELS_AND_DEPOTS_PLAN.md W1 — the store beside the stall: this
+    /// good's total stock sitting in every house/guild depot at this hub
+    /// (i.e. off the spot `stock` pool above but still counted into
+    /// `hub_stock`'s price/needs view — F7). Query-layer only; no tick code.
+    #[serde(default)] pub depot_stock: f32,
+    /// The depots that hold it, largest first: `(owner name, is_guild, amount)`.
+    #[serde(default)] pub depot_holders: Vec<(String, bool, f32)>,
 }
 
 /// One live city in the Markets window's picker.

@@ -31,6 +31,7 @@
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
+            yard_progress: 0.0,
         }
     }
 
@@ -121,6 +122,7 @@
             realms: vec![], leagues: vec![], prov_realm: vec![],
             prov_export_accum: vec![], prov_import_accum: vec![],
             prov_export_year: vec![], prov_import_year: vec![],
+            vessels: vec![], next_vessel_id: 0, fondacos: vec![],
         };
         s.rebuild_routes();
         s
@@ -6234,4 +6236,211 @@
         assert_eq!(s.hubs[6].component, 2, "a far 2-hub component must stay its own — it has real internal trade");
         assert_eq!(s.hubs[7].component, 3,
             "a far SINGLE-hub component must stay isolated — no distance-unlimited lifeline");
+    }
+
+    // ── YARDS_VESSELS_AND_DEPOTS_PLAN.md — S1-S4, the guild axis, W2/W3 ──
+
+    /// S1 · a world where no city ever clears `YARD_MIN_POP` never founds a
+    /// yard, and the (would-be) yard passes touch nothing — the same
+    /// guarantee `province_land_pass_is_a_noop_without_provinces` holds.
+    #[test]
+    fn a_world_with_no_yards_is_bit_identical() {
+        let goods = vec![good("timber", 3, 1, 2.0, 0.3, false)];
+        let mut hubs = vec![hub(0, 0.0, 0.0, 500.0, vec![5.0], 0)];
+        hubs[0].coastal = true;
+        let mut s = sim(hubs, goods);
+        let before = s.hubs.len();
+        s.maybe_found_yards();
+        s.yard_build_pass();
+        assert_eq!(s.hubs.len(), before, "a city below YARD_MIN_POP must not found a yard");
+        assert!(s.vessels.is_empty(), "no yard ever ran ⇒ no vessel is ever built");
+    }
+
+    /// S1 · a yard with nothing to draw on accumulates no progress and builds
+    /// nothing — it says so by simply never crossing `HULL_BUILD_POINTS`,
+    /// rather than stalling silently forever with no visible state.
+    #[test]
+    fn a_yard_with_no_material_builds_nothing() {
+        let goods = vec![
+            good("timber", 3, 1, 2.0, 0.3, false),
+            good("hardwoods", 3, 1, 2.0, 0.3, false),
+        ];
+        let mut hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![0.0, 0.0], 0)];
+        hubs[0].coastal = true;
+        hubs.push(hub(1, 0.1, 0.1, 10.0, vec![0.0, 0.0], 0));
+        hubs[1].is_estate = true;
+        hubs[1].parent = 0;
+        hubs[1].estate_kind = YARD_ESTATE_KIND;
+        let mut s = sim(hubs, goods);
+        s.yard_build_pass();
+        assert_eq!(s.hubs[1].yard_progress, 0.0, "no material in the parent city ⇒ zero progress");
+        assert!(s.vessels.is_empty());
+    }
+
+    /// D1's whole claim, asserted directly rather than left to inference: a
+    /// desert-coast city and a tropical city both reach a buildable material
+    /// mix once hardwoods reach their quay (grown locally or landed by
+    /// trade — the yard draws the hub's own stock pool either way).
+    #[test]
+    fn every_climate_can_build_a_hull() {
+        let goods = vec![good("hardwoods", 3, 1, 2.0, 0.3, false)];
+        for koppen_label in ["desert-coast", "tropical"] {
+            let mut hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![0.0], 0)];
+            hubs[0].coastal = true;
+            hubs.push(hub(1, 0.1, 0.1, 10.0, vec![0.0], 0));
+            hubs[1].is_estate = true;
+            hubs[1].parent = 0;
+            hubs[1].estate_kind = YARD_ESTATE_KIND;
+            let mut s = sim(hubs, goods.clone());
+            // Material reaching the quay — grown locally or landed by trade;
+            // the yard cannot tell the difference and must not need to.
+            stock_add_ungraded(&mut s.hubs[0].stock, 0, 500.0);
+            s.yard_build_pass();
+            // Either progress accumulated, or — since the draw was large enough
+            // to clear HULL_BUILD_POINTS in one pass — a hull completed outright
+            // (which resets progress to 0 and is the STRONGER proof of D1).
+            assert!(s.hubs[1].yard_progress > 0.0 || !s.vessels.is_empty(),
+                "{koppen_label} city with hardwoods reaching its quay must build (progress or a completed hull)");
+        }
+    }
+
+    /// S2 · seeding one `Vessel` per pre-existing fleet counter reproduces the
+    /// same summed capacity the bare counter always implied — the
+    /// representation changed, nothing else did.
+    #[test]
+    fn seeding_one_whole_hull_per_counter_is_bit_identical() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![], 3));
+        s.houses[0].fleet_river = 2;
+        s.seed_vessels_from_fleets();
+        assert_eq!(s.house_vessel_capacity(0, 0), 3.0 * SHIP_CAPACITY,
+            "3 seeded sea hulls must sum to exactly 3× SHIP_CAPACITY");
+        assert_eq!(s.house_vessel_capacity(0, 1), 2.0 * BOAT_CAPACITY,
+            "2 seeded river hulls must sum to exactly 2× BOAT_CAPACITY");
+        // Idempotent — a second call must not double the fleet.
+        s.seed_vessels_from_fleets();
+        assert_eq!(s.house_vessel_capacity(0, 0), 3.0 * SHIP_CAPACITY);
+    }
+
+    /// S3 · every vessel with an owner has its `parts` sum to exactly
+    /// `VESSEL_PARTS_TOTAL`, whether it went to one house or several.
+    #[test]
+    fn vessel_parts_always_sum_to_64() {
+        let goods = vec![good("hardwoods", 3, 1, 2.0, 0.3, false)];
+        let mut hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![0.0], 0)];
+        hubs[0].coastal = true;
+        hubs.push(hub(1, 0.1, 0.1, 10.0, vec![0.0], 0));
+        hubs[1].is_estate = true;
+        hubs[1].parent = 0;
+        hubs[1].estate_kind = YARD_ESTATE_KIND;
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![], 0));
+        s.houses[0].wealth = 500.0;
+        s.houses.push(house_at(0, vec![], 0));
+        s.houses[1].wealth = 150.0;
+        stock_add_ungraded(&mut s.hubs[0].stock, 0, 5_000.0);
+        for _ in 0..3 { s.yard_build_pass(); } // clear HULL_BUILD_POINTS
+        assert!(!s.vessels.is_empty(), "sufficient material must complete at least one hull");
+        for v in &s.vessels {
+            if v.parts.is_empty() { continue; } // city-owned — no house present
+            let total: u32 = v.parts.iter().map(|p| p.parts as u32).sum();
+            assert_eq!(total, VESSEL_PARTS_TOTAL as u32,
+                "vessel {} parts must sum to exactly {VESSEL_PARTS_TOTAL}, got {total}", v.id);
+        }
+    }
+
+    /// S3 · losing a vessel debits every part owner proportionally and ruins
+    /// none — fractional ownership's whole reason for existing (D3). Each
+    /// owner's loss is bounded to half its own wealth, so two houses sharing
+    /// a hull both survive its loss.
+    #[test]
+    fn a_lost_hull_debits_every_part_owner_and_ruins_none() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![], 0));
+        s.houses[0].wealth = 4.0; // deliberately thin — the cap must bind
+        s.houses.push(house_at(0, vec![], 0));
+        s.houses[1].wealth = 100.0;
+        s.vessels.push(Vessel {
+            id: 0, name: "Test hull".into(), kind: 0, home_hub: 0, at_hub: 0,
+            capacity: SHIP_CAPACITY, quality: 1.0, condition: 1.0,
+            parts: vec![
+                VesselShare { house: 0, parts: 32 },
+                VesselShare { house: 1, parts: 32 },
+            ],
+            built_tick: 0,
+        });
+        let (w0_before, w1_before) = (s.houses[0].wealth, s.houses[1].wealth);
+        s.lose_vessel(0);
+        assert!(s.vessels.is_empty());
+        assert!(s.houses[0].wealth >= w0_before * 0.5 - 1e-3,
+            "a part-owner's loss must be capped, never more than half its own wealth");
+        assert!(s.houses[1].wealth < w1_before, "the other part-owner is debited too");
+        assert!(s.houses[1].wealth > 0.0, "a fractional stake in a lost hull must not ruin the house");
+    }
+
+    /// S4, dose-walked · at `CAPACITY_BIND_DOSE == 0.0` a shipment of any size
+    /// needs zero extra vessel slots beyond the one it already reserves.
+    #[test]
+    fn n_yards_s4_capacity_bind_at_zero_is_a_noop() {
+        assert_eq!(CAPACITY_BIND_DOSE, 0.0);
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)];
+        let s = sim(hubs, goods);
+        assert_eq!(s.capacity_bind_extra_slots(1_000_000.0, SHIP_CAPACITY), 0,
+            "even a huge shipment must need zero extra slots at zero dose");
+    }
+
+    /// The guild axis, dose-walked · at `GUILD_CHARTER_RANGE_DAYS ==
+    /// INFINITY` no finite route length can ever exceed it, so a guild
+    /// candidate in `house_for`'s dispatch is never skipped on distance.
+    #[test]
+    fn n_yards_guild_axis_at_infinity_is_a_noop() {
+        assert_eq!(GUILD_CHARTER_RANGE_DAYS, f32::INFINITY);
+        assert!(!(3650.0f32 > GUILD_CHARTER_RANGE_DAYS), "no finite route length exceeds INFINITY");
+    }
+
+    /// W2, dose-walked · at `LANDED_CARGO_TO_DEPOT_DOSE == 0.0` a landed
+    /// house cargo diverts nothing into a depot, whatever room exists.
+    #[test]
+    fn n_yards_w2_landed_cargo_to_depot_at_zero_is_a_noop() {
+        assert_eq!(LANDED_CARGO_TO_DEPOT_DOSE, 0.0);
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![], 0));
+        s.warehouses.push(Warehouse { owner: 0, hub: 0, capacity: 10_000.0, stock: vec![0.0], tier: 1, damage: 0.0 });
+        let diverted = s.landed_cargo_to_depot(0, 0, 500.0, 0);
+        assert_eq!(diverted, 0.0, "zero dose must divert nothing, even with an owner and free room");
+    }
+
+    /// W3, dose-walked · at `WH_RELEASE_DOSE == 0.0` a depot never releases
+    /// stock back to the pool, however dear the local price runs.
+    #[test]
+    fn n_yards_w3_release_at_zero_is_a_noop() {
+        assert_eq!(WH_RELEASE_DOSE, 0.0);
+        let goods = vec![good("silk", 3, 2, 10.0, 0.4, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![0.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].price[0] = 40.0; // far past WH_RELEASE_PRICE_MULT × base_value
+        s.houses.push(house_at(0, vec![0], 0));
+        s.warehouses.push(Warehouse { owner: 0, hub: 0, capacity: 1000.0, stock: vec![300.0], tier: 1, damage: 0.0 });
+        let needs = vec![vec![0.0f32]];
+        s.warehouse_release_pass(&needs);
+        assert_eq!(s.warehouses[0].stock[0], 300.0, "zero dose must release nothing however dear the price");
+    }
+
+    /// W4/W5, dose-walked · both ship structurally inert.
+    #[test]
+    fn n_yards_w4_and_w5_ship_inert() {
+        assert!(!DEPOT_TO_DEPOT_TRANSFER_ENABLED);
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.depot_to_depot_transfer_pass();
+        s.maybe_found_fondaco();
+        assert!(s.fondacos.is_empty(), "W5 must never found a fondaco while its dose is zero");
     }

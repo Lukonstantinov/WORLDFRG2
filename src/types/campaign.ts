@@ -312,6 +312,12 @@ export interface HubGoodDetail {
    *  arrived): [city, house, guild, local, foreign]. Seller side only — there is no
    *  buyer attribution, see docs/TRADE_AND_MARKET_REVIEW.md. */
   supply_shares?: [number, number, number, number, number];
+  /** YARDS_VESSELS_AND_DEPOTS_PLAN.md W1 — this good's total stock sitting in
+   *  every house/guild depot at this hub (off the spot `stock` pool above,
+   *  but still counted into prices/needs — F7). */
+  depot_stock?: number;
+  /** The depots that hold it, largest first: [owner name, is_guild, amount]. */
+  depot_holders?: [string, boolean, number][];
 }
 /** One good's world-wide quality + trade picture (the floating Goods window). */
 export interface GoodMarketRow {

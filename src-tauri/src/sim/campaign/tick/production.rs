@@ -1085,17 +1085,30 @@ impl CampaignSim {
                             _why_bar = true;
                             continue;
                         }
+                        // YARDS_VESSELS_AND_DEPOTS_PLAN.md, "the guild axis, free" ·
+                        // a guild's charter is regional (F5 — nothing today tells a
+                        // Zunft from a Fugger); a long haul falls through to the
+                        // next candidate instead. `GUILD_CHARTER_RANGE_DAYS ==
+                        // INFINITY` ships as a true no-op.
+                        if self.houses[oi].is_guild && days > GUILD_CHARTER_RANGE_DAYS {
+                            continue;
+                        }
                         let slots = if sea { cap_sea[oi] } else { cap_land[oi] };
                         // Merchant-banker houses can finance cargo beyond their cash.
                         let credit = if self.houses[oi].archetype == ARCH_BANKING { BANK_CREDIT_MULT } else { 1.0 };
                         let afford = if pa > EPS { self.houses[oi].wealth * credit / pa } else { f32::MAX };
-                        if slots >= 1 && afford > EPS {
+                        // S4, dose-walked · a large shipment reserves more than
+                        // the base slot, proportional to its own size. Zero at
+                        // the shipped dose, so `need` is always 1 today.
+                        let extra = self.capacity_bind_extra_slots(amount, if sea { SHIP_CAPACITY } else { BOAT_CAPACITY });
+                        let need = 1 + extra;
+                        if slots >= need && afford > EPS {
                             amount = amount.min(afford);
-                            if sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; }
+                            if sea { cap_sea[oi] -= need; } else { cap_land[oi] -= need; }
                             owner = cand;
                             break;
                         }
-                        if slots < 1 { _why_slot = true; } else { _why_cash = true; }
+                        if slots < need { _why_slot = true; } else { _why_cash = true; }
                     }
                     if owner < 0 {
                         if _why_nohouse { self.diag_why_nohouse += 1; }
