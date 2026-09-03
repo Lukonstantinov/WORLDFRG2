@@ -1,7 +1,8 @@
 import { useState, useEffect, useMemo } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
-import { getCellInfo } from "@bridge";
+import { useViewportStore } from "@state/viewportStore";
+import { getCellInfo, simSetPlateOceanic } from "@bridge";
 import type { CellInfo } from "@types";
 import { GOOD_DEFS } from "@goods";
 import { settlementStory } from "@app/settlementStory";
@@ -81,12 +82,17 @@ function vectorToCompass(vx: number, vy: number): string {
 export function InfoPanel() {
   const inspectedCell = useUIStore((s) => s.inspectedCell);
   const setInspectedCell = useUIStore((s) => s.setInspectedCell);
+  const simRunning = useUIStore((s) => s.simRunning);
+  const setSimRunning = useUIStore((s) => s.setSimRunning);
   const meta = useWorldStore((s) => s.meta);
   const settlements = useWorldStore((s) => s.settlements);
   const rivers = useWorldStore((s) => s.rivers);
   const lakes = useWorldStore((s) => s.lakes);
   const toponyms = useWorldStore((s) => s.toponyms);
   const [info, setInfo] = useState<CellInfo | null>(null);
+  const [flippingPlate, setFlippingPlate] = useState(false);
+  const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
+  const frozen = meta?.frozen === true;
 
   useEffect(() => {
     if (!inspectedCell) {
@@ -97,6 +103,24 @@ export function InfoPanel() {
       .then(setInfo)
       .catch(() => setInfo(null));
   }, [inspectedCell]);
+
+  // The plate inspector's click-to-flip: override this cell's plate, then
+  // re-fetch so the panel (and the map, via invalidateTiles) show the rebuilt
+  // landmass. Only offered while `plate_is_oceanic` is known (a world with no
+  // plate data — template/painted — has nothing to flip) and unfrozen.
+  const handleFlipPlate = async () => {
+    if (!info || info.plate_is_oceanic === null || flippingPlate || simRunning) return;
+    setFlippingPlate(true);
+    setSimRunning(true); // block other geography-generating actions (e.g. Generate Full World) mid-flip
+    try {
+      await simSetPlateOceanic(info.plate_index, !info.plate_is_oceanic);
+      invalidateTiles();
+      const refreshed = await getCellInfo(info.wx, info.wy);
+      setInfo(refreshed);
+    } catch { /* leave the panel showing the pre-flip state on failure */ }
+    setFlippingPlate(false);
+    setSimRunning(false);
+  };
 
   // A settlement on (within ~2 cells of) the inspected cell → show its story.
   const story = useMemo(() => {
@@ -189,7 +213,24 @@ export function InfoPanel() {
       {row("Latitude", `${Math.abs(lat).toFixed(1)}\u00B0 ${latDir}`)}
       {row("Longitude", `${Math.abs(lon).toFixed(1)}\u00B0 ${lonDir}`)}
       {row("Terrain", info.terrain === "land" ? "Land" : "Sea")}
-      {row("Plate", `#${info.plate_index}`)}
+      {row("Plate", `#${info.plate_index}${
+        info.plate_is_oceanic === null ? "" : info.plate_is_oceanic ? " · Oceanic" : " · Continental"
+      }`)}
+      {info.plate_is_oceanic !== null && !frozen && (
+        <button
+          onClick={handleFlipPlate}
+          disabled={flippingPlate || simRunning}
+          title="Rebuild this world's landmass with this plate's type switched"
+          style={{
+            width: "100%", marginTop: 2, marginBottom: 2, padding: "3px 6px",
+            fontSize: 10, background: "#16283c", border: "1px solid #2a5a7a",
+            borderRadius: 3, color: "#8ab4d8", cursor: (flippingPlate || simRunning) ? "default" : "pointer",
+            opacity: (flippingPlate || simRunning) ? 0.6 : 1,
+          }}
+        >
+          {flippingPlate ? "Rebuilding landmass…" : `Flip plate #${info.plate_index} to ${info.plate_is_oceanic ? "Continental" : "Oceanic"}`}
+        </button>
+      )}
 
       {story && (
         <>

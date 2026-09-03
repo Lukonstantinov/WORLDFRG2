@@ -45,8 +45,48 @@ pub fn sim_generate_plates(
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
     let motion = plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
-    persist_plate_motion(&conn, &motion);
+    persist_plate_motion(&conn, &motion, seed);
     buf.save(&conn, "Generate plates & landmass")
+}
+
+/// The plate inspector's click-to-flip: override one plate's oceanic/
+/// continental assignment and re-rasterize landmass from it, keeping the SAME
+/// plate geometry (no re-partition — `plate_index`/`boundary_type` are
+/// untouched). `generate_plates_and_landmass` already decides `is_oceanic` per
+/// plate to hit a target ocean fraction (Slice 5); this exposes that decision
+/// for a specific plate. Reads the persisted `plate_seed` rather than taking a
+/// seed argument — the rebuild must use the exact seed generation used (the
+/// coastline noise field is keyed off it), and that is a fact about the
+/// world, not something the caller should have to track.
+#[tauri::command]
+pub fn sim_set_plate_oceanic(
+    plate_id: u16, is_oceanic: bool, db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
+
+    let json = metadata::get_meta(&conn, "plate_motion").map_err(|e| e.to_string())?.unwrap_or_default();
+    let mut motion: Vec<plates::PlateMotion> = serde_json::from_str(&json).unwrap_or_default();
+    if motion.is_empty() {
+        return Err("No plate data on this world — generate plates first".into());
+    }
+    let idx = plate_id as usize;
+    if idx >= motion.len() {
+        return Err(format!("Unknown plate id {plate_id} (this world has {} plates)", motion.len()));
+    }
+    let seed: u64 = metadata::get_meta(&conn, "plate_seed").map_err(|e| e.to_string())?
+        .and_then(|s| s.parse().ok())
+        .ok_or_else(|| "This world's plate generation seed was not recorded — regenerate plates to enable the inspector".to_string())?;
+
+    motion[idx].is_oceanic = is_oceanic;
+    let oceanic: Vec<bool> = motion.iter().map(|p| p.is_oceanic).collect();
+
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    plates::rebuild_landmass_from_plate_types(&mut buf, seed, &oceanic);
+
+    persist_plate_motion(&conn, &motion, seed);
+    buf.save(&conn, "Flip plate oceanic/continental")
 }
 
 /// Invert land and sea
@@ -444,7 +484,7 @@ pub fn sim_run_all(
 
     // Phase 1: Plates & landmass
     let motion = plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
-    persist_plate_motion(&conn, &motion);
+    persist_plate_motion(&conn, &motion, seed);
 
     // Phase 2: Elevation & depth. Plates exist on this path, so every model is
     // available and "plates" is the default.
@@ -1237,10 +1277,19 @@ fn persist_lakes(conn: &rusqlite::Connection, lakes: &[rivers::Lake]) {
 /// pattern `deposits`/`good_localities`/`lakes` already use. Called from every
 /// site that runs phase 1, so a re-generated world always has a fresh motion
 /// layer rather than one left over from a previous plate count or seed.
-fn persist_plate_motion(conn: &rusqlite::Connection, motion: &[plates::PlateMotion]) {
+///
+/// Also persists the generating SEED (`plate_seed`, the `settlements_seed`
+/// convention already used elsewhere), which the plate inspector's
+/// click-to-flip rebuild (`sim_set_plate_oceanic`) needs — a rebuild must use
+/// the SAME seed the plates were generated with (the coastline noise field is
+/// keyed directly off it), and the frontend has no reliable way to know that
+/// seed on its own (the seed field in the Landmass step is a UI draft the
+/// user may have since re-rolled before ever pressing Generate again).
+fn persist_plate_motion(conn: &rusqlite::Connection, motion: &[plates::PlateMotion], seed: u64) {
     if let Ok(json) = serde_json::to_string(motion) {
         let _ = metadata::set_meta(conn, "plate_motion", &json);
     }
+    let _ = metadata::set_meta(conn, "plate_seed", &seed.to_string());
 }
 
 /// The world's stored lake set. Falls back to recomputing at the old hard-coded

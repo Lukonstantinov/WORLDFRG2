@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useUIStore } from "@state/uiStore";
 import {
   simGeneratePlates, simInvertTerrain, loadImageTemplate,
   landOpSmoothRoughen, landOpFjords, landOpIslands, landOpFill,
-  renderWorldThumbnail, undoAction,
+  renderWorldThumbnail, undoAction, getPlateMotion, simSetPlateOceanic,
   type IslandKind,
 } from "@bridge";
+import type { PlateMotionArrow } from "@types";
 import { genBtn } from "@ui/workflow/workflowStyles";
 
 interface Props {
@@ -58,6 +59,39 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
     { a: { seed: number; thumb: string; w: number; h: number }; b: { seed: number; thumb: string; w: number; h: number } } | null
   >(null);
 
+  // ── Plate inspector: which plates exist and their oceanic/continental
+  // assignment (`generate_plates_and_landmass` already decides this to hit a
+  // target ocean fraction — this surfaces and overrides it per plate).
+  const [platesOpen, setPlatesOpen] = useState(true);
+  const [plates, setPlates] = useState<PlateMotionArrow[]>([]);
+  const [flippingPlateId, setFlippingPlateId] = useState<number | null>(null);
+
+  const refreshPlates = useCallback(async () => {
+    try {
+      setPlates(await getPlateMotion());
+    } catch { setPlates([]); }
+  }, []);
+
+  // Pick up plate data already on the world when this step mounts (e.g.
+  // navigating back to step 1 after generating), not only right after a
+  // fresh Generate press.
+  useEffect(() => { refreshPlates(); }, [refreshPlates]);
+
+  const handleFlipPlate = async (plateId: number, currentOceanic: boolean) => {
+    if (simRunning || flippingPlateId !== null) return;
+    setFlippingPlateId(plateId);
+    setSimRunning(true); // block other geography-generating actions mid-flip
+    setStatus(`Rebuilding landmass — plate #${plateId} → ${currentOceanic ? "Continental" : "Oceanic"}...`);
+    try {
+      await simSetPlateOceanic(plateId, !currentOceanic);
+      invalidateTiles();
+      await refreshPlates();
+      setStatus(`Plate #${plateId} flipped to ${currentOceanic ? "Continental" : "Oceanic"}`);
+    } catch (err) { setStatus(`Error: ${err}`); }
+    setFlippingPlateId(null);
+    setSimRunning(false);
+  };
+
   const hasLasso = lassoPolygon.length >= 3;
 
   const handleGeneratePlates = async (useSeed?: number) => {
@@ -69,6 +103,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
       invalidateTiles();
       markStepCompleted(1);
       setLandmassSource("plates");
+      await refreshPlates();
       setStatus("Plates & landmass generated");
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
@@ -106,6 +141,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
       invalidateTiles();
       markStepCompleted(1);
       setLandmassSource("template");
+      await refreshPlates(); // a template has no plates; clears any stale list from a prior plates-based generation
       setStatus(`Template loaded (${modified.length} tiles) — image auto-resized to world grid`);
     } catch (err) {
       setStatus(`Template error: ${err}`);
@@ -194,6 +230,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
       invalidateTiles();
       markStepCompleted(1);
       setLandmassSource("plates");
+      await refreshPlates();
       setVariants({
         a: { seed: seedA, thumb: thumbA.rgba, w: thumbA.width, h: thumbA.height },
         b: { seed: seedB, thumb: thumbB.rgba, w: thumbB.width, h: thumbB.height },
@@ -215,6 +252,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
     try {
       await simGeneratePlates(variants.a.seed, plateCount);
       invalidateTiles();
+      await refreshPlates();
       setVariants(null);
       setStatus("Variant A kept");
     } catch (err) { setStatus(`Error: ${err}`); }
@@ -250,6 +288,58 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
             <VariantThumb label="A" data={variants.a} onKeep={() => keepVariant("a")} disabled={simRunning} />
             <VariantThumb label="B (on map)" data={variants.b} onKeep={() => keepVariant("b")} disabled={simRunning} highlight />
           </div>
+        </div>
+      )}
+
+      <button
+        onClick={() => setPlatesOpen((v) => !v)}
+        style={{ ...genBtn, background: "transparent", border: "1px solid #22384f", textAlign: "left" }}
+      >
+        {platesOpen ? "▾" : "▸"} Plates {plates.length > 0 ? `(${plates.length})` : ""}
+      </button>
+      {platesOpen && (
+        <div style={panelStyle}>
+          {plates.length === 0 ? (
+            <div style={{ fontSize: 10, color: "#5a7591" }}>
+              No plate data yet — Generate from Plates first. (A template or painted
+              landmass has no plates to inspect.)
+            </div>
+          ) : (
+            <>
+              <div style={{ fontSize: 10, color: "#5a7591" }}>
+                Click Flip to swap a plate between Oceanic and Continental and
+                rebuild the coastline from it — same plate shapes, new land/sea.
+              </div>
+              <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+                {[...plates].sort((a, b) => b.area_frac - a.area_frac).map((p) => (
+                  <div key={p.id} style={{
+                    display: "flex", alignItems: "center", gap: 5, fontSize: 10.5,
+                    padding: "2px 4px", borderRadius: 3,
+                    background: p.is_oceanic ? "rgba(40,90,140,0.25)" : "rgba(90,110,50,0.25)",
+                  }}>
+                    <span style={{
+                      width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
+                      background: p.is_oceanic ? "#3a7ac0" : "#7a9a4a",
+                    }} />
+                    <span style={{ color: "#9ab0c8", minWidth: 24 }}>#{p.id}</span>
+                    <span style={{ color: "#c0d0e0", minWidth: 66 }}>
+                      {p.is_oceanic ? "Oceanic" : "Continental"}
+                    </span>
+                    <span style={{ color: "#6a8aaa", minWidth: 40 }}>
+                      {(p.area_frac * 100).toFixed(1)}%
+                    </span>
+                    <button
+                      onClick={() => handleFlipPlate(p.id, p.is_oceanic)}
+                      disabled={simRunning || flippingPlateId !== null}
+                      style={{ ...smallBtn, marginLeft: "auto", padding: "2px 6px", fontSize: 9.5 }}
+                    >
+                      {flippingPlateId === p.id ? "Rebuilding…" : `→ ${p.is_oceanic ? "Continental" : "Oceanic"}`}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </>
+          )}
         </div>
       )}
 

@@ -40,6 +40,11 @@ pub struct CellInfo {
     pub fertility: f32,
     pub fishery: f32,
     pub plate_index: u16,
+    /// This cell's plate's oceanic/continental assignment, read from
+    /// `metadata["plate_motion"]` (the plate inspector's data source) —
+    /// `None` on a world with no plate data (template/painted, or one
+    /// generated before B2), same discipline as an old save's empty `lakes`.
+    pub plate_is_oceanic: Option<bool>,
     pub is_volcanic: bool,
     pub is_shelf: bool,
     pub wind_vx: f32,

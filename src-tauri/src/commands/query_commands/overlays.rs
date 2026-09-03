@@ -1513,14 +1513,26 @@ pub fn get_overlays(db: State<'_, WorldDb>) -> Result<OverlaysState, String> {
 /// can read). `speed`/`vx`/`vy` are cells/Myr-scale relative units (the Euler-pole
 /// rate itself has no real-world calibration), so the frontend normalizes length —
 /// only relative speed and direction are meaningful.
+///
+/// `id` and `area_frac` (the plate inspector) let a click resolve straight to
+/// this same array: `get_cell_info` already returns `plate_index` for the
+/// clicked cell, and `id` here is that same index (the order `PlateMotion` was
+/// generated/persisted in), so the frontend never needs a second round trip
+/// to learn which entry a click landed on.
 #[derive(Serialize)]
 pub struct PlateMotionArrow {
+    pub id: u16,
     pub x: f32,
     pub y: f32,
     pub vx: f32,
     pub vy: f32,
     pub speed: f32,
     pub is_oceanic: bool,
+    /// This plate's REAL measured share of the world's cells (counted from the
+    /// persisted `plate_index` column, not the nominal size-class weight it was
+    /// seeded with) — honest area for the inspector card rather than a label
+    /// that can silently disagree with what actually got rasterized.
+    pub area_frac: f32,
 }
 
 /// Read the plate motion persisted at generation (`metadata["plate_motion"]`,
@@ -1540,14 +1552,31 @@ pub fn get_plate_motion(db: State<'_, WorldDb>) -> Result<Vec<PlateMotionArrow>,
         .unwrap_or_default();
     let motion: Vec<crate::sim::plates::PlateMotion> =
         serde_json::from_str(&json).unwrap_or_default();
-    Ok(motion.iter().map(|p| {
+    if motion.is_empty() {
+        return Ok(Vec::new());
+    }
+    // Only load the PLATES column (plate_index alone) to count area — cheap
+    // next to a full-buffer load, and this query already pays a DB round trip.
+    let mut cells = vec![0u32; motion.len()];
+    let mut total = 0u32;
+    if let Ok(buf) = crate::sim::world_buffer::WorldBuffer::load_with(
+        &conn, crate::sim::world_buffer::ColumnSet::PLATES,
+    ) {
+        for &pi in &buf.plate_index {
+            if let Some(c) = cells.get_mut(pi as usize) { *c += 1; }
+            total += 1;
+        }
+    }
+    Ok(motion.iter().enumerate().map(|(i, p)| {
         let (vx, vy) = p.velocity_at(p.centroid_x, p.centroid_y, grid_w);
         PlateMotionArrow {
+            id: i as u16,
             x: p.centroid_x,
             y: p.centroid_y,
             vx, vy,
             speed: (vx * vx + vy * vy).sqrt(),
             is_oceanic: p.is_oceanic,
+            area_frac: if total > 0 { cells[i] as f32 / total as f32 } else { 0.0 },
         }
     }).collect())
 }

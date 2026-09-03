@@ -141,6 +141,15 @@ export async function simInvertTerrain(): Promise<[number, number][]> {
   return invoke("sim_invert_terrain");
 }
 
+/** The plate inspector's click-to-flip: override one plate's oceanic/
+ *  continental assignment and re-rasterize landmass from it (same plate
+ *  geometry, no re-partition). Uses the world's own recorded generation seed
+ *  server-side — never pass one from the UI's Seed field, which may since
+ *  have been re-rolled without regenerating. */
+export async function simSetPlateOceanic(plateId: number, isOceanic: boolean): Promise<[number, number][]> {
+  return invoke("sim_set_plate_oceanic", { plateId, isOceanic });
+}
+
 export async function simGenerateTerrain(seed: number): Promise<[number, number][]> {
   return invoke("sim_generate_terrain", { seed });
 }
