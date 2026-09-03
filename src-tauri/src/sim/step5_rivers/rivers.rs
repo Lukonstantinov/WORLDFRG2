@@ -1700,6 +1700,93 @@ mod tests {
              has to be the same `fill_depth` the lakes were detected with.");
     }
 
+    /// WHAT A RIVER ACTUALLY ENDS AT, by how VISIBLE that terminus is.
+    ///
+    /// `dangling_stubs` accepts a mouth at a lake of ANY size, so a river ending
+    /// at a one-cell lake satisfies the gate — and at world zoom a one-cell lake
+    /// is invisible, so the reader sees a river stopping in open ground. That is
+    /// the same invisible-shoreline failure as the pond/lake threshold mismatch,
+    /// moved into the lake's SIZE. This classifies every mouth so the question
+    /// "why does that river stop" is answered with a measurement instead of a
+    /// guess.
+    #[test]
+    #[ignore]
+    fn diag_river_mouth_visibility() {
+        use crate::sim::world_buffer::{WorldBuffer, ColumnSet};
+        use crate::db::schema;
+        use rusqlite::Connection;
+        for seed in [4242u64, 7, 99] {
+            let (w, h) = (600u32, 300u32);
+            let conn = Connection::open_in_memory().unwrap();
+            schema::create_tables(&conn).unwrap();
+            for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+                conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![k, v]).unwrap();
+            }
+            let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+            crate::sim::plates::generate_plates_and_landmass(&mut buf, seed, 14);
+            crate::sim::elevation::generate_elevation(&mut buf, seed);
+            let n = buf.total();
+            buf.koppen = vec![crate::sim::koppen::BSK; n];
+            buf.precipitation = vec![340.0; n];
+            buf.temperature = vec![17.0; n];
+
+            let max_cells = ((w * h) as usize / 2000).max(20);
+            let wh = compute_world_hydrology(&buf, 0.004, max_cells);
+            let rivers = extract_rivers(&buf, &wh.hydro.flow_dir, &wh.hydro.acc,
+                                        &wh.hydro.filled, 0.5, 1.0, &wh.lakes, 0.004);
+
+            // Lake cell -> that lake's own cell count, so a mouth can be classified
+            // by how big the water it reaches actually is.
+            let mut lake_size: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for lk in &wh.lakes {
+                for &(x, y) in &lk.cells { lake_size.insert(buf.idx(x, y), lk.cells.len()); }
+            }
+            let mut on_channel: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+            for (ri, r) in rivers.iter().enumerate() {
+                for &(x, y) in &r.points { on_channel.entry(buf.idx(x, y)).or_insert(ri); }
+            }
+
+            let (mut sea, mut big_lake, mut tiny_lake, mut confluence, mut nothing) = (0, 0, 0, 0, 0);
+            // A lake under this many cells cannot be seen at world zoom, so a river
+            // ending in one reads to the eye exactly like a river ending nowhere.
+            const VISIBLE_LAKE_CELLS: usize = 4;
+            for (ri, r) in rivers.iter().enumerate() {
+                let Some(&(mx, my)) = r.points.last() else { continue };
+                let i = buf.idx(mx, my);
+                if buf.terrain[i] == 0 { sea += 1; continue; }
+                if let Some(&sz) = lake_size.get(&i) {
+                    if sz >= VISIBLE_LAKE_CELLS { big_lake += 1 } else { tiny_lake += 1 }
+                    continue;
+                }
+                // A channel cell is always LAND (`is_channel` requires it), so a
+                // river that reaches the coast has its last point on the land side
+                // and is only recognisable by a SEA NEIGHBOUR. Counting that as a
+                // "confluence" is what made an earlier cut of this diagnostic
+                // report `sea 0` on every world — the classes have to be separated.
+                let (mut at_sea, mut joins, mut touches_tiny) = (false, false, false);
+                for dy in -1i32..=1 { for dx in -1i32..=1 {
+                    if dx == 0 && dy == 0 { continue; }
+                    let ni = buf.widx(mx as i32 + dx, my as i32 + dy);
+                    if let Some(&o) = on_channel.get(&ni) { if o != ri { joins = true; } }
+                    if buf.terrain[ni] == 0 { at_sea = true; }
+                    if let Some(&sz) = lake_size.get(&ni) {
+                        if sz >= VISIBLE_LAKE_CELLS { joins = true } else { touches_tiny = true }
+                    }
+                }}
+                if at_sea { sea += 1 }
+                else if joins { confluence += 1 }
+                else if touches_tiny { tiny_lake += 1 }
+                else { nothing += 1 }
+            }
+            let invisible = tiny_lake + nothing;
+            println!("seed {seed}: {} rivers · sea {sea} · lake(visible) {big_lake} · \
+                      confluence {confluence} || LOOKS TRUNCATED: tiny-lake {tiny_lake} + nowhere \
+                      {nothing} = {invisible} ({:.1}%)",
+                     rivers.len(), 100.0 * invisible as f32 / rivers.len().max(1) as f32);
+        }
+    }
+
     /// THE REAL-WORLD stub count. The synthetic endorheic fixture proves the
     /// MECHANISM; this proves it on a world built by the actual generator, with
     /// real plates, real elevation, real climate and real basins — which is what

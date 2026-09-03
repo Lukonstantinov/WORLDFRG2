@@ -4114,6 +4114,40 @@ formed and it passed either way. **Always verify a new gate fails on the
 unfixed code** (§8.23b's own rule): reverted, it reports 104 invisible cells
 and fails loudly; restored, 0.
 
+**AND A THIRD TIME, in the lake's SIZE — the gate was honest and measuring
+the wrong thing.** The user reported truncated rivers again with the stub
+count at a genuine 0/49, so the gate's definition of "ends properly" had to
+be wrong rather than the count. It was: `dangling_stubs` accepts a mouth at a
+lake of ANY size, so a river ending at a ONE-CELL lake satisfies it — and a
+one-cell lake is smaller than a pixel at world zoom. Worse, the asymmetry was
+built in on purpose: river widths are explicitly zoom-compensated so "even
+small streams stay visible", while a lake draws as bare `fillRect(x, y, 1, 1)`
+per cell with no minimum. So the river was widened to stay visible and its own
+terminus was allowed to vanish. `diag_river_mouth_visibility` classifies every
+mouth by how visible its terminus actually is and measures **6-9% of all
+rivers ending at something the reader cannot see** (3 per world across 3
+seeds).
+
+The fix is cartographic and belongs in the renderer, because the DATA was
+right all along — the lake exists, it is in the list, the panel will list it.
+A lake at or under `MIN_LAKE_SYMBOL_CELLS` also draws a disc of at least
+`MIN_LAKE_SYMBOL_R` scaled by the same `1/sqrt(zoom)` the rivers use, so a
+pond and the stream feeding it stay in proportion; the true per-cell footprint
+is still filled underneath, and zooming in hands the drawing back to the real
+cells the moment they are bigger than the minimum. Every atlas draws a small
+water body at a minimum symbol size for exactly this reason.
+
+**The generalisation, now paid for three times in one sitting:** each of these
+was the model holding a fact and the RENDER dropping it — a ponded cell no
+lake represents, a basin between two thresholds, a lake below one pixel. When
+a user reports something missing from the map and the data gate says it is
+present, suspect the render before re-tuning the generator, and **measure the
+symptom the user can actually see rather than the invariant that is
+convenient to assert.** Note also what has NO automated gate here: this
+codebase has no frontend rendering test beyond `tsc`, so the minimum-symbol
+rule is guarded by the diagnostic plus looking at it — stated plainly rather
+than dressed up with an assertion that would not exercise the canvas.
+
 ---
 
 ### 8.24b Plate margins are warped at the SOURCE
