@@ -626,9 +626,9 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // ── Regionally-distinct commodities ──
         cg("citrus", "Citrus", "\u{1F34A}", "#f4a33a", Domain::Coastal, Distribution::Local, 0.55, 0.45, false,
             None, env(vec![(8,1.0),(9,1.0),(11,0.7)], Some([19.0,7.0]), Some([400.0,1100.0,300.0]), None, Some([25.0,40.0,8.0]), 0.4, 0.5)),
-        cg("flax", "Flax / Linen", "\u{1F9F5}", "#cfe0e8", Domain::Continental, Distribution::Local, 0.50, 0.40, false,
+        cg("flax", "Flax / Linen", "\u{1F331}", "#cfe0e8", Domain::Continental, Distribution::Local, 0.50, 0.40, false,
             None, env(vec![(12,1.0),(11,0.7),(15,0.8),(14,0.7)], Some([14.0,7.0]), Some([500.0,1200.0,300.0]), None, None, 0.5, 0.0)),
-        cg("coral", "Red Coral", "\u{1FAB8}", "#ff6f61", Domain::Marine, Distribution::Local, 0.60, 0.40, true,
+        cg("coral", "Red Coral", "\u{1F41A}", "#ff6f61", Domain::Marine, Distribution::Local, 0.60, 0.40, true,
             None, env(vec![], Some([26.0,5.0]), None, None, Some([0.0,30.0,8.0]), 0.0, 0.6)),
         // ── ISLAND ENDEMICS (`Distribution::Endemic`) ─────────────────────────
         // NOTE the domain: these are `Coastal`, not `Island`, and the split is
@@ -654,31 +654,31 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // the Banda relationship exactly.
         cg("nutmeg", "Nutmeg", "\u{1F330}", "#8b5a2b", Domain::Coastal, Distribution::Endemic, 0.93, 0.60, true,
             None, env(vec![(1,1.0),(2,0.9)], Some([26.0,4.0]), Some([1800.0,3500.0,500.0]), Some([0.0,0.30,0.12]), Some([0.0,12.0,5.0]), 0.0, 0.8)),
-        cg("mace", "Mace", "\u{1F536}", "#d2691e", Domain::Coastal, Distribution::Endemic, 0.94, 0.55, true,
+        cg("mace", "Mace", "\u{1F53A}", "#d2691e", Domain::Coastal, Distribution::Endemic, 0.94, 0.55, true,
             None, env(vec![(1,1.0),(2,0.9)], Some([26.0,4.0]), Some([1800.0,3500.0,500.0]), Some([0.0,0.30,0.12]), Some([0.0,12.0,5.0]), 0.0, 0.8)),
         // Socotra's dragon's blood — one island, an ARID one, which is why this
         // envelope looks nothing like the other endemics'.
-        cg("dragons_blood", "Dragon's Blood Resin", "\u{1FA78}", "#a41d1d", Domain::Coastal, Distribution::Endemic, 0.95, 0.50, true,
+        cg("dragons_blood", "Dragon's Blood Resin", "\u{2764}", "#a41d1d", Domain::Coastal, Distribution::Endemic, 0.95, 0.50, true,
             None, env(vec![(6,1.0),(4,0.8),(7,0.5)], Some([25.0,7.0]), Some([100.0,500.0,200.0]), Some([0.05,0.45,0.18]), Some([8.0,22.0,7.0]), 0.0, 0.5)),
         // Barus camphor (Sumatra / Borneo) — a wet-tropical island forest resin.
-        cg("camphor", "Camphor", "\u{1F9CA}", "#e8f4f8", Domain::Coastal, Distribution::Endemic, 0.90, 0.50, true,
+        cg("camphor", "Camphor", "\u{2744}", "#e8f4f8", Domain::Coastal, Distribution::Endemic, 0.90, 0.50, true,
             None, env(vec![(1,1.0),(2,0.8)], Some([25.0,5.0]), Some([2000.0,4000.0,600.0]), Some([0.05,0.40,0.15]), Some([0.0,10.0,5.0]), 0.4, 0.3)),
         // Sumatran / Javanese benzoin — the same islands, drier margin.
         cg("benzoin", "Benzoin", "\u{1F36F}", "#c98a3c", Domain::Coastal, Distribution::Endemic, 0.88, 0.45, true,
             None, env(vec![(2,1.0),(1,0.7),(3,0.5)], Some([24.0,5.0]), Some([1400.0,3000.0,500.0]), Some([0.05,0.45,0.18]), Some([0.0,14.0,6.0]), 0.3, 0.3)),
         // Timor / Sumba sandalwood — the dry-monsoon island heartwood.
-        cg("sandalwood", "Sandalwood", "\u{1FAB5}", "#c8a165", Domain::Coastal, Distribution::Endemic, 0.87, 0.55, true,
+        cg("sandalwood", "Sandalwood", "\u{1F334}", "#c8a165", Domain::Coastal, Distribution::Endemic, 0.87, 0.55, true,
             None, env(vec![(3,1.0),(23,0.8),(2,0.5)], Some([26.0,5.0]), Some([700.0,1600.0,400.0]), Some([0.05,0.45,0.18]), Some([5.0,20.0,7.0]), 0.0, 0.4)),
         // ── Extreme-rare luxuries (harsh placement: tiny homelands / few deposits) ──
         cg("cinnamon", "Cinnamon", "\u{1F33F}", "#a9603a", Domain::Coastal, Distribution::Local, 0.72, 0.50, true,
             None, env(vec![(2,1.0),(1,0.8),(3,0.6)], Some([27.0,6.0]), Some([1200.0,3000.0,400.0]), None, Some([0.0,15.0,6.0]), 0.0, 0.5)),
         cg("saffron", "Saffron", "\u{1F33C}", "#f4c430", Domain::Continental, Distribution::Local, 0.88, 0.55, true,
             None, env(vec![(8,1.0),(9,0.9),(7,0.7),(19,0.6)], Some([18.0,7.0]), Some([300.0,700.0,200.0]), Some([0.12,0.45,0.15]), Some([30.0,42.0,7.0]), 0.0, 0.0)),
-        cg("tyrian_purple", "Tyrian Purple", "\u{1F7E3}", "#6a0dad", Domain::Coastal, Distribution::Deposits, 0.90, 0.55, true,
+        cg("tyrian_purple", "Tyrian Purple", "\u{1F40C}", "#6a0dad", Domain::Coastal, Distribution::Deposits, 0.90, 0.55, true,
             dep(0.0, 1, 3), env(vec![(8,1.0),(9,1.0),(11,0.7),(4,0.6)], Some([22.0,8.0]), None, None, Some([28.0,42.0,6.0]), 0.0, 1.0)),
         cg("ambergris", "Ambergris", "\u{1F40B}", "#cfc0a0", Domain::Marine, Distribution::Deposits, 0.92, 0.60, true,
             dep(0.0, 1, 4), env(vec![], Some([12.0,10.0]), None, None, Some([30.0,65.0,12.0]), 0.0, 0.0)),
-        cg("jade", "Jade", "\u{1F7E2}", "#00a86b", Domain::Continental, Distribution::Deposits, 0.90, 0.55, true,
+        cg("jade", "Jade", "\u{2618}", "#00a86b", Domain::Continental, Distribution::Deposits, 0.90, 0.55, true,
             dep(0.40, 1, 3), env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
         // ── Gem types — the generic "gemstones" belt SPLIT into distinct gems, each
         //    a deposit good with its OWN ore-province noise (`province_scale`) +
@@ -694,14 +694,14 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             dep(0.38, 1, 2), env(vec![], Some([22.0,14.0]), None, Some([0.38,0.9,0.14]), None, 0.0, 0.0)),
         cg("diamond", "Diamond", "\u{1F48E}", "#dfe6ee", Domain::Continental, Distribution::Deposits, 0.90, 0.70, true,
             dep(0.55, 1, 3), env(vec![], None, None, Some([0.55,1.0,0.12]), None, 0.0, 0.0)),
-        cg("amethyst", "Amethyst", "\u{1F7E3}", "#9b59d0", Domain::Continental, Distribution::Deposits, 0.66, 0.48, false,
+        cg("amethyst", "Amethyst", "\u{1F49C}", "#9b59d0", Domain::Continental, Distribution::Deposits, 0.66, 0.48, false,
             dep(0.34, 2, 1), env(vec![], None, None, Some([0.34,0.85,0.16]), None, 0.0, 0.0)),
-        cg("topaz", "Topaz", "\u{1F7E7}", "#e0a92a", Domain::Continental, Distribution::Deposits, 0.62, 0.46, false,
+        cg("topaz", "Topaz", "\u{1F538}", "#e0a92a", Domain::Continental, Distribution::Deposits, 0.62, 0.46, false,
             dep(0.30, 2, 1), env(vec![], None, None, Some([0.30,0.8,0.16]), None, 0.0, 0.0)),
         // ── Precious metals & quarried stone (high-desire deposit goods) ──
         // Silver: a prized monetary metal, a touch commoner than gold. Hill/mountain
         // deposits. High desire — every wealthy market wants coin metal.
-        cg("silver", "Silver", "\u{1FA99}", "#c8ccd6", Domain::Continental, Distribution::Deposits, 0.74, 0.65, true,
+        cg("silver", "Silver", "\u{1F948}", "#c8ccd6", Domain::Continental, Distribution::Deposits, 0.74, 0.65, true,
             dep(0.30, 2, 1), env(vec![], None, None, Some([0.30,1.0,0.16]), None, 0.0, 0.0)),
         // Marble: quarried building/sculpture stone of the uplands.
         cg("marble", "Marble", "\u{1F3DB}\u{FE0F}", "#e8e6e0", Domain::Continental, Distribution::Deposits, 0.62, 0.45, false,
@@ -727,23 +727,23 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             env(vec![], None, None, Some([0.25,0.80,0.15]), None, 0.0, 0.0)),
         // Lapis lazuli: contact-metamorphic, and famously ONE source for four
         // thousand years (Sar-i-Sang) — districts=1 at the default deposit slider.
-        dg("lapis_lazuli", "Lapis Lazuli", "\u{1F535}", "#26619c", Domain::Continental,
+        dg("lapis_lazuli", "Lapis Lazuli", "\u{1F30C}", "#26619c", Domain::Continental,
             0.93, 0.60, true, 1, 6, "gem", 2, 40.0, 1.0,
             env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
         // Turquoise: a DERIVED weathering mineral — supergene alteration of a
         // copper body under an arid climate (Nishapur, Sinai). No independent
         // search: `place_mineral` walks `default_parent_for("turquoise")` == copper.
-        dg("turquoise", "Turquoise", "\u{1F7E6}", "#30d5c8", Domain::Continental,
+        dg("turquoise", "Turquoise", "\u{1F4A0}", "#30d5c8", Domain::Continental,
             0.75, 0.50, true, 1, 3, "gem", 2, 18.0, 1.0,
             env(vec![(4,1.0),(5,0.9),(6,0.8),(7,0.7)], None, None, Some([0.15,0.55,0.15]), None, 0.0, 0.0)),
         // Bog iron: wetland precipitate iron, structurally impossible under an
         // elevation-floor placer — the iron source of early medieval N. Europe.
-        dg("bog_iron", "Bog Iron", "\u{1FAA8}", "#5b4636", Domain::Continental,
+        dg("bog_iron", "Bog Iron", "\u{26CF}", "#5b4636", Domain::Continental,
             0.35, 0.30, false, 2, 1, "metal", 1, 2.0, 3.5,
             env(vec![(11,0.8),(12,1.0),(14,0.8),(15,0.9),(16,0.7)], None, None, Some([0.0,0.15,0.10]), None, 0.0, 0.0)),
         // Coal: a sedimentary-basin measure alongside limestone, already referenced
         // by `estate_kind_for_good`'s "coal" substring match but never a real good.
-        dg("coal", "Coal", "\u{26AB}", "#1c1c1c", Domain::Continental,
+        dg("coal", "Coal", "\u{2B1B}", "#1c1c1c", Domain::Continental,
             0.45, 0.35, false, 2, 1, "fuel", 0, 1.2, 3.0,
             env(vec![], None, None, Some([0.0,0.30,0.15]), None, 0.0, 0.0)),
         // Garnet: the bottom rung of the gem ladder — common orogenic gem gravel.
@@ -752,7 +752,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             env(vec![], None, None, Some([0.30,0.80,0.16]), None, 0.0, 0.0)),
         // Carnelian: agate's warm cousin, filling the same basalt amygdules — the
         // great Khambhat bead trade.
-        dg("carnelian", "Carnelian", "\u{1F7E0}", "#b33009", Domain::Continental,
+        dg("carnelian", "Carnelian", "\u{1F53B}", "#b33009", Domain::Continental,
             0.50, 0.40, false, 2, 1, "gem", 1, 5.0, 1.0,
             env(vec![], None, None, Some([0.20,0.70,0.18]), None, 0.0, 0.0)),
 
@@ -762,7 +762,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // the inputs. Edit these (or add your own) in the Goods Editor recipe rows. ──
         // Cloth ← fleece wool + a touch of dye. The classic "import raw wool, export
         // finished cloth" trade that made wool-poor weaving towns rich.
-        mg("cloth", "Woolen Cloth", "\u{1F9F6}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
+        mg("cloth", "Woolen Cloth", "\u{1F45A}", "#d8c8b0", 8.0, 1.4, 0.0, true, 1.2,
             vec![("wool_fleece", 1.0), ("dyes", 0.2)]),
         // Metalware & Arms ← iron + a little copper (tools, fittings, weapons).
         mg("metalware", "Metalware & Arms", "\u{2694}\u{FE0F}", "#9099a8", 9.0, 2.0, 0.0, false, 1.0,
@@ -795,16 +795,16 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // ── Ported richer manufactured library (on top of the PR's cloth / metalware
         //    / refined_sugar / citrus_liqueur). All hub-made, no map belt. ──
         // Textiles
-        mg("linen", "Linen", "\u{1F9FA}", "#cfe0e8", 5.0, 0.7, 0.0, false, 1.1,
+        mg("linen", "Linen", "\u{1F454}", "#cfe0e8", 5.0, 0.7, 0.0, false, 1.1,
             vec![("flax", 1.0)]),
         // Each cloth is woven from ONE fibre (cotton→cotton cloth, flax→linen,
         // wool→woolen cloth, silk→brocade); they are a "Cloth family" of distinct
         // goods, not a blend.
         mg("cotton_cloth", "Cotton Cloth", "\u{1F455}", "#eef0e8", 5.0, 0.7, 0.0, false, 1.1,
             vec![("cotton", 1.0)]),
-        mg("silk_brocade", "Fine Silk Brocade", "\u{1F9E3}", "#d96fb0", 28.0, 0.25, 0.0, true, 1.0,
+        mg("silk_brocade", "Fine Silk Brocade", "\u{1F458}", "#d96fb0", 28.0, 0.25, 0.0, true, 1.0,
             vec![("silk", 1.0), ("dyes", 0.2), ("gold", 0.02)]),
-        mg("carpets", "Carpets & Tapestry", "\u{1F7EB}", "#9b4f2f", 11.0, 1.0, 0.0, true, 1.0,
+        mg("carpets", "Carpets & Tapestry", "\u{1F3F5}", "#9b4f2f", 11.0, 1.0, 0.0, true, 1.0,
             vec![("wool_fleece", 1.2), ("dyes", 0.3)]),
         mg("leather_goods", "Leather Goods", "\u{1F45E}", "#7a4a2a", 4.0, 0.9, 0.0, false, 1.0,
             vec![("hides", 1.0), ("salt", 0.1)]),
@@ -827,15 +827,15 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         mg("mead", "Mead", "\u{1F36F}", "#e0a020", 4.0, 1.2, 0.05, false, 1.0,
             vec![("honey", 1.0)]),
         // Aromatics, cosmetics & craft luxuries
-        mg("perfume", "Perfume & Attar", "\u{1F9F4}", "#c79a4b", 30.0, 0.15, 0.0, true, 1.0,
+        mg("perfume", "Perfume & Attar", "\u{1F338}", "#c79a4b", 30.0, 0.15, 0.0, true, 1.0,
             vec![("frankincense", 0.3), ("saffron", 0.05), ("oliveoil", 0.2)]),
-        mg("soap", "Soap", "\u{1F9FC}", "#cfe0d8", 3.0, 0.9, 0.0, false, 1.0,
+        mg("soap", "Soap", "\u{1F6C1}", "#cfe0d8", 3.0, 0.9, 0.0, false, 1.0,
             vec![("oliveoil", 0.6), ("salt", 0.2)]),
         mg("candles", "Candles & Wax Goods", "\u{1F56F}\u{FE0F}", "#e8d8a0", 3.0, 0.8, 0.0, false, 1.0,
             vec![("honey", 0.8)]),
         mg("books", "Books & Manuscripts", "\u{1F4DA}", "#8a6a3a", 20.0, 0.5, 0.0, true, 1.0,
             vec![("paper", 0.8), ("dyes", 0.1)]),
-        mg("furniture", "Fine Furniture", "\u{1FA91}", "#6b4226", 5.0, 2.0, 0.0, false, 1.0,
+        mg("furniture", "Fine Furniture", "\u{1F6CB}", "#6b4226", 5.0, 2.0, 0.0, false, 1.0,
             vec![("hardwoods", 1.0), ("iron", 0.1)]),
         mg("ivory_carvings", "Ivory Carvings", "\u{265F}\u{FE0F}", "#efe6d0", 25.0, 0.5, 0.0, true, 1.0,
             vec![("ivory", 1.0)]),

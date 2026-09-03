@@ -176,6 +176,141 @@ export function Meter({
   );
 }
 
+/** A two-tone directional bar: how much of a total came IN against how much went
+ *  OUT, on one track. Direction reads without a label, which a single-colour
+ *  volume bar cannot do however it is sized.
+ *
+ *  `max` is the scale the bar is drawn to — pass the largest row's total so bars
+ *  are comparable down a list; leave it out and each bar fills its own track. */
+export function SplitBar({
+  inV, outV, max, width, height = 7, inColor = "#5fd0ff", outColor = "#ffce5f", style,
+}: {
+  inV: number; outV: number; max?: number; width?: number | string; height?: number;
+  inColor?: string; outColor?: string; style?: CSSProperties;
+}) {
+  const total = Math.max(0, inV) + Math.max(0, outV);
+  const scale = max && max > 0 ? max : total;
+  const frac = scale > 0 ? Math.min(1, total / scale) : 0;
+  const inShare = total > 0 ? Math.max(0, inV) / total : 0;
+  return (
+    <div style={{
+      width: width ?? undefined, flex: width === undefined ? 1 : undefined,
+      height, background: T.card, borderRadius: RADIUS.sm, overflow: "hidden",
+      display: "flex", ...style,
+    }}>
+      <div style={{ width: `${frac * inShare * 100}%`, background: inColor }} />
+      <div style={{ width: `${frac * (1 - inShare) * 100}%`, background: outColor }} />
+    </div>
+  );
+}
+
+/** One slice of a `Donut`. */
+export type Slice = { label: string; value: number; color: string };
+
+/** A donut chart — for a PART-OF-A-WHOLE reading only (a city's exports by good,
+ *  who carries its trade). A ranking belongs in bars: a donut makes two similar
+ *  slices genuinely hard to order, which is exactly what a ranked list is for.
+ *
+ *  Drawn as stroked arcs on one circle, so every slice shares one scale by
+ *  construction. Slices under `minSlice` of the whole are folded into one
+ *  "others" arc rather than drawn as unreadable slivers — and the fold is
+ *  reported in the returned legend, never silently dropped.
+ *
+ *  `center`/`sub` print inside the hole: the total, and what it is a total OF. */
+export function Donut({
+  slices, size = 108, thickness = 15, center, sub, minSlice = 0.02, restColor = T.inkFaint,
+}: {
+  slices: Slice[]; size?: number; thickness?: number;
+  center?: string; sub?: string; minSlice?: number; restColor?: string;
+}) {
+  const clean = slices.filter((s) => s.value > 0);
+  const total = clean.reduce((a, b) => a + b.value, 0);
+  if (total <= 0) {
+    return (
+      <div style={{ width: size, height: size, display: "grid", placeItems: "center",
+        color: T.inkFaint, fontSize: FZ.micro }}>no trade</div>
+    );
+  }
+  // Fold the slivers, then draw. Sorted so the arcs run largest-first from 12
+  // o'clock, which is what makes a donut readable at all.
+  const big = clean.filter((s) => s.value / total >= minSlice).sort((a, b) => b.value - a.value);
+  const restV = total - big.reduce((a, b) => a + b.value, 0);
+  const drawn = restV > 0
+    ? [...big, { label: `${clean.length - big.length} others`, value: restV, color: restColor }]
+    : big;
+
+  const r = (size - thickness) / 2;
+  const c = size / 2;
+  const circ = 2 * Math.PI * r;
+  let offset = 0;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img"
+      aria-label={drawn.map((s) => `${s.label} ${Math.round((s.value / total) * 100)}%`).join(", ")}>
+      <circle cx={c} cy={c} r={r} fill="none" stroke={T.raised} strokeWidth={thickness} />
+      <g transform={`rotate(-90 ${c} ${c})`}>
+        {drawn.map((s, i) => {
+          const len = (s.value / total) * circ;
+          const el = (
+            <circle key={i} cx={c} cy={c} r={r} fill="none" stroke={s.color} strokeWidth={thickness}
+              strokeDasharray={`${len} ${circ - len}`} strokeDashoffset={-offset}>
+              <title>{`${s.label} · ${Math.round((s.value / total) * 100)}%`}</title>
+            </circle>
+          );
+          offset += len;
+          return el;
+        })}
+      </g>
+      {center && (
+        <text x={c} y={c - 1} textAnchor="middle" fill={T.ink}
+          style={{ fontSize: Math.round(size * 0.145), fontWeight: 600 }}>{center}</text>
+      )}
+      {sub && (
+        <text x={c} y={c + Math.round(size * 0.115)} textAnchor="middle" fill={T.inkDim}
+          style={{ fontSize: Math.round(size * 0.082), letterSpacing: 0.4 }}>{sub}</text>
+      )}
+    </svg>
+  );
+}
+
+/** The legend a `Donut` needs to be readable — swatch, label, value, share. Kept
+ *  separate from the chart so a caller can place it beside or beneath. */
+export function DonutKey({
+  slices, total, fmt, minSlice = 0.02, restColor = T.inkFaint, onPick, picked,
+}: {
+  slices: Slice[]; total?: number; fmt?: (v: number) => string; minSlice?: number;
+  restColor?: string; onPick?: (label: string | null) => void; picked?: string | null;
+}) {
+  const clean = slices.filter((s) => s.value > 0);
+  const sum = total ?? clean.reduce((a, b) => a + b.value, 0);
+  if (sum <= 0) return null;
+  const big = clean.filter((s) => s.value / sum >= minSlice).sort((a, b) => b.value - a.value);
+  const restV = sum - big.reduce((a, b) => a + b.value, 0);
+  const rows = restV > 0
+    ? [...big, { label: `${clean.length - big.length} others`, value: restV, color: restColor }]
+    : big;
+  const f = fmt ?? ((v: number) => v.toFixed(0));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+      {rows.map((s) => (
+        <div key={s.label} data-no-drag
+          onClick={onPick ? () => onPick(picked === s.label ? null : s.label) : undefined}
+          style={{
+            display: "flex", alignItems: "center", gap: SPACE.sm, fontSize: FZ.base,
+            cursor: onPick ? "pointer" : "default", borderRadius: RADIUS.sm,
+            padding: "0 2px", background: picked === s.label ? T.card : "transparent",
+          }}>
+          <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
+          <span style={{ flex: 1, minWidth: 0, color: T.ink, overflow: "hidden",
+            textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
+          <span style={{ color: T.inkMid, fontVariantNumeric: "tabular-nums" }}>{f(s.value)}</span>
+          <span style={{ width: 30, textAlign: "right", color: T.inkDim,
+            fontVariantNumeric: "tabular-nums" }}>{((s.value / sum) * 100).toFixed(0)}%</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Interaction ──────────────────────────────────────────────────────────────
 
 /** A row of tabs. `tabs` is `[value, label]` pairs (label optional → value used). */

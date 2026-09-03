@@ -687,6 +687,11 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut g_partners: HashMap<u32, std::collections::HashSet<u32>> = HashMap::new();
     let mut route_amt: HashMap<(u32, u32, u8), f32> = HashMap::new(); // (good,partner,dir)→amt
     let mut partner_vol: HashMap<u32, f32> = HashMap::new();
+    // Split by direction as well as summed. `f.dir` is already in hand (the route
+    // fold below keys on it); it was simply dropped when the partner totals were
+    // rolled up, which conflated a supplier we depend on with a customer we sell to.
+    let mut partner_in: HashMap<u32, f32> = HashMap::new();
+    let mut partner_out: HashMap<u32, f32> = HashMap::new();
     let mut partner_goods: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // partner→good→amt
     // Transport split + carrier breakdown, per good and for the city as a whole.
     let mut g_sea: HashMap<u32, f32> = HashMap::new();
@@ -700,6 +705,8 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         g_partners.entry(f.good).or_default().insert(partner);
         *route_amt.entry((f.good, partner, f.dir)).or_insert(0.0) += f.amount;
         *partner_vol.entry(partner).or_insert(0.0) += f.amount;
+        if f.dir == 0 { *partner_in.entry(partner).or_insert(0.0) += f.amount; }
+        else { *partner_out.entry(partner).or_insert(0.0) += f.amount; }
         *partner_goods.entry(partner).or_default().entry(f.good).or_insert(0.0) += f.amount;
         *g_sea.entry(f.good).or_insert(0.0) += f.sea_amount;
         *route_sea.entry((f.good, partner, f.dir)).or_insert(0.0) += f.sea_amount;
@@ -745,6 +752,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
                         house: if who == u32::MAX { -1 } else { who as i32 },
                         amount: amt,
                         pct: if total > 0.0 { amt / total * 100.0 } else { 0.0 },
+                        color: if who == u32::MAX { RESIDUAL_TINT.into() } else { distinct_color(who as usize) },
                     }
                 }).collect()).unwrap_or_default();
                 v.sort_by(|a, b| b.amount.partial_cmp(&a.amount)
@@ -772,15 +780,29 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
 
     // ── Top partner cities (share of all this city's trade) ──
     let total_vol: f32 = partner_vol.values().sum::<f32>().max(1e-6);
+    // Each direction is a share of ITS OWN book, not of total trade: a city that
+    // imports a trickle and exports a flood would otherwise show every one of its
+    // suppliers at ~0%, which is exactly the dependency worth seeing.
+    let total_in: f32 = partner_in.values().sum::<f32>().max(1e-6);
+    let total_out: f32 = partner_out.values().sum::<f32>().max(1e-6);
     let mut partners: Vec<TradePartner> = partner_vol.iter().filter_map(|(&p, &vol)| {
         let (pname, px, py) = pos(p)?;
+        let iv = partner_in.get(&p).copied().unwrap_or(0.0);
+        let ov = partner_out.get(&p).copied().unwrap_or(0.0);
         let mut gs: Vec<(u32, f32)> = partner_goods.get(&p).map(|m| m.iter().map(|(&g, &a)| (g, a)).collect()).unwrap_or_default();
         gs.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let goods = gs.iter().take(4).filter_map(|(g, _)| sim.goods.get(*g as usize).map(|x| x.name.clone())).collect();
-        Some(TradePartner { hub: p, name: pname, px, py, volume: vol, pct: vol / total_vol * 100.0, goods })
+        Some(TradePartner {
+            hub: p, name: pname, px, py, volume: vol, pct: vol / total_vol * 100.0, goods,
+            in_volume: iv, out_volume: ov,
+            in_pct: iv / total_in * 100.0, out_pct: ov / total_out * 100.0,
+        })
     }).collect();
     partners.sort_by(|a, b| b.volume.partial_cmp(&a.volume).unwrap_or(std::cmp::Ordering::Equal));
-    partners.truncate(12);
+    // 12 was enough for one combined list; the view now ranks the same set twice
+    // (once per direction), so a city that is a big supplier but a small customer
+    // has to survive the truncation to appear in the import column at all.
+    partners.truncate(20);
 
     // ── TRADERS TAB ─────────────────────────────────────────────────────────
     // Who moved cargo AT THIS CITY, and who is established here. Two different
@@ -861,6 +883,15 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             mean_route_km: if a.vol > 0.0 { a.dist_wsum / a.vol } else { 0.0 },
             goods: gs.iter().take(5)
                 .filter_map(|(g, _)| sim.goods.get(*g as usize).map(|x| x.name.clone())).collect(),
+            color: if hi_i < 0 { RESIDUAL_TINT.into() } else { distinct_color(hi_i as usize) },
+            good_rows: gs.iter().take(8).filter_map(|(g, amt)| {
+                sim.goods.get(*g as usize).map(|x| TraderGood {
+                    name: x.name.clone(),
+                    amount: *amt,
+                    in_amount: a.by_good_in.get(g).copied().unwrap_or(0.0),
+                    out_amount: a.by_good_out.get(g).copied().unwrap_or(0.0),
+                })
+            }).collect(),
             has_office: office, has_bailo: bailo, seats_council: seats, is_captor: capt,
         }
     }).collect();
@@ -880,6 +911,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
                 name: h.name.clone(), is_guild: h.is_guild, house: i as i32,
                 has_office: office, has_bailo: bailo, seats_council: seats, is_captor: capt,
                 volume: acc.get(&iu).map(|a| a.vol).unwrap_or(0.0),
+                color: distinct_color(i),
             })
         }).collect();
     // A bailo outranks an office, a seat outranks both — sort by standing, then by

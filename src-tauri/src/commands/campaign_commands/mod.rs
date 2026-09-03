@@ -568,6 +568,13 @@ const CIVIC_TINT: &str = "#7a8aa0";
 /// `[r,g,b]` → `#rrggbb`.
 fn rgb_hex(c: [u8; 3]) -> String { format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2]) }
 
+/// The tint for the UNNAMED ownerless residual ("local merchants") wherever a
+/// named holder would carry its own heraldic colour. Deliberately a fixed muted
+/// green rather than a generated one: the residual is a CLASS, not a family, and
+/// giving it family-looking arms would dress up the very thing the Traders panel
+/// exists to report honestly (~96% of shipments move on no house's account).
+pub(crate) const RESIDUAL_TINT: &str = "#8fbf8f";
+
 /// Emoji for a building label (mirrors the frontend fallback so the payload is
 /// self-describing).
 fn building_emoji(label: &str) -> &'static str {
@@ -604,6 +611,55 @@ pub struct CityStores {
     pub goods_value: f32,
     /// Total units of all goods held at the city.
     pub goods_units: f32,
+}
+
+/// One class of hull in a city's VESSEL REGISTRY (sea ship / river boat / caravan).
+///
+/// **This is a REGISTRY, not a harbour count, and the distinction is the whole
+/// reason the struct is documented.** A vessel is not an entity in this sim:
+/// `fleet_sea` / `fleet_river` / `fleet_caravan` are three integer counters on
+/// `House` with no identity, no position and no cargo (see
+/// `docs/MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` — "a vessel is not a thing").
+/// So the only honest question a city can answer is *whose hulls are registered
+/// here* — the fleets of the houses and guilds SEATED at this city — and how many
+/// of those slots are currently carrying something.
+///
+/// `away` is computed with the identical arithmetic `dispatch` runs to build
+/// `cap_sea`/`cap_land`: one in-flight `InTransit` leg occupies exactly one slot
+/// of its mode, whatever its size. Nothing new is simulated or stored.
+#[derive(Serialize, Clone)]
+pub struct VesselClass {
+    /// "sea" | "river" | "caravan".
+    pub kind: String,
+    /// Hulls owned by houses/guilds seated at this city.
+    pub registered: u32,
+    /// Slots currently occupied by an in-flight leg of this mode.
+    pub away: u32,
+    /// `registered - away`, floored at 0 — see `land_pooled` for why it can floor.
+    pub idle: u32,
+}
+
+/// The city's vessel registry: who is homed here and what their hulls are doing.
+#[derive(Serialize, Clone, Default)]
+pub struct CityVessels {
+    /// Always three entries, in sea / river / caravan order.
+    pub classes: Vec<VesselClass>,
+    /// How many seated houses and guilds the registry covers (0 = no merchant
+    /// family is based here, which is the ordinary case — see `CarrierWhy`).
+    pub houses: u32,
+    /// Cargoes in flight TOWARD this city right now, and the soonest arrival in
+    /// days. Deliberately counted as CARGOES, never vessels: one shipment takes
+    /// one slot whatever its quantity, so a hull count would be a different and
+    /// unknowable number.
+    pub inbound_cargoes: u32,
+    pub inbound_eta: u32,
+    /// Cargoes in flight AWAY from this city.
+    pub outbound_cargoes: u32,
+    /// True when `dispatch` pools river and caravan capacity into one `cap_land`
+    /// (it does). A river leg can therefore be flying on a caravan's slot, so an
+    /// individual land class may show `away > registered` and its `idle` floors
+    /// at zero. The pooled land total is always exact; the split is indicative.
+    pub land_pooled: bool,
 }
 
 /// One coin in a city's currency basket (for the settlement-view pie).
@@ -752,6 +808,9 @@ pub struct HubDetail {
     /// Settlement DEVELOPMENT tier (0..5): 1 Outpost · 2 Market · 3 Guild Town ·
     /// 4 Free City · 5 Emporium. Advancement (institutions), not raw size.
     #[serde(default)] pub dev_tier: u8,
+    /// The VESSEL REGISTRY — hulls of the houses seated here, and what they are
+    /// doing. See `CityVessels`: a registry, not a berth count.
+    #[serde(default)] pub vessels: CityVessels,
 }
 
 /// Abstract social strata of a settlement for the HubPanel "Society" block:
@@ -2712,6 +2771,13 @@ pub struct CityTrader {
     /// Volume-weighted mean distance to this trader's partners, in km.
     pub mean_route_km: f32,
     pub goods: Vec<String>,
+    /// The holder's heraldic colour (see `TradeCarrier::color`).
+    #[serde(default)] pub color: String,
+    /// WHAT this trader actually moves through this city, largest first — the
+    /// same per-`(trader, good)` total the row above is folded from, which was
+    /// summed away into a bare name list. "Kervan carries this city's honey" is
+    /// then readable rather than inferable.
+    #[serde(default)] pub good_rows: Vec<TraderGood>,
     // ── standing at this city (independent of how much it carries) ──
     pub has_office: bool,
     pub has_bailo: bool,
@@ -2734,6 +2800,17 @@ pub struct CityEstablished {
     pub is_captor: bool,
     /// What this holder actually moved here this year (0 if nothing).
     pub volume: f32,
+    /// The holder's heraldic colour (see `TradeCarrier::color`).
+    #[serde(default)] pub color: String,
+}
+
+/// One good a named trader moves through a city, split by direction.
+#[derive(Serialize, Clone)]
+pub struct TraderGood {
+    pub name: String,
+    pub amount: f32,
+    pub in_amount: f32,
+    pub out_amount: f32,
 }
 
 /// WORLD-WIDE carrier diagnostics, for the Traders tab's foldable "why" note.
@@ -2767,6 +2844,16 @@ pub struct TradeCarrier {
     pub house: i32,
     pub amount: f32,
     pub pct: f32,
+    /// The holder's own stable map colour — `distinct_color(house_index)`, the
+    /// SAME source `ShipmentRow.color` and `OfficeHere.color` already use, so a
+    /// family reads as one identity across every trade surface and its lane on
+    /// the map. (Note this is the app's golden-angle IDENTITY colour, not
+    /// `CoatOfArms.tsx`'s FNV-hashed heraldic tincture — two different, both
+    /// deliberate, schemes; the trade views all speak the former.) The unnamed
+    /// residual gets a fixed neutral tint: it is a CLASS, not a family, and
+    /// dressing it in family-looking arms would flatter away the very thing this
+    /// panel exists to report.
+    #[serde(default)] pub color: String,
 }
 
 /// One good's flow along one partner route (for the per-good route list + map).
@@ -2795,6 +2882,20 @@ pub struct TradePartner {
     pub volume: f32,
     pub pct: f32,
     pub goods: Vec<String>,
+    /// Volume this city BOUGHT from this partner (`dir == 0`) and SOLD to it
+    /// (`dir == 1`), and each as a share of this city's whole import / export
+    /// book respectively.
+    ///
+    /// The direction was always there — the flow fold keys routes by
+    /// `(good, partner, dir)` — and was discarded when the partner totals were
+    /// summed, so one ranked list conflated "a city we depend on for grain" with
+    /// "a city we sell cloth to". Those are different relationships and rank
+    /// differently; nothing new is computed here, one accumulator simply stops
+    /// throwing `dir` away.
+    #[serde(default)] pub in_volume: f32,
+    #[serde(default)] pub out_volume: f32,
+    #[serde(default)] pub in_pct: f32,
+    #[serde(default)] pub out_pct: f32,
 }
 /// The settlement Flows subtab payload (last completed year + history).
 #[derive(Serialize, Clone, Default)]

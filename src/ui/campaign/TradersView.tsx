@@ -14,7 +14,7 @@ import { useEffect, useMemo, useState } from "react";
 import { campaignTradeFlows } from "@bridge";
 import type { TradeFlows, CityTrader, CityEstablished } from "@types";
 import { GOOD_DEFS } from "@goods";
-import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat } from "@ui/kit";
+import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat, SplitBar } from "@ui/kit";
 import { T, SPACE, FZ, RADIUS, SERIF } from "@ui/campaign/chronicleTheme";
 
 const GOOD_META = new Map(GOOD_DEFS.map((g) => [g.name, g]));
@@ -174,31 +174,59 @@ export function TradersView({ hubId, active, tick }: { hubId: number; active: bo
         {rows.map((t) => {
           const c = carriageOf(t);
           const isResidual = t.house < 0;
+          // The house's OWN colour — the same `distinct_color(index)` its shipment
+          // swatches, its offices and its lanes on the map already use, so a family
+          // is one identity everywhere. A left rail carries it rather than the text,
+          // which keeps names legible at any hue.
+          const tint = t.color ?? (isResidual ? T.inkFaint : t.is_guild ? "#7fb2d8" : "#c99a3a");
           return (
             <div
               key={`${t.house}:${t.name}`}
               style={{
-                display: "flex", flexDirection: "column", gap: 2, padding: "4px 4px",
+                display: "flex", flexDirection: "column", gap: 2, padding: "4px 4px 4px 6px",
                 borderRadius: RADIUS.sm, borderBottom: `1px solid ${T.lineSoft}`,
+                borderLeft: `3px solid ${tint}`,
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
                 <span style={{ width: 14, fontSize: FZ.tiny }}>{isResidual ? "·" : t.is_guild ? "🏛" : "⚜"}</span>
                 <span style={{
-                  flex: 1, minWidth: 70, color: isResidual ? T.inkDim : T.ink,
+                  flex: 1, minWidth: 70, color: isResidual ? T.inkDim : tint,
                   overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                 }}>{t.name}</span>
-                <Meter value={t.volume} max={maxVol} color={isResidual ? T.inkFaint : t.is_guild ? "#7fb2d8" : "#c99a3a"} height={7} style={{ maxWidth: 90 }} />
-                <span style={{ width: 40, textAlign: "right", color: T.inkMid }}>{t.pct.toFixed(0)}%</span>
+                {/* The BAR carries direction, not just size: a two-tone in/out split
+                    says whether this house supplies the city or buys it out, which a
+                    single-colour volume bar cannot. */}
+                <SplitBar inV={t.in_volume} outV={t.out_volume} max={maxVol} width={90} height={7} />
+                <span style={{ width: 40, textAlign: "right", color: T.inkMid,
+                  fontVariantNumeric: "tabular-nums" }}>{t.pct.toFixed(0)}%</span>
                 <span style={{ width: 28, textAlign: "center", fontSize: FZ.tiny }} title={c.label}>{c.icon}</span>
                 <span style={{ width: 70, textAlign: "right", color: T.inkDim, fontSize: FZ.tiny }}>
                   {t.mean_route_km > 0 ? `${fmt(t.mean_route_km)} km` : ""}
                 </span>
               </div>
               <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm, paddingLeft: 22 }}>
-                <span style={{ color: T.inkFaint, fontSize: FZ.tiny, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {t.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join(" ")}
-                  {t.goods.length > 0 && <span style={{ marginLeft: 4 }}>{t.goods.slice(0, 3).map((gn) => GOOD_META.get(gn)?.label ?? gn).join(" · ")}</span>}
+                {/* WHAT they move, with the quantity. `good_rows` carries the same
+                    per-(trader, good) totals the row above is folded from; the old
+                    line printed names only, so "who supplies our grain" was still a
+                    guess. Falls back to the bare list on a pre-split save. */}
+                <span style={{ color: T.inkFaint, fontSize: FZ.tiny, overflow: "hidden",
+                  textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }}>
+                  {(t.good_rows?.length ?? 0) > 0
+                    ? t.good_rows!.slice(0, 4).map((g) => (
+                        <span key={g.name} style={{ marginRight: 7 }}>
+                          {GOOD_META.get(g.name)?.emoji ?? "•"}{" "}
+                          <span style={{ color: T.inkDim }}>{GOOD_META.get(g.name)?.label ?? g.name}</span>{" "}
+                          <span style={{ color: T.inkMid, fontVariantNumeric: "tabular-nums" }}>{fmt(g.amount)}</span>
+                          <span style={{ color: g.out_amount >= g.in_amount ? "#ffce5f" : "#5fd0ff" }}>
+                            {g.out_amount >= g.in_amount ? " ▲" : " ▼"}
+                          </span>
+                        </span>
+                      ))
+                    : <>
+                        {t.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join(" ")}
+                        {t.goods.length > 0 && <span style={{ marginLeft: 4 }}>{t.goods.slice(0, 3).map((gn) => GOOD_META.get(gn)?.label ?? gn).join(" · ")}</span>}
+                      </>}
                 </span>
                 <span style={{ flex: 1 }} />
                 {t.reexport > 0 && <span style={{ color: T.inkFaint, fontSize: FZ.micro }}>re-exported {fmt(t.reexport)}</span>}
@@ -209,6 +237,8 @@ export function TradersView({ hubId, active, tick }: { hubId: number; active: bo
         })}
         <FootNote>
           · unnamed local merchants — the real trading capacity of this city. ⚜ house · 🏛 guild.
+          The left rail is the holder&apos;s own colour, the same one its lanes carry on the map.
+          ▲ sold out of here · ▼ brought in.
         </FootNote>
       </Section>
 
@@ -218,7 +248,8 @@ export function TradersView({ hubId, active, tick }: { hubId: number; active: bo
         {flows.established.map((e: CityEstablished) => (
           <div
             key={`${e.house}:${e.name}`}
-            style={{ display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px", borderBottom: `1px solid ${T.lineSoft}` }}
+            style={{ display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px 3px 6px",
+              borderBottom: `1px solid ${T.lineSoft}`, borderLeft: `3px solid ${e.color ?? T.lineSoft}` }}
           >
             <span style={{ width: 14, fontSize: FZ.tiny }}>{e.is_guild ? "🏛" : "⚜"}</span>
             <span style={{ flex: 1, minWidth: 70, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.name}</span>

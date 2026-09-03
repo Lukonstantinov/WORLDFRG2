@@ -212,6 +212,64 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             }
         })
         .collect();
+
+    // ── THE VESSEL REGISTRY ──────────────────────────────────────────────────
+    // "How many ships and caravans are here" has no literal answer: a vessel is
+    // not an entity (`fleet_*` are three counters on `House`, no identity, no
+    // position — `docs/MERCHANT_VESSELS_AND_INFORMATION_PLAN.md`). What IS real
+    // and worth a reader's time is the REGISTRY: the hulls of the houses and
+    // guilds seated at this city, and how many of those slots are carrying
+    // something right now.
+    //
+    // `away` uses the identical accounting `dispatch` runs when it builds
+    // `cap_sea`/`cap_land` — one in-flight `InTransit` leg occupies exactly one
+    // slot of its mode, whatever its quantity. No new state, no new pass, and
+    // nothing claimed that the model cannot support.
+    let vessels = {
+        let seated: Vec<usize> = sim.houses.iter().enumerate()
+            .filter(|(_, h)| !h.defunct && h.hub as usize == hi)
+            .map(|(i, _)| i).collect();
+        let (mut reg_sea, mut reg_riv, mut reg_car) = (0u32, 0u32, 0u32);
+        for &i in &seated {
+            let h = &sim.houses[i];
+            reg_sea += h.fleet_sea;
+            reg_riv += h.fleet_river;
+            reg_car += h.fleet_caravan;
+        }
+        // Legs flown on a SEATED house's account, by mode. `InTransit.river`
+        // distinguishes a barge leg from a caravan one; it is meaningless when
+        // `sea` is set, exactly as the sim documents.
+        let (mut away_sea, mut away_riv, mut away_car) = (0u32, 0u32, 0u32);
+        let (mut inbound, mut outbound, mut soonest) = (0u32, 0u32, u32::MAX);
+        for c in &sim.in_transit {
+            if c.to as usize == hi {
+                inbound += 1;
+                soonest = soonest.min(c.eta_tick.saturating_sub(sim.tick));
+            }
+            if c.from as usize == hi { outbound += 1; }
+            if c.owner >= 0 && seated.contains(&(c.owner as usize)) {
+                if c.sea { away_sea += 1; } else if c.river { away_riv += 1; } else { away_car += 1; }
+            }
+        }
+        let cls = |kind: &str, reg: u32, away: u32| VesselClass {
+            kind: kind.into(), registered: reg, away, idle: reg.saturating_sub(away),
+        };
+        CityVessels {
+            classes: vec![
+                cls("sea", reg_sea, away_sea),
+                cls("river", reg_riv, away_riv),
+                cls("caravan", reg_car, away_car),
+            ],
+            houses: seated.len() as u32,
+            inbound_cargoes: inbound,
+            inbound_eta: if soonest == u32::MAX { 0 } else { soonest },
+            outbound_cargoes: outbound,
+            // `dispatch` pools river + caravan into one `cap_land`, so a barge leg
+            // can be flying on a caravan's slot. The land TOTAL is exact; the
+            // split between the two land classes is indicative, and the UI says so.
+            land_pooled: true,
+        }
+    };
     // Journal stores the hub INDEX (not id), so filter by the resolved index.
     let events: Vec<JournalEntry> = sim
         .journal
@@ -622,6 +680,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             .map(|ci| colony_summary(&sim, ci))
             .collect(),
         city_stores,
+        vessels,
         dev_tier,
     }))
 }

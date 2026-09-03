@@ -508,8 +508,36 @@ export interface HubDetail {
   related_colonies?: ColonySummary[]; // colonies/outposts this city founded
   city_stores?: CityStores;          // civic warehouse + all goods held at the city (+ value)
   dev_tier?: number;                 // development tier 0..5 (Outpost..Emporium)
+  vessels?: CityVessels;             // the hulls registered to houses seated here
 }
 /** City stores: the civic (city-owned) warehouse + all goods held at the city, valued. */
+/** One class of hull in a city's VESSEL REGISTRY.
+ *
+ *  A REGISTRY, not a harbour count. A vessel is not an entity in this sim —
+ *  `fleet_sea`/`fleet_river`/`fleet_caravan` are three counters on `House` with
+ *  no identity, position or cargo — so the honest question a city can answer is
+ *  whose hulls are registered here (the houses SEATED at it) and how many of
+ *  those slots are carrying something. `away` uses the identical accounting
+ *  `dispatch` runs to build `cap_sea`/`cap_land`. */
+export interface VesselClass {
+  kind: "sea" | "river" | "caravan";
+  registered: number;
+  away: number;
+  idle: number;
+}
+export interface CityVessels {
+  /** Always three, in sea / river / caravan order. */
+  classes: VesselClass[];
+  /** Seated houses + guilds the registry covers (0 is the ordinary case). */
+  houses: number;
+  /** Cargoes — never vessels — in flight toward this city, and the soonest ETA. */
+  inbound_cargoes: number;
+  inbound_eta: number;
+  outbound_cargoes: number;
+  /** `dispatch` pools river + caravan capacity, so a barge leg can fly on a
+   *  caravan's slot: the land TOTAL is exact, the split is indicative. */
+  land_pooled: boolean;
+}
 export interface CityStores {
   reserve: CivicGoodRow[];   // civic warehouse contents, top by amount
   reserve_value: number;     // grain-eq value of the civic reserve
@@ -605,6 +633,10 @@ export interface TradeCarrier {
   house: number;
   amount: number;
   pct: number;
+  /** The holder's stable map colour (`distinct_color(index)` — the same source
+   *  `ShipmentRow.color` and `OfficeHere.color` use). The unnamed residual gets a
+   *  fixed neutral tint: it is a class, not a family. */
+  color?: string;
 }
 /** One good's flow along one partner route (per-good route list + map highlight). */
 export interface TradeRouteFlow {
@@ -628,6 +660,20 @@ export interface TradePartner {
   volume: number;
   pct: number;
   goods: string[];
+  /** Bought from this partner (dir 0) / sold to it (dir 1), and each as a share
+   *  of THIS city's own import / export book — not of total trade, or a city that
+   *  exports a flood and imports a trickle shows every supplier at ~0%. */
+  in_volume?: number;
+  out_volume?: number;
+  in_pct?: number;
+  out_pct?: number;
+}
+/** One good a named trader moves through a city, split by direction. */
+export interface TraderGood {
+  name: string;
+  amount: number;
+  in_amount: number;
+  out_amount: number;
 }
 /** Traders tab · one carrier's balance sheet at this city (docs/CITY_TRADERS_
  *  PANEL_PLAN.md). `house < 0` is the unnamed residual — local merchants on
@@ -652,6 +698,11 @@ export interface CityTrader {
   /** Volume-weighted mean distance to this trader's partners, in km. */
   mean_route_km: number;
   goods: string[];
+  /** The holder's stable map colour (see `TradeCarrier.color`). */
+  color?: string;
+  /** WHAT this trader moves here, largest first — the per-(trader, good) totals
+   *  the row is folded from, which used to be summed away into `goods`. */
+  good_rows?: TraderGood[];
   has_office: boolean;
   has_bailo: boolean;
   seats_council: boolean;
@@ -670,6 +721,8 @@ export interface CityEstablished {
   is_captor: boolean;
   /** What this holder actually moved here this year (0 if nothing). */
   volume: number;
+  /** The holder's stable map colour (see `TradeCarrier.color`). */
+  color?: string;
 }
 /** Traders tab · WORLD-WIDE (not per-city) carrier diagnostics behind the
  *  ownerless residual — the "why" note. Reset each New Year. */

@@ -67,6 +67,97 @@ function priceColor(xw: number): string {
   return C.ink;
 }
 
+/** DAYS OF COVER, as a word. `days` is stock ÷ this city's own daily need, so a
+ *  good nobody here wants has no cover figure at all — printing a huge number for
+ *  it would read as abundance when it actually means "not consumed". */
+function coverLabel(days: number, need: number): string {
+  if (need <= 1e-6) return "—";
+  if (days < 1) return "<1d";
+  if (days >= 999) return "999+";
+  return `${Math.round(days)}d`;
+}
+/** Thin reads as a warning, deep reads as quiet. A middling stock says nothing —
+ *  the same "quiet unless it matters" rule the verdict phrases follow. */
+function coverColor(days: number, need: number): string {
+  if (need <= 1e-6) return C.faint;
+  if (days < 2) return C.warn;
+  if (days < 6) return "#d9a441";
+  if (days > 150) return C.inkDim;
+  return C.inkMid;
+}
+
+/** THE VESSEL REGISTRY — hulls of the houses seated here, and what they carry.
+ *
+ *  Labelled a REGISTRY on purpose. A vessel is not an entity in this sim
+ *  (`fleet_sea`/`_river`/`_caravan` are three counters on `House` with no
+ *  identity or position), so "what is berthed here" has no answer; "whose hulls
+ *  are registered to this city, and how many of those slots are out" does, and
+ *  the backend computes it with the same arithmetic `dispatch` uses. A city with
+ *  no seated merchant family says so, which is the ordinary case and is itself
+ *  the most informative thing on the block. */
+function VesselRegistry({ v }: { v: NonNullable<HubDetail["vessels"]> }) {
+  // Folded state persists per browser, not per panel instance: a reader who does
+  // not want the registry does not want it again on the next city either. Guarded
+  // because storage throws outright in some embeddings.
+  const [open, setOpen] = useState<boolean>(() => {
+    try { return localStorage.getItem("wf.market.vessels") !== "0"; } catch { return true; }
+  });
+  const toggle = () => setOpen((o) => {
+    try { localStorage.setItem("wf.market.vessels", o ? "0" : "1"); } catch { /* ignore */ }
+    return !o;
+  });
+  const CLASS_META: Record<string, { icon: string; word: string; out: string }> = {
+    sea: { icon: "⛵", word: "sea ships", out: "at sea" },
+    river: { icon: "🛶", word: "river boats", out: "afloat" },
+    caravan: { icon: "🐫", word: "caravans", out: "on the road" },
+  };
+  const classes = (v.classes ?? []).filter((c) => c.registered > 0 || c.away > 0);
+  const anyHulls = classes.length > 0;
+  return (
+    <div style={{ border: `1px solid ${C.line}`, borderRadius: 4, padding: "4px 7px",
+      margin: "4px 0", background: C.card }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap", fontSize: 9 }}>
+        <span onClick={toggle} style={{ color: C.head, fontWeight: 700, cursor: "pointer", userSelect: "none" }}
+          title={open ? "hide the registry" : "show the registry"}>
+          <span style={{ color: C.faint, fontSize: 8 }}>{open ? "▾ " : "▸ "}</span>
+          ⚓ In port &amp; on the road
+        </span>
+        {open && anyHulls ? classes.map((c) => {
+          const m = CLASS_META[c.kind] ?? { icon: "•", word: c.kind, out: "away" };
+          return (
+            <span key={c.kind} style={{ color: C.inkMid }}
+              title={`${c.registered} ${m.word} registered to houses seated here · ${c.away} ${m.out} · ${c.idle} idle`}>
+              {m.icon} <b style={{ color: C.gold }}>{c.registered}</b>
+              <span style={{ color: C.faint }}> · </span>
+              <span style={{ color: "#5fd0ff" }}>{c.away} {m.out}</span>
+              <span style={{ color: C.faint }}> · </span>
+              <span style={{ color: c.idle > 0 ? C.good : C.faint }}>{c.idle} idle</span>
+            </span>
+          );
+        }) : open ? (
+          <span style={{ color: C.faint }}>
+            {v.houses > 0 ? "no house seated here owns a hull" : "no merchant house is seated here"}
+          </span>
+        ) : null}
+        <span style={{ flex: 1 }} />
+        {/* The cargo count stays visible when folded — it is the live figure, and
+            a fold that hides everything gives no reason to unfold. */}
+        <span style={{ color: C.inkDim }}>
+          {v.inbound_cargoes} cargo{v.inbound_cargoes === 1 ? "" : "es"} inbound
+          {v.inbound_cargoes > 0 ? ` · soonest ${v.inbound_eta}d` : ""} · {v.outbound_cargoes} out
+        </span>
+      </div>
+      {open && (
+        <div style={{ fontSize: 8, color: C.faint, marginTop: 1 }}>
+          Hulls belonging to the {v.houses} house{v.houses === 1 ? "" : "s"} seated here — a registry, not
+          a berth count: the sim gives a vessel no position.
+          {v.land_pooled ? " Caravan and river capacity are pooled, so the land split is indicative." : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** One aggregated side of the book for a good (what we bought / what we sold). */
 type Side = { units: number; value: number; deals: number };
 const emptySide = (): Side => ({ units: 0, value: 0, deals: 0 });
@@ -353,10 +444,18 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
   // `production` on the city itself and its estates' output are different figures
   // and are shown as different lines.
   const madeHere = useMemo(() => {
+    // Which of this city's own products actually LEAVE it. Manufactured goods in
+    // particular are sized against local population and so tend to clear the
+    // export reserve rarely — that is a real property of the model, and a view
+    // that shows output without showing whether any of it ships hides it.
+    const leaves = new Set(sells.filter((s) => s.amount > 0.01).map((s) => s.good));
     const own = detail.goods
       .filter((g) => g.production > 0.01)
       .sort((a, b) => b.production - a.production)
-      .map((g) => ({ good: g.name, output: g.production, source: "city fields", grade: g.grade ?? "" }));
+      .map((g) => ({
+        good: g.name, output: g.production, source: "city fields", grade: g.grade ?? "",
+        tier: 0, damage: 0, exported: leaves.has(g.name),
+      }));
     const est = (detail.estates_here ?? [])
       .filter((e) => e.output > 0.01)
       .sort((a, b) => b.output - a.output)
@@ -365,9 +464,17 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
         output: e.output,
         source: e.name || ESTATE_WORD[Math.min(e.kind, 6)] || "works",
         grade: "",
+        tier: e.tier ?? 0,
+        damage: e.damage ?? 0,
+        exported: leaves.has(e.good),
       }));
-    return [...own, ...est].slice(0, 14);
-  }, [detail]);
+    const all = [...own, ...est];
+    return {
+      rows: all.slice(0, 14),
+      works: (detail.estates_here ?? []).length,
+      stuck: all.filter((m) => !m.exported).length,
+    };
+  }, [detail, sells]);
 
   const rows = useMemo<BookRow[]>(() => {
     const out: BookRow[] = [];
@@ -437,6 +544,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
           }}>{lbl}</span>
         ))}
       </div>
+      {detail.vessels && <VesselRegistry v={detail.vessels} />}
       {standout && (
         <div style={{ fontSize: 9.5, color: C.warn, padding: "3px 0" }}>
           ⚠ {label(standout.g.name)} at {standout.xw.toFixed(2)}× — {standout.verdict!.text.toLowerCase()}
@@ -453,25 +561,49 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
             borderLeft: `1px solid ${C.line}`, borderRight: `1px solid ${C.line}` }}>
             {/* MADE HERE — the city's own fields, then every estate and manufactory */}
             <div style={{ color: C.head, fontSize: 9, fontWeight: 700, textAlign: "center" }}>── MADE HERE ──</div>
-            {madeHere.length === 0 && <div style={{ color: C.faint, fontSize: 9 }}>produces nothing of note</div>}
-            {madeHere.map((m, i) => (
+            {madeHere.rows.length === 0 && <div style={{ color: C.faint, fontSize: 9 }}>produces nothing of note</div>}
+            {madeHere.rows.map((m, i) => (
               <div key={i} style={{ display: "flex", gap: 4, fontSize: 9, alignItems: "baseline" }}>
                 <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {icon(m.good)} {label(m.good)}
                 </span>
+                {/* A works that never ships anything is the interesting case, so it
+                    is the one that gets a mark. Silent when the good does leave —
+                    the same "quiet unless it matters" rule the rest of the panel keeps. */}
+                {!m.exported && (
+                  <span style={{ color: C.faint, fontSize: 8 }} title="none of this leaves the city">⌂</span>
+                )}
+                {m.damage > 0.05 && (
+                  <span style={{ color: C.warn, fontSize: 8 }} title={`${Math.round(m.damage * 100)}% damaged`}>⚠</span>
+                )}
                 <span style={{ color: C.inkMid }}>{fmt(m.output)}</span>
                 <span style={{ color: C.faint, fontSize: 8, maxWidth: 92, overflow: "hidden",
-                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.source}</span>
+                  textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {m.source}{m.tier > 1 ? ` t${m.tier}` : ""}
+                </span>
               </div>
             ))}
+            {madeHere.rows.length > 0 && (
+              <div style={{ fontSize: 8, color: madeHere.stuck > 0 ? C.inkDim : C.faint, paddingTop: 1 }}>
+                {madeHere.works} works · {madeHere.stuck === 0
+                  ? "everything made here also ships"
+                  : `⌂ ${madeHere.stuck} of ${madeHere.rows.length} never leave the city`}
+              </div>
+            )}
 
             {/* ON THE MARKET — what is on offer, how long it lasts, and who supplied it */}
             <div style={{ color: C.head, fontSize: 9, fontWeight: 700, textAlign: "center", marginTop: 6 }}>
               ── ON THE MARKET ──
             </div>
-            <div style={{ display: "flex", gap: 4, fontSize: 8, color: C.faint }}>
+            {/* The four numeric columns were unlabelled except for "held", which
+                showed DAYS while reading like a quantity. Units and days are now
+                separate columns with their own headers: "39,284 · 312d" says glut
+                without needing the word. */}
+            <div style={{ display: "flex", gap: 4, fontSize: 8, color: C.faint,
+              borderBottom: `1px solid ${C.line}`, paddingBottom: 1 }}>
               <span style={{ flex: 1 }}>good</span>
-              <span style={{ width: 26, textAlign: "right" }}>held</span>
+              <span style={{ width: 42, textAlign: "right" }}>on stall</span>
+              <span style={{ width: 30, textAlign: "right" }}>cover</span>
               <span style={{ width: 38, textAlign: "right" }}>price</span>
               <span style={{ width: 72 }}>supplied by</span>
             </div>
@@ -495,8 +627,15 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
                       <span style={{ color: C.faint, fontSize: 8 }}>{isOpen ? "▾ " : "▸ "}</span>
                       {icon(r.g.name)} {label(r.g.name)}
                     </span>
-                    <span style={{ width: 26, textAlign: "right", color: r.days < 5 ? C.warn : C.inkMid }}>
-                      {r.g.need > 1e-6 ? `${Math.round(r.days)}d` : "—"}
+                    {/* UNITS — the quantity actually standing on the stall. It has
+                        always been in `HubGoodDetail.stock` and was never shown. */}
+                    <span style={{ width: 42, textAlign: "right", color: C.inkMid,
+                      fontVariantNumeric: "tabular-nums" }}>
+                      {r.g.stock > 0.5 ? Math.round(r.g.stock).toLocaleString() : "—"}
+                    </span>
+                    <span style={{ width: 30, textAlign: "right", fontVariantNumeric: "tabular-nums",
+                      color: coverColor(r.days, r.g.need) }}>
+                      {coverLabel(r.days, r.g.need)}
                     </span>
                     <span style={{ width: 38, textAlign: "right", fontWeight: 600, color: priceColor(r.xw) }}>
                       {r.xw.toFixed(2)}×
@@ -520,7 +659,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
         <div style={{ fontSize: 8, color: C.faint, marginTop: 4 }}>
           Prices are ×-world-standard, and a cargo's own price is what the deal was struck at.
           Lane counts are CARGOES, not vessels — a shipment takes one fleet slot whatever its
-          size, so vessels in port cannot be shown until they are real.
+          size. ⌂ marks a good this city makes and never ships.
         </div>
       )}
 
@@ -663,10 +802,20 @@ function BookDetail({ r, buys, sells, icon, label }: {
           </span>
         ))}
       </Line>
+      <Line k="on the stall">
+        <b style={{ color: C.ink }}>{Math.round(g.stock).toLocaleString()}</b> units
+        {g.need > 1e-6
+          ? <> · this city eats <b>{fmt(g.need)}</b> a day, so <b style={{ color: coverColor(r.days, g.need) }}>
+              {coverLabel(r.days, g.need)}</b> of cover</>
+          : <span style={{ color: C.faint }}> · nobody here consumes it</span>}
+      </Line>
       <Line k="made here">
         {g.production > 0.01
-          ? <>{fmt(g.production)} a day · holding <b>{Math.round(r.days)}</b> days of need</>
-          : <span style={{ color: C.faint }}>not produced here · holding {Math.round(r.days)} days of need</span>}
+          ? <>{fmt(g.production)} a day{g.grade ? `, ${g.grade.toLowerCase()}` : ""}
+              {r.sell.units > 0.01
+                ? <> · <span style={{ color: C.good }}>{fmt(r.sell.units)} shipped out</span></>
+                : <> · <span style={{ color: C.inkDim }}>none of it leaves the city</span></>}</>
+          : <span style={{ color: C.faint }}>not produced here</span>}
       </Line>
       <Line k="world">
         cheapest <b style={{ color: C.good }}>{cheapest.toFixed(2)}×</b> at {g.world_min_hub || "—"} ·
