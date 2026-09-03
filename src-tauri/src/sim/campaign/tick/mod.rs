@@ -1826,6 +1826,27 @@ const ESTATE_TERROIR_BELT_MIN: f32 = 0.35;
 /// own production scale, never an unrelated absolute one) and < 1 so a terroir estate
 /// can never out-produce the city's real specialties. See `maybe_found_estate`.
 const ESTATE_TERROIR_FRAC: f32 = 0.6;
+/// DEPOSITS_AND_MINING_PLAN.md slice 4 · how far from a Mine estate's parent city
+/// (an estate is co-located with its parent, rule 32) a real working still counts
+/// as "this city's own deposit" — a real district's own scale
+/// (`DISTRICT_RADIUS_KM`, §8.16) plus margin for the founding search itself.
+const MINE_DEPOSIT_SEARCH_KM: f32 = 60.0;
+/// D7 · a mine's `estate_tier` upgrade cost multiplier by `mine_depth` (0..3 =
+/// surface/shallow/deep/flooded). Digging deeper needs real drainage capital
+/// (Rio Tinto's reverse waterwheels, Agricola's *De Re Metallica*), so a flooded
+/// body grows far more slowly than a surface one at the same wealth — see
+/// `maybe_house_invests`'s upgrade branch.
+const MINE_UPGRADE_COST_MULT: [f32; 4] = [1.0, 1.3, 2.2, 3.5];
+/// Mercury consumed per unit of silver output by amalgamation (grain-equivalent
+/// value terms, not a physical mass ratio — the sim has no units finer than
+/// that). Small: mercury is a catalyst-scale input historically, not a bulk one.
+const MERCURY_PER_SILVER: f32 = 0.12;
+/// Silver recovery with NO mercury on hand — hand-smelting still works some of
+/// the ore, just less completely.
+const MERCURY_AMALGAMATION_FLOOR: f32 = 0.75;
+/// Silver recovery fully supplied with mercury — real amalgamation recovers ore
+/// a hand-smelt leaves behind.
+const MERCURY_AMALGAMATION_BONUS: f32 = 1.25;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
@@ -2380,6 +2401,19 @@ pub struct TickHub {
     /// Estate upgrade tier 1..5 — higher tiers produce more (owners invest to
     /// upgrade). 0 on non-estates / old saves (treated as tier 1 for estates).
     #[serde(default)] pub estate_tier: u8,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 (D7) · for a MINE (`estate_kind == 2`)
+    /// only: the depth class of the real working nearest this estate's parent
+    /// city (`DEPTH_SURFACE`/`_SHALLOW`/`_DEEP`/`_FLOODED`, `sim::deposits`),
+    /// looked up once at founding from `CampaignSim::mine_deposits`. Depth is THE
+    /// pre-modern mining constraint (Rio Tinto's reverse waterwheels, Agricola's
+    /// *De Re Metallica* exist for drainage alone): it does not touch this
+    /// estate's baseline output (already baked into `base_per_capita` by the
+    /// world-side `workable_intensity() = grade × depth_workability`, §8.16 — an
+    /// estate at a deep body already starts smaller), it scales how DEAR it is to
+    /// upgrade (`MINE_UPGRADE_COST_MULT`). `DEPTH_SURFACE` (0) on every other
+    /// estate kind, an old save, and a world with no positional deposit data —
+    /// the safe, ungated default (rule 26's discipline applied to depth).
+    #[serde(default)] pub mine_depth: u8,
     /// Tick of this estate's last build/upgrade. Manufactories may only be upgraded
     /// once every `MANUFACTORY_UPGRADE_INTERVAL` (re-tooling takes years).
     #[serde(default)] pub last_upgrade_tick: u32,
@@ -5570,6 +5604,26 @@ pub struct CampaignSim {
     /// W5 · every fondaco ever founded. Empty until `maybe_found_fondaco` is
     /// wired to actually run (it currently never is — see `Fondaco`'s own doc).
     #[serde(default)] pub fondacos: Vec<Fondaco>,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 · every real ore/gem/stone WORKING this
+    /// world's geology placed (§8.16), seeded ONCE at campaign start from
+    /// `metadata["deposits"]` (`lifecycle.rs`) — a positional/depth index, not a
+    /// duplicate of the full `sim::deposits::Deposit` record (grade/extent aren't
+    /// needed here). Read by `mine_depth_at` when an estate is founded; never
+    /// mutated afterward (the one-way snapshot, CLAUDE.md §3.4). Empty on an old
+    /// save, a template/painted world, or a world generated before slice 1 — every
+    /// reader treats that as "no depth data", never as "no deposit exists".
+    #[serde(default)] pub mine_deposits: Vec<MineSite>,
+}
+
+/// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
+/// into `CampaignSim::mine_deposits` — the good it produces, its cell, and its
+/// depth class (`sim::deposits::DEPTH_SURFACE`/`_SHALLOW`/`_DEEP`/`_FLOODED`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MineSite {
+    pub good: String,
+    pub x: f32,
+    pub y: f32,
+    pub depth: u8,
 }
 
 fn one_f32() -> f32 { 1.0 }
@@ -6290,6 +6344,68 @@ impl CampaignSim {
 
     pub fn day_of_year(&self) -> u32 {
         self.tick % TICKS_PER_YEAR
+    }
+
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 (D7) · the DEPTH of the real working of
+    /// `good` nearest (x, y), within `MINE_DEPOSIT_SEARCH_KM` — `DEPTH_SURFACE`
+    /// (ungated) if this world carries no positional deposit data at all, or none
+    /// of that mineral within reach. Called once, when a Mine estate is founded
+    /// (`maybe_found_estate`); never re-queried afterward, so a later change to
+    /// `mine_deposits` (there is none — it's a one-way worldgen snapshot) could
+    /// not retroactively regate an existing mine.
+    pub(crate) fn mine_depth_at(&self, good: &str, x: f32, y: f32) -> u8 {
+        if self.mine_deposits.is_empty() { return crate::sim::deposits::DEPTH_SURFACE; }
+        let ww = self.world_w.max(1.0);
+        let reach = MINE_DEPOSIT_SEARCH_KM * ww / EARTH_EQUATOR_KM;
+        let mut best: Option<(f32, u8)> = None;
+        for d in &self.mine_deposits {
+            if !d.good.eq_ignore_ascii_case(good) { continue; }
+            let mut dx = (d.x - x).abs();
+            if ww > 1.0 { dx = dx.min(ww - dx); }
+            let dy = d.y - y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > reach { continue; }
+            if best.map(|(bd, _)| dist < bd).unwrap_or(true) { best = Some((dist, d.depth)); }
+        }
+        best.map(|(_, depth)| depth).unwrap_or(crate::sim::deposits::DEPTH_SURFACE)
+    }
+
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 · mercury amalgamation, wired as a
+    /// CONSUMABLE EXTRACTION INPUT (not a manufacturing recipe — silver is dug,
+    /// not assembled from parts, so it never touches `manufacture.rs`). Mercury
+    /// (slice 3) shipped with correct geology and high value but no recipe
+    /// wiring; this is that wiring. Once a day, after ordinary extraction has
+    /// booked each mine's ore output: a silver mine that can draw mercury from
+    /// its OWN stock (the amalgamation process itself, Potosí's from 1554) works
+    /// its ore more completely; one with none on hand still smelts by hand, at a
+    /// real but lower recovery. `served` (0 = no mercury, 1 = fully supplied)
+    /// interpolates between `MERCURY_AMALGAMATION_FLOOR` and `_BONUS`, and the
+    /// stock ledger is adjusted by the DELTA only — ordinary production already
+    /// booked the unmodified `realized` amount, so this never double-counts.
+    /// A no-op wherever this world has no silver good, no mercury good, or no
+    /// silver-mine estate at all (every early-return leaves state untouched).
+    pub(crate) fn apply_mercury_amalgamation(&mut self) {
+        let Some(silver_g) = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("silver")) else { return };
+        let Some(mercury_g) = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("mercury")) else { return };
+        for h in 0..self.hubs.len() {
+            if !self.hubs[h].is_estate || self.hubs[h].estate_kind != 2 { continue; }
+            let out = self.hubs[h].production.get(silver_g).copied().unwrap_or(0.0);
+            if out <= EPS { continue; }
+            let needed = out * MERCURY_PER_SILVER;
+            let taken = stock_take(&mut self.hubs[h].stock, mercury_g, needed);
+            let served = if needed > EPS { (taken / needed).clamp(0.0, 1.0) } else { 1.0 };
+            let mult = MERCURY_AMALGAMATION_FLOOR
+                + (MERCURY_AMALGAMATION_BONUS - MERCURY_AMALGAMATION_FLOOR) * served;
+            let new_out = out * mult;
+            let delta = new_out - out;
+            self.hubs[h].production[silver_g] = new_out;
+            let band = production_band(true, self.hubs[h].quality.get(silver_g).copied().unwrap_or(0.0));
+            if delta >= 0.0 {
+                stock_add(&mut self.hubs[h].stock, silver_g, band, delta);
+            } else {
+                stock_take(&mut self.hubs[h].stock, silver_g, -delta);
+            }
+        }
     }
 
     /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1.2) — which seasonal slice
@@ -7177,6 +7293,11 @@ impl CampaignSim {
                     }
                 }
             }
+
+            // DEPOSITS_AND_MINING_PLAN.md slice 4 · mercury amalgamation — a
+            // consumable EXTRACTION input, applied once ordinary per-capita
+            // extraction has booked every mine's ore output for the day.
+            self.apply_mercury_amalgamation();
 
             // 1b) Manufacturing — cities transform imported raws into finished goods
             //     (wool→cloth, ore→arms), concentrated in big cities (labor ∝ pop).

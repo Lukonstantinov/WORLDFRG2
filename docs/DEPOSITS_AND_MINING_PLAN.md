@@ -1,7 +1,10 @@
 # Deposits, Mining & the Quarry Layer — Plan
 
 **Status: APPROVED IN DESIGN, PARTLY BUILT.** Slices 1–3 are on disk, gated and
-tested (§4). Slices 4–5 are unbuilt. Scope is medieval / early-colonial.
+tested (§4). Slice 4 is PARTLY built (mining capability's depth-cost gate +
+mercury amalgamation; mine-vs-quarry mechanics and per-D3 weak-body depletion
+are not). Slice 5 (the quarry window, mining settlements, growing catchment)
+is unbuilt. Scope is medieval / early-colonial.
 
 This plan covers the natural-resource half of the world: how minerals are placed
 (geology), how they are worked (mining as an industry), and how a settlement whose
@@ -339,33 +342,77 @@ The long tail for the import file: opal, peridot, jet, emery, natron, whetstone,
 ochre, flint, antimony, bismuth, millstone, slate, granite, alabaster, saltpetre,
 cobalt, calamine.
 
-### Slice 4 — Mining as an industry
+### Slice 4 — Mining as an industry ⭐ PARTLY BUILT, GATED
 
 The campaign half, and the first slice that can move the economy bands.
 
-- **Mining capability per city** — a four-tier ladder matching the depth classes.
-  Raises `depth_workability` for workings in its reach.
-- **Mine vs quarry as different mechanics:**
+**Built, this session** (`sim/campaign/tick/mod.rs`, `commands/campaign_commands/
+lifecycle.rs`):
+- `CampaignSim.mine_deposits: Vec<MineSite>` — the world's real ore/gem/stone
+  workings (§8.16, `metadata["deposits"]`), seeded once at campaign start
+  (`seed_mine_deposits`, mirroring `province.rs`/`economy.rs`'s own parse of the
+  same table). A positional/depth index, not a duplicate of the full `Deposit`
+  record — empty on a template world or one generated before slice 1, which
+  every reader treats as "no depth data" rather than "no deposit".
+- `TickHub.mine_depth: u8` — for a Mine estate (`estate_kind == 2`) only, the
+  depth class of the real working nearest its parent city, looked up ONCE at
+  founding (`create_estate` → `mine_depth_at`) within `MINE_DEPOSIT_SEARCH_KM`.
+  Never re-queried afterward. `DEPTH_SURFACE` (ungated) on every other kind, an
+  old save, and a world with no positional deposit data.
+- **Mining capability, as a cost gate rather than a workability multiplier.**
+  A mine's baseline output already reflects depth (it was baked into
+  `base_per_capita` at worldgen by `workable_intensity() = grade ×
+  depth_workability`, §8.16) — reapplying `depth_workability` here would double
+  the penalty. What was missing was the CAPABILITY side: `maybe_house_invests`'s
+  upgrade branch now scales a mine's upgrade cost by `MINE_UPGRADE_COST_MULT`
+  (indexed by `mine_depth`, 1.0/1.3/2.2/3.5 for surface/shallow/deep/flooded) —
+  a flooded body needs real drainage capital (Rio Tinto's reverse waterwheels,
+  Agricola's *De Re Metallica*) and so grows far more slowly at the same
+  wealth. Every other estate kind reads a flat 1.0 (unaffected).
+- **Mercury → silver amalgamation**, wired as a CONSUMABLE EXTRACTION input
+  (`apply_mercury_amalgamation`, called once daily right after ordinary
+  per-capita extraction), not a manufacturing recipe (silver is dug, not
+  assembled from parts — it never touches `manufacture.rs`). A silver-mine
+  estate draws mercury from its OWN stock; `served` (how much of the need was
+  met) interpolates recovery between `MERCURY_AMALGAMATION_FLOOR` (0.75, hand
+  smelting) and `_BONUS` (1.25, full amalgamation) — a true no-op wherever this
+  world has no silver good, no mercury good, or no silver mine.
 
-  | | Mine | Quarry |
-  |---|---|---|
-  | Constraint | depth, drainage, capital, timber | **transport** — stone is `bulk` 4+ |
-  | Founded by | a house or wealthy city (capital-intensive) | a settlement (cheap, useless far from water) |
-  | Fails when | water wins | haul cost exceeds the stone's value |
+Gate: `mine_depth_at_finds_the_nearest_working_within_reach`,
+`mine_upgrade_cost_mult_increases_with_depth_and_only_gates_mines`,
+`mercury_amalgamation_is_a_noop_without_both_goods`,
+`mercury_amalgamation_rewards_a_supplied_mine_and_still_serves_a_dry_one`
+(`tick::tests`) — all new, all pass. Plus `cargo test --lib tick::tests` (194
+passed) and `cargo test --lib econ_` (both scorecards + the inheritance gate),
+run in full and unchanged, since this only ever raises a mine's upgrade cost or
+adjusts silver by a bounded ±25% around a consumable it must actually spend.
 
-  The exception that proves the quarry rule: **Mons Claudianus**, the Roman
-  granodiorite quarry 120 km into the Egyptian Eastern Desert with no water and no
-  food, which existed only because the state paid. Worth supporting as a
-  treasury-drain edge case.
-- **Founding gated on a real deposit** — today an estate becomes a "mine" if the hub
-  happens to have a mineral in its basket, at any richness, with no reference to
-  whether a deposit exists nearby.
-- **Depletion per D3** — only weak bodies, only under sustained large-scale
-  extraction, only to a floor.
-- **Mercury → silver amalgamation** as a consumable extraction input.
+**Not built** (left for a future session, same discipline as everywhere else
+in this file — named rather than silently skipped):
+- **Mine vs quarry as separate mechanics.** Both still share `estate_kind == 2`
+  ("Mine") and the SAME depth gate; a stone/marble/gem "quarry" is not yet
+  bound by transport cost instead, nor exempted from the depth gate the way
+  the design's table asks (a marble quarry is near-surface in practice, so the
+  gate rarely bites it in play, but it is not STRUCTURALLY exempt).
+- **Founding gated on a real deposit**, beyond what already followed for free:
+  a Mine estate is only ever founded where `base_per_capita[g] > 0`, which —
+  for a `Deposits`-distribution good — already required a real working inside
+  the founding city's world-side catchment (slice 2's rewire). What is NOT
+  built is a campaign-time re-check against `mine_deposits` at founding (the
+  lookup only sets `mine_depth`; it never blocks founding when nothing is
+  found within `MINE_DEPOSIT_SEARCH_KM`, which can differ from the world-side
+  catchment radius).
+- **Depletion per D3** (weak bodies decline to a floor under sustained
+  pressure) — `update_province_goods_pressure` already made every mine
+  NEVER deplete (v2.0, §5), which satisfies D3's "persist" half but not its
+  "a weak body still declines" half; that needs `extent` threaded through,
+  which this session did not do.
+- Mons Claudianus-style treasury-funded quarrying, and the `Mines`
+  read-only inspector list. See Slice 5.
 
-**Gate:** `cargo test --lib simulate_decades_reports_dynamics` **and**
-`cargo test --lib econ_` (§2.1 and §2.5 both apply). This slice *will* move numbers.
+**Gate (going forward):** `cargo test --lib simulate_decades_reports_dynamics`
+**and** `cargo test --lib econ_` (§2.1 and §2.5 both apply) for any FURTHER
+change here. This slice *can* move numbers.
 
 > **Sequencing hazard.** Capping the settlement catchment (the separate supply-shed
 > work) and adding depth gating both *reduce* supply. Landing both before measuring

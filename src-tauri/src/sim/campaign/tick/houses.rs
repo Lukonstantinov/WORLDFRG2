@@ -579,6 +579,11 @@ impl CampaignSim {
             self.hubs[parent as usize].name.clone()
         } else { "New".into() };
         let name = format!("{} {}", owner_label, estate_kind_label(kind));
+        // DEPOSITS_AND_MINING_PLAN.md slice 4 (D7) · a MINE's depth is looked up
+        // ONCE here, from the real geology (`mine_deposits`), not invented — every
+        // other kind, and a world with no positional deposit data, stays ungated.
+        let mine_depth = if kind == 2 { self.mine_depth_at(&self.goods[g0].name, x, y) }
+            else { crate::sim::deposits::DEPTH_SURFACE };
         self.journal.push(JournalEntry {
             tick: self.tick, kind: "estate".into(), hub: parent, good: g0 as i32, value: 0.0,
             text: format!("{} establishes {} ({})", owner_label, name, self.goods[g0].name),
@@ -593,7 +598,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: kind, estate_tier: 1, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
+            estate_kind: kind, estate_tier: 1, mine_depth, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
@@ -820,9 +825,15 @@ impl CampaignSim {
             {
                 let tier = self.hubs[ei].estate_tier.max(1);
                 let is_manu = self.hubs[ei].estate_kind == 6;
+                // DEPOSITS_AND_MINING_PLAN.md slice 4 (D7) · a mine sitting on a
+                // deep/flooded body needs real drainage capital to dig deeper —
+                // the same real constant on EVERY other estate kind (1.0, a no-op).
+                let depth_mult = if self.hubs[ei].estate_kind == 2 {
+                    MINE_UPGRADE_COST_MULT[(self.hubs[ei].mine_depth as usize).min(3)]
+                } else { 1.0 };
                 // A manufactory upgrade is a major, dear re-tooling — flat 30k and only
                 // once every 5 years per workshop. A raw estate upgrade stays cheap.
-                let cost = if is_manu { MANUFACTORY_UPGRADE_COST } else { INVEST_COST_BASE * tier as f32 * 0.8 };
+                let cost = if is_manu { MANUFACTORY_UPGRADE_COST } else { INVEST_COST_BASE * tier as f32 * 0.8 * depth_mult };
                 let cooldown_ok = !is_manu
                     || tick.saturating_sub(self.hubs[ei].last_upgrade_tick) >= MANUFACTORY_UPGRADE_INTERVAL;
                 if cooldown_ok && self.houses[hi].wealth >= cost * 1.5

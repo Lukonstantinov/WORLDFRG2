@@ -20,7 +20,7 @@
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
+            estate_kind: 0, estate_tier: 0, mine_depth: 0, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
@@ -123,6 +123,7 @@
             prov_export_accum: vec![], prov_import_accum: vec![],
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
+            mine_deposits: vec![],
         };
         s.rebuild_routes();
         s
@@ -6556,4 +6557,82 @@
         s.depot_to_depot_transfer_pass();
         s.maybe_found_fondaco();
         assert!(s.fondacos.is_empty(), "W5 must never found a fondaco while its dose is zero");
+    }
+
+    // ── DEPOSITS_AND_MINING_PLAN.md slice 4 ─────────────────────────────────
+
+    /// `mine_depth_at` returns the NEAREST real working's depth within reach, and
+    /// `DEPTH_SURFACE` (ungated) both beyond reach and when this world carries no
+    /// positional deposit data at all — the safe default that keeps an old save
+    /// or a template world byte-identical (rule 26's discipline, on depth).
+    #[test]
+    fn mine_depth_at_finds_the_nearest_working_within_reach() {
+        let goods = vec![good("iron", 3, 1, 3.0, 0.3, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 5_000.0, vec![0.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.world_w = 3600.0;
+        // No data at all ⇒ ungated.
+        assert_eq!(s.mine_depth_at("iron", 0.0, 0.0), crate::sim::deposits::DEPTH_SURFACE);
+        s.mine_deposits = vec![
+            MineSite { good: "iron".into(), x: 2.0, y: 0.0, depth: crate::sim::deposits::DEPTH_DEEP },
+            MineSite { good: "iron".into(), x: 500.0, y: 0.0, depth: crate::sim::deposits::DEPTH_FLOODED },
+            MineSite { good: "silver".into(), x: 0.0, y: 0.0, depth: crate::sim::deposits::DEPTH_SHALLOW },
+        ];
+        // The nearest IRON working wins over a farther one and over a
+        // same-position working of a different good.
+        assert_eq!(s.mine_depth_at("iron", 0.0, 0.0), crate::sim::deposits::DEPTH_DEEP);
+        // Nothing of this good within reach ⇒ ungated, not "the world's default".
+        assert_eq!(s.mine_depth_at("copper", 0.0, 0.0), crate::sim::deposits::DEPTH_SURFACE);
+    }
+
+    /// A Mine estate founded near a real deep/flooded working is more expensive
+    /// to upgrade than one on a surface body — `MINE_UPGRADE_COST_MULT` is a real
+    /// increasing schedule, and any other estate kind is untouched (mult stays
+    /// 1.0 regardless of `mine_depth`, since only kind==2 reads it).
+    #[test]
+    fn mine_upgrade_cost_mult_increases_with_depth_and_only_gates_mines() {
+        assert!(MINE_UPGRADE_COST_MULT[0] < MINE_UPGRADE_COST_MULT[1]);
+        assert!(MINE_UPGRADE_COST_MULT[1] < MINE_UPGRADE_COST_MULT[2]);
+        assert!(MINE_UPGRADE_COST_MULT[2] < MINE_UPGRADE_COST_MULT[3]);
+        assert_eq!(MINE_UPGRADE_COST_MULT[crate::sim::deposits::DEPTH_SURFACE as usize], 1.0);
+    }
+
+    /// Mercury amalgamation is a true no-op when this world has no silver good,
+    /// no mercury good, or no silver mine at all — every early return must leave
+    /// production/stock untouched.
+    #[test]
+    fn mercury_amalgamation_is_a_noop_without_both_goods() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hub0 = hub(0, 0.0, 0.0, 5_000.0, vec![10.0], 0);
+        hub0.is_estate = true;
+        hub0.estate_kind = 2;
+        let mut s = sim(vec![hub0], goods);
+        s.apply_mercury_amalgamation();
+        assert_eq!(s.hubs[0].production[0], 10.0);
+    }
+
+    /// A silver-mine estate with NO mercury on hand still smelts (the floor),
+    /// but a fully-mercury-supplied one recovers MORE ore than it dug — and the
+    /// mercury it consumed is actually deducted from stock (a real consumable
+    /// input, not a free bonus).
+    #[test]
+    fn mercury_amalgamation_rewards_a_supplied_mine_and_still_serves_a_dry_one() {
+        let goods = vec![
+            good("silver", 3, 2, 30.0, 0.3, false),
+            good("mercury", 3, 2, 20.0, 0.2, false),
+        ];
+        let mut dry = hub(0, 0.0, 0.0, 2_000.0, vec![10.0, 0.0], 0);
+        dry.is_estate = true; dry.estate_kind = 2; dry.quality = vec![0.5, 0.5];
+        let mut wet = hub(1, 10.0, 0.0, 2_000.0, vec![10.0, 0.0], 0);
+        wet.is_estate = true; wet.estate_kind = 2; wet.quality = vec![0.5, 0.5];
+        // Enough mercury on hand to fully cover MERCURY_PER_SILVER × output.
+        stock_add(&mut wet.stock, 1, 1, 10.0 * MERCURY_PER_SILVER * 2.0);
+        let mut s = sim(vec![dry, wet], goods);
+        s.apply_mercury_amalgamation();
+        assert!((s.hubs[0].production[0] - 10.0 * MERCURY_AMALGAMATION_FLOOR).abs() < 1e-3,
+            "no mercury on hand must still serve at the floor, not zero");
+        assert!((s.hubs[1].production[0] - 10.0 * MERCURY_AMALGAMATION_BONUS).abs() < 1e-3,
+            "a fully-supplied mine must recover more than it dug");
+        assert!(stock_of(&s.hubs[1].stock, 1) < 10.0 * MERCURY_PER_SILVER * 2.0 - 1e-3,
+            "amalgamation must actually consume mercury, not read it for free");
     }

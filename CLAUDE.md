@@ -2401,10 +2401,13 @@ NOT wired (mercury→silver amalgamation, alum→cloth as a hard recipe input �
 real economic changes that need their own `econ_` measurement, not an add-only
 slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
 
-> **Still not built:** nothing reads `depth` yet. A mine is still a substring
-> match on the good's name (`tick/mod.rs`) and is mechanically identical to a
-> farm — no mining capability, no depth gating, no mine-vs-quarry split. See
-> `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
+> **Slice 4, partly built:** a mine estate now carries `mine_depth` (the real
+> working nearest its parent city, looked up once at founding) and digging a
+> deep/flooded body costs real drainage capital to upgrade
+> (`MINE_UPGRADE_COST_MULT`); mercury → silver amalgamation is wired as a
+> consumable extraction input. Still not built: mine-vs-quarry as separate
+> mechanics (both remain the same `estate_kind == 2`), and D3's "a weak body
+> still declines" half. See `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
 
 ---
 
@@ -3110,10 +3113,13 @@ NOT wired (mercury→silver amalgamation, alum→cloth as a hard recipe input �
 real economic changes that need their own `econ_` measurement, not an add-only
 slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
 
-> **Still not built:** nothing reads `depth` yet. A mine is still a substring
-> match on the good's name (`tick/mod.rs`) and is mechanically identical to a
-> farm — no mining capability, no depth gating, no mine-vs-quarry split. See
-> `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
+> **Slice 4, partly built:** a mine estate now carries `mine_depth` (the real
+> working nearest its parent city, looked up once at founding) and digging a
+> deep/flooded body costs real drainage capital to upgrade
+> (`MINE_UPGRADE_COST_MULT`); mercury → silver amalgamation is wired as a
+> consumable extraction input. Still not built: mine-vs-quarry as separate
+> mechanics (both remain the same `estate_kind == 2`), and D3's "a weak body
+> still declines" half. See `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
 
 ---
 
@@ -4740,13 +4746,23 @@ SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md
                                     version broke the hard wealth bound twice
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
-DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT. Ore geology
-                                    (§8.16) + grade→quality rewire + txt goods
-                                    import & 8 new minerals — all done, all gated
-                                    → mining as an industry (depth gating, mine vs
-                                    quarry) → quarry window, mining settlements,
-                                    growing settlement catchment (slices 4-5,
-                                    unbuilt). Carries the
+DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT, SLICE 4 PARTLY
+                                    BUILT. Ore geology (§8.16) + grade→quality
+                                    rewire + txt goods import & 8 new minerals —
+                                    all done, all gated. Slice 4: a mine estate's
+                                    `mine_depth` (real working nearest its parent,
+                                    looked up once at founding) now taxes its
+                                    OWN upgrade cost when the body is deep/
+                                    flooded (`MINE_UPGRADE_COST_MULT`, real
+                                    drainage capital, never the baseline output —
+                                    that's already baked in at worldgen) and
+                                    mercury → silver amalgamation is wired as a
+                                    consumable extraction input
+                                    (`apply_mercury_amalgamation`) — not yet
+                                    built: mine-vs-quarry as separate mechanics,
+                                    D3's weak-body depletion → quarry window,
+                                    mining settlements, growing settlement
+                                    catchment (slice 5, unbuilt). Carries the
                                     measured findings that motivated it and its own
                                     "deliberately not built" list
 WORLD_AND_TRADE_MASTER_PLAN.md    ← ⭐ THE ACTIVE PLAN. Three parts, one
