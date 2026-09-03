@@ -482,9 +482,83 @@ pub fn generate_plates_and_landmass_with_target(
     // exists to catch, per §8.16), the weighted call uses its own, smaller
     // amplitude — still enough to keep every margin visibly non-straight, just not
     // enough to cut a small plate adrift.
-    buf.plate_index = warped_voronoi_tuned_weighted(
+    // A weighted power diagram can leave a low-weight ("small" class) site's
+    // cell entirely EMPTY — not merely tiny — when a warp draw happens to push
+    // its neighbours' boundaries all the way across it. Measured directly
+    // (`diag_scratch_16_plate_min_area`): a 16-plate request landed as few as
+    // 8 DISTINCT surviving plates, up to half the requested count silently
+    // gone, not just imbalanced. `plate_territory_stays_connected` guards
+    // that a plate's cells (if any) stay in one piece; nothing previously
+    // checked that every requested plate has any cells at all.
+    //
+    // Fixed the same way `OCEAN_FILL_TRIALS` already fixes an analogous
+    // "one random draw can miss badly" failure a few lines below: try several
+    // independent warp draws (site positions and weights held fixed — only
+    // the warp's own noise seed varies) and keep whichever leaves the fewest
+    // plates empty, deterministically per (seed, plate_count) since every
+    // trial's seed is derived from the input `seed` by a fixed formula, not
+    // drawn from `rng`.
+    const PLATE_SURVIVAL_TRIALS: usize = 12;
+    let mut best_index = warped_voronoi_tuned_weighted(
         &seeds, &weights, buf.width, buf.height, count, seed,
         PLATE_WARP_AMP_FRAC_WEIGHTED, PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP);
+    let score = |idx: &[u16]| -> (usize, u32) {
+        let mut cells = vec![0u32; plates.len()];
+        for &pi in idx { cells[pi as usize] += 1; }
+        let empty = cells.iter().filter(|&&c| c == 0).count();
+        let min_nonzero = cells.iter().copied().filter(|&c| c > 0).min().unwrap_or(0);
+        (empty, min_nonzero)
+    };
+    let (mut best_empty, mut best_min) = score(&best_index);
+    for trial in 1..PLATE_SURVIVAL_TRIALS {
+        if best_empty == 0 { break; }
+        let trial_seed = seed.wrapping_add((trial as u64).wrapping_mul(0x9E3779B97F4A7C15));
+        let idx = warped_voronoi_tuned_weighted(
+            &seeds, &weights, buf.width, buf.height, count, trial_seed,
+            PLATE_WARP_AMP_FRAC_WEIGHTED, PLATE_WARP_WAVELENGTHS, PLATE_WARP_SIGMA_CLAMP);
+        let (empty, min_nonzero) = score(&idx);
+        if empty < best_empty || (empty == best_empty && min_nonzero > best_min) {
+            best_empty = empty; best_min = min_nonzero; best_index = idx;
+        }
+    }
+    buf.plate_index = best_index;
+
+    // Measured: varying only the warp draw (above) still left several plates
+    // empty on every one of 5 test seeds at 16 plates — the warp bends a
+    // boundary that already exists, it cannot rescue a site the UNWARPED
+    // power diagram itself never gave any territory to (a low-weight "small"
+    // class site fully dominated by its neighbours). No amount of retrying
+    // the same partition shape fixes that; it needs a direct guarantee.
+    // Plant a small forced enclave around any still-empty plate's own site —
+    // the closest thing to a minimum-viable territory a weighted power
+    // diagram cannot itself promise (`Plate` carries no notion of "must get
+    // something"). Radius scales with the SHORTER grid dimension (rule 25's
+    // spirit — stated relative to the world, not a fixed cell count) so it
+    // reads as a real small plate at any world size, never a speck nor a
+    // territory grab. This can only ever GIVE a rescued plate its own
+    // cells, taken from whichever plate(s) happened to have claimed that
+    // patch — no other plate's own site is ever touched.
+    {
+        let mut cells = vec![0u32; plates.len()];
+        for &pi in &buf.plate_index { cells[pi as usize] += 1; }
+        let h_i = buf.height as i32;
+        let radius = ((buf.width.min(buf.height) as f32) * 0.02).max(3.0) as i32;
+        for (pi, &c) in cells.iter().enumerate() {
+            if c > 0 { continue; }
+            let ecx = plates[pi].cx.round() as i32;
+            let ecy = plates[pi].cy.round() as i32;
+            for dy in -radius..=radius {
+                let y = ecy + dy;
+                if y < 0 || y >= h_i { continue; }
+                for dx in -radius..=radius {
+                    if dx * dx + dy * dy > radius * radius { continue; }
+                    let x = buf.wrap_x(ecx + dx);
+                    let idx = buf.idx(x, y as u32);
+                    buf.plate_index[idx] = pi as u16;
+                }
+            }
+        }
+    }
 
     // Slice 5: reassign is_oceanic to hit `ocean_fraction` BY CONSTRUCTION, from
     // each plate's REAL cell count (measured from the Voronoi assignment just
@@ -1249,6 +1323,26 @@ mod tests {
              {} seeds — plates still read as roughly uniform in size, which is exactly \
              what the old jittered-grid seeding produced and this gate exists to catch.",
             mean_ratio, ratios.len());
+    }
+
+    /// Every requested plate must actually exist. Measured directly before the
+    /// fix (varying the warp draw alone, then the guaranteed-rescue enclave):
+    /// a plain 16-plate request landed as few as 8 of the 16 IDs holding any
+    /// cells at all on 5/5 test seeds — a low-weight "small" class site fully
+    /// dominated by its neighbours in the unwarped power diagram, which no
+    /// amount of re-warping the same partition shape could rescue. "Asked for
+    /// N plates, got fewer" was not a display issue — the missing plates truly
+    /// had zero territory.
+    #[test]
+    fn every_requested_plate_gets_real_territory() {
+        for seed in 0..5u64 {
+            let buf = gen_world(360, 180, seed, 16);
+            let mut present = std::collections::HashSet::new();
+            for &p in &buf.plate_index { present.insert(p); }
+            assert_eq!(present.len(), 16,
+                "seed {}: requested 16 plates, only {} hold any cells at all",
+                seed, present.len());
+        }
     }
 
     /// The plate inspector's click-to-flip rebuild must be deterministic per
