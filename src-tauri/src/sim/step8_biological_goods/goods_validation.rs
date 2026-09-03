@@ -220,6 +220,56 @@ mod tests {
     /// case above.
     const PRE_EXISTING_EXCEPTIONS: &[&str] = &["dyes", "pearls"];
 
+    /// DIAGNOSTIC (not a gate) · where each `Distribution::Endemic` good actually
+    /// landed on the reference world.
+    ///
+    /// It is deliberately NOT asserted here, and that is the finding. This
+    /// fixture is 300×150, so one cell is ~133 km and `ISLAND_MAX_KM2`
+    /// (250,000 km²) makes **every** landmass on it continental — `is_island` is
+    /// false even for a 22-cell speck. The six endemics all score on the one
+    /// tropical continent, so there is exactly one candidate and they must share
+    /// it. A gate asserting dispersion here would fail on the fixed code and the
+    /// unfixed code alike, i.e. it would be measuring the world rather than the
+    /// mechanism — precisely the trap §8.24c records ("a world-sized test basin
+    /// cannot test the climate term") and §8.23b's rule that a gate needs a
+    /// fixture that can fail.
+    ///
+    /// The mechanism is gated where it IS decidable, on the chooser itself:
+    /// `biological::tests::endemic_goods_take_different_islands`.
+    #[test]
+    fn endemic_homelands_diagnostic() {
+        let (buf, _rivers, _settled, _province_id, specs) = reference_world(300, 150, 0xC0FFEE_5EED);
+        let land = biological::LandmassContext::build(&buf);
+        println!("\n── endemic homelands ────────────────────────────────");
+        let mut placed = 0usize;
+        for (slot, spec) in specs.iter().enumerate() {
+            if !spec.enabled || !matches!(spec.distribution, Distribution::Endemic) { continue; }
+            let Some(belt) = buf.goods.get(slot) else { continue };
+            let mut comps: Vec<u32> = Vec::new();
+            let mut cells = 0usize;
+            for (i, &v) in belt.iter().enumerate() {
+                if v == 0 || buf.terrain[i] != 1 { continue; }
+                cells += 1;
+                if let Some(&c) = land.id.get(i) {
+                    if c != u32::MAX && !comps.contains(&c) { comps.push(c); }
+                }
+            }
+            comps.sort_unstable();
+            if !comps.is_empty() { placed += 1; }
+            println!("  {:<16} {:>5} cells on landmass {:?}", spec.id, cells, comps);
+        }
+        let mut area: std::collections::BTreeMap<u32, usize> = Default::default();
+        for i in 0..buf.total() {
+            if buf.terrain[i] != 1 { continue; }
+            if let Some(&c) = land.id.get(i) { if c != u32::MAX { *area.entry(c).or_insert(0) += 1; } }
+        }
+        println!("  world offers {} landmasses, island threshold {} cells — so {} qualify as islands",
+            area.len(), land.island_max_cells,
+            area.values().filter(|&&a| (a as u32) <= land.island_max_cells).count());
+        // The ONLY thing this fixture can honestly assert: the coverage guarantee.
+        assert!(placed >= 4, "endemic goods stopped placing entirely ({placed} of 6 placed)");
+    }
+
     #[test]
     fn goods_coverage_diagnostic() {
         let (buf, _rivers, settled, province_id, specs) = reference_world(300, 150, 0xC0FFEE_5EED);

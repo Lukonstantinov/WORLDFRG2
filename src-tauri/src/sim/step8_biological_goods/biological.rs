@@ -1126,6 +1126,11 @@ pub fn compute_trade_goods(
     // Seed cells of the homelands placed so far, so each new Local good is pushed
     // to a DIFFERENT part of the continent (plausible spread, not all clustered).
     let mut placed_seeds: Vec<usize> = Vec::new();
+    // Which landmass each ENDEMIC good took, with the fingerprint of the
+    // suitability field that chose it. Two goods sharing a fingerprint are two
+    // products of one tree (nutmeg/mace) and share a home; everything else is
+    // pushed to an island of its own. See `score_signature`.
+    let mut endemic_claims: Vec<(u32, u64)> = Vec::new();
     // Goods whose FIRST homeland could not clear the seed threshold anywhere and
     // had to fall back to the least-bad cell on the map. That is the honest
     // signal "this world may have no suitable climate for this good" — before the
@@ -1241,11 +1246,14 @@ pub fn compute_trade_goods(
                 };
                 let endemic = matches!(spec.distribution, Distribution::Endemic);
                 let best_score = score.iter().copied().fold(0.0f32, f32::max);
-                let (mut belt, seed_cells) = localize_good(
+                let (mut belt, seed_cells, endemic_comp) = localize_good(
                     buf, &score, marine, unlimited, spec.rarity, salt, seed, &placed_seeds,
-                    spec.origins, endemic, Some(&land_ctx));
+                    spec.origins, endemic, Some(&land_ctx), &endemic_claims);
                 // Remember every homeland so the next good is seeded elsewhere.
                 placed_seeds.extend(seed_cells.iter().copied());
+                if let Some(c) = endemic_comp {
+                    endemic_claims.push((c, score_signature(&score)));
+                }
                 // `localize_good`'s seed threshold, recomputed here so the report
                 // can say WHY a good landed where it did rather than guessing.
                 let seed_thresh = (0.45 + (spec.rarity - 0.5).clamp(-0.5, 0.5) * 0.30).clamp(0.20, 0.75);
@@ -1925,11 +1933,32 @@ fn good_score_in_zone(
 /// behaviour). `endemic` confines the good to a single small landmass and
 /// disables the island-jump, which is the difference between "rare" and "grows
 /// in exactly one place on Earth" — see `Distribution::Endemic`.
+/// A deterministic fingerprint of a good's suitability field, used ONLY to tell
+/// "the same plant, sold as two products" from "a different plant that happens to
+/// like the same weather".
+///
+/// Nutmeg and mace are the aril and the seed of ONE tree and are shipped sharing
+/// an envelope deliberately, so they must land on the same island. Every other
+/// pair of endemics must not. Comparing the quantized score fields answers that
+/// exactly, with no new spec field and no hard-coded pair table: identical
+/// envelopes produce identical fields, and anything else does not.
+fn score_signature(score: &[f32]) -> u64 {
+    let mut hsh: u64 = 0xcbf29ce484222325;
+    for (i, &v) in score.iter().enumerate() {
+        let qv = (v.clamp(0.0, 1.0) * 255.0) as u8;
+        if qv == 0 { continue; }
+        hsh ^= (i as u64) ^ ((qv as u64) << 56);
+        hsh = hsh.wrapping_mul(0x100000001b3);
+    }
+    hsh
+}
+
 #[allow(clippy::too_many_arguments)]
 fn localize_good(
     buf: &WorldBuffer, score: &[f32], marine: bool, unlimited: bool, rarity: f32, salt: u64, seed: u64,
     existing: &[usize], origins: u8, endemic: bool, lm: Option<&LandmassContext>,
-) -> (Vec<u8>, Vec<usize>) {
+    endemic_claims: &[(u32, u64)],
+) -> (Vec<u8>, Vec<usize>, Option<u32>) {
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
@@ -1960,22 +1989,47 @@ fn localize_good(
     // a silent total failure of the feature, which is the exact outcome §8.16's
     // "a mineral must never silently vanish" rule exists to prevent.
     let endemic_comp: Option<u32> = if endemic {
+        let sig = score_signature(score);
+        // TWO PRODUCTS OF ONE TREE share a home. Checked first, so the dispersion
+        // rule below can never separate nutmeg from mace.
+        if let Some(&(c, _)) = endemic_claims.iter().find(|&&(_, s)| s == sig) {
+            Some(c)
+        } else {
         lm.and_then(|l| {
-            let mut best: Option<(u8, u32, u32)> = None; // (rank, area, comp)
+            let mut best: Option<(u8, u8, u32, u32)> = None; // (claimed, rank, area, comp)
             let mut seen: std::collections::BTreeSet<u32> = Default::default();
             for i in 0..n {
                 if buf.terrain[i] != 1 || score[i] <= 0.0 { continue; }
                 let Some(c) = l.id.get(i).copied().filter(|&c| c != u32::MAX) else { continue };
                 if !seen.insert(c) { continue; }
+                // An island ANOTHER endemic already lives on is the last resort.
+                //
+                // Without this the six shipped endemics all pile onto one island:
+                // they share a wet-tropical coastal envelope, so they score on the
+                // same landmasses, and "smallest scoring island" is a deterministic
+                // function of the world alone — every one of them picks the SAME
+                // answer. The reported "benzoin and other rare goods are placed on
+                // the same island" is exactly that, and it is also historically
+                // backwards: Banda nutmeg, Sumatran benzoin, Bornean camphor,
+                // Timorese sandalwood and Socotran dragon's blood are five islands,
+                // and their separateness is the whole reason each was worth a
+                // voyage.
+                //
+                // It stays a PREFERENCE, never a filter: if every scoring landmass
+                // is taken, the good still gets one rather than vanishing — the
+                // unconditional guarantee this block's own comment is built on, and
+                // the rule §8.16 states as "a mineral must never silently vanish".
+                let claimed = u8::from(endemic_claims.iter().any(|&(cc, _)| cc == c));
                 // rank 0 = a true island, 1 = anything else: a real island always
                 // beats a smaller-but-continental landmass.
                 let rank = if l.is_island(i) { 0u8 } else { 1u8 };
                 let area = l.area.get(c as usize).copied().unwrap_or(u32::MAX);
-                let cand = (rank, area, c);
+                let cand = (claimed, rank, area, c);
                 if best.map(|b| cand < b).unwrap_or(true) { best = Some(cand); }
             }
-            best.map(|(_, _, c)| c)
+            best.map(|(_, _, _, c)| c)
         })
+        }
     } else {
         None
     };
@@ -2005,7 +2059,7 @@ fn localize_good(
                 out[i] = q(score[i]);
             }
         }
-        return (out, Vec::new());
+        return (out, Vec::new(), endemic_comp);
     }
 
     // Dispersion: push each homeland AWAY from those already placed — both the
@@ -2116,7 +2170,7 @@ fn localize_good(
             }
         }
     }
-    (out, seeds)
+    (out, seeds, endemic_comp)
 }
 
 
@@ -2201,6 +2255,80 @@ mod tests {
     use crate::sim::elevation::fbm_noise;
     use std::collections::HashSet;
     use super::*;
+
+    /// THE ENDEMIC DISPERSION GATE — asserted at the chooser, where it is
+    /// decidable, rather than inferred from a generated world (which, at any test
+    /// resolution this suite can afford, offers exactly one qualifying landmass
+    /// and so cannot fail either way — see
+    /// `goods_validation::endemic_homelands_diagnostic`). Same discipline as
+    /// `a_division_moves_capital_and_creates_none`: assert the invariant at the
+    /// mechanism, not sixty years downstream.
+    ///
+    /// The world is four separate islands, all equally and identically suitable.
+    /// Before the claim list was threaded through `localize_good`, the chooser was
+    /// a pure function of the world — "smallest scoring landmass, preferring a
+    /// true island" — so every endemic returned the SAME island however many were
+    /// on offer, which is the reported "benzoin and the other rare goods keep
+    /// landing on one island".
+    ///
+    /// Verified to fail on the unfixed chooser: with `endemic_claims` ignored,
+    /// all four goods report the same component.
+    #[test]
+    fn endemic_goods_take_different_islands() {
+        // 40×10 of ocean with four 4×4 islands, well apart. Every island is the
+        // same size, so nothing but the claim list can separate them — which is
+        // exactly the property under test.
+        let (w, h) = (40u32, 10u32);
+        let mut buf = scoring_buf(w, h);
+        buf.terrain = vec![0u8; (w * h) as usize];
+        let islands = [2usize, 12, 22, 32];
+        for &ox in &islands {
+            for dy in 3..7usize { for dx in 0..4usize {
+                buf.terrain[dy * w as usize + ox + dx] = 1;
+            } }
+        }
+        let lm = LandmassContext::build(&buf);
+        // Every land cell scores identically and well: the score field cannot
+        // prefer one island over another.
+        let score: Vec<f32> = (0..buf.total())
+            .map(|i| if buf.terrain[i] == 1 { 0.9 } else { 0.0 }).collect();
+
+        let mut claims: Vec<(u32, u64)> = Vec::new();
+        let mut homes: Vec<u32> = Vec::new();
+        for k in 0..4u64 {
+            // Four DIFFERENT goods: same suitability shape, different seeds — so
+            // they must disperse. (A good whose score field is identical to an
+            // earlier one is the nutmeg/mace case and is asserted separately.)
+            let mut sc = score.clone();
+            // Perturb one cell per good so the signatures differ, exactly as two
+            // genuinely different plants would.
+            let probe = 3 * w as usize + islands[k as usize];
+            sc[probe] = 0.89;
+            let (_belt, _seeds, comp) = localize_good(
+                &buf, &sc, false, false, 0.5, k.wrapping_mul(0x9E37), 42, &[], 1, true, Some(&lm), &claims);
+            let c = comp.expect("an endemic good must always be given a home");
+            homes.push(c);
+            claims.push((c, score_signature(&sc)));
+        }
+        let distinct: HashSet<u32> = homes.iter().copied().collect();
+        assert_eq!(distinct.len(), 4,
+            "four endemic goods on a world of four equal islands landed on {} of them ({homes:?}) \
+             — the chooser is ignoring what earlier endemics claimed", distinct.len());
+
+        // TWO PRODUCTS OF ONE TREE: an identical score field must SHARE a home,
+        // never be dispersed. This is the nutmeg/mace exception, and it is why
+        // the mechanism keys on the score signature rather than simply banning
+        // every repeat.
+        let mut claims2: Vec<(u32, u64)> = Vec::new();
+        let (_b1, _s1, c1) = localize_good(
+            &buf, &score, false, false, 0.5, 7, 42, &[], 1, true, Some(&lm), &claims2);
+        claims2.push((c1.unwrap(), score_signature(&score)));
+        let (_b2, _s2, c2) = localize_good(
+            &buf, &score, false, false, 0.5, 99, 42, &[], 1, true, Some(&lm), &claims2);
+        assert_eq!(c1, c2,
+            "two goods with an IDENTICAL suitability field are one plant sold as two \
+             products (nutmeg and mace) and must share an island — got {c1:?} and {c2:?}");
+    }
 
     /// A minimal all-land world buffer for scoring tests. Mirrors the literal in
     /// `salt_pans_make_salt_and_brine` rather than sharing it, so a change to that
