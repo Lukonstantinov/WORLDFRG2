@@ -1367,7 +1367,24 @@ canvas/
                                   mask hasn't arrived
   PaintOverlay.ts               ← Brush preview, paint stamps
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
-  goodIcons.ts                  ← good → emoji/texture for overlays
+  goodIcons.ts                  ← EU4-style medallion for MAP overlays (`drawGoodIcon`,
+                                  radius-based, world-space) — untouched by the art pass below
+  goodArt.ts                    ← the 85-recipe illustration set (art redesign): `drawIcon`
+                                  (pixel treatment) / `drawIconVictorian` (ledger card) /
+                                  `drawGood` / `pixelize` / `drawMedallion`, one shape family
+                                  per good, no two goods share a picture. Separate from
+                                  `goodIcons.ts` because the two serve different contexts
+                                  (panel/ledger icons vs. a map medallion at arbitrary zoom)
+  goodIconCache.ts               ← offscreen-canvas cache for `goodArt.ts`, keyed
+                                  `${name}:${size}:${treatment}:${color}:${scale}` — `drawIcon`
+                                  allocates several offscreen canvases per call, too costly
+                                  for a list of 85
+  buildingArt.ts                 ← the 15 `SPRITE_MAP` building types, procedural
+                                  (`drawProcedural`), differentiated by architectural form
+                                  rather than palette — the art redesign's building pass
+  marketSquareArt.ts             ← the city MARKET SQUARE scene (`marketSquare`): stalls,
+                                  a culturally-mixed crowd, price chips — pure canvas,
+                                  driven by real hub state (see `ui/campaign/MarketSquare.tsx`)
 
 ui/SettingsPanel.tsx            ← ⚙ Appearance modal, THREE tabs: Map plates (the
                                   atlas-plate picker, §8.17 — the default tab),
@@ -1495,6 +1512,10 @@ ui/world/  — map & world
   useFloatingWindow.ts          ← Floating/dockable window hook
 
 ui/goods/  — goods
+  GoodIcon.tsx                   ← React wrapper over `canvas/goodArt.ts` (authored 2×,
+                                  displayed at half) — pixel treatment for inline list
+                                  icons, Victorian ledger treatment for hero/identity
+                                  icons ≥40px; never mixed within one screen
   GoodsEditor.tsx               ← Goods builder (distribution/value/bulk/perish + recipes)
   GoodsChainReview.tsx          ← Pre-generation planted-vs-manufactured review + recipe DAG
   GoodsBrowserPanel/GoodDetailPanel/GoodFlowPanel.tsx ← browser/detail/flow views
@@ -1546,7 +1567,13 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   frozen worldgen snapshot cannot do). Seeded from
                                   `selectedHub` on open, then never re-bound to it, so
                                   two markets can be read side by side
-  CityView.tsx · SettlementScene.tsx ← Isometric city view + scene
+  CityView.tsx · SettlementScene.tsx ← Isometric city view + scene, buildings drawn via
+                                  `canvas/buildingArt.ts`'s 15-type procedural set
+  MarketSquare.tsx               ← The market-square scene (`canvas/marketSquareArt.ts`)
+                                  mounted at the head of `CityMarketView` — stall keepers
+                                  from `detail.culture`/`.minorities`, wares ranked by
+                                  value on hand, chip prices from `price/base_value`, no
+                                  new IPC
   HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
                                   HousesPanel has a world ⚔ Feuds tab; the list is
                                   GROUPED BY TIER (Phase 1.1, Tier 3/4 collapsed by
@@ -1653,7 +1680,16 @@ ui/campaign/  — campaign / economy (+ helpers: chronicleTheme, cultureFigure, 
                                   Change folder. A save whose world does not match the
                                   one open is shown but marked, never hidden
   YearChronicle.tsx             ← SHARED year-grouped expandable chronicle
-  cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art
+  cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art.
+                                  `cultureFigure.ts` draws an INDIVIDUAL (a `sex` axis,
+                                  per-person seed) — still the renderer for House
+                                  portraits/`HouseCompare`, deliberately NOT replaced by
+                                  the dress-plate art below, which has no sex axis
+  cultureDress.ts                ← the art redesign's per-PEOPLE bust + costume figure
+                                  (18 preset kits index-aligned to `cultureFigure.ts`
+                                  KITS, plus `deriveKit`/`creoleKit`/`resolveKit`/
+                                  `REGISTERS`/`kitForCulture`) — renders `PeoplesPanel`,
+                                  where there is no one head to draw as a person
 
 ui/heraldry/  — heraldry
   CoatOfArms.tsx                ← Deterministic house heraldry (houseColor + shield SVG)
