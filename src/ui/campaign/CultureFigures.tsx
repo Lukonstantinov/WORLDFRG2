@@ -1,75 +1,74 @@
-import { useMemo, useState } from "react";
-import { cultureFigureSVG, cultureSeed, CULTURE_KIT_COUNT, type Occasion } from "@ui/campaign/cultureFigure";
+import { useEffect, useRef, useState } from "react";
+import { drawBust, drawFigure, resolveKit, REGISTERS, creoleKit, type Occasion, type DressKit } from "@ui/campaign/cultureDress";
 
-const OCCASIONS: { key: Occasion; label: string }[] = [
-  { key: "everyday", label: "Everyday" },
-  { key: "national", label: "National" },
-  { key: "ceremonial", label: "Ceremonial" },
-];
+const OCCASION_TITLE: Record<Occasion, string> = {
+  everyday: "Working dress — plainer cloth, no finery",
+  national: "National costume",
+  ceremonial: "Ceremonial finery — mantle, jewels, richer trim",
+};
 
-/** Full-body figures of a people in national dress — a man and a woman, drawn as flat
- *  vector "costume plates". Appearance + garments come from the culture's kit and are
- *  RANDOMISED per individual, so ↻ re-rolls two fresh people of the same culture. A
- *  creole blends both parent kits. Purely deterministic; no raster assets. */
+/** Authored at 2× and shown at half — the pixel treatment's one-pixel edge only
+ *  survives an integer upscale with smoothing off. */
+const PLATE_SCALE = 2;
+
+/** A people's DRESS PLATE: the portrait bust beside the full costume figure.
+ *  Headwear silhouette and neckline are per-people, which is what actually reads
+ *  at portrait size; a worldgen hearth with no preset kit gets a derived one and
+ *  a creole gets a composite of its two parents, so nothing renders blank. */
 export function CultureFigures({ name, kit, kit2, color }: {
   name: string; kit?: number; kit2?: number; color?: [number, number, number];
 }) {
-  const [roll, setRoll] = useState(0);
   const [occasion, setOccasion] = useState<Occasion>("national");
-  const figs = useMemo(() => {
-    const base = cultureSeed(name);
-    // A synthetic / unknown people can arrive with no kit index (kit null or -1).
-    // Deriving a stable kit from the name means it still gets a fully-dressed
-    // figure instead of rendering blank — the "clothes not showing" case.
-    const useKit = (kit == null || kit < 0)
-      ? (base % CULTURE_KIT_COUNT + CULTURE_KIT_COUNT) % CULTURE_KIT_COUNT
-      : kit;
-    return {
-      m: cultureFigureSVG({ kit: useKit, sex: "m", seed: base, kit2, variant: roll, occasion }),
-      f: cultureFigureSVG({ kit: useKit, sex: "f", seed: base ^ 0x9e37, kit2, variant: roll, occasion }),
+  const bustRef = useRef<HTMLCanvasElement | null>(null);
+  const figRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    let K: DressKit;
+    if (kit2 != null && kit2 >= 0 && kit2 !== kit) K = creoleKit(name, kit ?? name, kit2);
+    else K = resolveKit(kit != null && kit >= 0 ? kit : name, { region: "" });
+
+    const paint = (el: HTMLCanvasElement | null, w: number, h: number, draw: (c: CanvasRenderingContext2D) => void) => {
+      if (!el) return;
+      el.width = w * PLATE_SCALE; el.height = h * PLATE_SCALE;
+      el.style.width = w + "px"; el.style.height = h + "px";
+      const ctx = el.getContext("2d");
+      if (!ctx) return;
+      ctx.clearRect(0, 0, el.width, el.height);
+      draw(ctx);
     };
-  }, [name, kit, kit2, roll, occasion]);
-  if (!figs) return null;
+    paint(bustRef.current, BUST, BUST, (c) => drawBust(c, 0, 0, BUST * PLATE_SCALE, K, { occasion }));
+    paint(figRef.current, FIG_W, FIG_H, (c) => drawFigure(c, 0, 0, FIG_W * PLATE_SCALE, K, { occasion }));
+  }, [name, kit, kit2, occasion]);
+
   const plate = color
     ? `linear-gradient(180deg, rgba(${color[0]},${color[1]},${color[2]},0.12), rgba(${color[0]},${color[1]},${color[2]},0.02))`
     : "rgba(255,255,255,0.03)";
+
   return (
     <div>
-      <div style={{ display: "flex", gap: 10 }}>
-        <Plate label="♂ Man" svg={figs.m} bg={plate} />
-        <Plate label="♀ Woman" svg={figs.f} bg={plate} />
+      <div style={{
+        display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 12,
+        height: 132, background: plate, border: "1px solid #16202e", borderRadius: 6, padding: "4px 8px",
+      }}>
+        <canvas ref={bustRef} style={{ display: "block" }} />
+        <canvas ref={figRef} style={{ display: "block" }} />
       </div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 5 }}>
-        {/* Dress register: everyday working clothes ↔ national ↔ ceremonial finery. */}
-        <div style={{ display: "flex", gap: 0, border: "1px solid rgba(180,190,205,0.25)", borderRadius: 12, overflow: "hidden" }}>
-          {OCCASIONS.map((o) => (
-            <button key={o.key} onClick={() => setOccasion(o.key)}
-              title={o.key === "everyday" ? "Casual working dress (trousers, plain)"
-                : o.key === "ceremonial" ? "Ceremonial finery (robes, cloak, jewels)" : "National costume"}
-              style={{ fontSize: 9.5, padding: "2px 8px", cursor: "pointer", border: "none",
-                background: occasion === o.key ? "rgba(180,150,90,0.28)" : "transparent",
-                color: occasion === o.key ? "#e6cf9a" : "#8b93a0", fontWeight: occasion === o.key ? 700 : 400 }}>
-              {o.label}
+      <div style={{ display: "flex", justifyContent: "center", marginTop: 5 }}>
+        <div style={{ display: "flex", border: "1px solid rgba(180,190,205,0.25)", borderRadius: 12, overflow: "hidden" }}>
+          {REGISTERS.map((o) => (
+            <button key={o} onClick={() => setOccasion(o)} title={OCCASION_TITLE[o]}
+              style={{
+                fontSize: 9.5, padding: "2px 10px", cursor: "pointer", border: "none", textTransform: "capitalize",
+                background: occasion === o ? "rgba(180,150,90,0.28)" : "transparent",
+                color: occasion === o ? "#e6cf9a" : "#8b93a0", fontWeight: occasion === o ? 700 : 400,
+              }}>
+              {o}
             </button>
           ))}
         </div>
-        <button onClick={() => setRoll((r) => r + 1)} title="Show two other people of this culture"
-          style={{ fontSize: 10, padding: "2px 10px", borderRadius: 12, cursor: "pointer",
-            border: "1px solid rgba(180,190,205,0.3)", background: "rgba(255,255,255,0.05)", color: "#aeb6c0" }}>
-          ↻ another
-        </button>
       </div>
     </div>
   );
 }
 
-function Plate({ label, svg, bg }: { label: string; svg: string; bg: string }) {
-  return (
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ height: 172, background: bg, border: "1px solid rgba(180,190,205,0.18)",
-        borderRadius: 8, overflow: "hidden", display: "flex", alignItems: "flex-end", justifyContent: "center" }}
-        dangerouslySetInnerHTML={{ __html: svg }} />
-      <div style={{ textAlign: "center", fontSize: 9.5, color: "#8b93a0", marginTop: 3, letterSpacing: 0.3 }}>{label}</div>
-    </div>
-  );
-}
+const BUST = 92, FIG_W = 56, FIG_H = Math.round(56 * 2.1);
