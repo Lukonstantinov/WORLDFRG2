@@ -162,6 +162,15 @@ export function creoleKit(
 
 export type KitSpec = number | DressKit | string | null | undefined;
 
+const BY_NAME = new Map(DRESS_KITS.map((k) => [k.name.toLowerCase(), k]));
+
+/** A people's kit from its NAME alone — a preset where the name is one of the
+ *  eighteen, else a kit derived from the name. Used where the caller has a
+ *  culture name but not the sim's kit index. */
+export function kitForCulture(name: string): DressKit {
+  return BY_NAME.get((name || "").trim().toLowerCase()) ?? deriveKit(name || "unknown");
+}
+
 /** Accept a preset index, a kit object, or a name to derive from. */
 export function resolveKit(spec: KitSpec, opts?: DeriveOpts): DressKit {
   if (spec && typeof spec === "object") return spec;
