@@ -173,7 +173,7 @@ pub const GOOD_UNLIMITED: [bool; GOODS_COUNT] = [
     true, false, false,                           // salt unlimited
     false, true,                                  // whaling unlimited
     true, true, false, false,                     // wheat+iron unlimited; cotton seeded; gemstones special
-    false, false, false, false, false, false,     // hardwoods/horses/wools/ivory/cacao seeded
+    true, false, false, false, false, false,      // hardwoods UNLIMITED (see below); horses/wools/ivory/cacao seeded
     false, false, false,                          // copper/tin/gold = deposit goods (flag unused)
     false, false, false,                          // cloves(seeded), pepper(seeded), paper(seeded â†’ rarer)
     false, false, false, false, false,            // ceramics, glassware, tobacco, indigo, dates (all seeded homelands)
@@ -1692,6 +1692,18 @@ fn good_score_in_zone(
         GOOD_HARDWOODS => {
             // Tropical rainforest export wood (ebony / mahogany / teak). Fills the
             // gap left by `timber`, which is boreal/temperate only.
+            //
+            // UNLIMITED, exactly as `timber` is, and for the same reason. The two
+            // are ONE ROLE — the wood a hull is built from — split across climates,
+            // and until now they had opposite distributions: every suitable boreal
+            // and temperate cell grew timber, while the whole tropics shared a
+            // SINGLE seeded hardwood homeland. That asymmetry has no justification
+            // in the model (this arm's own comment says hardwoods exists to fill
+            // timber's gap) and it means a tropical or desert-coast city has no
+            // local hull wood at all — which would make shipbuilding structurally
+            // impossible for exactly the maritime cultures that were best at it.
+            // Teak-built Indian Ocean dhows and Malabar-built ships are the
+            // counter-example the old placement could not represent.
             let clim = match k { AF | AM => 1.0, AW => 0.5, CWA => 0.3, _ => 0.0 };
             clim * smoothstep(800.0, 1800.0, p) * (0.4 + 0.6 * fert)
                 * (1.0 - smoothstep(0.40, 0.65, elev))

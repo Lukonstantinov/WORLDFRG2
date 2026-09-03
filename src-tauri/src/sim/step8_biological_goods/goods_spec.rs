@@ -669,6 +669,33 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // Timor / Sumba sandalwood — the dry-monsoon island heartwood.
         cg("sandalwood", "Sandalwood", "\u{1F334}", "#c8a165", Domain::Coastal, Distribution::Endemic, 0.87, 0.55, true,
             None, env(vec![(3,1.0),(23,0.8),(2,0.5)], Some([26.0,5.0]), Some([700.0,1600.0,400.0]), Some([0.05,0.45,0.18]), Some([5.0,20.0,7.0]), 0.0, 0.4)),
+        // ── NAVAL STORES ────────────────────────────────────────────────────
+        // The two shipbuilding materials the world did not have. Both are
+        // `Global` (every suitable cell produces), so their scarcity is
+        // GEOGRAPHIC rather than a seeded homeland: a boreal coast is thick with
+        // pitch and a tropical one has none, which is a trade dependency instead
+        // of an accident of where one seed happened to land.
+        //
+        // THEY ARE MATERIALS, NOT REQUIREMENTS. The shipyard they are meant for
+        // does not hold a fixed recipe. A hull is built from whatever suitable
+        // construction material reaches the city — grown in its own hinterland or
+        // landed on its quay — and the MIX sets what kind of ship comes out, not
+        // whether one can be built at all. A fixed recipe would have locked the
+        // tropics and the desert out of seafaring permanently, which is the exact
+        // inverse of the history: Arabia is desert and was a great maritime
+        // culture precisely BECAUSE it imported Malabar teak, and a teak hull
+        // needs no paying at all because the wood's own oils do the job.
+        //
+        // So these two are worth having for what they add, not what they gate:
+        // a boreal city with pitch and hemp builds a better, longer-lived vessel
+        // than one paying with whatever it has — and a city with neither can
+        // still build, or buy them in. `timber` and `iron` are both
+        // `GOOD_UNLIMITED` and `hardwoods` now is too, so hull material is
+        // reachable everywhere and these are the goods that make it GOOD.
+        cg("pitch", "Pitch & Tar", "\u{1F6E2}", "#3b2f2a", Domain::Continental, Distribution::Global, 0.35, 0.40, false,
+            None, env(vec![(16,1.0),(15,0.9),(14,0.6),(12,0.4)], Some([2.0,12.0]), Some([350.0,1200.0,350.0]), Some([0.0,0.45,0.20]), Some([45.0,70.0,12.0]), 0.2, 0.2)),
+        cg("hemp", "Hemp", "\u{1F33F}", "#7f8f5a", Domain::Continental, Distribution::Global, 0.35, 0.40, false,
+            None, env(vec![(12,1.0),(15,0.9),(11,0.8),(14,0.7),(9,0.5),(8,0.4)], Some([13.0,9.0]), Some([500.0,1300.0,350.0]), Some([0.0,0.35,0.18]), Some([30.0,60.0,14.0]), 0.6, 0.0)),
         // ── Extreme-rare luxuries (harsh placement: tiny homelands / few deposits) ──
         cg("cinnamon", "Cinnamon", "\u{1F33F}", "#a9603a", Domain::Coastal, Distribution::Local, 0.72, 0.50, true,
             None, env(vec![(2,1.0),(1,0.8),(3,0.6)], Some([27.0,6.0]), Some([1200.0,3000.0,400.0]), None, Some([0.0,15.0,6.0]), 0.0, 0.5)),
