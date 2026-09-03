@@ -513,6 +513,9 @@ impl CampaignSim {
             // SETTLEMENT colonies grow faster (frontier boom + sponsored migration on
             // top) so they still mature into cities within a campaign.
             let colony_boom = if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous { POP_GROWTH_COLONY_MULT } else { 1.0 };
+            // DEPOSITS_AND_MINING_PLAN.md slice 5 · a mining settlement (the
+            // Potosí case) booms on top of the ordinary colony boom above.
+            let mining_boom = if self.hubs[h].is_mining_settlement { MINING_SETTLEMENT_GROWTH_MULT } else { 1.0 };
             // Small-city growth bonus (user rule): a well-fed town under 10k grows up
             // to 5× faster so humble settlements rise into cities — scaled by food
             // security (needs food on-site or traded in), no benefit when starving.
@@ -522,7 +525,7 @@ impl CampaignSim {
             // Trade-rich + well-fed cities of ANY size grow faster (user rule: up to
             // ~10%/yr) — a thriving, food-secure entrepôt booms; a poor/hungry one crawls.
             let trade_food_boost = 1.0 + TRADE_FOOD_GROWTH_BONUS * prosperity * food_sec;
-            let rate = if pop < capacity { POP_GROWTH_RATE * colony_boom * small_boost * trade_food_boost } else { POP_DECLINE_RATE };
+            let rate = if pop < capacity { POP_GROWTH_RATE * colony_boom * mining_boom * small_boost * trade_food_boost } else { POP_DECLINE_RATE };
             let mut new_pop = pop + rate * pop * (1.0 - pop / capacity);
             // Net demographic drift (births − deaths): a well-fed populace has a small
             // birth surplus so the TOTAL world can grow (migration alone only reshuffles
@@ -677,6 +680,7 @@ impl CampaignSim {
             if expansion_ok && self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();
                 self.maybe_found_food_colony(); // Greek-Crimea grain colony (food stress)
+                self.maybe_found_mining_colony(); // DEPOSITS_AND_MINING_PLAN.md slice 5 (Potosí)
                 self.colony_pass(); // graduation · dividends · autonomy
                 self.maybe_found_satellite(expansion_ok); // port/granary/workshop suburbs
                 self.maybe_absorb_dying_city();            // big city adopts a failing neighbour

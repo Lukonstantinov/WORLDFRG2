@@ -534,6 +534,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 estate_kind: 0,
                 estate_tier: 0,
                 mine_depth: 0,
+                mine_extent: u8::MAX,
+                is_mining_settlement: false,
                 last_upgrade_tick: 0,
                 owner_house: -1,
                 stake_bank: -1,
@@ -1298,7 +1300,7 @@ fn seed_mine_deposits(conn: &Connection, sim: &mut CampaignSim) {
     let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(conn, "deposits")
         .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     sim.mine_deposits = deposits.into_iter()
-        .map(|d| MineSite { good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth })
+        .map(|d| MineSite { good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth, extent: d.extent, district: d.district })
         .collect();
 }
 

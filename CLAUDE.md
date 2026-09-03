@@ -2401,13 +2401,18 @@ NOT wired (mercury→silver amalgamation, alum→cloth as a hard recipe input �
 real economic changes that need their own `econ_` measurement, not an add-only
 slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
 
-> **Slice 4, partly built:** a mine estate now carries `mine_depth` (the real
-> working nearest its parent city, looked up once at founding) and digging a
-> deep/flooded body costs real drainage capital to upgrade
-> (`MINE_UPGRADE_COST_MULT`); mercury → silver amalgamation is wired as a
-> consumable extraction input. Still not built: mine-vs-quarry as separate
-> mechanics (both remain the same `estate_kind == 2`), and D3's "a weak body
-> still declines" half. See `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
+> **Slices 4-5, built:** a MINE (`estate_kind == 2`) carries `mine_depth`
+> (the real working nearest its parent city) and digging a deep/flooded body
+> costs real drainage capital to upgrade (`MINE_UPGRADE_COST_MULT`); mercury →
+> silver amalgamation is a real consumable extraction input. A QUARRY
+> (`estate_kind == 8`, split off from Mine) is gated by TRANSPORT instead
+> (`QUARRY_INLAND_UPGRADE_COST_MULT`), never depth. A body KNOWN to be
+> `EXTENT_WEAK` now declines to a floor under pressure (D3); everything else
+> still persists. Mining SETTLEMENTS (the Potosí case,
+> `maybe_found_mining_colony`) found on a real GREAT/WORLD-CLASS strike, boom,
+> and DECLINE rather than die when their food lifeline fails. A settlement's
+> trade catchment radius grows slowly with age (`catchment_radius_km`,
+> derived, never stored). See `docs/DEPOSITS_AND_MINING_PLAN.md` slices 4-5.
 
 ---
 
@@ -3113,13 +3118,18 @@ NOT wired (mercury→silver amalgamation, alum→cloth as a hard recipe input �
 real economic changes that need their own `econ_` measurement, not an add-only
 slice) in `docs/DEPOSITS_AND_MINING_PLAN.md` slice 3.
 
-> **Slice 4, partly built:** a mine estate now carries `mine_depth` (the real
-> working nearest its parent city, looked up once at founding) and digging a
-> deep/flooded body costs real drainage capital to upgrade
-> (`MINE_UPGRADE_COST_MULT`); mercury → silver amalgamation is wired as a
-> consumable extraction input. Still not built: mine-vs-quarry as separate
-> mechanics (both remain the same `estate_kind == 2`), and D3's "a weak body
-> still declines" half. See `docs/DEPOSITS_AND_MINING_PLAN.md` slice 4.
+> **Slices 4-5, built:** a MINE (`estate_kind == 2`) carries `mine_depth`
+> (the real working nearest its parent city) and digging a deep/flooded body
+> costs real drainage capital to upgrade (`MINE_UPGRADE_COST_MULT`); mercury →
+> silver amalgamation is a real consumable extraction input. A QUARRY
+> (`estate_kind == 8`, split off from Mine) is gated by TRANSPORT instead
+> (`QUARRY_INLAND_UPGRADE_COST_MULT`), never depth. A body KNOWN to be
+> `EXTENT_WEAK` now declines to a floor under pressure (D3); everything else
+> still persists. Mining SETTLEMENTS (the Potosí case,
+> `maybe_found_mining_colony`) found on a real GREAT/WORLD-CLASS strike, boom,
+> and DECLINE rather than die when their food lifeline fails. A settlement's
+> trade catchment radius grows slowly with age (`catchment_radius_km`,
+> derived, never stored). See `docs/DEPOSITS_AND_MINING_PLAN.md` slices 4-5.
 
 ---
 
@@ -4746,24 +4756,36 @@ SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md
                                     version broke the hard wealth bound twice
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
-DEPOSITS_AND_MINING_PLAN.md       ← ⭐ APPROVED, SLICES 1-3 BUILT, SLICE 4 PARTLY
-                                    BUILT. Ore geology (§8.16) + grade→quality
-                                    rewire + txt goods import & 8 new minerals —
-                                    all done, all gated. Slice 4: a mine estate's
-                                    `mine_depth` (real working nearest its parent,
-                                    looked up once at founding) now taxes its
-                                    OWN upgrade cost when the body is deep/
-                                    flooded (`MINE_UPGRADE_COST_MULT`, real
-                                    drainage capital, never the baseline output —
-                                    that's already baked in at worldgen) and
-                                    mercury → silver amalgamation is wired as a
+DEPOSITS_AND_MINING_PLAN.md       ← ⭐ BUILT — all five slices, gated. Ore
+                                    geology (§8.16) + grade→quality rewire + txt
+                                    goods import & 8 new minerals (1-3). Slice 4:
+                                    MINE (`estate_kind` 2) vs QUARRY (8, split
+                                    off) as genuinely different mechanics — a
+                                    mine's `mine_depth` taxes its OWN upgrade cost
+                                    when deep/flooded (`MINE_UPGRADE_COST_MULT`,
+                                    never the baseline output, already baked in
+                                    at worldgen); a quarry is gated by TRANSPORT
+                                    instead (`QUARRY_INLAND_UPGRADE_COST_MULT`);
+                                    mercury → silver amalgamation is a real
                                     consumable extraction input
-                                    (`apply_mercury_amalgamation`) — not yet
-                                    built: mine-vs-quarry as separate mechanics,
-                                    D3's weak-body depletion → quarry window,
-                                    mining settlements, growing settlement
-                                    catchment (slice 5, unbuilt). Carries the
-                                    measured findings that motivated it and its own
+                                    (`apply_mercury_amalgamation`); a body KNOWN
+                                    `EXTENT_WEAK` now declines to a floor under
+                                    pressure (D3), everything else still
+                                    persists. Slice 5: the quarry/mine window
+                                    (districts → workings, `ProvinceInspector.
+                                    tsx`); mining SETTLEMENTS (the Potosí case,
+                                    `maybe_found_mining_colony`) found on a real
+                                    GREAT/WORLD-CLASS strike, boom, and DECLINE
+                                    rather than die when their food lifeline
+                                    fails; a settlement's trade catchment radius
+                                    grows slowly with age as a pure derived read
+                                    (`catchment_radius_km`, never stored per-hub
+                                    state). Not built: a drawn growing-catchment
+                                    DISC on the survey plate (the value is real
+                                    and served; no new canvas layer renders it)
+                                    and the Mons Claudianus treasury-quarry edge
+                                    case. Carries the measured findings that
+                                    motivated it and its own
                                     "deliberately not built" list
 WORLD_AND_TRADE_MASTER_PLAN.md    ← ⭐ THE ACTIVE PLAN. Three parts, one
                                     dependency chain (the land decides where

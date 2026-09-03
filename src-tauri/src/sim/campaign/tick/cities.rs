@@ -675,6 +675,14 @@ impl CampaignSim {
     /// fishery collapses and recovers, plantation wears soil, vineyard doesn't lose
     /// tonnage). 0 = no estate found (ordinary rural production; the default rate).
     fn dominant_estate_kind(&self, p: usize, g: usize) -> u8 {
+        self.dominant_estate_kind_and_extent(p, g).0
+    }
+
+    /// As `dominant_estate_kind`, plus the estate's own `mine_extent` (D3) — a
+    /// Mine/Quarry's real body may be WEAK, which is what lets the wear/heal
+    /// pass below distinguish "a small vein that plays out" from "Potosí",
+    /// instead of treating every deposit as equally inexhaustible.
+    fn dominant_estate_kind_and_extent(&self, p: usize, g: usize) -> (u8, u8) {
         for (h, hub) in self.hubs.iter().enumerate() {
             if !hub.is_estate || hub.abandoned { continue; }
             if self.hub_province.get(h).copied().unwrap_or(-1) != p as i32 { continue; }
@@ -682,10 +690,10 @@ impl CampaignSim {
                 .filter(|&(_, &v)| v > 0.0)
                 .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal));
             if let Some((mg, _)) = main {
-                if mg == g { return hub.estate_kind; }
+                if mg == g { return (hub.estate_kind, hub.mine_extent); }
             }
         }
-        0
+        (0, unknown_extent())
     }
 
     /// §2.5 · the MARKET ↔ LOCAL split — what share of a province's production of
@@ -728,14 +736,23 @@ impl CampaignSim {
                 let exploitation = actual[idx] / potential;
                 let pressure = (exploitation - 1.0).max(0.0);
                 let ease = (1.0 - exploitation).max(0.0);
-                let kind = self.dominant_estate_kind(p, g);
-                // v2.0 · a mine no longer wears down under pressure at all — the ore
-                // body's richness (grade/extent, `deposits.rs` §8.16) is a fixed
-                // geological fact set once at worldgen, not something a decade of
-                // digging should thin out. Same treatment a vineyard already gets
+                let (kind, extent) = self.dominant_estate_kind_and_extent(p, g);
+                // v2.0 · a mine/quarry no longer wears down under pressure by default —
+                // the ore body's richness (grade/extent, `deposits.rs` §8.16) is a
+                // fixed geological fact set once at worldgen, not something a decade
+                // of digging should thin out. Same treatment a vineyard already gets
                 // ("doesn't lose tonnage") and for the identical reason.
+                //
+                // DEPOSITS_AND_MINING_PLAN.md D3 · the one EXCEPTION: a body whose
+                // real `extent` is KNOWN to be `EXTENT_WEAK` still declines under
+                // sustained pressure — slowly, and only ever to `PROV_GOOD_DEPLETION_
+                // CAP`'s floor (0.75, never to zero) — "a small vein plays out".
+                // `unknown_extent()`/moderate/great/world-class all persist exactly
+                // as before; this can only ever apply where real geology says so.
+                let is_weak_body = (kind == 2 || kind == 8) && extent == crate::sim::deposits::EXTENT_WEAK;
                 let (wear_k, recover_k): (f32, f32) = match kind {
-                    2 => (0.0, 1.0),  // mine — the deposit's richness never erodes
+                    _ if is_weak_body => (0.18, 0.35), // a weak body plays out slowly
+                    2 | 8 => (0.0, 1.0),  // mine/quarry — a body of unknown/real size never erodes
                     4 => (0.8, 2.2),  // fishery — "collapses and recovers": hard down, fast back
                     5 => (0.0, 1.0),  // vineyard — doesn't lose tonnage under pressure
                     _ => (1.0, 1.0),
@@ -1693,7 +1710,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, mine_depth: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
+            estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: unknown_extent(), is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,

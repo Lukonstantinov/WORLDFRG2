@@ -1444,6 +1444,132 @@ impl CampaignSim {
         });
     }
 
+    /// DEPOSITS_AND_MINING_PLAN.md slice 5 · THE POTOSÍ CASE — a settlement whose
+    /// existence IS the deposit. Sited directly on a real GREAT/WORLD-CLASS
+    /// working (`mine_deposits`), never on the ordinary `colonizable` fertile-
+    /// land list — a mining town forms wherever the ore is, however poor the
+    /// land (Cerro Rico sits at 4,090 m with no agriculture; the synthetic site
+    /// below floors `fertility` near zero for exactly that reason). Reuses the
+    /// settlement-colony machinery end to end (backers, `create_market_colony`,
+    /// `designate_colony_supply`'s food-lifeline contract) so a mining
+    /// settlement gets the SAME famine safety net any colony gets — "all food
+    /// imported" is this, not a bespoke mechanic.
+    pub(crate) fn maybe_found_mining_colony(&mut self) {
+        if self.mine_deposits.is_empty() { return; }
+        let n_mining = self.hubs.iter().filter(|h| h.is_mining_settlement && !h.abandoned).count();
+        if n_mining >= MAX_MINING_SETTLEMENTS { return; }
+        // Founder: the same profile as an ordinary settlement colony (large,
+        // prosperous, some treasury to commit).
+        let mut best = (usize::MAX, 0.0f32);
+        for h in 0..self.hubs.len() {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.colony_kind != 0 { continue; }
+            if hub.population < COLONY_PARENT_MIN_POP || hub.starving > 0.7 { continue; }
+            if hub.sent_prosperity < 0.25 { continue; }
+            let score = hub.population * hub.sent_prosperity.clamp(0.0, 1.0) * (0.2 + hub.treasury);
+            if score > best.1 { best = (h, score); }
+        }
+        let Some(founder) = (best.0 != usize::MAX).then_some(best.0) else { return };
+        let ww = self.world_w.max(1.0);
+        let cap = MINING_SETTLEMENT_MAX_KM * ww / EARTH_EQUATOR_KM;
+        let served_reach = MINE_DEPOSIT_SEARCH_KM * ww / EARTH_EQUATOR_KM;
+        let (fx, fy) = (self.hubs[founder].x, self.hubs[founder].y);
+        // Nearest GREAT/WORLD-CLASS working with no real settlement already on it.
+        let mut best_site: Option<(usize, f32)> = None; // (deposit index, dist)
+        for (di, d) in self.mine_deposits.iter().enumerate() {
+            if d.extent < crate::sim::deposits::EXTENT_GREAT { continue; }
+            let mut dx = (d.x - fx).abs();
+            if ww > 1.0 { dx = dx.min(ww - dx); }
+            let dist = (dx * dx + (d.y - fy) * (d.y - fy)).sqrt();
+            if dist > cap { continue; }
+            // "Already served" means a real MINE is already working this body, or a
+            // mining settlement already sits on it — NOT merely that an ordinary
+            // city happens to be within founding range (that's normal; a founder
+            // has to be near enough to reach the site at all).
+            let served = self.hubs.iter().any(|h| {
+                if h.abandoned { return false; }
+                if !((h.is_estate && h.estate_kind == 2) || h.is_mining_settlement) { return false; }
+                let mut hdx = (h.x - d.x).abs();
+                if ww > 1.0 { hdx = hdx.min(ww - hdx); }
+                let hdy = h.y - d.y;
+                (hdx * hdx + hdy * hdy).sqrt() < served_reach
+            });
+            if served { continue; }
+            if best_site.map(|(_, bd)| dist < bd).unwrap_or(true) { best_site = Some((di, dist)); }
+        }
+        let Some((di, _)) = best_site else { return };
+        let d = self.mine_deposits[di].clone();
+        let Some(good_slot) = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case(&d.good)) else { return };
+        // ── Raise the capital, same joint-stock pattern as an ordinary settlement colony ──
+        let need = COLONY_FOUND_COST;
+        let city_put = self.hubs[founder].treasury.min(need).max(0.0);
+        let house_idx = self.strongest_house_at(founder).filter(|&h| !self.houses[h].defunct);
+        let house_put = house_idx.map(|h| (need - city_put).min(self.houses[h].wealth * 0.3).max(0.0)).unwrap_or(0.0);
+        let comp = self.hubs[founder].component;
+        let bank_idx = self.banks.iter().position(|b| !b.defunct
+            && self.hubs.get(b.seat as usize).map(|s| s.component == comp).unwrap_or(false));
+        let Some(bank_idx) = bank_idx else { return };
+        let bank_lend = (need - city_put - house_put).min(self.banks[bank_idx].reserves * 0.5).max(0.0);
+        let raised = city_put + house_put + bank_lend;
+        if raised < need * 0.8 { return; }
+        let mut backers: Vec<(u8, u32, f32)> = Vec::new();
+        if city_put > 0.5 { self.hubs[founder].treasury -= city_put; backers.push((0, founder as u32, city_put / raised)); }
+        if let (Some(h), true) = (house_idx, house_put > 0.5) { self.houses[h].wealth -= house_put; backers.push((1, h as u32, house_put / raised)); }
+        if bank_lend > 0.5 {
+            self.banks[bank_idx].reserves -= bank_lend;
+            self.banks[bank_idx].loans.push(Loan {
+                borrower_house: -1, borrower_polis: founder as i32, principal: bank_lend,
+                outstanding: bank_lend, rate: BANK_LOAN_RATE, start_tick: self.tick,
+                term_ticks: TICKS_PER_YEAR * 8, purpose: "colony".into(),
+            });
+        }
+        backers.push((2, bank_idx as u32, (bank_lend.max(0.1)) / raised));
+        // A synthetic site: sited on the real ore, not on the fertile-land list.
+        // `fertility` deliberately near zero (Cerro Rico's own "no agriculture");
+        // `belt[good] = 1.0` is what makes `create_market_colony` seed it as an
+        // extraction economy rather than a photocopy of its founder's basket.
+        let ng = self.goods.len();
+        let mut belt = vec![0.0f32; ng];
+        belt[good_slot] = 1.0;
+        let site = ColonizeSite {
+            x: d.x, y: d.y, koppen: 0, elevation: 0.6, fertility: 0.03, coastal: false,
+            kind_hint: 2, trade_value: 0.9, delta: false, chokepoint: false, province: -1, belt,
+        };
+        let seed = (self.hubs[founder].population * COLONY_MIGRATION_FRAC).max(80.0);
+        self.hubs[founder].population = (self.hubs[founder].population - seed)
+            .max(self.hubs[founder].founding_pop * 0.3);
+        let new = self.create_market_colony(founder, &site, backers, seed);
+        self.hubs[new].is_mining_settlement = true;
+        self.hubs[new].estate_kind = 0; // a settlement, never an estate
+        if let Some(h) = house_idx {
+            if !self.houses[h].offices.contains(&(new as u32)) {
+                self.houses[h].offices.push(new as u32);
+                let (cn, city) = (self.houses[h].name.clone(), self.hubs[new].name.clone());
+                self.houses[h].events.push(HouseEvent { tick: self.tick, kind: "branch".into(),
+                    text: format!("{} opens a counting-house in {}", cn, city) });
+            }
+        }
+        self.hubs[new].main_bank = bank_idx as i32;
+        let bank_house = self.banks[bank_idx].house as i32;
+        self.hubs[new].council_house = bank_house;
+        let cshort = self.hubs[new].name.replace(" (colony)", "");
+        self.hubs[new].coin_name = format!("{} mark", cshort);
+        self.hubs[new].coin_trust = 0.40;
+        self.hubs[new].mint_fineness = 1.0;
+        self.apply_colony_charter(new);
+        // All food imported (D7) — the same food-lifeline contract every colony
+        // gets, sized generously since a mining town grows no food of its own.
+        self.hubs[new].reserve_food = 60.0;
+        let est_deficit_monthly = (self.hubs[new].population * 0.45).max(350.0);
+        self.designate_colony_supply(new, est_deficit_monthly);
+        let (pname, cname) = (self.hubs[founder].name.clone(), self.hubs[new].name.clone());
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "colony".into(), hub: new as i32, good: good_slot as i32, value: 1.0,
+            text: format!("{} founds the mining settlement {}, on a {} strike",
+                pname, cname, crate::sim::deposits::extent_label(d.extent)),
+        });
+    }
+
 
     /// GRAIN COLONY (the Greek Crimea pattern): a large city gripped by a SUSTAINED food
     /// shortage plants a farming colony on the most FERTILE reachable site to secure its
@@ -1593,7 +1719,7 @@ impl CampaignSim {
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
-            estate_kind: 0, estate_tier: 0, mine_depth: 0, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
+            estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: unknown_extent(), is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
@@ -1767,6 +1893,16 @@ impl CampaignSim {
             // lifeline in `update_food_and_starvation`, so no yearly re-sign here.)
             // COLLAPSE: empty reserve + severe sustained starvation → the lifeline failed.
             if self.hubs[h].reserve_food <= 0.0 && self.hubs[h].starving > 0.8 {
+                // DEPOSITS_AND_MINING_PLAN.md D3 · a mining settlement DECLINES
+                // instead — the ore body is still there even when the food
+                // lifeline falters, so the town shrinks toward a floor rather
+                // than being wiped the way an ordinary colony's is.
+                if self.hubs[h].is_mining_settlement {
+                    let floor = self.hubs[h].founding_pop * MINING_SETTLEMENT_FLOOR_FRAC;
+                    self.hubs[h].population = (self.hubs[h].population * MINING_SETTLEMENT_DECLINE_MULT).max(floor);
+                    self.hubs[h].starving = (self.hubs[h].starving * 0.75).max(0.0);
+                    continue;
+                }
                 self.collapse_colony(h);
                 continue;
             }
