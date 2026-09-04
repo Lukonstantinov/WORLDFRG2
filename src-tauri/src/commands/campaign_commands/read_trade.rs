@@ -976,9 +976,56 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         why_barred: sim.diag_why_bar,
     };
 
+    // ── SEASONAL TRADE — the same fold as `goods` above, but kept split by
+    // calendar quarter instead of folded into one annual figure. Sourced from
+    // `trade_last_season` (real per-quarter data) rather than re-deriving from
+    // `trade_last`, which has already summed the quarters away.
+    let mut sg_in: HashMap<(u8, u32), f32> = HashMap::new();
+    let mut sg_out: HashMap<(u8, u32), f32> = HashMap::new();
+    let mut sg_carriers: HashMap<(u8, u32), HashMap<u32, f32>> = HashMap::new();
+    for f in sim.trade_last_season.iter().filter(|f| f.hub == hidx) {
+        let partner = city_of(f.partner);
+        if partner == hidx { continue; }
+        let key = (f.season, f.good);
+        if f.dir == 0 { *sg_in.entry(key).or_insert(0.0) += f.amount; }
+        else { *sg_out.entry(key).or_insert(0.0) += f.amount; }
+        let cg = sg_carriers.entry(key).or_default();
+        for &(who, amt) in &f.carriers { *cg.entry(who).or_insert(0.0) += amt; }
+    }
+    let seasons: Vec<SeasonFlow> = (0u8..4).map(|season| {
+        let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
+        for &(s, g) in sg_in.keys().chain(sg_out.keys()) { if s == season { good_ids.insert(g); } }
+        let mut goods: Vec<SeasonGoodFlow> = good_ids.into_iter().map(|g| {
+            let key = (season, g);
+            let iv = sg_in.get(&key).copied().unwrap_or(0.0);
+            let ov = sg_out.get(&key).copied().unwrap_or(0.0);
+            let total = iv + ov;
+            let mut carriers: Vec<TradeCarrier> = sg_carriers.get(&key).map(|m| m.iter().map(|(&who, &amt)| {
+                let h = if who == u32::MAX { None } else { sim.houses.get(who as usize) };
+                TradeCarrier {
+                    name: h.map(|x| x.name.clone()).unwrap_or_else(|| "local merchants".into()),
+                    is_guild: h.map(|x| x.is_guild).unwrap_or(false),
+                    house: if who == u32::MAX { -1 } else { who as i32 },
+                    amount: amt,
+                    pct: if total > 0.0 { amt / total * 100.0 } else { 0.0 },
+                    color: if who == u32::MAX { RESIDUAL_TINT.into() } else { distinct_color(who as usize) },
+                }
+            }).collect()).unwrap_or_default();
+            carriers.sort_by(|a, b| b.amount.partial_cmp(&a.amount)
+                .unwrap_or(std::cmp::Ordering::Equal).then(a.name.cmp(&b.name)));
+            carriers.truncate(6);
+            SeasonGoodFlow { good: g, in_volume: iv, out_volume: ov, carriers }
+        }).collect();
+        goods.sort_by(|a, b| (b.in_volume + b.out_volume).partial_cmp(&(a.in_volume + a.out_volume))
+            .unwrap_or(std::cmp::Ordering::Equal));
+        SeasonFlow { season, goods }
+    }).collect();
+    let lat_frac = sim.hub_lat_frac(hi);
+
     Ok(Some(TradeFlows {
         hub: id, hub_x, hub_y, goods, routes, partners,
         traders, established, carrier_why, produced_here, consumed_here,
+        seasons, lat_frac,
     }))
 }
 

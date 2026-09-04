@@ -785,6 +785,31 @@ export interface TradeFlows {
    *  units), so trade volume can be read against the city's own capacity. */
   produced_here: number;
   consumed_here: number;
+  /** Seasonal Trade panel · this city's goods split by calendar quarter instead
+   *  of folded into one annual figure. Always 4 entries once real data exists;
+   *  empty on a save from before the season split. */
+  seasons?: SeasonFlow[];
+  /** This hub's approximate latitude as a signed fraction: +1 = north pole,
+   *  0 = equator, −1 = south pole — the same convention the campaign's own
+   *  seasonal-harvest model uses. Used to name/colour the Seasonal Trade
+   *  panel's quarters (temperate four-season vs. tropical monsoon). */
+  lat_frac?: number;
+}
+/** One good's trade at a city within a single calendar quarter — the Seasonal
+ *  Trade panel's per-good row, a slimmed `TradeFlowGood` (no history/avg —
+ *  those are annual concepts, and no own_production — this is about what
+ *  MOVED, not what was made). */
+export interface SeasonGoodFlow {
+  good: number;
+  in_volume: number;
+  out_volume: number;
+  carriers: TradeCarrier[];
+}
+/** One calendar quarter's worth of a city's trade. */
+export interface SeasonFlow {
+  /** 0..3 — Jan-Mar, Apr-Jun, Jul-Sep, Oct-Dec. */
+  season: number;
+  goods: SeasonGoodFlow[];
 }
 /** One estate / manufactory in a settlement's hinterland. */
 export interface EstateRow {

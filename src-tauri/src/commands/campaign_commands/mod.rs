@@ -2969,6 +2969,47 @@ pub struct TradeFlows {
     pub produced_here: f32,
     #[serde(default)]
     pub consumed_here: f32,
+    /// Seasonal Trade panel · this city's own goods, split by calendar quarter
+    /// (`SeasonFlow.season` 0..3) instead of folded into one annual figure.
+    /// Always exactly 4 entries once `trade_last_season` has real data; empty on
+    /// a save from before the season split (`#[serde(default)]`), which the
+    /// panel reads as "not available yet" rather than four empty quarters.
+    #[serde(default)]
+    pub seasons: Vec<SeasonFlow>,
+    /// This hub's approximate latitude, as the SAME signed fraction
+    /// `CampaignSim::hub_lat_frac` already uses for real seasonal harvests:
+    /// +1 = north pole, 0 = equator, −1 = south pole. Served so the frontend can
+    /// name and colour the Seasonal Trade panel's quarters the way this
+    /// hemisphere and latitude band actually name their seasons (a temperate
+    /// four-season year vs. a tropical monsoon cycle) — the naming is display
+    /// logic, so it stays in TypeScript rather than being baked into Rust text.
+    #[serde(default)]
+    pub lat_frac: f32,
+}
+
+/// One good's trade at this city within a single calendar quarter — the
+/// Seasonal Trade panel's per-good row, a slimmed-down `TradeFlowGood`: no
+/// `history`/`avg_volume` (those are annual concepts) and no `own_production`
+/// (the seasonal panel is about what MOVED, not what was made).
+#[derive(Serialize, Clone)]
+pub struct SeasonGoodFlow {
+    pub good: u32,
+    pub in_volume: f32,
+    pub out_volume: f32,
+    /// Who carried it this quarter, largest first — same shape and the same
+    /// cap (6) as `TradeFlowGood::carriers`.
+    #[serde(default)]
+    pub carriers: Vec<TradeCarrier>,
+}
+
+/// One calendar quarter's worth of this city's trade (Seasonal Trade panel).
+#[derive(Serialize, Clone, Default)]
+pub struct SeasonFlow {
+    /// 0..3 — never `SEASON_WHOLE_YEAR`; `campaign_trade_flows` only ever
+    /// builds this from `trade_last_season`, whose entries are always a real
+    /// quarter (see `TradeFlowAgg::season`'s own doc comment).
+    pub season: u8,
+    pub goods: Vec<SeasonGoodFlow>,
 }
 
 /// One labelled money line in the Accountant view (a city's tax/profit, or a

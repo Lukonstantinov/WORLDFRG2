@@ -114,6 +114,41 @@ function unusualness(g: TradeFlowGood): number {
   return (Math.abs(g.out_volume - g.in_volume) / total) * Math.log1p(total);
 }
 
+/** One quarter's display identity for the Seasonal Trade panel — a name, a short
+ *  label, an emoji and a colour. Purely presentational (rule 14: this decides
+ *  what the panel SAYS, never what the sim computes), so the naming logic lives
+ *  here rather than in Rust. */
+type SeasonMeta = { name: string; short: string; emoji: string; color: string; blurb: string };
+
+const TEMPERATE_SEASONS: SeasonMeta[] = [
+  { name: "Winter", short: "Winter", emoji: "❄", color: "#5fa8d8", blurb: "Jan–Mar · the coldest quarter." },
+  { name: "Spring", short: "Spring", emoji: "🌸", color: "#e895c2", blurb: "Apr–Jun · the thaw and the planting." },
+  { name: "Summer", short: "Summer", emoji: "☀", color: "#6fbf6f", blurb: "Jul–Sep · the warmest quarter." },
+  { name: "Fall", short: "Fall", emoji: "🍁", color: "#c67a3a", blurb: "Oct–Dec · the harvest and the cooling." },
+];
+const TROPICAL_SEASONS: SeasonMeta[] = [
+  { name: "The Cool Dry Season", short: "Cool Dry", emoji: "🍃", color: "#b7a06a",
+    blurb: "Jan–Mar · dry cool winds off the north-east, clearest skies of the year, lowest humidity." },
+  { name: "The Hot Dry & Pre-Monsoon Season", short: "Hot Dry", emoji: "🔥", color: "#e0703a",
+    blurb: "Apr–Jun · the sun stands overhead — often the hottest stretch of the whole year." },
+  { name: "The Peak Wet (Monsoon) Season", short: "Monsoon", emoji: "🌧", color: "#2f8f6b",
+    blurb: "Jul–Sep · torrential daily rain, tropical storms, lush green, flooding rivers." },
+  { name: "The Post-Monsoon Transition", short: "Post-Monsoon", emoji: "🌤", color: "#d4b24a",
+    blurb: "Oct–Dec · the rain belt withdraws south, winds swing north-east, weather turns breezy." },
+];
+/** Four quarters' worth of names/colours for this hub, keyed off latitude and
+ *  hemisphere: a tropical monsoon cycle under 30° either side of the equator
+ *  (one system, not mirrored — the real tropics don't reverse), a temperate
+ *  four-season year above it, reversed in the southern hemisphere by a real
+ *  6-month (two-quarter) shift rather than merely relabelled. Array index i
+ *  corresponds to `SeasonFlow.season === i` (0 = Jan–Mar … 3 = Oct–Dec). */
+function seasonMetaFor(latFrac: number | undefined): SeasonMeta[] {
+  const lat = latFrac ?? 0;
+  if (Math.abs(lat) * 90 < 30) return TROPICAL_SEASONS;
+  if (lat >= 0) return TEMPERATE_SEASONS;
+  return [TEMPERATE_SEASONS[2], TEMPERATE_SEASONS[3], TEMPERATE_SEASONS[0], TEMPERATE_SEASONS[1]];
+}
+
 /** A tiny trend sparkline of a good's yearly trade volume. Green when rising into
  *  the last year, red when it has fallen from its peak. */
 function Spark({ vals }: { vals: number[] }) {
@@ -210,6 +245,9 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   // flat list that long is mostly scrolling past nothing) — one click shows
   // every good actually imported or exported, not just the busiest ones.
   const [showAllGoods, setShowAllGoods] = useState(false);
+  // Seasonal Trade folds closed by default — it's a second reading of the same
+  // trade, not the first thing worth seeing.
+  const [seasonalOpen, setSeasonalOpen] = useState(false);
 
   // Fetch on open / when the campaign year ticks over (flows refresh yearly). Track
   // a real loading flag so a resolved-but-empty result ("no trade recorded") is told
@@ -333,6 +371,32 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       namedShare: carrTotal > 0 ? named / carrTotal : 0,
       homeGrown: { producedOut, resoldOut, importedIn },
     };
+  }, [flows]);
+
+  // ── SEASONAL TRADE ──────────────────────────────────────────────────────
+  // The same "what moved" reading as `shape` above, kept split by calendar
+  // quarter instead of folded into one annual figure — four small part-of-a-
+  // whole readings rather than one big one, so the seasonal SWING is what
+  // reads, not the annual total (already shown above).
+  const seasonal = useMemo(() => {
+    if (!flows || !flows.seasons || flows.seasons.length !== 4) return null;
+    const metas = seasonMetaFor(flows.lat_frac);
+    const nameOf = new Map(flows.goods.map((g) => [g.good, g.name]));
+    return [...flows.seasons]
+      .sort((a, b) => a.season - b.season)
+      .map((s) => {
+        const meta = metas[s.season] ?? metas[0];
+        const slices: Slice[] = s.goods
+          .map((g) => {
+            const nm = nameOf.get(g.good) ?? `#${g.good}`;
+            const gm = GOOD_META.get(nm);
+            return { label: gm?.label ?? nm, value: g.in_volume + g.out_volume, color: gm?.color ?? T.inkDim };
+          })
+          .filter((x) => x.value > 0);
+        const inV = s.goods.reduce((a, g) => a + g.in_volume, 0);
+        const outV = s.goods.reduce((a, g) => a + g.out_volume, 0);
+        return { season: s.season, meta, slices, inV, outV, total: inV + outV };
+      });
   }, [flows]);
 
   // Partners, ranked TWICE — once per direction. A city you depend on for grain
@@ -740,6 +804,67 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
               </>
             );
           })()}
+        </Section>
+      )}
+
+      {/* ── Seasonal Trade ────────────────────────────────────────────────────
+          The same "what moved" reading above, folded into ONE annual figure —
+          here it's kept split by calendar quarter, so a city whose exports
+          are really a single autumn harvest surge (or a monsoon-season spice
+          rush) reads as that, not as a flat yearly average. Folds closed by
+          default: a second reading of the same trade, not the first thing
+          worth seeing. Four small cards rather than one big section, so all
+          four quarters compare at a glance. */}
+      {seasonal && seasonal.some((s) => s.total > 0) && (
+        <Section
+          title="Seasonal Trade"
+          right={<Chip on={seasonalOpen} onClick={() => setSeasonalOpen((v) => !v)}>{seasonalOpen ? "hide" : "show"}</Chip>}
+        >
+          {seasonalOpen ? (
+            <>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: SPACE.md }}>
+                {seasonal.map((s) => (
+                  <Card key={s.season} style={{ borderColor: `${s.meta.color}55` }}>
+                    <div style={{ display: "flex", alignItems: "baseline", gap: 5, marginBottom: SPACE.sm }}>
+                      <span style={{ fontSize: FZ.base }}>{s.meta.emoji}</span>
+                      <span style={{ color: s.meta.color, fontWeight: 700, fontSize: FZ.body, fontFamily: SERIF }}>
+                        {s.meta.short}
+                      </span>
+                      <span style={{ flex: 1 }} />
+                      <span style={{ color: T.inkMid, fontSize: FZ.tiny, fontVariantNumeric: "tabular-nums" }}>
+                        {fmt(s.total)}
+                      </span>
+                    </div>
+                    {s.slices.length > 0 ? (
+                      <div style={{ display: "flex", gap: SPACE.sm, alignItems: "center" }}>
+                        <Donut slices={s.slices} size={72} center={fmt(s.total)} sub="" />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <DonutKey slices={s.slices.slice(0, 4)} fmt={fmt} />
+                          <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm, marginTop: 4 }}>
+                            <span style={{ color: DIR_IN, fontSize: FZ.micro }}>◀</span>
+                            <BalanceBar inV={s.inV} outV={s.outV} max={Math.max(s.inV + s.outV, 1e-6)} />
+                            <span style={{ color: DIR_OUT, fontSize: FZ.micro }}>▶</span>
+                          </div>
+                        </div>
+                      </div>
+                    ) : (
+                      <div style={{ color: T.inkFaint, fontSize: FZ.tiny }}>nothing traded this quarter</div>
+                    )}
+                    <div style={{ color: T.inkFaint, fontSize: FZ.micro, marginTop: SPACE.sm }}>{s.meta.blurb}</div>
+                  </Card>
+                ))}
+              </div>
+              <FootNote>
+                {Math.abs(flows.lat_frac ?? 0) * 90 < 30
+                  ? "This settlement sits within 30° of the equator, so its year runs on the tropical monsoon cycle rather than four temperate seasons."
+                  : (flows.lat_frac ?? 0) >= 0
+                    ? "Northern hemisphere seasons — winter, spring, summer, fall in calendar order."
+                    : "Southern hemisphere seasons — the same cycle as the north, shifted half a year."}
+              </FootNote>
+            </>
+          ) : (
+            <EmptyNote>Click &quot;show&quot; to see this city&apos;s trade split by season.</EmptyNote>
+          )}
         </Section>
       )}
 
