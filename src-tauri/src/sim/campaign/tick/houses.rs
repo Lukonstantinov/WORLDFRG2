@@ -1073,6 +1073,86 @@ impl CampaignSim {
         }
     }
 
+    /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 5 — found a ROUTE post where a real
+    /// trade gap exists, rather than where resources are richest
+    /// (`try_found_house_outpost`'s job). At most one per call, same discipline as
+    /// the outpost founder: richest qualifying house first.
+    pub(crate) fn maybe_found_route_post(&mut self) {
+        if self.colonizable.is_empty() || self.hubs.is_empty() { return; }
+        let n = self.hubs.len();
+        if self.days.len() != n * n || self.route_outlet.len() != n * n { return; }
+        if self.hubs.iter().filter(|h| h.colony_kind == 4 && !h.abandoned).count() >= MAX_ROUTE_POSTS {
+            return;
+        }
+        // The single longest same-component real-hub gap with no friendly outlet
+        // already serving it — "the longest gap without a friendly port" (§5 slice
+        // 5), read straight off the days matrix and the entrepôt composition §6d
+        // already maintains, rather than scored by resource richness.
+        let real: Vec<usize> = (0..n).filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned).collect();
+        let mut best: (usize, usize, f32) = (usize::MAX, usize::MAX, 0.0);
+        for &a in &real {
+            for &b in &real {
+                if b <= a || self.hubs[a].component != self.hubs[b].component { continue; }
+                let d = self.days[a * n + b];
+                if !d.is_finite() || d < ROUTE_POST_MIN_GAP_DAYS { continue; }
+                if self.route_outlet.get(a * n + b).copied().unwrap_or(-1) >= 0 { continue; }
+                if d > best.2 { best = (a, b, d); }
+            }
+        }
+        let (ga, gb) = (best.0, best.1);
+        if ga == usize::MAX { return; }
+        // Cylindrical midpoint (X wraps).
+        let mut dx = self.hubs[gb].x - self.hubs[ga].x;
+        if self.world_w > 1.0 {
+            if dx > self.world_w * 0.5 { dx -= self.world_w; }
+            if dx < -self.world_w * 0.5 { dx += self.world_w; }
+        }
+        let mut mx = self.hubs[ga].x + dx * 0.5;
+        if self.world_w > 1.0 {
+            mx = ((mx % self.world_w) + self.world_w) % self.world_w;
+        }
+        let my = (self.hubs[ga].y + self.hubs[gb].y) * 0.5;
+
+        // Founder: the richest house that clears the same bar an outpost does.
+        let mut candidates: Vec<(usize, f32)> = self.houses.iter().enumerate()
+            .filter(|(_, hh)| !hh.defunct && hh.wealth > OUTPOST_FOUND_WEALTH)
+            .map(|(hi, hh)| (hi, hh.wealth))
+            .collect();
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let Some(&(hi, _)) = candidates.first() else { return };
+        if self.houses[hi].wealth < OUTPOST_FOUND_COST { return; }
+
+        // Nearest colonizable site to the gap's midpoint this house has surveyed
+        // (same survey gate `try_found_house_outpost` already applies).
+        let nodes = [(mx, my)];
+        let mut bi = (usize::MAX, f32::MAX);
+        for (i, s) in self.colonizable.iter().enumerate() {
+            if !self.house_knows(hi, s.province) { continue; }
+            let d = self.nearest_node_dist(&nodes, s.x, s.y);
+            if d < bi.1 { bi = (i, d); }
+        }
+        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
+        let site = self.colonizable.swap_remove(si);
+
+        self.houses[hi].wealth -= OUTPOST_FOUND_COST;
+        // Fully house-funded, same as a resource outpost — no city/bank required.
+        let backers = vec![(1u8, hi as u32, 1.0f32)];
+        let home = self.houses[hi].hub as usize;
+        let new = self.create_market_colony(home, &site, backers, ROUTE_POST_SEED_POP);
+        self.hubs[new].colony_kind = 4;
+        self.hubs[new].owner_house = hi as i32;
+        self.hubs[new].name = format!("{} (post)",
+            self.hubs[new].name.replace(" (colony)", ""));
+        let (hn, ga_n, gb_n, cn) = (self.houses[hi].name.clone(),
+            self.hubs[ga].name.clone(), self.hubs[gb].name.clone(), self.hubs[new].name.clone());
+        self.houses[hi].events.push(HouseEvent { tick: self.tick, kind: "colony".into(),
+            text: format!("founds the waystation {} on the {}–{} road", cn, ga_n, gb_n) });
+        self.journal.push(JournalEntry {
+            tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
+            text: format!("{} plants the trade post {} to shorten the {}–{} run", hn, cn, ga_n, gb_n),
+        });
+    }
+
     /// Per-good total per-capita output across every hub — the cheap proxy the
     /// outpost path uses to judge a good "unexploited" (no city has a real industry
     /// in it yet). Includes estates: an estate already working a good means the

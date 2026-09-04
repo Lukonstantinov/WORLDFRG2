@@ -881,6 +881,27 @@ const OUTPOST_INPUT_BIAS: f32 = 1.0;
 const OUTPOST_GRADUATE_YEARS: u32 = 30;
 /// …and its owning house must be at least this rich to make the investment.
 const OUTPOST_GRADUATE_WEALTH: f32 = 60_000.0;
+// ── Route posts (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 5) — colony_kind = 4.
+//    Unlike a resource outpost (colony_kind = 2, an estate) a route post is a REAL
+//    hub from birth (`is_estate = false`, via `create_market_colony`) sited where a
+//    trade GAP exists rather than where resources are richest. Deliberately the
+//    widest-blast-radius piece of the plan (§7 R3): capped hard, gated on the same
+//    wealth bar an outpost clears, and — unlike an outpost — subject to the SAME
+//    lifecycle/abandonment a real settlement already has, so a post whose lane goes
+//    quiet declines like any other town rather than needing its own decay code.
+const ROUTE_POST_START_TICK: u32 = OUTPOST_START_TICK;
+/// A lane shorter than this (travel-days) has no real "gap" to fill — a route post
+/// exists to shorten an otherwise-teleported long haul, not to sit beside a town its
+/// neighbour already reaches in a week.
+const ROUTE_POST_MIN_GAP_DAYS: f32 = 25.0;
+/// At most this many route posts may exist at once — a hard ceiling independent of
+/// `MAX_TOTAL_ESTATES` (route posts are not estates), so the mechanism cannot pave
+/// the map with waystations even on a world with many long, busy lanes.
+const MAX_ROUTE_POSTS: usize = 10;
+/// A tiny waypoint, not a town — Cape Town's own founding character (§3, "under
+/// explicit orders not to become a colony"). It grows from real traffic afterward
+/// (ordinary settlement demographics, unchanged) or it stays a hamlet forever.
+const ROUTE_POST_SEED_POP: f32 = 60.0;
 // ── Trade bases (houses develop EXISTING under-traded small cities).
 //    The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──

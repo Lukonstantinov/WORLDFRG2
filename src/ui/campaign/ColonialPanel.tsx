@@ -83,10 +83,11 @@ export function ColonialPanel() {
   const stats = useMemo(() => {
     const settle = colonies.filter((c) => c.colony_kind === 1);
     const outposts = colonies.filter((c) => c.colony_kind === 2);
+    const posts = colonies.filter((c) => c.colony_kind === 4);
     const autonomous = settle.filter((c) => c.autonomous).length;
     const stressed = settle.filter((c) => reserveFrac(c) < 0.4 && !c.autonomous).length;
     const metros = new Set(settle.map((c) => c.founder_hub)).size;
-    return { settle: settle.length, outposts: outposts.length, autonomous, stressed, metros };
+    return { settle: settle.length, outposts: outposts.length, posts: posts.length, autonomous, stressed, metros };
   }, [colonies]);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(COLONIAL_TINT);
@@ -111,6 +112,7 @@ export function ColonialPanel() {
           <div style={statRow}>
             <Stat n={stats.settle} l="colonies" />
             <Stat n={stats.outposts} l="outposts" />
+            <Stat n={stats.posts} l="trade posts" />
             <Stat n={stats.autonomous} l="autonomous" />
             <Stat n={stats.stressed} l="⚠ food-short" warn={stats.stressed > 0} />
             <Stat n={stats.metros} l="metropoleis" />
@@ -246,14 +248,20 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
   const outpost = c.colony_kind === 2;
   const satellite = c.colony_kind === 3;
   const settlementColony = c.colony_kind === 1;
+  // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 5 — a route post is a REAL hub
+  // (unlike a resource outpost's estate marker), but still house-owned, so it
+  // gets its own square mark rather than falling through to the generic
+  // settlement-colony violet dot.
+  const routePost = c.colony_kind === 4;
   const frac = reserveFrac(c);
-  const stage = c.autonomous ? "Autonomous" : outpost ? "Outpost" : satellite ? "Satellite" : (STAGE[c.colony_stage] || "Colony");
+  const stage = c.autonomous ? "Autonomous" : outpost ? "Outpost" : routePost ? "Trade post"
+    : satellite ? "Satellite" : (STAGE[c.colony_stage] || "Colony");
   return (
     <div onClick={onClick} style={{ ...rowS, ...(selected ? rowSel : {}) }}>
       <span style={{
-        width: 10, height: 10, borderRadius: outpost ? 2 : "50%", flex: "0 0 auto", marginTop: 3,
-        background: outpost ? "#0a0a0a" : satellite ? "#e0503a" : COLONY_VIOLET,
-        border: outpost ? `2px solid ${c.owner_color || OUTPOST_TAN}` : "none",
+        width: 10, height: 10, borderRadius: (outpost || routePost) ? 2 : "50%", flex: "0 0 auto", marginTop: 3,
+        background: outpost ? "#0a0a0a" : routePost ? "#c9973f" : satellite ? "#e0503a" : COLONY_VIOLET,
+        border: (outpost || routePost) ? `2px solid ${c.owner_color || OUTPOST_TAN}` : "none",
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -261,7 +269,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
           <span style={badge(c.autonomous)}>{stage}</span>
         </div>
         <div style={{ fontSize: 10, color: "#7a90a8" }}>
-          {outpost
+          {(outpost || routePost)
             ? `${c.owner_house_name} · pop ${fmtPop(c.population)}`
             : `pop ${fmtPop(c.population)}${c.coin_name ? ` · ${c.coin_name}` : ""}${c.charter_open ? " · charter ✔" : ""}`}
         </div>

@@ -1604,8 +1604,9 @@ fn colony_summary(sim: &CampaignSim, hi: usize) -> ColonySummary {
         3 => { let a = (sim.tick.saturating_sub(hub.colony_founded_tick) / 365) as u32; (a, 40i32 - a as i32) }
         _ => (0, 0),
     };
-    // House outpost owner (kind 2): the owning house, coloured like the Houses panel.
-    let (owner_house_name, owner_color) = if hub.colony_kind == 2 && hub.owner_house >= 0 {
+    // House outpost owner (kind 2 resource / kind 4 route post): the owning house,
+    // coloured like the Houses panel.
+    let (owner_house_name, owner_color) = if (hub.colony_kind == 2 || hub.colony_kind == 4) && hub.owner_house >= 0 {
         let oh = hub.owner_house as usize;
         (sim.houses.get(oh).map(|h| h.name.clone()).unwrap_or_default(), distinct_color(oh))
     } else {
