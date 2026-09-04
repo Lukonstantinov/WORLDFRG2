@@ -637,15 +637,24 @@ impl CampaignSim {
                     by_inputs = by_inputs.min(avail / qty);
                 }
                 if !by_inputs.is_finite() || by_inputs <= 0.0 { continue; }
-                let made = by_inputs.min(labor_cap);
+                // S3 · the same price nudge the raw extraction pass carries — a
+                // no-op at PROD_ELASTICITY = 0.0.
+                let price_mult = production_price_mult(
+                    self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value),
+                    self.goods[g].base_value);
+                let made = by_inputs.min(labor_cap) * price_mult;
                 if made <= 0.0 { continue; }
                 // Clone inputs to avoid borrow conflict while mutating stock.
                 let inputs = self.goods[g].inputs.clone();
+                if self.hubs[h].demand_accum.len() != ng * DEMAND_CLASSES {
+                    self.hubs[h].demand_accum.resize(ng * DEMAND_CLASSES, 0.0);
+                }
                 for (idx, qty) in inputs {
                     if idx >= ng { continue; }
                     let mut need = made * qty;
                     let take = stock_of(&self.hubs[h].stock, idx).min(need);
                     stock_take(&mut self.hubs[h].stock, idx, take);
+                    demand_add(&mut self.hubs[h].demand_accum, idx, DEMAND_MANUFACTORY, take); // S6
                     need -= take;
                     if need > 0.0 {
                         if let Some(sl) = subs.get(&idx) {
@@ -653,6 +662,7 @@ impl CampaignSim {
                                 if need <= 0.0 { break; }
                                 let t = stock_of(&self.hubs[h].stock, s).min(need);
                                 stock_take(&mut self.hubs[h].stock, s, t);
+                                demand_add(&mut self.hubs[h].demand_accum, s, DEMAND_MANUFACTORY, t); // S6
                                 need -= t;
                             }
                         }
@@ -743,9 +753,29 @@ impl CampaignSim {
                 foreign_lux = 1.0 + tier_gain * prestige;
             }
         }
+        // S1 (CONSUMPTION_REBUILD_PLAN.md) · THE DEMAND TABLE IS A BUDGET
+        // SHARE, NOT A QUANTITY. `TIER_WEIGHT[tier] * desire` used to be the
+        // raw QUANTITY a head consumed per day, with `base_value` applied only
+        // afterwards to price it — which makes a good's share of spend RISE
+        // with its price, backwards, and is the traced cause of the measured
+        // absurdity in `docs/CONSUMPTION_AND_GOODS_REVIEW.md`: food & drink at
+        // 12.4% of a city's consumption spend against a historical 60-80%, and
+        // a city spending 13.2x more on gemstones than on wheat.
+        //
+        // The same two numbers now name a BUDGET SHARE, and dividing by price
+        // gives the quantity — constant-share (Cobb-Douglas) demand, the
+        // standard model and the one Allen's basket work assumes. The divisor
+        // is `base_value`, the good's INTRINSIC worth, never the live price —
+        // dividing by a live price would make demand perfectly price-elastic
+        // in aggregate and duplicate N6's `elastic_aggregate_mult`, which is
+        // deliberately applied OUTSIDE this function, to the category
+        // aggregate only. Gate:
+        // `econ_expenditure_shares_resemble_a_household`.
+        let value = tg.base_value.max(BUDGET_VALUE_FLOOR);
         self.hubs[h].population
             * TIER_WEIGHT[tg.need_tier.min(2) as usize]
             * tg.desire.max(0.0)
+            / value
             * cadence
             * foreign_lux
             * self.society_demand_mult(h, tg.need_tier)

@@ -616,7 +616,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -770,7 +770,7 @@ impl CampaignSim {
         }
         let Some(mut g0) = (bestg.0 != usize::MAX).then_some(bestg.0) else { return };
         let mut eff_percap = bestg.2;
-        let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
+        let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food, self.goods[g0].distribution);
         // A fishery needs a coast; inland, fall back to the strongest food good (a farm).
         if kind == 4 && !self.hubs[parent].coastal {
             let mut bf = (g0, 0.0f32);
@@ -933,7 +933,7 @@ impl CampaignSim {
                     if score > bg.1 { bg = (g, score); }
                 }
                 if bg.0 == usize::MAX { continue; }
-                let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food);
+                let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food, self.goods[bg.0].distribution);
                 (bg.0, k, self.hubs[target].base_per_capita.get(bg.0).copied().unwrap_or(0.05).max(0.05) * 1.5)
             };
             // A fishery needs a coast; inland fall back to a farm of the city's good.
@@ -1276,7 +1276,7 @@ impl CampaignSim {
         // but bias hard toward a SCARCE manufacturing input the site can yield.
         let (mut g0, mut gbest) = (usize::MAX, 0.0f32);
         for g in 0..ng {
-            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food) == self.colonizable[si].kind_hint {
+            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food, self.goods[g].distribution) == self.colonizable[si].kind_hint {
                 let mut s = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
                 if short_input(g, self) { s += OUTPOST_INPUT_BIAS; } // resource-colony pull
                 if s > gbest { gbest = s; g0 = g; }
@@ -1300,7 +1300,7 @@ impl CampaignSim {
         let cost = OUTPOST_FOUND_COST;
         if self.houses[hi].wealth < cost { return false; }
         let site = self.colonizable.swap_remove(si);
-        let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food);
+        let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food, self.goods[g0].distribution);
         let founder_max_pc = self.hubs[home].base_per_capita.iter().cloned().fold(0.0f32, f32::max).max(0.1);
         let percap = founder_max_pc * (0.4 + site.fertility);
         let est_pop = OUTPOST_MAX_POP; // a small trade post (hard-capped, never grows into a city)
@@ -2771,6 +2771,7 @@ impl CampaignSim {
             // Phase G: wealth bleeds (upkeep + consumption) so it plateaus and some
             // flows to the people — runs right after interest so it offsets it.
             self.apply_wealth_sinks();
+            self.household_income_pass(); // S7, dosed from zero
             self.pay_to_regain_markets();
             self.recompute_monopolies_and_power();
             // Phase 1.1 · reads political_power/monopoly/dominant_seat just refreshed

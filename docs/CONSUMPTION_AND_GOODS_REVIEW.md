@@ -1,8 +1,10 @@
 # Consumption, goods quantity and the warehouse glut — a measured review
 
-**Status: ANALYSIS ONLY. Nothing here is implemented.** One test-only diagnostic
-was added (`econ_measure_goods_stock_and_price`) because the central claims are
-worth nothing unless measured. No production code was changed.
+**Status: the measurements here are what motivated `docs/CONSUMPTION_REBUILD_
+PLAN.md`, whose slices are now BUILT** (S1/S2/S4/S6/S8-backend live; S3/S5/S7
+built and wired but dosed to a verified-zero no-op — see that plan's own
+status line for the gates). This document is left as the original measured
+analysis and is not rewritten as each slice lands.
 
 This answers a set of questions put to it directly: are any goods' quantities
 right; why do heavy luxuries like gemstones move in bulk; why are warehouses

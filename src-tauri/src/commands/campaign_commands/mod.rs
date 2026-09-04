@@ -415,10 +415,15 @@ pub struct HubGoodDetail {
     /// only the City Warehouse panel ever read it. The market view's "supplied by"
     /// column is the same figure — no new state, no new pass.
     ///
-    /// Note this is the SELLER side. There is no matching buyer attribution: arriving
-    /// cargo lands in one undifferentiated pool that `council_provision_pass`,
-    /// `sync_and_stock_warehouses` and daily consumption all draw from, so "who bought
-    /// this cargo" would need new state — see `docs/TRADE_AND_MARKET_REVIEW.md`.
+    /// The BUYER side (S6, CONSUMPTION_REBUILD_PLAN.md) — `[manufactory, council,
+    /// household]` shares summing to 1 (or all zero when nothing was bought),
+    /// read from the hub's decaying `demand_accum`. Household consumption is
+    /// deliberately never written to this ledger — `eat = need.min(stock)` has
+    /// no counterparty to book — so its share is always 0.0, which is the
+    /// honest reading rather than an invented one: `docs/CONSUMPTION_AND_
+    /// GOODS_REVIEW.md`'s own finding is that most of a city's consumption has
+    /// no identifiable buyer at all.
+    #[serde(default)] pub demand_shares: [f32; 3],
     #[serde(default)] pub supply_shares: [f32; 5],
     /// YARDS_VESSELS_AND_DEPOTS_PLAN.md W1 — the store beside the stall: this
     /// good's total stock sitting in every house/guild depot at this hub

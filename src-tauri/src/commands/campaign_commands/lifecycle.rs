@@ -372,6 +372,18 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 inputs,
                 labor: spec.map(|s| s.labor).filter(|v| *v > 0.0).unwrap_or(1.0),
                 consumption_interval: spec.map(|s| s.consumption_interval).filter(|v| *v > 0.0).unwrap_or(30.0),
+                // S4 (CONSUMPTION_REBUILD_PLAN.md) · the real world-side placement
+                // model, not a name guess. A good with no spec (shouldn't happen —
+                // every column has one — but never trust an index blindly) degrades
+                // to DIST_UNKNOWN, which keeps `estate_kind_for_good`'s old
+                // substring-only cascade as the fallback.
+                distribution: spec.map(|s| match s.distribution {
+                    crate::sim::goods_spec::Distribution::Global => crate::sim::tick::DIST_GLOBAL,
+                    crate::sim::goods_spec::Distribution::Local => crate::sim::tick::DIST_LOCAL,
+                    crate::sim::goods_spec::Distribution::Deposits => crate::sim::tick::DIST_DEPOSITS,
+                    crate::sim::goods_spec::Distribution::Endemic => crate::sim::tick::DIST_ENDEMIC,
+                    crate::sim::goods_spec::Distribution::Manufactured => crate::sim::tick::DIST_MANUFACTURED,
+                }).unwrap_or(crate::sim::tick::DIST_UNKNOWN),
             }
         })
         .collect();
@@ -615,7 +627,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tier: 0,
                 standing: 0.0,
                 war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-                wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+                wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
             }
         })
         .collect();
@@ -703,9 +715,17 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     let total_pop: f32 = hubs.iter().map(|h| h.population).sum::<f32>().max(1.0);
     let total_prod: f32 = hubs.iter().flat_map(|h| h.production.iter()).sum::<f32>().max(1e-3);
     let tier_w = [1.0f32, 0.45, 0.22];
+    // S1 (CONSUMPTION_REBUILD_PLAN.md) · `base_need` now divides by `base_value`
+    // — the demand table names a BUDGET SHARE, not a raw quantity — so this
+    // calibration sum must carry the same division or day one starts at the
+    // wrong absolute level (a mismatch this plan's own doc calls "easy to miss
+    // and impossible to see"). `BUDGET_VALUE_FLOOR` matches `base_need`'s own
+    // floor exactly, for the same reason: never let a zero/negative-valued good
+    // produce an infinite ration.
     let sum_tw_desire: f32 = goods
         .iter()
-        .map(|g| tier_w[g.need_tier.min(2) as usize] * g.desire.max(0.0))
+        .map(|g| tier_w[g.need_tier.min(2) as usize] * g.desire.max(0.0)
+            / g.base_value.max(crate::sim::tick::BUDGET_VALUE_FLOOR))
         .sum::<f32>()
         .max(1e-3);
     let need_scale = total_prod / (total_pop * sum_tw_desire);

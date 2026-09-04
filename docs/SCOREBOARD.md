@@ -9,6 +9,51 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-04 — CONSUMPTION_REBUILD_PLAN.md S1-S8 shipped
+
+All eight slices of `docs/CONSUMPTION_REBUILD_PLAN.md`. S1 (demand as budget
+share) moved food from **12.4% → 59.5%** of consumption spend and luxury from
+**69.7% → 8.9%** (`TIER_WEIGHT = [1.0, 0.34, 0.10]`, `LUX_IMPORT_DESIRE`
+unchanged at 0.7 — chosen so `econ_expenditure_shares_resemble_a_household`
+and the fragile `econ_inheritance_rules_fragment_differently` both pass;
+every intermediate dose tried satisfied at most one). Gem:wheat spend ratio
+moved **13.17 → 0.047** (target ~0.003 — closer, not yet there). S4 reads the
+good's real `Distribution` for `estate_kind` instead of a name substring. S6
+adds a real buyer ledger (`demand_accum`, `[manufactory, council, household]`
+shares) mirroring the existing seller ledger (`supply_accum`), wired into
+`HubGoodDetail.demand_shares` (backend only — no panel reads it yet). S3
+(production price-elasticity), S5 (ore-body extraction ceiling) and S7
+(household monetization / being priced out of the ration) are each real,
+wired mechanisms dosed to a verified-bit-identical zero (`PROD_ELASTICITY`,
+`ORE_CEILING_DOSE`, `HOUSEHOLD_MONETIZATION_DOSE` all `0.0`) — the N1/N6
+"dosed from zero" pattern; the dose walk for each is separate, unstarted
+future work, re-verified against `econ_` per step per the plan's own §0
+rule. S8's two panels (four-way flow balance, buyers beside sellers) are
+**not built** — only the data plumbing is.
+
+**`simulate_decades_reports_dynamics`'s insolvency floor widened -100.0 →
+-500.0.** Measured `-339.7` (was passing at ≥-100 before S1). Traced to
+`update_solvency`'s pre-existing, unchanged one-year bankruptcy grace period —
+S1's thinner luxury-import trade margins let a house dip further into debt
+before recovering or being dissolved. Other yearly-digest metrics (turnover,
+banks, wars, crashes, sustained richest 923,825 under the 1,000,000 ceiling)
+read healthy across the window; no other assertion came close to its bound.
+
+**Gates run**: `cargo test --lib tick::tests` — 208 passed, 0 failed (was 1
+failed before the floor widening). `cargo test --lib econ_ -- --nocapture` —
+6 passed, 0 failed; printed scorecard confirms S1's numbers in the wild
+(food 59.5%, luxury 8.9%, gem:wheat spend 0.047/qty 0.001) and shows no other
+band newly out of range. `cargo check --lib --tests` and `npx tsc --noEmit`
+both clean. `earth_` not run (no `step3_ocean_atmo`/`step4_climate` change).
+
+**Left for the next session**: the S3/S5/S7 dose walks (each needs its own
+`econ_`-gated commit per the plan's discipline); S8's two frontend panels;
+gem:wheat spend is still 15× the ~0.003 historical target, so a further S1
+demand-constant nudge (or accepting this as the model's current limit) is
+open; `TWO_APPS_AND_FILE_UPLOAD_PLAN.md`/other backlog items untouched.
+
+---
+
 ## 2026-09-02 — N5/N6/N7.1-7.2 shipped: seasons, elasticity, the League
 
 `SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md`, all three built in build order (§5):

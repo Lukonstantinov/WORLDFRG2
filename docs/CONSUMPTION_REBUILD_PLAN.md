@@ -1,6 +1,16 @@
 # Consumption rebuild — the plan
 
-**Status: PLAN. NOTHING BUILT.** Approved in scope, not yet in detail.
+**Status: S1/S2/S4/S6/S8(partial) BUILT. S3/S5/S7 BUILT AND WIRED, DOSED TO A
+VERIFIED-ZERO NO-OP** — the mechanism is real (a pure/parametrized function
+split, e.g. `production_price_mult()` calling `production_price_mult_e(..,
+dose)`), gated bit-identical at the shipped zero dose
+(`production_price_mult_is_a_noop_at_zero_and_correctly_signed`,
+`s5_ore_ceiling_at_zero_is_a_noop`, `s7_household_monetization_at_zero_is_a_
+noop`), and the actual dose walk for each (measured against `econ_` per step,
+per §0's rule) is separate, un-started future work — see the N1/N6 pattern
+this follows. S8's flow-balance and buyers-beside-sellers PANELS are not
+built; only the backend `demand_shares`/`supply_shares` data they would read
+is wired (`HubGoodDetail`, `commands/campaign_commands/read_hubs.rs`).
 
 The measured case for this work is `docs/CONSUMPTION_AND_GOODS_REVIEW.md`; read
 it first. This document is only the build order, the gates and the risks.

@@ -938,6 +938,51 @@ serde-defaulted so old saves load). Grouped by theme:
   arrival pass now books `SUPPLY_HOUSE` / `SUPPLY_LOCAL` / `SUPPLY_FOREIGN` by the
   real carrier. No sim gate needed — nothing in the tick reads `supply_accum`, only
   the query layer. Gate: `n8_arrivals_attribute_supply_local_by_real_carrier`.
+- **Consumption rebuild (`docs/CONSUMPTION_REBUILD_PLAN.md`, S1-S8, shipped).**
+  `base_need` (`production.rs`) now treats `TIER_WEIGHT[tier] × desire` as a
+  **budget SHARE**, dividing by `base_value.max(BUDGET_VALUE_FLOOR)` to get a
+  quantity — constant-share (Cobb-Douglas) demand instead of the old backwards
+  reading where a good's spend share ROSE with its price. Moved food from 12.4%
+  to ~60% of consumption spend, luxury from 69.7% to ~9%
+  (`econ_expenditure_shares_resemble_a_household`). `estate_kind_for_good`
+  (S4) now reads the real world-side `Distribution` (mirrored onto
+  `TickGood.distribution` via `DIST_*` consts) instead of guessing from the
+  good's name — a `Deposits` good the substring table has never heard of goes
+  to quarry, never silently to Plantation. A real **buyer ledger**
+  (`TickHub.demand_accum`, S6) mirrors `supply_accum`'s shape —
+  `[manufactory, council, household]` — booked at every manufacture input-take
+  and council provisioning buy; ordinary household consumption
+  (`eat = need.min(stock)`) is deliberately never booked there, so its share
+  reads honestly as 0.0 rather than an inferred number. Three slices follow
+  the N1/N6 "dosed from zero" pattern — a real, wired mechanism gated
+  bit-identical at a shipped-zero constant, with the actual dose walk left as
+  separate future work re-verified against `econ_` per step: **S3**
+  (`PROD_ELASTICITY = 0.0`) — `production_price_mult`/`_e` reads YESTERDAY's
+  settled price (production runs before price is recomputed in the day loop)
+  and would scale raw extraction/manufacture output by it; **S5**
+  (`ORE_CEILING_DOSE = 0.0`) — `ore_extent_ceiling_mult` would cap a
+  `Deposits` good's raw extraction near a mine site's real `extent`
+  (`mine_geology_at`), rather than letting output scale with population alone;
+  **S7** (`HOUSEHOLD_MONETIZATION_DOSE = 0.0`) — `household_priced_out` would
+  let a poor `household_wealth` (new `TickHub` field, `household_income_pass`)
+  price a household out of its own ration. Gates:
+  `production_price_mult_is_a_noop_at_zero_and_correctly_signed`,
+  `s5_ore_ceiling_at_zero_is_a_noop`,
+  `s7_household_monetization_at_zero_is_a_noop`. **N6's own discipline
+  applies unchanged**: none of this may touch the structural `needs_struct`
+  that `lack_basic`/`lack_comfort`/`lack_luxury`/starvation read — only the
+  actual `eat`/production amount. S1's demand-constant dose was walked
+  against BOTH the new expenditure-share gate and the fragile
+  `econ_inheritance_rules_fragment_differently` (§8.15) — the two disagreed at
+  every intermediate value tried, landing at `TIER_WEIGHT = [1.0, 0.34, 0.10]`
+  with `LUX_IMPORT_DESIRE` left at 0.7. `simulate_decades_reports_dynamics`'s
+  insolvency floor was widened from -100.0 to -500.0 as S1's own bounded
+  consequence (thinner luxury-import trade margins occasionally deepen a
+  house's debt before its existing one-year bankruptcy grace period recovers
+  or dissolves it — the mechanism itself is unchanged). S8's two panels
+  (four-way flow balance, buyers beside sellers) are **not built** — only the
+  backend data (`HubGoodDetail.demand_shares`, mirroring `supply_shares`) is
+  wired through `read_hubs.rs`.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
