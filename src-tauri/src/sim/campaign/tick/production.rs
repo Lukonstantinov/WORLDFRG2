@@ -289,8 +289,18 @@ impl CampaignSim {
         // local market; a homogeneous backwater simply trades among itself.
         let mut by_comp: std::collections::HashMap<u32, Vec<usize>> = std::collections::HashMap::new();
         for &a in &real { by_comp.entry(self.hubs[a].component).or_default().push(a); }
+        // DETERMINISM: HashMap iteration order is randomized per process (a fresh
+        // hasher key each run), so walking `by_comp.values()` directly would build
+        // `markets` in a different cross-component order every run. That order only
+        // matters on a DISTANCE TIE below (`cand.sort_by` is stable, so a tie breaks
+        // on `cand`'s build order, which comes from `markets`) — but a tie is common
+        // on a regular grid, and which market wins reshapes the whole route-days
+        // matrix from campaign start onward. Sort by component id first.
+        let mut comp_ids: Vec<u32> = by_comp.keys().copied().collect();
+        comp_ids.sort_unstable();
         let mut markets: Vec<usize> = Vec::new();
-        for hubs_in in by_comp.values() {
+        for comp in comp_ids {
+            let hubs_in = &by_comp[&comp];
             let mut v = hubs_in.clone();
             v.sort_by(|&x, &y| self.hubs[y].population.partial_cmp(&self.hubs[x].population)
                 .unwrap_or(std::cmp::Ordering::Equal));
