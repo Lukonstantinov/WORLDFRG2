@@ -369,6 +369,14 @@ const COLONY_FOUND_COST: f32 = 14.0;
 const COLONY_PARENT_MIN_POP: f32 = 5_000.0;
 /// Hard ceiling on live settlement colonies (route-matrix is O(hubs²)).
 const MAX_SETTLEMENT_COLONIES: usize = 24;
+/// DEPOSITS_AND_MINING_PLAN.md slice 5 · hard ceiling on mining settlements
+/// (the Potosí class) — a genuinely rare founding (only a GREAT/WORLD_CLASS
+/// body qualifies), small on purpose: there were only ever a handful of these
+/// in a given era, not one per city.
+pub(crate) const MAX_MINING_SETTLEMENTS: usize = 8;
+/// Same shape as `COLONY_MAX_KM` — a mining venture is still a bold reach, not
+/// a trip to the far side of the world.
+const MINING_SETTLEMENT_MAX_KM: f32 = 2500.0;
 /// Fraction of the parent's population that emigrates to seed a settlement colony.
 const COLONY_MIGRATION_FRAC: f32 = 0.06;
 // ── Colony food LIFELINE: dedicated supply ships on the grain run ──────────────────
@@ -569,6 +577,19 @@ const URBAN_CROWDING_MORTALITY: f32 = 0.012;
 const URBAN_CROWD_FLOOR: f32 = 25_000.0;
 /// Young settlement colonies grow this much faster organically (frontier boom).
 const POP_GROWTH_COLONY_MULT: f32 = 2.2;
+/// DEPOSITS_AND_MINING_PLAN.md slice 5 (the Potosí case) · a mining settlement
+/// booms harder than an ordinary frontier colony while its ore is flowing — a
+/// silver strike draws people the way no ordinary farmland does (Potosí
+/// reached ~160,000 by 1600, among the largest cities on Earth, from nothing).
+/// Kept modest relative to `POP_GROWTH_COLONY_MULT` (both apply together, since
+/// a mining settlement IS a settlement colony) so the hard-asserted bounded-
+/// wealth dynamics gate stays honest rather than chasing the historical peak.
+const MINING_SETTLEMENT_GROWTH_MULT: f32 = 1.6;
+/// D3 · a mining settlement whose food lifeline fails DECLINES, it never dies
+/// outright the way an ordinary colony's `collapse_colony` does — the ore body
+/// persists even when supply falters, so the town shrinks toward a floor.
+const MINING_SETTLEMENT_DECLINE_MULT: f32 = 0.97; // per failed-lifeline check
+const MINING_SETTLEMENT_FLOOR_FRAC: f32 = 0.20;   // of founding_pop, never below
 /// Below this population a settlement is a "small city" (user growth/disease rules).
 const SMALL_CITY_POP: f32 = 10_000.0;
 /// A well-fed small city grows up to this multiple of the base rate (user rule:
@@ -1421,6 +1442,49 @@ pub(crate) const CAPACITY_BIND_DOSE: f32 = 0.0;
 /// the shipped, no-op setting — a guild is unbounded exactly as before this
 /// change, verified by `n_yards_guild_axis_at_infinity_is_a_noop`.
 pub(crate) const GUILD_CHARTER_RANGE_DAYS: f32 = f32::INFINITY;
+/// Small-city trade rescue, DOSE-WALKED (§2.4/§2.8). `dispatch`'s target
+/// shortlist is ranked by `gap * hub_pull(b)`, and `hub_pull` alone spans
+/// 1.0..HUB_PULL_MAX — so a small town (hub_pull ~1) can hold the single
+/// BEST raw arbitrage gap on a lane and still never place in gravity's top
+/// 3 on any seller's list, ever ("the cities are just dead on the map").
+/// Two direct fixes were tried and reverted first: removing the second
+/// `hub_pull` weighting entirely, and halving it via `.sqrt()` — both broke
+/// `simulate_decades_reports_dynamics`'s hard-asserted wealth bound (see the
+/// doc comment at the `targets.push` call site in `production.rs::dispatch`),
+/// because that weighting is real wealth-DISPERSION machinery, not a pure
+/// bug. This is the "genuinely different mechanism" instead: an ADDED 4th
+/// target slot carrying whichever reachable market held the single best
+/// UNWEIGHTED gap, fired probabilistically (`hash01(a, g, tick) < DOSE`) so
+/// it never replaces or reweights the existing gravity-ranked top 3 — pure
+/// addition, not substitution. At `DOSE = 1.0` (always fire) this measurably
+/// broke a SECOND, different gate: `econ_inheritance_rules_fragment_
+/// differently` inverted (partible's mean wealth per house rose ABOVE
+/// primogeniture's), because uniformly raising the trade floor for small
+/// towns lifts partible's many small firms' mean more than primogeniture's
+/// few large firms' — a structural tension with that gate's own premise, not
+/// a tuning miss. Measured dose walk (`econ_inheritance_rules_fragment_
+/// differently`'s partible-vs-primogeniture mean wealth, must stay
+/// partible < primogeniture):
+///
+///   dose 1.00  177444 vs 124510  INVERTED (fails)
+///   dose 0.30  237464 vs 200738  INVERTED (fails)
+///   dose 0.05  275001 vs 290246  correct order (passes)
+///
+/// `simulate_decades_reports_dynamics`'s sustained-richest figure stayed
+/// bit-identical to the pre-rescue baseline (278201) at 0.05 on the
+/// dynamics test's own reference world — this dose is low enough that it
+/// never actually fires there, and only engages on the larger/longer-run
+/// world `econ_inheritance...` exercises. Shipped at `0.05`: low enough to
+/// hold both gates, high enough to give an excluded small city a real
+/// (if infrequent) chance at every seller's dispatch rather than zero
+/// chance forever. Also moved `econ_fidelity_scorecard`'s price-gap ×
+/// distance from -0.061 to -0.064 (noise) and its large-world sibling from
+/// -0.061 to +0.031 (an improvement toward the historically-expected
+/// positive sign) — plausible, since routing SOME trade to small,
+/// out-of-the-way markets is closer to how real distance-decay integration
+/// works than gravity's winner-take-most shortlist. Raising the dose
+/// further, re-measuring both gates at each step, is real future work.
+pub(crate) const SMALL_CITY_RESCUE_DOSE: f32 = 0.05;
 /// W2, DOSE-WALKED: the fraction of landed cargo that goes to the carrying
 /// house's OWN depot at the destination (room permitting) instead of the
 /// undifferentiated city pool (F8). `0.0` ships as a true no-op — every
@@ -1497,13 +1561,21 @@ fn estate_kind_for_good(name: &str, food: bool) -> u8 {
     // in `dominant_estate_kind` (cities.rs §2.5: a mine barely recovers, a
     // plantation just wears soil) and the wrong label in the UI/journal. Keep
     // this in sync with `default_list()`/`default_custom_goods()`'s Deposits set.
-    if n.contains("iron") || n.contains("gem") || n.contains("salt") || n.contains("amber")
-        || n.contains("ore") || n.contains("stone") || n.contains("copper") || n.contains("silver")
+    //
+    // DEPOSITS_AND_MINING_PLAN.md slice 4 (mine vs quarry) · split into TWO real
+    // kinds instead of one. A MINE (2) is a deep-shaft body — depth/drainage is
+    // its constraint (`mine_depth`/`MINE_UPGRADE_COST_MULT`). A QUARRY (8) is a
+    // near-surface working — stone, gems, salt, amber — whose constraint is
+    // TRANSPORT (heavy `bulk`, useless far from water), never depth; it never
+    // reads `mine_depth` at all (only `estate_kind == 2` does).
+    if n.contains("iron") || n.contains("ore") || n.contains("copper") || n.contains("silver")
         || n.contains("gold") || n.contains("coal") || n.contains("tin") || n.contains("lead")
+        || n.contains("mercury") { return 2; }
+    if n.contains("gem") || n.contains("salt") || n.contains("amber") || n.contains("stone")
         || n.contains("marble") || n.contains("jade") || n.contains("lapis") || n.contains("turquoise")
-        || n.contains("mercury") || n.contains("alum") || n.contains("ruby") || n.contains("sapphire")
+        || n.contains("alum") || n.contains("ruby") || n.contains("sapphire")
         || n.contains("emerald") || n.contains("diamond") || n.contains("amethyst") || n.contains("topaz")
-        || n.contains("garnet") || n.contains("carnelian") { return 2; }
+        || n.contains("garnet") || n.contains("carnelian") { return 8; }
     if food { return 1; }
     // Any other cultivated trade good (silk, spices, cotton, sugar, tea, coffee, …).
     3
@@ -1513,7 +1585,7 @@ fn estate_kind_for_good(name: &str, food: bool) -> u8 {
 pub fn estate_kind_label(kind: u8) -> &'static str {
     match kind {
         1 => "Farm", 2 => "Mine", 3 => "Plantation", 4 => "Fishery", 5 => "Vineyard",
-        6 => "Manufactory", 7 => "Yard", _ => "Estate",
+        6 => "Manufactory", 7 => "Yard", 8 => "Quarry", _ => "Estate",
     }
 }
 
@@ -1568,6 +1640,7 @@ fn disaster_table(kind: u8) -> &'static [(&'static str, f32, f32)] {
         5 => &[("frost", 0.8, 0.25), ("hail", 0.5, 0.6)],
         6 => &[("fire", 1.0, 0.8)],
         7 => &[("fire", 1.1, 0.7)], // a timber yard burns readily and rebuilds slowly
+        8 => &[("rockfall", 0.9, 0.6)], // a quarry face, not a shaft — no flooding
         1 | 3 => &[("murrain", 0.7, 0.6)],
         _ => &[("fire", 0.5, 1.0)],
     }
@@ -1858,6 +1931,42 @@ const ESTATE_TERROIR_BELT_MIN: f32 = 0.35;
 /// own production scale, never an unrelated absolute one) and < 1 so a terroir estate
 /// can never out-produce the city's real specialties. See `maybe_found_estate`.
 const ESTATE_TERROIR_FRAC: f32 = 0.6;
+/// DEPOSITS_AND_MINING_PLAN.md slice 4 · how far from a Mine estate's parent city
+/// (an estate is co-located with its parent, rule 32) a real working still counts
+/// as "this city's own deposit" — a real district's own scale
+/// (`DISTRICT_RADIUS_KM`, §8.16) plus margin for the founding search itself.
+pub(crate) const MINE_DEPOSIT_SEARCH_KM: f32 = 60.0;
+/// DEPOSITS_AND_MINING_PLAN.md slice 5 · the "growing settlement catchment"
+/// knob (`CampaignSim::catchment_radius_km`). The honest pre-modern number: a
+/// cart hauls grain economically ~30–50 km, so a catchment does not scale
+/// freely with population — it can only creep outward slowly (better roads,
+/// more carters), never leap.
+const CATCHMENT_GROWTH_PER_YEAR_KM: f32 = 0.15;
+/// Total lifetime growth caps out here — +10–20 km on the 50–120 km base, per
+/// the plan's own number.
+const CATCHMENT_MAX_GROWTH_KM: f32 = 20.0;
+/// D7 · a mine's `estate_tier` upgrade cost multiplier by `mine_depth` (0..3 =
+/// surface/shallow/deep/flooded). Digging deeper needs real drainage capital
+/// (Rio Tinto's reverse waterwheels, Agricola's *De Re Metallica*), so a flooded
+/// body grows far more slowly than a surface one at the same wealth — see
+/// `maybe_house_invests`'s upgrade branch.
+const MINE_UPGRADE_COST_MULT: [f32; 4] = [1.0, 1.3, 2.2, 3.5];
+/// D7 table · a Quarry founded away from a coast or navigable river (no cheap
+/// bulk haul for heavy stone) costs this much more to expand — "useless far
+/// from water" made a real number instead of a line in a design doc. Mons
+/// Claudianus (a state-funded desert quarry 120 km from any water) is the
+/// named exception, not the rule this constant encodes.
+const QUARRY_INLAND_UPGRADE_COST_MULT: f32 = 2.0;
+/// Mercury consumed per unit of silver output by amalgamation (grain-equivalent
+/// value terms, not a physical mass ratio — the sim has no units finer than
+/// that). Small: mercury is a catalyst-scale input historically, not a bulk one.
+const MERCURY_PER_SILVER: f32 = 0.12;
+/// Silver recovery with NO mercury on hand — hand-smelting still works some of
+/// the ore, just less completely.
+const MERCURY_AMALGAMATION_FLOOR: f32 = 0.75;
+/// Silver recovery fully supplied with mercury — real amalgamation recovers ore
+/// a hand-smelt leaves behind.
+const MERCURY_AMALGAMATION_BONUS: f32 = 1.25;
 /// Global ceiling on satellite production sites (estates + colonies). Estates are
 /// real hubs in `self.hubs`, so an uncapped count quadratically slows every tick.
 const MAX_TOTAL_ESTATES: usize = 220;
@@ -2412,6 +2521,33 @@ pub struct TickHub {
     /// Estate upgrade tier 1..5 — higher tiers produce more (owners invest to
     /// upgrade). 0 on non-estates / old saves (treated as tier 1 for estates).
     #[serde(default)] pub estate_tier: u8,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 (D7) · for a MINE (`estate_kind == 2`)
+    /// only: the depth class of the real working nearest this estate's parent
+    /// city (`DEPTH_SURFACE`/`_SHALLOW`/`_DEEP`/`_FLOODED`, `sim::deposits`),
+    /// looked up once at founding from `CampaignSim::mine_deposits`. Depth is THE
+    /// pre-modern mining constraint (Rio Tinto's reverse waterwheels, Agricola's
+    /// *De Re Metallica* exist for drainage alone): it does not touch this
+    /// estate's baseline output (already baked into `base_per_capita` by the
+    /// world-side `workable_intensity() = grade × depth_workability`, §8.16 — an
+    /// estate at a deep body already starts smaller), it scales how DEAR it is to
+    /// upgrade (`MINE_UPGRADE_COST_MULT`). `DEPTH_SURFACE` (0) on every other
+    /// estate kind, an old save, and a world with no positional deposit data —
+    /// the safe, ungated default (rule 26's discipline applied to depth).
+    #[serde(default)] pub mine_depth: u8,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4/D3 · for a MINE or QUARRY only: the
+    /// real body's EXTENT (`EXTENT_WEAK`/`_MODERATE`/`_GREAT`/`_WORLD_CLASS`,
+    /// `sim::deposits`), looked up once at founding alongside `mine_depth`.
+    /// `u8::MAX` = unknown (an old save, no positional data, or any other kind)
+    /// — deliberately NOT `EXTENT_WEAK` (0), which would silently apply D3's
+    /// decline to every pre-existing estate. Only a KNOWN weak body declines;
+    /// unknown is treated exactly like moderate/great/world-class (persists).
+    #[serde(default = "unknown_extent")] pub mine_extent: u8,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 5 · the Potosí case — a settlement whose
+    /// existence IS the deposit (`maybe_found_mining_colony`). Set once at
+    /// founding; read by the population pass (explosive growth) and `colony_pass`
+    /// (decline, never death — D3's "persist" rule extended to the SETTLEMENT,
+    /// not just the ore). `false` on every ordinary hub/estate/old save.
+    #[serde(default)] pub is_mining_settlement: bool,
     /// Tick of this estate's last build/upgrade. Manufactories may only be upgraded
     /// once every `MANUFACTORY_UPGRADE_INTERVAL` (re-tooling takes years).
     #[serde(default)] pub last_upgrade_tick: u32,
@@ -2789,6 +2925,7 @@ pub(crate) const LAW_FOREIGN_BAR: u8 = 6;
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
 fn neg_one_i32() -> i32 { -1 }
+fn unknown_extent() -> u8 { u8::MAX }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -4531,7 +4668,7 @@ const EPIDEMIC_CONTAGION_MAG: f32 = 0.06;      // milder cull than the origin
 /// ocean to ANOTHER CONTINENT via a long maritime trade tie (user rule). Regional
 /// coastal spread still works; only transoceanic jumps are blocked.
 const PLAGUE_HOP_MAX_KM: f32 = 1500.0;
-const EARTH_EQUATOR_KM: f32 = 40075.0;        // world_w cells span this at the equator
+pub(crate) const EARTH_EQUATOR_KM: f32 = 40075.0;        // world_w cells span this at the equator
 
 // ── Historical DISEASES ─────────────────────────────────────────────────────────
 /// Transmission mode: 0 = TRADE lanes (rats/goods) · 1 = WATER (river-mouth/coast) ·
@@ -5614,6 +5751,28 @@ pub struct CampaignSim {
     /// W5 · every fondaco ever founded. Empty until `maybe_found_fondaco` is
     /// wired to actually run (it currently never is — see `Fondaco`'s own doc).
     #[serde(default)] pub fondacos: Vec<Fondaco>,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 · every real ore/gem/stone WORKING this
+    /// world's geology placed (§8.16), seeded ONCE at campaign start from
+    /// `metadata["deposits"]` (`lifecycle.rs`) — a positional/depth index, not a
+    /// duplicate of the full `sim::deposits::Deposit` record (grade/extent aren't
+    /// needed here). Read by `mine_depth_at` when an estate is founded; never
+    /// mutated afterward (the one-way snapshot, CLAUDE.md §3.4). Empty on an old
+    /// save, a template/painted world, or a world generated before slice 1 — every
+    /// reader treats that as "no depth data", never as "no deposit exists".
+    #[serde(default)] pub mine_deposits: Vec<MineSite>,
+}
+
+/// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
+/// into `CampaignSim::mine_deposits` — the good it produces, its cell, and its
+/// depth class (`sim::deposits::DEPTH_SURFACE`/`_SHALLOW`/`_DEEP`/`_FLOODED`).
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct MineSite {
+    pub good: String,
+    pub x: f32,
+    pub y: f32,
+    pub depth: u8,
+    #[serde(default = "unknown_extent")] pub extent: u8,
+    #[serde(default)] pub district: u32,
 }
 
 fn one_f32() -> f32 { 1.0 }
@@ -6334,6 +6493,99 @@ impl CampaignSim {
 
     pub fn day_of_year(&self) -> u32 {
         self.tick % TICKS_PER_YEAR
+    }
+
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 (D7) · the DEPTH + EXTENT of the real
+    /// working of `good` nearest (x, y), within `MINE_DEPOSIT_SEARCH_KM` —
+    /// `(DEPTH_SURFACE, unknown_extent())` (ungated) if this world carries no
+    /// positional deposit data at all, or none of that mineral within reach.
+    /// Called once, when a Mine/Quarry estate is founded (`create_estate`);
+    /// never re-queried afterward, so a later change to `mine_deposits` (there
+    /// is none — it's a one-way worldgen snapshot) could not retroactively
+    /// regate an existing estate.
+    pub(crate) fn mine_geology_at(&self, good: &str, x: f32, y: f32) -> (u8, u8) {
+        if self.mine_deposits.is_empty() {
+            return (crate::sim::deposits::DEPTH_SURFACE, unknown_extent());
+        }
+        let ww = self.world_w.max(1.0);
+        let reach = MINE_DEPOSIT_SEARCH_KM * ww / EARTH_EQUATOR_KM;
+        let mut best: Option<(f32, u8, u8)> = None;
+        for d in &self.mine_deposits {
+            if !d.good.eq_ignore_ascii_case(good) { continue; }
+            let mut dx = (d.x - x).abs();
+            if ww > 1.0 { dx = dx.min(ww - dx); }
+            let dy = d.y - y;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist > reach { continue; }
+            if best.map(|(bd, ..)| dist < bd).unwrap_or(true) { best = Some((dist, d.depth, d.extent)); }
+        }
+        best.map(|(_, depth, extent)| (depth, extent))
+            .unwrap_or((crate::sim::deposits::DEPTH_SURFACE, unknown_extent()))
+    }
+
+    /// Thin wrapper over `mine_geology_at` for callers that only need the depth.
+    #[cfg(test)]
+    pub(crate) fn mine_depth_at(&self, good: &str, x: f32, y: f32) -> u8 {
+        self.mine_geology_at(good, x, y).0
+    }
+
+    /// DEPOSITS_AND_MINING_PLAN.md slice 5 · a settlement's TRADE CATCHMENT
+    /// radius, growing slowly across the campaign — "a province view disc that
+    /// visibly grows across the year slider". A pure DERIVED read, never
+    /// per-hub stored state: `base` mirrors the world-side 50–120 km curve
+    /// (`economy.rs`'s own catchment radius, by founding population — the same
+    /// curve, so a fresh colony reads identically to how the world-gen catchment
+    /// would have scored it), and `grown` is a function of TIME ALONE since
+    /// founding, capped — never of live population (which can fall), matching
+    /// the plan's "grow slowly" without needing a new mutable field threaded
+    /// through every hub-construction site. No conflict with the one-way
+    /// snapshot rule (§3.4): this never re-attributes production, only display.
+    pub(crate) fn catchment_radius_km(&self, h: usize) -> f32 {
+        let hub = &self.hubs[h];
+        let pop = hub.founding_pop.max(1.0);
+        let t = (pop.ln() - 6.2) / (11.5 - 6.2);
+        let base = 50.0 + t.clamp(0.0, 1.0) * (120.0 - 50.0);
+        let years = (self.tick.saturating_sub(hub.founded_tick) as f32 / TICKS_PER_YEAR as f32).max(0.0);
+        let grown = (CATCHMENT_GROWTH_PER_YEAR_KM * years).min(CATCHMENT_MAX_GROWTH_KM);
+        base + grown
+    }
+
+    /// DEPOSITS_AND_MINING_PLAN.md slice 4 · mercury amalgamation, wired as a
+    /// CONSUMABLE EXTRACTION INPUT (not a manufacturing recipe — silver is dug,
+    /// not assembled from parts, so it never touches `manufacture.rs`). Mercury
+    /// (slice 3) shipped with correct geology and high value but no recipe
+    /// wiring; this is that wiring. Once a day, after ordinary extraction has
+    /// booked each mine's ore output: a silver mine that can draw mercury from
+    /// its OWN stock (the amalgamation process itself, Potosí's from 1554) works
+    /// its ore more completely; one with none on hand still smelts by hand, at a
+    /// real but lower recovery. `served` (0 = no mercury, 1 = fully supplied)
+    /// interpolates between `MERCURY_AMALGAMATION_FLOOR` and `_BONUS`, and the
+    /// stock ledger is adjusted by the DELTA only — ordinary production already
+    /// booked the unmodified `realized` amount, so this never double-counts.
+    /// A no-op wherever this world has no silver good, no mercury good, or no
+    /// silver-mine estate at all (every early-return leaves state untouched).
+    pub(crate) fn apply_mercury_amalgamation(&mut self) {
+        let Some(silver_g) = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("silver")) else { return };
+        let Some(mercury_g) = self.goods.iter().position(|g| g.name.eq_ignore_ascii_case("mercury")) else { return };
+        for h in 0..self.hubs.len() {
+            if !self.hubs[h].is_estate || self.hubs[h].estate_kind != 2 { continue; }
+            let out = self.hubs[h].production.get(silver_g).copied().unwrap_or(0.0);
+            if out <= EPS { continue; }
+            let needed = out * MERCURY_PER_SILVER;
+            let taken = stock_take(&mut self.hubs[h].stock, mercury_g, needed);
+            let served = if needed > EPS { (taken / needed).clamp(0.0, 1.0) } else { 1.0 };
+            let mult = MERCURY_AMALGAMATION_FLOOR
+                + (MERCURY_AMALGAMATION_BONUS - MERCURY_AMALGAMATION_FLOOR) * served;
+            let new_out = out * mult;
+            let delta = new_out - out;
+            self.hubs[h].production[silver_g] = new_out;
+            let band = production_band(true, self.hubs[h].quality.get(silver_g).copied().unwrap_or(0.0));
+            if delta >= 0.0 {
+                stock_add(&mut self.hubs[h].stock, silver_g, band, delta);
+            } else {
+                stock_take(&mut self.hubs[h].stock, silver_g, -delta);
+            }
+        }
     }
 
     /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1.2) — which seasonal slice
@@ -7221,6 +7473,11 @@ impl CampaignSim {
                     }
                 }
             }
+
+            // DEPOSITS_AND_MINING_PLAN.md slice 4 · mercury amalgamation — a
+            // consumable EXTRACTION input, applied once ordinary per-capita
+            // extraction has booked every mine's ore output for the day.
+            self.apply_mercury_amalgamation();
 
             // 1b) Manufacturing — cities transform imported raws into finished goods
             //     (wool→cloth, ore→arms), concentrated in big cities (labor ∝ pop).

@@ -244,7 +244,7 @@ pub fn current_world_ref(conn: &Connection) -> Result<WorldRef, String> {
 // DLC 1 "Living Trade" — tick simulation commands.
 // ═══════════════════════════════════════════════════════════════════════════
 
-use crate::sim::tick::{CampaignSim, House, JournalEntry, ORIGIN_NONE, SpecCenter, TickGood, TickHub};
+use crate::sim::tick::{CampaignSim, House, JournalEntry, MineSite, ORIGIN_NONE, SpecCenter, TickGood, TickHub};
 use crate::commands::query_commands::EconomySnapshot;
 
 /// Compact clock for the Campaign Clock UI.
@@ -308,6 +308,14 @@ pub struct HubBrief {
     /// (`population_status`, mod.rs), reusing the same 0.5 threshold the
     /// existing civic-granary famine release already keys on.
     #[serde(default)] pub pop_status: u8,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 5 · the Potosí case — a settlement
+    /// whose existence IS the deposit (drives a distinct map marker).
+    #[serde(default)] pub is_mining_settlement: bool,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 5 · this settlement's trade catchment
+    /// radius (km), which only ever grows with age — the "growing settlement
+    /// catchment" the map/province view can draw as a disc. A pure derived
+    /// read (`CampaignSim::catchment_radius_km`), never stored per-hub state.
+    #[serde(default)] pub catchment_radius_km: f32,
 }
 
 /// What `campaign_start_sim` / `campaign_advance` / `campaign_get_state` return.
@@ -1018,7 +1026,8 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
     let hubs = sim
         .hubs
         .iter()
-        .map(|h| {
+        .enumerate()
+        .map(|(hi, h)| {
             // Month-over-month growth from the last two per-hub history samples.
             let n = h.history.len();
             let growth = if n >= 2 && h.history[n - 2].population > 0.0 {
@@ -1055,6 +1064,8 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                 },
                 tier: h.tier,
                 pop_status: crate::sim::tick::population_status(h.food_balance, h.starving),
+                is_mining_settlement: h.is_mining_settlement,
+                catchment_radius_km: sim.catchment_radius_km(hi),
             }
         })
         .collect();
@@ -2759,6 +2770,12 @@ pub struct TradeFlowGood {
     /// `own_export = out_volume - transit`, `for_us = in_volume - transit`.
     #[serde(default)]
     pub own_production: f32,
+    /// This settlement (its own fields, or an estate/manufactory parented to it)
+    /// actually MAKES this good — the same "made here" reading `CityMarketView`'s
+    /// Market tab already shows, so the Flows tab can mark a good PRODUCED rather
+    /// than merely resold. `false` for a good this city only ever moves through.
+    #[serde(default)]
+    pub produced: bool,
 }
 /// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
 /// that touched this city, by who financed it.

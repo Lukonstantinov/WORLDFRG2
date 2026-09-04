@@ -533,6 +533,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tw_guild: 0.0,
                 estate_kind: 0,
                 estate_tier: 0,
+                mine_depth: 0,
+                mine_extent: u8::MAX,
+                is_mining_settlement: false,
                 last_upgrade_tick: 0,
                 owner_house: -1,
                 stake_bank: -1,
@@ -1030,7 +1033,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // YARDS_VESSELS_AND_DEPOTS_PLAN.md · `seed_vessels_from_fleets` (called
         // just below) populates `vessels` from the fresh fleet counters.
         vessels: vec![], next_vessel_id: 0, fondacos: vec![],
+        mine_deposits: vec![],
     };
+    seed_mine_deposits(&conn, &mut sim);
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
     // campaign built on an older economy snapshot can NEVER found colonies/outposts.
@@ -1281,6 +1286,22 @@ fn seed_province_land(provs: &[crate::sim::provinces::Province], n: usize, sim: 
     sim.prov_realm = vec![-1; n];
     sim.prov_history = vec![Vec::new(); n];
     sim.prov_events = vec![Vec::new(); n];
+}
+
+/// DEPOSITS_AND_MINING_PLAN.md slice 4 · load the world's real ore/gem/stone
+/// workings (§8.16, `metadata["deposits"]`) into `sim.mine_deposits` — the same
+/// table `province.rs`/`economy.rs` already parse, read here as `MineSite`'s
+/// positional/depth index rather than the full `Deposit` record. Absent on a
+/// template/painted world or one generated before slice 1 (`get_meta` returns
+/// nothing), which leaves `mine_deposits` empty — `mine_depth_at`'s own contract
+/// treats that as "no data", never "no deposit", so an old/plain world stays
+/// bit-identical (no depth gate can ever apply where there is nothing to gate).
+fn seed_mine_deposits(conn: &Connection, sim: &mut CampaignSim) {
+    let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(conn, "deposits")
+        .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    sim.mine_deposits = deposits.into_iter()
+        .map(|d| MineSite { good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth, extent: d.extent, district: d.district })
+        .collect();
 }
 
 /// Nearest province seat to (x,y), cylindrical in X. -1 if no seats.

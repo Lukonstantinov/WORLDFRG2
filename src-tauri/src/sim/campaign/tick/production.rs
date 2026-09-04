@@ -1079,7 +1079,7 @@ impl CampaignSim {
                 // Find the best deficit hubs among a's NEAREST reachable markets.
                 // (Capping to the K nearest keeps this O(K) rather than O(n); the
                 // 3 hungriest are kept below, so far-flung hubs never mattered.)
-                let mut targets: Vec<(usize, f32, f32)> = Vec::new(); // (b, gap, days)
+                let mut targets: Vec<(usize, f32, f32, f32)> = Vec::new(); // (b, weighted_gap, raw_gap, days)
                 for ti in 0..self.neighbors[a].len() {
                     let b = self.neighbors[a][ti] as usize;
                     if b == a {
@@ -1138,15 +1138,34 @@ impl CampaignSim {
                         // (CLAUDE.md §2.4). The small-city exclusion this was meant to
                         // fix is real (§1.4) but needs a mechanism that doesn't touch
                         // this wealth-dispersion effect — real future work.
-                        targets.push((b, gap * self.hub_pull(b), days));
+                        targets.push((b, gap * self.hub_pull(b), gap, days));
                     }
                 }
                 if targets.is_empty() {
                     continue;
                 }
+                // Small-city rescue (SMALL_CITY_RESCUE_DOSE, dose-walked — see
+                // its doc comment in mod.rs). Captured BEFORE gravity sorts the
+                // list: the single best UNWEIGHTED (raw) gap target, which a
+                // small town can hold even though gravity always ranks it out
+                // of the top 3. An ADDED slot, fired probabilistically, never a
+                // reweighting of the existing top 3 — that weighting is real
+                // wealth-dispersion machinery (see the doc comment above).
+                let rescue_target = if SMALL_CITY_RESCUE_DOSE > 0.0 {
+                    targets.iter().cloned()
+                        .max_by(|x, y| x.2.partial_cmp(&y.2).unwrap_or(std::cmp::Ordering::Equal))
+                } else {
+                    None
+                };
                 targets.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
                 targets.truncate(3); // ship to the 3 most attractive reachable markets
-                for (b, _gap, days) in targets {
+                if let Some(rescue) = rescue_target {
+                    if !targets.iter().any(|t| t.0 == rescue.0)
+                        && hash01(a as u64, g as u64, tick as u64) < SMALL_CITY_RESCUE_DOSE {
+                        targets.push(rescue);
+                    }
+                }
+                for (b, _gap, _raw_gap, days) in targets {
                     if surplus <= EPS {
                         break;
                     }

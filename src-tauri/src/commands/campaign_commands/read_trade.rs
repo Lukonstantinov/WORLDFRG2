@@ -729,6 +729,23 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
     for &g in hist_by_good.keys() { good_ids.insert(g); }
+
+    // ── PRODUCED HERE — the same "made here" reading CityMarketView's Market tab
+    // shows (the city's own fields, `> 0.01`, plus every estate/manufactory
+    // parented to it), so the Flows tab can mark a good as PRODUCED rather than
+    // merely passing through. A good this city only ever resells is not in here.
+    let produced_here: std::collections::HashSet<u32> = {
+        let mut s = std::collections::HashSet::new();
+        if let Some(own) = sim.hubs.get(hi) {
+            for (g, &v) in own.production.iter().enumerate() { if v > 0.01 { s.insert(g as u32); } }
+        }
+        for h in &sim.hubs {
+            if h.is_estate && !h.abandoned && h.parent == hi as i32 {
+                for (g, &v) in h.production.iter().enumerate() { if v > 0.01 { s.insert(g as u32); } }
+            }
+        }
+        s
+    };
     let mut goods: Vec<TradeFlowGood> = good_ids.into_iter().map(|g| {
         let history: Vec<f32> = hist_by_good.get(&g).map(|v| (*v).clone()).unwrap_or_default();
         let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
@@ -773,6 +790,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
                 v
             },
             own_production,
+            produced: produced_here.contains(&g),
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));

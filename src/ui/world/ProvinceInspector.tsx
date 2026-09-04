@@ -74,6 +74,9 @@ export function ProvinceInspector() {
   const [goodMasks, setGoodMasks] = useState<ProvinceGoodMask[]>([]);
   const [goodSort, setGoodSort] = useState<"potential" | "quality">("quality");
   const [depositsOnly, setDepositsOnly] = useState(false);
+  /** DEPOSITS_AND_MINING_PLAN.md slice 5 (D6) · which ore district (good|district
+   *  key) is currently expanded to its individual workings in the list below. */
+  const [openDistrict, setOpenDistrict] = useState<string | null>(null);
   // #9 · which belt goods are shown on the minimap "goods" plate (null = all).
   const [goodFilter, setGoodFilter] = useState<Set<string> | null>(null);
   const [tab, setTab] = useState<Tab>("land");
@@ -587,6 +590,72 @@ export function ProvinceInspector() {
                 </Section>
               );
             })()}
+
+            {/* DEPOSITS_AND_MINING_PLAN.md slice 5 (D6) · the quarry/mine window —
+                DISTRICTS, expanding to their individual WORKINGS on click. A flat
+                list of every working (~2-8 per district, up to a dozen districts
+                per province) would be too long to scan; grouping by district is
+                what a real mining register looks like. */}
+            {(() => {
+              const dep = potential?.deposits ?? [];
+              if (dep.length === 0) return null;
+              type Grp = { key: string; good: string; model: string; district: number; items: typeof dep };
+              const groups = new Map<string, Grp>();
+              for (const d of dep) {
+                const key = `${d.good}|${d.district}`;
+                let g = groups.get(key);
+                if (!g) { g = { key, good: d.good, model: d.model, district: d.district, items: [] }; groups.set(key, g); }
+                g.items.push(d);
+              }
+              const rows = [...groups.values()].sort((a, b) => {
+                const ag = Math.max(...a.items.map((d) => d.grade));
+                const bg = Math.max(...b.items.map((d) => d.grade));
+                return bg - ag;
+              });
+              return (
+                <Section title={`Workings · ${rows.length} district${rows.length === 1 ? "" : "s"}`}>
+                  {rows.map((g) => {
+                    const bestGrade = Math.max(...g.items.map((d) => d.grade));
+                    const bestExtent = Math.max(...g.items.map((d) => d.extent));
+                    const anyWorkable = g.items.some((d) => d.workable);
+                    const open = openDistrict === g.key;
+                    return (
+                      <div key={g.key} style={{ marginBottom: 4 }}>
+                        <div onClick={() => setOpenDistrict(open ? null : g.key)}
+                          style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer",
+                            padding: "2px 4px", borderRadius: 3,
+                            background: open ? T.card : "transparent" }}>
+                          <span style={{ width: 14, color: T.inkFaint, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+                          <span style={{ width: 128, color: T.ink }}>{goodEmojiByName(g.good)} {goodLabelByName(g.good)}</span>
+                          <span style={{ color: T.inkDim, fontSize: 11 }}>{g.model}</span>
+                          <span style={{ color: T.gold, letterSpacing: 1 }}
+                            title={`grade ${(bestGrade * 100).toFixed(0)}%`}>{stars(bestGrade)}</span>
+                          <Badge tone="neutral">{extentWord(bestExtent)}</Badge>
+                          {!anyWorkable && <Badge tone="bad">flooded — unworked</Badge>}
+                          <span style={{ flex: 1 }} />
+                          <span style={{ color: T.inkFaint, fontSize: 11 }}>{g.items.length}× working{g.items.length === 1 ? "" : "s"}</span>
+                        </div>
+                        {open && (
+                          <div style={{ paddingLeft: 22, marginTop: 2 }}>
+                            {g.items.map((d, i) => (
+                              <div key={i} style={{ display: "flex", gap: 8, alignItems: "center",
+                                fontSize: 11, color: T.inkDim, padding: "1px 0" }}>
+                                <span style={{ width: 60 }}>grade {(d.grade * 100).toFixed(0)}%</span>
+                                <span style={{ width: 70 }}>{extentWord(d.extent)}</span>
+                                <span style={{ width: 60 }}>{depthWord(d.depth)}</span>
+                                <span style={{ color: d.workable ? T.accent : T.badInk }}>
+                                  {d.workable ? "workable" : "not yet workable"}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </Section>
+              );
+            })()}
           </>
         )}
 
@@ -830,6 +899,22 @@ function eventIcon(kind: string): string {
 /** #9 · Deposit depth (0 surface … 3 flooded) → a word for the workings note. */
 function depthWord(d: number): string {
   return ["surface", "shallow", "deep", "flooded"][Math.max(0, Math.min(3, d))];
+}
+
+/** DEPOSITS_AND_MINING_PLAN.md slice 5 (D6) · a working's extent (0 weak … 3
+ *  world-class), same vocabulary `deposits::extent_label`/`grade_label` use. */
+function extentWord(e: number): string {
+  return ["weak", "moderate", "great", "world-class"][Math.max(0, Math.min(3, e))];
+}
+
+/** `goodEmoji`/`goodLabel` (provinceStory.ts) key `GOOD_DEFS` by POSITIONAL
+ *  index (a world good column), but `ProvinceDepositDot.good` carries the
+ *  spec ID string — a by-name lookup instead. */
+function goodEmojiByName(id: string): string {
+  return GOOD_DEFS.find((d) => d.name === id)?.emoji ?? "⛏️";
+}
+function goodLabelByName(id: string): string {
+  return GOOD_DEFS.find((d) => d.name === id)?.label ?? id;
 }
 
 const sortBtn: React.CSSProperties = {

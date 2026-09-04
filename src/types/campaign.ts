@@ -49,6 +49,12 @@ export interface CampaignHubBrief {
   tier: number;
   /** ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.11: 0 content · 1 short · 2 starving. */
   pop_status?: number;
+  /** DEPOSITS_AND_MINING_PLAN.md slice 5 · the Potosí case — a settlement
+   *  whose existence IS the deposit. */
+  is_mining_settlement?: boolean;
+  /** DEPOSITS_AND_MINING_PLAN.md slice 5 · this settlement's trade catchment
+   *  radius in km — only ever grows with age. */
+  catchment_radius_km?: number;
 }
 /** Atlas 2.0 · one named trade basin (campaign_get_trade_basins). */
 export interface TradeBasin {
@@ -639,6 +645,10 @@ export interface TradeFlowGood {
    *  `transit = max(0, out_volume - own_production)`,
    *  `own_export = out_volume - transit`, `for_us = in_volume - transit`. */
   own_production?: number;
+  /** This settlement (its own fields, or an estate/manufactory parented to it)
+   *  actually MAKES this good — the same "made here" reading the Market tab
+   *  shows. `false` for a good this city only ever resells. */
+  produced?: boolean;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {
@@ -2740,6 +2750,13 @@ export interface ProvinceDepositDot {
   grade: number;
   extent: number;
   depth: number;
+  /** DEPOSITS_AND_MINING_PLAN.md slice 5 (D6) · which ore district (within this
+   *  good) this working belongs to — the quarry/mine window's grouping key. */
+  district: number;
+  /** The deposit model's own label ("volcanic arc", "craton", …). */
+  model: string;
+  /** D7 · whether pre-modern technology can actually work this body today. */
+  workable: boolean;
 }
 
 /** CLAUDE.md §8.19 (goods localities, shipped) Slice 6 · one terroir locality located in a province
