@@ -464,6 +464,31 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                       last year {fmt(g.last_volume)} · {g.history.length}-year trend
                     </span>
                   </div>
+                  {/* TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — own produce vs
+                      passing-through vs bought-for-itself, derived with no new
+                      sim state: a good this city neither makes nor consumes but
+                      both imports and exports is one this city is a STOP for,
+                      not an origin or a destination. */}
+                  {(g.own_production ?? 0) > 0 || g.out_volume > 0 || g.in_volume > 0 ? (() => {
+                    const transit = Math.max(0, g.out_volume - (g.own_production ?? 0));
+                    const ownExport = g.out_volume - transit;
+                    const forUs = Math.max(0, g.in_volume - transit);
+                    const segTotal = Math.max(ownExport + transit + forUs, 1e-6);
+                    return (
+                      <div style={{ width: "100%", padding: "0 0 4px 28px" }}>
+                        <div style={{ display: "flex", height: 6, borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${(ownExport / segTotal) * 100}%`, background: DIR_OUT }} title={`own produce, exported: ${fmt(ownExport)}`} />
+                          <div style={{ width: `${(transit / segTotal) * 100}%`, background: T.gold }} title={`passing through: ${fmt(transit)}`} />
+                          <div style={{ width: `${(forUs / segTotal) * 100}%`, background: DIR_IN }} title={`bought for itself: ${fmt(forUs)}`} />
+                        </div>
+                        <div style={{ display: "flex", gap: SPACE.md, marginTop: 2, fontSize: FZ.micro, color: T.inkFaint }}>
+                          <span>own {fmt(ownExport)}</span>
+                          {transit > 0 && <span style={{ color: T.gold }}>transit {fmt(transit)}</span>}
+                          <span>for us {fmt(forUs)}</span>
+                        </div>
+                      </div>
+                    );
+                  })() : null}
                   {/* HOW IT TRAVELS + WHO CARRIES IT. Both are read straight off
                       state the tick already had per shipment. "Who carries it" is
                       the monopoly question: one house moving nearly all of a good

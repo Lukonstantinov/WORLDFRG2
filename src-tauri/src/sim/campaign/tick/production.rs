@@ -267,7 +267,12 @@ impl CampaignSim {
             cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
             for &(dist, b) in cand.iter().take(MIN_GUARANTEED_PARTNERS) {
                 if days[a * n + b].is_finite() { continue; }
-                let d = (dist * self.days_per_cell).max(1.0);
+                // TRADE_STAGING_AND_POSTS_PLAN.md slice 2 — terrain-penalise this
+                // rescue lane exactly like the pathfinder-miss fallback above (§1.1):
+                // priced flat, it undercuts every real pathfound route on the map and
+                // makes the least plausible lane the cheapest one.
+                let mult = terrain_route_mult(self.hubs[a].koppen).max(terrain_route_mult(self.hubs[b].koppen));
+                let d = (dist * self.days_per_cell * mult).max(1.0);
                 days[a * n + b] = d;
                 days[b * n + a] = d;
             }
@@ -307,7 +312,9 @@ impl CampaignSim {
             cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
             for &(dist, m) in cand.iter().take(MARKET_LINKS) {
                 if days[a * n + m].is_finite() { continue; }
-                let d = (dist * self.days_per_cell).max(1.0);
+                // Same terrain penalty as #4/#6 (TRADE_STAGING_AND_POSTS_PLAN.md slice 2).
+                let mult = terrain_route_mult(self.hubs[a].koppen).max(terrain_route_mult(self.hubs[m].koppen));
+                let d = (dist * self.days_per_cell * mult).max(1.0);
                 days[a * n + m] = d;
                 days[m * n + a] = d;
             }
@@ -526,10 +533,26 @@ impl CampaignSim {
     /// Freight to haul one unit of good `g` over `days` at an already-discounted
     /// per-day `rate`: bulky goods cost more, perishable goods accrue spoilage.
     /// A 0 bulk (old saves) is treated as 1.0, so freight is unchanged for them.
+    /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 adds `VICTUAL_PER_DAY` —
+    /// crew/animal subsistence, the same shape as the perishable term (a flat
+    /// per-unit-day add, not a rate), so a long voyage costs non-linearly more
+    /// than a short one on TOP of the existing linear freight rate.
     #[inline]
     pub(crate) fn good_freight(&self, g: usize, rate: f32, days: f32) -> f32 {
         let bulk = { let b = self.goods[g].bulk; if b <= 0.0 { 1.0 } else { b } };
-        rate * days * bulk + self.goods[g].perishable.max(0.0) * days
+        rate * days * bulk + self.goods[g].perishable.max(0.0) * days + VICTUAL_PER_DAY * days
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — scale a REFERENCE loss
+    /// probability (calibrated for a `LOSS_REFERENCE_DAYS`-long voyage) to an
+    /// actual voyage of `days`, so a 9,000 km crossing is no longer exactly as
+    /// safe as a 200 km one (§1.2). `1 - (1-p)^n` composes `n` independent
+    /// per-reference-leg rolls into one probability; `n` need not be an
+    /// integer since we only need the resulting probability, not a leg count.
+    #[inline]
+    pub(crate) fn distance_scaled_loss(p: f32, days: f32) -> f32 {
+        let n = (days / LOSS_REFERENCE_DAYS).max(0.0);
+        1.0 - (1.0 - p).powf(n)
     }
 
 
@@ -1082,6 +1105,16 @@ impl CampaignSim {
                     let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
+                        // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 named this a double
+                        // application of `hub_pull` (once in `rebuild_neighbors` to
+                        // shortlist partners, again here to rank them) and proposed
+                        // dropping the second one. MEASURED, REVERTED: doing so pushes
+                        // the sustained-richest-house figure from ~1.0M to 1.70M,
+                        // breaking `simulate_decades_reports_dynamics`'s hard-asserted
+                        // wealth-concentration bound (CLAUDE.md §2.1) — removing the
+                        // second weighting does not spread trade more evenly, it lets
+                        // the AI chase the single highest-margin gap instead of the
+                        // gravity-favoured big markets, concentrating wealth harder.
                         // GRAVITY: weight the profit by the destination's trade pull so
                         // merchants prefer to supply the great markets (big entrepôts) —
                         // they clear more volume and pay reliably. The real `gap`/`days`
@@ -1153,6 +1186,14 @@ impl CampaignSim {
                     // the two land-vessel kinds actually carried it is real data this
                     // sim already has and was simply not writing out.
                     let sea = self.hubs[a].coastal && self.hubs[b].coastal;
+                    // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 6 — this lane's
+                    // composed-route outlet (if any), read early so the bar check
+                    // below can tell "barred from trading at a/b" (a hard block,
+                    // unchanged) from "barred from PASSING the outlet this route
+                    // relays through" (§4.1: bypass at real risk, never a block —
+                    // a post owner who could simply delete a rival's lane would be
+                    // a stronger weapon than any existing war goal).
+                    let outlet = self.route_outlet.get(a * n + b).copied().unwrap_or(-1);
                     // ── Who carries it ──────────────────────────────────────────
                     // Prefer the SELLER's house (the exporter organizes the sale);
                     // if it has no free vessel / no capital, fall back to the
@@ -1162,6 +1203,7 @@ impl CampaignSim {
                     // in importing capitals never grew. Only if NEITHER can carry it
                     // does it fall to independent local merchants & guilds.
                     let mut owner = -1i32;
+                    let mut bypassing = false;
                     let mut _why_nohouse = true;
                     let (mut _why_slot, mut _why_cash, mut _why_bar) = (false, false, false);
                     for cand in [self.house_for(a, g), self.house_for(b, g)] {
@@ -1174,6 +1216,11 @@ impl CampaignSim {
                             _why_bar = true;
                             continue;
                         }
+                        // Slice 6 — barred from the outlet this route relays
+                        // through (not a's or b's own market): the house may still
+                        // run the leg, unwelcome, at extra voyage risk below.
+                        bypassing = outlet >= 0 && self.house_barred.get(oi)
+                            .is_some_and(|v| v.contains(&(outlet as u32)));
                         // YARDS_VESSELS_AND_DEPOTS_PLAN.md, "the guild axis, free" ·
                         // a guild's charter is regional (F5 — nothing today tells a
                         // Zunft from a Fugger); a long haul falls through to the
@@ -1239,6 +1286,15 @@ impl CampaignSim {
                     stock_take(&mut self.hubs[a].stock, g, amount);
                     let sale = amount * pa;
                     self.hubs[a].export_earn += sale;
+                    // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — the fixed
+                    // outfitting charge, independent of cargo size. Only a real
+                    // house pays it (limited liability floors it at 0, same
+                    // discipline as the loss write-off below); the ownerless
+                    // residual has no crew to victual and no vessel to outfit.
+                    if owner >= 0 {
+                        let oi = owner as usize;
+                        self.houses[oi].wealth = (self.houses[oi].wealth - OUTFIT_COST).max(0.0);
+                    }
                     // An ESTATE's sales pay rent to its OWNER: a share to the owning
                     // house's wealth (the engine of house growth), or to the parent
                     // city's prosperity if the estate is city-owned.
@@ -1355,9 +1411,17 @@ impl CampaignSim {
                         };
                         // A shipping dynasty loses fewer cargoes (skilled crews).
                         if self.houses[oi].archetype == ARCH_FLEET { p *= FLEET_LOSS_MULT; }
+                        // Slice 6 (§4.1 Brake 2) — bypassing a post that has barred
+                        // this house is survivable, never a flat "the lane is
+                        // deleted" block, but it is genuinely riskier: running past
+                        // an unfriendly port without leave to call there.
+                        if bypassing { p += BYPASS_LOSS_ADD; }
+                        // Scale the per-reference-leg rate to this voyage's real
+                        // length (slice 3, §1.2) instead of rolling the flat rate
+                        // regardless of distance.
                         hash01(self.seed,
                             (tick as u64) ^ 0x5EA10 ^ ((a as u64) << 8) ^ (b as u64),
-                            g as u64) < p
+                            g as u64) < Self::distance_scaled_loss(p, days)
                     } else {
                         // N1b (ACTORS_AND_CARRIAGE_PLAN.md §3.1) — ownerless cargo can
                         // sink too, dosed independently from the house rates above.
@@ -1445,8 +1509,12 @@ impl CampaignSim {
                         // trading house's profit before it is credited (a
                         // redistribution, never added on top — rule 18), and only
                         // when the outlet is a real, still-standing hub.
+                        // Slice 6 — a bypassing house pays the outlet no toll: it
+                        // never called there, it slipped past under real risk
+                        // (the extra loss chance above), so the port earns nothing
+                        // from a passage it tried to forbid.
                         if let Some(&p) = self.route_outlet.get(a * n + b) {
-                            if p >= 0 && (p as usize) < self.hubs.len() && p as usize != a && p as usize != b {
+                            if !bypassing && p >= 0 && (p as usize) < self.hubs.len() && p as usize != a && p as usize != b {
                                 let fee = profit * ENTREPOT_FEE_FRAC;
                                 if fee > 0.0 {
                                     profit -= fee;
@@ -1515,25 +1583,44 @@ impl CampaignSim {
                     // simply hardcoded false here when the CAPACITY split reverted,
                     // silently reading every river leg as "overland" downstream.
                     let river = !sea && self.hubs[a].river && self.hubs[b].river;
+                    // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 4 (the keystone) — if
+                    // this lane's price was composed through an entrepôt outlet
+                    // (§6d, `route_outlet`, read above for the slice 6 bar check),
+                    // the CARGO now actually stops there instead of teleporting
+                    // straight to `b`: the first leg lands at the outlet and the
+                    // arrivals pass (mod.rs) re-embarks it for the second, real leg.
+                    // A plain direct lane (`outlet < 0`) is byte-for-byte the old
+                    // one-leg behaviour. Full break-of-bulk (selling AT the outlet
+                    // instead of forwarding) is deliberately not built — see the
+                    // arrivals-pass comment for why.
+                    let (leg_to, leg_via, leg_days) = if outlet >= 0 && outlet as usize != a && outlet as usize != b {
+                        let d_ap = self.lane_days(a, outlet as usize);
+                        if d_ap.is_finite() { (outlet as u32, b as i32, d_ap) } else { (b as u32, -1, days) }
+                    } else {
+                        (b as u32, -1, days)
+                    };
                     self.in_transit.push(InTransit {
                         from: a as u32,
-                        to: b as u32,
+                        to: leg_to,
                         good: g,
                         amount,
-                        eta_tick: tick + (days.ceil() as u32).max(1),
+                        eta_tick: tick + (leg_days.ceil() as u32).max(1),
                         owner,
                         sea,
                         river,
                         // A house voyage is a ROUND TRIP: on arrival at b it tries to
                         // buy b's surplus and carry it home to a (sold there for a
                         // second profit). Guild/local one-way trips spawn no return.
+                        // A transshipped leg (`leg_via >= 0`) never spawns a return —
+                        // the round trip belongs to the FINAL leg, once one sails.
                         phase: 0,
-                        home: if owner >= 0 { a as i32 } else { -1 },
+                        home: if owner >= 0 && leg_via < 0 { a as i32 } else { -1 },
                         contract: false,
                         price: pa,
                         local: owner < 0 && days <= LOCAL_HAUL_DAYS,
+                        via: leg_via,
                     });
-                    self.log_trade(a as u32, b as u32, g, amount, owner, sea, river, pa);
+                    self.log_trade(a as u32, leg_to, g, amount, owner, sea, river, pa);
                 }
             }
         }
@@ -1654,6 +1741,7 @@ impl CampaignSim {
             contract: false,
             price: pb_buy,
             local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
+            via: -1, // the return leg is not routed through the composed-pricing outlet
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, river, pb_buy);
     }

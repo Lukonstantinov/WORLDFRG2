@@ -2763,6 +2763,13 @@ pub struct TradeFlowGood {
     /// Who moved it — houses, guilds, or unnamed local merchants — largest first.
     #[serde(default)]
     pub carriers: Vec<TradeCarrier>,
+    /// TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — this city's OWN yearly output of
+    /// this good (`TickHub.production[g]` annualised), so the three-way split
+    /// "own produce · passing through · bought for itself" can be drawn without
+    /// any new sim state: `transit = max(0, out_volume - own_production)`,
+    /// `own_export = out_volume - transit`, `for_us = in_volume - transit`.
+    #[serde(default)]
+    pub own_production: f32,
     /// This settlement (its own fields, or an estate/manufactory parented to it)
     /// actually MAKES this good — the same "made here" reading `CityMarketView`'s
     /// Market tab already shows, so the Flows tab can mark a good PRODUCED rather

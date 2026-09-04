@@ -146,6 +146,38 @@ const HOUSE_BRANCH_WEALTH: f32 = 12.0;
 const SEA_LOSS: f32 = 0.05;
 const CARAVAN_LOSS: f32 = 0.03;
 const RIVER_LOSS: f32 = 0.015;
+/// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — `SEA_LOSS`/`CARAVAN_LOSS`/
+/// `RIVER_LOSS` above are the loss PROBABILITY for a voyage of this many days;
+/// a longer or shorter leg scales via `1 - (1 - p)^(days / LOSS_REFERENCE_DAYS)`
+/// (`CampaignSim::distance_scaled_loss`) rather than the old flat per-shipment
+/// roll, which made a 9,000 km crossing exactly as safe as a 200 km one (§1.2).
+const LOSS_REFERENCE_DAYS: f32 = 20.0;
+/// A per-voyage subsistence cost (crew wages, draft-animal fodder, harbour
+/// dues) on top of the existing per-unit freight rate — "victualling"
+/// (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3). Folded into `good_freight`,
+/// which every caller (dispatch, `deploy_return_leg`, futures delivery)
+/// already reads, so a long haul costs non-linearly more than a short one
+/// even before the freight rate itself is applied. Kept small relative to
+/// `freight_per_day` (0.018 shipped) since it is a flat add per unit-day,
+/// not a rate — see `good_freight`'s own doc comment.
+const VICTUAL_PER_DAY: f32 = 0.001;
+/// A fixed per-voyage outfitting charge (crew wages up front, harbour dues,
+/// loading) independent of how much cargo the voyage carries — "so long hauls
+/// need scale" (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3): a tiny shipment
+/// barely amortises this, a large one absorbs it easily. Charged once per
+/// dispatched (house-owned) shipment in `production.rs::dispatch`, deducted
+/// from the carrying house directly rather than folded into the per-unit
+/// price gap, so it does not distort the arbitrage math that decides WHICH
+/// market gets the cargo — only whether running the voyage at all was worth it.
+const OUTFIT_COST: f32 = 0.05;
+/// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 6 (§4.1 Brake 2) — the EXTRA voyage
+/// loss probability (additive, before `distance_scaled_loss` scales it to the
+/// real leg length) a house pays for running a leg through an entrepôt outlet
+/// that has barred it. Never a flat block — a post owner who could delete a
+/// rival's lane outright would be a stronger weapon than any existing war
+/// goal (`WAR_GOAL_PROVINCE` only transfers one province) — but a real,
+/// survivable cost for slipping past under embargo.
+const BYPASS_LOSS_ADD: f32 = 0.12;
 /// Independent trade shorter than this (travel-days) is "local merchants";
 /// anything longer is organized "guild" long-haul. Splits the non-house carry.
 const LOCAL_HAUL_DAYS: f32 = 8.0;
@@ -2971,6 +3003,18 @@ pub struct InTransit {
     /// regardless). `#[serde(default)]` — an old save's in-flight cargo reads
     /// false and books `SUPPLY_FOREIGN`, exactly its pre-N8 behaviour.
     #[serde(default)] pub local: bool,
+    /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 4 (the keystone) — when this
+    /// leg's route was composed through an entrepôt outlet (`CampaignSim::
+    /// route_outlet`), `to` is that OUTLET, not the ultimate buyer, and `via`
+    /// names the real destination. On arrival at the outlet the cargo is a
+    /// real stop, not a teleport: `arrive_at_outlet` decides BREAK OF BULK
+    /// (sell into the outlet's own market — real revenue, real throughput,
+    /// the cargo may be bought onward by anyone, D2) versus continuing —
+    /// spawning a fresh onward leg to `via` — by comparing the outlet's own
+    /// price against the destination's net of the remaining freight.
+    /// `-1` (the default) is a plain, un-transshipped leg, unchanged from
+    /// before this field existed — an old save's in-flight cargo reads `-1`.
+    #[serde(default = "neg_one_i32")] pub via: i32,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -7622,19 +7666,52 @@ impl CampaignSim {
                 hb.in_by_land *= 0.98;
                 for v in hb.supply_accum.iter_mut() { *v *= 0.98; }
             }
-            // (to, good, amount, sea, phase, home, owner, local) — phase/home/owner let
-            // an arriving OUTBOUND house cargo spawn its return leg from the dest hub;
-            // `local` (N8) says whether an ownerless arrival was a short haul.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool)> = Vec::new();
+            // (to, good, amount, sea, phase, home, owner, local, via, price) — phase/
+            // home/owner let an arriving OUTBOUND house cargo spawn its return leg
+            // from the dest hub; `local` (N8) says whether an ownerless arrival was a
+            // short haul; `via` (TRADE_STAGING_AND_POSTS_PLAN.md slice 4) names a
+            // REAL destination beyond this arrival when the leg that just landed was
+            // only the first hop of a composed entrepôt route.
+            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt, sea, phase, home, owner, local) in landed {
+            for (to, g, amt, sea, phase, home, owner, local, via, price) in landed {
+                // TRADE_STAGING_AND_POSTS_PLAN.md slice 4 — a leg composed through
+                // an entrepôt outlet (`via >= 0`) does NOT take delivery here: the
+                // buyer at the real destination already settled this trade at
+                // dispatch time (§6d's composed price), so the cargo simply
+                // re-embarks for the second, real leg to `via`. This is what makes
+                // a long lane an actual RELAY — two real legs with real travel
+                // time — instead of one leg whose price alone pretended a stop
+                // happened. Full break-of-bulk (the outlet selling the cargo
+                // itself instead of forwarding it) is deliberately NOT built here:
+                // the economics were already settled for delivery to the ORIGINAL
+                // buyer at dispatch time, so diverting the cargo at the stop would
+                // pay the seller twice — once via the arbitrage profit already
+                // credited, once via the outlet's own local sale. Making the stop a
+                // genuine economic choice needs the settlement itself to move to
+                // arrival time, which is real future work, not silently skipped.
+                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len() {
+                    let b = via as usize;
+                    let d2 = self.lane_days(to, b);
+                    let eta2 = if d2.is_finite() { tick + (d2.ceil() as u32).max(1) } else { tick + 1 };
+                    let sea2 = self.hubs[to].coastal && self.hubs[b].coastal;
+                    let river2 = !sea2 && self.hubs[to].river && self.hubs[b].river;
+                    self.in_transit.push(InTransit {
+                        from: to as u32, to: b as u32, good: g, amount: amt,
+                        eta_tick: eta2, owner, sea: sea2, river: river2,
+                        // The round-trip bonus leg belongs to a direct voyage only
+                        // (§1 above) — a relayed voyage's vessel does not sail home.
+                        phase, home: -1, contract: false, price, local, via: -1,
+                    });
+                    continue;
+                }
                 if to < self.hubs.len() {
                     // W2, dose-walked (`LANDED_CARGO_TO_DEPOT_DOSE`) · a slice of a
                     // house-owned arrival goes straight into that carrier's own
