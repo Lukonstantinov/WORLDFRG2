@@ -83,6 +83,7 @@
             trade_cur: Default::default(),
             city_dominator: vec![],
             trade_last: vec![],
+            trade_last_season: vec![],
             trade_hist: vec![],
             figures: vec![],
             fairs: vec![],
@@ -6767,4 +6768,59 @@
         assert!(!s.hubs[0].abandoned, "a mining settlement must never be wiped by a failed lifeline");
         assert!(s.hubs[0].population > 0.0);
         assert!(s.hubs[0].population >= s.hubs[0].founding_pop * MINING_SETTLEMENT_FLOOR_FRAC - 1e-3);
+    }
+
+    /// The seasonal trade split must be purely additive: `trade_last`'s annual
+    /// totals (summed across all 4 quarters of `trade_last_season`) must equal
+    /// what a single season-less accumulator would have produced. Ships shipments
+    /// in every quarter of the year across sea and river legs with two different
+    /// carriers, so the fold has real carrier maps and transport splits to merge.
+    #[test]
+    fn trade_last_season_sums_to_trade_last() {
+        let goods = vec![good("wool", 1, 1, 5.0, 0.5, false)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 100.0, vec![0.0], 0), hub(1, 1.0, 0.0, 100.0, vec![0.0], 0)], goods);
+        // One shipment per quarter (day 10, 100, 200, 300), alternating sea/river
+        // and carrier, so every field on `TradeCur` gets real, non-trivial content.
+        for (day, amount, owner, sea, river) in
+            [(10u32, 4.0, 7i32, true, false), (100, 6.0, -1, false, true), (200, 3.0, 7, false, false), (300, 5.0, 9, true, false)]
+        {
+            s.tick = day;
+            s.log_trade(0, 1, 0, amount, owner, sea, river, 1.0);
+        }
+        s.fold_trade_year();
+
+        assert!(!s.trade_last.is_empty(), "the annual fold must produce entries");
+        assert!(!s.trade_last_season.is_empty(), "the quarterly fold must produce entries");
+        // Every trade_last_season entry must carry a REAL quarter, never the
+        // whole-year sentinel.
+        for f in &s.trade_last_season {
+            assert!(f.season < SEASON_WHOLE_YEAR, "a quarterly entry must not carry the whole-year sentinel");
+        }
+        // Every trade_last entry must carry the whole-year sentinel.
+        for f in &s.trade_last {
+            assert_eq!(f.season, SEASON_WHOLE_YEAR, "an annual entry must carry the whole-year sentinel");
+        }
+
+        for annual in &s.trade_last {
+            let key = (annual.hub, annual.good, annual.partner, annual.dir);
+            let mut amount = 0.0f32;
+            let mut sea_amount = 0.0f32;
+            let mut river_amount = 0.0f32;
+            let mut carriers: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+            for q in &s.trade_last_season {
+                if (q.hub, q.good, q.partner, q.dir) == key {
+                    amount += q.amount;
+                    sea_amount += q.sea_amount;
+                    river_amount += q.river_amount;
+                    for &(carrier, v) in &q.carriers { *carriers.entry(carrier).or_insert(0.0) += v; }
+                }
+            }
+            assert!((amount - annual.amount).abs() < 1e-4, "annual amount must equal the sum across quarters");
+            assert!((sea_amount - annual.sea_amount).abs() < 1e-4, "annual sea_amount must equal the sum across quarters");
+            assert!((river_amount - annual.river_amount).abs() < 1e-4, "annual river_amount must equal the sum across quarters");
+            for &(carrier, v) in &annual.carriers {
+                let summed = carriers.get(&carrier).copied().unwrap_or(0.0);
+                assert!((summed - v).abs() < 1e-4, "annual carrier volume must equal the sum across quarters");
+            }
+        }
     }

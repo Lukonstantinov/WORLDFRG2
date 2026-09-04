@@ -2153,7 +2153,13 @@ impl CampaignSim {
             // the floor here, so "how did this reach us" and "who brought it" were
             // unanswerable a year later even though the tick knew both.
             let carrier = if owner >= 0 { owner as u32 } else { u32::MAX };
-            for key in [(to, g, from, 0u8), (from, g, to, 1u8)] {
+            // Calendar quarter this shipment falls in (0..3), from the day-of-year —
+            // the real granularity `log_trade` already has (`self.tick`) but that
+            // `fold_trade_year` used to discard entirely when folding into the
+            // annual `trade_last`. Kept as a SEPARATE accumulator key so the annual
+            // fold (summed back across all 4 quarters) stays bit-identical.
+            let season = (((self.tick % 365) / 91) as u8).min(3);
+            for key in [(to, g, from, 0u8, season), (from, g, to, 1u8, season)] {
                 let e = self.trade_cur.entry(key).or_default();
                 e.amount += amount;
                 if sea { e.sea_amount += amount; }
@@ -2169,18 +2175,52 @@ impl CampaignSim {
     /// trend history (goods that DIDN'T trade get a 0, so a fallen trade shows its
     /// decline), then clear the accumulator for the new year.
     pub(crate) fn fold_trade_year(&mut self) {
-        let mut last: Vec<TradeFlowAgg> = self.trade_cur.iter()
-            .map(|(&(hub, good, partner, dir), cur)| {
-                // Carriers, largest first, so the panel's "who supplies this" reads
-                // in order without re-sorting; ties break on the index so the fold
-                // stays deterministic.
-                let mut carriers: Vec<(u32, f32)> = cur.carriers.iter().map(|(&k, &v)| (k, v)).collect();
-                carriers.sort_by(|a, b| b.1.partial_cmp(&a.1)
-                    .unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
-                TradeFlowAgg {
-                    hub, good, partner, dir,
-                    amount: cur.amount, sea_amount: cur.sea_amount, river_amount: cur.river_amount, carriers,
-                }
+        fn sorted_carriers(carriers: &std::collections::HashMap<u32, f32>) -> Vec<(u32, f32)> {
+            // Carriers, largest first, so the panel's "who supplies this" reads
+            // in order without re-sorting; ties break on the index so the fold
+            // stays deterministic.
+            let mut v: Vec<(u32, f32)> = carriers.iter().map(|(&k, &v)| (k, v)).collect();
+            v.sort_by(|a, b| b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+            v
+        }
+        // The real per-quarter breakdown, straight from the season-keyed accumulator.
+        let mut last_season: Vec<TradeFlowAgg> = self.trade_cur.iter()
+            .map(|(&(hub, good, partner, dir, season), cur)| TradeFlowAgg {
+                hub, good, partner, dir, season,
+                amount: cur.amount, sea_amount: cur.sea_amount, river_amount: cur.river_amount,
+                carriers: sorted_carriers(&cur.carriers),
+            })
+            .collect();
+        last_season.sort_by(|a, b| (a.hub, a.good, a.dir, a.partner, a.season)
+            .cmp(&(b.hub, b.good, b.dir, b.partner, b.season)));
+        // The annual total: re-aggregated by summing back across all 4 quarters, so
+        // this stays bit-identical to what a single season-less accumulator would
+        // have produced (the invariant the season split must never break). Summed
+        // in a SORTED key order rather than raw HashMap iteration order — a float
+        // sum is order-dependent, and HashMap iteration order is randomized per
+        // process, so summing in map order would make every downstream figure
+        // (and the whole economy's trajectory, over enough years) reproducible
+        // only by accident. `econ_scorecard_is_deterministic` caught exactly this.
+        let mut cur_sorted: Vec<(&(u32, u32, u32, u8, u8), &TradeCur)> = self.trade_cur.iter().collect();
+        cur_sorted.sort_by_key(|(k, _)| **k);
+        let mut annual: std::collections::HashMap<(u32, u32, u32, u8), TradeCur> = std::collections::HashMap::new();
+        for (&(hub, good, partner, dir, _season), cur) in cur_sorted {
+            let e = annual.entry((hub, good, partner, dir)).or_default();
+            e.amount += cur.amount;
+            e.sea_amount += cur.sea_amount;
+            e.river_amount += cur.river_amount;
+            let mut carriers_sorted: Vec<(&u32, &f32)> = cur.carriers.iter().collect();
+            carriers_sorted.sort_by_key(|(k, _)| **k);
+            for (&carrier, &amt) in carriers_sorted {
+                *e.carriers.entry(carrier).or_insert(0.0) += amt;
+            }
+        }
+        let mut last: Vec<TradeFlowAgg> = annual.iter()
+            .map(|(&(hub, good, partner, dir), cur)| TradeFlowAgg {
+                hub, good, partner, dir, season: SEASON_WHOLE_YEAR,
+                amount: cur.amount, sea_amount: cur.sea_amount, river_amount: cur.river_amount,
+                carriers: sorted_carriers(&cur.carriers),
             })
             .collect();
         // Deterministic order (the panel re-sorts by volume anyway).
@@ -2239,6 +2279,7 @@ impl CampaignSim {
             self.trade_hist.truncate(TRADE_HIST_ROWS);
         }
         self.trade_last = last;
+        self.trade_last_season = last_season;
         self.trade_cur.clear();
     }
 

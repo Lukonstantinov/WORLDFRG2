@@ -3088,7 +3088,18 @@ pub struct TradeFlowAgg {
     /// merchants / no named owner) and is stored as `u32::MAX`.
     #[serde(default)]
     pub carriers: Vec<(u32, f32)>,
+    /// Which calendar quarter this entry covers: 0..3 for `trade_last_season`'s
+    /// real per-quarter breakdown, `SEASON_WHOLE_YEAR` (4) for `trade_last`'s
+    /// existing annual entries — the sentinel keeps every pre-existing
+    /// `TradeFlowAgg` construction site (and every old save's deserialized
+    /// entry, via `#[serde(default)]`) honestly labelled "not seasonal data"
+    /// rather than silently reading as quarter 0.
+    #[serde(default = "season_whole_year")]
+    pub season: u8,
 }
+fn season_whole_year() -> u8 { SEASON_WHOLE_YEAR }
+/// Sentinel for `TradeFlowAgg.season` meaning "the whole year", not a real quarter.
+pub const SEASON_WHOLE_YEAR: u8 = 4;
 
 /// Per-(hub, good) yearly trade-volume series (in + out), so the Flows subtab can
 /// graph trade DYNAMICS over the campaign and show which trades have fallen.
@@ -5466,12 +5477,13 @@ pub struct CampaignSim {
     #[serde(default)]
     pub contracts: Vec<Contract>,
     /// THIS year's trade-flow accumulator for the settlement Flows subtab, keyed by
-    /// (hub, good, partner, dir). In-memory only (`skip`) — a mid-year save/reload
-    /// loses just the partial current year; completed years live in `trade_last`/
-    /// `trade_hist`. Observability only; never feeds back into the simulation, so it
-    /// has no bearing on determinism.
+    /// (hub, good, partner, dir, season — 0..3, the calendar quarter `log_trade` was
+    /// called in). In-memory only (`skip`) — a mid-year save/reload loses just the
+    /// partial current year; completed years live in `trade_last`/`trade_last_
+    /// season`/`trade_hist`. Observability only; never feeds back into the
+    /// simulation, so it has no bearing on determinism.
     #[serde(skip)]
-    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8), TradeCur>,
+    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8, u8), TradeCur>,
     /// Per-hub trade DOMINATOR (house index, −1 = none), recomputed monthly from
     /// `House.influence`. Derived → not serialized. Drives the dominance trade edge.
     #[serde(skip)]
@@ -5480,6 +5492,14 @@ pub struct CampaignSim {
     /// breakdown the Flows subtab reads. Appended LAST → `#[serde(default)]`.
     #[serde(default)]
     pub trade_last: Vec<TradeFlowAgg>,
+    /// The LAST completed year's flows, split by calendar QUARTER (`season` 0..3) —
+    /// the Seasonal Trade panel's source. Same (hub,good,partner,dir) rows as
+    /// `trade_last`, just not summed across the year; `trade_last`'s own totals are
+    /// always exactly the sum of the matching four `trade_last_season` entries.
+    /// Appended LAST → `#[serde(default)]`, so an old save loads with this empty
+    /// until the next New Year folds a real quarterly breakdown into it.
+    #[serde(default)]
+    pub trade_last_season: Vec<TradeFlowAgg>,
     /// Per-(hub, good) yearly trade-volume history (the trend graphs).
     #[serde(default)]
     pub trade_hist: Vec<TradeHist>,
