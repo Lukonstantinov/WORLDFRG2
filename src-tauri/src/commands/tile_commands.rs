@@ -86,6 +86,24 @@ fn pack_tiles(raw: &[RawTileImage], lod: i32) -> Vec<u8> {
     out
 }
 
+/// The wrap bound for `(tx, ty)` requests at a given LOD, in whatever unit
+/// those requests actually arrive in: BASE-tile coords at lod 0 (the bound is
+/// just `base_tiles_x`), SUPERTILE coords at lod>0, each covering `2^lod` base
+/// tiles per side (`TileManager` requests `[stx, sty]`; `render_supertiles`
+/// multiplies back up by `2^lod`) — so the bound there is the base-tile count
+/// divided DOWN by `2^lod`, not the base-tile count itself. Getting this wrong
+/// makes a wrap trigger only once a SUPERTILE index reaches the BASE-tile
+/// count — far past the real supertile edge — and every supertile strictly
+/// between the true edge and that far-off bound requests real base tiles
+/// beyond the world's actual width, which read back as blank/default-sea: a
+/// solid gap band across the map at any zoomed-out (lod>0) view wide or
+/// panned far enough to reach it.
+fn wrap_bound_at_lod(base_tiles_x: i32, lod: i32) -> i32 {
+    if base_tiles_x <= 0 { return 0; }
+    let s = 1i32 << lod.clamp(0, MAX_LOD);
+    ((base_tiles_x + s - 1) / s).max(1)
+}
+
 /// Render the requested tiles for every layer at the given LOD, as raw RGBA.
 fn render_tiles_raw(
     tiles: Vec<(i32, i32)>,
@@ -100,7 +118,10 @@ fn render_tiles_raw(
     // sim clamps Y at the poles), so an out-of-range ty is left exactly as
     // before (`load_blob_with_version` returns none → default sea).
     let (gw, _gh) = grid_dims(db);
-    let tiles_x = if gw > 0 { ((gw + TILE_SIZE - 1) / TILE_SIZE) as i32 } else { 0 };
+    let base_tiles_x = if gw > 0 { ((gw + TILE_SIZE - 1) / TILE_SIZE) as i32 } else { 0 };
+    // `tiles` arrive in whatever coordinate system the caller is using — see
+    // `wrap_bound_at_lod`'s own doc comment for why the bound must match it.
+    let tiles_x = wrap_bound_at_lod(base_tiles_x, lod);
     let needs_wrap = tiles_x > 0 && tiles.iter().any(|&(tx, _)| tx < 0 || tx >= tiles_x);
     if !needs_wrap {
         return if lod == 0 { render_full_res(tiles, layers, db) } else { render_supertiles(tiles, layers, lod, db) };
@@ -671,6 +692,25 @@ mod tests {
         for (g, col) in out.goods.iter().enumerate() {
             assert!(col.iter().all(|&v| v != 0), "sample_supertile dropped goods belt {g}");
         }
+    }
+
+    /// The wrap bound must be in SUPERTILE units at lod>0, not base-tile units —
+    /// the exact bug that let a zoomed-out (lod>0) request past the real edge
+    /// skip wrapping entirely and read real base tiles far beyond the world's
+    /// actual width, rendering as a blank/default-sea gap band on the map.
+    /// A 3600-wide world has `ceil(3600/128) = 29` base tile columns.
+    #[test]
+    fn wrap_bound_shrinks_with_lod() {
+        assert_eq!(wrap_bound_at_lod(29, 0), 29, "lod 0 requests are base-tile coords: bound is the base count");
+        assert_eq!(wrap_bound_at_lod(29, 1), 15, "lod 1 supertiles cover 2 base tiles each: ceil(29/2)");
+        assert_eq!(wrap_bound_at_lod(29, 2), 8, "lod 2 supertiles cover 4 base tiles each: ceil(29/4)");
+        assert_eq!(wrap_bound_at_lod(29, 4), 2, "lod 4 supertiles cover 16 base tiles each: ceil(29/16)");
+        // The bug in miniature: a supertile index that is genuinely out of range
+        // for its own lod (here, 10 at lod 2, whose valid range is 0..8) must be
+        // caught by the bound — the pre-fix bound (29, the raw base-tile count)
+        // would have missed it entirely.
+        assert!(10 >= wrap_bound_at_lod(29, 2), "a supertile index past its own lod's real edge must be flagged for wrapping");
+        assert_eq!(wrap_bound_at_lod(0, 2), 0, "no grid data yet ⇒ no bound, exactly like the lod-0 case");
     }
 
     /// The packed format must parse back exactly (mirrors the TS parser in

@@ -831,17 +831,10 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         e.0 += l.grade; e.1 += 1;
     }
 
-    let mut goods: Vec<ProvinceGoodPotential> = Vec::new();
-    for g in 0..ng {
-        if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
-        let idx = p * ng + g;
-        let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
-        // A good ABSENT from the whole province sits at the exact belt-histogram bin-0
-        // floor (`PROV_GOOD_ABSENT_BELT` ≈ 8/255); any real presence is strictly above
-        // it. The old `<= 0.001` gate let that floor through, so a cold-desert province
-        // listed pepper/cacao/tropical hardwoods it can't grow. Same gate the "currently
-        // worked" list already uses, so both readings agree on what is actually present.
-        if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
+    // One good's belt richness → a full `ProvinceGoodPotential` row, shared by
+    // both sources below (the live campaign snapshot and the world fallback) so
+    // the two can never drift in what they compute from a belt value.
+    let build_good = |g: usize, belt: f32, potential: f32, actual: f32| -> ProvinceGoodPotential {
         let name = sim.goods[g].name.clone();
         let dep = is_deposit.get(&name).copied().unwrap_or(false);
         let mar = is_marine.get(&name).copied().unwrap_or(false);
@@ -857,18 +850,55 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         let grade_for_word = if dep && workings > 0 { mean_grade }
             else if has_locality { mean_locality_grade }
             else { belt };
-        goods.push(ProvinceGoodPotential {
+        ProvinceGoodPotential {
             good: g as u8,
             name,
-            potential: sim.province_good_potential(p, g),
+            potential,
             belt,
-            actual: actual_all.get(idx).copied().unwrap_or(0.0),
+            actual,
             is_deposit: dep,
             is_marine: mar,
             mean_grade, workings, best_depth,
             has_locality, mean_locality_grade, locality_count,
             grade_word: crate::sim::deposits::grade_label(grade_for_word).to_string(),
-        });
+        }
+    };
+    // A good ABSENT from the whole province sits at the exact belt-histogram bin-0
+    // floor (`PROV_GOOD_ABSENT_BELT` ≈ 8/255); any real presence is strictly above
+    // it. The old `<= 0.001` gate let that floor through, so a cold-desert province
+    // listed pepper/cacao/tropical hardwoods it can't grow. Same gate the "currently
+    // worked" list already uses, so both readings agree on what is actually present.
+    let mut goods: Vec<ProvinceGoodPotential> = Vec::new();
+    if ng > 0 && p < np {
+        for g in 0..ng {
+            if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
+            let idx = p * ng + g;
+            let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
+            if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
+            goods.push(build_good(g, belt, sim.province_good_potential(p, g), actual_all.get(idx).copied().unwrap_or(0.0)));
+        }
+    } else {
+        // FALLBACK — this campaign's own `prov_good_belt` snapshot is empty (a
+        // campaign started before Phase 5's per-province goods exploitation
+        // existed, so nothing was ever snapshotted at `campaign_start_sim`).
+        // Read the WORLD's own frozen belt for this province straight from
+        // `metadata["provinces"]` — the exact same source `prov_good_belt` is a
+        // one-time copy OF (§5) — rather than silently listing zero goods for
+        // every province on an older save. No live land-use data exists in this
+        // path, so `potential`/`actual` fall back to the belt itself / 0 — an
+        // honest "untapped, unmeasured" reading rather than a fabricated number.
+        if let Ok(Some(s)) = metadata::get_meta(&conn, "provinces") {
+            if let Ok(provs) = serde_json::from_str::<Vec<crate::sim::provinces::Province>>(&s) {
+                if let Some(wp) = provs.get(p) {
+                    for (g, &belt) in wp.good_belt.iter().enumerate() {
+                        if g >= ng { break; }
+                        if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
+                        if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
+                        goods.push(build_good(g, belt, belt, 0.0));
+                    }
+                }
+            }
+        }
     }
     // Richest potential first (a deposit good's richness is reflected in its belt).
     goods.sort_by(|a, b| b.potential.partial_cmp(&a.potential).unwrap_or(std::cmp::Ordering::Equal)
