@@ -2763,6 +2763,12 @@ pub struct TradeFlowGood {
     /// Who moved it — houses, guilds, or unnamed local merchants — largest first.
     #[serde(default)]
     pub carriers: Vec<TradeCarrier>,
+    /// This settlement (its own fields, or an estate/manufactory parented to it)
+    /// actually MAKES this good — the same "made here" reading `CityMarketView`'s
+    /// Market tab already shows, so the Flows tab can mark a good PRODUCED rather
+    /// than merely resold. `false` for a good this city only ever moves through.
+    #[serde(default)]
+    pub produced: bool,
 }
 /// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
 /// that touched this city, by who financed it.

@@ -639,6 +639,10 @@ export interface TradeFlowGood {
   river_volume?: number;
   /** Who moved it — houses, guilds, or unnamed local merchants — largest first. */
   carriers: TradeCarrier[];
+  /** This settlement (its own fields, or an estate/manufactory parented to it)
+   *  actually MAKES this good — the same "made here" reading the Market tab
+   *  shows. `false` for a good this city only ever resells. */
+  produced?: boolean;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {

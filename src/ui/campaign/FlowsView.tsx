@@ -144,6 +144,51 @@ function BalanceBar({ inV, outV, max }: { inV: number; outV: number; max: number
 
 type Sort = "unusual" | "volume";
 
+/** A partner city expanded inline — which goods move each way, largest first.
+ *  Built straight from `flows.routes` (already per-good, per-partner, per-
+ *  direction), so no extra query is needed: this is exactly what a partner row
+ *  answers when asked "what do we actually trade with them". */
+function PartnerGoodsBreakdown({ hub, flows }: { hub: number; flows: TradeFlows }) {
+  const rows = useMemo(() => flows.routes.filter((r) => r.partner === hub), [flows, hub]);
+  if (rows.length === 0) return <EmptyNote>no goods recorded for this route</EmptyNote>;
+  const nameOf = (good: number) => {
+    const g = flows.goods.find((x) => x.good === good);
+    const meta = g ? GOOD_META.get(g.name) : undefined;
+    return { emoji: meta?.emoji ?? "•", label: meta?.label ?? g?.name ?? `good ${good}`, produced: g?.produced };
+  };
+  const max = Math.max(...rows.map((r) => r.amount), 1e-6);
+  const col = (dir: number, tint: string, lbl: string) => {
+    const rs = rows.filter((r) => r.dir === dir).sort((a, b) => b.amount - a.amount).slice(0, 8);
+    if (rs.length === 0) return null;
+    return (
+      <div style={{ flex: 1, minWidth: 150 }}>
+        <div style={{ color: tint, fontSize: FZ.micro, letterSpacing: 0.5, marginBottom: 2 }}>{lbl}</div>
+        {rs.map((r) => {
+          const n = nameOf(r.good);
+          return (
+            <div key={r.good} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0" }}>
+              <span style={{ width: 14, fontSize: FZ.tiny }}>{n.emoji}</span>
+              <span style={{
+                flex: 1, minWidth: 0, color: T.inkMid, fontSize: FZ.tiny,
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>{n.label}</span>
+              {n.produced && <span title="produced here, not resold" style={{ fontSize: FZ.tiny }}>⚒</span>}
+              <Meter value={r.amount} max={max} color={tint} height={5} />
+              <span style={{ width: 40, textAlign: "right", color: T.inkDim, fontSize: FZ.tiny }}>{fmt(r.amount)}</span>
+            </div>
+          );
+        })}
+      </div>
+    );
+  };
+  return (
+    <div style={{ width: "100%", display: "flex", gap: SPACE.md, padding: "3px 4px 4px 22px" }}>
+      {col(0, DIR_IN, "◀ THEY SEND US")}
+      {col(1, DIR_OUT, "WE SEND THEM ▶")}
+    </div>
+  );
+}
+
 export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   hubId: number; active: boolean; tick: number; setFlowHighlight: (s: Seg[]) => void;
 }) {
@@ -229,10 +274,13 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   // `flows.goods`, which is already on hand — no extra query, no new state.
   const shape = useMemo(() => {
     if (!flows) return null;
+    // A PRODUCED good's label is marked (⚒) so the exports key answers "does this
+    // city actually grow this, or only pass it through" at a glance — exactly the
+    // reading a re-export-heavy entrepôt needs and a volume ranking alone hides.
     const slice = (pick: (g: TradeFlowGood) => number): Slice[] =>
       flows.goods
         .map((g) => ({
-          label: GOOD_META.get(g.name)?.label ?? g.name,
+          label: (g.produced ? "⚒ " : "") + (GOOD_META.get(g.name)?.label ?? g.name),
           value: pick(g),
           color: GOOD_META.get(g.name)?.color ?? T.inkDim,
         }))
@@ -364,7 +412,21 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
               >
                 <span style={{ width: 12, color: T.inkFaint }}>{sel ? "▾" : "▸"}</span>
                 <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
-                <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink }}>{meta?.label ?? g.name}</span>
+                <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink, display: "flex", alignItems: "center", gap: 5 }}>
+                  {meta?.label ?? g.name}
+                  {/* PRODUCED HERE — the same "made here" reading the Market tab shows,
+                      so an exported good this city actually GROWS reads differently
+                      from one it only ever resells (docs request: mark what is made
+                      here so real exports stand out from pass-through trade). */}
+                  {g.produced && (
+                    <span title="produced here — this city's own fields or estates make this, it is not resold"
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 2, fontSize: FZ.tiny,
+                        color: T.goodInk, background: "rgba(76,174,122,0.16)", border: "1px solid rgba(76,174,122,0.4)",
+                        borderRadius: RADIUS.sm, padding: "0 4px", lineHeight: "14px", flex: "0 0 auto",
+                      }}>⚒ made here</span>
+                  )}
+                </span>
                 <BalanceBar inV={g.in_volume} outV={g.out_volume} max={maxTotal} />
                 <span style={{ width: 54, textAlign: "right", color: T.inkMid }}>{fmt(g.avg_volume)}/yr</span>
                 {/* The verdict, not a number. A steady, balanced good gets a muted
@@ -457,7 +519,8 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
             </div>
           );
         })}
-        <FootNote>Click a good to map its routes. Bar shows the in/out split; length is total volume.</FootNote>
+        <FootNote>Click a good to map its routes. Bar shows the in/out split; length is total volume.
+          ⚒ made here marks a good this city actually produces (fields or estates), not merely resells.</FootNote>
       </Section>
 
       {/* ── Selected good's routes ───────────────────────────────────────────── */}
@@ -535,7 +598,8 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                     EXPORTS BY GOOD
                   </div>
                   <DonutKey slices={shape.out} fmt={fmt} onPick={(lbl) => {
-                    const g = flows.goods.find((x) => (GOOD_META.get(x.name)?.label ?? x.name) === lbl);
+                    const plain = lbl && lbl.startsWith("⚒ ") ? lbl.slice(2) : lbl;
+                    const g = flows.goods.find((x) => (GOOD_META.get(x.name)?.label ?? x.name) === plain);
                     setSelGood(g && selGood !== g.good ? g.good : null);
                     setSelDir(g && selGood !== g.good ? 1 : null);
                     setSelPartner(null); setSelRoute(null);
@@ -551,7 +615,8 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                     IMPORTS BY GOOD
                   </div>
                   <DonutKey slices={shape.inn} fmt={fmt} onPick={(lbl) => {
-                    const g = flows.goods.find((x) => (GOOD_META.get(x.name)?.label ?? x.name) === lbl);
+                    const plain = lbl && lbl.startsWith("⚒ ") ? lbl.slice(2) : lbl;
+                    const g = flows.goods.find((x) => (GOOD_META.get(x.name)?.label ?? x.name) === plain);
                     setSelGood(g && selGood !== g.good ? g.good : null);
                     setSelDir(g && selGood !== g.good ? 0 : null);
                     setSelPartner(null); setSelRoute(null);
@@ -581,6 +646,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
               </div>
             )}
           </div>
+          <FootNote>⚒ marks a good this city actually produces — the rest is re-exported, not grown or mined here.</FootNote>
         </Section>
       )}
 
@@ -608,20 +674,24 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
                   {list.map((p) => {
                     const sel = selPartner === p.hub;
                     return (
-                      <div key={p.hub} data-no-drag
-                        onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
-                        style={{
-                          display: "flex", alignItems: "center", gap: SPACE.sm, padding: "2px 4px",
-                          borderRadius: RADIUS.sm, cursor: "pointer",
-                          background: sel ? T.card : "transparent",
-                        }}>
-                        <span style={{ flex: 1, minWidth: 60, color: sel ? T.gold : T.ink,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                        <Meter value={vol(p)} max={max} color={tint} height={7} />
-                        <span style={{ width: 46, textAlign: "right", color: T.inkMid,
-                          fontVariantNumeric: "tabular-nums" }}>{fmt(vol(p))}</span>
-                        <span style={{ width: 32, textAlign: "right", color: T.inkDim,
-                          fontVariantNumeric: "tabular-nums" }}>{pctOf(p).toFixed(0)}%</span>
+                      <div key={p.hub}>
+                        <div data-no-drag
+                          onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
+                          style={{
+                            display: "flex", alignItems: "center", gap: SPACE.sm, padding: "2px 4px",
+                            borderRadius: RADIUS.sm, cursor: "pointer",
+                            background: sel ? T.card : "transparent",
+                          }}>
+                          <span style={{ width: 12, color: T.inkFaint, fontSize: FZ.tiny }}>{sel ? "▾" : "▸"}</span>
+                          <span style={{ flex: 1, minWidth: 60, color: sel ? T.gold : T.ink,
+                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                          <Meter value={vol(p)} max={max} color={tint} height={7} />
+                          <span style={{ width: 46, textAlign: "right", color: T.inkMid,
+                            fontVariantNumeric: "tabular-nums" }}>{fmt(vol(p))}</span>
+                          <span style={{ width: 32, textAlign: "right", color: T.inkDim,
+                            fontVariantNumeric: "tabular-nums" }}>{pctOf(p).toFixed(0)}%</span>
+                        </div>
+                        {sel && <PartnerGoodsBreakdown hub={p.hub} flows={flows} />}
                       </div>
                     );
                   })}
@@ -655,26 +725,30 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
             {flows.partners.map((p) => {
               const sel = selPartner === p.hub;
               return (
-                <div key={p.hub} data-no-drag
-                  onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
-                  style={{
-                    display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
-                    borderRadius: RADIUS.sm, cursor: "pointer", background: sel ? T.card : "transparent",
-                  }}>
-                  <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink,
-                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
-                  <Meter value={p.pct} max={maxPartner} color="#c99a3a" height={7} />
-                  <span style={{ width: 36, textAlign: "right", color: T.inkMid }}>{p.pct.toFixed(0)}%</span>
-                  <span style={{ width: 96, textAlign: "right", color: T.inkDim, fontSize: FZ.base,
-                    overflow: "hidden", whiteSpace: "nowrap" }}>
-                    {p.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join("")}
-                  </span>
+                <div key={p.hub}>
+                  <div data-no-drag
+                    onClick={() => { setSelPartner(sel ? null : p.hub); setSelGood(null); setSelRoute(null); }}
+                    style={{
+                      display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
+                      borderRadius: RADIUS.sm, cursor: "pointer", background: sel ? T.card : "transparent",
+                    }}>
+                    <span style={{ width: 12, color: T.inkFaint, fontSize: FZ.tiny }}>{sel ? "▾" : "▸"}</span>
+                    <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink,
+                      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                    <Meter value={p.pct} max={maxPartner} color="#c99a3a" height={7} />
+                    <span style={{ width: 36, textAlign: "right", color: T.inkMid }}>{p.pct.toFixed(0)}%</span>
+                    <span style={{ width: 96, textAlign: "right", color: T.inkDim, fontSize: FZ.base,
+                      overflow: "hidden", whiteSpace: "nowrap" }}>
+                      {p.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join("")}
+                    </span>
+                  </div>
+                  {sel && <PartnerGoodsBreakdown hub={p.hub} flows={flows} />}
                 </div>
               );
             })}
           </>
         )}
-        <FootNote>Click a city to map every route to it.</FootNote>
+        <FootNote>Click a city to expand what it sends/buys and map every route to it.</FootNote>
       </Section>
     </div>
   );
