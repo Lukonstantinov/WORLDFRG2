@@ -5165,6 +5165,32 @@ TECTONICS_AND_ISOLATION_PLAN.md   ← ⭐ AGREED, NOTHING BUILT. Two subjects.
                                     sutures with ages, height falling with age. It
                                     says plainly that this fakes the HISTORY rather
                                     than the physics
+CONSUMPTION_REBUILD_PLAN.md       ← ⭐ APPROVED IN SCOPE, NOTHING BUILT. The
+                                    build order for the review below, after
+                                    three decisions on the maximal path: add a
+                                    price→production loop (not just tuning), the
+                                    population PAYS for what it consumes, and a
+                                    mine's output comes from the ore body's
+                                    `extent` rather than the city's population.
+                                    Eight slices, each with its own gate, its own
+                                    push and a gate-that-is-not-the-target; the
+                                    three behavioural ones (price loop, ore
+                                    ceiling, households) each dosed from zero on
+                                    the N1/N6 pattern, re-running `econ_` PER
+                                    DOSE STEP. **S1 is the cheap keystone**: the
+                                    demand table becomes a BUDGET SHARE rather
+                                    than a quantity — one division by
+                                    `base_value`, no table rewritten — which
+                                    alone moves food 12.4%→46.5% of consumption
+                                    spend, and two constant nudges carry it to
+                                    61.0% food / 8.8% luxury / gems at 0.05×
+                                    bread. Names the part of S1 that is easy to
+                                    miss and impossible to see (`need_scale`'s
+                                    own `sum_tw_desire` must gain the same
+                                    terms), and the two things NOT in scope so
+                                    they are not assumed done (N1's ownerless
+                                    residual; `tech_factor` pinned at its 0.85
+                                    floor)
 CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     #[ignore]d diagnostic added). WHY THE
                                     WAREHOUSES ARE FULL AND THE GEMS MOVE IN
