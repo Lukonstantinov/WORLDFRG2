@@ -1113,28 +1113,40 @@ impl CampaignSim {
         }
         let my = (self.hubs[ga].y + self.hubs[gb].y) * 0.5;
 
-        // Founder: the richest house that clears the same bar an outpost does.
+        // Founder: the richest house that clears a route post's (much lighter than
+        // an outpost's) wealth bar.
         let mut candidates: Vec<(usize, f32)> = self.houses.iter().enumerate()
-            .filter(|(_, hh)| !hh.defunct && hh.wealth > OUTPOST_FOUND_WEALTH)
+            .filter(|(_, hh)| !hh.defunct && hh.wealth > ROUTE_POST_FOUND_WEALTH)
             .map(|(hi, hh)| (hi, hh.wealth))
             .collect();
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let Some(&(hi, _)) = candidates.first() else { return };
-        if self.houses[hi].wealth < OUTPOST_FOUND_COST { return; }
+        if self.houses[hi].wealth < ROUTE_POST_FOUND_COST { return; }
 
-        // Nearest colonizable site to the gap's midpoint this house has surveyed
-        // (same survey gate `try_found_house_outpost` already applies).
+        // Site: prefer a genuine transhipment point — a river-mouth delta or a
+        // land/sea chokepoint (the world's own step-7a junction survey) — within
+        // ROUTE_POST_JUNCTION_KM of the gap's midpoint; only fall back to the
+        // plain nearest-surveyed-site pick when no such junction is in reach, so a
+        // gap with no real geographic pinch point still gets a post rather than
+        // none. Historically this is how a trade city actually forms: at the point
+        // cargo must change carrier, not at an arbitrary midpoint.
         let nodes = [(mx, my)];
-        let mut bi = (usize::MAX, f32::MAX);
+        let junction_cells = ROUTE_POST_JUNCTION_KM * self.world_w / EARTH_EQUATOR_KM;
+        let mut best_junction = (usize::MAX, f32::MAX);
+        let mut best_any = (usize::MAX, f32::MAX);
         for (i, s) in self.colonizable.iter().enumerate() {
             if !self.house_knows(hi, s.province) { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
-            if d < bi.1 { bi = (i, d); }
+            if d < best_any.1 { best_any = (i, d); }
+            if (s.delta || s.chokepoint) && d <= junction_cells && d < best_junction.1 {
+                best_junction = (i, d);
+            }
         }
+        let bi = if best_junction.0 != usize::MAX { best_junction } else { best_any };
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
         let site = self.colonizable.swap_remove(si);
 
-        self.houses[hi].wealth -= OUTPOST_FOUND_COST;
+        self.houses[hi].wealth -= ROUTE_POST_FOUND_COST;
         // Fully house-funded, same as a resource outpost — no city/bank required.
         let backers = vec![(1u8, hi as u32, 1.0f32)];
         let home = self.houses[hi].hub as usize;
