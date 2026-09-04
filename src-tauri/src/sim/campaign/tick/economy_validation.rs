@@ -2556,3 +2556,59 @@ fn n8_arrivals_attribute_supply_local_by_real_carrier() {
         "an ownerless short-haul arrival must book SUPPLY_LOCAL — it was structurally \
          always zero before this fix");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC (ignored) · the per-good stock/price census behind
+// `docs/CONSUMPTION_AND_GOODS_REVIEW.md`.
+//
+// The review's central claim is that stock accumulates without bound because
+// production is per-capita and price-inelastic while consumption is capped at
+// the structural ration — so a city's warehouse fills up and its prices sink to
+// `PRICE_FLOOR_MULT`. That claim is only worth making if it is MEASURED, and
+// this is the instrument: it runs the reference world and prints, per good and
+// per year, how many DAYS of the world's own structural need is actually held,
+// and where the price landed relative to `base_value`.
+//
+//   cargo test --lib econ_measure_goods_stock_and_price -- --ignored --nocapture
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+#[ignore]
+fn econ_measure_goods_stock_and_price() {
+    let mut s = reference_world();
+    let ng = s.goods.len();
+    let names: Vec<String> = s.goods.iter().map(|g| g.name.clone()).collect();
+    let bases: Vec<f32> = s.goods.iter().map(|g| g.base_value).collect();
+    let tiers: Vec<u8> = s.goods.iter().map(|g| g.need_tier).collect();
+
+    println!("\n── per-good census · reference world ──");
+    println!("{:>4} {:>8} {:>4} {:>14} {:>14} {:>12} {:>11} {:>10}",
+             "yr", "good", "tier", "stock", "need/day", "days_held", "price/base", "prod/need");
+
+    let mut last_year = 0u32;
+    for year in [1u32, 5, 10, 25, 50, 100] {
+        s.advance((year - last_year) * 365);
+        last_year = year;
+        for g in 0..ng {
+            let mut stock = 0.0f64;
+            let mut need = 0.0f64;
+            let mut prod = 0.0f64;
+            let mut pw = 0.0f64;
+            let mut pop = 0.0f64;
+            for h in 0..s.hubs.len() {
+                if s.hubs[h].abandoned { continue; }
+                stock += s.hub_stock(h, g) as f64;
+                need += s.base_need(h, g) as f64;
+                prod += s.hubs[h].production.get(g).copied().unwrap_or(0.0) as f64;
+                let p = s.hubs[h].population as f64;
+                pw += (s.hubs[h].price.get(g).copied().unwrap_or(0.0) / bases[g]) as f64 * p;
+                pop += p;
+            }
+            let days = if need > 1e-6 { stock / need } else { f64::INFINITY };
+            println!("{:>4} {:>8} {:>4} {:>14.0} {:>14.1} {:>12.1} {:>11.3} {:>10.2}",
+                     year, names[g], tiers[g], stock, need, days,
+                     if pop > 0.0 { pw / pop } else { 0.0 },
+                     if need > 1e-6 { prod / need } else { 0.0 });
+        }
+        println!();
+    }
+}

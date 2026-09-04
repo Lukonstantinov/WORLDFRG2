@@ -5165,6 +5165,57 @@ TECTONICS_AND_ISOLATION_PLAN.md   ← ⭐ AGREED, NOTHING BUILT. Two subjects.
                                     sutures with ages, height falling with age. It
                                     says plainly that this fakes the HISTORY rather
                                     than the physics
+CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
+                                    #[ignore]d diagnostic added). WHY THE
+                                    WAREHOUSES ARE FULL AND THE GEMS MOVE IN
+                                    BULK. Consumption is `eat = need.min(stock)`
+                                    with **no counterparty** — the population is
+                                    a sink, not an agent, so **there are no
+                                    buyers in this economy** and no market panel
+                                    can honestly show any (`supply_accum`'s five
+                                    classes are all SELLERS). Measured from the
+                                    shipped demand tables: food & drink is
+                                    **12.4%** of a city's consumption spend
+                                    (history: 60-80%), luxury tier **69.7%**, and
+                                    a city spends **13.2× more on gemstones than
+                                    on wheat**. Measured in the reference world
+                                    (`econ_measure_goods_stock_and_price`): 312
+                                    days of grain and 1,519 days of silk held in
+                                    YEAR ONE, rising to 20.5 years and 171 years
+                                    by year 100, with `price/base` pinned at
+                                    0.13-0.28 against a `PRICE_FLOOR_MULT` of
+                                    0.15. Four causes, each sufficient:
+                                    consumption capped at the ration so 100% of
+                                    surplus is retained; production reads no
+                                    price ANYWHERE (`made = by_inputs.min(
+                                    labor_cap)`); **31 of 45 goods ship
+                                    `perishable = 0.0`** so spoilage
+                                    early-returns and `wh_capacity` — whose only
+                                    effect is a multiplier ON the spoil rate — is
+                                    provably inert for them; and `need_scale` is
+                                    ONE aggregate scalar over all 45 goods, so at
+                                    most the AVERAGE is right and each good's
+                                    level is an accident of two tables nobody
+                                    compared. **The manufactory shortage is the
+                                    same bug**: `maybe_found_guild_workshop`
+                                    gates on `demand_pressure_at >= 1.08` while
+                                    that function is `(price/base).clamp(0.6,
+                                    3.0)`, so at the measured price it clamps to
+                                    0.6 and the gate is unconditionally false
+                                    everywhere; `maybe_found_estate` uses the
+                                    same figure as a SCORE not a GATE, which is
+                                    the whole asymmetry. Also: `estate_kind` is
+                                    guessed by **substring match on the good's
+                                    name** rather than read from `distribution`
+                                    (the icon bug's root, and a stale-table
+                                    failure its own doc comment already records);
+                                    the strata are a single clamped 0.4-1.8 tilt
+                                    with the comfort tier literally neutral, and
+                                    `Pop` is inert, so a Vic3-style pops WINDOW
+                                    would imply causation the sim does not have.
+                                    Ends with 8 gated proposals in build order
+                                    and 6 questions that need a decision before
+                                    any of it starts
 CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND INERT,
                                     UI NOT BUILT. A third tab beside Market/Flows:
                                     WHO TRADES HERE (carriers by volume/standing/
