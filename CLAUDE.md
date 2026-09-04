@@ -5205,12 +5205,12 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     (history: 60-80%), luxury tier **69.7%**, and
                                     a city spends **13.2× more on gemstones than
                                     on wheat**. Measured in the reference world
-                                    (`econ_measure_goods_stock_and_price`): 312
-                                    days of grain and 1,519 days of silk held in
-                                    YEAR ONE, rising to 20.5 years and 171 years
+                                    (`econ_measure_goods_stock_and_price`): 314
+                                    days of grain and 1,499 days of silk held in
+                                    YEAR ONE, rising to 29.5 years and 197 years
                                     by year 100, with `price/base` pinned at
-                                    0.13-0.28 against a `PRICE_FLOOR_MULT` of
-                                    0.15. Four causes, each sufficient:
+                                    0.14-0.52 against a `PRICE_FLOOR_MULT` of
+                                    0.15 (one excursion, iron at 0.94). Four causes, each sufficient:
                                     consumption capped at the ration so 100% of
                                     surplus is retained; production reads no
                                     price ANYWHERE (`made = by_inputs.min(
@@ -5226,9 +5226,10 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     same bug**: `maybe_found_guild_workshop`
                                     gates on `demand_pressure_at >= 1.08` while
                                     that function is `(price/base).clamp(0.6,
-                                    3.0)`, so at the measured price it clamps to
-                                    0.6 and the gate is unconditionally false
-                                    everywhere; `maybe_found_estate` uses the
+                                    3.0)` whose measured MAXIMUM across every
+                                    good and date is 0.94, so the gate is never
+                                    once satisfied anywhere — unsatisfiable, not
+                                    merely rare; `maybe_found_estate` uses the
                                     same figure as a SCORE not a GATE, which is
                                     the whole asymmetry. Also: `estate_kind` is
                                     guessed by **substring match on the good's

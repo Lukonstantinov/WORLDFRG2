@@ -21,7 +21,9 @@ cargo test --lib econ_measure_goods_stock_and_price -- --ignored --nocapture
 
 Runs the `economy_validation.rs` reference world (30 cities, 6 goods, 10 houses)
 and prints, per good and per year: total stock, structural need per day, **days
-of need held**, mean price ÷ `base_value`, and production ÷ need.
+of need held**, mean price ÷ `base_value`, and production ÷ need. Every figure in
+§3 and §4 below was re-measured at `44f5289` (current `main`); an earlier run on
+a base 44 commits older gave the same picture with slightly milder numbers.
 
 The demand-share table in §2 is arithmetic over the shipped constants
 (`biological.rs`'s 45-good tables × `tick/mod.rs`'s `TIER_WEIGHT`,
@@ -168,22 +170,22 @@ Reference world, `econ_measure_goods_stock_and_price`:
 
 ```
   yr     good tier          stock       need/day    days_held  price/base  prod/need
-   1    wheat    0        2980292         9564.2        311.6       0.197       1.50
-   1     silk    2        1040180          684.9       1518.6       0.172       5.67
-   5    wheat    0       11079858        23004.7        481.6       0.189       1.03
-   5     silk    2        9130724         1884.1       4846.2       0.169       5.91
-  10    wheat    0       31792524        51634.6        615.7       0.270       0.95
-  10     silk    2       31807533         4446.2       7153.9       0.169       6.76
-  25    wheat    0      287333932       209535.3       1371.3       0.605       1.14
-  25     silk    2      247969287        18676.7      13276.9       0.178       5.25
-  50    wheat    0     1325296348       315944.8       4194.7       0.518       1.18
-  50     silk    2      928932177        27985.6      33193.2       0.161       4.41
- 100    wheat    0     2815864023       375388.9       7501.2       0.353       1.15
- 100     silk    2     2044564312        32777.3      62377.4       0.170       3.64
+   1    wheat    0        3033355         9667.8        313.8       0.212       1.50
+   1     silk    2        1050379          700.5       1499.4       0.176       5.58
+   5    wheat    0       11564008        23687.6        488.2       0.194       1.12
+   5     silk    2       10138943         1955.1       5185.9       0.168       7.31
+  10    wheat    0       31869040        53709.5        593.4       0.337       0.92
+  10     silk    2       37031239         4719.2       7846.9       0.168       7.99
+  25    wheat    0      284821876       206121.4       1381.8       0.517       1.17
+  25     silk    2      250183266        18387.7      13606.0       0.168       5.07
+  50    wheat    0     1286956402       308591.3       4170.4       0.445       1.24
+  50     silk    2      949063676        27943.3      33963.9       0.163       4.62
+ 100    wheat    0     4045006625       376044.6      10756.7       0.312       1.45
+ 100     silk    2     2389137796        33157.5      72054.2       0.138       4.73
 ```
 
-**By year 25 the world holds 3.8 years of grain and 36 years of silk; by year
-100, 20.5 years of grain and 171 years of silk** — and it was already holding 10
+**By year 25 the world holds 3.8 years of grain and 37 years of silk; by year
+100, 29.5 years of grain and 197 years of silk** — and it was already holding 10
 months of grain and 4 years of silk in year *one*. This is not a slow drift: it
 is the founding condition, and it compounds without limit. Note that this happens
 even though `tech_factor` is pinned at its floor of 0.85 for the whole run (a
@@ -215,10 +217,16 @@ Four mechanisms, each individually sufficient:
    reads "tons of goods stored": the number is real, the cap beside it is inert.
 
 The price column is the proof that the market has stopped functioning:
-`price/base` sits at **0.165–0.28** for every good at every date.
-`PRICE_FLOOR_MULT` is **0.15**. The whole world is pinned within a hair of the
-price floor from year one. `live_price = base × (need/stock)^k` cannot go lower,
-so the clamp is doing all the work and prices carry no information at all.
+`price/base` sits between **0.138 and 0.52** for almost every good at every date,
+against a `PRICE_FLOOR_MULT` of **0.15**. The whole world lives within a hair of
+the price floor from year one; `live_price = base × (need/stock)^k` cannot go
+lower, so the clamp does the work and prices carry almost no information.
+
+The one instructive exception is IRON, which reaches **0.942** at year 100 with
+`production ÷ need` finally dipping to **0.96** — the only good in the run that
+ever comes close to scarcity, and even it never crosses 1.0× base. That single
+excursion is worth more than the rest of the column: it shows the price mechanism
+is alive and would respond, if anything ever made a good genuinely scarce.
 
 ---
 
@@ -243,9 +251,11 @@ pub(crate) fn demand_pressure_at(&self, h: usize, g: usize) -> f32 {
 ```
 
 So a workshop opens only where a good sells for **≥1.08 × its base value**. §3
-just measured that the world sits at **0.17–0.28 × base**, clamped by
-`demand_pressure_at` to its floor of **0.6**. `0.6 < 1.08` is unconditionally
-true, in every city, for every good, from year one.
+just measured that the world sits between **0.138 and 0.942 × base** — the
+maximum reached by any good at any date in a 100-year run — so
+`demand_pressure_at` returns at most 0.942 and usually its clamped floor of
+**0.6**. It never once reaches 1.08, in any city, for any good, from year one.
+The gate is not merely rarely satisfied; on this evidence it is unsatisfiable.
 
 **The glut is the cause of the manufactory shortage.** It is one bug, not two:
 unbounded stock → prices pinned at the floor → the demand gate can never clear →
