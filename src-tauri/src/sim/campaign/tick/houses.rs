@@ -272,6 +272,7 @@ impl CampaignSim {
                 contract: true, // its vessel is held by the standing contract reservation
                 price: pt,
                 local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
+                via: -1, // a standing contract delivers direct, never composed through an outlet
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
@@ -1242,6 +1243,14 @@ impl CampaignSim {
             let age = tick.saturating_sub(hub.colony_founded_tick);
             if age < OUTPOST_GRADUATE_YEARS * TICKS_PER_YEAR { continue; }
             if hub.population < OUTPOST_MAX_POP * 0.9 { continue; }
+            // TRADE_STAGING_AND_POSTS_PLAN.md §1.6/§4.2 — graduation used to read
+            // only age + population + the owner's wealth, never traffic, so a post
+            // sitting on the busiest lane in the world grew no faster than one on a
+            // dead lane. `transit_year` (§6d's own throughput accumulator, already
+            // populated for every hub including estates) must show SOME real trade
+            // actually running through this post before it can mature into a city —
+            // age and a rich owner alone are not enough.
+            if hub.transit_year <= 0.0 { continue; }
             let wealth = self.houses[owner as usize].wealth;
             if wealth < OUTPOST_GRADUATE_WEALTH { continue; }
             if wealth > best.1 { best = (h, wealth); }
