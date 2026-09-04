@@ -1474,17 +1474,24 @@ pub(crate) const GUILD_CHARTER_RANGE_DAYS: f32 = f32::INFINITY;
 /// bit-identical to the pre-rescue baseline (278201) at 0.05 on the
 /// dynamics test's own reference world — this dose is low enough that it
 /// never actually fires there, and only engages on the larger/longer-run
-/// world `econ_inheritance...` exercises. Shipped at `0.05`: low enough to
-/// hold both gates, high enough to give an excluded small city a real
-/// (if infrequent) chance at every seller's dispatch rather than zero
-/// chance forever. Also moved `econ_fidelity_scorecard`'s price-gap ×
-/// distance from -0.061 to -0.064 (noise) and its large-world sibling from
-/// -0.061 to +0.031 (an improvement toward the historically-expected
-/// positive sign) — plausible, since routing SOME trade to small,
-/// out-of-the-way markets is closer to how real distance-decay integration
-/// works than gravity's winner-take-most shortlist. Raising the dose
-/// further, re-measuring both gates at each step, is real future work.
-pub(crate) const SMALL_CITY_RESCUE_DOSE: f32 = 0.05;
+/// world `econ_inheritance...` exercises.
+///
+/// **RE-MEASURED AND REVERTED TO 0.0.** Shipped at `0.05` on the strength of
+/// the dose walk above (measured on `main` at the time), but once combined
+/// with the rest of `main` at merge time (nothing in this file — the
+/// interaction is with other commits landed around the same time) the gate
+/// it was walked against started failing again: `econ_inheritance_rules_
+/// fragment_differently` measured partible RICHER than primogeniture
+/// (281944 vs 241796) with the dose still at 0.05. Toggling the constant
+/// alone, nothing else, flips the result back to the passing 275267 vs
+/// 306897 — confirmed directly, not inferred. This is the exact trap §2.4
+/// warns about: a dose walk against one gate, measured at one point in the
+/// commit graph, is not proof against every future combination of commits.
+/// Back to `0.0` (a true no-op — every dispatch call already degrades to
+/// the pre-rescue behaviour, verified by the same gate) until the small-
+/// city-exclusion problem this was meant to fix gets a mechanism measured
+/// AFTER the codebase it will actually ship alongside, not before.
+pub(crate) const SMALL_CITY_RESCUE_DOSE: f32 = 0.0;
 /// W2, DOSE-WALKED: the fraction of landed cargo that goes to the carrying
 /// house's OWN depot at the destination (room permitting) instead of the
 /// undifferentiated city pool (F8). `0.0` ships as a true no-op — every
