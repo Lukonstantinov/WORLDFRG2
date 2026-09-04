@@ -315,9 +315,14 @@ export interface HubGoodDetail {
   /** Matching yearly traded volume — same years, same length. */
   vol_hist?: number[];
   /** Who SUPPLIED this good here recently, shares summing to 1 (all zero = nothing
-   *  arrived): [city, house, guild, local, foreign]. Seller side only — there is no
-   *  buyer attribution, see docs/TRADE_AND_MARKET_REVIEW.md. */
+   *  arrived): [city, house, guild, local, foreign]. The SELLER side. */
   supply_shares?: [number, number, number, number, number];
+  /** The BUYER side (S6, CONSUMPTION_REBUILD_PLAN.md) — [manufactory, council,
+   *  household] shares summing to 1 (all zero = no attributed demand this period).
+   *  Household consumption is deliberately never written to this ledger (the
+   *  ordinary `eat = need.min(stock)` path books nothing), so its share is
+   *  always 0.0 — a household total would be residual/inferred, not measured. */
+  demand_shares?: [number, number, number];
   /** YARDS_VESSELS_AND_DEPOTS_PLAN.md W1 — this good's total stock sitting in
    *  every house/guild depot at this hub (off the spot `stock` pool above,
    *  but still counted into prices/needs — F7). */

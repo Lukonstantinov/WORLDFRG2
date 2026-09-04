@@ -97,11 +97,16 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 base_value: sim.goods[g].base_value,
                 stock: crate::sim::tick::stock_of(&hub.stock, g),
                 // The REAL per-tick demand the sim consumes (matches base_need in
-                // tick.rs): pop × tier-weight × desire × need_scale × demand pressure.
-                // Showing raw desire×pop made every good read "0% of need".
+                // tick.rs): pop × tier-weight × desire ÷ base_value × need_scale ×
+                // demand pressure. Showing raw desire×pop made every good read "0%
+                // of need". S1 (CONSUMPTION_REBUILD_PLAN.md) — the demand table
+                // names a BUDGET SHARE, so this mirror must carry the same
+                // /base_value division `base_need` does, or this panel silently
+                // drifts from what the sim actually consumes.
                 need: hub.population
-                    * [1.0f32, 0.45, 0.22][sim.goods[g].need_tier.min(2) as usize]
+                    * crate::sim::tick::TIER_WEIGHT[sim.goods[g].need_tier.min(2) as usize]
                     * sim.goods[g].desire.max(0.0)
+                    / sim.goods[g].base_value.max(crate::sim::tick::BUDGET_VALUE_FLOOR)
                     * sim.need_scale
                     * crate::sim::tick::DEMAND_PRESSURE,
                 production: hub.production[g],
@@ -122,6 +127,13 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                         hub.supply_accum.get(sbase + c).copied().unwrap_or(0.0).max(0.0));
                     let total: f32 = raw.iter().sum();
                     if total > 1e-3 { raw.map(|v| v / total) } else { [0.0; 5] }
+                },
+                demand_shares: {
+                    let dbase = g * crate::sim::tick::DEMAND_CLASSES;
+                    let raw: [f32; 3] = std::array::from_fn(|c|
+                        hub.demand_accum.get(dbase + c).copied().unwrap_or(0.0).max(0.0));
+                    let total: f32 = raw.iter().sum();
+                    if total > 1e-3 { raw.map(|v| v / total) } else { [0.0; 3] }
                 },
                 depot_stock: sim.warehouses.iter()
                     .filter(|w| w.owner >= 0 && w.hub as usize == hi)

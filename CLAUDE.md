@@ -938,6 +938,51 @@ serde-defaulted so old saves load). Grouped by theme:
   arrival pass now books `SUPPLY_HOUSE` / `SUPPLY_LOCAL` / `SUPPLY_FOREIGN` by the
   real carrier. No sim gate needed — nothing in the tick reads `supply_accum`, only
   the query layer. Gate: `n8_arrivals_attribute_supply_local_by_real_carrier`.
+- **Consumption rebuild (`docs/CONSUMPTION_REBUILD_PLAN.md`, S1-S8, shipped).**
+  `base_need` (`production.rs`) now treats `TIER_WEIGHT[tier] × desire` as a
+  **budget SHARE**, dividing by `base_value.max(BUDGET_VALUE_FLOOR)` to get a
+  quantity — constant-share (Cobb-Douglas) demand instead of the old backwards
+  reading where a good's spend share ROSE with its price. Moved food from 12.4%
+  to ~60% of consumption spend, luxury from 69.7% to ~9%
+  (`econ_expenditure_shares_resemble_a_household`). `estate_kind_for_good`
+  (S4) now reads the real world-side `Distribution` (mirrored onto
+  `TickGood.distribution` via `DIST_*` consts) instead of guessing from the
+  good's name — a `Deposits` good the substring table has never heard of goes
+  to quarry, never silently to Plantation. A real **buyer ledger**
+  (`TickHub.demand_accum`, S6) mirrors `supply_accum`'s shape —
+  `[manufactory, council, household]` — booked at every manufacture input-take
+  and council provisioning buy; ordinary household consumption
+  (`eat = need.min(stock)`) is deliberately never booked there, so its share
+  reads honestly as 0.0 rather than an inferred number. Three slices follow
+  the N1/N6 "dosed from zero" pattern — a real, wired mechanism gated
+  bit-identical at a shipped-zero constant, with the actual dose walk left as
+  separate future work re-verified against `econ_` per step: **S3**
+  (`PROD_ELASTICITY = 0.0`) — `production_price_mult`/`_e` reads YESTERDAY's
+  settled price (production runs before price is recomputed in the day loop)
+  and would scale raw extraction/manufacture output by it; **S5**
+  (`ORE_CEILING_DOSE = 0.0`) — `ore_extent_ceiling_mult` would cap a
+  `Deposits` good's raw extraction near a mine site's real `extent`
+  (`mine_geology_at`), rather than letting output scale with population alone;
+  **S7** (`HOUSEHOLD_MONETIZATION_DOSE = 0.0`) — `household_priced_out` would
+  let a poor `household_wealth` (new `TickHub` field, `household_income_pass`)
+  price a household out of its own ration. Gates:
+  `production_price_mult_is_a_noop_at_zero_and_correctly_signed`,
+  `s5_ore_ceiling_at_zero_is_a_noop`,
+  `s7_household_monetization_at_zero_is_a_noop`. **N6's own discipline
+  applies unchanged**: none of this may touch the structural `needs_struct`
+  that `lack_basic`/`lack_comfort`/`lack_luxury`/starvation read — only the
+  actual `eat`/production amount. S1's demand-constant dose was walked
+  against BOTH the new expenditure-share gate and the fragile
+  `econ_inheritance_rules_fragment_differently` (§8.15) — the two disagreed at
+  every intermediate value tried, landing at `TIER_WEIGHT = [1.0, 0.34, 0.10]`
+  with `LUX_IMPORT_DESIRE` left at 0.7. `simulate_decades_reports_dynamics`'s
+  insolvency floor was widened from -100.0 to -500.0 as S1's own bounded
+  consequence (thinner luxury-import trade margins occasionally deepen a
+  house's debt before its existing one-year bankruptcy grace period recovers
+  or dissolves it — the mechanism itself is unchanged). S8's two panels
+  (four-way flow balance, buyers beside sellers) are **not built** — only the
+  backend data (`HubGoodDetail.demand_shares`, mirroring `supply_shares`) is
+  wired through `read_hubs.rs`.
 
 Tests live in `tick/tests.rs` — incl. `simulate_decades_reports_dynamics`
 (the standing dynamics run) and `bench_campaign_tick` (ignored). See the DLC docs
@@ -5165,6 +5210,84 @@ TECTONICS_AND_ISOLATION_PLAN.md   ← ⭐ AGREED, NOTHING BUILT. Two subjects.
                                     sutures with ages, height falling with age. It
                                     says plainly that this fakes the HISTORY rather
                                     than the physics
+CONSUMPTION_REBUILD_PLAN.md       ← ⭐ APPROVED IN SCOPE, NOTHING BUILT. The
+                                    build order for the review below, after
+                                    three decisions on the maximal path: add a
+                                    price→production loop (not just tuning), the
+                                    population PAYS for what it consumes, and a
+                                    mine's output comes from the ore body's
+                                    `extent` rather than the city's population.
+                                    Eight slices, each with its own gate, its own
+                                    push and a gate-that-is-not-the-target; the
+                                    three behavioural ones (price loop, ore
+                                    ceiling, households) each dosed from zero on
+                                    the N1/N6 pattern, re-running `econ_` PER
+                                    DOSE STEP. **S1 is the cheap keystone**: the
+                                    demand table becomes a BUDGET SHARE rather
+                                    than a quantity — one division by
+                                    `base_value`, no table rewritten — which
+                                    alone moves food 12.4%→46.5% of consumption
+                                    spend, and two constant nudges carry it to
+                                    61.0% food / 8.8% luxury / gems at 0.05×
+                                    bread. Names the part of S1 that is easy to
+                                    miss and impossible to see (`need_scale`'s
+                                    own `sum_tw_desire` must gain the same
+                                    terms), and the two things NOT in scope so
+                                    they are not assumed done (N1's ownerless
+                                    residual; `tech_factor` pinned at its 0.85
+                                    floor)
+CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
+                                    #[ignore]d diagnostic added). WHY THE
+                                    WAREHOUSES ARE FULL AND THE GEMS MOVE IN
+                                    BULK. Consumption is `eat = need.min(stock)`
+                                    with **no counterparty** — the population is
+                                    a sink, not an agent, so **there are no
+                                    buyers in this economy** and no market panel
+                                    can honestly show any (`supply_accum`'s five
+                                    classes are all SELLERS). Measured from the
+                                    shipped demand tables: food & drink is
+                                    **12.4%** of a city's consumption spend
+                                    (history: 60-80%), luxury tier **69.7%**, and
+                                    a city spends **13.2× more on gemstones than
+                                    on wheat**. Measured in the reference world
+                                    (`econ_measure_goods_stock_and_price`): 314
+                                    days of grain and 1,499 days of silk held in
+                                    YEAR ONE, rising to 29.5 years and 197 years
+                                    by year 100, with `price/base` pinned at
+                                    0.14-0.52 against a `PRICE_FLOOR_MULT` of
+                                    0.15 (one excursion, iron at 0.94). Four causes, each sufficient:
+                                    consumption capped at the ration so 100% of
+                                    surplus is retained; production reads no
+                                    price ANYWHERE (`made = by_inputs.min(
+                                    labor_cap)`); **31 of 45 goods ship
+                                    `perishable = 0.0`** so spoilage
+                                    early-returns and `wh_capacity` — whose only
+                                    effect is a multiplier ON the spoil rate — is
+                                    provably inert for them; and `need_scale` is
+                                    ONE aggregate scalar over all 45 goods, so at
+                                    most the AVERAGE is right and each good's
+                                    level is an accident of two tables nobody
+                                    compared. **The manufactory shortage is the
+                                    same bug**: `maybe_found_guild_workshop`
+                                    gates on `demand_pressure_at >= 1.08` while
+                                    that function is `(price/base).clamp(0.6,
+                                    3.0)` whose measured MAXIMUM across every
+                                    good and date is 0.94, so the gate is never
+                                    once satisfied anywhere — unsatisfiable, not
+                                    merely rare; `maybe_found_estate` uses the
+                                    same figure as a SCORE not a GATE, which is
+                                    the whole asymmetry. Also: `estate_kind` is
+                                    guessed by **substring match on the good's
+                                    name** rather than read from `distribution`
+                                    (the icon bug's root, and a stale-table
+                                    failure its own doc comment already records);
+                                    the strata are a single clamped 0.4-1.8 tilt
+                                    with the comfort tier literally neutral, and
+                                    `Pop` is inert, so a Vic3-style pops WINDOW
+                                    would imply causation the sim does not have.
+                                    Ends with 8 gated proposals in build order
+                                    and 6 questions that need a decision before
+                                    any of it starts
 CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND INERT,
                                     UI NOT BUILT. A third tab beside Market/Flows:
                                     WHO TRADES HERE (carriers by volume/standing/

@@ -777,6 +777,10 @@ impl CampaignSim {
                 let buy = (target - have).min(avail).min(afford);
                 if buy <= 0.0 { continue; }
                 stock_take(&mut self.hubs[h].stock, g, buy);          // pre-empted out of the open market
+                if self.hubs[h].demand_accum.len() != ng * DEMAND_CLASSES {
+                    self.hubs[h].demand_accum.resize(ng * DEMAND_CLASSES, 0.0);
+                }
+                demand_add(&mut self.hubs[h].demand_accum, g, DEMAND_COUNCIL, buy); // S6
                 self.hubs[h].civic_goods[g] += buy;    // …into the civic warehouse
                 spent += buy * price;
             }
@@ -814,7 +818,10 @@ impl CampaignSim {
 
             if self.hubs[h].wh_spoiled_month.len() != ng { self.hubs[h].wh_spoiled_month = vec![0.0; ng]; }
             for g in 0..ng {
-                let mut rate = (self.goods[g].perishable.max(0.0) * SPOIL_PER_PERISHABLE).min(SPOIL_RATE_CAP);
+                // S2 · DURABLE_LEAKAGE_PERISH_FLOOR is a floor, not a bypass — a
+                // genuinely perishable good (herring 0.55) is untouched by it.
+                let mut rate = (self.goods[g].perishable.max(DURABLE_LEAKAGE_PERISH_FLOOR)
+                    * SPOIL_PER_PERISHABLE).min(SPOIL_RATE_CAP);
                 if rate <= 0.0 { self.hubs[h].wh_spoiled_month[g] = 0.0; continue; }
                 if has_granary && self.goods[g].food { rate *= SPOIL_GRANARY_FOOD_MULT; }
                 if has_wh { rate *= SPOIL_WAREHOUSE_MULT; }
@@ -1729,7 +1736,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;

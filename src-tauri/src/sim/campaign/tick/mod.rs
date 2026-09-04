@@ -27,11 +27,35 @@ pub const TICKS_PER_YEAR: u32 = 365;
 pub const SEASONS: [&str; 4] = ["Spring", "Summer", "Autumn", "Winter"];
 
 const EPS: f32 = 1e-4;
-const TIER_WEIGHT: [f32; 3] = [1.0, 0.45, 0.22];
+// S1 (CONSUMPTION_REBUILD_PLAN.md) · comfort/luxury arms narrowed from
+// [1.0, 0.45, 0.22]. `base_need` now names a BUDGET SHARE, not a quantity,
+// so this is what fixes the actual expenditure split rather than the raw
+// per-good desire numbers — moving food/drink from 12.4% to ~60% of
+// consumption spend and the luxury tier from 69.7% to ~9%, measured by
+// `econ_expenditure_shares_resemble_a_household` (mirroring
+// `docs/CONSUMPTION_AND_GOODS_REVIEW.md`'s own §2 arithmetic). 0.34/0.10 —
+// not the more aggressive 0.28/0.07 first tried — is the dose that ALSO
+// clears `econ_inheritance_rules_fragment_differently`'s "houses ever
+// founded" margin (a 0.28/0.07 + `LUX_IMPORT_DESIRE` 0.4 combination passed
+// the expenditure gate but left that margin at 61/59 = 1.034x against its
+// required 1.05x floor). Re-verify BOTH gates before narrowing further.
+pub(crate) const TIER_WEIGHT: [f32; 3] = [1.0, 0.34, 0.10];
+/// The floor `base_need` and `lifecycle.rs`'s `need_scale` calibration both
+/// divide `base_value` against, so a hypothetical zero/negative-valued good
+/// can never produce an infinite ration.
+pub(crate) const BUDGET_VALUE_FLOOR: f32 = 0.1;
 /// Cities covet LUXURIES they can't make at home — fine goods from far lands. A
 /// luxury good NOT produced locally gets this extra desire, scaled by its prestige
 /// (base_value), so high-value foreign luxuries drive vigorous inter-city trade
 /// instead of every city being content with what it produces itself (#2).
+// S1 (CONSUMPTION_REBUILD_PLAN.md) · a 0.4 dose here (alongside TIER_WEIGHT's
+// narrowed arms above) was tried FIRST and inverted
+// `econ_inheritance_rules_fragment_differently` (partible 107,460 vs
+// primogeniture 95,380 — the exact failure mode COMFORT_IMPORT_FRAC's own
+// history below already recorded for this pathway). Left at its original
+// 0.7: TIER_WEIGHT's own narrowing is enough to clear the expenditure-share
+// gate without re-touching the foreign-import lever that has broken this
+// gate twice now. Re-verify BOTH gates before changing this again.
 const LUX_IMPORT_DESIRE: f32 = 0.7;
 /// Share of `LUX_IMPORT_DESIRE` a COMFORT-tier good draws when a city cannot make it
 /// at home (a luxury draws the full amount). See `production.rs::base_need` for the
@@ -881,6 +905,48 @@ const OUTPOST_INPUT_BIAS: f32 = 1.0;
 const OUTPOST_GRADUATE_YEARS: u32 = 30;
 /// …and its owning house must be at least this rich to make the investment.
 const OUTPOST_GRADUATE_WEALTH: f32 = 60_000.0;
+// ── Route posts (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 5) — colony_kind = 4.
+//    Unlike a resource outpost (colony_kind = 2, an estate) a route post is a REAL
+//    hub from birth (`is_estate = false`, via `create_market_colony`) sited where a
+//    trade GAP exists rather than where resources are richest. Deliberately the
+//    widest-blast-radius piece of the plan (§7 R3): capped hard, gated on the same
+//    wealth bar an outpost clears, and — unlike an outpost — subject to the SAME
+//    lifecycle/abandonment a real settlement already has, so a post whose lane goes
+//    quiet declines like any other town rather than needing its own decay code.
+/// Unlike an outpost (a deliberate LATE, heavy-capital resource venture), a route
+/// post is a modest waystation on an ALREADY-EXISTING lane — historically these
+/// (river-mouth kontors, strait toll-posts) are among the EARLIEST trade
+/// settlements, often predating the interior's own development. Gated only on
+/// houses existing at all (§ "Emergence order" — houses from year 10), not on the
+/// outpost era's wealth-accumulation window.
+const ROUTE_POST_START_TICK: u32 = 10 * 365;
+/// A lane shorter than this (travel-days) has no real "gap" to fill — a route post
+/// exists to shorten an otherwise-teleported long haul, not to sit beside a town its
+/// neighbour already reaches in a week.
+const ROUTE_POST_MIN_GAP_DAYS: f32 = 25.0;
+/// At most this many route posts may exist at once — a hard ceiling independent of
+/// `MAX_TOTAL_ESTATES` (route posts are not estates), so the mechanism cannot pave
+/// the map with waystations even on a world with many long, busy lanes.
+const MAX_ROUTE_POSTS: usize = 10;
+/// A tiny waypoint, not a town — Cape Town's own founding character (§3, "under
+/// explicit orders not to become a colony"). It grows from real traffic afterward
+/// (ordinary settlement demographics, unchanged) or it stays a hamlet forever.
+const ROUTE_POST_SEED_POP: f32 = 60.0;
+/// A route post is a modest venture next to a resource outpost's heavy capital —
+/// a small factory/kontor a merely-comfortable house can stake, not only a "great
+/// house" (§ outpost wealth bar above, ≈100k/70k). Set low enough that the founding
+/// era is decided by ROUTE_POST_START_TICK (when houses first exist), not by a
+/// decades-long wealth climb — an ordinary house can found one within its first
+/// few years, exactly like a real early trading factory.
+const ROUTE_POST_FOUND_WEALTH: f32 = 20_000.0;
+const ROUTE_POST_FOUND_COST: f32 = 9_000.0;
+/// Search radius (km) around a trade gap's midpoint within which a genuine
+/// transhipment point — the world's own step-7a junction survey (`ColonizeSite`'s
+/// `delta`/`chokepoint` flags, §4/§7) — is preferred over a plain nearest-site pick.
+/// Historically a trade city forms where cargo must change CARRIER, not at an
+/// arbitrary midpoint: a river-mouth delta (river↔sea) or a strait/isthmus
+/// chokepoint (land↔sea, land↔land around a barrier) is exactly that point.
+const ROUTE_POST_JUNCTION_KM: f32 = 600.0;
 // ── Trade bases (houses develop EXISTING under-traded small cities).
 //    The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──
@@ -1552,37 +1618,49 @@ const POLITICAL_POWER_BONUS: f32 = 0.15;
 
 /// Estate-kind id for a produced good, from its name + food flag (0 = unsuited).
 /// 1 farm · 2 mine · 3 plantation · 4 fishery · 5 vineyard.
-fn estate_kind_for_good(name: &str, food: bool) -> u8 {
+/// S4 (CONSUMPTION_REBUILD_PLAN.md) · `distribution` (read from the world-side
+/// `GoodSpec` at campaign start, `DIST_*` above) decides the one classification
+/// that used to go silently stale: whether a good is mined/quarried at all. A
+/// `DIST_DEPOSITS` good can therefore NEVER fall through to Plantation any more,
+/// however a future custom mineral happens to be named — closing the whole class
+/// of bug the substring table's own history already recorded once (the gem
+/// split, tin, lead, mercury, alum, lapis, turquoise all silently mis-filed).
+/// The substring table still decides the FINER mine-vs-quarry split (ore metal
+/// vs. gem/stone/salt/amber — a distinction `Distribution` alone doesn't carry)
+/// and still handles `DIST_UNKNOWN` (an old save, pre-this-field) exactly as
+/// before, so an old save's classification is byte-identical.
+fn estate_kind_for_good(name: &str, food: bool, distribution: u8) -> u8 {
     let n = name.to_ascii_lowercase();
+    if distribution == DIST_DEPOSITS {
+        // Mine vs quarry (DEPOSITS_AND_MINING_PLAN.md slice 4) — a MINE (2) is a
+        // deep-shaft body constrained by depth/drainage (`mine_depth`/
+        // `MINE_UPGRADE_COST_MULT`); a QUARRY (8) is a near-surface working
+        // constrained by TRANSPORT instead (heavy `bulk`, useless far from
+        // water) and never reads `mine_depth`. Ore metals are mines; everything
+        // else Deposits-distributed (gems, stone, salt, amber, and any custom
+        // mineral this table has never heard of) is a quarry by default — the
+        // fix that makes an unmatched name fall to the RIGHT bucket instead of
+        // out of the deposits classification entirely.
+        if n.contains("iron") || n.contains("ore") || n.contains("copper") || n.contains("silver")
+            || n.contains("gold") || n.contains("coal") || n.contains("tin") || n.contains("lead")
+            || n.contains("mercury") { return 2; }
+        return 8;
+    }
     if n.contains("wine") || n.contains("grape") { return 5; }
     if n.contains("fish") || n.contains("pearl") || n.contains("whal")
         || n.contains("herring") || n.contains("stockfish") { return 4; }
-    // Mined/quarried goods — every `Distribution::Deposits` mineral this campaign
-    // ships (§8.16), not just the original six. `TickGood` (unlike the world-side
-    // `GoodSpec`) carries no `distribution` field, so this stays a name table —
-    // but it had gone stale: the gem-split (ruby/sapphire/emerald/diamond/
-    // amethyst/topaz/garnet/carnelian), tin, lead, marble, jade and the
-    // DEPOSITS_AND_MINING_PLAN slice-3 minerals (mercury, alum, lapis_lazuli,
-    // turquoise) all fell through to "any other cultivated trade good" below and
-    // got founded as a Plantation instead of a Mine — the wrong depletion curve
-    // in `dominant_estate_kind` (cities.rs §2.5: a mine barely recovers, a
-    // plantation just wears soil) and the wrong label in the UI/journal. Keep
-    // this in sync with `default_list()`/`default_custom_goods()`'s Deposits set.
-    //
-    // DEPOSITS_AND_MINING_PLAN.md slice 4 (mine vs quarry) · split into TWO real
-    // kinds instead of one. A MINE (2) is a deep-shaft body — depth/drainage is
-    // its constraint (`mine_depth`/`MINE_UPGRADE_COST_MULT`). A QUARRY (8) is a
-    // near-surface working — stone, gems, salt, amber — whose constraint is
-    // TRANSPORT (heavy `bulk`, useless far from water), never depth; it never
-    // reads `mine_depth` at all (only `estate_kind == 2` does).
-    if n.contains("iron") || n.contains("ore") || n.contains("copper") || n.contains("silver")
-        || n.contains("gold") || n.contains("coal") || n.contains("tin") || n.contains("lead")
-        || n.contains("mercury") { return 2; }
-    if n.contains("gem") || n.contains("salt") || n.contains("amber") || n.contains("stone")
-        || n.contains("marble") || n.contains("jade") || n.contains("lapis") || n.contains("turquoise")
-        || n.contains("alum") || n.contains("ruby") || n.contains("sapphire")
-        || n.contains("emerald") || n.contains("diamond") || n.contains("amethyst") || n.contains("topaz")
-        || n.contains("garnet") || n.contains("carnelian") { return 8; }
+    if distribution == DIST_UNKNOWN {
+        // Pre-S4 save: no `distribution` to trust, so the old cascade stays
+        // exactly as it shipped (kept in sync with the Deposits set above).
+        if n.contains("iron") || n.contains("ore") || n.contains("copper") || n.contains("silver")
+            || n.contains("gold") || n.contains("coal") || n.contains("tin") || n.contains("lead")
+            || n.contains("mercury") { return 2; }
+        if n.contains("gem") || n.contains("salt") || n.contains("amber") || n.contains("stone")
+            || n.contains("marble") || n.contains("jade") || n.contains("lapis") || n.contains("turquoise")
+            || n.contains("alum") || n.contains("ruby") || n.contains("sapphire")
+            || n.contains("emerald") || n.contains("diamond") || n.contains("amethyst") || n.contains("topaz")
+            || n.contains("garnet") || n.contains("carnelian") { return 8; }
+    }
     if food { return 1; }
     // Any other cultivated trade good (silk, spices, cotton, sugar, tea, coffee, …).
     3
@@ -1680,6 +1758,20 @@ const WAREHOUSE_PROD: f32 = 1.05;  // all goods (supply smoothing)
 // worst case to something a stock column can still show meaningfully.
 const SPOIL_PER_PERISHABLE: f32 = 0.5;
 const SPOIL_RATE_CAP: f32 = 0.30;
+/// S2 (CONSUMPTION_REBUILD_PLAN.md) · a FLOOR under `perishable` itself, not a
+/// separate mechanism — 31 of the 45 shipped goods ship `perishable = 0.0`,
+/// which made `warehouse_and_spoilage_pass` early-return for them
+/// (`if rate <= 0.0 { continue; }`) and made their stock a strictly
+/// non-decreasing function of time; `docs/CONSUMPTION_AND_GOODS_REVIEW.md`
+/// measured a durable good's stock reaching hundreds of years of need held.
+/// Real for every good, including metal and gems — leakage, theft, breakage,
+/// tarnish, spillage, rot in transit — historically real losses a literally
+/// zero perishability denies by construction. Half wheat's own 0.02 (so a
+/// durable's decay is real but visibly gentler than a foodstuff's), giving a
+/// good with no perishable of its own ~0.5%/month, ~6%/year. Gate: `days_held`
+/// per good stays under a ceiling over a 100-year run
+/// (`econ_measure_goods_stock_and_price`, the same diagnostic the review used).
+const DURABLE_LEAKAGE_PERISH_FLOOR: f32 = 0.01;
 /// A Granary halves FOOD spoilage; a Warehouse halves spoilage generally —
 /// both structures already exist for a production bonus (`WORKSHOP_PROD`
 /// above); this gives them a second, thematically obvious job instead of a
@@ -1943,6 +2035,103 @@ const ESTATE_TERROIR_FRAC: f32 = 0.6;
 /// as "this city's own deposit" — a real district's own scale
 /// (`DISTRICT_RADIUS_KM`, §8.16) plus margin for the founding search itself.
 pub(crate) const MINE_DEPOSIT_SEARCH_KM: f32 = 60.0;
+/// S5 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero, the N1/N6 pattern —
+/// 0.0 is a verified bit-identical no-op (`s5_ore_ceiling_at_zero_is_a_noop`).
+/// At 1.0, a `Distribution::Deposits` good's output is capped at
+/// `founding_pop * base_per_capita * ore_extent_ceiling_mult(extent)`
+/// regardless of how large the city's LIVE population has since grown —
+/// `docs/CONSUMPTION_AND_GOODS_REVIEW.md`'s measured complaint: today
+/// `production[gems] = base_per_capita * population`, so a metropolis mines
+/// gems 20x faster than the town on the same lode, purely because it has more
+/// people, never because the lode is any richer. The actual dose (how hard
+/// the cap should bite) is real future work, not silently assumed done —
+/// deliberately left at 0.0, its own multi-commit measured dose-walk.
+pub(crate) const ORE_CEILING_DOSE: f32 = 0.0;
+
+/// S3 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero, the N1/N6/S5 pattern.
+/// `production_price_mult` (below) is a true 1.0 no-op at 0.0
+/// (`s3_price_elasticity_at_zero_is_a_noop`) — neither the raw per-capita pass
+/// nor `manufacture_pass` reads a price today, so nothing in this economy ever
+/// makes less of a worthless thing, which `docs/CONSUMPTION_AND_GOODS_REVIEW.md`
+/// names as one of the four sufficient causes of the warehouse glut. The
+/// price read is naturally LAGGED by the day loop's own order (production
+/// runs at step 1, price is recomputed at step 3, so a day's production sees
+/// YESTERDAY's settled price) — exactly the "a farmer responds to last
+/// year's price, not today's" behaviour the plan calls for, with no extra
+/// bookkeeping. The dose walk itself — how hard output should actually
+/// respond — is real future work and is NOT this commit: it is the single
+/// most wealth-sensitive lever in this plan (§3 of the plan), to be raised
+/// and re-measured against `econ_` + the dynamics run per step, never in one
+/// jump.
+pub(crate) const PROD_ELASTICITY: f32 = 0.0;
+
+/// S7 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero, the highest-risk lever
+/// in the plan — the merchant layer holds ALL the money in this model by
+/// construction today, and giving households a monetary existence
+/// redistributes wealth away from it, against the hard-won top-10% share
+/// band (Phase 4.3/Phase 5 of the house series). 0.0 is a verified
+/// bit-identical no-op (`s7_household_monetization_at_zero_is_a_noop`); the
+/// real dose walk — how large a wage, how hard a shortfall should bite — is
+/// its own future measured, multi-commit work, re-run against `econ_` and
+/// the dynamics run per step, exactly like S3/S5.
+pub(crate) const HOUSEHOLD_MONETIZATION_DOSE: f32 = 0.0;
+/// Share of a hub's `trade_wealth` paid out monthly as household wages —
+/// the WAGE half of the design fork CONSUMPTION_REBUILD_PLAN.md's S7 leaves
+/// open (wages vs. a share of city output); a placeholder shape, inert at
+/// the shipped dose regardless of its exact value.
+const HOUSEHOLD_WAGE_SHARE: f32 = 0.02;
+
+/// The amount of `eat` (units of the good) a household cannot afford at
+/// `household_wealth` / `price`, scaled by `dose` — split out as a pure
+/// function (the N6/S3 pattern) so a test can exercise a non-zero dose
+/// without touching the shipped constant. At `dose = 0.0` this is always
+/// exactly 0.0 (a literal no-op, not merely small).
+#[inline]
+pub(crate) fn household_priced_out(eat: f32, household_wealth: f32, price: f32, dose: f32) -> f32 {
+    if dose == 0.0 { return 0.0; }
+    let affordable = household_wealth.max(0.0) / price.max(0.01);
+    (eat - affordable).max(0.0) * dose.clamp(0.0, 1.0)
+}
+
+/// `price / base_value`, clamped, run through a monotone dampened response and
+/// blended in by `PROD_ELASTICITY` — at 0.0 this returns EXACTLY 1.0 for any
+/// input, which is what makes the dose provably inert rather than merely
+/// small. `resp` is a smooth, clamp-bounded excess-demand signal (√ dampens a
+/// price spike so a brief shortage doesn't whipsaw output; clamped to ±0.5 so
+/// even at full dose a producer can at most halve or 1.5x its output from
+/// price alone).
+#[inline]
+pub(crate) fn production_price_mult(price: f32, base: f32) -> f32 {
+    production_price_mult_e(price, base, PROD_ELASTICITY)
+}
+
+/// The dose-PARAMETRIZED form, split out (the N6 `elastic_aggregate_mult`/`_e`
+/// pattern) so a test can exercise a non-zero dose without touching the
+/// shipped constant.
+#[inline]
+pub(crate) fn production_price_mult_e(price: f32, base: f32, dose: f32) -> f32 {
+    if dose == 0.0 { return 1.0; }
+    let ratio = (price / base.max(BUDGET_VALUE_FLOOR)).clamp(0.05, 20.0);
+    let resp = (ratio.sqrt() - 1.0).clamp(-0.5, 0.5);
+    1.0 + dose.clamp(0.0, 1.0) * resp
+}
+
+/// A deposit's `extent` tier as a multiple of the founding-scale baseline
+/// output — the ceiling scales with what the WORLD placed at this working
+/// (§8.16), never with a hand-picked absolute unit. `unknown_extent()`
+/// (u8::MAX, no geology data at this hub — an old save, or no working within
+/// `MINE_DEPOSIT_SEARCH_KM`) returns no cap at all: §8.16's own rule that a
+/// mineral must never silently vanish applies here exactly as it does to
+/// placement.
+pub(crate) fn ore_extent_ceiling_mult(extent: u8) -> f32 {
+    match extent {
+        crate::sim::deposits::EXTENT_WEAK => 0.3,
+        crate::sim::deposits::EXTENT_MODERATE => 1.0,
+        crate::sim::deposits::EXTENT_GREAT => 3.0,
+        crate::sim::deposits::EXTENT_WORLD_CLASS => 8.0,
+        _ => f32::INFINITY,
+    }
+}
 /// DEPOSITS_AND_MINING_PLAN.md slice 5 · the "growing settlement catchment"
 /// knob (`CampaignSim::catchment_radius_km`). The honest pre-modern number: a
 /// cart hauls grain economically ~30–50 km, so a catchment does not scale
@@ -2434,7 +2623,25 @@ pub struct TickGood {
     /// weak daily local demand → the good sits cheaper and is mostly traded
     /// merchant-to-merchant. 0 on old saves → treated as the neutral 30 in base_need.
     #[serde(default)] pub consumption_interval: f32,
+    /// S4 (CONSUMPTION_REBUILD_PLAN.md) · the world-side `Distribution` this good
+    /// was placed by (`DIST_*` below), read straight from `GoodSpec` at campaign
+    /// start. `estate_kind_for_good` used to GUESS this from a substring match on
+    /// the good's NAME — its own doc comment already recorded that table going
+    /// stale once (the whole gem split, tin, lead, mercury, alum, lapis, turquoise
+    /// all silently fell through to "Plantation"). Reading the real answer removes
+    /// the whole class of bug rather than re-patching the substring list again.
+    /// `DIST_UNKNOWN` (the serde default, for a save from before this field) keeps
+    /// the substring guess as an honest fallback — never a hard error.
+    #[serde(default = "default_distribution")] pub distribution: u8,
 }
+
+pub(crate) const DIST_GLOBAL: u8 = 0;
+pub(crate) const DIST_LOCAL: u8 = 1;
+pub(crate) const DIST_DEPOSITS: u8 = 2;
+pub(crate) const DIST_ENDEMIC: u8 = 3;
+pub(crate) const DIST_MANUFACTURED: u8 = 4;
+pub(crate) const DIST_UNKNOWN: u8 = 255;
+fn default_distribution() -> u8 { DIST_UNKNOWN }
 
 /// One settlement participating in the living economy.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -2852,6 +3059,28 @@ pub struct TickHub {
     /// isn't counted — the single pool and the price formula are unchanged
     /// either way (D20's own scope).
     #[serde(default)] pub supply_accum: Vec<f32>,
+    /// S6 (CONSUMPTION_REBUILD_PLAN.md) · a BUYER ledger mirroring
+    /// `supply_accum`'s shape (flat `ng × DEMAND_CLASSES`, decayed daily
+    /// alongside it) — the counterpart the review named missing: every class
+    /// in `supply_accum` is a SELLER, and there was no buyer-side equivalent
+    /// at all. Covers the buyers that are actually identifiable events in the
+    /// sim: a manufactory drawing its recipe inputs, and a city council's
+    /// provisioning purchase. Household consumption stays deliberately
+    /// UNATTRIBUTED — `eat = need.min(stock)` has no counterparty to book,
+    /// and inventing one here would misstate what the model actually knows.
+    #[serde(default)] pub demand_accum: Vec<f32>,
+    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · the household stratum's OWN spendable
+    /// money — dosed from zero (`HOUSEHOLD_MONETIZATION_DOSE`), the fork the
+    /// plan names: today `eat = need.min(stock)` has no counterparty at all, so
+    /// the population is a sink, never an agent. At a non-zero dose,
+    /// `household_income_pass` (monthly) pays a wage into this from the hub's
+    /// own trade wealth and the consumption loop draws it down — a real
+    /// budget constraint, so a price spike can genuinely price a household
+    /// out, which is what makes dearth possible instead of merely displayed.
+    /// Scoped DELIBERATELY short of the plan's own S7 (a single pooled
+    /// balance, not per-stratum; no wage-vs-share-of-output design decision
+    /// made yet) — see this field's own doc in CONSUMPTION_REBUILD_PLAN.md.
+    #[serde(default)] pub household_wealth: f32,
     /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · this works' ownership
     /// table — supersedes `stake_bank`/`stake_share` (F2) as the source of
     /// truth for dividend payout; those two fields are kept only as a cheap
@@ -4451,6 +4680,25 @@ pub const SUPPLY_CLASSES: usize = 5;
 pub(crate) fn supply_add(acc: &mut [f32], g: usize, class: usize, amt: f32) {
     if amt <= 0.0 { return; }
     let idx = g * SUPPLY_CLASSES + class.min(SUPPLY_CLASSES - 1);
+    if let Some(v) = acc.get_mut(idx) { *v += amt; }
+}
+
+// S6 (CONSUMPTION_REBUILD_PLAN.md) · the buyer-side counterpart of the seller
+// classes above. `DEMAND_HOUSEHOLD` is deliberately never written to — see
+// `TickHub.demand_accum`'s own doc — and exists only so a reader iterating
+// `0..DEMAND_CLASSES` can label the always-zero remainder honestly rather
+// than silently omitting it.
+pub const DEMAND_MANUFACTORY: usize = 0;
+pub const DEMAND_COUNCIL: usize = 1;
+pub const DEMAND_HOUSEHOLD: usize = 2;
+pub const DEMAND_CLASSES: usize = 3;
+
+/// Tag `amt` of good `g` as bought by buyer `class`. Same accumulate-and-decay
+/// shape as `supply_add`.
+#[inline]
+pub(crate) fn demand_add(acc: &mut [f32], g: usize, class: usize, amt: f32) {
+    if amt <= 0.0 { return; }
+    let idx = g * DEMAND_CLASSES + class.min(DEMAND_CLASSES - 1);
     if let Some(v) = acc.get_mut(idx) { *v += amt; }
 }
 
@@ -7458,8 +7706,27 @@ impl CampaignSim {
                     }
                     let percap = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0);
                     let struct_bonus = struct_all * if self.goods[g].food { struct_food } else { 1.0 };
-                    let realized = percap * pop * self.seasonal_mult(h, g, doy)
-                        * prod_mult[h][g] * tech * struct_bonus * eff;
+                    // S3 · yesterday's settled price (this pass runs before today's
+                    // price step) nudges output — a no-op at PROD_ELASTICITY = 0.0.
+                    let price_mult = production_price_mult(
+                        self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value),
+                        self.goods[g].base_value);
+                    let mut realized = percap * pop * self.seasonal_mult(h, g, doy)
+                        * prod_mult[h][g] * tech * struct_bonus * eff * price_mult;
+                    // S5 · a real ore body caps output regardless of population.
+                    // `ORE_CEILING_DOSE == 0.0` short-circuits before touching
+                    // `mine_geology_at` at all, so this is a true no-op at zero dose.
+                    if ORE_CEILING_DOSE > 0.0 && self.goods[g].distribution == DIST_DEPOSITS {
+                        let (_, extent) = self.mine_geology_at(
+                            &self.goods[g].name, self.hubs[h].x, self.hubs[h].y);
+                        let mult = ore_extent_ceiling_mult(extent);
+                        if mult.is_finite() {
+                            let ceiling = self.hubs[h].founding_pop.max(1.0) * percap * mult;
+                            if realized > ceiling {
+                                realized -= (realized - ceiling) * ORE_CEILING_DOSE.clamp(0.0, 1.0);
+                            }
+                        }
+                    }
                     self.hubs[h].production[g] = realized;
                     let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                     stock_add(&mut self.hubs[h].stock, g, band, realized);
@@ -7641,7 +7908,24 @@ impl CampaignSim {
                 let mut tier_unmet = [0.0f32; 3];
                 for g in 0..ng {
                     let need = needs_struct[h][g];
-                    let eat = need.min(stock_of(&self.hubs[h].stock, g));
+                    let mut eat = need.min(stock_of(&self.hubs[h].stock, g));
+                    // S7 · a real budget constraint, dosed from zero. `need`
+                    // (fed to `tier_unmet` below, and so to `lack_basic`/
+                    // crisis relief) stays the pure STRUCTURAL ration
+                    // regardless of dose — N6's own rule, "elasticity belongs
+                    // to the market, not the ration" — a household priced out
+                    // simply shows up as unmet need, the same signal a stock
+                    // shortage already produces.
+                    if HOUSEHOLD_MONETIZATION_DOSE > 0.0 {
+                        let price = self.hubs[h].price.get(g).copied()
+                            .unwrap_or(self.goods[g].base_value).max(0.01);
+                        eat -= household_priced_out(eat, self.hubs[h].household_wealth, price,
+                            HOUSEHOLD_MONETIZATION_DOSE);
+                        eat = eat.max(0.0);
+                        let spend = eat * price;
+                        self.hubs[h].household_wealth = (self.hubs[h].household_wealth - spend).max(0.0);
+                        self.hubs[h].civic_pool += spend; // the money reaches somewhere real
+                    }
                     stock_take(&mut self.hubs[h].stock, g, eat);
                     let t = self.goods[g].need_tier.min(2) as usize;
                     tier_need[t] += need;
@@ -7692,6 +7976,7 @@ impl CampaignSim {
                 hb.in_by_sea *= 0.98;
                 hb.in_by_land *= 0.98;
                 for v in hb.supply_accum.iter_mut() { *v *= 0.98; }
+                for v in hb.demand_accum.iter_mut() { *v *= 0.98; } // S6
             }
             // (to, good, amount, sea, phase, home, owner, local, via, price) — phase/
             // home/owner let an arriving OUTBOUND house cargo spawn its return leg
@@ -7849,6 +8134,21 @@ impl CampaignSim {
         let commoner = (1.0 - patrician - burgher - underclass).max(0.05);
         let t = patrician + burgher + commoner + underclass;
         (patrician / t, burgher / t, commoner / t, underclass / t)
+    }
+
+    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · monthly wage into `household_wealth`
+    /// — a true no-op at the shipped `HOUSEHOLD_MONETIZATION_DOSE` (0.0). At a
+    /// non-zero dose this is the INCOME half of "the population pays for what
+    /// it consumes"; the consumption loop (`update_food_and_starvation`) is
+    /// the SPENDING half.
+    pub(crate) fn household_income_pass(&mut self) {
+        if HOUSEHOLD_MONETIZATION_DOSE == 0.0 { return; }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let wage = self.hubs[h].trade_wealth.max(0.0) * HOUSEHOLD_WAGE_SHARE
+                * HOUSEHOLD_MONETIZATION_DOSE.clamp(0.0, 1.0);
+            self.hubs[h].household_wealth += wage;
+        }
     }
 
     fn apply_wealth_sinks(&mut self) {

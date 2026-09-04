@@ -2556,3 +2556,193 @@ fn n8_arrivals_attribute_supply_local_by_real_carrier() {
         "an ownerless short-haul arrival must book SUPPLY_LOCAL — it was structurally \
          always zero before this fix");
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// DIAGNOSTIC (ignored) · the per-good stock/price census behind
+// `docs/CONSUMPTION_AND_GOODS_REVIEW.md`.
+//
+// The review's central claim is that stock accumulates without bound because
+// production is per-capita and price-inelastic while consumption is capped at
+// the structural ration — so a city's warehouse fills up and its prices sink to
+// `PRICE_FLOOR_MULT`. That claim is only worth making if it is MEASURED, and
+// this is the instrument: it runs the reference world and prints, per good and
+// per year, how many DAYS of the world's own structural need is actually held,
+// and where the price landed relative to `base_value`.
+//
+//   cargo test --lib econ_measure_goods_stock_and_price -- --ignored --nocapture
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+#[ignore]
+fn econ_measure_goods_stock_and_price() {
+    let mut s = reference_world();
+    let ng = s.goods.len();
+    let names: Vec<String> = s.goods.iter().map(|g| g.name.clone()).collect();
+    let bases: Vec<f32> = s.goods.iter().map(|g| g.base_value).collect();
+    let tiers: Vec<u8> = s.goods.iter().map(|g| g.need_tier).collect();
+
+    println!("\n── per-good census · reference world ──");
+    println!("{:>4} {:>8} {:>4} {:>14} {:>14} {:>12} {:>11} {:>10}",
+             "yr", "good", "tier", "stock", "need/day", "days_held", "price/base", "prod/need");
+
+    let mut last_year = 0u32;
+    for year in [1u32, 5, 10, 25, 50, 100] {
+        s.advance((year - last_year) * 365);
+        last_year = year;
+        for g in 0..ng {
+            let mut stock = 0.0f64;
+            let mut need = 0.0f64;
+            let mut prod = 0.0f64;
+            let mut pw = 0.0f64;
+            let mut pop = 0.0f64;
+            for h in 0..s.hubs.len() {
+                if s.hubs[h].abandoned { continue; }
+                stock += s.hub_stock(h, g) as f64;
+                need += s.base_need(h, g) as f64;
+                prod += s.hubs[h].production.get(g).copied().unwrap_or(0.0) as f64;
+                let p = s.hubs[h].population as f64;
+                pw += (s.hubs[h].price.get(g).copied().unwrap_or(0.0) / bases[g]) as f64 * p;
+                pop += p;
+            }
+            let days = if need > 1e-6 { stock / need } else { f64::INFINITY };
+            println!("{:>4} {:>8} {:>4} {:>14.0} {:>14.1} {:>12.1} {:>11.3} {:>10.2}",
+                     year, names[g], tiers[g], stock, need, days,
+                     if pop > 0.0 { pw / pop } else { 0.0 },
+                     if need > 1e-6 { prod / need } else { 0.0 });
+        }
+        println!();
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S1 GATE (CONSUMPTION_REBUILD_PLAN.md) · the demand table is now a budget
+// share, not a quantity — this asserts the resulting expenditure split
+// actually resembles a household's, computed directly off the shipped
+// GOOD_DESIRE/NEED_TIER/BASE_VALUE tables the same way base_need reads them
+// (population term cancels: every good multiplies it identically), mirroring
+// docs/CONSUMPTION_AND_GOODS_REVIEW.md §2's own arithmetic so the doc and the
+// gate can never silently disagree.
+//
+// Verified to FAIL on the pre-S1 code (§8.23b's own rule): with
+// TIER_WEIGHT = [1.0, 0.45, 0.22], LUX_IMPORT_DESIRE = 0.7 and no /base_value
+// term, this reads food 12.4% / luxury 69.7%.
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+fn econ_expenditure_shares_resemble_a_household() {
+    use crate::sim::biological::{GOOD_NAMES, GOOD_DESIRE, GOOD_NEED_TIER, GOOD_BASE_VALUE};
+    use crate::tile::cell::GOODS_COUNT;
+    const FOOD: [&str; 12] = [
+        "wheat", "rice", "barley", "millet", "stockfish", "herring",
+        "dates", "oliveoil", "salt", "beer", "honey", "sugar",
+    ];
+    let mut total_spend = 0.0f64;
+    let mut food_spend = 0.0f64;
+    let mut lux_spend = 0.0f64;
+    let mut gem_qty = 0.0f64;
+    let mut gem_spend = 0.0f64;
+    let mut wheat_qty = 0.0f64;
+    let mut wheat_spend = 0.0f64;
+    for g in 0..GOODS_COUNT {
+        let tier = GOOD_NEED_TIER[g].min(2) as usize;
+        let value = (GOOD_BASE_VALUE[g] as f64).max(super::BUDGET_VALUE_FLOOR as f64);
+        // foreign_lux applies only to an imported comfort/luxury good; a
+        // world-average share cannot know import status per hub, so — as the
+        // review's own table does — this measures the LOCAL floor (foreign_lux
+        // = 1.0), which is the conservative (smallest) luxury share possible.
+        let tw = [1.0f64, 0.34, 0.10][tier];
+        let qty = tw * (GOOD_DESIRE[g] as f64).max(0.0) / value;
+        let spend = qty * value;
+        total_spend += spend;
+        if FOOD.contains(&GOOD_NAMES[g]) { food_spend += spend; }
+        if tier == 2 { lux_spend += spend; }
+        if GOOD_NAMES[g] == "gemstones" { gem_qty = qty; gem_spend = spend; }
+        if GOOD_NAMES[g] == "wheat" { wheat_qty = qty; wheat_spend = spend; }
+    }
+    let food_share = food_spend / total_spend;
+    let lux_share = lux_spend / total_spend;
+    println!(
+        "expenditure shares: food {:.1}% luxury {:.1}% gem:wheat spend {:.3} qty {:.3}",
+        100.0 * food_share, 100.0 * lux_share,
+        gem_spend / wheat_spend, gem_qty / wheat_qty,
+    );
+    assert!(food_share >= 0.50 && food_share <= 0.80,
+        "food/drink share of consumption spend {:.1}% is outside the historical \
+         50-80% band (Allen's basket)", 100.0 * food_share);
+    assert!(lux_share < 0.15,
+        "luxury-tier share of consumption spend {:.1}% is too high — pre-modern \
+         luxury spending was a low single-digit share, concentrated in <5% of \
+         the population", 100.0 * lux_share);
+    assert!(gem_spend / wheat_spend < 1.0,
+        "a city still spends more on gemstones ({:.2}x) than on wheat, by value",
+        gem_spend / wheat_spend);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S5 GATE (CONSUMPTION_REBUILD_PLAN.md) · the ore ceiling is dosed from zero,
+// the N1/N6 pattern — assert the shipped constant IS zero, then prove a real
+// injected deposit (extent WEAK, which caps hardest) makes NO measurable
+// difference to production. A world of two cities of very different
+// population, one sitting on a real (weak) deposit and one not, must still
+// show gem output scaling with population exactly as it does today.
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+fn s5_ore_ceiling_at_zero_is_a_noop() {
+    assert_eq!(ORE_CEILING_DOSE, 0.0);
+    let goods = vec![
+        good("wheat", 0, 0, 1.0, 0.85, true),
+        good("gemstones", 1, 2, 60.0, 0.40, false),
+    ];
+    let mut gh = TickGood { distribution: DIST_DEPOSITS, ..goods[1].clone() };
+    gh.name = "gemstones".into();
+    let goods = vec![goods[0].clone(), gh];
+    let big = hub(0, 0.0, 0.0, 40_000.0, vec![40_000.0 * 20.0, 40_000.0 * 0.02], 0);
+    let small = hub(1, 10.0, 0.0, 4_000.0, vec![4_000.0 * 20.0, 4_000.0 * 0.02], 0);
+    let mut s = sim(vec![big, small], goods);
+    // A real, hard-capping deposit sits right on the big city.
+    s.mine_deposits.push(MineSite {
+        good: "gemstones".into(), x: 0.0, y: 0.0,
+        depth: crate::sim::deposits::DEPTH_SURFACE,
+        extent: crate::sim::deposits::EXTENT_WEAK, district: 0,
+    });
+    s.advance(30);
+    let big_gems = s.hubs[0].production[1];
+    let small_gems = s.hubs[1].production[1];
+    assert!(big_gems > 0.0 && small_gems > 0.0, "both cities must still produce gems");
+    // Population ratio is 10:1; at zero dose the deposit must change nothing —
+    // the big city's output must still track its population, not be capped
+    // down toward the small city's.
+    assert!(big_gems / small_gems > 5.0,
+        "at ORE_CEILING_DOSE = 0.0 a real deposit must have NO effect: big city \
+         {big_gems:.1} vs small city {small_gems:.1} (ratio {:.2}, expected >5)",
+        big_gems / small_gems);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// S7 GATE (CONSUMPTION_REBUILD_PLAN.md) · household monetization is dosed
+// from zero — the highest-risk lever in the plan. Assert the shipped constant
+// IS zero, then prove a real (nonzero) household_wealth injected directly
+// makes NO measurable difference: consumption, stock and the household
+// balance itself must all be unaffected at the shipped dose.
+// ─────────────────────────────────────────────────────────────────────────────
+#[test]
+fn s7_household_monetization_at_zero_is_a_noop() {
+    assert_eq!(HOUSEHOLD_MONETIZATION_DOSE, 0.0);
+    let mut s = reference_world();
+    // Starve every hub of money — if the budget constraint were live at any
+    // dose, this would collapse consumption to near zero.
+    for h in s.hubs.iter_mut() { h.household_wealth = 0.0; }
+    s.advance(60);
+    let poor_wheat: f32 = (0..s.hubs.len()).map(|h| s.hub_stock(h, 0)).sum();
+    let poor_wealth: f32 = s.hubs.iter().map(|h| h.household_wealth).sum();
+
+    let mut s2 = reference_world();
+    for h in s2.hubs.iter_mut() { h.household_wealth = 1_000_000.0; }
+    s2.advance(60);
+    let rich_wheat: f32 = (0..s2.hubs.len()).map(|h| s2.hub_stock(h, 0)).sum();
+
+    assert_eq!(poor_wealth, 0.0,
+        "at HOUSEHOLD_MONETIZATION_DOSE = 0.0, household_income_pass must never write \
+         household_wealth (it stayed exactly 0.0 across 60 days)");
+    assert!((poor_wheat - rich_wheat).abs() < poor_wheat * 1e-6,
+        "at HOUSEHOLD_MONETIZATION_DOSE = 0.0, starting household_wealth at 0 vs 1,000,000 \
+         must leave stock identical: {poor_wheat} vs {rich_wheat}");
+}

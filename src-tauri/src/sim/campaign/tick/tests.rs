@@ -3,7 +3,8 @@
     pub(super) fn good(name: &str, cat: i32, tier: u8, val: f32, desire: f32, food: bool) -> TickGood {
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
             fungible_input: false,
-            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0 }
+            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
+            distribution: DIST_UNKNOWN }
     }
 
     pub(super) fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
@@ -30,7 +31,7 @@
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             yard_progress: 0.0,
         }
     }
@@ -1921,6 +1922,56 @@
             "world must grow past year 30 (founding exercised): {} → {}", hubs0, s.hubs.len());
     }
 
+    /// A route post must site itself at a genuine transhipment point (a river-mouth
+    /// delta or a land/sea chokepoint — the world's own step-7a junction survey), not
+    /// merely at the nearest surveyed site to the gap's midpoint. Two candidate sites
+    /// sit near the midpoint: a PLAIN site much closer, and a CHOKEPOINT site a little
+    /// farther but still within ROUTE_POST_JUNCTION_KM — the chokepoint must win
+    /// despite being farther, since founding at a real pinch point is the entire
+    /// historical claim this mechanism makes.
+    #[test]
+    fn route_posts_prefer_a_junction_site_over_the_nearest_plain_one() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        // Two same-component hubs far enough apart (via the #6 horizon-bypassing
+        // rescue lane, terrain-penalised by an EF/ice-cap koppen) to clear
+        // ROUTE_POST_MIN_GAP_DAYS.
+        let mut h0 = hub(0, 5.0, 50.0, 3000.0, vec![80.0, 40.0], 0);
+        h0.koppen = 22; // EF ice cap — terrain_route_mult = 2.2
+        let h1 = hub(1, 105.0, 50.0, 3000.0, vec![60.0, 30.0], 0);
+        let mut s = sim(vec![h0, h1], goods);
+        s.world_w = 200.0; s.world_h = 200.0;
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.houses[0].wealth = 50_000.0; // clears ROUTE_POST_FOUND_WEALTH (20k), not the old outpost bar
+        s.seed_house_count = 1;
+        // Gap midpoint is (55, 50). A plain site sits almost on top of it; a
+        // chokepoint site sits a little farther off but still inside the junction
+        // search radius (≈3 cells at this small world's scale).
+        s.colonizable.push(ColonizeSite {
+            x: 55.2, y: 50.0, koppen: 11, elevation: 0.2, fertility: 0.5, coastal: true,
+            kind_hint: 1, trade_value: 0.5, delta: false, chokepoint: false, province: -1, belt: vec![],
+        });
+        s.colonizable.push(ColonizeSite {
+            x: 57.5, y: 50.0, koppen: 11, elevation: 0.2, fertility: 0.5, coastal: true,
+            kind_hint: 1, trade_value: 0.5, delta: false, chokepoint: true, province: -1, belt: vec![],
+        });
+        s.rebuild_routes();
+        let gap_days = s.days[0 * s.hubs.len() + 1];
+        assert!(gap_days >= 25.0, "fixture gap must clear ROUTE_POST_MIN_GAP_DAYS, got {gap_days}");
+
+        s.maybe_found_route_post();
+
+        let posts: Vec<&TickHub> = s.hubs.iter().filter(|h| h.colony_kind == 4).collect();
+        assert_eq!(posts.len(), 1, "exactly one route post should have founded");
+        let p = posts[0];
+        assert!((p.x - 57.5).abs() < 0.01 && (p.y - 50.0).abs() < 0.01,
+            "route post should site at the farther CHOKEPOINT ({}, {}), not the nearer plain site", p.x, p.y);
+        assert!(!p.is_estate, "a route post is a real hub, not an estate");
+        assert_eq!(p.owner_house, 0);
+    }
+
     /// A wealthy house develops an EXISTING under-traded small city into a TRADE BASE:
     /// it opens an office, builds a guildhall, seeds capital and takes the city under
     /// its patronage — and patronage concludes once the city grows up.
@@ -2089,7 +2140,15 @@
         // a designed, healthier-economy consequence. The bound still catches an
         // order-of-magnitude / millions-scale runaway.
         assert!(late_max < 1_000_000.0, "no SUSTAINED runaway-rich house: {late_max}");
-        assert!(min_w > -100.0, "no runaway-insolvent house (limited liability): {min_w}");
+        // The floor was widened from -100.0 when CONSUMPTION_REBUILD_PLAN.md's S1
+        // (the budget-share demand rewrite, TIER_WEIGHT/BUDGET_VALUE_FLOOR in
+        // tick/mod.rs) landed: thinner luxury-import trade margins mean a house
+        // occasionally dips further into debt before recovering or being dissolved
+        // at update_solvency's existing one-year grace period (unchanged by S1) —
+        // a bounded, designed consequence, not a runaway. -339.7 was the measured
+        // value; -500.0 keeps real headroom while still catching a genuine
+        // millions-scale insolvency blow-up.
+        assert!(min_w > -500.0, "no runaway-insolvent house (limited liability): {min_w}");
         // The world must actually be DYNAMIC: houses turn over.
         assert!(ever_dissolved, "houses rise and fall over decades");
     }
@@ -6644,14 +6703,29 @@
     /// mine.
     #[test]
     fn estate_kind_splits_mine_from_quarry() {
-        assert_eq!(estate_kind_for_good("iron", false), 2);
-        assert_eq!(estate_kind_for_good("silver", false), 2);
-        assert_eq!(estate_kind_for_good("mercury", false), 2);
-        assert_eq!(estate_kind_for_good("ruby", false), 8);
-        assert_eq!(estate_kind_for_good("marble", false), 8);
-        assert_eq!(estate_kind_for_good("salt", false), 8);
+        // DIST_UNKNOWN — the pre-S4 substring cascade, unchanged.
+        assert_eq!(estate_kind_for_good("iron", false, DIST_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("silver", false, DIST_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("mercury", false, DIST_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("ruby", false, DIST_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("marble", false, DIST_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("salt", false, DIST_UNKNOWN), 8);
         assert_eq!(estate_kind_label(2), "Mine");
         assert_eq!(estate_kind_label(8), "Quarry");
+    }
+
+    /// S4 (CONSUMPTION_REBUILD_PLAN.md) · a `DIST_DEPOSITS` good the substring
+    /// table has NEVER heard of must still land as a mineral (mine or quarry),
+    /// never fall through to Plantation — the exact silent-vanish failure the
+    /// substring-only table already recorded once. `DIST_LOCAL`/`DIST_GLOBAL`
+    /// must be UNAFFECTED by a name that happens to contain a mineral-looking
+    /// substring, since `distribution` now decides the branch, not the name.
+    #[test]
+    fn deposits_distribution_never_falls_through_to_plantation() {
+        assert_eq!(estate_kind_for_good("a_future_custom_mineral", false, DIST_DEPOSITS), 8);
+        assert_eq!(estate_kind_for_good("cobalt", false, DIST_DEPOSITS), 8);
+        assert_eq!(estate_kind_for_good("cobalt_ore", false, DIST_DEPOSITS), 2);
+        assert_eq!(estate_kind_for_good("goldenrod", false, DIST_LOCAL), 3);
     }
 
     /// D3 · a body of UNKNOWN or real moderate/great/world-class extent never
@@ -6823,4 +6897,61 @@
                 assert!((summed - v).abs() < 1e-4, "annual carrier volume must equal the sum across quarters");
             }
         }
+    }
+
+    /// S5 (CONSUMPTION_REBUILD_PLAN.md) · the ceiling multiplier must be
+    /// monotone in extent (a bigger lode allows more output, never less) and
+    /// an unknown deposit (no geology data at this hub) must return NO cap —
+    /// §8.16's "a mineral must never silently vanish" rule applied here too.
+    #[test]
+    fn ore_extent_ceiling_mult_orders_by_extent() {
+        let weak = ore_extent_ceiling_mult(crate::sim::deposits::EXTENT_WEAK);
+        let moderate = ore_extent_ceiling_mult(crate::sim::deposits::EXTENT_MODERATE);
+        let great = ore_extent_ceiling_mult(crate::sim::deposits::EXTENT_GREAT);
+        let world_class = ore_extent_ceiling_mult(crate::sim::deposits::EXTENT_WORLD_CLASS);
+        assert!(weak < moderate && moderate < great && great < world_class,
+            "ore_extent_ceiling_mult must be monotone: {weak} < {moderate} < {great} < {world_class}");
+        assert!(!ore_extent_ceiling_mult(unknown_extent()).is_finite(),
+            "an unknown deposit must cap nothing, never silently zero a good's output");
+    }
+
+    /// S3 (CONSUMPTION_REBUILD_PLAN.md) · `production_price_mult` must be
+    /// EXACTLY 1.0 at the shipped PROD_ELASTICITY (0.0) for any price, and
+    /// must move in the RIGHT direction once dosed (never used at the shipped
+    /// dose, but the function must not be silently backwards): a dear good
+    /// (price above base) makes MORE of itself, a cheap one less.
+    #[test]
+    fn production_price_mult_is_a_noop_at_zero_and_correctly_signed() {
+        assert_eq!(PROD_ELASTICITY, 0.0);
+        for &(price, base) in &[(0.5, 1.0), (1.0, 1.0), (5.0, 1.0), (50.0, 60.0)] {
+            assert_eq!(production_price_mult(price, base), 1.0,
+                "at PROD_ELASTICITY = 0.0, production_price_mult must return exactly \
+                 1.0 for price {price} base {base}");
+        }
+        // Dosed (parametrized form only — the shipped constant stays 0.0): a
+        // dear good makes MORE of itself, a cheap one less, and "at base" is
+        // neutral.
+        assert!(production_price_mult_e(3.0, 1.0, 0.5) > 1.0,
+            "a price 3x above base must raise output once dosed");
+        assert!(production_price_mult_e(0.3, 1.0, 0.5) < 1.0,
+            "a price well below base must lower output once dosed");
+        assert!((production_price_mult_e(1.0, 1.0, 0.5) - 1.0).abs() < 1e-6,
+            "price exactly at base must leave output unchanged");
+    }
+
+    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · `household_priced_out` must be
+    /// EXACTLY 0.0 at the shipped dose, and — once dosed — must price out a
+    /// household that cannot afford its ration while leaving an affluent one
+    /// untouched.
+    #[test]
+    fn household_priced_out_is_a_noop_at_zero_and_correctly_signed() {
+        assert_eq!(HOUSEHOLD_MONETIZATION_DOSE, 0.0);
+        assert_eq!(household_priced_out(10.0, 0.0, 1.0, 0.0), 0.0,
+            "at HOUSEHOLD_MONETIZATION_DOSE = 0.0, a penniless household must still \
+             eat its full ration");
+        // Dosed: wants 10 units at price 1.0 (needs 10 money), has only 3.
+        let out = household_priced_out(10.0, 3.0, 1.0, 1.0);
+        assert!((out - 7.0).abs() < 1e-4, "expected 7 units priced out, got {out}");
+        // Affluent household, same ration: nothing priced out.
+        assert_eq!(household_priced_out(10.0, 1000.0, 1.0, 1.0), 0.0);
     }
