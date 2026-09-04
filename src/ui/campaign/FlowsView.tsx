@@ -53,6 +53,11 @@ function fmt(n: number): string {
  *  reading a label. */
 const DIR_IN = "#5fd0ff";
 const DIR_OUT = "#ffce5f";
+/** A good this city's own fields or an estate/manufactory actually PRODUCES —
+ *  vs. one it only re-exports or resells — is marked with this tint and a ✽
+ *  prefix wherever it's listed, so "made here" reads at a glance instead of
+ *  needing a click into the good's own row. */
+const PRODUCED_TINT = "#e6c15a";
 
 /** A good's trading VERDICT: the phrase a merchant would use, derived from the
  *  in/out split and the trend. `tone` is undefined for an unremarkable good — a
@@ -156,6 +161,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   // A SINGLE isolated route (one partner→here / here→partner for one good), shown on the
   // map on its own with its direction arrow.
   const [selRoute, setSelRoute] = useState<{ good: number; partner: number; dir: number } | null>(null);
+  // The list defaults to the top 16 (a healthy city can trade 30+ goods and a
+  // flat list that long is mostly scrolling past nothing) — one click shows
+  // every good actually imported or exported, not just the busiest ones.
+  const [showAllGoods, setShowAllGoods] = useState(false);
 
   // Fetch on open / when the campaign year ticks over (flows refresh yearly). Track
   // a real loading flag so a resolved-but-empty result ("no trade recorded") is told
@@ -229,12 +238,14 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   // `flows.goods`, which is already on hand — no extra query, no new state.
   const shape = useMemo(() => {
     if (!flows) return null;
+    // Produced goods get the gold tint + a ✽ prefix on their label, so "made
+    // here" reads straight off the donut/legend rather than needing a click.
     const slice = (pick: (g: TradeFlowGood) => number): Slice[] =>
       flows.goods
         .map((g) => ({
-          label: GOOD_META.get(g.name)?.label ?? g.name,
+          label: (g.produced ? "✽ " : "") + (GOOD_META.get(g.name)?.label ?? g.name),
           value: pick(g),
-          color: GOOD_META.get(g.name)?.color ?? T.inkDim,
+          color: g.produced ? PRODUCED_TINT : (GOOD_META.get(g.name)?.color ?? T.inkDim),
         }))
         .filter((x) => x.value > 0);
     // Carriage is summed ACROSS goods, so it answers "who moves this city's
@@ -258,12 +269,22 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
     const named = carriers.filter((c) => c.label !== "local merchants")
       .reduce((a, b) => a + b.value, 0);
     const carrTotal = carriers.reduce((a, b) => a + b.value, 0);
+    // Home-grown vs. brought-in: of everything this city sends out, how much
+    // is its OWN production leaving vs. goods it merely re-exports — set
+    // beside the total it brings in from elsewhere. One shared unit (trade
+    // volume) throughout, so the two bars are directly comparable.
+    let producedOut = 0, resoldOut = 0, importedIn = 0;
+    for (const g of flows.goods) {
+      if (g.produced) producedOut += g.out_volume; else resoldOut += g.out_volume;
+      importedIn += g.in_volume;
+    }
     return {
       out: slice((g) => g.out_volume),
       inn: slice((g) => g.in_volume),
       carriers,
       /** Share of carriage on a NAMED house or guild's account, 0..1. */
       namedShare: carrTotal > 0 ? named / carrTotal : 0,
+      homeGrown: { producedOut, resoldOut, importedIn },
     };
   }, [flows]);
 
@@ -341,10 +362,15 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
           <span style={{ display: "flex", gap: 4 }}>
             <Chip on={sort === "unusual"} onClick={() => setSort("unusual")}>unusual</Chip>
             <Chip on={sort === "volume"} onClick={() => setSort("volume")}>volume</Chip>
+            {sortedGoods.length > 16 && (
+              <Chip on={showAllGoods} onClick={() => setShowAllGoods((v) => !v)}>
+                {showAllGoods ? "top 16" : `all ${sortedGoods.length}`}
+              </Chip>
+            )}
           </span>
         }
       >
-        {sortedGoods.slice(0, 16).map((g) => {
+        {(showAllGoods ? sortedGoods : sortedGoods.slice(0, 16)).map((g) => {
           const meta = GOOD_META.get(g.name);
           const sel = selGood === g.good;
           const v = verdictOf(g);
@@ -364,7 +390,12 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
               >
                 <span style={{ width: 12, color: T.inkFaint }}>{sel ? "▾" : "▸"}</span>
                 <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
-                <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink }}>{meta?.label ?? g.name}</span>
+                <span style={{ width: 10, color: PRODUCED_TINT, fontSize: FZ.tiny }} title="Produced in this city">
+                  {g.produced ? "✽" : ""}
+                </span>
+                <span style={{ flex: 1, minWidth: 70, color: g.produced ? PRODUCED_TINT : sel ? T.gold : T.ink }}>
+                  {meta?.label ?? g.name}
+                </span>
                 <BalanceBar inV={g.in_volume} outV={g.out_volume} max={maxTotal} />
                 <span style={{ width: 54, textAlign: "right", color: T.inkMid }}>{fmt(g.avg_volume)}/yr</span>
                 {/* The verdict, not a number. A steady, balanced good gets a muted
@@ -581,6 +612,49 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
               </div>
             )}
           </div>
+        </Section>
+      )}
+
+      {/* ── Home-grown vs. brought-in ─────────────────────────────────────────
+          A separate question from "what moves" above: of everything leaving
+          this city, how much is its OWN production being sold versus goods it
+          only re-exports, set beside the total it buys in from elsewhere. One
+          shared unit (trade volume) throughout, so the three bars compare
+          directly — unlike `produced_here`'s grain-equivalent VALUE, which
+          cannot be read against a per-good VOLUME figure without mixing units. */}
+      {shape && (shape.homeGrown.producedOut + shape.homeGrown.resoldOut + shape.homeGrown.importedIn > 0) && (
+        <Section title="Home-grown vs. brought-in">
+          {(() => {
+            const hg = shape.homeGrown;
+            const total = Math.max(hg.producedOut + hg.resoldOut + hg.importedIn, 1e-6);
+            const rows: [string, number, string][] = [
+              ["✽ own production, sold", hg.producedOut, PRODUCED_TINT],
+              ["bought in, then resold", hg.resoldOut, T.inkDim],
+              ["bought in from elsewhere", hg.importedIn, DIR_IN],
+            ];
+            return (
+              <>
+                {rows.map(([label, v, col]) => v > 0 && (
+                  <div key={label} style={{ display: "flex", alignItems: "center", gap: SPACE.sm, padding: "2px 0" }}>
+                    <span style={{ width: 150, color: T.ink, fontSize: FZ.base }}>{label}</span>
+                    <div style={{ flex: 1, height: 8, background: T.card, borderRadius: RADIUS.sm, overflow: "hidden" }}>
+                      <div style={{ width: `${(v / total) * 100}%`, height: "100%", background: col }} />
+                    </div>
+                    <span style={{ width: 60, textAlign: "right", color: T.inkMid,
+                      fontVariantNumeric: "tabular-nums" }}>{fmt(v)}/yr</span>
+                    <span style={{ width: 34, textAlign: "right", color: T.inkDim }}>
+                      {((v / total) * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                ))}
+                <FootNote>
+                  {hg.producedOut + hg.resoldOut > 0
+                    ? `Of what this city sells, ${((hg.producedOut / Math.max(hg.producedOut + hg.resoldOut, 1e-6)) * 100).toFixed(0)}% is its own production — the rest passes through from somewhere else.`
+                    : "This city sells nothing of its own yet — everything traded out is bought-in first."}
+                </FootNote>
+              </>
+            );
+          })()}
         </Section>
       )}
 

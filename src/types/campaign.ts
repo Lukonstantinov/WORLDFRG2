@@ -633,6 +633,9 @@ export interface TradeFlowGood {
   river_volume?: number;
   /** Who moved it — houses, guilds, or unnamed local merchants — largest first. */
   carriers: TradeCarrier[];
+  /** This city's own fields or an estate/manufactory in its hinterland
+   *  actually produces this good, vs. it moving purely as a re-export/resale. */
+  produced?: boolean;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {

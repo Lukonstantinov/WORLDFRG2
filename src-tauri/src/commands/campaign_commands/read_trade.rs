@@ -729,6 +729,15 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
     for &g in hist_by_good.keys() { good_ids.insert(g); }
+    // "Made here": this city's own fields, OR an estate/manufactory parented
+    // to it, actually produces the good — mirrors CityMarketView's `madeHere`
+    // (own `HubDetail.goods[].production` + `estates_here[].output`).
+    const PRODUCED_MIN: f32 = 0.01;
+    let hub_produces = |g: u32| -> bool {
+        let own = sim.hubs.get(hi).and_then(|h| h.production.get(g as usize)).copied().unwrap_or(0.0) > PRODUCED_MIN;
+        own || sim.hubs.iter().any(|e| e.is_estate && e.parent == hi as i32
+            && e.production.get(g as usize).copied().unwrap_or(0.0) > PRODUCED_MIN)
+    };
     let mut goods: Vec<TradeFlowGood> = good_ids.into_iter().map(|g| {
         let history: Vec<f32> = hist_by_good.get(&g).map(|v| (*v).clone()).unwrap_or_default();
         let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
@@ -766,6 +775,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
                 v.truncate(6);
                 v
             },
+            produced: hub_produces(g),
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
