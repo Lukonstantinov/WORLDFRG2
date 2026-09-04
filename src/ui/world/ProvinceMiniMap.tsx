@@ -680,11 +680,16 @@ export function ProvinceMiniMap({
                 ))}
               </clipPath>
               <g clipPath={`url(#${clipId})`}>
-                {/* No belt area for this good ⇒ its locality carries the area, as it
-                    did before the core-marker reduction. Clipped to the province, so
-                    the km-scale square can never flood the plate the way the old
-                    unclipped one did. */}
-                {cores.filter((l) => !covered.has(l.good)).map((l, i) => square(l, `la${i}`, false))}
+                {/* LAND localities never draw the km-scale square (a real user
+                    report: "squares appear on every good there is"). Plate 6a's
+                    belt-mask layer just above already draws the real coverage
+                    AREA at full cell fidelity — that IS the province-sized goods
+                    layer the square fallback was invented to stand in for when a
+                    mask hadn't arrived. A square drawn on top of that duplicated
+                    the reading in a coarser, less honest shape. What's kept below
+                    is the small diamond CORE marker — the "explicit zone, more
+                    saturated" spot request — at the locality's real cell,
+                    regardless of whether a belt mask exists for it. */}
                 {cores.map((l, i) => {
                   const [lx, ly] = toLocal(l.x, l.y);
                   const r = stride * 0.9;

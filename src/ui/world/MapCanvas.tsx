@@ -247,21 +247,29 @@ export function MapCanvas() {
     // wrapped position needs `overlayManager.render` called again per visible
     // copy, each time with the coordinate space shifted by `k * grid_width`.
     const m = metaRef.current;
+    // TRUE span: every world-copy actually touching the screen right now,
+    // UNCAPPED. A rect-union clip costs nothing per extra copy, so the tile
+    // background always gets the real span — nothing here may ever leave a
+    // genuinely visible strip of screen with no clip rect over it.
     let kMin = 0, kMax = 0;
     if (m && m.grid_width > 0) {
       const leftWorldX = (0 - viewport.x) / viewport.scaleX;
       const rightWorldX = (w - viewport.x) / viewport.scaleX;
       kMin = Math.floor(Math.min(leftWorldX, rightWorldX) / m.grid_width);
       kMax = Math.floor(Math.max(leftWorldX, rightWorldX) / m.grid_width);
-      // A pathologically zoomed-out view could span many world-widths at
-      // once; cap how many overlay passes one frame pays for rather than let
-      // the render cost grow unbounded with how far the user scrolls out.
-      const MAX_COPIES = 6;
-      if (kMax - kMin + 1 > MAX_COPIES) {
-        const mid = Math.round((kMin + kMax) / 2);
-        kMin = mid - Math.floor(MAX_COPIES / 2);
-        kMax = kMin + MAX_COPIES - 1;
-      }
+    }
+    // OVERLAY span: the same copies, but capped — redrawing rivers/settlements/
+    // labels/routes N times per frame is real render cost, unlike a clip rect,
+    // so a pathologically zoomed-out view bounds how many copies pay for it.
+    // This used to be the SAME kMin/kMax the tile clip used, which meant
+    // capping it also clipped tiles out of a still-visible strip of screen —
+    // the "map goes blank at the edge when zoomed out / panned far" bug.
+    let kMinO = kMin, kMaxO = kMax;
+    const MAX_COPIES = 6;
+    if (kMaxO - kMinO + 1 > MAX_COPIES) {
+      const mid = Math.round((kMinO + kMaxO) / 2);
+      kMinO = mid - Math.floor(MAX_COPIES / 2);
+      kMaxO = kMinO + MAX_COPIES - 1;
     }
 
     // Clip to the logical world bounds — PER COPY, not one rect spanning the
@@ -302,10 +310,11 @@ export function MapCanvas() {
       ctx.restore();
     }
 
-    // Draw overlays — once per visible world-copy, each shifted so canonical
-    // `[0, grid_width)` content lands at world position `[k*grid_width, …)`.
+    // Draw overlays — once per visible world-copy (capped at MAX_COPIES, see
+    // kMinO/kMaxO above), each shifted so canonical `[0, grid_width)` content
+    // lands at world position `[k*grid_width, …)`.
     if (overlayManager) {
-      for (let k = kMin; k <= kMax; k++) {
+      for (let k = kMinO; k <= kMaxO; k++) {
         ctx.save();
         if (m) {
           ctx.beginPath();
