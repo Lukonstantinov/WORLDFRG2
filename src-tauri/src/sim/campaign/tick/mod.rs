@@ -913,7 +913,13 @@ const OUTPOST_GRADUATE_WEALTH: f32 = 60_000.0;
 //    wealth bar an outpost clears, and — unlike an outpost — subject to the SAME
 //    lifecycle/abandonment a real settlement already has, so a post whose lane goes
 //    quiet declines like any other town rather than needing its own decay code.
-const ROUTE_POST_START_TICK: u32 = OUTPOST_START_TICK;
+/// Unlike an outpost (a deliberate LATE, heavy-capital resource venture), a route
+/// post is a modest waystation on an ALREADY-EXISTING lane — historically these
+/// (river-mouth kontors, strait toll-posts) are among the EARLIEST trade
+/// settlements, often predating the interior's own development. Gated only on
+/// houses existing at all (§ "Emergence order" — houses from year 10), not on the
+/// outpost era's wealth-accumulation window.
+const ROUTE_POST_START_TICK: u32 = 10 * 365;
 /// A lane shorter than this (travel-days) has no real "gap" to fill — a route post
 /// exists to shorten an otherwise-teleported long haul, not to sit beside a town its
 /// neighbour already reaches in a week.
@@ -926,6 +932,21 @@ const MAX_ROUTE_POSTS: usize = 10;
 /// explicit orders not to become a colony"). It grows from real traffic afterward
 /// (ordinary settlement demographics, unchanged) or it stays a hamlet forever.
 const ROUTE_POST_SEED_POP: f32 = 60.0;
+/// A route post is a modest venture next to a resource outpost's heavy capital —
+/// a small factory/kontor a merely-comfortable house can stake, not only a "great
+/// house" (§ outpost wealth bar above, ≈100k/70k). Set low enough that the founding
+/// era is decided by ROUTE_POST_START_TICK (when houses first exist), not by a
+/// decades-long wealth climb — an ordinary house can found one within its first
+/// few years, exactly like a real early trading factory.
+const ROUTE_POST_FOUND_WEALTH: f32 = 20_000.0;
+const ROUTE_POST_FOUND_COST: f32 = 9_000.0;
+/// Search radius (km) around a trade gap's midpoint within which a genuine
+/// transhipment point — the world's own step-7a junction survey (`ColonizeSite`'s
+/// `delta`/`chokepoint` flags, §4/§7) — is preferred over a plain nearest-site pick.
+/// Historically a trade city forms where cargo must change CARRIER, not at an
+/// arbitrary midpoint: a river-mouth delta (river↔sea) or a strait/isthmus
+/// chokepoint (land↔sea, land↔land around a barrier) is exactly that point.
+const ROUTE_POST_JUNCTION_KM: f32 = 600.0;
 // ── Trade bases (houses develop EXISTING under-traded small cities).
 //    The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──

@@ -1922,6 +1922,56 @@
             "world must grow past year 30 (founding exercised): {} → {}", hubs0, s.hubs.len());
     }
 
+    /// A route post must site itself at a genuine transhipment point (a river-mouth
+    /// delta or a land/sea chokepoint — the world's own step-7a junction survey), not
+    /// merely at the nearest surveyed site to the gap's midpoint. Two candidate sites
+    /// sit near the midpoint: a PLAIN site much closer, and a CHOKEPOINT site a little
+    /// farther but still within ROUTE_POST_JUNCTION_KM — the chokepoint must win
+    /// despite being farther, since founding at a real pinch point is the entire
+    /// historical claim this mechanism makes.
+    #[test]
+    fn route_posts_prefer_a_junction_site_over_the_nearest_plain_one() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        // Two same-component hubs far enough apart (via the #6 horizon-bypassing
+        // rescue lane, terrain-penalised by an EF/ice-cap koppen) to clear
+        // ROUTE_POST_MIN_GAP_DAYS.
+        let mut h0 = hub(0, 5.0, 50.0, 3000.0, vec![80.0, 40.0], 0);
+        h0.koppen = 22; // EF ice cap — terrain_route_mult = 2.2
+        let h1 = hub(1, 105.0, 50.0, 3000.0, vec![60.0, 30.0], 0);
+        let mut s = sim(vec![h0, h1], goods);
+        s.world_w = 200.0; s.world_h = 200.0;
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.houses[0].wealth = 50_000.0; // clears ROUTE_POST_FOUND_WEALTH (20k), not the old outpost bar
+        s.seed_house_count = 1;
+        // Gap midpoint is (55, 50). A plain site sits almost on top of it; a
+        // chokepoint site sits a little farther off but still inside the junction
+        // search radius (≈3 cells at this small world's scale).
+        s.colonizable.push(ColonizeSite {
+            x: 55.2, y: 50.0, koppen: 11, elevation: 0.2, fertility: 0.5, coastal: true,
+            kind_hint: 1, trade_value: 0.5, delta: false, chokepoint: false, province: -1, belt: vec![],
+        });
+        s.colonizable.push(ColonizeSite {
+            x: 57.5, y: 50.0, koppen: 11, elevation: 0.2, fertility: 0.5, coastal: true,
+            kind_hint: 1, trade_value: 0.5, delta: false, chokepoint: true, province: -1, belt: vec![],
+        });
+        s.rebuild_routes();
+        let gap_days = s.days[0 * s.hubs.len() + 1];
+        assert!(gap_days >= 25.0, "fixture gap must clear ROUTE_POST_MIN_GAP_DAYS, got {gap_days}");
+
+        s.maybe_found_route_post();
+
+        let posts: Vec<&TickHub> = s.hubs.iter().filter(|h| h.colony_kind == 4).collect();
+        assert_eq!(posts.len(), 1, "exactly one route post should have founded");
+        let p = posts[0];
+        assert!((p.x - 57.5).abs() < 0.01 && (p.y - 50.0).abs() < 0.01,
+            "route post should site at the farther CHOKEPOINT ({}, {}), not the nearer plain site", p.x, p.y);
+        assert!(!p.is_estate, "a route post is a real hub, not an estate");
+        assert_eq!(p.owner_house, 0);
+    }
+
     /// A wealthy house develops an EXISTING under-traded small city into a TRADE BASE:
     /// it opens an office, builds a guildhall, seeds capital and takes the city under
     /// its patronage — and patronage concludes once the city grows up.
