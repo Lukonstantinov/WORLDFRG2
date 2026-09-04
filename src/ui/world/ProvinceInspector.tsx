@@ -325,23 +325,36 @@ export function ProvinceInspector() {
             ]} />
         </div>
 
-        {/* #9 · goods legend + filter — the colour code of each surface good, click ONE
-            to ISOLATE it (see only that good's best-quality area); click it again to show
-            all. Only when the "goods" plate is on and there are belt goods. */}
+        {/* #9 · goods legend + filter — the colour code of each surface good, a real
+            MULTI-TOGGLE: click any chip to switch that good on/off independently of
+            the rest (a real user report — this used to collapse to a single isolated
+            good on click, which reads as "pick one" rather than "turn off what I
+            don't need"). Shift-click a chip to ISOLATE just that good in one step;
+            "all" resets to showing everything. Only when the "goods" plate is on and
+            there are belt goods. */}
         {plates.includes("goods") && beltGoods.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 5, alignItems: "center" }}>
             <span style={{ fontSize: 10, color: T.inkFaint, marginRight: 2 }}>Goods:</span>
             {beltGoods.map((g) => {
-              const isolated = !!goodFilter && goodFilter.size === 1 && goodFilter.has(g.name);
               const shown = !goodFilter || goodFilter.has(g.name);
               const col = GOOD_DEFS.find((d) => d.name === g.name)?.color ?? "#56c8d8";
               return (
-                <button key={g.name} onClick={() => setGoodFilter((prev) => {
-                  // Click = isolate this good; click the already-isolated good = show all.
-                  if (prev && prev.size === 1 && prev.has(g.name)) return null;
-                  return new Set([g.name]);
+                <button key={g.name} onClick={(e) => setGoodFilter((prev) => {
+                  // Shift-click: isolate just this good in one step.
+                  if (e.shiftKey) {
+                    if (prev && prev.size === 1 && prev.has(g.name)) return null;
+                    return new Set([g.name]);
+                  }
+                  // Plain click: toggle this good on/off, independent of the rest —
+                  // starting from "all shown" the first time any chip is clicked.
+                  const cur = prev ?? new Set(beltGoods.map((x) => x.name));
+                  const next = new Set(cur);
+                  if (next.has(g.name)) next.delete(g.name); else next.add(g.name);
+                  // Toggling everything back on collapses to "show all" (no filter),
+                  // which is what keeps a fresh province starting unfiltered.
+                  return next.size === beltGoods.length ? null : next;
                 })}
-                  title={`${goodLabel(g.good)} · quality ${Math.round(g.quality * 100)}% — click to ${isolated ? "show all" : "show only this"}`}
+                  title={`${goodLabel(g.good)} · quality ${Math.round(g.quality * 100)}% — click to toggle, shift-click to isolate`}
                   style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 10, cursor: "pointer",
                     padding: "1px 5px", borderRadius: 10, border: `1px solid ${T.lineSoft}`,
                     background: shown ? T.raised : T.card, color: shown ? T.ink : T.inkFaint, opacity: shown ? 1 : 0.7 }}>
