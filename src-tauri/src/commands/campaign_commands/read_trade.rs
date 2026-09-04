@@ -729,20 +729,34 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
     for &g in hist_by_good.keys() { good_ids.insert(g); }
-    // "Made here": this city's own fields, OR an estate/manufactory parented
-    // to it, actually produces the good — mirrors CityMarketView's `madeHere`
-    // (own `HubDetail.goods[].production` + `estates_here[].output`).
-    const PRODUCED_MIN: f32 = 0.01;
-    let hub_produces = |g: u32| -> bool {
-        let own = sim.hubs.get(hi).and_then(|h| h.production.get(g as usize)).copied().unwrap_or(0.0) > PRODUCED_MIN;
-        own || sim.hubs.iter().any(|e| e.is_estate && e.parent == hi as i32
-            && e.production.get(g as usize).copied().unwrap_or(0.0) > PRODUCED_MIN)
+
+    // ── PRODUCED HERE — the same "made here" reading CityMarketView's Market tab
+    // shows (the city's own fields, `> 0.01`, plus every estate/manufactory
+    // parented to it), so the Flows tab can mark a good as PRODUCED rather than
+    // merely passing through. A good this city only ever resells is not in here.
+    let produced_here: std::collections::HashSet<u32> = {
+        let mut s = std::collections::HashSet::new();
+        if let Some(own) = sim.hubs.get(hi) {
+            for (g, &v) in own.production.iter().enumerate() { if v > 0.01 { s.insert(g as u32); } }
+        }
+        for h in &sim.hubs {
+            if h.is_estate && !h.abandoned && h.parent == hi as i32 {
+                for (g, &v) in h.production.iter().enumerate() { if v > 0.01 { s.insert(g as u32); } }
+            }
+        }
+        s
     };
     let mut goods: Vec<TradeFlowGood> = good_ids.into_iter().map(|g| {
         let history: Vec<f32> = hist_by_good.get(&g).map(|v| (*v).clone()).unwrap_or_default();
         let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
         let iv = g_in.get(&g).copied().unwrap_or(0.0);
         let ov = g_out.get(&g).copied().unwrap_or(0.0);
+        // TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — `production[g]` is the
+        // hub's current daily output rate; annualise it against the same
+        // TICKS_PER_YEAR the yearly trade folds themselves use, so it is
+        // comparable to `in_volume`/`out_volume`.
+        let own_production = sim.hubs.get(hi).and_then(|h| h.production.get(g as usize))
+            .copied().unwrap_or(0.0).max(0.0) * crate::sim::tick::TICKS_PER_YEAR as f32;
         TradeFlowGood {
             good: g,
             name: sim.goods.get(g as usize).map(|x| x.name.clone()).unwrap_or_default(),
@@ -775,7 +789,8 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
                 v.truncate(6);
                 v
             },
-            produced: hub_produces(g),
+            own_production,
+            produced: produced_here.contains(&g),
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));

@@ -638,6 +638,21 @@ pub struct ProvinceDepositDot {
     pub grade: f32,
     pub extent: u8,
     pub depth: u8,
+    /// DEPOSITS_AND_MINING_PLAN.md slice 5 (D6) · which ORE DISTRICT (within
+    /// this good) this working belongs to — the quarry/mine window's grouping
+    /// key, so a district's 2-8 workings list together instead of flat.
+    #[serde(default)]
+    pub district: u32,
+    /// The deposit MODEL's own label (`DepositModel::label`) — "volcanic arc",
+    /// "craton", … — shown in the window instead of a bare good name.
+    #[serde(default)]
+    pub model: String,
+    /// D7 · whether pre-modern technology can actually work this body TODAY —
+    /// always true above `DEPTH_FLOODED`; a flooded body needs a real Mine
+    /// estate already established nearby (drainage capital already sunk) —
+    /// see `campaign_province_potential`'s own computation.
+    #[serde(default)]
+    pub workable: bool,
 }
 
 /// CLAUDE.md §8.19 (goods localities, shipped) Slice 6 — one terroir locality located in a province,
@@ -745,7 +760,23 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
     let mut agg: std::collections::HashMap<String, (f32, u32, u8)> = std::collections::HashMap::new(); // (grade_sum, n, max_depth)
     for d in &deposits {
         if prov_at(d.x, d.y) != id as i32 { continue; }
-        dots.push(ProvinceDepositDot { good: d.good.clone(), x: d.x, y: d.y, grade: d.grade, extent: d.extent, depth: d.depth });
+        // D7 · a flooded body is only "workable" once real drainage capital has
+        // gone in — i.e. a Mine estate is already established at/near it. Every
+        // shallower depth is workable by construction (that's what the depth
+        // ladder itself means).
+        let workable = d.depth != crate::sim::deposits::DEPTH_FLOODED || sim.hubs.iter().any(|h| {
+            if !h.is_estate || h.abandoned || h.estate_kind != 2 { return false; }
+            let mut hdx = (h.x - d.x as f32).abs();
+            if sim.world_w > 1.0 { hdx = hdx.min(sim.world_w - hdx); }
+            let hdy = h.y - d.y as f32;
+            let reach = crate::sim::tick::MINE_DEPOSIT_SEARCH_KM * sim.world_w.max(1.0)
+                / crate::sim::tick::EARTH_EQUATOR_KM;
+            (hdx * hdx + hdy * hdy).sqrt() < reach
+        });
+        dots.push(ProvinceDepositDot {
+            good: d.good.clone(), x: d.x, y: d.y, grade: d.grade, extent: d.extent, depth: d.depth,
+            district: d.district, model: d.model.label().to_string(), workable,
+        });
         let e = agg.entry(d.good.clone()).or_insert((0.0, 0, 0));
         e.0 += d.grade; e.1 += 1; e.2 = e.2.max(d.depth);
     }

@@ -1,7 +1,11 @@
 # Deposits, Mining & the Quarry Layer — Plan
 
-**Status: APPROVED IN DESIGN, PARTLY BUILT.** Slices 1–3 are on disk, gated and
-tested (§4). Slices 4–5 are unbuilt. Scope is medieval / early-colonial.
+**Status: BUILT.** Slices 1–5 are all on disk, gated and tested (§4). The one
+deliberately-deferred piece is a drawn growing-catchment DISC on the province
+survey plate (the backend value is real and served; no new canvas layer
+renders it) and the Mons Claudianus treasury-funded-quarry edge case (the
+plan's own named exception, not a bespoke mechanic). Scope is medieval /
+early-colonial.
 
 This plan covers the natural-resource half of the world: how minerals are placed
 (geology), how they are worked (mining as an industry), and how a settlement whose
@@ -339,56 +343,149 @@ The long tail for the import file: opal, peridot, jet, emery, natron, whetstone,
 ochre, flint, antimony, bismuth, millstone, slate, granite, alabaster, saltpetre,
 cobalt, calamine.
 
-### Slice 4 — Mining as an industry
+### Slice 4 — Mining as an industry ⭐ PARTLY BUILT, GATED
 
 The campaign half, and the first slice that can move the economy bands.
 
-- **Mining capability per city** — a four-tier ladder matching the depth classes.
-  Raises `depth_workability` for workings in its reach.
-- **Mine vs quarry as different mechanics:**
+**Built, this session** (`sim/campaign/tick/mod.rs`, `commands/campaign_commands/
+lifecycle.rs`):
+- `CampaignSim.mine_deposits: Vec<MineSite>` — the world's real ore/gem/stone
+  workings (§8.16, `metadata["deposits"]`), seeded once at campaign start
+  (`seed_mine_deposits`, mirroring `province.rs`/`economy.rs`'s own parse of the
+  same table). A positional/depth index, not a duplicate of the full `Deposit`
+  record — empty on a template world or one generated before slice 1, which
+  every reader treats as "no depth data" rather than "no deposit".
+- `TickHub.mine_depth: u8` — for a Mine estate (`estate_kind == 2`) only, the
+  depth class of the real working nearest its parent city, looked up ONCE at
+  founding (`create_estate` → `mine_depth_at`) within `MINE_DEPOSIT_SEARCH_KM`.
+  Never re-queried afterward. `DEPTH_SURFACE` (ungated) on every other kind, an
+  old save, and a world with no positional deposit data.
+- **Mining capability, as a cost gate rather than a workability multiplier.**
+  A mine's baseline output already reflects depth (it was baked into
+  `base_per_capita` at worldgen by `workable_intensity() = grade ×
+  depth_workability`, §8.16) — reapplying `depth_workability` here would double
+  the penalty. What was missing was the CAPABILITY side: `maybe_house_invests`'s
+  upgrade branch now scales a mine's upgrade cost by `MINE_UPGRADE_COST_MULT`
+  (indexed by `mine_depth`, 1.0/1.3/2.2/3.5 for surface/shallow/deep/flooded) —
+  a flooded body needs real drainage capital (Rio Tinto's reverse waterwheels,
+  Agricola's *De Re Metallica*) and so grows far more slowly at the same
+  wealth. Every other estate kind reads a flat 1.0 (unaffected).
+- **Mercury → silver amalgamation**, wired as a CONSUMABLE EXTRACTION input
+  (`apply_mercury_amalgamation`, called once daily right after ordinary
+  per-capita extraction), not a manufacturing recipe (silver is dug, not
+  assembled from parts — it never touches `manufacture.rs`). A silver-mine
+  estate draws mercury from its OWN stock; `served` (how much of the need was
+  met) interpolates recovery between `MERCURY_AMALGAMATION_FLOOR` (0.75, hand
+  smelting) and `_BONUS` (1.25, full amalgamation) — a true no-op wherever this
+  world has no silver good, no mercury good, or no silver mine.
 
-  | | Mine | Quarry |
-  |---|---|---|
-  | Constraint | depth, drainage, capital, timber | **transport** — stone is `bulk` 4+ |
-  | Founded by | a house or wealthy city (capital-intensive) | a settlement (cheap, useless far from water) |
-  | Fails when | water wins | haul cost exceeds the stone's value |
+Gate: `mine_depth_at_finds_the_nearest_working_within_reach`,
+`mine_upgrade_cost_mult_increases_with_depth_and_only_gates_mines`,
+`mercury_amalgamation_is_a_noop_without_both_goods`,
+`mercury_amalgamation_rewards_a_supplied_mine_and_still_serves_a_dry_one`
+(`tick::tests`) — all new, all pass. Plus `cargo test --lib tick::tests` (194
+passed) and `cargo test --lib econ_` (both scorecards + the inheritance gate),
+run in full and unchanged, since this only ever raises a mine's upgrade cost or
+adjusts silver by a bounded ±25% around a consumable it must actually spend.
 
-  The exception that proves the quarry rule: **Mons Claudianus**, the Roman
-  granodiorite quarry 120 km into the Egyptian Eastern Desert with no water and no
-  food, which existed only because the state paid. Worth supporting as a
-  treasury-drain edge case.
-- **Founding gated on a real deposit** — today an estate becomes a "mine" if the hub
-  happens to have a mineral in its basket, at any richness, with no reference to
-  whether a deposit exists nearby.
-- **Depletion per D3** — only weak bodies, only under sustained large-scale
-  extraction, only to a floor.
-- **Mercury → silver amalgamation** as a consumable extraction input.
+**Also built, later in the same session — the mine/quarry split and D3:**
+- **Mine vs quarry are now two real kinds.** `estate_kind_for_good` splits the
+  old combined list: deep-shaft metals (iron/copper/silver/gold/coal/tin/
+  lead/mercury) are `2` ("Mine"); near-surface stone/gem/salt/amber goods are
+  a NEW `8` ("Quarry"). Only `estate_kind == 2` ever reads `mine_depth` or
+  `MINE_UPGRADE_COST_MULT` — a Quarry is structurally exempt from the depth
+  gate, exactly as the design table asks. A Quarry instead reads its OWN
+  transport gate: `QUARRY_INLAND_UPGRADE_COST_MULT` (2×) when its parent city
+  is neither coastal nor on a navigable river — "useless far from water" as a
+  real number. `disaster_table` gained its own quarry entry (`rockfall`, no
+  flooding — a quarry face isn't a shaft).
+- **D3's "a weak body still declines" half.** `mine_extent` (new `TickHub`
+  field, looked up at founding alongside `mine_depth`, `u8::MAX` = unknown —
+  never `EXTENT_WEAK`, which would silently regate every pre-existing estate)
+  feeds `update_province_goods_pressure`: a body of unknown/moderate/great/
+  world-class extent still never depletes (v2.0's own behaviour, unchanged),
+  but a body KNOWN to be `EXTENT_WEAK` now wears slowly under sustained
+  pressure, capped at `PROV_GOOD_DEPLETION_CAP` (0.75) — a real floor, never
+  zero, exactly D3's "persist... to a floor" wording.
 
-**Gate:** `cargo test --lib simulate_decades_reports_dynamics` **and**
-`cargo test --lib econ_` (§2.1 and §2.5 both apply). This slice *will* move numbers.
+**Still not built:** Mons Claudianus-style treasury-funded desert quarrying
+(the exception the plan names, not the rule); a campaign-time re-check of
+`mine_deposits` that would BLOCK founding a Mine with nothing in reach (today
+`base_per_capita[g] > 0` already requires a real world-side working in the
+founding city's catchment, per slice 2 — the gap is only that the two
+catchment radii, world-side and `MINE_DEPOSIT_SEARCH_KM`, aren't the same
+number, which can leave `mine_depth` reading `DEPTH_SURFACE`/ungated on a rare
+edge case rather than truly blocking).
+
+**Gate:** `mine_depth_at_finds_the_nearest_working_within_reach`,
+`mine_upgrade_cost_mult_increases_with_depth_and_only_gates_mines`,
+`estate_kind_splits_mine_from_quarry`,
+`a_weak_body_declines_but_a_persists_by_default`, plus `mercury_amalgamation_*`
+above (`tick::tests`) — all pass. `cargo test --lib simulate_decades_reports_
+dynamics` **and** `cargo test --lib econ_` (§2.1/§2.5) re-run in full after
+every change here, unchanged.
 
 > **Sequencing hazard.** Capping the settlement catchment (the separate supply-shed
 > work) and adding depth gating both *reduce* supply. Landing both before measuring
 > risks tuning two new constraints against each other blind — exactly the failure
 > §2.4 warns about. **The exploitation-distribution measurement must exist first.**
 
-### Slice 5 — The quarry window, mining settlements, growing catchment
+### Slice 5 — The quarry window, mining settlements, growing catchment ⭐ BUILT
 
-- **Quarry / mine window** — districts, expanding to workings (D6). Each row: good,
-  model, grade tier, extent, depth, whether it is currently workable.
-- **Mining settlements (the Potosí class)** — a settlement whose existence is the
-  deposit: terrible habitability (Cerro Rico sits at 4,090 m with no agriculture),
-  all food imported via the existing colony food-lifeline path, explosive growth
-  (Potosí reached ~160,000 by 1600, among the largest cities on Earth), and — per D3
-  — decline rather than death. Marked as a distinct settlement class.
-- **Growing catchment** — +10–20 km on the existing 50–120 km base as population
-  rises. Store as **one float per hub** (`radius_km`), grow slowly, rasterise only
-  in the view. No per-cell campaign state, no conflict with §3.4's snapshot rule,
-  and the province view gets a disc that visibly grows across the year slider.
+- **Quarry / mine window (D6) — built.** `ProvinceDepositDot` gained `district`/
+  `model`/`workable`, computed in `campaign_province_potential` (`province.rs`)
+  from the real per-working `Deposit` record plus a live cross-check against
+  `sim.hubs` (a flooded body is `workable` only once a real Mine estate is
+  already established within `MINE_DEPOSIT_SEARCH_KM` — real drainage capital
+  already sunk, not a guess). Frontend: `ProvinceInspector.tsx`'s Land tab
+  gained a "Workings" section — districts (grouped by `good|district`), each
+  expanding on click to its individual workings (grade/extent/depth/workable),
+  the exact D6 shape.
+- **Mining settlements (the Potosí class) — built.** `maybe_found_mining_colony`
+  (`colonies.rs`) reuses the settlement-colony machinery end to end (backers,
+  `create_market_colony`, the food-lifeline supply-ship contract — D7's "all
+  food imported" is this, not a bespoke mechanic) but sites the settlement
+  directly on a real GREAT/WORLD-CLASS working from `mine_deposits`, never on
+  the ordinary fertile-land `colonizable` list — a synthetic `ColonizeSite`
+  floors `fertility` near zero (Cerro Rico's own "no agriculture") and biases
+  `belt` toward the struck mineral. `TickHub.is_mining_settlement` marks it.
+  EXPLOSIVE GROWTH: `MINING_SETTLEMENT_GROWTH_MULT` (1.6×) stacks on top of
+  the ordinary colony-boom multiplier in the population pass (`disease.rs`) —
+  kept modest relative to Potosí's real historical peak (~160,000) so the
+  hard-asserted bounded-wealth dynamics gate stays honest rather than chasing
+  the number. DECLINE, NOT DEATH (D3): `colony_pass`'s collapse trigger now
+  branches on `is_mining_settlement` — instead of `collapse_colony` (population
+  → 0, `abandoned = true`), a mining settlement whose lifeline fails shrinks
+  toward `founding_pop × MINING_SETTLEMENT_FLOOR_FRAC` (0.20) and recovers
+  starving, never wiped.
+- **Growing catchment — built, as a pure DERIVED read.** `CampaignSim::
+  catchment_radius_km(h)` mirrors the world-side 50–120 km curve (by founding
+  population) plus `CATCHMENT_GROWTH_PER_YEAR_KM` (0.15 km/yr) since
+  `founded_tick`, capped at `CATCHMENT_MAX_GROWTH_KM` (+20 km total) — the
+  plan's own "+10–20 km on the base" number. Deliberately grows with TIME
+  ALONE, never with live population (which can fall), so no new per-hub
+  mutable state was needed — no conflict with §3.4's snapshot rule, and no new
+  field to thread through every hub-construction site. Exposed on `HubBrief`
+  (`catchment_radius_km`, `is_mining_settlement`) for the frontend to read.
+  **Not done:** an actual growing DISC drawn on the province survey plate —
+  the backend value is real and served, but no new canvas layer was added in
+  `OverlayManager.ts`/`ProvinceMiniMap.tsx` (~4.6k/large files, real geometry
+  work that could not be visually verified in this session without a running
+  app). Reading the number as text is possible today via `HubBrief`; drawing
+  it as a disc is the one honestly-deferred piece of this slice.
 
 The honest pre-modern number: a cart hauls grain economically ~30–50 km; a city
 extends past that only via water. So +10–20 km on growth is right, and the shed
-should not scale freely with population.
+does not scale freely with population.
+
+**Gate:** `mining_settlement_founds_on_a_great_deposit`,
+`mining_settlement_declines_but_never_dies`,
+`catchment_radius_grows_with_age_and_is_capped` (`tick::tests`) — all pass.
+`cargo test --lib simulate_decades_reports_dynamics` (203 pass) and `cargo
+test --lib econ_` (both scorecards, unchanged) re-run in full. `npx tsc
+--noEmit` clean on the frontend types + `ProvinceInspector.tsx` changes —
+**not** visually verified in a running app (no browser available in this
+session); say so rather than claiming it was checked.
 
 ---
 
@@ -405,17 +502,30 @@ Recorded so a future session does not read absence as oversight.
   data it would need.
 - **Ore beneficiation and smelting chains.** Ore → metal is not modelled as a
   manufacturing step; a mine produces the finished metal.
-- **Mercury as an extraction input** until slice 4 (see the warning above).
-- **Settlement death by exhaustion**, per D3.
-- **Contesting a deposit by war.** Same gap as rule 24's held provinces.
+- **Mercury as an extraction input** — BUILT in slice 4 (`apply_mercury_
+  amalgamation`); struck through here since it's no longer a gap.
+- **Settlement death by exhaustion, per D3** — BUILT in slice 5
+  (`colony_pass`'s mining-settlement branch declines toward a floor instead of
+  `collapse_colony`); struck through here since it's no longer a gap.
+- **Contesting a deposit by war.** Same gap as rule 24's held provinces. Still
+  open.
+- **A drawn catchment disc on the province survey plate.** The backend value
+  (`CampaignSim::catchment_radius_km`) is real and served on `HubBrief`; no new
+  canvas layer renders it. Still open.
+- **Mons Claudianus-style treasury-funded desert quarrying** (the state pays
+  for a quarry with no water/food nearby) — the plan's own named exception,
+  not built as a bespoke mechanic.
 
 ---
 
 ## 7. Order
 
-1. **Slice 1** — geological placement. *Partly built; finish and gate.*
-2. **Slice 2** — grade → quality rewire.
-3. **Slice 3** — txt import + 8 new goods.
-4. *(Prerequisite)* exploitation-distribution measurement.
-5. **Slice 4** — mining industry, depth gating, mine/quarry split.
-6. **Slice 5** — quarry window, mining settlements, growing catchment.
+1. **Slice 1** — geological placement. ✅ built and gated.
+2. **Slice 2** — grade → quality rewire. ✅ built and gated.
+3. **Slice 3** — txt import + 8 new goods. ✅ built and gated.
+4. **Slice 4** — mining industry, depth gating, mine/quarry split. ✅ built and
+   gated (mining capability's depth-cost gate, mercury amalgamation, the
+   mine/quarry split, D3 weak-body depletion).
+5. **Slice 5** — quarry window, mining settlements, growing catchment. ✅ built
+   and gated, save the growing-catchment DISC's own canvas layer (backend
+   value real and served, not drawn) and the Mons Claudianus edge case.
