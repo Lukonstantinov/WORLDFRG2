@@ -255,6 +255,29 @@ const KM_EQUATOR: f32 = 40075.0;
 /// `leg_exceeds_range_uses_the_right_cap_per_mode`, dead code at this dose.
 /// The dose walk down — on the Earth-scale reference world specifically, not
 /// the small unit fixtures — is real future work.
+/// SECOND trial, same historically-motivated dose, this session: fixed the
+/// `world_w: 100.0` mismatch above (unit fixtures AND the standing dynamics
+/// gate rescaled to the real ~3600-wide grid `days_per_cell`'s own default is
+/// already calibrated for) and re-measured clean — `tick::tests` (209/209)
+/// and `econ_fidelity_scorecard` both genuinely IMPROVE at this dose: the
+/// price/distance gradient moves from the documented −0.064 baseline to
+/// **+0.153**, and goods showing any positive gradient go from 0/6 to 4/6 —
+/// real, reproduced evidence this is the right mechanism for that finding.
+/// But `econ_inheritance_rules_fragment_differently` broke REPRODUCIBLY at
+/// this dose on the real reference world: partible came out RICHER than
+/// primogeniture (123,668 vs 64,698, bit-identical across two runs) while
+/// plain `main` at the identical base commit passes cleanly (89,056 vs
+/// 126,150) — ruled out as the gate's own known cross-run flakiness by that
+/// exact A/B (same commit, only this dose differs). A real structural
+/// finding, the same shape as N2's (§ its own doc comment): capping the
+/// ownerless long-haul residual concentrates surviving capital onto whichever
+/// few houses keep fleet reach, hard enough to invert this gate's core claim.
+/// Shipped back at `INFINITY` — the price-integration win is real but not
+/// worth this cost. Re-attempting needs either a lower dose (walked, not
+/// jumped straight to the historical value) or pairing it with something
+/// that keeps capital from re-concentrating (a real relay via route posts,
+/// TRADE_STAGING_AND_POSTS_PLAN.md's own break-of-bulk, still unbuilt) —
+/// re-run BOTH gates at every step, not just `econ_fidelity_scorecard`.
 const SHIP_LEG_MAX_KM: f32 = f32::INFINITY;
 const CARAVAN_LEG_MAX_KM: f32 = f32::INFINITY;
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
