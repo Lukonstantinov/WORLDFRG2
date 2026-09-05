@@ -204,8 +204,11 @@ export function SplitBar({
   );
 }
 
-/** One slice of a `Donut`. */
-export type Slice = { label: string; value: number; color: string };
+/** One slice of a `Donut`. `textColor` is optional and affects only the LABEL in
+ *  `DonutKey` (the wedge/swatch always draws `color`, so a slice's true identity
+ *  color is never lost to a highlight) — e.g. tinting a produced-here good's name
+ *  without flattening every produced good's wedge to one shared colour. */
+export type Slice = { label: string; value: number; color: string; textColor?: string };
 
 /** A donut chart — for a PART-OF-A-WHOLE reading only (a city's exports by good,
  *  who carries its trade). A ranking belongs in bars: a donut makes two similar
@@ -300,7 +303,7 @@ export function DonutKey({
             padding: "0 2px", background: picked === s.label ? T.card : "transparent",
           }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
-          <span style={{ flex: 1, minWidth: 0, color: T.ink, overflow: "hidden",
+          <span style={{ flex: 1, minWidth: 0, color: s.textColor ?? T.ink, overflow: "hidden",
             textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.label}</span>
           <span style={{ color: T.inkMid, fontVariantNumeric: "tabular-nums" }}>{f(s.value)}</span>
           <span style={{ width: 30, textAlign: "right", color: T.inkDim,
