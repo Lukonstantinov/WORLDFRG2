@@ -2331,6 +2331,36 @@ mod tests {
         }
     }
 
+    /// `Province.good_belt` is a ONE-TIME aggregate of the tile `goods` columns taken
+    /// AT generation time — there is no later refresh. Both run-alls used to call
+    /// province generation BEFORE Phase 8 (`compute_trade_goods`) ever wrote a byte
+    /// into those columns, so every world built through either button froze
+    /// `good_belt` at all-zero for every province regardless of what actually grows
+    /// there — silently emptying the Province Inspector's goods legend/layer/coverage
+    /// (`campaign_province_potential`'s world-level fallback reads exactly this
+    /// field). Fixed by reordering `sim_run_all`/`sim_run_all_from_terrain` so
+    /// biological goods placement runs first; this guards the underlying fact so a
+    /// future reorder can't reintroduce it silently.
+    #[test]
+    fn good_belt_requires_goods_to_already_be_placed_in_the_tile_columns() {
+        let mut buf = blank_world();
+        // A rich, uniform good over the whole province footprint.
+        buf.goods[0] = vec![220u8; buf.total()];
+        let towns = vec![settle("a", 40, 32, 9000)];
+        let (provs_after, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        let belt_after = provs_after[0].good_belt[0];
+        assert!(belt_after > 0.5,
+            "a province generated AFTER the good is placed must read a rich belt, got {belt_after}");
+
+        // The same world, but generated BEFORE the good is placed (the bug: an
+        // identical buffer with the goods column still at its pre-Phase-8 zero).
+        let buf_before = blank_world();
+        let (provs_before, _) = generate_provinces(&buf_before, &[], &[], &towns, 0.5);
+        let belt_before = provs_before[0].good_belt[0];
+        assert!(belt_before <= crate::sim::tick::PROV_GOOD_ABSENT_BELT,
+            "sanity: a province generated before any good exists must read as absent, got {belt_before}");
+    }
+
     /// Borders must actually RIDE the crests. A cost-flood alone can only lean toward
     /// a barrier; the marker-controlled watershed snap is what puts the line on it.
     #[test]
