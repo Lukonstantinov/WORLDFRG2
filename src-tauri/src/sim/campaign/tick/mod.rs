@@ -1014,12 +1014,18 @@ const DIASPORA_MOBILITY_GATE: f32 = 0.5;  // only cultures at/above this mobilit
 const DIASPORA_MAX_MINORITY: f32 = 0.45;  // a diaspora tops out at this share of a host
 const DIASPORA_MAX_PER_YEAR: u32 = 20;    // a visible flow, still legible
 /// ── Ruin REVIVAL — a long-dead site is resettled once its region recovers.
-const RESETTLE_COOLDOWN_YEARS: u32 = 15; // a ruin must lie empty this long first
+/// Loosened from the original 15y/8,000-pop/10%/2-per-year shipped values: measured
+/// play reported ruins sitting resettle-eligible for decades with revival still rare,
+/// which read as "nobody ever wants to come back" even in a genuinely recovered
+/// region. Each knob still requires an actually-thriving nearby patron
+/// (`sent_prosperity >= 0.5`, `food_balance >= 0.1`) — this only shortens the wait
+/// and raises the odds once that condition is real, it does not remove the gate.
+const RESETTLE_COOLDOWN_YEARS: u32 = 10; // a ruin must lie empty this long first
 const RESETTLE_REACH_FRAC: f32 = 0.12;   // a thriving patron must be within this of world width
-const RESETTLE_PATRON_MIN_POP: f32 = 8_000.0; // the reviving region needs a real city nearby
+const RESETTLE_PATRON_MIN_POP: f32 = 5_000.0; // the reviving region needs a real city nearby
 const RESETTLE_POP: f32 = 500.0;         // pioneers refound a small town (tiered scale)
-const RESETTLE_PROB: f32 = 0.10;         // per eligible ruin per year
-const RESETTLE_MAX_PER_YEAR: u32 = 2;    // trickle, so revivals stay legible
+const RESETTLE_PROB: f32 = 0.20;         // per eligible ruin per year
+const RESETTLE_MAX_PER_YEAR: u32 = 4;    // still a trickle, so revivals stay legible
 /// House TRADE OUTPOSTS open earlier — year 30 — but are gated behind serious
 /// wealth: only a great house (≈150k) can afford the heavy founding cost (≈120k).
 /// Easier conditions than a settlement colony (no bank/food/joint-stock), just the
