@@ -58,6 +58,15 @@ const DIR_OUT = "#ffce5f";
  *  prefix wherever it's listed, so "made here" reads at a glance instead of
  *  needing a click into the good's own row. */
 const PRODUCED_TINT = "#e6c15a";
+/** The "made here" LABEL tint for the shape-of-trade donuts — distinct from
+ *  `PRODUCED_TINT` above, which used to also replace the wedge/swatch COLOUR
+ *  for every produced good. That flattened the whole chart to one shade
+ *  whenever most exports happened to be home-grown (the common case), losing
+ *  each good's own identity colour entirely. The wedge/swatch now always
+ *  keeps the good's real colour; only the donut-key LABEL TEXT tints red when
+ *  the good is produced here, so "made here" still reads at a glance without
+ *  erasing which good is which. */
+const PRODUCED_INK = "#d9705c";
 
 /** A good's trading VERDICT: the phrase a merchant would use, derived from the
  *  in/out split and the trend. `tone` is undefined for an unremarkable good — a
@@ -330,7 +339,11 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
         .map((g) => ({
           label: (g.produced ? "⚒ " : "") + (GOOD_META.get(g.name)?.label ?? g.name),
           value: pick(g),
-          color: g.produced ? PRODUCED_TINT : (GOOD_META.get(g.name)?.color ?? T.inkDim),
+          // The wedge/swatch is always the good's OWN colour — a produced good
+          // is marked by its label tinting red (below) and its ⚒ prefix, never
+          // by losing its identity colour to a shared "produced" tint.
+          color: GOOD_META.get(g.name)?.color ?? T.inkDim,
+          textColor: g.produced ? PRODUCED_INK : undefined,
         }))
         .filter((x) => x.value > 0);
     // Carriage is summed ACROSS goods, so it answers "who moves this city's
