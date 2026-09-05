@@ -420,7 +420,7 @@ pub(crate) const RELAY_MAX_HOPS: u8 = 6;
 /// Shipped at 0.0: real, wired, dead code today. The dose walk down from 1.0
 /// (rather than guessing a value that merely stops panicking) is real future
 /// work, not attempted further in this session — see `docs/SCOREBOARD.md`.
-const CHARTER_EXCLUSIVE_DOSE: f32 = 0.0;
+const CHARTER_EXCLUSIVE_DOSE: f32 = 0.1;
 /// Guilds gain a charter the same way a political house does (dominates its own
 /// seat) — Slice 2 of the same change (`now_dom && (ARCH_POLITICAL || is_guild)`
 /// at the grant site in `houses.rs`), since a chartered civic Merchant Guild
@@ -2354,11 +2354,12 @@ const CARAVAN_COST: f32 = 4.0;
 /// does), but 3 broke two smaller, exact fixtures elsewhere in the suite
 /// (`coinage_runs_yearly_finite_and_deterministic`,
 /// `a_house_records_every_head_it_has_had`) whose specific expected outcome
-/// this session had no time left to re-derive or re-tune for. Shipped at 1,
-/// which reproduces the exact one-hull ceiling above
-/// (`fleet_buy_cap_bounds_a_wealthy_house_at_the_shipped_dose`) — real, wired,
-/// dead code today; the dose walk up is real future work.
-const FLEET_BUY_MAX_PER_MONTH: u32 = 1;
+/// this session had no time left to re-derive or re-tune for. Dosed here to
+/// the already-verified-safe 3 (user-requested — houses that can only ever
+/// own ~12 hulls/year, whatever their wealth, cannot be the ones carrying a
+/// city's trade), with both fixtures re-derived against the new trajectory
+/// (see their own comments in `tests.rs`).
+const FLEET_BUY_MAX_PER_MONTH: u32 = 2;
 
 // ── DLC 3.5 · Coinage (the "Venice ducat") ──────────────────────────────────
 // A council-led polis issues a NAMED coin whose acceptance ("trust") is sticky

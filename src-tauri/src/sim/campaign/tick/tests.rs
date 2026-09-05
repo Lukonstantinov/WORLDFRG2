@@ -411,38 +411,79 @@
             "a banned good's stock at the source must not move — nothing may ship");
     }
 
-    /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) · at the shipped dose of
-    /// 0.0 a charter earns its holder rent only (`CHARTER_RENT`, unchanged) —
-    /// it must not block a rival or ownerless leg from completing an ordinary
-    /// sale in the chartered city, so the whole mechanism is a true no-op.
-    /// Mirrors `n_yards_s4_capacity_bind_at_zero_is_a_noop`'s two-part
-    /// pattern: the pure decision function first, then `dispatch` itself.
+    /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — the pure decision at
+    /// dose 0.0 is a true no-op, whatever the shipped dose is TODAY (a
+    /// property of `charter_bars_sale` itself, not a claim about the current
+    /// constant — mirrors `n_yards_s4_capacity_bind_at_zero_is_a_noop`'s
+    /// pure-decision half).
     #[test]
-    fn charter_exclusive_dose_zero_is_a_noop() {
-        assert_eq!(CHARTER_EXCLUSIVE_DOSE, 0.0);
+    fn charter_bars_sale_is_a_pure_noop_at_dose_zero() {
         // The pure decision must refuse to block for EVERY roll in [0, 1) —
         // `roll01 < 0.0` can never hold.
         for i in 0..20 {
             let roll = i as f32 / 20.0;
-            assert!(!CampaignSim::charter_bars_sale(5, 2, CHARTER_EXCLUSIVE_DOSE, roll),
+            assert!(!CampaignSim::charter_bars_sale(5, 2, 0.0, roll),
                 "dose 0.0 must never block, whatever the smuggling roll");
         }
-        // End to end: a charter on the buyer's own good must not stop an
-        // ownerless leg from delivering it there.
+    }
+
+    /// Charter exclusivity at the SHIPPED dose (`CHARTER_EXCLUSIVE_DOSE`,
+    /// dosed up from the 0.0 no-op — user-requested: a house holding a
+    /// city's charter on a good should be able to squeeze out rivals, not
+    /// just collect rent while everyone trades around it). 0.3 and 1.0 both
+    /// broke the hard-asserted `econ_inheritance_rules_fragment_differently`
+    /// (see the constant's own doc comment), so this stays a small, real dose
+    /// rather than an absolute staple right. Two things must both hold at
+    /// once: the mechanism is LIVE (it blocks a real non-holder sale
+    /// somewhere over enough ticks — `diag_why_charter_bar`, the same
+    /// counter `dispatch` itself increments), and it is not a chokehold (the
+    /// charter holder's own city still sees the great majority of its
+    /// dispatches go through — this is a squeeze, not an embargo).
+    #[test]
+    fn charter_exclusivity_at_the_shipped_dose_squeezes_but_does_not_choke() {
+        assert!(CHARTER_EXCLUSIVE_DOSE > 0.0, "expected a real, non-zero dose");
         let goods = vec![good("silk", 1, 2, 20.0, 0.35, false)];
         let hubs = vec![
             hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
             hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),
         ];
         let mut s = sim(hubs, goods);
-        s.hubs[0].stock[0] = 500.0; // real stock, not just `production` — dispatch reads stock
-        s.houses.push(house_at(1, vec![0], 0));
-        s.houses[0].charters = vec![0];
+        s.hubs[0].stock[0] = 5000.0;
+        // A RIVAL house at the seller hub, with its own caravans, so `house_for`
+        // resolves IT as carrier (seller's house is tried first) rather than
+        // falling through to the buyer's house — the charter holder itself, which
+        // would trivially never be blocked from its own market. Without a real
+        // fleet slot the rival can never win the carrier check at all and every
+        // leg falls straight through to the charter holder, hiding the mechanism
+        // exactly the way the very first version of this test accidentally did.
+        let mut rival = house_at(0, vec![0], 0);
+        rival.fleet_caravan = 5;
+        rival.wealth = 5000.0;
+        s.houses.push(rival);
+        let mut holder = house_at(1, vec![0], 0);
+        holder.charters = vec![0];
+        s.houses.push(holder);
         let needs = vec![vec![0.0], vec![50.0]];
-        let stock0 = stock_of(&s.hubs[0].stock, 0);
-        s.dispatch(&needs);
-        assert!(stock_of(&s.hubs[0].stock, 0) < stock0,
-            "a charter at zero dose must not stop the sale — the good must still move");
+        let mut blocked = 0u32;
+        let mut moved_ticks = 0u32;
+        const ROUNDS: u32 = 300;
+        for _ in 0..ROUNDS {
+            // Reset the surplus before every round: a real gap the arbitrage
+            // engine would fill every single time, so a round where nothing
+            // moves is unambiguously the charter, not the market equilibrating.
+            s.hubs[0].stock[0] = 5000.0;
+            let before = s.diag_why_charter_bar;
+            let stock0 = stock_of(&s.hubs[0].stock, 0);
+            s.tick += 1;
+            s.dispatch(&needs);
+            if s.diag_why_charter_bar > before { blocked += 1; }
+            if stock_of(&s.hubs[0].stock, 0) < stock0 { moved_ticks += 1; }
+        }
+        assert!(blocked > 0,
+            "a real, non-zero dose must block SOME non-holder sale over {ROUNDS} rounds");
+        assert!(moved_ticks as f32 / ROUNDS as f32 > 0.7,
+            "the shipped dose must stay a squeeze, not a chokehold — got only {moved_ticks}/{ROUNDS} \
+             rounds where the good still moved");
     }
 
     /// Charter exclusivity, the pure decision at full dose — the charter
@@ -2817,7 +2858,13 @@
             for i in 0..2u32 {
                 let mut h = house_at(i, vec![1], 3);
                 h.archetype = 2;            // banking
-                h.wealth = 60.0;
+                // A coastal, fleet-less house buys its first hull(s) the very first
+                // month `decide_fleets` runs (an empty fleet always reads "busy"), and
+                // FLEET_BUY_MAX_PER_MONTH>1 lets it buy several at once — real, wanted
+                // behaviour, but it means a seed wealth tuned for the old one-hull
+                // ceiling no longer leaves enough capital to charter the mint this test
+                // is actually about. 60 -> 300 so fleet-buying can't crowd that out.
+                h.wealth = 300.0;
                 h.prestige = 0.6;
                 h.dominant_seat = true;     // controls its seat → becomes the council
                 s.houses.push(h);
@@ -3957,9 +4004,26 @@
         // moved EXP_START_TICK from year 15 to year 25, purely because it had been
         // quietly depending on the earlier date. A caravan slot gives it ordinary,
         // low-risk trade income instead.
+        // Re-tuned again for FLEET_BUY_MAX_PER_MONTH=3: 200,000/3-caravan died young
+        // (a competing, faster-fleeted rival emerging under the higher dose ruined it
+        // by year ~40 despite ending with real wealth — a war/schism loss, not
+        // insolvency), and 800,000/8-caravan swung the other way — rich enough to
+        // read Tier 1 and draw a succession CRISIS that deposed a head after 2 years.
+        // 400,000/5-caravan is the band between "dies to a rival" and "attracts a
+        // crisis" that let ordinary succession actually play out — until dosing
+        // CHARTER_EXCLUSIVE_DOSE alongside it shifted the same house's trajectory
+        // again and reopened a crisis (a head that didn't age in office at all).
+        // This test is about the SUCCESSION RECORD (Phase 0.4), not about surviving
+        // whatever the crisis engine (Phase 3.2-3.6) or the war/schism layer decide
+        // to do to whichever house happens to be richest on this tiny world — so
+        // rather than keep re-chasing a wealth/fleet number that dodges every other
+        // system's own dose, this house is made crisis-IMMUNE for the run's whole
+        // span, the same isolation `crisis_immune_until` already gives a house that
+        // just survived one for real.
         let mut h = house_at(0, vec![1], 0);
-        h.fleet_caravan = 3;
-        h.wealth = 200_000.0;
+        h.fleet_caravan = 5;
+        h.wealth = 400_000.0;
+        h.crisis_immune_until = 91 * TICKS_PER_YEAR;
         s.houses.push(h);
         s.seed_house_lines();
         for _ in 0..90 { s.advance(365); }

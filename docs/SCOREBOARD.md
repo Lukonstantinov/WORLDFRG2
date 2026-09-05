@@ -9,6 +9,53 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-05 — Two carriage/monopoly knobs dosed up from `ACTORS_AND_CARRIAGE_PLAN.md`'s zero
+
+User-requested: local merchants (the ownerless residual, §5.1) were carrying
+>90% of every city's trade, and houses had no way to actually corner a good in
+a city they dominate. Two already-wired, already-zero-dosed mechanisms
+(`ACTORS_AND_CARRIAGE_PLAN.md`) were dosed up a step, each re-verified against
+`tick::tests` (216 passed) and `econ_` (6 passed) together, not separately.
+
+- **`FLEET_BUY_MAX_PER_MONTH` 1 → 2** (mod.rs). A prior session's own doc
+  comment recorded that 3 held the two headline gates but broke two smaller
+  exact fixtures (`coinage_runs_yearly_finite_and_deterministic`,
+  `a_house_records_every_head_it_has_had`) it had no time to re-derive. This
+  session re-derived both once (a house's seed wealth no longer covers a
+  now-faster fleet-buy burn at the old value) — but 3 *also* pushed a
+  measured `simulate_decades_reports_dynamics` metric (no sustained
+  runaway-rich house) and `the_dosed_economy_stays_healthy_on_a_
+  realistically_dense_world` (trade volume) outside their hard-asserted
+  floors, which the prior session's note hadn't caught. **2 is the dose that
+  holds all four**: `econ_measure_carrier_mix` moved house-financed shipments
+  **4.3% → ~8%** (reference 8.3%, large 7.7%) with no other gate moved.
+- **`CHARTER_EXCLUSIVE_DOSE` 0.0 → 0.1** (mod.rs). A charter now actually bars
+  a non-holder's sale of that good in the chartered city some of the time
+  ("smuggling" still gets through at `1 - dose`), instead of only ever
+  earning its holder rent. 0.3 and 1.0 were already measured (by an earlier
+  session) to break the hard-asserted `econ_inheritance_rules_fragment_
+  differently` — a staple-right closure redistributes capital toward
+  whoever already holds a charter regardless of which inheritance law is
+  running. 0.1 holds it (partible mean wealth 106,568 < primogeniture's
+  167,155, per the gate's own printed table). New test
+  `charter_exclusivity_at_the_shipped_dose_squeezes_but_does_not_choke`
+  asserts both halves of "squeeze, not chokehold": the mechanism visibly
+  blocks a real non-holder sale, and the charter holder's own city still
+  sees most of its trade go through.
+- Both fixture re-tunes needed a THIRD pass each (wealth/fleet alone kept
+  either dying to a faster rival or getting rich enough to draw a succession
+  crisis) before landing on giving `a_house_records_every_head_it_has_had`'s
+  single house `crisis_immune_until` cover for the test's own span — that
+  test is about the Phase 0.4 succession RECORD, not about surviving
+  whatever the crisis/war/schism layer does to whichever house is richest on
+  a given dose, and re-chasing a wealth number that dodges every other
+  system's own dose is not a fix.
+- **Not attempted**: `N1_LOCAL_HAUL_BIND_DAYS`/`N2_BAN_PRICE_RATIO` stay at
+  `INFINITY` — both are documented as having broken the hard wealth bound
+  even at a halved dose in an earlier session, and "no house at either end"
+  (57–58% of the ownerless residual, unmoved by either change above) is a
+  house-*formation*/geographic-coverage gap, not a carriage-capacity one.
+
 ## 2026-09-04 — CONSUMPTION_REBUILD_PLAN.md S1-S8 shipped
 
 All eight slices of `docs/CONSUMPTION_REBUILD_PLAN.md`. S1 (demand as budget
