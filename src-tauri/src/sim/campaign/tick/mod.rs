@@ -278,8 +278,32 @@ const KM_EQUATOR: f32 = 40075.0;
 /// that keeps capital from re-concentrating (a real relay via route posts,
 /// TRADE_STAGING_AND_POSTS_PLAN.md's own break-of-bulk, still unbuilt) —
 /// re-run BOTH gates at every step, not just `econ_fidelity_scorecard`.
+///
+/// THIRD ATTEMPT — the relay the second attempt's own note asked for is now
+/// built (`staging_hop`), and it changes what this constant MEANS. Over-range
+/// no longer REFUSES a leg: it re-routes it through the nearest settlement on
+/// the way, which then re-evaluates and hops onward, so a 9,000 km lane is
+/// still legal — it is simply carried in stages instead of teleported. That
+/// removes the exact asymmetry the second attempt measured as the cause of
+/// the inheritance-gate inversion: capping only the ownerless residual left
+/// house fleets as the sole long-haul carrier and concentrated capital on
+/// them. The cap is therefore now applied to EVERY carrier, house and
+/// ownerless alike, because with a relay available it no longer privileges
+/// anyone — and "the outpost is a must for every trade merchant" is the
+/// maintainer's own statement of the rule.
 const SHIP_LEG_MAX_KM: f32 = f32::INFINITY;
 const CARAVAN_LEG_MAX_KM: f32 = f32::INFINITY;
+/// Hard termination guarantee for the staging relay (rule 22's discipline —
+/// a crisis, a war and a bank run all carry one, and a cargo that can be
+/// re-embarked on arrival needs one for the same reason). `staging_hop` only
+/// ever returns a hop that STRICTLY reduces the remaining straight-line
+/// distance, so a relay terminates on its own; this cap is the belt-and-
+/// braces bound in case a future edit weakens that invariant, and it is what
+/// makes "this cargo cannot loop forever" a property of the type rather than
+/// of an argument about float monotonicity. A cargo that exhausts its hops
+/// simply lands where it is and joins that hub's market pool — it is never
+/// deleted (losing cargo silently is how a conservation bug hides).
+pub(crate) const RELAY_MAX_HOPS: u8 = 6;
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
 /// (`House.charters`, already granted to a POLITICAL house or a chartered guild
 /// that dominates its own seat, on its own specialty goods) today only earns the
@@ -3274,6 +3298,13 @@ pub struct InTransit {
     /// `-1` (the default) is a plain, un-transshipped leg, unchanged from
     /// before this field existed — an old save's in-flight cargo reads `-1`.
     #[serde(default = "neg_one_i32")] pub via: i32,
+    /// How many legs this cargo has already been carried on, counting from 0
+    /// at dispatch. Only a RELAYED cargo (`via >= 0`) ever increments it, and
+    /// it is bounded by `RELAY_MAX_HOPS` — see that constant for why a bound
+    /// exists at all. `#[serde(default)]` — an old save's in-flight cargo
+    /// reads 0, i.e. "this is its first leg", which is exactly right for a
+    /// cargo dispatched before relaying existed.
+    #[serde(default)] pub hops: u8,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -5667,9 +5698,19 @@ pub struct CampaignSim {
     /// destination hub has chartered this good to a house that isn't the carrier.
     /// Zero while the dose stays at 0.0.
     #[serde(default)] pub diag_why_charter_bar: u32,
-    /// N1c (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`) — an ownerless leg refused
-    /// because it exceeds its mode's real per-voyage range.
+    /// N1c (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`) — a leg refused because it
+    /// exceeds its mode's real per-voyage range AND no settlement on the map
+    /// could stage it. With the relay built this is the genuinely unreachable
+    /// case only; an over-range leg that CAN be staged is counted by
+    /// `diag_relay_staged` instead and still sails.
     #[serde(default)] pub diag_why_leg_range_bind: u32,
+    /// Legs dispatched as a STAGED relay — over their mode's range, so routed
+    /// through an intermediate settlement rather than refused or teleported.
+    /// The instrument for the range dose: this rising while
+    /// `diag_why_leg_range_bind` stays near zero is what "long trade now goes
+    /// in stages" looks like as a number, and the two moving together instead
+    /// is what "the caps are too tight for this map" looks like.
+    #[serde(default)] pub diag_relay_staged: u32,
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
@@ -8007,16 +8048,16 @@ impl CampaignSim {
             // short haul; `via` (TRADE_STAGING_AND_POSTS_PLAN.md slice 4) names a
             // REAL destination beyond this arrival when the leg that just landed was
             // only the first hop of a composed entrepôt route.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32)> = Vec::new();
+            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32, u8)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price, c.hops));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt, sea, phase, home, owner, local, via, price) in landed {
+            for (to, g, amt, sea, phase, home, owner, local, via, price, hops) in landed {
                 // TRADE_STAGING_AND_POSTS_PLAN.md slice 4 — a leg composed through
                 // an entrepôt outlet (`via >= 0`) does NOT take delivery here: the
                 // buyer at the real destination already settled this trade at
@@ -8032,18 +8073,45 @@ impl CampaignSim {
                 // credited, once via the outlet's own local sale. Making the stop a
                 // genuine economic choice needs the settlement itself to move to
                 // arrival time, which is real future work, not silently skipped.
-                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len() {
+                //
+                // THE RELAY CHAINS HERE. The onward leg is re-checked against the
+                // mode's range exactly as the first one was, so a cargo crossing a
+                // distance no single voyage covers is carried stop by stop for as
+                // many stages as the map requires, rather than being teleported the
+                // moment it has left its first port. `hops` bounds that walk
+                // (`RELAY_MAX_HOPS`); a cargo that exhausts it simply takes delivery
+                // where it stands instead of vanishing — cargo is never destroyed
+                // here, only re-addressed.
+                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len()
+                    && hops < RELAY_MAX_HOPS
+                {
                     let b = via as usize;
-                    let d2 = self.lane_days(to, b);
+                    let staged = if Self::leg_exceeds_range(
+                        self.hub_km(to, b),
+                        self.hubs[to].coastal && self.hubs[b].coastal,
+                        SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM,
+                    ) {
+                        self.staging_hop(to, b, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM)
+                    } else { None };
+                    // No stop available for a still-over-range leg means the last
+                    // stretch is run as one long haul rather than stranding the
+                    // cargo: the alternative is to delete goods a buyer has already
+                    // paid for at dispatch, which would break conservation.
+                    let (next_to, next_via) = match staged {
+                        Some(p) => (p, b as i32),
+                        None => (b, -1),
+                    };
+                    let d2 = self.lane_days(to, next_to);
                     let eta2 = if d2.is_finite() { tick + (d2.ceil() as u32).max(1) } else { tick + 1 };
-                    let sea2 = self.hubs[to].coastal && self.hubs[b].coastal;
-                    let river2 = !sea2 && self.hubs[to].river && self.hubs[b].river;
+                    let sea2 = self.hubs[to].coastal && self.hubs[next_to].coastal;
+                    let river2 = !sea2 && self.hubs[to].river && self.hubs[next_to].river;
                     self.in_transit.push(InTransit {
-                        from: to as u32, to: b as u32, good: g, amount: amt,
+                        from: to as u32, to: next_to as u32, good: g, amount: amt,
                         eta_tick: eta2, owner, sea: sea2, river: river2,
                         // The round-trip bonus leg belongs to a direct voyage only
                         // (§1 above) — a relayed voyage's vessel does not sail home.
-                        phase, home: -1, contract: false, price, local, via: -1,
+                        phase, home: -1, contract: false, price, local, via: next_via,
+                        hops: hops.saturating_add(1),
                     });
                     continue;
                 }

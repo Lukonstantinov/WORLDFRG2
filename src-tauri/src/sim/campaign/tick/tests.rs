@@ -65,7 +65,7 @@
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, base_days_season: vec![], season_slices: 0, colony_supply: vec![],
             hub_culture: vec![], hub_minorities: vec![], estate_idle_years: vec![],
             diag_shipments: 0, diag_by_house: 0, diag_by_guild: 0, diag_lost: 0, diag_volume: 0.0,
-            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0, diag_why_charter_bar: 0, diag_why_leg_range_bind: 0,
+            diag_why_nohouse: 0, diag_why_slot: 0, diag_why_cash: 0, diag_why_bar: 0, diag_why_no_carrier_bind: 0, diag_why_charter_bar: 0, diag_why_leg_range_bind: 0, diag_relay_staged: 0,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
@@ -6091,6 +6091,162 @@
             "a cheap direct route must never be replaced by a more expensive composed one, got {}",
             s.days[0 * n + 2]);
         assert_eq!(s.route_outlet[0 * n + 2], -1, "no outlet should be recorded when direct already wins");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // TRADE_STAGING_AND_POSTS_PLAN.md slices 3+4 · the STAGING RELAY
+    //
+    // The caps are passed in explicitly rather than read from the shipped
+    // `SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`, so these gates test the
+    // MECHANISM at a real dose while the shipped dose stays a no-op — the
+    // same split `leg_exceeds_range_uses_the_right_cap_per_mode` already
+    // uses, and what lets the dose be walked without rewriting the tests.
+    //
+    // Scale matters here and is not arbitrary: `world_w = 4000` puts a cell
+    // at ~10 km, so the 50-cell hub spacing below is ~500 km — inside an
+    // 800 km caravan range, while the 100-cell end-to-end span is not. A
+    // coarser world would make every leg over-range and the fixture would
+    // pass while testing nothing (§8.24a4's own lesson about grid size being
+    // load-bearing in a fixture).
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The claim in one line: a leg too long for its mode is carried to the
+    /// settlement on the way, not refused. This is the whole difference
+    /// between the reverted N1c attempt (which deleted such lanes, and
+    /// inverted `econ_inheritance_rules_fragment_differently` by doing so)
+    /// and the relay.
+    #[test]
+    fn a_leg_past_its_range_is_staged_through_a_settlement_on_the_way() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0),   // a
+            hub(1, 50.0, 0.0, 5000.0, vec![10.0], 0),  // the stop on the way
+            hub(2, 100.0, 0.0, 5000.0, vec![10.0], 0), // b
+        ];
+        let mut s = sim(hubs, goods);
+        s.world_w = 4000.0; // ~10 km per cell
+        s.rebuild_routes();
+
+        let (ship, caravan) = (3500.0, 800.0);
+        assert!(s.hub_km(0, 2) > caravan,
+            "fixture must put b past a caravan's range, got {} km", s.hub_km(0, 2));
+        assert!(s.hub_km(0, 1) < caravan,
+            "…while the intermediate stop is reachable, got {} km", s.hub_km(0, 1));
+
+        assert_eq!(s.staging_hop(0, 2, ship, caravan), Some(1),
+            "an over-range leg must stage through the settlement on the way");
+        // …and a leg already inside its range is never staged: the relay must
+        // not reroute ordinary short trade, or it would change every lane on
+        // the map rather than only the impossible ones.
+        assert_eq!(s.staging_hop(0, 1, ship, caravan), None,
+            "a leg inside its own range needs no stop (and asking for one is how \
+             a relay quietly becomes a rewrite of all trade)");
+    }
+
+    /// A gap no port can break is genuinely refused — the relay must not
+    /// invent a stop that does not exist. This is the one case where the
+    /// range rule still blocks a trade outright, and it has to stay
+    /// reachable or `diag_why_leg_range_bind` would be dead by construction.
+    #[test]
+    fn a_gap_no_settlement_can_break_is_refused_not_staged() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0),
+            hub(1, 300.0, 0.0, 5000.0, vec![10.0], 0), // far side of an empty ocean
+        ];
+        let mut s = sim(hubs, goods);
+        s.world_w = 4000.0;
+        s.rebuild_routes();
+
+        assert!(s.hub_km(0, 1) > 800.0, "fixture must be over-range to be meaningful");
+        assert_eq!(s.staging_hop(0, 1, 3500.0, 800.0), None,
+            "with no third settlement anywhere there is nothing to stage through");
+    }
+
+    /// The TERMINATION invariant, on the only fixture that can actually see
+    /// it: a settlement that is reachable and legal but lies the WRONG WAY.
+    ///
+    /// This exists because the obvious gate does not test this. On a chain of
+    /// ports laid out between source and destination, picking the candidate
+    /// with the least remaining distance makes progress by construction, so
+    /// deleting the progress check leaves such a test passing — verified, not
+    /// assumed. Here the only candidate is *further* from the destination than
+    /// the origin is, so the progress rule is the single thing standing
+    /// between the relay and a cargo shuttling between two ports forever.
+    #[test]
+    fn a_stop_that_lies_the_wrong_way_is_never_staged_through() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0),    // a
+            hub(1, 300.0, 0.0, 5000.0, vec![10.0], 0),  // b — far, over-range
+            hub(2, -50.0, 0.0, 5000.0, vec![10.0], 0),  // c — near a, but AWAY from b
+        ];
+        let mut s = sim(hubs, goods);
+        s.world_w = 4000.0;
+        s.rebuild_routes();
+
+        let (ship, caravan) = (3500.0, 800.0);
+        // c is a perfectly legal hop in its own right — so if it is rejected,
+        // it can only be the progress rule doing it.
+        assert!(!CampaignSim::leg_exceeds_range(s.hub_km(0, 2), false, ship, caravan),
+            "the wrong-way stop must itself be within range, or this gate proves nothing");
+        assert!(s.hub_km(2, 1) > s.hub_km(0, 1),
+            "…and must genuinely lie further from the destination than the origin does");
+
+        assert_eq!(s.staging_hop(0, 1, ship, caravan), None,
+            "staging through a port that leaves the cargo further from its destination \
+             is how a relay becomes an infinite shuttle");
+    }
+
+    /// The termination guarantee, asserted rather than argued: walking
+    /// `staging_hop` from source to destination across a chain of ports no
+    /// single voyage could cross must ARRIVE, within `RELAY_MAX_HOPS`, with
+    /// every individual leg legal in its own mode and every step strictly
+    /// closer to the destination.
+    ///
+    /// These are exactly the two invariants the relay's freedom from infinite
+    /// loops rests on, which is why they are tested together and not
+    /// separately: drop the progress check and this hangs; drop the legality
+    /// check and staging launders one illegal leg into several.
+    #[test]
+    fn staging_walks_a_long_lane_to_its_destination_in_bounded_hops() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Six ports strung 50 cells (~500 km) apart: 2,500 km end to end,
+        // which no 800 km caravan leg can cross in one go.
+        let hubs: Vec<TickHub> = (0..6)
+            .map(|i| hub(i, i as f32 * 50.0, 0.0, 5000.0, vec![10.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        s.world_w = 4000.0;
+        s.rebuild_routes();
+
+        let (ship, caravan) = (3500.0, 800.0);
+        let (src, dst) = (0usize, 5usize);
+        assert!(s.hub_km(src, dst) > caravan * 2.0,
+            "fixture must need several hops, not one");
+
+        let mut at = src;
+        let mut hops = 0u8;
+        let mut last_remaining = f32::INFINITY;
+        while at != dst {
+            assert!(hops < RELAY_MAX_HOPS,
+                "the relay must reach {dst} within RELAY_MAX_HOPS, stuck at {at}");
+            let remaining = s.hub_km(at, dst);
+            assert!(remaining < last_remaining,
+                "every hop must strictly close the gap (termination): {remaining} !< {last_remaining}");
+            last_remaining = remaining;
+            let next = if CampaignSim::leg_exceeds_range(remaining, false, ship, caravan) {
+                s.staging_hop(at, dst, ship, caravan)
+                    .unwrap_or_else(|| panic!("no stop available from {at} — the chain should provide one"))
+            } else {
+                dst // the last stretch is inside range: sail it
+            };
+            assert!(!CampaignSim::leg_exceeds_range(s.hub_km(at, next), false, ship, caravan),
+                "the leg {at}→{next} the relay chose must itself be legal");
+            at = next;
+            hops += 1;
+        }
+        assert!(hops > 1, "a 2,500 km lane under an 800 km cap must take more than one leg");
     }
 
     // ─────────────────────────────────────────────────────────────────────
