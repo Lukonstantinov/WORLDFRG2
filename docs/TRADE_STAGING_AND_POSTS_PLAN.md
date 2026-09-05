@@ -1,6 +1,26 @@
 # Trade Staging & Trading Posts — implementation plan
 
-> **Status: APPROVED, NOTHING BUILT.** Design settled with the maintainer 2026-08-31.
+> **Status: APPROVED. Slice 4's legs are BUILT (inert); slice 3's range rule is
+> BUILT but undosed; slices 1, 2, 5, 6, 7 are not built.** Design settled with
+> the maintainer 2026-08-31.
+>
+> What shipped since: the entrepôt composition (`route_outlet` + `InTransit.via`)
+> makes a composed lane two real timed legs, and the STAGING RELAY
+> (`CampaignSim::staging_hop`) carries a leg past its mode's range through the
+> settlements on the way, chaining hop by hop and bounded by `RELAY_MAX_HOPS`.
+> The range rule is a ROUTING rule and never deletes a lane — where no stop
+> exists the cargo sails direct, which is what R5 below was really pointing at.
+> It is shipped inert (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM` at INFINITY).
+>
+> **Read that constant's doc comment before attempting the dose.** A three-point
+> dose walk is recorded there, and it establishes that the blocker is the
+> INSTRUMENT: `world_w` serves both the trade horizon (a fraction of it) and the
+> km conversion (an inverse of it), so this doc's own fixtures put adjacent hubs
+> 1,202 km (`econ_inheritance_rules_fragment_differently`) and 3,607 km
+> (`reference_world`) apart — further than any caravan stage — and no real-km
+> range rule can be honestly exercised on them. A second blocker is recorded
+> there too: `dispatch` ignores cargo already afloat when pricing a buyer, so
+> any change that lengthens voyages causes repeat over-shipment.
 > UI schematics for every slice exist as a published artifact ("Break of Bulk", 8 plates).
 > Read §1 before §5 — the measured findings are why the slices are in this order.
 

@@ -290,7 +290,58 @@ const KM_EQUATOR: f32 = 40075.0;
 /// them. The cap is therefore now applied to EVERY carrier, house and
 /// ownerless alike, because with a relay available it no longer privileges
 /// anyone — and "the outpost is a must for every trade merchant" is the
-/// maintainer's own statement of the rule.
+/// maintainer's own statement of the rule. It is also now a ROUTING rule that
+/// can never delete a lane: no stop available ⇒ the cargo sails anyway.
+///
+/// THE DOSE WALK, MEASURED — and the reason this still ships at INFINITY.
+/// Three points, both gates at each (the second attempt's own instruction):
+///
+/// | dose (ship/caravan) | result |
+/// |---|---|
+/// | 3500/800, refusing | CATASTROPHIC — inheritance world collapses to 3 live houses and 59k total wealth against a 2.5M baseline |
+/// | 3500/800, routing-only | economy healthy again (2.20M), but the gate still fails on margin: 55 partible houses ever against 59 primogeniture |
+/// | 6000/3000, routing-only | all six `econ_` gates PASS (79 ever, mean wealth 105,084) — but `simulate_decades_reports_dynamics` breaks its hard wealth bound at 1,342,055, and top-10% share falls to 0.303, far under its 0.60–0.90 band |
+///
+/// **THE INSTRUMENT IS THE BLOCKER, NOT THE MECHANISM, AND THAT IS THE REAL
+/// FINDING HERE.** These fixtures cannot measure a rule stated in real km,
+/// because their km-per-cell is an accident. `world_w` does two unrelated
+/// jobs — the trade HORIZON is a world-width FRACTION (`TRADE_MAX_DIST_FRAC ×
+/// world_w`, so bigger = more reach) while distance is `KM_EQUATOR /
+/// world_w` (so bigger = fewer km). The two pull opposite ways, and
+/// `econ_inheritance_rules_fragment_differently` sets `world_w = 300` purely
+/// to widen the horizon, saying so in its own comment with no geographic
+/// intent whatever. The arithmetic that falls out: its 9-cell hub spacing is
+/// **1,202 km**, and `reference_world`'s own (`world_w = 100`) is **3,607
+/// km**. Adjacent towns on these maps sit further apart than any historical
+/// caravan stage, so an 800 km cap has no legal stop anywhere to relay
+/// through and the relay degrades to the refusal that killed attempt two.
+/// A real generated world is the opposite case — `world_w = 3600`, hundreds
+/// of settlements a few hundred km apart — which is exactly where a relay
+/// works and exactly what no gate here models.
+///
+/// This also retrospectively undermines attempt two's headline win: the
+/// price/distance gradient "improving" to +0.153 at 3500/800 was very
+/// probably an artefact of near-total trade collapse on a mis-scaled
+/// fixture, not market integration. Treat that number as withdrawn.
+///
+/// **A SECOND, INDEPENDENT BLOCKER, found while dosing and worth more than
+/// the dose**: `dispatch` prices a buyer off its CURRENT stock alone and
+/// consults `in_transit` only for vessel slots, so a city with ten shiploads
+/// already sailing to it still advertises the full shortage that summoned
+/// them, and every seller ships into that phantom gap again each tick. Short
+/// voyages hide it; anything that lengthens a voyage exposes it, which is why
+/// the relay found it. Wiring an ETA-aware inbound tally into the buyer's
+/// price removed the early runaway outright (1,318,260 at year 10 → 216,018).
+/// It is NOT bundled here: it is a live change at zero dose that perturbs
+/// `simulate_decades_reports_dynamics` on its own, so it needs its own commit
+/// and its own measurement rather than riding in under a constant that is
+/// currently inert. It is very likely a prerequisite for ever dosing this.
+///
+/// So: the mechanism is built, gated and inert; the next step is the
+/// INSTRUMENT (a fixture whose hub spacing is a real distance — see
+/// `reference_world_large`, whose 100-cell spacing at `world_w = 3600` is
+/// 1,113 km and is the only existing world where a range rule could be
+/// honestly exercised), then the afloat fix, then the dose.
 const SHIP_LEG_MAX_KM: f32 = f32::INFINITY;
 const CARAVAN_LEG_MAX_KM: f32 = f32::INFINITY;
 /// Hard termination guarantee for the staging relay (rule 22's discipline —

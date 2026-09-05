@@ -1386,7 +1386,36 @@ impl CampaignSim {
                     if Self::leg_exceeds_range(self.hub_km(a, b), sea, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM) {
                         match self.staging_hop(a, b, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM) {
                             Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
-                            None => { self.diag_why_leg_range_bind += 1; continue; }
+                            // NO STOP EXISTS — and the cargo still sails. This is
+                            // the design's single most important line, and getting
+                            // it wrong is what killed the two previous attempts.
+                            //
+                            // The complaint this whole mechanism answers is not
+                            // that long-range trade HAPPENS — it is historically
+                            // ordinary and the maintainer explicitly approves it —
+                            // but that it happens with no intermediary stop. So the
+                            // range rule is a ROUTING rule, never a prohibition: it
+                            // can only ever send cargo through more ports, never
+                            // delete a lane. Where the map offers no port to break
+                            // the gap, sailing it direct is the only physical
+                            // option anyway (and is exactly the historical
+                            // no-alternative-site case).
+                            //
+                            // Refusing instead is what both earlier attempts did,
+                            // and it is measurably fatal rather than merely strict:
+                            // on `econ_inheritance_rules_fragment_differently`'s own
+                            // fixture, adjacent hubs sit 1,202 km apart (its
+                            // `world_w = 300` is set to widen the TRADE HORIZON, a
+                            // world-width FRACTION — it is not a geographic claim,
+                            // and km/cell is `KM_EQUATOR / world_w`, so the two uses
+                            // of that one field pull opposite ways). Under an 800 km
+                            // caravan cap every land leg there is over-range with no
+                            // legal stop in existence, so refusal severed essentially
+                            // all overland trade and the run collapsed to 3 surviving
+                            // houses and 59k of total wealth against a 2.5M baseline.
+                            // As a routing rule the same dose cannot do that to any
+                            // world, however sparse.
+                            None => { self.diag_why_leg_range_bind += 1; }
                         }
                     }
                     // Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — hub `b` has
