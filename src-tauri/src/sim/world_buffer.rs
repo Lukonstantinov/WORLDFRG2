@@ -632,14 +632,32 @@ impl WorldBuffer {
         }
         let tile_w = TILE_SIZE.min(self.width - tx as u32 * TILE_SIZE) as usize;
         let tile_h = TILE_SIZE.min(self.height - ty as u32 * TILE_SIZE);
+        // `width` is essentially never an exact multiple of TILE_SIZE (3600/128 =
+        // 28.125), so the world's LAST tile column is genuinely partial: `tile_w`
+        // real columns, then a trailing pad out to TILE_SIZE. The world is
+        // cylindrical (rule 6) — cell `width` IS cell `0` — so that pad should
+        // show the map's own wrapped continuation, not default/sea filler. Left
+        // unfixed, this baked a permanent gap (not a loading artefact) into every
+        // tile store at every copy seam, the width of the pad, visible whenever a
+        // view crossed or was wide enough to show the wrap boundary. Clamped to
+        // `self.width` so a world narrower than one tile-pad (test fixtures only)
+        // can't read out of bounds — it keeps the old blank-pad behaviour there
+        // instead, which no real-sized world ever hits.
+        let pad_w = (TILE_SIZE as usize).saturating_sub(tile_w).min(self.width as usize);
 
         for ly in 0..tile_h {
             let wi0 = ((ty as u32 * TILE_SIZE + ly) * self.width + tx as u32 * TILE_SIZE) as usize;
             let ti0 = (ly * TILE_SIZE) as usize;
+            // This row's own column-0 offset — the wrap target for the pad above.
+            let wrap0 = ((ty as u32 * TILE_SIZE + ly) * self.width) as usize;
             macro_rules! copy_rows {
                 ($c:expr => $($f:ident),* $(,)?) => {
                     if self.cols.has($c) { $(
                         tile.$f[ti0..ti0 + tile_w].copy_from_slice(&self.$f[wi0..wi0 + tile_w]);
+                        if pad_w > 0 {
+                            tile.$f[ti0 + tile_w..ti0 + tile_w + pad_w]
+                                .copy_from_slice(&self.$f[wrap0..wrap0 + pad_w]);
+                        }
                     )* }
                 };
             }
@@ -674,6 +692,10 @@ impl WorldBuffer {
             if self.cols.has(ColumnSet::GOODS) {
                 for g in 0..self.goods.len() {
                     tile.goods[g][ti0..ti0 + tile_w].copy_from_slice(&self.goods[g][wi0..wi0 + tile_w]);
+                    if pad_w > 0 {
+                        tile.goods[g][ti0 + tile_w..ti0 + tile_w + pad_w]
+                            .copy_from_slice(&self.goods[g][wrap0..wrap0 + pad_w]);
+                    }
                 }
             }
         }
@@ -767,6 +789,45 @@ mod tests {
             .unwrap();
         }
         conn
+    }
+
+    /// The world's LAST tile column is genuinely partial whenever `width` isn't a
+    /// multiple of `TILE_SIZE` (the overwhelming common case — 3600/128=28.125).
+    /// The map is cylindrical (rule 6: cell `width` IS cell `0`), so that
+    /// column's trailing pad must show the world's own wrapped continuation, not
+    /// default/sea filler — otherwise every tile store bakes in a permanent gap
+    /// at the wrap seam, the width of the pad, in every layer at once.
+    #[test]
+    fn the_last_tile_column_pads_with_the_wrapped_continuation() {
+        // 200 % 128 = 72, so tile column 1 (the last, tiles_x=2) has tile_w=72
+        // real columns and pad_w=56 — wide enough to be an unmistakable gap.
+        let conn = test_world(200, 150);
+        let mut full = WorldBuffer::load(&conn).unwrap();
+        let w = full.width;
+        for y in 0..full.height {
+            for x in 0..w {
+                full.elevation[(y * w + x) as usize] = x as f32;
+            }
+        }
+        full.save(&conn, "seed").unwrap();
+
+        let tiles_x = (w + TILE_SIZE - 1) / TILE_SIZE;
+        let tile_w = TILE_SIZE.min(w - (tiles_x - 1) * TILE_SIZE) as usize;
+        let pad_w = TILE_SIZE as usize - tile_w;
+        assert!(pad_w > 0, "fixture must actually exercise a partial last column");
+
+        let blob = tile_store::load_blob_with_version(&conn, (tiles_x - 1) as i32, 0, 0)
+            .unwrap().unwrap().1;
+        let tile = TileData::decompress(&blob);
+        // Column `tile_w + i` of the last tile (world x = (tiles_x-1)*TILE_SIZE +
+        // tile_w + i, i.e. the true wrap-around position) must read as world
+        // column `i` — the wrapped continuation — not the old default 0.0.
+        for i in 0..pad_w {
+            assert_eq!(
+                tile.elevation[tile_w + i], i as f32,
+                "pad column {i} of the last tile must wrap to world column {i}, not sit at its old default"
+            );
+        }
     }
 
     /// A partial-mask save must overwrite ONLY the loaded columns and preserve
