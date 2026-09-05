@@ -1383,8 +1383,8 @@ impl CampaignSim {
                     // ownerless-only version was the thing that broke the
                     // inheritance gate. Dead code at INFINITY.
                     let mut staged: i32 = -1;
-                    if Self::leg_exceeds_range(self.hub_km(a, b), sea, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM) {
-                        match self.staging_hop(a, b, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM) {
+                    if Self::leg_exceeds_range(self.hub_km(a, b), sea, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                        match self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
                             Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
                             // NO STOP EXISTS — and the cargo still sails. This is
                             // the design's single most important line, and getting
