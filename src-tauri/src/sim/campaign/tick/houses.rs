@@ -273,6 +273,7 @@ impl CampaignSim {
                 price: pt,
                 local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
                 via: -1, // a standing contract delivers direct, never composed through an outlet
+                hops: 0,
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);

@@ -980,6 +980,79 @@ impl CampaignSim {
         dist_km > if sea { ship_cap_km } else { caravan_cap_km }
     }
 
+    /// The real distance between two hubs in KILOMETRES — `hub_cell_dist`
+    /// converted through the world's own scale, which is the unit every range
+    /// rule here is stated in (rule 25: a threshold about the world is stated
+    /// in km and converted per world, never as a cell count, because a cell is
+    /// ~11 km at 3600×1800 and ~133 km on a test world).
+    pub(crate) fn hub_km(&self, a: usize, b: usize) -> f32 {
+        self.hub_cell_dist(a, b) * (KM_EQUATOR / self.world_w.max(1.0))
+    }
+
+    /// TRADE_STAGING_AND_POSTS_PLAN.md slice 3+4 — THE STAGING RELAY.
+    ///
+    /// A leg `a → b` that exceeds its mode's unprovisioned range is not
+    /// refused; it is carried to an intermediate settlement and re-embarked
+    /// there. This returns that next stop, or `None` when no port on the map
+    /// can break the gap — which is the only case where the trade genuinely
+    /// cannot happen (an ocean wider than any ship's endurance, with nothing
+    /// in it).
+    ///
+    /// Why this is the whole point: the plan's own risk register (R5) says
+    /// range must be checked per LEG and that legs "are what make a long lane
+    /// legal at all". Capping the whole hop instead — which is what the second
+    /// N1c attempt did — deletes the lane rather than staging it, and a
+    /// deleted lane concentrates capital on whoever still has reach. That was
+    /// measured, not theorised: it inverted
+    /// `econ_inheritance_rules_fragment_differently`.
+    ///
+    /// Three rules hold this together:
+    ///
+    /// - **The candidate set is the hub's OWN trade neighbours**, not the
+    ///   whole world. That keeps it O(`NEIGHBOR_K`) inside `dispatch`'s hot
+    ///   seller×good×target loop rather than O(n) (§8.9 rule 1's spirit), and
+    ///   it is also the honest model: a captain makes for a port he already
+    ///   trades with, not for the globally optimal waypoint. It is likewise
+    ///   what makes a trading post matter the moment posts become real hubs —
+    ///   a post enters this candidate set for free, with no siting code here.
+    /// - **A hop must make STRICT PROGRESS** — the remaining distance to `b`
+    ///   has to fall. This is the termination guarantee (`RELAY_MAX_HOPS` is
+    ///   only the backstop), and it is also what stops a cargo being walked
+    ///   sideways into a dead end for the sake of a legal leg.
+    /// - **The hop itself must be legal in its own mode.** The sub-leg `a → p`
+    ///   is re-classified (`p` may be inland where `b` was coastal, so a sea
+    ///   hop can become a caravan hop) and re-checked against that mode's cap.
+    ///   Without this, staging would launder an illegal leg into two illegal
+    ///   ones.
+    ///
+    /// Chooses the candidate that gets FURTHEST along — minimum remaining
+    /// distance — with the hub index as a deterministic tie-break, because a
+    /// tie broken by iteration order is how a "deterministic per (seed, tick)"
+    /// sim quietly stops being one.
+    pub(crate) fn staging_hop(&self, a: usize, b: usize, ship_cap_km: f32, caravan_cap_km: f32) -> Option<usize> {
+        let n = self.hubs.len();
+        if a >= n || b >= n || a == b { return None; }
+        let remaining = self.hub_km(a, b);
+        let mut best: Option<(usize, f32)> = None;
+        for &pn in self.neighbors.get(a)?.iter() {
+            let p = pn as usize;
+            if p >= n || p == a || p == b { continue; }
+            // The onward gap must actually shrink, or this is not progress.
+            let rest = self.hub_km(p, b);
+            if !(rest < remaining) { continue; }
+            // …and the hop we would actually sail has to be legal itself, in
+            // whichever mode IT is (a stop inland turns a sea leg into a land
+            // one), over a lane that exists at all.
+            if !self.lane_days(a, p).is_finite() { continue; }
+            let hop_sea = self.hubs[a].coastal && self.hubs[p].coastal;
+            if Self::leg_exceeds_range(self.hub_km(a, p), hop_sea, ship_cap_km, caravan_cap_km) { continue; }
+            if best.map_or(true, |(bp, br)| rest < br || (rest == br && p < bp)) {
+                best = Some((p, rest));
+            }
+        }
+        best.map(|(p, _)| p)
+    }
+
     /// Arbitrage one round: each surplus hub ships toward the best reachable
     /// deficit hubs, creating in-transit cargo with an ETA. Bounded per hub.
     pub(crate) fn dispatch(&mut self, needs: &[Vec<f32>]) {
@@ -1298,16 +1371,51 @@ impl CampaignSim {
                             self.diag_why_no_carrier_bind += 1;
                             continue;
                         }
-                        // N1c — the same ownerless residual capped by real
-                        // per-mode geographic range rather than routed days
-                        // (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`).
-                        let mut dx = (self.hubs[a].x - self.hubs[b].x).abs();
-                        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
-                        let dy = self.hubs[a].y - self.hubs[b].y;
-                        let dist_km = (dx * dx + dy * dy).sqrt() * (KM_EQUATOR / self.world_w.max(1.0));
-                        if Self::leg_exceeds_range(dist_km, sea, SHIP_LEG_MAX_KM, CARAVAN_LEG_MAX_KM) {
-                            self.diag_why_leg_range_bind += 1;
-                            continue;
+                    }
+                    // N1c + the staging relay — a leg past its mode's real
+                    // geographic range (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`,
+                    // read against straight-line km, not the terrain-penalised
+                    // `days`) does not sail that far in one go. It is STAGED
+                    // through the nearest settlement on the way and re-embarked
+                    // there; only when no port at all can break the gap is the
+                    // trade refused. Applied to every carrier, house and
+                    // ownerless alike — see the constants' own doc for why the
+                    // ownerless-only version was the thing that broke the
+                    // inheritance gate. Dead code at INFINITY.
+                    let mut staged: i32 = -1;
+                    if Self::leg_exceeds_range(self.hub_km(a, b), sea, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                        match self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                            Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
+                            // NO STOP EXISTS — and the cargo still sails. This is
+                            // the design's single most important line, and getting
+                            // it wrong is what killed the two previous attempts.
+                            //
+                            // The complaint this whole mechanism answers is not
+                            // that long-range trade HAPPENS — it is historically
+                            // ordinary and the maintainer explicitly approves it —
+                            // but that it happens with no intermediary stop. So the
+                            // range rule is a ROUTING rule, never a prohibition: it
+                            // can only ever send cargo through more ports, never
+                            // delete a lane. Where the map offers no port to break
+                            // the gap, sailing it direct is the only physical
+                            // option anyway (and is exactly the historical
+                            // no-alternative-site case).
+                            //
+                            // Refusing instead is what both earlier attempts did,
+                            // and it is measurably fatal rather than merely strict:
+                            // on `econ_inheritance_rules_fragment_differently`'s own
+                            // fixture, adjacent hubs sit 1,202 km apart (its
+                            // `world_w = 300` is set to widen the TRADE HORIZON, a
+                            // world-width FRACTION — it is not a geographic claim,
+                            // and km/cell is `KM_EQUATOR / world_w`, so the two uses
+                            // of that one field pull opposite ways). Under an 800 km
+                            // caravan cap every land leg there is over-range with no
+                            // legal stop in existence, so refusal severed essentially
+                            // all overland trade and the run collapsed to 3 surviving
+                            // houses and 59k of total wealth against a 2.5M baseline.
+                            // As a routing rule the same dose cannot do that to any
+                            // world, however sparse.
+                            None => { self.diag_why_leg_range_bind += 1; }
                         }
                     }
                     // Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — hub `b` has
@@ -1633,12 +1741,31 @@ impl CampaignSim {
                     // one-leg behaviour. Full break-of-bulk (selling AT the outlet
                     // instead of forwarding) is deliberately not built — see the
                     // arrivals-pass comment for why.
-                    let (leg_to, leg_via, leg_days) = if outlet >= 0 && outlet as usize != a && outlet as usize != b {
-                        let d_ap = self.lane_days(a, outlet as usize);
-                        if d_ap.is_finite() { (outlet as u32, b as i32, d_ap) } else { (b as u32, -1, days) }
+                    // A STAGED leg (the range relay above) takes precedence over the
+                    // entrepôt outlet: the outlet is a price optimisation and may be
+                    // declined, whereas a staging stop is the only way this cargo can
+                    // legally move at all. Both compose identically — first leg to the
+                    // stop, `via` naming where it is really going — so the arrivals
+                    // pass needs no idea which of the two put it there.
+                    let first_stop = if staged >= 0 { staged } else { outlet };
+                    let (leg_to, leg_via, leg_days) = if first_stop >= 0 && first_stop as usize != a && first_stop as usize != b {
+                        let d_ap = self.lane_days(a, first_stop as usize);
+                        if d_ap.is_finite() { (first_stop as u32, b as i32, d_ap) } else { (b as u32, -1, days) }
                     } else {
                         (b as u32, -1, days)
                     };
+                    // A STAGED first leg sails to the stop, not to `b`, so it is that
+                    // hop's own mode that decides which fleet pool is charged and how
+                    // it is tallied — an inland caravanserai turns a sea lane's first
+                    // leg into a land one. Only the staged case re-derives this: the
+                    // entrepôt-outlet path's own (pre-existing) use of the a→b mode is
+                    // left exactly as it was, because changing it is a real behaviour
+                    // change on a live path and belongs to its own measured commit,
+                    // not smuggled in under a constant that is currently a no-op.
+                    let (leg_sea, leg_river) = if staged >= 0 {
+                        let s = self.hubs[a].coastal && self.hubs[leg_to as usize].coastal;
+                        (s, !s && self.hubs[a].river && self.hubs[leg_to as usize].river)
+                    } else { (sea, river) };
                     self.in_transit.push(InTransit {
                         from: a as u32,
                         to: leg_to,
@@ -1646,8 +1773,8 @@ impl CampaignSim {
                         amount,
                         eta_tick: tick + (leg_days.ceil() as u32).max(1),
                         owner,
-                        sea,
-                        river,
+                        sea: leg_sea,
+                        river: leg_river,
                         // A house voyage is a ROUND TRIP: on arrival at b it tries to
                         // buy b's surplus and carry it home to a (sold there for a
                         // second profit). Guild/local one-way trips spawn no return.
@@ -1659,8 +1786,9 @@ impl CampaignSim {
                         price: pa,
                         local: owner < 0 && days <= LOCAL_HAUL_DAYS,
                         via: leg_via,
+                        hops: 0,
                     });
-                    self.log_trade(a as u32, leg_to, g, amount, owner, sea, river, pa);
+                    self.log_trade(a as u32, leg_to, g, amount, owner, leg_sea, leg_river, pa);
                 }
             }
         }
@@ -1782,6 +1910,7 @@ impl CampaignSim {
             price: pb_buy,
             local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
             via: -1, // the return leg is not routed through the composed-pricing outlet
+            hops: 0,
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, river, pb_buy);
     }

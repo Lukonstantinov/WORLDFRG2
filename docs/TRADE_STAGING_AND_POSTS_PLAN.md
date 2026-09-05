@@ -1,6 +1,48 @@
 # Trade Staging & Trading Posts — implementation plan
 
-> **Status: APPROVED, NOTHING BUILT.** Design settled with the maintainer 2026-08-31.
+> **Status: APPROVED. Slices 3 and 4 are BUILT AND DOSED LIVE; slices 1, 2, 5, 6,
+> 7 are not built.** Design settled with the maintainer 2026-08-31.
+>
+> **Cargo no longer teleports.** The entrepôt composition (`route_outlet` +
+> `InTransit.via`) makes a composed lane two real timed legs, and the STAGING
+> RELAY (`CampaignSim::staging_hop`) carries a leg past its mode's range through
+> the settlements on the way, chaining hop by hop and bounded by
+> `RELAY_MAX_HOPS`. Shipped live at `SHIP_LEG_MAX_KM` 3500 km /
+> `CARAVAN_LEG_MAX_KM` 800 km.
+>
+> **The one design decision that made it work**, and the correction to two
+> earlier attempts: range is a ROUTING rule, never a prohibition. Where no stop
+> exists the cargo sails direct. At the identical dose, REFUSING an over-range
+> leg collapses `econ_inheritance_rules_fragment_differently`'s world to 3 live
+> houses and 59k total wealth against a 2.5M baseline; routing leaves it at
+> 2.20M. R5 below was pointing at exactly this and was read too narrowly twice.
+>
+> **What licensed the dose** is a new instrument, because none of this repo's
+> existing fixtures could provide one. `world_w` serves two opposed purposes —
+> the trade horizon is a FRACTION of it, distance is `KM_EQUATOR / world_w` — so
+> `econ_inheritance_rules_fragment_differently` (which sets `world_w = 300`
+> purely to buy horizon, saying so in its own comment) has adjacent hubs 1,202
+> km apart, and `reference_world` (`world_w = 100`) 3,607 km apart: further than
+> any historical caravan stage, so a real-km cap there has no legal stop to
+> relay through and can only ever read as "all trade dies". Every fixture built
+> through `sim()` therefore opts out of the caps in one documented place, and
+> the dose is gated instead by `the_dosed_economy_stays_healthy_on_a_
+> realistically_dense_world` on `tests::dense_world` — towns ~445 km apart
+> across ~4,000 × 2,200 km at `world_w` 3600. Measured there over 40 years, the
+> caps make the economy **less** concentrated, not more: peak house wealth
+> 734,570 uncapped → 323,040 capped. Staging spreads a long lane's margin across
+> the ports along it; refusing hands it to whoever can still make the crossing.
+>
+> **Two things recorded rather than fixed.** (1) `dispatch` prices a buyer off
+> its CURRENT stock alone and reads `in_transit` only for vessel slots, so a
+> city with cargo already sailing to it still advertises the shortage that
+> summoned it; short voyages hid this and staging exposed it. An ETA-aware
+> inbound tally removed a runaway outright on a toy world (1,318,260 at year 10
+> → 216,018) but perturbs the dynamics gate at zero dose, so it needs its own
+> commit — fix it before tightening these caps further. (2) The +0.153
+> price/distance gradient once reported for this dose is WITHDRAWN: it was
+> measured on the mis-scaled fixtures above and is very probably an artefact of
+> trade collapse, not market integration.
 > UI schematics for every slice exist as a published artifact ("Break of Bulk", 8 plates).
 > Read §1 before §5 — the measured findings are why the slices are in this order.
 
