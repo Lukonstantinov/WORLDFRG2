@@ -192,6 +192,7 @@ function BalanceBar({ inV, outV, max }: { inV: number; outV: number; max: number
 }
 
 type Sort = "unusual" | "volume";
+type GoodFilter = "all" | "produced" | "imported";
 
 /** A partner city expanded inline — which goods move each way, largest first.
  *  Built straight from `flows.routes` (already per-good, per-partner, per-
@@ -247,6 +248,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
   const [selDir, setSelDir] = useState<number | null>(null); // null=both · 0=import · 1=export
   const [selPartner, setSelPartner] = useState<number | null>(null);
   const [sort, setSort] = useState<Sort>("unusual");
+  const [goodFilter, setGoodFilter] = useState<GoodFilter>("all");
   // A SINGLE isolated route (one partner→here / here→partner for one good), shown on the
   // map on its own with its direction arrow.
   const [selRoute, setSelRoute] = useState<{ good: number; partner: number; dir: number } | null>(null);
@@ -432,12 +434,21 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
 
   const sortedGoods = useMemo(() => {
     if (!flows) return [];
-    const gs = [...flows.goods];
+    // "produced" = this city's own fields/estates make it (the same ⚒ "made
+    // here" reading shown on each row); "imported" is its complement — a good
+    // that reaches this city with no local production behind it at all. A good
+    // can be BOTH produced here and import-dependent (local output falling
+    // short of local demand), so these two filters are not each other's
+    // strict opposite by volume — only by whether anything is grown/mined here.
+    const gs = flows.goods.filter((g) =>
+      goodFilter === "produced" ? !!g.produced :
+      goodFilter === "imported" ? !g.produced :
+      true);
     gs.sort(sort === "volume"
       ? (a, b) => b.avg_volume - a.avg_volume
       : (a, b) => unusualness(b) - unusualness(a));
     return gs;
-  }, [flows, sort]);
+  }, [flows, sort, goodFilter]);
 
   if (!active) return <EmptyNote>Realized trade appears once a campaign is running.</EmptyNote>;
   if (loading && !flows) return <EmptyNote>Loading trade flows…</EmptyNote>;
@@ -483,7 +494,15 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       <Section
         title="Traded goods"
         right={
-          <span style={{ display: "flex", gap: 4 }}>
+          <span style={{ display: "flex", flexWrap: "wrap", justifyContent: "flex-end", gap: 4 }}>
+            <Chip on={goodFilter === "produced"}
+              onClick={() => setGoodFilter((f) => f === "produced" ? "all" : "produced")}>
+              produced here
+            </Chip>
+            <Chip on={goodFilter === "imported"}
+              onClick={() => setGoodFilter((f) => f === "imported" ? "all" : "imported")}>
+              imported only
+            </Chip>
             <Chip on={sort === "unusual"} onClick={() => setSort("unusual")}>unusual</Chip>
             <Chip on={sort === "volume"} onClick={() => setSort("volume")}>volume</Chip>
             {sortedGoods.length > 16 && (
@@ -494,6 +513,13 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
           </span>
         }
       >
+        {sortedGoods.length === 0 && (
+          <FootNote>
+            {goodFilter === "produced"
+              ? "Nothing this city produces itself is currently traded."
+              : "Everything this city trades, it also produces some of itself."}
+          </FootNote>
+        )}
         {(showAllGoods ? sortedGoods : sortedGoods.slice(0, 16)).map((g) => {
           const meta = GOOD_META.get(g.name);
           const sel = selGood === g.good;
@@ -721,7 +747,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
               <div style={{ display: "flex", gap: SPACE.md, alignItems: "center", minWidth: 250, flex: 1 }}>
                 <Donut slices={shape.out} size={104} center={fmt(balance?.outV ?? 0)} sub="SOLD /yr" />
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: DIR_OUT, fontSize: FZ.micro, letterSpacing: 0.6, marginBottom: 2 }}>
+                  <div style={{ color: T.badInk, fontSize: FZ.micro, letterSpacing: 0.6, marginBottom: 2 }}>
                     EXPORTS BY GOOD
                   </div>
                   <DonutKey slices={shape.out} fmt={fmt} onPick={(lbl) => {

@@ -3095,7 +3095,7 @@ export class OverlayManager {
           }
         }
         // Dynamically-earned commercial rank (campaign, re-ranked twice a year): a
-        // TRADE HUB wears a small blue diamond, an ENTREPÔT a red triangle — a distinct
+        // TRADE HUB wears a small blue square, an ENTREPÔT a red disc — a distinct
         // shape set above the population dot, so "how big" and "how commercial" read
         // together. Rises and falls with the trade that actually flows through.
         const hc = s.hubClass ?? 0;
@@ -3106,24 +3106,15 @@ export class OverlayManager {
           ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
           ctx.strokeStyle = "rgba(0,0,0,0.7)";
           if (hc >= 2) {
-            ctx.fillStyle = "#e63030"; // entrepôt — red triangle
+            ctx.fillStyle = "#e63030"; // entrepôt — red disc
             ctx.beginPath();
-            ctx.moveTo(mx, my - mr);
-            ctx.lineTo(mx - mr * 0.9, my + mr * 0.7);
-            ctx.lineTo(mx + mr * 0.9, my + mr * 0.7);
-            ctx.closePath();
+            ctx.arc(mx, my, mr, 0, Math.PI * 2);
             ctx.fill();
             ctx.stroke();
           } else {
-            ctx.fillStyle = "#3a86d6"; // trade hub — blue diamond
-            ctx.beginPath();
-            ctx.moveTo(mx, my - mr);
-            ctx.lineTo(mx - mr * 0.8, my);
-            ctx.lineTo(mx, my + mr);
-            ctx.lineTo(mx + mr * 0.8, my);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
+            ctx.fillStyle = "#3a86d6"; // trade hub — blue square
+            ctx.fillRect(mx - mr * 0.87, my - mr * 0.87, mr * 1.74, mr * 1.74);
+            ctx.strokeRect(mx - mr * 0.87, my - mr * 0.87, mr * 1.74, mr * 1.74);
           }
         }
         // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding
