@@ -574,14 +574,16 @@ pub fn sim_run_all(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3): partition into
-    // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
-    // run-all called this before — "Generate Full World" ended at phase 8 and left
-    // the province layer unreachable except from the standalone Settlements/
-    // Provinces step panels.
-    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
-
-    // Phase 8: Biological — shark + shipworm waters + trade-good belts.
+    // Phase 8: Biological — shark + shipworm waters + trade-good belts. Runs
+    // BEFORE province generation now (was after): `Province.good_belt` is a
+    // one-time aggregate of the tile `goods` columns taken AT province-generation
+    // time (`sim::provinces::generate_provinces`'s `goods_hist` accumulation), so
+    // generating provinces first froze every province's belt at all-zero — the
+    // goods columns didn't exist yet. That silently emptied the Province
+    // Inspector's goods legend/layer/coverage on every world built through this
+    // button, since `campaign_province_potential`'s world-level fallback reads
+    // exactly this frozen field. See CLAUDE.md §8.19/§5 and the campaign_commands
+    // fallback this bug defeated.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
@@ -591,6 +593,13 @@ pub fn sim_run_all(
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
+
+    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3): partition into
+    // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
+    // run-all called this before — "Generate Full World" ended at phase 8 and left
+    // the province layer unreachable except from the standalone Settlements/
+    // Provinces step panels.
+    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -969,11 +978,10 @@ pub fn sim_run_all_from_terrain(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
-    // call in `sim_run_all`; this path was missing it too.
-    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
-
-    // Phase 8: Biological — shark + shipworm waters + trade-good belts.
+    // Phase 8: Biological — shark + shipworm waters + trade-good belts. Runs
+    // BEFORE province generation now — see the identical reordering + rationale
+    // in `sim_run_all`: province generation freezes `Province.good_belt` from the
+    // tile `goods` columns, which are still all-zero until this phase runs.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
@@ -983,6 +991,10 @@ pub fn sim_run_all_from_terrain(
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
+
+    // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
+    // call in `sim_run_all`; this path was missing it too.
+    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
 
     let modified = buf.save(&conn, "Full generation from template")?;
 
