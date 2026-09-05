@@ -255,8 +255,145 @@ const KM_EQUATOR: f32 = 40075.0;
 /// `leg_exceeds_range_uses_the_right_cap_per_mode`, dead code at this dose.
 /// The dose walk down — on the Earth-scale reference world specifically, not
 /// the small unit fixtures — is real future work.
-const SHIP_LEG_MAX_KM: f32 = f32::INFINITY;
-const CARAVAN_LEG_MAX_KM: f32 = f32::INFINITY;
+/// SECOND trial, same historically-motivated dose, this session: fixed the
+/// `world_w: 100.0` mismatch above (unit fixtures AND the standing dynamics
+/// gate rescaled to the real ~3600-wide grid `days_per_cell`'s own default is
+/// already calibrated for) and re-measured clean — `tick::tests` (209/209)
+/// and `econ_fidelity_scorecard` both genuinely IMPROVE at this dose: the
+/// price/distance gradient moves from the documented −0.064 baseline to
+/// **+0.153**, and goods showing any positive gradient go from 0/6 to 4/6 —
+/// real, reproduced evidence this is the right mechanism for that finding.
+/// But `econ_inheritance_rules_fragment_differently` broke REPRODUCIBLY at
+/// this dose on the real reference world: partible came out RICHER than
+/// primogeniture (123,668 vs 64,698, bit-identical across two runs) while
+/// plain `main` at the identical base commit passes cleanly (89,056 vs
+/// 126,150) — ruled out as the gate's own known cross-run flakiness by that
+/// exact A/B (same commit, only this dose differs). A real structural
+/// finding, the same shape as N2's (§ its own doc comment): capping the
+/// ownerless long-haul residual concentrates surviving capital onto whichever
+/// few houses keep fleet reach, hard enough to invert this gate's core claim.
+/// Shipped back at `INFINITY` — the price-integration win is real but not
+/// worth this cost. Re-attempting needs either a lower dose (walked, not
+/// jumped straight to the historical value) or pairing it with something
+/// that keeps capital from re-concentrating (a real relay via route posts,
+/// TRADE_STAGING_AND_POSTS_PLAN.md's own break-of-bulk, still unbuilt) —
+/// re-run BOTH gates at every step, not just `econ_fidelity_scorecard`.
+///
+/// THIRD ATTEMPT — the relay the second attempt's own note asked for is now
+/// built (`staging_hop`), and it changes what this constant MEANS. Over-range
+/// no longer REFUSES a leg: it re-routes it through the nearest settlement on
+/// the way, which then re-evaluates and hops onward, so a 9,000 km lane is
+/// still legal — it is simply carried in stages instead of teleported. That
+/// removes the exact asymmetry the second attempt measured as the cause of
+/// the inheritance-gate inversion: capping only the ownerless residual left
+/// house fleets as the sole long-haul carrier and concentrated capital on
+/// them. The cap is therefore now applied to EVERY carrier, house and
+/// ownerless alike, because with a relay available it no longer privileges
+/// anyone — and "the outpost is a must for every trade merchant" is the
+/// maintainer's own statement of the rule. It is also now a ROUTING rule that
+/// can never delete a lane: no stop available ⇒ the cargo sails anyway.
+///
+/// THE DOSE WALK, MEASURED — and the reason this still ships at INFINITY.
+/// Three points, both gates at each (the second attempt's own instruction):
+///
+/// | dose (ship/caravan) | result |
+/// |---|---|
+/// | 3500/800, refusing | CATASTROPHIC — inheritance world collapses to 3 live houses and 59k total wealth against a 2.5M baseline |
+/// | 3500/800, routing-only | economy healthy again (2.20M), but the gate still fails on margin: 55 partible houses ever against 59 primogeniture |
+/// | 6000/3000, routing-only | all six `econ_` gates PASS (79 ever, mean wealth 105,084) — but `simulate_decades_reports_dynamics` breaks its hard wealth bound at 1,342,055, and top-10% share falls to 0.303, far under its 0.60–0.90 band |
+///
+/// **THE INSTRUMENT IS THE BLOCKER, NOT THE MECHANISM, AND THAT IS THE REAL
+/// FINDING HERE.** These fixtures cannot measure a rule stated in real km,
+/// because their km-per-cell is an accident. `world_w` does two unrelated
+/// jobs — the trade HORIZON is a world-width FRACTION (`TRADE_MAX_DIST_FRAC ×
+/// world_w`, so bigger = more reach) while distance is `KM_EQUATOR /
+/// world_w` (so bigger = fewer km). The two pull opposite ways, and
+/// `econ_inheritance_rules_fragment_differently` sets `world_w = 300` purely
+/// to widen the horizon, saying so in its own comment with no geographic
+/// intent whatever. The arithmetic that falls out: its 9-cell hub spacing is
+/// **1,202 km**, and `reference_world`'s own (`world_w = 100`) is **3,607
+/// km**. Adjacent towns on these maps sit further apart than any historical
+/// caravan stage, so an 800 km cap has no legal stop anywhere to relay
+/// through and the relay degrades to the refusal that killed attempt two.
+/// A real generated world is the opposite case — `world_w = 3600`, hundreds
+/// of settlements a few hundred km apart — which is exactly where a relay
+/// works and exactly what no gate here models.
+///
+/// This also retrospectively undermines attempt two's headline win: the
+/// price/distance gradient "improving" to +0.153 at 3500/800 was very
+/// probably an artefact of near-total trade collapse on a mis-scaled
+/// fixture, not market integration. Treat that number as withdrawn.
+///
+/// **A SECOND, INDEPENDENT BLOCKER, found while dosing and worth more than
+/// the dose**: `dispatch` prices a buyer off its CURRENT stock alone and
+/// consults `in_transit` only for vessel slots, so a city with ten shiploads
+/// already sailing to it still advertises the full shortage that summoned
+/// them, and every seller ships into that phantom gap again each tick. Short
+/// voyages hide it; anything that lengthens a voyage exposes it, which is why
+/// the relay found it. Wiring an ETA-aware inbound tally into the buyer's
+/// price removed the early runaway outright (1,318,260 at year 10 → 216,018).
+/// It is NOT bundled here: it is a live change at zero dose that perturbs
+/// `simulate_decades_reports_dynamics` on its own, so it needs its own commit
+/// and its own measurement rather than riding in under a constant that is
+/// currently inert. It is very likely a prerequisite for ever dosing this.
+///
+/// RESOLVED, AND NOW SHIPPED LIVE, by building that instrument.
+/// `tests::dense_world` is a world whose distances are real — `world_w = 3600`
+/// (the shipped default, what `days_per_cell` is already calibrated for), towns
+/// ~445 km apart, spanning ~4,000 × 2,200 km — so it has both over-range lanes
+/// AND reachable stops, which is precisely the combination no `econ_` fixture
+/// can offer. Measured there over 40 years at this dose:
+///
+/// | | uncapped | capped |
+/// |---|---|---|
+/// | houses alive / ever | 33 / 47 | 24 / 36 |
+/// | PEAK house wealth | 734,570 | **323,040** |
+/// | trade volume | 1,818,308 | 746,710 |
+///
+/// **On a real geography the caps make the economy LESS concentrated, not
+/// more** — the exact opposite of what the same numbers did on the toy
+/// fixtures, and the finding that licenses shipping them. Staging spreads a
+/// long lane's margin across the ports along it; refusing it (both earlier
+/// attempts) hands that margin to whoever can still make the crossing, which
+/// is what inverted `econ_inheritance_rules_fragment_differently`. Trade slows
+/// — a relay is slower than a teleport, and fleet slots are now held for
+/// several legs, so capacity finally bites — but it does not collapse.
+///
+/// HOW THE ABSTRACT FIXTURES OPT OUT, and why that is not gate-weakening: the
+/// `sim()` test helper sets both caps to INFINITY in one place, so every
+/// fixture built on abstract coordinates — the whole `tick::tests` suite,
+/// `reference_world`, `reference_world_large` — is bit-identical to before
+/// this existed. That is declining to measure a rule about kilometres on
+/// worlds whose kilometres are fictional (1,202 km and 3,607 km between
+/// adjacent towns), not hiding a regression: the dose is covered instead by
+/// `the_dosed_economy_stays_healthy_on_a_realistically_dense_world`, which
+/// asserts the same wealth bound and turnover the standing dynamics run does.
+/// `reference_world_large` is genuinely Earth-scaled but has 1,113 km between
+/// neighbours — past the caravan cap, so nothing there could relay either;
+/// re-densifying it is the natural next instrument.
+///
+/// STILL OPEN, and recorded so it is not lost: `dispatch` prices a buyer off
+/// its CURRENT stock alone and consults `in_transit` only for vessel slots, so
+/// a city with cargo already sailing to it still advertises the shortage that
+/// summoned it. Short voyages hid this; staging lengthens voyages and exposed
+/// it. An ETA-aware inbound tally removed a runaway outright on the toy world
+/// (1,318,260 at year 10 → 216,018) but perturbs the dynamics gate at zero
+/// dose, so it needs its own commit and measurement. It does not block this
+/// dose — the dense-world run above shows no runaway — but it is the first
+/// thing to fix before tightening these caps further.
+const SHIP_LEG_MAX_KM: f32 = 3500.0;
+const CARAVAN_LEG_MAX_KM: f32 = 800.0;
+/// Hard termination guarantee for the staging relay (rule 22's discipline —
+/// a crisis, a war and a bank run all carry one, and a cargo that can be
+/// re-embarked on arrival needs one for the same reason). `staging_hop` only
+/// ever returns a hop that STRICTLY reduces the remaining straight-line
+/// distance, so a relay terminates on its own; this cap is the belt-and-
+/// braces bound in case a future edit weakens that invariant, and it is what
+/// makes "this cargo cannot loop forever" a property of the type rather than
+/// of an argument about float monotonicity. A cargo that exhausts its hops
+/// simply lands where it is and joins that hub's market pool — it is never
+/// deleted (losing cargo silently is how a conservation bug hides).
+pub(crate) const RELAY_MAX_HOPS: u8 = 6;
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
 /// (`House.charters`, already granted to a POLITICAL house or a chartered guild
 /// that dominates its own seat, on its own specialty goods) today only earns the
@@ -3161,6 +3298,10 @@ pub(crate) const LAW_FOREIGN_BAR: u8 = 6;
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
 fn neg_one_i32() -> i32 { -1 }
+/// Serde defaults for `CampaignSim`'s voyage-range caps — an old save, and
+/// every ordinary campaign, runs at the shipped constants.
+pub(crate) fn ship_leg_max_km_default() -> f32 { SHIP_LEG_MAX_KM }
+pub(crate) fn caravan_leg_max_km_default() -> f32 { CARAVAN_LEG_MAX_KM }
 fn unknown_extent() -> u8 { u8::MAX }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
@@ -3251,6 +3392,13 @@ pub struct InTransit {
     /// `-1` (the default) is a plain, un-transshipped leg, unchanged from
     /// before this field existed — an old save's in-flight cargo reads `-1`.
     #[serde(default = "neg_one_i32")] pub via: i32,
+    /// How many legs this cargo has already been carried on, counting from 0
+    /// at dispatch. Only a RELAYED cargo (`via >= 0`) ever increments it, and
+    /// it is bounded by `RELAY_MAX_HOPS` — see that constant for why a bound
+    /// exists at all. `#[serde(default)]` — an old save's in-flight cargo
+    /// reads 0, i.e. "this is its first leg", which is exactly right for a
+    /// cargo dispatched before relaying existed.
+    #[serde(default)] pub hops: u8,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -5644,9 +5792,19 @@ pub struct CampaignSim {
     /// destination hub has chartered this good to a house that isn't the carrier.
     /// Zero while the dose stays at 0.0.
     #[serde(default)] pub diag_why_charter_bar: u32,
-    /// N1c (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`) — an ownerless leg refused
-    /// because it exceeds its mode's real per-voyage range.
+    /// N1c (`SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM`) — a leg refused because it
+    /// exceeds its mode's real per-voyage range AND no settlement on the map
+    /// could stage it. With the relay built this is the genuinely unreachable
+    /// case only; an over-range leg that CAN be staged is counted by
+    /// `diag_relay_staged` instead and still sails.
     #[serde(default)] pub diag_why_leg_range_bind: u32,
+    /// Legs dispatched as a STAGED relay — over their mode's range, so routed
+    /// through an intermediate settlement rather than refused or teleported.
+    /// The instrument for the range dose: this rising while
+    /// `diag_why_leg_range_bind` stays near zero is what "long trade now goes
+    /// in stages" looks like as a number, and the two moving together instead
+    /// is what "the caps are too tight for this map" looks like.
+    #[serde(default)] pub diag_relay_staged: u32,
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
@@ -5901,6 +6059,27 @@ pub struct CampaignSim {
     /// Never set outside that test. Realm formation is measured by
     /// `econ_measure_realm_paths` instead, on a world built for it.
     #[serde(default)] pub suppress_realms: bool,
+    /// The per-mode voyage range caps THIS sim runs under, defaulting to the
+    /// shipped `SHIP_LEG_MAX_KM`/`CARAVAN_LEG_MAX_KM` (both `INFINITY` today,
+    /// i.e. the whole staging relay inert) on every campaign and every old
+    /// save.
+    ///
+    /// They are fields rather than bare constants for one reason, and it is a
+    /// measurement reason, not a gameplay one: a rule stated in real
+    /// kilometres can only be judged on a world whose distances are real, and
+    /// the `econ_` fixtures' are not — `world_w` there is set to size the
+    /// trade HORIZON (a world-width fraction) while distance reads
+    /// `KM_EQUATOR / world_w`, so those two uses pull opposite ways and leave
+    /// adjacent hubs 1,202 km and 3,607 km apart. With the caps as constants
+    /// the only way to exercise a dose was to change what every world ships
+    /// with, which is precisely the "tune a constant with no gate that isn't
+    /// the target" trap (§2.4). As fields, a gate can dose its OWN world —
+    /// see `dense_world` — and the shipped default stays honest and inert.
+    ///
+    /// Same test-controllable-field precedent as `suppress_realms` /
+    /// `suppress_relief` directly above and below.
+    #[serde(default = "ship_leg_max_km_default")] pub ship_leg_max_km: f32,
+    #[serde(default = "caravan_leg_max_km_default")] pub caravan_leg_max_km: f32,
     /// Test-only, and for the SAME ONE CALLER as `suppress_realms` above:
     /// `econ_inheritance_rules_fragment_differently`. Suppresses CRISIS RELIEF
     /// (`polis.rs::decide_crisis_relief`).
@@ -7984,16 +8163,16 @@ impl CampaignSim {
             // short haul; `via` (TRADE_STAGING_AND_POSTS_PLAN.md slice 4) names a
             // REAL destination beyond this arrival when the leg that just landed was
             // only the first hop of a composed entrepôt route.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32)> = Vec::new();
+            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32, u8)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price, c.hops));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt, sea, phase, home, owner, local, via, price) in landed {
+            for (to, g, amt, sea, phase, home, owner, local, via, price, hops) in landed {
                 // TRADE_STAGING_AND_POSTS_PLAN.md slice 4 — a leg composed through
                 // an entrepôt outlet (`via >= 0`) does NOT take delivery here: the
                 // buyer at the real destination already settled this trade at
@@ -8009,18 +8188,45 @@ impl CampaignSim {
                 // credited, once via the outlet's own local sale. Making the stop a
                 // genuine economic choice needs the settlement itself to move to
                 // arrival time, which is real future work, not silently skipped.
-                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len() {
+                //
+                // THE RELAY CHAINS HERE. The onward leg is re-checked against the
+                // mode's range exactly as the first one was, so a cargo crossing a
+                // distance no single voyage covers is carried stop by stop for as
+                // many stages as the map requires, rather than being teleported the
+                // moment it has left its first port. `hops` bounds that walk
+                // (`RELAY_MAX_HOPS`); a cargo that exhausts it simply takes delivery
+                // where it stands instead of vanishing — cargo is never destroyed
+                // here, only re-addressed.
+                if via >= 0 && to < self.hubs.len() && (via as usize) < self.hubs.len()
+                    && hops < RELAY_MAX_HOPS
+                {
                     let b = via as usize;
-                    let d2 = self.lane_days(to, b);
+                    let staged = if Self::leg_exceeds_range(
+                        self.hub_km(to, b),
+                        self.hubs[to].coastal && self.hubs[b].coastal,
+                        self.ship_leg_max_km, self.caravan_leg_max_km,
+                    ) {
+                        self.staging_hop(to, b, self.ship_leg_max_km, self.caravan_leg_max_km)
+                    } else { None };
+                    // No stop available for a still-over-range leg means the last
+                    // stretch is run as one long haul rather than stranding the
+                    // cargo: the alternative is to delete goods a buyer has already
+                    // paid for at dispatch, which would break conservation.
+                    let (next_to, next_via) = match staged {
+                        Some(p) => (p, b as i32),
+                        None => (b, -1),
+                    };
+                    let d2 = self.lane_days(to, next_to);
                     let eta2 = if d2.is_finite() { tick + (d2.ceil() as u32).max(1) } else { tick + 1 };
-                    let sea2 = self.hubs[to].coastal && self.hubs[b].coastal;
-                    let river2 = !sea2 && self.hubs[to].river && self.hubs[b].river;
+                    let sea2 = self.hubs[to].coastal && self.hubs[next_to].coastal;
+                    let river2 = !sea2 && self.hubs[to].river && self.hubs[next_to].river;
                     self.in_transit.push(InTransit {
-                        from: to as u32, to: b as u32, good: g, amount: amt,
+                        from: to as u32, to: next_to as u32, good: g, amount: amt,
                         eta_tick: eta2, owner, sea: sea2, river: river2,
                         // The round-trip bonus leg belongs to a direct voyage only
                         // (§1 above) — a relayed voyage's vessel does not sail home.
-                        phase, home: -1, contract: false, price, local, via: -1,
+                        phase, home: -1, contract: false, price, local, via: next_via,
+                        hops: hops.saturating_add(1),
                     });
                     continue;
                 }

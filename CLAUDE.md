@@ -1022,6 +1022,33 @@ Three facts about the campaign that are easy to miss and shape any change here:
   plan) and has NOT been done. `N1B_OWNERLESS_LOSS_RATE` (currently `0.0`) is the
   same shape for letting ownerless cargo sink — `let lost = if owner >= 0 {..}`
   above is no longer literal, but the roll never fires at zero dose.
+  **N1c (per-mode voyage RANGE) is the exception — it is DOSED LIVE**
+  (`SHIP_LEG_MAX_KM` 3500 km / `CARAVAN_LEG_MAX_KM` 800 km,
+  `TRADE_STAGING_AND_POSTS_PLAN.md` slices 3+4). **Cargo no longer teleports:**
+  a leg past its mode's range is routed to the next settlement on the way
+  (`staging_hop`, picking from the hub's own trade neighbours, required to be
+  legal in its own mode and to strictly close the gap), and the arrivals pass
+  re-checks the onward leg so the cargo walks stop by stop, bounded by
+  `RELAY_MAX_HOPS`. **It is a ROUTING rule, never a prohibition** — with no
+  stop available the cargo sails direct — and that distinction is the whole
+  mechanism: at the identical dose, REFUSING an over-range leg collapsed
+  `econ_inheritance_rules_fragment_differently`'s world to 3 live houses,
+  while routing left it healthy. Two earlier attempts refused, and both broke
+  that gate; see the constants' doc comment for the full three-point dose walk.
+  **Read this before touching either cap:** every fixture built through
+  `sim()` opts OUT (both caps `INFINITY`, set in one place), because those
+  worlds' coordinates are abstract — `world_w` there sizes the trade HORIZON
+  (a fraction of it) while distance reads `KM_EQUATOR / world_w`, so the two
+  uses pull opposite ways and leave adjacent hubs 1,202 km and 3,607 km apart,
+  further than any real caravan stage. A rule in kilometres cannot be measured
+  on that, so the dose is gated by `the_dosed_economy_stays_healthy_on_a_
+  realistically_dense_world` on `tests::dense_world` (towns ~445 km apart
+  across ~4,000 × 2,200 km at `world_w` 3600) instead. That world is also
+  where the licence to ship came from: over 40 years the caps make the economy
+  LESS concentrated, not more — peak house wealth 734,570 uncapped → 323,040
+  capped — because staging spreads a long lane's margin across the ports along
+  it. Real campaigns get the dose from `campaign_start_sim`; old saves and
+  every test fixture are bit-identical.
   **N2 (cargo bans, §3.2) is the same shape and for a sharper reason: a live
   trial genuinely broke the hard-asserted wealth bound** (a sustained richest
   house of 1,005,714) even after halving the dose once — a real structural
