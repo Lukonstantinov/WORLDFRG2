@@ -84,9 +84,15 @@ pub fn compute_political(
             edges.insert((i.min(j), i.max(j)));
         }
     }
+    // ONE DIJKSTRA PER SOURCE, NOT PER EDGE (P2/A1): `edges` stores each pair as
+    // `(i.min(j), i.max(j))`, so batching by that smaller-index source collapses
+    // the per-edge whole-grid search to one per distinct source node.
     let mut centrality = vec![0.0f32; nn];
-    for &(a, b) in &edges {
-        if let Some(path) = coarse_dijkstra(&cc, cnode[a], cnode[b]) {
+    let edges_vec: Vec<(usize, usize)> = edges.iter().copied().collect();
+    let coarse_pairs: Vec<(usize, usize)> = edges_vec.iter().map(|&(a, b)| (cnode[a], cnode[b])).collect();
+    let paths = coarse_dijkstra_batch(&cc, &coarse_pairs);
+    for (&(a, b), path) in edges_vec.iter().zip(paths.into_iter()) {
+        if let Some(path) = path {
             if path_allowed(&cc, &path, reach, max_crossing, grid_w) {
                 centrality[a] += 1.0;
                 centrality[b] += 1.0;

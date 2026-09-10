@@ -152,10 +152,16 @@ pub fn compute_economy(
         }
     }
     // Materialise each candidate as a routed edge → adjacency + per-edge coarse path.
+    // ONE DIJKSTRA PER SOURCE, NOT PER CANDIDATE (P2/A1): `cand` stores each pair as
+    // `(a.min(b), a.max(b))`, so batching by that smaller-index source collapses the
+    // per-candidate whole-grid search to one per distinct source node.
+    let cand_vec: Vec<(usize, usize)> = cand.iter().copied().collect();
+    let coarse_pairs: Vec<(usize, usize)> = cand_vec.iter().map(|&(a, b)| (cnode[a], cnode[b])).collect();
+    let paths = coarse_dijkstra_batch(&cc, &coarse_pairs);
     let mut adj: Vec<Vec<(usize, f32, usize)>> = vec![Vec::new(); nn]; // (to, cost, edge_id)
     let mut edge_paths: Vec<Vec<usize>> = Vec::new();
-    for &(a, b) in &cand {
-        let path = match coarse_dijkstra(&cc, cnode[a], cnode[b]) { Some(p) => p, None => continue };
+    for (&(a, b), path) in cand_vec.iter().zip(paths.into_iter()) {
+        let path = match path { Some(p) => p, None => continue };
         if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
         let cost = coarse_path_cost(&cc, &path).max(0.01);
         let eid = edge_paths.len();

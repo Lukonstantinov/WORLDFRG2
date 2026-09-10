@@ -752,9 +752,16 @@ pub(crate) fn compute_route_days_matrix_for_season(
     // always in FINE cells — a route's price must not silently change with the
     // world's own coarsening factor.
     let cost_to_days = (days_per_cell * cc.f as f32) / (OPEN_SEA_COST * 100.0);
+    // A2 (§8.9 rule 2's discipline) — one Dijkstra per SOURCE hub, and every source
+    // is independent of every other, so the n searches run in parallel: each closure
+    // writes only its own row (`par_chunks_mut(n)`), so the result is identical
+    // regardless of thread scheduling. At `SEASON_SLICES` seasonal grids this is the
+    // ~1,000-search campaign-start cost P4 names; this is what makes it ~cores× faster
+    // with no change to the matrix's values.
+    use rayon::prelude::*;
     let mut days = vec![f32::INFINITY; n * n];
-    for a in 0..n {
-        days[a * n + a] = 0.0;
+    days.par_chunks_mut(n).enumerate().for_each(|(a, row)| {
+        row[a] = 0.0;
         // Run Dijkstra for every hub regardless of component so that sea lanes
         // connect cities on different geographic components (separate continents).
         // The component filter was the reason isolated continents could never trade
@@ -764,11 +771,81 @@ pub(crate) fn compute_route_days_matrix_for_season(
             if b == a { continue; }
             let d = dist.get(nodes[b]).copied().unwrap_or(i64::MAX);
             if d != i64::MAX {
-                days[a * n + b] = (d as f32 * cost_to_days).max(1.0);
+                row[b] = (d as f32 * cost_to_days).max(1.0);
             }
         }
-    }
+    });
     Ok(days)
+}
+
+/// Resolve one (start, goal) pair from an ALREADY-COMPUTED single-source
+/// `coarse_dijkstra_dist_prev` result into the same `Option<Vec<usize>>` shape
+/// `coarse_dijkstra` returns — a predecessor walk from `goal` back to `start`,
+/// reversed. Shared by `coarse_dijkstra_batch` and any caller (e.g.
+/// `compute_trade_matrix`'s lazily-cached per-source lookups) that keeps its own
+/// `(dist, prev)` cache instead of pre-declaring every edge up front.
+fn coarse_path_from_dist_prev(
+    dist: &[i64],
+    prev: &[usize],
+    start: usize,
+    goal: usize,
+) -> Option<Vec<usize>> {
+    if start == goal { return None; }
+    if dist.get(goal).copied().unwrap_or(i64::MAX) == i64::MAX { return None; }
+    let mut path = Vec::new();
+    let mut cur = goal;
+    while cur != usize::MAX {
+        path.push(cur);
+        if cur == start { break; }
+        cur = prev[cur];
+    }
+    if path.len() < 2 || *path.last().unwrap() != start { return None; }
+    path.reverse();
+    Some(path)
+}
+
+/// Batch many coarse-grid point-to-point queries into ONE Dijkstra per distinct
+/// SOURCE rather than one per pair (§8.9 rule 1's spirit, extended to the query
+/// layer — ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md P2/A1). `pairs` are
+/// `(start, goal)` coarse-node indices; the returned `Vec` matches `pairs` 1:1.
+/// Each `Some` path is bit-identical to what `coarse_dijkstra(cc, start, goal)`
+/// would have returned — both explore the same graph with the same tie-breaking
+/// (`BinaryHeap<Reverse<(i64, usize)>>`), and Dijkstra finalises a node's
+/// distance/predecessor the moment it is popped regardless of whether the caller
+/// keeps searching past it, so the point-to-point search's early exit at `goal`
+/// changes only how much of the grid is explored, never the path found (the same
+/// fact `flow.rs`'s own per-source rewrite already relies on).
+fn coarse_dijkstra_batch(
+    cc: &CoarseCost,
+    pairs: &[(usize, usize)],
+) -> Vec<Option<Vec<usize>>> {
+    use rayon::prelude::*;
+    let mut by_source: HashMap<usize, Vec<usize>> = HashMap::new();
+    for (i, &(s, _)) in pairs.iter().enumerate() {
+        by_source.entry(s).or_default().push(i);
+    }
+    // A2 (§8.9 rule 2's discipline extended to the query layer) — each distinct
+    // source's Dijkstra is independent of every other, so the sources run in
+    // parallel; each task only ever writes the `out` slots its OWN `idxs` name
+    // (disjoint across sources by construction, since `by_source` partitions
+    // `0..pairs.len()`), so the merged result is identical regardless of thread
+    // scheduling or completion order — no lock, no shared mutable state.
+    let by_source: Vec<(usize, Vec<usize>)> = by_source.into_iter().collect();
+    let computed: Vec<(Vec<usize>, Vec<Option<Vec<usize>>>)> = by_source
+        .into_par_iter()
+        .map(|(s, idxs)| {
+            let (dist, prev) = coarse_dijkstra_dist_prev(cc, s);
+            let paths: Vec<Option<Vec<usize>>> = idxs.iter()
+                .map(|&i| coarse_path_from_dist_prev(&dist, &prev, s, pairs[i].1))
+                .collect();
+            (idxs, paths)
+        })
+        .collect();
+    let mut out: Vec<Option<Vec<usize>>> = vec![None; pairs.len()];
+    for (idxs, paths) in computed {
+        for (i, p) in idxs.into_iter().zip(paths.into_iter()) { out[i] = p; }
+    }
+    out
 }
 
 /// Is a path acceptable under the chosen trade reach?
@@ -3065,6 +3142,92 @@ mod route_pricing_tests {
         assert!(
             (3.0..=5.0).contains(&ratio),
             "navigable river should price near 4× coastal sea (got river={river_cost}, ratio={ratio})"
+        );
+    }
+}
+
+#[cfg(test)]
+mod dijkstra_batch_tests {
+    use super::*;
+    use crate::db::{schema, WorldDb};
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use rusqlite::Connection;
+
+    /// A deterministic pseudo-random terrain/elevation mosaic — mixed land, sea and
+    /// relief, so routed paths genuinely braid rather than all following one obvious
+    /// diagonal (a uniform grid would make every tie-break the same and could mask a
+    /// batching bug that only shows up when paths actually differ by source).
+    fn mixed_world(w: u32, h: u32) -> WorldDb {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        let mut seed = 12345u64;
+        let mut next = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 33) as u32
+        };
+        for i in 0..buf.total() {
+            let r = next();
+            buf.terrain[i] = if r % 5 < 3 { 1 } else { 0 }; // ~60% land
+            buf.elevation[i] = ((r >> 8) % 1000) as f32 / 1000.0;
+            buf.koppen[i] = 12; // Cfb, no surcharge
+            buf.temperature[i] = 18.0; // above every freeze/ice-land threshold
+        }
+        buf.save(&conn, "test").unwrap();
+        WorldDb::new(conn)
+    }
+
+    /// A1 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9) — batching many
+    /// point-to-point queries into one Dijkstra per distinct source must return
+    /// the EXACT same path per pair a one-off `coarse_dijkstra(start, goal)` would.
+    /// Callers (route drawing, centrality counting, trade-matrix edges) depend on
+    /// the actual polyline returned, not merely on reachability, so this asserts
+    /// path equality, not just "both found a route" — the real A1 gate: routes must
+    /// be byte-identical before and after the batching change.
+    #[test]
+    fn batched_dijkstra_matches_per_pair_dijkstra() {
+        let w = 140u32;
+        let h = 70u32;
+        let db = mixed_world(w, h);
+        let conn = db.conn.lock().unwrap();
+        let world = db.cached_tiles_with_conn(&conn).unwrap();
+        let cc = build_coarse_cost(&world, w, h, "", false, true, 0.0, -1, 12).unwrap();
+        let cn = (cc.cw * cc.ch) as usize;
+
+        // A spread of source/goal pairs, then force several to share one source —
+        // the exact scenario A1's batching optimises — plus a same-cell pair, which
+        // must resolve to None on both sides (coarse_dijkstra's own `path.len() < 2`
+        // rejection).
+        let mut pairs: Vec<(usize, usize)> = Vec::new();
+        let mut seed = 777u64;
+        let mut next = move || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1);
+            (seed >> 33) as usize
+        };
+        for _ in 0..40 {
+            pairs.push((next() % cn, next() % cn));
+        }
+        let shared_source = pairs[0].0;
+        for pair in pairs.iter_mut().take(6).skip(1) { pair.0 = shared_source; }
+        pairs.push((shared_source, shared_source));
+
+        let batched = coarse_dijkstra_batch(&cc, &pairs);
+        for (i, &(s, g)) in pairs.iter().enumerate() {
+            let expected = coarse_dijkstra(&cc, s, g);
+            assert_eq!(
+                batched[i], expected,
+                "pair {i} ({s} -> {g}) diverged: batched {:?} vs per-pair {:?}",
+                batched[i], expected
+            );
+        }
+        // The forced-shared-source pairs must actually have exercised the batching
+        // path (a route found, not all None), or the test proves nothing.
+        assert!(
+            (1..6).any(|i| batched[i].is_some()),
+            "the shared-source pairs never found a route — test fixture is too sparse"
         );
     }
 }

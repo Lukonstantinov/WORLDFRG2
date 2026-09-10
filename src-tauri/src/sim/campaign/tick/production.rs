@@ -1119,13 +1119,18 @@ impl CampaignSim {
         // reason `quarantined`/`food_locked` are (read inside the hot loop).
         // `House.charters` is implicitly at the house's OWN seat (`h.hub`), so
         // this is a cheap O(houses × charters-per-house) build, not O(n·ng).
-        let mut charter_owner: Vec<Vec<i32>> = vec![vec![-1; ng]; n];
+        // A4 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md P5) — ONE flat allocation
+        // instead of `n` separate heap allocations (`vec![vec![-1; ng]; n]`), the
+        // only nested-`Vec` allocation left in the production path: at 200 hubs ×
+        // 365 days × 500 years that was 36.5M small allocations for no reason —
+        // the same flat-array convention `prov_good_belt` already states.
+        let mut charter_owner: Vec<i32> = vec![-1; n * ng];
         for (hi, h) in self.houses.iter().enumerate() {
             if h.defunct || h.charters.is_empty() { continue; }
             let hub = h.hub as usize;
             if hub >= n { continue; }
             for &g in &h.charters {
-                if g < ng { charter_owner[hub][g] = hi as i32; }
+                if g < ng { charter_owner[hub * ng + g] = hi as i32; }
             }
         }
         // ── Merchant fleet capacity (concurrent shipment slots) for this round ──
@@ -1450,7 +1455,7 @@ impl CampaignSim {
                     // (a rival house, or the ownerless residual): the sale is barred
                     // here unless a "smuggling" roll clears the dose. True no-op at
                     // dose 0.0, since `hash01(..) >= 0.0` always holds.
-                    let charter_here = charter_owner[b][g];
+                    let charter_here = charter_owner[b * ng + g];
                     let roll = hash01(self.seed,
                         (tick as u64) ^ 0xC4A47E5 ^ ((a as u64) << 8) ^ (b as u64), g as u64);
                     if Self::charter_bars_sale(charter_here, owner, CHARTER_EXCLUSIVE_DOSE, roll) {

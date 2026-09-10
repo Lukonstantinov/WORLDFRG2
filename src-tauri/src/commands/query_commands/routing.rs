@@ -97,10 +97,18 @@ pub fn compute_trade_routes(
     let all_edges: Vec<((usize, usize), bool)> = major_edges.iter().map(|&e| (e, false))
         .chain(minor_edges.iter().map(|&e| (e, true)))
         .collect();
-    for &((a, b), minor) in &all_edges {
-        let start = cc.cidx(nodes[a].0, nodes[a].1);
-        let goal = cc.cidx(nodes[b].0, nodes[b].1);
-        let path = match coarse_dijkstra(&cc, start, goal) { Some(p) => p, None => continue };
+    // ONE DIJKSTRA PER SOURCE, NOT PER EDGE (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
+    // P2/A1) — every edge is stored `(a.min(b), a.max(b))`, so many edges share the
+    // same smaller-index endpoint as their pathfinding source (a hub's 3-nearest-
+    // neighbour fan, every minor road into the same major hub). A world with a few
+    // hundred settlements used to run one whole-grid search PER EDGE; grouping by
+    // source collapses that to one search per distinct source node.
+    let coarse_pairs: Vec<(usize, usize)> = all_edges.iter()
+        .map(|&((a, b), _)| (cc.cidx(nodes[a].0, nodes[a].1), cc.cidx(nodes[b].0, nodes[b].1)))
+        .collect();
+    let paths = coarse_dijkstra_batch(&cc, &coarse_pairs);
+    for (&(_, minor), path) in all_edges.iter().zip(paths.into_iter()) {
+        let path = match path { Some(p) => p, None => continue };
         if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
 
         let mut sea_cells = 0u32;
@@ -469,6 +477,16 @@ pub fn compute_trade_matrix(
     // Lazily-computed least-cost path per region pair (None = unreachable).
     let mut pair_path: std::collections::HashMap<(usize, usize), Option<Vec<usize>>> =
         std::collections::HashMap::new();
+    // ONE DIJKSTRA PER SOURCE, NOT PER PAIR (P2/A1). Which (supply, deficit) pairs
+    // are ever queried is only known lazily — the greedy match below can satisfy a
+    // deficit from its first supplier and never reach the rest — so unlike the
+    // fixed-edge-list call sites this cannot pre-batch. Instead a source's full
+    // single-source Dijkstra is run at most ONCE and kept here; a supply region that
+    // recurs across many goods (the common case — the outer loop is per-good) then
+    // answers every later pair from the cached `(dist, prev)` instead of re-searching
+    // the whole grid.
+    let mut source_dist_prev: std::collections::HashMap<usize, (Vec<i64>, Vec<usize>)> =
+        std::collections::HashMap::new();
     // Per coarse-edge accumulation for the bundled trunks: total volume, volume
     // by good (to name the corridor by its dominant commodity), and directional
     // volume (which way the goods are pulled — toward the consuming hub).
@@ -512,7 +530,10 @@ pub fn compute_trade_matrix(
                     // Coastal-sea hugging is still allowed (is_open_sea is false
                     // there), so island/coastal trade via short coastal hops works,
                     // but no trunk beelines across a basin between continents.
-                    let p = coarse_dijkstra(&cc, region_node[s.0], region_node[di])
+                    let src = region_node[s.0];
+                    let (dist, prev) = source_dist_prev.entry(src)
+                        .or_insert_with(|| coarse_dijkstra_dist_prev(&cc, src));
+                    let p = coarse_path_from_dist_prev(dist, prev, src, region_node[di])
                         .filter(|p| path_allowed(&cc, p, reach, max_crossing, grid_w))
                         .filter(|p| !p.iter().any(|&c| cc.is_open_sea[c]));
                     pair_path.insert(key, p);
