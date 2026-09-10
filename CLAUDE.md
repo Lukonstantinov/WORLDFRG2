@@ -5490,17 +5490,37 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     or two towns sharing one coarse cell — with no
                                     fall-through, so the "no town is left unconnected"
                                     comment above the loop is not true as written.
-                                    (4) `good_freight` has NO MODE TERM: the correct
-                                    1:4:8 sea:river:road ratio (Masschaele) lives in
-                                    the cost grid but arrives as DAYS, so it never
-                                    sorts cargo by bulk — wheat and silk take the same
-                                    road penalty, where historically road freight kills
-                                    grain and barely touches silk; measured, 300 km of
-                                    grain carriage costs 30% of its value against real
-                                    cart carriage that roughly DOUBLED it, and it is
-                                    exactly as cheap by sea. It also reaches only the
-                                    founding hubs — every colony founded during a
-                                    campaign routes by straight line. (5) Caravan/boat
+                                    (4) freight — **the doc CORRECTS ITSELF here and
+                                    the correction is the finding**; read §2's
+                                    correction block, not the claim above it. First cut
+                                    said `good_freight` has no mode term so distance is
+                                    mispriced (30% of grain's value over 300 km, "as
+                                    cheap by sea"). Literally true about the missing
+                                    term, WRONG in conclusion: it used the NOMINAL
+                                    `days_per_cell` (55 km/day) where `days_per_cell`
+                                    is only a REFERENCE speed pinned to cost 2.2
+                                    (`cost_to_days = days_per_cell·f/(OPEN_SEA_COST·
+                                    100)`), never the speed anything travels. Real
+                                    routed speeds: calm coastal sea **242 km/day**,
+                                    nav river 60.5, flat land 30.2, hills 14.8 — so
+                                    300 km overland costs **54.5%** of grain's value
+                                    (not 30%) against 6.8% by coastal sea, an 8:1
+                                    ratio that is exactly Masschaele. LAND speeds match
+                                    history; **calm coastal sea is 2.4-4.8× too fast**
+                                    against a ~50-100 km/day real effective average, so
+                                    the lever is the coastal-sea cost rung, NOT
+                                    `freight_per_day` and not a new mode term (C1 is
+                                    rewritten). What survives: the mode penalty is
+                                    PROPORTIONAL, never DIFFERENTIAL — road should be
+                                    disqualifying for grain and merely dear for silk
+                                    (now C1b). And it REMOVES a charge: a 4,000 km sea
+                                    haul at 91% beating 1,000 km overland at 182% is
+                                    historically CORRECT (Baltic grain reached
+                                    Amsterdam; inland Polish grain did not), so
+                                    trans-oceanic trade is §5's component bug alone,
+                                    not a freight mispricing. Freight does still reach
+                                    only the founding hubs — every colony founded
+                                    during a campaign routes by straight line. (5) Caravan/boat
                                     capacity is declared and unwired: `CAPACITY_BIND_
                                     DOSE = 0`, so any shipment takes one slot; 96% of
                                     cargo is ownerless and never reaches the check;

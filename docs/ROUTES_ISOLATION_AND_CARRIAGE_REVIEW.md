@@ -118,19 +118,65 @@ Three things then throw most of it away:
 
 - **The ratio is applied to DAYS, and days then does double duty as freight.**
   `good_freight(g, rate, days) = rate*days*bulk + perishable*days + VICTUAL*days`.
-  There is **no mode term anywhere in freight.** The 8× road penalty therefore
-  arrives as *time*, and multiplies `bulk` only incidentally. Historically this is
-  backwards in an important way: road freight is what **kills bulk goods
-  specifically** and barely inconveniences luxuries. A pack train carrying silk
-  across the Alps was ordinary commerce; the same train carrying wheat was
-  economically impossible. In this model wheat (`bulk 3.0`) and silk (`bulk 1.0`)
-  both take the same 8× road multiplier on days, so the mode never sorts the cargo.
+  There is **no mode term anywhere in freight** — literally true, and the
+  conclusion first drawn from it here was WRONG. See the correction block below,
+  which supersedes it: the mode ratio DOES reach freight, through `days`.
 
-  Measured, at `freight_per_day = 0.018`, wheat `base_value 1.0`, `bulk 3.0`,
-  55 km/day: freight is `0.055/day`, so **300 km of carriage costs 30% of grain's
-  value** — against real cart carriage that roughly *doubled* grain's price over
-  150–300 km. Overland bulk freight is ~3× too cheap, and it is exactly as cheap
-  by sea, where it should be ~8–20× cheaper.
+  What survives is narrower and still real: the mode penalty is
+  **proportional, never differential.** Wheat (`bulk 3.0`) pays 3× silk's freight
+  on either mode, and road costs 8× sea for both alike. Historically road
+  carriage is *disqualifying* for grain specifically and merely expensive for
+  silk — a pack train over the Alps carrying silk was ordinary commerce, the
+  same train carrying wheat was not. That differential is what the model lacks;
+  the ratio itself is present and correct.
+
+> ### CORRECTION (same session, before anything was built)
+>
+> The paragraph above originally claimed 300 km of grain carriage costs **30%**
+> of its value, that overland bulk freight is **~3× too cheap**, and that it is
+> **"exactly as cheap by sea."** All three were wrong, and the cause was using
+> the NOMINAL `days_per_cell` (55 km/day) instead of the ROUTED speed the cost
+> grid actually produces. Re-derived from `cost_to_days = days_per_cell · f /
+> (OPEN_SEA_COST · 100)`, one coarse cell at cost `c` takes `c·100·cost_to_days`
+> days, so the real effective speeds at the default 3600-wide grid are:
+>
+> | medium | cost | km/day | real pre-modern effective average |
+> |---|---|---|---|
+> | calm coastal sea | 0.50 | **242.0** | ~50–100 (fast passage ~150) |
+> | open sea | 2.20 | 55.0 | ″ |
+> | navigable river | 2.00 | 60.5 | ~40–60 downstream |
+> | flat temperate land | 4.00 | 30.2 | cart ~15–20, pack ~25–40 |
+> | steppe (campaign matrix) | 4.50 | 26.9 | ″ |
+> | desert | 6.00 | 20.2 | ″ |
+> | hills (e = 0.3) | 8.20 | 14.8 | ″ |
+>
+> Wheat freight is `0.055/day`, so the corrected figures are **54.5% of grain's
+> value over 300 km overland** (not 30%), **6.8% over 300 km of coastal sea**, and
+> **181.8% over 1,000 km overland**. Against a real cart that roughly doubled
+> grain's price over 150–300 km, flat-land carriage is about **2× too cheap**, and
+> on ordinary hilly ground (112% at 300 km) it is **already about right**. The
+> road:sea ratio measures **8:1**, exactly Masschaele.
+>
+> **So the diagnosis moves, and so does the fix.** The problem is NOT that road
+> freight is cheap; it is that **calm coastal sea runs at 242 km/day**, 2.4–4.8×
+> the real effective average, which makes every long sea lane far too cheap in
+> ABSOLUTE terms while the ratio stays right. The lever is therefore the
+> coastal-sea cost rung (`0.5`) or the 55 km/day reference speed — **not**
+> `freight_per_day`, and not a new mode term in `good_freight`. C1 below is
+> rewritten accordingly.
+>
+> One thing this correction *removes* from the charge sheet: a 4,000 km sea
+> crossing costs 91% of grain's value against 1,000 km overland at 182%, so the
+> model does prefer the long sea haul — and **that is historically correct**
+> (Baltic grain reached Amsterdam while inland Polish grain could not). The
+> trans-oceanic problem is §5's component bug making two continents one market
+> at all; it is not a freight mispricing.
+>
+> **The lesson, which is the reusable part:** the campaign's `days` are cost
+> units divided by `OPEN_SEA_COST`, so `days_per_cell` is a REFERENCE speed
+> attached to cost 2.2, never the speed anything actually travels at. Any freight
+> or travel-time arithmetic that reads `days_per_cell` as "the speed" is wrong by
+> the ratio of that medium's cost to 2.2 — 8× for coastal sea, 1.8× for flat land.
 
 - **`TickHub.river` buys a city nothing.** Every reader of it (`production.rs`,
   `houses.rs`, `read_hubs.rs`) uses it either as a **display label** — which of two
@@ -456,15 +502,25 @@ the current comment claims and does not keep.
 
 ### Stage C — carriage that sorts cargo by mode (the historical core)
 
-**C1 · Put mode into `good_freight`, and make it multiply `bulk`.**
-A per-mode rate — sea : river : road — applied to the *bulk* term, so road freight
-kills grain and barely touches silk. Calibrate road so grain roughly doubles over
-150–300 km (Masschaele; Duncan-Jones on the Price Edict), which means raising
-overland bulk freight ~3× **and** cutting sea bulk freight well below it.
-*Gate that is not the target:* `econ_expenditure_shares_resemble_a_household` —
-food is ~60% of spend, and tripling grain's carriage will push on it hard. Dose
-this from the current mode-blind rate, re-running `econ_` **per step**, not in one
-jump. Expect the wealth bound to be the binding constraint.
+**C1 · Slow calm coastal sea toward a real effective average** (REWRITTEN by the
+correction in §2 — the original called for raising road freight ~3× and adding a
+mode term to `good_freight`, and both were based on a bad number). The road:sea
+ratio is already 8:1 and correct; the ABSOLUTE level of sea speed is not. Raise the
+coastal-sea cost rung above `0.5` (or lower the 55 km/day reference) until calm
+coastal sea lands in the ~50–100 km/day band, and leave `freight_per_day` alone.
+Land speeds already sit where history puts them, so this must not touch them.
+*Gate that is not the target:* `econ_expenditure_shares_resemble_a_household` — food
+is ~60% of spend and dearer sea freight pushes on it hard — plus
+`the_dosed_economy_stays_healthy_on_a_realistically_dense_world`, since slowing sea
+lengthens every lane's `days` and `SHIP_LEG_MAX_KM`'s staging relay reads distance,
+not days. Dose in steps, re-running `econ_` per step. Expect the hard wealth bound
+to bind: slower sea concentrates margin in the ports that can still reach a market.
+
+**C1b · Only then, the DIFFERENTIAL penalty** — make road cost scale harder with
+`bulk` than sea does, so grain is priced off the road while silk is not. This is
+the part of the original C1 that survives, and it is a genuine addition rather
+than a recalibration. *Gate:* long-haul trade VOLUME must not collapse, and
+low-bulk luxury lanes must survive unchanged.
 
 **C2 · Separate travel TIME from freight COST.** Right now one `days` is both, so
 the 1:4:8 cost ratio also claims a ship is 8× faster than a cart, which it is not
@@ -570,6 +626,24 @@ almost everything sets is the thing being fixed.
 - **The tick is not the performance problem.** One nested-`Vec` allocation in the
   whole production path, bounded dispatch, precomputed lookups. Do not go looking
   for wins there; they are in the query layer.
+- **`days_per_cell` is NOT a speed — it is a reference speed pinned to cost 2.2.**
+  This document's own worst error (§2's correction block) came from reading it as
+  one. `cost_to_days = days_per_cell · f / (OPEN_SEA_COST · 100)`, so a medium's real
+  speed is `55 · 2.2 / cost` km/day — 242 for calm coastal sea, 30.2 for flat land.
+  Any freight or travel-time figure derived from the nominal 55 km/day is wrong by
+  that medium's cost ratio. Recorded here because the mistake survived writing the
+  finding, the plan and the commit message, and was only caught by re-deriving the
+  arithmetic when asked to explain it out loud.
+- **Overland freight is NOT badly mispriced, and road:sea is NOT flat.** Both were
+  claimed in this document's first cut and both are false: 54.5% of grain's value
+  over 300 km of flat land, 112% over hilly, against a real cart that roughly
+  doubled it — so land is about 2× cheap at worst and right on ordinary ground —
+  and the road:sea ratio measures 8:1. Do not "fix" `freight_per_day`.
+- **A long sea haul beating a shorter overland one is CORRECT, not a bug.** 4,000 km
+  by sea at 91% of grain's value against 1,000 km overland at 182% is the Baltic-
+  grain-to-Amsterdam fact. Trans-oceanic trade is wrong here for one reason only —
+  §5's component build makes two continents one market — and fixing freight would
+  not touch it.
 - **The 1:4:8 ratio is not missing and does not need re-deriving.** It is correct,
   cited, and in the cost grid already. The problem is its reach (§2), not its value.
   Do not "add" it.
