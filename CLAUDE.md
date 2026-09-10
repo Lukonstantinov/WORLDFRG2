@@ -1206,6 +1206,24 @@ shipped from that audit, each additive and gated:
   GAIN` over home. A true no-op on a province-less campaign only in its
   province half; the city-dearth half still fires (`hub_province`/`prov_cap`
   reading empty just zeroes `prov_pressure`, not the whole push).
+  **`EXODUS_DEST_ABSORB_CAP` (0.10, added after this shipped)**: every pushed
+  hub in a component independently ranks the same candidates and picks its
+  single best-off destination, so without a cap they all converge on the SAME
+  winner in the SAME year. A destination may not absorb migrants worth more
+  than this share of its own pass-start population per year; a source whose
+  top pick is already full falls through to the next-best candidate. Fixed a
+  real regression this introduced in two dense-world route-staging gates
+  (`the_dosed_economy_stays_healthy_on_a_realistically_dense_world`,
+  `the_relay_carries_long_lanes_in_stages_on_a_realistically_dense_world`).
+  The obvious theory — an unbounded destination floods, overloads, and the
+  resulting famine deaths (unlike exodus itself) destroy population — is
+  TESTED AND FALSE (`diag_exodus_population_concentration`, `#[ignore]`d):
+  total population on `dense_world` collapses along nearly the same
+  trajectory regardless of whether exodus is disabled, uncapped, or capped
+  anywhere from 0.08 to 0.15; that crash is a pre-existing property of the
+  fixture. What the cap in a narrow 0.09–0.12 band actually restores is which
+  HUBS end up populated (and so stay viable relay waypoints), not how much
+  population survives in total.
 - **Per-profession consumption baskets** (`cities.rs::society_demand_mult`) —
   composed WITH S1, deliberately, after the audit itself recommended against
   building this (risk of fighting S1's just-shipped budget-share demand
@@ -5445,8 +5463,14 @@ CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND I
                                     the same good, and the column must not claim
                                     more than that
 ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
-                                  ← ⭐ ANALYSIS ONLY, NOTHING BUILT. The route/
-                                    connectivity/carriage counterpart to TRADE_AND_
+                                  ← ⭐ STAGES A + B BUILT (§9's own plan — dedup/
+                                    parallelise the routing Dijkstras, sample the cost
+                                    grid per tile, price mountain passes by minimum,
+                                    build trade components from ROUTED reachability
+                                    instead of Euclidean distance, guarantee every
+                                    settlement a route with fall-through); STAGE C
+                                    (the carriage/economy dose walk) NOT STARTED. The
+                                    route/connectivity/carriage counterpart to TRADE_AND_
                                     MARKET_REVIEW (which reviews the PRICE mechanism).
                                     Its headline is that the economy's problem is not
                                     missing mechanism: **ELEVEN built, wired, gated
@@ -5462,34 +5486,50 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     `econ_inheritance_rules_fragment_differently`
                                     (single-seed, 60-year) as the one instrument
                                     blocking all eleven doses.
-                                    **Five measured bugs.** (1) Mountain passes ARE
-                                    priced (a ×0.45 saddle discount) but the coarse
-                                    cell is 55.7 km and elevation is POINT-SAMPLED
-                                    from the block centre, so a 1-10 km real pass is
-                                    invisible and route quality through mountains is
-                                    luck — a pass is a MINIMUM, so reduce the block
-                                    by min land elevation. (2) COMPONENTS ARE BUILT
-                                    FROM EUCLIDEAN DISTANCE, land and sea never
-                                    consulted: `max_link = 0.30 * world_w` = 12,022 km
-                                    at the default grid, wider than EVERY ocean on
-                                    Earth, and union-find is transitive — so the world
-                                    collapses to ONE component, every
-                                    `component == component` guard is a no-op, and #6/
-                                    #6b draw exactly the straight-line trans-oceanic
-                                    lanes their own comments say they prevent. The
-                                    start-time tiny-component rescue is ALSO still
-                                    unbounded ("any distance"): TECTONICS_AND_
-                                    ISOLATION_PLAN Part A fixed the tick-time twin
-                                    (`ISOLATION_RESCUE_MAX_KM`) and never the
-                                    start-time one, and its guard test hands the
-                                    tick-time function components ALREADY ASSIGNED, so
-                                    it cannot see the build. (3) A non-hub settlement
-                                    gets exactly ONE candidate link, chosen by
-                                    STRAIGHT-LINE distance, dropped silently on a
-                                    Dijkstra miss, a `path_allowed` reach violation,
-                                    or two towns sharing one coarse cell — with no
-                                    fall-through, so the "no town is left unconnected"
-                                    comment above the loop is not true as written.
+                                    **Five measured bugs, three now FIXED (B1-B3).**
+                                    (1) FIXED — mountain passes ARE priced (a ×0.45
+                                    saddle discount) but the coarse cell WAS 55.7 km
+                                    with elevation POINT-SAMPLED from the block centre,
+                                    so a 1-10 km real pass was invisible and route
+                                    quality through mountains was luck. `min_land_elev`
+                                    (the block's own minimum land elevation, sampled in
+                                    the same per-tile pass that also dropped the six
+                                    full-grid fine arrays, §8.9-style) now prices both
+                                    the base relief term and the saddle discount; the
+                                    centre-sampled `elev` is kept for every OTHER reader
+                                    (`path_metrics`, `flow.rs`'s land-leg kind). Gated
+                                    by `a_narrow_pass_off_centre_is_still_found`.
+                                    (2) FIXED — components WERE built from EUCLIDEAN
+                                    distance, land and sea never consulted (`max_link =
+                                    0.30 * world_w` = 12,022 km at the default grid,
+                                    wider than EVERY ocean on Earth), so the world
+                                    collapsed to ONE component and every
+                                    `component == component` guard downstream was a
+                                    no-op. `compute_routed_components`
+                                    (query_commands/mod.rs) now builds components from
+                                    AT MOST *k* single-source Dijkstra searches (*k* =
+                                    number of components) over the real coarse cost
+                                    grid, bounded by a new `TRADE_COMPONENT_HORIZON_KM`
+                                    (3,000 km) via `path_allowed`'s reach-1 rule. The
+                                    old "rescue tiny/lone components... any distance"
+                                    fuse is RETIRED, not capped — real reachability
+                                    already unions anything that can legally reach a
+                                    bigger market, so a hub that cannot is genuinely
+                                    isolated and may go poor. Gated by two
+                                    `component_tests` fixtures (an ocean wider than the
+                                    horizon splits; narrower merges).
+                                    (3) FIXED — a non-hub settlement got exactly ONE
+                                    candidate link by straight-line distance, dropped
+                                    silently on a Dijkstra miss, a reach violation, or a
+                                    shared coarse cell. `compute_trade_routes` now tries
+                                    a ranked shortlist of its 5 nearest hubs, folded
+                                    into the same batched-Dijkstra call, falling through
+                                    to the next candidate instead of dropping the town;
+                                    a town whose whole shortlist fails is logged, though
+                                    surfacing that to the UI is a separate, unbuilt
+                                    frontend/bridge change. Gated by
+                                    `a_lesser_town_falls_through_to_its_second_hub_
+                                    when_the_first_is_unreachable`.
                                     (4) freight — **the doc CORRECTS ITSELF here and
                                     the correction is the finding**; read §2's
                                     correction block, not the claim above it. First cut
@@ -5527,24 +5567,34 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     `cap_land` pools boats WITH caravans; and 120:40 is
                                     3:1 against a historical ~10-13:1 (a cog 150-200 t
                                     vs a hundred-camel caravan 15-20 t).
-                                    **Perf** (§8 of the doc): ZERO rayon in all seven
-                                    `query_commands/` files; one Dijkstra per PAIR at
-                                    four call sites (~500 whole-grid searches, ~2 GB of
-                                    allocation churn per route refresh) when the
-                                    single-source fix is already done and DOCUMENTED as
-                                    precedent in `flow.rs`; `build_coarse_cost` loads
-                                    97 MB of fine fields to read 259k centre cells
-                                    (390 MB on Large); campaign start pays 5× that plus
-                                    ~1,000 sequential Dijkstras (`SEASON_SLICES`);
-                                    `charter_owner` allocates n nested Vecs PER DAY.
-                                    Four-stage plan (A free speed → B cost grid can see
-                                    terrain → C carriage sorts cargo by mode → D
-                                    siting), each item with a gate that is not its own
-                                    target, plus 7 open questions and a NON-FINDINGS
-                                    list recording that the tick is NOT the perf
-                                    problem, the 1:4:8 ratio does not need re-deriving,
-                                    and worldgen river siting is one of the better-
-                                    modelled things in the tree
+                                    **Perf** (§8 of the doc; P1/P2/P3/P5 now FIXED by
+                                    Stage A, P4 improved as a consequence): ZERO rayon
+                                    in all seven `query_commands/` files → rayon now
+                                    covers the batched Dijkstra and the route-days
+                                    matrix build; one Dijkstra per PAIR at four call
+                                    sites (~500 whole-grid searches, ~2 GB of allocation
+                                    churn per route refresh) → deduped to one per SOURCE
+                                    via a shared `coarse_dijkstra_batch`, proven
+                                    byte-identical to the old per-pair paths;
+                                    `build_coarse_cost` loading 97 MB of fine fields to
+                                    read 259k centre cells (390 MB on Large) → sampled
+                                    per tile as it loads instead; `charter_owner`
+                                    allocating n nested Vecs PER DAY → one flat
+                                    `Vec<i32>`. Campaign start's ~1,000 sequential
+                                    Dijkstras (`SEASON_SLICES`) are the same batching
+                                    win applied at scale, now parallel rather than
+                                    sequential. Four-stage plan (A free speed → B cost
+                                    grid can see terrain → C carriage sorts cargo by
+                                    mode → D siting) — A and B are now BUILT (see the
+                                    bugs list above for B1-B3's own status); C and D are
+                                    not started. Plus 7 open questions (§10, all
+                                    answered — A→B→C order, isolated markets may starve,
+                                    a ~3,000 km trade horizon, the inheritance gate goes
+                                    multi-seed before Stage C) and a NON-FINDINGS list
+                                    recording that the tick is NOT the perf problem, the
+                                    1:4:8 ratio does not need re-deriving, and worldgen
+                                    river siting is one of the better-modelled things in
+                                    the tree
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```

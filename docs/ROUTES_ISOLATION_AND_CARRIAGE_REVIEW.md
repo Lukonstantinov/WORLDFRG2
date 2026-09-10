@@ -1,10 +1,13 @@
 # Routes, Isolation & Carriage — a review, five measured bugs, and a plan
 
-**Status: ANALYSIS ONLY. Nothing here is built and nothing is approved.** This is a
-read of the trade-route / connectivity / carriage layer as it actually stands at
-`d8cd026`, the measured findings that came out of reading it, and a plan in
-dependency order. It follows §2.4's rules: every proposal carries a **gate that is
-not its own target**, and the findings are written down whether or not anyone acts.
+**Status: STAGE A + B BUILT AND GATED; STAGE C NOT STARTED.** This began as analysis
+only; §10's questions have since been answered (A → B → C order, isolated markets may
+starve, a ~3,000 km regional trade horizon, `econ_inheritance_rules_fragment_
+differently` to go multi-seed before any Stage C dose walk) and Stages A and B are
+now implemented — see each item's own status line below. Stage C (the carriage/
+economy dose walk) is unstarted; the multi-seed gate work it depends on has not been
+done either. It follows §2.4's rules: every proposal carries a **gate that is not its
+own target**, and the findings are written down whether or not anyone acts.
 
 It goes *underneath* `docs/TRADE_AND_MARKET_REVIEW.md` (which reviews the price
 mechanism) and beside `docs/TECTONICS_AND_ISOLATION_PLAN.md` Part A (which
@@ -444,25 +447,38 @@ names **a gate that is not its own target**, per §2.4.
 
 ### Stage A — free speed, zero behaviour change (do first, unblocks measurement)
 
-**A1 · One Dijkstra per source at the four remaining call sites.**
-Adopt `coarse_dijkstra_dist_prev` + predecessor-walk exactly as `flow.rs` did.
-*Gate that is not the target:* the routes must be **byte-identical** — dump route
-polylines before and after and diff. The `flow.rs` comment already asserts the
-paths are the same; this proves it rather than trusting it.
+**✅ BUILT.** All four items shipped together (`d7caa11`, `dcfa266`).
+
+**A1 · One Dijkstra per source at the four remaining call sites.** ✅ Shipped as a
+shared `coarse_dijkstra_batch`/`coarse_path_from_dist_prev` pair in `query_commands/
+mod.rs`, adopted at all four sites (`compute_trade_routes`, the candidate-edge build
+in `compute_trade_matrix`'s region graph, route centrality, and the lazily-matched
+greedy loop in `compute_trade_matrix`'s flow assignment — kept lazy there, per-source
+cached rather than pre-batched, since which pairs are queried depends on the greedy
+match itself).
+*Gate that is not the target:* ✅ done, as a direct equality test rather than a
+manual dump-and-diff — `dijkstra_batch_tests::batched_dijkstra_matches_per_pair_
+dijkstra` asserts the batched output equals `coarse_dijkstra`'s own per-pair result,
+cell-for-cell, on a mixed land/sea/relief world.
 
 **A2 · Rayon the independent Dijkstras** (per source in the matrix build, per
-source in the route build).
-*Gate:* `ocean_atmosphere_field_checksums`-style determinism — same seed, identical
-output regardless of thread scheduling (§8.9 rule 2's discipline). A route matrix
-that varies with core count is worse than a slow one.
+source in the route build). ✅ Shipped in both `coarse_dijkstra_batch` and
+`compute_route_days_matrix_for_season` (`par_chunks_mut` over rows/sources).
+*Gate:* satisfied by construction — each parallel task writes only the output
+slots its own source owns (disjoint by construction), so the merge is order-
+independent; no dedicated determinism test was added beyond that argument.
 
 **A3 · Sample `build_coarse_cost` per tile instead of loading six full grids.**
-*Gate:* the coarse grid must come out bit-identical while the fine allocation
-disappears — assert equality against the current builder on a real world, then
-measure peak RSS.
+✅ Shipped, folded together with B1 per this plan's own note.
+*Gate:* the "bit-identical" form of this gate no longer applies once B1 changes
+what a block's cost actually is — see B1's own gate below, which is what actually
+covers this pair.
 
-**A4 · Flatten `charter_owner`.**
-*Gate:* `cargo test --lib tick::tests` unchanged; the dynamics run bit-identical.
+**A4 · Flatten `charter_owner`.** ✅ Shipped — one `Vec<i32>` sized `n·ng` in place
+of `n` separate heap allocations.
+*Gate:* `cargo test --lib tick::tests` — 212/216 at the time (the same 4 pre-
+existing failures Stage A's own commit diagnosed as unrelated to it, confirmed by
+reverting this branch's changes and reproducing them on baseline).
 
 Stage A changes no simulated number. That is the point: it makes every measurement
 below cheap enough to run per dose step, which is what §2.4 requires and what the
@@ -470,35 +486,54 @@ stalled dose walk has been paying for.
 
 ### Stage B — make the cost grid able to see terrain (correctness, small)
 
+**✅ BUILT.** B1 shipped with A3 (`dcfa266`); B2 and B3 shipped together (`6a24322`).
+
 **B1 · Sample per-block MIN land elevation for traversal cost** (mean/centre for
-climate, hazard, temperature). Fold into A3.
-*Gate that is not the target:* a **pass-finding** test — build a world with a known
-ridge pierced by one known gap, and assert the least-cost route crosses at the gap
-rather than over the crest, at the *production* `f`. Then re-read the Earth gate:
-it scores a baked DEM and calls no generator (§8.23b), so it cannot move — verify
-rather than assume.
-*Caveat to state up front:* a min-reduce makes land **cheaper** everywhere, not
-only at passes. Expect overland routes to lengthen relative to sea and re-measure
-the sea/land share of trade before and after.
+climate, hazard, temperature). ✅ Shipped — `min_land_elev` prices the base relief
+term and the saddle discount; `elev` (centre-sampled) is untouched for every other
+reader (`path_metrics`, `flow.rs`'s land-leg kind).
+*Gate that is not the target:* ✅ done as planned — `a_narrow_pass_off_centre_is_
+still_found` builds a ridge with one real gap placed off its block's own centre
+sample, and asserts crossing costs distinctly less than the same ridge with no gap
+at all (a same-column "did it cross here" check doesn't discriminate: a single
+blocking column has nowhere else to cross regardless of whether the gap is seen).
+Verified failing on the unfixed centre-only code first, per §8.24a3's rule.
+*Caveat that materialised:* re-read, the Earth gate indeed cannot move (§8.23b — it
+scores a baked DEM, calls no generator) — verified, not just assumed.
 
-**B2 · Build components from ROUTED reachability, not Euclidean distance**, using
-the coarse grid and `path_allowed`'s own crossing rule. Cap the start-time tiny
-rescue at `ISOLATION_RESCUE_MAX_KM`, the same constant the tick-time twin uses.
-*Gate:* extend `rescue_tiny_components_never_crosses_an_ocean` to exercise the
-**component build** on a real two-continent fixture — an ocean wider than the reach
-must yield **two** components. Verify it **fails on the unfixed code** first
-(§8.24a3's own rule, paid for three times already).
-*Gate that is not the target:* `econ_fidelity_scorecard`. Splitting a world into
-real markets will move the price/distance gradient, and the direction is the
-interesting result either way — a genuinely isolated continent *should* show its
-own internal gradient.
+**B2 · Build components from ROUTED reachability, not Euclidean distance.** ✅
+Shipped as `compute_routed_components` (at most *k* single-source searches, *k* =
+number of components), using `path_allowed`'s reach-1 rule bounded by a NEW
+`TRADE_COMPONENT_HORIZON_KM` (3,000 km, per §10 Q3's confirmed reading) rather than
+the pre-existing `ISOLATION_RESCUE_MAX_KM` this item originally proposed reusing —
+that constant governs a different, already-tested tick-time mechanism and was left
+alone (see the commit's own scoping note). **The tiny-component rescue was
+RETIRED, not capped**: with real reachability deciding components, a hub
+reachable to a bigger market is already unioned with it, and one that isn't is
+genuinely isolated — per §10 Q2's confirmed "let it starve" reading, forcing it
+onto an unreachable market was exactly the dishonest union this item names.
+*Gate:* ✅ done, as two NEW dedicated fixtures (`component_tests`) rather than an
+extension of `rescue_tiny_components_never_crosses_an_ocean` (that test exercises a
+different function — the tick-time twin — not the component build this item
+touches): two landmasses split by open water wider than the horizon come out as
+two components; the same landmasses with a narrower gap come out as one. Both
+directions asserted on purpose.
+*Gate that is not the target:* `econ_fidelity_scorecard` — run (green) as part of
+the broader `econ_` suite; the reference/scorecard world's own components did not
+visibly change at this world's scale, so no gradient movement was measured either
+way. A larger, more geographically dispersed world would be a better instrument for
+this specific claim — not yet built.
 
-**B3 · Guarantee every settlement a route, by routed cost with fall-through.**
-Pick the nearest hub by cost (free from A1), try candidates in order until one
-passes `path_allowed`, and report the genuinely unroutable rather than dropping it.
-*Gate:* a test asserting **every** settlement in a real generated world appears in
-at least one returned route, or is explicitly reported unroutable — the guarantee
-the current comment claims and does not keep.
+**B3 · Guarantee every settlement a route, by routed cost with fall-through.** ✅
+Shipped — a ranked shortlist of the nearest 5 hubs (not just the nearest 1) per
+lesser town, folded into the same A1 batch so extra candidates cost nothing beyond
+what testing the first one already cost per source.
+*Gate:* ✅ partially — `a_lesser_town_falls_through_to_its_second_hub_when_the_
+first_is_unreachable` (via a new testable `compute_trade_routes_impl`) proves the
+fall-through mechanism directly rather than end-to-end on a full generated world.
+**Reporting the genuinely unroutable is partial**: a town whose whole shortlist
+fails is logged (`log::warn!`), not surfaced through the IPC/UI layer — that is a
+separate frontend/bridge change, not attempted this pass.
 
 ### Stage C — carriage that sorts cargo by mode (the historical core)
 
