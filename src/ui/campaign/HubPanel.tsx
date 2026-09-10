@@ -39,7 +39,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "depots" | "warehouse" | "people" | "supply" | "provision";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -224,10 +224,10 @@ export function HubPanel() {
     return () => setFlowHighlight([]);
   }, [tab, tradeView, selectedHub, setFlowHighlight]);
 
-  // Futures lanes touching this city (Depots tab's import/export summary; the
+  // Futures lanes touching this city (Warehouse tab's import/export summary; the
   // per-depot list itself hands off to WarehousesPanel, which fetches its own).
   useEffect(() => {
-    if (tab !== "depots" || !campActive) return;
+    if (tab !== "warehouse" || !campActive) return;
     let alive = true;
     campaignFuturesLanes().then((l) => { if (alive) setLanes(l); }).catch(() => {});
     return () => { alive = false; };
@@ -316,8 +316,7 @@ export function HubPanel() {
     ...(colony ? [{ id: "supply" as Tab, label: "Supply" }] : []),
     { id: "trade", label: "Trade" },
     { id: "estates", label: "Estates" },
-    ...(campActive && detail && !detail.is_estate ? [{ id: "warehouse" as Tab, label: "Warehouse" }] : []),
-    ...(campActive ? [{ id: "depots" as Tab, label: "Depots" }] : []),
+    ...(campActive && detail ? [{ id: "warehouse" as Tab, label: "Warehouse" }] : []),
     { id: "people", label: "People" },
   ];
 
@@ -638,7 +637,11 @@ export function HubPanel() {
               )}
             </div>
           )}
-          {hub.top_export && (
+          {/* Richest trade / Monopolies read the FROZEN worldgen EconHub snapshot
+              (economy never re-runs once a campaign starts, §3.4). Shown only
+              pre-campaign — once live, the Trade tab's Market/Flows/Traders
+              views carry the real, moving equivalent. */}
+          {!campActive && hub.top_export && (
             <div style={{ color: "#e0c060", fontSize: 11, margin: "5px 0 2px", display: "flex", gap: 6, alignItems: "baseline" }}>
               <span style={{ color: "#6a86a6", fontSize: 10 }}>Richest trade:</span>
               <span style={{ fontWeight: 700 }}>{iconFor(hub.top_export)} {labelFor(hub.top_export)}</span>
@@ -649,20 +652,16 @@ export function HubPanel() {
               )}
             </div>
           )}
-          {hub.monopolies && hub.monopolies.length > 0 && (
+          {!campActive && hub.monopolies && hub.monopolies.length > 0 && (
             <div style={{ color: "#9ab0c8", fontSize: 10, margin: "4px 0 2px" }}>
               <span style={{ color: "#6a86a6" }}>Monopolies: </span>
               {hub.monopolies.map((m) => `${iconFor(m)} ${labelFor(m)}`).join(", ")}
             </div>
           )}
 
-          {/* Ward grid — buildings tinted by their owning faction (control at a glance) */}
-          {detail && (detail.buildings?.length ?? 0) > 0 && (
-            <>
-              <div style={{ ...sectionHdr, marginTop: 6 }}>Buildings &amp; control</div>
-              <WardGrid buildings={detail.buildings!} />
-            </>
-          )}
+          {/* Buildings & control (the ward grid) lives on the Estates tab now —
+              it's a holdings/ownership view and duplicated the exact same
+              component here for no reason. */}
 
           {/* DLC 3.5 · City finances — the treasury books (taxes in, spending out) */}
           {detail && (detail.treasury !== undefined) && (
@@ -912,16 +911,12 @@ export function HubPanel() {
         );
       })()}
 
-      {/* ════════════ DEPOTS — the per-depot LIST hands off to the Warehouses
-             panel (which already reads `selectedHub` and filters to this city);
-             the futures import/export summary + map-focus action stay, since
-             neither exists anywhere else. ════════════ */}
-      {/* ════════════ WAREHOUSE (the city's OWN store — §4.3/D17) ════════════ */}
-      {tab === "warehouse" && selectedHub !== null && (
-        <CityWarehousePanel hub={selectedHub} tick={campTick} />
-      )}
-
-      {tab === "depots" && (() => {
+      {/* ════════════ WAREHOUSE (the city's OWN store — §4.3/D17), plus the
+             futures import/export summary + map-focus action (formerly the
+             separate Depots tab, folded in here — the per-depot LIST itself
+             hands off to the Warehouses panel, which already reads
+             `selectedHub` and filters to this city). ════════════ */}
+      {tab === "warehouse" && selectedHub !== null && (() => {
         const inbound = lanes.filter((l) => l.b_name === hub.name);
         const outbound = lanes.filter((l) => l.a_name === hub.name);
         const cityList = (ls: FuturesLane[], pick: (l: FuturesLane) => string) =>
@@ -929,9 +924,10 @@ export function HubPanel() {
         const focusCity = () => { setFuturesFocus({ city: hub.name }); setOverlayVisible("futures", true); };
         return (
           <>
+            <CityWarehousePanel hub={selectedHub} tick={campTick} />
             <div onClick={() => useUIStore.getState().setShowWarehouses(true)}
               title="Every house warehouse & manufactory in the world, filtered to this city"
-              style={{ cursor: "pointer", color: "#9ab0c8", fontSize: 10 }}>
+              style={{ marginTop: 8, cursor: "pointer", color: "#9ab0c8", fontSize: 10 }}>
               🏬 Warehouses &amp; estates here →
             </div>
             <div style={{ ...sectionHdr, marginTop: 8 }}>Futures supply links</div>
@@ -984,12 +980,11 @@ export function HubPanel() {
               FONDACO badge where a foreign trading community keeps a bailo here. */}
           <PeoplePowers hub={hub.id} />
 
-          <div style={{ ...sectionHdr, marginTop: 8 }}>Society</div>
-          <div style={{ display: "flex", gap: 4 }}>
-            <ClassTile label="Nobility" value={hub.nobility ?? 0} level={hub.elite_level ?? 0} color="#e0c060" />
-            <ClassTile label="Merchants" value={hub.merchants ?? 0} level={hub.merchant_level ?? 0} color="#5fc8a8" />
-            <ClassTile label="Commoners" value={hub.commoners ?? 0} level={1} color="#8aa0c0" />
-          </div>
+          {/* Society lives on the Summary tab (live SocietyBrief, once a campaign
+              is running) — this used to duplicate it here with the cruder,
+              frozen worldgen 3-class estimate (hub.nobility/merchants/commoners),
+              which could disagree with the live figure. Removed rather than kept
+              in sync with two sources of truth. */}
 
           {/* How goods reach this city — by ship (sea) vs caravan (land). Every
               shipment, house or guild, is tagged by how it travelled. */}
@@ -1146,7 +1141,13 @@ export function HubPanel() {
             );
           })()}
 
-          {hub.luxuries && hub.luxuries.length > 0 && (
+          {/* Luxury market / Shortages / Cargo both ways / World trade nodes /
+              Wealthiest hubs all read the FROZEN worldgen EconHub snapshot or
+              its trade-matrix corridors — pre-campaign projections that never
+              move once play begins (§3.4). Shown only pre-campaign; the Trade
+              tab (Market/Flows/Traders) is the live equivalent of every one of
+              these once a campaign is running. */}
+          {!campActive && hub.luxuries && hub.luxuries.length > 0 && (
             <>
               <div style={{ ...sectionHdr, marginTop: 6 }}>Luxury market (demand vs. arrivals · price)</div>
               {(() => {
@@ -1174,7 +1175,7 @@ export function HubPanel() {
             </>
           )}
 
-          {hub.shortages && hub.shortages.length > 0 && (
+          {!campActive && hub.shortages && hub.shortages.length > 0 && (
             <>
               <div style={{ ...sectionHdr, marginTop: 6 }}>Shortages — why goods don't arrive</div>
               {hub.shortages.map((s) => (
@@ -1188,7 +1189,7 @@ export function HubPanel() {
             </>
           )}
 
-          {(outCargo.length > 0 || inCargo.length > 0) && (
+          {!campActive && (outCargo.length > 0 || inCargo.length > 0) && (
             <>
               <div style={{ ...sectionHdr, marginTop: 6 }}>Cargo both ways</div>
               <div style={{ display: "flex", gap: 8 }}>
@@ -1213,7 +1214,7 @@ export function HubPanel() {
             </>
           )}
 
-          {economy.class_stats && economy.class_stats.length > 0 && (
+          {!campActive && economy.class_stats && economy.class_stats.length > 0 && (
             <>
               <div style={{ ...sectionHdr, marginTop: 6 }}>World trade nodes</div>
               <div style={{ display: "flex", gap: 4 }}>
@@ -1228,18 +1229,22 @@ export function HubPanel() {
             </>
           )}
 
-          <div style={{ ...sectionHdr, marginTop: 6 }}>Wealthiest hubs</div>
-          {wealthSorted.slice(0, 5).map((h, i) => (
-            <div key={h.id} onClick={() => setSelectedHub(h.id)}
-              style={{ ...row, cursor: "pointer", background: h.id === hub.id ? "#1a2c40" : "transparent" }}>
-              <span style={{ color: "#6a86a6", minWidth: 16 }}>#{i + 1}</span>
-              <span style={{ flex: 1, color: h.id === hub.id ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {h.id === topHub?.id ? "🟨 " : h.emporium ? "🔺 " : ""}{h.name}
-              </span>
-              <span style={{ color: "#9ab0c8", fontSize: 9 }}>{h.population.toLocaleString()}</span>
-              <span style={{ color: "#7fd0a0", fontSize: 10, minWidth: 32, textAlign: "right" }}>{Math.round(h.wealth * 100)}%</span>
-            </div>
-          ))}
+          {!campActive && (
+            <>
+              <div style={{ ...sectionHdr, marginTop: 6 }}>Wealthiest hubs</div>
+              {wealthSorted.slice(0, 5).map((h, i) => (
+                <div key={h.id} onClick={() => setSelectedHub(h.id)}
+                  style={{ ...row, cursor: "pointer", background: h.id === hub.id ? "#1a2c40" : "transparent" }}>
+                  <span style={{ color: "#6a86a6", minWidth: 16 }}>#{i + 1}</span>
+                  <span style={{ flex: 1, color: h.id === hub.id ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {h.id === topHub?.id ? "🟨 " : h.emporium ? "🔺 " : ""}{h.name}
+                  </span>
+                  <span style={{ color: "#9ab0c8", fontSize: 9 }}>{h.population.toLocaleString()}</span>
+                  <span style={{ color: "#7fd0a0", fontSize: 10, minWidth: 32, textAlign: "right" }}>{Math.round(h.wealth * 100)}%</span>
+                </div>
+              ))}
+            </>
+          )}
 
           {/* ── history charts + chronicle ── */}
           {detail ? (
@@ -1716,19 +1721,6 @@ function peopleSummary(hub: EconHub, labelFor: (id: string) => string, topName?:
   if (isTop && hub.nearest_ref) s += ` The world's pre-eminent entrepôt — a rival to ${hub.nearest_ref} of old.`;
   else if (topName) s += ` In trade it looks up to ${topName}, the realm's greatest market.`;
   return s;
-}
-
-function ClassTile({ label, value, level, color }: { label: string; value: number; level: number; color: string }) {
-  const lvlWord = level > 0.6 ? "high" : level > 0.3 ? "moderate" : "low";
-  return (
-    <div style={{ ...statTile, flex: 1 }}>
-      <div style={{ color, fontSize: 12, fontWeight: 700 }}>{value.toLocaleString()}</div>
-      <div style={{ color: "#6a86a6", fontSize: 8 }}>{label}</div>
-      <div style={{ height: 3, background: "#13202e", borderRadius: 2, marginTop: 2 }}>
-        <div style={{ height: 3, width: `${Math.min(100, level * 100)}%`, background: color, borderRadius: 2 }} title={`${lvlWord} share`} />
-      </div>
-    </div>
-  );
 }
 
 function Stat({ label, value }: { label: string; value: string }) {
