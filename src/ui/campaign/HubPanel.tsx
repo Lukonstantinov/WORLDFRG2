@@ -173,6 +173,18 @@ function HouseSharePie({ houses, localVolume, guildVolume, merchants }:
   );
 }
 
+/** The independent (non-house) trade volume a hub's local merchants + guilds
+ *  move, split by MERCHANT_LEVEL — the one formula "Ships & caravans working
+ *  this port" and "Who controls the trade" both need (a resident house's real
+ *  volume always leaves SOME trade for the unaffiliated locals + organised
+ *  guilds), so it lives once instead of being copy-pasted between them. */
+function independentTradeShare(hub: EconHub, houses: HouseBrief[]): { houseVol: number; mlev: number; guildVolume: number; localVolume: number } {
+  const houseVol = houses.reduce((s, h) => s + Math.max(0, h.volume ?? h.wealth), 0);
+  const mlev = hub.merchant_level ?? 0.3;
+  const independent = houseVol * (0.25 + 0.7 * mlev) + 0.5;
+  return { houseVol, mlev, guildVolume: independent * mlev, localVolume: independent * (1 - mlev) };
+}
+
 /** Hub inspector: click a trade hub → a tabbed settlement window. Overview holds
  *  the identity, population mood and character; Market the prices (× world value,
  *  supply/demand, currency, cheapest/dearest, exports & imports); Society the
@@ -189,6 +201,11 @@ export function HubPanel() {
   // The campaign tick — re-fetch the hub detail whenever it advances so the open
   // settlement's prices/wealth/population update live alongside the campaign.
   const campTick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
+  // Every live settlement's brief (id/name/trade_volume/wealth/hub_class) — the
+  // moving equivalent of the frozen worldgen `economy.hubs`, used so "GREATEST
+  // HUB"/EMPORIUM/wealth-rank track who is actually leading DURING a campaign
+  // instead of staying pinned to the pre-campaign snapshot forever.
+  const campHubs = useCampaignStore((s) => s.snapshot?.hubs ?? []);
   // A satellite still UNDER CONSTRUCTION shows the dedicated construction window instead
   // of this normal city panel; once built (build_stage→0) this panel takes over again.
   const isConstruction = useCampaignStore((s) => {
@@ -274,13 +291,34 @@ export function HubPanel() {
   const fmt = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0);
   const stars = Math.max(1, Math.min(5, hub.stars));
 
-  const topHub = economy.hubs.reduce((a, b) => (b.throughput ?? 0) > (a.throughput ?? 0) ? b : a, economy.hubs[0]);
-  const isTop = !!topHub && topHub.id === hub.id;
+  // Static (worldgen) ranking — the pre-campaign truth, and still what the
+  // "Wealthiest hubs" list (People tab, shown only pre-campaign) reads.
+  const topHubStatic = economy.hubs.reduce((a, b) => (b.throughput ?? 0) > (a.throughput ?? 0) ? b : a, economy.hubs[0]);
+  const wealthSorted = [...economy.hubs].sort((a, b) => b.wealth - a.wealth);
+  // Live (campaign) ranking — recomputed every tick from the running sim's own
+  // hub roster, which also covers campaign-founded settlements the frozen
+  // worldgen economy never knew about.
+  const selfCampHub = campHubs.find((h) => h.id === hub.id);
+  const topHubLive = campHubs.length > 0
+    ? campHubs.reduce((a, b) => (b.trade_volume ?? 0) > (a.trade_volume ?? 0) ? b : a, campHubs[0])
+    : undefined;
+  const wealthRankLive = [...campHubs]
+    .sort((a, b) => ((b.trade_wealth ?? 0) + (b.grain_wealth ?? 0)) - ((a.trade_wealth ?? 0) + (a.grain_wealth ?? 0)))
+    .findIndex((h) => h.id === hub.id) + 1;
+
+  const topHubName = campActive ? (topHubLive?.name ?? topHubStatic?.name) : topHubStatic?.name;
+  const isTop = campActive
+    ? !!selfCampHub && !!topHubLive && topHubLive.id === selfCampHub.id
+    : !!topHubStatic && topHubStatic.id === hub.id;
+  const isEmporium = campActive ? (selfCampHub?.hub_class ?? 0) >= 2 : !!hub.emporium;
   const cmp = isTop
     ? `≈${Math.round(hub.ref_pct ?? 100)}% of ${hub.nearest_ref ?? "Venice"}`
-    : `≈${Math.round(((hub.throughput ?? 0) / ((topHub?.throughput) || 1)) * 100)}% of ${topHub?.name ?? "the capital"}`;
-  const wealthSorted = [...economy.hubs].sort((a, b) => b.wealth - a.wealth);
-  const wealthRank = wealthSorted.findIndex((h) => h.id === hub.id) + 1;
+    : campActive
+      ? `≈${Math.round(((selfCampHub?.trade_volume ?? 0) / (topHubLive?.trade_volume || 1)) * 100)}% of ${topHubName ?? "the capital"}`
+      : `≈${Math.round(((hub.throughput ?? 0) / (topHubStatic?.throughput || 1)) * 100)}% of ${topHubName ?? "the capital"}`;
+  const wealthRank = campActive ? wealthRankLive : wealthSorted.findIndex((h) => h.id === hub.id) + 1;
+  const rankTotal = campActive ? campHubs.length : economy.hubs.length;
+  const showRank = campActive ? !!selfCampHub : inEconomy;
 
   const desireClass = (good: string): string | null =>
     economy.good_stats?.find((g) => g.good_name === good)?.biggest_desire_class ?? null;
@@ -327,15 +365,15 @@ export function HubPanel() {
       {/* ── Title + stats header (always visible; drag handle) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>
-          <div style={{ color: isTop ? "#f4c430" : hub.emporium ? "#ff8a6a" : "#e8d8b0", fontSize: 15, fontWeight: 700 }}>
-            {isTop ? "🟨 " : hub.emporium ? "🔺 " : ""}{hub.name}
+          <div style={{ color: isTop ? "#f4c430" : isEmporium ? "#ff8a6a" : "#e8d8b0", fontSize: 15, fontWeight: 700 }}>
+            {isTop ? "🟨 " : isEmporium ? "🔺 " : ""}{hub.name}
             {isTop && <span style={{ color: "#f4c430", fontSize: 9, marginLeft: 5 }}>GREATEST HUB</span>}
-            {!isTop && hub.emporium && <span style={{ color: "#ff6a4a", fontSize: 9, marginLeft: 5 }}>EMPORIUM</span>}
+            {!isTop && isEmporium && <span style={{ color: "#ff6a4a", fontSize: 9, marginLeft: 5 }}>EMPORIUM</span>}
           </div>
           <div style={{ color: "#8aa0c0", fontSize: 10 }}>
             <span style={{ color: "#ffd24a" }}>{"★".repeat(stars)}</span>
             {`  ${cmp}`}
-            {inEconomy && <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${economy.hubs.length}`}</span>}
+            {showRank && <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${rankTotal}`}</span>}
             {hub.sea_access === false && <span style={{ color: "#6a86a6" }}>{"  ·  lake/inland"}</span>}
           </div>
           {detail?.patron && (
@@ -685,7 +723,7 @@ export function HubPanel() {
           )}
 
           {/* Character summary */}
-          <div style={blurbBox}>{peopleSummary(hub, labelFor, topHub?.name, isTop)}</div>
+          <div style={blurbBox}>{peopleSummary(hub, labelFor, topHubName, isTop)}</div>
 
           {/* Satellite villages: sub-cap hinterland settlements that market through this
               town — how the small villages join the trade network. */}
@@ -1024,16 +1062,12 @@ export function HubPanel() {
             const hRiver = hs.reduce((s, h) => s + (h.fleet_river ?? 0), 0);
             const hCar = hs.reduce((s, h) => s + (h.fleet_caravan ?? 0), 0);
             const hVessels = hSea + hRiver + hCar;
-            const houseVol = hs.reduce((s, h) => s + Math.max(0, h.volume ?? h.wealth), 0);
-            const mlev = hub.merchant_level ?? 0.3;
-            const independent = houseVol * (0.25 + 0.7 * mlev) + 0.5;
-            const guildVol = independent * mlev;
-            const localVol = independent * (1 - mlev);
+            const { houseVol, mlev, guildVolume, localVolume } = independentTradeShare(hub, hs);
             // Vessels per unit of trade volume, inferred from the houses (fallback: a
             // light rate off the merchant population when no house fleet exists yet).
             const perVol = houseVol > 1e-4 && hVessels > 0 ? hVessels / houseVol : 0;
-            const estLocal = perVol > 0 ? localVol * perVol : (hub.merchants ?? 0) * 0.0008 * (1 - mlev);
-            const estGuild = perVol > 0 ? guildVol * perVol : (hub.merchants ?? 0) * 0.0008 * mlev;
+            const estLocal = perVol > 0 ? localVolume * perVol : (hub.merchants ?? 0) * 0.0008 * (1 - mlev);
+            const estGuild = perVol > 0 ? guildVolume * perVol : (hub.merchants ?? 0) * 0.0008 * mlev;
             const seaPctOfHub = (() => {
               const sea = detail?.in_by_sea ?? 0, land = detail?.in_by_land ?? 0;
               return sea + land > 1e-4 ? sea / (sea + land) : (hub.coastal ? 0.5 : 0);
@@ -1100,15 +1134,10 @@ export function HubPanel() {
           {(() => {
             const hs = detail?.houses ?? [];
             const total = Math.max(1e-6, hs.reduce((s, h) => s + Math.max(0, h.wealth), 0));
-            // Local merchants & guilds always move some trade. The independent
-            // (non-house) volume scales with the merchant class (merchant_level
-            // 0..1); a base term keeps it present even with no houses. It splits
-            // into organised GUILDS (∝ merchant_level) and unaffiliated LOCALS.
-            const mlev = hub.merchant_level ?? 0.3;
-            const houseVol = hs.reduce((s, h) => s + Math.max(0, h.volume ?? h.wealth), 0);
-            const independent = houseVol * (0.25 + 0.7 * mlev) + 0.5;
-            const guildVolume = independent * mlev;
-            const localVolume = independent * (1 - mlev);
+            // Local merchants & guilds always move some trade — the same
+            // independent-volume estimate "Ships & caravans working this port"
+            // uses above, shared via independentTradeShare().
+            const { guildVolume, localVolume } = independentTradeShare(hub, hs);
             return (
               <>
                 <div style={{ ...sectionHdr, marginTop: 6 }}>Who controls the trade (houses · merchants · guilds)</div>
@@ -1237,7 +1266,7 @@ export function HubPanel() {
                   style={{ ...row, cursor: "pointer", background: h.id === hub.id ? "#1a2c40" : "transparent" }}>
                   <span style={{ color: "#6a86a6", minWidth: 16 }}>#{i + 1}</span>
                   <span style={{ flex: 1, color: h.id === hub.id ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {h.id === topHub?.id ? "🟨 " : h.emporium ? "🔺 " : ""}{h.name}
+                    {h.id === topHubStatic?.id ? "🟨 " : h.emporium ? "🔺 " : ""}{h.name}
                   </span>
                   <span style={{ color: "#9ab0c8", fontSize: 9 }}>{h.population.toLocaleString()}</span>
                   <span style={{ color: "#7fd0a0", fontSize: 10, minWidth: 32, textAlign: "right" }}>{Math.round(h.wealth * 100)}%</span>
