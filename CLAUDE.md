@@ -5039,9 +5039,16 @@ TRADE_STAGING_AND_POSTS_PLAN.md   ← ⭐ APPROVED, NOTHING BUILT. Seven slices 
                                     absurd long lane is the CHEAPEST on the map), travel
                                     mode is `coastal_a && coastal_b` alone (a river or
                                     lake city is never "sea", so all its trade reads as
-                                    overland), the campaign route matrix is built with
-                                    `rivers_json = ""` so `is_river` is ALL FALSE and the
-                                    river cost rungs are never reached, `hub_pull` is
+                                    overland), the campaign route matrix WAS built with
+                                    `rivers_json = ""` so `is_river` was ALL FALSE and the
+                                    river cost rungs never reached — **that one is now
+                                    FIXED** (`metadata["rivers"]` is kept in sync by
+                                    `persist_rivers` and read by
+                                    `compute_route_days_matrix_for_season`; the finding
+                                    survives only for hubs founded DURING a campaign,
+                                    which still fall back to a straight line — see
+                                    `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §2),
+                                    `hub_pull` is
                                     applied TWICE on the same axis, and loss is a flat
                                     per-shipment roll independent of distance. Also the
                                     three things that already exist and make the plan
@@ -5437,6 +5444,87 @@ CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND I
                                     measurable is a trader landing and re-shipping
                                     the same good, and the column must not claim
                                     more than that
+ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
+                                  ← ⭐ ANALYSIS ONLY, NOTHING BUILT. The route/
+                                    connectivity/carriage counterpart to TRADE_AND_
+                                    MARKET_REVIEW (which reviews the PRICE mechanism).
+                                    Its headline is that the economy's problem is not
+                                    missing mechanism: **ELEVEN built, wired, gated
+                                    mechanisms ship at a dose of exactly zero**
+                                    (N1/N1b/N2 · CAPACITY_BIND_DOSE · DEMAND_/PROD_
+                                    ELASTICITY · ORE_CEILING · HOUSEHOLD_MONETIZATION ·
+                                    WH_RELEASE · LEAGUE_BOYCOTT_MAX · GUILD_CHARTER_
+                                    RANGE), so production ignores price, demand
+                                    ignores price, carriage ignores capacity and
+                                    storage ignores price — which IS
+                                    TRADE_AND_MARKET_REVIEW F1's measured flatness
+                                    restated as a cause. Names
+                                    `econ_inheritance_rules_fragment_differently`
+                                    (single-seed, 60-year) as the one instrument
+                                    blocking all eleven doses.
+                                    **Five measured bugs.** (1) Mountain passes ARE
+                                    priced (a ×0.45 saddle discount) but the coarse
+                                    cell is 55.7 km and elevation is POINT-SAMPLED
+                                    from the block centre, so a 1-10 km real pass is
+                                    invisible and route quality through mountains is
+                                    luck — a pass is a MINIMUM, so reduce the block
+                                    by min land elevation. (2) COMPONENTS ARE BUILT
+                                    FROM EUCLIDEAN DISTANCE, land and sea never
+                                    consulted: `max_link = 0.30 * world_w` = 12,022 km
+                                    at the default grid, wider than EVERY ocean on
+                                    Earth, and union-find is transitive — so the world
+                                    collapses to ONE component, every
+                                    `component == component` guard is a no-op, and #6/
+                                    #6b draw exactly the straight-line trans-oceanic
+                                    lanes their own comments say they prevent. The
+                                    start-time tiny-component rescue is ALSO still
+                                    unbounded ("any distance"): TECTONICS_AND_
+                                    ISOLATION_PLAN Part A fixed the tick-time twin
+                                    (`ISOLATION_RESCUE_MAX_KM`) and never the
+                                    start-time one, and its guard test hands the
+                                    tick-time function components ALREADY ASSIGNED, so
+                                    it cannot see the build. (3) A non-hub settlement
+                                    gets exactly ONE candidate link, chosen by
+                                    STRAIGHT-LINE distance, dropped silently on a
+                                    Dijkstra miss, a `path_allowed` reach violation,
+                                    or two towns sharing one coarse cell — with no
+                                    fall-through, so the "no town is left unconnected"
+                                    comment above the loop is not true as written.
+                                    (4) `good_freight` has NO MODE TERM: the correct
+                                    1:4:8 sea:river:road ratio (Masschaele) lives in
+                                    the cost grid but arrives as DAYS, so it never
+                                    sorts cargo by bulk — wheat and silk take the same
+                                    road penalty, where historically road freight kills
+                                    grain and barely touches silk; measured, 300 km of
+                                    grain carriage costs 30% of its value against real
+                                    cart carriage that roughly DOUBLED it, and it is
+                                    exactly as cheap by sea. It also reaches only the
+                                    founding hubs — every colony founded during a
+                                    campaign routes by straight line. (5) Caravan/boat
+                                    capacity is declared and unwired: `CAPACITY_BIND_
+                                    DOSE = 0`, so any shipment takes one slot; 96% of
+                                    cargo is ownerless and never reaches the check;
+                                    `cap_land` pools boats WITH caravans; and 120:40 is
+                                    3:1 against a historical ~10-13:1 (a cog 150-200 t
+                                    vs a hundred-camel caravan 15-20 t).
+                                    **Perf** (§8 of the doc): ZERO rayon in all seven
+                                    `query_commands/` files; one Dijkstra per PAIR at
+                                    four call sites (~500 whole-grid searches, ~2 GB of
+                                    allocation churn per route refresh) when the
+                                    single-source fix is already done and DOCUMENTED as
+                                    precedent in `flow.rs`; `build_coarse_cost` loads
+                                    97 MB of fine fields to read 259k centre cells
+                                    (390 MB on Large); campaign start pays 5× that plus
+                                    ~1,000 sequential Dijkstras (`SEASON_SLICES`);
+                                    `charter_owner` allocates n nested Vecs PER DAY.
+                                    Four-stage plan (A free speed → B cost grid can see
+                                    terrain → C carriage sorts cargo by mode → D
+                                    siting), each item with a gate that is not its own
+                                    target, plus 7 open questions and a NON-FINDINGS
+                                    list recording that the tick is NOT the perf
+                                    problem, the 1:4:8 ratio does not need re-deriving,
+                                    and worldgen river siting is one of the better-
+                                    modelled things in the tree
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```
