@@ -8,6 +8,7 @@ import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinSh
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
+const HP_GOOD_COLOR: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.color]));
 import { climatePhrase } from "@ui/world/climate";
 import { CoatOfArms, houseColor } from "@ui/heraldry/CoatOfArms";
 import { CoinIcon } from "@ui/heraldry/CoinIcon";
@@ -168,6 +169,69 @@ function HouseSharePie({ houses, localVolume, guildVolume, merchants }:
           <div>Leads trade: <span style={{ color: top.color, fontWeight: 600 }}>{top.name}</span> ({Math.round(top.frac * 100)}%)</div>
         )}
         <div style={{ color: "#7f8a99" }}>by trade volume moved</div>
+      </div>
+    </div>
+  );
+}
+
+/** A settlement's SPECIALIZATION TIER, from how concentrated its production mix
+ *  is (Herfindahl-style: sum of squared shares). A city living off one good —
+ *  the Potosí case — reads as fragile in a way an even spread does not, and
+ *  the tier name says so without a raw index number. */
+type SpecTier = { label: string; icon: string; color: string };
+function specializationTier(topShare: number): SpecTier {
+  if (topShare >= 0.55) return { label: "Monotown", icon: "🏚", color: "#e0764a" };
+  if (topShare >= 0.35) return { label: "Specialist town", icon: "⚒", color: "#e0c060" };
+  if (topShare >= 0.18) return { label: "Trading post", icon: "⚖", color: "#7fd0a0" };
+  return { label: "Universal market", icon: "🌐", color: "#7fb0e0" };
+}
+
+/** THE TRADE SIGNATURE — a settlement's own production mix as a donut, same
+ *  visual language as HouseSharePie/CultureDonut (a reader who knows one
+ *  reads all three). Answers "what does this place actually make" at a
+ *  glance, and names the specialization tier its concentration implies — a
+ *  monotown is one price crash from ruin in a way a diversified market isn't.
+ *  Prefers the LIVE production mix (this campaign's own estates/manufactories,
+ *  summed by good) and falls back to the frozen worldgen mix pre-campaign;
+ *  never mixes the two so the ring never straddles a stale and a live number. */
+function TradeSignature({ mix, iconFor, labelFor }:
+  { mix: { good: string; value: number }[]; iconFor: (id: string) => string; labelFor: (id: string) => string }) {
+  const R = 30, r = 17, cx = 34, cy = 34;
+  const total = Math.max(1e-6, mix.reduce((s, m) => s + Math.max(0, m.value), 0));
+  const slices = mix
+    .map((m) => ({ ...m, frac: Math.max(0, m.value) / total, color: HP_GOOD_COLOR[m.good] ?? houseColor(m.good) }))
+    .filter((s) => s.frac > 0.01)
+    .sort((a, b) => b.frac - a.frac);
+  if (slices.length === 0) return null;
+  let a0 = -Math.PI / 2;
+  const arc = (frac: number) => {
+    const a1 = a0 + Math.min(frac, 0.9999) * Math.PI * 2;
+    const large = frac > 0.5 ? 1 : 0;
+    const p = (rad: number, ang: number) => `${cx + rad * Math.cos(ang)},${cy + rad * Math.sin(ang)}`;
+    const d = `M ${p(R, a0)} A ${R} ${R} 0 ${large} 1 ${p(R, a1)} L ${p(r, a1)} A ${r} ${r} 0 ${large} 0 ${p(r, a0)} Z`;
+    a0 = a1;
+    return d;
+  };
+  const top = slices[0];
+  const tier = specializationTier(top.frac);
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 6px" }}>
+      <svg width={68} height={68} viewBox="0 0 68 68" style={{ flex: "0 0 auto" }}>
+        {slices.map((s) => (
+          <path key={s.good} d={arc(s.frac)} fill={s.color} stroke="#0c1118" strokeWidth={0.6}>
+            <title>{`${labelFor(s.good)}: ${Math.round(s.frac * 100)}%`}</title>
+          </path>
+        ))}
+      </svg>
+      <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.5 }}>
+        <div style={{ color: tier.color, fontWeight: 700 }}>
+          {tier.icon} {tier.label}
+        </div>
+        <div>
+          Leads with: <span style={{ fontWeight: 600 }}>{iconFor(top.good)} {labelFor(top.good)}</span>
+          {" "}({Math.round(top.frac * 100)}%)
+        </div>
+        <div style={{ color: "#7f8a99" }}>{slices.length} good{slices.length === 1 ? "" : "s"} in its trade mix</div>
       </div>
     </div>
   );
@@ -696,6 +760,26 @@ export function HubPanel() {
               {hub.monopolies.map((m) => `${iconFor(m)} ${labelFor(m)}`).join(", ")}
             </div>
           )}
+
+          {/* THE TRADE SIGNATURE — this settlement's own production mix as a
+              donut + a named specialization tier (Universal market → Trading
+              post → Specialist town → Monotown). Prefers the LIVE mix (this
+              campaign's own estates/manufactories, summed by good) and falls
+              back to the frozen worldgen mix pre-campaign — never both, so
+              the ring is never half stale, half live. */}
+          {(() => {
+            const liveMix = new Map<string, number>();
+            for (const e of detail?.estates_here ?? []) {
+              liveMix.set(e.good, (liveMix.get(e.good) ?? 0) + Math.max(0, e.output));
+            }
+            const mix = liveMix.size > 0
+              ? [...liveMix.entries()].map(([good, value]) => ({ good, value }))
+              : hub.produces.map((g) => ({ good: g.good_name, value: g.amount }));
+            return mix.length > 0
+              ? <><div style={{ ...sectionHdr, marginTop: 6 }}>Trade signature</div>
+                  <TradeSignature mix={mix} iconFor={iconFor} labelFor={labelFor} /></>
+              : null;
+          })()}
 
           {/* Buildings & control (the ward grid) lives on the Estates tab now —
               it's a holdings/ownership view and duplicated the exact same
