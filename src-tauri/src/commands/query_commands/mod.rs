@@ -802,6 +802,80 @@ pub(crate) fn compute_route_days_matrix_for_season(
     Ok(days)
 }
 
+/// B2 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §5/§9) — the regional trade
+/// horizon: a single contiguous open-water crossing longer than this is not a
+/// leg any pre-modern trade network sailed direct, so it is what a "trade
+/// component" (§5/§10 Q3) and the tiny-component rescue (below) are both
+/// bounded by. Coastal hugging is unrelated to this and stays unlimited —
+/// `path_allowed`'s reach-1 rule only counts a run of OPEN (non-shelf,
+/// non-coastal) sea cells — so a long coastal or staged route can still
+/// compose an arbitrarily long network out of hops each within this bound.
+pub(crate) const TRADE_COMPONENT_HORIZON_KM: f32 = 3000.0;
+
+/// A component is a claim about REACHABILITY and must be built from
+/// reachability, not from a ruler laid on the map. The old build
+/// (`campaign_commands::lifecycle`) unioned any two hubs whose straight-line
+/// distance fell under `0.30 * world_w` — 12,022 km at the default grid,
+/// wider than every ocean on Earth — so a real-world map collapsed into ONE
+/// component and every `component == component` guard downstream
+/// (`rebuild_routes`'s #6/#6b, `maybe_found_route_post`, `urban_exodus_pass`)
+/// became a no-op, drawing exactly the straight-line trans-oceanic lanes
+/// those guards exist to prevent.
+///
+/// Built from AT MOST `k` single-source Dijkstra searches, where `k` is the
+/// number of distinct components — never one per hub-PAIR, and not even one
+/// per hub. Each unassigned hub becomes a seed in turn: run ONE search from
+/// it, then assign every OTHER still-unassigned hub reachable under
+/// `path_allowed`'s coastal-crossing rule (reach 1, `TRADE_COMPONENT_HORIZON_KM`)
+/// to that same component. Symmetric (the coarse grid is an undirected cost
+/// graph, so reachability from the seed is reachability to it), which is what
+/// lets a later seed's inner loop skip every index already resolved by an
+/// earlier one — see the loop bound below.
+pub(crate) fn compute_routed_components(
+    db: &WorldDb,
+    conn: &rusqlite::Connection,
+    hub_xy: &[(f32, f32)],
+) -> Result<Vec<u32>, String> {
+    let n = hub_xy.len();
+    if n == 0 { return Ok(vec![]); }
+    let grid_w: u32 = metadata::get_meta(conn, "grid_width")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    let grid_h: u32 = metadata::get_meta(conn, "grid_height")
+        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
+    if grid_w == 0 || grid_h == 0 { return Ok(vec![0; n]); }
+    let world = db.cached_tiles_with_conn(conn)?;
+    let rivers_json = metadata::get_meta(conn, "rivers").ok().flatten().unwrap_or_default();
+    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h,
+        &rivers_json, false, true, 0.0, -1, 12)?;
+    let max_crossing_frac = TRADE_COMPONENT_HORIZON_KM / KM_EQUATOR;
+    let cell = |x: f32, y: f32| -> usize {
+        let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
+        let cy = ((y / cc.f as f32) as i32).clamp(0, cc.ch - 1);
+        (cy * cc.cw + cx) as usize
+    };
+    let nodes: Vec<usize> = hub_xy.iter().map(|&(x, y)| cell(x, y)).collect();
+    let mut comp: Vec<i32> = vec![-1; n];
+    let mut next_comp: i32 = 0;
+    for seed in 0..n {
+        if comp[seed] >= 0 { continue; }
+        comp[seed] = next_comp;
+        let (dist, prev) = coarse_dijkstra_dist_prev(&cc, nodes[seed]);
+        // Every index < seed is already resolved by construction: the outer
+        // loop visits indices in order, so any earlier still-unassigned index
+        // would itself have become a seed before this iteration.
+        for other in (seed + 1)..n {
+            if comp[other] >= 0 { continue; }
+            if let Some(path) = coarse_path_from_dist_prev(&dist, &prev, nodes[seed], nodes[other]) {
+                if path_allowed(&cc, &path, 1, max_crossing_frac, grid_w) {
+                    comp[other] = next_comp;
+                }
+            }
+        }
+        next_comp += 1;
+    }
+    Ok(comp.into_iter().map(|c| c.max(0) as u32).collect())
+}
+
 /// Resolve one (start, goal) pair from an ALREADY-COMPUTED single-source
 /// `coarse_dijkstra_dist_prev` result into the same `Option<Vec<usize>>` shape
 /// `coarse_dijkstra` returns — a predecessor walk from `goal` back to `start`,
@@ -3253,6 +3327,84 @@ mod route_pricing_tests {
              high ridge with no gap at all (gap crossing {cost_gap}, no-gap crossing \
              {cost_flat}) — a min-per-block sample must have found it"
         );
+    }
+}
+
+#[cfg(test)]
+mod component_tests {
+    use super::*;
+    use crate::db::{schema, WorldDb};
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use rusqlite::Connection;
+
+    /// Two landmasses, all-land except for one OPEN-SEA gap between them
+    /// (`gap_cells` fine cells wide, no shelf, so the whole gap counts against
+    /// `path_allowed`'s reach-1 crossing rule). `grid_w = 3600` keeps the
+    /// coarse block at the production scale (`f = 5`, ~55.7 km) so a distance
+    /// stated in km converts the same way it would on a real world.
+    fn two_landmasses(gap_cells: u32) -> (WorldDb, f32, f32) {
+        let w = 3600u32;
+        let h = 20u32;
+        let land_w = 100u32;
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        let west_end = land_w;
+        let east_start = land_w + gap_cells;
+        let east_end = east_start + land_w;
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                let land = x < west_end || (x >= east_start && x < east_end);
+                buf.terrain[idx] = if land { 1 } else { 0 };
+                buf.elevation[idx] = if land { 0.1 } else { 0.0 };
+                buf.koppen[idx] = 12; // Cfb, no surcharge
+                buf.temperature[idx] = 18.0; // above every freeze threshold
+            }
+        }
+        buf.save(&conn, "test").unwrap();
+        let west_x = (west_end / 2) as f32;
+        let east_x = (east_start + land_w / 2) as f32;
+        (WorldDb::new(conn), west_x, east_x)
+    }
+
+    /// B2 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §5/§9/§10 Q3) — a component
+    /// must be built from real reachability: two landmasses separated by open
+    /// water WIDER than `TRADE_COMPONENT_HORIZON_KM` must come out as two
+    /// components, and the same two landmasses separated by a gap narrower
+    /// than the horizon must come out as one. A gate that only ever produced
+    /// two components regardless of distance would pass the first half and
+    /// prove nothing; a gate that always merged would pass the second half
+    /// and prove nothing — this checks both directions on purpose.
+    #[test]
+    fn components_split_across_an_ocean_wider_than_the_horizon() {
+        let km_per_cell = KM_EQUATOR / 3600.0;
+        let far_gap = ((TRADE_COMPONENT_HORIZON_KM / km_per_cell) * 1.3) as u32; // clearly over
+        let (db, west_x, east_x) = two_landmasses(far_gap);
+        let conn = db.conn.lock().unwrap();
+        let comps = compute_routed_components(&db, &conn, &[(west_x, 10.0), (east_x, 10.0)])
+            .expect("component build failed");
+        assert_ne!(comps[0], comps[1],
+            "a gap of {far_gap} fine cells (~{:.0} km, over the {TRADE_COMPONENT_HORIZON_KM} \
+             km horizon) must NOT be unioned into one component",
+            far_gap as f32 * km_per_cell);
+    }
+
+    #[test]
+    fn components_merge_across_an_ocean_narrower_than_the_horizon() {
+        let km_per_cell = KM_EQUATOR / 3600.0;
+        let near_gap = ((TRADE_COMPONENT_HORIZON_KM / km_per_cell) * 0.3) as u32; // clearly under
+        let (db, west_x, east_x) = two_landmasses(near_gap);
+        let conn = db.conn.lock().unwrap();
+        let comps = compute_routed_components(&db, &conn, &[(west_x, 10.0), (east_x, 10.0)])
+            .expect("component build failed");
+        assert_eq!(comps[0], comps[1],
+            "a gap of {near_gap} fine cells (~{:.0} km, well under the {TRADE_COMPONENT_HORIZON_KM} \
+             km horizon) must be unioned into one component",
+            near_gap as f32 * km_per_cell);
     }
 }
 

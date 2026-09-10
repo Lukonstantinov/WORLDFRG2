@@ -657,55 +657,43 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
             }
         }
     }
-    // Geographic K-nearest union: each hub links to its nearest neighbours within a
-    // max single-hop distance (≈30% of world width, mirroring the worldgen link
-    // ceiling). Transitive chaining then fuses a whole continent into one component
-    // regardless of its size, but a wide OCEAN gap (> the cap) is never bridged, so
-    // separate continents / far islands remain their own markets.
+    // B2 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §5/§9) — a component is a
+    // claim about REACHABILITY, built from a real routed cost grid + the same
+    // coastal-crossing rule (`path_allowed`, reach 1, `TRADE_COMPONENT_
+    // HORIZON_KM` ≈ 3,000 km — §10 Q3's confirmed reading) the route matrix
+    // above already uses, not from a straight-line ruler. The old K-nearest
+    // Euclidean union linked any two hubs within `0.30 * world_w` — 12,022 km
+    // at the default grid, wider than every ocean on Earth — so a real-world
+    // map collapsed into ONE component regardless of geography.
+    //
+    // This also RETIRES the old "rescue tiny/lone components... any distance"
+    // fuse: with real reachability deciding components, a hub that could
+    // legally reach a bigger market is already unioned with it here, and one
+    // that cannot is genuinely isolated — forcing it onto a market it cannot
+    // reach was exactly the dishonest trans-oceanic union this review names.
+    // A tiny or lone component is now allowed to exist, and to be poor
+    // (`docs/TECTONICS_AND_ISOLATION_PLAN.md` Part A's own committed answer,
+    // §10 Q2's confirmed reading: an isolated market may starve).
     {
-        const COMP_K: usize = 6;
-        let world_w = world_ref.grid_width as f32;
-        let max_link = (world_w * 0.30).max(1.0);
-        let max_link2 = max_link * max_link;
-        let d2 = |a: usize, b: usize| -> f32 {
-            let mut dx = (hubs[a].x - hubs[b].x).abs();
-            if world_w > 1.0 { dx = dx.min(world_w - dx); } // cylindrical wrap on X
-            let dy = hubs[a].y - hubs[b].y;
-            dx * dx + dy * dy
-        };
         let real: Vec<usize> = (0..nn).filter(|&i| !hubs[i].is_estate).collect();
-        let mut scratch: Vec<(usize, f32)> = Vec::with_capacity(real.len());
-        for &i in &real {
-            scratch.clear();
-            for &j in &real {
-                if j != i { scratch.push((j, d2(i, j))); }
-            }
-            scratch.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
-            for &(j, dd) in scratch.iter().take(COMP_K) {
-                if dd <= max_link2 { uf_union(&mut parent, i, j); }
-            }
-        }
-        // Rescue tiny/lone components: a settlement whose cluster has < 3 real hubs
-        // can't sustain a market and appears as a dead "cosmetic" dot that never
-        // trades (rebuild_routes marks it unreachable). Fuse each into the nearest
-        // SUBSTANTIAL market (any distance) so every city is on a trading network.
-        {
-            let mut roots = vec![0usize; nn];
-            for i in 0..nn { roots[i] = uf_find(&mut parent, i); }
-            let mut size: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
-            for &i in &real { *size.entry(roots[i]).or_default() += 1; }
-            let big: Vec<usize> = real.iter().cloned()
-                .filter(|&i| size.get(&roots[i]).copied().unwrap_or(0) >= 3).collect();
-            if !big.is_empty() {
-                let mut unions: Vec<(usize, usize)> = Vec::new();
-                for &i in &real {
-                    if size.get(&roots[i]).copied().unwrap_or(0) >= 3 { continue; }
-                    let mut bj = None; let mut bd = f32::INFINITY;
-                    for &j in &big { let d = d2(i, j); if d < bd { bd = d; bj = Some(j); } }
-                    if let Some(j) = bj { unions.push((i, j)); }
+        let real_xy: Vec<(f32, f32)> = real.iter().map(|&i| (hubs[i].x, hubs[i].y)).collect();
+        match crate::commands::query_commands::compute_routed_components(&db, &conn, &real_xy) {
+            Ok(geo_comp) if geo_comp.len() == real.len() => {
+                // Union every real hub with the first real hub sharing its
+                // geographic component id — same effect as unioning all
+                // members pairwise, cheaper, and independent of `real`'s order.
+                let mut first_of: std::collections::HashMap<u32, usize> = std::collections::HashMap::new();
+                for (&i, &g) in real.iter().zip(geo_comp.iter()) {
+                    match first_of.entry(g) {
+                        std::collections::hash_map::Entry::Vacant(e) => { e.insert(i); }
+                        std::collections::hash_map::Entry::Occupied(e) => uf_union(&mut parent, i, *e.get()),
+                    }
                 }
-                for (i, j) in unions { uf_union(&mut parent, i, j); }
             }
+            // Best-effort: on any failure (no grid yet, bad metadata) every
+            // real hub keeps whatever the corridor/chain unions above already
+            // gave it, rather than the campaign failing to start.
+            _ => {}
         }
     }
     for i in 0..nn {

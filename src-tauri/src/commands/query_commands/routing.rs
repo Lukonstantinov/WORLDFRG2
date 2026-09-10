@@ -20,19 +20,40 @@ pub fn compute_trade_routes(
     db: State<'_, WorldDb>,
 ) -> Result<Vec<TradeRoute>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    compute_trade_routes_impl(
+        &db, &conn, &settlements_json, &rivers_json, reach, max_crossing,
+        desert_routes, economic_regions, piracy, season, months,
+    )
+}
 
-    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
+/// The logic behind `compute_trade_routes`, extracted so it can be exercised
+/// directly in tests without constructing a Tauri-managed `State` (B3's own
+/// gate needs this — see `routing_fallback_tests` below).
+fn compute_trade_routes_impl(
+    db: &WorldDb,
+    conn: &rusqlite::Connection,
+    settlements_json: &str,
+    rivers_json: &str,
+    reach: u8,
+    max_crossing: f32,
+    desert_routes: bool,
+    economic_regions: u32,
+    piracy: f32,
+    season: i32,
+    months: u32,
+) -> Result<Vec<TradeRoute>, String> {
+    let grid_w: u32 = metadata::get_meta(conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
+    let grid_h: u32 = metadata::get_meta(conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
 
     let settlements: Vec<RouteSettlement> =
-        serde_json::from_str(&settlements_json).unwrap_or_default();
+        serde_json::from_str(settlements_json).unwrap_or_default();
     if settlements.len() < 2 { return Ok(vec![]); }
 
-    let world = db.cached_tiles_with_conn(&conn)?;
-    let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h, &rivers_json, reach == 2, desert_routes, piracy, season, months)?;
+    let world = db.cached_tiles_with_conn(conn)?;
+    let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h, rivers_json, reach == 2, desert_routes, piracy, season, months)?;
     let (cw, f) = (cc.cw, cc.f);
 
     // Map EVERY settlement to a coarse node (sorted by score, strongest first).
@@ -49,11 +70,10 @@ pub fn compute_trade_routes(
     // (default 14 regions ≈ 84 hubs, matching the legacy fixed 80).
     let hubs = nn.min(((economic_regions.clamp(2, 40) as usize) * 6).clamp(10, 200));
 
-    // Candidate links: top hubs link to their 3 nearest neighbours; every other
-    // settlement links to its single nearest neighbour (a minor road). Tracked
-    // separately so minor roads can be drawn thinner.
+    // Candidate links: top hubs link to their 3 nearest neighbours. Minor
+    // (lesser-town) links are built below with a ranked fallback shortlist
+    // (B3), not a single nearest-neighbour pick.
     let mut major_edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
-    let mut minor_edges: std::collections::HashSet<(usize, usize)> = std::collections::HashSet::new();
     let nearest_k = |i: usize, k: usize| -> Vec<usize> {
         let mut dists: Vec<(usize, i64)> = Vec::with_capacity(nn - 1);
         for j in 0..nn {
@@ -69,48 +89,53 @@ pub fn compute_trade_routes(
     for i in 0..hubs {
         for j in nearest_k(i, 3) { major_edges.insert((i.min(j), i.max(j))); }
     }
-    // Each lesser town links to its nearest HUB (a major-network node), not merely
-    // its nearest neighbour — otherwise small towns chain only to each other and
-    // never reach the trunk network. This guarantees every settlement is attached
-    // to the major trade routes.
-    let nearest_hub = |i: usize| -> Option<usize> {
-        let mut best = None;
-        let mut bd = i64::MAX;
+    // B3 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §4/§9) — each lesser town gets
+    // a RANKED shortlist of candidate hubs (nearest first), not just the single
+    // nearest. The single-candidate version dropped a town SILENTLY whenever its
+    // one pick failed — Dijkstra found nothing, the path's open-water run broke
+    // the trade reach, or two towns shared a coarse cell — despite the comment
+    // above it claiming "no town is left unconnected". Trying the shortlist in
+    // order until one is actually accepted is what makes that guarantee true.
+    const MINOR_FALLBACK_K: usize = 5;
+    let nearest_hubs_ranked = |i: usize, k: usize| -> Vec<usize> {
+        let mut dists: Vec<(usize, i64)> = Vec::with_capacity(hubs);
         for j in 0..hubs {
             if i == j { continue; }
             let mut dx = (nodes[i].0 - nodes[j].0).abs();
             if dx > cw / 2 { dx = cw - dx; }
             let dy = nodes[i].1 - nodes[j].1;
-            let d = (dx * dx + dy * dy) as i64;
-            if d < bd { bd = d; best = Some(j); }
+            dists.push((j, (dx * dx + dy * dy) as i64));
         }
-        best
+        dists.sort_by_key(|&(_, d)| d);
+        dists.iter().take(k).map(|&(j, _)| j).collect()
     };
+    // Per lesser town, its ranked candidate hubs (empty for major-network hubs).
+    let mut town_candidates: Vec<Vec<usize>> = vec![Vec::new(); nn];
     for i in hubs..nn {
-        if let Some(j) = nearest_hub(i) {
-            let e = (i.min(j), i.max(j));
-            if !major_edges.contains(&e) { minor_edges.insert(e); }
-        }
+        town_candidates[i] = nearest_hubs_ranked(i, MINOR_FALLBACK_K);
     }
 
-    let mut routes: Vec<TradeRoute> = Vec::new();
-    let all_edges: Vec<((usize, usize), bool)> = major_edges.iter().map(|&e| (e, false))
-        .chain(minor_edges.iter().map(|&e| (e, true)))
-        .collect();
-    // ONE DIJKSTRA PER SOURCE, NOT PER EDGE (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
-    // P2/A1) — every edge is stored `(a.min(b), a.max(b))`, so many edges share the
-    // same smaller-index endpoint as their pathfinding source (a hub's 3-nearest-
-    // neighbour fan, every minor road into the same major hub). A world with a few
-    // hundred settlements used to run one whole-grid search PER EDGE; grouping by
-    // source collapses that to one search per distinct source node.
-    let coarse_pairs: Vec<(usize, usize)> = all_edges.iter()
+    let all_edges: Vec<((usize, usize), bool)> = major_edges.iter().map(|&e| (e, false)).collect();
+    // ONE DIJKSTRA PER SOURCE, NOT PER EDGE (P2/A1) — every edge/candidate pair
+    // is grouped by its coarse SOURCE node before batching, so testing several
+    // fallback candidates per town costs nothing beyond what testing only the
+    // first candidate already cost per source.
+    let major_pairs: Vec<(usize, usize)> = all_edges.iter()
         .map(|&((a, b), _)| (cc.cidx(nodes[a].0, nodes[a].1), cc.cidx(nodes[b].0, nodes[b].1)))
         .collect();
-    let paths = coarse_dijkstra_batch(&cc, &coarse_pairs);
-    for (&(_, minor), path) in all_edges.iter().zip(paths.into_iter()) {
-        let path = match path { Some(p) => p, None => continue };
-        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+    let mut town_pairs: Vec<(usize, usize)> = Vec::new();
+    for (i, cands) in town_candidates.iter().enumerate() {
+        for &j in cands {
+            town_pairs.push((cc.cidx(nodes[i].0, nodes[i].1), cc.cidx(nodes[j].0, nodes[j].1)));
+        }
+    }
+    let mut all_pairs = major_pairs;
+    all_pairs.extend_from_slice(&town_pairs);
+    let all_paths = coarse_dijkstra_batch(&cc, &all_pairs);
+    let (major_paths, town_paths) = all_paths.split_at(all_edges.len());
 
+    let mut routes: Vec<TradeRoute> = Vec::new();
+    let mut push_route = |path: Vec<usize>, minor: bool, routes: &mut Vec<TradeRoute>| {
         let mut sea_cells = 0u32;
         let mut river_cells = 0u32;
         let pts: Vec<[f32; 2]> = path.iter().map(|&c| {
@@ -118,7 +143,6 @@ pub fn compute_trade_routes(
             if cc.is_land[c] && cc.is_river[c] { river_cells += 1; }
             cc.world_of(c)
         }).collect();
-
         let kind = if sea_cells as usize * 3 >= path.len() {
             1
         } else if river_cells as usize * 4 >= path.len() {
@@ -127,6 +151,42 @@ pub fn compute_trade_routes(
             0
         };
         routes.push(TradeRoute { points: pts, kind, minor });
+    };
+    for (&(_, minor), path) in all_edges.iter().zip(major_paths.iter()) {
+        let path = match path { Some(p) => p.clone(), None => continue };
+        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+        push_route(path, minor, &mut routes);
+    }
+    // Consume `town_paths` in the same flattened order `town_pairs` was built in
+    // (per town, candidates in rank order); take the FIRST candidate that both
+    // found a path and clears the trade reach, so a rejected top pick falls
+    // through instead of leaving the town unconnected. `unrouted` collects any
+    // town whose whole shortlist failed — genuinely reported rather than
+    // silently dropped, though surfacing it to the UI is not yet built (a
+    // frontend/bridge addition, out of this pass's scope).
+    let mut unrouted: Vec<usize> = Vec::new();
+    let mut cursor = 0usize;
+    for i in hubs..nn {
+        let k = town_candidates[i].len();
+        let mut accepted = false;
+        for path in &town_paths[cursor..cursor + k] {
+            if let Some(p) = path {
+                if path_allowed(&cc, p, reach, max_crossing, grid_w) {
+                    push_route(p.clone(), true, &mut routes);
+                    accepted = true;
+                    break;
+                }
+            }
+        }
+        if !accepted && k > 0 { unrouted.push(i); }
+        cursor += k;
+    }
+    if !unrouted.is_empty() {
+        log::warn!(
+            "compute_trade_routes: {} of {} settlements have no legal route to any of their \
+             {MINOR_FALLBACK_K} nearest hubs under the current trade reach",
+            unrouted.len(), nn - hubs
+        );
     }
 
     Ok(routes)
@@ -600,4 +660,84 @@ pub fn compute_trade_matrix(
     }
 
     Ok(TradeMatrix { regions, flows, trunks, goods: goods_names })
+}
+
+#[cfg(test)]
+mod routing_fallback_tests {
+    use super::*;
+    use crate::db::{schema, WorldDb};
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use rusqlite::Connection;
+
+    /// B3 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §4/§9) — a lesser town whose
+    /// geometrically NEAREST hub sits across a strait wider than the trade
+    /// reach must still get a route, by falling through to its next-nearest
+    /// hub, rather than being dropped because its first pick failed. Builds a
+    /// mainland (hub B + the lesser town T, all-land, always reachable) and a
+    /// small island (hub A) separated from it by open water far wider than
+    /// the chosen `max_crossing`, with T placed closer to A by straight-line
+    /// distance than to B — the single-nearest-candidate code picked A,
+    /// failed `path_allowed`, and dropped T with no fallback.
+    #[test]
+    fn a_lesser_town_falls_through_to_its_second_hub_when_the_first_is_unreachable() {
+        let w = 3600u32;
+        let h = 20u32;
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                // Mainland x < 3000; a small island at [3280, 3320); open sea
+                // elsewhere (a ~280-cell-wide strait on both sides of the
+                // island, far past any reasonable crossing limit).
+                let land = x < 3000 || (3280..3320).contains(&x);
+                buf.terrain[idx] = if land { 1 } else { 0 };
+                buf.elevation[idx] = if land { 0.1 } else { 0.0 };
+                buf.koppen[idx] = 12; // Cfb, no surcharge
+                buf.temperature[idx] = 18.0; // above every freeze threshold
+            }
+        }
+        buf.save(&conn, "test").unwrap();
+        let db = WorldDb::new(conn);
+        let conn = db.conn.lock().unwrap();
+
+        // 10 far-off mainland fillers + hub A (island) + hub B (mainland) all
+        // tied at score 100 clear the hub cutoff (economic_regions=2 → top 12);
+        // T is scored last so it alone falls into the fallback path.
+        let fillers = [300, 500, 700, 900, 1100, 1300, 1500, 1700, 1900, 2100];
+        let mut json = String::from("[");
+        for x in fillers { json += &format!(r#"{{"x":{x},"y":10,"score":100}},"#); }
+        json += r#"{"x":3300,"y":10,"score":100},"#; // hub A — island, across the strait
+        json += r#"{"x":100,"y":10,"score":100},"#;  // hub B — mainland, reachable by land
+        json += r#"{"x":2990,"y":10,"score":1}"#;    // T — nearer A by straight line, but A is unreachable
+        json += "]";
+
+        // reach=1 (coastal/short crossings), max_crossing=0.02 (72 fine cells
+        // at this grid) — the ~280-cell strait to the island fails this by a
+        // wide margin; an all-land route to hub B does not.
+        let routes = compute_trade_routes_impl(
+            &db, &conn, &json, "", 1, 0.02, false, 2, 0.0, -1, 12,
+        ).expect("compute_trade_routes_impl failed");
+
+        // T's own position (world coords) must appear as an ENDPOINT of some
+        // returned route — proof it got a road at all, not just that routes
+        // exist in general.
+        let t_pt = [2990.0f32, 10.0];
+        let t_has_route = routes.iter().any(|r| {
+            r.points.first().is_some_and(|&p| close(p, t_pt))
+                || r.points.last().is_some_and(|&p| close(p, t_pt))
+        });
+        assert!(t_has_route,
+            "the lesser town must fall through to hub B once hub A fails the \
+             crossing limit, not be silently dropped — routes found: {}",
+            routes.len());
+    }
+
+    fn close(a: [f32; 2], b: [f32; 2]) -> bool {
+        (a[0] - b[0]).abs() < 6.0 && (a[1] - b[1]).abs() < 6.0
+    }
 }
