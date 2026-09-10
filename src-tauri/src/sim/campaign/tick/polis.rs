@@ -368,10 +368,15 @@ impl CampaignSim {
             if hub.is_estate || hub.abandoned || hub.population < 1.0 { continue; }
             if hub.civic_goods.len() < ng { continue; }
             // FAMINE is the harder of the two signals; DEARTH is the earlier one.
+            // A standing GRAIN LAW (`LAW_GRAIN`, `enact_standing_laws`) is a policy
+            // to call dearth SOONER — it eases the two dearth triggers toward zero,
+            // never the famine trigger or the release/export-lock severity below.
+            let has_grain_law = hub.laws.iter().any(|l| l.kind == LAW_GRAIN);
+            let ease = if has_grain_law { GRAIN_LAW_TRIGGER_EASE } else { 1.0 };
             let famine = hub.starving > RELIEF_STARVE_TRIGGER;
             let dearth = famine
-                || hub.lack_basic > RELIEF_LACK_TRIGGER
-                || hub.food_balance < RELIEF_BALANCE_TRIGGER;
+                || hub.lack_basic > RELIEF_LACK_TRIGGER * ease
+                || hub.food_balance < RELIEF_BALANCE_TRIGGER * ease;
             if !dearth { continue; }
             let frac = if famine { RELIEF_RELEASE_FAMINE } else { RELIEF_RELEASE_DEARTH };
             let mut release = Vec::new();

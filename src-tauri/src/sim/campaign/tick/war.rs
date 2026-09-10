@@ -36,6 +36,66 @@ impl CampaignSim {
         spend
     }
 
+    // ── THE LEVY — see `TickHub.war_manpower`'s own doc comment. ──────────────
+
+    /// Raise `hub`'s war-manpower toward `LEVY_MAX_FRAC_OF_SOLDIERS` of its
+    /// soldier-class Pop, a fraction of the gap per round (mobilization takes a
+    /// few rounds, not one). A hub with no soldier-class Pop yet (an estate, or
+    /// a pre-DLC-4 save whose `derive_pops` hasn't run) simply raises nothing —
+    /// `war_manpower` stays at its serde default of 0.
+    fn raise_manpower_levy(&mut self, hub: usize) {
+        let soldiers = self.hubs[hub].pops.iter()
+            .find(|p| p.profession == POP_SOLDIER)
+            .map(|p| p.size)
+            .unwrap_or(0.0);
+        let target = soldiers * LEVY_MAX_FRAC_OF_SOLDIERS;
+        let cur = self.hubs[hub].war_manpower;
+        if target > cur {
+            self.hubs[hub].war_manpower = cur + (target - cur) * LEVY_RAISE_RATE;
+        }
+    }
+
+    /// Yearly demobilization — a hub not currently at war eases its levy back
+    /// toward 0 (soldiers return to their trades). Cheap no-op once a hub
+    /// already carries none.
+    pub(crate) fn demobilize_levies(&mut self) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].war_with >= 0 { continue; }
+            if self.hubs[h].war_manpower <= EPS { continue; }
+            self.hubs[h].war_manpower *= 1.0 - LEVY_DEMOB_RATE;
+            if self.hubs[h].war_manpower < 0.5 { self.hubs[h].war_manpower = 0.0; }
+        }
+    }
+
+    /// Spend real casualties from both belligerents' levy this fought round,
+    /// scaled by the round's own magnitude (`mag`) and biased against whichever
+    /// side `delta` went against — the round's loser bleeds more. A share of
+    /// the manpower lost (`LEVY_DEATH_FRAC`) is an actual death fed back into
+    /// `hub.population`, multiplicatively — the same idiom every other
+    /// demographic event in this file already uses (`disease.rs`'s plague
+    /// cull, starvation's growth drag), never a raw subtraction.
+    fn apply_war_casualties(&mut self, a: usize, b: usize, mag: f32, delta: f32) {
+        let scale = (mag / 8.0).clamp(0.3, 2.0);
+        let (loss_a, loss_b) = if delta >= 0.0 {
+            (LEVY_CASUALTY_BASE, LEVY_CASUALTY_BASE + LEVY_CASUALTY_LOSER_BONUS)
+        } else {
+            (LEVY_CASUALTY_BASE + LEVY_CASUALTY_LOSER_BONUS, LEVY_CASUALTY_BASE)
+        };
+        self.spend_levy_casualties(a, loss_a * scale);
+        self.spend_levy_casualties(b, loss_b * scale);
+    }
+
+    fn spend_levy_casualties(&mut self, hub: usize, frac: f32) {
+        let wm = self.hubs[hub].war_manpower;
+        if wm <= EPS { return; }
+        let lost = wm * frac;
+        self.hubs[hub].war_manpower = (wm - lost).max(0.0);
+        let pop = self.hubs[hub].population.max(1.0);
+        let death_frac = ((lost * LEVY_DEATH_FRAC) / pop).clamp(0.0, 0.5);
+        if death_frac > 0.0 {
+            self.hubs[hub].population *= 1.0 - death_frac;
+        }
+    }
 
     /// §3.4d · houses broken by war, on a defeat severe enough to matter (gated by
     /// the caller). Two independent paths, both funnelling into the SAME
@@ -594,8 +654,13 @@ impl CampaignSim {
                 let due = (self.wars[wi].round as u64 + 1) * WAR_ROUND_TICKS as u64;
                 if due > tick.saturating_sub(self.wars[wi].start_tick) as u64 { break; }
                 self.wars[wi].round += 1;
-                let strength_a = self.wars[wi].chest_a + self.hubs[a].treasury.max(0.0) + 1.0;
-                let strength_b = self.wars[wi].chest_b + self.hubs[b].treasury.max(0.0) + 1.0;
+                // THE LEVY · raise manpower before it's read into strength this round.
+                self.raise_manpower_levy(a);
+                self.raise_manpower_levy(b);
+                let strength_a = self.wars[wi].chest_a + self.hubs[a].treasury.max(0.0) + 1.0
+                    + self.hubs[a].war_manpower * LEVY_STRENGTH_WEIGHT;
+                let strength_b = self.wars[wi].chest_b + self.hubs[b].treasury.max(0.0) + 1.0
+                    + self.hubs[b].war_manpower * LEVY_STRENGTH_WEIGHT;
                 let bias = strength_a / (strength_a + strength_b);
                 let salt = ((wi as u64) << 16) ^ self.wars[wi].round as u64;
                 let roll_kind = hash01(self.seed, tick as u64 ^ 0x0A2D, salt);

@@ -289,6 +289,73 @@ impl CampaignSim {
         }
     }
 
+    /// EMIGRATION / URBAN EXODUS — see this file's own module-level doc comment
+    /// on the `EXODUS_*` constants (`mod.rs`) for the full rationale. Gated on
+    /// nothing (unlike the land pass above, this needs no province layer to be
+    /// meaningful — `sent_prosperity`/`starving` are core city fields), but the
+    /// PROVINCE half of the push is a true no-op without one (`hub_province`/
+    /// `prov_cap`/`prov_rural` all read empty ⇒ `prov_pressure` stays 0), so a
+    /// province-less campaign still gets a real (if narrower) exodus mechanic
+    /// rather than none at all.
+    pub(crate) fn urban_exodus_pass(&mut self) {
+        let n = self.hubs.len();
+        if n == 0 { return; }
+        // Per-hub PUSH: real city dearth blended with the pressure its own
+        // province's rural pool is under.
+        let mut push: Vec<f32> = vec![0.0; n];
+        for h in 0..n {
+            let hub = &self.hubs[h];
+            if hub.is_estate || hub.abandoned || hub.population < EXODUS_MIN_POP { continue; }
+            let city_dearth = hub.starving.clamp(0.0, 1.0)
+                .max((EXODUS_PROSPERITY_FLOOR - hub.sent_prosperity).max(0.0));
+            if city_dearth <= 0.0 { continue; }
+            let prov_pressure = match self.hub_province.get(h).copied() {
+                Some(p) if p >= 0 => {
+                    let p = p as usize;
+                    let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(1.0);
+                    (self.prov_rural.get(p).copied().unwrap_or(0.0) / cap).clamp(0.0, 1.0)
+                }
+                _ => 0.0,
+            };
+            push[h] = (city_dearth * (0.6 + 0.4 * prov_pressure)).clamp(0.0, 1.0);
+        }
+        // Route each pushed hub to the best-off OTHER hub sharing its trade
+        // component — an existing corridor, never a new path search.
+        for h in 0..n {
+            if push[h] <= 0.0 { continue; }
+            let comp = self.hubs[h].component;
+            let here_opp = self.hubs[h].sent_prosperity.clamp(0.0, 1.0)
+                * (1.0 - self.hubs[h].starving.clamp(0.0, 1.0));
+            let mut best: Option<(usize, f32)> = None;
+            for o in 0..n {
+                if o == h { continue; }
+                let ob = &self.hubs[o];
+                if ob.is_estate || ob.abandoned || ob.population < 1.0 { continue; }
+                if ob.component != comp { continue; }
+                let opp = ob.sent_prosperity.clamp(0.0, 1.0) * (1.0 - ob.starving.clamp(0.0, 1.0));
+                if best.map_or(true, |(_, b)| opp > b) { best = Some((o, opp)); }
+            }
+            let Some((dest, dest_opp)) = best else { continue };
+            if dest_opp <= here_opp + EXODUS_MIN_OPPORTUNITY_GAIN { continue; }
+            let movers = (self.hubs[h].population * EXODUS_RATE * push[h])
+                .min(self.hubs[h].population * EXODUS_MAX_SHARE);
+            if movers < 1.0 { continue; }
+            self.hubs[h].population = (self.hubs[h].population - movers).max(1.0);
+            self.hubs[dest].population += movers;
+            // Migrants carry their home culture with them (same convention the
+            // rural pull above uses).
+            let culture = self.hub_culture.get(h).cloned().unwrap_or_default();
+            if !culture.is_empty() { self.add_minority(dest, &culture, movers); }
+            if movers >= EXODUS_CHRONICLE_MIN {
+                let (from, to) = (self.hubs[h].name.clone(), self.hubs[dest].name.clone());
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "event".into(), hub: h as i32, good: -1, value: movers,
+                    text: format!("Dearth drives {:.0} people from {} to {}.", movers, from, to),
+                });
+            }
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════════
     //  PROVINCE LAND STATE  (FIX_PLAN B1 — the feedback edge)
     //
@@ -1484,16 +1551,37 @@ impl CampaignSim {
     pub(crate) fn society_demand_mult(&self, h: usize, need_tier: u8) -> f32 {
         let s = &self.hubs[h].society;
         let tot = s.patrician + s.burgher + s.commoner + s.underclass;
-        if tot < 1e-3 { return 1.0; } // unseeded (e.g. estates)
-        let elite = (s.patrician + s.burgher) / tot;
-        let mass = (s.commoner + s.underclass) / tot;
-        const ELITE_BASE: f32 = 0.18;
-        const MASS_BASE: f32 = 0.82;
-        match need_tier {
-            2 => (1.0 + STRATA_DEMAND_TILT * (elite - ELITE_BASE) / ELITE_BASE).clamp(0.4, 1.8),
-            0 => (1.0 + STRATA_DEMAND_TILT * (mass - MASS_BASE) / MASS_BASE).clamp(0.6, 1.4),
-            _ => 1.0, // comfort tier neutral
+        let base = if tot < 1e-3 {
+            1.0 // unseeded (e.g. estates)
+        } else {
+            let elite = (s.patrician + s.burgher) / tot;
+            let mass = (s.commoner + s.underclass) / tot;
+            const ELITE_BASE: f32 = 0.18;
+            const MASS_BASE: f32 = 0.82;
+            match need_tier {
+                2 => (1.0 + STRATA_DEMAND_TILT * (elite - ELITE_BASE) / ELITE_BASE).clamp(0.4, 1.8),
+                0 => (1.0 + STRATA_DEMAND_TILT * (mass - MASS_BASE) / MASS_BASE).clamp(0.6, 1.4),
+                _ => 1.0, // comfort tier neutral
+            }
+        };
+        // Item 6 (population audit) · blend in the PROFESSION-weighted reading —
+        // see `PROFESSION_BASKET_DOSE`'s own doc comment. A hub with no `Pop`
+        // yet (an estate, or before `derive_pops` has run this year) leaves
+        // `base` untouched — additive, never a replacement.
+        if PROFESSION_BASKET_DOSE <= 0.0 { return base; }
+        let pops = &self.hubs[h].pops;
+        if pops.is_empty() { return base; }
+        let tier = need_tier.min(2) as usize;
+        let mut w = 0.0f32;
+        let mut wsum = 0.0f32;
+        for p in pops {
+            let a = PROFESSION_TIER_AFFINITY[(p.profession as usize).min(8)][tier];
+            w += p.size * a;
+            wsum += p.size;
         }
+        if wsum < 1e-3 { return base; }
+        let prof_mult = ((w / wsum) / PROFESSION_TIER_BASELINE[tier]).clamp(0.4, 1.8);
+        base * (1.0 - PROFESSION_BASKET_DOSE) + prof_mult * PROFESSION_BASKET_DOSE
     }
 
 
@@ -1712,7 +1800,7 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: unknown_extent(), is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
-            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),

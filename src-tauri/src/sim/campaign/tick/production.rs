@@ -607,6 +607,26 @@ impl CampaignSim {
         let mut pops: Vec<f32> = self.hubs.iter().map(|h| h.population.max(0.0)).collect();
         pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let median_pop = if pops.is_empty() { 1.0 } else { pops[pops.len() / 2].max(1.0) };
+        // CRAFTSMEN GATE THE MANUFACTORY (population audit, item 2): where a hub
+        // carries a real craftsmen-class Pop, that class — not raw population —
+        // sets its manufacturing scale, so a farming/military town of the same
+        // total size can no longer out-manufacture a genuinely craft-heavy one.
+        // Median CRAFTSMEN plays exactly the role median POPULATION already
+        // played above, at the same scale, so the substitution below needs no
+        // new calibration constant. A hub with no craftsmen Pop yet (an estate,
+        // or a save from before DLC 4 wired `derive_pops`) falls back to the
+        // population ratio exactly as it always was — additive, not a
+        // replacement, until Pop exists. Deliberately NOT yet a single budget
+        // CONTESTED across every good made at one city (the plan's other half)
+        // — goods differ hugely in `labor`, and getting that cross-good unit
+        // conversion right needs real dosing this pass doesn't have the room
+        // for; each good still draws its own independent cap, now off the
+        // craftsmen ratio instead of the population ratio.
+        let mut craft_pops: Vec<f32> = self.hubs.iter()
+            .filter_map(|h| h.pops.iter().find(|p| p.profession == POP_CRAFTSMAN).map(|p| p.size))
+            .collect();
+        craft_pops.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let median_craftsmen = if craft_pops.is_empty() { 1.0 } else { craft_pops[craft_pops.len() / 2].max(1.0) };
 
         // Fungible input substitutes (bay salt ↔ rock salt as a preservative cure).
         // Mirrors worldgen `manufacture::apply_manufacturing`; narrow by design so
@@ -635,9 +655,16 @@ impl CampaignSim {
         let tech = self.tech_factor;
         for h in 0..self.hubs.len() {
             let pop = self.hubs[h].population.max(0.0);
+            let craftsmen = self.hubs[h].pops.iter()
+                .find(|p| p.profession == POP_CRAFTSMAN)
+                .map(|p| p.size);
+            let scale_ratio = match craftsmen {
+                Some(c) if c > 0.0 => c / median_craftsmen,
+                _ => pop / median_pop,
+            };
             for &g in &order {
                 let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };
-                let labor_cap = (pop / median_pop) * labor * tech;
+                let labor_cap = scale_ratio * labor * tech;
                 if labor_cap <= 0.0 { continue; }
                 let mut by_inputs = f32::INFINITY;
                 for &(idx, qty) in &self.goods[g].inputs {

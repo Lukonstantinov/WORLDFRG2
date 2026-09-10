@@ -563,6 +563,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 war_with: -1,
                 war_since: 0,
                 war_effort: 0.0,
+                war_manpower: 0.0,
                 tribute_to: -1,
                 tribute_until: 0,
                 coin_name: String::new(),

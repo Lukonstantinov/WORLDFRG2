@@ -606,7 +606,7 @@ impl CampaignSim {
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
             estate_kind: kind, estate_tier: 1, mine_depth, mine_extent, is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
-            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, tribute_to: -1, tribute_until: 0,
+            finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
@@ -2223,10 +2223,17 @@ impl CampaignSim {
         for gi in 0..self.guilds.len() {
             let (hub, good) = (self.guilds[gi].hub as usize, self.guilds[gi].good as usize);
             if hub >= self.hubs.len() || good >= ng { continue; }
-            // Master the craft: a steady, capped quality lift.
+            // Master the craft: a steady, capped quality lift. A chartered MONOPOLY
+            // (`LAW_GUILD_MONOPOLY`) raises the ceiling a guild secure from outside
+            // competition can reach.
             if self.hubs[hub].quality.len() == ng {
+                let cap = if self.hubs[hub].laws.iter().any(|l| l.kind == LAW_GUILD_MONOPOLY && l.good == good as i32) {
+                    GUILD_MONOPOLY_QUALITY_CAP
+                } else {
+                    GUILD_QUALITY_CAP
+                };
                 let q = self.hubs[hub].quality[good];
-                self.hubs[hub].quality[good] = (q + GUILD_QUALITY_STEP).min(GUILD_QUALITY_CAP);
+                self.hubs[hub].quality[good] = (q + GUILD_QUALITY_STEP).min(cap);
             }
             self.guilds[gi].strength = (self.guilds[gi].strength + 0.04).min(1.0);
             // Raise a guildhall once the guild is well-established (one-time monument).
@@ -2255,6 +2262,43 @@ impl CampaignSim {
         }
     }
 
+    /// Turn on the two orphaned standing `Law` kinds (4-5) — see `Law::kind`'s own
+    /// doc comment. Idempotent per (hub, kind[, good]): a city or guild never
+    /// re-enacts a law it already holds, so this can run every year for free.
+    /// Neither kind invents new persisted state — `Law`/`push_law` already existed
+    /// (kinds 0/6 were the only ones ever enacted before this).
+    pub(crate) fn enact_standing_laws(&mut self, yr: u32) {
+        // GRAIN LAW — a city that has actually lived through famine learns the
+        // lesson: `decide_crisis_relief` (polis.rs) reads it to call dearth sooner.
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if self.hubs[h].starving <= RELIEF_STARVE_TRIGGER { continue; }
+            if self.hubs[h].laws.iter().any(|l| l.kind == LAW_GRAIN) { continue; }
+            self.push_law(h, LAW_GRAIN, -1, -1, yr);
+            let city = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "event".into(), hub: h as i32, good: -1, value: 0.0,
+                text: format!(
+                    "{} enacts a grain law: the council will open the granary — and bar its export — at the first sign of dearth.",
+                    city),
+            });
+        }
+        // GUILD MONOPOLY — a guild secure enough to have raised its hall is
+        // chartered an exclusive right over its craft (a real quality ceiling
+        // lift, `run_craft_guilds` above).
+        for gi in 0..self.guilds.len() {
+            if !self.guilds[gi].hall { continue; }
+            let (hub, good) = (self.guilds[gi].hub as usize, self.guilds[gi].good as usize);
+            if hub >= self.hubs.len() || good >= self.goods.len() { continue; }
+            if self.hubs[hub].laws.iter().any(|l| l.kind == LAW_GUILD_MONOPOLY && l.good == good as i32) { continue; }
+            self.push_law(hub, LAW_GUILD_MONOPOLY, -1, good as i32, yr);
+            let (city, gn) = (self.hubs[hub].name.clone(), self.goods[good].name.clone());
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "event".into(), hub: hub as i32, good: good as i32, value: 0.0,
+                text: format!("The {} guild of {} is chartered an exclusive monopoly over its craft.", gn, city),
+            });
+        }
+    }
 
     /// Phase 5 (flavour) · dynastic MARRIAGES between houses. Once a year a prominent
     /// house may wed another — ending any feud between them, sealing an alliance, and

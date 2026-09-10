@@ -581,6 +581,11 @@ impl CampaignSim {
             // its cities (migration carries culture); big cities pay a graveyard mortality.
             // No-op unless a province layer was seeded into the campaign.
             self.province_demography_pass();
+            // Emigration / urban exodus — the missing PUSH: a city in real dearth
+            // can now lose people to flight along an existing trade corridor, not
+            // only to starvation. Runs after the pass above so this year's fresh
+            // `prov_rural`/`prov_cap` inform the push. See `EXODUS_*` (mod.rs).
+            self.urban_exodus_pass();
             // Province works v2.0 · a prosperous holder autonomously begins a land
             // improvement here (no player action required — see the pass's own doc).
             // Runs BEFORE the land pass so a work started this year can also progress

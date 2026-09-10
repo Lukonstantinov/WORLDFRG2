@@ -438,6 +438,46 @@ const STRATA_DEMAND_TILT: f32 = 0.45;
 /// Fraction of a hub's population that flows between adjacent strata in a year at
 /// full mobility pressure — bounded so the social structure shifts gradually.
 const STRATA_MOBILITY_RATE: f32 = 0.04;
+// ── PER-PROFESSION CONSUMPTION BASKETS (population audit, item 6) — composed
+// WITH S1, not competing with it. S1 (`base_need`) fixed WHAT SHARE of a
+// city's budget a GOOD gets; `society_demand_mult` above still only tilts
+// that share by the coarse 2-bucket elite/mass split of `Society` (4
+// strata) and, by its own admission, leaves the ENTIRE comfort tier
+// neutral. This blends in a genuine PROFESSION-weighted reading (the 9-way
+// `Pop` split `derive_pops` already derives, at zero extra sim state — no
+// new field, `hub.pops` is read directly) at a SMALL, bounded dose, so an
+// imperfectly-calibrated affinity number can only ever nudge the result,
+// the same caution `COMFORT_IMPORT_FRAC`'s own repeated-regression history
+// argues for. Dosed at 0.15 and re-verified against
+// `econ_expenditure_shares_resemble_a_household` + `simulate_decades_
+// reports_dynamics` rather than assumed safe; walk it further only with a
+// fresh gate run at each step, per this file's own §2.4 discipline.
+const PROFESSION_BASKET_DOSE: f32 = 0.15;
+/// How strongly each `Pop` profession's own budget leans into a need tier
+/// (basic/comfort/luxury), relative to the population average — a rough,
+/// historically-motivated ranking (soldiers and farmers provisioned but
+/// little disposable luxury spend; craftsmen/merchants the "middling sort"
+/// who actually buy manufactured comfort goods; clergy lean ceremonial
+/// luxury; capitalists/aristocrats status consumption) rather than a
+/// measured series — this is a STRUCTURAL claim (who spends on what),
+/// bounded by the small dose above, not a calibrated number on its own.
+const PROFESSION_TIER_AFFINITY: [[f32; 3]; 9] = [
+    [1.10, 0.70, 0.30], // 0 Farmers
+    [1.15, 0.60, 0.15], // 1 Labourers
+    [0.95, 1.30, 0.50], // 2 Craftsmen
+    [0.90, 1.20, 0.60], // 3 Clerks
+    [0.85, 1.30, 1.10], // 4 Merchants
+    [0.90, 1.00, 1.20], // 5 Clergy
+    [0.60, 1.10, 1.80], // 6 Capitalists
+    [0.50, 1.00, 2.00], // 7 Aristocrats
+    [1.20, 0.60, 0.20], // 8 Soldiers
+];
+/// The reference reading `PROFESSION_TIER_AFFINITY` averages to on a
+/// "typical" society mix (worked out by hand from `derive_pops`'s own
+/// profession split at a plausible patrician/burgher/commoner/underclass
+/// 0.05/0.25/0.55/0.15 society) — what a hub sitting exactly at that mix
+/// reads as `prof_mult ≈ 1.0` against, so the blend is a true no-op there.
+const PROFESSION_TIER_BASELINE: [f32; 3] = [1.050, 0.822, 0.423];
 // ── Civil unrest & revolts (It. 3) — the social substrate turns load-bearing. ──
 /// How fast a hub's smouldering `unrest` eases toward its driver target (yearly).
 const UNREST_EASE: f32 = 0.35;
@@ -736,6 +776,38 @@ const URBAN_CROWDING_MORTALITY: f32 = 0.012;
 /// Above this population the urban-graveyard mortality begins to bite (ramps to full
 /// by ~+120k over it).
 const URBAN_CROWD_FLOOR: f32 = 25_000.0;
+// ── EMIGRATION / URBAN EXODUS (population audit, item 4) — unrest's missing
+// consequence short of a revolt. `province_demography_pass` already moves
+// people COUNTRYSIDE → city, weighted by each city's own prosperity/food; it
+// never lets anyone LEAVE a city, so a city in real dearth could previously
+// only shed people to starvation, never to flight. `urban_exodus_pass`
+// (`cities.rs`) is the missing PUSH, bound to both axes the brief names: the
+// city's own dearth (`starving`, `sent_prosperity`) AND its PROVINCE's own
+// pressure (a full, exhausted countryside behind it means no refuge nearby
+// even before the city itself starves) — so a city can now be pushed by a
+// bad harvest region-wide, not only by its own market failing. Routed to the
+// best-off OTHER hub sharing its trade COMPONENT (the existing corridor
+// graph `component` already encodes, never a new path search — rule 34's
+// discipline: use what is already computed).
+/// Ignore hubs below this population — a hamlet's flight is noise.
+const EXODUS_MIN_POP: f32 = 500.0;
+/// Below this `sent_prosperity` a city counts as hard-pressed even absent
+/// outright starvation.
+const EXODUS_PROSPERITY_FLOOR: f32 = 0.35;
+/// Share of population that flees per year at full push pressure (1.0);
+/// scales down with the actual, milder pressure a city usually carries.
+const EXODUS_RATE: f32 = 0.05;
+/// Hard ceiling — however severe the dearth, a single year never empties more
+/// than this share of a city.
+const EXODUS_MAX_SHARE: f32 = 0.08;
+/// A destination must beat the home city's own opportunity reading by at
+/// least this much to be worth fleeing to — otherwise the countryside itself
+/// (already handled by `province_demography_pass`) or plain starvation is the
+/// more honest outcome than a lateral, pointless move.
+const EXODUS_MIN_OPPORTUNITY_GAIN: f32 = 0.10;
+/// Only chronicle a flight this large or bigger — keeps the journal from
+/// flooding with every small, ordinary year.
+const EXODUS_CHRONICLE_MIN: f32 = 200.0;
 /// Young settlement colonies grow this much faster organically (frontier boom).
 const POP_GROWTH_COLONY_MULT: f32 = 2.2;
 /// DEPOSITS_AND_MINING_PLAN.md slice 5 (the Potosí case) · a mining settlement
@@ -907,6 +979,12 @@ const RELIEF_MIN_RELEASE: f32 = 1.0;
 /// How long the export bar stands once imposed — two months, re-imposed monthly
 /// while the famine lasts, so it lapses on its own when the crisis passes.
 const RELIEF_EXPORT_LOCK_TICKS: u32 = 60;
+/// A GRAIN LAW (`LAW_GRAIN`, enacted by `enact_standing_laws` on a city that has
+/// actually lived through a famine) is a standing policy to call dearth SOONER,
+/// not a stronger response once called — it multiplies `RELIEF_LACK_TRIGGER`/
+/// `RELIEF_BALANCE_TRIGGER` toward zero, leaving the release fraction and export
+/// lock (`RELIEF_RELEASE_DEARTH`/`_FAMINE`, `RELIEF_EXPORT_LOCK_TICKS`) untouched.
+const GRAIN_LAW_TRIGGER_EASE: f32 = 0.7;
 /// N2 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.2) · a non-food good's live price must
 /// reach this multiple of its own base value before a council bars its export.
 /// Shipped at `INFINITY` — provably dead code, exactly `N1_LOCAL_HAUL_BIND_DAYS`'s
@@ -2556,6 +2634,38 @@ const WAR_LEVY_RATE: f32 = 0.12;
 /// (consumed — the destructive cost of armies & blockade).
 const WAR_SPEND_RATE: f32 = 0.30;
 
+// ── THE LEVY · war finally spends a body, not just a purse. Answers the
+// absence `war_side_exhaustion`'s own doc comment names ("neither invents a
+// troop-count field"). `TickHub.war_manpower` is drawn from the soldier-class
+// Pop (`POP_SOLDIER`), raised while at war (`raise_levy`) and spent by real
+// casualties each round (`apply_war_casualties`, both `war.rs`) — see that
+// field's own doc comment. Dosed conservatively (a small `LEVY_STRENGTH_
+// WEIGHT` so manpower TILTS a round rather than deciding it outright) and
+// re-verified against `simulate_decades_reports_dynamics` +
+// `econ_measure_war_frequency` (the existing ~45-wars/century instrument)
+// rather than assumed safe, per this file's own §2.4 discipline.
+/// At most this share of a hub's soldier-class Pop may be under arms at once.
+const LEVY_MAX_FRAC_OF_SOLDIERS: f32 = 0.5;
+/// Share of the gap to the target raised each quarterly round — mobilization
+/// takes a few rounds, not one.
+const LEVY_RAISE_RATE: f32 = 0.25;
+/// Share eased back toward 0 each year at peace (demobilization).
+const LEVY_DEMOB_RATE: f32 = 0.20;
+/// Converts a manpower headcount into the same "strength" units `strength_a`/
+/// `strength_b` already use (treasury + war chest, grain-eq).
+const LEVY_STRENGTH_WEIGHT: f32 = 0.01;
+/// Baseline share of BOTH sides' current levy lost to attrition each fought
+/// round.
+const LEVY_CASUALTY_BASE: f32 = 0.03;
+/// Extra share the round's LOSING side (the one `delta` went against) loses
+/// on top of the baseline.
+const LEVY_CASUALTY_LOSER_BONUS: f32 = 0.04;
+/// Of a round's manpower losses, the share that are actual deaths (the rest
+/// desert, are wounded, or are simply stood down) — what feeds back into
+/// `hub.population`, kept small and bounded like every other demographic
+/// event in this file (`disease.rs`'s plague cull, starvation's growth drag).
+const LEVY_DEATH_FRAC: f32 = 0.3;
+
 // ── CITY_PROVINCE_WAR_PLAN.md §3.4a · the score & round engine ──────────────────
 // Same shape as the succession-crisis engine (`crisis.rs`): a fixed round cap is
 // the termination guarantee of LAST RESORT (rule 22's discipline applied to war),
@@ -2952,6 +3062,16 @@ pub struct TickHub {
     #[serde(default)] pub war_since: u32,
     /// Accumulated war effort / morale this side has mustered (war chest spent).
     #[serde(default)] pub war_effort: f32,
+    /// THE LEVY — real mobilized manpower currently under arms, drawn from the
+    /// city's own soldier pool (`Pop.profession == POP_SOLDIER`, itself
+    /// `so.underclass * 0.45`, see `derive_pops`). Topped up toward
+    /// `LEVY_MAX_FRAC_OF_SOLDIERS` of that pool while at war (`raise_levy`),
+    /// spent by casualties each war round (`apply_war_casualties`), and
+    /// demobilized (eased back to 0) at peace. This is the one thing a
+    /// headcount can say that the abstract `Society`/`Pop` shares alone
+    /// cannot: it gets SPENT — see `docs/CLAUDE.md` §5.1's own note that war
+    /// "neither invents a troop-count field" before this.
+    #[serde(default)] pub war_manpower: f32,
     /// TRIBUTARY state: the overlord hub this city owes tribute to (−1 = free), set
     /// when it loses a war whose goal was Tribute. Cleared when the term lapses.
     #[serde(default = "neg_one_i32")] pub tribute_to: i32,
@@ -3288,8 +3408,14 @@ pub struct Law {
     /// 4 grain law (civic granary) · 5 guild monopoly · 6 foreign-ownership bar
     /// (ESTATES_SHARES_AND_WAREHOUSE_PLAN.md A4 — read by `resolve_envoy`;
     /// enacted only at a fresh council capture, the "5) Payoff" step below).
-    /// Kinds 1-5 are the pre-existing aspirational set: documented since before
-    /// this slice, still enacted nowhere. Left as-is (not this slice's job).
+    /// Kinds 1-3 (tariff/free-trade/debasement) remain the aspirational set —
+    /// `decide_polis_policy` already owns that axis every year, so a standing
+    /// LAW naming it would compete with, not extend, an existing decision.
+    /// Kinds 4-5 are now real: `enact_standing_laws` (`houses.rs`) enacts a
+    /// GRAIN LAW on a city that has actually starved (read by
+    /// `decide_crisis_relief`, `GRAIN_LAW_TRIGGER_EASE`) and a GUILD MONOPOLY
+    /// once a craft guild raises its hall (read by `run_craft_guilds`,
+    /// `GUILD_MONOPOLY_QUALITY_CAP`) — both idempotent per (hub, kind[, good]).
     pub kind: u8,
     /// Beneficiary house (−1 none).
     pub house: i32,
@@ -3301,6 +3427,11 @@ pub struct Law {
 /// ownership bar. Kept as a top-level const (not just the doc-comment on
 /// `Law::kind`) because `resolve_envoy` compares against it directly.
 pub(crate) const LAW_FOREIGN_BAR: u8 = 6;
+/// `Law.kind` for a grain law (read by `decide_crisis_relief`).
+pub(crate) const LAW_GRAIN: u8 = 4;
+/// `Law.kind` for a guild monopoly, `Law.good` naming the protected craft
+/// (read by `run_craft_guilds`).
+pub(crate) const LAW_GUILD_MONOPOLY: u8 = 5;
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
@@ -5054,6 +5185,13 @@ pub const POP_PROFESSIONS: [&str; 9] = [
     "Farmers", "Labourers", "Craftsmen", "Clerks", "Merchants", "Clergy",
     "Capitalists", "Aristocrats", "Soldiers",
 ];
+/// `Pop.profession` index for the soldier class (`derive_pops`'s
+/// `so.underclass * 0.45`) — the pool `raise_levy` (`war.rs`) draws from.
+pub(crate) const POP_SOLDIER: u8 = 8;
+/// `Pop.profession` index for the craftsmen class (`derive_pops`'s
+/// `so.burgher * 0.40`) — what `apply_manufacturing` (`production.rs`) gates
+/// manufactured-good labor capacity on, in place of raw population.
+pub(crate) const POP_CRAFTSMAN: u8 = 2;
 
 /// DLC 4 · a typed population unit — the foundation of the Nations & POPs layer.
 /// The abstract `Society` shares are derived into these each year. NOT yet wired
@@ -5289,6 +5427,15 @@ const GUILD_QUALITY_CAP: f32 = 0.92;
 const GUILD_STRIKE_CHANCE: f32 = 0.10;
 const GUILD_STRIKE_MAG: f32 = 0.5;      // halves the good's manufacture while out
 const GUILD_HALL_STRENGTH: f32 = 0.6;   // standing at which a guildhall is raised
+/// A GUILD MONOPOLY law (`LAW_GUILD_MONOPOLY`) lifts a guild's quality ceiling
+/// past the ordinary `GUILD_QUALITY_CAP` — an exclusive charter is what real
+/// guild ordinances actually granted (the right to bar outsiders, not a price
+/// or an estate slot this codebase can safely touch — ACTORS_AND_CARRIAGE_
+/// PLAN.md §2's own note that no flavour-layer guild can yet "exclude anyone").
+/// Small and bounded on purpose: it never lets a chartered good's quality do
+/// anything a price/production change further downstream would need its own
+/// `econ_` gate to justify.
+const GUILD_MONOPOLY_QUALITY_CAP: f32 = 0.97;
 
 /// Phase 5 (flavour) · fashion / wonders / piracy / diaspora tuning (all bounded).
 const FASHION_YEARLY_CHANCE: f32 = 0.35;
@@ -7794,6 +7941,8 @@ impl CampaignSim {
                 self.update_currency_baskets();
                 self.update_banks(yr);
                 self.update_wars(yr);
+                // THE LEVY · a hub no longer at war stands its manpower down.
+                self.demobilize_levies();
                 // B3 · civic public debt (Monte): service coupons, default if over-levered,
                 // and issue fresh bonds where the treasury is short (post-war financing).
                 self.update_public_debt(yr);
@@ -7816,6 +7965,10 @@ impl CampaignSim {
                 self.arrange_marriages(yr);
                 // Phase 5 (flavour) · craft guilds master their craft, strike, build.
                 self.run_craft_guilds(yr);
+                // Standing laws (kinds 4-5) — a grain law after a real famine, a guild
+                // monopoly once a guild's hall stands. Reads this year's `starving`/
+                // guild state, so runs right after both are updated above.
+                self.enact_standing_laws(yr);
                 // Phase 5 (flavour) · lighter set: fashion cycles, civic wonders,
                 // piracy raids, diaspora quarters.
                 self.roll_fashion(yr);

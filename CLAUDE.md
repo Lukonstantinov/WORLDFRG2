@@ -1070,9 +1070,15 @@ Three facts about the campaign that are easy to miss and shape any change here:
   technology + growth model. There are no capital goods, no fuel inputs and no labour
   market, so nothing in the economy can influence its own growth rate (Part C of the
   fix plan). Don't mistake the finance layer for a growth engine — it redistributes.
-- **`Pop` is inert.** `hubs[h].pops` is written yearly in `cities.rs` and read ONLY by
-  `campaign_get_pops` for display; `militancy`/`consciousness` are computed and
-  discarded. The live social model is the abstract `Society` shares (item B3).
+- **`Pop` is no longer inert** (was true through FIX_PLAN B3's first pass; stale by
+  the time a population audit re-verified it — see §5.4). `derive_pops` (yearly,
+  `cities.rs`) feeds `update_unrest` (pop-weighted militancy) and now also
+  `raise_manpower_levy`/`apply_war_casualties` (`war.rs`, §5.4) and
+  `apply_manufacturing`'s craftsmen-class labor cap (`production.rs`, §5.4) — real,
+  gated consumers, not display-only. `campaign_get_pops` (the panel it was meant for)
+  still has zero frontend callers. The live SOCIETAL model remains the abstract
+  `Society` shares (item B3); `Pop` layers a genuine profession axis on top of it now,
+  not a competing one.
 
 ### 5.3 Province works v2.0 — autonomous land improvement
 `maybe_fund_province_works` (`cities.rs`, yearly, just before `province_land_pass`)
@@ -1128,6 +1134,102 @@ Gates: `province_works_begin_on_their_own_once_the_seat_is_advanced` (an advance
 seat DOES start one; an untiered town outside a realm does not, however rich),
 `state_infrastructure_needs_a_realm`, `work_cost_scales_with_province_size_and_
 roughness`, and the two pre-existing work tests, which still pass unchanged.
+
+---
+
+### 5.4 The population audit — Pop's first real consumers, and the missing PUSH
+
+A session-driven audit of `Pop`/`Society`/settlement data (triggered by a settlement-
+panel tidy-up surfacing how much of it was display-only) found `Pop` re-verified as
+NOT quite inert (FIX_PLAN B3 had already wired pop-weighted militancy into
+`update_unrest`) but still contributing nothing a `Society`-share formula couldn't —
+and three adjacent absences that mattered more: war has no bodies, manufacturing
+reads raw population instead of the craftsmen who actually work a bench, and
+migration only ever pulls people INTO a city, never pushes them OUT. Five items
+shipped from that audit, each additive and gated:
+
+- **THE LEVY** (`war.rs`) — war finally spends a body, not just a purse.
+  `TickHub.war_manpower` is drawn from the soldier-class `Pop`
+  (`POP_SOLDIER`, `derive_pops`'s `so.underclass * 0.45`), raised toward
+  `LEVY_MAX_FRAC_OF_SOLDIERS` of that pool a few rounds at a time
+  (`raise_manpower_levy`) while a hub is at war, and spent by real casualties
+  each fought round (`apply_war_casualties`) — a small share of which
+  (`LEVY_DEATH_FRAC`) are actual deaths, fed back into `hub.population` the
+  same multiplicative way every other demographic event in this file already
+  is (`disease.rs`'s plague cull, starvation's growth drag), never a raw
+  subtraction. `LEVY_STRENGTH_WEIGHT` folds it into the existing round-bias
+  calculation (`strength_a`/`strength_b`) at a deliberately small weight, so
+  manpower TILTS a round rather than deciding it outright. `demobilize_levies`
+  (yearly) eases a hub's levy back to 0 once it is no longer at war. This is
+  the one thing a headcount can say that the abstract `Society`/`Pop` shares
+  alone cannot — it gets SPENT.
+- **Craftsmen gate the manufactory** (`production.rs::apply_manufacturing`) —
+  a hub's manufactured-good labor cap now scales off its CRAFTSMEN-class
+  `Pop` (`POP_CRAFTSMAN`) relative to the world median, in place of raw
+  population, so a farming/military town of the same total size can no
+  longer out-manufacture a genuinely craft-heavy one. Reuses the exact
+  median-ratio calibration `median_pop` already used, so no new constant was
+  needed for the substitution itself. A hub with no craftsmen `Pop` yet
+  falls back to the old population ratio exactly — additive, not a
+  replacement. **Deliberately NOT yet** a single labor budget CONTESTED
+  across every good made at one city (goods differ hugely in `labor`, and
+  that cross-good unit conversion needs real dosing this pass didn't have
+  room for) — each good still draws its own independent cap, just off a
+  truer denominator now.
+- **Two orphaned `Law` kinds turned on** (`houses.rs::enact_standing_laws`,
+  yearly) — of `Law::kind`'s six variants, only 0 (favoured-house charter) and
+  6 (foreign-ownership bar) were ever enacted; 1-5 were a purely aspirational
+  set rendered in the UI as if real. A GRAIN LAW (`LAW_GRAIN`) is enacted on a
+  city that has actually lived through famine (`starving > RELIEF_STARVE_
+  TRIGGER`) and read by `decide_crisis_relief` (`polis.rs`) to call dearth
+  SOONER — `GRAIN_LAW_TRIGGER_EASE` eases the two dearth triggers toward zero,
+  never the famine trigger or the release/export-lock severity once called. A
+  GUILD MONOPOLY (`LAW_GUILD_MONOPOLY`) is chartered once a craft guild raises
+  its hall, lifting that (hub, good)'s quality ceiling from `GUILD_QUALITY_CAP`
+  to `GUILD_MONOPOLY_QUALITY_CAP` — a real, bounded expression of the
+  exclusive-entry right `ACTORS_AND_CARRIAGE_PLAN.md` §2 notes no flavour-layer
+  guild can yet grant, kept small enough to need no separate `econ_` gate.
+  Kinds 1-3 (tariff/free-trade/debasement) remain aspirational — that axis is
+  already owned every year by `decide_polis_policy`, so a standing law naming
+  it would compete rather than extend.
+- **Emigration / urban exodus** (`cities.rs::urban_exodus_pass`, yearly,
+  called alongside `province_demography_pass`) — unrest's missing consequence
+  short of a revolt. The existing rural→urban pull already weighs a
+  destination city's own prosperity/food; nothing let anyone LEAVE a city
+  before this. A hub's PUSH pressure blends its own dearth (`starving`,
+  `sent_prosperity` below `EXODUS_PROSPERITY_FLOOR`) with its PROVINCE's own
+  rural pressure (`prov_rural/prov_cap`) — bound to both axes, per the
+  brief: a city can now be pushed by a bad harvest region-wide, not only by
+  its own market failing. Routed to the best-off OTHER hub sharing its trade
+  `component` (an existing corridor, never a new path search — rule 34's
+  discipline), only when that destination clears `EXODUS_MIN_OPPORTUNITY_
+  GAIN` over home. A true no-op on a province-less campaign only in its
+  province half; the city-dearth half still fires (`hub_province`/`prov_cap`
+  reading empty just zeroes `prov_pressure`, not the whole push).
+- **Per-profession consumption baskets** (`cities.rs::society_demand_mult`) —
+  composed WITH S1, deliberately, after the audit itself recommended against
+  building this (risk of fighting S1's just-shipped budget-share demand
+  rework) and the maintainer chose to build it anyway. S1 owns WHAT SHARE of
+  a city's budget a good gets; `society_demand_mult` still only tilted that
+  share by a coarse 2-bucket elite/mass split of the 4-strata `Society` and,
+  by its own doc comment, left the entire COMFORT tier neutral. This blends
+  in a genuine 9-profession reading (`PROFESSION_TIER_AFFINITY`, read
+  straight off `hub.pops` — no new persisted state) at a small, bounded
+  `PROFESSION_BASKET_DOSE` (0.15), normalized against a hand-derived
+  "typical society" baseline (`PROFESSION_TIER_BASELINE`) so a hub at that
+  mix reads as a no-op. Re-verified against `econ_expenditure_shares_
+  resemble_a_household` at this dose: food/luxury shares held at 59.5%/8.9%,
+  inside the pre-change measured range — the dose is small enough to nudge,
+  not move, the aggregate. Affinity numbers are a structural ranking (who
+  plausibly spends on what), not a measured series — treat like
+  `COMFORT_IMPORT_FRAC`: walk further only with a fresh gate run per step.
+
+All five are additive (no field is removed, no existing behaviour path is deleted)
+and were verified together against `cargo test --lib tick::tests` (216 passed) and
+`cargo test --lib econ_` (6 passed) before shipping. `econ_measure_war_frequency`
+(the `#[ignore]`d 300-year war-frequency diagnostic) was not re-run this pass —
+flagged as a natural follow-up before dosing the levy any further, not silently
+assumed clean.
 
 ---
 
