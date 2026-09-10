@@ -320,26 +320,39 @@ impl CampaignSim {
             push[h] = (city_dearth * (0.6 + 0.4 * prov_pressure)).clamp(0.0, 1.0);
         }
         // Route each pushed hub to the best-off OTHER hub sharing its trade
-        // component — an existing corridor, never a new path search.
+        // component — an existing corridor, never a new path search. Every
+        // destination has a hard absorption cap for the year
+        // (`EXODUS_DEST_ABSORB_CAP` of its OWN pass-start population, snapshot
+        // before any migration this pass so the cap can't itself drift as the
+        // pass runs): every pushed hub in a component independently ranks the
+        // SAME candidates, so without a cap they all pick the SAME single
+        // winner in the SAME year and flood it faster than its own production
+        // can catch up. A source whose top pick is already full falls through
+        // to the next-best candidate that still clears the opportunity-gain
+        // bar, rather than piling on regardless.
+        let start_pop: Vec<f32> = self.hubs.iter().map(|h| h.population).collect();
+        let dest_cap: Vec<f32> = start_pop.iter().map(|&p| p * EXODUS_DEST_ABSORB_CAP).collect();
+        let mut absorbed: Vec<f32> = vec![0.0; n];
         for h in 0..n {
             if push[h] <= 0.0 { continue; }
             let comp = self.hubs[h].component;
             let here_opp = self.hubs[h].sent_prosperity.clamp(0.0, 1.0)
                 * (1.0 - self.hubs[h].starving.clamp(0.0, 1.0));
-            let mut best: Option<(usize, f32)> = None;
-            for o in 0..n {
-                if o == h { continue; }
+            let mut candidates: Vec<(usize, f32)> = (0..n).filter_map(|o| {
+                if o == h { return None; }
                 let ob = &self.hubs[o];
-                if ob.is_estate || ob.abandoned || ob.population < 1.0 { continue; }
-                if ob.component != comp { continue; }
+                if ob.is_estate || ob.abandoned || ob.population < 1.0 { return None; }
+                if ob.component != comp { return None; }
                 let opp = ob.sent_prosperity.clamp(0.0, 1.0) * (1.0 - ob.starving.clamp(0.0, 1.0));
-                if best.map_or(true, |(_, b)| opp > b) { best = Some((o, opp)); }
-            }
-            let Some((dest, dest_opp)) = best else { continue };
-            if dest_opp <= here_opp + EXODUS_MIN_OPPORTUNITY_GAIN { continue; }
+                if opp <= here_opp + EXODUS_MIN_OPPORTUNITY_GAIN { return None; }
+                Some((o, opp))
+            }).collect();
+            candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
             let movers = (self.hubs[h].population * EXODUS_RATE * push[h])
                 .min(self.hubs[h].population * EXODUS_MAX_SHARE);
             if movers < 1.0 { continue; }
+            let Some(&(dest, _)) = candidates.iter().find(|&&(o, _)| absorbed[o] + movers <= dest_cap[o]) else { continue };
+            absorbed[dest] += movers;
             self.hubs[h].population = (self.hubs[h].population - movers).max(1.0);
             self.hubs[dest].population += movers;
             // Migrants carry their home culture with them (same convention the

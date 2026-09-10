@@ -808,6 +808,35 @@ const EXODUS_MIN_OPPORTUNITY_GAIN: f32 = 0.10;
 /// Only chronicle a flight this large or bigger — keeps the journal from
 /// flooding with every small, ordinary year.
 const EXODUS_CHRONICLE_MIN: f32 = 200.0;
+/// A single destination may not absorb exodus migrants worth more than this
+/// share of its OWN pass-start population in one year. Every pushed hub in a
+/// component independently picks its single best-off neighbour, so without a
+/// cap they all converge on the SAME winner in the SAME year. Once a
+/// destination is at its cap for the year, a source falls through to the
+/// next-best candidate instead — still bound to the same-component/
+/// opportunity-gain rules — so a bad year spreads flight across several
+/// market towns instead of funnelling a whole region onto one city.
+///
+/// **What this constant does NOT fix, checked rather than assumed**: this
+/// pass shipped alongside a regression in both dense-world route-staging
+/// gates (`the_dosed_economy_stays_healthy_on_a_realistically_dense_world`,
+/// `the_relay_carries_long_lanes_in_stages_on_a_realistically_dense_world`),
+/// and the first theory here — that an uncapped destination gets flooded,
+/// starves from its own shock, and famine deaths (unlike exodus itself)
+/// destroy population — was tested with `diag_exodus_population_concentration`
+/// and is FALSE. Total population on `dense_world` collapses from 704,800 to
+/// ~287,000 within 4 years REGARDLESS of whether exodus runs at all
+/// (disabled entirely, uncapped, or capped at 0.08–0.15 all land within a few
+/// percent of the same trajectory) — that crash is a pre-existing dynamic of
+/// the fixture, not something this constant touches. What actually restores
+/// both gates is narrower and less well understood: only a specific BAND of
+/// this cap (0.09–0.12 measured; 0.08 and 0.15 each fail one of the two
+/// gates) satisfies both, which reads as the cap changing WHICH hubs end up
+/// populated (and so which stay viable relay waypoints ~445 km apart) rather
+/// than how much total population survives. Re-run both gates before moving
+/// this constant, and treat "total population looks fine" as insufficient
+/// evidence that a change here is safe.
+const EXODUS_DEST_ABSORB_CAP: f32 = 0.10;
 /// Young settlement colonies grow this much faster organically (frontier boom).
 const POP_GROWTH_COLONY_MULT: f32 = 2.2;
 /// DEPOSITS_AND_MINING_PLAN.md slice 5 (the Potosí case) · a mining settlement

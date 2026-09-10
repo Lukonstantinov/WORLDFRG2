@@ -6523,6 +6523,47 @@
              refusal that broke the inheritance gate");
     }
 
+    /// Diagnostic (`#[ignore]`d, like `econ_diagnose_house_turnover`) written
+    /// while chasing the regression urban exodus caused in both dense-world
+    /// route-staging gates (`the_dosed_economy_stays_healthy_on_a_
+    /// realistically_dense_world`, `the_relay_carries_long_lanes_in_stages_
+    /// on_a_realistically_dense_world`). It measures TOTAL population, and the
+    /// finding is a NEGATIVE one: the first theory — an uncapped destination
+    /// gets flooded by every source's independent "best neighbour" pick,
+    /// overloads faster than its own production catches up, and the resulting
+    /// famine deaths (unlike exodus itself) destroy population — predicted
+    /// this diagnostic should show a much healthier total once
+    /// `EXODUS_DEST_ABSORB_CAP` caps that flood. It does not: total population
+    /// on `dense_world` collapses from 704,800 to ~287,000 within 4 years
+    /// almost IDENTICALLY whether exodus is disabled entirely, uncapped, or
+    /// capped anywhere from 0.08 to 0.15 — so that crash is a pre-existing
+    /// dynamic of the fixture, not something exodus or this cap causes. What
+    /// the cap actually fixes (a narrow 0.09–0.12 band restores both gates;
+    /// 0.08 and 0.15 each still fail one) is which HUBS end up populated, not
+    /// how much population survives in total — this diagnostic cannot see
+    /// that, only the aggregate it rules out. Run with `-- --ignored
+    /// --nocapture` to watch the (misleadingly stable-looking) trajectory.
+    #[test]
+    #[ignore]
+    fn diag_exodus_population_concentration() {
+        let mut dosed = dense_world();
+        dosed.ship_leg_max_km = SHIP_LEG_MAX_KM;
+        dosed.caravan_leg_max_km = CARAVAN_LEG_MAX_KM;
+        for yr in 0..40 {
+            dosed.advance(365);
+            if yr % 5 == 4 || yr == 0 {
+                let pops: Vec<f32> = dosed.hubs.iter().map(|h| h.population).collect();
+                let alive = dosed.hubs.iter().filter(|h| !h.abandoned).count();
+                let max = pops.iter().cloned().fold(0.0f32, f32::max);
+                let min = pops.iter().cloned().fold(f32::INFINITY, f32::min);
+                let total: f32 = pops.iter().sum();
+                let mean = total / pops.len() as f32;
+                println!("yr {yr}: alive {alive}/{} pop min {min:.0} max {max:.0} mean {mean:.0} total {total:.0}",
+                    dosed.hubs.len());
+            }
+        }
+    }
+
     // ─────────────────────────────────────────────────────────────────────
     // N5 · the sailing window (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1)
     // ─────────────────────────────────────────────────────────────────────
