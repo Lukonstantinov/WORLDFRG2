@@ -291,7 +291,12 @@ fn build_coarse_cost(
     let ch = ((grid_h + f - 1) / f) as i32;
     let cn = (cw * ch) as usize;
 
-    // Sample each coarse cell from its centre fine cell (one tile pass).
+    // Sample each coarse cell from its centre fine cell — SAMPLED PER TILE AS IT
+    // LOADS (A3, ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md P3/§9), not via a full
+    // 6-array, 97 MB (390 MB on "Large") fine-grid load that existed only to read
+    // 259k centre cells out of it. Every fine cell is still visited once (same
+    // iteration count as the old fill pass), but the only per-cell allocations
+    // left are the `cn`-sized coarse outputs themselves.
     let mut is_land = vec![false; cn];
     let mut elev = vec![0.0f32; cn];
     let mut koppen = vec![0u8; cn];
@@ -306,18 +311,19 @@ fn build_coarse_cost(
     // cheap AND is NOT counted as an open-water crossing. Only deep / high sea
     // (non-shelf ocean) counts against the trade-reach crossing limit.
     let mut shelf = vec![false; cn];
+    // B1 (§9, folded into A3 since both change how a block is reduced) — the
+    // MINIMUM land elevation among a block's own fine cells, used ONLY for
+    // traversal cost below. A pass is a minimum: the old centre-only sample read
+    // a 55.7 km block as a wall whenever its one sampled cell happened to be a
+    // peak, however low the actual gap elsewhere in that block. `elev` above
+    // (the centre sample) is kept for every OTHER consumer this file returns it
+    // to (`path_metrics`'s effective-time slowdown, `flow.rs`'s land-leg
+    // classification) — those want the block's representative relief, not its
+    // cheapest corner.
+    let mut min_land_elev = vec![f32::INFINITY; cn];
     {
         let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
         let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
-        // Load fine fields, then resample. (We only need the centre cell of each
-        // coarse block, but a full load keeps the index math simple.)
-        let fn_cells = (grid_w * grid_h) as usize;
-        let mut f_terrain = vec![0u8; fn_cells];
-        let mut f_elev = vec![0.0f32; fn_cells];
-        let mut f_koppen = vec![0u8; fn_cells];
-        let mut f_hazard = vec![0.0f32; fn_cells];
-        let mut f_temp = vec![0.0f32; fn_cells];
-        let mut f_shelf = vec![0u8; fn_cells];
         for ty in 0..tiles_y as i32 {
             for tx in 0..tiles_x as i32 {
                 let tile = world.tile(tx, ty);
@@ -328,30 +334,39 @@ fn build_coarse_cost(
                 for ly in 0..max_ly {
                     for lx in 0..max_lx {
                         let ti = (ly * TILE_SIZE + lx) as usize;
-                        let gi = ((base_y + ly) * grid_w + (base_x + lx)) as usize;
-                        f_terrain[gi] = tile.terrain[ti];
-                        f_elev[gi] = tile.elevation[ti];
-                        f_koppen[gi] = tile.koppen[ti];
-                        f_hazard[gi] = (tile.storm_base[ti].max(tile.reef_risk[ti])) as f32 / 255.0;
-                        f_temp[gi] = tile.temperature[ti];
-                        f_shelf[gi] = tile.is_shelf[ti];
+                        let gx = base_x + lx;
+                        let gy = base_y + ly;
+                        let cx = (gx / f).min(cw as u32 - 1) as i32;
+                        let cy = (gy / f).min(ch as u32 - 1) as i32;
+                        let ci = (cy * cw + cx) as usize;
+                        let land = tile.terrain[ti] == 1;
+                        if land {
+                            let e = tile.elevation[ti];
+                            if e < min_land_elev[ci] { min_land_elev[ci] = e; }
+                        }
+                        // The one designated CENTRE fine cell per coarse block —
+                        // same position the old resample read — carries every
+                        // other (representative, not minimum) field.
+                        let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
+                        let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
+                        if gx != wx || gy != wy { continue; }
+                        is_land[ci] = land;
+                        elev[ci] = tile.elevation[ti];
+                        koppen[ci] = tile.koppen[ti];
+                        sea_hazard[ci] = (tile.storm_base[ti].max(tile.reef_risk[ti])) as f32 / 255.0;
+                        temp[ci] = tile.temperature[ti];
+                        shelf[ci] = tile.is_shelf[ti] != 0;
                     }
                 }
             }
         }
-        for cy in 0..ch {
-            for cx in 0..cw {
-                let wx = (cx as u32 * f + f / 2).min(grid_w - 1);
-                let wy = (cy as u32 * f + f / 2).min(grid_h - 1);
-                let gi = (wy * grid_w + wx) as usize;
-                let ci = (cy * cw + cx) as usize;
-                is_land[ci] = f_terrain[gi] == 1;
-                elev[ci] = f_elev[gi];
-                koppen[ci] = f_koppen[gi];
-                sea_hazard[ci] = f_hazard[gi];
-                temp[ci] = f_temp[gi];
-                shelf[ci] = f_shelf[gi] != 0;
-            }
+        // A land block's own centre cell is itself one of its land fine cells, so
+        // `min_land_elev` is always set (≤ the centre sample) wherever `is_land`
+        // is true. Defensive only — guards a block whose designated centre
+        // fine-cell position doesn't line up with its own `(cx, cy)` mapping,
+        // which the two independent formulas above should never allow.
+        for ci in 0..cn {
+            if is_land[ci] && !min_land_elev[ci].is_finite() { min_land_elev[ci] = elev[ci]; }
         }
     }
 
@@ -383,7 +398,13 @@ fn build_coarse_cost(
             cost[ci] = if is_land[ci] {
                 // Lower relief multiplier than before (22 → 14) so interiors are
                 // traversable and inland trade actually happens.
-                let mut c = 4.0 + elev[ci] * 14.0;
+                // B1 — priced off the block's own MINIMUM land elevation, not its
+                // centre sample: a block that contains a real low gap is cheap to
+                // cross because it contains that gap, not because a die roll put
+                // the sampled cell there. `elev[ci]` (centre) stays untouched for
+                // every downstream reader that wants the block's representative
+                // relief instead (effective-time slowdown, land/sea leg kind).
+                let mut c = 4.0 + min_land_elev[ci] * 14.0;
                 // Desert/steppe surcharge. In "Silk Road" mode (overland caravans
                 // preferred over dangerous seas) the arid-land penalty is cut so
                 // STEPPE corridors (the Silk Road's main highway) and deserts
@@ -435,8 +456,11 @@ fn build_coarse_cost(
     // Mountain-pass (saddle) discount: a moderately high land cell that is a
     // local low along one axis (a gap between higher flanks) is a pass, so cut
     // its cost — caravans thread passes rather than going over/around ranges.
+    // B1 — reads `min_land_elev`, the same minimum the base cost above now uses,
+    // so "is this block a local low" compares real minimums to real minimums
+    // rather than one arbitrary sampled point to its neighbours' sampled points.
     {
-        let base = elev.clone();
+        let base = min_land_elev.clone();
         for cy in 0..ch {
             for cx in 0..cw {
                 let ci = (cy * cw + cx) as usize;
@@ -3142,6 +3166,92 @@ mod route_pricing_tests {
         assert!(
             (3.0..=5.0).contains(&ratio),
             "navigable river should price near 4× coastal sea (got river={river_cost}, ratio={ratio})"
+        );
+    }
+
+    /// B1 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9) — a pass is a MINIMUM.
+    /// Builds TWO otherwise-identical worlds: a ridge with one real one-fine-cell
+    /// gap placed deliberately OFF its coarse block's own designated centre
+    /// sample, and the same ridge with no gap at all (uniformly high). Crossing
+    /// the ridge must cost distinctly LESS with the gap than without it — the
+    /// direct, self-contained version of "the block's cost must reflect a real
+    /// low point even when the centre sample never lands on it": under the old
+    /// centre-only sampling, the gap's coarse column reads from its (high,
+    /// non-gap) centre cell in BOTH worlds, so crossing cost comes out identical
+    /// and this assertion fails; a bare "did it cross at column X" check does
+    /// not discriminate here, since with a single blocking column the path has
+    /// no alternative to route through regardless of whether the gap is seen.
+    #[test]
+    fn a_narrow_pass_off_centre_is_still_found() {
+        let w = 3500u32; // f = w/700 = 5, the production block width
+        let h = 20u32;
+        let ridge = 90u32..110u32;
+        let gap_gx = 101u32; // inside the ridge, off its coarse block's centre sample
+
+        let build = |with_gap: bool| -> (Vec<i64>, i32, i32) {
+            let conn = Connection::open_in_memory().unwrap();
+            schema::create_tables(&conn).unwrap();
+            for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+                metadata::set_meta(&conn, k, v).unwrap();
+            }
+            let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+            for i in 0..buf.total() {
+                buf.terrain[i] = 1; // all land — the only obstacle is relief
+                buf.koppen[i] = 12; // Cfb, no climate surcharge
+                buf.temperature[i] = 18.0;
+            }
+            for y in 0..h {
+                for x in 0..w {
+                    let idx = buf.idx(x, y);
+                    buf.elevation[idx] = if with_gap && x == gap_gx { 0.05 }
+                        else if ridge.contains(&x) { 0.95 }
+                        else { 0.1 };
+                }
+            }
+            buf.save(&conn, "test").unwrap();
+            let db = WorldDb::new(conn);
+            let conn = db.conn.lock().unwrap();
+            let world = db.cached_tiles_with_conn(&conn).unwrap();
+            let cc = build_coarse_cost(&world, w, h, "", false, true, 0.0, -1, 12).unwrap();
+
+            if with_gap {
+                // Fixture sanity check: the gap must NOT be the block's own
+                // centre sample, or this test proves nothing about off-centre
+                // detection.
+                let gap_cx = (gap_gx / cc.f) as i32;
+                let centre_gx = (gap_cx as u32 * cc.f + cc.f / 2).min(w - 1);
+                assert_ne!(centre_gx, gap_gx,
+                    "test fixture error: the gap must sit off the block's own centre sample");
+            }
+
+            let mid_cy = cc.ch / 2;
+            let start = cc.cidx(0, mid_cy);
+            let goal = cc.cidx((200u32 / cc.f) as i32, mid_cy);
+            // Close through the ridge (200 world cells / 40 coarse cells), far
+            // apart the other way around the cylinder (~3300 world cells), so
+            // the route is never tempted to dodge the ridge by wrapping around
+            // the back — it must actually cross.
+            let (dist, _prev) = coarse_dijkstra_dist_prev(&cc, start);
+            (dist, goal as i32, cc.cw)
+        };
+
+        let (dist_gap, goal, _cw) = build(true);
+        let (dist_flat, _goal2, _cw2) = build(false);
+        let cost_gap = dist_gap[goal as usize];
+        let cost_flat = dist_flat[goal as usize];
+        assert!(cost_gap != i64::MAX && cost_flat != i64::MAX,
+            "expected both worlds to route across (gap={cost_gap}, flat={cost_flat})");
+        // Only ONE of the ridge's several coarse columns actually carries the
+        // gap, so its saving is diluted across the whole route rather than
+        // dominating it — measured ~5% at this fixture's proportions. Under the
+        // old centre-only sampling the two costs are EXACTLY equal (the gap's
+        // column reads its unchanged high centre sample either way), so any
+        // margin below 1.0 discriminates; 0.97 leaves real headroom above that
+        // exact tie without demanding an unrealistically large swing.
+        assert!((cost_gap as f64) < (cost_flat as f64) * 0.97,
+            "a real off-centre gap must cross distinctly cheaper than a uniformly \
+             high ridge with no gap at all (gap crossing {cost_gap}, no-gap crossing \
+             {cost_flat}) — a min-per-block sample must have found it"
         );
     }
 }
