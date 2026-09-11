@@ -195,6 +195,14 @@ export function MapCanvas() {
   })();
   const activeToolRef = useRef(activeTool);
   activeToolRef.current = activeTool;
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — the base-layer opacity
+  // slider was wired to nothing (§F11). `provinceOpacity` one field over IS
+  // wired via `om.setProvinceOpacity` below, which is what proved this was an
+  // omission rather than a design; the base layer gets the same treatment.
+  const layerOpacity = useUIStore((s) => s.layerOpacity);
+  const layerOpacityRef = useRef(layerOpacity);
+  layerOpacityRef.current = layerOpacity;
+  const overlayOpacity = useUIStore((s) => s.overlayOpacity);
   const brushRadiusRef = useRef(brushRadius);
   brushRadiusRef.current = brushRadius;
   const economyRef = useRef(economy);
@@ -321,8 +329,14 @@ export function MapCanvas() {
     }
 
     // Draw tiles (only those within the visible tile range).
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — the base layer's own
+    // opacity, previously wired to nothing (the slider drew a live % but no
+    // renderer ever read `uiStore.layerOpacity`).
     const visible = viewport.getVisibleTileRange(w, h);
+    const baseAlpha = layerOpacityRef.current;
+    if (baseAlpha < 1) ctx.globalAlpha = Math.max(0, baseAlpha);
     tileManager.draw(ctx, visible);
+    if (baseAlpha < 1) ctx.globalAlpha = 1;
 
     // SWIPE COMPARE: the second layer over the same ground, clipped to the right
     // of the divider. The clip is computed in WORLD space (the active transform),
@@ -952,6 +966,16 @@ export function MapCanvas() {
     om.setProvinceOpacity(provinceOpacity);
     requestRender();
   }, [provinceOpacity, requestRender]);
+
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — per-overlay opacity.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setOverlayOpacity(overlayOpacity);
+    requestRender();
+  }, [overlayOpacity, requestRender]);
+
+  useEffect(() => { requestRender(); }, [layerOpacity, requestRender]);
 
   // Province fill style: distinct-per-province vs one flat colour, + custom border.
   useEffect(() => {

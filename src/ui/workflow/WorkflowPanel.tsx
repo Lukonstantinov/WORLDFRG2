@@ -251,6 +251,16 @@ export function WorkflowPanel() {
   const stepProps = { seed, plateCount, invalidateTiles };
 
   const hasTemplate = landmassSource === "template" || landmassSource === "painted";
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 4 — "Generate Full World" and
+  // "Complete from Landmass" merge into ONE primary button whose behaviour is
+  // decided by `landmassSource`, stated in a line of text rather than by
+  // making the user pick between two buttons that differed only by colour.
+  // The one genuine choice — regenerate a painted/templated landmass too —
+  // is a small checkbox, shown only when there is a landmass to keep.
+  const landmassExists = hasTemplate || stepCompleted[1];
+  const [regenerateLandmassToo, setRegenerateLandmassToo] = useState(false);
+  const willUsePlates = !landmassExists || landmassSource === "plates" || regenerateLandmassToo;
+  const handleGenerate = () => (willUsePlates ? handleRunAll() : handleRunFromTemplate());
 
   return (
     <div style={{
@@ -276,20 +286,30 @@ export function WorkflowPanel() {
           onChange={(e) => setPlateCount(Number(e.target.value))} style={inputStyle} />
       </div>
 
-      {/* Generate Full World (from plates) — geography work, blocked once frozen */}
-      <button onClick={handleRunAll} disabled={simRunning || frozen}
+      {/* GENERATION_UX_REDESIGN_PLAN.md Slice 4 — one primary Generate button. */}
+      <button onClick={handleGenerate} disabled={simRunning || frozen}
         title={frozen ? "World is finalized — unfreeze to regenerate geography" : undefined}
-        style={{ ...genBtn, background: "#1a5a2a", border: "1px solid #2a7040", color: "#a0e0b0", fontWeight: 600, textAlign: "center", opacity: frozen ? 0.5 : 1 }}>
-        {simRunning ? "Generating..." : "Generate Full World"}
+        style={{
+          ...genBtn,
+          background: willUsePlates ? "#1a5a2a" : "#1a4a5a",
+          border: `1px solid ${willUsePlates ? "#2a7040" : "#2a6070"}`,
+          color: willUsePlates ? "#a0e0b0" : "#a0d0e0",
+          fontWeight: 600, textAlign: "center", opacity: frozen ? 0.5 : 1,
+        }}>
+        {simRunning ? "Generating..." : "Generate World"}
       </button>
-
-      {/* Generate from existing template/painted landmass */}
-      {(hasTemplate || stepCompleted[1]) && (
-        <button onClick={handleRunFromTemplate} disabled={simRunning || frozen}
-          title={frozen ? "World is finalized — unfreeze to regenerate geography" : undefined}
-          style={{ ...genBtn, background: "#1a4a5a", border: "1px solid #2a6070", color: "#a0d0e0", fontWeight: 600, textAlign: "center", opacity: frozen ? 0.5 : 1 }}>
-          {simRunning ? "Generating..." : "Complete from Landmass"}
-        </button>
+      <div style={{ fontSize: 9.5, color: "#5a7390", lineHeight: 1.4, margin: "-1px 0 2px" }}>
+        {willUsePlates
+          ? "Generating from plates — your landmass will be regenerated."
+          : "Generating from your painted landmass — your coastlines are kept."}
+      </div>
+      {landmassExists && landmassSource !== "plates" && (
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "#8098b0", margin: "0 0 2px" }}>
+          <input type="checkbox" checked={regenerateLandmassToo}
+            onChange={(e) => setRegenerateLandmassToo(e.target.checked)}
+            style={{ accentColor: "#4a90d0", width: 12, height: 12 }} />
+          Regenerate the landmass too (from plates)
+        </label>
       )}
 
       <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />

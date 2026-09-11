@@ -120,6 +120,19 @@ const climateOverlays = [
   { id: "latLines", label: "Lat Lines" },
 ];
 
+// GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — only the overlay keys
+// `OverlayManager.render` routes through `withOpacity` actually respond to a
+// per-overlay opacity slider. Showing the slider for every overlay id would
+// recreate F11's own bug (a control wired to nothing) for whichever key isn't
+// covered, so the affordance is limited to the real set.
+const OPACITY_CAPABLE = new Set([
+  "provinces", "tradeRegions", "tradeFlows", "dynamicFlow", "campaignCorridors",
+  "expeditions", "travelRoute", "goodScarcity", "riverBreaks", "merchantRoutes",
+  "goodFlow", "futures", "houseControl", "coinDominance", "plagueZones",
+  "guildCities", "dynastyLinks", "tradeCorridors", "tradeBasins", "tradeHeat",
+  "colonies", "settlementNames", "hubNames", "toponyms",
+]);
+
 const overlayTypes = [
   { id: "rivers", label: "Rivers" },
   { id: "lakes", label: "Lakes" },
@@ -214,6 +227,8 @@ export function Toolbar() {
         .map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
     : GOOD_DEFS.map((g) => ({ id: g.name, icon: g.emoji, name: g.label }));
   const setLayerOpacity = useUIStore((s) => s.setLayerOpacity);
+  const overlayOpacity = useUIStore((s) => s.overlayOpacity);
+  const setOverlayOpacity = useUIStore((s) => s.setOverlayOpacity);
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStretchToFit = useUIStore((s) => s.setStretchToFit);
   const setShowGoodsBrowser = useUIStore((s) => s.setShowGoodsBrowser);
@@ -498,6 +513,19 @@ export function Toolbar() {
                 {o.label}
               </span>
             </label>
+            {overlayVisibility[o.id] && OPACITY_CAPABLE.has(o.id) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 3px 22px" }}>
+                <input
+                  type="range" min={0} max={100}
+                  value={Math.round((overlayOpacity[o.id] ?? 1) * 100)}
+                  onChange={(e) => setOverlayOpacity(o.id, Number(e.target.value) / 100)}
+                  style={{ ...rangeStyle, height: 3 }}
+                />
+                <span style={{ fontSize: 8.5, color: "#5a7390", minWidth: 24, textAlign: "right" }}>
+                  {Math.round((overlayOpacity[o.id] ?? 1) * 100)}%
+                </span>
+              </div>
+            )}
             {/* Route-bound migration: ribbon / dots / focus mode (people follow trade routes). */}
             {o.id === "migrations" && overlayVisibility[o.id] && (
               <div style={{ display: "flex", gap: 3, margin: "1px 0 4px 22px" }}>

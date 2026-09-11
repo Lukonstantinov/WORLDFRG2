@@ -505,6 +505,43 @@ export class OverlayManager {
    *  outline are always drawn at full strength so the political map stays legible
    *  however far the fill is faded back. */
   private provinceOpacity = 0.5;
+  /** GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — per-OVERLAY opacity, keyed
+   *  by the same `visibility` key each overlay already gates on. Defaults to 1
+   *  (untouched) for any key not present, so a map nobody has adjusted renders
+   *  bit-identically to before this existed. Set from `uiStore.overlayOpacity`
+   *  via `setOverlayOpacity`. */
+  private overlayOpacity: Record<string, number> = {};
+  setOverlayOpacity(map: Record<string, number>) { this.overlayOpacity = map; }
+  /** Draw one overlay GROUP at its own opacity, whatever internal `globalAlpha`
+   *  juggling `draw` does for selection highlights etc. At opacity 1 (the
+   *  default — nothing touched) this is exactly `draw(ctx)` with zero extra
+   *  cost, which is what keeps every untouched map bit-identical. Below 1, the
+   *  group renders once to an offscreen canvas carrying the SAME transform
+   *  `ctx` is mid-transform with (world-cell coordinates, panned/zoomed), then
+   *  is composited back at the requested alpha — the only way to apply one
+   *  uniform opacity over a block that sets its own `globalAlpha` internally
+   *  (a river's discharge shading, a lake's selection glow, …) without
+   *  touching that block's own code. */
+  private withOpacity(ctx: CanvasRenderingContext2D, key: string, draw: (c: CanvasRenderingContext2D) => void) {
+    const op = this.overlayOpacity[key];
+    if (op === undefined || op >= 1) { draw(ctx); return; }
+    if (op <= 0) return;
+    const canvas = ctx.canvas;
+    const off = document.createElement("canvas");
+    off.width = canvas.width;
+    off.height = canvas.height;
+    const octx = off.getContext("2d")!;
+    // Carry the SAME transform ctx is mid-transform with, so world-cell
+    // coordinates the draw callback issues land in the same screen position
+    // on the offscreen canvas as they would on the real one.
+    octx.setTransform(ctx.getTransform());
+    draw(octx);
+    ctx.save();
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = op;
+    ctx.drawImage(off, 0, 0);
+    ctx.restore();
+  }
   /** Province id → seat cell, for marking the selected province's seat. */
   private provinceSeats: Map<number, { x: number; y: number }> = new Map();
   /** Atlas 2.0 · refugee roads (age01 = 0 fresh … 1 faded out). */
@@ -2277,12 +2314,12 @@ export class OverlayManager {
     this.placedLabels = [];
     // Provinces underlie everything (a base political/economic layer).
     if (this.visibility.provinces && this.provinceRaster) {
-      this.renderProvinces(ctx);
+      this.withOpacity(ctx, 'provinces', (c) => this.renderProvinces(c));
     }
     // Trade-region territories first (under everything else) so markers/routes
     // stay legible on top.
     if (this.visibility.tradeRegions && this.econRegions.length > 0) {
-      this.renderEconRegions(ctx);
+      this.withOpacity(ctx, 'tradeRegions', (c) => this.renderEconRegions(c));
     }
 
     if (this.visibility.lakes && this.lakes.length > 0) {
@@ -2839,16 +2876,16 @@ export class OverlayManager {
     // Trade flows: bundled commodity trunks routed over the trade network
     // (width ∝ total volume on each corridor).
     if (this.visibility.tradeFlows && this.tradeTrunks.length > 0) {
-      this.renderTradeTrunks(ctx);
+      this.withOpacity(ctx, 'tradeFlows', (c) => this.renderTradeTrunks(c));
     }
     if (this.visibility.dynamicFlow && this.dynamicTrunks.length > 0) {
-      this.renderDynamicFlow(ctx);
+      this.withOpacity(ctx, 'dynamicFlow', (c) => this.renderDynamicFlow(c));
     }
     if (this.visibility.campaignCorridors && this.tradeCorridorList.length > 0) {
-      this.renderTradeCorridors(ctx);
+      this.withOpacity(ctx, 'campaignCorridors', (c) => this.renderTradeCorridors(c));
     }
     if (this.visibility.expeditions && (this.expeditions.length > 0 || this.expeditionFails.length > 0)) {
-      this.renderExpeditions(ctx);
+      this.withOpacity(ctx, 'expeditions', (c) => this.renderExpeditions(c));
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
@@ -2860,7 +2897,7 @@ export class OverlayManager {
     // #23 · the chosen itinerary route — a bright magenta thread with endpoint
     // pins, drawn over the trade network so the journey stands out.
     if (this.visibility.travelRoute && this.travelRoute.length >= 2) {
-      this.renderTravelRoute(ctx);
+      this.withOpacity(ctx, 'travelRoute', (c) => this.renderTravelRoute(c));
     }
 
     // Ridge-drawing tool: sketch the user's drawn ridge lines (width ∝ footprint,
@@ -2877,27 +2914,27 @@ export class OverlayManager {
     // #37 · per-good scarcity: graduated discs at each hub, green where the good
     // is cheap/abundant through to red where it is dear/scarce.
     if (this.visibility.goodScarcity && this.goodScarcity.length > 0) {
-      this.renderGoodScarcity(ctx);
+      this.withOpacity(ctx, 'goodScarcity', (c) => this.renderGoodScarcity(c));
     }
 
     // 🌊 Reach breaks: where a trunk river turns upper→middle→delta.
     if (this.visibility.riverBreaks !== false && this.riverBreaks.length > 0) {
-      this.renderRiverBreaks(ctx);
+      this.withOpacity(ctx, 'riverBreaks', (c) => this.renderRiverBreaks(c));
     }
 
     // Merchant layer: live family/guild routes coloured by the owning house.
     if (this.visibility.merchantRoutes && this.merchantRoutes.length > 0) {
-      this.renderMerchantRoutes(ctx);
+      this.withOpacity(ctx, 'merchantRoutes', (c) => this.renderMerchantRoutes(c));
     }
 
     // Goods Atlas: one good's yearly flow, snapped onto the existing trade routes.
     if (this.visibility.goodFlow && this.goodFlows.length > 0) {
-      this.renderGoodFlows(ctx);
+      this.withOpacity(ctx, 'goodFlow', (c) => this.renderGoodFlows(c));
     }
 
     // Futures layer: contractual supply lanes (source → buyer), dashed + directed.
     if (this.visibility.futures && this.futuresLanes.length > 0) {
-      this.renderFutures(ctx);
+      this.withOpacity(ctx, 'futures', (c) => this.renderFutures(c));
     }
 
     // Political influence: translucent discs sized by trade power.
@@ -2925,12 +2962,12 @@ export class OverlayManager {
     // trade) and the trade routes it runs are tinted that house's unique colour;
     // every other settlement is a small grey dot and every other route is grey.
     if (this.visibility.houseControl && this.settlements.length > 0) {
-      this.renderHouseControlLayer(ctx);
+      this.withOpacity(ctx, 'houseControl', (c) => this.renderHouseControlLayer(c));
     }
 
     // Monetary-dominance map: tint EVERY settlement by the coin it settles in.
     if (this.visibility.coinDominance && this.coinUse.length > 0) {
-      this.renderCoinDominance(ctx);
+      this.withOpacity(ctx, 'coinDominance', (c) => this.renderCoinDominance(c));
     }
     // Coin-usage drill-down: a selected coin's territory (primary / held / reserve).
     if (this.coinOverlayHub != null && this.coinUse.length > 0) {
@@ -2944,11 +2981,11 @@ export class OverlayManager {
 
     // Phase 6 · plague-struck cities (red glow) + contagion routes.
     if (this.visibility.plagueZones && this.plagueCities.length > 0) {
-      this.renderPlagueZones(ctx);
+      this.withOpacity(ctx, 'plagueZones', (c) => this.renderPlagueZones(c));
     }
     // Phase 6 · guild cities marked with their good's emoji.
     if (this.visibility.guildCities && this.guildCities.length > 0) {
-      this.renderGuildCities(ctx);
+      this.withOpacity(ctx, 'guildCities', (c) => this.renderGuildCities(c));
     }
     // Phase 6 · living notable figures.
     if (this.visibility.figureMarks && this.figureMarks.length > 0) {
@@ -2960,7 +2997,7 @@ export class OverlayManager {
     }
     // Phase 7 · dynasty ties (alliances gold, feuds red) between seat cities.
     if (this.visibility.dynastyLinks && this.dynastyLinks.length > 0) {
-      this.renderDynastyLinks(ctx);
+      this.withOpacity(ctx, 'dynastyLinks', (c) => this.renderDynastyLinks(c));
     }
 
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
@@ -2971,7 +3008,7 @@ export class OverlayManager {
     // Directional trade corridors: one net-direction arrow per hub→hub corridor
     // (so direction only flips at hubs), width ∝ total value carried.
     if (this.visibility.tradeCorridors && this.corridors.length > 0) {
-      this.renderCorridors(ctx);
+      this.withOpacity(ctx, 'tradeCorridors', (c) => this.renderCorridors(c));
     }
 
     // Strategic chokepoints: high-volume trade gateways (straits / passes).
@@ -2993,14 +3030,14 @@ export class OverlayManager {
     // Atlas 2.0 · NAMED TRADE BASINS — dashed hulls + region labels, drawn first
     // so heat, routes and markers sit on top.
     if (this.visibility.tradeBasins && this.basins.length > 0) {
-      this.renderTradeBasins(ctx);
+      this.withOpacity(ctx, 'tradeBasins', (c) => this.renderTradeBasins(c));
     }
 
     // Atlas 2.0 · TRADE HEAT — where trade concentrates. Soft additive glows per
     // hub, radius + colour ∝ last year's throughput (teal → gold → crimson).
     // Drawn UNDER the settlement markers so the dots stay crisp on the glow.
     if (this.visibility.tradeHeat && this.heatPoints.length > 0) {
-      this.renderTradeHeat(ctx);
+      this.withOpacity(ctx, 'tradeHeat', (c) => this.renderTradeHeat(c));
     }
 
     // Atlas 2.0 · MIGRATION — route-bound flows (dots/ribbon/focus) when present,
@@ -3201,7 +3238,7 @@ export class OverlayManager {
 
     // Colonies & house trade outposts (their own markers + routed supply lanes).
     if (this.visibility.colonies && this.colonies.length > 0) {
-      this.renderColonies(ctx);
+      this.withOpacity(ctx, 'colonies', (c) => this.renderColonies(c));
     }
 
     // Name labels (opt-in overlays). Drawn last so they sit on top of markers.
@@ -3214,14 +3251,14 @@ export class OverlayManager {
     // a low-priority toponym (a minor river/peak name) drawn earlier in the
     // frame could permanently claim a coastal town's label space.
     if (this.visibility.settlementNames && this.settlements.length > 0) {
-      this.renderSettlementNames(ctx);
+      this.withOpacity(ctx, 'settlementNames', (c) => this.renderSettlementNames(c));
     }
     if (this.visibility.hubNames && this.politicalCenters.length > 0) {
-      this.renderHubNames(ctx);
+      this.withOpacity(ctx, 'hubNames', (c) => this.renderHubNames(c));
     }
     // #26 · geographic toponyms: culture-styled labels for rivers/peaks/lakes/regions.
     if (this.visibility.toponyms && this.toponyms.length > 0) {
-      this.renderToponyms(ctx);
+      this.withOpacity(ctx, 'toponyms', (c) => this.renderToponyms(c));
     }
 
     // Search highlight pin: a bright double ring + dot on the searched settlement,

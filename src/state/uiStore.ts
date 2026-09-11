@@ -82,6 +82,10 @@ interface UIStore {
   simRunning: boolean;
   overlayVisibility: Record<string, boolean>;
   layerOpacity: number;
+  /** GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — per-OVERLAY opacity, keyed
+   *  by the same string `overlayVisibility` uses. Absent = 1 (untouched), so a
+   *  map nobody has adjusted is bit-identical to before this field existed. */
+  overlayOpacity: Record<string, number>;
   /** MAP PLATES (ui/world/mapThemes.ts) — the id of the applied plate, or null for
    *  "Custom". A plate is a named composition of base layer + overlays + label
    *  typography; picking a layer or flipping an overlay by hand clears this, so the
@@ -314,6 +318,7 @@ interface UIStore {
   setOverlaysVisible: (types: string[], visible: boolean) => void;
   toggleOverlay: (type: string) => void;
   setLayerOpacity: (opacity: number) => void;
+  setOverlayOpacity: (type: string, opacity: number) => void;
   setHoverInfo: (c: CellInfo | null) => void;
   setIsolateClass: (c: number | null) => void;
   setElevationStyle: (s: string | null) => void;
@@ -458,6 +463,7 @@ export const useUIStore = create<UIStore>((set) => ({
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
   layerOpacity: 1,
+  overlayOpacity: {},
   activeMapTheme: null,
   hoverInfo: null,
   isolateClass: null,
@@ -572,6 +578,9 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedChain: (id) => set({ selectedChain: id }),
   setSimRunning: (running) => set({ simRunning: running }),
   setLayerOpacity: (opacity) => set({ layerOpacity: opacity }),
+  setOverlayOpacity: (type, opacity) => set((state) => ({
+    overlayOpacity: { ...state.overlayOpacity, [type]: opacity },
+  })),
   setHoverInfo: (c) => set({ hoverInfo: c }),
   setIsolateClass: (c) => set({ isolateClass: c }),
   setElevationStyle: (s) => set({ elevationStyle: s, activeMapTheme: null }),
