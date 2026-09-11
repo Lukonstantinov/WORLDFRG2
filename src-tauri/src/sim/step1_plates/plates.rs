@@ -1,5 +1,6 @@
 use rand::prelude::*;
 use rayon::prelude::*;
+use std::collections::BinaryHeap;
 use std::collections::VecDeque;
 use crate::sim::world_buffer::WorldBuffer;
 use crate::sim::step2_terrain::elevation::fbm_noise;
@@ -434,14 +435,20 @@ pub(crate) fn warped_voronoi_tuned_weighted(
 /// non-`#[must_use]` return value in statement position is not an error.
 /// Matches WF1 plate-generator.ts algorithm.
 pub fn generate_plates_and_landmass(buf: &mut WorldBuffer, seed: u64, plate_count: u32) -> Vec<PlateMotion> {
-    generate_plates_and_landmass_with_target(buf, seed, plate_count, DEFAULT_OCEAN_FRACTION)
+    generate_plates_and_landmass_with_target(buf, seed, plate_count, DEFAULT_OCEAN_FRACTION, None)
 }
 
 /// As `generate_plates_and_landmass`, but with an explicit ocean-area target
-/// (Slice 5). `ocean_fraction` is clamped to a sane range so a pathological
-/// input can never empty the world of land or of sea entirely.
+/// (Slice 5) and, since GENERATION_UX_REDESIGN_PLAN.md Slice 2 (F2/F3), an
+/// explicit CONTINENT GOAL: `None`/`-1` = as many separate landmasses as
+/// possible (today's default behaviour, so every pre-existing caller —
+/// `generate_plates_and_landmass` included — is bit-identical), `0` = as FEW
+/// as possible (Pangaea), `n > 0` = nearest to `n`. `ocean_fraction` is
+/// clamped to a sane range so a pathological input can never empty the world
+/// of land or of sea entirely.
 pub fn generate_plates_and_landmass_with_target(
     buf: &mut WorldBuffer, seed: u64, plate_count: u32, ocean_fraction: f32,
+    continent_goal: Option<i32>,
 ) -> Vec<PlateMotion> {
     let mut rng = StdRng::seed_from_u64(seed);
     let w = buf.width as f32;
@@ -454,8 +461,25 @@ pub fn generate_plates_and_landmass_with_target(
     let rows = (count + cols - 1) / cols;
     let cell_w = w / cols as f32;
     let cell_h = h / rows as f32;
+    let plate_spacing = (w * h / count.max(1) as f32).sqrt();
 
-    let mut plates: Vec<Plate> = Vec::with_capacity(count);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 1 (F4) — CLASS-AWARE SEEDING. F4
+    // measured that the old grid-jitter-then-classify order lets a small-class
+    // site land inside a giant's dominance region "by construction" whenever
+    // the two are jittered within ~1.9 plate spacings of each other (which the
+    // grid guarantees for neighbouring cells), so the power diagram gives that
+    // small site ZERO territory and only the disc-stamp rescue below used to
+    // save it. Fix: draw every plate's size class FIRST, then place sites in
+    // DESCENDING class order, nudging a smaller site away from an
+    // already-placed bigger one whenever it falls inside that bigger site's
+    // own dominance radius — the exact `d² > (w_big − w_small)·spacing²·SCALE`
+    // crossing point the power diagram itself uses, so the nudge is neither
+    // more nor less than what the class gap actually requires.
+    struct RawSeed {
+        cx: f32, cy: f32, size_weight: f32, is_oceanic: bool, density: f32,
+        pole_angle: f32, pole_dist: f32, omega: f32,
+    }
+    let mut raw: Vec<RawSeed> = Vec::with_capacity(count);
     for i in 0..count {
         let col = i % cols;
         let row = i / cols;
@@ -478,10 +502,10 @@ pub fn generate_plates_and_landmass_with_target(
         // the old model's 0.5..1.0 speed range — continuity of scale, not of
         // mechanism — while cells elsewhere along a shared boundary see a
         // different distance/angle from the pole and so a different velocity.
+        // Stored as (angle, dist) rather than an absolute (pole_x, pole_y) so
+        // the pole can be re-anchored to the site's nudged position below.
         let pole_angle = rng.gen::<f32>() * std::f32::consts::TAU;
         let pole_dist = (0.15 + rng.gen::<f32>() * 0.35) * w;
-        let pole_x = cx + pole_angle.cos() * pole_dist;
-        let pole_y = cy + pole_angle.sin() * pole_dist;
         let speed = 0.5 + rng.gen::<f32>() * 0.5;
         let omega = (if rng.gen::<bool>() { 1.0 } else { -1.0 }) * speed / pole_dist.max(1.0);
         // Part B1 — a SIZE CLASS ladder, not a smooth distribution: a real
@@ -504,9 +528,68 @@ pub fn generate_plates_and_landmass_with_target(
             acc += class_p;
             if class_roll < acc { size_weight = class_w; break; }
         }
+        raw.push(RawSeed { cx, cy, size_weight, is_oceanic, density, pole_angle, pole_dist, omega });
+    }
+
+    // Place in DESCENDING class order (ties broken by original index, so the
+    // whole pass stays deterministic). Each already-placed bigger-or-equal
+    // site can push a not-yet-placed smaller one out of its dominance radius;
+    // the push is clamped to the smaller site's own jitter cell, so the grid
+    // structure every existing gate assumes is never disturbed.
+    let mut order: Vec<usize> = (0..count).collect();
+    order.sort_by(|&a, &b| {
+        raw[b].size_weight.partial_cmp(&raw[a].size_weight).unwrap()
+            .then(a.cmp(&b))
+    });
+    let mut placed: Vec<usize> = Vec::with_capacity(count);
+    for &i in &order {
+        let col = i % cols;
+        let row = i / cols;
+        let cell_x0 = col as f32 * cell_w;
+        let cell_x1 = cell_x0 + cell_w;
+        let cell_y0 = row as f32 * cell_h;
+        let cell_y1 = cell_y0 + cell_h;
+        let mut cx = raw[i].cx;
+        let mut cy = raw[i].cy;
+        let wt = raw[i].size_weight;
+        for &j in &placed {
+            let wt_j = raw[j].size_weight;
+            if wt_j <= wt { continue; }
+            let min_dist = plate_spacing * ((wt_j - wt) * POWER_DIAGRAM_OFFSET_SCALE).max(0.0).sqrt();
+            if min_dist <= 0.0 { continue; }
+            let mut dx = cx - raw[j].cx;
+            if dx > w / 2.0 { dx -= w; }
+            if dx < -w / 2.0 { dx += w; }
+            let dy = cy - raw[j].cy;
+            let dist = (dx * dx + dy * dy).sqrt();
+            if dist >= min_dist { continue; }
+            let (nx, ny) = if dist > 1e-4 {
+                (dx / dist, dy / dist)
+            } else {
+                // Degenerate coincidence: push toward the cell's own far corner.
+                let cell_cx = (cell_x0 + cell_x1) * 0.5;
+                let cell_cy = (cell_y0 + cell_y1) * 0.5;
+                let ddx = cell_cx - raw[j].cx;
+                let ddy = cell_cy - raw[j].cy;
+                let dlen = (ddx * ddx + ddy * ddy).sqrt().max(1e-4);
+                (ddx / dlen, ddy / dlen)
+            };
+            let push = min_dist - dist;
+            cx = (cx + nx * push).clamp(cell_x0, (cell_x1 - 0.001).max(cell_x0));
+            cy = (cy + ny * push).clamp(cell_y0, (cell_y1 - 0.001).max(cell_y0));
+        }
+        raw[i].cx = cx;
+        raw[i].cy = cy;
+        placed.push(i);
+    }
+
+    let mut plates: Vec<Plate> = Vec::with_capacity(count);
+    for s in raw.iter() {
+        let pole_x = s.cx + s.pole_angle.cos() * s.pole_dist;
+        let pole_y = s.cy + s.pole_angle.sin() * s.pole_dist;
         plates.push(Plate {
-            cx, cy, is_oceanic, density,
-            pole_x, pole_y, omega, size_weight,
+            cx: s.cx, cy: s.cy, is_oceanic: s.is_oceanic, density: s.density,
+            pole_x, pole_y, omega: s.omega, size_weight: s.size_weight,
         });
     }
 
@@ -591,60 +674,80 @@ pub fn generate_plates_and_landmass_with_target(
     }
     buf.plate_index = best_index;
 
-    // Measured: varying only the warp draw (above) still left several plates
-    // empty on every one of 5 test seeds at 16 plates — the warp bends a
-    // boundary that already exists, it cannot rescue a site the UNWARPED
-    // power diagram itself never gave any territory to (a low-weight "small"
-    // class site fully dominated by its neighbours). No amount of retrying
-    // the same partition shape fixes that; it needs a direct guarantee.
-    // Plant a small forced enclave around any still-empty plate's own site —
-    // the closest thing to a minimum-viable territory a weighted power
-    // diagram cannot itself promise (`Plate` carries no notion of "must get
-    // something"). Radius scales with the SHORTER grid dimension (rule 25's
-    // spirit — stated relative to the world, not a fixed cell count) so it
-    // reads as a real small plate at any world size, never a speck nor a
-    // territory grab. This can only ever GIVE a rescued plate its own
-    // cells, taken from whichever plate(s) happened to have claimed that
-    // patch — no other plate's own site is ever touched.
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 1 (F4) — REGION-GROW RESCUE, not a
+    // disc stamp. Class-aware seeding above removes most of the cause, but a
+    // residual guarantee must still exist: "a mineral must never silently
+    // vanish" (§8.16) applied to plates — a requested plate must always get
+    // SOME territory. The old mechanism stamped a mathematically near-perfect
+    // circle, which is exactly the "small circular ones" artefact the report
+    // named; F4 measured it as 43% of plates at the app's default count.
     //
-    // The enclave's OUTLINE is warped, not a bare circle: a mathematically
-    // perfect disc reads as an obvious artefact next to every other plate's
-    // irregular, warped-Voronoi margin ("circular ones" — a real report). A
-    // small inner core (`ENCLAVE_CORE_FRAC`) is always filled unconditionally
-    // — that alone is what keeps the "never empty" guarantee — and an
-    // angle-keyed noise field (sampled on a fixed-radius ring so it varies
-    // smoothly by BEARING, not by distance from centre) extends a further,
-    // irregular penumbra out to the old full radius, so the enclave reads as
-    // a small organic blob like any other plate rather than a stamped circle.
+    // This claims cells by BFS outward from the still-empty plate's own site,
+    // always expanding into whichever already-claimed NEIGHBOUR currently has
+    // the most cells to spare (a max-heap keyed on the donor's live cell
+    // count), until the rescued plate reaches a REAL FRACTION of the world's
+    // mean plate area — never a fixed disc — or donors run out. A donor is
+    // never taken below its own floor, so this can only ever GIVE a rescued
+    // plate territory; it can never reduce another plate to empty in turn.
+    // The result's outline is made of the same BFS-irregular margins as any
+    // other plate's edge, not a circle.
     {
-        let mut cells = vec![0u32; plates.len()];
-        for &pi in &buf.plate_index { cells[pi as usize] += 1; }
+        let total_cells = buf.total() as f32;
+        let mean_area = total_cells / plates.len().max(1) as f32;
+        const RESCUE_TARGET_AREA_FRAC: f32 = 0.15;
+        const RESCUE_DONOR_FLOOR_FRAC: f32 = 0.10;
+        let target_area = ((mean_area * RESCUE_TARGET_AREA_FRAC).round() as u32).max(8);
+        let donor_floor = ((mean_area * RESCUE_DONOR_FLOOR_FRAC).round() as u32).max(4);
+
+        let mut cell_counts: Vec<u32> = vec![0; plates.len()];
+        for &pi in &buf.plate_index { cell_counts[pi as usize] += 1; }
+        let total_len = buf.total() as usize;
         let h_i = buf.height as i32;
-        const ENCLAVE_CORE_FRAC: f32 = 0.55;
-        let radius_max = ((buf.width.min(buf.height) as f32) * 0.02).max(3.0);
-        let radius_min = radius_max * ENCLAVE_CORE_FRAC;
-        let scan = radius_max.ceil() as i32 + 1;
-        for (pi, &c) in cells.iter().enumerate() {
-            if c > 0 { continue; }
-            let ecx = plates[pi].cx.round() as i32;
-            let ecy = plates[pi].cy.round() as i32;
-            let salt = seed.wrapping_add((pi as u64).wrapping_mul(0x9E3779B97F4A7C15));
-            for dy in -scan..=scan {
-                let y = ecy + dy;
-                if y < 0 || y >= h_i { continue; }
-                for dx in -scan..=scan {
-                    let dist = ((dx * dx + dy * dy) as f32).sqrt();
-                    if dist > radius_max { continue; }
-                    if dist > radius_min {
-                        let angle = (dy as f32).atan2(dx as f32);
-                        let raw = fbm_noise(angle.cos() * 3.0 + 100.0, angle.sin() * 3.0 + 100.0, salt, 3, 2.0, 0.5);
-                        let t = ((raw - FBM_MEASURED_MIN) / (FBM_MEASURED_MAX - FBM_MEASURED_MIN)).clamp(0.0, 1.0);
-                        let r_eff = radius_min + t * (radius_max - radius_min);
-                        if dist > r_eff { continue; }
-                    }
-                    let x = buf.wrap_x(ecx + dx);
-                    let idx = buf.idx(x, y as u32);
+
+        for pi in 0..plates.len() {
+            // Not just the literally-empty: a naturally small power-diagram
+            // cell (e.g. 14 cells) is just as much the "small circular ones"
+            // artefact once rescued via the old disc stamp, and F4 measured
+            // it as the SAME failure — a site dominated almost entirely, not
+            // only entirely, by its neighbours. Anything under the target
+            // gets topped up the same way; a plate already at or above it is
+            // untouched.
+            if cell_counts[pi] >= target_area { continue; }
+            let ecx = buf.wrap_x(plates[pi].cx.round() as i32);
+            let ecy = (plates[pi].cy.round() as i32).clamp(0, h_i - 1) as u32;
+            let start_idx = buf.idx(ecx, ecy) as usize;
+
+            let mut heap: BinaryHeap<(u32, u32)> = BinaryHeap::new();
+            let mut in_heap = vec![false; total_len];
+            let seed_donor = cell_counts[buf.plate_index[start_idx] as usize];
+            heap.push((seed_donor, start_idx as u32));
+            in_heap[start_idx] = true;
+
+            while cell_counts[pi] < target_area {
+                let Some((_, idx_u32)) = heap.pop() else { break };
+                let idx = idx_u32 as usize;
+                let cur_plate = buf.plate_index[idx] as usize;
+                // A donor at its floor must NOT seal off whatever lies beyond
+                // it — the frontier still expands through a skipped cell, it
+                // just does not claim that particular cell. Only the actual
+                // claim is conditional; the BFS growth is not.
+                if cur_plate != pi && cell_counts[cur_plate] > donor_floor {
                     buf.plate_index[idx] = pi as u16;
+                    cell_counts[cur_plate] -= 1;
+                    cell_counts[pi] += 1;
+                }
+                let x = (idx as u32 % buf.width) as i32;
+                let y = (idx as u32 / buf.width) as i32;
+                for &(dx, dy) in &[(-1i32, 0), (1, 0), (0, -1i32), (0, 1)] {
+                    let nx = buf.wrap_x(x + dx);
+                    let ny = y + dy;
+                    if ny < 0 || ny >= h_i { continue; }
+                    let nidx = buf.idx(nx, ny as u32) as usize;
+                    if in_heap[nidx] { continue; }
+                    let np = buf.plate_index[nidx] as usize;
+                    if np == pi { continue; }
+                    in_heap[nidx] = true;
+                    heap.push((cell_counts[np], nidx as u32));
                 }
             }
         }
@@ -691,16 +794,29 @@ pub fn generate_plates_and_landmass_with_target(
         let continents = count_continental_components(&adjacency, plates.len(), &oceanic);
         trials.push((err, continents, oceanic));
     }
-    // Among the trials closest to the ocean-fraction target, prefer the one
-    // that scatters the continental plates into the MOST separate landmasses
-    // — "more continents" — rather than always taking the single best area
-    // match regardless of whether it happens to fuse everything continental
-    // into one connected supercontinent (see CONTINENT_AREA_TOLERANCE_FRAC).
+    // Among the trials closest to the ocean-fraction target, pick the one that
+    // best satisfies `continent_goal` (see CONTINENT_AREA_TOLERANCE_FRAC).
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 2 (F3) — this used to be a
+    // hardcoded objective ("always the MOST separate landmasses"), which made
+    // a Pangaea preset impossible: the mechanism to count continents already
+    // existed, only the comparator was fixed. `None`/`-1` keeps today's
+    // default (most continents); `0` picks the FEWEST (Pangaea); `n > 0`
+    // picks whichever trial's continent count is nearest `n`.
     let min_err = trials.iter().map(|t| t.0).min().unwrap_or(0);
-    let best = trials.iter()
+    let candidates: Vec<&(i64, usize, Vec<bool>)> = trials.iter()
         .filter(|t| t.0 <= min_err + area_tolerance)
-        .max_by_key(|t| (t.1, -(t.0)))
-        .expect("OCEAN_FILL_TRIALS > 0, so at least one trial exists");
+        .collect();
+    let best = match continent_goal {
+        Some(n) if n > 0 => candidates.iter()
+            .min_by_key(|t| ((t.1 as i64 - n as i64).abs(), t.0))
+            .copied(),
+        Some(n) if n == 0 => candidates.iter()
+            .min_by_key(|t| (t.1, t.0))
+            .copied(),
+        _ => candidates.iter()
+            .max_by_key(|t| (t.1, -(t.0)))
+            .copied(),
+    }.expect("OCEAN_FILL_TRIALS > 0, so at least one trial exists");
     for (pi, p) in plates.iter_mut().enumerate() { p.is_oceanic = best.2[pi]; }
 
     // Classify boundaries FIRST (needed by slice 4 below). Rayon-parallel:
@@ -1523,6 +1639,75 @@ mod tests {
              supercontinent the less common outcome, not the default one.", counts.len());
     }
 
+    /// GENERATION_UX_REDESIGN_PLAN.md Slice 2 (F3) gate — `continent_goal` was
+    /// unreachable from any caller, so a Pangaea preset was impossible even
+    /// though the mechanism to count and select continents already existed.
+    /// `Some(0)` (fewest continents) and `Some(99)` (an archipelago-scale goal
+    /// no world at this plate count can reach, so the comparator always picks
+    /// the MOST continents among the trials) must measurably differ in land
+    /// component count on the SAME seed, or the knob is decorative.
+    #[test]
+    fn a_pangaea_target_fuses_the_continents_an_archipelago_target_does_not() {
+        fn count_land_components(buf: &WorldBuffer) -> usize {
+            let w = buf.width as i32;
+            let h = buf.height as i32;
+            let mut visited = vec![false; buf.total()];
+            let mut components = 0usize;
+            for start in 0..buf.total() {
+                if buf.terrain[start] != 1 || visited[start] { continue; }
+                components += 1;
+                let mut stack = vec![start];
+                visited[start] = true;
+                while let Some(ci) = stack.pop() {
+                    let cx = (ci as u32 % buf.width) as i32;
+                    let cy = (ci as u32 / buf.width) as i32;
+                    for dy in -1..=1i32 {
+                        let ny = cy + dy;
+                        if ny < 0 || ny >= h { continue; }
+                        for dx in -1..=1i32 {
+                            if dx == 0 && dy == 0 { continue; }
+                            let nx = w_wrap(buf, cx + dx);
+                            let ni = buf.idx(nx, ny as u32);
+                            if buf.terrain[ni] == 1 && !visited[ni] {
+                                visited[ni] = true;
+                                stack.push(ni);
+                            }
+                        }
+                    }
+                }
+            }
+            components
+        }
+        fn w_wrap(buf: &WorldBuffer, x: i32) -> u32 { buf.wrap_x(x) }
+        fn blank_world(w: u32, h: u32) -> WorldBuffer {
+            let conn = Connection::open_in_memory().unwrap();
+            schema::create_tables(&conn).unwrap();
+            for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+                conn.execute(
+                    "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                    rusqlite::params![k, v],
+                ).unwrap();
+            }
+            WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap()
+        }
+
+        let mut pangaea_wins = 0usize;
+        const SEEDS: u64 = 6;
+        for seed in 0..SEEDS {
+            let mut buf_p = blank_world(360, 180);
+            let mut buf_a = blank_world(360, 180);
+            generate_plates_and_landmass_with_target(&mut buf_p, seed, 16, DEFAULT_OCEAN_FRACTION, Some(0));
+            generate_plates_and_landmass_with_target(&mut buf_a, seed, 16, DEFAULT_OCEAN_FRACTION, Some(99));
+            let cp = count_land_components(&buf_p);
+            let ca = count_land_components(&buf_a);
+            println!("seed {seed}: pangaea-goal={cp} continents, archipelago-goal={ca} continents");
+            if cp < ca { pangaea_wins += 1; }
+        }
+        assert!(pangaea_wins * 2 >= SEEDS as usize,
+            "continent_goal made no measurable difference on {} of {} seeds — the knob \
+             is decorative", SEEDS as usize - pangaea_wins, SEEDS);
+    }
+
     /// Every requested plate must actually exist. Measured directly before the
     /// fix (varying the warp draw alone, then the guaranteed-rescue enclave):
     /// a plain 16-plate request landed as few as 8 of the 16 IDs holding any
@@ -1533,13 +1718,53 @@ mod tests {
     /// had zero territory.
     #[test]
     fn every_requested_plate_gets_real_territory() {
+        // GENERATION_UX_REDESIGN_PLAN.md Slice 1 (F4) STRENGTHENS this: a
+        // 25-cell rescue disc used to satisfy "holds any cells at all" — the
+        // gate was passing on exactly the artefact being reported. Every
+        // plate must now hold a REAL FRACTION of the world's mean plate area,
+        // not merely a non-zero count.
+        const MIN_AREA_FRAC_OF_MEAN: f32 = 0.05;
         for seed in 0..5u64 {
             let buf = gen_world(360, 180, seed, 16);
-            let mut present = std::collections::HashSet::new();
-            for &p in &buf.plate_index { present.insert(p); }
-            assert_eq!(present.len(), 16,
+            let mut cells = vec![0u32; 16];
+            for &p in &buf.plate_index { cells[p as usize] += 1; }
+            let present = cells.iter().filter(|&&c| c > 0).count();
+            assert_eq!(present, 16,
                 "seed {}: requested 16 plates, only {} hold any cells at all",
-                seed, present.len());
+                seed, present);
+            let mean_area = buf.total() as f32 / 16.0;
+            let min_area = mean_area * MIN_AREA_FRAC_OF_MEAN;
+            for (pi, &c) in cells.iter().enumerate() {
+                assert!((c as f32) >= min_area,
+                    "seed {}: plate {} holds only {} cells, under {:.0}% of the mean plate \
+                     area ({:.0}) — a disc-sized rescue artefact, not real territory",
+                    seed, pi, c, MIN_AREA_FRAC_OF_MEAN * 100.0, mean_area);
+            }
+        }
+    }
+
+    /// GENERATION_UX_REDESIGN_PLAN.md Slice 1's own stated target: zero
+    /// disc-sized plates at 8/16/24/32 on the seeds that, before this slice,
+    /// produced 3.1/6.9/10.9/15.0 per world (F4). Uses the SAME "disc-sized"
+    /// definition `diag_enclave_rescue_rate` measured with (the old stamp's
+    /// own `radius_max = 0.02*min(w,h)` disc area), so this is a genuine
+    /// before/after comparison on the same yardstick, promoted from a
+    /// `#[ignore]`d diagnostic to an asserted floor now the fix has landed.
+    #[test]
+    fn plate_seeding_produces_no_disc_sized_plates() {
+        let (w, h) = (360u32, 180u32);
+        let radius_max = ((w.min(h)) as f32 * 0.02).max(3.0);
+        let enclave_area = (std::f32::consts::PI * radius_max * radius_max).ceil() as u32;
+        for &count in &[8u32, 16, 24, 32] {
+            for seed in 0..6u64 {
+                let buf = gen_world(w, h, seed, count);
+                let mut cells = vec![0u32; count as usize];
+                for &p in &buf.plate_index { cells[p as usize] += 1; }
+                let discs = cells.iter().filter(|&&c| c > 0 && c <= enclave_area).count();
+                assert_eq!(discs, 0,
+                    "plates={} seed={}: {} disc-sized (<= {} cell) plates survive class-aware \
+                     seeding + region-grow rescue", count, seed, discs, enclave_area);
+            }
         }
     }
 

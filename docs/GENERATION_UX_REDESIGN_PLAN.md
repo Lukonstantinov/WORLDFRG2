@@ -1,13 +1,67 @@
 # Generation UX Redesign — plates you draw, cities you place, worlds you pick, maps you print
 
-> **STATUS: ANALYSIS + PLAN. NOTHING BUILT YET** except one `#[ignore]`d
-> diagnostic (`diag_enclave_rescue_rate`, `sim/step1_plates/plates.rs`) added to
-> measure the "small circular plates" report rather than assert it.
+> **STATUS: Slices 1-3 BUILT and gated. Slices 4-11 still plan only.**
 >
 > Read §1 (measured findings) before §3 (the slices). Four of the six asks turn
 > out to be *reaching a mechanism that already exists* rather than building one,
 > and two of them are genuine new work. Knowing which is which is most of the
 > value here.
+>
+> **Slice 1 (F4, "small circular plates")** — shipped. Class-aware seeding
+> (`generate_plates_and_landmass_with_target`, `step1_plates/plates.rs`) places
+> sites in descending size-class order, nudging a smaller site out of a bigger
+> one's dominance radius before the power diagram ever runs; the old disc stamp
+> is deleted and replaced by a BFS region-grow rescue that tops up any plate
+> under 15% of the world's mean plate area by claiming cells from whichever
+> neighbour has the most to spare (never below its own floor). Measured:
+> disc-sized plates at 360×180 fell from 38-47% (F4's baseline) to **0/12
+> worlds at every plate count tested** (8/16/24/32); at 900×450, 1/12 worlds
+> (0.08/world). `every_requested_plate_gets_real_territory` is strengthened to
+> require a real fraction of mean plate area, not merely non-zero; a new
+> `plate_seeding_produces_no_disc_sized_plates` asserts the zero-disc target on
+> the same yardstick the old `diag_enclave_rescue_rate` measured. Connectivity,
+> the ≥5× size-order gate and margin non-straightness are all still green.
+>
+> **Slice 2 (F2/F3, ocean fraction + continent goal)** — shipped at the
+> mechanism level. `generate_plates_and_landmass_with_target` gained
+> `continent_goal: Option<i32>` (`None`/`-1` = most continents, today's
+> default; `0` = fewest (Pangaea); `n>0` = nearest `n`), and the ocean-fill
+> comparator is now a function of it instead of a hardcoded `max_by_key`.
+> `sim_generate_plates` (Tauri command) gained `ocean_fraction`/`continent_goal`
+> as `Option` args, persisted to `metadata` exactly as `culture_count` already
+> is; `bridge/world.ts`'s `simGeneratePlates` takes them as optional trailing
+> params. New gate `a_pangaea_target_fuses_the_continents_an_archipelago_
+> target_does_not`. **Not done**: no frontend slider/preset UI calls these
+> yet — Slice 5 (world presets) and the Landmass step panel are still plan
+> only, so the knob is reachable from Rust and the bridge but not yet from
+> any button.
+>
+> **Slice 3 (F1, run-all discards settings)** — shipped for all six settings
+> the table names: settlement density/cap, province granularity, shelf
+> width/slope/noise/dropoff, lake fill depth/max fraction (+ river
+> density/width), and ore-district count/spread. Each owning step command
+> (`sim_generate_shelves`, `sim_rivers_hydrology`, `sim_biological`,
+> `sim_generate_provinces`; `sim_generate_settlements` already did this for
+> realism/cap) now persists its own inputs to `metadata`; both `sim_run_all`
+> and `sim_run_all_from_terrain` read them back via `meta_f32`/`meta_u32`/
+> `meta_u32_opt` helpers instead of hardcoding, falling back to the exact
+> defaults this function always used when a step's panel has never run. Ocean
+> fraction/continent goal are threaded through `sim_run_all`'s own plate
+> generation call the same way.
+>
+> Verified: `cargo test --lib step1_plates::plates::tests` (11 passed, 3
+> `#[ignore]`d diagnostics also re-run and confirm the target),
+> `land_fraction_tracks_the_target`, `coastline_departs_from_the_plate_
+> boundary`, `cargo check --lib --tests`, `npx tsc --noEmit`, and `earth_`
+> (unchanged at 70.2%/39.0% — this work never touches step3/step4, confirmed
+> rather than assumed per §2.3's discipline). `econ_`/dynamics not run: no
+> `sim/campaign/tick/` code was touched.
+>
+> Slices 4-11 (the one-button merge, world presets, the plates/settlement
+> editors, the frontend-side export rewrite, first-run legibility, per-layer
+> opacity, more plates/symbol styles) remain **plan only** — each is real
+> frontend UI or a multi-file rewrite (the PDF export in particular pulls in a
+> new Rust dependency) that a from-scratch session should scope on its own.
 
 ---
 

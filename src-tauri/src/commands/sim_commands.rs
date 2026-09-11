@@ -32,20 +32,65 @@ fn persist_goods_placement(
     Ok(())
 }
 
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — read a step panel's own
+/// persisted setting back out of `metadata`, falling back to `default` for a
+/// world that has never run that step (or was generated before this slice),
+/// so `sim_run_all` reading back nothing behaves exactly as it always did.
+fn meta_f32(conn: &rusqlite::Connection, key: &str, default: f32) -> f32 {
+    metadata::get_meta(conn, key).ok().flatten()
+        .and_then(|s| s.parse::<f32>().ok())
+        .unwrap_or(default)
+}
+
+fn meta_u32(conn: &rusqlite::Connection, key: &str, default: u32) -> u32 {
+    metadata::get_meta(conn, key).ok().flatten()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(default)
+}
+
+/// As `meta_u32`, but an EMPTY stored string (the `settlements_max`
+/// convention for "no cap") reads as `None` rather than falling back.
+fn meta_u32_opt(conn: &rusqlite::Connection, key: &str) -> Option<u32> {
+    metadata::get_meta(conn, key).ok().flatten()
+        .filter(|s| !s.is_empty())
+        .and_then(|s| s.parse::<u32>().ok())
+}
+
 /// Generate tectonic plates and derive landmass.
 /// Phase 1: Plate tectonics → terrain
+/// `ocean_fraction`/`continent_goal` are the two landmass axes
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 2 (F2/F3) reaches: the mechanism to
+/// honour both already existed in `plates.rs` and was unreachable from any
+/// caller. Both `Option`, both defaulting to today's behaviour
+/// (`DEFAULT_OCEAN_FRACTION` / "as many continents as possible"), so a caller
+/// that omits them is bit-identical to before this slice. Persisted to
+/// `metadata` the way `culture_count` already is (rule/§4 pattern) — that is
+/// what lets `sim_run_all` honour them (Slice 3) without growing two more
+/// positional arguments.
 #[tauri::command]
 pub fn sim_generate_plates(
     seed: u64,
     plate_count: u32,
+    ocean_fraction: Option<f32>,
+    continent_goal: Option<i32>,
     db: State<'_, WorldDb>,
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
-    let motion = plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    let motion = plates::generate_plates_and_landmass_with_target(
+        &mut buf, seed, plate_count,
+        ocean_fraction.unwrap_or(plates::DEFAULT_OCEAN_FRACTION),
+        continent_goal,
+    );
     persist_plate_motion(&conn, &motion, seed);
+    if let Some(f) = ocean_fraction {
+        metadata::set_meta(&conn, "ocean_fraction", &f.to_string()).map_err(|e| e.to_string())?;
+    }
+    if let Some(g) = continent_goal {
+        metadata::set_meta(&conn, "continent_goal", &g.to_string()).map_err(|e| e.to_string())?;
+    }
     buf.save(&conn, "Generate plates & landmass")
 }
 
@@ -205,6 +250,11 @@ pub fn sim_rivers_hydrology(
     // Hydrology panel, goods and settlements agree on the brine.
     rivers::classify_salt_lakes(&buf, &mut lakes, &extracted_rivers);
     persist_lakes(&conn, &lakes);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — record for `sim_run_all`.
+    let _ = metadata::set_meta(&conn, "lake_fill_depth", &lake_fill_depth.to_string());
+    let _ = metadata::set_meta(&conn, "lake_max_fraction", &lake_max_fraction.to_string());
+    let _ = metadata::set_meta(&conn, "river_density", &river_density.to_string());
+    let _ = metadata::set_meta(&conn, "river_width", &river_width.to_string());
 
     // Store rivers as serialized state for rendering
     // (Rivers are overlays, not per-cell data stored in tiles)
@@ -356,6 +406,10 @@ pub fn sim_biological(
     rivers::classify_salt_lakes(&buf, &mut salt_lakes, &river_data);
     biological::apply_salt_pans(&mut buf, &salt_lakes, &goods);
 
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — record for `sim_run_all`.
+    let _ = metadata::set_meta(&conn, "gem_deposits", &gem_deposits.to_string());
+    let _ = metadata::set_meta(&conn, "climate_strictness", &climate_strictness.to_string());
+
     buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
 }
 
@@ -482,8 +536,20 @@ pub fn sim_run_all(
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load(&conn)?;
 
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — every one of these used to
+    // be hardcoded here regardless of what the matching step panel's own
+    // slider said, so "Generate Full World" silently discarded most of the
+    // panel the user had just filled in. Read back exactly what each step's
+    // own command persists (§ "record for sim_run_all" comments there),
+    // falling back to the SAME defaults this function has always used so a
+    // world that never touched a given step's panel is unaffected.
+    let ocean_fraction = meta_f32(&conn, "ocean_fraction", plates::DEFAULT_OCEAN_FRACTION);
+    let continent_goal: Option<i32> = metadata::get_meta(&conn, "continent_goal").ok().flatten()
+        .and_then(|s| s.parse::<i32>().ok());
+
     // Phase 1: Plates & landmass
-    let motion = plates::generate_plates_and_landmass(&mut buf, seed, plate_count);
+    let motion = plates::generate_plates_and_landmass_with_target(
+        &mut buf, seed, plate_count, ocean_fraction, continent_goal);
     persist_plate_motion(&conn, &motion, seed);
 
     // Phase 2: Elevation & depth. Plates exist on this path, so every model is
@@ -491,11 +557,16 @@ pub fn sim_run_all(
     apply_elevation_model(&mut buf, seed, &elev_mode,
         mountain_density, mountain_height, mountain_spread, noise_roughness, true);
     elevation::compute_sea_depth(&mut buf);
-    // Phase 2b: continental shelves (default params). Without this the only
-    // shelf-tagged cells are the thin 1-shelf ring compute_sea_depth marks, so
-    // the shelf layer looked empty and upwelling/fisheries had almost nothing to
-    // work with.
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    // Phase 2b: continental shelves. Without this the only shelf-tagged cells
+    // are the thin 1-shelf ring compute_sea_depth marks, so the shelf layer
+    // looked empty and upwelling/fisheries had almost nothing to work with.
+    elevation::generate_shelves(
+        &mut buf, seed,
+        meta_f32(&conn, "shelf_width", 12.0),
+        meta_f32(&conn, "shelf_noise", 0.4),
+        meta_f32(&conn, "shelf_depth_profile", 0.3),
+        meta_f32(&conn, "shelf_dropoff_width", 8.0),
+    );
 
     // Phase 3: Ocean & atmosphere (salinity before currents for thermohaline coupling)
     ocean::compute_wind_belts(&mut buf);
@@ -531,13 +602,19 @@ pub fn sim_run_all(
     // Phase 4: Climate
     koppen::classify_koppen(&mut buf);
 
-    // Phase 5: Rivers (default river/lake parameters). Lakes first so channel
-    // extraction can stop rivers at lake shores instead of crossing the water.
-    let lake_max = (buf.total() / 2000).max(20);
-    let wh = rivers::compute_world_hydrology(&buf, 0.004, lake_max);
+    // Phase 5: Rivers. Lakes first so channel extraction can stop rivers at
+    // lake shores instead of crossing the water. GENERATION_UX_REDESIGN_
+    // PLAN.md Slice 3 (F1) — read back the Rivers step's own persisted
+    // settings instead of hardcoding them.
+    let lake_fill_depth = meta_f32(&conn, "lake_fill_depth", 0.004);
+    let lake_max_fraction = meta_f32(&conn, "lake_max_fraction", 0.0005); // matches the old `total/2000` default
+    let river_density = meta_f32(&conn, "river_density", 0.5);
+    let river_width = meta_f32(&conn, "river_width", 1.0);
+    let lake_max = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(20);
+    let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, lake_max);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes, 0.004);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes, lake_fill_depth);
     persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
@@ -563,14 +640,18 @@ pub fn sim_run_all(
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
-    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
+    // realism/cap sliders, read back instead of hardcoded.
+    let settlement_realism = meta_f32(&conn, "settlements_realism", 0.55);
+    let settlement_cap = meta_u32_opt(&conn, "settlements_max").map(|c| c as usize);
+    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, settlement_realism, settlement_cap);
     // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
     // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
     // maxima-of-habitability search structurally cannot find, since a great port need
     // not sit on the best farmland. Runs after the base pass (so it can respect
     // spacing from it) and before province generation.
     generated_settlements.extend(settlements::generate_trade_sites(
-        &buf, &hab_fields.trade, &generated_settlements, 0.55,
+        &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
@@ -589,7 +670,11 @@ pub fn sim_run_all(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Biological step's own
+    // ore-district count / spread sliders, read back instead of hardcoded.
+    let gem_deposits = meta_u32(&conn, "gem_deposits", 6);
+    let climate_strictness = meta_f32(&conn, "climate_strictness", 0.5);
+    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
@@ -599,7 +684,10 @@ pub fn sim_run_all(
     // run-all called this before — "Generate Full World" ended at phase 8 and left
     // the province layer unreachable except from the standalone Settlements/
     // Provinces step panels.
-    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
+    // province-granularity slider, read back instead of hardcoded.
+    let province_granularity = meta_f32(&conn, "province_granularity", 0.5);
+    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, province_granularity)?;
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -935,13 +1023,19 @@ pub fn sim_run_all_from_terrain(
     // Phase 4: Climate
     koppen::classify_koppen(&mut buf);
 
-    // Phase 5: Rivers (default river/lake parameters). Lakes first so channel
-    // extraction can stop rivers at lake shores instead of crossing the water.
-    let lake_max = (buf.total() / 2000).max(20);
-    let wh = rivers::compute_world_hydrology(&buf, 0.004, lake_max);
+    // Phase 5: Rivers. Lakes first so channel extraction can stop rivers at
+    // lake shores instead of crossing the water. GENERATION_UX_REDESIGN_
+    // PLAN.md Slice 3 (F1) — read back the Rivers step's own persisted
+    // settings instead of hardcoding them.
+    let lake_fill_depth = meta_f32(&conn, "lake_fill_depth", 0.004);
+    let lake_max_fraction = meta_f32(&conn, "lake_max_fraction", 0.0005); // matches the old `total/2000` default
+    let river_density = meta_f32(&conn, "river_density", 0.5);
+    let river_width = meta_f32(&conn, "river_width", 1.0);
+    let lake_max = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(20);
+    let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, lake_max);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
-    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, 0.5, 1.0, &lakes, 0.004);
+    let extracted_rivers = rivers::extract_rivers(&buf, &hydro.flow_dir, &hydro.acc, &hydro.filled, river_density, river_width, &lakes, lake_fill_depth);
     persist_rivers(&conn, &extracted_rivers);
     let oxbows = rivers::extract_oxbows(&extracted_rivers, &buf, &lakes);
     lakes.extend(oxbows);
@@ -967,14 +1061,18 @@ pub fn sim_run_all_from_terrain(
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
-    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, 0.55, None);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
+    // realism/cap sliders, read back instead of hardcoded.
+    let settlement_realism = meta_f32(&conn, "settlements_realism", 0.55);
+    let settlement_cap = meta_u32_opt(&conn, "settlements_max").map(|c| c as usize);
+    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, settlement_realism, settlement_cap);
     // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
     // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
     // maxima-of-habitability search structurally cannot find, since a great port need
     // not sit on the best farmland. Runs after the base pass (so it can respect
     // spacing from it) and before province generation.
     generated_settlements.extend(settlements::generate_trade_sites(
-        &buf, &hab_fields.trade, &generated_settlements, 0.55,
+        &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
@@ -987,14 +1085,21 @@ pub fn sim_run_all_from_terrain(
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
-    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 6, 0.5, &goods);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Biological step's own
+    // ore-district count / spread sliders, read back instead of hardcoded.
+    let gem_deposits = meta_u32(&conn, "gem_deposits", 6);
+    let climate_strictness = meta_f32(&conn, "climate_strictness", 0.5);
+    let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
 
     // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
     // call in `sim_run_all`; this path was missing it too.
-    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, 0.5)?;
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
+    // province-granularity slider, read back instead of hardcoded.
+    let province_granularity = meta_f32(&conn, "province_granularity", 0.5);
+    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, province_granularity)?;
 
     let modified = buf.save(&conn, "Full generation from template")?;
 
@@ -1039,6 +1144,13 @@ pub fn sim_generate_shelves(
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_shelves(&mut buf, seed, shelf_width, noise_amount, depth_profile, dropoff_width);
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the same `settlements_*`
+    // pattern `sim_generate_settlements` already uses: record the panel's own
+    // inputs so `sim_run_all` can read them back instead of hardcoding.
+    let _ = metadata::set_meta(&conn, "shelf_width", &shelf_width.to_string());
+    let _ = metadata::set_meta(&conn, "shelf_noise", &noise_amount.to_string());
+    let _ = metadata::set_meta(&conn, "shelf_depth_profile", &depth_profile.to_string());
+    let _ = metadata::set_meta(&conn, "shelf_dropoff_width", &dropoff_width.to_string());
     buf.save(&conn, "Generate shelves")
 }
 
@@ -1405,6 +1517,9 @@ pub fn sim_generate_provinces(
 
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
     let settle: Vec<settlements::Settlement> = serde_json::from_str(&settlements_json).unwrap_or_default();
+
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — record for `sim_run_all`.
+    let _ = metadata::set_meta(&conn, "province_granularity", &granularity.unwrap_or(0.5).to_string());
 
     generate_and_persist_provinces(&conn, &buf, &river_data, &settle, granularity.unwrap_or(0.5))
 }

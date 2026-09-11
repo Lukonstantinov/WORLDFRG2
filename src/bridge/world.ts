@@ -133,8 +133,20 @@ export async function loadImageTemplate(path: string): Promise<[number, number][
 
 // --- Simulation commands ---
 
-export async function simGeneratePlates(seed: number, plateCount: number): Promise<[number, number][]> {
-  return invoke("sim_generate_plates", { seed, plateCount });
+// GENERATION_UX_REDESIGN_PLAN.md Slice 2 (F2/F3) — oceanFraction (0..1, share
+// of the world that ends up sea) and continentGoal (-1/undefined = as many
+// separate landmasses as possible, the old default; 0 = as few as possible
+// (Pangaea); n>0 = nearest to n) are both optional so every existing caller
+// stays bit-identical.
+export async function simGeneratePlates(
+  seed: number, plateCount: number,
+  oceanFraction?: number, continentGoal?: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_plates", {
+    seed, plateCount,
+    oceanFraction: oceanFraction ?? null,
+    continentGoal: continentGoal ?? null,
+  });
 }
 
 export async function simInvertTerrain(): Promise<[number, number][]> {
