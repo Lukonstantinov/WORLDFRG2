@@ -37,6 +37,32 @@ import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types
 const CAMPAIGN_ROUTE_REACH = 0;
 const CAMPAIGN_ROUTE_MAX_CROSSING = 1.0;
 
+/** Must mirror the backend's tile grid (`TILE_SIZE` in `tile/coords.rs` /
+ *  `TileManager.ts` / `TileViewport.ts`). */
+const TILE_SIZE = 128;
+
+/** The world's REAL wrap period for tile content is not `grid_width` — tiles
+ *  are 128-cell blocks and no shipped grid width (1800/3600/7200) is a
+ *  multiple of that, so the backend's cylindrical wrap (`wrap_tx` in
+ *  `tile_commands.rs`) operates on whole TILE INDICES, repeating every
+ *  `ceil(grid_width / TILE_SIZE) * TILE_SIZE` cells — e.g. 3712 for a
+ *  3600-wide world, not 3600. Before this, the render loop below wrapped
+ *  OVERLAYS (settlements/rivers/routes) every `grid_width` cells while the
+ *  TILES underneath them kept repeating every `paddedWidth` cells: the two
+ *  periods diverge by `paddedWidth - grid_width` at copy 1, twice that at
+ *  copy 2, and so on — settlements drifting further from their own
+ *  coastline with every world-copy the viewport scrolls past, and the
+ *  `[grid_width, paddedWidth)` padding band (real but ungenerated "sea",
+ *  the tail of the world's last partial tile column) showing through as a
+ *  bright, uniform vertical stripe at every seam. Copy placement below now
+ *  uses this SAME period for both tiles and overlays — each copy still only
+ *  shows its first `grid_width` real cells (the clip rects stay `grid_width`
+ *  wide), so the padding band is hidden rather than mis-explained. */
+function wrapPeriod(gridWidth: number): number {
+  if (gridWidth <= 0) return 0;
+  return Math.ceil(gridWidth / TILE_SIZE) * TILE_SIZE;
+}
+
 /** Largest box with the world's aspect ratio that fits inside the pane. */
 function fitBox(paneW: number, paneH: number, gridW: number, gridH: number) {
   if (paneW <= 0 || paneH <= 0 || gridW <= 0 || gridH <= 0) {
@@ -245,18 +271,20 @@ export function MapCanvas() {
     // (rivers, settlements, routes, labels…) are vector data positioned once
     // in canonical `[0, grid_width)` space, so making them reappear at a
     // wrapped position needs `overlayManager.render` called again per visible
-    // copy, each time with the coordinate space shifted by `k * grid_width`.
+    // copy, each time with the coordinate space shifted by `k * period`
+    // (`period`, not `grid_width` — see `wrapPeriod`'s own doc comment).
     const m = metaRef.current;
+    const period = m ? wrapPeriod(m.grid_width) : 0;
     // TRUE span: every world-copy actually touching the screen right now,
     // UNCAPPED. A rect-union clip costs nothing per extra copy, so the tile
     // background always gets the real span — nothing here may ever leave a
     // genuinely visible strip of screen with no clip rect over it.
     let kMin = 0, kMax = 0;
-    if (m && m.grid_width > 0) {
+    if (m && period > 0) {
       const leftWorldX = (0 - viewport.x) / viewport.scaleX;
       const rightWorldX = (w - viewport.x) / viewport.scaleX;
-      kMin = Math.floor(Math.min(leftWorldX, rightWorldX) / m.grid_width);
-      kMax = Math.floor(Math.max(leftWorldX, rightWorldX) / m.grid_width);
+      kMin = Math.floor(Math.min(leftWorldX, rightWorldX) / period);
+      kMax = Math.floor(Math.max(leftWorldX, rightWorldX) / period);
     }
     // OVERLAY span: the same copies, but capped — redrawing rivers/settlements/
     // labels/routes N times per frame is real render cost, unlike a clip rect,
@@ -273,20 +301,21 @@ export function MapCanvas() {
     }
 
     // Clip to the logical world bounds — PER COPY, not one rect spanning the
-    // whole kMin..kMax range. Tiles are 128×128, so the world grid (e.g.
+    // whole kMin..kMax range, and each copy positioned `period` (the tile
+    // grid's own padded wrap width) apart while staying only `grid_width`
+    // (the REAL width) wide. Tiles are 128×128, so the world grid (e.g.
     // 3600×1800) is covered by tiles that extend past the edges (29×15 →
     // 3712×1920); the last partial tile row/column is default-sea and
     // otherwise bleeds in as a thin ocean strip at the edge of EVERY copy —
     // including the INTERNAL seams between adjacent copies, which a single
     // wide rect only ever excludes at its own two outer edges. One rect per
     // copy in the same path unions correctly under the canvas's default
-    // nonzero winding rule (all rects wind the same way), so this is the
-    // one-line difference from the old single-rect clip.
+    // nonzero winding rule (all rects wind the same way).
     ctx.save();
     if (m) {
       ctx.beginPath();
       for (let k = kMin; k <= kMax; k++) {
-        ctx.rect(k * m.grid_width, 0, m.grid_width, m.grid_height);
+        ctx.rect(k * period, 0, m.grid_width, m.grid_height);
       }
       ctx.clip();
     }
@@ -304,7 +333,7 @@ export function MapCanvas() {
       const dividerWorldX = (w * cmp.pos - viewport.x) / viewport.scaleX;
       ctx.save();
       ctx.beginPath();
-      ctx.rect(dividerWorldX, 0, kMax * m.grid_width + m.grid_width - dividerWorldX, m.grid_height);
+      ctx.rect(dividerWorldX, 0, kMax * period + m.grid_width - dividerWorldX, m.grid_height);
       ctx.clip();
       tileManager.draw(ctx, visible, cmp.layer);
       ctx.restore();
@@ -312,16 +341,18 @@ export function MapCanvas() {
 
     // Draw overlays — once per visible world-copy (capped at MAX_COPIES, see
     // kMinO/kMaxO above), each shifted so canonical `[0, grid_width)` content
-    // lands at world position `[k*grid_width, …)`.
+    // lands at world position `[k*period, k*period + grid_width)` — the SAME
+    // period the tile clip above uses, so a settlement lands on the real
+    // wrapped copy of its own coastline instead of drifting off it.
     if (overlayManager) {
       for (let k = kMinO; k <= kMaxO; k++) {
         ctx.save();
         if (m) {
           ctx.beginPath();
-          ctx.rect(k * m.grid_width, 0, m.grid_width, m.grid_height);
+          ctx.rect(k * period, 0, m.grid_width, m.grid_height);
           ctx.clip();
         }
-        if (k !== 0) ctx.translate(k * (m?.grid_width ?? 0), 0);
+        if (k !== 0) ctx.translate(k * period, 0);
         overlayManager.render(ctx);
         ctx.restore();
       }
