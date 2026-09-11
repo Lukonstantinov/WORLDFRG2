@@ -745,6 +745,33 @@ of a 400-km "near a navigable river" boolean, and tighten that radius to somethi
 that means "on a river".
 *Gate:* the share of hubs flagged riverine must **fall** substantially; a flag
 almost everything sets is the thing being fixed.
+**BUILT.** `compute_habitability_fields`'s own per-cell classification is
+transient (a fine-grid pass inside worldgen with no persisted per-settlement
+output), so rather than re-plumb that field through settlements, D3 reads the
+same THREE landmark facts straight off the `sim::rivers::River` objects
+already carried in `metadata["rivers"]` — no new persisted state, same
+discipline as the C1/C1b freight fixes reusing existing fields.
+`campaign_commands::lifecycle.rs`'s `river_hubs` set (read by `campaign_start_sim`
+into `TickHub.river`) now collects three landmark point sets instead of every
+navigable-river cell: a great MOUTH (`River.mouth_kind != 0` — an actual delta
+or estuary, not every trunk's plain terminus), a CONFLUENCE (a tributary's own
+last point, where it joins the larger stream), and the HEAD OF NAVIGATION (a
+navigable, non-tributary river's upstream-most point — the historical
+break-of-bulk where cargo transships boat-to-cart). A hub counts as riverine
+within `RIVER_LANDMARK_RADIUS_KM` = 25 km of any of these (was ~400 km of ANY
+navigable-river cell — a whole drainage basin, not a river town). **Measured**
+on a real generated world (`river_class_flag_is_tighter_than_the_old_
+navigable_radius`, `commands/real_world_diagnostics.rs`, `#[ignore]`d — the
+same paired-before/after-on-one-world discipline C1's own diagnostic uses):
+at 1800×900 (production-scale km/cell — the diagnostic's usual 300-wide world
+is ~134 km/cell, which makes a 25 km radius sub-cell and would fail on grid
+coarseness alone, rule 21/25's own caution), the old rule flagged **10.9%** of
+hubs riverine, the new one **2.0%** — a real ~5.5× drop, not almost-everything.
+Verified: `cargo check --lib --tests` clean (a `commands/**` wiring-only
+change per §2.8's table — `hub.river` is an INPUT the tick already reads
+unchanged, not a new tick mechanism, so `tick::tests`/`econ_` are not the
+narrowest gate here). D2 (a founded colony's own river flag/component) remains
+unstarted — see its own entry above for why.
 
 ---
 

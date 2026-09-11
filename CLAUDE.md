@@ -5689,7 +5689,22 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     stashed pre-D1 run of the same commit — every
                                     printed figure bit-identical, confirmed rather
                                     than assumed (see `docs/SCOREBOARD.md`
-                                    2026-09-11d). D2/D3 remain unstarted.
+                                    2026-09-11d). **D3 BUILT** — `hub.river`
+                                    now reads three real river LANDMARKS off
+                                    `sim::rivers::River` (a mouth's
+                                    `mouth_kind != 0`, a tributary's own
+                                    confluence point, a navigable trunk's
+                                    head-of-navigation) within 25 km, replacing
+                                    a blanket ~400 km "near any navigable
+                                    point" test. Measured on a real 1800×900
+                                    world: riverine share 10.9% → 2.0%, a real
+                                    ~5.5× drop (the gate's own "must fall
+                                    substantially" bar), diagnostic run at
+                                    production-scale km/cell since the usual
+                                    300-wide test world is too coarse for a
+                                    25 km radius to mean anything (rule 21/25).
+                                    D2 remains unstarted — its own entry
+                                    records why a quick version isn't safe.
                                     Plus 7 open questions
                                     (§10, all answered — A→B→C order, isolated markets
                                     may starve, a ~3,000 km trade horizon, the

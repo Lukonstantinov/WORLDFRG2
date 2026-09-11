@@ -440,26 +440,47 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         })
         .collect();
 
-    // WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 (transport modes, capacity half)
-    // — which founding hubs sit on a real NAVIGABLE river, read from the same
-    // `metadata["rivers"]` key `compute_route_days_matrix` now reliably reads
-    // (persisted the moment hydrology runs, not only on a manual save — see
-    // `sim_commands::persist_rivers`). A hub within 1% of world width of any
-    // navigable-river point counts as riverine; that threshold is the same
-    // "documented proxy" scale used elsewhere in this codebase (e.g. `geology.
-    // rs`'s phase-2 climate term) rather than an exact hydrological claim.
+    // ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md Stage D3 — river CLASS, not a
+    // blanket "near any navigable-river point" boolean. The old form flagged a
+    // hub riverine if it fell within 1% of world width (≈400 km on a 3600-wide
+    // world) of ANY navigable-river cell — a whole regional catchment, not a
+    // river town — which set the flag on almost every settlement near a major
+    // drainage and made `hub.river` nearly meaningless as a discriminator (it
+    // gates the river-freight discount and yard eligibility, see rule mod.rs
+    // §5.1's `hub.river` readers). Three real river LANDMARKS instead, each a
+    // single point already computed by worldgen and carried in `sim::rivers::
+    // River` itself: a great river MOUTH (`mouth_kind != 0` — a real delta or
+    // estuary, not every trunk's terminus), a CONFLUENCE (a tributary's own
+    // last point, where it joins the larger stream), and the HEAD OF
+    // NAVIGATION (a navigable trunk's upstream-most point — the historical
+    // fall line where cargo transships from boat to cart). Radius tightened
+    // from "somewhere in the drainage basin" to `RIVER_LANDMARK_RADIUS_KM` —
+    // stated in km and converted per world (rule 25), not a cell count — small
+    // enough to mean "sits at this landmark", not "is in this region".
+    const RIVER_LANDMARK_RADIUS_KM: f32 = 25.0;
     let river_hubs: std::collections::HashSet<u32> = {
         let rivers_json = metadata::get_meta(&conn, "rivers").ok().flatten().unwrap_or_default();
         let rivers: Vec<crate::sim::rivers::River> =
             serde_json::from_str(&rivers_json).unwrap_or_default();
-        let nav_pts: Vec<(f32, f32)> = rivers.iter().filter(|r| r.navigable)
-            .flat_map(|r| r.points.iter().map(|&(x, y)| (x as f32, y as f32)))
-            .collect();
-        let max_d2 = (grid_w * 0.01).powi(2);
-        if nav_pts.is_empty() { std::collections::HashSet::new() } else {
+        let mut landmarks: Vec<(f32, f32)> = Vec::new();
+        for r in &rivers {
+            if let Some(&(x, y)) = r.points.last() {
+                if r.mouth_kind != 0 || r.tributary {
+                    landmarks.push((x as f32, y as f32));
+                }
+            }
+            if r.navigable && !r.tributary {
+                if let Some(&(x, y)) = r.points.first() {
+                    landmarks.push((x as f32, y as f32));
+                }
+            }
+        }
+        let km_per_cell = 40075.0 / grid_w;
+        let max_d2 = (RIVER_LANDMARK_RADIUS_KM / km_per_cell).powi(2);
+        if landmarks.is_empty() { std::collections::HashSet::new() } else {
             order.iter().filter(|&&hi| {
                 let eh = &econ.hubs[hi];
-                nav_pts.iter().any(|&(rx, ry)| {
+                landmarks.iter().any(|&(rx, ry)| {
                     let (dx, dy) = (eh.x - rx, eh.y - ry);
                     dx * dx + dy * dy <= max_d2
                 })
