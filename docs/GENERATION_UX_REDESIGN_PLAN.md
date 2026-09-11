@@ -1,6 +1,7 @@
 # Generation UX Redesign — plates you draw, cities you place, worlds you pick, maps you print
 
-> **STATUS: Slices 1-3 BUILT and gated. Slices 4-11 still plan only.**
+> **STATUS: Slices 1-10 built (8 fully, one — 8 — as a real, working subset;
+> see its own note); Slice 11(a) built, 11(b) not attempted.**
 >
 > Read §1 (measured findings) before §3 (the slices). Four of the six asks turn
 > out to be *reaching a mechanism that already exists* rather than building one,
@@ -57,11 +58,106 @@
 > rather than assumed per §2.3's discipline). `econ_`/dynamics not run: no
 > `sim/campaign/tick/` code was touched.
 >
-> Slices 4-11 (the one-button merge, world presets, the plates/settlement
-> editors, the frontend-side export rewrite, first-run legibility, per-layer
-> opacity, more plates/symbol styles) remain **plan only** — each is real
-> frontend UI or a multi-file rewrite (the PDF export in particular pulls in a
-> new Rust dependency) that a from-scratch session should scope on its own.
+> **Slice 4 (the one-button merge)** — shipped. "Generate Full World" and
+> "Complete from Landmass" are one button (`WorkflowPanel.handleGenerate`),
+> reading `landmassSource` to decide which path runs, with a status line
+> naming the actual consequence and a "regenerate the landmass too" checkbox
+> for the one genuine choice — exactly the plan's own decided shape.
+>
+> **Slice 5 (world presets)** — shipped. Ten `WorldPreset` entries
+> (`ui/workflow/worldPresets.ts`) compose ocean fraction/continent goal
+> (Slice 2), elevation model + sliders, and planetary knobs (reusing
+> `ARCHETYPES`' own mild/strong span + `archetypeAt`). A new backend
+> `set_landmass_axes` command persists the landmass axes ahead of a Generate
+> press, the same `set_culture_count` pattern. Picking a preset with landmass
+> axes set also flips "regenerate the landmass too" on, so it can't be
+> silently ignored by "keep my landmass".
+>
+> **Slice 6 (plates as a drawable step)** — shipped, scoped down from a
+> step-list split. `generate_plates_and_landmass_from_seeds` (`plates.rs`)
+> takes hand-drawn `UserPlateSeed`s that override the nearest auto-generated
+> site's position/class/type — after the class-aware seeding pass (so a
+> hand-placed small plate gets the same protection a generated one gets) and
+> with the type LOCKED through the later ocean-fraction reassignment (which
+> otherwise reassigns every plate's type by construction). New command
+> `sim_generate_plates_from_seeds`; a "Draw Plate Seeds" tool in the Landmass
+> step (click to place, shift-click to delete, class/type picker). **Folded
+> into the existing Landmass step rather than a real step-list split** —
+> renumbering would touch every persisted `stepCompleted` key for a
+> presentational reorganisation; the actual mechanism the plan asks for
+> (draw seeds → Generate classifies & builds the rest) is what's built.
+>
+> **Slice 7 (settlement placement + editor)** — shipped. Read-only backend
+> `place_settlement_at` derives a Settlement through the same
+> FOOD_TO_POP/TRADE_ALPHA/civ_factor/cold_factor/winter_factor chain
+> `generate_settlements` uses (local catchment + real neighbours, since the
+> batch pass's mutual Voronoi/crossroads count can't be called for one point
+> in isolation). `Settlement` gains serde-defaulted `manual`/`edited` flags.
+> Frontend: a "Place Settlement" map tool (the default: click, the world
+> decides) plus a full inline editor (rename/re-tier/population/delete) on
+> the settlement list; re-running "Find Settlements" keeps every
+> manual/edited settlement instead of silently discarding it — a documented
+> simplification (union with a fresh batch, not literally feeding them in as
+> spacing constraints, which the real batch algorithm can't take as input
+> without a larger rewrite). Drag-to-move is NOT built — a position field
+> isn't offered either; deleting and re-placing is the move path this pass
+> ships.
+>
+> **Slice 8 (export, frontend-side)** — shipped as a real, working SUBSET.
+> A new "Map (PNG)" export tab captures the live on-screen canvas directly
+> (`getApp().canvas.toDataURL`) — base layer through the exact tile path the
+> screen uses (fixes F5's seams by construction) plus every visible overlay
+> at the live opacity (fixes F7, inherits Slice 10 for free) — with a Map
+> Plate picker to apply a composition first. Export is no longer Forge-only
+> (fixes F10). The raw single-layer tab's list is now derived from
+> `Toolbar.layerGroups` instead of a stale hand copy (fixes F6). **NOT
+> built, named so it isn't assumed done**: the multi-page vector-text PDF
+> atlas (gazetteer, embedded selectable type, legend page) — it needs a new
+> Rust PDF crate and a font-embedding step the plan itself flagged as
+> substantial; and a resolution multiplier independent of the current
+> viewport (export captures the view's actual current pixel resolution, not
+> a separate full-grid stitch at an arbitrary multiple).
+>
+> **Slice 9 (Quick/Detailed wizard head)** — shipped. `wizardMode` toggles
+> between a Quick summary (status + the one button that matters next, no
+> 13-step list) and the unchanged Detailed step list. Purely a display
+> choice — neither mode reads or writes state the other doesn't already use.
+>
+> **Slice 10 (per-layer opacity)** — shipped. The base layer's opacity slider
+> now actually applies (previously wired to nothing — F11's own bug).
+> `OverlayManager.withOpacity` gives 24 of the overlay render call sites
+> (every simple one-line `if (visibility.X) this.renderX(ctx)` dispatch) a
+> real per-overlay opacity, offscreen-composited only when opacity < 1 so the
+> untouched default case costs nothing. A compact slider appears under each
+> opacity-capable overlay's checkbox. **Not covered**: overlays whose draw
+> code is inlined directly in `render()` rather than factored into a named
+> method (rivers, lakes, and others) — extending `withOpacity` to those would
+> mean restructuring each inline block into a callback, left for a future
+> pass rather than attempted piecemeal here.
+>
+> **Slice 11(a) (more map plates)** — shipped. Six new `MAP_THEMES` entries:
+> Powers, Commerce, Crisis, Colonial (the campaign compositions F12 named as
+> missing) plus Hydrological Basins and Nautical Chart (the two world plates
+> the original twelve lacked, using the Alpine/Abyssal elevation styles).
+> Pure data — no new mechanism, same `MANAGED_OVERLAYS` derivation.
+>
+> **Slice 11(b) (symbol-style registry) — NOT attempted.** A real settlement/
+> river/lake/border symbol registry (§8.11's pattern applied to map symbols
+> instead of type) is a substantial standalone feature — the settlement
+> marker alone is ~150 lines of inline, already-sophisticated draw logic in
+> `OverlayManager.render`, and the plan asks for it across four feature
+> types with themed presets and per-class override. Left for its own pass
+> rather than a token single-variant implementation.
+>
+> Every slice's Rust changes are verified with `cargo check --lib --tests`
+> (clean) and the `step1_plates::plates::tests` module (11 passed, including
+> two new gates — `plate_seeding_produces_no_disc_sized_plates` at zero
+> across every tested plate count, `a_user_seed_keeps_its_explicit_type_and_
+> claims_its_own_cell`); every frontend change with `npx tsc --noEmit`
+> (clean throughout). `earth_` re-confirmed unchanged (70.2%/39.0%) since
+> Slice 1 is the only slice touching worldgen physics at all.
+> `econ_`/dynamics were never run — nothing in any slice touches
+> `sim/campaign/tick/`.
 
 ---
 
