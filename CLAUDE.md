@@ -5607,16 +5607,48 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     win applied at scale, now parallel rather than
                                     sequential. Four-stage plan (A free speed → B cost
                                     grid can see terrain → C carriage sorts cargo by
-                                    mode → D siting) — A and B are now BUILT (see the
-                                    bugs list above for B1-B3's own status); C and D are
-                                    not started. Plus 7 open questions (§10, all
-                                    answered — A→B→C order, isolated markets may starve,
-                                    a ~3,000 km trade horizon, the inheritance gate goes
-                                    multi-seed before Stage C) and a NON-FINDINGS list
-                                    recording that the tick is NOT the perf problem, the
-                                    1:4:8 ratio does not need re-deriving, and worldgen
-                                    river siting is one of the better-modelled things in
-                                    the tree
+                                    mode → D siting) — A and B are BUILT (see the
+                                    bugs list above for B1-B3's own status); **C1
+                                    BUILT** — `COASTAL_SEA_COST` 0.5 → 1.6
+                                    (`query_commands/mod.rs`), which the shared
+                                    `cost_to_days` conversion resolves to ~75.6 km/day
+                                    (was 242, 2.4-4.8× the real ~50-100 km/day
+                                    pre-modern effective average), leaving `freight_
+                                    per_day` and every land/river cost untouched —
+                                    gated by `coastal_sea_speed_matches_the_
+                                    historical_effective_average`. **Measured on a
+                                    real generated world, same seed before/after**
+                                    (`real_world_price_distance_gradient`,
+                                    `commands/real_world_diagnostics.rs`, `#[ignore]`d
+                                    — built for exactly this gap, since every `tick::
+                                    tests`/`econ_` fixture is a synthetic in-memory
+                                    `CampaignSim` that never touches `build_coarse_
+                                    cost` at all, so neither of the two gates this
+                                    dose's own doc names could ever move): grain price/
+                                    distance gradient **r = 0.092 → 0.185**, nearly
+                                    doubled, both positive — the historically correct
+                                    sign, and the metric `WORLD_AND_TRADE_MASTER_PLAN.
+                                    md` §4/F2 names as this whole area's headline
+                                    failure. See that doc's "UPDATE 2" for the full
+                                    pair and its caveats (one seed, one world size, one
+                                    20-year run). This NECESSARILY
+                                    retires the old static "sea:river:road ≈ 1:4:8"
+                                    cost-grid ratio the non-findings list below once
+                                    called settled (`coastal_sea_river_and_open_sea_
+                                    price_in_a_sane_order` now asserts ordering, not a
+                                    fixed ratio) — see §8.15-adjacent doc comment at
+                                    `COASTAL_SEA_COST` for why: that ratio is a
+                                    citation of Masschaele's FREIGHT-cost figure, and
+                                    the cost grid conflates freight cost with travel
+                                    SPEED through one shared conversion. C1b-C4 and
+                                    Stage D remain unstarted. Plus 7 open questions
+                                    (§10, all answered — A→B→C order, isolated markets
+                                    may starve, a ~3,000 km trade horizon, the
+                                    inheritance gate goes multi-seed before Stage C,
+                                    now built — see §8.15) and a NON-FINDINGS list
+                                    recording that the tick is NOT the perf problem
+                                    and worldgen river siting is one of the
+                                    better-modelled things in the tree
 IN_APP_VERIFICATION_CHECKLIST.md  ← Manual in-app verification checklist
 PORTING_REFERENCE.md              ← Porting reference
 ```

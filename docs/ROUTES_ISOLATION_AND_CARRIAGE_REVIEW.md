@@ -1,16 +1,21 @@
 # Routes, Isolation & Carriage — a review, five measured bugs, and a plan
 
-**Status: STAGE A + B BUILT AND GATED; STAGE C's OWN PREREQUISITE BUILT; STAGE C NOT
-STARTED.** This began as analysis only; §10's questions have since been answered (A → B
-→ C order, isolated markets may starve, a ~3,000 km regional trade horizon,
-`econ_inheritance_rules_fragment_differently` to go multi-seed before any Stage C dose
-walk) and Stages A and B are now implemented — see each item's own status line below.
-`econ_inheritance_rules_fragment_differently` is now multi-seed (`INHERITANCE_GATE_
-SEEDS = [42, 1337, 7]`, both of the gate's own assertions checked per seed plus a
-seed-averaged margin, ~6 min in debug) — see §8.15 of `CLAUDE.md` for the gate's own
-description and a fresh 6-seed robustness re-measurement (both contrasts now 6/6, up
-from the stale 5/6 this doc's own §10 Q1 answer was written against). Stage C (the
-carriage/economy dose walk itself) is still unstarted. It follows §2.4's rules: every
+**Status: STAGE A + B BUILT AND GATED; STAGE C's OWN PREREQUISITE BUILT; STAGE C
+STARTED (C1 BUILT AND MEASURED).** This began as analysis only; §10's questions have
+since been answered (A → B → C order, isolated markets may starve, a ~3,000 km regional
+trade horizon, `econ_inheritance_rules_fragment_differently` to go multi-seed before any
+Stage C dose walk) and Stages A and B are now implemented — see each item's own status
+line below. `econ_inheritance_rules_fragment_differently` is now multi-seed
+(`INHERITANCE_GATE_SEEDS = [42, 1337, 7]`, both of the gate's own assertions checked per
+seed plus a seed-averaged margin, ~6 min in debug) — see §8.15 of `CLAUDE.md` for the
+gate's own description and a fresh 6-seed robustness re-measurement (both contrasts now
+6/6, up from the stale 5/6 this doc's own §10 Q1 answer was written against). **C1 is
+now built**: `COASTAL_SEA_COST` 0.5 → 1.6 (see its own status line under §9), measured
+on a real generated world (`real_world_price_distance_gradient`,
+`WORLD_AND_TRADE_MASTER_PLAN.md` §4's "UPDATE 2") to nearly DOUBLE the grain price/
+distance gradient on the SAME seed (r = 0.092 → 0.185, both positive, the historically
+correct sign) — a genuine, paired, attributable result on the metric this whole review
+exists to move. C1b–C4 and Stage D remain unstarted. It follows §2.4's rules: every
 proposal carries a **gate that is not its own target**, and the findings are written
 down whether or not anyone acts.
 
@@ -555,6 +560,27 @@ is ~60% of spend and dearer sea freight pushes on it hard — plus
 lengthens every lane's `days` and `SHIP_LEG_MAX_KM`'s staging relay reads distance,
 not days. Dose in steps, re-running `econ_` per step. Expect the hard wealth bound
 to bind: slower sea concentrates margin in the ports that can still reach a market.
+**BUILT.** `COASTAL_SEA_COST` (`query_commands/mod.rs`) `0.5` → `1.6`, resolving to
+~75.6 km/day (was 242) — mid-band, `freight_per_day` and every land/river cost
+untouched. **A real, load-bearing finding surfaced building this**: NEITHER named
+gate above can actually observe a `build_coarse_cost` change — every `tick::tests`/
+`econ_` fixture is a synthetic in-memory `CampaignSim` (hand-built `days`, zero DB/
+tile access by the module's own design, §5), so this dose is provably a no-op
+against both. The correct instrument already existed for exactly this gap:
+`real_world_price_distance_gradient` (`commands/real_world_diagnostics.rs`,
+`#[ignore]`d, builds a real world end-to-end through the actual Tauri commands). A
+same-seed paired run (424242) measured grain price/distance gradient **r = 0.092 →
+0.185** — nearly doubled, both positive, the historically correct sign — see
+`WORLD_AND_TRADE_MASTER_PLAN.md` §4's "UPDATE 2" for the full measurement and its own
+caveats (one seed, one world size, one 20-year run). Mechanically gated by the new
+`coastal_sea_speed_matches_the_historical_effective_average` (asserts the derived
+km/day figure itself, not a placeholder ratio) and a rewritten `coastal_sea_river_
+and_open_sea_price_in_a_sane_order` (the old `navigable_river_prices_near_the_
+masschaele_ratio` asserted a fixed sea:river ratio that C1 necessarily retires — see
+`COASTAL_SEA_COST`'s own doc comment for why that ratio was a freight-cost citation
+conflated with travel speed, not a claim this cost grid can keep literally). Verified:
+`cargo test --lib query_commands` 16/16; `tick::tests`/`econ_` deliberately NOT
+re-run for this dose — the finding above is why they cannot move.
 
 **C1b · Only then, the DIFFERENTIAL penalty** — make road cost scale harder with
 `bulk` than sea does, so grain is priced off the road while silk is not. This is
@@ -695,9 +721,16 @@ almost everything sets is the thing being fixed.
   grain-to-Amsterdam fact. Trans-oceanic trade is wrong here for one reason only —
   §5's component build makes two continents one market — and fixing freight would
   not touch it.
-- **The 1:4:8 ratio is not missing and does not need re-deriving.** It is correct,
-  cited, and in the cost grid already. The problem is its reach (§2), not its value.
-  Do not "add" it.
+- **The 1:4:8 ratio is not missing and does not need re-deriving — STALE AS OF C1.**
+  This was true when written: the ratio was correct, cited, and in the cost grid
+  already, and the problem was its reach (§2), not its value. C1 necessarily retired
+  it as a literal static cost-grid ratio (see `COASTAL_SEA_COST`'s own doc comment):
+  the ratio is a citation of Masschaele's FREIGHT-cost figure, and the shared
+  `cost_to_days` conversion this cost grid uses conflates freight cost with travel
+  SPEED — so fixing coastal sea's absolute speed (a real bug) necessarily changes
+  its cost relative to river/land (not a bug, a consequence). C1b's job is to
+  recover a Masschaele-shaped differential at the FREIGHT level instead, scaled by
+  `bulk`, not baked back into this grid.
 - **`rivers_json = ""` is fixed.** CLAUDE.md's §5.1 note and
   `TRADE_STAGING_AND_POSTS_PLAN.md`'s finding that the campaign matrix is built with
   no river geometry are **both now stale** — `metadata["rivers"]` is wired and read.

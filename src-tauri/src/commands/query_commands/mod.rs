@@ -201,8 +201,27 @@ struct CoarseCost {
 }
 
 const SEA_BLOCK_COST: f32 = 1.0e6;
-/// Cost of an open-water (no land neighbour) coarse cell. Higher than the
-/// coastal-sea cost (0.5) so least-cost routes/flows still hug the coast and cross
+/// Cost of a coastal/shelf-hugging sea cell — the C1 dose
+/// (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9). Was `0.5`, which the cost-to-days
+/// conversion (`cost_to_days`, shared by every real campaign's route-days matrix)
+/// resolves to **242 km/day** — 2.4-4.8× the real pre-modern effective average of
+/// ~50-100 km/day (fast passage ~150) that `OPEN_SEA_COST`'s own 55 km/day already
+/// sits inside correctly. `1.6` resolves to **~75.6 km/day**
+/// (`days_per_cell · OPEN_SEA_COST / COASTAL_SEA_COST`, mid-band, still meaningfully
+/// cheaper than open sea's 55 so coast-hugging stays preferred over a beeline).
+/// **Deliberately NOT a re-derivation of the old "sea:river:road = 1:4:8" ratio** —
+/// that ratio is a citation of Masschaele's measured FREIGHT-cost figure (EcHR 46,
+/// 1993, 266-79), and this cost grid conflates freight cost with travel SPEED via
+/// one shared `cost_to_days` formula. Raising this rung fixes only coastal sea's
+/// absolute speed (land and river speeds are untouched — they already sit where
+/// history puts them, verified in the review doc's own table) and necessarily
+/// breaks that STATIC ratio; recovering a Masschaele-shaped differential at the
+/// FREIGHT level, scaled by a good's `bulk` rather than baked into the cost grid,
+/// is C1b's job, not this constant's. See `coastal_sea_speed_matches_the_
+/// historical_effective_average` for the mechanical claim this dose makes.
+const COASTAL_SEA_COST: f32 = 1.6;
+/// Cost of an open-water (no land neighbour) coarse cell. Higher than
+/// `COASTAL_SEA_COST` so least-cost routes/flows still hug the coast and cross
 /// open ocean at the narrowest point — but low enough that a sea crossing is
 /// genuinely PREFERRED over a long overland detour, and separate landmasses get
 /// wired into one trade network whenever a reasonable crossing exists (the user
@@ -425,9 +444,13 @@ fn build_coarse_cost(
                 // Navigable trunk = a fast inland highway (cheapest overland
                 // corridor); a minor river is still a cheap valley route.
                 // CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 5 — raised from
-                // 0.8 (a sea:river:road ratio of 1:1.6:8) toward Masschaele's
-                // measured 1:4:8 (EcHR 46, 1993, 266–79): coastal sea is 0.5, so
-                // 2.0 lands the navigable-river rung at exactly 4×.
+                // 0.8 toward Masschaele's measured freight-cost ratio (EcHR 46, 1993,
+                // 266–79). C1 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9) decoupled
+                // this rung's SPEED from that citation — see `COASTAL_SEA_COST`'s own
+                // doc comment — so 2.0 no longer lands at a clean 4× of coastal sea;
+                // it is left as-is because navigable-river SPEED (60.5 km/day at this
+                // cost) already sits inside the real ~40-60 km/day downstream band on
+                // its own merits, independent of what coastal sea prices at.
                 if is_nav_river[ci] { c = c.min(2.0); }
                 else if is_river[ci] { c = c.min(1.4); }
                 // Ice-sheet land (EF ice cap or a deeply frozen interior) is
@@ -443,11 +466,12 @@ fn build_coarse_cost(
             } else if block_sea {
                 SEA_BLOCK_COST
             } else {
-                // Open water is now markedly dearer than coastal sea (set to 0.5
-                // below). Routes and the trade-flow trunks both least-cost over
-                // this grid, so a high open-sea base makes them hug the coast and
-                // take the SHORTEST crossing through straits/chokepoints instead
-                // of beelining straight across deep ocean between continents.
+                // Open water is now markedly dearer than coastal sea (set to
+                // `COASTAL_SEA_COST` below). Routes and the trade-flow trunks both
+                // least-cost over this grid, so a high open-sea base makes them hug
+                // the coast and take the SHORTEST crossing through straits/
+                // chokepoints instead of beelining straight across deep ocean
+                // between continents.
                 OPEN_SEA_COST
             };
         }
@@ -494,7 +518,7 @@ fn build_coarse_cost(
                 // Coastal-ring AND continental-shelf water is cheap coast-hugging
                 // shipping (reachable sea). …but never re-open frozen water (sea ice
                 // stays blocked).
-                if (coastal || shelf[ci]) && temp[ci] > SEA_FREEZE_C { cost[ci] = 0.5; }
+                if (coastal || shelf[ci]) && temp[ci] > SEA_FREEZE_C { cost[ci] = COASTAL_SEA_COST; }
             }
         }
     }
@@ -752,8 +776,10 @@ pub(crate) fn compute_route_days_matrix_for_season(
     if grid_w == 0 || grid_h == 0 { return Err("no grid".into()); }
     let world = db.cached_tiles_with_conn(conn)?;
     // WORLD_AND_TRADE_MASTER_PLAN.md Part III §4 — river geometry, so a navigable
-    // river's real cost discount (§7's sea:river:road ≈ 1:4:8 ratio) actually
-    // reaches the campaign's pathfound `base_days`. Previously hardcoded to `""`
+    // river's real cost discount actually reaches the campaign's pathfound
+    // `base_days` (`COASTAL_SEA_COST`'s own doc comment records how C1 later
+    // decoupled the sea/river/road rungs from a single static ratio). Previously
+    // hardcoded to `""`
     // ("campaign has no overlay JSON"), which was true only in the sense that
     // nobody had wired it up — `sim_commands::persist_rivers` now keeps the
     // `rivers` metadata key in sync with the world's own hydrology the moment it
@@ -3187,13 +3213,77 @@ mod route_pricing_tests {
         );
     }
 
-    /// The navigable-river rung, priced through the WORLDGEN cost grid directly
-    /// (`build_coarse_cost`, which — unlike the campaign's own route matrix — does
-    /// receive real river geometry): raised from 0.8 toward Masschaele's measured
-    /// sea:river:road ≈ 1:4:8, so a navigable river should now price at roughly 4×
-    /// coastal sea (0.5), not 1.6×.
+    /// C1 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9) — calm coastal sea's
+    /// DERIVED speed must land inside the real pre-modern effective average
+    /// (~50-100 km/day, fast passage ~150 — the review doc's own table). Builds a
+    /// thin land strip with two hubs in the water immediately alongside it, far
+    /// enough apart that the shortest route hugs the coast the whole way (every
+    /// cell it crosses prices at `COASTAL_SEA_COST` — land is dearer per cell, so
+    /// the pathfinder never detours onto it), and converts the resulting `days` to
+    /// km/day using the SAME `days_per_cell` formula a real campaign derives
+    /// (`(40075.0 / grid_w) / 55.0`, `campaign_commands/lifecycle.rs`) at the
+    /// shipped default grid width (3600) — not the arbitrary `0.2` this file's
+    /// other route-day tests use, since THIS claim is about a real km/day figure,
+    /// not a ratio to an old placeholder.
     #[test]
-    fn navigable_river_prices_near_the_masschaele_ratio() {
+    fn coastal_sea_speed_matches_the_historical_effective_average() {
+        let w = 3600u32;
+        let h = 80u32; // narrow: two rows off the land strip is already open sea
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        let land_y = h / 2;
+        for i in 0..buf.total() {
+            buf.terrain[i] = 0;
+            buf.temperature[i] = 18.0;
+            buf.koppen[i] = 12; // Cfb — no koppen surcharge
+        }
+        for x in 0..w {
+            let idx = buf.idx(x, land_y);
+            buf.terrain[idx] = 1;
+            buf.elevation[idx] = 0.05;
+        }
+        buf.save(&conn, "test").unwrap();
+        let db = WorldDb::new(conn);
+        let conn = db.conn.lock().unwrap();
+
+        let days_per_cell = (40075.0f32 / w as f32) / 55.0; // the real production formula
+        // Two hubs in the coastal water row immediately south of the land strip,
+        // well under half the world's width apart so the cylindrical wrap can
+        // never make "the other way around" the shorter path.
+        let sea_y = (land_y + 1) as f32;
+        let hub_xy = vec![(200.0f32, sea_y), (1600.0f32, sea_y)];
+        let components = vec![0u32, 0u32];
+        let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
+            .expect("route matrix build failed");
+        let route_days = days[1];
+        assert!(route_days.is_finite() && route_days > 0.0, "no coastal route found");
+
+        let km_per_fine_cell = 40075.0 / w as f32;
+        let dist_km = (hub_xy[1].0 - hub_xy[0].0).abs() * km_per_fine_cell;
+        let speed_km_per_day = dist_km / route_days;
+        assert!(
+            (50.0..=100.0).contains(&speed_km_per_day),
+            "calm coastal sea should land in the real ~50-100 km/day effective-average \
+             band (got {speed_km_per_day:.1} km/day over {dist_km:.0} km in {route_days:.2} days)"
+        );
+    }
+
+    /// The navigable-river and coastal-sea rungs, priced through the WORLDGEN cost
+    /// grid directly (`build_coarse_cost`, which — unlike the campaign's own route
+    /// matrix — does receive real river geometry). C1 decoupled coastal sea's
+    /// SPEED from the old static "sea:river:road ≈ 1:4:8" citation (see
+    /// `COASTAL_SEA_COST`'s own doc comment) — river stays at cost `2.0`,
+    /// unaffected — so this no longer asserts a fixed ratio, only that the three
+    /// rungs still price in a sane ORDER: coastal sea cheapest (cheap coast-
+    /// hugging), then navigable river, then open sea dearest (so a route still
+    /// hugs the coast and prefers a navigable river over open water, which is the
+    /// actual routing behaviour this rung exists to produce).
+    #[test]
+    fn coastal_sea_river_and_open_sea_price_in_a_sane_order() {
         let w = 100u32;
         let h = 20u32;
         let conn = Connection::open_in_memory().unwrap();
@@ -3230,16 +3320,23 @@ mod route_pricing_tests {
 
         // Sample a river cell well clear of either end (avoid edge effects).
         let river_cost = cc.cost[(land_y as i32 / cc.f as i32 * cc.cw + (w as i32 / cc.f as i32) / 2) as usize];
+        // A coastal-sea cell immediately off the land row (the coastal discount).
+        let coastal_row = (land_y as i32 / cc.f as i32) + 1;
+        let coastal_cost = cc.cost[(coastal_row * cc.cw + (w as i32 / cc.f as i32) / 2) as usize];
         // A pure open-sea cell, far from the land row (avoids the coastal discount).
         let open_sea_cost = cc.cost[(0 * cc.cw + cc.cw / 2) as usize];
         assert!(
             (open_sea_cost - OPEN_SEA_COST).abs() < 0.05,
             "expected a far cell to read as plain open sea, got {open_sea_cost}"
         );
-        let ratio = river_cost / 0.5; // 0.5 = the coastal-sea cost Masschaele's ratio is stated against
         assert!(
-            (3.0..=5.0).contains(&ratio),
-            "navigable river should price near 4× coastal sea (got river={river_cost}, ratio={ratio})"
+            (coastal_cost - COASTAL_SEA_COST).abs() < 0.05,
+            "expected the row off the coast to read as coastal sea, got {coastal_cost}"
+        );
+        assert!(
+            coastal_cost < river_cost && river_cost < open_sea_cost,
+            "expected coastal sea < navigable river < open sea (got coastal={coastal_cost}, \
+             river={river_cost}, open sea={open_sea_cost})"
         );
     }
 
