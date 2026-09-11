@@ -1,7 +1,8 @@
 # Generation UX Redesign — plates you draw, cities you place, worlds you pick, maps you print
 
-> **STATUS: Slices 1-10 built (8 fully, one — 8 — as a real, working subset;
-> see its own note); Slice 11(a) built, 11(b) not attempted.**
+> **STATUS: Slices 1-10 built, all fully including 8 (see its own note for
+> what was finished after its initial subset shipment); Slice 11 fully built
+> (a) plus a real, working subset for (b) — the symbol-style registry.**
 >
 > Read §1 (measured findings) before §3 (the slices). Four of the six asks turn
 > out to be *reaching a mechanism that already exists* rather than building one,
@@ -103,37 +104,63 @@
 > isn't offered either; deleting and re-placing is the move path this pass
 > ships.
 >
-> **Slice 8 (export, frontend-side)** — shipped as a real, working SUBSET.
-> A new "Map (PNG)" export tab captures the live on-screen canvas directly
-> (`getApp().canvas.toDataURL`) — base layer through the exact tile path the
-> screen uses (fixes F5's seams by construction) plus every visible overlay
-> at the live opacity (fixes F7, inherits Slice 10 for free) — with a Map
-> Plate picker to apply a composition first. Export is no longer Forge-only
-> (fixes F10). The raw single-layer tab's list is now derived from
-> `Toolbar.layerGroups` instead of a stale hand copy (fixes F6). **NOT
-> built, named so it isn't assumed done**: the multi-page vector-text PDF
-> atlas (gazetteer, embedded selectable type, legend page) — it needs a new
-> Rust PDF crate and a font-embedding step the plan itself flagged as
-> substantial; and a resolution multiplier independent of the current
-> viewport (export captures the view's actual current pixel resolution, not
-> a separate full-grid stitch at an arbitrary multiple).
+> **Slice 8 (export, frontend-side)** — now fully shipped, including the two
+> pieces once named as NOT built. A "Map (PNG)" export tab captures the live
+> on-screen canvas directly (`getApp().canvas.toDataURL`) — base layer
+> through the exact tile path the screen uses (fixes F5's seams by
+> construction) plus every visible overlay at the live opacity (fixes F7,
+> inherits Slice 10 for free) — with a Map Plate picker to apply a
+> composition first. Export is no longer Forge-only (fixes F10). The raw
+> single-layer tab's list is derived from `Toolbar.layerGroups` instead of a
+> stale hand copy (fixes F6).
+>
+> **The resolution multiplier is real**, not a stretched screenshot.
+> `MapCanvas.tsx`'s draw body was factored into `drawScene(ctx, w, h, dpr)`,
+> parameterized over an explicit context/size/pixel-density instead of
+> reading them off the live canvas, so the same draw code can target a fresh
+> offscreen canvas at `dpr × multiplier` — genuine additional pixel density
+> over the current view. A 1×/2×/3×/4× picker sits beside the PNG export.
+>
+> **The PDF atlas is built**, avoiding the "new Rust crate + font-embedding
+> step" blocker by using a fact about the format rather than a new
+> dependency: PDF's 14 STANDARD fonts (Helvetica among them) need no
+> embedding at all, so real, selectable, searchable vector text is reachable
+> with a small hand-rolled writer (`canvas/pdfWriter.ts`, no new package,
+> Rust or npm). A third "Atlas (PDF)" export tab lets you pick any number of
+> map plates (one full-bleed page each, captured through the same
+> `drawScene`/raw-pixel path the resolution multiplier uses) plus an optional
+> gazetteer — paginated text pages listing settlements, provinces, rivers and
+> lakes with their coordinates. **The one deliberate simplification**: each
+> page's map raster is written as a RAW uncompressed RGB stream (no
+> `/Filter`) rather than JPEG/Flate-compressed — no codec dependency, but a
+> multi-plate atlas is a large file. There is no embedded legend page or a
+> graticule beyond what the captured plate itself draws — the gazetteer and
+> real vector type are what the plan actually named as the hard part, and
+> both are real.
 >
 > **Slice 9 (Quick/Detailed wizard head)** — shipped. `wizardMode` toggles
 > between a Quick summary (status + the one button that matters next, no
 > 13-step list) and the unchanged Detailed step list. Purely a display
 > choice — neither mode reads or writes state the other doesn't already use.
 >
-> **Slice 10 (per-layer opacity)** — shipped. The base layer's opacity slider
-> now actually applies (previously wired to nothing — F11's own bug).
-> `OverlayManager.withOpacity` gives 24 of the overlay render call sites
-> (every simple one-line `if (visibility.X) this.renderX(ctx)` dispatch) a
-> real per-overlay opacity, offscreen-composited only when opacity < 1 so the
-> untouched default case costs nothing. A compact slider appears under each
-> opacity-capable overlay's checkbox. **Not covered**: overlays whose draw
-> code is inlined directly in `render()` rather than factored into a named
-> method (rivers, lakes, and others) — extending `withOpacity` to those would
-> mean restructuring each inline block into a callback, left for a future
-> pass rather than attempted piecemeal here.
+> **Slice 10 (per-layer opacity)** — now fully shipped. The base layer's
+> opacity slider actually applies (previously wired to nothing — F11's own
+> bug). `OverlayManager.withOpacity` gives **46** of the overlay render call
+> sites real per-overlay opacity, offscreen-composited only when opacity < 1
+> so the untouched default case costs nothing — the original 24 one-line
+> `if (visibility.X) this.renderX(ctx)` dispatches, plus 22 more inline
+> blocks (lakes, rivers, currents, wind, plateMotion, latLines,
+> fisheryBanks, cultures, states, sharkZones, shipwormZones, stormZones,
+> monsoonZones, reefZones, tradeRoutes, politicalInfluence, speculation,
+> figureMarks, landmarks, chokepoints, migrations, settlements) wrapped in
+> place — each body's own `ctx` parameter shadows the outer one, so no draw
+> code needed rewriting. A compact slider appears under each opacity-capable
+> overlay's checkbox, `Toolbar.OPACITY_CAPABLE` extended to match. **One
+> pair deliberately left out**: `windBelts`/`itcz` share draw helpers
+> (`belt`/`ribbon`/`trace`) defined in a parent scope that closes over the
+> outer `ctx` directly rather than taking it as a parameter, so the
+> shadowing trick doesn't reach them — wrapping would mean restructuring
+> those helpers, left for a future pass.
 >
 > **Slice 11(a) (more map plates)** — shipped. Six new `MAP_THEMES` entries:
 > Powers, Commerce, Crisis, Colonial (the campaign compositions F12 named as
@@ -141,13 +168,18 @@
 > the original twelve lacked, using the Alpine/Abyssal elevation styles).
 > Pure data — no new mechanism, same `MANAGED_OVERLAYS` derivation.
 >
-> **Slice 11(b) (symbol-style registry) — NOT attempted.** A real settlement/
-> river/lake/border symbol registry (§8.11's pattern applied to map symbols
-> instead of type) is a substantial standalone feature — the settlement
-> marker alone is ~150 lines of inline, already-sophisticated draw logic in
-> `OverlayManager.render`, and the plan asks for it across four feature
-> types with themed presets and per-class override. Left for its own pass
-> rather than a token single-variant implementation.
+> **Slice 11(b) (symbol-style registry)** — shipped as a real, working
+> SUBSET rather than the plan's full menu. `OverlayManager.symbolStyles`
+> (§8.11's registry pattern applied to map symbols) offers **two** variants
+> per category rather than the plan's five/four/etc.: settlement marker
+> (graduated circles by tier, or a fixed-radius rank dot), river width rule
+> (discharge-scaled, or constant), lake fill (solid, or an outlined wash with
+> a traced per-cell boundary), province border (single stroke, or a pale
+> casing halo under it). Edited in ⚙ Appearance's new "Map symbols" tab,
+> persisted to `localStorage` only (NOT to the world-file appearance
+> envelope labelStyles/lineColors already use — a smaller scope, documented
+> rather than silently matched). A representative, working implementation of
+> the pattern, not a token single-variant stand-in.
 >
 > Every slice's Rust changes are verified with `cargo check --lib --tests`
 > (clean) and the `step1_plates::plates::tests` module (11 passed, including

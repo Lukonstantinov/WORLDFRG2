@@ -14,8 +14,10 @@
  * re-scale of an already-rasterized screenshot.
  */
 export type ExportSnapshotFn = (multiplier: number) => string | null;
+export type ExportSnapshotRawFn = (multiplier: number) => ImageData | null;
 
 let fn: ExportSnapshotFn | null = null;
+let rawFn: ExportSnapshotRawFn | null = null;
 
 export function setExportSnapshotFn(f: ExportSnapshotFn | null) {
   fn = f;
@@ -23,4 +25,16 @@ export function setExportSnapshotFn(f: ExportSnapshotFn | null) {
 
 export function exportMapSnapshot(multiplier: number): string | null {
   return fn ? fn(multiplier) : null;
+}
+
+/** GENERATION_UX_REDESIGN_PLAN.md Slice 8 (PDF atlas) — the RAW-pixel sibling
+ *  of `exportMapSnapshot`: returns `ImageData` straight off the offscreen
+ *  render instead of a PNG data URL, so the PDF writer can embed it as an
+ *  uncompressed RGB stream without a decode round-trip. */
+export function setExportSnapshotRawFn(f: ExportSnapshotRawFn | null) {
+  rawFn = f;
+}
+
+export function exportMapSnapshotRaw(multiplier: number): ImageData | null {
+  return rawFn ? rawFn(multiplier) : null;
 }

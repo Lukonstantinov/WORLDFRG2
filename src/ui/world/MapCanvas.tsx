@@ -3,7 +3,7 @@ import { initPixiApp, type MapApp } from "@canvas/PixiApp";
 import { TileViewport } from "@canvas/TileViewport";
 import { TileManager } from "@canvas/TileManager";
 import { OverlayManager, type ColonyMarker } from "@canvas/OverlayManager";
-import { setExportSnapshotFn } from "@canvas/mapExport";
+import { setExportSnapshotFn, setExportSnapshotRawFn } from "@canvas/mapExport";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "@canvas/PaintOverlay";
 import { useWorldStore } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
@@ -416,10 +416,27 @@ export function MapCanvas() {
     return off.toDataURL("image/png");
   }, [drawScene]);
 
+  const exportSnapshotRaw = useCallback((multiplier: number): ImageData | null => {
+    const mapApp = appRef.current;
+    if (!mapApp) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = mapApp.canvas.width / dpr;
+    const cssH = mapApp.canvas.height / dpr;
+    const effDpr = dpr * Math.max(1, multiplier);
+    const off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(cssW * effDpr));
+    off.height = Math.max(1, Math.round(cssH * effDpr));
+    const octx = off.getContext("2d");
+    if (!octx) return null;
+    drawScene(octx, cssW, cssH, effDpr);
+    return octx.getImageData(0, 0, off.width, off.height);
+  }, [drawScene]);
+
   useEffect(() => {
     setExportSnapshotFn(exportSnapshot);
-    return () => setExportSnapshotFn(null);
-  }, [exportSnapshot]);
+    setExportSnapshotRawFn(exportSnapshotRaw);
+    return () => { setExportSnapshotFn(null); setExportSnapshotRawFn(null); };
+  }, [exportSnapshot, exportSnapshotRaw]);
 
   const refreshTiles = useCallback(() => {
     const viewport = viewportRef.current;

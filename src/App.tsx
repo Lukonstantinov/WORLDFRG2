@@ -57,7 +57,8 @@ import { useGoodsStore } from "@state/goodsStore";
 import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, writeExportImage, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
 import { useSettingsStore } from "@state/settingsStore";
 import { getApp } from "@canvas/PixiApp";
-import { exportMapSnapshot } from "@canvas/mapExport";
+import { exportMapSnapshot, exportMapSnapshotRaw } from "@canvas/mapExport";
+import { PdfDocument, rgbaToRgb, type TextLine } from "@canvas/pdfWriter";
 import { MAP_THEMES, applyMapTheme } from "@ui/world/mapThemes";
 import { layerGroups } from "@ui/world/Toolbar";
 
@@ -81,7 +82,7 @@ const EXPORTABLE_LAYERS: { id: string; label: string }[] =
 // export (a heightmap-adjacent use case a composited screenshot can't serve).
 function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) {
   const setStatus = useUIStore((s) => s.setStatus);
-  const [tab, setTab] = useState<"map" | "layers">("map");
+  const [tab, setTab] = useState<"map" | "layers" | "atlas">("map");
   const [selected, setSelected] = useState<Set<string>>(
     new Set(["elevation", "climate", "biomes"])
   );
@@ -94,6 +95,23 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
   // re-runs the exact on-screen draw code at a boosted device-pixel ratio),
   // not a re-scale of an already-rasterized screenshot.
   const [resMultiplier, setResMultiplier] = useState(1);
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 8 (the PDF atlas) — a page per
+  // selected plate, a gazetteer page, real vector text via the PDF standard
+  // fonts (no embedding needed — see pdfWriter.ts's own doc comment).
+  const [atlasPlates, setAtlasPlates] = useState<Set<string>>(new Set(["physical"]));
+  const [atlasGazetteer, setAtlasGazetteer] = useState(true);
+  const [atlasProgress, setAtlasProgress] = useState("");
+  const settlements = useWorldStore((s) => s.settlements);
+  const rivers = useWorldStore((s) => s.rivers);
+  const lakes = useWorldStore((s) => s.lakes);
+  const provinces = useWorldStore((s) => s.provinces);
+
+  const toggleAtlasPlate = (id: string) =>
+    setAtlasPlates((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -163,6 +181,139 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
     setBusy(false);
   };
 
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 8 (the PDF atlas). Page size is A4
+  // landscape in PDF points (842 x 595) — every page shares this size
+  // (`PdfDocument`'s own constraint), so a map plate's raster is scaled to
+  // fill the full bleed; the gazetteer's text pages share it too.
+  const ATLAS_PAGE_W = 842;
+  const ATLAS_PAGE_H = 595;
+
+  /** Chunked base64 encode — `String.fromCharCode(...bytes)` overflows the
+   *  call stack on a multi-MB uncompressed page (this writer's own honest
+   *  trade-off, see pdfWriter.ts's doc comment), so this walks the buffer in
+   *  small slices instead of spreading the whole array at once. */
+  const bytesToBase64 = (bytes: Uint8Array): string => {
+    let binary = "";
+    const chunk = 0x8000;
+    for (let i = 0; i < bytes.length; i += chunk) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + chunk));
+    }
+    return btoa(binary);
+  };
+
+  /** Paginates a flat list of gazetteer lines into `TextLine[]` pages sized
+   *  to fit the atlas page, a section heading (bold, larger) starting each
+   *  section on its own fresh page rather than running headings together
+   *  with the entries below them. */
+  const buildGazetteerPages = (
+    sections: { title: string; rows: string[] }[],
+  ): TextLine[][] => {
+    const marginX = 44;
+    const topY = ATLAS_PAGE_H - 50;
+    const lineH = 13;
+    const bottomY = 40;
+    const pages: TextLine[][] = [];
+    let page: TextLine[] = [];
+    let y = topY;
+    const newPage = () => { if (page.length) pages.push(page); page = []; y = topY; };
+    for (const section of sections) {
+      if (!section.rows.length) continue;
+      if (y < topY) newPage(); // start each section on a fresh page
+      page.push({ text: section.title, x: marginX, y, size: 15, font: "F2" });
+      y -= lineH * 1.6;
+      for (const row of section.rows) {
+        if (y < bottomY) { newPage(); page.push({ text: `${section.title} (cont.)`, x: marginX, y, size: 11, font: "F2" }); y -= lineH * 1.4; }
+        page.push({ text: row, x: marginX, y, size: 9, font: "F1" });
+        y -= lineH;
+      }
+      y -= lineH; // gap before next section
+    }
+    if (page.length) pages.push(page);
+    return pages;
+  };
+
+  const handleExportAtlas = async () => {
+    if (!getApp()) { alert("Map canvas not ready."); return; }
+    const plates = MAP_THEMES.filter((t) => atlasPlates.has(t.id));
+    if (plates.length === 0 && !atlasGazetteer) { alert("Pick at least one plate or the gazetteer."); return; }
+    setBusy(true);
+    setAtlasProgress("");
+    try {
+      const savedTheme = activeMapTheme;
+      const doc = new PdfDocument(ATLAS_PAGE_W, ATLAS_PAGE_H);
+
+      for (let i = 0; i < plates.length; i++) {
+        const theme = plates[i];
+        setAtlasProgress(`Rendering plate ${i + 1}/${plates.length}: ${theme.name}…`);
+        applyMapTheme(theme);
+        // Same bounded-delay heuristic the single-page PNG export already
+        // relies on to let the tile layer finish redrawing after a theme
+        // switch — there is no "redraw complete" signal to await instead.
+        await new Promise((r) => setTimeout(r, 700));
+        const img = exportMapSnapshotRaw(1);
+        if (!img) continue;
+        const rgb = rgbaToRgb(img);
+        doc.addImagePage(rgb, img.width, img.height, [
+          { text: theme.name, x: 40, y: ATLAS_PAGE_H - 34, size: 16, font: "F2" },
+          { text: base, x: 40, y: 22, size: 9, font: "F1" },
+        ]);
+      }
+
+      if (atlasGazetteer) {
+        setAtlasProgress("Building gazetteer…");
+        const settlementRows = settlements
+          .slice().sort((a, b) => b.population - a.population)
+          .map((s) => `${s.name}  —  ${s.size}, pop. ${s.population.toLocaleString()}  (${s.x}, ${s.y})`);
+        const riverRows = rivers
+          .filter((r) => r.points.length > 0)
+          .map((r, i) => `River #${i + 1}${r.major ? " (major)" : ""}${r.navigable ? ", navigable" : ""}  —  source (${r.points[0][0]}, ${r.points[0][1]})`);
+        const lakeRows = lakes
+          .filter((l) => l.cells.length > 0)
+          .map((l, i) => `Lake #${i + 1}${l.endorheic ? " (salt)" : ""}  —  ${l.cells.length} cells, near (${l.cells[0][0]}, ${l.cells[0][1]})`);
+        const provinceRows = provinces
+          .slice().sort((a, b) => a.name.localeCompare(b.name))
+          .map((p) => `${p.name}  —  ${p.culture}, ${p.cells} cells  (seat ${p.seat_x}, ${p.seat_y})`);
+
+        const pages = buildGazetteerPages([
+          { title: "Gazetteer — Settlements", rows: settlementRows },
+          { title: "Gazetteer — Provinces", rows: provinceRows },
+          { title: "Gazetteer — Rivers", rows: riverRows },
+          { title: "Gazetteer — Lakes", rows: lakeRows },
+        ]);
+        for (const lines of pages) doc.addTextPage(lines);
+      }
+
+      if (savedTheme) {
+        const t = MAP_THEMES.find((t) => t.id === savedTheme);
+        if (t) applyMapTheme(t);
+      }
+
+      setAtlasProgress("Writing PDF…");
+      const bytes = doc.build();
+      const b64 = bytesToBase64(bytes);
+
+      let path: string | null = null;
+      const def = `${base}_atlas.pdf`;
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const result = await save({ filters: [{ name: "PDF Document", extensions: ["pdf"] }], defaultPath: def });
+        if (result) path = result;
+      } catch {
+        const input = prompt("Save the atlas PDF to path:", def);
+        if (input) path = input;
+      }
+      if (!path) { setBusy(false); setAtlasProgress(""); return; }
+      await writeExportImage(path, `data:application/pdf;base64,${b64}`);
+      setStatus(`Atlas exported to ${path}`);
+      onClose();
+    } catch (err) {
+      console.error("Atlas export failed:", err);
+      alert("Atlas export failed: " + err);
+    }
+    setBusy(false);
+    setAtlasProgress("");
+  };
+
   return (
     <div style={{
       position: "absolute", inset: 0, display: "flex",
@@ -178,7 +329,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
           Export
         </h2>
         <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
-          {(["map", "layers"] as const).map((t) => (
+          {(["map", "layers", "atlas"] as const).map((t) => (
             <button key={t} onClick={() => setTab(t)}
               style={{
                 flex: 1, padding: "6px 0", borderRadius: 6, cursor: "pointer", fontSize: 12,
@@ -186,7 +337,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
                 background: tab === t ? "#16324a" : "#0d1219",
                 color: tab === t ? "#cfe2f6" : "#7090b0", fontWeight: tab === t ? 600 : 400,
               }}>
-              {t === "map" ? "Map (PNG)" : "Layers (raw)"}
+              {t === "map" ? "Map (PNG)" : t === "layers" ? "Layers (raw)" : "Atlas (PDF)"}
             </button>
           ))}
         </div>
@@ -251,7 +402,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
               </button>
             </div>
           </>
-        ) : (
+        ) : tab === "layers" ? (
           <>
             <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10 }}>
               Each selected layer is saved as <code>{base}_&lt;layer&gt;.png</code> at full
@@ -282,6 +433,46 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
               <button onClick={handleExportLayers} disabled={busy || (selected.size === 0 && !heightmap)}
                 style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
                 {busy ? "Exporting..." : "Choose Folder & Export"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
+              A multi-page PDF: one full-bleed page per selected plate (real
+              vector title/caption text, no font embedding needed) plus an
+              optional gazetteer listing settlements, provinces, rivers and
+              lakes. Each map page is a raw, uncompressed raster, so a
+              several-plate atlas can be a large file.
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={dialogLabel}>Plates</label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px", maxHeight: 160, overflowY: "auto" }}>
+                {MAP_THEMES.map((t) => (
+                  <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", padding: "2px 0" }}>
+                    <input type="checkbox" checked={atlasPlates.has(t.id)} onChange={() => toggleAtlasPlate(t.id)}
+                      style={{ accentColor: "#4a90d0" }} />
+                    {t.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #1a2535" }}>
+              <input type="checkbox" checked={atlasGazetteer} onChange={() => setAtlasGazetteer((v) => !v)}
+                style={{ accentColor: "#4a90d0" }} />
+              Gazetteer pages (settlements, provinces, rivers, lakes)
+            </label>
+            {atlasProgress && (
+              <div style={{ color: "#4a90d0", fontSize: 11, marginBottom: 10 }}>{atlasProgress}</div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={onClose} disabled={busy}
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+                Cancel
+              </button>
+              <button onClick={handleExportAtlas} disabled={busy || (atlasPlates.size === 0 && !atlasGazetteer)}
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+                {busy ? "Building..." : "Build Atlas PDF…"}
               </button>
             </div>
           </>
