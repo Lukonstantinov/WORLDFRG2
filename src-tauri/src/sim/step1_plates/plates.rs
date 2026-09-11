@@ -1543,6 +1543,95 @@ mod tests {
         }
     }
 
+    /// DIAGNOSTIC (not a gate): how often does the forced-enclave rescue fire,
+    /// and how big is what it stamps? The enclave is the only mechanism in this
+    /// file that can produce a plate whose outline is a (noise-perturbed) DISC
+    /// rather than a warped power-diagram cell — i.e. the "sometimes plates
+    /// create small circular ones" report. A rescued plate's area is bounded by
+    /// `pi * radius_max^2` with `radius_max = 0.02 * min(w, h)`, which is far
+    /// below anything the power diagram itself produces, so counting plates
+    /// under that bound measures the symptom directly.
+    #[test]
+    #[ignore]
+    fn diag_enclave_rescue_rate() {
+        for &(w, h) in &[(360u32, 180u32), (900, 450)] {
+            let radius_max = ((w.min(h)) as f32 * 0.02).max(3.0);
+            let enclave_area = (std::f32::consts::PI * radius_max * radius_max).ceil() as u32;
+            for &count in &[8u32, 16, 24, 32] {
+                let mut rescued_total = 0usize;
+                let mut worlds_hit = 0usize;
+                const SEEDS: u64 = 12;
+                for seed in 0..SEEDS {
+                    let buf = gen_world(w, h, seed, count);
+                    let mut cells = vec![0u32; count as usize];
+                    for &p in &buf.plate_index { cells[p as usize] += 1; }
+                    let rescued = cells.iter().filter(|&&c| c > 0 && c <= enclave_area).count();
+                    rescued_total += rescued;
+                    if rescued > 0 { worlds_hit += 1; }
+                }
+                println!(
+                    "{}x{} plates={:>2}: {}/{} worlds show a disc-sized plate, {:.2} per world (enclave <= {} cells)",
+                    w, h, count, worlds_hit, SEEDS,
+                    rescued_total as f32 / SEEDS as f32, enclave_area,
+                );
+            }
+        }
+    }
+
+    /// Companion to `diag_enclave_rescue_rate`: is a "disc-sized" plate really a
+    /// stamped enclave, or just a genuinely small power-diagram cell? Reports the
+    /// full size distribution plus a CIRCULARITY score (4*pi*area / perimeter^2;
+    /// 1.0 = perfect disc) for the small plates, so the claim rests on shape and
+    /// not only on area.
+    #[test]
+    #[ignore]
+    fn diag_plate_size_distribution() {
+        let (w, h) = (360u32, 180u32);
+        let radius_max = ((w.min(h)) as f32 * 0.02).max(3.0);
+        let enclave_area = (std::f32::consts::PI * radius_max * radius_max).ceil() as u32;
+        for &count in &[16u32, 32] {
+            let mut circ_small: Vec<f32> = Vec::new();
+            let mut circ_big: Vec<f32> = Vec::new();
+            for seed in 0..4u64 {
+                let buf = gen_world(w, h, seed, count);
+                let mut cells = vec![0u32; count as usize];
+                for &p in &buf.plate_index { cells[p as usize] += 1; }
+                // perimeter: 4-neighbour cells belonging to a different plate
+                let mut perim = vec![0u32; count as usize];
+                let wi = buf.width as i32;
+                let hi = buf.height as i32;
+                for y in 0..hi {
+                    for x in 0..wi {
+                        let me = buf.plate_index[buf.idx(x as u32, y as u32)];
+                        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
+                            let ny = y + dy;
+                            if ny < 0 || ny >= hi { perim[me as usize] += 1; continue; }
+                            let nx = buf.wrap_x(x + dx);
+                            if buf.plate_index[buf.idx(nx, ny as u32)] != me {
+                                perim[me as usize] += 1;
+                            }
+                        }
+                    }
+                }
+                let mut sorted: Vec<u32> = cells.clone();
+                sorted.sort_unstable();
+                if seed == 0 {
+                    println!("  {} plates, seed 0 sizes: {:?}", count, sorted);
+                }
+                for pi in 0..count as usize {
+                    if cells[pi] == 0 || perim[pi] == 0 { continue; }
+                    let c = 4.0 * std::f32::consts::PI * cells[pi] as f32
+                        / (perim[pi] as f32 * perim[pi] as f32);
+                    if cells[pi] <= enclave_area { circ_small.push(c); } else { circ_big.push(c); }
+                }
+            }
+            let mean = |v: &Vec<f32>| if v.is_empty() { f32::NAN } else { v.iter().sum::<f32>() / v.len() as f32 };
+            println!(
+                "{} plates: {} small (<= {} cells) circularity {:.3} | {} normal circularity {:.3}",
+                count, circ_small.len(), enclave_area, mean(&circ_small), circ_big.len(), mean(&circ_big));
+        }
+    }
+
     /// The plate inspector's click-to-flip rebuild must be deterministic per
     /// (seed, assignment) — the same "same seed, same result" discipline rule
     /// 10 asks of every other world-mutating entry point.
