@@ -277,7 +277,7 @@ fn reference_world() -> CampaignSim {
             delta: false,
             chokepoint: false,
             province: -1,
-            belt: vec![],
+            belt: vec![], river: false,
         });
     }
 
@@ -858,7 +858,7 @@ fn reference_world_large() -> CampaignSim {
             delta: false,
             chokepoint: false,
             province: -1,
-            belt: vec![],
+            belt: vec![], river: false,
         });
     }
 

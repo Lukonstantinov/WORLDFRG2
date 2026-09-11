@@ -1363,8 +1363,15 @@ fn recompute_colonizable(
     let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
     let world = db.cached_tiles_with_conn(conn)?;
     let province_raster = crate::commands::query_commands::read_province_raster(conn);
+    // D2 — same river-landmark test the initial Economy-step pool uses
+    // (`query_commands::economy::compute_economy`), so a mid-campaign
+    // recompute doesn't quietly regress every colony sited from it back to
+    // `river: false`.
+    let rivers_json = metadata::get_meta(conn, "rivers").ok().flatten().unwrap_or_default();
+    let rivers: Vec<crate::sim::rivers::River> =
+        serde_json::from_str(&rivers_json).unwrap_or_default();
     Ok(crate::commands::query_commands::compute_colonizable_sites(
-        &world, grid_w, grid_h, hub_xy, &base_value, province_raster.as_ref()))
+        &world, grid_w, grid_h, hub_xy, &base_value, province_raster.as_ref(), &rivers))
 }
 
 /// Recompute the NEAR-city satellite site pool from current tiles (≤500 km from a

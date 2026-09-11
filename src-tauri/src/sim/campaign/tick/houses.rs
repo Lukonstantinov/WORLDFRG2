@@ -560,7 +560,7 @@ impl CampaignSim {
     /// per-capita output rate. Shared by neighbour-estates and new-land colonies.
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn create_estate(&mut self, parent: i32, x: f32, y: f32, g0: usize, kind: u8,
-                     owner_house: i32, koppen: u8, coastal: bool, component: u32,
+                     owner_house: i32, koppen: u8, coastal: bool, river: bool, component: u32,
                      base_pop: f32, percap: f32) {
         let ng = self.goods.len();
         let est_pop = base_pop.max(1.0);
@@ -599,7 +599,7 @@ impl CampaignSim {
             id, x, y, name, population: est_pop, founding_pop: est_pop,
             stock: vec![0.0; ng * GRADE_BANDS], price: self.goods.iter().map(|g| g.base_value).collect(),
             production, grain_wealth: 0.0, trade_wealth: 0.0, food_balance: 1.0, starving: 0.0,
-            is_estate: true, parent, koppen, coastal, river: false, component,
+            is_estate: true, parent, koppen, coastal, river, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
@@ -797,9 +797,9 @@ impl CampaignSim {
         // The winner's effective capacity (its own rate, or the terroir-derived one for
         // a good the city didn't itself produce) sets the estate's output rate.
         let percap = eff_percap.max(0.05) * 1.5;
-        let (koppen, coastal, component) =
-            (self.hubs[parent].koppen, self.hubs[parent].coastal, self.hubs[parent].component);
-        self.create_estate(parent as i32, ex, ey, g0, kind, owner_house, koppen, coastal,
+        let (koppen, coastal, river, component) =
+            (self.hubs[parent].koppen, self.hubs[parent].coastal, self.hubs[parent].river, self.hubs[parent].component);
+        self.create_estate(parent as i32, ex, ey, g0, kind, owner_house, koppen, coastal, river,
             component, est_pop, percap);
     }
 
@@ -955,9 +955,9 @@ impl CampaignSim {
             let ey = self.hubs[target].y
                 + (hash01(self.seed, target as u64, tick as u64 ^ 0x77) - 0.5) * self.world_w * 0.02;
             let est_pop = self.hubs[target].founding_pop * 0.12;
-            let (koppen, coastal, component) =
-                (self.hubs[target].koppen, self.hubs[target].coastal, self.hubs[target].component);
-            self.create_estate(target as i32, ex, ey, g0, kind, hi as i32, koppen, coastal,
+            let (koppen, coastal, river, component) =
+                (self.hubs[target].koppen, self.hubs[target].coastal, self.hubs[target].river, self.hubs[target].component);
+            self.create_estate(target as i32, ex, ey, g0, kind, hi as i32, koppen, coastal, river,
                 component, est_pop, percap);
         }
     }
@@ -1033,9 +1033,9 @@ impl CampaignSim {
         let ex = self.hubs[h].x + (off - 0.5) * self.world_w * 0.02;
         let ey = self.hubs[h].y
             + (hash01(self.seed, h as u64, self.tick as u64 ^ 0x55) - 0.5) * self.world_w * 0.02;
-        let (koppen, coastal, component) =
-            (self.hubs[h].koppen, self.hubs[h].coastal, self.hubs[h].component);
-        self.create_estate(h as i32, ex, ey, g, 6, owner, koppen, coastal, component,
+        let (koppen, coastal, river, component) =
+            (self.hubs[h].koppen, self.hubs[h].coastal, self.hubs[h].river, self.hubs[h].component);
+        self.create_estate(h as i32, ex, ey, g, 6, owner, koppen, coastal, river, component,
             est_pop, MANUFACTORY_PERCAP);
         let (city, gn) = (self.hubs[h].name.clone(), self.goods[g].name.clone());
         let who = if owner >= 0 && self.houses[owner as usize].is_guild {
@@ -1347,7 +1347,7 @@ impl CampaignSim {
         let component = self.hubs[home].component;          // joins the home trade web
         self.houses[hi].wealth -= cost;
         // parent = −1 keeps the outpost at its REMOTE site coords (not co-located).
-        self.create_estate(-1, site.x, site.y, g0, kind, hi as i32, site.koppen, site.coastal,
+        self.create_estate(-1, site.x, site.y, g0, kind, hi as i32, site.koppen, site.coastal, site.river,
             component, est_pop, percap);
         let new = self.hubs.len() - 1;
         self.hubs[new].colony_kind = 2;

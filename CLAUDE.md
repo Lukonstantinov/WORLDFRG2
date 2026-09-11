@@ -5712,8 +5712,21 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     production-scale km/cell since the usual
                                     300-wide test world is too coarse for a
                                     25 km radius to mean anything (rule 21/25).
-                                    D2 remains unstarted — its own entry
-                                    records why a quick version isn't safe.
+                                    **D2's RIVER half now BUILT** (the
+                                    COMPONENT half remains deferred — its own
+                                    entry records why): `compute_colonizable_
+                                    sites` stamps each candidate site's real
+                                    `river` flag via the SAME landmark test
+                                    D3 uses (`sim::rivers::river_landmarks`,
+                                    factored out for this reuse), wired
+                                    through every founding path
+                                    (`create_estate`, `create_market_colony`,
+                                    the mid-campaign pool recompute) in place
+                                    of the hardcoded `river: false` every
+                                    campaign-founded hub previously shipped
+                                    with. `econ_` bit-identical (the change
+                                    only writes a field no economic pass
+                                    conditions on differently yet).
                                     **C4 BUILT** — `N1_LOCAL_HAUL_BIND_DAYS`
                                     dosed to 90 days, completing Stage C.
                                     Routes an over-threshold ownerless leg

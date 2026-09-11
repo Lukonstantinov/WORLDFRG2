@@ -42,7 +42,13 @@ pub fn compute_economy(
     let base_value: Vec<f32> = specs.iter().map(|s| s.base_value.max(0.0)).collect();
     let settle_xy: Vec<(f32, f32)> = settlements.iter().map(|s| (s.x as f32, s.y as f32)).collect();
     let province_raster = read_province_raster(&conn);
-    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settle_xy, &base_value, province_raster.as_ref());
+    // D2 — parsed once here, ahead of `cached_coarse_cost` below, purely for
+    // `compute_colonizable_sites`' own river-landmark test (see its doc
+    // comment); unrelated to the coarse cost grid `cached_coarse_cost` builds
+    // from the same raw `rivers_json` string further down.
+    let rivers: Vec<crate::sim::rivers::River> =
+        serde_json::from_str(&rivers_json).unwrap_or_default();
+    let colonizable_sites = compute_colonizable_sites(&world, grid_w, grid_h, &settle_xy, &base_value, province_raster.as_ref(), &rivers);
 
     let wrap_dx = |a: i32, b: i32| -> i32 {
         let mut d = (a - b).abs();

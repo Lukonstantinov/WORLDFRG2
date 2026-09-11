@@ -1871,9 +1871,26 @@ pub(crate) fn compute_colonizable_sites(
     settlements: &[(f32, f32)],
     base_value: &[f32],
     province_raster: Option<&(u32, u32, Vec<u32>)>,
+    rivers: &[crate::sim::rivers::River],
 ) -> Vec<crate::sim::tick::ColonizeSite> {
     use crate::sim::tick::ColonizeSite;
     if grid_w == 0 || grid_h == 0 { return vec![]; }
+    // D2 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`) — the SAME landmark test
+    // D3 flags a worldgen hub with, evaluated directly at each candidate
+    // site's own coordinates. No coarse grid of any kind is involved, which
+    // is what makes this safe to reuse here: D2's originally-diagnosed
+    // obstacle was reconciling `compute_colonizable_sites`' own coarse grid
+    // against `build_coarse_cost`'s DIFFERENTLY-SCALED `is_river` grid, and
+    // this mechanism never touches that grid at all.
+    let river_landmarks = crate::sim::rivers::river_landmarks(rivers);
+    let km_per_cell = KM_EQUATOR / grid_w.max(1) as f32;
+    let river_max_d2 = (crate::sim::rivers::RIVER_LANDMARK_RADIUS_KM / km_per_cell).powi(2);
+    let is_riverine = |wx: f32, wy: f32| -> bool {
+        river_landmarks.iter().any(|&(rx, ry)| {
+            let (dx, dy) = (wx - rx, wy - ry);
+            dx * dx + dy * dy <= river_max_d2
+        })
+    };
     // Province lookup (rw × rh raster over the same world grid) — a site's province
     // is a one-time snapshot at generation time, same "campaign never touches a tile
     // again" discipline the rest of the province layer follows. None (no layer yet /
@@ -1992,6 +2009,7 @@ pub(crate) fn compute_colonizable_sites(
                 fertility: fert[ci], coastal: cst, kind_hint, trade_value: tval[ci],
                 delta, chokepoint: choke, province: province_at(wx, wy),
                 belt: belt_field[ci * ng..(ci + 1) * ng].to_vec(),
+                river: is_riverine(wx, wy),
             }));
         }
     }
@@ -2077,6 +2095,7 @@ pub(crate) fn compute_satellite_sites(
                 fertility: fert, coastal, kind_hint, trade_value: tv.min(1.0),
                 delta: false, chokepoint: false, province: -1, // always near an existing city
                 belt: vec![], // satellite founding doesn't read it (F6 is about `create_market_colony`)
+                river: false, // D2 scoped to `compute_colonizable_sites`; satellite founding doesn't read it
             }));
         }
     }

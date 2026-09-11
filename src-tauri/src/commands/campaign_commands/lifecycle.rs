@@ -457,26 +457,13 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     // from "somewhere in the drainage basin" to `RIVER_LANDMARK_RADIUS_KM` —
     // stated in km and converted per world (rule 25), not a cell count — small
     // enough to mean "sits at this landmark", not "is in this region".
-    const RIVER_LANDMARK_RADIUS_KM: f32 = 25.0;
     let river_hubs: std::collections::HashSet<u32> = {
         let rivers_json = metadata::get_meta(&conn, "rivers").ok().flatten().unwrap_or_default();
         let rivers: Vec<crate::sim::rivers::River> =
             serde_json::from_str(&rivers_json).unwrap_or_default();
-        let mut landmarks: Vec<(f32, f32)> = Vec::new();
-        for r in &rivers {
-            if let Some(&(x, y)) = r.points.last() {
-                if r.mouth_kind != 0 || r.tributary {
-                    landmarks.push((x as f32, y as f32));
-                }
-            }
-            if r.navigable && !r.tributary {
-                if let Some(&(x, y)) = r.points.first() {
-                    landmarks.push((x as f32, y as f32));
-                }
-            }
-        }
+        let landmarks = crate::sim::rivers::river_landmarks(&rivers);
         let km_per_cell = 40075.0 / grid_w;
-        let max_d2 = (RIVER_LANDMARK_RADIUS_KM / km_per_cell).powi(2);
+        let max_d2 = (crate::sim::rivers::RIVER_LANDMARK_RADIUS_KM / km_per_cell).powi(2);
         if landmarks.is_empty() { std::collections::HashSet::new() } else {
             order.iter().filter(|&&hi| {
                 let eh = &econ.hubs[hi];

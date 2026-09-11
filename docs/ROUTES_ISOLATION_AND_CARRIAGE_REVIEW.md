@@ -742,6 +742,37 @@ unrelated matrilineal failure only); `econ_` 6/6, bit-identical.
 
 **D2 · Give a founded colony a real `river` flag and a real component**, from the
 site's own geography rather than `false` and the founder's id.
+**The RIVER half BUILT; the COMPONENT half still deliberately deferred.** The
+originally-diagnosed obstacle below (reconciling two differently-scaled coarse
+grids) turned out to be moot once D3 shipped its own landmark mechanism in the
+same session: `sim::rivers::river_landmarks` (factored out of D3's own
+`river_hubs` computation in `lifecycle.rs`, now shared) is a plain scan of
+worldgen's `River` points with no coarse grid involved at all, so evaluating it
+at a `ColonizeSite`'s own `(x, y)` needed no resampling — `compute_colonizable_
+sites` now takes the parsed `rivers` list (already available as
+`rivers_json` in `compute_economy`'s own signature) and stamps a real `river:
+bool` per candidate site via the SAME `RIVER_LANDMARK_RADIUS_KM` test D3 uses.
+Wired through every site source that reaches a founded hub: `create_estate`
+(shared by co-located estates/manufactories/yards, now reading the PARENT
+hub's own `river` field, and remote house outposts, now reading the site's
+own) and `create_market_colony`/settlement colonies (`colonies.rs`, now
+reading `site.river`); the mid-campaign colonizable-pool recompute
+(`campaign_commands/mod.rs::recompute_colonizable`) parses `rivers_json` the
+same way so a pool refill mid-campaign doesn't regress every subsequent
+colony back to `river: false`. `compute_satellite_sites` is left at
+`river: false` deliberately — D2 scoped to `compute_colonizable_sites`, and
+no satellite-founding code reads the field. Gated by `tick::tests` (217/217 —
+one pre-existing failure unrelated to this change, confirmed via `git stash`
+to fail identically on the pre-D2 commit) and `econ_` (bit-identical: the
+change only ever WRITES a `bool` no economic pass reads yet — `hub.river`'s
+two live readers, the river-freight discount and yard eligibility, both
+already worked correctly off a hub's own field; this just makes that field
+honest for a founded-during-campaign hub instead of hardcoded false).
+**The COMPONENT half remains unbuilt**, for the same reason recorded below:
+it is not a small fix, and attempting it without also wiring a real
+founder→site route (`compute_coarse_route`) risks silently stranding a colony
+from its founder's trade network — a real regression, not a diagnosis. Kept
+as explicit future work rather than attempted under time pressure.
 **Scoped, not built — two real obstacles found, recorded so the next attempt
 doesn't re-discover them.** (1) The RIVER half looks like a one-line fix
 (`ColonizeSite` has `coastal`/`delta`/`chokepoint` already computed from tile

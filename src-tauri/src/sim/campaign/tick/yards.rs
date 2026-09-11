@@ -58,9 +58,9 @@ impl CampaignSim {
         let ex = self.hubs[h].x + (off - 0.5) * self.world_w * 0.02;
         let ey = self.hubs[h].y
             + (hash01(self.seed, h as u64, self.tick as u64 ^ 0x7A2E) - 0.5) * self.world_w * 0.02;
-        let (koppen, coastal, component) =
-            (self.hubs[h].koppen, self.hubs[h].coastal, self.hubs[h].component);
-        self.create_estate(h as i32, ex, ey, g0, YARD_ESTATE_KIND, owner, koppen, coastal, component,
+        let (koppen, coastal, river, component) =
+            (self.hubs[h].koppen, self.hubs[h].coastal, self.hubs[h].river, self.hubs[h].component);
+        self.create_estate(h as i32, ex, ey, g0, YARD_ESTATE_KIND, owner, koppen, coastal, river, component,
             est_pop, 0.05);
         let city = self.hubs[h].name.clone();
         self.journal.push(JournalEntry {

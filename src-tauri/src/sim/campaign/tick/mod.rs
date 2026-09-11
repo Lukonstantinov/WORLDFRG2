@@ -203,8 +203,28 @@ const VICTUAL_PER_DAY: f32 = 0.001;
 /// `ORE_CEILING_DOSE`/`HOUSEHOLD_MONETIZATION_DOSE` already established. NOT
 /// yet dosed: that needs the same `econ_`-per-step walk those constants'
 /// doc comments describe, and C1b's own gate (long-haul trade VOLUME must not
-/// collapse; a low-bulk luxury lane must survive unchanged) — left as the
-/// explicit next step, not silently assumed done.
+/// collapse; a low-bulk luxury lane must survive unchanged).
+///
+/// **Dose walk attempted, and it found the fixture's limit, not a workable
+/// dose.** Set temporarily to 0.5 with `tests::dense_world`'s wheat `bulk`
+/// forced to 3.0 (silk left untouched, to isolate the penalty's own effect
+/// from a plain bulk change), 40-year run: `diag_volume` and every house's
+/// peak wealth came back bit-for-bit identical to the unpenalised run — and
+/// stayed bit-identical even forcing wheat's bulk to an absurd 50.0. The
+/// cause is visible at `good_freight`'s own call site (`production.rs`'s
+/// dispatch loop): at `dense_world`'s ~445 km inter-hub spacing,
+/// `freight_rate * days * bulk_mult` for wheat (`base_value` 1.0) already
+/// matches or exceeds wheat's own value at the reference `bulk` of 3.0 with
+/// NO penalty applied at all — land wheat trade in this fixture is already
+/// priced to (near-)zero at baseline, so a differential penalty on top has
+/// nothing left to bite. `dense_world` cannot discriminate this dose as
+/// built; a working gate needs either a higher-value bulky good or a fixture
+/// with shorter hub spacing, so land grain trade is viable at baseline and
+/// can be seen to shrink under the dose. NOT dosed as a result — per
+/// CLAUDE.md §2.4, tuning a constant with no gate that isn't the target is
+/// not a judgement call, and this is that case. Left as the explicit next
+/// step (build a fixture that can fail, then dose), not silently assumed
+/// done.
 pub(crate) const LAND_BULK_PENALTY: f32 = 0.0;
 /// A fixed per-voyage outfitting charge (crew wages up front, harbour dues,
 /// loading) independent of how much cargo the voyage carries — "so long hauls
@@ -271,6 +291,30 @@ const N1_LOCAL_HAUL_BIND_DAYS: f32 = 90.0;
 /// independently dosed from the house loss rates above (today `owner < 0`
 /// cargo never sinks at all: "the guard is literal", §1.1 of the plan). Shipped
 /// at 0.0, so the roll below never fires and the change is bit-identical.
+///
+/// **Dose walk attempted at even a token rate, and it surfaced a real
+/// feedback loop rather than a tunable collapse.** Set temporarily to 0.01
+/// (a fifth of `CARAVAN_LOSS`) and run against
+/// `n1_bind_stays_healthy_on_a_realistically_dense_world`'s own dense-world
+/// fixture: the UNCAPPED (`loose`) side's `diag_volume` did not fall, it rose
+/// **6.4×** — 781,472 to 4,991,590 over the same 40 years — and the capped
+/// (`dosed`) side fell from 1,926,713 to 720,253, failing the volume-collapse
+/// assertion from the wrong direction (dosed sank well below loose, not
+/// merely below its own floor). The mechanism: `dispatch`'s target-room
+/// calculation (`max_stock`/`room` in `production.rs`) reopens a buyer's
+/// deficit the moment stock there stays short, and ownerless cargo lost in
+/// transit never arrives to close that deficit — so a lost shipment does not
+/// reduce recorded trade, it invites MORE of it, repeatedly, into a market
+/// that can never fill. `diag_volume` counts dispatched cargo, not delivered
+/// value, so this reads as a volume EXPLOSION while representing pure waste
+/// (cargo destroyed and endlessly re-attempted), which is worse than a
+/// collapse would have been and not something a smaller dose alone fixes —
+/// the feedback is structural, present at any nonzero rate, just weaker.
+/// Dosing this properly needs the room/deficit calculation to account for
+/// cargo already lost this cycle (or an equivalent brake), which is real,
+/// separate work — not attempted here. NOT dosed as a result, per CLAUDE.md
+/// §2.4: a 6.4× swing on the very gate meant to catch a collapse is a
+/// structural finding, not a value to tune around.
 const N1B_OWNERLESS_LOSS_RATE: f32 = 0.0;
 /// A world's equatorial circumference in km — the same conversion every other
 /// module states locally per rule 25 (`localities.rs`, `deposits.rs`,
@@ -4669,6 +4713,15 @@ pub struct ColonizeSite {
     /// Empty on a save from before this slice (serde default), which is a true
     /// no-op: every reader falls back to the old founder-basket behaviour.
     #[serde(default)] pub belt: Vec<f32>,
+    /// D2 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`) — is this site within
+    /// D3's own `RIVER_LANDMARK_RADIUS_KM` of a real river landmark (mouth /
+    /// confluence / head of navigation), computed the SAME way D3 flags a
+    /// worldgen hub — `sim::rivers::river_landmarks` — rather than a distinct
+    /// mechanism. Read by colony/outpost founding in place of the hardcoded
+    /// `river: false` every such hub previously shipped with. `#[serde(default)]`
+    /// (false) on a snapshot computed before this field existed, which is a
+    /// true no-op: a colony founded from it reads exactly as it always did.
+    #[serde(default)] pub river: bool,
 }
 
 /// A worldgen settlement that ranked BELOW the live-hub cap, so it is NOT

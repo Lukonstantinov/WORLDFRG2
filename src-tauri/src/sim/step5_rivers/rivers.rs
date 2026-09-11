@@ -96,6 +96,39 @@ pub struct River {
     pub braids: Vec<Vec<(f32, f32)>>,
 }
 
+/// D3's landmark radius, in km (rule 25) — how close a point must sit to a
+/// river landmark (below) to count as riverine. Shared so D2's colonize-site
+/// flag and D3's worldgen-hub flag can never quietly diverge.
+pub const RIVER_LANDMARK_RADIUS_KM: f32 = 25.0;
+
+/// D3 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`)'s three river LANDMARKS —
+/// a great river MOUTH (`mouth_kind != 0`), a tributary's own CONFLUENCE
+/// point, and a navigable trunk's HEAD OF NAVIGATION — as world-cell
+/// coordinates. Factored out of `campaign_commands/lifecycle.rs`'s original
+/// `river_hubs` computation (D3) so D2 can reuse the exact same mechanism at
+/// `compute_colonizable_sites` time, rather than reaching for the unrelated,
+/// differently-scaled coarse river grid `build_coarse_cost` builds for
+/// routing cost — the two were never the same data and reconciling their
+/// resolutions was D2's own originally-diagnosed obstacle. This function has
+/// no coarse grid at all: it is a plain scan of worldgen's own `River`
+/// points, identical for both callers.
+pub fn river_landmarks(rivers: &[River]) -> Vec<(f32, f32)> {
+    let mut landmarks: Vec<(f32, f32)> = Vec::new();
+    for r in rivers {
+        if let Some(&(x, y)) = r.points.last() {
+            if r.mouth_kind != 0 || r.tributary {
+                landmarks.push((x as f32, y as f32));
+            }
+        }
+        if r.navigable && !r.tributary {
+            if let Some(&(x, y)) = r.points.first() {
+                landmarks.push((x as f32, y as f32));
+            }
+        }
+    }
+    landmarks
+}
+
 fn one_f32() -> f32 { 1.0 }
 
 /// Lake data
