@@ -198,6 +198,84 @@ export const MAP_THEMES: MapTheme[] = [
     linePreset: "High contrast",
     requires: 8,
   },
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 11(a) — the campaign half had the
+  // most to show and NO compositions of its own (§8.17's own gap, F12): of
+  // twelve plates, exactly one (Political, above) touched a single campaign
+  // overlay (`states`). `requires: 10` (Economy) is the closest a `MapTheme`
+  // can state to "a campaign is running" — the theme still degrades to a
+  // dimmed/empty read on a world with no campaign, the same as any other
+  // plate whose step hasn't run (see `themeReady`).
+  {
+    id: "powers",
+    name: "Powers",
+    glyph: "👑",
+    blurb: "Realms, their writ over the land, and who commands each city.",
+    layer: "land",
+    overlays: [
+      "provinces", "provinceBorders", "states", "houseControl",
+      "settlements", "hubNames",
+    ],
+    provinceOpacity: 0.5,
+    labelTheme: "Modern Cartographic",
+    requires: 10,
+  },
+  {
+    id: "commerce",
+    name: "Commerce",
+    glyph: "⚜",
+    blurb: "Live trade volume, corridors and who actually carries it.",
+    layer: "land",
+    overlays: [
+      "dynamicFlow", "tradeHeat", "campaignCorridors", "merchantRoutes",
+      "settlements",
+    ],
+    labelTheme: "Modern Cartographic",
+    requires: 10,
+  },
+  {
+    id: "crisis",
+    name: "Crisis",
+    glyph: "☠",
+    blurb: "Plague, migration and where people are fleeing from.",
+    layer: "land",
+    overlays: ["plagueZones", "migrations", "settlements", "settlementNames"],
+    linePreset: "High contrast",
+    requires: 10,
+  },
+  {
+    id: "colonial",
+    name: "Colonial",
+    glyph: "⛶",
+    blurb: "Outposts, colonies and the expeditions reaching for new ground.",
+    layer: "land",
+    overlays: ["colonies", "expeditions", "migrations", "settlements", "settlementNames"],
+    labelTheme: "Modern Cartographic",
+    requires: 10,
+  },
+  // The two world plates the original twelve were missing.
+  {
+    id: "basins",
+    name: "Hydrological Basins",
+    glyph: "⛰",
+    blurb: "Rivers and lakes over real relief — where the water actually runs from.",
+    layer: "elevation",
+    elevationStyle: "alpine",
+    overlays: ["rivers", "lakes", "riverBreaks"],
+    labelTheme: "Classic Atlas",
+    requires: 5,
+  },
+  {
+    id: "nautical",
+    name: "Nautical Chart",
+    glyph: "⚓",
+    blurb: "Bathymetry, reefs, storms and shipping lanes on a chart-style ground.",
+    layer: "elevation",
+    elevationStyle: "abyssal",
+    overlays: ["reefZones", "stormZones", "currents", "tradeRoutes"],
+    labelTheme: "Classic Atlas",
+    linePreset: "High contrast",
+    requires: 8,
+  },
 ];
 
 /** Every overlay any plate touches. Applying a plate sets each of these
