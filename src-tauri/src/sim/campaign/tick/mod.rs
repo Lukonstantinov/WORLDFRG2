@@ -185,6 +185,27 @@ const LOSS_REFERENCE_DAYS: f32 = 20.0;
 /// `freight_per_day` (0.018 shipped) since it is a flat add per unit-day,
 /// not a rate — see `good_freight`'s own doc comment.
 const VICTUAL_PER_DAY: f32 = 0.001;
+/// C1b (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) — the DIFFERENTIAL bulk
+/// penalty C1 deliberately left out: C1 fixed coastal sea's absolute SPEED
+/// (`COASTAL_SEA_COST`, `query_commands/mod.rs`) but the land/sea freight-cost
+/// gap it produces is still purely PROPORTIONAL — wheat (`bulk` 3.0) and silk
+/// (`bulk` 0.35) both pay the same multiple more on land than at sea, when
+/// historically road carriage was *disqualifying* for grain specifically and
+/// merely dearer for silk (a pack train over the Alps carrying silk was
+/// ordinary commerce; the same train carrying wheat was not — §2's own
+/// framing). `good_freight`'s land branch scales `bulk` further by
+/// `1.0 + LAND_BULK_PENALTY * (bulk - 1.0).max(0.0)` — a bulk AT OR BELOW 1.0
+/// (every priced good in the reference world except wheat) is untouched on
+/// either mode, so a low-bulk luxury lane cannot be penalised by this term at
+/// any dose; sea is never touched by it at all. `0.0` is the shipped setting
+/// — a TRUE no-op, proven by `c1b_land_bulk_penalty_is_a_noop_at_zero` —
+/// wired ahead of dosing it, exactly the pattern `CAPACITY_BIND_DOSE`/
+/// `ORE_CEILING_DOSE`/`HOUSEHOLD_MONETIZATION_DOSE` already established. NOT
+/// yet dosed: that needs the same `econ_`-per-step walk those constants'
+/// doc comments describe, and C1b's own gate (long-haul trade VOLUME must not
+/// collapse; a low-bulk luxury lane must survive unchanged) — left as the
+/// explicit next step, not silently assumed done.
+pub(crate) const LAND_BULK_PENALTY: f32 = 0.0;
 /// A fixed per-voyage outfitting charge (crew wages up front, harbour dues,
 /// loading) independent of how much cargo the voyage carries — "so long hauls
 /// need scale" (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3): a tiny shipment

@@ -15,7 +15,10 @@ on a real generated world (`real_world_price_distance_gradient`,
 `WORLD_AND_TRADE_MASTER_PLAN.md` §4's "UPDATE 2") to nearly DOUBLE the grain price/
 distance gradient on the SAME seed (r = 0.092 → 0.185, both positive, the historically
 correct sign) — a genuine, paired, attributable result on the metric this whole review
-exists to move. C1b–C4 and Stage D remain unstarted. It follows §2.4's rules: every
+exists to move. **C1b is also now wired**, at zero dose (`LAND_BULK_PENALTY`,
+`good_freight`'s new `sea` parameter) — a true no-op, proven by `cargo test --lib
+tick::tests`/`econ_` staying bit-identical, and NOT yet dosed (see its own status line
+under §9). C2–C4 and Stage D remain unstarted. It follows §2.4's rules: every
 proposal carries a **gate that is not its own target**, and the findings are written
 down whether or not anyone acts.
 
@@ -587,6 +590,23 @@ re-run for this dose — the finding above is why they cannot move.
 the part of the original C1 that survives, and it is a genuine addition rather
 than a recalibration. *Gate:* long-haul trade VOLUME must not collapse, and
 low-bulk luxury lanes must survive unchanged.
+**WIRED AT ZERO DOSE, NOT YET DOSED.** `good_freight` (`tick/production.rs`)
+gained a `sea: bool` parameter (every one of its 6 call sites already computed
+this `hubs[a].coastal && hubs[b].coastal` test nearby, for the display-only
+river/sea labelling C1's own §2 records — reused, not duplicated); a LAND leg's
+`bulk` term now scales by `1.0 + LAND_BULK_PENALTY * (bulk - 1.0).max(0.0)`,
+sea untouched, and a good at or below `bulk = 1.0` untouched on either mode at
+any dose — silk (`bulk` 0.35) can never be penalised by this term. `LAND_BULK_
+PENALTY = 0.0` ships as the TRUE no-op — the same wired-ahead-of-dosing pattern
+`CAPACITY_BIND_DOSE`/`ORE_CEILING_DOSE`/`HOUSEHOLD_MONETIZATION_DOSE` already
+established, not a new one — proven by `c1b_land_bulk_penalty_is_a_noop_at_zero`. Verified:
+`cargo check --lib --tests` clean; `tick::tests` 216/217 (the one failure is
+the pre-existing, unrelated matrilineal regression); `econ_` 6/6, all bit-
+identical to before this change (expected — the dose is 0.0, so every number
+in every gate is untouched by construction). **Dosing it is separate, unstarted
+work**: needs the same `econ_`-per-step walk `LAND_BULK_PENALTY`'s own doc
+comment describes, re-verified against this section's own gate each step —
+not silently assumed done just because the mechanism is wired.
 
 **C2 · Separate travel TIME from freight COST.** Right now one `days` is both, so
 the 1:4:8 cost ratio also claims a ship is 8× faster than a cart, which it is not

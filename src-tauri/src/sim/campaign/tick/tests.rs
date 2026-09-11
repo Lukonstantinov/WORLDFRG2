@@ -7039,6 +7039,28 @@
             "even a huge shipment must need zero extra slots at zero dose");
     }
 
+    /// C1b, dose-walked (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) · at
+    /// `LAND_BULK_PENALTY == 0.0` a LAND leg's freight for a bulky good must be
+    /// IDENTICAL to what the same good would cost over the same distance at SEA
+    /// — the mode argument to `good_freight` is a true no-op at the shipped
+    /// dose. Uses a good with `bulk > 1.0` (wheat, 3.0) specifically, since a
+    /// bulk-at-or-below-1.0 good is untouched by this term at ANY dose and so
+    /// would pass this assertion even with the penalty wired backwards.
+    #[test]
+    fn c1b_land_bulk_penalty_is_a_noop_at_zero() {
+        assert_eq!(LAND_BULK_PENALTY, 0.0);
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.goods[0].bulk = 3.0; // `good()` always seeds bulk 1.0; force a bulky fixture
+        assert!(s.goods[0].bulk > 1.0, "fixture must actually be bulky to exercise this term");
+        let land = s.good_freight(0, 0.02, 10.0, false);
+        let sea = s.good_freight(0, 0.02, 10.0, true);
+        assert!((land - sea).abs() < 1e-6,
+            "at zero dose a land leg must cost exactly what a sea leg would \
+             (land {land}, sea {sea})");
+    }
+
     /// The guild axis, dose-walked · at `GUILD_CHARTER_RANGE_DAYS ==
     /// INFINITY` no finite route length can ever exceed it, so a guild
     /// candidate in `house_for`'s dispatch is never skipped on distance.

@@ -547,10 +547,23 @@ impl CampaignSim {
     /// crew/animal subsistence, the same shape as the perishable term (a flat
     /// per-unit-day add, not a rate), so a long voyage costs non-linearly more
     /// than a short one on TOP of the existing linear freight rate.
+    /// C1b (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) — `sea` is the SAME
+    /// `hubs[a].coastal && hubs[b].coastal` test every caller already computes
+    /// for its own mode-labelling purposes; a LAND leg's bulk term is scaled
+    /// further by `LAND_BULK_PENALTY` (`0.0` shipped, see that constant's own
+    /// doc comment) so, once dosed, a bulky good pays more to move overland
+    /// than the same distance would cost a low-bulk good — the DIFFERENTIAL
+    /// penalty C1 alone cannot express (it can only move the absolute level of
+    /// one mode, never open a gap that varies BY GOOD).
     #[inline]
-    pub(crate) fn good_freight(&self, g: usize, rate: f32, days: f32) -> f32 {
+    pub(crate) fn good_freight(&self, g: usize, rate: f32, days: f32, sea: bool) -> f32 {
         let bulk = { let b = self.goods[g].bulk; if b <= 0.0 { 1.0 } else { b } };
-        rate * days * bulk + self.goods[g].perishable.max(0.0) * days + VICTUAL_PER_DAY * days
+        let bulk_mult = if sea || LAND_BULK_PENALTY <= 0.0 {
+            bulk
+        } else {
+            bulk * (1.0 + LAND_BULK_PENALTY * (bulk - 1.0).max(0.0))
+        };
+        rate * days * bulk_mult + self.goods[g].perishable.max(0.0) * days + VICTUAL_PER_DAY * days
     }
 
     /// TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — scale a REFERENCE loss
@@ -1245,9 +1258,13 @@ impl CampaignSim {
                     if !days.is_finite() {
                         continue;
                     }
+                    // C1b — computed once here and reused below (the ranking gap,
+                    // the delivered-cost-parity cap, and the display-only `sea`
+                    // label just past it all want the identical test).
+                    let sea = self.hubs[a].coastal && self.hubs[b].coastal;
                     let pb = self.live_price(stock_of(&self.hubs[b].stock, g), needs[b][g], base);
                     // A trusted reserve coin at the buyer `b` shaves freight (DLC 3.5).
-                    let freight = self.good_freight(g, freight_rate * coin_disc[b], days);
+                    let freight = self.good_freight(g, freight_rate * coin_disc[b], days, sea);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
                         // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 named this a double
@@ -1314,8 +1331,18 @@ impl CampaignSim {
                     if surplus <= EPS {
                         break;
                     }
+                    // Route mode: a sea voyage when both ends are coastal, else overland —
+                    // unless both ends are also river-connected, which is a DISPLAY-only
+                    // distinction (`river`, below): the capacity pool a leg draws from
+                    // stays the sea/land split alone (see the `cap_land` doc comment
+                    // above for why that split was tried and reverted), but which of
+                    // the two land-vessel kinds actually carried it is real data this
+                    // sim already has and was simply not writing out. Computed here
+                    // (moved up from just past the delivered-cost cap) so C1b's freight
+                    // call below reads the same mode label the capacity pool does.
+                    let sea = self.hubs[a].coastal && self.hubs[b].coastal;
                     // Don't overfill b past delivered-cost parity.
-                    let delivered = pa + self.good_freight(g, freight_rate, days);
+                    let delivered = pa + self.good_freight(g, freight_rate, days, sea);
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
                     let room = (max_stock - stock_of(&self.hubs[b].stock, g)).max(0.0);
@@ -1323,14 +1350,6 @@ impl CampaignSim {
                     if amount <= EPS {
                         continue;
                     }
-                    // Route mode: a sea voyage when both ends are coastal, else overland —
-                    // unless both ends are also river-connected, which is a DISPLAY-only
-                    // distinction (`river`, below): the capacity pool a leg draws from
-                    // stays the sea/land split alone (see the `cap_land` doc comment
-                    // above for why that split was tried and reverted), but which of
-                    // the two land-vessel kinds actually carried it is real data this
-                    // sim already has and was simply not writing out.
-                    let sea = self.hubs[a].coastal && self.hubs[b].coastal;
                     // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 6 — this lane's
                     // composed-route outlet (if any), read early so the bar check
                     // below can tell "barred from trading at a/b" (a hard block,
@@ -1854,6 +1873,9 @@ impl CampaignSim {
             * self.coin_discount(a);
         // An office at b gives the holder a standing −5% on what it buys there.
         let office_disc = if self.houses[owner].offices.contains(&(b as u32)) { OFFICE_BUY_DISCOUNT } else { 0.0 };
+        // C1b — `a`/`b` are fixed for the whole call, so this is computed once
+        // rather than per candidate good (moved up from just past the loop below).
+        let sea = self.hubs[b].coastal && self.hubs[a].coastal;
         // Pick b's surplus good that earns the most carried home to a.
         let mut best: Option<(usize, f32, f32, f32)> = None; // (good, amount, buy_price, sell_price)
         let mut best_score = 0.0f32;
@@ -1872,7 +1894,7 @@ impl CampaignSim {
             let discount = (if bargain { 0.25 } else { 0.0 } + office_disc).min(MAX_BUY_DISCOUNT);
             let pb_buy = pb * (1.0 - discount);
             let pa_sell = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
-            let freight = self.good_freight(g, freight_rate, days);
+            let freight = self.good_freight(g, freight_rate, days, sea);
             let gap = pa_sell - pb_buy - freight - self.margin * base;
             if gap <= 0.0 { continue; }
             // Don't overfill a past delivered-cost parity.
@@ -1888,8 +1910,7 @@ impl CampaignSim {
             }
         }
         let Some((g, amount, pb_buy, pa_sell)) = best else { return };
-        let freight = self.good_freight(g, freight_rate, days);
-        let sea = self.hubs[b].coastal && self.hubs[a].coastal;
+        let freight = self.good_freight(g, freight_rate, days, sea);
         let river = !sea && self.hubs[b].river && self.hubs[a].river;
         // Buy at b (goods leave b's stock), sell on arrival at a.
         stock_take(&mut self.hubs[b].stock, g, amount);

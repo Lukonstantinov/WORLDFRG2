@@ -5640,8 +5640,23 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     `COASTAL_SEA_COST` for why: that ratio is a
                                     citation of Masschaele's FREIGHT-cost figure, and
                                     the cost grid conflates freight cost with travel
-                                    SPEED through one shared conversion. C1b-C4 and
-                                    Stage D remain unstarted. Plus 7 open questions
+                                    SPEED through one shared conversion. **C1b also
+                                    WIRED, at zero dose** — `good_freight` (`tick/
+                                    production.rs`) gained a `sea: bool` param (every
+                                    call site already computed `hubs[a].coastal &&
+                                    hubs[b].coastal` nearby for display purposes,
+                                    reused not duplicated); a LAND leg's `bulk` term
+                                    scales by `1.0 + LAND_BULK_PENALTY * (bulk -
+                                    1.0).max(0.0)`, sea untouched, a good at or below
+                                    bulk 1.0 untouched on either mode at any dose.
+                                    `LAND_BULK_PENALTY = 0.0` ships as a true no-op —
+                                    the `CAPACITY_BIND_DOSE`/`ORE_CEILING_DOSE`
+                                    pattern — proven by `c1b_land_bulk_penalty_is_a_
+                                    noop_at_zero` plus `tick::tests` 216/217 (the one
+                                    failure pre-existing, unrelated) and `econ_` 6/6
+                                    bit-identical. Dosing it is separate, unstarted
+                                    work. C2-C4 and Stage D remain unstarted. Plus 7
+                                    open questions
                                     (§10, all answered — A→B→C order, isolated markets
                                     may starve, a ~3,000 km trade horizon, the
                                     inheritance gate goes multi-seed before Stage C,

@@ -250,7 +250,7 @@ impl CampaignSim {
                 c.strike_price * (1.0 - CONTRACT_PRICE_BAND),
                 c.strike_price * (1.0 + CONTRACT_PRICE_BAND));
             let value = delivered_qty * pt;
-            let freight = delivered_qty * self.good_freight(g, self.freight_per_day, days);
+            let freight = delivered_qty * self.good_freight(g, self.freight_per_day, days, sea);
             self.houses[seller].wealth += value - freight;
             // Toll-free network transit: when the cargo moves between the house's OWN
             // cities (its gates), it pays reduced civic tolls at both ends.

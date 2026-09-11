@@ -959,7 +959,10 @@ fn econ_fidelity_scorecard_large_world() {
         }
     }
     let freight_rate = s.freight_per_day; // no discount, matching F4's own headline calc
-    let longest_freight = s.good_freight(0, freight_rate, longest_days);
+    // `sea: false` — this figure is compared against Masschaele's OVERLAND target
+    // just below, and at the shipped `LAND_BULK_PENALTY = 0.0` the mode argument
+    // is a no-op either way (C1b, `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9).
+    let longest_freight = s.good_freight(0, freight_rate, longest_days, false);
     let freight_frac_of_value = longest_freight / wheat_base_value;
 
     let card = measure(&mut s);
