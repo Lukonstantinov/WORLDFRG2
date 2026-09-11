@@ -135,6 +135,19 @@ const OPACITY_CAPABLE = new Set([
   "goodFlow", "futures", "houseControl", "coinDominance", "plagueZones",
   "guildCities", "dynastyLinks", "tradeCorridors", "tradeBasins", "tradeHeat",
   "colonies", "settlementNames", "hubNames", "toponyms",
+  // Extended to every remaining overlay `OverlayManager.render` routes
+  // through `withOpacity`, once its draw code stopped being inlined
+  // directly in `render()` (rivers/lakes/settlements and friends). The two
+  // NOT covered — windBelts, itcz — share drawing helpers (`belt`/`ribbon`/
+  // `trace`) defined in their common parent block that close over the
+  // OUTER `ctx`, so wrapping just their own sub-block wouldn't actually
+  // redirect their drawing; left as a named, deliberate gap rather than
+  // wrapped incorrectly.
+  "lakes", "rivers", "currents", "wind", "plateMotion", "latLines",
+  "fisheryBanks", "cultures", "states", "sharkZones", "shipwormZones",
+  "stormZones", "monsoonZones", "reefZones", "tradeRoutes",
+  "politicalInfluence", "speculation", "figureMarks", "landmarks",
+  "chokepoints", "migrations", "settlements",
 ]);
 
 const overlayTypes = [
@@ -601,17 +614,32 @@ export function Toolbar() {
         <SectionHead title="Biological" open={openSection.Biological} onToggle={() => toggleSection("Biological")} />
         {openSection.Biological && (<>
         {bioOverlays.map((o) => (
-          <label key={o.id} style={checkboxRow}>
-            <input
-              type="checkbox"
-              checked={!!overlayVisibility[o.id]}
-              onChange={() => toggleOverlay(o.id)}
-              style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
-            />
-            <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
-              {o.label}
-            </span>
-          </label>
+          <div key={o.id}>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={!!overlayVisibility[o.id]}
+                onChange={() => toggleOverlay(o.id)}
+                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+              />
+              <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+                {o.label}
+              </span>
+            </label>
+            {overlayVisibility[o.id] && OPACITY_CAPABLE.has(o.id) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 3px 22px" }}>
+                <input
+                  type="range" min={0} max={100}
+                  value={Math.round((overlayOpacity[o.id] ?? 1) * 100)}
+                  onChange={(e) => setOverlayOpacity(o.id, Number(e.target.value) / 100)}
+                  style={{ ...rangeStyle, height: 3 }}
+                />
+                <span style={{ fontSize: 8.5, color: "#5a7390", minWidth: 24, textAlign: "right" }}>
+                  {Math.round((overlayOpacity[o.id] ?? 1) * 100)}%
+                </span>
+              </div>
+            )}
+          </div>
         ))}
         {/* Seasonal storm month: 0 = combined annual extent, 1..months scrubs
             the cyclone season (zones fade out in their calm months). */}

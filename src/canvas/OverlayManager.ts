@@ -2330,6 +2330,7 @@ export class OverlayManager {
     }
 
     if (this.visibility.lakes && this.lakes.length > 0) {
+      this.withOpacity(ctx, 'lakes', (ctx) => {
       const lhl = this.lakeHighlight;
       const hasLakeHL = lhl >= 0 && lhl < this.lakes.length;
       this.lakes.forEach((lake, li) => {
@@ -2390,9 +2391,11 @@ export class OverlayManager {
         }
       });
       ctx.globalAlpha = 1;
+    });
     }
 
     if (this.visibility.rivers && this.rivers.length > 0) {
+      this.withOpacity(ctx, 'rivers', (ctx) => {
       ctx.globalAlpha = 0.85;
       // Width and COLOUR shade track the river's discharge (set physically in
       // rivers.rs from precipitation × drainage area × climate): a small headwater
@@ -2517,23 +2520,33 @@ export class OverlayManager {
         ctx.restore();
       }
       ctx.globalAlpha = 1;
+    });
     }
 
     if (this.visibility.currents && this.currentLines.length > 0) {
+      this.withOpacity(ctx, 'currents', (ctx) => {
       for (const line of this.currentLines) {
         this.renderStreamline(ctx, line);
       }
+    });
     }
 
     if (this.visibility.wind && this.windData && this.windData.samples.length > 0) {
-      for (const v of this.windData.samples) {
+      // Narrowed to a local before the callback: TS control-flow narrowing on
+      // `this.windData` (a mutable property) doesn't carry into a closure.
+      const windData = this.windData;
+      this.withOpacity(ctx, 'wind', (ctx) => {
+      for (const v of windData.samples) {
         if (v.vx === 0 && v.vy === 0) continue;
         this.renderArrow(ctx, v.x, v.y, v.vx, v.vy, WIND_COLOR, 0.5);
       }
+    });
     }
 
     if (this.visibility.plateMotion && this.plateMotionData && this.plateMotionData.arrows.length > 0) {
-      const { arrows, gridW } = this.plateMotionData;
+      const plateMotionData = this.plateMotionData;
+      this.withOpacity(ctx, 'plateMotion', (ctx) => {
+      const { arrows, gridW } = plateMotionData;
       const maxSpeed = arrows.reduce((m, a) => Math.max(m, a.speed), 0);
       // Plate-scale arrows (§8.24 B2): far longer than a wind arrow — one per
       // plate, anchored at its centroid — since a wind arrow's 12-cell cap would
@@ -2547,10 +2560,13 @@ export class OverlayManager {
         const color = a.is_oceanic ? PLATE_MOTION_OCEANIC_COLOR : PLATE_MOTION_CONTINENTAL_COLOR;
         this.renderPlateArrow(ctx, a.x, a.y, a.vx, a.vy, len, color);
       }
+    });
     }
 
     if (this.visibility.latLines && this.latLinesData) {
-      const { gridW, gridH, equatorOffset, latScale, lineRatio } = this.latLinesData;
+      const latLinesData = this.latLinesData;
+      this.withOpacity(ctx, 'latLines', (ctx) => {
+      const { gridW, gridH, equatorOffset, latScale, lineRatio } = latLinesData;
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = LAT_LINE_COLOR;
       ctx.lineWidth = 0.5;
@@ -2587,6 +2603,7 @@ export class OverlayManager {
         ctx.fillText(label, 4, y + fontSize + 1);
       }
       ctx.globalAlpha = 1;
+    });
     }
 
     // ── Climate bands: circulation belts (subtropical high / polar front) and the
@@ -2721,6 +2738,7 @@ export class OverlayManager {
     // Fishery grand banks: large translucent teal discs over rich grounds.
     // Drawn before settlements/routes so dots and lines stay legible on top.
     if (this.visibility.fisheryBanks && this.fisheryBanks.length > 0) {
+      this.withOpacity(ctx, 'fisheryBanks', (ctx) => {
       for (const bank of this.fisheryBanks) {
         const alpha = 0.10 + 0.22 * Math.min(1, bank.score);
         ctx.beginPath();
@@ -2736,11 +2754,13 @@ export class OverlayManager {
         ctx.setLineDash([]);
       }
       ctx.globalAlpha = 1;
+    });
     }
 
     // Peoples / culture territories: each hearth's land tinted in its colour with
     // the people name at the centroid. Drawn first so belts/hazards sit on top.
     if (this.visibility.cultures && this.cultureRegions.length > 0) {
+      this.withOpacity(ctx, 'cultures', (ctx) => {
       for (const r of this.cultureRegions) {
         const [cr, cg, cb] = r.color;
         this.renderRegionMask(ctx, r.cells, r.cell_size, `rgb(${cr},${cg},${cb})`, "", r.x, r.y, 0.22);
@@ -2755,6 +2775,7 @@ export class OverlayManager {
       }
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
+    });
     }
 
     // States (§3.3): a tier 1-2 city's own writ, tinted distinctly from any house's
@@ -2762,6 +2783,7 @@ export class OverlayManager {
     // sphere. Drawn after peoples/before belts — a political claim over land the
     // way `cultureRegions` reads an ethnic one.
     if (this.visibility.states && this.stateRegions.length > 0) {
+      this.withOpacity(ctx, 'states', (ctx) => {
       if (this.statesDirty) this.buildStateRender();
       if (this.stateCanvas && this.provinceRaster) {
         // Exact fill: blit the province-raster-resolution tint (each pixel
@@ -2794,6 +2816,7 @@ export class OverlayManager {
       }
       ctx.textAlign = "start";
       ctx.textBaseline = "alphabetic";
+    });
     }
 
     // Trade-good belts. Slice 5 (D3/D9/D10): the FILL comes from each good's
@@ -2846,38 +2869,48 @@ export class OverlayManager {
 
     // Shark-infested water: the highest-risk habitat cells + a shark glyph.
     if (this.visibility.sharkZones && this.sharkZones.length > 0) {
+      this.withOpacity(ctx, 'sharkZones', (ctx) => {
       for (const z of this.sharkZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, SHARK_COLOR, "\u{1F988}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
       }
+    });
     }
 
     // Shipworm hull-hazard water: warm brackish coasts marked + a worm glyph.
     if (this.visibility.shipwormZones && this.shipwormZones.length > 0) {
+      this.withOpacity(ctx, 'shipwormZones', (ctx) => {
       for (const z of this.shipwormZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, SHIPWORM_COLOR, "\u{1FAB1}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
       }
+    });
     }
 
     // Storm/cyclone belts: open-ocean danger water marked + a cyclone glyph.
     if (this.visibility.stormZones && this.stormZones.length > 0) {
+      this.withOpacity(ctx, 'stormZones', (ctx) => {
       for (const z of this.stormZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, STORM_COLOR, "\u{1F300}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
       }
+    });
     }
 
     // Monsoon-climate land: the seasonal wet-season flood belt marked + a rain
     // glyph (a natural-disaster sibling of the cyclone zones, on land not sea).
     if (this.visibility.monsoonZones && this.monsoonZones.length > 0) {
+      this.withOpacity(ctx, 'monsoonZones', (ctx) => {
       for (const z of this.monsoonZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, MONSOON_COLOR, "\u{1F327}", z.x, z.y, 0.14 + 0.20 * Math.min(1, z.score));
       }
+    });
     }
 
     // Reef/shoal wreck hazards: warm shallow coastal water marked + a rock glyph.
     if (this.visibility.reefZones && this.reefZones.length > 0) {
+      this.withOpacity(ctx, 'reefZones', (ctx) => {
       for (const z of this.reefZones) {
         this.renderRegionMask(ctx, z.cells, z.cell_size, REEF_COLOR, "\u{1FAA8}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
       }
+    });
     }
 
     // Trade flows: bundled commodity trunks routed over the trade network
@@ -2896,9 +2929,11 @@ export class OverlayManager {
     }
 
     if (this.visibility.tradeRoutes && this.tradeRoutes.length > 0) {
+      this.withOpacity(ctx, 'tradeRoutes', (ctx) => {
       for (const route of this.tradeRoutes) {
         this.renderTradeRoute(ctx, route);
       }
+    });
     }
 
     // #23 · the chosen itinerary route — a bright magenta thread with endpoint
@@ -2965,6 +3000,7 @@ export class OverlayManager {
 
     // Political influence: translucent discs sized by trade power.
     if (this.visibility.politicalInfluence && this.politicalCenters.length > 0) {
+      this.withOpacity(ctx, 'politicalInfluence', (ctx) => {
       // Trade posts (outposts) shown on the trade-hub layer as small black dots,
       // a distinct class below the blue hubs / red emporia / golden capital.
       const dotR = Math.max(0.6, 1.3 / Math.sqrt(this.currentScale));
@@ -2976,12 +3012,15 @@ export class OverlayManager {
         ctx.fill();
       }
       for (const c of this.politicalCenters) this.renderPoliticalCenter(ctx, c);
+    });
     }
 
     // DLC 3 · speculation risk: translucent discs sized by bubble risk, coloured
     // green→amber→red by tier (rendered above the trade-hub markers).
     if (this.visibility.speculation && this.specCenters.length > 0) {
+      this.withOpacity(ctx, 'speculation', (ctx) => {
       for (const c of this.specCenters) this.renderSpecCenter(ctx, c);
+    });
     }
 
     // Merchant-family control: settlements a house dominates (>=50% of local
@@ -3015,11 +3054,15 @@ export class OverlayManager {
     }
     // Phase 6 · living notable figures.
     if (this.visibility.figureMarks && this.figureMarks.length > 0) {
+      this.withOpacity(ctx, 'figureMarks', (ctx) => {
       this.renderEmojiMarks(ctx, this.figureMarks, "#9070c0");
+    });
     }
     // Phase 6 · landmarks & sacred sites.
     if (this.visibility.landmarks && this.landmarkMarks.length > 0) {
+      this.withOpacity(ctx, 'landmarks', (ctx) => {
       this.renderEmojiMarks(ctx, this.landmarkMarks, "#40b090");
+    });
     }
     // Phase 7 · dynasty ties (alliances gold, feuds red) between seat cities.
     if (this.visibility.dynastyLinks && this.dynastyLinks.length > 0) {
@@ -3039,7 +3082,9 @@ export class OverlayManager {
 
     // Strategic chokepoints: high-volume trade gateways (straits / passes).
     if (this.visibility.chokepoints && this.chokepoints.length > 0) {
+      this.withOpacity(ctx, 'chokepoints', (ctx) => {
       for (const cp of this.chokepoints) this.renderChokepoint(ctx, cp);
+    });
     }
 
     // Selected supply-chain road (origin → hub stops → here) with per-hop price.
@@ -3069,11 +3114,14 @@ export class OverlayManager {
     // Atlas 2.0 · MIGRATION — route-bound flows (dots/ribbon/focus) when present,
     // else the legacy fading refugee-road arrows.
     if (this.visibility.migrations !== false) {
+      this.withOpacity(ctx, 'migrations', (ctx) => {
       if (this.migrationRoutes.length > 0) this.renderMigrationRoutes(ctx);
       else if (this.migrations.length > 0) this.renderMigrations(ctx);
+    });
     }
 
     if (this.visibility.settlements && this.settlements.length > 0) {
+      this.withOpacity(ctx, 'settlements', (ctx) => {
       for (const s of this.settlements) {
         // A DEAD (abandoned/collapsed) city is a † ruin: a dark cross on a faint
         // parchment halo, still on the map so the loss stays visible forever.
@@ -3202,6 +3250,7 @@ export class OverlayManager {
         }
         ctx.globalAlpha = 1;
       }
+    });
     }
 
     // #1/#23 · Culture-share overlay: for the isolated people, each settlement gets
