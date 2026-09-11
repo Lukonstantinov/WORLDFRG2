@@ -467,6 +467,32 @@ export function resolveLabelTheme(
   ) as Record<LabelKey, LabelStyle>;
 }
 
+/** GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — the SYMBOL-STYLE registry.
+ *  §8.11 already established the pattern for map LABELS (one registry, a
+ *  named theme, per-class override, edited in Settings); this does the same
+ *  for how a map FEATURE is drawn, module-level exactly like `labelStyles`/
+ *  `lineColors` above, so every `OverlayManager` instance and every draw call
+ *  reads the same live values without threading a prop through.
+ *
+ *  Two variants per category ship (today's default plus one real alternate),
+ *  not the plan's full menu — a representative, working slice of the
+ *  pattern rather than a token single-variant stand-in, with the remaining
+ *  variants (pictorial settlements, double-line navigable rivers, a
+ *  shore-banded lake, a hatched frontier band) left for a future pass. */
+export interface SymbolStyles {
+  settlement: "graduated" | "rankDot";
+  river: "discharge" | "constant";
+  lake: "filled" | "outlined";
+  border: "single" | "casing";
+}
+export const SYMBOL_STYLE_DEFAULTS: SymbolStyles = {
+  settlement: "graduated", river: "discharge", lake: "filled", border: "single",
+};
+export const symbolStyles: SymbolStyles = { ...SYMBOL_STYLE_DEFAULTS };
+export function setSymbolStyles(partial: Partial<SymbolStyles>) {
+  Object.assign(symbolStyles, partial);
+}
+
 export class OverlayManager {
   private rivers: RiverData[] = [];
   private lakes: LakeData[] = [];
@@ -2222,7 +2248,16 @@ export class OverlayManager {
       ctx.globalAlpha = 1;
     }
     // Borders — thin dark line between adjacent provinces (1 screen px at any zoom).
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — "casing" border style: a
+    // wider pale halo drawn first, under the normal line, the road-casing
+    // convention some atlases use to make a border read at a glance even
+    // over a busy fill — instead of the default single thin line.
     if (this.provinceBorderPath) {
+      if (symbolStyles.border === "casing") {
+        ctx.strokeStyle = "rgba(255,255,255,0.55)";
+        ctx.lineWidth = 3 / this.currentScale;
+        ctx.stroke(this.provinceBorderPath);
+      }
       ctx.strokeStyle = this.provinceBorderColor;
       ctx.lineWidth = 1 / this.currentScale;
       ctx.stroke(this.provinceBorderPath);
@@ -2337,9 +2372,29 @@ export class OverlayManager {
         const isSel = hasLakeHL && li === lhl;
         // Oxbow backwater · salt-lake brine tint · else open blue water. When a
         // lake is selected in the Hydrology panel, dim the others so it stands out.
-        ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
-        ctx.fillStyle = lakeFill(lake);
-        for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+        // GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — "outlined" lake style:
+        // a faint wash over the true footprint plus a solid stroke on its
+        // boundary cells (neighbour test against a per-lake cell set), the
+        // hollow-interior convention some atlases use for water bodies —
+        // instead of the default solid fill.
+        if (symbolStyles.lake === "outlined") {
+          const cellSet = new Set(lake.cells.map(([x, y]) => `${x},${y}`));
+          ctx.globalAlpha = (hasLakeHL ? (isSel ? 0.35 : 0.10) : 0.22);
+          ctx.fillStyle = lakeFill(lake);
+          for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+          ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
+          ctx.strokeStyle = lakeFill(lake);
+          ctx.lineWidth = Math.max(0.3, 0.6 / Math.sqrt(this.currentScale));
+          for (const [x, y] of lake.cells) {
+            const edge = !cellSet.has(`${x - 1},${y}`) || !cellSet.has(`${x + 1},${y}`)
+              || !cellSet.has(`${x},${y - 1}`) || !cellSet.has(`${x},${y + 1}`);
+            if (edge) ctx.strokeRect(x, y, 1, 1);
+          }
+        } else {
+          ctx.globalAlpha = hasLakeHL ? (isSel ? 1 : 0.28) : 1;
+          ctx.fillStyle = lakeFill(lake);
+          for (const [x, y] of lake.cells) ctx.fillRect(x, y, 1, 1);
+        }
         // ── A SMALL LAKE STILL HAS TO BE VISIBLE ─────────────────────────────
         // A lake is drawn at its true footprint, one cell per fillRect — so a
         // one-to-three-cell lake is at most a few pixels at world zoom, i.e.
@@ -2418,7 +2473,10 @@ export class OverlayManager {
         // trunk): a creek ≈ 0.55, a high-order trunk ≈ 1.3, zoom-compensated. Kept
         // deliberately thin — earlier bands still read as fat ribbons on close zoom.
         const ord = river.order ?? (river.major ? 4 : 1);
-        const baseW = 0.4 + Math.min(ord, 6) * 0.15;
+        // GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — "constant weight" river
+        // style: every channel the same width regardless of discharge, the
+        // plain alternative to the discharge-tapered default above.
+        const baseW = symbolStyles.river === "constant" ? 0.75 : 0.4 + Math.min(ord, 6) * 0.15;
         const riverW = Math.max(0.4, Math.min(1.5, baseW) * inv);
         ctx.globalAlpha = hasHL ? (isHL ? 0.95 : 0.22) : 0.85;
         ctx.strokeStyle = riverShade(river.major);
@@ -3143,6 +3201,36 @@ export class OverlayManager {
           ctx.moveTo(cx, cy - r * 1.15); ctx.lineTo(cx, cy + r);
           ctx.moveTo(cx - r * 0.75, cy - r * 0.45); ctx.lineTo(cx + r * 0.75, cy - r * 0.45);
           ctx.stroke();
+          continue;
+        }
+        // GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — the "rank-tiered dot"
+        // symbol style: a FIXED radius per tier (the classic topographic
+        // convention), never a continuous population curve. A simpler,
+        // genuinely different alternative to the graduated style below,
+        // which this branch skips entirely (including the hub-class marker,
+        // left off this style deliberately rather than duplicated).
+        if (symbolStyles.settlement === "rankDot") {
+          const cx = s.x + 0.5, cy = s.y + 0.5;
+          const pop = s.population;
+          const radius = s.size === "outpost" ? 0.5
+            : s.size === "village" ? 0.7
+            : pop >= 100_000 ? 1.6
+            : pop >= 20_000 ? 1.2
+            : 0.9;
+          ctx.globalAlpha = 0.95;
+          ctx.fillStyle = pop >= 20_000 ? "#ff8a3c" : s.size === "outpost" ? "#9aa7b4" : "#f0f0f0";
+          ctx.strokeStyle = "rgba(0,0,0,0.65)";
+          ctx.lineWidth = Math.max(0.25, radius * 0.16);
+          ctx.beginPath();
+          ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+          if (pop >= 100_000) {
+            ctx.fillStyle = "rgba(26,18,6,0.9)";
+            ctx.beginPath();
+            ctx.arc(cx, cy, radius * 0.34, 0, Math.PI * 2);
+            ctx.fill();
+          }
           continue;
         }
         // Dot scales continuously with population (log) on top of the tier base,

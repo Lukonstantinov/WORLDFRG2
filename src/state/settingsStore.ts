@@ -3,6 +3,7 @@ import {
   LINE_COLOR_DEFAULTS, type LineColorKey, setLineColors,
   LABEL_STYLE_DEFAULTS, LABEL_THEMES, type LabelKey, type LabelStyle,
   setLabelStyles, resolveLabelTheme,
+  SYMBOL_STYLE_DEFAULTS, type SymbolStyles, setSymbolStyles,
 } from "@canvas/OverlayManager";
 import { setAppearance } from "@bridge";
 
@@ -19,6 +20,13 @@ export type LabelOverride = Partial<Record<LabelKey, Partial<LabelStyle>>>;
 
 const LS_KEY = "wf2.appearance.lineColors";
 const LS_LABEL_KEY = "wf2.appearance.labelStyles";
+// GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — the symbol-style registry.
+// Persisted to localStorage only (a per-machine appearance preference, the
+// same tier `lineColors`/`labelStyles` start from) — NOT into the world/
+// campaign file's appearance envelope, which would need its own version
+// bump and round-trip plumbing; a deliberately smaller scope than the full
+// label-typography machinery this mirrors.
+const LS_SYMBOL_KEY = "wf2.appearance.symbolStyles";
 
 /** Label typography themes, re-exported so the panel can list them by name. */
 export const LABEL_THEME_NAMES = Object.keys(LABEL_THEMES);
@@ -63,6 +71,15 @@ function loadLocalLabels(): { over: LabelOverride; theme: ThemeName } {
 function saveLocalLabels(over: LabelOverride, theme: ThemeName) {
   try { localStorage.setItem(LS_LABEL_KEY, JSON.stringify({ over, theme })); } catch { /* ignore */ }
 }
+function loadLocalSymbols(): Partial<SymbolStyles> {
+  try {
+    const s = localStorage.getItem(LS_SYMBOL_KEY);
+    return s ? (JSON.parse(s) as Partial<SymbolStyles>) : {};
+  } catch { return {}; }
+}
+function saveLocalSymbols(s: SymbolStyles) {
+  try { localStorage.setItem(LS_SYMBOL_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+}
 
 /** Full label styles → the sparse override (only fields differing from defaults). */
 function labelsToOverride(s: LabelStyles): LabelOverride {
@@ -102,6 +119,8 @@ setLineColors(initial); // seed the renderer registry before first paint
 const initialLabelsLS = loadLocalLabels();
 const initialLabels = mergeLabels(initialLabelsLS.over);
 setLabelStyles(initialLabels);
+const initialSymbols: SymbolStyles = { ...SYMBOL_STYLE_DEFAULTS, ...loadLocalSymbols() };
+setSymbolStyles(initialSymbols);
 
 /** What we persist into the world/campaign file.
  *
@@ -130,7 +149,7 @@ export function readEnvelope(
   return { colors: raw as Partial<LineColors>, labels: {} };
 }
 
-interface SettingsState {
+export interface SettingsState {
   lineColors: LineColors;
   preset: ThemeName;
   setLineColor: (k: LineColorKey, hex: string) => void;
@@ -151,6 +170,11 @@ interface SettingsState {
   resetLabelStyle: (k: LabelKey) => void;
   applyLabelTheme: (name: string) => void;
   resetLabels: () => void;
+
+  // ── Map symbol styles (§ Slice 11(b)) ──
+  symbolStyles: SymbolStyles;
+  setSymbolStyle: <K extends keyof SymbolStyles>(k: K, v: SymbolStyles[K]) => void;
+  resetSymbolStyles: () => void;
 }
 
 /** Push a full appearance state into the renderer, localStorage and (unless we are
@@ -212,5 +236,19 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
     applyLabelTheme: (name) =>
       applyLabels(resolveLabelTheme(LABEL_THEMES[name] ?? {}), name),
     resetLabels: () => applyLabels(resolveLabelTheme({}), DEFAULT_LABEL_THEME),
+
+    // ── Map symbol styles ──
+    symbolStyles: initialSymbols,
+    setSymbolStyle: (k, v) => {
+      const next = { ...get().symbolStyles, [k]: v };
+      setSymbolStyles(next);
+      saveLocalSymbols(next);
+      set({ symbolStyles: next });
+    },
+    resetSymbolStyles: () => {
+      setSymbolStyles(SYMBOL_STYLE_DEFAULTS);
+      saveLocalSymbols(SYMBOL_STYLE_DEFAULTS);
+      set({ symbolStyles: { ...SYMBOL_STYLE_DEFAULTS } });
+    },
   };
 });

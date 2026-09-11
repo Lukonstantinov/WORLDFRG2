@@ -105,9 +105,10 @@ const inputStyle: React.CSSProperties = {
 
 export function SettingsPanel({ onClose }: { onClose: () => void }) {
   const { lineColors, preset, setLineColor, resetLineColor, resetAll, applyPreset,
-    labelStyles, labelTheme, setLabelStyle, resetLabelStyle, applyLabelTheme, resetLabels } =
+    labelStyles, labelTheme, setLabelStyle, resetLabelStyle, applyLabelTheme, resetLabels,
+    symbolStyles, setSymbolStyle, resetSymbolStyles } =
     useSettingsStore();
-  const [tab, setTab] = useState<"plates" | "lines" | "labels">("plates");
+  const [tab, setTab] = useState<"plates" | "lines" | "labels" | "symbols">("plates");
 
   return (
     <div style={{
@@ -132,7 +133,7 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
 
         {/* Section tabs */}
         <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-          {([["plates", "Map plates"], ["lines", "Overlay lines"], ["labels", "Map labels"]] as const).map(([id, lbl]) => (
+          {([["plates", "Map plates"], ["lines", "Overlay lines"], ["labels", "Map labels"], ["symbols", "Map symbols"]] as const).map(([id, lbl]) => (
             <button key={id} onClick={() => setTab(id)} style={{
               padding: "5px 12px", borderRadius: 7, fontSize: 12, cursor: "pointer",
               border: `1px solid ${tab === id ? "#2c5a86" : "#1e2e42"}`,
@@ -150,6 +151,8 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
             setLabelStyle={setLabelStyle} resetLabelStyle={resetLabelStyle}
             applyLabelTheme={applyLabelTheme} resetLabels={resetLabels}
           />
+        ) : tab === "symbols" ? (
+          <SymbolSection symbolStyles={symbolStyles} setSymbolStyle={setSymbolStyle} resetSymbolStyles={resetSymbolStyles} />
         ) : (
         <>
         {/* Theme presets */}
@@ -324,6 +327,98 @@ function LabelSection({
               </div>
             );
           })}
+        </div>
+      ))}
+    </>
+  );
+}
+
+// GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — the symbol-style registry's
+// Settings panel. §8.11's own pattern (one registry, edited here, applied
+// instantly) carried over to map SYMBOLS instead of type: four categories,
+// two variants each (today's default plus one real alternate) — a
+// representative slice of the plan's fuller menu rather than every listed
+// variant, left for a future pass.
+const SYMBOL_OPTIONS: {
+  key: "settlement" | "river" | "lake" | "border";
+  label: string;
+  choices: { value: string; label: string; blurb: string }[];
+}[] = [
+  {
+    key: "settlement", label: "Settlements",
+    choices: [
+      { value: "graduated", label: "Graduated circle", blurb: "Size tracks population continuously (today's default)." },
+      { value: "rankDot", label: "Rank-tiered dot", blurb: "A fixed size per tier — the classic topographic convention." },
+    ],
+  },
+  {
+    key: "river", label: "Rivers",
+    choices: [
+      { value: "discharge", label: "Discharge-tapered", blurb: "Width tracks the river's real discharge (today's default)." },
+      { value: "constant", label: "Constant weight", blurb: "Every channel drawn the same width." },
+    ],
+  },
+  {
+    key: "lake", label: "Lakes",
+    choices: [
+      { value: "filled", label: "Filled", blurb: "The true footprint, solid (today's default)." },
+      { value: "outlined", label: "Outlined", blurb: "A faint wash with a solid shoreline stroke — hollow interior." },
+    ],
+  },
+  {
+    key: "border", label: "Province borders",
+    choices: [
+      { value: "single", label: "Single line", blurb: "One thin dark line (today's default)." },
+      { value: "casing", label: "Casing", blurb: "A pale halo under the line, for a border that reads over a busy fill." },
+    ],
+  },
+];
+
+function SymbolSection({
+  symbolStyles, setSymbolStyle, resetSymbolStyles,
+}: {
+  symbolStyles: import("@state/settingsStore").SettingsState["symbolStyles"];
+  setSymbolStyle: <K extends "settlement" | "river" | "lake" | "border">(
+    k: K, v: import("@state/settingsStore").SettingsState["symbolStyles"][K],
+  ) => void;
+  resetSymbolStyles: () => void;
+}) {
+  return (
+    <>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+        <div style={{ color: muted, fontSize: 11, lineHeight: 1.5, flex: 1 }}>
+          How a feature is DRAWN, not its colour — a settlement's marker
+          shape, a river's weight rule, a lake's fill, a border's line.
+        </div>
+        <button onClick={resetSymbolStyles}
+          style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid #1e2e42", background: "#0d1219", color: "#9fb6cc", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+          Reset symbols
+        </button>
+      </div>
+      {SYMBOL_OPTIONS.map((cat) => (
+        <div key={cat.key} style={{ marginBottom: 16 }}>
+          <div style={{ fontSize: 10.5, textTransform: "uppercase", letterSpacing: 1, color: muted, marginBottom: 6 }}>{cat.label}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            {cat.choices.map((c) => {
+              const active = symbolStyles[cat.key] === c.value;
+              return (
+                <label key={c.value} style={{
+                  display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 8px",
+                  borderRadius: 7, cursor: "pointer",
+                  border: `1px solid ${active ? "#2c5a86" : "#1e2e42"}`,
+                  background: active ? "#16293c" : "transparent",
+                }}>
+                  <input type="radio" name={`symbol-${cat.key}`} checked={active}
+                    onChange={() => setSymbolStyle(cat.key, c.value as never)}
+                    style={{ marginTop: 3 }} />
+                  <div>
+                    <div style={{ fontSize: 12.5, color: active ? "#cfe2f6" : "#a0b8d0" }}>{c.label}</div>
+                    <div style={{ fontSize: 10.5, color: muted, lineHeight: 1.4 }}>{c.blurb}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
         </div>
       ))}
     </>
