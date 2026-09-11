@@ -72,6 +72,15 @@ export async function setPlanetConfig(cfg: PlanetConfig): Promise<PlanetConfig> 
   }));
 }
 
+// GENERATION_UX_REDESIGN_PLAN.md Slice 5 — set the landmass axes ahead of a
+// Generate press (a world preset), without regenerating anything itself.
+export async function setLandmassAxes(oceanFraction?: number, continentGoal?: number): Promise<void> {
+  return invoke("set_landmass_axes", {
+    oceanFraction: oceanFraction ?? null,
+    continentGoal: continentGoal ?? null,
+  });
+}
+
 /** How many cultures the world starts with (0 = auto by land area). */
 export async function setCultureCount(count: number): Promise<void> {
   return invoke("set_culture_count", { count });

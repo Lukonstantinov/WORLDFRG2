@@ -29,6 +29,7 @@ pub fn run() {
             world_commands::get_planet_config,
             world_commands::set_planet_config,
             world_commands::set_culture_count,
+            world_commands::set_landmass_axes,
             world_commands::get_culture_count,
             tile_commands::get_tiles,
             tile_commands::get_tiles_packed,

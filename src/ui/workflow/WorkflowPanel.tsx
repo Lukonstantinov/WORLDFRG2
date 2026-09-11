@@ -3,9 +3,11 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
 import { simRunAll, simRunAllFromTerrain, finalizeWorld, saveWorldAs, persistOverlays, getWorldMeta, getProvinceLayer,
-  computePolitical, computeEconomy, computeSettlementDevelopment } from "@bridge";
+  computePolitical, computeEconomy, computeSettlementDevelopment,
+  getPlanetConfig, setPlanetConfig, setLatitudeConfig, setLandmassAxes } from "@bridge";
 import type { Settlement, RiverData } from "@types";
 import { genBtn } from "@ui/workflow/workflowStyles";
+import { WORLD_PRESETS, worldPresetPlanetKnobs, type WorldPreset } from "@ui/workflow/worldPresets";
 import { StepLandmass } from "@ui/workflow/StepLandmass";
 import { StepElevation } from "@ui/workflow/StepElevation";
 import { StepOceanAtmo } from "@ui/workflow/StepOceanAtmo";
@@ -60,6 +62,7 @@ export function WorkflowPanel() {
   const setLandmassSource = useUIStore((s) => s.setLandmassSource);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const terrainParams = useUIStore((s) => s.terrainParams);
+  const setTerrainParams = useUIStore((s) => s.setTerrainParams);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
   const { setRivers, setLakes, setSettlements, setEconomy, setSettlementsDeveloped, setMeta, setProvinces } = useWorldStore();
   const meta = useWorldStore((s) => s.meta);
@@ -67,6 +70,66 @@ export function WorkflowPanel() {
   const bioParams = useUIStore((s) => s.bioParams);
   const [seed, setSeed] = useState(() => Math.floor(Math.random() * 999999));
   const [plateCount, setPlateCount] = useState(16);
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 5 — world presets. `selectedPreset`
+  // is display-only (which chip reads highlighted); applying a preset writes
+  // straight into the SAME state Generate already reads (terrainParams,
+  // metadata via setLandmassAxes/setPlanetConfig), so it composes with every
+  // control below rather than being a separate code path.
+  const [selectedPreset, setSelectedPreset] = useState<string | null>(null);
+  const [presetBusy, setPresetBusy] = useState(false);
+
+  const applyWorldPreset = async (p: WorldPreset) => {
+    setPresetBusy(true);
+    try {
+      setSelectedPreset(p.id);
+      // Landmass axes + elevation model/sliders — only the fields the preset
+      // actually names, per rule: a preset only sets the axes it is about.
+      await setLandmassAxes(p.oceanFraction, p.continentGoal);
+      // A preset's ocean fraction/continent goal only take effect on a
+      // from-plates generation — force the "regenerate the landmass too"
+      // checkbox on so the preset the user just picked actually applies,
+      // rather than silently being ignored by "Complete from Landmass".
+      if ((p.oceanFraction !== undefined || p.continentGoal !== undefined) && landmassExists) {
+        setRegenerateLandmassToo(true);
+      }
+      const terrainPatch: Partial<typeof terrainParams> = {};
+      if (p.elevMode !== undefined) terrainPatch.mode = p.elevMode;
+      if (p.elevDensity !== undefined) terrainPatch.density = p.elevDensity;
+      if (p.elevHeight !== undefined) terrainPatch.height = p.elevHeight;
+      if (p.elevSpread !== undefined) terrainPatch.spread = p.elevSpread;
+      if (p.elevRoughness !== undefined) terrainPatch.roughness = p.elevRoughness;
+      if (Object.keys(terrainPatch).length > 0) setTerrainParams(terrainPatch);
+
+      // Planetary knobs — reuses the exact ARCHETYPES span + archetypeAt
+      // interpolation StepWorldCharacteristics already applies by hand.
+      const knobs = worldPresetPlanetKnobs(p);
+      if (knobs) {
+        const current = await getPlanetConfig();
+        const next = {
+          ...current,
+          rotationRate: knobs.rotationRate ?? current.rotationRate,
+          solarLum: knobs.solarLum ?? current.solarLum,
+          greenhouse: knobs.greenhouse ?? current.greenhouse,
+          eccentricity: knobs.eccentricity ?? current.eccentricity,
+          dryness: knobs.dryness ?? current.dryness,
+        };
+        await setPlanetConfig(next);
+        if (knobs.obliquity !== undefined || knobs.equatorOffset !== undefined || knobs.latScale !== undefined) {
+          const lc = useWorldStore.getState().latConfig;
+          const eq = knobs.equatorOffset ?? lc.equatorOffset;
+          const sc = knobs.latScale ?? lc.latScale;
+          const tilt = knobs.obliquity ?? (meta?.obliquity ?? 23.44);
+          useWorldStore.getState().setLatConfig(eq, sc, lc.lineRatio);
+          const m = await setLatitudeConfig(eq, sc, lc.lineRatio, tilt);
+          setMeta(m);
+        }
+      }
+      setStatus(`Preset "${p.label}" applied — press Generate World.`);
+    } catch (err) {
+      setStatus(`Error applying preset: ${err}`);
+    }
+    setPresetBusy(false);
+  };
 
   const frozen = meta?.frozen === true;
   const canAdvance = (step: number) => stepCompleted[step] === true;
@@ -271,6 +334,34 @@ export function WorkflowPanel() {
       <div style={{ color: "#3a80c0", fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
         World Generation
       </div>
+
+      {/* GENERATION_UX_REDESIGN_PLAN.md Slice 5 — world presets: pick one,
+          press Generate World below, get a whole world. */}
+      <div style={{ opacity: frozen ? 0.5 : 1, pointerEvents: frozen ? "none" : undefined }}>
+        <div style={{ color: "#8098b0", fontSize: 10.5, marginBottom: 3 }}>Presets</div>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
+          {WORLD_PRESETS.map((p) => (
+            <button key={p.id} onClick={() => applyWorldPreset(p)} disabled={presetBusy}
+              title={p.blurb}
+              style={{
+                fontSize: 9.5, padding: "3px 2px", borderRadius: 4, cursor: presetBusy ? "wait" : "pointer",
+                textAlign: "center", lineHeight: 1.25,
+                border: `1px solid ${selectedPreset === p.id ? "#4a90d0" : "#26374d"}`,
+                background: selectedPreset === p.id ? "#16324a" : "#131c28",
+                color: selectedPreset === p.id ? "#cfe2f6" : "#8098b0",
+              }}>
+              {p.icon} {p.label}
+            </button>
+          ))}
+        </div>
+        {selectedPreset && (
+          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 4, lineHeight: 1.35 }}>
+            {WORLD_PRESETS.find((p) => p.id === selectedPreset)?.expect}
+          </div>
+        )}
+      </div>
+
+      <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
 
       {/* Seed & Plates */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>

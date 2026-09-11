@@ -129,6 +129,25 @@ pub fn get_culture_count(db: State<'_, WorldDb>) -> Result<u32, String> {
         .and_then(|s| s.parse::<u32>().ok()).unwrap_or(0))
 }
 
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 5 (world presets) — set the two
+/// landmass axes (§ Slice 2, F2/F3) WITHOUT regenerating anything, exactly the
+/// `set_culture_count` pattern: a preset picks a whole world's settings before
+/// a single Generate press, so it must be able to persist these ahead of
+/// `sim_generate_plates`/`sim_run_all` rather than only as their own args.
+#[tauri::command]
+pub fn set_landmass_axes(ocean_fraction: Option<f32>, continent_goal: Option<i32>, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    match ocean_fraction {
+        Some(f) => { metadata::set_meta(&conn, "ocean_fraction", &f.to_string()).map_err(|e| e.to_string())?; }
+        None => { metadata::set_meta(&conn, "ocean_fraction", "").map_err(|e| e.to_string())?; }
+    }
+    match continent_goal {
+        Some(g) => { metadata::set_meta(&conn, "continent_goal", &g.to_string()).map_err(|e| e.to_string())?; }
+        None => { metadata::set_meta(&conn, "continent_goal", "").map_err(|e| e.to_string())?; }
+    }
+    Ok(())
+}
+
 /// Update the latitude framing (equator position + expansion). Persisted to
 /// metadata so the next run of any simulation phase generates against the new
 /// latitudes. Values are clamped to sane ranges.
