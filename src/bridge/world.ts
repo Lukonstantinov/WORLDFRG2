@@ -618,6 +618,13 @@ export async function exportLayers(
   return invoke("export_layers", { dir, baseName, layers });
 }
 
+// GENERATION_UX_REDESIGN_PLAN.md Slice 8 (F5/F6/F7/F10) — write a PNG the
+// frontend already composited (base layer + overlays, at the live opacity
+// and layer the map is actually showing) straight to disk.
+export async function writeExportImage(path: string, base64Png: string): Promise<void> {
+  return invoke("write_export_image", { path, base64Png });
+}
+
 // ── World/campaign split ──
 
 /** Freeze the world's geography; campaign steps unlock. */

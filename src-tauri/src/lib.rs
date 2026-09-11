@@ -225,6 +225,7 @@ pub fn run() {
             file_commands::open_world,
             file_commands::export_heightmap,
             file_commands::export_layers,
+            file_commands::write_export_image,
         ])
         .setup(|app| {
             // Capture panic location + message to a file. The crash-guard in

@@ -50,7 +50,11 @@ const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
  *  `ridges` is listed here for the first time — it has always existed in
  *  `ActiveLayer` and in `render_tile` (`render_ridges`), but belonged to no group,
  *  so it was unreachable from the UI. */
-const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[] }[] = [
+// GENERATION_UX_REDESIGN_PLAN.md Slice 8 (F6) — exported so the Export
+// dialog's raw-layer list can be DERIVED from this, the canonical layer list
+// the app actually renders from, rather than a second hand-copied table that
+// drifts (F6 measured EXPORTABLE_LAYERS at 15 entries against this list's 26).
+export const layerGroups: { group: string; layers: { id: ActiveLayer; label: string }[] }[] = [
   {
     group: "Terrain",
     layers: [

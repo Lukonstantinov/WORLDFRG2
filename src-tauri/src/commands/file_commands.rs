@@ -283,6 +283,23 @@ pub fn export_layers(
     Ok(written)
 }
 
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 8 (F5/F6/F7/F10) — write a PNG the
+/// FRONTEND already composited (base layer + overlays, drawn through the same
+/// tile cache and `OverlayManager.render(ctx)` the screen uses, at the map's
+/// own current opacity — no code duplicated from `export_layers` above, which
+/// is a pure Rust tile stitcher with no opinion about rivers, cities, borders,
+/// names, or per-layer opacity, exactly what F7 named as the problem). This is
+/// the ONLY Rust-side piece of the new export path: a generic bytes-to-disk
+/// write, since the frontend has no direct filesystem access in this app.
+#[tauri::command]
+pub fn write_export_image(path: String, base64_png: String) -> Result<(), String> {
+    use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
+    // Accept either a bare base64 string or a full `data:image/png;base64,...` URI.
+    let data = base64_png.split(',').next_back().unwrap_or(&base64_png);
+    let bytes = BASE64.decode(data).map_err(|e| format!("Bad image data: {e}"))?;
+    std::fs::write(&path, bytes).map_err(|e| format!("Failed to write {path}: {e}"))
+}
+
 fn sanitize(s: &str) -> String {
     s.chars()
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })

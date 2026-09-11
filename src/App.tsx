@@ -54,35 +54,40 @@ import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
 import { useViewportStore } from "@state/viewportStore";
 import { useGoodsStore } from "@state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, writeExportImage, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
 import { useSettingsStore } from "@state/settingsStore";
+import { getApp } from "@canvas/PixiApp";
+import { MAP_THEMES, applyMapTheme } from "@ui/world/mapThemes";
+import { layerGroups } from "@ui/world/Toolbar";
 
-const EXPORTABLE_LAYERS: { id: string; label: string }[] = [
-  { id: "land", label: "Land / Sea" },
-  { id: "elevation", label: "Elevation" },
-  { id: "terrain", label: "Hillshade" },
-  { id: "climate", label: "Climate" },
-  { id: "biomes", label: "Biomes" },
-  { id: "temperature", label: "Temperature" },
-  { id: "precipitation", label: "Precipitation" },
-  { id: "soil", label: "Soil" },
-  { id: "fertility", label: "Fertility" },
-  { id: "fisheries", label: "Fisheries" },
-  { id: "habitability", label: "Habitability" },
-  { id: "currents", label: "Currents" },
-  { id: "wind", label: "Wind" },
-  { id: "shelf", label: "Shelf" },
-  { id: "plates", label: "Plates" },
-];
+// GENERATION_UX_REDESIGN_PLAN.md Slice 8 (F6) — DERIVED from `layerGroups`,
+// the canonical list `Toolbar.tsx` renders from, instead of a second
+// hand-copied table (the old list drifted to 15 of the real 26 layers).
+const EXPORTABLE_LAYERS: { id: string; label: string }[] =
+  layerGroups.flatMap((g) => g.layers);
 
+// GENERATION_UX_REDESIGN_PLAN.md Slice 8 (F5/F6/F7/F10) — the export is now a
+// COMPOSITION, not a layer dump. "Map (PNG)" captures the live on-screen
+// canvas — base layer through the same tile path the screen uses (fixing F5's
+// seams by construction, since there is no second render path to drift from
+// it) PLUS every visible overlay (rivers/cities/borders/names — F7, which the
+// old Rust-side tile stitcher could never see) at whatever opacity is
+// currently set (Slice 10, inherited for free). Available in BOTH modes
+// (F10) since it just reads whatever `getApp()` is showing, Forge or
+// Chronicle alike. The MAP PLATE picker lets you apply one of the named
+// compositions (§8.17) before capturing, rather than assembling one by hand.
+// "Layers (raw)" below is the OLD path, kept for raw single-layer data
+// export (a heightmap-adjacent use case a composited screenshot can't serve).
 function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) {
   const setStatus = useUIStore((s) => s.setStatus);
+  const [tab, setTab] = useState<"map" | "layers">("map");
   const [selected, setSelected] = useState<Set<string>>(
     new Set(["elevation", "climate", "biomes"])
   );
   const [heightmap, setHeightmap] = useState(true);
   const [busy, setBusy] = useState(false);
   const base = name || "world";
+  const activeMapTheme = useUIStore((s) => s.activeMapTheme);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -91,7 +96,34 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
       return next;
     });
 
-  const handleExport = async () => {
+  const handleExportMap = async () => {
+    const canvas = getApp()?.canvas;
+    if (!canvas) { alert("Map canvas not ready."); return; }
+    setBusy(true);
+    try {
+      const dataUrl = canvas.toDataURL("image/png");
+      let path: string | null = null;
+      const def = `${base}_map.png`;
+      try {
+        const { save } = await import("@tauri-apps/plugin-dialog");
+        const result = await save({ filters: [{ name: "PNG Image", extensions: ["png"] }], defaultPath: def });
+        if (result) path = result;
+      } catch {
+        const input = prompt("Save the map PNG to path:", def);
+        if (input) path = input;
+      }
+      if (!path) { setBusy(false); return; }
+      await writeExportImage(path, dataUrl);
+      setStatus(`Map exported to ${path}`);
+      onClose();
+    } catch (err) {
+      console.error("Map export failed:", err);
+      alert("Map export failed: " + err);
+    }
+    setBusy(false);
+  };
+
+  const handleExportLayers = async () => {
     setBusy(true);
     try {
       let dir: string | null = null;
@@ -133,42 +165,100 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
     }}>
       <div style={{
         background: "#111820", border: "1px solid #1e2e42", borderRadius: 10,
-        padding: "24px 28px", minWidth: 360, maxHeight: "80%", overflowY: "auto",
+        padding: "24px 28px", minWidth: 380, maxHeight: "80%", overflowY: "auto",
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
       }}>
-        <h2 style={{ margin: "0 0 16px", color: "#c0d8f0", fontSize: 17, fontWeight: 600 }}>
-          Export Layers
+        <h2 style={{ margin: "0 0 12px", color: "#c0d8f0", fontSize: 17, fontWeight: 600 }}>
+          Export
         </h2>
-        <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10 }}>
-          Each selected layer is saved as <code>{base}_&lt;layer&gt;.png</code> at full resolution.
-        </div>
-
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px", marginBottom: 14 }}>
-          {EXPORTABLE_LAYERS.map((l) => (
-            <label key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", padding: "2px 0" }}>
-              <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l.id)}
-                style={{ accentColor: "#4a90d0" }} />
-              {l.label}
-            </label>
+        <div style={{ display: "flex", gap: 4, marginBottom: 14 }}>
+          {(["map", "layers"] as const).map((t) => (
+            <button key={t} onClick={() => setTab(t)}
+              style={{
+                flex: 1, padding: "6px 0", borderRadius: 6, cursor: "pointer", fontSize: 12,
+                border: `1px solid ${tab === t ? "#4a90d0" : "#1e2e42"}`,
+                background: tab === t ? "#16324a" : "#0d1219",
+                color: tab === t ? "#cfe2f6" : "#7090b0", fontWeight: tab === t ? 600 : 400,
+              }}>
+              {t === "map" ? "Map (PNG)" : "Layers (raw)"}
+            </button>
           ))}
         </div>
 
-        <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #1a2535" }}>
-          <input type="checkbox" checked={heightmap} onChange={() => setHeightmap((v) => !v)}
-            style={{ accentColor: "#4a90d0" }} />
-          16-bit grayscale heightmap (for game engines)
-        </label>
+        {tab === "map" ? (
+          <>
+            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
+              Captures the map exactly as shown — base layer, every visible
+              overlay (rivers, cities, borders, names, trade routes…) and their
+              opacity. Set up the view you want first, or pick a plate below.
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={dialogLabel}>Map Plate</label>
+              <select
+                value={activeMapTheme ?? ""}
+                onChange={(e) => {
+                  const theme = MAP_THEMES.find((t) => t.id === e.target.value);
+                  if (theme) applyMapTheme(theme);
+                }}
+                style={dialogInput}
+              >
+                <option value="">— current view —</option>
+                {MAP_THEMES.map((t) => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
+              {activeMapTheme && (
+                <div style={{ color: "#405060", fontSize: 9, marginTop: 3 }}>
+                  Give the map a moment to finish redrawing before exporting.
+                </div>
+              )}
+            </div>
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={onClose} disabled={busy}
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+                Cancel
+              </button>
+              <button onClick={handleExportMap} disabled={busy}
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+                {busy ? "Exporting..." : "Save Map PNG…"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10 }}>
+              Each selected layer is saved as <code>{base}_&lt;layer&gt;.png</code> at full
+              grid resolution — raw data, no overlays. Use "Map (PNG)" for a real map.
+            </div>
 
-        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-          <button onClick={onClose} disabled={busy}
-            style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
-            Cancel
-          </button>
-          <button onClick={handleExport} disabled={busy || (selected.size === 0 && !heightmap)}
-            style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
-            {busy ? "Exporting..." : "Choose Folder & Export"}
-          </button>
-        </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px", marginBottom: 14 }}>
+              {EXPORTABLE_LAYERS.map((l) => (
+                <label key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", padding: "2px 0" }}>
+                  <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l.id)}
+                    style={{ accentColor: "#4a90d0" }} />
+                  {l.label}
+                </label>
+              ))}
+            </div>
+
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #1a2535" }}>
+              <input type="checkbox" checked={heightmap} onChange={() => setHeightmap((v) => !v)}
+                style={{ accentColor: "#4a90d0" }} />
+              16-bit grayscale heightmap (for game engines)
+            </label>
+
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button onClick={onClose} disabled={busy}
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+                Cancel
+              </button>
+              <button onClick={handleExportLayers} disabled={busy || (selected.size === 0 && !heightmap)}
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+                {busy ? "Exporting..." : "Choose Folder & Export"}
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
@@ -719,7 +809,6 @@ export default function App() {
             <>
               <button onClick={handleSaveAs} style={headerBtn} title="Save the WORLD (geography/climate) to a .worldforge file">Save World</button>
               <button onClick={() => setShowImport(true)} style={headerBtn} title="Copy layers from another world file">Import Layers</button>
-              <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
             </>
           )}
           {isLoaded && appMode === "chronicle" && (
@@ -734,6 +823,12 @@ export default function App() {
               <button onClick={() => setShowLibrary(true)} style={campaignBtn}
                 title="Browse your campaigns folder — every save, with the year it reached">📚 Campaigns</button>
             </>
+          )}
+          {/* GENERATION_UX_REDESIGN_PLAN.md Slice 8 (F10) — export is no
+              longer Forge-only: the end-of-campaign map (realms, trade flows,
+              plague, colonies…) is the one most worth printing. */}
+          {isLoaded && (
+            <button onClick={() => setShowExport(true)} style={headerBtn}>Export</button>
           )}
         </div>
 
