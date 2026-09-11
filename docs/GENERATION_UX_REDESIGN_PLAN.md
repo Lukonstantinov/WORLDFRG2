@@ -437,23 +437,28 @@ Four forks were put to the maintainer and answered:
 | What is the PDF? | **Multi-page atlas with real vector text** — a page per plate, a legend page, a gazetteer, selectable/searchable type. |
 | How much control over cities? | **Full editor** (rename / re-tier / set population / move / delete, on generated cities too) — **but placing a city with everything world-derived stays the default path**, never a form to fill in. |
 
-Two remain open. Neither blocks starting, and each has a recommendation I will
-follow unless told otherwise:
+Both remaining questions have since been answered too:
 
-**Q-A · May a preset override settings you have already set?** Strict (only the
-axes the preset is about — `ARCHETYPES`'s existing rule, so picking "Archipelago"
-cannot silently discard the tilt you set two minutes ago) or total (a preset is a
-complete world recipe and everything else resets)?
-*Recommendation: strict, plus a visible diff before it applies* — "this preset
-will change: ocean 70%→45%, plates 16→9, tilt 23°→31°". That way the safe
-behaviour is the default and the predictable behaviour is still legible.
+**Q-A · May a preset overwrite settings you have already set?** Neither "strict"
+nor "total" — a preset applied to a partly-generated world offers **two explicit
+choices**, and never a silent third:
 
-**Q-B · Should export composite overlays by default?** Your "selectable layers"
-reads to me as yes — rivers, cities and names are layers to the user even though
-they are a different mechanism internally.
-*Recommendation: yes, on by default.* This is the call that moves the export from
-Rust to the frontend, so it is the single biggest architectural consequence in
-this plan and worth confirming explicitly.
+- **Fill in what is missing** — apply the preset only to the axes whose steps
+  have not run yet, and **warn** which of the preset's own settings are being
+  skipped and why ("Elevation is already generated; this preset's Mountainous
+  relief will not be applied. Regenerate Elevation to use it."). Nothing already
+  generated is touched.
+- **Overwrite fully** — apply every axis and invalidate the downstream steps, so
+  the world regenerates from the earliest axis the preset touches.
+
+The dialog must name the actual consequence in both cases (which steps are
+skipped, or which will be regenerated), because the whole failure this replaces
+is a preset quietly doing one of the two and the user finding out later.
+
+**Q-B · Should export composite overlays by default?** **Yes.** Rivers, cities,
+borders and names are layers to the user, so they are layers in the export, on by
+default. This is the decision that moves the export from Rust to the frontend —
+`OverlayManager.render(ctx)` is the only place those exist.
 
 ## 5. Deliberately NOT in this plan
 
