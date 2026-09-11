@@ -1410,6 +1410,11 @@ impl CampaignSim {
                         }
                         if slots < need { _why_slot = true; } else { _why_cash = true; }
                     }
+                    // C4 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` Stage C4) — `staged`
+                    // is declared here, before N1, so N1's own bind can hand the leg
+                    // to the SAME relay N1c uses below rather than inventing a second
+                    // one; N1c's own check then simply skips a leg N1 already staged.
+                    let mut staged: i32 = -1;
                     if owner < 0 {
                         if _why_nohouse { self.diag_why_nohouse += 1; }
                         else if _why_slot { self.diag_why_slot += 1; }
@@ -1417,10 +1422,23 @@ impl CampaignSim {
                         else if _why_bar { self.diag_why_bar += 1; }
                         // N1 (the keystone, ACTORS_AND_CARRIAGE_PLAN.md §3.1) — a long
                         // haul with no house carrier does not sail at all rather than
-                        // moving for free. Dead at N1_LOCAL_HAUL_BIND_DAYS = INFINITY.
-                        if days > N1_LOCAL_HAUL_BIND_DAYS {
-                            self.diag_why_no_carrier_bind += 1;
-                            continue;
+                        // moving for free — UNLESS it can be staged through a port on
+                        // the way, exactly N1c's own relay below. A pure refusal here
+                        // is the shape that measurably collapsed the economy when N1c
+                        // tried it (see that constant's own three-attempt doc history);
+                        // routing through a stop is what let N1c ship live instead, so
+                        // N1's dose reuses the identical mechanism rather than risking
+                        // the same catastrophe a second time. Only a leg with NO
+                        // reachable stop at all is refused, the same "genuinely cannot
+                        // happen" case N1c reserves refusal for.
+                        if days > self.local_haul_bind_days {
+                            match self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                                Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
+                                None => {
+                                    self.diag_why_no_carrier_bind += 1;
+                                    continue;
+                                }
+                            }
                         }
                     }
                     // N1c + the staging relay — a leg past its mode's real
@@ -1433,8 +1451,7 @@ impl CampaignSim {
                     // ownerless alike — see the constants' own doc for why the
                     // ownerless-only version was the thing that broke the
                     // inheritance gate. Dead code at INFINITY.
-                    let mut staged: i32 = -1;
-                    if Self::leg_exceeds_range(self.hub_km(a, b), sea, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                    if staged < 0 && Self::leg_exceeds_range(self.hub_km(a, b), sea, self.ship_leg_max_km, self.caravan_leg_max_km) {
                         match self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
                             Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
                             // NO STOP EXISTS — and the cargo still sails. This is

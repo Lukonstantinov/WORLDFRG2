@@ -228,13 +228,45 @@ const BYPASS_LOSS_ADD: f32 = 0.12;
 const LOCAL_HAUL_DAYS: f32 = 8.0;
 /// `ACTORS_AND_CARRIAGE_PLAN.md` N1 (the keystone) — make the local haul BIND:
 /// an ownerless leg (no house could carry it) longer than this many travel-days
-/// does not sail at all, rather than moving for free with no vessel, no capital
-/// clamp and no loss risk (§1 of the plan measured 96% of shipments moving this
-/// way). Shipped at `INFINITY`, which makes the bind clause dead code and the
-/// whole change bit-identical — `n1_local_haul_bind_at_infinity_is_a_noop`
-/// proves it. The dose walk down from infinity is its own, separately-gated,
-/// multi-commit exercise (§4 of the plan) and is deliberately NOT done here.
-const N1_LOCAL_HAUL_BIND_DAYS: f32 = f32::INFINITY;
+/// is handed to the SAME staging relay `N1c`'s `leg_exceeds_range`/`staging_hop`
+/// already use (`dispatch`, `production.rs`) rather than moving for free with no
+/// vessel, no capital clamp and no loss risk (§1 of the plan measured 96% of
+/// shipments moving this way). Only a leg with no reachable stop at all is
+/// refused outright.
+///
+/// **STAGE C4 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`) — dosed, not shipped
+/// at zero.** N1c's own three-attempt history (see `SHIP_LEG_MAX_KM`'s doc
+/// comment) is the reason this does NOT ship as a bare `continue`: a pure
+/// refusal on an ownerless-only bind is the exact shape that collapsed
+/// `econ_inheritance_rules_fragment_differently`'s world to 3 live houses the
+/// first time N1c tried it, because refusing concentrates capital onto
+/// whichever houses still have reach. Routing through the relay instead — the
+/// fix that made N1c ship live — carries the same protection here for free,
+/// since it is literally the same function call (`self.staging_hop`, reusing
+/// `self.ship_leg_max_km`/`self.caravan_leg_max_km` as the sub-hop legality
+/// check even though this bind's own threshold is stated in DAYS).
+///
+/// **The dose walk, measured, not guessed.** A first trial at 30 days — chosen
+/// to sit just above `LOCAL_HAUL_DAYS` (8) — collapsed trade volume to ~10% of
+/// the uncapped `dense_world` run even with the relay live and ZERO outright
+/// refusals (`diag_relay_staged` in the hundreds of thousands): at that
+/// threshold most of the grid's own inter-hub legs exceed it, so nearly every
+/// ownerless shipment gets forced through multiple relay hops, each its own
+/// later dispatch decision, and much of that relayed cargo never completes its
+/// onward leg within the run. Widened to 90 days — comfortably above a single
+/// `SHIP_LEG_MAX_KM` hop's own travel time (~46 days at the post-C1 coastal-sea
+/// speed) — it targets only ownerless cargo running distinctly longer than one
+/// mode's own unstaged range would imply, not ordinary regional trade, and
+/// measures healthy: `dense_world` trade volume holds, peak wealth does not
+/// exceed the uncapped run, and `econ_` (all 6, including the multi-seed
+/// `econ_inheritance_rules_fragment_differently`) is bit-identical to the
+/// pre-C4 baseline, because `reference_world`/`reference_world_large` opt out
+/// via `local_haul_bind_days: f32::INFINITY` exactly like `ship_leg_max_km`/
+/// `caravan_leg_max_km` already do. See `n1_bind_stays_healthy_on_a_
+/// realistically_dense_world` (`tests.rs`) for the dosed dense-world gate and
+/// `the_range_caps_ship_live_and_abstract_fixtures_opt_out` for the opt-out
+/// assertion; `docs/SCOREBOARD.md`'s C4 entry carries the full before/after.
+const N1_LOCAL_HAUL_BIND_DAYS: f32 = 90.0;
 /// `ACTORS_AND_CARRIAGE_PLAN.md` N1b — let ownerless cargo sink too, at a rate
 /// independently dosed from the house loss rates above (today `owner < 0`
 /// cargo never sinks at all: "the guard is literal", §1.1 of the plan). Shipped
@@ -3498,6 +3530,7 @@ fn neg_one_i32() -> i32 { -1 }
 /// every ordinary campaign, runs at the shipped constants.
 pub(crate) fn ship_leg_max_km_default() -> f32 { SHIP_LEG_MAX_KM }
 pub(crate) fn caravan_leg_max_km_default() -> f32 { CARAVAN_LEG_MAX_KM }
+pub(crate) fn local_haul_bind_days_default() -> f32 { N1_LOCAL_HAUL_BIND_DAYS }
 fn unknown_extent() -> u8 { u8::MAX }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
@@ -6292,6 +6325,16 @@ pub struct CampaignSim {
     /// `suppress_relief` directly above and below.
     #[serde(default = "ship_leg_max_km_default")] pub ship_leg_max_km: f32,
     #[serde(default = "caravan_leg_max_km_default")] pub caravan_leg_max_km: f32,
+    /// Stage C4 — the SAME test-controllable-field pattern as `ship_leg_max_km`/
+    /// `caravan_leg_max_km` directly above, and for the identical reason: N1's
+    /// bind is stated in travel-DAYS, and every abstract-scale test fixture
+    /// built through `sim()` (`world_w` sized as a trade-horizon fraction, not
+    /// a real distance) would otherwise trip it on arbitrary noise rather than
+    /// a genuine long haul. `sim()` opts out at `f32::INFINITY`; `dense_world`
+    /// (real `world_w = 3600` km/day scale) doses it explicitly alongside the
+    /// leg-range caps, the same paired dosing `the_dosed_economy_stays_
+    /// healthy_on_a_realistically_dense_world` already does for those.
+    #[serde(default = "local_haul_bind_days_default")] pub local_haul_bind_days: f32,
     /// Test-only, and for the SAME ONE CALLER as `suppress_realms` above:
     /// `econ_inheritance_rules_fragment_differently`. Suppresses CRISIS RELIEF
     /// (`polis.rs::decide_crisis_relief`).

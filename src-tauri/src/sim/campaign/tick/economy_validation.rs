@@ -2537,20 +2537,30 @@ fn econ_measure_carriage_ceiling() {
     println!("    makes MEASURABLE; five plan slices rest on it holding.");
 }
 
-/// N1 · N1b (`ACTORS_AND_CARRIAGE_PLAN.md` §3.1) ship at zero dose and must
-/// prove bit-identical before any dose walk begins (§4.1 rule 1: "ship at zero
-/// dose and prove bit-identity first"). Cheap and NOT `#[ignore]`d — a real
-/// multi-house, multi-good world run for a season, asserting the bind clause
-/// never fires (no finite travel-days value can exceed `INFINITY`) and that an
-/// ownerless voyage never sinks on its own (`N1B_OWNERLESS_LOSS_RATE = 0.0`),
-/// exactly the pre-N1/N1b behaviour the plan measured. `econ_measure_carrier_
-/// mix` above already proves the world genuinely ships ownerless cargo, so this
-/// doesn't need its own 60-year run to be meaningful.
+/// N1b (`ACTORS_AND_CARRIAGE_PLAN.md` §3.1) ships at zero dose and must prove
+/// bit-identical before any dose walk begins (§4.1 rule 1: "ship at zero dose
+/// and prove bit-identity first"). Cheap and NOT `#[ignore]`d — a real
+/// multi-house, multi-good world run for a season, asserting that an ownerless
+/// voyage never sinks on its own (`N1B_OWNERLESS_LOSS_RATE = 0.0`), exactly the
+/// pre-N1b behaviour the plan measured. `econ_measure_carrier_mix` above
+/// already proves the world genuinely ships ownerless cargo, so this doesn't
+/// need its own 60-year run to be meaningful.
+///
+/// **N1 itself is no longer zero-dosed** (Stage C4,
+/// `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`) — `N1_LOCAL_HAUL_BIND_DAYS` is
+/// the shipped LIVE constant a real campaign's `local_haul_bind_days` field
+/// defaults to, but every abstract-scale fixture built through `sim()`
+/// (including `reference_world` below) opts OUT at `f32::INFINITY`, the exact
+/// pattern `ship_leg_max_km`/`caravan_leg_max_km` already established — see
+/// `abstract_fixtures_opt_out_of_real_km_rules` for that assertion. So this
+/// test's own bind-stays-dead claim is unchanged in spirit, just now phrased
+/// against the FIELD (which is `INFINITY` here) rather than the constant.
 #[test]
-fn n1_and_n1b_ship_at_zero_dose_are_noops() {
-    assert_eq!(N1_LOCAL_HAUL_BIND_DAYS, f32::INFINITY);
+fn n1b_ownerless_loss_at_zero_dose_is_a_noop() {
     assert_eq!(N1B_OWNERLESS_LOSS_RATE, 0.0);
     let mut s = reference_world();
+    assert_eq!(s.local_haul_bind_days, f32::INFINITY,
+        "reference_world must opt out of the real-days N1 bind (C4)");
     let mut total_bind = 0u64;
     let mut total_shipments = 0u64;
     let mut ownerless_shipments = 0u64;
@@ -2566,7 +2576,7 @@ fn n1_and_n1b_ship_at_zero_dose_are_noops() {
     assert!(total_shipments > 0, "the reference world must actually trade");
     assert!(ownerless_shipments > 0, "the reference world must actually ship ownerless cargo");
     assert_eq!(total_bind, 0,
-        "N1_LOCAL_HAUL_BIND_DAYS = INFINITY must make the bind clause dead code");
+        "local_haul_bind_days = INFINITY must make the bind clause dead code on this fixture");
 }
 
 /// N8 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.8) · every arrival used to book

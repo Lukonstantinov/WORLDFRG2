@@ -670,6 +670,38 @@ keystone and belongs last, because until C1–C3 land there is no carriage econo
 for the 96% to be forced into — binding first would just delete trade.
 *Gate:* long-haul trade **volume must not collapse** — the companion gate
 `MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` already names as the one that matters.
+**BUILT, dosed at 90 days — attempted out of the plan's own stated order
+(C1/C1b landed, C2 assessed, C3 deliberately skipped), on the judgment that
+N1c's own precedent already answers the exact risk C3 was meant to retire.**
+`N1_LOCAL_HAUL_BIND_DAYS` (`mod.rs`) no longer refuses an over-threshold
+ownerless leg outright — it hands it to the SAME `staging_hop` relay N1c's own
+`leg_exceeds_range` check uses, only refusing when no stop exists at all,
+because N1c's own three-attempt history already proved a bare refusal on an
+ownerless-only bind is the exact shape that collapses this project's hardest
+gate. Made a per-sim FIELD (`local_haul_bind_days`), not a bare constant —
+`ship_leg_max_km`/`caravan_leg_max_km`'s own established pattern — so every
+abstract-scale test fixture built through `sim()` opts out at `INFINITY`
+(`the_range_caps_ship_live_and_abstract_fixtures_opt_out`), and only
+`campaign_start_sim`'s real construction and `tests::dense_world`'s dosed
+variant see the live value. **The dose walk itself is a real negative
+result**: a first trial at 30 days (just above `LOCAL_HAUL_DAYS`=8) staged
+enormous numbers of legs with ZERO outright refusals yet still collapsed
+`dense_world`'s trade volume to ~10% of the uncapped run — most of the grid's
+own inter-hub legs exceed 30 days, so nearly every ownerless shipment relays
+through several hops across several dispatch cycles, and much of it never
+completes its onward leg within the run; staging without refusing is not
+automatically safe once it fires on THIS large a share of trade. Widened to
+90 days (comfortably above a single `SHIP_LEG_MAX_KM` hop's own ~46-day
+travel time), it targets only cargo running distinctly longer than one
+mode's unstaged range implies, and measures healthy on both required
+instruments: `tests::dense_world` over 40 years (`n1_bind_stays_healthy_on_a_
+realistically_dense_world`) — zero refusals, trade volume holds well above
+the plan's own floor, peak wealth does not exceed the uncapped run — and the
+multi-seed `econ_inheritance_rules_fragment_differently`, unaffected because
+`reference_world`/`reference_world_large` opt out exactly like the N1c caps
+already did. Full `econ_` (6/6) confirmed bit-identical to the pre-C4
+baseline for the same reason. C4 completes Stage C as originally scoped;
+`LAND_BULK_PENALTY` (C1b's own dose) remains unstarted.
 
 ### Stage D — siting
 

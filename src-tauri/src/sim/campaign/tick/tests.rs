@@ -82,6 +82,7 @@
             // file, and the whole `econ_` suite, bit-identical to before the
             // staging relay existed.
             ship_leg_max_km: f32::INFINITY, caravan_leg_max_km: f32::INFINITY,
+            local_haul_bind_days: f32::INFINITY,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
@@ -557,6 +558,8 @@
             "every abstract fixture must opt out of a real-km rule");
         assert_eq!(s.caravan_leg_max_km, f32::INFINITY,
             "every abstract fixture must opt out of a real-km rule");
+        assert_eq!(s.local_haul_bind_days, f32::INFINITY,
+            "every abstract fixture must opt out of a real-days rule (C4)");
 
         // End to end on such a fixture: a 1000km ownerless caravan leg — well
         // past the shipped 800km cap — must still sail, because this world's
@@ -6521,6 +6524,62 @@
              {peak_dosed:.0} against loose {peak_loose:.0} — if this inverts, the relay has \
              stopped spreading a long lane's margin along it and is behaving like the \
              refusal that broke the inheritance gate");
+    }
+
+    /// C4 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`) — the companion gate for
+    /// N1's OWN dose, mirroring `the_dosed_economy_stays_healthy_on_a_
+    /// realistically_dense_world` exactly, because N1's bind reuses N1c's own
+    /// staging relay and inherits its risk: an ownerless-only refusal is the
+    /// shape that collapsed the inheritance gate the first time N1c tried it.
+    /// N1 avoids a bare refusal by handing the leg to `staging_hop` — the SAME
+    /// call N1c makes — so this test's job is to confirm that reuse actually
+    /// keeps the economy healthy once N1's OWN threshold (days, not km) is the
+    /// one doing the binding, on top of N1c's caps rather than in isolation
+    /// (a real campaign ships both live at once).
+    #[test]
+    fn n1_bind_stays_healthy_on_a_realistically_dense_world() {
+        const YEARS: usize = 40;
+        let mut loose = dense_world();
+        let mut dosed = dense_world();
+        dosed.ship_leg_max_km = SHIP_LEG_MAX_KM;
+        dosed.caravan_leg_max_km = CARAVAN_LEG_MAX_KM;
+        dosed.local_haul_bind_days = N1_LOCAL_HAUL_BIND_DAYS;
+
+        let (mut peak_loose, mut peak_dosed) = (0.0f32, 0.0f32);
+        for _ in 0..YEARS {
+            loose.advance(365);
+            dosed.advance(365);
+            let r = |s: &CampaignSim| s.houses.iter().filter(|h| !h.defunct)
+                .map(|h| h.wealth).fold(0.0f32, f32::max);
+            peak_loose = peak_loose.max(r(&loose));
+            peak_dosed = peak_dosed.max(r(&dosed));
+        }
+        let alive = dosed.houses.iter().filter(|h| !h.defunct).count();
+        let poorest = dosed.houses.iter().map(|h| h.wealth).fold(f32::INFINITY, f32::min);
+
+        eprintln!("[diag] refusals={} staged={} volume dosed={:.0} loose={:.0}",
+            dosed.diag_why_no_carrier_bind, dosed.diag_relay_staged, dosed.diag_volume, loose.diag_volume);
+        assert!(dosed.diag_why_no_carrier_bind == 0 || dosed.diag_relay_staged > 0,
+            "N1's bind must be reaching real legs and routing them through the relay, \
+             not silently refusing everything: {} refusals, {} staged",
+            dosed.diag_why_no_carrier_bind, dosed.diag_relay_staged);
+        assert!(peak_dosed.is_finite() && peak_dosed < 1_000_000.0,
+            "a dosed run must not produce a runaway-rich house: {peak_dosed:.0}");
+        assert!(poorest > -500_000.0 && poorest.is_finite(),
+            "limited liability still bounds the downside: {poorest:.0}");
+        assert!(alive >= 8, "the merchant class must survive the caps, {alive} alive");
+        assert!(dosed.houses.len() > alive,
+            "houses must still fail under the caps — {} ever, {alive} alive", dosed.houses.len());
+        // The plan's own named companion gate: long-haul trade volume must not
+        // collapse. N1's own bind adds a second brake on top of N1c's, so the
+        // floor is looser than N1c's solo 0.25 — this measures the COMBINED
+        // dose, not N1 in isolation.
+        assert!(dosed.diag_volume > loose.diag_volume * 0.15,
+            "trade must not collapse under the combined N1+N1c dose: {:.0} against {:.0} loose",
+            dosed.diag_volume, loose.diag_volume);
+        assert!(peak_dosed <= peak_loose * 1.1,
+            "staging must not concentrate wealth more than teleporting does: dosed peak \
+             {peak_dosed:.0} against loose {peak_loose:.0}");
     }
 
     /// Diagnostic (`#[ignore]`d, like `econ_diagnose_house_turnover`) written

@@ -1013,15 +1013,24 @@ Three facts about the campaign that are easy to miss and shape any change here:
   MOVES**, and any embargo built on `house_barred` touches 0.1% of trade. Do not
   reason about trade volume, fleet economics or exclusion without reading
   `docs/ACTORS_AND_CARRIAGE_PLAN.md` §1 first.
-  **N1 (the plan's keystone) is now wired at zero dose.** `N1_LOCAL_HAUL_BIND_DAYS`
-  (currently `INFINITY`) is a real bind clause in `dispatch`: an ownerless leg
-  longer than the threshold does not sail at all, rather than moving for free. At
-  infinity the clause is provably dead code (`n1_and_n1b_ship_at_zero_dose_are_
-  noops`), so the 96%/4% split above is still exactly today's measured behaviour —
-  the dose walk down from infinity is separate, multi-commit, gated work (§4 of the
-  plan) and has NOT been done. `N1B_OWNERLESS_LOSS_RATE` (currently `0.0`) is the
-  same shape for letting ownerless cargo sink — `let lost = if owner >= 0 {..}`
-  above is no longer literal, but the roll never fires at zero dose.
+  **N1 (the plan's keystone) is now DOSED LIVE** (`ROUTES_ISOLATION_AND_
+  CARRIAGE_REVIEW.md` Stage C4). `N1_LOCAL_HAUL_BIND_DAYS` = 90 days is a real
+  bind clause in `dispatch`: an ownerless leg longer than the threshold no
+  longer moves for free — it is handed to N1c's own `staging_hop` relay
+  (below) rather than refused outright, a bare refusal being the exact shape
+  that collapsed `econ_inheritance_rules_fragment_differently` the first time
+  N1c tried it. It is a per-sim FIELD (`local_haul_bind_days`), the same
+  `ship_leg_max_km`/`caravan_leg_max_km` opt-out pattern, so every abstract
+  test fixture stays at `INFINITY` and only a real campaign or `tests::
+  dense_world`'s dosed variant sees 90. A first dose trial at 30 days
+  (just above `LOCAL_HAUL_DAYS`) staged everything with zero refusals and
+  STILL collapsed `dense_world` trade volume to ~10% — proof that "routes
+  instead of refuses" alone doesn't make a bind safe once it fires on most
+  of a world's trade; 90 days measures healthy on both `tests::dense_world`
+  and the multi-seed inheritance gate. `N1B_OWNERLESS_LOSS_RATE` (currently
+  `0.0`) is the same shape for letting ownerless cargo sink — `let lost = if
+  owner >= 0 {..}` above is no longer literal, but the roll never fires at
+  zero dose, and dosing it is separate, unstarted work.
   **N1c (per-mode voyage RANGE) is the exception — it is DOSED LIVE**
   (`SHIP_LEG_MAX_KM` 3500 km / `CARAVAN_LEG_MAX_KM` 800 km,
   `TRADE_STAGING_AND_POSTS_PLAN.md` slices 3+4). **Cargo no longer teleports:**
@@ -5705,6 +5714,25 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     25 km radius to mean anything (rule 21/25).
                                     D2 remains unstarted — its own entry
                                     records why a quick version isn't safe.
+                                    **C4 BUILT** — `N1_LOCAL_HAUL_BIND_DAYS`
+                                    dosed to 90 days, completing Stage C.
+                                    Routes an over-threshold ownerless leg
+                                    through N1c's own `staging_hop` relay
+                                    rather than refusing it outright (N1c's own
+                                    history already proved a bare refusal on
+                                    an ownerless-only bind collapses the
+                                    inheritance gate), made a per-sim field so
+                                    abstract fixtures opt out exactly like
+                                    `ship_leg_max_km`/`caravan_leg_max_km`. A
+                                    30-day first trial staged everything with
+                                    zero refusals and still collapsed
+                                    `dense_world` trade volume to ~10% — proof
+                                    routing alone isn't automatically safe once
+                                    it fires on most of a world's trade. 90
+                                    days measures healthy on `tests::
+                                    dense_world` over 40 years and leaves the
+                                    multi-seed inheritance gate + full `econ_`
+                                    bit-identical (both opt out via the field).
                                     Plus 7 open questions
                                     (§10, all answered — A→B→C order, isolated markets
                                     may starve, a ~3,000 km trade horizon, the
