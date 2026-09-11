@@ -94,6 +94,44 @@ pub fn sim_generate_plates(
     buf.save(&conn, "Generate plates & landmass")
 }
 
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 6 — plates as their own DRAWABLE first
+/// step. `user_seeds_json` is a JSON array of `{x, y, sizeClass, isOceanic}`
+/// (camelCase from the frontend, matching `plates::UserPlateSeed` via serde's
+/// default rename — Tauri's `invoke` already does this for every other
+/// command's args). Each override the NEAREST auto-generated site's position/
+/// class/type; every seed the user did not place is filled in by the
+/// generator, exactly as every other plate is. An empty array is identical to
+/// `sim_generate_plates`.
+#[tauri::command]
+pub fn sim_generate_plates_from_seeds(
+    seed: u64,
+    plate_count: u32,
+    ocean_fraction: Option<f32>,
+    continent_goal: Option<i32>,
+    user_seeds_json: String,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_PLATES)?;
+    let user_seeds: Vec<plates::UserPlateSeed> = serde_json::from_str(&user_seeds_json)
+        .map_err(|e| format!("Bad seed list: {e}"))?;
+    let motion = plates::generate_plates_and_landmass_from_seeds(
+        &mut buf, seed, plate_count,
+        ocean_fraction.unwrap_or(plates::DEFAULT_OCEAN_FRACTION),
+        continent_goal, &user_seeds,
+    );
+    persist_plate_motion(&conn, &motion, seed);
+    if let Some(f) = ocean_fraction {
+        metadata::set_meta(&conn, "ocean_fraction", &f.to_string()).map_err(|e| e.to_string())?;
+    }
+    if let Some(g) = continent_goal {
+        metadata::set_meta(&conn, "continent_goal", &g.to_string()).map_err(|e| e.to_string())?;
+    }
+    buf.save(&conn, "Generate plates from drawn seeds")
+}
+
 /// The plate inspector's click-to-flip: override one plate's oceanic/
 /// continental assignment and re-rasterize landmass from it, keeping the SAME
 /// plate geometry (no re-partition — `plate_index`/`boundary_type` are

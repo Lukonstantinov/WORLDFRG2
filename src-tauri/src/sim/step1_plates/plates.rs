@@ -450,6 +450,41 @@ pub fn generate_plates_and_landmass_with_target(
     buf: &mut WorldBuffer, seed: u64, plate_count: u32, ocean_fraction: f32,
     continent_goal: Option<i32>,
 ) -> Vec<PlateMotion> {
+    generate_plates_and_landmass_from_seeds(buf, seed, plate_count, ocean_fraction, continent_goal, &[])
+}
+
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 6 — one HAND-DRAWN plate seed: a
+/// centre, a size class and an oceanic/continental type, exactly what the
+/// plan's own decided answer to "what does drawing the plates mean" asks for.
+/// `size_class` indexes `SIZE_CLASS_WEIGHTS`/`SIZE_CLASS_PROPORTIONS`
+/// (0=giant · 1=large · 2=medium · 3=small).
+#[derive(Clone, Copy, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserPlateSeed {
+    pub x: f32,
+    pub y: f32,
+    pub size_class: u8,
+    pub is_oceanic: bool,
+}
+
+/// As `generate_plates_and_landmass_with_target`, but a caller-supplied set of
+/// `user_seeds` OVERRIDES the nearest auto-generated site's position, size
+/// class and oceanic/continental type (Slice 6's decided design: "the
+/// partition regenerates from your seeds... seeds you do not place are filled
+/// in by the generator"). An empty `user_seeds` is exactly the old behaviour —
+/// every OTHER caller of `generate_plates_and_landmass_with_target` passes `&[]`
+/// via that wrapper, so this is a bit-identical extension, not a rewrite.
+///
+/// The override happens AFTER the class-aware seeding pass below (so a
+/// user-placed small plate still gets the same dominance-radius protection
+/// from an auto-generated giant that a generated small plate gets) and BEFORE
+/// the power-diagram partition runs, so every existing plate gate — including
+/// `plate_territory_stays_connected` and the size-order gate — applies to a
+/// hand-seeded world exactly as it does to a generated one.
+pub fn generate_plates_and_landmass_from_seeds(
+    buf: &mut WorldBuffer, seed: u64, plate_count: u32, ocean_fraction: f32,
+    continent_goal: Option<i32>, user_seeds: &[UserPlateSeed],
+) -> Vec<PlateMotion> {
     let mut rng = StdRng::seed_from_u64(seed);
     let w = buf.width as f32;
     let h = buf.height as f32;
@@ -581,6 +616,38 @@ pub fn generate_plates_and_landmass_with_target(
         raw[i].cx = cx;
         raw[i].cy = cy;
         placed.push(i);
+    }
+
+    // Slice 6 — a hand-drawn seed overrides the NEAREST auto-generated site
+    // (by wrapped distance), never a random one, so a click near a giant's
+    // grid cell actually replaces that giant rather than some unrelated site
+    // on the far side of the map. `oceanic_lock` records which plates must
+    // keep the user's explicit type through the ocean-fraction reassignment
+    // below, rather than being shuffled like every other plate.
+    let mut oceanic_lock: Vec<Option<bool>> = vec![None; count];
+    if !user_seeds.is_empty() {
+        let mut claimed = vec![false; count];
+        for us in user_seeds {
+            let mut best_i = usize::MAX;
+            let mut best_d = f32::MAX;
+            for i in 0..count {
+                if claimed[i] { continue; }
+                let mut dx = raw[i].cx - us.x;
+                if dx > w / 2.0 { dx -= w; }
+                if dx < -w / 2.0 { dx += w; }
+                let dy = raw[i].cy - us.y;
+                let d = dx * dx + dy * dy;
+                if d < best_d { best_d = d; best_i = i; }
+            }
+            if best_i == usize::MAX { continue; }
+            claimed[best_i] = true;
+            raw[best_i].cx = us.x.rem_euclid(w);
+            raw[best_i].cy = us.y.clamp(0.0, h - 1.0);
+            let class = (us.size_class as usize).min(SIZE_CLASS_WEIGHTS.len() - 1);
+            raw[best_i].size_weight = SIZE_CLASS_WEIGHTS[class];
+            raw[best_i].is_oceanic = us.is_oceanic;
+            oceanic_lock[best_i] = Some(us.is_oceanic);
+        }
     }
 
     let mut plates: Vec<Plate> = Vec::with_capacity(count);
@@ -774,11 +841,23 @@ pub fn generate_plates_and_landmass_with_target(
     let area_tolerance = (CONTINENT_AREA_TOLERANCE_FRAC * buf.total() as f64) as i64;
     let mut trials: Vec<(i64, usize, Vec<bool>)> = Vec::with_capacity(24);
     const OCEAN_FILL_TRIALS: usize = 24;
+    // Slice 6 — a locked plate's oceanic/continental type was the user's own
+    // explicit choice (`UserPlateSeed.is_oceanic`); it must survive the
+    // ocean-fraction reassignment below rather than being shuffled like every
+    // other plate, or drawing a plate "continental" could silently flip it
+    // back to ocean the moment Simulate runs.
+    let locked_ocean_cells: i64 = (0..plates.len())
+        .filter(|&pi| oceanic_lock[pi] == Some(true))
+        .map(|pi| plate_cells[pi] as i64)
+        .sum();
     for _ in 0..OCEAN_FILL_TRIALS {
-        let mut order: Vec<usize> = (0..plates.len()).collect();
+        let mut order: Vec<usize> = (0..plates.len()).filter(|&pi| oceanic_lock[pi].is_none()).collect();
         order.shuffle(&mut rng);
         let mut oceanic = vec![false; plates.len()];
-        let mut ocean_cells_so_far: i64 = 0;
+        for pi in 0..plates.len() {
+            if let Some(v) = oceanic_lock[pi] { oceanic[pi] = v; }
+        }
+        let mut ocean_cells_so_far: i64 = locked_ocean_cells;
         for &pi in &order {
             let cells = plate_cells[pi] as i64;
             // Take this plate as oceanic if doing so gets closer to the target
@@ -1307,6 +1386,44 @@ mod tests {
         assert_eq!(a.terrain, b.terrain);
         assert_eq!(a.boundary_type, b.boundary_type);
         assert_eq!(a.plate_index, b.plate_index);
+    }
+
+    /// GENERATION_UX_REDESIGN_PLAN.md Slice 6 gate — a hand-drawn seed's
+    /// EXPLICIT oceanic/continental type must survive the ocean-fraction
+    /// reassignment pass, and the cell the user clicked must end up on the
+    /// plate that seed claimed (never on some unrelated auto-generated one).
+    #[test]
+    fn a_user_seed_keeps_its_explicit_type_and_claims_its_own_cell() {
+        let (w, h) = (240u32, 120u32);
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
+            conn.execute(
+                "INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            ).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        let (ux, uy) = (60.0f32, 60.0f32);
+        let user_seeds = [UserPlateSeed { x: ux, y: uy, size_class: 0, is_oceanic: false }];
+        generate_plates_and_landmass_from_seeds(&mut buf, 99, 12, DEFAULT_OCEAN_FRACTION, None, &user_seeds);
+        let idx = buf.idx(ux as u32, uy as u32);
+        let claimed_plate = buf.plate_index[idx];
+        // The clicked cell's own plate must be land-majority (continental) —
+        // the strongest observable proxy for "the lock held", since terrain
+        // rasterization (coastline noise) can still put the exact clicked
+        // pixel a cell either side of the coast.
+        let mut land = 0u32;
+        let mut total = 0u32;
+        for (i, &pi) in buf.plate_index.iter().enumerate() {
+            if pi != claimed_plate { continue; }
+            total += 1;
+            if buf.terrain[i] == 1 { land += 1; }
+        }
+        assert!(total > 0, "the clicked plate holds no cells at all");
+        assert!((land as f32 / total as f32) > 0.5,
+            "user seed asked for CONTINENTAL but its plate is {:.0}% land",
+            100.0 * land as f32 / total as f32);
     }
 
     /// LOCAL STRAIGHTNESS of a partition's margins, in 0..1 — the metric this

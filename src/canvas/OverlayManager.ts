@@ -1185,6 +1185,13 @@ export class OverlayManager {
     this.lassoSketch = points;
   }
 
+  /** GENERATION_UX_REDESIGN_PLAN.md Slice 6 — the drawn plate seeds awaiting
+   *  a Generate press. Sketch-only, same lifecycle as `lassoSketch`. */
+  private plateSeedDrafts: { x: number; y: number; sizeClass: number; isOceanic: boolean }[] = [];
+  setPlateSeedDrafts(seeds: { x: number; y: number; sizeClass: number; isOceanic: boolean }[]) {
+    this.plateSeedDrafts = seeds;
+  }
+
   setRidgeSketch(lines: RidgeLine[]) {
     this.ridgeSketch = lines;
   }
@@ -2909,6 +2916,25 @@ export class OverlayManager {
     // Landmass lasso: the freehand selection polygon the area tools operate on.
     if (this.lassoSketch.length > 0) {
       this.renderLassoSketch(ctx);
+    }
+
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 6 — drawn plate seeds awaiting a
+    // Generate press: a filled disc sized by class, ringed in a colour by
+    // oceanic/continental type, radius zoom-compensated the same way the
+    // river/lake minimum-symbol rule does, so a seed stays a real target to
+    // click on (drag to nudge, click to delete) at any zoom.
+    if (this.plateSeedDrafts.length > 0) {
+      const inv = 1 / Math.sqrt(this.currentScale);
+      for (const s of this.plateSeedDrafts) {
+        const r = (3.5 - s.sizeClass * 0.6) * inv;
+        ctx.beginPath();
+        ctx.arc(s.x + 0.5, s.y + 0.5, r, 0, Math.PI * 2);
+        ctx.fillStyle = s.isOceanic ? "rgba(60,120,200,0.55)" : "rgba(200,150,60,0.55)";
+        ctx.fill();
+        ctx.lineWidth = 1 * inv;
+        ctx.strokeStyle = s.isOceanic ? "#4a90d0" : "#d0a050";
+        ctx.stroke();
+      }
     }
 
     // #37 · per-good scarcity: graduated discs at each hub, green where the good

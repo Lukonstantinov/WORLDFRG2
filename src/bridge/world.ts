@@ -158,6 +158,27 @@ export async function simGeneratePlates(
   });
 }
 
+// GENERATION_UX_REDESIGN_PLAN.md Slice 6 — plates from hand-drawn seeds. Each
+// seed overrides the nearest auto-generated site; whatever the generator
+// picks for the rest fills in around them.
+export interface UserPlateSeed {
+  x: number;
+  y: number;
+  sizeClass: number; // 0=giant · 1=large · 2=medium · 3=small
+  isOceanic: boolean;
+}
+export async function simGeneratePlatesFromSeeds(
+  seed: number, plateCount: number, userSeeds: UserPlateSeed[],
+  oceanFraction?: number, continentGoal?: number,
+): Promise<[number, number][]> {
+  return invoke("sim_generate_plates_from_seeds", {
+    seed, plateCount,
+    oceanFraction: oceanFraction ?? null,
+    continentGoal: continentGoal ?? null,
+    userSeedsJson: JSON.stringify(userSeeds),
+  });
+}
+
 export async function simInvertTerrain(): Promise<[number, number][]> {
   return invoke("sim_invert_terrain");
 }

@@ -138,6 +138,12 @@ interface UIStore {
   /** Landmass step lasso: the transient (unsaved, single) selection polygon the
    *  area tools operate on. Cleared after each op re-rolls the world. */
   lassoPolygon: LassoPolygon;
+  /** GENERATION_UX_REDESIGN_PLAN.md Slice 6 — hand-drawn plate seeds awaiting
+   *  a Generate press: centre + size class (0=giant..3=small) + oceanic type.
+   *  Transient, same lifecycle as `lassoPolygon` — cleared once submitted. */
+  plateSeeds: { x: number; y: number; sizeClass: number; isOceanic: boolean }[];
+  /** The class/type the NEXT clicked seed gets. */
+  plateSeedDraft: { sizeClass: number; isOceanic: boolean };
   riverParams: RiverParamsState;
   bioParams: BioParamsState;
   showTradeMatrix: boolean;
@@ -339,6 +345,10 @@ interface UIStore {
   clearRidgeLines: () => void;
   setLassoPolygon: (poly: LassoPolygon) => void;
   clearLasso: () => void;
+  addPlateSeed: (x: number, y: number) => void;
+  removePlateSeed: (index: number) => void;
+  clearPlateSeeds: () => void;
+  setPlateSeedDraft: (d: Partial<{ sizeClass: number; isOceanic: boolean }>) => void;
   setRidgeParams: (p: Partial<{ width: number; height: number; character: number; noise: number }>) => void;
   setRiverParams: (p: Partial<RiverParamsState>) => void;
   setBioParams: (p: Partial<BioParamsState>) => void;
@@ -483,6 +493,8 @@ export const useUIStore = create<UIStore>((set) => ({
   terrainParams: { density: 0.5, height: 0.5, spread: 0.5, roughness: 0.4, seed: null, mode: "plates" },
   ridgeLines: [],
   lassoPolygon: [],
+  plateSeeds: [],
+  plateSeedDraft: { sizeClass: 2, isOceanic: false },
   ridgeParams: { width: 8, height: 0.7, character: 0.5, noise: 0.4 },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.006, lakeMaxFraction: 0.0001 },
   bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.12, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
@@ -632,6 +644,14 @@ export const useUIStore = create<UIStore>((set) => ({
   clearRidgeLines: () => set({ ridgeLines: [] }),
   setLassoPolygon: (poly) => set({ lassoPolygon: poly }),
   clearLasso: () => set({ lassoPolygon: [] }),
+  addPlateSeed: (x, y) => set((state) => ({
+    plateSeeds: [...state.plateSeeds, { x, y, ...state.plateSeedDraft }],
+  })),
+  removePlateSeed: (index) => set((state) => ({
+    plateSeeds: state.plateSeeds.filter((_, i) => i !== index),
+  })),
+  clearPlateSeeds: () => set({ plateSeeds: [] }),
+  setPlateSeedDraft: (d) => set((state) => ({ plateSeedDraft: { ...state.plateSeedDraft, ...d } })),
   setRidgeParams: (p) =>
     set((state) => ({ ridgeParams: { ...state.ridgeParams, ...p } })),
 

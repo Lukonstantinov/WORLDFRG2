@@ -1459,6 +1459,15 @@ export function MapCanvas() {
     requestRender();
   }, [lassoPolygon, requestRender]);
 
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 6 — sync drawn plate seeds onto the overlay.
+  const plateSeeds = useUIStore((s) => s.plateSeeds);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setPlateSeedDrafts(plateSeeds);
+    requestRender();
+  }, [plateSeeds, requestRender]);
+
   // 🌊 Hydrology · the selected river system's subtree glows on the map, each
   // tributary in its own colour (branch / order scheme).
   const riverHighlight = useUIStore((s) => s.riverHighlight);
@@ -1990,6 +1999,30 @@ export function MapCanvas() {
               requestRender();
             })
             .catch((err) => setStatus(`Cannot place a settlement there: ${err}`));
+        }
+      }
+    } else if (tool === "plateSeed") {
+      // GENERATION_UX_REDESIGN_PLAN.md Slice 6 — click to drop a plate seed
+      // (centre + the current class/type draft), shift-click the nearest one
+      // to delete it. Purely a store append/remove — the seeds are submitted
+      // together when the panel's own Generate button is pressed.
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
+          const wrappedX = Math.floor(((wx % m.grid_width) + m.grid_width) % m.grid_width);
+          const wrappedY = Math.floor(wy);
+          const store = useUIStore.getState();
+          if (e.shiftKey && store.plateSeeds.length > 0) {
+            let best = -1; let bestD = Infinity;
+            store.plateSeeds.forEach((s, i) => {
+              const d = (s.x - wrappedX) ** 2 + (s.y - wrappedY) ** 2;
+              if (d < bestD) { bestD = d; best = i; }
+            });
+            if (best >= 0) store.removePlateSeed(best);
+          } else {
+            store.addPlateSeed(wrappedX, wrappedY);
+          }
         }
       }
     } else if (tool === "ridge") {

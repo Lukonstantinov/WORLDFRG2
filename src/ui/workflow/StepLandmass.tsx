@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useUIStore } from "@state/uiStore";
 import {
-  simGeneratePlates, simInvertTerrain, loadImageTemplate,
+  simGeneratePlates, simGeneratePlatesFromSeeds, simInvertTerrain, loadImageTemplate,
   landOpSmoothRoughen, landOpFjords, landOpIslands, landOpFill,
   renderWorldThumbnail, undoAction, getPlateMotion, simSetPlateOceanic,
   type IslandKind,
@@ -24,6 +24,10 @@ const labelStyle: React.CSSProperties = { color: "#8ba3bd", minWidth: 60 };
 const smallBtn: React.CSSProperties = {
   ...genBtn, padding: "3px 8px", fontSize: 11, marginTop: 0,
 };
+const iconBtnStyle: React.CSSProperties = {
+  padding: "0 3px", border: "none", background: "transparent", cursor: "pointer",
+  color: "#c06a6a", fontSize: 10, lineHeight: 1,
+};
 
 function randomSeed(): number {
   return Math.floor(Math.random() * 0xffffffff);
@@ -39,6 +43,17 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
   const clearLasso = useUIStore((s) => s.clearLasso);
   const activeTool = useUIStore((s) => s.activeTool);
   const setTool = useUIStore((s) => s.setTool);
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 6 — plates as their own drawable
+  // step (folded into this panel rather than a separate wizard step, since
+  // renumbering the step list would touch every persisted `stepCompleted`
+  // key; the mechanism the plan actually asks for — draw seeds, Generate
+  // fills in the rest — is what's built here).
+  const plateSeeds = useUIStore((s) => s.plateSeeds);
+  const plateSeedDraft = useUIStore((s) => s.plateSeedDraft);
+  const setPlateSeedDraft = useUIStore((s) => s.setPlateSeedDraft);
+  const removePlateSeed = useUIStore((s) => s.removePlateSeed);
+  const clearPlateSeeds = useUIStore((s) => s.clearPlateSeeds);
+  const [seedsOpen, setSeedsOpen] = useState(plateSeeds.length > 0);
 
   const [areaOpen, setAreaOpen] = useState(true);
   const [smoothAmount, setSmoothAmount] = useState(-0.5);
@@ -111,6 +126,27 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
 
   const handleRandomise = async () => {
     await handleGeneratePlates(randomSeed());
+  };
+
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 6 — "Simulate" = classify & build:
+  // one call derives the Euler poles, classifies every margin, rolls
+  // volcanism and rasterizes the coastline from the drawn (+ auto-filled)
+  // seeds — exactly what `sim_generate_plates_from_seeds` already does, so
+  // this is not a separate step, just Generate reading the drawn seeds.
+  const handleGenerateFromSeeds = async () => {
+    if (simRunning) return;
+    setSimRunning(true);
+    setStatus(`Building plates from ${plateSeeds.length} drawn seed${plateSeeds.length === 1 ? "" : "s"} (+ auto-fill)...`);
+    try {
+      const useSeed = lockSeed ? seed : randomSeed();
+      await simGeneratePlatesFromSeeds(useSeed, Math.max(plateCount, plateSeeds.length), plateSeeds);
+      invalidateTiles();
+      markStepCompleted(1);
+      setLandmassSource("plates");
+      await refreshPlates();
+      setStatus(`Plates built from ${plateSeeds.length} drawn seed${plateSeeds.length === 1 ? "" : "s"} + the rest auto-filled.`);
+    } catch (err) { setStatus(`Error: ${err}`); }
+    setSimRunning(false);
   };
 
   const handleInvert = async () => {
@@ -287,6 +323,74 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
           <div style={{ display: "flex", gap: 8 }}>
             <VariantThumb label="A" data={variants.a} onKeep={() => keepVariant("a")} disabled={simRunning} />
             <VariantThumb label="B (on map)" data={variants.b} onKeep={() => keepVariant("b")} disabled={simRunning} highlight />
+          </div>
+        </div>
+      )}
+
+      {/* GENERATION_UX_REDESIGN_PLAN.md Slice 6 — draw plate seeds. */}
+      <button
+        onClick={() => setSeedsOpen((v) => !v)}
+        style={{ ...genBtn, background: "transparent", border: "1px solid #22384f", textAlign: "left" }}
+      >
+        {seedsOpen ? "▾" : "▸"} Draw Plate Seeds {plateSeeds.length > 0 ? `(${plateSeeds.length})` : ""}
+      </button>
+      {seedsOpen && (
+        <div style={panelStyle}>
+          <div style={{ fontSize: 10, color: "#5a7591", lineHeight: 1.4 }}>
+            Click the map to drop a plate's centre. Seeds you place override the
+            nearest auto-generated site; the rest fill in around them. Drag the
+            "Plates" count above to control the total.
+          </div>
+          <div style={rowStyle}>
+            <button onClick={() => setTool(activeTool === "plateSeed" ? "pan" : "plateSeed")}
+              style={{ ...smallBtn, background: activeTool === "plateSeed" ? "#2a5080" : undefined,
+                color: activeTool === "plateSeed" ? "#fff" : undefined }}>
+              {activeTool === "plateSeed" ? "📍 Click the map…" : "📍 Draw seeds"}
+            </button>
+          </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Class</span>
+            <select value={plateSeedDraft.sizeClass}
+              onChange={(e) => setPlateSeedDraft({ sizeClass: Number(e.target.value) })}
+              style={{ flex: 1 }}>
+              <option value={0}>Giant</option>
+              <option value={1}>Large</option>
+              <option value={2}>Medium</option>
+              <option value={3}>Small</option>
+            </select>
+          </div>
+          <div style={rowStyle}>
+            <span style={labelStyle}>Type</span>
+            <button onClick={() => setPlateSeedDraft({ isOceanic: false })}
+              style={{ ...smallBtn, flex: 1, background: !plateSeedDraft.isOceanic ? "#5a3a1a" : undefined }}>
+              Continental
+            </button>
+            <button onClick={() => setPlateSeedDraft({ isOceanic: true })}
+              style={{ ...smallBtn, flex: 1, background: plateSeedDraft.isOceanic ? "#1a3a5a" : undefined }}>
+              Oceanic
+            </button>
+          </div>
+          {plateSeeds.length > 0 && (
+            <div style={{ maxHeight: 100, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
+              {plateSeeds.map((s, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8090b0" }}>
+                  <span>
+                    {["Giant", "Large", "Medium", "Small"][s.sizeClass]} · {s.isOceanic ? "Oceanic" : "Continental"} @ {s.x},{s.y}
+                  </span>
+                  <button onClick={() => removePlateSeed(i)} style={{ ...iconBtnStyle }}>✕</button>
+                </div>
+              ))}
+            </div>
+          )}
+          <div style={rowStyle}>
+            <button onClick={handleGenerateFromSeeds} disabled={simRunning || plateSeeds.length === 0}
+              style={{ ...smallBtn, flex: 1 }}>
+              Generate from Seeds
+            </button>
+            <button onClick={clearPlateSeeds} disabled={plateSeeds.length === 0}
+              style={{ ...smallBtn, background: "#1a2a40" }}>
+              Clear
+            </button>
           </div>
         </div>
       )}

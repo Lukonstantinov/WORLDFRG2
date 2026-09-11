@@ -82,6 +82,7 @@ pub fn run() {
             goods_import::import_goods_txt,
             template_commands::load_image_template,
             sim_commands::sim_generate_plates,
+            sim_commands::sim_generate_plates_from_seeds,
             sim_commands::sim_set_plate_oceanic,
             sim_commands::sim_invert_terrain,
             sim_commands::sim_generate_terrain,
