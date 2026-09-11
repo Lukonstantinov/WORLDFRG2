@@ -57,6 +57,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, writeExportImage, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
 import { useSettingsStore } from "@state/settingsStore";
 import { getApp } from "@canvas/PixiApp";
+import { exportMapSnapshot } from "@canvas/mapExport";
 import { MAP_THEMES, applyMapTheme } from "@ui/world/mapThemes";
 import { layerGroups } from "@ui/world/Toolbar";
 
@@ -88,6 +89,11 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
   const [busy, setBusy] = useState(false);
   const base = name || "world";
   const activeMapTheme = useUIStore((s) => s.activeMapTheme);
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 8 — the resolution multiplier: real
+  // additional pixel density over the current view (`exportMapSnapshot`
+  // re-runs the exact on-screen draw code at a boosted device-pixel ratio),
+  // not a re-scale of an already-rasterized screenshot.
+  const [resMultiplier, setResMultiplier] = useState(1);
 
   const toggle = (id: string) =>
     setSelected((prev) => {
@@ -97,11 +103,11 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
     });
 
   const handleExportMap = async () => {
-    const canvas = getApp()?.canvas;
-    if (!canvas) { alert("Map canvas not ready."); return; }
+    if (!getApp()) { alert("Map canvas not ready."); return; }
     setBusy(true);
     try {
-      const dataUrl = canvas.toDataURL("image/png");
+      const dataUrl = exportMapSnapshot(resMultiplier);
+      if (!dataUrl) { alert("Could not render the map for export."); setBusy(false); return; }
       let path: string | null = null;
       const def = `${base}_map.png`;
       try {
@@ -212,6 +218,27 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
                   Give the map a moment to finish redrawing before exporting.
                 </div>
               )}
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <label style={dialogLabel}>Resolution</label>
+              <div style={{ display: "flex", gap: 4 }}>
+                {[1, 2, 3, 4].map((m) => (
+                  <button key={m} onClick={() => setResMultiplier(m)}
+                    style={{
+                      flex: 1, padding: "6px 0", borderRadius: 6, cursor: "pointer", fontSize: 12,
+                      border: `1px solid ${resMultiplier === m ? "#4a90d0" : "#1e2e42"}`,
+                      background: resMultiplier === m ? "#16324a" : "#0d1219",
+                      color: resMultiplier === m ? "#cfe2f6" : "#7090b0", fontWeight: resMultiplier === m ? 600 : 400,
+                    }}>
+                    {m}×
+                  </button>
+                ))}
+              </div>
+              <div style={{ color: "#405060", fontSize: 9, marginTop: 3 }}>
+                Extra pixel density over the current view — a real re-render at
+                the higher resolution, not a stretched screenshot. Higher
+                multiples take longer and produce a larger file.
+              </div>
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={onClose} disabled={busy}

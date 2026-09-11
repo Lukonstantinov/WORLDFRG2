@@ -3,6 +3,7 @@ import { initPixiApp, type MapApp } from "@canvas/PixiApp";
 import { TileViewport } from "@canvas/TileViewport";
 import { TileManager } from "@canvas/TileManager";
 import { OverlayManager, type ColonyMarker } from "@canvas/OverlayManager";
+import { setExportSnapshotFn } from "@canvas/mapExport";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "@canvas/PaintOverlay";
 import { useWorldStore } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
@@ -240,17 +241,23 @@ export function MapCanvas() {
   }, []);
 
   /** Render the map to the 2D canvas */
-  const renderFrame = useCallback(() => {
-    const mapApp = appRef.current;
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 8 — the scene-drawing body, factored
+  // out of `renderFrame` so the export snapshot can call the EXACT same code
+  // against an offscreen canvas at a boosted pixel ratio, instead of a second
+  // implementation that could drift from what the screen actually shows
+  // (§8.18's "never reintroduce a second copy" discipline, applied to a
+  // render path rather than a colour table). `w`/`h` are CSS-pixel view
+  // dimensions; `dpr` is the EFFECTIVE device-pixel ratio to render at —
+  // `window.devicePixelRatio` for the live screen, or `devicePixelRatio ×
+  // multiplier` for a higher-resolution export — so the exported image is a
+  // real higher-density render of the SAME view, not an upscaled screenshot.
+  const drawScene = useCallback((
+    ctx: CanvasRenderingContext2D, w: number, h: number, dpr: number,
+  ) => {
     const viewport = viewportRef.current;
     const tileManager = tileManagerRef.current;
     const overlayManager = overlayManagerRef.current;
-    if (!mapApp || !viewport || !tileManager) return;
-
-    const { ctx, canvas } = mapApp;
-    const dpr = window.devicePixelRatio || 1;
-    const w = canvas.width / dpr;
-    const h = canvas.height / dpr;
+    if (!viewport || !tileManager) return;
 
     // Clear
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -376,6 +383,43 @@ export function MapCanvas() {
     // Reset transform
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }, []);
+
+  const renderFrame = useCallback(() => {
+    const mapApp = appRef.current;
+    if (!mapApp) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = mapApp.canvas.width / dpr;
+    const h = mapApp.canvas.height / dpr;
+    drawScene(mapApp.ctx, w, h, dpr);
+  }, [drawScene]);
+
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 8 — export at `multiplier`×
+  // additional pixel density over the current view, by running the identical
+  // `drawScene` onto a fresh offscreen canvas instead of the live one.
+  // Registered on the `mapExport` module singleton so the Export dialog
+  // (which lives outside this component) can call it without MapCanvas
+  // having to lift its internal TileManager/OverlayManager/viewport refs out
+  // as props.
+  const exportSnapshot = useCallback((multiplier: number): string | null => {
+    const mapApp = appRef.current;
+    if (!mapApp) return null;
+    const dpr = window.devicePixelRatio || 1;
+    const cssW = mapApp.canvas.width / dpr;
+    const cssH = mapApp.canvas.height / dpr;
+    const effDpr = dpr * Math.max(1, multiplier);
+    const off = document.createElement("canvas");
+    off.width = Math.max(1, Math.round(cssW * effDpr));
+    off.height = Math.max(1, Math.round(cssH * effDpr));
+    const octx = off.getContext("2d");
+    if (!octx) return null;
+    drawScene(octx, cssW, cssH, effDpr);
+    return off.toDataURL("image/png");
+  }, [drawScene]);
+
+  useEffect(() => {
+    setExportSnapshotFn(exportSnapshot);
+    return () => setExportSnapshotFn(null);
+  }, [exportSnapshot]);
 
   const refreshTiles = useCallback(() => {
     const viewport = viewportRef.current;
