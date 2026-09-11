@@ -710,6 +710,34 @@ unrelated matrilineal failure only); `econ_` 6/6, bit-identical.
 
 **D2 · Give a founded colony a real `river` flag and a real component**, from the
 site's own geography rather than `false` and the founder's id.
+**Scoped, not built — two real obstacles found, recorded so the next attempt
+doesn't re-discover them.** (1) The RIVER half looks like a one-line fix
+(`ColonizeSite` has `coastal`/`delta`/`chokepoint` already computed from tile
+data in `compute_colonizable_sites`, so a `river` field seems like the same
+shape) but `compute_colonizable_sites` samples its own coarse grid at
+`f = grid_w / 120` while the only existing river rasterization
+(`build_coarse_cost`'s `is_river`) runs at `f = grid_w / 700` — a different
+resolution, computed from a DIFFERENT function that isn't even called yet at
+the point `compute_colonizable_sites` runs in `compute_economy`
+(`economy.rs`: colonizable sites at line 45, `cached_coarse_cost` at line 73).
+Reusing it needs either a shared river-cell sampler at colonizable-sites'
+own coarse resolution, or reordering the two calls and resampling — a real
+but small plumbing task, not a data problem. (2) The COMPONENT half is the
+harder one and is NOT a small fix: `rebuild_routes`' own #4 comment states
+plainly that copying the founder's `component` is load-bearing — "every hub
+founded DURING the campaign — a colony, a satellite — falls here, since
+`base_days` only ever covers the founding set: straight-line fallback." A
+colony's `component` currently BORROWS its founder's connectivity precisely
+because a freshly-founded hub has no pathfound route of its own. Replacing it
+with the site's own real geographic component (which is very often DIFFERENT
+— colonization is usually overseas by design) would, without also building a
+real founder→colony route to substitute for the missing `base_days` entry,
+silently strand every future colony outside its own founder's trade network —
+the same "silent isolation" failure mode Stage B's component fix (§9 B2) was
+built to catch elsewhere. Doing this safely needs a founder-to-site route
+computed at founding time (`compute_coarse_route`, already built for rule 35,
+is the right tool) wired into `rebuild_routes` as a seeded route rather than a
+component re-assignment — real, scoped work, not attempted this session.
 
 **D3 · Carry worldgen's river CLASS into the campaign** — mouth / confluence /
 head-of-navigation, which `compute_habitability_fields` already computes — instead
