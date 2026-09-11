@@ -201,6 +201,51 @@ What is missing is one backend command (`place_settlement_at(x, y)` returning a
 fully-scored `Settlement`), one tool, and **one rule**: re-running "Find
 Settlements" must not silently delete hand-placed cities.
 
+### F10 · Export is Forge-only — and the campaign half has more overlays than the world half
+
+The Export button is gated `isLoaded && appMode === "forge"`. So a **finished
+campaign cannot be exported at all**: five hundred years of realms, trade flows,
+merchant-house control, colonies, plagues, migration corridors and named figures
+are on the map, and there is no way to get any of it onto a page.
+
+That is backwards from where the value is. Counting `overlayVisibility`'s ~50
+keys, **17 are campaign-only** — `states`, `houseControl`, `dynamicFlow`,
+`tradeHeat`, `merchantRoutes`, `campaignCorridors`, `colonies`, `plagueZones`,
+`guildCities`, `landmarks`, `figureMarks`, `dynastyLinks`, `speculation`,
+`coinDominance`, `migrations`, `expeditions`, `futures` — and the map a player
+most wants to print is the one at the end of a campaign, not the one before it
+started.
+
+Nothing technical stands in the way: `OverlayManager` draws campaign overlays
+through the same `render(ctx)` as world overlays, so a frontend-side export
+(F7's architecture) gets them for free. This is a gate to remove, not a feature
+to build.
+
+### F11 · `layerOpacity` is a slider that does nothing
+
+`uiStore.layerOpacity` exists, the Toolbar renders it with a live percentage
+readout, and `mapThemes.ts` sets it per plate (`layerOpacity: theme.layerOpacity
+?? 1`). **Nothing reads it.** `grep` finds exactly three consumers — the two
+Toolbar lines that draw the slider, and the map-theme line that writes it — and
+zero renderers. The base layer is drawn at full opacity whatever the slider says.
+
+The contrast one field away proves it is an omission rather than a design: 
+`provinceOpacity` is wired (`MapCanvas` pushes it into
+`OverlayManager.setProvinceOpacity`) and works.
+
+So "the opacity should carry into the PNG and PDF" is really two tasks, and the
+first is the bigger one: **make opacity apply on screen at all**, then get it
+into the export for free by exporting through the same renderer.
+
+### F12 · The map-plate system stops at the world/campaign line
+
+Of the twelve MAP PLATES (§8.17), **all twelve are worldgen plates** and exactly
+one campaign overlay (`states`, in the Political plate) appears in any of them.
+There is no "the powers of this century" plate, no trade plate, no crisis plate —
+so the campaign half, which has the most to show, has no compositions at all and
+every campaign view has to be assembled overlay by overlay from memory. That is
+the exact problem §8.17 says map plates exist to solve, left half-solved.
+
 ### F9 · Nothing about first-run tells you what to do
 
 The wizard is 13 steps; the panel is 220 px wide; the primary button
@@ -226,7 +271,7 @@ grid-size presets (New World dialog) — and none of them produces a *world*.
 
 ---
 
-## 3. The plan — nine slices, in dependency order
+## 3. The plan — eleven slices, in dependency order
 
 Each slice names its own gate. Slices 1–3 are backend and independently
 verifiable; 4–9 are frontend and verified by `npx tsc --noEmit` plus looking at
@@ -415,6 +460,13 @@ The export becomes a **composition**, not a layer dump:
   Rust assembles the document. Page size (A4/A3/Letter/custom) and DPI are user
   settings with A3 @ 300 dpi as the default.
 
+- **Available in BOTH modes** (F10). The export button loses its
+  `appMode === "forge"` gate. In Chronicle it offers the campaign overlays as
+  layers like any other, so the end-of-campaign map — realms, trade flows, house
+  control, plague, colonies — is exportable, which is the map most worth printing.
+  The export dialog is one component in both modes; only the layer list differs,
+  and it is derived either way.
+
 ### Slice 9 · First-run legibility (F9)
 
 The wizard gets a two-mode head: **Quick** (preset → Generate → done, the 90%
@@ -425,6 +477,67 @@ layers — `layerReady` is the precedent); and settings that the run-all now
 honours (Slice 3) are visibly the same settings, not a parallel set.
 
 ---
+
+### Slice 10 · Per-layer opacity, applied on screen and therefore in the export (F11)
+
+`layerOpacity` is currently a slider wired to nothing, so "carry the opacity into
+the PNG and PDF" starts by making it mean something at all.
+
+- **Wire the base layer's opacity** the way `provinceOpacity` is already wired:
+  the store value reaches the renderer, and the map dims. One consumer, the same
+  path the province fill already uses.
+- **Give each OVERLAY its own opacity**, not just the base layer. A map is read by
+  pushing some things back and bringing others forward — provinces faint under
+  sharp rivers, a trade-flow web at 40% over a full-strength coastline — and today
+  only provinces can do that. `overlayOpacity: Record<string, number>` alongside
+  the existing `overlayVisibility`, defaulting to 1 so nothing changes until it is
+  touched.
+- **The export inherits it by construction.** Because the export renders through
+  the SAME `OverlayManager.render(ctx)` and the same tile path (Slice 8), the
+  exported page has the opacities you set without the export knowing what opacity
+  is. This is the whole argument for exporting frontend-side rather than
+  reimplementing compositing in Rust — a second implementation would drift from
+  the screen exactly as F5 and F6 already did.
+- **PDF note**: per-layer opacity is preserved by flattening each composited
+  raster page, so a partly-transparent overlay prints as it looks. The vector text
+  layer stays fully opaque on top; a 40% place name is a printing defect, not a
+  style.
+- Map plates set opacity as part of their composition (the `MapTheme.layerOpacity`
+  field that already exists and is already ignored).
+
+### Slice 11 · More plates, and a symbol-style registry (F12)
+
+Two different things, deliberately separated because they are often conflated:
+
+**(a) More PLATES — compositions.** Campaign plates are the gap: *Powers* (realms
++ province borders + capitals + house control), *Commerce* (dynamic flow + trade
+heat + corridors + merchant routes), *Crisis* (plague + unrest + migration +
+abandoned settlements), *Colonial* (colonies + lifelines + expeditions). Plus the
+world plates the set is missing: *Hydrological Basins* (watersheds, river order,
+lake catchments) and *Nautical Chart* (bathymetry + reefs + storms + shipping
+lanes on a chart-style ground).
+
+**(b) More STYLES — how a feature is DRAWN.** This is your "city markings" ask, and
+it is a registry, not a plate. §8.11 already established exactly this pattern for
+type: one `labelStyles` registry, themed presets, per-class override, edited in
+Settings. A third registry does for symbols what that did for labels:
+
+- **Settlements**: graduated circle (today) · rank-tiered dot · square/star by
+  size class · pictorial (the classic town-and-tower atlas mark) · circle-with-
+  centre-dot (topographic convention).
+- **Rivers**: discharge-tapered (today) · constant weight · double-line for
+  navigable trunks · dashed for the intermittent/dries-up class §8.24a4 already
+  models but draws only one way.
+- **Lakes**: filled (today) · outlined · filled-with-shore-band, keeping the
+  minimum-symbol rule §8.24a3 paid for.
+- **Borders**: single line · hatched frontier band · pale casing.
+
+Three rules carried over from §8.11, because that registry already learned them:
+every symbol draws through the registry (never a `ctx.arc` at a call site, or that
+class silently escapes the theme and the Settings panel); a style must survive
+export, which it does for free once symbols live in one place; and a plate may
+name a symbol theme, so *Nautical Chart* can bring chart conventions with it
+rather than only a colour ramp.
 
 ## 4. Decisions taken, and the two still open
 
