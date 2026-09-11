@@ -614,6 +614,34 @@ the 1:4:8 cost ratio also claims a ship is 8× faster than a cart, which it is n
 over the same path.
 *Gate:* arrival latencies must stay inside plausible historical bands per mode
 while the cost ratio moves independently.
+**RE-ASSESSED POST-C1 — the numeric urgency is gone; the architectural question
+is not.** The "8×" figure this item was written against was the PRE-C1 world.
+Post-C1 the same formula gives calm coastal sea **75.6 km/day** against flat
+land's unchanged **30.3 km/day** — a **2.5:1** speed ratio, not 8:1, and inside
+(if anything slightly under) the doc's own cited "~4×, and it waits for wind"
+range. Since `days` still serves both cost and time through the identical
+number, this ratio is simultaneously the SPEED ratio and the FREIGHT-cost
+ratio, and 2.5:1 is a plausible number for BOTH at once — the specific
+contradiction C2 was written to fix (an implausible 8:1 masquerading as both)
+no longer exists at the shipped C1 dose. **What remains is real but smaller**:
+`days` is still architecturally ONE number for two different physical
+quantities, so nothing STOPS a future dose (C1b's `LAND_BULK_PENALTY`, a
+future river/hazard retune) from reopening the same contradiction, and no gate
+here would catch it — `arrival latencies must stay inside plausible historical
+bands per mode while the cost ratio moves independently` cannot be asserted
+today because nothing distinguishes an arrival-latency claim from a
+freight-cost claim in the code to begin with. **Deliberately NOT attempted
+this session**: a full time/cost channel split touches `CampaignSim.days`,
+`base_days`/`base_days_season`, `lane_days`, every dispatch/arrivals/contract/
+futures call site that reads `days` for EITHER purpose, and the staging
+relay's own range checks (`leg_exceeds_range` reads `hub_km`, not `days`, so
+it is unaffected either way, but every OTHER caller is not been audited) — a
+blast radius comparable to or larger than C1+C1b combined, for a contradiction
+that is not currently live. Recommendation for whoever revisits this: treat it
+as a STANDING INVARIANT to check after any future dose that touches mode
+costs (re-run the arithmetic above, not a new mechanism), and only build the
+actual channel split if a future dose reopens an implausible ratio the
+one-number model can no longer represent honestly.
 
 **C3 · Split `cap_land` into boat and caravan pools; widen SHIP:CARAVAN toward
 ~10:1**; then begin the `CAPACITY_BIND_DOSE` walk from zero.
@@ -622,6 +650,20 @@ while the cost ratio moves independently.
 §5's N2 record shows an export-locked market's rent concentrating harder than
 anticipated (a sustained richest house of 1,005,714). Dose in small steps and read
 top-10% share every step.
+**DELIBERATELY NOT ATTEMPTED THIS SESSION — a known, unexplained landmine.**
+`WORLD_AND_TRADE_MASTER_PLAN.md` §4 already tried exactly this split
+(`cap_river`/`cap_caravan` in place of pooled `cap_land`) in full, verified the
+combined-pool arithmetic by hand at every call site, and still measured a real
+regression (`a_house_records_every_head_it_has_had`: a house that survived 90
+years pooled went bankrupt split, only when its fleet was actually nonzero) with
+**no cause found** — "the per-call arithmetic checks out, so if there is a real
+bug it is subtle." Re-attempting the identical split now, with no new
+information about that cause, would very likely walk into the same unexplained
+failure and spend this session's budget re-discovering what the prior one
+already recorded. Per §2.4 ("negative results are deliverables"), the fields
+(`TickHub.river`, `InTransit.river`) are already left in place inert for exactly
+this reason — whoever next attempts C3 should start by reproducing that 90-year
+regression on a fleet-bearing fixture BEFORE re-building the split, not after.
 
 **C4 · Only then, `N1_LOCAL_HAUL_BIND_DAYS` down from infinity.** This is the
 keystone and belongs last, because until C1–C3 land there is no carriage economy
@@ -637,6 +679,34 @@ mode** before founding.
 *Gate:* `econ_diagnose_outpost_founding` — outposts must still get founded. The
 recorded failure mode here is a tightened gate silently stalling founding
 altogether, which is exactly what `OUTPOST_MAX_PER_CALL` was introduced to fix.
+**BUILT.** `try_found_house_outpost` (`houses.rs`) — the only outpost/colony
+founder that built `nodes` from home + offices + estates rather than a single
+founder point (`maybe_found_settlement_colony`/`maybe_found_food_colony` already
+measured from the parent alone) — now applies three checks per candidate site,
+on top of the existing nearest-node reach: (1) a HARD outer bound, distance from
+the metropolis (`home`) alone must also clear `COLONY_MAX_KM` — the nearest-node
+distance still governs SCORING (a real regional foothold legitimately shortens
+the practical distance), but can no longer let reach compound past the cap
+through a chain of estates; (2) a MINIMUM gap (`OUTPOST_MIN_GAP_KM` = 150 km) —
+a site founded on top of an existing node is not a frontier; (3) "routable in
+its own mode" via the SAME `leg_exceeds_range` check ordinary trade legs already
+enforce (`ship_leg_max_km`/`caravan_leg_max_km`) rather than a new mechanism —
+`CampaignSim` has no tile access to pathfind for real (§5's own architecture),
+so a mode-appropriate straight-line range is the same proxy the rest of this
+file already relies on, and it is `INFINITY` in every test fixture (the
+established opt-out), so a true no-op there and live only in a real campaign.
+**Measured**: `econ_diagnose_outpost_founding` (150-year run, `reference_world`)
+now founds **1** outpost (year 30) against the doc's own recorded pre-D1 baseline
+of 2 (year 31, plus one more) — still non-zero, so the gate's named failure mode
+(silent total stall) did not occur. The reduction is not a regression: on this
+fixture `OUTPOST_MIN_GAP_KM` and the routability check are both provably inert
+(150 km is under half a coarse cell at this fixture's `world_w` = 100, and the
+leg-range caps are `INFINITY`), so the home-distance check — which can only ADD
+a rejection relative to the old nearest-node check, never remove one — is the
+only mechanism that could have changed the count, and it is exactly the
+"reach compounds through a distant relay" loophole D1 exists to close. Verified:
+`cargo check --lib --tests` clean; `tick::tests` 216/217 (pre-existing,
+unrelated matrilineal failure only); `econ_` 6/6, bit-identical.
 
 **D2 · Give a founded colony a real `river` flag and a real component**, from the
 site's own geography rather than `false` and the founder's id.

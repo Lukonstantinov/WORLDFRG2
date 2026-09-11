@@ -1235,6 +1235,10 @@ impl CampaignSim {
             network_coastal |= h.coastal;
         }
         let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
+        // D1 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) — the minimum gap, in
+        // the same cell units `cap`/`nearest_node_dist` already use.
+        let min_gap = OUTPOST_MIN_GAP_KM * self.world_w / EARTH_EQUATOR_KM;
+        let km_per_cell = KM_EQUATOR / self.world_w.max(1.0);
         // Per-good world output — the proxy for deciding a valuable good is still
         // UNEXPLOITED and so worth reaching a frontier province to open.
         let world_out = self.world_good_output();
@@ -1253,6 +1257,29 @@ impl CampaignSim {
             if !self.house_knows(hi, s.province) { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
+            // D1 — a real outer bound from the METROPOLIS specifically, not the
+            // nearest network node: without this a chain of estates each up to
+            // `cap` from the last lets a house's total reach from home compound
+            // past `COLONY_MAX_KM` indefinitely. The office/estate relay above
+            // still governs which node a site is SCORED against (a real regional
+            // foothold legitimately shortens the practical distance); this only
+            // stops the compounding.
+            let d_home = self.nearest_node_dist(
+                &[(self.hubs[home].x, self.hubs[home].y)], s.x, s.y);
+            if d_home > cap { continue; }
+            // D1 — a site founded on top of an existing node is not a frontier.
+            if d < min_gap { continue; }
+            // D1 — routable in its own mode: reuse the SAME per-leg range check
+            // ordinary trade already enforces (`leg_exceeds_range`) rather than
+            // inventing a second one; `CampaignSim` has no tile access to pathfind
+            // for real (§5), so a mode-appropriate straight-line range is the same
+            // proxy the rest of this file already relies on. `ship_leg_max_km`/
+            // `caravan_leg_max_km` are `INFINITY` in every test fixture (the
+            // established opt-out — see their own doc comment), so this is a true
+            // no-op there and live only in a real campaign.
+            if Self::leg_exceeds_range(d * km_per_cell, s.coastal, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                continue;
+            }
             // Site premiums (G6): a delta or a land→sea chokepoint is exactly where
             // cargo transships, and the colony-founding path already prices both
             // heavily — the house outpost path used to read neither, so an outpost

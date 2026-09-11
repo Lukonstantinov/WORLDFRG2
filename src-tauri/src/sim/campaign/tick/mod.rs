@@ -1176,6 +1176,14 @@ const OUTPOST_INPUT_BIAS: f32 = 1.0;
 const OUTPOST_GRADUATE_YEARS: u32 = 30;
 /// …and its owning house must be at least this rich to make the investment.
 const OUTPOST_GRADUATE_WEALTH: f32 = 60_000.0;
+/// D1 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) — the minimum straight-line
+/// distance a candidate outpost site must sit from every one of a house's own
+/// network nodes (home/offices/estates). Founding literally beside a node the
+/// house already holds adds no reach — it is not a frontier, just a second
+/// building at the same address. Stated in km per rule 25 and small relative to
+/// `COLONY_MAX_KM` (2,500) on purpose: this only screens out the degenerate
+/// zero-distance case, it is not another regional-range knob.
+const OUTPOST_MIN_GAP_KM: f32 = 150.0;
 // ── Route posts (TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 5) — colony_kind = 4.
 //    Unlike a resource outpost (colony_kind = 2, an estate) a route post is a REAL
 //    hub from birth (`is_estate = false`, via `create_market_colony`) sited where a

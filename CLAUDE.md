@@ -5655,8 +5655,42 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     noop_at_zero` plus `tick::tests` 216/217 (the one
                                     failure pre-existing, unrelated) and `econ_` 6/6
                                     bit-identical. Dosing it is separate, unstarted
-                                    work. C2-C4 and Stage D remain unstarted. Plus 7
-                                    open questions
+                                    work. **C2 re-assessed, not built** — its "8×
+                                    too fast" numeric complaint was pre-C1; post-C1
+                                    the same formula gives coastal sea 75.6 km/day
+                                    against land's unchanged 30.3 (2.5:1, inside the
+                                    doc's own "~4×" citation), so the specific
+                                    contradiction is gone — the architectural split
+                                    (`days` still serves both cost and time) is
+                                    deferred as a standing invariant to re-check, not
+                                    built, given its blast radius. **C3 deliberately
+                                    skipped** — `WORLD_AND_TRADE_MASTER_PLAN.md` §4
+                                    already tried this exact `cap_land` split and hit
+                                    an unexplained regression (a 90-year house went
+                                    bankrupt split, arithmetic verified correct);
+                                    re-attempting with no new information would very
+                                    likely re-discover the same failure. C4 remains
+                                    last by design. **D1 BUILT** —
+                                    `try_found_house_outpost` (`houses.rs`) now caps
+                                    distance from the METROPOLIS specifically (not
+                                    just the nearest network node, which still
+                                    governs scoring), adds a 150 km minimum gap, and
+                                    checks mode-legal range via the SAME
+                                    `leg_exceeds_range` ordinary trade already uses
+                                    (a no-op in every test fixture, live only in a
+                                    real campaign). `econ_diagnose_outpost_founding`
+                                    now founds 1 outpost (was 2) on the reference
+                                    fixture — not a regression: the reduction is the
+                                    home-distance check doing exactly its job (it can
+                                    only ADD a rejection relative to the old check),
+                                    and founding did not silently stall (the gate's
+                                    own named failure mode). `econ_fidelity_scorecard`/
+                                    `_large_world` diffed line-for-line against a
+                                    stashed pre-D1 run of the same commit — every
+                                    printed figure bit-identical, confirmed rather
+                                    than assumed (see `docs/SCOREBOARD.md`
+                                    2026-09-11d). D2/D3 remain unstarted.
+                                    Plus 7 open questions
                                     (§10, all answered — A→B→C order, isolated markets
                                     may starve, a ~3,000 km trade horizon, the
                                     inheritance gate goes multi-seed before Stage C,
