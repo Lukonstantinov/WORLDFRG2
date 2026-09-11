@@ -78,6 +78,11 @@ interface UIStore {
   statusText: string;
   inspectedCell: { wx: number; wy: number } | null;
   workflowStep: WorkflowStep;
+  /** GENERATION_UX_REDESIGN_PLAN.md Slice 9 (F9) — the wizard's two-mode head.
+   *  "quick" = preset → Generate → done, the 90% path; "detailed" = the full
+   *  13-step wizard, unchanged. Purely a DISPLAY choice — every setting it
+   *  reads or writes is the same state either mode uses. */
+  wizardMode: "quick" | "detailed";
   stepCompleted: Record<number, boolean>;
   simRunning: boolean;
   overlayVisibility: Record<string, boolean>;
@@ -310,6 +315,7 @@ interface UIStore {
   setFuturesFocus: (f: { city?: string; holder?: string; good?: string } | null) => void;
   setSelectedChain: (id: number | null) => void;
   setWorkflowStep: (step: WorkflowStep) => void;
+  setWizardMode: (mode: "quick" | "detailed") => void;
   markStepCompleted: (step: number) => void;
   setStepsCompleted: (steps: number[]) => void;
   setSimRunning: (running: boolean) => void;
@@ -431,6 +437,7 @@ export const useUIStore = create<UIStore>((set) => ({
   statusText: "",
   inspectedCell: null,
   workflowStep: 1,
+  wizardMode: "quick",
   stepCompleted: {},
   simRunning: false,
   overlayVisibility: {
@@ -727,6 +734,7 @@ export const useUIStore = create<UIStore>((set) => ({
       activeMapTheme: null,
     });
   },
+  setWizardMode: (mode) => set({ wizardMode: mode }),
 
   markStepCompleted: (step) =>
     set((state) => {

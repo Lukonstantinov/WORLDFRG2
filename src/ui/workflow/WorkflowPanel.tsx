@@ -60,6 +60,8 @@ export function WorkflowPanel() {
   const setStatus = useUIStore((s) => s.setStatus);
   const landmassSource = useUIStore((s) => s.landmassSource);
   const setLandmassSource = useUIStore((s) => s.setLandmassSource);
+  const wizardMode = useUIStore((s) => s.wizardMode);
+  const setWizardMode = useUIStore((s) => s.setWizardMode);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const terrainParams = useUIStore((s) => s.terrainParams);
   const setTerrainParams = useUIStore((s) => s.setTerrainParams);
@@ -335,6 +337,23 @@ export function WorkflowPanel() {
         World Generation
       </div>
 
+      {/* GENERATION_UX_REDESIGN_PLAN.md Slice 9 (F9) — the two-mode head.
+          Purely a display choice: both modes read/write the same state, so
+          switching never loses anything a preset or a step already set. */}
+      <div style={{ display: "flex", gap: 3, marginBottom: 2 }}>
+        {(["quick", "detailed"] as const).map((m) => (
+          <button key={m} onClick={() => setWizardMode(m)}
+            style={{
+              flex: 1, fontSize: 10.5, padding: "3px 0", borderRadius: 4, cursor: "pointer",
+              border: `1px solid ${wizardMode === m ? "#4a90d0" : "#26374d"}`,
+              background: wizardMode === m ? "#16324a" : "#0e1826",
+              color: wizardMode === m ? "#cfe2f6" : "#6a86a6", fontWeight: wizardMode === m ? 600 : 400,
+            }}>
+            {m === "quick" ? "Quick" : "Detailed"}
+          </button>
+        ))}
+      </div>
+
       {/* GENERATION_UX_REDESIGN_PLAN.md Slice 5 — world presets: pick one,
           press Generate World below, get a whole world. */}
       <div style={{ opacity: frozen ? 0.5 : 1, pointerEvents: frozen ? "none" : undefined }}>
@@ -405,6 +424,35 @@ export function WorkflowPanel() {
 
       <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
 
+      {/* GENERATION_UX_REDESIGN_PLAN.md Slice 9 \u2014 the Quick-mode summary:
+          no 13-step list, just where the world stands and the one button
+          that matters next. Switching to Detailed shows the full wizard on
+          the SAME state, so nothing is lost by starting here. */}
+      {wizardMode === "quick" && (
+        <div>
+          {canAdvance(10) ? (
+            <>
+              <div style={{ fontSize: 10.5, color: "#60a060", marginBottom: 4 }}>
+                \u2713 World generated \u2014 settlements, trade and economy are built.
+              </div>
+              <button onClick={finalizeAndPlay} disabled={simRunning}
+                style={{ ...navBtn, width: "100%", background: "#2a6a3a", color: "#a0e0b0", fontWeight: 600, padding: "6px 0" }}>
+                \ud83d\udd12 Finalize &amp; Play \u2192
+              </button>
+            </>
+          ) : (
+            <div style={{ fontSize: 10.5, color: "#5a7390", lineHeight: 1.4 }}>
+              Pick a preset above (or just press Generate World) for a complete,
+              playable world \u2014 settlements, trade routes and economy included.
+            </div>
+          )}
+          <button onClick={() => setWizardMode("detailed")}
+            style={{ ...navBtn, width: "100%", marginTop: 6, background: "transparent", color: "#6a86a6" }}>
+            Switch to Detailed for step-by-step control \u2192
+          </button>
+        </div>
+      )}
+
       {/* Steps \u2014 Geography group (1, 0, 2-6) then Detail group (7-10):
           settlements, trade goods, political & economy. ALL are generation and run
           in Forge; finalizing after Economy hands the finished world to Chronicle.
@@ -413,7 +461,7 @@ export function WorkflowPanel() {
           rather than a number precisely so it can sit out of numeric order without
           reading as a mistake \u2014 and so its id (and everyone's persisted
           stepCompleted map) never had to be renumbered. */}
-      {STEP_INFO.map(({ step, label, desc }) => {
+      {wizardMode === "detailed" && STEP_INFO.map(({ step, label, desc }) => {
         const isActive = workflowStep === step;
         const isDone = stepCompleted[step] === true;
         // Only geography steps (1-6) lock once the world is finalized (frozen);
