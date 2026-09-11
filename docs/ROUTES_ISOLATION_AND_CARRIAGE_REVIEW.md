@@ -1,13 +1,18 @@
 # Routes, Isolation & Carriage — a review, five measured bugs, and a plan
 
-**Status: STAGE A + B BUILT AND GATED; STAGE C NOT STARTED.** This began as analysis
-only; §10's questions have since been answered (A → B → C order, isolated markets may
-starve, a ~3,000 km regional trade horizon, `econ_inheritance_rules_fragment_
-differently` to go multi-seed before any Stage C dose walk) and Stages A and B are
-now implemented — see each item's own status line below. Stage C (the carriage/
-economy dose walk) is unstarted; the multi-seed gate work it depends on has not been
-done either. It follows §2.4's rules: every proposal carries a **gate that is not its
-own target**, and the findings are written down whether or not anyone acts.
+**Status: STAGE A + B BUILT AND GATED; STAGE C's OWN PREREQUISITE BUILT; STAGE C NOT
+STARTED.** This began as analysis only; §10's questions have since been answered (A → B
+→ C order, isolated markets may starve, a ~3,000 km regional trade horizon,
+`econ_inheritance_rules_fragment_differently` to go multi-seed before any Stage C dose
+walk) and Stages A and B are now implemented — see each item's own status line below.
+`econ_inheritance_rules_fragment_differently` is now multi-seed (`INHERITANCE_GATE_
+SEEDS = [42, 1337, 7]`, both of the gate's own assertions checked per seed plus a
+seed-averaged margin, ~6 min in debug) — see §8.15 of `CLAUDE.md` for the gate's own
+description and a fresh 6-seed robustness re-measurement (both contrasts now 6/6, up
+from the stale 5/6 this doc's own §10 Q1 answer was written against). Stage C (the
+carriage/economy dose walk itself) is still unstarted. It follows §2.4's rules: every
+proposal carries a **gate that is not its own target**, and the findings are written
+down whether or not anyone acts.
 
 It goes *underneath* `docs/TRADE_AND_MARKET_REVIEW.md` (which reviews the price
 mechanism) and beside `docs/TECTONICS_AND_ISOLATION_PLAN.md` Part A (which
@@ -609,6 +614,17 @@ almost everything sets is the thing being fixed.
    at the point where it is decidable). **I would make it multi-seed before touching
    a single dose**, but this is a call about the project's own instrument and yours
    to make.
+   **BUILT.** Three seeds (`INHERITANCE_GATE_SEEDS = [42, 1337, 7]`, a prefix of the
+   6-seed robustness diagnostic's own list chosen by position, not by outcome), each
+   run under all four laws; the wiring checks and both statistical claims (houses
+   ever founded, mean wealth per house) are asserted per seed, with the houses-ever
+   MARGIN floor (1.05×) checked on the seed-average rather than per seed, since one
+   seed alone can measure as low as a 1.02× ratio despite the contrast being real
+   in aggregate. A fresh 6-seed re-measurement, done to calibrate this change, found
+   the model itself had moved since the stale numbers this answer was written
+   against — both contrasts now hold 6/6 (were 5/6), most likely from Stage A/B's
+   routing fixes though that was not isolated by bisection. See `CLAUDE.md` §8.15
+   for the gate's full description and the corrected robustness table.
 
 2. **Should a truly isolated continent be allowed to starve?** B2 will create real
    isolated markets for the first time. `TECTONICS_AND_ISOLATION_PLAN.md` Part A

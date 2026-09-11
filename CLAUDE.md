@@ -2446,12 +2446,22 @@ Four rules for anyone changing this:
   observation-only game the chronicle is the product.
 
 Gate: `cargo test --lib econ_inheritance_rules_fragment_differently -- --nocapture` runs
-ONE world four times, changing only the law, and asserts the rule is wired (partible
-divides, the rest do not) and that it MATTERS — **more houses ever founded** (now by a
-≥1.05× margin rather than a bare `>`, which on a near-tie is a coin flip dressed as a
-gate: crisis relief once flipped it at 190 against 196) **and lower mean wealth per
-house**. Note what it does *not* claim: the top share and Gini do not fall under
-partible, because a division adds small firms at the bottom as fast as it trims the top.
+**THREE worlds** (`INHERITANCE_GATE_SEEDS = [42, 1337, 7]`, a prefix of the robustness
+diagnostic's own 6-seed list chosen by position rather than by which seeds happen to
+pass) four times each, changing only the law, and asserts the rule is wired on every
+seed (partible divides, the rest do not) and that it MATTERS — **more houses ever
+founded** (per seed, plus a ≥1.05× margin on the seed-AVERAGE — a single seed's ratio can
+dip as low as 1.02, so the margin floor is checked on the average rather than per seed,
+which would reject a real contrast for landing on an unlucky world) **and lower mean
+wealth per house** (per seed — this one holds 6/6 in the full sweep, the stronger of the
+two). Note what it does *not* claim: the top share and Gini do not fall under partible,
+because a division adds small firms at the bottom as fast as it trims the top.
+**Multi-seeded per `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §10 Q1** — a single fixed
+seed is what let realm formation, crisis relief, the trade horizon and
+`COMFORT_IMPORT_FRAC` each perturb this gate in turn without the gate itself being able
+to tell a real confounder from ordinary cross-world noise (see the cautionary tale
+below). Runtime cost: ~6 minutes in debug (vs. ~2 for the old single-seed form) — the
+full 6-seed sweep stays `#[ignore]`d for exactly that reason.
 
 Two companions were added alongside. `a_division_moves_capital_and_creates_none` asserts
 the zero-sum invariant AT `divide_estate`, where it is decidable, instead of inferring it
@@ -2466,13 +2476,13 @@ length, and **wrong**. The sweep had been run while `COMFORT_IMPORT_FRAC` still 
 `a7ff520`'s 0.60 — the very dose that had inverted this gate in the first place. Re-run at
 the corrected 0.30:
 
-| contrast | @0.60 (broken) | @0.30 (shipped) |
-|---|---|---|
-| more houses ever founded | 6/6 | 5/6 |
-| more houses still standing | 4/6 | 2/6 |
-| lower top share | 2/6 | 3/6 |
-| **lower mean wealth per house** | **1/6** | **5/6** |
-| no MORE capital in total | 1/6 | 5/6 |
+| contrast | @0.60 (broken) | @0.30 (shipped, then) | @0.30 (shipped, 2026-09-11 re-measure) |
+|---|---|---|---|
+| more houses ever founded | 6/6 | 5/6 | **6/6** |
+| more houses still standing | 4/6 | 2/6 | 5/6 |
+| lower top share | 2/6 | 3/6 | 4/6 |
+| **lower mean wealth per house** | **1/6** | **5/6** | **6/6** |
+| no MORE capital in total | 1/6 | 5/6 | 4/6 |
 
 The claim is real; the dose genuinely broke it. **A seed sweep only tells you about the
 world you ran it in** — measuring robustness inside an already-distorted economy produced
@@ -2480,6 +2490,14 @@ a thorough, plausible, false conclusion ("the merchant pool is not conserved; fi
 is a multiplier on merchant wealth"), which is an artefact of the 0.60 dose and not a
 property of the model. Before concluding an assertion is unsound, check that the world you
 measured in is not itself the thing that is broken.
+
+**The 2026-09-11 column is why the gate went multi-seed instead of staying at 5/6.** Both
+of the gate's own assertions (houses-ever direction, mean-wealth direction) now measure
+6/6 — a real improvement, most likely from Stage A/B's routing fixes landing between the
+two measurements, though that was not isolated and re-confirmed by bisection. The lesson
+generalises past this one dose: **a stale sweep is not a fact about the model, it is a
+fact about the code and the dose at the time it was run** — re-measure before trusting an
+old conclusion in EITHER direction, not only when a result looks suspicious.
 
 **THE TWO GATES DISAGREE ABOUT THAT DOSE, and the one that set it isn't about trade.**
 0.30 was chosen because it restores this gate — weak grounds for a demand parameter, so
@@ -5468,10 +5486,14 @@ ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
                                     grid per tile, price mountain passes by minimum,
                                     build trade components from ROUTED reachability
                                     instead of Euclidean distance, guarantee every
-                                    settlement a route with fall-through); STAGE C
-                                    (the carriage/economy dose walk) NOT STARTED. The
-                                    route/connectivity/carriage counterpart to TRADE_AND_
-                                    MARKET_REVIEW (which reviews the PRICE mechanism).
+                                    settlement a route with fall-through); §10 Q1's own
+                                    PREREQUISITE for Stage C — make
+                                    `econ_inheritance_rules_fragment_differently`
+                                    multi-seed before touching a single dose — is now
+                                    BUILT too (see §8.15's gate description); STAGE C
+                                    (the carriage/economy dose walk itself) NOT STARTED.
+                                    The route/connectivity/carriage counterpart to
+                                    TRADE_AND_MARKET_REVIEW (which reviews the PRICE mechanism).
                                     Its headline is that the economy's problem is not
                                     missing mechanism: **ELEVEN built, wired, gated
                                     mechanisms ship at a dose of exactly zero**
