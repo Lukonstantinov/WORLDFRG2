@@ -2274,6 +2274,9 @@ export interface Settlement {
   dead?: boolean;   // abandoned/collapsed → drawn as a † ruin cross, not a dot
   isNew?: boolean;  // founded this campaign, still young → gold founding star
   hubClass?: number; // 0 ordinary · 1 trade hub · 2 entrepôt (campaign, earned live)
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — the settlement editor.
+  manual?: boolean; // hand-placed via placeSettlementAt, not from a generated batch
+  edited?: boolean; // any field of a generated settlement has been hand-overridden
 }
 
 /** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct.

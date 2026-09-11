@@ -229,6 +229,18 @@ export async function simGenerateSettlements(
   return invoke("sim_generate_settlements", { seed, riversJson, realism, maxSettlements });
 }
 
+// GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — place one settlement by hand,
+// fully derived (habitability/name/population) through the same chain a
+// generated one uses. Read-only on the backend; the caller adds the result to
+// its own settlement array. `existing` is the settlement list already held
+// (for a real crossroads/access read against real neighbours).
+export async function placeSettlementAt(
+  x: number, y: number, riversJson: string, existing: { x: number; y: number }[],
+): Promise<import("@types").Settlement> {
+  const existingJson = JSON.stringify(existing.map((s) => [s.x, s.y]));
+  return invoke("place_settlement_at", { x, y, riversJson, existingJson });
+}
+
 export async function simBiological(
   seed: number, riversJson: string, gemDeposits: number, climateStrictness: number,
 ): Promise<[number, number][]> {

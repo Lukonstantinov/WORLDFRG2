@@ -11,7 +11,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -1966,6 +1966,30 @@ export function MapCanvas() {
             tileManagerRef.current?.invalidate(modified);
             refreshTiles();
           }).catch(console.error);
+        }
+      }
+    } else if (tool === "placeSettlement") {
+      // GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — click, the world decides.
+      // Read-only on the backend (no tile write, no save); the derived
+      // Settlement is added straight to the store, exactly like a generated
+      // batch, so trade routes pick it up the moment it's added (F8's own
+      // "aliveness" claim — MapCanvas's route effect already lists
+      // `settlements` in its dependency array).
+      const rect = containerRef.current?.getBoundingClientRect();
+      if (rect) {
+        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
+          const wrappedX = Math.floor(((wx % m.grid_width) + m.grid_width) % m.grid_width);
+          const wrappedY = Math.floor(wy);
+          const currentRivers = useWorldStore.getState().rivers;
+          const currentSettlements = useWorldStore.getState().settlements;
+          placeSettlementAt(wrappedX, wrappedY, JSON.stringify(currentRivers), currentSettlements)
+            .then((s) => {
+              useWorldStore.getState().setSettlements([...currentSettlements, s]);
+              setStatus(`Placed ${s.name} (${s.size}, ~${s.population.toLocaleString()}) — the world's own figure.`);
+              requestRender();
+            })
+            .catch((err) => setStatus(`Cannot place a settlement there: ${err}`));
         }
       }
     } else if (tool === "ridge") {

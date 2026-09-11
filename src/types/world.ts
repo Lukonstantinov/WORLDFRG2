@@ -93,7 +93,7 @@ export type PaintValue =
   | { type: "shelf"; value: number }
   | { type: "volcanic"; value: number };
 
-export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge" | "lasso";
+export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge" | "lasso" | "placeSettlement";
 
 /** A hand-drawn mountain-ridge line: a polyline spine (world cells) whose stroke
  *  width encodes the range's footprint width, opacity encodes peak height, and a

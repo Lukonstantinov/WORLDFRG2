@@ -2245,7 +2245,7 @@ mod tests {
         Settlement {
             id: id.to_string(), x, y, name: id.to_string(), size: "town".into(),
             population: pop, score: 1.0, culture: String::new(), region: String::new(),
-            site: String::new(),
+            site: String::new(), manual: false, edited: false,
         }
     }
 

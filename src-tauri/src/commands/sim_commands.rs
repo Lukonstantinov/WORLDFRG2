@@ -1215,6 +1215,26 @@ pub fn sim_generate_settlements(
     Ok(SimSettlementsResult { modified, settlements: result })
 }
 
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — place ONE settlement by hand
+/// at a clicked cell, fully derived (habitability, culture-appropriate name,
+/// population from the same chain a generated site uses). Read-only: no tile
+/// column is written, no save happens — the frontend adds the returned
+/// `Settlement` to its own array, exactly as it already does for a generated
+/// batch. `existing_json` is the settlement array the frontend already holds
+/// (for the crossroads/access read against real neighbours); geography does
+/// not need to be unfrozen to run this, mirroring the read-only settlement
+/// queries elsewhere.
+#[tauri::command]
+pub fn place_settlement_at(
+    x: u32, y: u32, rivers_json: String, existing_json: String, db: State<'_, WorldDb>,
+) -> Result<settlements::Settlement, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SETTLEMENTS)?;
+    let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
+    let existing: Vec<(u32, u32)> = serde_json::from_str(&existing_json).unwrap_or_default();
+    settlements::place_settlement_at(&buf, x, y, &river_data, &existing)
+}
+
 #[derive(serde::Serialize)]
 pub struct SimSettlementsResult {
     pub modified: Vec<(i32, i32)>,

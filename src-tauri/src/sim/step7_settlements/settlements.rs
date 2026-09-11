@@ -19,6 +19,18 @@ pub struct Settlement {
     #[serde(default)] pub region: String,
     /// The site type: "coast" | "river" | "hills" | "plain".
     #[serde(default)] pub site: String,
+    // ── GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8, the settlement editor) ──
+    /// True for a hand-placed settlement (`place_settlement_at`). Regenerating
+    /// (`sim_generate_settlements`) must never silently delete one of these —
+    /// the frontend re-adds every manual/edited settlement after a fresh
+    /// batch generates around it. `#[serde(default)]` so an old save (every
+    /// settlement generated, none hand-placed) loads as `false` throughout.
+    #[serde(default)] pub manual: bool,
+    /// True once any field of a GENERATED settlement has been hand-edited
+    /// (renamed / re-tiered / population set / moved). Distinct from `manual`
+    /// so the UI can say "you changed this" even for an otherwise-ordinary
+    /// generated town.
+    #[serde(default)] pub edited: bool,
 }
 
 /// Classify a cell's site type from terrain (for settlement labels / search rows).
@@ -712,6 +724,7 @@ pub fn generate_settlements(
             culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
             region: crate::sim::names::region_name(sx, sy, w, h),
             site: site_label(buf, idx, is_river_cell[idx]).to_string(),
+            manual: false, edited: false,
         });
     }
 
@@ -800,6 +813,7 @@ pub fn generate_settlements(
                 culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
                 region: crate::sim::names::region_name(sx, sy, w, h),
                 site: site_label(buf, idx, river_near[idx]).to_string(),
+                manual: false, edited: false,
             });
         }
     }
@@ -1041,9 +1055,127 @@ pub fn generate_trade_sites(
             culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
             region: crate::sim::names::region_name(sx, sy, w, h),
             site: "port".to_string(),
+            manual: false, edited: false,
         });
     }
     out
+}
+
+/// GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — place ONE settlement by hand
+/// at a clicked cell, derived the same way `generate_settlements` derives a
+/// real one and through the SAME constants (`FOOD_TO_POP`/`TRADE_ALPHA`/
+/// `civ_factor`/`cold_factor`/`winter_factor`), so a hand-placed city is not a
+/// different KIND of object from a generated one — every field a downstream
+/// consumer reads is filled exactly as it would be for a generated site.
+///
+/// What this cannot literally call is `generate_settlements` itself: its
+/// carrying-capacity catchment and crossroads count are defined over the
+/// WHOLE site set at once (a coarse Voronoi against every other site). Here
+/// the catchment is a bounded local sum around the clicked cell — the same
+/// `max_catch` radius the batch pass uses, off a nominal realism of 0.55 (the
+/// app's own default, since a hand-placed site has no batch-derived spacing
+/// of its own) — and the crossroads count reads the caller's own `existing`
+/// settlement list, which in the live app IS exactly the list a fresh batch
+/// pass would use.
+pub fn place_settlement_at(
+    buf: &WorldBuffer, x: u32, y: u32, rivers: &[River], existing: &[(u32, u32)],
+) -> Result<Settlement, String> {
+    let w = buf.width;
+    let h = buf.height;
+    if x >= w || y >= h { return Err("Cell is outside the world".into()); }
+    let idx = buf.idx(x, y);
+    if buf.terrain[idx] != 1 { return Err("Cannot place a settlement in open water".into()); }
+
+    let food = compute_food_capacity(buf, rivers);
+    let mut is_river_cell = vec![false; buf.total()];
+    for river in rivers { for &(rx, ry) in &river.points { is_river_cell[buf.idx(rx, ry)] = true; } }
+
+    // Local food catchment — same max_catch radius `generate_settlements` uses.
+    let min_dist = ((w as f32 / (95.0 + 90.0 * (1.0 - 0.55))) as i32).max(3);
+    let max_catch = min_dist as f32 * 2.5;
+    let max_catch2 = (max_catch * max_catch) as i64;
+    let r = max_catch.ceil() as i32;
+    let mut catch_food = 0.0f32;
+    for dy in -r..=r {
+        let yy = y as i32 + dy;
+        if yy < 0 || yy >= h as i32 { continue; }
+        for dx in -r..=r {
+            if (dx * dx + dy * dy) as i64 > max_catch2 { continue; }
+            let xx = buf.wrap_x(x as i32 + dx);
+            let fi = buf.idx(xx, yy as u32);
+            if food[fi] > 0.0 { catch_food += food[fi]; }
+        }
+    }
+
+    let near_coast = buf.distance_to_ocean[idx] < 0.05;
+    let mut mouth_here = false;
+    let mut nav_here = false;
+    for rv in rivers {
+        if let Some(&(mx, my)) = rv.points.last() {
+            if (mx as i32 - x as i32).abs() <= 3 && (my as i32 - y as i32).abs() <= 3 { mouth_here = true; }
+        }
+        for &(dx2, dy2) in &rv.delta { if dx2 == x && dy2 == y { mouth_here = true; } }
+        if rv.navigable {
+            for &(rx, ry) in &rv.points { if rx == x && ry == y { nav_here = true; } }
+        }
+    }
+
+    let mid = (min_dist * 4) as i64;
+    let mid2 = mid * mid;
+    let mut neigh = 0i32;
+    for &(ox, oy) in existing {
+        let mut dx = (x as i32 - ox as i32).abs();
+        if dx > w as i32 / 2 { dx = w as i32 - dx; }
+        let dy = y as i32 - oy as i32;
+        if (dx * dx + dy * dy) as i64 <= mid2 { neigh += 1; }
+    }
+    let crossroads = (neigh as f32 / 6.0).min(1.0);
+    let access = ((if near_coast { 0.55 } else { 0.0 })
+        + (if mouth_here { 0.45 } else if nav_here { 0.3 } else { 0.0 })
+        + 0.3 * crossroads)
+        .clamp(0.0, 1.0);
+
+    const FOOD_TO_POP: f32 = 25.0;
+    const TRADE_ALPHA: f32 = 2.6;
+    let pop_agri = catch_food * FOOD_TO_POP;
+    let port_premium = 1.0 + (if near_coast { 0.5 } else { 0.0 }) + (if mouth_here { 0.3 } else { 0.0 });
+    let abs_lat = buf.latitude(y).abs();
+    let civ_factor = 1.0 + 0.30 * (-((abs_lat - 30.0).powi(2)) / (2.0 * 12.0 * 12.0)).exp();
+    let cold_factor = if abs_lat <= 45.0 {
+        1.0
+    } else if abs_lat <= 62.0 {
+        1.0 - 0.55 * (abs_lat - 45.0) / 17.0
+    } else {
+        (0.45 - 0.18 * (abs_lat - 62.0) / 13.0).max(0.22)
+    };
+    let winter_t = crate::sim::koppen::seasonal_temps(buf, x, y).0;
+    let winter_factor = if winter_t >= -8.0 { 1.0 } else { (1.0 + (winter_t + 8.0) / 22.0).clamp(0.30, 1.0) };
+    let population = (pop_agri * (1.0 + TRADE_ALPHA * access) * port_premium
+        * civ_factor * cold_factor * winter_factor).max(40.0) as u32;
+
+    let size = if population >= 100_000 { "capital" }
+        else if population >= 30_000 { "city" }
+        else if population >= 5_000 { "town" }
+        else { "village" };
+    let tier = if size == "capital" { 2 } else if size == "city" { 1 } else { 0 };
+    let name = crate::sim::names::gen_name_epithet(x, y, w, h, tier);
+
+    // Real habitability score, the same field a generated site's `score` is —
+    // computed fresh here since a hand-placed site has no batch pass to read
+    // it from.
+    let hab_fields = compute_habitability_fields(buf, rivers, &[], None);
+
+    Ok(Settlement {
+        id: format!("manual-{}-{}-{}", x, y, existing.len()),
+        x, y, name,
+        size: size.to_string(),
+        population,
+        score: hab_fields.hab[idx],
+        culture: crate::sim::names::culture_label(x, y, w, h).to_string(),
+        region: crate::sim::names::region_name(x, y, w, h),
+        site: site_label(buf, idx, is_river_cell[idx]).to_string(),
+        manual: true, edited: false,
+    })
 }
 
 #[cfg(test)]

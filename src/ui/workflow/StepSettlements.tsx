@@ -4,6 +4,7 @@ import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
 import { simGenerateSettlements, simGenerateProvinces, setCultureCount as saveCultureCount, getCultureCount } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
+import type { Settlement } from "@types";
 
 interface Props {
   seed: number;
@@ -43,6 +44,31 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
 
   const step6Done = stepCompleted[6] === true;
 
+  // GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — the settlement editor.
+  const setTool = useUIStore((s) => s.setTool);
+  const activeTool = useUIStore((s) => s.activeTool);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ name: string; size: Settlement["size"]; population: number } | null>(null);
+
+  const startEdit = (s: Settlement) => {
+    setEditingId(s.id);
+    setDraft({ name: s.name, size: s.size, population: s.population });
+  };
+  const saveEdit = (s: Settlement) => {
+    if (!draft) return;
+    const next = settlements.map((x) => x.id === s.id
+      ? { ...x, name: draft.name, size: draft.size, population: draft.population, edited: true }
+      : x);
+    setSettlements(next);
+    setEditingId(null);
+    setDraft(null);
+  };
+  const deleteSettlement = (s: Settlement) => {
+    if (!confirm(`Delete ${s.name}? This cannot be undone by "Find Settlements" alone.`)) return;
+    setSettlements(settlements.filter((x) => x.id !== s.id));
+    if (editingId === s.id) { setEditingId(null); setDraft(null); }
+  };
+
   const handleGenerate = async () => {
     if (simRunning) return;
     if (!step6Done) {
@@ -55,7 +81,16 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       const result = await simGenerateSettlements(
         seed, JSON.stringify(rivers), settlementRealism,
         settlementCap > 0 ? settlementCap : undefined);
-      setSettlements(result.settlements);
+      // Re-running "Find Settlements" must never silently delete a hand-placed
+      // or hand-edited city (GENERATION_UX_REDESIGN_PLAN.md Slice 7's own
+      // rule). A real batch pass would feed them in as pre-placed sites and
+      // respect spacing against them; this is the simpler union — keep every
+      // manual/edited settlement from the CURRENT set and add the fresh batch
+      // around it, dropping only a fresh site that landed on the exact same cell.
+      const kept = settlements.filter((s) => s.manual || s.edited);
+      const keptCells = new Set(kept.map((s) => `${s.x},${s.y}`));
+      const merged = [...kept, ...result.settlements.filter((s) => !keptCells.has(`${s.x},${s.y}`))];
+      setSettlements(merged);
       markStepCompleted(7);
       // Show the habitability heatmap + ranked city dots.
       setLayer("habitability");
@@ -71,7 +106,8 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       // reported separately so a handful of new ports is visible, not silent.
       const ports = result.settlements.filter((s) => s.site === "port").length;
       setStatus(`${result.settlements.length} sites: ${capitals} capitals, ${cities} cities, ${towns} towns, ${villages} villages`
-        + (ports > 0 ? ` (incl. ${ports} trade junction${ports === 1 ? "" : "s"})` : ""));
+        + (ports > 0 ? ` (incl. ${ports} trade junction${ports === 1 ? "" : "s"})` : "")
+        + (kept.length > 0 ? ` + ${kept.length} kept manual/edited` : ""));
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
   };
@@ -98,6 +134,15 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
 
   const dot = (size: string) =>
     size === "capital" ? "★" : size === "city" ? "●" : size === "town" ? "○" : "·";
+
+  const iconBtn: React.CSSProperties = {
+    padding: "0 3px", border: "none", background: "transparent", cursor: "pointer",
+    color: "#7a8aa0", fontSize: 10, lineHeight: 1,
+  };
+  const miniInput: React.CSSProperties = {
+    padding: "2px 5px", background: "#080c12", border: "1px solid #1e2e42",
+    borderRadius: 3, color: "#b0c0d0", fontSize: 10, outline: "none",
+  };
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
@@ -151,22 +196,72 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         Find Settlements
       </button>
 
+      {/* GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — manual placement. The
+          default is: you click, the world decides (habitability, culture-
+          appropriate name, population derived from the same food-capacity
+          chain a generated site uses) — editing below is opt-in on top. */}
+      {step6Done && (
+        <button onClick={() => setTool(activeTool === "placeSettlement" ? "select" : "placeSettlement")}
+          style={{ ...genBtn, marginBottom: 0,
+            background: activeTool === "placeSettlement" ? "#2a5080" : undefined,
+            color: activeTool === "placeSettlement" ? "#fff" : undefined }}>
+          {activeTool === "placeSettlement" ? "📍 Click the map to place…" : "📍 Place Settlement"}
+        </button>
+      )}
+
       {settlements.length > 0 && (
-        <div style={{ maxHeight: 140, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
+        <div style={{ maxHeight: 220, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
           {[...settlements].sort((a, b) => b.population - a.population).slice(0, 60).map((s, i) => (
-            <div key={s.id}
-              onClick={() => focusOn(s.x, s.y)}
-              title="Click to locate on the map"
-              style={{ display: "flex", justifyContent: "space-between", padding: "1px 3px",
-                cursor: "pointer", borderRadius: 2 }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#16202e")}
-              onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-              <span style={{ color: "#8090b0", fontSize: 10 }}>
-                {dot(s.size)} #{i + 1} {s.size}
-              </span>
-              <span style={{ color: "#7a8aa0", fontSize: 10 }}>
-                {s.population >= 1000 ? `${(s.population / 1000).toFixed(s.population >= 10000 ? 0 : 1)}k` : s.population}
-              </span>
+            <div key={s.id} style={{ borderRadius: 2 }}>
+              <div
+                onClick={() => focusOn(s.x, s.y)}
+                title="Click to locate on the map"
+                style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1px 3px",
+                  cursor: "pointer" }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#16202e")}
+                onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
+                <span style={{ color: "#8090b0", fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}>
+                  {dot(s.size)} #{i + 1} {s.size}
+                  {s.manual && <span title="Hand-placed" style={{ color: "#6ab0e0" }}>📍</span>}
+                  {s.edited && !s.manual && <span title="Hand-edited" style={{ color: "#e0b06a" }}>✎</span>}
+                </span>
+                <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                  <span style={{ color: "#7a8aa0", fontSize: 10 }}>
+                    {s.population >= 1000 ? `${(s.population / 1000).toFixed(s.population >= 10000 ? 0 : 1)}k` : s.population}
+                  </span>
+                  <button onClick={(e) => { e.stopPropagation(); startEdit(s); }}
+                    title="Edit" style={{ ...iconBtn }}>✎</button>
+                  <button onClick={(e) => { e.stopPropagation(); deleteSettlement(s); }}
+                    title="Delete" style={{ ...iconBtn, color: "#c06a6a" }}>✕</button>
+                </span>
+              </div>
+              {editingId === s.id && draft && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 3, padding: "3px 4px 5px 20px" }}>
+                  <input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })}
+                    style={miniInput} placeholder="Name" />
+                  <div style={{ display: "flex", gap: 3 }}>
+                    <select value={draft.size}
+                      onChange={(e) => setDraft({ ...draft, size: e.target.value as Settlement["size"] })}
+                      style={{ ...miniInput, flex: 1 }}>
+                      {(["village", "town", "city", "capital"] as const).map((t) => (
+                        <option key={t} value={t}>{t}</option>
+                      ))}
+                    </select>
+                    <input type="number" min={1} value={draft.population}
+                      onChange={(e) => setDraft({ ...draft, population: Math.max(1, Number(e.target.value)) })}
+                      style={{ ...miniInput, width: 70 }} />
+                  </div>
+                  <div style={{ color: "#405060", fontSize: 8.5 }}>
+                    The world's own figure was {s.population >= 1000 ? `${(s.population / 1000).toFixed(1)}k` : s.population}.
+                    A hand-set population is no longer a consequence of the land.
+                  </div>
+                  <div style={{ display: "flex", gap: 3 }}>
+                    <button onClick={() => saveEdit(s)} style={{ ...genBtn, flex: 1, marginBottom: 0 }}>Save</button>
+                    <button onClick={() => { setEditingId(null); setDraft(null); }}
+                      style={{ ...genBtn, flex: 1, marginBottom: 0, background: "#1a2a40" }}>Cancel</button>
+                  </div>
+                </div>
+              )}
             </div>
           ))}
           {settlements.length > 60 && (
