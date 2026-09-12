@@ -111,14 +111,31 @@ phases.
 Weighted early because the player is observation-only: this is the chain that
 makes the world worth watching. Lowest risk to the economy gates of the three.
 
-- **2.1 · Untie the quality ceiling from city size.** Today
-  `cap = 0.62 + size_bonus(≤0.20) + struct_bonus(≤0.14)` and `QUALITY_LEARN_RATE`
-  drives everyone to their cap, so **the largest city is automatically the finest
-  maker of everything it makes**, at a world spread of about 1.26×. Replace the
-  size term with **accumulated tradition** — years of continuous production of
-  that good at that hub, guild presence, a master's arrival.
+- **2.1 · Give the quality ceiling a term that still discriminates among mature
+  cities.** *Rewritten after Phase 0.2 ran; the prediction it was first written on
+  was falsified — see the correction below.* Today
+  `cap = (0.62 + size_bonus + struct_bonus).clamp(0, 0.97)`, where `size_bonus` is
+  `(pop / 60_000).min(0.20)` — a term that **saturates at 60,000 population**. So
+  it separates a village from a town and then stops discriminating entirely: every
+  real city with a workshop and a guildhall lands on exactly 0.960. Add a term that
+  keeps working above that — **accumulated tradition** (years of continuous
+  production of that good at that hub) plus the master's arrival from 2.2.
   *Dose decided by 0.2, not now* (decision 3). Nothing else in this phase reads
   until this lands.
+
+  > **CORRECTION — the prediction was wrong, and what replaced it is better.**
+  > This slice first claimed "the largest city is automatically the finest maker of
+  > everything it makes." `real_world_craft_spread` measured the opposite: across
+  > 14 manufactured goods on a real world, the finest maker was the biggest city
+  > **0 times**. Not because tradition already works — because **there is no finest
+  > maker at all.** Quality SATURATES: for most goods the median maker is already at
+  > the maximum, so "the leader" is an arbitrary tie-break among cities sitting on a
+  > shared ceiling. The one thing that lifts a city above it is `LAW_GUILD_MONOPOLY`
+  > (`GUILD_MONOPOLY_QUALITY_CAP` 0.97 against the natural 0.96) — so the single
+  > mechanism already in the tree that produces a distinctive maker is a guild
+  > charter, which is a good omen for 2.2 and the reason this slice's target moved
+  > from "untie it from size" to "add a term that still discriminates". Recorded per
+  > §2.4: a prediction from reading the code, falsified by running it.
   *Chronicle:* nothing yet — this is the enabling change. Say so rather than
   inventing an event for it.
   *Gate:* 0.2 re-run (the leader must stop being merely the biggest city); the

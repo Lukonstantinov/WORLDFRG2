@@ -227,10 +227,21 @@ world sits between 0.62 and 0.96 — a ~26% price spread — **and the ceiling i
 by CITY SIZE.** The largest city is automatically the finest maker of everything
 it makes.
 
-That is backwards. Murano is an island, Solingen a town, Meissen a town. Until a
+**MEASURED — and the prediction above is FALSE.** `real_world_craft_spread`
+(Phase 0.2) ran it on a real world: across 14 manufactured goods the finest maker
+was the biggest city **0 times**. Not because tradition already works, but because
+`size_bonus` is `(pop / 60_000).min(0.20)` and therefore **saturates at 60,000
+population** — so every real city with a workshop and a guildhall converges on the
+same ceiling (0.960) and there is no leader at all, only a tie. The sole mechanism
+that lifts anyone above it is `LAW_GUILD_MONOPOLY` (`GUILD_MONOPOLY_QUALITY_CAP`
+0.97), which is a good omen for G-A/G-B: a guild charter is already the one thing
+in the tree that makes a maker distinctive.
+
+So the target is not "untie quality from size" but **"give the ceiling a term that
+still discriminates among mature cities"** — and it is the same problem as topic 5,
+not a separate one. Murano is an island, Solingen a town, Meissen a town; until a
 small place can out-make a metropolis at one thing, no guild mechanic will read as
-a signature craft — which makes this the same problem as topic 5, not a separate
-one.
+a signature craft.
 
 ---
 
@@ -305,12 +316,13 @@ Historically a signature product comes from five causes, and only two are modell
 
 **Variants.**
 
-- **S-A · Untie the quality ceiling from city size** *(the enabling change — do
-  this first or nothing else reads)*
-  Today `cap = 0.62 + size + structures`, so a metropolis is the best maker of
-  everything. Replace the size term with an **accumulated tradition** term: years
-  of continuous production of that good at that hub, guild presence, and a
-  master's arrival (G-B) — and widen the spread so a specialist can genuinely
+- **S-A · Give the ceiling a term that discriminates among mature cities** *(the
+  enabling change — do this first or nothing else reads)*
+  Today `cap = 0.62 + size + structures` with the size term saturating at 60,000
+  population, so — measured, not predicted — every real city converges on the same
+  ceiling and no city leads at anything. Add an **accumulated tradition** term:
+  years of continuous production of that good at that hub, guild presence, and a
+  master's arrival (G-B), and widen the spread so a specialist can genuinely
   out-make a bigger neighbour. Nothing else in this section works without it.
 
 - **S-B · The Signature** *(small, once S-A is in)*

@@ -2902,7 +2902,35 @@ fn econ_measure_finance() {
         println!("  income  interest {interest:>12.0} ({:.0}%)", pct(interest));
         println!("          dividends{dividends:>12.0} ({:.0}%)", pct(dividends));
         println!("          bills    {bills:>12.0} ({:.0}%)  ← paid by NOBODY", pct(bills));
-        println!("  write-offs        {losses:>12.0}");
+        println!("  write-offs (gross){losses:>12.0}");
+        // Is the loan book profitable? `losses` is a GROSS tally: `bank_pass`
+        // books the whole outstanding balance to it but simultaneously credits
+        // `real_estate += outstanding * 0.4`, so the EQUITY hit of a default is
+        // only 60% of the figure above. Reporting gross against interest would
+        // overstate the damage by 40% and invite exactly the wrong conclusion
+        // ("lending loses money"), so both are printed.
+        const DEFAULT_RECOVERY: f32 = 0.4; // mirrors bank_pass's own 0.4
+        let net_loss = losses * (1.0 - DEFAULT_RECOVERY);
+        let book = interest - net_loss;
+        println!("  write-offs (net)  {net_loss:>12.0}   (40% recovered as foreclosed property)");
+        println!("  loan book P&L     {book:>12.0}   (interest − NET write-offs){}",
+                 if book < 0.0 { "  ← loss-making" } else { "" });
+
+        // WHY did the failed banks fail? `fail_bank` (own insolvency) and
+        // `trigger_regional_crash`'s contagion sweep both just set `defunct`,
+        // so the two are indistinguishable from the flag — but they push
+        // DIFFERENT event text, which lets this split them without touching a
+        // line of production code. The split decides whether Phase 1.1
+        // (separating failure from contagion) is treating the cause or a
+        // symptom, so it must be measured rather than assumed.
+        let (mut by_panic, mut by_own) = (0usize, 0usize);
+        for b in s.banks.iter().filter(|b| b.defunct) {
+            let swept = b.events.iter().rev()
+                .find(|e| e.kind == "failed")
+                .is_some_and(|e| e.text.contains("swept away"));
+            if swept { by_panic += 1; } else { by_own += 1; }
+        }
+        println!("  failures  own insolvency {by_own}   swept away in a panic {by_panic}");
         println!("  loans outstanding by purpose:");
         if by_purpose.is_empty() { println!("    (none)"); }
         for (purpose, (n, amt)) in &by_purpose {

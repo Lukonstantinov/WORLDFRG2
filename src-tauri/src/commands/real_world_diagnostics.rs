@@ -275,8 +275,8 @@ async fn real_world_craft_spread() {
     println!("\n── craft spread · real world · 40y ──────────────────────────────");
     println!("  ceiling today = 0.62 + size_bonus(<=0.20) + struct_bonus(<=0.14)");
     println!("  price effect  = quality_value_mult(q) = 0.6 + 0.9q\n");
-    println!("  {:<18} {:>5} {:>6} {:>6} {:>6} {:>7}  {:>9}",
-             "manufactured good", "hubs", "minQ", "medQ", "maxQ", "price×", "leader");
+    println!("  {:<18} {:>5} {:>6} {:>6} {:>6} {:>7} {:>5} {}",
+             "manufactured good", "hubs", "minQ", "medQ", "maxQ", "price×", "@top", "leader");
 
     // Does the FINEST maker also happen to be the LARGEST maker? Counted across
     // every good with at least two makers — the headline claim to falsify.
@@ -300,6 +300,12 @@ async fn real_world_craft_spread() {
         let mult = |q: f32| 0.6 + 0.9 * q.clamp(0.0, 1.0);
         let spread = if mult(lo) > 1e-6 { mult(hi) / mult(lo) } else { 1.0 };
 
+        // SATURATION is the thing the first run actually found, so measure it
+        // rather than leaving it to be inferred from "median == max": how many
+        // makers sit within a whisker of this good's own best. Where that is
+        // most of them there is no "finest maker" at all, only a tie, and the
+        // leader/biggest comparison below is reporting an arbitrary tie-break.
+        let at_top = makers.iter().filter(|m| m.1 >= hi - 0.005).count();
         let best_q = makers.iter().cloned()
             .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
         let biggest = makers.iter().cloned()
@@ -310,8 +316,9 @@ async fn real_world_craft_spread() {
             if same { leader_is_biggest += 1; }
             spreads.push(spread);
         }
-        println!("  {:<18} {:>5} {:>6.3} {:>6.3} {:>6.3} {:>6.2}×  {}",
+        println!("  {:<18} {:>5} {:>6.3} {:>6.3} {:>6.3} {:>6.2}× {:>5} {}",
                  sim.goods[g].name, makers.len(), lo, med, hi, spread,
+                 format!("{}", at_top),
                  if makers.len() < 2 { "sole maker" }
                  else if same { "= BIGGEST CITY" } else { "not the biggest" });
     }
@@ -328,7 +335,10 @@ async fn real_world_craft_spread() {
              100.0 * leader_is_biggest as f32 / goods_measured as f32);
     println!("  price spread best/worst · mean   {mean_spread:.2}×   median {:.2}×   max {:.2}×",
              spreads[spreads.len() / 2], spreads[spreads.len() - 1]);
-    println!("\n  → Phase 2.1 asks for the ceiling to come from accumulated TRADITION");
-    println!("    rather than city size. The two numbers above are what it has to move:");
-    println!("    the leader must stop being merely the biggest, and the spread must widen.");
+    println!("\n  '@top' = makers within 0.005 of that good's best. Where it is most of");
+    println!("  them, quality has SATURATED at the shared ceiling and 'the finest maker'");
+    println!("  is an arbitrary tie-break, not a fact about the world.");
+    println!("  → Phase 2.1's target, restated by this measurement: the problem is not");
+    println!("    that the biggest city wins, it is that EVERY established maker reaches");
+    println!("    the same ceiling, so no city is distinctive at anything.");
 }

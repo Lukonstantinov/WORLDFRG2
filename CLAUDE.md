@@ -5503,10 +5503,10 @@ INSTITUTIONS_BUILD_ORDER.md       ← ⭐ DECIDED IN SCOPE; PHASE 0 BUILT, THE R
                                     the bleeding (bank failure splits from
                                     contagion; a bank may hold the Monte;
                                     `League.purse` finally buys a convoy) · Phase 2
-                                    is the Murano feature (untie the quality
-                                    ceiling from city size → secrecy + the master
-                                    who leaves → the signature → the refining
-                                    entrepôt) · Phase 3 wires war spending to debt
+                                    is the Murano feature (give the quality
+                                    ceiling a term that still discriminates among
+                                    mature cities → secrecy + the master who
+                                    leaves → the signature → the refining entrepôt) · Phase 3 wires war spending to debt
                                     issuance, closing the 1345 chain from four
                                     systems that each already work · Phase 4 is
                                     exclusion, dosed and last, under one rule —
@@ -5541,10 +5541,16 @@ INSTITUTIONS_BRAINSTORM.md        ← ⭐ BRAINSTORM, NOTHING APPROVED OR BUILT.
                                     industrial espionage, so the Murano THEFT half
                                     is built and the SECRECY half is not; and the
                                     quality ceiling is `0.62 + size + structures`,
-                                    so **the largest city is automatically the
-                                    finest maker of everything it makes** (a ~26%
-                                    world price spread), which is backwards —
-                                    Murano is an island, Solingen a town. Three
+                                    where the size term SATURATES at 60,000 pop —
+                                    and `real_world_craft_spread` then FALSIFIED
+                                    this file's own first prediction: the finest
+                                    maker is the biggest city **0 times in 14
+                                    goods**, because every real city converges on
+                                    the SAME ceiling (0.960) and there is no leader
+                                    at all, only a tie. `LAW_GUILD_MONOPOLY` (0.97)
+                                    is the one thing that lifts anyone above it, so
+                                    a guild charter is already the only mechanism
+                                    producing a distinctive maker. Three
                                     interlocking chains proposed rather than six
                                     projects: money-and-consequence (banks stop
                                     dying → war paid by borrowing → a bank holds
