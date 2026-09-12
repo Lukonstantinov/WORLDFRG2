@@ -120,6 +120,12 @@ export const GOOD_DEFS: GoodDef[] = [
   { name: "coal", label: "Coal", emoji: "\u{2B1B}", color: "#1c1c1c" },
   { name: "garnet", label: "Garnet", emoji: "\u{2666}\u{FE0F}", color: "#8b0000" },
   { name: "carnelian", label: "Carnelian", emoji: "\u{1F53B}", color: "#b33009" },
+  // The two naval-stores goods (CLAUDE.md §8.4/YARDS_VESSELS_AND_DEPOTS_PLAN —
+  // what a hull is actually built from) were never mirrored here either, so
+  // they fell through to the same 📦-box/raw-id fallback as the minerals and
+  // endemics above. Label/glyph/colour copied from `goods_spec.rs::cg`.
+  { name: "pitch", label: "Pitch & Tar", emoji: "\u{1F6E2}", color: "#3b2f2a" },
+  { name: "hemp", label: "Hemp", emoji: "\u{1F33F}", color: "#7f8f5a" },
 ];
 
 /** Overlay-visibility key for a good's region toggle. */
@@ -202,11 +208,13 @@ const GOOD_CATEGORY: Record<string, string> = {
   hides: "Textiles & Animal", horses: "Textiles & Animal", ivory: "Textiles & Animal",
   cloth: "Textiles & Animal", linen: "Textiles & Animal", cotton_cloth: "Textiles & Animal",
   silk_brocade: "Textiles & Animal", carpets: "Textiles & Animal", leather_goods: "Textiles & Animal",
+  hemp: "Textiles & Animal",
   // Forestry & craft — wood/clay/paper raws AND the workshop crafts made from them
   timber: "Forestry & Craft", hardwoods: "Forestry & Craft", paper: "Forestry & Craft",
   clay: "Forestry & Craft", ceramics: "Forestry & Craft", glassware: "Forestry & Craft",
   books: "Forestry & Craft", furniture: "Forestry & Craft", candles: "Forestry & Craft",
   soap: "Forestry & Craft", statuary: "Forestry & Craft", ivory_carvings: "Forestry & Craft",
+  pitch: "Forestry & Craft",
   // Minerals & metals — both salts, ores, gems, stone AND the metalwork forged from them
   salt: "Minerals & Metals", bay_salt: "Minerals & Metals", iron: "Minerals & Metals",
   copper: "Minerals & Metals", tin: "Minerals & Metals", gold: "Minerals & Metals",
