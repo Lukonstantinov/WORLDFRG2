@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { initPixiApp, type MapApp } from "@canvas/PixiApp";
 import { TileViewport } from "@canvas/TileViewport";
-import { TileManager } from "@canvas/TileManager";
+import { TileManager, lodForScale } from "@canvas/TileManager";
 import { OverlayManager, type ColonyMarker } from "@canvas/OverlayManager";
 import { setExportSnapshotFn, setExportSnapshotRawFn } from "@canvas/mapExport";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "@canvas/PaintOverlay";
@@ -58,10 +58,31 @@ const TILE_SIZE = 128;
  *  bright, uniform vertical stripe at every seam. Copy placement below now
  *  uses this SAME period for both tiles and overlays — each copy still only
  *  shows its first `grid_width` real cells (the clip rects stay `grid_width`
- *  wide), so the padding band is hidden rather than mis-explained. */
-function wrapPeriod(gridWidth: number): number {
+ *  wide), so the padding band is hidden rather than mis-explained.
+ *
+ *  That fixed LOD 0. It is WRONG at LOD>0 — a real, separate bug: the
+ *  backend regroups tiles into `2^lod`-wide supertiles before wrapping
+ *  (`wrap_bound_at_lod` in `tile_commands.rs`), and rounds the base-tile
+ *  count UP to a whole number of supertiles, which is a DIFFERENT cell
+ *  count from the LOD-0 period whenever `base_tiles_x` isn't a multiple of
+ *  `2^lod` — e.g. 29 base tiles at LOD 1 (S=2) wrap every `ceil(29/2)*256 =
+ *  3840` cells, not the LOD-0 period's 3712. Any zoomed-out view (LOD>0) —
+ *  which is exactly the view that shows a wrap seam at all, since the whole
+ *  point of zooming out is to fit more than one world-width on screen — was
+ *  still clipping/translating copies at the LOD-0 period while the fetched
+ *  tiles actually wrapped `period(lod) - period(0)` cells further along.
+ *  That gap (uncovered by ANY copy's clip rect, since copy k ends at
+ *  `k*period(0)+grid_width` and copy k+1 starts at `(k+1)*period(0)`, short
+ *  of where the real wrapped content actually resumes) painted through as
+ *  the canvas's own background fill — a solid near-black band at the seam.
+ *  `lod` must be the SAME one `TileManager` is actually fetching at
+ *  (`lodForScale(viewport.scale)`), or the two disagree again. */
+function wrapPeriod(gridWidth: number, lod = 0): number {
   if (gridWidth <= 0) return 0;
-  return Math.ceil(gridWidth / TILE_SIZE) * TILE_SIZE;
+  const baseTilesX = Math.ceil(gridWidth / TILE_SIZE);
+  const s = 1 << Math.max(0, Math.min(4, lod));
+  const tilesXAtLod = Math.max(1, Math.ceil(baseTilesX / s));
+  return tilesXAtLod * TILE_SIZE * s;
 }
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -289,7 +310,10 @@ export function MapCanvas() {
     // copy, each time with the coordinate space shifted by `k * period`
     // (`period`, not `grid_width` — see `wrapPeriod`'s own doc comment).
     const m = metaRef.current;
-    const period = m ? wrapPeriod(m.grid_width) : 0;
+    // Must match the LOD `TileManager.loadVisibleTiles` actually fetched at
+    // (same `viewport.scale` input, same `lodForScale`), or the copy seam
+    // computed here disagrees with where the fetched tiles really wrap.
+    const period = m ? wrapPeriod(m.grid_width, lodForScale(viewport.scale)) : 0;
     // TRUE span: every world-copy actually touching the screen right now,
     // UNCAPPED. A rect-union clip costs nothing per extra copy, so the tile
     // background always gets the real span — nothing here may ever leave a

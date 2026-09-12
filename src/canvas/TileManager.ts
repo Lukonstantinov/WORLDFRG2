@@ -16,8 +16,12 @@ interface CachedTile {
 }
 
 /** LOD for a viewport scale: at scale 1 every world cell is ≥1px (full res);
- *  each halving of the scale steps one LOD up. Min zoom 0.05 → LOD 4. */
-function lodForScale(scale: number): number {
+ *  each halving of the scale steps one LOD up. Min zoom 0.05 → LOD 4.
+ *  Exported so `MapCanvas` can compute the SAME LOD when working out where
+ *  the tile grid actually wraps (`wrapPeriod` in `MapCanvas.tsx`) — the two
+ *  must agree, or the seam the renderer clips to disagrees with the seam the
+ *  fetched tiles actually wrap at. */
+export function lodForScale(scale: number): number {
   if (!(scale > 0)) return MAX_LOD;
   return Math.max(0, Math.min(MAX_LOD, Math.floor(Math.log2(1 / scale))));
 }

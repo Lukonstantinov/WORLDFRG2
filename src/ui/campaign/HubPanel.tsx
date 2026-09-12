@@ -764,11 +764,27 @@ export function HubPanel() {
           {/* THE TRADE SIGNATURE — this settlement's own production mix as a
               donut + a named specialization tier (Universal market → Trading
               post → Specialist town → Monotown). Prefers the LIVE mix (this
-              campaign's own estates/manufactories, summed by good) and falls
+              campaign's own city-fields production PLUS its estates/
+              manufactories, summed by good — the same two sources
+              `CityMarketView`'s "made here" list already combines) and falls
               back to the frozen worldgen mix pre-campaign — never both, so
-              the ring is never half stale, half live. */}
+              the ring is never half stale, half live.
+              A hub's ordinary agricultural/raw goods (grain, flax, hemp…)
+              are usually "city fields" production with no discrete Estate
+              behind them at all — only investment-grade production (a
+              lumber camp, a manufactory) gets an `estates_here` row. Summing
+              `estates_here` ALONE therefore made a hub with a diverse field
+              economy and just one small estate read as a 100% "Monotown" in
+              whatever that one estate happened to make — the donut was
+              blind to most of what the Trade tab's own "made here" tags (and
+              the traded-goods list right below it) already showed. */}
           {(() => {
             const liveMix = new Map<string, number>();
+            for (const g of detail?.goods ?? []) {
+              if (g.production > 0.01) {
+                liveMix.set(g.name, (liveMix.get(g.name) ?? 0) + g.production);
+              }
+            }
             for (const e of detail?.estates_here ?? []) {
               liveMix.set(e.good, (liveMix.get(e.good) ?? 0) + Math.max(0, e.output));
             }
