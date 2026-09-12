@@ -143,6 +143,7 @@ export function MapCanvas() {
   const warHighlight = useViewportStore((s) => s.warHighlight);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
   const goodQualityHeatmap = useUIStore((s) => s.goodQualityHeatmap);
+  const merchantRouteRisk = useUIStore((s) => s.merchantRouteRisk);
   const lineColors = useSettingsStore((s) => s.lineColors);
   // D10 · the renderer's OWN belt-quality scale, served rather than copied (§8.18).
   const palettes = usePaletteStore((s) => s.palettes);
@@ -1444,6 +1445,13 @@ export function MapCanvas() {
     om.setGoodQualityHeatmap(goodQualityHeatmap);
     requestRender();
   }, [goodQualityHeatmap, requestRender]);
+  // Merchant Routes: colour by voyage risk instead of the carrying house.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setMerchantRouteRisk(merchantRouteRisk);
+    requestRender();
+  }, [merchantRouteRisk, requestRender]);
 
   // Merchant-family control overlay — which settlements each house holds. Driven
   // by the live campaign houses (updates dynamically as the campaign advances).

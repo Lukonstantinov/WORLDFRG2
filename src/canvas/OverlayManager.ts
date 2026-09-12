@@ -662,6 +662,9 @@ export class OverlayManager {
   /** false = mix toward the good's own hue (default); true = the heat ramp. Set
    *  from `uiStore.goodQualityHeatmap` in `MapCanvas.tsx`. */
   private goodQualityHeatmap = false;
+  /** Merchant Routes: colour by voyage risk instead of the carrying house's
+   *  own colour. Set from `uiStore.merchantRouteRisk`. */
+  private merchantRouteRisk = false;
   private cultureRegions: CultureRegion[] = [];
   private stateRegions: StateRegion[] = [];
   /** States are rendered EXACTLY like provinces: a prebuilt raster-resolution fill
@@ -1625,6 +1628,28 @@ export class OverlayManager {
     if (this.goodQualityHeatmap === on) return;
     this.goodQualityHeatmap = on;
     this.goodMasksDirty = true;
+  }
+
+  /** Switch Merchant Routes between the carrying-house colour and a risk
+   *  ramp (green → yellow → red, `MerchantRoute.risk`). No cached geometry
+   *  to invalidate — the next frame's `renderMerchantRoutes` just reads it. */
+  setMerchantRouteRisk(on: boolean) {
+    this.merchantRouteRisk = on;
+  }
+
+  /** Green (safe) → yellow → red (dangerous) for a 0..1 voyage-loss
+   *  probability. Thresholds are the reference per-voyage house rates
+   *  (`SEA_LOSS`/`CARAVAN_LOSS` in the sim) rather than round numbers, so
+   *  "yellow" means "about as risky as an ordinary house-carried sea leg",
+   *  not an arbitrary cutoff. */
+  private static riskColor(risk: number): string {
+    const t = Math.max(0, Math.min(1, risk / 0.15));
+    if (t <= 0.5) {
+      const k = t / 0.5; // green → yellow
+      return `rgb(${Math.round(70 + k * 185)},${Math.round(180 - k * 10)},60)`;
+    }
+    const k = (t - 0.5) / 0.5; // yellow → red
+    return `rgb(255,${Math.round(170 - k * 130)},${Math.round(60 - k * 40)})`;
   }
 
   /** Sample the served HEAT ramp (RGB stops, hex colours) at an absolute belt value. */
@@ -4530,7 +4555,8 @@ export class OverlayManager {
       if (!pts || pts.length < 2) continue;
       const norm = r.volume / maxVol;
       ctx.globalAlpha = 0.5 + 0.4 * norm;
-      ctx.strokeStyle = r.color || "#cccccc";
+      ctx.strokeStyle = this.merchantRouteRisk
+        ? OverlayManager.riskColor(r.risk ?? 0) : (r.color || "#cccccc");
       ctx.lineWidth = Math.max(0.5, (0.8 + norm * 4.0) / Math.sqrt(this.currentScale));
       ctx.setLineDash(r.sea ? [] : [dash, dash]);
       ctx.beginPath();

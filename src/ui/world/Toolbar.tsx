@@ -211,6 +211,8 @@ export function Toolbar() {
   const setOverlaysVisible = useUIStore((s) => s.setOverlaysVisible);
   const goodQualityHeatmap = useUIStore((s) => s.goodQualityHeatmap);
   const toggleGoodQualityHeatmap = useUIStore((s) => s.toggleGoodQualityHeatmap);
+  const merchantRouteRisk = useUIStore((s) => s.merchantRouteRisk);
+  const toggleMerchantRouteRisk = useUIStore((s) => s.toggleMerchantRouteRisk);
   const migrationMode = useUIStore((s) => s.migrationMode);
   const setMigrationMode = useUIStore((s) => s.setMigrationMode);
   const showBankIcons = useUIStore((s) => s.showBankIcons);
@@ -638,6 +640,34 @@ export function Toolbar() {
                   {Math.round((overlayOpacity[o.id] ?? 1) * 100)}%
                 </span>
               </div>
+            )}
+            {/* Colour by voyage RISK instead of the carrying house — the same
+                distance-scaled loss probability `dispatch` actually rolls,
+                surfaced before the fact instead of only as a chronicle event
+                after a ship sinks. Only meaningful once the layer is on. */}
+            {o.id === "merchantRoutes" && overlayVisibility[o.id] && (
+              <label style={{
+                display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
+                fontSize: 9, color: "#8aa0b8", margin: "0 0 3px 22px", userSelect: "none",
+              }}>
+                <input
+                  type="checkbox"
+                  checked={merchantRouteRisk}
+                  onChange={toggleMerchantRouteRisk}
+                  style={{ accentColor: "#d9a441", width: 11, height: 11 }}
+                />
+                <span>colour by risk</span>
+                {merchantRouteRisk && (
+                  <span style={{ display: "flex", alignItems: "center", gap: 3, marginLeft: 2 }}>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#469c46" }} />
+                    <span style={{ color: "#5a7390" }}>safe</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e0c93c", marginLeft: 3 }} />
+                    <span style={{ color: "#5a7390" }}>risky</span>
+                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e0562a", marginLeft: 3 }} />
+                    <span style={{ color: "#5a7390" }}>perilous</span>
+                  </span>
+                )}
+              </label>
             )}
           </div>
         ))}

@@ -7391,6 +7391,22 @@ impl CampaignSim {
         d * self.season_mult(a, b, self.season_slice_now())
     }
 
+    /// The real per-round-trip voyage-loss probability for a lane, in the SAME
+    /// units and formula `dispatch` actually rolls against (`distance_scaled_
+    /// loss`) — a query-layer read, not a new mechanic, so the map's route
+    /// overlays can finally show what has only ever lived as a dice roll
+    /// inside the tick. `river` beats `sea` (a river barge is the safer of the
+    /// two land-adjacent modes); a house's own `FLEET_LOSS_MULT`/bypass terms
+    /// are deliberately NOT folded in here — this is the lane's OWN risk, the
+    /// same figure every house/ownerless carrier on it starts from, not one
+    /// specific house's discounted rate.
+    pub(crate) fn lane_risk(&self, a: usize, b: usize, sea: bool, river: bool) -> f32 {
+        let days = self.lane_days(a, b);
+        if !days.is_finite() { return 0.0; }
+        let base = if sea { SEA_LOSS } else if river { RIVER_LOSS } else { CARAVAN_LOSS };
+        Self::distance_scaled_loss(base, days)
+    }
+
     /// Yearly GOVERNMENT pass: seed each city's regime + key figures, let houses bribe /
     /// intimidate them into service, capture the government (→ favourable policy + trade
     /// influence), turn seats over on their term (sometimes installing a house kinsman),

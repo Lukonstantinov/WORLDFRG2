@@ -861,6 +861,9 @@ export interface MerchantRoute {
   /** True when this corridor travels by river barge, not caravan (mutually
    *  exclusive with `sea`). */
   river?: boolean;
+  /** This lane's real voyage-loss probability (0..1) — the same
+   *  distance-scaled roll the sim actually makes, not a display estimate. */
+  risk?: number;
   volume: number;
   out_goods: [string, number][]; // goods a→b
   ret_goods: [string, number][]; // goods b→a

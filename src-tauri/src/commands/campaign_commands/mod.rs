@@ -2100,6 +2100,11 @@ pub struct MerchantRoute {
     /// True when this corridor travels by river barge rather than caravan
     /// (mutually exclusive with `sea`) — see `RecentTrade.river`'s doc comment.
     #[serde(default)] pub river: bool,
+    /// This lane's real voyage-loss probability (`CampaignSim::lane_risk`) —
+    /// the same distance-scaled roll `dispatch` actually makes, not a display
+    /// estimate. 0..1; the map colours a route by this so risk reads at a
+    /// glance instead of living only inside a dice roll no one ever sees.
+    #[serde(default)] pub risk: f32,
     pub volume: f32,
     /// Goods flowing a→b and b→a (name, volume), each sorted by volume.
     pub out_goods: Vec<(String, f32)>,

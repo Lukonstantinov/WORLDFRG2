@@ -240,7 +240,9 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
             holder: h.map(|x| x.name.clone()).unwrap_or_default(),
             color: distinct_color(owner),
             is_guild: h.map(|x| x.is_guild).unwrap_or(false),
-            sea: a.sea, river: a.river, volume: a.vol,
+            sea: a.sea, river: a.river,
+            risk: sim.lane_risk(city_of(lo) as usize, city_of(hi) as usize, a.sea, a.river),
+            volume: a.vol,
             out_goods: sort_goods(a.out), ret_goods: sort_goods(a.ret),
         }
     }).collect();

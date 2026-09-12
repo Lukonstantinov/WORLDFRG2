@@ -119,6 +119,12 @@ interface UIStore {
    *  reading is subtle for a muted/dark good and the user could not see quality
    *  differences at all. Same numbers either way, different paint. */
   goodQualityHeatmap: boolean;
+  /** MERCHANT ROUTES: colour the lane by its real voyage-loss risk (green →
+   *  yellow → red, `MerchantRoute.risk`) instead of the carrying house's own
+   *  heraldic colour. Same identical figure the tick actually rolls against
+   *  each voyage — this just makes it visible before the loss happens rather
+   *  than only after, as a chronicle event. */
+  merchantRouteRisk: boolean;
   /** SWIPE COMPARE: a second layer drawn to the right of a draggable divider.
    *  Every causal chain in this app is a two-layer question — precipitation against
    *  elevation for rain shadow, currents against temperature, biomes against Köppen
@@ -336,6 +342,7 @@ interface UIStore {
   setElevationStyle: (s: string | null) => void;
   setGoodQualityHeatmap: (on: boolean) => void;
   toggleGoodQualityHeatmap: () => void;
+  toggleMerchantRouteRisk: () => void;
   setCompareLayer: (l: ActiveLayer | null) => void;
   setComparePos: (p: number) => void;
   setLandmassSource: (source: LandmassSource) => void;
@@ -486,6 +493,7 @@ export const useUIStore = create<UIStore>((set) => ({
   isolateClass: null,
   elevationStyle: null,
   goodQualityHeatmap: false,
+  merchantRouteRisk: false,
   compareLayer: null,
   comparePos: 0.5,
   stretchToFit: true,
@@ -605,6 +613,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setElevationStyle: (s) => set({ elevationStyle: s, activeMapTheme: null }),
   setGoodQualityHeatmap: (on) => set({ goodQualityHeatmap: on }),
   toggleGoodQualityHeatmap: () => set((state) => ({ goodQualityHeatmap: !state.goodQualityHeatmap })),
+  toggleMerchantRouteRisk: () => set((state) => ({ merchantRouteRisk: !state.merchantRouteRisk })),
   setCompareLayer: (l) => set({ compareLayer: l }),
   setComparePos: (p) => set({ comparePos: Math.max(0, Math.min(1, p)) }),
 
