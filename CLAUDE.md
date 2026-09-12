@@ -5478,6 +5478,50 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     Ends with 8 gated proposals in build order
                                     and 6 questions that need a decision before
                                     any of it starts
+INSTITUTIONS_BRAINSTORM.md        ← ⭐ BRAINSTORM, NOTHING APPROVED OR BUILT.
+                                    Variants for six institutions the maintainer
+                                    asked about — banks as a player · war's real
+                                    trade impact · craft guilds/the Murano case ·
+                                    a bureaucratic apparatus · settlements with
+                                    unique production · trade leagues. Its §0 is
+                                    the finding that unifies them: **nothing in
+                                    this world can forbid anything.** `dispatch`
+                                    honours exactly five prohibitions (plague
+                                    quarantine · famine food lock · `export_ban_
+                                    until` at INFINITY · league boycott at 0 ·
+                                    `house_barred`, authored only by colonies) and
+                                    **WAR IS NOT ONE OF THEM** — `dispatch` never
+                                    reads `self.wars`, so two cities at war trade
+                                    at full volume every day; the "blockade" only
+                                    scales `export_earn` (real for a city's
+                                    prosperity, zero effect on cargo). Every one of
+                                    the six is a different answer to "who may
+                                    exclude whom from what". Other measured items:
+                                    `League.purse` has ONE writer and ZERO readers
+                                    (dues accumulate forever, unspent); glassware
+                                    and ceramics DO exist (belt goods converted to
+                                    recipes, glassware ← bay_salt + timber) and
+                                    `maybe_steal_quality` already implements
+                                    industrial espionage, so the Murano THEFT half
+                                    is built and the SECRECY half is not; and the
+                                    quality ceiling is `0.62 + size + structures`,
+                                    so **the largest city is automatically the
+                                    finest maker of everything it makes** (a ~26%
+                                    world price spread), which is backwards —
+                                    Murano is an island, Solingen a town. Three
+                                    interlocking chains proposed rather than six
+                                    projects: money-and-consequence (banks stop
+                                    dying → war paid by borrowing → a bank holds
+                                    the bond → a lost war breaks it, the 1345
+                                    chain, four systems that each work and are not
+                                    connected) · exclusion (contraband → a routed
+                                    blockade → league privileges → the staple
+                                    right, every one routing through a neutral
+                                    rather than refusing, per N1c/N2's measured
+                                    lesson) · why-a-place-is-itself (untie quality
+                                    from city size → a craft can be kept and lost →
+                                    the signature → the entrepôt). §8 carries seven
+                                    open questions that gate the work
 BANKS_MONEY_AND_CRAFT_PLAN.md     ← ⭐ REVIEW + PLAN, NOTHING BUILT. Banks, coinage
                                     and the craft guilds, measured against the
                                     standing dynamics run rather than against the
