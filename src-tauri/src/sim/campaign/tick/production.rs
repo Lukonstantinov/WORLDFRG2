@@ -721,6 +721,13 @@ impl CampaignSim {
                 let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                 stock_add(&mut self.hubs[h].stock, g, band, made);
                 self.hubs[h].production[g] += made;
+                // Works Card fix (mirrors the raw-extraction site in mod.rs's daily
+                // pass): accumulate the real running-month total for a manufactory
+                // estate instead of `works_monthly_pass` sampling today's rate alone.
+                if self.hubs[h].is_estate {
+                    if self.hubs[h].works_accum.len() != ng { self.hubs[h].works_accum.resize(ng, 0.0); }
+                    self.hubs[h].works_accum[g] += made;
+                }
                 let supply_class = self.hub_supply_class(h);
                 if self.hubs[h].supply_accum.len() != ng * SUPPLY_CLASSES {
                     self.hubs[h].supply_accum.resize(ng * SUPPLY_CLASSES, 0.0);

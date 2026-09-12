@@ -3319,26 +3319,31 @@ export class OverlayManager {
           }
         }
         // Dynamically-earned commercial rank (campaign, re-ranked twice a year): a
-        // TRADE HUB wears a small blue square, an ENTREPÔT a red disc — a distinct
-        // shape set above the population dot, so "how big" and "how commercial" read
-        // together. Rises and falls with the trade that actually flows through.
+        // TRADE HUB wears a blue square ring, an ENTREPÔT/EMPORIUM a red triangle
+        // ring (matching the Political layer's own emporium convention) — drawn
+        // CONCENTRIC with the settlement's own dot (a surrounding outline, stroke
+        // only, never filled) rather than a badge floating above it, so the marker
+        // sits exactly where the city is instead of appearing offset from it.
+        // Rises and falls with the trade that actually flows through.
         const hc = s.hubClass ?? 0;
         if (hc >= 1) {
           const dinv = 1 / Math.sqrt(this.currentScale);
-          const mr = Math.max(radius * 0.85, 1.3 * dinv);
-          const mx = cx, my = cy - radius - mr * 1.15;
-          ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
-          ctx.strokeStyle = "rgba(0,0,0,0.7)";
+          const mr = Math.max(radius * 1.6, radius + 1.1 * dinv);
+          ctx.lineWidth = Math.max(0.3, 0.55 * dinv);
           if (hc >= 2) {
-            ctx.fillStyle = "#e63030"; // entrepôt — red disc
+            // Emporium / entrepôt — a red triangle ring.
+            ctx.strokeStyle = "#e63030";
+            const h2 = mr * 1.6;
             ctx.beginPath();
-            ctx.arc(mx, my, mr, 0, Math.PI * 2);
-            ctx.fill();
+            ctx.moveTo(cx, cy - h2 * 0.62);
+            ctx.lineTo(cx - mr, cy + h2 * 0.38);
+            ctx.lineTo(cx + mr, cy + h2 * 0.38);
+            ctx.closePath();
             ctx.stroke();
           } else {
-            ctx.fillStyle = "#3a86d6"; // trade hub — blue square
-            ctx.fillRect(mx - mr * 0.87, my - mr * 0.87, mr * 1.74, mr * 1.74);
-            ctx.strokeRect(mx - mr * 0.87, my - mr * 0.87, mr * 1.74, mr * 1.74);
+            // Trade hub — a blue square ring.
+            ctx.strokeStyle = "#3a86d6";
+            ctx.strokeRect(cx - mr, cy - mr, mr * 2, mr * 2);
           }
         }
         // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding

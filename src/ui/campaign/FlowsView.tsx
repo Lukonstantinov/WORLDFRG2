@@ -47,6 +47,61 @@ function fmt(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return n.toFixed(n >= 100 ? 0 : 1);
 }
+/** Green → yellow → red for a 0..1 voyage-loss risk — the SAME ramp and the
+ *  same reference scale (0.15) `OverlayManager.riskColor` uses for the map's
+ *  risk-coloured merchant routes, so a route reads the same risk colour here
+ *  and there. */
+function riskColor(risk: number): string {
+  const t = Math.max(0, Math.min(1, (risk ?? 0) / 0.15));
+  if (t <= 0.5) {
+    const k = t / 0.5;
+    return `rgb(${Math.round(70 + k * 185)},${Math.round(180 - k * 10)},60)`;
+  }
+  const k = (t - 0.5) / 0.5;
+  return `rgb(255,${Math.round(170 - k * 130)},${Math.round(60 - k * 40)})`;
+}
+/** This CITY's own three-way split for a good — own produce exported, passing
+ *  through (imported then re-exported, made by nobody here), bought for
+ *  itself — the same derivation `TradeFlowGood`'s own doc comment gives
+ *  (`transit = max(0, out_volume - own_production)`). Shared by the collapsed
+ *  row's badge and the expanded row's bar so the two never disagree. */
+function goodSplit(g: TradeFlowGood) {
+  const transit = Math.max(0, g.out_volume - (g.own_production ?? 0));
+  const ownExport = g.out_volume - transit;
+  const forUs = Math.max(0, g.in_volume - transit);
+  return { transit, ownExport, forUs };
+}
+/** Per-good transit/consumed badge for the COLLAPSED row — user request: "make
+ *  transit hub info by the good, not overall [...] some goods are imported to
+ *  consume fully and others just transit". A good this city neither makes nor
+ *  keeps but both imports and exports is a STOP for it (🔀); one it imports and
+ *  barely re-exports is consumed here (🏠 terminal) — distinct from ⚒ produced
+ *  here, which can be true at the same time as neither of these. Quiet (null)
+ *  for an ordinary good, same "a healthy row stays quiet" rule as `verdictOf`. */
+function goodTransitBadge(g: TradeFlowGood): { icon: string; label: string; tone: Tone } | null {
+  const total = g.in_volume + g.out_volume;
+  if (total <= 0) return null;
+  const { transit, forUs } = goodSplit(g);
+  if (transit > 0 && transit / total > 0.15) {
+    return { icon: "🔀", label: "transit", tone: "warn" };
+  }
+  if (g.in_volume > 0 && forUs / total > 0.15 && g.out_volume < g.in_volume * 0.15) {
+    return { icon: "🏠", label: "consumed here", tone: undefined as unknown as Tone };
+  }
+  return null;
+}
+/** What the PARTNER does with a good, from `TradeRouteFlow.partner_role`
+ *  (computed server-side off the partner's OWN production/in/out — never this
+ *  city's). A blank role (not enough of the partner's own trade to classify)
+ *  renders nothing rather than guessing. */
+function partnerRoleBadge(role?: string): { icon: string; label: string; tone: Tone } | null {
+  switch (role) {
+    case "transit": return { icon: "🔀", label: "transit hub", tone: "warn" };
+    case "producer": return { icon: "⚒", label: "producer", tone: "good" };
+    case "consumer": return { icon: "🏠", label: "terminal consumer", tone: undefined as unknown as Tone };
+    default: return null;
+  }
+}
 
 /** IMPORT blue / EXPORT gold — one pair, used for every directional mark in the
  *  view (sub-rows, route rows, the balance bar) so direction is legible without
@@ -253,6 +308,11 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
   const [selPartner, setSelPartner] = useState<number | null>(null);
   const [sort, setSort] = useState<Sort>("unusual");
   const [goodFilter, setGoodFilter] = useState<GoodFilter>("all");
+  // How the selected good's per-partner route list is ordered — volume (the
+  // default), voyage RISK (riskiest lane first) or REWARD (highest value first,
+  // `amount × base_value` — a trickle of a precious good can outrank a flood of
+  // grain). User request: "filter them also by trade risk and also by reward".
+  const [routeSort, setRouteSort] = useState<"amount" | "risk" | "value">("amount");
   // A SINGLE isolated route (one partner→here / here→partner for one good), shown on the
   // map on its own with its direction arrow.
   const [selRoute, setSelRoute] = useState<{ good: number; partner: number; dir: number } | null>(null);
@@ -305,11 +365,14 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
     setFlowHighlight(segs);
   }, [flows, selGood, selDir, selPartner, selRoute, setFlowHighlight]);
 
-  const goodRoutes = useMemo(
-    () => (flows && selGood != null
-      ? flows.routes.filter((r) => r.good === selGood && (selDir == null || r.dir === selDir))
-      : []),
-    [flows, selGood, selDir]);
+  const goodRoutes = useMemo(() => {
+    if (!flows || selGood == null) return [];
+    const rs = flows.routes.filter((r) => r.good === selGood && (selDir == null || r.dir === selDir));
+    const key = routeSort === "risk" ? (r: typeof rs[number]) => r.risk ?? 0
+      : routeSort === "value" ? (r: typeof rs[number]) => r.value ?? 0
+      : (r: typeof rs[number]) => r.amount;
+    return [...rs].sort((a, b) => key(b) - key(a));
+  }, [flows, selGood, selDir, routeSort]);
 
   // ── The city's whole trading position, from the per-good rows it already has ──
   const balance = useMemo(() => {
@@ -599,6 +662,20 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                         borderRadius: RADIUS.sm, padding: "0 4px", lineHeight: "14px", flex: "0 0 auto",
                       }}>⚒ made here</span>
                   )}
+                  {(() => {
+                    const tb = goodTransitBadge(g);
+                    if (!tb) return null;
+                    return (
+                      <span title={tb.label === "transit"
+                          ? "passes through this city without being made or kept here"
+                          : "imported and mostly kept here, exported little to nowhere else"}
+                        style={{
+                          display: "inline-flex", alignItems: "center", gap: 2, fontSize: FZ.tiny,
+                          color: T.gold, background: "rgba(230,193,90,0.14)", border: "1px solid rgba(230,193,90,0.4)",
+                          borderRadius: RADIUS.sm, padding: "0 4px", lineHeight: "14px", flex: "0 0 auto",
+                        }}>{tb.icon} {tb.label}</span>
+                    );
+                  })()}
                 </span>
                 <BalanceBar inV={g.in_volume} outV={g.out_volume} max={maxTotal} />
                 <span style={{ width: 54, textAlign: "right", color: T.inkMid }}>{fmt(g.avg_volume)}/yr</span>
@@ -643,9 +720,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                       both imports and exports is one this city is a STOP for,
                       not an origin or a destination. */}
                   {(g.own_production ?? 0) > 0 || g.out_volume > 0 || g.in_volume > 0 ? (() => {
-                    const transit = Math.max(0, g.out_volume - (g.own_production ?? 0));
-                    const ownExport = g.out_volume - transit;
-                    const forUs = Math.max(0, g.in_volume - transit);
+                    const { transit, ownExport, forUs } = goodSplit(g);
                     const segTotal = Math.max(ownExport + transit + forUs, 1e-6);
                     return (
                       <div style={{ width: "100%", padding: "0 0 4px 28px" }}>
@@ -726,6 +801,13 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
         <Section
           title={`${selDir === 1 ? "Export routes" : selDir === 0 ? "Import routes" : "Routes"} — ${
             GOOD_META.get(flows.goods.find((x) => x.good === selGood)?.name ?? "")?.label ?? "good"}`}
+          right={
+            <div style={{ display: "flex", gap: 4 }}>
+              <Chip on={routeSort === "amount"} onClick={() => setRouteSort("amount")}>volume</Chip>
+              <Chip on={routeSort === "risk"} onClick={() => setRouteSort("risk")}>risk</Chip>
+              <Chip on={routeSort === "value"} onClick={() => setRouteSort("value")}>reward</Chip>
+            </div>
+          }
         >
           {goodRoutes.length === 0 && (() => {
             const g = flows.goods.find((x) => x.good === selGood);
@@ -757,9 +839,21 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                 <span style={{ width: 34, color: col, fontSize: FZ.tiny }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>
                 <span style={{
                   flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  color: isSel ? T.gold : T.ink,
+                  color: isSel ? T.gold : T.ink, display: "flex", alignItems: "center", gap: 4,
                 }}>
                   {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
+                  {(() => {
+                    const role = partnerRoleBadge(r.partner_role);
+                    if (!role) return null;
+                    return (
+                      <span
+                        title={`${r.partner_name} is, on its own trade in this good, a ${role.label}`}
+                        style={{ fontSize: FZ.tiny, flex: "0 0 auto", opacity: 0.85 }}
+                      >
+                        {role.icon}
+                      </span>
+                    );
+                  })()}
                 </span>
                 {(() => {
                   const routeTr = transportOf(r.sea_amount ?? 0, r.river_amount ?? 0, r.amount);
@@ -770,12 +864,29 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                     </span>
                   );
                 })()}
+                <span
+                  title={`voyage risk ${(((r.risk ?? 0) * 100).toFixed(1))}%`}
+                  style={{
+                    width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto",
+                    background: riskColor(r.risk ?? 0),
+                  }}
+                />
                 <span style={{ width: 50, textAlign: "right", color: T.inkMid }}>{fmt(r.amount)}</span>
+                <span style={{ width: 46, textAlign: "right", color: T.gold, fontSize: FZ.tiny }}
+                  title="reward — this route's value at the good's base price">
+                  {fmt(r.value ?? 0)}
+                </span>
                 <span style={{ width: 38, textAlign: "right", color: T.inkDim }}>{r.pct.toFixed(0)}%</span>
               </div>
             );
           })}
-          {goodRoutes.length > 0 && <FootNote>Click a route to isolate it on the map.</FootNote>}
+          {goodRoutes.length > 0 && (
+            <FootNote>
+              Click a route to isolate it on the map. The dot is voyage risk (green→red); the gold
+              figure is the route's value. 🔀 transit hub · ⚒ producer · 🏠 terminal consumer — what
+              the PARTNER itself does with this good.
+            </FootNote>
+          )}
         </Section>
       )}
 

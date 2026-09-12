@@ -617,7 +617,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -2685,41 +2685,49 @@ impl CampaignSim {
                     });
                 }
             }
-            // OPEN: the strongest non-home partner with a real tie the holder can afford.
+            // OPEN: the strongest non-home partner(s) with a real tie the holder can
+            // afford — up to `OFFICE_OPEN_MAX_PER_MONTH` in the same month (that
+            // constant's own doc comment: the "no house at either end" carrier-mix
+            // bucket dwarfs the fleet-busy one, so REACH binds harder than fleet
+            // size). Each iteration re-scans `trade_at` excluding offices just
+            // opened THIS call, and re-checks affordability against wealth already
+            // spent this call — the identical discipline `decide_fleets` uses for
+            // `FLEET_BUY_MAX_PER_MONTH`, so a house can never open past what it can
+            // actually afford.
             if max_vol <= 0.0 { continue; }
-            let mut cand: Option<(usize, f32)> = None;
-            for &(hb, v) in &self.houses[hi].trade_at {
-                let hb = hb as usize;
-                if hb == home || hb >= n { continue; }
-                if self.houses[hi].offices.contains(&(hb as u32)) { continue; }
-                // Relaxed the relative gate 0.5→0.3 so a house also plants offices at
-                // its SECOND-tier partners, not only its single dominant one — this
-                // spreads several competing houses' counting-houses across each city
-                // (was: one house monopolising a settlement).
-                if v < OFFICE_OPEN_VOLUME || v < max_vol * 0.3 { continue; }
-                if cand.map_or(true, |(_, bv)| v > bv) { cand = Some((hb, v)); }
-            }
-            if let Some((hb, _)) = cand {
+            for _ in 0..OFFICE_OPEN_MAX_PER_MONTH {
+                let mut cand: Option<(usize, f32)> = None;
+                for &(hb, v) in &self.houses[hi].trade_at {
+                    let hb = hb as usize;
+                    if hb == home || hb >= n { continue; }
+                    if self.houses[hi].offices.contains(&(hb as u32)) { continue; }
+                    // Relaxed the relative gate 0.5→0.3 so a house also plants offices at
+                    // its SECOND-tier partners, not only its single dominant one — this
+                    // spreads several competing houses' counting-houses across each city
+                    // (was: one house monopolising a settlement).
+                    if v < OFFICE_OPEN_VOLUME || v < max_vol * 0.3 { continue; }
+                    if cand.map_or(true, |(_, bv)| v > bv) { cand = Some((hb, v)); }
+                }
+                let Some((hb, _)) = cand else { break };
                 // Cost scales with the host city's importance (population).
                 let cost = OFFICE_COST_BASE * (1.0 + self.hubs[hb].population / 50_000.0);
                 // Phase 2.4 · an EXPANSIVE head opens a foothold on a thinner cushion, a
                 // ROOTED one wants a fatter one first — axis 3, ±15% capped.
                 let afford_mult = 1.5 * self.head_character_factor(hi, 3).recip();
-                if self.houses[hi].wealth >= cost * afford_mult {
-                    self.houses[hi].wealth -= cost;
-                    self.houses[hi].offices.push(hb as u32);
-                    let cn = self.houses[hi].name.clone();
-                    let city = self.hubs[hb].name.clone();
-                    let verb = if self.houses[hi].is_guild { "establishes a factory" } else { "opens a counting-house" };
-                    self.houses[hi].events.push(HouseEvent {
-                        tick, kind: "branch".into(),
-                        text: format!("{} {} in {}", cn, verb, city),
-                    });
-                    self.journal.push(JournalEntry {
-                        tick, kind: "office".into(), hub: hb as i32, good: -1, value: 0.0,
-                        text: format!("{} {} in {}", cn, verb, city),
-                    });
-                }
+                if self.houses[hi].wealth < cost * afford_mult { break; }
+                self.houses[hi].wealth -= cost;
+                self.houses[hi].offices.push(hb as u32);
+                let cn = self.houses[hi].name.clone();
+                let city = self.hubs[hb].name.clone();
+                let verb = if self.houses[hi].is_guild { "establishes a factory" } else { "opens a counting-house" };
+                self.houses[hi].events.push(HouseEvent {
+                    tick, kind: "branch".into(),
+                    text: format!("{} {} in {}", cn, verb, city),
+                });
+                self.journal.push(JournalEntry {
+                    tick, kind: "office".into(), hub: hb as i32, good: -1, value: 0.0,
+                    text: format!("{} {} in {}", cn, verb, city),
+                });
             }
         }
     }

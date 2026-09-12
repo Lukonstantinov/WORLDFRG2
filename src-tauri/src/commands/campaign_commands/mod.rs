@@ -2961,6 +2961,28 @@ pub struct TradeRouteFlow {
     /// went by caravan.
     #[serde(default)]
     pub river_amount: f32,
+    /// This route's real voyage-loss risk (`CampaignSim::lane_risk`), mode
+    /// read off whichever of sea/river/caravan carried the majority of
+    /// `amount` — the same figure the map's risk-coloured routes use, so a
+    /// player can filter/sort the Flows list by it instead of only seeing it
+    /// on the map.
+    #[serde(default)]
+    pub risk: f32,
+    /// The "reward" reading of this route — its grain-equivalent VALUE
+    /// (`amount × the good's base_value`), not just a raw unit count, so a
+    /// trickle of a precious good and a flood of grain can be ranked on the
+    /// same scale.
+    #[serde(default)]
+    pub value: f32,
+    /// What the PARTNER itself does with this good, read off the partner's own
+    /// (good-level) production/in/out — not this city's: "transit" (the partner
+    /// neither makes much of it nor keeps most of what arrives — it re-ships
+    /// onward), "producer" (the partner makes it and this route is a real
+    /// origin/destination for that supply), or "consumer" (the partner takes it
+    /// in and exports little to nowhere else — a terminal market). "" when the
+    /// partner has no meaningful flow of this good to classify.
+    #[serde(default)]
+    pub partner_role: String,
 }
 /// A top partner city: its share of ALL this city's trade + the goods exchanged.
 #[derive(Serialize, Clone)]

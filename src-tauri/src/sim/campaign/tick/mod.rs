@@ -1449,6 +1449,34 @@ const OFFICE_CLOSE_VOLUME: f32 = 0.5;
 const OFFICE_COST_BASE: f32 = 4.0;
 /// Standing discount on goods a holder BUYS in a city where it has an office.
 const OFFICE_BUY_DISCOUNT: f32 = 0.05;
+/// `update_guilds_and_offices`'s OPEN step picks exactly one candidate city
+/// (its single strongest untied trade partner) and opens at most one office
+/// there per house per month.
+///
+/// **Tried raising this to 2, and reverted — a real, measured negative
+/// result, so it is not attempted again without the finding below being
+/// addressed first.** `econ_measure_carrier_mix` finds 55-57% of all
+/// ownerless shipments have NO HOUSE AT EITHER END at all (dwarfing the
+/// 32-35% lost to a busy fleet), so widening house REACH looked like the
+/// right lever — and at `OFFICE_OPEN_MAX_PER_MONTH = 2` it genuinely worked
+/// on that fixture (`reference_world`/`reference_world_large`: "no house at
+/// either end" fell 57.4%→50.9% / 56.9%→54.4%), but overall house-financed
+/// share barely moved (8.6%→8.7%, 9.9%→9.4%) because the freed volume just
+/// piled onto the OTHER bottleneck instead ("no free vessel" rose
+/// 34.0%→40.5% / 32.6%→35.6%) — reach and fleet size are complementary, not
+/// substitutes. Worse: on `dense_world` (the realistic-scale gate,
+/// `the_dosed_economy_stays_healthy_on_a_realistically_dense_world` /
+/// `the_relay_carries_long_lanes_in_stages_on_a_realistically_dense_world`),
+/// dosing this ALONE collapsed dispatched volume by ~80% (1.27M vs 6.32M
+/// loose) — the same class of failure `FLEET_BUY_MAX_PER_MONTH = 3` produces
+/// via wealth concentration, but here via a volume collapse instead, and
+/// worse than that fleet attempt on its own axis. The two failures share a
+/// suspect: something about the staging relay's interaction with a house
+/// reaching MORE cities (or owning MORE hulls) that this session did not
+/// have time to isolate. Real next step: instrument `staging_hop`'s own
+/// success/failure rate as reach/fleet size increase, on `dense_world`
+/// specifically, before touching either constant again.
+const OFFICE_OPEN_MAX_PER_MONTH: u32 = 1;
 // ── Office leases (Phase 5: trade network reach). A house signing a futures contract
 //    LEASES the cities at both ends for a guaranteed term, so its bases stay put for
 //    the life of the contract: a leased office never auto-closes, pays the city a rent
@@ -2560,17 +2588,16 @@ const CARAVAN_COST: f32 = 4.0;
 /// month when its idle capital (after this month's purchases) still clears the
 /// buy threshold — each purchase re-checks affordability against the wealth
 /// already spent this call, so a house can never buy past what it can actually
-/// afford. `simulate_decades_reports_dynamics` and `econ_inheritance_rules_
-/// fragment_differently` both held at 3 (a higher buy rate alone does not
-/// invert the inheritance gate the way `CHARTER_EXCLUSIVE_DOSE` beside it
-/// does), but 3 broke two smaller, exact fixtures elsewhere in the suite
-/// (`coinage_runs_yearly_finite_and_deterministic`,
-/// `a_house_records_every_head_it_has_had`) whose specific expected outcome
-/// this session had no time left to re-derive or re-tune for. Dosed here to
-/// the already-verified-safe 3 (user-requested — houses that can only ever
-/// own ~12 hulls/year, whatever their wealth, cannot be the ones carrying a
-/// city's trade), with both fixtures re-derived against the new trajectory
-/// (see their own comments in `tests.rs`).
+/// afford. Dosed 1 → 2 (2026-09-05, `518cc6f`): measured via
+/// `econ_measure_carrier_mix`, house-financed shipments rose 4.3% → ~8%.
+/// **3 was tried first and reverted** — it broke `simulate_decades_reports_
+/// dynamics`'s sustained-richest-house bound and `the_dosed_economy_stays_
+/// healthy_on_a_realistically_dense_world`'s trade-volume floor, i.e. it
+/// bought the carrier-mix shift by concentrating wealth harder rather than
+/// by houses out-competing the ownerless residual on equal terms. Stale
+/// prose that named different, smaller fixtures as the reason was corrected
+/// here — see the commit's own message for the real account, `git log
+/// -S FLEET_BUY_MAX_PER_MONTH`.
 const FLEET_BUY_MAX_PER_MONTH: u32 = 2;
 
 // ── DLC 3.5 · Coinage (the "Venice ducat") ──────────────────────────────────
@@ -3467,6 +3494,17 @@ pub struct TickHub {
     /// UNATTRIBUTED — `eat = need.min(stock)` has no counterparty to book,
     /// and inventing one here would misstate what the model actually knows.
     #[serde(default)] pub demand_accum: Vec<f32>,
+    /// An ESTATE's own running production total for the CURRENT month, one
+    /// slot per good — accumulated daily, read and zeroed by
+    /// `works_monthly_pass`. Exists because `production[g]` (above) is a
+    /// per-DAY rate, freshly recomputed every day, and `works_monthly_pass`
+    /// used to sample it directly into a `MonthSample` it then called a
+    /// "month" — so a manufactory whose input arrives in lumps (candles from
+    /// honey that isn't delivered every day) showed whatever that one
+    /// instant happened to be, mislabeled `/mo` on the Works Card, routinely
+    /// reading a small fraction of its real monthly output. `#[serde(default)]`
+    /// so an old save's estates simply start accumulating from the next tick.
+    #[serde(default)] pub works_accum: Vec<f32>,
     /// S7 (CONSUMPTION_REBUILD_PLAN.md) · the household stratum's OWN spendable
     /// money — dosed from zero (`HOUSEHOLD_MONETIZATION_DOSE`), the fork the
     /// plan names: today `eat = need.min(stock)` has no counterparty at all, so
@@ -8247,6 +8285,13 @@ impl CampaignSim {
                     let band = production_band(self.hubs[h].is_estate, self.hubs[h].quality.get(g).copied().unwrap_or(0.0));
                     stock_add(&mut self.hubs[h].stock, g, band, realized);
                     supply_add(&mut self.hubs[h].supply_accum, g, supply_class, realized);
+                    // Works Card fix: accumulate this ESTATE's real running-month total
+                    // (`works_monthly_pass` reads and resets it) instead of that pass
+                    // sampling `production[g]`'s instantaneous per-day rate directly.
+                    if self.hubs[h].is_estate {
+                        if self.hubs[h].works_accum.len() != ng { self.hubs[h].works_accum.resize(ng, 0.0); }
+                        self.hubs[h].works_accum[g] += realized;
+                    }
                 }
                 // SUBSISTENCE FARMING — a REMOTE land settlement whose trade component
                 // cannot supply food feeds itself from its own fields, so an isolated

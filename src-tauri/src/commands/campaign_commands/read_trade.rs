@@ -481,7 +481,14 @@ pub fn campaign_works_card(hub: u32, db: State<'_, WorldDb>) -> Result<Option<Wo
 
     let monthly: Vec<WorksMonthPoint> = hb.monthly.iter()
         .map(|m| WorksMonthPoint { output: m.output, quality: m.quality, price: m.price }).collect();
-    let monthly_output = hb.production.get(g).copied().unwrap_or(0.0);
+    // The last COMPLETED month's real total (`works_monthly_pass` accumulates it
+    // daily, not a snapshot of today's per-day rate — see that function's own
+    // doc comment for why the old direct `hb.production[g]` read routinely
+    // under-reported a lumpy manufactory's true output). A works under a month
+    // old has no sample yet; extrapolate its current per-day rate over a
+    // nominal 30-day month rather than showing a bare "0.0/mo".
+    let monthly_output = hb.monthly.last().map(|m| m.output)
+        .unwrap_or_else(|| hb.production.get(g).copied().unwrap_or(0.0) * 30.0);
     let prev_output = hb.monthly.iter().rev().nth(1).map(|m| m.output).unwrap_or(monthly_output);
     let brand = if hb.brand_chronicled {
         let place = crate::sim::tick::brand_place(&hb.name, crate::sim::tick::estate_kind_label(hb.estate_kind));
@@ -729,6 +736,38 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         for &(who, amt) in &f.carriers { *cg.entry(who).or_insert(0.0) += amt; }
     }
 
+    // ── Partner role, per (partner city, good) — read off the PARTNER's own
+    // ledger (every hub's `trade_last`, not just this city's), so the route list
+    // can say what a partner actually does with a good rather than only what
+    // this city trades with it. One extra full pass over `trade_last`, city-
+    // folded exactly like the loop above.
+    let mut pg_in: HashMap<(u32, u32), f32> = HashMap::new();  // (city, good) → that city's own imports
+    let mut pg_out: HashMap<(u32, u32), f32> = HashMap::new(); // (city, good) → that city's own exports
+    for f in sim.trade_last.iter() {
+        let city = city_of(f.hub);
+        let key = (city, f.good);
+        if f.dir == 0 { *pg_in.entry(key).or_insert(0.0) += f.amount; }
+        else { *pg_out.entry(key).or_insert(0.0) += f.amount; }
+    }
+    let partner_role_for = |partner: u32, g: u32| -> String {
+        let p_in = pg_in.get(&(partner, g)).copied().unwrap_or(0.0);
+        let p_out = pg_out.get(&(partner, g)).copied().unwrap_or(0.0);
+        let total = p_in + p_out;
+        if total < 1e-6 { return String::new(); }
+        let p_prod = sim.hubs.get(partner as usize).and_then(|h| h.production.get(g as usize))
+            .copied().unwrap_or(0.0).max(0.0) * crate::sim::tick::TICKS_PER_YEAR as f32;
+        let p_transit = (p_out - p_prod).max(0.0);
+        if p_out < total * 0.05 {
+            "consumer".to_string()
+        } else if p_transit / total > 0.25 {
+            "transit".to_string()
+        } else if p_prod > 0.01 {
+            "producer".to_string()
+        } else {
+            String::new()
+        }
+    };
+
     // ── Goods list: union of last-year flows + historical series ──
     let mut hist_by_good: HashMap<u32, &Vec<f32>> = HashMap::new();
     // `trade_hist` is keyed by the sim's ARRAY INDEX (`hidx`), exactly like `trade_last`
@@ -811,11 +850,24 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
         let (pname, px, py) = pos(partner)?;
         let tot = good_total.get(&g).copied().unwrap_or(0.0).max(1e-6);
+        let sea_amount = route_sea.get(&(g, partner, dir)).copied().unwrap_or(0.0);
+        let river_amount = route_river.get(&(g, partner, dir)).copied().unwrap_or(0.0);
+        // Risk mode = whichever of sea/river/caravan actually carried the
+        // majority of this route's amount — a route aggregates many
+        // individual shipments over the reporting window, which can mix
+        // modes, so this reads as "how this lane is mostly run".
+        let land_amount = (amount - sea_amount - river_amount).max(0.0);
+        let sea = sea_amount >= river_amount && sea_amount >= land_amount;
+        let river = !sea && river_amount >= land_amount;
+        let (from, to) = if dir == 1 { (hi, partner as usize) } else { (partner as usize, hi) };
+        let base_value = sim.goods.get(g as usize).map(|x| x.base_value).unwrap_or(1.0);
         Some(TradeRouteFlow {
             good: g, partner, partner_name: pname, px, py, dir, amount,
             pct: amount / tot * 100.0,
-            sea_amount: route_sea.get(&(g, partner, dir)).copied().unwrap_or(0.0),
-            river_amount: route_river.get(&(g, partner, dir)).copied().unwrap_or(0.0),
+            sea_amount, river_amount,
+            risk: sim.lane_risk(from, to, sea, river),
+            value: amount * base_value,
+            partner_role: partner_role_for(partner, g),
         })
     }).collect();
     routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));

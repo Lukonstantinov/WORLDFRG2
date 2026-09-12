@@ -854,21 +854,46 @@ impl CampaignSim {
     /// samples its own DOMINANT good's output/quality/price into its 12-month
     /// ring — the works card's curves. A non-estate hub is a village in the
     /// plan's own sense (D14) and carries no card, so nothing is sampled for it.
+    ///
+    /// Reads `works_accum` — the estate's real running-MONTH total, accumulated
+    /// daily in `production.rs`/`mod.rs`'s production step — rather than
+    /// `production[g]`, which is only ever today's instantaneous per-day rate.
+    /// The old code sampled that single day and called it a "month", so a
+    /// manufactory fed by lumpy input deliveries (candles made only on the days
+    /// honey actually arrives) showed whatever that one instant happened to be —
+    /// routinely a small fraction of its real month, mislabeled `/mo` on the
+    /// Works Card. An old save's estate starts with an empty accumulator; the
+    /// first sample after loading falls back to the previous per-day reading
+    /// rather than reporting a false zero.
     pub(crate) fn works_monthly_pass(&mut self) {
         let ng = self.goods.len();
         if ng == 0 { return; }
         for h in 0..self.hubs.len() {
             if !self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
-            let g = (0..ng.min(self.hubs[h].production.len()))
-                .max_by(|&a, &b| self.hubs[h].production[a]
-                    .partial_cmp(&self.hubs[h].production[b]).unwrap_or(std::cmp::Ordering::Equal));
+            let has_accum = self.hubs[h].works_accum.len() >= ng;
+            let g = if has_accum {
+                (0..ng).max_by(|&a, &b| self.hubs[h].works_accum[a]
+                    .partial_cmp(&self.hubs[h].works_accum[b]).unwrap_or(std::cmp::Ordering::Equal))
+            } else {
+                (0..ng.min(self.hubs[h].production.len()))
+                    .max_by(|&a, &b| self.hubs[h].production[a]
+                        .partial_cmp(&self.hubs[h].production[b]).unwrap_or(std::cmp::Ordering::Equal))
+            };
             let Some(g) = g else { continue };
+            let output = if has_accum {
+                self.hubs[h].works_accum[g]
+            } else {
+                self.hubs[h].production.get(g).copied().unwrap_or(0.0)
+            };
             let sample = MonthSample {
-                output: self.hubs[h].production.get(g).copied().unwrap_or(0.0),
+                output,
                 quality: self.hubs[h].quality.get(g).copied().unwrap_or(0.0),
                 price: self.hubs[h].price.get(g).copied().unwrap_or(0.0),
             };
             self.hubs[h].monthly.push(sample);
+            if has_accum {
+                for v in self.hubs[h].works_accum.iter_mut() { *v = 0.0; }
+            }
             if self.hubs[h].monthly.len() > WORKS_MONTHLY_CAP {
                 let excess = self.hubs[h].monthly.len() - WORKS_MONTHLY_CAP;
                 self.hubs[h].monthly.drain(0..excess);
@@ -1738,7 +1763,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;

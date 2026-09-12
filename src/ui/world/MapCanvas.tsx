@@ -340,22 +340,30 @@ export function MapCanvas() {
       kMaxO = kMinO + MAX_COPIES - 1;
     }
 
-    // Clip to the logical world bounds — PER COPY, not one rect spanning the
-    // whole kMin..kMax range, and each copy positioned `period` (the tile
-    // grid's own padded wrap width) apart while staying only `grid_width`
-    // (the REAL width) wide. Tiles are 128×128, so the world grid (e.g.
-    // 3600×1800) is covered by tiles that extend past the edges (29×15 →
-    // 3712×1920); the last partial tile row/column is default-sea and
-    // otherwise bleeds in as a thin ocean strip at the edge of EVERY copy —
-    // including the INTERNAL seams between adjacent copies, which a single
-    // wide rect only ever excludes at its own two outer edges. One rect per
-    // copy in the same path unions correctly under the canvas's default
+    // Clip to `period`-wide bands, one PER COPY, laid edge-to-edge with zero
+    // gap between them — `period` (not `grid_width`) is what tiles actually
+    // repeat on at this LOD (`wrapPeriod`'s own doc comment), so spacing
+    // consecutive copies by anything narrower than `period` misaligns their
+    // tiles, and clipping any one copy to less than its own full `period`
+    // reopens a strip neither copy draws into. Tiles are 128×128, so the
+    // world grid (e.g. 3600×1800) is covered by tiles that extend past the
+    // true edge (29×15 → 3712×1920); the last partial tile row/column past
+    // `grid_width` is default-sea, which bleeds in as a thin ocean strip at
+    // the edge of every copy. An earlier version clipped each copy down to
+    // exactly `grid_width` to hide that bleed — which left literal unpainted
+    // canvas (background, i.e. BLACK) in the `period − grid_width` gap this
+    // opened at every INTERNAL seam between copies, a far worse defect than
+    // the thin sea-bleed it was trying to hide. Clipping to the full `period`
+    // instead keeps every copy touching its neighbour with nothing between,
+    // and only ever shows that bleed strip at the two true OUTER edges of the
+    // whole visible span — harmless, off at the screen's periphery. One rect
+    // per copy in the same path unions correctly under the canvas's default
     // nonzero winding rule (all rects wind the same way).
     ctx.save();
     if (m) {
       ctx.beginPath();
       for (let k = kMin; k <= kMax; k++) {
-        ctx.rect(k * period, 0, m.grid_width, m.grid_height);
+        ctx.rect(k * period, 0, period, m.grid_height);
       }
       ctx.clip();
     }

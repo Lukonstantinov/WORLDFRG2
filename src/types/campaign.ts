@@ -688,6 +688,18 @@ export interface TradeRouteFlow {
   dir: number;   // 0 inbound, 1 outbound
   amount: number;
   pct: number;
+  /** This route's real voyage-loss risk (0..1, `CampaignSim::lane_risk`) — the
+   *  same figure the map's risk-coloured merchant routes use. */
+  risk?: number;
+  /** The "reward" reading of this route: its grain-equivalent VALUE
+   *  (`amount × the good's base_value`), so a trickle of a precious good and a
+   *  flood of grain can be ranked/filtered on the same scale. */
+  value?: number;
+  /** What the PARTNER itself does with this good, read off the partner's own
+   *  production/in/out — "transit" (re-ships onward, doesn't make/keep most of
+   *  it), "producer" (makes it, a real origin), "consumer" (a terminal market —
+   *  takes it in, exports little to nowhere else), or "" if not classifiable. */
+  partner_role?: string;
 }
 /** A top partner city: share of all this city's trade + goods exchanged. */
 export interface TradePartner {
