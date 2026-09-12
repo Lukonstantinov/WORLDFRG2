@@ -906,7 +906,11 @@ serde-defaulted so old saves load). Grouped by theme:
 
 - **The flavour layer, and what it is NOT** (`houses.rs`, all doc-labelled "Phase 4/5
   (flavour)" in their own source): `CraftGuild` (`seed_craft_guilds`/`run_craft_guilds`
-  — hub · good · strength · hall, capped at `GUILD_MAX`=12; lifts one good's local
+  — hub · good · strength · hall, capped at `GUILD_MAX`=12 **for the whole world, and
+  seeded ONCE at tick 0** (`guilds_seeded`) from year-zero production, with no founding
+  or dissolution pass ever after — so 21 manufactured goods share 12 guilds, each craft
+  has at most one guild anywhere, and the roster is frozen for 500 years
+  (`docs/BANKS_MONEY_AND_CRAFT_PLAN.md` C-F1); lifts one good's local
   quality by `GUILD_QUALITY_STEP` to a `GUILD_QUALITY_CAP`, a `GUILD_STRIKE_CHANCE`
   strike halving that good's manufacture for 20-60 days, and one guildhall granting
   +0.05 civic stability). `Fair` (`seed_trade_fairs`/`run_trade_fairs` — one per large
@@ -919,7 +923,12 @@ serde-defaulted so old saves load). Grouped by theme:
   exclude anyone — see `docs/ACTORS_AND_CARRIAGE_PLAN.md` §2.
 - **Public debt is real** (`money.rs::update_public_debt`): a council with a seat
   issues bonds against throughput, services a `DEBT_COUPON` out of treasury, and pays
-  holders (houses and banks) pro-rata — a working *Monte*, not flavour.
+  holders pro-rata — a working *Monte*, not flavour. **Correction (measured):** this
+  line used to read "holders (houses and banks)". `debt_holders` is
+  `Vec<(kind, idx, amt)>` and the kind byte allows a bank, but the single issuance
+  site pushes only `(0, house, …)` and every payout loop opens `if kind != 0
+  { continue; }` — **no bank has ever held a bond**. See
+  `docs/BANKS_MONEY_AND_CRAFT_PLAN.md` B-F4 (slice 2 fixes it).
 - **Two different things are called "guild"** — `House{is_guild}` (a CIVIC MERCHANT
   body: the same struct with a flag, a civic subsidy, bankruptcy immunity, and
   strictly FEWER organs than a private house — no tier, kin, goals, crisis or
@@ -5469,6 +5478,52 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     Ends with 8 gated proposals in build order
                                     and 6 questions that need a decision before
                                     any of it starts
+BANKS_MONEY_AND_CRAFT_PLAN.md     ← ⭐ REVIEW + PLAN, NOTHING BUILT. Banks, coinage
+                                    and the craft guilds, measured against the
+                                    standing dynamics run rather than against the
+                                    code. Headline: all three are modelled well
+                                    INTERNALLY and are terminal — `price_level` is
+                                    computed by a real quantity-theory loop and read
+                                    by NOBODY (`live_price` is `base·(need/stock)^k`,
+                                    no money term), `coin_exchange`'s bimetallic
+                                    ratio prices only a bank's own bill income (a
+                                    merchant crossing currencies pays no spread), and
+                                    a craft guild's entire economic power is one
+                                    quality ceiling. Money's ONE channel into trade is
+                                    `coin_discount`'s ≤10% freight shave above
+                                    `RESERVE_TRUST_MIN` 0.55 — and the measured run
+                                    puts average coin trust at 43% from year 30 on, so
+                                    that channel is CLOSED for half the campaign,
+                                    because 12 crashes in 50 years (every `fail_bank`
+                                    calls `trigger_regional_crash`) keep hammering
+                                    trust down. Two subsystems in a loop neither was
+                                    designed against; invisible without the digest.
+                                    Also: nobody BORROWS (`bank_maybe_lend` rolls a
+                                    die and pushes cash at the RICHEST resident, no
+                                    project attached), `BANK_CREDIT_MULT`'s 1.6×
+                                    "trades on credit" is an archetype perk connected
+                                    to no bank and never repaid, no bank may hold
+                                    public debt though CLAUDE.md claimed otherwise
+                                    (B-F4, now corrected above), and the world holds
+                                    **12 craft guilds total, seeded once at tick 0 and
+                                    never founded or dissolved again**, against 21
+                                    manufactured goods — Florence alone had 21 arti.
+                                    Eight slices, gate each: 0 the missing instrument
+                                    (`econ_measure_finance` — there is no `econ_*`
+                                    diagnostic for finance at all) · 1 split bank
+                                    failure from contagion (cheapest, re-opens the
+                                    coin channel) · 2 let a bank hold the Monte ·
+                                    3 credit demanded not pushed · 4 make
+                                    `price_level` spendable (dosed from zero; touches
+                                    `live_price`, may not survive) · 5 make someone
+                                    pay the bill · 6 A6/Fugger, loan→arrears→offtake ·
+                                    7 crafts as a live population. §5 lists what is
+                                    deliberately NOT proposed (wages/labour is
+                                    FIX_PLAN Part C, not a finance change); §6 maps
+                                    what SYSTEMS_21_PROPOSALS, SOCIAL_ECONOMIC_WEALTH_
+                                    PROPOSAL (whose "banking is dormant, lower the
+                                    founding bar" reading is now measurably STALE and
+                                    backwards) and ESTATES_SHARES A5/A6 already said
 CITY_TRADERS_PANEL_PLAN.md        ← ⭐ AGREED, BACKEND GROUNDWORK BUILT AND INERT,
                                     UI NOT BUILT. A third tab beside Market/Flows:
                                     WHO TRADES HERE (carriers by volume/standing/
