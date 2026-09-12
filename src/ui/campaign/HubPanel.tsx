@@ -876,6 +876,32 @@ export function HubPanel() {
               ))}
             </div>
           )}
+          {/* BREAK-OF-BULK RELAY — the real Ostia case: this hub is where
+              OTHER hub-pairs' cheapest routes actually transship (sea trade
+              onto a caravan, or vice versa), read off `route_outlet`
+              (`relay_count`/`relay_examples`). Distinct from raw trade
+              throughput/hub_class — a modest port can be everyone else's
+              waypoint, and a huge trading city can never be anyone's. Shown
+              as a standing fact above all three sub-views, same convention
+              as "barred here" above. */}
+          {(detail?.relay_count ?? 0) > 0 && (
+            <div style={{
+              display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6,
+              margin: "0 0 6px", padding: "5px 8px", borderRadius: 5,
+              background: "rgba(47,209,201,0.08)", border: "1px solid rgba(47,209,201,0.35)",
+              fontSize: 10,
+            }}>
+              <span style={{ color: "#2fd1c9", fontWeight: 700 }}>
+                ⚓ break-of-bulk relay — {detail!.relay_count} route{detail!.relay_count === 1 ? "" : "s"}
+              </span>
+              {(detail?.relay_examples?.length ?? 0) > 0 && (
+                <span style={{ color: "#9fd6d2" }}>
+                  e.g. {detail!.relay_examples!.join(" · ")}
+                  {(detail!.relay_count ?? 0) > (detail!.relay_examples?.length ?? 0) ? ", …" : ""}
+                </span>
+              )}
+            </div>
+          )}
           {tradeView === "flows" && (
             <FlowsView hubId={hub.id} active={campActive} tick={campTick} setFlowHighlight={setFlowHighlight}
               tariffIncome={detail ? (detail.finance?.prev ?? detail.finance ?? null)?.tax_trade : undefined} />

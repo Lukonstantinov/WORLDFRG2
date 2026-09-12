@@ -3366,6 +3366,34 @@ export class OverlayManager {
           ctx.fill();
           ctx.stroke();
         }
+        // TRADE_STAGING_AND_POSTS_PLAN.md Part II Slice C1 · a BREAK-OF-BULK
+        // relay — the real Ostia case (sea trade transships onto a caravan
+        // here), not just a busy port: this hub is where OTHER hub-pairs'
+        // cheapest routes actually relay (`relayCount`, off `route_outlet`),
+        // a genuinely different question from `hubClass`'s raw trade-
+        // throughput rank — a small port with no volume of its own can still
+        // be everyone else's waypoint. A distinct teal HOURGLASS (goods
+        // changing hands/mode here), placed opposite the founding star
+        // (lower-left) so the two badges never collide.
+        if (s.isTransitKnot) {
+          const dinv = 1 / Math.sqrt(this.currentScale);
+          const hr = Math.max(radius * 0.85, 1.3 * dinv);
+          const hx = cx - radius - hr * 0.6, hy = cy + radius + hr * 0.4;
+          ctx.fillStyle = "#2fd1c9";
+          ctx.strokeStyle = "rgba(0,0,0,0.6)";
+          ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
+          ctx.beginPath();
+          ctx.moveTo(hx - hr, hy - hr * 0.7);
+          ctx.lineTo(hx + hr, hy - hr * 0.7);
+          ctx.lineTo(hx, hy);
+          ctx.closePath();
+          ctx.moveTo(hx - hr, hy + hr * 0.7);
+          ctx.lineTo(hx + hr, hy + hr * 0.7);
+          ctx.lineTo(hx, hy);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
         ctx.globalAlpha = 1;
       }
     });

@@ -706,6 +706,8 @@ export function MapCanvas() {
         dead: isDead(h),
         isNew: isNew(h),
         hubClass: h.hub_class ?? 0,
+        isTransitKnot: h.is_transit_knot ?? false,
+        relayCount: h.relay_count ?? 0,
       };
     });
     // Add any live hubs with no static counterpart (organic towns swarmed and
@@ -719,6 +721,8 @@ export function MapCanvas() {
         dead: isDead(h),
         isNew: isNew(h),
         hubClass: h.hub_class ?? 0,
+        isTransitKnot: h.is_transit_knot ?? false,
+        relayCount: h.relay_count ?? 0,
       });
     }
     return merged;

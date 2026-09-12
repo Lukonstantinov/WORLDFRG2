@@ -410,6 +410,23 @@ impl CampaignSim {
         self.routes_dirty = false;
     }
 
+    /// #6d companion · how many (a,b) pairs' cheapest route actually RELAYS
+    /// through each hub — the real Ostia-style break-of-bulk count, distinct
+    /// from `hub_class`'s raw trade-throughput rank: a hub can carry a huge
+    /// volume of its OWN trade and never be anyone else's waypoint (no relays),
+    /// or be a modest port that many OTHER pairs' cheapest routes happen to
+    /// transship through (many relays) — the two questions genuinely disagree.
+    /// One count per hub index, read straight off `route_outlet` (no new state).
+    pub(crate) fn relay_counts(&self) -> Vec<u32> {
+        let mut counts = vec![0u32; self.hubs.len()];
+        for &p in &self.route_outlet {
+            if p >= 0 {
+                if let Some(c) = counts.get_mut(p as usize) { *c += 1; }
+            }
+        }
+        counts
+    }
+
 
     /// Build each hub's nearest reachable trade partners (sorted nearest first,
     /// capped to `NEIGHBOR_K`). Estates are kept as candidates (they have a

@@ -292,6 +292,15 @@ pub struct HubBrief {
     /// 1 trade hub · 2 entrepôt. Drives the distinct map marker (blue diamond / red
     /// triangle). 0 until a campaign has run.
     #[serde(default)] pub hub_class: u8,
+    /// The real Ostia-style break-of-bulk count: how many OTHER hub-pairs'
+    /// cheapest route actually relays through this hub (`CampaignSim::
+    /// relay_counts`, off `route_outlet`) — distinct from `hub_class`'s raw
+    /// trade-throughput rank. A hub can carry huge volume of its OWN trade
+    /// and never be anyone else's waypoint, or the reverse.
+    #[serde(default)] pub relay_count: u32,
+    /// `relay_count >= TRANSIT_KNOT_MIN_RELAYS` — drives the map's distinct
+    /// transit-knot marker, a real question from what `hub_class` answers.
+    #[serde(default)] pub is_transit_knot: bool,
     /// Satellite CONSTRUCTION stage: 0 = finished/not a build site · 1..=5 = building.
     /// Drives the map's under-construction marker + opens the construction window.
     #[serde(default)] pub build_stage: u8,
@@ -800,6 +809,13 @@ pub struct HubDetail {
     /// `house_barred` inverted from "per house" to "per city") — the Trade tab
     /// had no way to show who this city has shut out.
     #[serde(default)] pub barred_here: Vec<BarredHouse>,
+    /// The real Ostia-style break-of-bulk count — how many OTHER hub-pairs'
+    /// cheapest route relays through this hub (`CampaignSim::relay_counts`),
+    /// distinct from raw trade throughput. 0 for an ordinary city.
+    #[serde(default)] pub relay_count: u32,
+    /// A few example "A → B" pair names this hub relays for, so the panel can
+    /// say WHAT it is a waypoint between, not just a bare count.
+    #[serde(default)] pub relay_examples: Vec<String>,
     // ── DLC 3.5 · treasury, finances, war, and the carrying trade ──
     /// Retained civic treasury (grain-eq).
     #[serde(default)] pub treasury: f32,
@@ -1032,6 +1048,7 @@ fn persist_campaign(db: &WorldDb, conn: &Connection) -> Result<(), String> {
 }
 
 fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
+    let relay_counts = sim.relay_counts();
     let hubs = sim
         .hubs
         .iter()
@@ -1064,6 +1081,9 @@ fn build_snapshot(sim: &CampaignSim) -> CampaignSnapshot {
                 founded_tick: h.founded_tick,
                 trade_volume: h.trade_last_year,
                 hub_class: h.hub_class,
+                relay_count: relay_counts.get(hi).copied().unwrap_or(0),
+                is_transit_knot: relay_counts.get(hi).copied().unwrap_or(0)
+                    >= crate::sim::tick::TRANSIT_KNOT_MIN_RELAYS,
                 build_stage: h.build_stage,
                 died_cause: h.died_cause.clone(),
                 pop_spark: {

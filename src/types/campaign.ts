@@ -38,6 +38,13 @@ export interface CampaignHubBrief {
   /** Dynamically-earned commercial class (re-ranked twice a year): 0 ordinary ·
    *  1 trade hub · 2 entrepôt. Drives the distinct map marker. */
   hub_class?: number;
+  /** The real Ostia-style break-of-bulk count — how many OTHER hub-pairs'
+   *  cheapest route relays through this hub, distinct from `hub_class`'s raw
+   *  trade-throughput rank. */
+  relay_count?: number;
+  /** `relay_count` past the transit-knot threshold — drives the map's
+   *  distinct break-of-bulk marker. */
+  is_transit_knot?: boolean;
   /** Satellite construction stage: 0 = finished/not building · 1..=5 = under construction. */
   build_stage?: number;
   /** Why the settlement died ("famine"/"plague"/"war"/"disaster"; "" = alive). */
@@ -515,6 +522,11 @@ export interface HubDetail {
    *  `HouseBrief.barred` — that lists cities a house is shut out of, this
    *  lists houses this city has shut out). */
   barred_here?: BarredHouse[];
+  /** The real Ostia-style break-of-bulk count — how many OTHER hub-pairs'
+   *  cheapest route relays through this hub. 0 for an ordinary city. */
+  relay_count?: number;
+  /** A few example "A → B" pair names this hub relays for. */
+  relay_examples?: string[];
   /** DLC 3 · the polis government of this seat (null for estates). */
   government?: Government | null;
   treasury?: number;                 // retained civic treasury
@@ -2307,6 +2319,11 @@ export interface Settlement {
   dead?: boolean;   // abandoned/collapsed → drawn as a † ruin cross, not a dot
   isNew?: boolean;  // founded this campaign, still young → gold founding star
   hubClass?: number; // 0 ordinary · 1 trade hub · 2 entrepôt (campaign, earned live)
+  // The real Ostia-style break-of-bulk case: this hub is where OTHER hub-pairs'
+  // cheapest routes actually relay, a genuinely different question from hubClass's
+  // raw trade-throughput rank. Drives a distinct map marker.
+  isTransitKnot?: boolean;
+  relayCount?: number;
   // GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — the settlement editor.
   manual?: boolean; // hand-placed via placeSettlementAt, not from a generated batch
   edited?: boolean; // any field of a generated settlement has been hand-overridden

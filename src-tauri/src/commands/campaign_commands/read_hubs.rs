@@ -254,6 +254,33 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         .map(|(_, h)| BarredHouse { name: h.name.clone(), is_guild: h.is_guild })
         .collect();
 
+    // ── Break-of-bulk relay — the real Ostia case ───────────────────────────
+    // `route_outlet[a*n+b] == hi` means this hub is the coastal transshipment
+    // point that (a,b) pair's cheapest route actually relays through
+    // (`production.rs` #6d) — a genuinely different question from raw trade
+    // throughput (`hub_class`): a city can carry a flood of its OWN trade and
+    // never be anyone else's waypoint, or the reverse.
+    let (relay_count, relay_examples) = {
+        let n = sim.hubs.len();
+        let mut count = 0u32;
+        let mut examples: Vec<String> = Vec::new();
+        if !sim.route_outlet.is_empty() {
+            for a in 0..n {
+                for b in 0..n {
+                    if a == b { continue; }
+                    if sim.route_outlet.get(a * n + b).copied().unwrap_or(-1) != hi as i32 { continue; }
+                    count += 1;
+                    if examples.len() < 4 {
+                        if let (Some(ha), Some(hb)) = (sim.hubs.get(a), sim.hubs.get(b)) {
+                            examples.push(format!("{} → {}", ha.name, hb.name));
+                        }
+                    }
+                }
+            }
+        }
+        (count, examples)
+    };
+
     // ── THE VESSEL REGISTRY ──────────────────────────────────────────────────
     // "How many ships and caravans are here" has no literal answer: a vessel is
     // not an entity (`fleet_*` are three counters on `House`, no identity, no
@@ -618,6 +645,8 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         sold,
         estates_here,
         barred_here,
+        relay_count,
+        relay_examples,
         structures: hub.structures.iter().map(|&s| (
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),

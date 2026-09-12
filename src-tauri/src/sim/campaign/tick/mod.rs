@@ -5814,6 +5814,12 @@ impl CityFinance {
 /// check this flag, and the panel's history is exactly what it was). Flip
 /// back to `true` to re-enable — nothing else needs to change.
 const EXPEDITIONS_ENABLED: bool = false;
+/// A hub must be OTHER pairs' cheapest-route outlet (`CampaignSim::
+/// relay_counts`) at least this many times before the map marks it a
+/// break-of-bulk TRANSIT KNOT — a handful of pairs happening to relay
+/// through a port is not yet the Ostia case, a real waypoint for a whole
+/// region's trade is.
+pub(crate) const TRANSIT_KNOT_MIN_RELAYS: u32 = 3;
 const EXP_START_TICK: u32 = 25 * TICKS_PER_YEAR;
 /// A house needs this much wealth to bankroll a venture (they are expensive).
 const EXP_MIN_HOUSE_WEALTH: f32 = 60.0;
