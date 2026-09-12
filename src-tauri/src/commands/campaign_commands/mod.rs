@@ -3003,6 +3003,32 @@ pub struct TradeRouteFlow {
     /// partner has no meaningful flow of this good to classify.
     #[serde(default)]
     pub partner_role: String,
+    /// THE MAIN ROUTE'S LEGS — the real Ostia case. `-1` when this route runs
+    /// direct; otherwise the coastal hub (`CampaignSim::route_outlet`,
+    /// direction-aware) this exact (from,to) pair's cheapest route actually
+    /// composes through, so the map can draw it as two legs instead of one
+    /// straight line, and the panel can say "via X".
+    #[serde(default = "neg_one_i32c")]
+    pub relay_hub: i32,
+    #[serde(default)]
+    pub relay_name: String,
+    #[serde(default)]
+    pub relay_px: f32,
+    #[serde(default)]
+    pub relay_py: f32,
+    /// ONE-HOP look-through when `partner_role == "transit"`: the partner's
+    /// own biggest supplier of this exact good — the honest "where it
+    /// actually came from" one level up, never chased further. `-1` when the
+    /// partner is itself the origin (or a plain consumer) rather than a relay.
+    #[serde(default = "neg_one_i32c")]
+    pub origin_hub: i32,
+    #[serde(default)]
+    pub origin_name: String,
+    /// Whether that one-hop-upstream supplier itself MAKES the good (its own
+    /// `production[g] > 0`) — true means "found the real source", false means
+    /// "still further upstream than we trace".
+    #[serde(default)]
+    pub origin_is_producer: bool,
 }
 /// A top partner city: its share of ALL this city's trade + the goods exchanged.
 #[derive(Serialize, Clone)]

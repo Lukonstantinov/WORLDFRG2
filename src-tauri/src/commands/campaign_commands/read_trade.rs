@@ -845,6 +845,33 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
 
     // ── Routes (per good, ranked; pct of that good's total flow) ──
+    let n = sim.hubs.len();
+    // ── One-hop LOOK-THROUGH: if the partner itself doesn't make this good
+    // and mostly re-ships what it takes in (`partner_role == "transit"`), find
+    // its own biggest SUPPLIER for this exact good — the honest answer to
+    // "where did it actually come from" one level up. Never claimed as more
+    // than one hop: a transit partner's own supplier can itself be a further
+    // relay, and this does not chase that chain (§ TRADE_STAGING_AND_POSTS_
+    // PLAN.md's own one-transshipment discipline for `route_outlet` below).
+    let origin_for = |partner: u32, g: u32| -> (i32, String, bool) {
+        let mut sums: HashMap<u32, f32> = HashMap::new();
+        for f in sim.trade_last.iter() {
+            if f.dir != 0 || f.good != g { continue; }
+            if city_of(f.hub) != partner { continue; }
+            let upstream = city_of(f.partner);
+            if upstream == partner { continue; }
+            *sums.entry(upstream).or_insert(0.0) += f.amount;
+        }
+        let Some((&best, _)) = sums.iter()
+            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal)) else {
+            return (-1, String::new(), false);
+        };
+        let name = pos(best).map(|(nm, ..)| nm).unwrap_or_default();
+        let is_producer = sim.hubs.get(best as usize)
+            .map(|h| h.production.get(g as usize).copied().unwrap_or(0.0) > 0.01)
+            .unwrap_or(false);
+        (best as i32, name, is_producer)
+    };
     let mut good_total: HashMap<u32, f32> = HashMap::new();
     for (&(g, _, _), &amt) in &route_amt { *good_total.entry(g).or_insert(0.0) += amt; }
     let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
@@ -861,13 +888,32 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         let river = !sea && river_amount >= land_amount;
         let (from, to) = if dir == 1 { (hi, partner as usize) } else { (partner as usize, hi) };
         let base_value = sim.goods.get(g as usize).map(|x| x.base_value).unwrap_or(1.0);
+        // The REAL MAIN-ROUTE LEGS: `route_outlet` (production.rs #6d) records,
+        // per directed (from,to) pair, the coastal outlet its cheapest route
+        // actually composes through — the Ostia case. Direction-aware: an
+        // export (dir=1) checks here→partner, an import (dir=0) checks
+        // partner→here, so the relay named always matches the direction the
+        // good actually moves.
+        let relay = sim.route_outlet.get(from * n + to).copied().unwrap_or(-1);
+        let (relay_hub, relay_name, relay_px, relay_py) = if relay >= 0 {
+            match pos(relay as u32) {
+                Some((rn, rx, ry)) => (relay, rn, rx, ry),
+                None => (-1, String::new(), 0.0, 0.0),
+            }
+        } else { (-1, String::new(), 0.0, 0.0) };
+        let partner_role = partner_role_for(partner, g);
+        let (origin_hub, origin_name, origin_is_producer) = if partner_role == "transit" {
+            origin_for(partner, g)
+        } else { (-1, String::new(), false) };
         Some(TradeRouteFlow {
             good: g, partner, partner_name: pname, px, py, dir, amount,
             pct: amount / tot * 100.0,
             sea_amount, river_amount,
             risk: sim.lane_risk(from, to, sea, river),
             value: amount * base_value,
-            partner_role: partner_role_for(partner, g),
+            partner_role,
+            relay_hub, relay_name, relay_px, relay_py,
+            origin_hub, origin_name, origin_is_producer,
         })
     }).collect();
     routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));

@@ -34,7 +34,7 @@
  *  map exactly as before — that behaviour is unchanged and deliberately so. */
 import { useEffect, useMemo, useState } from "react";
 import { campaignTradeFlows } from "@bridge";
-import type { TradeFlows, TradeFlowGood, TradePartner } from "@types";
+import type { TradeFlows, TradeFlowGood, TradePartner, TradeRouteFlow } from "@types";
 import { GOOD_DEFS } from "@goods";
 import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat,
          Donut, DonutKey, SplitBar, type Slice } from "@ui/kit";
@@ -340,6 +340,27 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
   // Reset selection when the settlement changes.
   useEffect(() => { setSelGood(null); setSelDir(null); setSelPartner(null); setSelRoute(null); }, [hubId]);
 
+  // THE MAIN ROUTE'S LEGS — the Ostia case. A route with a `relay_hub` draws
+  // as TWO segments (here↔relay, relay↔partner) instead of one straight line,
+  // each independently resolved onto the real road/sea network by the same
+  // per-segment routing MapCanvas already does for every flow-highlight entry
+  // — no new plumbing, just more segments. `ax`/`ay` stays "here" and `bx`/`by`
+  // stays "partner" for a DIRECT route (unchanged); for a relayed one, each
+  // leg's own `ax` is that leg's RECEIVING end (dir 0 draws the arrow at `ax`,
+  // dir 1 at `bx` — the same convention the single-segment case already used,
+  // just applied twice).
+  const legSegs = (ax: number, ay: number, r: TradeRouteFlow, w: number): Seg[] => {
+    const bx = r.px + 0.5, by = r.py + 0.5;
+    if ((r.relay_hub ?? -1) >= 0 && r.relay_px != null && r.relay_py != null) {
+      const rx = r.relay_px + 0.5, ry = r.relay_py + 0.5;
+      if (r.dir === 1) {
+        return [{ ax, ay, bx: rx, by: ry, dir: 1, w }, { ax: rx, ay: ry, bx, by, dir: 1, w }];
+      }
+      return [{ ax: rx, ay: ry, bx, by, dir: 0, w }, { ax, ay, bx: rx, by: ry, dir: 0, w }];
+    }
+    return [{ ax, ay, bx, by, dir: r.dir, w }];
+  };
+
   // Drive the map highlight from the current selection. A good can be narrowed to
   // just its IMPORT (dir 0) or EXPORT (dir 1) routes via the sub-rows (#16).
   useEffect(() => {
@@ -347,20 +368,20 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
     const ax = flows.hub_x + 0.5, ay = flows.hub_y + 0.5;
     let segs: Seg[] = [];
     if (selRoute) {
-      // A single isolated route → one segment, drawn thick with its direction arrow.
+      // A single isolated route → its leg(s), drawn thick with its direction arrow.
       const r = flows.routes.find((x) => x.good === selRoute.good && x.partner === selRoute.partner && x.dir === selRoute.dir);
-      if (r) segs = [{ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 3.5 }];
+      if (r) segs = legSegs(ax, ay, r, 3.5);
       setFlowHighlight(segs);
       return;
     }
     if (selGood != null) {
       const rs = flows.routes.filter((r) => r.good === selGood && (selDir == null || r.dir === selDir));
       const max = Math.max(...rs.map((r) => r.amount), 1e-6);
-      segs = rs.map((r) => ({ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 1 + (r.amount / max) * 3 }));
+      segs = rs.flatMap((r) => legSegs(ax, ay, r, 1 + (r.amount / max) * 3));
     } else if (selPartner != null) {
       const rs = flows.routes.filter((r) => r.partner === selPartner);
       const max = Math.max(...rs.map((r) => r.amount), 1e-6);
-      segs = rs.map((r) => ({ ax, ay, bx: r.px + 0.5, by: r.py + 0.5, dir: r.dir, w: 1 + (r.amount / max) * 3 }));
+      segs = rs.flatMap((r) => legSegs(ax, ay, r, 1 + (r.amount / max) * 3));
     }
     setFlowHighlight(segs);
   }, [flows, selGood, selDir, selPartner, selRoute, setFlowHighlight]);
@@ -830,7 +851,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                 data-no-drag
                 onClick={() => setSelRoute(isSel ? null : { good: r.good, partner: r.partner, dir: r.dir })}
                 style={{
-                  display: "flex", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
+                  display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
                   cursor: "pointer", borderRadius: RADIUS.sm,
                   background: isSel ? T.card : "transparent",
                   borderLeft: `2px solid ${isSel ? col : "transparent"}`,
@@ -877,6 +898,28 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                   {fmt(r.value ?? 0)}
                 </span>
                 <span style={{ width: 38, textAlign: "right", color: T.inkDim }}>{r.pct.toFixed(0)}%</span>
+                {/* THE MAIN ROUTE'S LEGS + WHERE IT ACTUALLY CAME FROM — the
+                    Ostia case, user request: "mark that legs if it's main
+                    route", "from where good arrived and what origin it was
+                    if the import city is transit hub or the original city
+                    where good is produced". A relay splits the route into two
+                    legs on the map (see `legSegs` above); an ORIGIN one hop
+                    upstream of a transit partner is named here since the map
+                    has no room to draw a third leg without real per-shipment
+                    provenance data the sim doesn't keep. */}
+                {(r.relay_hub ?? -1) >= 0 && (
+                  <span style={{ width: "100%", fontSize: FZ.tiny, color: "#2fd1c9", paddingLeft: 34 }}
+                    title={`this route's cheapest path relays through ${r.relay_name} — two legs, not one`}>
+                    ⚓ via {r.relay_name}
+                  </span>
+                )}
+                {(r.origin_hub ?? -1) >= 0 && (
+                  <span style={{ width: "100%", fontSize: FZ.tiny, color: T.inkDim, paddingLeft: 34 }}
+                    title="one hop upstream of the transit partner — not chased further">
+                    🔎 {r.partner_name} mostly gets this from <span style={{ color: T.ink }}>{r.origin_name}</span>
+                    {r.origin_is_producer ? " (which makes it)" : " (itself further upstream)"}
+                  </span>
+                )}
               </div>
             );
           })}
@@ -884,7 +927,8 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
             <FootNote>
               Click a route to isolate it on the map. The dot is voyage risk (green→red); the gold
               figure is the route's value. 🔀 transit hub · ⚒ producer · 🏠 terminal consumer — what
-              the PARTNER itself does with this good.
+              the PARTNER itself does with this good. ⚓ via names a real relay leg; 🔎 traces one hop
+              past a transit partner toward where the good is actually made.
             </FootNote>
           )}
         </Section>

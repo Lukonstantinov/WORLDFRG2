@@ -712,6 +712,21 @@ export interface TradeRouteFlow {
    *  it), "producer" (makes it, a real origin), "consumer" (a terminal market —
    *  takes it in, exports little to nowhere else), or "" if not classifiable. */
   partner_role?: string;
+  /** THE MAIN ROUTE'S LEGS — the Ostia case. -1 when this route runs direct;
+   *  otherwise the coastal hub this exact (from,to) pair's cheapest route
+   *  actually composes through (`CampaignSim::route_outlet`), so the map can
+   *  draw it as two legs and the panel can say "via X". */
+  relay_hub?: number;
+  relay_name?: string;
+  relay_px?: number;
+  relay_py?: number;
+  /** ONE-HOP look-through when `partner_role === "transit"`: the partner's
+   *  own biggest supplier of this exact good. -1 when the partner is itself
+   *  the origin (or a plain consumer). Never chased past one hop. */
+  origin_hub?: number;
+  origin_name?: string;
+  /** Whether that one-hop-upstream supplier itself makes the good. */
+  origin_is_producer?: boolean;
 }
 /** A top partner city: share of all this city's trade + goods exchanged. */
 export interface TradePartner {
