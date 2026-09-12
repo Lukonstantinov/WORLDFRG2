@@ -486,6 +486,7 @@ pub fn campaign_works_card(hub: u32, db: State<'_, WorldDb>) -> Result<Option<Wo
         Some(crate::sim::tick::brand_name(&place, &good_name))
     } else { None };
 
+    let is_mine_or_quarry = hb.estate_kind == 2 || hb.estate_kind == 8;
     Ok(Some(WorksCardInfo {
         hub,
         name: hb.name.clone(),
@@ -506,6 +507,13 @@ pub fn campaign_works_card(hub: u32, db: State<'_, WorldDb>) -> Result<Option<Wo
         owners,
         monthly,
         brand,
+        age_years: (sim.tick.saturating_sub(hb.founded_tick) as f32
+            / crate::sim::tick::TICKS_PER_YEAR as f32).max(0.0),
+        workforce: hb.population,
+        deposit_extent_label: is_mine_or_quarry
+            .then(|| crate::sim::deposits::extent_label(hb.mine_extent).to_string()),
+        deposit_depth_label: is_mine_or_quarry
+            .then(|| crate::sim::deposits::depth_label(hb.mine_depth).to_string()),
     }))
 }
 

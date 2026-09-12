@@ -242,6 +242,18 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         })
         .collect();
 
+    // ── Who this city bars ──────────────────────────────────────────────────
+    // `house_barred` is indexed BY HOUSE ("which cities is house H shut out
+    // of"), which is what `HouseBrief.barred` already reads. A city's own
+    // Trade tab needs the inverse — "who has WE shut out" — so this scans
+    // every live house's list for an entry equal to this hub's own index.
+    // Houses are few (tens), so a per-hub-view linear scan costs nothing.
+    let barred_here: Vec<BarredHouse> = sim.houses.iter().enumerate()
+        .filter(|(hxi, h)| !h.defunct
+            && sim.house_barred.get(*hxi).is_some_and(|v| v.contains(&(hi as u32))))
+        .map(|(_, h)| BarredHouse { name: h.name.clone(), is_guild: h.is_guild })
+        .collect();
+
     // ── THE VESSEL REGISTRY ──────────────────────────────────────────────────
     // "How many ships and caravans are here" has no literal answer: a vessel is
     // not an entity (`fleet_*` are three counters on `House`, no identity, no
@@ -605,6 +617,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         bought,
         sold,
         estates_here,
+        barred_here,
         structures: hub.structures.iter().map(|&s| (
             crate::sim::tick::structure_label(s).to_string(),
             crate::sim::tick::structure_effect(s).to_string(),

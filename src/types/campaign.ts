@@ -511,6 +511,10 @@ export interface HubDetail {
   sold?: number;
   /** Estates & manufactories in this city's hinterland. */
   estates_here?: EstateRow[];
+  /** Houses/guilds currently barred from trading here (the inverse of
+   *  `HouseBrief.barred` — that lists cities a house is shut out of, this
+   *  lists houses this city has shut out). */
+  barred_here?: BarredHouse[];
   /** DLC 3 · the polis government of this seat (null for estates). */
   government?: Government | null;
   treasury?: number;                 // retained civic treasury
@@ -962,6 +966,14 @@ export interface WorksCardInfo {
   /** 4.13 (A3) · "Kalos wine" — set once the works has been chronicled for
    *  reaching GREAT or better; null otherwise. */
   brand: string | null;
+  /** Years since founding. */
+  age_years: number;
+  /** The works' own population — a labour-force reading, not the city's. */
+  workforce: number;
+  /** A mine/quarry's real body — grade/extent and depth labels
+   *  ("world-class"/"deep"…). Undefined for every other estate kind. */
+  deposit_extent_label?: string | null;
+  deposit_depth_label?: string | null;
 }
 /** A foreign merchant's office hosted in a settlement (host-side view). */
 export interface OfficeHere {
@@ -983,6 +995,12 @@ export interface PopBrief {
   needs_luxury: number;
   consciousness: number;
   militancy: number;
+}
+
+/** One house/guild a city has shut out — the inverse of `HouseBrief.barred`. */
+export interface BarredHouse {
+  name: string;
+  is_guild: boolean;
 }
 
 export interface HouseBrief {

@@ -151,6 +151,25 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
         {" "}yield {card.yield_index.toFixed(1)}× · <span style={{ color: T.gold, fontWeight: 700 }}>{card.yield_label.toUpperCase()}</span>
       </div>
 
+      {/* Age / workforce — read straight off fields the sim already tracked
+          (founding tick, the works' own population) but never surfaced here. */}
+      <div style={{ marginTop: 2, fontSize: FZ.small, color: T.inkDim }}>
+        {card.age_years.toFixed(0)} {card.age_years === 1 ? "year" : "years"} operating ·
+        {" "}~{Math.round(card.workforce).toLocaleString()} workers
+      </div>
+
+      {/* A mine/quarry's real body — grade × depth, already computed for the
+          Deposits panel and never read by this card before. */}
+      {card.deposit_extent_label && (
+        <div style={{
+          marginTop: 5, padding: "4px 7px", borderRadius: RADIUS.sm,
+          background: "rgba(217,164,65,0.07)", border: `1px solid rgba(217,164,65,0.3)`,
+          fontSize: FZ.small, color: "#e6c06a",
+        }}>
+          ⛏ {card.deposit_extent_label} body, {card.deposit_depth_label} working
+        </div>
+      )}
+
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
         <span style={{ fontSize: FZ.small, color: conditionColor, width: 70 }}>{conditionWord}</span>
         <Meter value={card.condition} max={1} color={conditionColor} height={5} />

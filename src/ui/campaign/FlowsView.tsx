@@ -239,8 +239,12 @@ function PartnerGoodsBreakdown({ hub, flows }: { hub: number; flows: TradeFlows 
   );
 }
 
-export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
+export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome }: {
   hubId: number; active: boolean; tick: number; setFlowHighlight: (s: Seg[]) => void;
+  /** This city's own `tax_trade` (CityFinance) — passed through only so the
+   *  transit-hub summary below can say what its pass-through trade actually
+   *  earns, instead of asserting the tariff exists with no figure attached. */
+  tariffIncome?: number;
 }) {
   const [flows, setFlows] = useState<TradeFlows | null>(null);
   const [loading, setLoading] = useState(false);
@@ -324,6 +328,28 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
       else position = "a balanced entrepôt";
     }
     return { inV, outV, net, total, position, tone };
+  }, [flows]);
+
+  // ── Transit — a good this city neither makes nor consumes but both imports
+  // and exports is one it is a STOP for, not an origin or a destination
+  // (TRADE_STAGING_AND_POSTS_PLAN.md slice 1's own per-good split, already
+  // shown inside each good's row below). Summed here into a city-level fact,
+  // because the per-good bars never answered "is this place ITSELF a transit
+  // hub" without adding up every row by hand. A staged leg is taxed on BOTH
+  // ends (export tariff leaving the seller, import tariff arriving at the
+  // buyer — production.rs charges both unconditionally per leg), so transit
+  // trade is not a free pass-through: it is already double-taxed at every
+  // city it moves through. This is a read of `flows.goods` already on hand —
+  // no new query, no new sim state. */
+  const transit = useMemo(() => {
+    if (!flows) return null;
+    let vol = 0, exportVol = 0;
+    for (const g of flows.goods) {
+      vol += Math.max(0, g.out_volume - (g.own_production ?? 0));
+      exportVol += g.out_volume;
+    }
+    if (vol <= 0) return null;
+    return { vol, share: exportVol > 0 ? vol / exportVol : 0 };
   }, [flows]);
 
   // ── THE SHAPE OF THE TRADE ──────────────────────────────────────────────
@@ -487,6 +513,25 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight }: {
             <BalanceBar inV={balance.inV} outV={balance.outV} max={balance.total} />
             <span style={{ color: DIR_OUT, fontSize: FZ.micro }}>out ▶</span>
           </div>
+          {/* TRANSIT HUB — only shown once pass-through trade is a real share of
+              what leaves this city (>8%), so a city that merely resells the odd
+              cargo doesn't get badged as something it barely is. */}
+          {transit && transit.share > 0.08 && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: SPACE.sm, marginTop: SPACE.md,
+              padding: "5px 8px", borderRadius: RADIUS.sm, background: "rgba(216,178,74,0.08)",
+              border: `1px solid ${T.lineGold}`,
+            }}>
+              <Badge tone="gold">🔀 transit hub</Badge>
+              <span style={{ fontSize: FZ.small, color: T.inkMid }}>
+                {fmt(transit.vol)}/yr passes through without being made or kept here
+                ({Math.round(transit.share * 100)}% of exports)
+                {tariffIncome !== undefined && tariffIncome > 0 && (
+                  <> — taxed on both legs, part of the {fmt(tariffIncome)}/yr this city collects in trade tariffs</>
+                )}.
+              </span>
+            </div>
+          )}
         </Card>
       )}
 

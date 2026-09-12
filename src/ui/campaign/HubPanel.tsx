@@ -853,8 +853,32 @@ export function HubPanel() {
               }}>{v === "market" ? "Market" : v === "flows" ? "Flows" : "Traders"}</div>
             ))}
           </div>
+          {/* BARRED HERE — the inverse of a house's own "shut out of N markets"
+              phrase (§ house stability gauges): who THIS city has shut out.
+              An active embargo was previously invisible from the city side —
+              a player could see a house's own standing say "shut out of 3
+              markets" with no way to check whether one of them was the city
+              they were looking at. Shown above all three sub-views since it's
+              a standing fact about the city, not something Market/Flows/
+              Traders individually answer. */}
+          {(detail?.barred_here?.length ?? 0) > 0 && (
+            <div style={{
+              display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6,
+              margin: "0 0 6px", padding: "5px 8px", borderRadius: 5,
+              background: "rgba(192,87,58,0.08)", border: "1px solid rgba(192,87,58,0.35)",
+              fontSize: 10,
+            }}>
+              <span style={{ color: "#e08080", fontWeight: 700 }}>🚫 barred here</span>
+              {detail!.barred_here!.map((b, i) => (
+                <span key={i} style={{ color: "#cfa8a0" }}>
+                  {b.is_guild ? "🏛" : "⚜"} {b.name}{i < detail!.barred_here!.length - 1 ? "," : ""}
+                </span>
+              ))}
+            </div>
+          )}
           {tradeView === "flows" && (
-            <FlowsView hubId={hub.id} active={campActive} tick={campTick} setFlowHighlight={setFlowHighlight} />
+            <FlowsView hubId={hub.id} active={campActive} tick={campTick} setFlowHighlight={setFlowHighlight}
+              tariffIncome={detail ? (detail.finance?.prev ?? detail.finance ?? null)?.tax_trade : undefined} />
           )}
           {tradeView === "traders" && (
             <TradersView hubId={hub.id} active={campActive} tick={campTick} />

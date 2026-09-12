@@ -796,6 +796,10 @@ pub struct HubDetail {
     #[serde(default)] pub sold: f32,
     /// Estates & manufactories in this city's hinterland.
     #[serde(default)] pub estates_here: Vec<EstateRow>,
+    /// Houses/guilds currently BARRED from trading here (an active embargo,
+    /// `house_barred` inverted from "per house" to "per city") — the Trade tab
+    /// had no way to show who this city has shut out.
+    #[serde(default)] pub barred_here: Vec<BarredHouse>,
     // ── DLC 3.5 · treasury, finances, war, and the carrying trade ──
     /// Retained civic treasury (grain-eq).
     #[serde(default)] pub treasury: f32,
@@ -1710,6 +1714,16 @@ fn grade_tier(q: f32) -> usize {
 }
 const GRADE_NAMES: [&str; 5] = ["Coarse", "Common", "Standard", "Fine", "Exquisite"];
 
+/// One house or guild shut out of a CITY's market (the inverse reading of
+/// `HouseBrief.barred` — that field answers "which cities is this house
+/// barred from", this answers "which houses does this city bar" for the
+/// Trade tab of the city itself, which had no way to show it before).
+#[derive(Serialize, Clone)]
+pub struct BarredHouse {
+    pub name: String,
+    pub is_guild: bool,
+}
+
 /// One merchant family for the Houses panel / settlement window.
 #[derive(Serialize)]
 pub struct HouseBrief {
@@ -2221,6 +2235,17 @@ pub struct WorksCardInfo {
     /// only once the works has actually been chronicled for reaching GREAT or
     /// better, so the card never claims a name the world hasn't heard yet.
     pub brand: Option<String>,
+    /// Years since founding (`founded_tick`, already tracked, never surfaced).
+    #[serde(default)] pub age_years: f32,
+    /// The works' own population (`est_pop` at founding, grown/shrunk since) —
+    /// a labour-force reading, not the parent city's.
+    #[serde(default)] pub workforce: f32,
+    /// A mine/quarry's real geology — `mine_depth`/`mine_extent`, already
+    /// computed for the Deposits panel (§8.16) and never read here, so the
+    /// card could show a bare tier star rating for a body whose actual grade
+    /// and depth the sim already knows. `None` for every non-mine/quarry kind.
+    #[serde(default)] pub deposit_extent_label: Option<String>,
+    #[serde(default)] pub deposit_depth_label: Option<String>,
 }
 
 /// One city in the live "richest cities" ranking.
