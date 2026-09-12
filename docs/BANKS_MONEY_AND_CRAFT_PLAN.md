@@ -131,9 +131,14 @@ digest, since both halves read healthy on their own.
 **C-F1 · Twelve craft guilds. In the world. For ever.** `GUILD_MAX = 12`.
 `seed_craft_guilds` runs **once**, at first tick (`guilds_seeded`), assigning each
 manufactured good to the single city that produced most of it in year zero. There
-are **21 manufactured goods** in the shipped library, so nine crafts have no guild
+are **23 manufactured goods** in the shipped library, so eleven crafts have no guild
 anywhere, every craft that has one has exactly one, and no guild is ever founded or
 dissolved for the remaining 500 years. Florence alone had 21 *arti*.
+*(Corrected: an earlier count of 21 missed `ceramics` and `glassware` — both are
+declared as belt goods and then converted to `Distribution::Manufactured` with real
+recipes further down `default_goods_spec`, so a grep for the `mg(` helper cannot see
+them. Relevant beyond the count: glass DOES exist as a craft, so the Murano question
+is not a missing-good problem — see `docs/INSTITUTIONS_BRAINSTORM.md` §3.)*
 
 **C-F2 · A guild's whole economic power is a quality ceiling.** `run_craft_guilds`
 lifts one good's local quality by `GUILD_QUALITY_STEP` toward `GUILD_QUALITY_CAP`

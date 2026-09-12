@@ -2799,3 +2799,122 @@ fn s7_household_monetization_at_zero_is_a_noop() {
         "at HOUSEHOLD_MONETIZATION_DOSE = 0.0, starting household_wealth at 0 vs 1,000,000 \
          must leave stock identical: {poor_wheat} vs {rich_wheat}");
 }
+
+
+/// `docs/INSTITUTIONS_BUILD_ORDER.md` Phase 0.1 · DIAGNOSTIC, not a gate.
+///
+/// **There is no `econ_*` diagnostic for finance at all** — 18 of them cover
+/// carriage, turnover, war, realms, outposts, population and expenditure, and
+/// not one measures a bank. `docs/BANKS_MONEY_AND_CRAFT_PLAN.md` had to be
+/// written against the dynamics digest for that reason. This is the instrument
+/// phases 1 and 3 dose against.
+///
+/// Reports, over a long run on both reference worlds:
+///  * banks chartered / failed / surviving, and mean lifespan in years —
+///    the digest shows a live count oscillating 4-9 with 12 crashes in 50
+///    years, which suggests near-total mortality but cannot prove it, because
+///    a live COUNT cannot distinguish "the same eight banks" from "eight new
+///    banks every decade";
+///  * bank income by class (interest · stake dividends · bills of exchange),
+///    since `bills_income` is earned from a spread NO MERCHANT PAYS;
+///  * loans by purpose and the share of house wealth that is borrowed —
+///    `bank_maybe_lend` pushes cash at the RICHEST resident on a die roll, so
+///    the expectation is that credit is both small and pointed at the top;
+///  * public debt outstanding and how much of it a BANK holds, which must be
+///    exactly zero until Phase 1.2 (the issuance site only ever pushes
+///    `(0, house, …)` and every payout loop filters `kind != 0`);
+///  * the live maximum of `demand_pressure_at`, which decides whether
+///    `CONSUMPTION_AND_GOODS_REVIEW`'s "the workshop gate is unsatisfiable"
+///    finding still holds after S1 moved every price.
+///
+/// ```bash
+/// cargo test --lib econ_measure_finance -- --ignored --nocapture
+/// ```
+#[test]
+#[ignore]
+fn econ_measure_finance() {
+    for (label, mut s) in [("reference", reference_world()), ("large", reference_world_large())] {
+        let years = 150u32;
+        // `demand_pressure_at`'s running max, sampled yearly across every
+        // (hub, good) — the workshop gate reads `>= WORKSHOP_MIN_DEMAND` (1.08).
+        let mut max_pressure = 0.0f32;
+        for _ in 0..years {
+            s.advance(365);
+            for h in 0..s.hubs.len() {
+                if s.hubs[h].is_estate || s.hubs[h].abandoned { continue; }
+                for g in 0..s.goods.len() {
+                    let p = s.demand_pressure_at(h, g);
+                    if p > max_pressure { max_pressure = p; }
+                }
+            }
+        }
+
+        let live: Vec<&Bank> = s.banks.iter().filter(|b| !b.defunct).collect();
+        let dead: Vec<&Bank> = s.banks.iter().filter(|b| b.defunct).collect();
+        let chartered = s.banks.len();
+        // A defunct bank's lifespan is founded→now (the tick it failed is not
+        // stored separately), so this is an UPPER bound on the dead ones and
+        // exact for the living. Stated rather than quietly reported as exact.
+        let mean_life = if chartered == 0 { 0.0 } else {
+            s.banks.iter()
+                .map(|b| (s.tick.saturating_sub(b.founded_tick)) as f32 / TICKS_PER_YEAR as f32)
+                .sum::<f32>() / chartered as f32
+        };
+        let sum = |f: fn(&Bank) -> f32| s.banks.iter().map(f).sum::<f32>();
+        let (interest, dividends, bills, losses) = (
+            sum(|b| b.interest_earned), sum(|b| b.dividends_earned),
+            sum(|b| b.bills_income), sum(|b| b.losses));
+        let income = interest + dividends + bills;
+        let pct = |x: f32| if income > 1e-6 { 100.0 * x / income } else { 0.0 };
+
+        // Loans outstanding by purpose, and how much of it houses are carrying.
+        let mut by_purpose: std::collections::BTreeMap<String, (u32, f32)> =
+            std::collections::BTreeMap::new();
+        let mut owed_by_houses = 0.0f32;
+        for b in s.banks.iter().filter(|b| !b.defunct) {
+            for l in &b.loans {
+                let e = by_purpose.entry(l.purpose.clone()).or_insert((0, 0.0));
+                e.0 += 1;
+                e.1 += l.outstanding;
+                if l.borrower_house >= 0 { owed_by_houses += l.outstanding; }
+            }
+        }
+        let house_wealth: f32 = s.houses.iter().filter(|h| h.is_merchant())
+            .map(|h| h.wealth.max(0.0)).sum();
+
+        // Public debt, and who holds it. `debt_holders` is (kind, idx, amt) and
+        // kind 1 would be a bank — the whole point is that it is never written.
+        let (mut debt_total, mut held_by_house, mut held_by_bank) = (0.0f32, 0.0f32, 0.0f32);
+        for h in &s.hubs {
+            debt_total += h.debt_principal.max(0.0);
+            for &(kind, _, amt) in &h.debt_holders {
+                if kind == 0 { held_by_house += amt; } else { held_by_bank += amt; }
+            }
+        }
+
+        println!("\n── finance · {label} · {years}y ──────────────────────────────");
+        println!("  banks chartered {chartered}   surviving {}   failed {}",
+                 live.len(), dead.len());
+        println!("  mean age/lifespan {mean_life:.1}y  (upper bound for the failed —");
+        println!("    a failure tick is not stored, so a dead bank counts to now)");
+        println!("  crashes recorded  {}   ({:.2}/century)",
+                 s.crashes.len(), 100.0 * s.crashes.len() as f32 / years as f32);
+        println!("  income  interest {interest:>12.0} ({:.0}%)", pct(interest));
+        println!("          dividends{dividends:>12.0} ({:.0}%)", pct(dividends));
+        println!("          bills    {bills:>12.0} ({:.0}%)  ← paid by NOBODY", pct(bills));
+        println!("  write-offs        {losses:>12.0}");
+        println!("  loans outstanding by purpose:");
+        if by_purpose.is_empty() { println!("    (none)"); }
+        for (purpose, (n, amt)) in &by_purpose {
+            println!("    {purpose:<14} {n:>4} loans  {amt:>12.0}");
+        }
+        println!("  owed by houses    {owed_by_houses:>12.0}  against house wealth {house_wealth:.0}");
+        println!("    → borrowed share of merchant capital {:.2}%",
+                 if house_wealth > 1e-6 { 100.0 * owed_by_houses / house_wealth } else { 0.0 });
+        println!("  public debt       {debt_total:>12.0}   held by houses {held_by_house:.0}, by BANKS {held_by_bank:.0}");
+        println!("  max demand_pressure_at seen {max_pressure:.3}  (workshop gate needs >= {WORKSHOP_MIN_DEMAND})");
+        if max_pressure < WORKSHOP_MIN_DEMAND {
+            println!("    → the workshop-founding gate is STILL unsatisfiable on this world.");
+        }
+    }
+}

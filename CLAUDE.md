@@ -908,7 +908,7 @@ serde-defaulted so old saves load). Grouped by theme:
   (flavour)" in their own source): `CraftGuild` (`seed_craft_guilds`/`run_craft_guilds`
   — hub · good · strength · hall, capped at `GUILD_MAX`=12 **for the whole world, and
   seeded ONCE at tick 0** (`guilds_seeded`) from year-zero production, with no founding
-  or dissolution pass ever after — so 21 manufactured goods share 12 guilds, each craft
+  or dissolution pass ever after — so 23 manufactured goods share 12 guilds, each craft
   has at most one guild anywhere, and the roster is frozen for 500 years
   (`docs/BANKS_MONEY_AND_CRAFT_PLAN.md` C-F1); lifts one good's local
   quality by `GUILD_QUALITY_STEP` to a `GUILD_QUALITY_CAP`, a `GUILD_STRIKE_CHANCE`
@@ -5478,6 +5478,42 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     Ends with 8 gated proposals in build order
                                     and 6 questions that need a decision before
                                     any of it starts
+INSTITUTIONS_BUILD_ORDER.md       ← ⭐ DECIDED IN SCOPE; PHASE 0 BUILT, THE REST
+                                    NOT. The sequenced order for the brainstorm
+                                    below, after four maintainer decisions: the
+                                    player stays OBSERVATION-ONLY (so "play the
+                                    bank" is REJECTED, not deferred) · all three
+                                    chains sequenced in one plan · MEASURE the
+                                    craft spread before choosing its dose · Murano
+                                    scoped as ONE named feature, not a guild
+                                    rework. Its governing rule follows from the
+                                    first decision and is harder than a player
+                                    verb: **every mechanism must produce a legible
+                                    STORY, not a decision** — a slice names what it
+                                    writes to the chronicle or it is not done,
+                                    which disqualifies a mechanism whose whole
+                                    effect is a percentage on a hidden accumulator
+                                    (today's war blockade) and admits a smaller one
+                                    that is nameable ("the Doge bars pitch and hemp
+                                    to Genoa"). Phase 0 = three instruments, no
+                                    production code: `econ_measure_finance` and
+                                    `real_world_craft_spread` are BUILT (see
+                                    SCOREBOARD for what they measured);
+                                    `econ_measure_war_trade` is not. Phase 1 stops
+                                    the bleeding (bank failure splits from
+                                    contagion; a bank may hold the Monte;
+                                    `League.purse` finally buys a convoy) · Phase 2
+                                    is the Murano feature (untie the quality
+                                    ceiling from city size → secrecy + the master
+                                    who leaves → the signature → the refining
+                                    entrepôt) · Phase 3 wires war spending to debt
+                                    issuance, closing the 1345 chain from four
+                                    systems that each already work · Phase 4 is
+                                    exclusion, dosed and last, under one rule —
+                                    **every prohibition ROUTES through a neutral,
+                                    it never refuses** · Phase 5 is the cadastre as
+                                    a fifth `ProvWork` kind. §6 lists what is
+                                    deliberately out
 INSTITUTIONS_BRAINSTORM.md        ← ⭐ BRAINSTORM, NOTHING APPROVED OR BUILT.
                                     Variants for six institutions the maintainer
                                     asked about — banks as a player · war's real
@@ -5550,7 +5586,7 @@ BANKS_MONEY_AND_CRAFT_PLAN.md     ← ⭐ REVIEW + PLAN, NOTHING BUILT. Banks, c
                                     public debt though CLAUDE.md claimed otherwise
                                     (B-F4, now corrected above), and the world holds
                                     **12 craft guilds total, seeded once at tick 0 and
-                                    never founded or dissolved again**, against 21
+                                    never founded or dissolved again**, against 23
                                     manufactured goods — Florence alone had 21 arti.
                                     Eight slices, gate each: 0 the missing instrument
                                     (`econ_measure_finance` — there is no `econ_*`

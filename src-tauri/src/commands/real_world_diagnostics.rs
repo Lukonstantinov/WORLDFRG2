@@ -211,3 +211,124 @@ async fn river_class_flag_is_tighter_than_the_old_navigable_radius() {
         "the tightened river flag should cover substantially fewer hubs: old {old_share:.3}, new {new_share:.3}"
     );
 }
+
+
+/// `docs/INSTITUTIONS_BUILD_ORDER.md` Phase 0.2 · DIAGNOSTIC, not a gate.
+///
+/// Answers the question the maintainer deferred rather than guessing at it:
+/// **how wide is the world's craft-quality spread today, and is the finest
+/// maker of a good simply the biggest city that makes it?**
+///
+/// `update_good_quality` (`tick/production.rs`) sets each hub's ceiling at
+/// `0.62 + size_bonus(<=0.20) + struct_bonus(<=0.14)` and `QUALITY_LEARN_RATE`
+/// (0.04/month) drives every producer to its own cap within a few years, so the
+/// prediction from reading the code is that quality tracks POPULATION almost
+/// perfectly and the realised price spread (`quality_value_mult` = 0.6 + 0.9q)
+/// is narrow. This measures whether that is actually so.
+///
+/// It must run on a REAL world, not on `economy_validation.rs`'s synthetic
+/// `reference_world`: that fixture ships six goods and **not one of them has a
+/// recipe**, so it has no manufactured goods, no manufactories and no quality
+/// learning to measure. A diagnostic run there would report a tidy zero and
+/// measure the fixture (§8.20/§8.24c's own repeated lesson).
+///
+/// ```bash
+/// cargo test --lib real_world_craft_spread -- --ignored --nocapture
+/// ```
+#[tokio::test]
+#[ignore]
+async fn real_world_craft_spread() {
+    let app = tauri::test::mock_app();
+    let db = WorldDb::in_memory().expect("in-memory WorldDb");
+    app.manage(db);
+    let state = app.state::<WorldDb>();
+
+    eprintln!("[diagnostic] generating world…");
+    world_commands::new_world("craft-spread".into(), 300, 150, state.clone())
+        .expect("new_world");
+    let seed = 424242u64;
+    let run = sim_commands::sim_run_all(
+        seed, 10, "plates".into(), 0.5, 0.5, 0.5, 0.5, state.clone(),
+    ).expect("sim_run_all");
+    let settlements_json = serde_json::to_string(&run.settlements).unwrap();
+    let rivers_json = serde_json::to_string(&run.rivers).unwrap();
+    let econ = compute_economy(
+        settlements_json, rivers_json, 0, 0.15, false, 6, 0.5, 0.0, -1, 1, state.clone(),
+    ).expect("compute_economy");
+    eprintln!("[diagnostic] economy built: {} hubs", econ.hubs.len());
+
+    finalize_world(state.clone()).expect("finalize_world");
+    campaign_start_sim(seed, state.clone()).expect("campaign_start_sim");
+    // 40 years: manufactories have to be FOUNDED before any quality can
+    // accumulate, and `maybe_found_guild_workshop` is a yearly roll — 20 years
+    // measures the founding lag as much as the spread.
+    eprintln!("[diagnostic] campaign started, advancing 40y…");
+    for i in 0..4 {
+        campaign_advance(3650, state.clone()).await.expect("campaign_advance");
+        eprintln!("[diagnostic] advanced decade {}", i + 1);
+    }
+
+    let conn = state.conn.lock().unwrap();
+    let sim = get_sim(&state, &conn).unwrap().expect("a campaign sim must be resident");
+    let ng = sim.goods.len();
+
+    println!("\n── craft spread · real world · 40y ──────────────────────────────");
+    println!("  ceiling today = 0.62 + size_bonus(<=0.20) + struct_bonus(<=0.14)");
+    println!("  price effect  = quality_value_mult(q) = 0.6 + 0.9q\n");
+    println!("  {:<18} {:>5} {:>6} {:>6} {:>6} {:>7}  {:>9}",
+             "manufactured good", "hubs", "minQ", "medQ", "maxQ", "price×", "leader");
+
+    // Does the FINEST maker also happen to be the LARGEST maker? Counted across
+    // every good with at least two makers — the headline claim to falsify.
+    let (mut goods_measured, mut leader_is_biggest) = (0usize, 0usize);
+    let mut spreads: Vec<f32> = Vec::new();
+
+    for g in 0..ng {
+        if sim.goods[g].inputs.is_empty() { continue; } // manufactured only
+        let mut makers: Vec<(usize, f32, f32)> = Vec::new(); // (hub, quality, population)
+        for h in 0..sim.hubs.len() {
+            if sim.hubs[h].abandoned { continue; }
+            if sim.hubs[h].production.get(g).copied().unwrap_or(0.0) <= 0.0 { continue; }
+            let q = sim.hubs[h].quality.get(g).copied().unwrap_or(0.0);
+            makers.push((h, q, sim.hubs[h].population));
+        }
+        if makers.is_empty() { continue; }
+        let mut qs: Vec<f32> = makers.iter().map(|m| m.1).collect();
+        qs.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        let (lo, hi) = (qs[0], qs[qs.len() - 1]);
+        let med = qs[qs.len() / 2];
+        let mult = |q: f32| 0.6 + 0.9 * q.clamp(0.0, 1.0);
+        let spread = if mult(lo) > 1e-6 { mult(hi) / mult(lo) } else { 1.0 };
+
+        let best_q = makers.iter().cloned()
+            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+        let biggest = makers.iter().cloned()
+            .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+        let same = best_q.0 == biggest.0;
+        if makers.len() >= 2 {
+            goods_measured += 1;
+            if same { leader_is_biggest += 1; }
+            spreads.push(spread);
+        }
+        println!("  {:<18} {:>5} {:>6.3} {:>6.3} {:>6.3} {:>6.2}×  {}",
+                 sim.goods[g].name, makers.len(), lo, med, hi, spread,
+                 if makers.len() < 2 { "sole maker" }
+                 else if same { "= BIGGEST CITY" } else { "not the biggest" });
+    }
+
+    if goods_measured == 0 {
+        println!("\n  NO manufactured good has two or more makers on this world.");
+        println!("  That is itself the finding: report it rather than a spread of nothing.");
+        return;
+    }
+    spreads.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+    let mean_spread = spreads.iter().sum::<f32>() / spreads.len() as f32;
+    println!("\n  goods with >=2 makers            {goods_measured}");
+    println!("  finest maker IS the biggest city {leader_is_biggest}  ({:.0}%)",
+             100.0 * leader_is_biggest as f32 / goods_measured as f32);
+    println!("  price spread best/worst · mean   {mean_spread:.2}×   median {:.2}×   max {:.2}×",
+             spreads[spreads.len() / 2], spreads[spreads.len() - 1]);
+    println!("\n  → Phase 2.1 asks for the ceiling to come from accumulated TRADITION");
+    println!("    rather than city size. The two numbers above are what it has to move:");
+    println!("    the leader must stop being merely the biggest, and the spread must widen.");
+}
