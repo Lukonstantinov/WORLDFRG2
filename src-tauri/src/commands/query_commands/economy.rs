@@ -304,6 +304,22 @@ pub fn compute_economy(
             .map(|s| matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits))
             .unwrap_or(false))
         .collect();
+    // A `Domain::Marine` good (fish, whaling, pearls, coral, marine salt…) can
+    // only ever be worked by a hub that actually has a boat — but `claim` above
+    // assigns every cell to its nearest hub by RADIUS alone, with no domain
+    // check ("a port works its own fishery" — true only if the claiming hub IS
+    // a port). A hub's radius grows with population (up to 120 km for a great
+    // metropolis) regardless of whether it touches open water, so a large
+    // inland/lake city whose catchment merely REACHES a stretch of real coast
+    // could end up crediting itself with "own production" of Whaling Grounds —
+    // reported directly (an inland/lake-tagged settlement showing whaling as
+    // ✂ made here). `node_sea` (same `distance_to_ocean < 0.06` real-ocean test
+    // `sea_access`/`coastal` already use) gates the credit below.
+    let is_marine_good: Vec<bool> = (0..gc)
+        .map(|g| specs.get(g)
+            .map(|s| matches!(s.domain, crate::sim::goods_spec::Domain::Marine))
+            .unwrap_or(false))
+        .collect();
     let deposits_early: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
         .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     let good_slot_early: std::collections::HashMap<&str, usize> =
@@ -317,6 +333,7 @@ pub fn compute_economy(
         let ti = ((wy % TILE_SIZE) * TILE_SIZE + (wx % TILE_SIZE)) as usize;
         for g in 0..gc.min(tile.goods.len()) {
             if is_deposit_good[g] { continue; }
+            if is_marine_good[g] && !node_sea[hh as usize] { continue; }
             prod[hh as usize][g] += tile.goods[g][ti] as f32 / 255.0;
         }
     }
@@ -329,7 +346,7 @@ pub fn compute_economy(
         let Some(&g) = good_slot_early.get(d.good.as_str()) else { continue };
         let key = (d.y as u64) * (grid_w as u64) + d.x as u64;
         if let Some(&(_, hh)) = claim.get(&key) {
-            if hh != u32::MAX {
+            if hh != u32::MAX && !(is_marine_good.get(g).copied().unwrap_or(false) && !node_sea[hh as usize]) {
                 let mult = EXTENT_MULT[(d.extent as usize).min(3)];
                 prod[hh as usize][g] += d.workable_intensity() * mult;
             }
@@ -378,16 +395,24 @@ pub fn compute_economy(
             for (k, &g) in uncovered.iter().enumerate() {
                 let (v, wx, wy) = best[k];
                 if v <= 0.0 { continue; } // genuinely absent on this world — do not invent it
-                // Nearest live hub to the homeland cell (X wraps, Y clamps).
-                let mut nh = 0usize;
+                // Nearest live hub to the homeland cell (X wraps, Y clamps) — for a
+                // Marine good, nearest COASTAL hub, same reasoning as the two claim
+                // loops above: a hub with no boat cannot be this good's producer of
+                // last resort either. A marine good with no coastal hub anywhere in
+                // the world stays genuinely uncovered rather than invented at an
+                // inland town.
+                let marine = is_marine_good.get(g).copied().unwrap_or(false);
+                let mut nh: Option<usize> = None;
                 let mut nd = i64::MAX;
                 for hh in 0..nn {
+                    if marine && !node_sea[hh] { continue; }
                     let raw = (nodes[hh].x as i64 - wx as i64).rem_euclid(grid_w as i64);
                     let dx = raw.min(grid_w as i64 - raw);
                     let dy = nodes[hh].y as i64 - wy as i64;
                     let d2 = dx * dx + dy * dy;
-                    if d2 < nd { nd = d2; nh = hh; }
+                    if d2 < nd { nd = d2; nh = Some(hh); }
                 }
+                let Some(nh) = nh else { continue };
                 // Enough to clear the `> 0.05` emit gate below and read as a real, if
                 // scarce, source (belt value is 0..1 after the /255).
                 prod[nh][g] += (v / 255.0).max(0.12);

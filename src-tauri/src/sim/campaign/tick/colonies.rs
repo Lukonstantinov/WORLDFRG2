@@ -937,6 +937,7 @@ impl CampaignSim {
             || tick.saturating_sub(e.launched_tick) < 3 * TICKS_PER_YEAR);
         self.route_prospects.retain(|p| p.established
             || tick.saturating_sub(p.last_tick) < EXP_PROSPECT_TTL);
+        if !EXPEDITIONS_ENABLED { return; }
         if !expansion_ok || tick < EXP_START_TICK { return; }
         if self.expeditions.iter().filter(|e| e.status <= 2).count() >= EXP_MAX_ACTIVE { return; }
         let n = self.hubs.len();

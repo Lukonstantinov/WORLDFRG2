@@ -5769,6 +5769,13 @@ impl CityFinance {
 /// decision 7: five years of exploration before COLONY_START_TICK's year-30
 /// founding passes open, now that expeditions gate founding (§1.2) rather than
 /// running in parallel with it. Was year 15.
+/// Player-requested kill switch (2026-09, "disable expeditions for now").
+/// `expedition_launch_pass` early-returns before considering any NEW venture
+/// once this is false; every in-flight expedition, established corridor and
+/// past record is untouched (they're read by other passes/queries that don't
+/// check this flag, and the panel's history is exactly what it was). Flip
+/// back to `true` to re-enable — nothing else needs to change.
+const EXPEDITIONS_ENABLED: bool = false;
 const EXP_START_TICK: u32 = 25 * TICKS_PER_YEAR;
 /// A house needs this much wealth to bankroll a venture (they are expensive).
 const EXP_MIN_HOUSE_WEALTH: f32 = 60.0;
