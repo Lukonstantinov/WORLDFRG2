@@ -268,7 +268,13 @@ impl CampaignSim {
                 let hub = &self.hubs[h];
                 let prosp = hub.sent_prosperity.clamp(0.0, 1.0);
                 let fed = (1.0 - hub.starving).clamp(0.0, 1.0);
-                let pull = (0.15 + prosp) * fed * (1.0 + 0.4 * hub.hub_class as f32);
+                // A young trade post pays a real frontier premium for labour —
+                // user-requested — tapering to nothing once it clears stage 2
+                // (4,000 pop), the same threshold `route_post_pass` promotes it at.
+                let frontier = if hub.colony_kind == 4 && hub.population < 4_000.0 {
+                    ROUTE_POST_MIGRATION_BONUS
+                } else { 0.0 };
+                let pull = ((0.15 + prosp) * (1.0 + 0.4 * hub.hub_class as f32) + frontier) * fed;
                 if pull > 0.0 { pulls.push((h, pull)); total += pull; }
             }
             if total <= 0.0 { continue; }

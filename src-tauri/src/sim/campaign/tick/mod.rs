@@ -1323,6 +1323,41 @@ const ROUTE_POST_FOUND_COST: f32 = 9_000.0;
 /// arbitrary midpoint: a river-mouth delta (river↔sea) or a strait/isthmus
 /// chokepoint (land↔sea, land↔land around a barrier) is exactly that point.
 const ROUTE_POST_JUNCTION_KM: f32 = 600.0;
+/// **The hard cap this section's own doc comment already promised ("capped hard")
+/// and the shipped code never actually enforced** — `maybe_found_route_post`
+/// picked the single LONGEST same-component gap in the whole world with no
+/// ceiling at all, so a wealthy house could plant a waystation a continent away
+/// from its own seat (measured: a world large enough for the longest live gap to
+/// exceed 10,000 miles/16,000 km founds a post exactly that far out — the
+/// user-reported case). A route post is a smaller, cheaper venture than a
+/// resource outpost (`ROUTE_POST_FOUND_WEALTH`/`_COST` well under an outpost's
+/// bar), so it gets an EQUAL, not a longer, reach — same value as
+/// `COLONY_MAX_KM`, named separately because the two are conceptually distinct
+/// caps (home-distance for a founder vs. distance from a colony's own
+/// metropolis) that happen to share a number today. Checked against the SITE,
+/// not the gap's far end — a post two days from home bridging a much longer
+/// gap beyond it is exactly the historical kontor/factory pattern (a waystation
+/// projects from the founder's own reach, the LANE it serves can run on).
+const ROUTE_POST_MAX_HOME_KM: f32 = COLONY_MAX_KM;
+/// How many of the longest qualifying gaps `maybe_found_route_post` tries, in
+/// order, before giving up for this call. A single best-or-nothing pick (the
+/// pre-fix shape) either plants a post with no real connection to its founder
+/// or, once `ROUTE_POST_MAX_HOME_KM` rejects it, silently stalls forever if the
+/// world's single longest gap always sits far from every wealthy house — the
+/// same "rank a shortlist, fall through" discipline
+/// `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`'s lesser-town routing fix already
+/// uses, so a nearer, still-real gap gets founded instead.
+const ROUTE_POST_GAP_CANDIDATES: usize = 8;
+/// User-requested: encourage migration TO a fresh trade post — a real, bounded
+/// pull bonus added to `province_demography_pass`'s ordinary opportunity term
+/// for a small (`< 4,000` pop, still stage-1/2) `colony_kind == 4` hub, tapering
+/// to zero once it has established itself. Historically a frontier factory
+/// paid a real wage premium for exactly this reason — labour was scarce there,
+/// not merely welcome — and without it a post's own growth (`route_post_pass`)
+/// depends entirely on however much rural pull its remote siting happens to
+/// draw on its own, which can be nearly nothing for a waystation planted where
+/// no province has much of a rural pool to begin with.
+const ROUTE_POST_MIGRATION_BONUS: f32 = 0.35;
 // ── Trade bases (houses develop EXISTING under-traded small cities).
 //    The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──
@@ -3669,6 +3704,7 @@ fn neg_one_i32() -> i32 { -1 }
 pub(crate) fn ship_leg_max_km_default() -> f32 { SHIP_LEG_MAX_KM }
 pub(crate) fn caravan_leg_max_km_default() -> f32 { CARAVAN_LEG_MAX_KM }
 pub(crate) fn local_haul_bind_days_default() -> f32 { N1_LOCAL_HAUL_BIND_DAYS }
+pub(crate) fn route_post_max_home_km_default() -> f32 { ROUTE_POST_MAX_HOME_KM }
 fn unknown_extent() -> u8 { u8::MAX }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
@@ -6495,6 +6531,16 @@ pub struct CampaignSim {
     /// leg-range caps, the same paired dosing `the_dosed_economy_stays_
     /// healthy_on_a_realistically_dense_world` already does for those.
     #[serde(default = "local_haul_bind_days_default")] pub local_haul_bind_days: f32,
+    /// Same test-controllable-field precedent as `ship_leg_max_km`/`local_haul_
+    /// bind_days` directly above, for the identical reason: `ROUTE_POST_MAX_
+    /// HOME_KM` is stated in real kilometres, and every abstract-scale `sim()`
+    /// fixture (built for a purpose that has nothing to do with distance —
+    /// `route_posts_prefer_a_junction_site_over_the_nearest_plain_one` failed
+    /// on this exact mismatch, a 200-km/cell test world putting its own
+    /// founder ~10,400 km from the site it was testing) would trip the cap on
+    /// pure fixture-scale noise rather than a genuine overreach. `sim()` opts
+    /// out at `f32::INFINITY`; a real campaign gets the shipped dose.
+    #[serde(default = "route_post_max_home_km_default")] pub route_post_max_home_km: f32,
     /// Test-only, and for the SAME ONE CALLER as `suppress_realms` above:
     /// `econ_inheritance_rules_fragment_differently`. Suppresses CRISIS RELIEF
     /// (`polis.rs::decide_crisis_relief`).
