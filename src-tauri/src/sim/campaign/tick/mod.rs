@@ -1328,10 +1328,23 @@ const ROUTE_POST_START_TICK: u32 = 10 * 365;
 /// exists to shorten an otherwise-teleported long haul, not to sit beside a town its
 /// neighbour already reaches in a week.
 const ROUTE_POST_MIN_GAP_DAYS: f32 = 25.0;
+/// A MODAL-MISMATCH gap — one endpoint coastal, the other not, or one river-linked
+/// and the other not — needs a real break-of-bulk settlement even on a short lane:
+/// a ship cannot simply beach cargo and conjure camels, so the transshipment point
+/// is a geographic necessity of the ROUTE, not a function of its length. Set far
+/// below `ROUTE_POST_MIN_GAP_DAYS` (which exists for the *opposite* reason — an
+/// ordinary long haul with no natural chokepoint) so a modest coastal-to-inland
+/// lane still qualifies; a floor still exists so two adjacent hubs a day apart
+/// don't spawn a post between them.
+const ROUTE_POST_MODAL_MIN_GAP_DAYS: f32 = 5.0;
 /// At most this many route posts may exist at once — a hard ceiling independent of
 /// `MAX_TOTAL_ESTATES` (route posts are not estates), so the mechanism cannot pave
-/// the map with waystations even on a world with many long, busy lanes.
-const MAX_ROUTE_POSTS: usize = 10;
+/// the map with waystations even on a world with many long, busy lanes. Raised from
+/// the original 10 when modal-mismatch founding (above) was added — a world with
+/// several sea/river/land junctions all wanting their own kontor would otherwise
+/// exhaust the old, lower cap on generic long-haul waystations alone and starve the
+/// (more load-bearing) modal-junction case the cap exists to bound, not eliminate.
+const MAX_ROUTE_POSTS: usize = 24;
 /// A tiny waypoint, not a town — Cape Town's own founding character (§3, "under
 /// explicit orders not to become a colony"). It grows from real traffic afterward
 /// (ordinary settlement demographics, unchanged) or it stays a hamlet forever.

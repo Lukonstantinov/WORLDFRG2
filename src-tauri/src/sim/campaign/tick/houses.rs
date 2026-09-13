@@ -1095,18 +1095,31 @@ impl CampaignSim {
         // founder or silently founding nothing at all (`ROUTE_POST_GAP_
         // CANDIDATES`'s own doc comment).
         let real: Vec<usize> = (0..n).filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned).collect();
-        let mut gaps: Vec<(usize, usize, f32)> = Vec::new();
+        // `modal` marks a gap where the two ends need DIFFERENT carriers — one
+        // coastal and the other not, or one river-linked and the other not — the
+        // literal "merchants can't stop on an uninhabited coast and conjure camels"
+        // case. It is kept separate from a plain long-haul gap because it demands a
+        // REAL junction site below (no falling back to an arbitrary nearest town):
+        // a modal post's whole reason to exist is standing at the actual point cargo
+        // changes carrier, not at a waystation partway down an ordinary long road.
+        let mut gaps: Vec<(usize, usize, f32, bool)> = Vec::new();
         for &a in &real {
             for &b in &real {
                 if b <= a || self.hubs[a].component != self.hubs[b].component { continue; }
                 let d = self.days[a * n + b];
-                if !d.is_finite() || d < ROUTE_POST_MIN_GAP_DAYS { continue; }
+                if !d.is_finite() { continue; }
                 if self.route_outlet.get(a * n + b).copied().unwrap_or(-1) >= 0 { continue; }
-                gaps.push((a, b, d));
+                let modal = self.hubs[a].coastal != self.hubs[b].coastal
+                    || self.hubs[a].river != self.hubs[b].river;
+                let min_gap = if modal { ROUTE_POST_MODAL_MIN_GAP_DAYS } else { ROUTE_POST_MIN_GAP_DAYS };
+                if d < min_gap { continue; }
+                gaps.push((a, b, d, modal));
             }
         }
         if gaps.is_empty() { return; }
-        gaps.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap_or(std::cmp::Ordering::Equal));
+        // Modal-mismatch gaps first (the geographic necessity), longest within
+        // each group second.
+        gaps.sort_by(|x, y| y.3.cmp(&x.3).then(y.2.partial_cmp(&x.2).unwrap_or(std::cmp::Ordering::Equal)));
         gaps.truncate(ROUTE_POST_GAP_CANDIDATES);
 
         // Founder: the richest house that clears a route post's (much lighter than
@@ -1125,7 +1138,7 @@ impl CampaignSim {
         let max_home_cells = self.route_post_max_home_km * self.world_w / EARTH_EQUATOR_KM;
         let junction_cells = ROUTE_POST_JUNCTION_KM * self.world_w / EARTH_EQUATOR_KM;
 
-        for (ga, gb, _d) in gaps {
+        for (ga, gb, _d, modal) in gaps {
             // Cylindrical midpoint (X wraps).
             let mut dx = self.hubs[gb].x - self.hubs[ga].x;
             if self.world_w > 1.0 {
@@ -1161,7 +1174,18 @@ impl CampaignSim {
                     best_junction = (i, d);
                 }
             }
-            let bi = if best_junction.0 != usize::MAX { best_junction } else { best_any };
+            // A MODAL gap accepts only a real junction — no fallback to the nearest
+            // arbitrary site. Its whole premise is "cargo must change carrier here";
+            // planting a post at a random inland/offshore point wouldn't solve that,
+            // so a modal gap with no surveyed chokepoint/delta in reach is skipped
+            // rather than mis-sited (the loop falls through to the next candidate).
+            let bi = if modal {
+                best_junction
+            } else if best_junction.0 != usize::MAX {
+                best_junction
+            } else {
+                best_any
+            };
             let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { continue };
             let site = self.colonizable.swap_remove(si);
 
@@ -1171,15 +1195,22 @@ impl CampaignSim {
             let new = self.create_market_colony(home, &site, backers, ROUTE_POST_SEED_POP);
             self.hubs[new].colony_kind = 4;
             self.hubs[new].owner_house = hi as i32;
-            self.hubs[new].name = format!("{} (post)",
-                self.hubs[new].name.replace(" (colony)", ""));
+            let post_label = if modal { "trading post" } else { "post" };
+            self.hubs[new].name = format!("{} ({})",
+                self.hubs[new].name.replace(" (colony)", ""), post_label);
             let (hn, ga_n, gb_n, cn) = (self.houses[hi].name.clone(),
                 self.hubs[ga].name.clone(), self.hubs[gb].name.clone(), self.hubs[new].name.clone());
             self.houses[hi].events.push(HouseEvent { tick: self.tick, kind: "colony".into(),
                 text: format!("founds the waystation {} on the {}–{} road", cn, ga_n, gb_n) });
+            let journal_text = if modal {
+                format!("{} plants the trading post {} where cargo bound between {} and {} must change carrier",
+                    hn, cn, ga_n, gb_n)
+            } else {
+                format!("{} plants the trade post {} to shorten the {}–{} run", hn, cn, ga_n, gb_n)
+            };
             self.journal.push(JournalEntry {
                 tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
-                text: format!("{} plants the trade post {} to shorten the {}–{} run", hn, cn, ga_n, gb_n),
+                text: journal_text,
             });
             return; // at most one per call
         }
