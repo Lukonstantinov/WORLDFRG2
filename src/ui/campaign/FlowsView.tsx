@@ -65,7 +65,7 @@ function riskColor(risk: number): string {
  *  itself — the same derivation `TradeFlowGood`'s own doc comment gives
  *  (`transit = max(0, out_volume - own_production)`). Shared by the collapsed
  *  row's badge and the expanded row's bar so the two never disagree. */
-function goodSplit(g: TradeFlowGood) {
+export function goodSplit(g: TradeFlowGood) {
   const transit = Math.max(0, g.out_volume - (g.own_production ?? 0));
   const ownExport = g.out_volume - transit;
   const forUs = Math.max(0, g.in_volume - transit);

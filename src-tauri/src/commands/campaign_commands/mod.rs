@@ -441,6 +441,30 @@ pub struct HubGoodDetail {
     #[serde(default)] pub depot_stock: f32,
     /// The depots that hold it, largest first: `(owner name, is_guild, amount)`.
     #[serde(default)] pub depot_holders: Vec<(String, bool, f32)>,
+    /// The council's own secured reserve of this good (`TickHub.civic_goods[g]`)
+    /// — what `council_provision_pass`'s right-of-first-buy has already pulled
+    /// off the open market into the civic warehouse, distinct from `stock`
+    /// (still on the open market) and `depot_stock` (a private house/guild
+    /// depot). Zero on a good the council never provisions (non-food, no
+    /// colony/satellite dependents).
+    #[serde(default)] pub civic_goods: f32,
+    /// Needs-ladder tier (`GoodSpec.need_tier`): 0 basic, 1 comfort, 2 luxury —
+    /// mirrored here exactly as `TradeFlowGood.need_tier` is, so a good's kind
+    /// reads the same on the Market tab as on Flows.
+    #[serde(default)] pub need_tier: u8,
+    /// A CHARTERED STAPLE RIGHT at THIS hub (`House.charters`, granted to a
+    /// political house or guild that dominates its own seat — houses.rs — and
+    /// enforced live in `dispatch` via `CHARTER_EXCLUSIVE_DOSE`): the holder's
+    /// name, or empty when nobody holds one here. Charters are implicitly at
+    /// the holder's OWN seat, so this is only ever non-empty when `hub` IS
+    /// that house's seat.
+    #[serde(default)] pub charter_holder: String,
+    #[serde(default)] pub charter_is_guild: bool,
+    /// The charter holder's measured trade-volume monopoly SHARE on this good
+    /// (`House.monopoly`, 0..1) — the same figure that decided whether it ever
+    /// won the "monopoly" chronicle event. 0 when there is no charter, or the
+    /// share hasn't been measured yet.
+    #[serde(default)] pub charter_share: f32,
 }
 
 /// One live city in the Markets window's picker.

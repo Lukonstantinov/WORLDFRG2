@@ -336,6 +336,19 @@ export interface HubGoodDetail {
   depot_stock?: number;
   /** The depots that hold it, largest first: [owner name, is_guild, amount]. */
   depot_holders?: [string, boolean, number][];
+  /** The council's own secured reserve of this good (right-of-first-buy),
+   *  distinct from `stock` (open market) and `depot_stock` (a private depot). */
+  civic_goods?: number;
+  /** Needs-ladder tier: 0 basic, 1 comfort, 2 luxury (mirrors TradeFlowGood). */
+  need_tier?: number;
+  /** A chartered STAPLE RIGHT at this hub — the holder's name, or "" for none.
+   *  Charters sit at the holder's own seat, so non-empty only when this hub
+   *  IS that house's/guild's seat. */
+  charter_holder?: string;
+  charter_is_guild?: boolean;
+  /** The charter holder's measured monopoly SHARE of local trade in this good
+   *  (0..1); 0 when there is no charter or it hasn't been measured yet. */
+  charter_share?: number;
 }
 /** One good's world-wide quality + trade picture (the floating Goods window). */
 export interface GoodMarketRow {
