@@ -42,6 +42,17 @@ pub(crate) const LEAGUE_BOYCOTT_TICKS: u32 = TICKS_PER_YEAR;
 /// Chronicle cap, mirroring `HOUSE_EVENTS_CAP`'s discipline at League scale
 /// (a league's whole life is a handful of events, not thousands).
 pub(crate) const LEAGUE_EVENTS_CAP: usize = 60;
+/// INSTITUTIONS_BUILD_ORDER.md 1.3 · `League.purse` had one writer (dues) and
+/// zero readers. Each year, if the purse can afford it, it buys a season's
+/// convoy escort: member-to-member lanes lose cargo at a reduced rate for the
+/// year. A league with no purse (or that never accrues enough) never affords
+/// one — bit-identical to before this slice, since `escort_until_tick` starts
+/// and stays at 0 (`n7_a_world_with_no_leagues_is_bit_identical` still holds:
+/// zero members ⇒ zero dues ⇒ zero purse ⇒ never funds an escort).
+pub(crate) const LEAGUE_ESCORT_COST: f32 = 20.0;
+/// Multiplier on voyage loss probability for a lane between two hubs of the
+/// SAME league while its escort is active this year.
+pub(crate) const LEAGUE_ESCORT_LOSS_MULT: f32 = 0.5;
 
 /// A pure yearly decision for one league — dues to collect, who leaves, who
 /// the seat becomes if it fell, and (once dosed) a boycott to open. Split
@@ -142,7 +153,7 @@ impl CampaignSim {
             self.leagues.push(League {
                 id, name: name.clone(), seat_hub: seat as u32, purse: 0.0,
                 founded_tick: self.tick, dissolved_tick: 0, last_threat_tick: self.tick,
-                boycotts: vec![],
+                boycotts: vec![], escort_until_tick: 0,
                 events: vec![RealmEvent {
                     tick: self.tick, kind: "league_founded".into(),
                     text: format!("{} founded with {} members", name, member_count),
@@ -250,6 +261,27 @@ impl CampaignSim {
             self.leagues[li].boycotts.push(b);
         }
         self.leagues[li].boycotts.retain(|b| b.until_tick > self.tick);
+        // 1.3 · the purse buys a season's convoy escort if it can afford one —
+        // the first real reader `League.purse` has ever had.
+        let name = self.leagues[li].name.clone();
+        let had_escort = self.leagues[li].escort_until_tick >= self.tick;
+        if self.leagues[li].purse >= LEAGUE_ESCORT_COST {
+            self.leagues[li].purse -= LEAGUE_ESCORT_COST;
+            self.leagues[li].escort_until_tick = self.tick + TICKS_PER_YEAR;
+            self.leagues[li].events.push(RealmEvent {
+                tick: self.tick, kind: "escort".into(),
+                text: format!("{name} fits out a convoy for the season"),
+            });
+        } else if had_escort {
+            // The escort it had is about to lapse and there's no purse to
+            // renew it — legible on the way out, not a silent lapse. Fires
+            // once (this branch requires `had_escort`, which a lapsed escort
+            // no longer satisfies next year).
+            self.leagues[li].events.push(RealmEvent {
+                tick: self.tick, kind: "no_escort".into(),
+                text: format!("{name} cannot afford a convoy this season"),
+            });
+        }
         let ev = &mut self.leagues[li].events;
         if ev.len() > LEAGUE_EVENTS_CAP {
             let drop = ev.len() - LEAGUE_EVENTS_CAP;

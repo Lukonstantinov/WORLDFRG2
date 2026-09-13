@@ -611,6 +611,7 @@ impl CampaignSim {
             // DLC 4 · seed the new estate's quality (length ng) so it's graded from
             // day one — a manufactory (kind 6) starts as a humble workshop and learns.
             quality: { let mut q = vec![0.0f32; ng]; if g0 < ng { q[g0] = if kind == 6 { 0.34 } else { 0.46 }; } q },
+            tradition: vec![0.0f32; ng],
             stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
@@ -2227,7 +2228,8 @@ impl CampaignSim {
                 if p > best { best = p; best_hub = h; }
             }
             if best_hub != usize::MAX && best > 0.0 {
-                guilds.push(CraftGuild { hub: best_hub as u32, good: g as u32, strength: 0.3, hall: false });
+                guilds.push(CraftGuild { hub: best_hub as u32, good: g as u32, strength: 0.3, hall: false,
+                    secrecy: 0.0, signature: None });
             }
         }
         // Keep the strongest guilds (by their host city's output) if we overflow.
@@ -2273,6 +2275,29 @@ impl CampaignSim {
                     value: 0.0, text: format!("The {} guild of {} raises a grand guildhall.", gn, city),
                 });
             }
+            // INSTITUTIONS_BUILD_ORDER.md 2.2 · a guild with a hall accrues SECRECY —
+            // the counterparty `maybe_steal_quality` never had before this. A guild
+            // with no hall yet has nothing organised enough to keep a secret with.
+            if self.guilds[gi].hall {
+                self.guilds[gi].secrecy = (self.guilds[gi].secrecy + GUILD_SECRECY_GROWTH).min(GUILD_SECRECY_CAP);
+            }
+            // 2.3 · THE SIGNATURE — once this city's tradition + quality both clear a
+            // real threshold, its craft earns a name that travels with the cargo.
+            // Both gates (not quality alone) so a young workshop that got lucky
+            // (a stolen technique) hasn't earned one yet. Once-only, like a milestone.
+            if self.guilds[gi].signature.is_none() {
+                let tradition_ok = self.hubs[hub].tradition.get(good).copied().unwrap_or(0.0) >= SIGNATURE_TRADITION_YEARS;
+                let quality_ok = self.hubs[hub].quality.get(good).copied().unwrap_or(0.0) >= SIGNATURE_QUALITY_FLOOR;
+                if tradition_ok && quality_ok {
+                    let signature = brand_name(self.hubs[hub].name.trim(), &self.goods[good].name);
+                    self.guilds[gi].signature = Some(signature.clone());
+                    self.journal.push(JournalEntry {
+                        tick: self.tick, kind: "signature".into(), hub: hub as i32, good: good as i32,
+                        value: 0.0,
+                        text: format!("\"{}\" becomes a name known in distant markets", signature),
+                    });
+                }
+            }
             // A strike: the masters down tools, halting the craft for a spell.
             if hash01(self.seed, yr as u64 ^ 0x6111D, gi as u64) < GUILD_STRIKE_CHANCE {
                 let dur = 20 + (hash01(self.seed, yr as u64, gi as u64) * 40.0) as u32;
@@ -2286,6 +2311,48 @@ impl CampaignSim {
                     value: dur as f32, text: format!("The {} guild of {} downs tools in a strike.", gn, city),
                 });
             }
+        }
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 2.2 · THE MASTER WHO LEAVES. A rival city may
+    /// bribe away the master of a guild's craft — reusing `STEWARD_POACH_CHANCE`'s
+    /// exact shape (an office's steward defecting), at the same base rate, resisted
+    /// by the guild's own `secrecy` exactly like the theft roll (`maybe_steal_
+    /// quality`). On success the destination's TRADITION jumps toward the source's
+    /// (never quality itself — that still has to climb via `QUALITY_LEARN_RATE`),
+    /// chronicled on BOTH sides: the source's loss and the destination's gain.
+    /// A world with no guilds calls this on an empty list — bit-identical.
+    pub(crate) fn maybe_poach_master(&mut self, yr: u32) {
+        let ng = self.goods.len();
+        for gi in 0..self.guilds.len() {
+            let (hub, good) = (self.guilds[gi].hub as usize, self.guilds[gi].good as usize);
+            if hub >= self.hubs.len() || good >= ng { continue; }
+            let chance = (MASTER_POACH_CHANCE - self.guilds[gi].secrecy).max(0.0);
+            if hash01(self.seed, yr as u64 ^ 0xB4A57E, gi as u64) >= chance { continue; }
+            // The richest OTHER city already making this good, but not yet its
+            // master — a rival that can plausibly afford to bribe one away.
+            let mut dest = (usize::MAX, 0.0f32);
+            for h in 0..self.hubs.len() {
+                if h == hub || self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+                if self.hubs[h].production.get(good).copied().unwrap_or(0.0) <= 0.0 { continue; }
+                if self.hubs[h].tradition.get(good).copied().unwrap_or(0.0)
+                    >= self.hubs[hub].tradition.get(good).copied().unwrap_or(0.0) { continue; }
+                if self.hubs[h].treasury > dest.1 { dest = (h, self.hubs[h].treasury); }
+            }
+            let Some(dh) = (dest.0 != usize::MAX).then_some(dest.0) else { continue };
+            if self.hubs[dh].tradition.len() != ng { self.hubs[dh].tradition = vec![0.0f32; ng]; }
+            let carried = self.hubs[hub].tradition.get(good).copied().unwrap_or(0.0) * MASTER_POACH_TRADITION_FRAC;
+            self.hubs[dh].tradition[good] = self.hubs[dh].tradition[good].max(carried);
+            // The source loses standing (a real blow, not merely a story beat) —
+            // strength drops and secrecy is partly spent bribing the guard past.
+            self.guilds[gi].strength = (self.guilds[gi].strength - 0.15).max(0.0);
+            self.guilds[gi].secrecy = (self.guilds[gi].secrecy * 0.5).max(0.0);
+            let (source_city, dest_city, gn) = (self.hubs[hub].name.clone(),
+                self.hubs[dh].name.clone(), self.goods[good].name.clone());
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "master_poached".into(), hub: hub as i32, good: good as i32, value: carried,
+                text: format!("A master of the {} craft is lured away from {} to {}", gn, source_city, dest_city),
+            });
         }
     }
 

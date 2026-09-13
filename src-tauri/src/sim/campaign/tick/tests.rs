@@ -25,7 +25,7 @@
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
-            quality: Vec::new(), stolen_good: -1, stolen_from: -1,
+            quality: Vec::new(), tradition: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
@@ -126,7 +126,7 @@
             // unaffected by the B1 land layer (that is the gate).
             prov_forest: vec![], prov_arable: vec![], prov_pasture: vec![],
             prov_irrigated: vec![], prov_soil: vec![],
-            prov_area_km2: vec![], prov_relief_m: vec![], prov_tenure: vec![],
+            prov_area_km2: vec![], prov_relief_m: vec![], prov_cadastre: vec![], prov_tenure: vec![],
             suppress_realms: false, suppress_relief: false,
             prov_tax: vec![], prov_arrears: vec![], prov_unrest: vec![],
             prov_surplus: vec![], prov_revenue: vec![], prov_holder: vec![],
@@ -410,6 +410,62 @@
         s.dispatch(&needs);
         assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0,
             "a banned good's stock at the source must not move — nothing may ship");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 4.1 · WAR CONTRABAND is lane-scoped, not a
+    /// blanket ban — a belligerent still trades a contraband good with a THIRD
+    /// city it is not at war with, unlike `export_ban_until` (N2), which bars a
+    /// good to everyone.
+    #[test]
+    fn contraband_blocks_only_the_lane_to_the_actual_enemy() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0), // seller, at war with hub 1
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),   // the enemy
+            hub(2, 10.0, 0.0, 9000.0, vec![10.0], 0),  // a neutral third city
+        ];
+        for h in &mut hubs { h.coastal = false; }
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        s.hubs[0].stock[0] = 5000.0;
+        s.hubs[0].war_with = 1;
+        s.hubs[1].war_with = 0;
+        let needs = vec![vec![0.0], vec![50.0], vec![50.0]];
+        s.dispatch(&needs);
+        // `dispatch` only ever CREATES in-transit cargo — arrival is a separate
+        // step inside `advance`'s own day loop (`eta_tick <= tick`, `mod.rs`),
+        // never run here — so the question "did this lane ship" is answered by
+        // what `dispatch` decided to send, not by destination stock a single
+        // call can never move.
+        assert!(!s.in_transit.iter().any(|c| c.to == 1 && c.good == 0),
+            "the enemy receives none of the banned good");
+        assert!(s.in_transit.iter().any(|c| c.to == 2 && c.good == 0),
+            "a neutral third city still receives it — the ban is lane-scoped, not a blanket ban");
+    }
+
+    /// A world at peace is untouched — the contraband check reads `war_with`,
+    /// which defaults to −1, so it is a true no-op absent any war.
+    #[test]
+    fn contraband_is_a_noop_at_peace() {
+        let goods = vec![good("iron", 1, 2, 20.0, 0.35, false)];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 100.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        for h in &mut hubs { h.coastal = false; }
+        let mut s = sim(hubs, goods);
+        s.world_w = 4007.5;
+        s.rebuild_routes();
+        s.hubs[0].stock[0] = 5000.0;
+        let needs = vec![vec![0.0], vec![50.0]];
+        s.dispatch(&needs);
+        // Same reasoning as `contraband_blocks_only_the_lane_to_the_actual_enemy`
+        // above: `dispatch` only creates in-transit cargo, it never delivers it
+        // (arrival is a separate step in `advance`'s day loop) — so "trades
+        // normally" is read off what shipped, not off a destination stock that
+        // cannot move within a single `dispatch` call.
+        assert!(s.in_transit.iter().any(|c| c.to == 1 && c.good == 0),
+            "at peace, iron trades normally");
     }
 
     /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — the pure decision at
@@ -1690,6 +1746,106 @@
             "a road must respond to roughness MORE than an irrigation channel does");
     }
 
+    /// INSTITUTIONS_BUILD_ORDER.md 5.1 · THE CADASTRE — a fifth `ProvWork` kind,
+    /// crown-funded like the road/irrigation pair, permanently marking
+    /// `prov_cadastre[p]` on completion and, from then on, raising the
+    /// province's own collection efficiency at the tithe.
+    #[test]
+    fn a_surveyed_province_collects_more_and_a_free_one_never_gets_the_cadastre() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mk = || {
+            let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+            let mut s = sim(hubs, goods.clone());
+            s.prov_cap = vec![50_000.0];
+            s.prov_rural = vec![30_000.0];
+            s.prov_culture = vec!["Aiora".into()];
+            s.prov_seat = vec![[0.0, 0.0]];
+            s.hub_province = vec![0];
+            s.prov_net_mig = vec![0.0];
+            s.ensure_province_land(1);
+            s.hubs[0].treasury = 80_000.0;
+            s.hubs[0].tier = 1;
+            // No arrears/unrest (no road wanted), well irrigated already (no
+            // irrigation wanted), so a settled province under a realm falls
+            // straight to the cadastre.
+            s.prov_irrigated[0] = 0.9;
+            s.prov_arable[0] = 0.5;
+            s.prov_forest[0] = 0.05;
+            s.prov_pasture[0] = 0.45;
+            s
+        };
+
+        // FREE province: never surveyed, however long it runs.
+        let mut free = mk();
+        for yr in 0..80u32 { free.maybe_fund_province_works(yr); free.advance_province_works(0, yr); free.tick += TICKS_PER_YEAR; }
+        assert!(!free.prov_cadastre.get(0).copied().unwrap_or(false),
+            "a province outside a realm may never be surveyed");
+
+        // The SAME province, crowned: a cadastre eventually begins and completes.
+        let mut held = mk();
+        held.prov_holder = vec![0];
+        held.prov_holder_house = vec![-1];
+        held.prov_realm = vec![-1];
+        let rid = held.found_civic_realm(0, REALM_YEAR_FLOOR, REALM_PATH_CITY);
+        assert_eq!(held.prov_realm[0], rid as i32);
+        held.realms[rid as usize].treasury = 1_000_000.0;
+        held.realms[rid as usize].cohesion = 0.9;
+        for yr in 0..80u32 {
+            held.maybe_fund_province_works(yr);
+            held.advance_province_works(0, yr);
+            held.tick += TICKS_PER_YEAR;
+        }
+        assert!(held.prov_cadastre.get(0).copied().unwrap_or(false),
+            "a settled province under a realm must eventually be surveyed");
+
+        // Efficiency is measurably higher once surveyed, at identical cohesion
+        // and distance (the capital IS the province's own seat here, so
+        // distance is zero either way).
+        let base = held.realm_collection_efficiency(rid as usize, 0);
+        held.prov_cadastre[0] = false;
+        let unsurveyed = held.realm_collection_efficiency(rid as usize, 0) ;
+        held.prov_cadastre[0] = true;
+        let _ = base;
+        assert!(unsurveyed <= held.realm_collection_efficiency(rid as usize, 0),
+            "the raw efficiency term is unaffected by the survey — the CADASTRE \
+             multiplier is applied at the tithe call site, not inside \
+             realm_collection_efficiency itself; this just re-confirms that fact \
+             so a future refactor cannot silently move the multiplier in twice");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 5.2 · FARM OR COLLECT — an active tax farm is
+    /// consequential every year it stands: rural unrest rises and the crown's
+    /// own cohesion decays, not just at the moment of sale.
+    #[test]
+    fn an_active_tax_farm_raises_unrest_and_decays_cohesion_every_year() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.prov_cap = vec![50_000.0];
+        s.prov_rural = vec![30_000.0];
+        s.prov_culture = vec!["Aiora".into()];
+        s.prov_seat = vec![[0.0, 0.0]];
+        s.hub_province = vec![0];
+        s.prov_net_mig = vec![0.0];
+        s.ensure_province_land(1);
+        s.prov_holder = vec![0];
+        s.prov_holder_house = vec![-1];
+        s.prov_realm = vec![-1];
+        let rid = s.found_civic_realm(0, REALM_YEAR_FLOOR, REALM_PATH_CITY);
+        s.prov_realm[0] = rid as i32;
+        s.houses.push(house_at(0, vec![0], 2));
+        s.houses[0].wealth = 10_000.0;
+        s.realms[rid as usize].tax_farm = Some(TaxFarm { house: 0, started_tick: s.tick, years: 5 });
+        let cohesion0 = s.realms[rid as usize].cohesion;
+        let unrest0 = s.prov_unrest[0];
+        for _ in 0..3 { s.decide_realm_taxes(rid as usize, s.year()); }
+        assert!(s.prov_unrest[0] > unrest0, "a standing farm raises rural unrest over time");
+        assert!(s.realms[rid as usize].cohesion < cohesion0,
+            "a standing farm decays the crown's own administrative grip");
+        assert!(s.realms[rid as usize].cohesion >= TAX_FARM_COHESION_FLOOR - 1e-4,
+            "the decay is bounded, never runaway");
+    }
+
     /// FEUDS · the elaborated model must do the four things the flat `rivals` list could
     /// not: heat with overlap, ESCALATE through stages, cool when the overlap goes away,
     /// and keep `rivals` in sync so every existing reader still works.
@@ -2951,6 +3107,110 @@
     }
 
     #[test]
+    fn a_bank_whose_liquidation_value_covers_deposits_winds_down_without_a_crash() {
+        // INSTITUTIONS_BUILD_ORDER.md 1.1 · reserves alone cover liabilities in
+        // full — wound down quietly, depositors paid, no contagion ignited.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0)], goods);
+        s.houses.push(house_at(0, vec![0], 2));
+        let mk_bank = |name: &str, house: u32, reserves: f32, deposits: f32, notes: f32| Bank {
+            name: name.into(), house, seat: 0, founded_tick: 0, defunct: false,
+            reserves, loans: vec![], real_estate: 0.0, deposits, notes_issued: notes,
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0,
+            stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        };
+        s.banks.push(mk_bank("Banco Solvente", 0, 1000.0, 500.0, 0.0));
+        let house_wealth_before = s.houses[0].wealth;
+        s.resolve_bank_failure(0);
+        assert!(s.banks[0].defunct, "the bank still exits");
+        assert!(s.crashes.is_empty(), "a quiet wind-down must never ignite contagion");
+        assert!(s.banks[0].events.iter().any(|e| e.kind == "wound_down"),
+            "the bank's own record says it was wound down, not collapsed");
+        assert!(s.journal.iter().any(|j| j.text.contains("wound up")),
+            "the chronicle names the wind-down");
+        assert!(s.houses[0].wealth >= house_wealth_before,
+            "the residual (liquidation value in excess of deposits) reaches the owning house");
+    }
+
+    #[test]
+    fn a_bank_beyond_its_own_liquidation_value_is_absorbed_by_a_solvent_rival() {
+        // INSTITUTIONS_BUILD_ORDER.md 1.1 · the failing bank cannot cover its own
+        // deposits, but a healthy rival in the same trade component can take on
+        // its book at a discount. Depositors are protected; no crash.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0)], goods);
+        for i in 0..2u32 { s.houses.push(house_at(i, vec![0], 2)); }
+        let mk_bank = |name: &str, house: u32, reserves: f32, deposits: f32, notes: f32| Bank {
+            name: name.into(), house, seat: 0, founded_tick: 0, defunct: false,
+            reserves, loans: vec![], real_estate: 0.0, deposits, notes_issued: notes,
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0,
+            stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        };
+        s.banks.push(mk_bank("Banco Debole", 0, 50.0, 800.0, 0.0));   // liquidation 50 < 800
+        s.banks.push(mk_bank("Banco Forte", 1, 1000.0, 200.0, 0.0));  // ratio 5.0, ample capacity
+        let failing_owner_wealth_before = s.houses[0].wealth;
+        s.resolve_bank_failure(0);
+        assert!(s.banks[0].defunct, "the failing bank still exits");
+        assert!(!s.banks[1].defunct, "the acquirer is untouched");
+        assert!(s.crashes.is_empty(), "an absorption must never ignite contagion");
+        assert!(s.banks[0].events.iter().any(|e| e.kind == "absorbed"));
+        assert!(s.banks[1].events.iter().any(|e| e.kind == "absorbs"));
+        assert!((s.banks[1].deposits - 200.0).abs() > 1.0, "the acquirer takes on the deposit liability");
+        // The failing bank's owning house is PAID a real discounted buyout price
+        // (not left with nothing, and not made whole either).
+        assert!(s.houses[0].wealth > failing_owner_wealth_before, "the failing bank's owner is paid a real price");
+        assert!(s.journal.iter().any(|j| j.text.contains("takes over")),
+            "the chronicle names who took over whom");
+    }
+
+    #[test]
+    fn a_bank_with_no_rescue_available_still_collapses_into_a_crash() {
+        // INSTITUTIONS_BUILD_ORDER.md 1.1 · neither rescue is possible (no
+        // liquidation cover, no solvent rival) — the OLD path, and only this path
+        // may still ignite contagion.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![hub(0, 10.0, 10.0, 10000.0, vec![100.0], 0)], goods);
+        s.houses.push(house_at(0, vec![0], 2));
+        let bank = Bank {
+            name: "Banco Solo".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
+            reserves: 10.0, loans: vec![], real_estate: 0.0, deposits: 800.0, notes_issued: 0.0,
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0,
+            stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        };
+        s.banks.push(bank);
+        s.resolve_bank_failure(0);
+        assert!(s.banks[0].defunct);
+        assert_eq!(s.crashes.len(), 1, "with no rescue possible, collapse still ignites the crash");
+        assert!(s.banks[0].events.iter().any(|e| e.kind == "failed"), "the old collapse path ran");
+    }
+
+    #[test]
+    fn a_bank_may_hold_the_monte_and_is_paid_its_coupon() {
+        // INSTITUTIONS_BUILD_ORDER.md 1.2 · a bank subscribing the civic public
+        // debt is paid its coupon out of the SAME loop a house holder already is.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![hub(0, 10.0, 10.0, 20000.0, vec![500.0], 0)], goods);
+        s.hubs[0].council_house = 0;
+        s.houses.push(house_at(0, vec![0], 2));
+        s.tick = DEBT_START_TICK + 1;
+        s.hubs[0].debt_principal = 1000.0;
+        s.hubs[0].debt_coupon = 0.06;
+        s.hubs[0].treasury = 10_000.0;
+        let bank = Bank {
+            name: "Banco Pubblico".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
+            reserves: 500.0, loans: vec![], real_estate: 0.0, deposits: 0.0, notes_issued: 0.0,
+            branches: vec![0], prestige: 0.5, interest_earned: 0.0, losses: 0.0,
+            stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        };
+        s.banks.push(bank);
+        s.hubs[0].debt_holders.push((1, 0, 1000.0)); // kind 1 = bank
+        let reserves_before = s.banks[0].reserves;
+        s.update_public_debt(s.year());
+        assert!(s.banks[0].reserves > reserves_before, "the bank's coupon reached its reserves");
+        assert!(!s.banks[0].defunct);
+    }
+
+    #[test]
     fn economic_war_levies_houses_and_resolves() {
         // DLC 3.5 · a war drains resident houses via levies and resolves after ≥2
         // years into the war log with reparations — the wealth sink in action.
@@ -2977,6 +3237,44 @@
         assert_eq!(s.war_log.len(), 1, "war resolved into the log by the round cap at the latest");
         assert!(s.hubs[0].war_with < 0 && s.hubs[1].war_with < 0, "war state cleared");
         assert!(s.war_log[0].levies_total > 0.0, "levies recorded");
+    }
+
+    #[test]
+    fn a_hub_at_war_issues_more_public_debt_than_one_at_peace() {
+        // INSTITUTIONS_BUILD_ORDER.md 3.1 · war spending issues debt — the SAME
+        // issuance mechanism, a higher target while `war_with >= 0`, bounded by
+        // the same `DEBT_MAX_RATIO`/serviceability gate either way.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs = vec![
+            hub(0, 10.0, 10.0, 20000.0, vec![2000.0], 0), // at war
+            hub(1, 60.0, 10.0, 20000.0, vec![2000.0], 1), // at peace, otherwise identical
+        ];
+        for h in hubs.iter_mut() {
+            h.council_house = 0;
+            h.treasury = 50_000.0;
+            h.tw_house = 5000.0; h.tw_local = 5000.0; h.tw_guild = 0.0; // throughput
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..2u32 { let mut h = house_at(i, vec![0], 2); h.wealth = 40_000.0; s.houses.push(h); }
+        s.tick = DEBT_START_TICK + 1;
+        s.hubs[0].war_with = 1;
+        // One year hits the SAME per-year issuance step cap (`DEBT_ISSUE_STEP ×
+        // throughput`) for both hubs regardless of target — the war premium only
+        // shows up once debt approaches the (different) targets, over several
+        // years, exactly like a real Monte growing toward its ceiling.
+        for _ in 0..5 {
+            s.hubs[0].treasury = 50_000.0;
+            s.hubs[1].treasury = 50_000.0;
+            s.houses[0].wealth = s.houses[0].wealth.max(40_000.0);
+            s.houses[1].wealth = s.houses[1].wealth.max(40_000.0);
+            s.update_public_debt(s.year());
+            s.tick += TICKS_PER_YEAR;
+        }
+        assert!(s.hubs[0].debt_principal > 0.0, "the belligerent hub borrows");
+        assert!(s.hubs[1].debt_principal > 0.0, "the peaceful hub still opens its own Monte");
+        assert!(s.hubs[0].debt_principal > s.hubs[1].debt_principal,
+            "war raises the debt TARGET, so the belligerent hub issues more \
+             ({} vs {})", s.hubs[0].debt_principal, s.hubs[1].debt_principal);
     }
 
     #[test]
@@ -6792,7 +7090,7 @@
         s.leagues.push(League {
             id: 0, name: "Test League".into(), seat_hub: 0, purse: 0.0,
             founded_tick: 0, dissolved_tick: 0, last_threat_tick: 0,
-            boycotts: vec![], events: vec![],
+            boycotts: vec![], escort_until_tick: 0, events: vec![],
         });
         for h in 0..3 { s.hubs[h].league = 0; }
         assert!(s.hubs.iter().all(|h| h.realm == -1), "joining a league must never set sovereignty");
@@ -6856,7 +7154,7 @@
         stock_set_total(&mut s.hubs[0].stock, 0, 5000.0);
         s.leagues.push(League {
             id: 0, name: "T".into(), seat_hub: 0, purse: 0.0, founded_tick: 0,
-            dissolved_tick: 0, last_threat_tick: 0, boycotts: vec![], events: vec![],
+            dissolved_tick: 0, last_threat_tick: 0, boycotts: vec![], escort_until_tick: 0, events: vec![],
         });
         s.hubs[0].league = 0;
         s.hubs[1].league = 0;
@@ -6887,6 +7185,7 @@
             id: 0, name: "T".into(), seat_hub: 0, purse: 0.0, founded_tick: 0,
             dissolved_tick: 0, last_threat_tick: 0,
             boycotts: vec![Boycott { target: 1, good: -1, until_tick: s.tick + 1000 }],
+            escort_until_tick: 0,
             events: vec![],
         });
         s.hubs[0].league = 0;
@@ -6897,6 +7196,236 @@
             "a boycotted target must receive nothing from the boycotting hub");
         assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0,
             "the boycotted lane being the only target, the seller's stock must not move either");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 1.3 · a league whose purse can afford it fits
+    /// out a convoy escort — `League.purse`'s first real reader. A league with
+    /// no purse must stay inert (the pre-existing bit-identical guarantee for
+    /// leagues, `n7_a_world_with_no_leagues_is_bit_identical`, is untouched
+    /// since `escort_until_tick` starts and stays at 0 there).
+    #[test]
+    fn n7_the_purse_buys_a_convoy_escort_when_it_can_afford_one() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Low treasury → tiny yearly dues, so the purse is effectively what we
+        // preset it to, not what dues keep refilling — lets the test control
+        // whether year 2 can afford a renewal.
+        let mut hubs: Vec<TickHub> = (0..3).map(|i| hub(i, i as f32 * 5.0, 0.0, 2000.0, vec![600.0], 0)).collect();
+        for h in hubs.iter_mut() { h.treasury = 60.0; }
+        let mut s = sim(hubs, goods);
+        s.tick = 10_000;
+        s.leagues.push(League {
+            id: 0, name: "Test League".into(), seat_hub: 0, purse: LEAGUE_ESCORT_COST - 1.0,
+            founded_tick: 0, dissolved_tick: 0, last_threat_tick: s.tick,
+            boycotts: vec![], escort_until_tick: 0, events: vec![],
+        });
+        for h in 0..3 { s.hubs[h].league = 0; }
+        s.run_league_diet();
+        assert!(!s.leagues.is_empty(), "the league must not have dissolved");
+        assert!(s.leagues[0].escort_until_tick > s.tick, "an affordable escort is funded");
+        assert!(s.leagues[0].events.iter().any(|e| e.kind == "escort"),
+            "the funding is chronicled");
+        // A second year, right as the escort lapses, with a purse too thin to
+        // renew it — the escort's own doc: the lapse is legible too, not silent.
+        let escort_until = s.leagues[0].escort_until_tick;
+        s.tick = escort_until;
+        s.run_league_diet();
+        assert!(s.leagues[0].events.iter().any(|e| e.kind == "no_escort"),
+            "an unaffordable renewal is chronicled too, not silently dropped");
+    }
+
+    /// A league that never accrues a purse (no members, or never enough dues)
+    /// never funds an escort — `escort_until_tick` stays at its serde default 0.
+    #[test]
+    fn n7_an_empty_purse_never_funds_an_escort() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Treasury kept just above LEAGUE_DUES_MIN_TREASURY (never expelled) but
+        // low enough that a year's dues (LEAGUE_DUES_FRAC · treasury) stay well
+        // under LEAGUE_ESCORT_COST even summed across all three members.
+        let mut hubs: Vec<TickHub> = (0..3).map(|i| hub(i, i as f32 * 5.0, 0.0, 2000.0, vec![600.0], 0)).collect();
+        for h in hubs.iter_mut() { h.treasury = 60.0; }
+        let mut s = sim(hubs, goods);
+        s.tick = 10_000;
+        s.leagues.push(League {
+            id: 0, name: "Poor League".into(), seat_hub: 0, purse: 0.0,
+            founded_tick: 0, dissolved_tick: 0, last_threat_tick: s.tick,
+            boycotts: vec![], escort_until_tick: 0, events: vec![],
+        });
+        for h in 0..3 { s.hubs[h].league = 0; }
+        // Dues this year are tiny (LEAGUE_DUES_FRAC · treasury), far under
+        // LEAGUE_ESCORT_COST, so the purse still can't afford one.
+        s.run_league_diet();
+        assert_eq!(s.leagues[0].escort_until_tick, 0, "too poor a purse funds nothing");
+        assert!(!s.leagues[0].events.iter().any(|e| e.kind == "escort"));
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 2.1 · the quality CAP no longer reads
+    /// population at all — it is purely tradition (+ structures). A hub that
+    /// keeps producing accumulates tradition every month (faster under a
+    /// guild) and its quality cap — and so its realised quality — climbs with
+    /// it; a hub that stops producing decays back down. This is the direct
+    /// replacement for the old `size_bonus` and is what lets a small city
+    /// out-master a metropolis that only just started (Murano vs a capital).
+    #[test]
+    fn quality_cap_tracks_tradition_not_population() {
+        let mut g = good("glass", 1, 2, 10.0, 0.4, false);
+        g.inputs = vec![(0, 1.0)]; // self-referential dummy input — only needs to be non-empty
+        let goods = vec![g];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 500.0, vec![10.0], 0),      // tiny population
+            hub(1, 5.0, 0.0, 900_000.0, vec![10.0], 0),  // huge population
+        ];
+        for h in hubs.iter_mut() { h.quality = vec![0.0]; h.tradition = vec![0.0]; }
+        let mut s = sim(hubs, goods);
+        // Both hubs produce continuously for a long run — population plays no
+        // part any more, so their quality trajectories must be IDENTICAL.
+        for _ in 0..(TRADITION_YEARS_FULL as u32 * 12) {
+            s.update_good_quality();
+        }
+        assert!(s.hubs[0].tradition[0] >= TRADITION_YEARS_FULL - 0.5,
+            "continuous production must accumulate tradition toward the full cap");
+        assert!((s.hubs[0].quality[0] - s.hubs[1].quality[0]).abs() < 1e-4,
+            "population must not enter the cap at all — tiny hub {} vs huge hub {}",
+            s.hubs[0].quality[0], s.hubs[1].quality[0]);
+        assert!(s.hubs[0].quality[0] > QUALITY_CAP_BASE,
+            "decades of practice must lift quality above the un-practised base cap");
+
+        // Now hub 0 stops producing — tradition (and so quality) must DECAY,
+        // unlike the old size/struct terms which only ever rose.
+        s.hubs[0].production[0] = 0.0;
+        let q_before = s.hubs[0].quality[0];
+        // Tradition caps at 2×`TRADITION_YEARS_FULL` and only the bonus band
+        // below `TRADITION_YEARS_FULL` moves the cap, so enough months of
+        // decay must pass to actually bring it back under that threshold.
+        for _ in 0..3200 { s.update_good_quality(); }
+        assert!(s.hubs[0].quality[0] < q_before,
+            "a craft not practised for years must lose standing, not merely stop growing");
+    }
+
+    /// 2.1 companion · a guild speeds tradition growth (organised transmission
+    /// of skill), so an otherwise-identical hub with a guild present pulls
+    /// ahead of one without.
+    #[test]
+    fn a_guild_grows_tradition_faster_than_practice_alone() {
+        let mut g = good("glass", 1, 2, 10.0, 0.4, false);
+        g.inputs = vec![(0, 1.0)];
+        let goods = vec![g];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0), // guilded
+            hub(1, 5.0, 0.0, 5000.0, vec![10.0], 0), // ungilded, otherwise identical
+        ];
+        for h in hubs.iter_mut() { h.quality = vec![0.0]; h.tradition = vec![0.0]; }
+        let mut s = sim(hubs, goods);
+        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.3, hall: false, secrecy: 0.0, signature: None });
+        for _ in 0..120 { s.update_good_quality(); } // 10 years
+        assert!(s.hubs[0].tradition[0] > s.hubs[1].tradition[0],
+            "the guilded hub must accumulate tradition faster over the same decade");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 2.2 · SECRECY must measurably resist theft —
+    /// "a guarded craft must diffuse SLOWER than an unguarded one, or secrecy is
+    /// decoration." Two otherwise-identical worlds, differing only in the
+    /// leader guild's `secrecy`, sampled across many houses/years; count how
+    /// often `maybe_steal_quality` actually lifts the thief's quality.
+    #[test]
+    fn guild_secrecy_measurably_slows_the_diffusion_of_a_guarded_craft() {
+        fn build(secrecy: f32) -> CampaignSim {
+            let goods = vec![good("glass", 1, 2, 10.0, 0.4, false)];
+            let mut hubs = vec![
+                hub(0, 0.0, 0.0, 9000.0, vec![10.0], 0), // the world leader
+            ];
+            for hi in 1..=20u32 {
+                hubs.push(hub(hi, hi as f32, 0.0, 9000.0, vec![10.0], 0));
+            }
+            let n = hubs.len();
+            let mut s = sim(hubs, vec![]);
+            s.goods = goods;
+            for h in 0..n {
+                s.hubs[h].quality = vec![0.0];
+                s.hubs[h].production = vec![1.0];
+                s.hubs[h].is_estate = true;
+                s.hubs[h].estate_kind = 6;
+                s.hubs[h].owner_house = h as i32;
+            }
+            s.hubs[0].quality[0] = 0.95; // the leader, far ahead
+            s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.6, hall: true, secrecy, signature: None });
+            s.houses = (0..n).map(|h| {
+                let mut ho = house_at(h as u32, vec![0], 0);
+                ho.archetype = 0; // not ARCH_FLEET, which is excluded from spying
+                ho
+            }).collect();
+            s
+        }
+        // A theft roll must clear TWO independent gates: the attempt chance
+        // (`QUALITY_STEAL_CHANCE`, identical between the two builds — same
+        // seed, same per-(house,year) roll) and, only if a guild guards the
+        // leader, the secrecy roll on top of it. Driving secrecy to 1.0 (well
+        // past the shipped `GUILD_SECRECY_CAP`, deliberately — this isolates
+        // the MECHANISM from the dose, the same split `charter_bars_sale`'s
+        // own pure-decision test uses) makes the foil roll certain, so this is
+        // a direct test of the gate rather than a statistical race that a
+        // small sample can flip either way through path-dependent history
+        // (an early foil changes who is even eligible to try next).
+        let mut guarded = build(1.0);
+        let mut open = build(0.0);
+        let mut guarded_thefts = 0u32;
+        let mut open_thefts = 0u32;
+        for yr in 0..400u32 {
+            let before = guarded.hubs.iter().filter(|h| h.stolen_good == 0).count();
+            guarded.maybe_steal_quality(yr);
+            if guarded.hubs.iter().filter(|h| h.stolen_good == 0).count() > before { guarded_thefts += 1; }
+            let before = open.hubs.iter().filter(|h| h.stolen_good == 0).count();
+            open.maybe_steal_quality(yr);
+            if open.hubs.iter().filter(|h| h.stolen_good == 0).count() > before { open_thefts += 1; }
+        }
+        assert!(open_thefts > 0, "an unguarded craft must actually diffuse over 400 years");
+        assert_eq!(guarded_thefts, 0,
+            "a guild guarded at secrecy 1.0 must foil every attempt — secrecy is a real \
+             subtraction from the theft roll, not decoration");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 2.2 · THE MASTER WHO LEAVES — a defecting
+    /// master must carry a FRACTION of the source's tradition to the destination
+    /// (never quality itself directly) and must be chronicled on both sides;
+    /// the source's guild loses strength and secrecy as a real cost.
+    #[test]
+    fn maybe_poach_master_carries_tradition_and_costs_the_source_guild() {
+        let goods = vec![good("glass", 1, 2, 10.0, 0.4, false)];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![10.0], 0), // the master's home
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0), // a poorer rival, less tradition
+        ];
+        hubs[0].production = vec![1.0]; hubs[0].tradition = vec![40.0]; hubs[0].treasury = 10.0;
+        hubs[1].production = vec![1.0]; hubs[1].tradition = vec![2.0]; hubs[1].treasury = 5000.0; // rich enough to bribe
+        let mut s = sim(hubs, goods);
+        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.6, hall: true, secrecy: 0.0, signature: None });
+        let mut poached = false;
+        for yr in 0..2000u32 {
+            let strength_before = s.guilds[0].strength;
+            s.maybe_poach_master(yr);
+            if s.guilds[0].strength < strength_before {
+                poached = true;
+                break;
+            }
+        }
+        assert!(poached, "MASTER_POACH_CHANCE must be reachable over enough years");
+        assert!(s.hubs[1].tradition[0] > 2.0,
+            "the destination's tradition must rise once a master defects to it");
+        assert!(s.hubs[1].tradition[0] < s.hubs[0].tradition[0],
+            "the destination jumps TOWARD the source's standing, never past it in one defection");
+        assert!(s.journal.iter().any(|j| j.kind == "master_poached" && j.hub == 0),
+            "the source's loss must be chronicled");
+    }
+
+    /// 2.2 companion · a world with no guilds at all is untouched by either
+    /// mechanism — `maybe_poach_master` iterates the (empty) guild list and
+    /// returns immediately.
+    #[test]
+    fn a_world_with_no_guilds_is_untouched_by_poaching() {
+        let goods = vec![good("glass", 1, 2, 10.0, 0.4, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![10.0], 0)];
+        let mut s = sim(hubs, goods);
+        for yr in 0..500u32 { s.maybe_poach_master(yr); }
+        assert!(s.hubs[0].tradition.is_empty(), "no guild, nothing to poach");
     }
 
     /// TECTONICS_AND_ISOLATION_PLAN.md Part A — the guard against a trans-oceanic

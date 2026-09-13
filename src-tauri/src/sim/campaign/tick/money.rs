@@ -707,7 +707,7 @@ impl CampaignSim {
             }
             // 7) Failure (only if recapitalization couldn't cover it).
             if self.banks[bi].equity() < 0.0 || self.banks[bi].reserves < 0.0 {
-                self.fail_bank(bi);
+                self.resolve_bank_failure(bi);
             }
         }
     }
@@ -876,6 +876,134 @@ impl CampaignSim {
         self.banks[bi].stakes.clear();
     }
 
+
+    /// INSTITUTIONS_BUILD_ORDER.md 1.1 · decide how a bank that has gone
+    /// technically insolvent actually exits: WOUND DOWN (its own liquidation
+    /// value covers depositors in full — no crash), ABSORBED (a solvent rival
+    /// in the same trade component buys the book at a discount — depositors are
+    /// protected, no crash), or COLLAPSE (the old path — only when neither
+    /// rescue is possible, and only this path ignites `trigger_regional_crash`).
+    pub(crate) fn resolve_bank_failure(&mut self, bi: usize) {
+        if self.banks[bi].defunct { return; }
+        // NOTES are a liability too — the credit a bank has issued is owed to
+        // the wider economy just as much as a deposit is, and equity (the
+        // trigger that got us here) is computed against BOTH. Winding down
+        // against deposits alone let almost every failure "succeed" quietly
+        // (deposits are typically small next to notes_issued, since most
+        // lending is note-funded credit creation) and measurably drove
+        // crashes to ~0/century — an overcorrection past the plan's own
+        // "only collapse ignites contagion", not a fix of it. See
+        // docs/SCOREBOARD.md for the measured before/after.
+        let liabilities = self.banks[bi].liabilities();
+        let reserves = self.banks[bi].reserves.max(0.0);
+        let non_cash = self.banks[bi].real_estate
+            + self.banks[bi].loans_outstanding()
+            + self.banks[bi].stake_book();
+        let liquidation = reserves + non_cash * BANK_LIQUIDATION_FRAC;
+
+        if liquidation >= liabilities {
+            self.wind_down_bank(bi, liquidation);
+            return;
+        }
+
+        let seat = self.banks[bi].seat as usize;
+        let region: Option<u32> = if seat < self.hubs.len() { Some(self.hubs[seat].component) } else { None };
+        let owner = self.banks[bi].house;
+        let mut best: (usize, f32) = (usize::MAX, 0.0);
+        for rb in 0..self.banks.len() {
+            if rb == bi || self.banks[rb].defunct { continue; }
+            let rseat = self.banks[rb].seat as usize;
+            if rseat >= self.hubs.len() || region.is_none() || Some(self.hubs[rseat].component) != region { continue; }
+            if self.banks[rb].house == owner { continue; }
+            if self.banks[rb].reserve_ratio() < BANK_ABSORB_MIN_RATIO { continue; }
+            let capacity = self.banks[rb].reserves;
+            if capacity > best.1 { best = (rb, capacity); }
+        }
+        if best.0 != usize::MAX && best.1 >= liabilities * BANK_ABSORB_RESERVE_FRAC {
+            self.absorb_bank(bi, best.0);
+            return;
+        }
+        self.fail_bank(bi);
+    }
+
+    /// A bank whose own liquidation value covers its depositors in full winds
+    /// down quietly: depositors are paid, any residual goes to the owning house,
+    /// stakes revert to their works, and — critically — no crash is ignited.
+    fn wind_down_bank(&mut self, bi: usize, liquidation: f32) {
+        let tick = self.tick;
+        let name = self.banks[bi].name.clone();
+        let seat = self.banks[bi].seat as usize;
+        let deposits = self.banks[bi].deposits;
+        let liabilities = self.banks[bi].liabilities();
+        let residual = (liquidation - liabilities).max(0.0);
+        self.banks[bi].defunct = true;
+        let owner = self.banks[bi].house as usize;
+        if residual > 0.0 && owner < self.houses.len() && !self.houses[owner].defunct {
+            self.houses[owner].wealth += residual;
+        }
+        self.release_bank_stakes(bi);
+        self.banks[bi].events.push(HouseEvent { tick, kind: "wound_down".into(),
+            text: format!("is wound up; its depositors are paid in full ({:.0})", deposits) });
+        self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: seat as i32, good: -1,
+            value: deposits,
+            text: format!("The {} is wound up; its depositors are paid in full", name) });
+    }
+
+    /// A solvent rival in the same trade component buys the failing bank's book
+    /// at a discount: it takes on the loans, stakes and branches (and the
+    /// deposit liability, protecting depositors) in exchange for a discounted
+    /// buyout paid to the failing bank's owning house. No crash is ignited.
+    fn absorb_bank(&mut self, bi: usize, rb: usize) {
+        let tick = self.tick;
+        let seat = self.banks[bi].seat as usize;
+        let failing_name = self.banks[bi].name.clone();
+        let (loans, stakes, branches, deposits, notes, reserves, real_estate) = {
+            let b = &self.banks[bi];
+            (b.loans.clone(), b.stakes.clone(), b.branches.clone(),
+             b.deposits, b.notes_issued, b.reserves.max(0.0), b.real_estate)
+        };
+        let book_value = reserves + (real_estate + self.banks[bi].loans_outstanding()
+            + self.banks[bi].stake_book()) * BANK_LIQUIDATION_FRAC;
+        let price = (book_value * BANK_ABSORB_PRICE_FRAC).min(self.banks[rb].reserves * 0.5).max(0.0);
+
+        // The acquirer takes on the assets and the deposit liability.
+        self.banks[rb].loans.extend(loans);
+        self.banks[rb].stakes.extend(stakes.clone());
+        for br in branches {
+            if !self.banks[rb].branches.contains(&br) { self.banks[rb].branches.push(br); }
+        }
+        // Re-point each transferred manufactory stake at the acquiring bank.
+        for s in &stakes {
+            let eh = s.estate_hub as usize;
+            if eh < self.hubs.len() && self.hubs[eh].stake_bank == bi as i32 {
+                self.hubs[eh].stake_bank = rb as i32;
+                for sh in self.hubs[eh].shares.iter_mut() {
+                    if sh.holder_kind == 3 && sh.holder == bi as u32 { sh.holder = rb as u32; }
+                }
+            }
+        }
+        self.banks[rb].reserves += reserves - price;
+        self.banks[rb].deposits += deposits;
+        self.banks[rb].notes_issued += notes;
+
+        let acquirer_name = self.banks[rb].name.clone();
+        let owner = self.banks[bi].house as usize;
+        if price > 0.0 && owner < self.houses.len() && !self.houses[owner].defunct {
+            self.houses[owner].wealth += price;
+        }
+        self.banks[bi].loans.clear();
+        self.banks[bi].stakes.clear();
+        self.banks[bi].deposits = 0.0;
+        self.banks[bi].notes_issued = 0.0;
+        self.banks[bi].defunct = true;
+        self.banks[bi].events.push(HouseEvent { tick, kind: "absorbed".into(),
+            text: format!("is taken over by the {}", acquirer_name) });
+        self.banks[rb].events.push(HouseEvent { tick, kind: "absorbs".into(),
+            text: format!("takes over the {}'s book for {:.0}", failing_name, price) });
+        self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: seat as i32, good: -1,
+            value: price,
+            text: format!("The {} takes over {}'s books", acquirer_name, failing_name) });
+    }
 
     /// A bank fails: depositors are wiped, its notes go worthless, the owning house
     /// is battered, and the failure ignites a regional crash.
@@ -1058,9 +1186,19 @@ impl CampaignSim {
                     let holders = self.hubs[h].debt_holders.clone();
                     let total: f32 = holders.iter().map(|x| x.2).sum::<f32>().max(EPS);
                     for (kind, idx, amt) in holders {
-                        if kind != 0 { continue; }
-                        if let Some(ho) = self.houses.get_mut(idx as usize) {
-                            if !ho.defunct { ho.wealth += coupon * (amt / total); }
+                        let pay = coupon * (amt / total);
+                        // INSTITUTIONS_BUILD_ORDER.md 1.2 · a bank may hold the Monte
+                        // (kind 1) alongside a house (kind 0) — the coupon is a real
+                        // specie inflow to the bank's reserves, exactly like interest
+                        // income from a loan.
+                        if kind == 0 {
+                            if let Some(ho) = self.houses.get_mut(idx as usize) {
+                                if !ho.defunct { ho.wealth += pay; }
+                            }
+                        } else if kind == 1 {
+                            if let Some(bk) = self.banks.get_mut(idx as usize) {
+                                if !bk.defunct { bk.reserves += pay; bk.interest_earned += pay; }
+                            }
                         }
                     }
                 }
@@ -1077,9 +1215,15 @@ impl CampaignSim {
                     let holders = self.hubs[h].debt_holders.clone();
                     let total: f32 = holders.iter().map(|x| x.2).sum::<f32>().max(EPS);
                     for (kind, idx, amt) in &holders {
-                        if *kind != 0 { continue; }
-                        if let Some(ho) = self.houses.get_mut(*idx as usize) {
-                            if !ho.defunct { ho.wealth += retire * (amt / total); } // capital returned
+                        let ret = retire * (amt / total);
+                        if *kind == 0 {
+                            if let Some(ho) = self.houses.get_mut(*idx as usize) {
+                                if !ho.defunct { ho.wealth += ret; } // capital returned
+                            }
+                        } else if *kind == 1 {
+                            if let Some(bk) = self.banks.get_mut(*idx as usize) {
+                                if !bk.defunct { bk.reserves += ret; }
+                            }
                         }
                     }
                     for hd in self.hubs[h].debt_holders.iter_mut() { hd.2 *= 1.0 - retire / (total.max(EPS)); }
@@ -1092,14 +1236,26 @@ impl CampaignSim {
             if self.hubs[h].debt_principal > EPS
                 && self.hubs[h].debt_principal / throughput > DEBT_DEFAULT_RATIO {
                 let cut = self.hubs[h].debt_principal * DEBT_HAIRCUT;
+                // 1.2/3.1 · name the banks a civic default hurts, not just houses —
+                // a bank holder takes the same fractional haircut as a house holder.
+                let bank_names: Vec<String> = self.hubs[h].debt_holders.iter()
+                    .filter(|(kind, idx, _)| *kind == 1
+                        && self.banks.get(*idx as usize).map_or(false, |b| !b.defunct))
+                    .map(|(_, idx, _)| self.banks[*idx as usize].name.clone())
+                    .collect();
                 for hd in self.hubs[h].debt_holders.iter_mut() { hd.2 *= 1.0 - DEBT_HAIRCUT; }
                 self.hubs[h].debt_principal -= cut;
                 self.hubs[h].coin_trust = (self.hubs[h].coin_trust - DEBT_DEFAULT_TRUST_HIT).max(0.0);
                 let city = self.hubs[h].name.clone();
+                let text = if bank_names.is_empty() {
+                    format!("{} restructures its public debt — bondholders take a {:.0}% haircut ({:.0} written down)",
+                        city, DEBT_HAIRCUT * 100.0, cut)
+                } else {
+                    format!("{} restructures its public debt — bondholders take a {:.0}% haircut ({:.0} written down), hitting {}",
+                        city, DEBT_HAIRCUT * 100.0, cut, bank_names.join(", "))
+                };
                 self.journal.push(JournalEntry {
-                    tick, kind: "debt".into(), hub: h as i32, good: -1, value: cut,
-                    text: format!("{} restructures its public debt — bondholders take a {:.0}% haircut ({:.0} written down)",
-                        city, DEBT_HAIRCUT * 100.0, cut),
+                    tick, kind: "debt".into(), hub: h as i32, good: -1, value: cut, text,
                 });
             }
 
@@ -1108,7 +1264,18 @@ impl CampaignSim {
             //    city's people (civic pool), so the borrowing does real work rather than
             //    piling in the treasury. Gated on serviceability: a council only issues
             //    as far as it can pay the resulting coupon out of its treasury income.
-            let target = DEBT_TARGET_RATIO * throughput;
+            // INSTITUTIONS_BUILD_ORDER.md 3.1 · WAR SPENDING ISSUES DEBT. Historically
+            // wars were paid by debt, and that is exactly what created the Monte and
+            // made banks systemically important. A hub at war (`war_with >= 0`, set
+            // fresh THIS year by `update_wars`, which already runs before this pass)
+            // raises its own target ratio, so the SAME issuance mechanism above
+            // (still bounded by `DEBT_MAX_RATIO` and the serviceability check) issues
+            // more while the war lasts — no new mechanism, just a real reason for the
+            // existing one to fire harder. The chain closes with 1.2 in place: war →
+            // debt spike → a bank holds the bond → the war is lost → `DEBT_HAIRCUT` →
+            // the bank fails (`resolve_bank_failure`) → the crash.
+            let at_war = self.hubs[h].war_with >= 0;
+            let target = DEBT_TARGET_RATIO * throughput * if at_war { WAR_DEBT_TARGET_MULT } else { 1.0 };
             let cap_headroom = DEBT_MAX_RATIO * throughput - self.hubs[h].debt_principal;
             if self.hubs[h].debt_principal < target && cap_headroom > 1.0 {
                 // Richest non-defunct resident (private) house here subscribes.
@@ -1137,12 +1304,71 @@ impl CampaignSim {
                         } else if self.hubs[h].debt_holders.len() < DEBT_HOLDER_CAP {
                             self.hubs[h].debt_holders.push((0, bidx, step));
                         }
+                        // 3.1 · name the war when it is why the borrowing happened —
+                        // "the loan that financed the war, named" (every subsequent
+                        // draw on an already-open Monte stays the plain wording,
+                        // since the WAR beat is the opening, not every instalment).
                         if fresh {
                             let (city, house) = (self.hubs[h].name.clone(), self.houses[buyer.0].name.clone());
+                            let text = if at_war {
+                                let enemy = self.hubs.get(self.hubs[h].war_with as usize)
+                                    .map(|e| e.name.clone()).unwrap_or_else(|| "its enemy".into());
+                                format!("{} borrows to pay for its war with {} — {} subscribes {:.0} to the new Monte at {:.1}%",
+                                    city, enemy, house, step, coupon * 100.0)
+                            } else {
+                                format!("{} opens a public debt (Monte) at {:.1}% — {} subscribes {:.0}",
+                                    city, coupon * 100.0, house, step)
+                            };
+                            self.journal.push(JournalEntry {
+                                tick, kind: "debt".into(), hub: h as i32, good: -1, value: step, text,
+                            });
+                        }
+                    }
+                }
+                // INSTITUTIONS_BUILD_ORDER.md 1.2 · a sound resident bank with idle
+                // reserve headroom may also subscribe the Monte — a safe asset that
+                // is not a loan to a merchant. Independent of the house buyer above:
+                // whatever headroom the house left, a bank can still take up.
+                let cap_headroom2 = DEBT_MAX_RATIO * throughput - self.hubs[h].debt_principal;
+                if cap_headroom2 > 1.0 {
+                    let mut bbuyer = (usize::MAX, 0.0f32);
+                    for (bi, bk) in self.banks.iter().enumerate() {
+                        if bk.defunct || bk.seat as usize != h { continue; }
+                        let headroom = (bk.reserves - bk.liabilities() * 0.3).max(0.0);
+                        if headroom > bbuyer.1 { bbuyer = (bi, headroom); }
+                    }
+                    if bbuyer.0 != usize::MAX && bbuyer.1 > 10.0 {
+                        let step = (target - self.hubs[h].debt_principal)
+                            .min(throughput * DEBT_ISSUE_STEP).min(bbuyer.1 * 0.3).min(cap_headroom2);
+                        let coupon = if self.hubs[h].debt_coupon > 0.0 { self.hubs[h].debt_coupon } else { DEBT_COUPON };
+                        let new_coupon = (self.hubs[h].debt_principal + step) * coupon;
+                        if step > 1.0 && self.hubs[h].treasury > new_coupon * DEBT_SERVICE_COVER {
+                            self.banks[bbuyer.0].reserves -= step;
+                            self.hubs[h].civic_pool += step;
+                            self.hubs[h].finance.spent_works += step;
+                            self.hubs[h].debt_coupon = coupon;
+                            let fresh = self.hubs[h].debt_principal <= EPS;
+                            self.hubs[h].debt_principal += step;
+                            let bidx = bbuyer.0 as u32;
+                            if let Some(hd) = self.hubs[h].debt_holders.iter_mut().find(|x| x.0 == 1 && x.1 == bidx) {
+                                hd.2 += step;
+                            } else if self.hubs[h].debt_holders.len() < DEBT_HOLDER_CAP {
+                                self.hubs[h].debt_holders.push((1, bidx, step));
+                            }
+                            let (city, bank) = (self.hubs[h].name.clone(), self.banks[bbuyer.0].name.clone());
                             self.journal.push(JournalEntry {
                                 tick, kind: "debt".into(), hub: h as i32, good: -1, value: step,
-                                text: format!("{} opens a public debt (Monte) at {:.1}% — {} subscribes {:.0}",
-                                    city, coupon * 100.0, house, step),
+                                text: if fresh && at_war {
+                                    let enemy = self.hubs.get(self.hubs[h].war_with as usize)
+                                        .map(|e| e.name.clone()).unwrap_or_else(|| "its enemy".into());
+                                    format!("{} borrows to pay for its war with {} — the {} subscribes {:.0} to the new Monte at {:.1}%",
+                                        city, enemy, bank, step, coupon * 100.0)
+                                } else if fresh {
+                                    format!("{} opens a public debt (Monte) at {:.1}% — the {} subscribes {:.0}",
+                                        city, coupon * 100.0, bank, step)
+                                } else {
+                                    format!("The {} takes up {:.0} of {}'s public debt", bank, step, city)
+                                },
                             });
                         }
                     }

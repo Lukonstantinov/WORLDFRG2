@@ -104,16 +104,23 @@ impl CampaignSim {
     }
 
 
-    /// DLC 4 · learning-by-doing: each month every MANUFACTORY/city drifts the
-    /// quality of the manufactured goods it makes toward a skill cap set by its size
-    /// and its craft buildings (guildhall/workshop). "Manufacturers start producing
-    /// higher quality goods" — and big skilled cities reach finer grades.
+    /// DLC 4 · learning-by-doing, REBUILT per INSTITUTIONS_BUILD_ORDER.md 2.1: each
+    /// month every MANUFACTORY/city drifts the quality of the manufactured goods it
+    /// makes toward a skill cap. The cap used to be `0.62 + size_bonus(<=0.20) +
+    /// struct_bonus(<=0.14)` — POPULATION, not practice, so "the largest city is
+    /// automatically the finest maker of everything it makes" (measured by
+    /// `real_world_craft_spread`: the leader was simply the biggest city on the
+    /// overwhelming majority of goods, at a ~1.26× world price spread). The size
+    /// term is now ACCUMULATED TRADITION — years of continuous production of this
+    /// good at THIS hub, growing faster under an organised guild, decaying slowly
+    /// (never resetting outright) when production lapses — so a small city that has
+    /// made a good for centuries can out-master a metropolis that only just started.
+    /// Murano is an island, Solingen a town; this is what lets either read as one.
     pub(crate) fn update_good_quality(&mut self) {
         let ng = self.goods.len();
         for h in 0..self.hubs.len() {
             if self.hubs[h].quality.len() != ng { continue; }
-            let pop = self.hubs[h].population.max(1.0);
-            let size_bonus = (pop / 60_000.0).min(0.20);
+            if self.hubs[h].tradition.len() != ng { self.hubs[h].tradition = vec![0.0f32; ng]; }
             let mut struct_bonus = 0.0;
             if self.hub_has_struct(h, STRUCT_WORKSHOP) { struct_bonus += 0.08; }
             if self.hub_has_struct(h, STRUCT_GUILDHALL) { struct_bonus += 0.06; }
@@ -121,12 +128,31 @@ impl CampaignSim {
             for g in 0..ng {
                 let manufactured = !self.goods[g].inputs.is_empty();
                 if !(manufactured || manu_estate) { continue; }
-                if self.hubs[h].production.get(g).copied().unwrap_or(0.0) <= 0.0
-                    && self.hubs[h].quality[g] <= 0.0 { continue; }
-                let cap = (0.62 + size_bonus + struct_bonus).clamp(0.0, 0.97);
+                let producing = self.hubs[h].production.get(g).copied().unwrap_or(0.0) > 0.0;
+                if !producing && self.hubs[h].quality[g] <= 0.0 && self.hubs[h].tradition[g] <= 0.0 {
+                    continue;
+                }
+                // A guild organises the transmission of skill — tradition compounds
+                // faster under one than it would drifting on population alone.
+                let has_guild = self.guilds.iter()
+                    .any(|gd| gd.hub as usize == h && gd.good as usize == g);
+                if producing {
+                    let growth = TRADITION_GROWTH_PER_MONTH
+                        * if has_guild { TRADITION_GUILD_GROWTH_MULT } else { 1.0 };
+                    self.hubs[h].tradition[g] = (self.hubs[h].tradition[g] + growth).min(TRADITION_YEARS_FULL * 2.0);
+                } else {
+                    self.hubs[h].tradition[g] = (self.hubs[h].tradition[g] - TRADITION_DECAY_PER_MONTH).max(0.0);
+                }
+                let tradition_bonus = (self.hubs[h].tradition[g] / TRADITION_YEARS_FULL).min(1.0) * TRADITION_BONUS_MAX;
+                let cap = (QUALITY_CAP_BASE + tradition_bonus + struct_bonus).clamp(0.0, 0.97);
                 let q = self.hubs[h].quality[g];
                 if q < cap {
                     self.hubs[h].quality[g] = (q + (cap - q) * QUALITY_LEARN_RATE).min(cap);
+                } else if q > cap {
+                    // Tradition can DECAY (unlike the old size/struct terms, which
+                    // only ever rose) — a craft not practised for a generation
+                    // loses standing, not just growth headroom.
+                    self.hubs[h].quality[g] = (q + (cap - q) * QUALITY_LEARN_RATE).max(cap);
                 }
             }
         }
@@ -166,6 +192,22 @@ impl CampaignSim {
                     && best_q[g] - self.hubs[ei].quality.get(g).copied().unwrap_or(0.0) > 0.12);
             let Some((ei, g)) = mine else { continue };
             let leader = best_hub[g];
+            // INSTITUTIONS_BUILD_ORDER.md 2.2 · a guild's SECRECY resists the theft —
+            // the counterparty espionage never had. A guarded craft (Murano's own
+            // case) must measurably diffuse SLOWER than an unguarded one, or secrecy
+            // is decoration; a world with no guilds is untouched by this at all.
+            if let Some(gi) = self.guilds.iter().position(|gd| gd.hub as usize == leader && gd.good as usize == g) {
+                let secrecy = self.guilds[gi].secrecy;
+                if hash01(self.seed, (hi as u64) ^ 0x5EC4E7, yr as u64 ^ g as u64) < secrecy {
+                    let (hn, gn, victim) = (self.houses[hi].name.clone(),
+                        self.goods[g].name.clone(), self.hubs[leader].name.clone());
+                    self.journal.push(JournalEntry {
+                        tick: self.tick, kind: "espionage".into(), hub: leader as i32, good: g as i32, value: 0.0,
+                        text: format!("{}'s attempt to steal the secret of {} from {} is foiled", hn, gn, victim),
+                    });
+                    continue;
+                }
+            }
             let gain = (best_q[g] - self.hubs[ei].quality[g]) * QUALITY_STEAL_FRAC;
             self.hubs[ei].quality[g] += gain;
             self.hubs[ei].stolen_good = g as i32;
@@ -692,16 +734,27 @@ impl CampaignSim {
                 Some(c) if c > 0.0 => c / median_craftsmen,
                 _ => pop / median_pop,
             };
+            // 2.4 · THE REFINING ENTREPÔT — a high-throughput port with no local
+            // production of its own can still be a manufacturing power, if what it
+            // makes it makes from what it IMPORTS (Amsterdam refining Caribbean
+            // sugar). `base_per_capita` is the hub's own belt-derived raw yield, so
+            // near-zero there for an input is the honest "this hub grows none of
+            // it" reading; real throughput (not city size) is the gate.
+            let is_entrepot_candidate = self.hub_throughput(h) >= ENTREPOT_THROUGHPUT_FLOOR;
             for &g in &order {
                 let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };
                 let labor_cap = scale_ratio * labor * tech;
                 if labor_cap <= 0.0 { continue; }
                 let mut by_inputs = f32::INFINITY;
+                let mut n_inputs = 0u32;
+                let mut n_imported = 0u32;
                 for &(idx, qty) in &self.goods[g].inputs {
                     if qty <= 0.0 || idx >= ng { continue; }
                     let mut avail = stock_of(&self.hubs[h].stock, idx);
                     if let Some(sl) = subs.get(&idx) { for &s in sl { avail += stock_of(&self.hubs[h].stock, s); } }
                     by_inputs = by_inputs.min(avail / qty);
+                    n_inputs += 1;
+                    if self.hubs[h].base_per_capita.get(idx).copied().unwrap_or(0.0) <= 0.0 { n_imported += 1; }
                 }
                 if !by_inputs.is_finite() || by_inputs <= 0.0 { continue; }
                 // S3 · the same price nudge the raw extraction pass carries — a
@@ -709,8 +762,29 @@ impl CampaignSim {
                 let price_mult = production_price_mult(
                     self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value),
                     self.goods[g].base_value);
+                let import_dep = if n_inputs > 0 { n_imported as f32 / n_inputs as f32 } else { 0.0 };
+                // The bonus is an EFFICIENCY gain (less raw spent per unit made,
+                // via `entrepot_mult` below on the input take) — never extra output
+                // conjured beyond what `by_inputs` (real stock on hand) supports.
+                // Amsterdam refined more sugar per hundredweight of cane than a
+                // village press, it did not refine sugar it never received.
+                let is_entrepot_now = is_entrepot_candidate && import_dep >= ENTREPOT_IMPORT_DEP_FLOOR;
+                let entrepot_mult = if is_entrepot_now { 1.0 + ENTREPOT_MANUFACTURE_BONUS } else { 1.0 };
                 let made = by_inputs.min(labor_cap) * price_mult;
                 if made <= 0.0 { continue; }
+                // 2.4 · chronicle the FIRST time this city becomes a refining
+                // entrepôt for this good — its own description changes, "lives by
+                // what passes through" — idempotent per (hub, good) via `Law`'s
+                // existing shape (LAW_ENTREPOT), the same pattern the grain law and
+                // guild monopoly already use.
+                if is_entrepot_now && !self.hubs[h].laws.iter().any(|l| l.kind == LAW_ENTREPOT && l.good == g as i32) {
+                    self.push_law(h, LAW_ENTREPOT, -1, g as i32, self.year());
+                    let (city, gn) = (self.hubs[h].name.clone(), self.goods[g].name.clone());
+                    self.journal.push(JournalEntry {
+                        tick: self.tick, kind: "entrepot".into(), hub: h as i32, good: g as i32, value: 0.0,
+                        text: format!("{} now lives by what passes through it — refining {} from imported stock", city, gn),
+                    });
+                }
                 // Clone inputs to avoid borrow conflict while mutating stock.
                 let inputs = self.goods[g].inputs.clone();
                 if self.hubs[h].demand_accum.len() != ng * DEMAND_CLASSES {
@@ -718,7 +792,7 @@ impl CampaignSim {
                 }
                 for (idx, qty) in inputs {
                     if idx >= ng { continue; }
-                    let mut need = made * qty;
+                    let mut need = made * qty / entrepot_mult;
                     let take = stock_of(&self.hubs[h].stock, idx).min(need);
                     stock_take(&mut self.hubs[h].stock, idx, take);
                     demand_add(&mut self.hubs[h].demand_accum, idx, DEMAND_MANUFACTORY, take); // S6
@@ -1151,6 +1225,11 @@ impl CampaignSim {
         // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
         // (it's constant across this dispatch round and read in the hot inner loop).
         let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
+        // 4.1 · which goods are WAR CONTRABAND, resolved by name once per dispatch
+        // rather than string-comparing inside the hot loop.
+        let contraband_good: Vec<bool> = (0..ng)
+            .map(|g| CONTRABAND_GOODS.contains(&self.goods[g].name.as_str()))
+            .collect();
         // Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — which house, if any,
         // holds a charter on good g at hub h, precomputed once for the same
         // reason `quarantined`/`food_locked` are (read inside the hot loop).
@@ -1273,6 +1352,16 @@ impl CampaignSim {
                     // since a boycott is mutual non-trade) will not ship this lane.
                     if hub_boycotts[a].iter().any(|bo| bo.until_tick > tick && bo.target == b as u32 && (bo.good < 0 || bo.good as usize == g))
                         || hub_boycotts[b].iter().any(|bo| bo.until_tick > tick && bo.target == a as u32 && (bo.good < 0 || bo.good as usize == g)) {
+                        continue;
+                    }
+                    // INSTITUTIONS_BUILD_ORDER.md 4.1 · CONTRABAND — a war bans a
+                    // short list of war-material goods to the ENEMY specifically
+                    // (never to every buyer, unlike `export_ban_until` — the same
+                    // lane-scoped shape N7.2's boycott needed and N2 didn't have).
+                    // Everything else keeps flowing at full volume; this is the
+                    // safest possible first dose of wartime exclusion (§4's own
+                    // "smallest blast radius first").
+                    if contraband_good[g] && self.hubs[a].war_with == b as i32 {
                         continue;
                     }
                     // N5 — the annual mean scaled by this lane's seasonal
@@ -1651,6 +1740,19 @@ impl CampaignSim {
                         };
                         // A shipping dynasty loses fewer cargoes (skilled crews).
                         if self.houses[oi].archetype == ARCH_FLEET { p *= FLEET_LOSS_MULT; }
+                        // 1.3 · a member-to-member lane under an active League
+                        // convoy escort loses cargo at a reduced rate.
+                        if a < self.hubs.len() && b < self.hubs.len() {
+                            let la = self.hubs[a].league;
+                            let lb = self.hubs[b].league;
+                            if la >= 0 && la == lb {
+                                let li = la as usize;
+                                if li < self.leagues.len()
+                                    && self.leagues[li].escort_until_tick >= tick {
+                                    p *= LEAGUE_ESCORT_LOSS_MULT;
+                                }
+                            }
+                        }
                         // Slice 6 (§4.1 Brake 2) — bypassing a post that has barred
                         // this house is survivable, never a flat "the lane is
                         // deleted" block, but it is genuinely riskier: running past

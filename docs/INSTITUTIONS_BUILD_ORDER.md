@@ -1,9 +1,17 @@
 # Institutions — the sequenced build order
 
-> **DECIDED IN SCOPE, NOTHING BUILT.** The design and the variants are in
-> `docs/INSTITUTIONS_BRAINSTORM.md`; this file is the order, the gates, and what
-> each slice owes the chronicle. Four decisions were taken by the maintainer and
-> are recorded in §0 — they are the reason this order is what it is.
+> **PHASES 0, 1, 2, 3.1, 4.1 AND 5 SHIPPED (2026-09-13); 4.2-4.5 NOT YET
+> ATTEMPTED.** The design and the variants are in `docs/INSTITUTIONS_BRAINSTORM.
+> md`; this file is the order, the gates, and what each slice owes the
+> chronicle. Four decisions were taken by the maintainer and are recorded in §0
+> — they are the reason this order is what it is. See `CLAUDE.md` §9's own
+> entry for this file and `docs/SCOREBOARD.md`'s 2026-09-13 row for what
+> shipped and what each gate measured. Phase 4.2-4.5 (the routed blockade,
+> league privileges, the Kontor, the boycott dosed) remain exactly as designed
+> below — each still owes its own multi-seed inheritance-gate/dense-world/
+> dynamics gate walk before it ships, and 4.5 is explicitly flagged in the plan
+> as the one most likely to need a negative-result writeup rather than a clean
+> dose, the same way N2's market closure did twice.
 
 ---
 
@@ -38,7 +46,7 @@ percentage on a hidden accumulator (the current war blockade, `export_earn` ×
 
 ---
 
-## Phase 0 · Instruments. Nothing changes.
+## Phase 0 · Instruments. Nothing changes. (SHIPPED)
 
 Three diagnostics, all `#[ignore]`d, no production code touched. This phase
 exists because two of the three chains below are dose-walks, and
@@ -64,7 +72,7 @@ walked against a blind instrument is how this codebase wastes a session.
 
 ---
 
-## Phase 1 · Stop the bleeding. Two dead things, both cheap.
+## Phase 1 · Stop the bleeding. Two dead things, both cheap. (SHIPPED)
 
 Both fix a measured defect rather than adding a mechanism, and both unblock later
 phases.
@@ -106,7 +114,7 @@ phases.
 
 ---
 
-## Phase 2 · Why a place is itself. (Chain 3 — the Murano feature.)
+## Phase 2 · Why a place is itself. (Chain 3 — the Murano feature.) (SHIPPED)
 
 Weighted early because the player is observation-only: this is the chain that
 makes the world worth watching. Lowest risk to the economy gates of the three.
@@ -160,7 +168,7 @@ makes the world worth watching. Lowest risk to the economy gates of the three.
 
 ---
 
-## Phase 3 · War is paid for by borrowing. (Chain 1b.)
+## Phase 3 · War is paid for by borrowing. (Chain 1b.) (3.1 SHIPPED)
 
 The historically central linkage and the cheapest big win in the plan, because
 every piece already exists and none of them are connected.
@@ -182,7 +190,7 @@ every piece already exists and none of them are connected.
 
 ---
 
-## Phase 4 · Exclusion, dosed. (Chain 2 — riskiest, therefore last.)
+## Phase 4 · Exclusion, dosed. (Chain 2 — riskiest, therefore last.) (4.1 SHIPPED; 4.2-4.5 NOT ATTEMPTED)
 
 **One rule governs the whole phase: every prohibition ROUTES, it never refuses.**
 An excluded lane goes through a neutral port at extra cost via `staging_hop`,
@@ -227,7 +235,7 @@ its negative result written down (§2.4), exactly as N2 did.
 
 ---
 
-## Phase 5 · The apparatus. (Orthogonal — may land beside any phase above.)
+## Phase 5 · The apparatus. (Orthogonal — may land beside any phase above.) (SHIPPED)
 
 - **5.1 · The cadastre.** A fifth `ProvWork` kind: expensive once, per province,
   permanently raising that province's collection efficiency. Domesday, the

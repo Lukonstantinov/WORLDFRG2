@@ -1977,6 +1977,21 @@ impl CampaignSim {
     fn maybe_farm_tithe(&mut self, ri: usize, yr: u32) {
         let tick = self.tick;
         if self.realms[ri].tax_farm.is_some() {
+            // INSTITUTIONS_BUILD_ORDER.md 5.2 · FARM OR COLLECT — the choice is now
+            // consequential every year it stands, not just at the sale. The farmer
+            // squeezes for more than the crown itself would risk (it already paid
+            // up front and answers to no one for the term), so rural unrest rises
+            // across the realm's own provinces and the crown's own administrative
+            // grip (`cohesion`, which `realm_collection_efficiency` already reads)
+            // decays a little — this is what makes 5.1's cadastre MATTER rather
+            // than merely exist: a surveyed province still resents a bad farmer.
+            for p in 0..self.prov_realm.len() {
+                if self.prov_realm[p] != ri as i32 { continue; }
+                if p < self.prov_unrest.len() {
+                    self.prov_unrest[p] = (self.prov_unrest[p] + TAX_FARM_UNREST_RATE).min(1.0);
+                }
+            }
+            self.realms[ri].cohesion = (self.realms[ri].cohesion - TAX_FARM_COHESION_DECAY).max(TAX_FARM_COHESION_FLOOR);
             // Expire a completed term — collection reverts to the crown.
             let f = self.realms[ri].tax_farm.as_ref().unwrap();
             if tick.saturating_sub(f.started_tick) >= f.years * TICKS_PER_YEAR {

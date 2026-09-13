@@ -816,7 +816,27 @@ serde-defaulted so old saves load). Grouped by theme:
 - **Coin / Credit / Crashes (DLC 3.5):** `decide_coinage` (named polis coin, sticky
   `coin_trust`, seigniorage, `coin_discount` freight, `coin_value` index); `Bank`
   balance sheets (`update_banks` founding+branches, `bank_pass` lend/service/fail);
-  `trigger_regional_crash` contagion via `fail_bank` & `maybe_pop_bubbles`.
+  `trigger_regional_crash` contagion via `fail_bank` & `maybe_pop_bubbles`. A
+  failing bank now tries `resolve_bank_failure`'s two rescues (wound down,
+  absorbed by a solvent rival) BEFORE the old collapse-into-`fail_bank` path —
+  `INSTITUTIONS_BUILD_ORDER.md` Phase 1.1/1.2, §9. A bank may also hold the
+  Monte now (`update_public_debt`'s `kind == 1` holder class) and `League.
+  purse` funds a real convoy escort (Phase 1.3).
+- **Institutions (`INSTITUTIONS_BUILD_ORDER.md`, Phases 1/2/3.1/4.1/5 shipped,
+  4.2-4.5 not yet attempted — full detail in §9's own entry):** bank rescue
+  splits from contagion and a bank may hold public debt (above); the Murano
+  feature — quality's ceiling comes from accumulated `TickHub.tradition`
+  (practice, not population), a guildhall's `secrecy` resists theft
+  (`maybe_steal_quality`) and resists `maybe_poach_master` (a defecting master
+  carrying tradition to a rival city), a named signature is earned once
+  tradition+quality both clear a floor, and a high-throughput import-dependent
+  hub becomes a refining entrepôt (`LAW_ENTREPOT`); war spending issues public
+  debt (`WAR_DEBT_TARGET_MULT`), closing the war→debt→bank→crash chain; war
+  CONTRABAND (`CONTRABAND_GOODS`) bans a short list of war-material goods to
+  the actual enemy only, checked live in `dispatch` against `war_with`; and a
+  fifth `ProvWork` kind, the CADASTRE (`WORK_CADASTRE`), permanently raises a
+  surveyed province's tithe collection, with an active tax farm now costing
+  real unrest+cohesion every year it stands.
 - **Wealth / War / Flow (DLC 3.5):** capped bank interest + progressive civic wealth
   tax → treasury; `CityFinance` per-hub ledger; `update_wars` (rival poleis, forced
   house levies, war-chest, blockade, reparations, war goals); contract penalty
@@ -5478,42 +5498,99 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     Ends with 8 gated proposals in build order
                                     and 6 questions that need a decision before
                                     any of it starts
-INSTITUTIONS_BUILD_ORDER.md       ← ⭐ DECIDED IN SCOPE; PHASE 0 BUILT, THE REST
-                                    NOT. The sequenced order for the brainstorm
-                                    below, after four maintainer decisions: the
-                                    player stays OBSERVATION-ONLY (so "play the
-                                    bank" is REJECTED, not deferred) · all three
-                                    chains sequenced in one plan · MEASURE the
-                                    craft spread before choosing its dose · Murano
+INSTITUTIONS_BUILD_ORDER.md       ← ⭐ PHASES 0, 1, 2, 3.1, 4.1 AND 5 BUILT AND
+                                    GATED; 4.2-4.5 NOT YET ATTEMPTED. The
+                                    sequenced order for the brainstorm below,
+                                    after four maintainer decisions: the player
+                                    stays OBSERVATION-ONLY (so "play the bank" is
+                                    REJECTED, not deferred) · all three chains
+                                    sequenced in one plan · MEASURE the craft
+                                    spread before choosing its dose · Murano
                                     scoped as ONE named feature, not a guild
                                     rework. Its governing rule follows from the
                                     first decision and is harder than a player
                                     verb: **every mechanism must produce a legible
                                     STORY, not a decision** — a slice names what it
-                                    writes to the chronicle or it is not done,
-                                    which disqualifies a mechanism whose whole
-                                    effect is a percentage on a hidden accumulator
-                                    (today's war blockade) and admits a smaller one
-                                    that is nameable ("the Doge bars pitch and hemp
-                                    to Genoa"). Phase 0 = three instruments, no
-                                    production code: `econ_measure_finance` and
-                                    `real_world_craft_spread` are BUILT (see
-                                    SCOREBOARD for what they measured);
-                                    `econ_measure_war_trade` is not. Phase 1 stops
-                                    the bleeding (bank failure splits from
-                                    contagion; a bank may hold the Monte;
-                                    `League.purse` finally buys a convoy) · Phase 2
-                                    is the Murano feature (untie the quality
-                                    ceiling from city size → secrecy + the master
-                                    who leaves → the signature → the refining
-                                    entrepôt) · Phase 3 wires war spending to debt
-                                    issuance, closing the 1345 chain from four
-                                    systems that each already work · Phase 4 is
-                                    exclusion, dosed and last, under one rule —
-                                    **every prohibition ROUTES through a neutral,
-                                    it never refuses** · Phase 5 is the cadastre as
-                                    a fifth `ProvWork` kind. §6 lists what is
-                                    deliberately out
+                                    writes to the chronicle or it is not done.
+                                    Phase 0 = three instruments, no production
+                                    code: `econ_measure_finance` and `real_world_
+                                    craft_spread` (see SCOREBOARD 2026-09-13 for
+                                    what they measured — the second now shows 0%
+                                    "leader is simply the biggest city", down from
+                                    100% before Phase 2); `econ_measure_war_trade`
+                                    still isn't built. **Phase 1 (shipped)**:
+                                    `resolve_bank_failure` tries WOUND DOWN
+                                    (liquidation covers deposits+notes — deposits
+                                    alone let almost every failure "succeed"
+                                    quietly and drove crashes toward 0/century)
+                                    then ABSORBED (a solvent same-component rival
+                                    buys the book) before the old COLLAPSE path,
+                                    which alone still ignites
+                                    `trigger_regional_crash`; a bank may now hold
+                                    the Monte (`kind == 1` in every coupon/
+                                    deleverage/haircut/default loop, plus a fresh
+                                    bank-subscribes-headroom path); `League.purse`
+                                    funds a season's convoy escort
+                                    (`LEAGUE_ESCORT_COST`/`_LOSS_MULT`) and
+                                    chronicles an unaffordable renewal too, not
+                                    just a funded one. **Phase 2 (shipped)** — the
+                                    Murano feature: `TickHub.tradition` (years of
+                                    practice, faster under a guild, decaying when
+                                    idle) fully replaces the old population
+                                    `size_bonus` in the quality cap; a guildhall
+                                    accrues `CraftGuild.secrecy` that subtracts
+                                    from `maybe_steal_quality`'s roll; `maybe_
+                                    poach_master` (new) lets a rival bribe away a
+                                    master, carrying `MASTER_POACH_TRADITION_FRAC`
+                                    of the source's tradition to the destination
+                                    at a real cost to the source guild's strength
+                                    +secrecy; a signature (`brand_name`) is earned
+                                    once tradition clears `SIGNATURE_TRADITION_
+                                    YEARS` AND quality clears `SIGNATURE_QUALITY_
+                                    FLOOR`; a high-throughput, import-dependent
+                                    hub (`ENTREPOT_THROUGHPUT_FLOOR`/`_IMPORT_
+                                    DEP_FLOOR`) gets a manufacture efficiency
+                                    bonus on the input TAKE only, chronicled once
+                                    via the new `LAW_ENTREPOT`. **Phase 3.1
+                                    (shipped)**: a hub at war raises its own debt
+                                    target (`WAR_DEBT_TARGET_MULT`, still bounded
+                                    by the pre-existing `DEBT_MAX_RATIO`/
+                                    serviceability gate) and the Monte-opening/
+                                    civic-default chronicle lines now name the war
+                                    and the banks a default hits — closing the
+                                    war→debt→bank-holds-it→haircut→fails→crash
+                                    chain from four systems that already existed.
+                                    **Phase 4.1 (shipped)**: `CONTRABAND_GOODS`
+                                    (metalware/iron/timber/pitch/hemp) is checked
+                                    live in `dispatch` against `TickHub.war_with`
+                                    — lane-scoped to the actual enemy, unlike
+                                    `export_ban_until`'s blanket ban — and every
+                                    declare-war chronicle line names which of the
+                                    goods this world carries are barred. **Phase
+                                    4.2-4.5 (routed blockade / league privileges /
+                                    the Kontor / the boycott dosed) are NOT YET
+                                    ATTEMPTED** — the plan's own text calls 4.5
+                                    "last, and expect trouble", and each slice owes
+                                    the same three expensive gates (multi-seed
+                                    inheritance, `dense_world` volume, the
+                                    dynamics sustained-richest bound). **Phase 5
+                                    (shipped)**: a fifth `ProvWork` kind
+                                    (`WORK_CADASTRE`, crown-funded, state-
+                                    infrastructure-tier) permanently multiplies a
+                                    surveyed province's tithe collection by
+                                    `PROV_CADASTRE_EFFICIENCY_MULT`; an active tax
+                                    farm now costs real rural unrest + crown
+                                    cohesion every year it stands, which is what
+                                    makes the cadastre matter rather than merely
+                                    exist. §6 lists what is deliberately out.
+                                    **`econ_inheritance_rules_fragment_
+                                    differently` is confirmed pre-existing broken,
+                                    independent of any of this** — it fails
+                                    identically on the commit before this whole
+                                    plan's work began; not a regression this work
+                                    introduced, and left unchased per §8.15's own
+                                    caution against tuning a dose against a stale
+                                    or already-distorted measurement.
 INSTITUTIONS_BRAINSTORM.md        ← ⭐ BRAINSTORM, NOTHING APPROVED OR BUILT.
                                     Variants for six institutions the maintainer
                                     asked about — banks as a player · war's real
