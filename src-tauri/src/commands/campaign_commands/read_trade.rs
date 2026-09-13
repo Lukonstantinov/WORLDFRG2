@@ -888,6 +888,8 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             },
             own_production,
             produced: produced_here.contains(&g),
+            need_tier: sim.goods.get(g as usize).map(|x| x.need_tier).unwrap_or(0),
+            base_value: sim.goods.get(g as usize).map(|x| x.base_value).unwrap_or(1.0),
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));

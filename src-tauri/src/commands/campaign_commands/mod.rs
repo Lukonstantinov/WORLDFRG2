@@ -2847,6 +2847,17 @@ pub struct TradeFlowGood {
     /// than merely resold. `false` for a good this city only ever moves through.
     #[serde(default)]
     pub produced: bool,
+    /// The needs-ladder tier this good sits on (`GoodSpec::need_tier`, mirrored
+    /// onto `TickGood`): 0 basic, 1 comfort, 2 luxury — so the Flows tab can
+    /// filter "what kind of good is this" without a second, hand-copied table
+    /// (§8.18's discipline applied to a category rather than a colour ramp).
+    #[serde(default)]
+    pub need_tier: u8,
+    /// The good's `base_value` (the grain-equivalent numeraire price), so the
+    /// frontend can rank goods by trade VALUE (`volume × base_value`) as well
+    /// as raw volume, without re-deriving or hand-copying the price table.
+    #[serde(default)]
+    pub base_value: f32,
 }
 /// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
 /// that touched this city, by who financed it.

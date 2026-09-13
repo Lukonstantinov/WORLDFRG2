@@ -246,8 +246,24 @@ function BalanceBar({ inV, outV, max }: { inV: number; outV: number; max: number
   );
 }
 
-type Sort = "unusual" | "volume";
+type Sort = "unusual" | "volume" | "reward" | "cost" | "value";
 type GoodFilter = "all" | "produced" | "imported";
+/** The needs-ladder tier (`GoodSpec.need_tier`): 0 basic, 1 comfort, 2 luxury.
+ *  `null` = no tier filter. A separate dimension from `GoodFilter` above — a
+ *  good can be both luxury AND produced here, so the two filters compose
+ *  rather than one replacing the other. */
+type TierFilter = 0 | 1 | 2 | null;
+const TIER_LABELS = ["Basic needs", "Comfort", "Luxury"] as const;
+
+/** This good's trade VALUE at base price — `volume × base_value`, the same
+ *  grain-equivalent reading `TradeRouteFlow.value` already gives per route,
+ *  folded to the whole-good level so a trickle of a precious good and a flood
+ *  of grain can be ranked on one scale. `reward` is what selling it earns
+ *  (export value), `cost` is what buying it costs (import value), `value` is
+ *  the total turnover either way. */
+function goodReward(g: TradeFlowGood): number { return g.out_volume * (g.base_value ?? 1); }
+function goodCost(g: TradeFlowGood): number { return g.in_volume * (g.base_value ?? 1); }
+function goodValue(g: TradeFlowGood): number { return (g.in_volume + g.out_volume) * (g.base_value ?? 1); }
 
 /** A partner city expanded inline — which goods move each way, largest first.
  *  Built straight from `flows.routes` (already per-good, per-partner, per-
@@ -308,6 +324,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
   const [selPartner, setSelPartner] = useState<number | null>(null);
   const [sort, setSort] = useState<Sort>("unusual");
   const [goodFilter, setGoodFilter] = useState<GoodFilter>("all");
+  // Basic/comfort/luxury — a separate axis from `goodFilter` (produced/imported),
+  // so the two compose rather than one replacing the other. User request: filter
+  // Trade Flow by need tier to see which partner cities supply each kind of good.
+  const [tierFilter, setTierFilter] = useState<TierFilter>(null);
   // How the selected good's per-partner route list is ordered — volume (the
   // default), voyage RISK (riskiest lane first) or REWARD (highest value first,
   // `amount × base_value` — a trickle of a precious good can outrank a flood of
@@ -551,14 +571,39 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
     // short of local demand), so these two filters are not each other's
     // strict opposite by volume — only by whether anything is grown/mined here.
     const gs = flows.goods.filter((g) =>
-      goodFilter === "produced" ? !!g.produced :
-      goodFilter === "imported" ? !g.produced :
-      true);
-    gs.sort(sort === "volume"
-      ? (a, b) => b.avg_volume - a.avg_volume
-      : (a, b) => unusualness(b) - unusualness(a));
+      (goodFilter === "produced" ? !!g.produced :
+       goodFilter === "imported" ? !g.produced :
+       true) &&
+      (tierFilter == null || (g.need_tier ?? 0) === tierFilter));
+    const key = sort === "volume" ? (g: TradeFlowGood) => g.avg_volume
+      : sort === "reward" ? goodReward
+      : sort === "cost" ? goodCost
+      : sort === "value" ? goodValue
+      : unusualness;
+    gs.sort((a, b) => key(b) - key(a));
     return gs;
-  }, [flows, sort, goodFilter]);
+  }, [flows, sort, goodFilter, tierFilter]);
+
+  // ── Top sources for a filtered TIER — user request: "see from which cities
+  // settlement takes the largest amounts of these types of goods". Aggregates
+  // `flows.routes` (already per-good, per-partner, per-direction) by partner,
+  // restricted to imports (dir 0) of the selected tier's goods — no new query.
+  const tierImportSources = useMemo(() => {
+    if (!flows || tierFilter == null) return null;
+    const tierOf = new Map(flows.goods.map((g) => [g.good, g.need_tier ?? 0]));
+    const byPartner = new Map<number, { name: string; amount: number }>();
+    for (const r of flows.routes) {
+      if (r.dir !== 0) continue;
+      if ((tierOf.get(r.good) ?? 0) !== tierFilter) continue;
+      const row = byPartner.get(r.partner) ?? { name: r.partner_name, amount: 0 };
+      row.amount += r.amount;
+      byPartner.set(r.partner, row);
+    }
+    return [...byPartner.entries()]
+      .map(([hub, v]) => ({ hub, ...v }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10);
+  }, [flows, tierFilter]);
 
   if (!active) return <EmptyNote>Realized trade appears once a campaign is running.</EmptyNote>;
   if (loading && !flows) return <EmptyNote>Loading trade flows…</EmptyNote>;
@@ -632,8 +677,19 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
               onClick={() => setGoodFilter((f) => f === "imported" ? "all" : "imported")}>
               imported only
             </Chip>
+            {/* Basic/comfort/luxury — a separate axis from produced/imported above,
+                so a luxury good that also happens to be produced here still shows. */}
+            {TIER_LABELS.map((label, t) => (
+              <Chip key={t} on={tierFilter === t}
+                onClick={() => setTierFilter((f) => f === t ? null : (t as TierFilter))}>
+                {label}
+              </Chip>
+            ))}
             <Chip on={sort === "unusual"} onClick={() => setSort("unusual")}>unusual</Chip>
             <Chip on={sort === "volume"} onClick={() => setSort("volume")}>volume</Chip>
+            <Chip on={sort === "reward"} onClick={() => setSort("reward")}>reward</Chip>
+            <Chip on={sort === "cost"} onClick={() => setSort("cost")}>cost</Chip>
+            <Chip on={sort === "value"} onClick={() => setSort("value")}>value</Chip>
             {sortedGoods.length > 16 && (
               <Chip on={showAllGoods} onClick={() => setShowAllGoods((v) => !v)}>
                 {showAllGoods ? "top 16" : `all ${sortedGoods.length}`}
@@ -644,10 +700,38 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
       >
         {sortedGoods.length === 0 && (
           <FootNote>
-            {goodFilter === "produced"
+            {tierFilter != null
+              ? `Nothing on the ${TIER_LABELS[tierFilter].toLowerCase()} tier is currently traded here.`
+              : goodFilter === "produced"
               ? "Nothing this city produces itself is currently traded."
               : "Everything this city trades, it also produces some of itself."}
           </FootNote>
+        )}
+        {/* Top sources for the selected tier — answers "which cities does this
+            settlement import the most basic/comfort/luxury goods from". */}
+        {tierImportSources && tierImportSources.length > 0 && (
+          <Card style={{ marginBottom: SPACE.sm }}>
+            <div style={{ color: T.inkFaint, fontSize: FZ.micro, letterSpacing: 0.5, marginBottom: 4 }}>
+              ◀ TOP SOURCES — {TIER_LABELS[tierFilter as 0 | 1 | 2].toUpperCase()}
+            </div>
+            {(() => {
+              const max = Math.max(...tierImportSources.map((p) => p.amount), 1e-6);
+              return tierImportSources.map((p) => (
+                <div key={p.hub} data-no-drag
+                  onClick={() => { setSelPartner(selPartner === p.hub ? null : p.hub); setSelGood(null); setSelRoute(null); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: SPACE.sm, padding: "2px 4px", cursor: "pointer",
+                    borderRadius: RADIUS.sm, background: selPartner === p.hub ? T.card : "transparent",
+                  }}>
+                  <span style={{ flex: 1, minWidth: 60, color: selPartner === p.hub ? T.gold : T.ink,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                  <Meter value={p.amount} max={max} color={DIR_IN} height={6} />
+                  <span style={{ width: 50, textAlign: "right", color: T.inkMid, fontSize: FZ.tiny }}>{fmt(p.amount)}/yr</span>
+                </div>
+              ));
+            })()}
+            <FootNote>Every good on this tier this city buys in, summed by supplier city.</FootNote>
+          </Card>
         )}
         {(showAllGoods ? sortedGoods : sortedGoods.slice(0, 16)).map((g) => {
           const meta = GOOD_META.get(g.name);
@@ -814,7 +898,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
           );
         })}
         <FootNote>Click a good to map its routes. Bar shows the in/out split; length is total volume.
-          ⚒ made here marks a good this city actually produces (fields or estates), not merely resells.</FootNote>
+          ⚒ made here marks a good this city actually produces (fields or estates), not merely resells.
+          Sorting by <b>reward</b>/<b>cost</b>/<b>value</b> ranks by grain-equivalent worth (export/import/total
+          volume × the good&apos;s base price) rather than raw unit count, so a trickle of a precious good can
+          outrank a flood of grain.</FootNote>
       </Section>
 
       {/* ── Selected good's routes ───────────────────────────────────────────── */}

@@ -670,6 +670,11 @@ export interface TradeFlowGood {
    *  actually MAKES this good — the same "made here" reading the Market tab
    *  shows. `false` for a good this city only ever resells. */
   produced?: boolean;
+  /** Needs-ladder tier (`GoodSpec.need_tier`): 0 basic, 1 comfort, 2 luxury. */
+  need_tier?: number;
+  /** The good's `base_value` (grain-equivalent numeraire price) — lets the
+   *  frontend rank by trade VALUE (volume × base_value) as well as raw volume. */
+  base_value?: number;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {
