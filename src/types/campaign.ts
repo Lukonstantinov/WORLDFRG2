@@ -907,6 +907,11 @@ export interface MerchantRoute {
   out_goods: [string, number][]; // goods a→b
   ret_goods: [string, number][]; // goods b→a
   path?: [number, number][]; // routed a→b polyline (roads/sea); skipped if no corridor
+  /** THE MAIN ROUTE'S LEGS — the Ostia case. When this pair's cheapest path
+   *  relays through a coastal outlet, it arrives as TWO entries meeting at
+   *  that hub rather than one straight line. 0 = ordinary direct route,
+   *  1 = the relay/transshipment point is at `a`, 2 = it's at `b`. */
+  relay_at?: number;
 }
 /** One active futures contract as a directional supply lane (source → buyer). */
 export interface FuturesLane {

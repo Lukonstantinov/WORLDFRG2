@@ -4609,6 +4609,24 @@ export class OverlayManager {
       const a = pts[0], b = pts[pts.length - 1];
       ctx.beginPath(); ctx.arc(a[0] + 0.5, a[1] + 0.5, dotR, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(b[0] + 0.5, b[1] + 0.5, dotR, 0, Math.PI * 2); ctx.fill();
+      // THE MAIN ROUTE'S LEGS — the Ostia case. This route is one HALF of a
+      // pair that relays through a coastal outlet (`relay_at`), so the point
+      // where cargo actually transships gets a distinct teal ring on top of
+      // the ordinary endpoint dot — the visible "place where it transfers
+      // trade" a plain colour-matched dot at every route's endpoint cannot
+      // show, and (via `sea` differing leg to leg) exactly where an overland
+      // <-> sea mode change happens.
+      if (r.relay_at === 1 || r.relay_at === 2) {
+        const [rx, ry] = r.relay_at === 1 ? a : b;
+        const ringR = Math.max(1.6, 3.2 / Math.sqrt(this.currentScale));
+        ctx.globalAlpha = 0.95;
+        ctx.strokeStyle = "#2fd1c9";
+        ctx.lineWidth = Math.max(0.5, 1.0 / Math.sqrt(this.currentScale));
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.arc(rx + 0.5, ry + 0.5, ringR, 0, Math.PI * 2);
+        ctx.stroke();
+      }
     }
     ctx.globalAlpha = 1;
     ctx.setLineDash([]);

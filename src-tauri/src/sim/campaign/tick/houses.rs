@@ -1234,7 +1234,19 @@ impl CampaignSim {
             nodes.push((h.x, h.y));
             network_coastal |= h.coastal;
         }
-        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
+        // Player-requested tightening (2026-09): a trade post's own tolerable
+        // distance from its FOUNDING house's home city depends on whether the
+        // journey there is shippable. `OUTPOST_MAX_KM_LAND` (1200) applies by
+        // default; `OUTPOST_MAX_KM_SEA` (3000) applies only when BOTH ends
+        // have a real sea connection (both coastal) or a real river
+        // connection (both river-linked) — an actual shippable leg, not just
+        // "the house owns a port somewhere else in its network"
+        // (`network_coastal` above still gates whether a COASTAL SITE can be
+        // reached at all; this decides how FAR either kind of site may sit).
+        // Replaces the old flat `COLONY_MAX_KM` (2500) for house outposts
+        // only — mining/settlement colonies are untouched.
+        let cap_land = OUTPOST_MAX_KM_LAND * self.world_w / EARTH_EQUATOR_KM;
+        let cap_sea = OUTPOST_MAX_KM_SEA * self.world_w / EARTH_EQUATOR_KM;
         // D1 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) — the minimum gap, in
         // the same cell units `cap`/`nearest_node_dist` already use.
         let min_gap = OUTPOST_MIN_GAP_KM * self.world_w / EARTH_EQUATOR_KM;
@@ -1255,15 +1267,18 @@ impl CampaignSim {
             // plant an outpost in a province it has never surveyed. Seeded from
             // day-one holdings (§3.1), so this constrains expansion only.
             if !self.house_knows(hi, s.province) { continue; }
+            let sea_linked = (self.hubs[home].coastal && s.coastal)
+                || (self.hubs[home].river && s.river);
+            let cap = if sea_linked { cap_sea } else { cap_land };
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
             // D1 — a real outer bound from the METROPOLIS specifically, not the
             // nearest network node: without this a chain of estates each up to
             // `cap` from the last lets a house's total reach from home compound
-            // past `COLONY_MAX_KM` indefinitely. The office/estate relay above
-            // still governs which node a site is SCORED against (a real regional
-            // foothold legitimately shortens the practical distance); this only
-            // stops the compounding.
+            // indefinitely. The office/estate relay above still governs which
+            // node a site is SCORED against (a real regional foothold
+            // legitimately shortens the practical distance); this only stops
+            // the compounding.
             let d_home = self.nearest_node_dist(
                 &[(self.hubs[home].x, self.hubs[home].y)], s.x, s.y);
             if d_home > cap { continue; }

@@ -2129,6 +2129,14 @@ pub struct MerchantRoute {
     /// Goods flowing a→b and b→a (name, volume), each sorted by volume.
     pub out_goods: Vec<(String, f32)>,
     pub ret_goods: Vec<(String, f32)>,
+    /// THE MAIN ROUTE'S LEGS — the Ostia case. When this pair's cheapest path
+    /// composes through a coastal outlet (`CampaignSim::route_outlet`, #6d),
+    /// it is served as TWO `MerchantRoute` entries meeting at that hub rather
+    /// than one straight line; this names which of THIS entry's own two
+    /// endpoints is the transshipment point, so the map can mark it — 0 =
+    /// this is an ordinary direct route, 1 = the relay sits at `a`, 2 = the
+    /// relay sits at `b`.
+    #[serde(default)] pub relay_at: u8,
 }
 
 /// One active FUTURES CONTRACT as a directional supply lane for the Futures map

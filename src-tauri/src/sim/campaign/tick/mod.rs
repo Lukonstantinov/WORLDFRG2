@@ -656,6 +656,14 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// 16 800 km at default res — colonies appeared across whole oceans). 2500 km cap
 /// (user rule): a colony is a bold venture but not on the far side of the world.
 const COLONY_MAX_KM: f32 = 2500.0;
+/// A house TRADE OUTPOST's own tolerable distance from its founding house's
+/// home city (`try_found_house_outpost`) — tighter than `COLONY_MAX_KM` above
+/// (which still governs settlement/mining colonies) and split by whether the
+/// journey is actually shippable (player rule, 2026-09): 1200 km overland by
+/// default, 3000 km when both the home city and the site have a real sea or
+/// river connection. Both are far under any 10,000 km ceiling by construction.
+const OUTPOST_MAX_KM_LAND: f32 = 1200.0;
+const OUTPOST_MAX_KM_SEA: f32 = 3000.0;
 /// SATELLITES hug their metropolis — a day's ride (Ostia→Rome), never an ocean. They
 /// draw from a dedicated near-city pool (`compute_satellite_sites`) and are capped at
 /// this range from the parent (user rule).

@@ -233,21 +233,69 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
         v.sort_by(|x, y| y.1.partial_cmp(&x.1).unwrap_or(std::cmp::Ordering::Equal));
         v
     };
-    let mut out: Vec<MerchantRoute> = groups.into_iter().map(|((owner, lo, hi), a)| {
+    // THE MAIN ROUTE'S LEGS — the Ostia case, on the STANDING Merchant Routes
+    // overlay this time (not just the Flows tab's one-off highlight, which
+    // only ever drew while a route was clicked). If a pair's cheapest path
+    // composes through a coastal outlet (`CampaignSim::route_outlet`, #6d),
+    // draw TWO segments meeting at the relay instead of one straight line —
+    // which is also what makes a real sea<->caravan mode CHANGE at the relay
+    // city visible: each leg gets its own sea/river classification from its
+    // own two endpoints, not the one classification the whole corridor used
+    // to share end-to-end.
+    let n = sim.hubs.len();
+    let leg_mode = |x: usize, y: usize| -> (bool, bool, f32) {
+        let sea = sim.hubs[x].coastal && sim.hubs[y].coastal;
+        let river = !sea && sim.hubs[x].river && sim.hubs[y].river;
+        (sea, river, sim.lane_risk(x, y, sea, river))
+    };
+    let mut out: Vec<MerchantRoute> = Vec::new();
+    for ((owner, lo, hi), a) in groups {
         let h = sim.houses.get(owner);
-        MerchantRoute {
-            a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
-            holder: h.map(|x| x.name.clone()).unwrap_or_default(),
-            color: distinct_color(owner),
-            is_guild: h.map(|x| x.is_guild).unwrap_or(false),
-            sea: a.sea, river: a.river,
-            risk: sim.lane_risk(city_of(lo) as usize, city_of(hi) as usize, a.sea, a.river),
-            volume: a.vol,
-            out_goods: sort_goods(a.out), ret_goods: sort_goods(a.ret),
+        let holder = h.map(|x| x.name.clone()).unwrap_or_default();
+        let color = distinct_color(owner);
+        let is_guild = h.map(|x| x.is_guild).unwrap_or(false);
+        let out_goods = sort_goods(a.out);
+        let ret_goods = sort_goods(a.ret);
+        let (city_lo, city_hi) = (city_of(lo) as usize, city_of(hi) as usize);
+        // `route_outlet` is direction-aware and not necessarily symmetric —
+        // check both directions of this undirected pair, since a merchant
+        // corridor's own recorded shipments may run either way.
+        let relay = sim.route_outlet.get(city_lo * n + city_hi).copied()
+            .filter(|&p| p >= 0 && p as usize != city_lo && p as usize != city_hi)
+            .or_else(|| sim.route_outlet.get(city_hi * n + city_lo).copied()
+                .filter(|&p| p >= 0 && p as usize != city_lo && p as usize != city_hi));
+        if let Some(p) = relay {
+            let p = p as usize;
+            let (sea1, river1, risk1) = leg_mode(city_lo, p);
+            let (sea2, river2, risk2) = leg_mode(p, city_hi);
+            let pname = sim.hubs.get(p).map(|x| x.name.clone()).unwrap_or_default();
+            let ppos = sim.hubs.get(p).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
+            out.push(MerchantRoute {
+                a: pos(lo), b: ppos, a_name: hname(lo), b_name: pname.clone(),
+                holder: holder.clone(), color: color.clone(), is_guild,
+                sea: sea1, river: river1, risk: risk1, volume: a.vol,
+                out_goods: out_goods.clone(), ret_goods: ret_goods.clone(),
+                relay_at: 2, // relay sits at this leg's `b`
+            });
+            out.push(MerchantRoute {
+                a: ppos, b: pos(hi), a_name: pname, b_name: hname(hi),
+                holder, color, is_guild,
+                sea: sea2, river: river2, risk: risk2, volume: a.vol,
+                out_goods, ret_goods,
+                relay_at: 1, // relay sits at this leg's `a`
+            });
+        } else {
+            out.push(MerchantRoute {
+                a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
+                holder, color, is_guild,
+                sea: a.sea, river: a.river,
+                risk: sim.lane_risk(city_lo, city_hi, a.sea, a.river),
+                volume: a.vol, out_goods, ret_goods, relay_at: 0,
+            });
         }
-    }).collect();
+    }
     out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
-    out.truncate(150);
+    out.truncate(220);
     Ok(out)
 }
 
