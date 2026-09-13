@@ -2771,10 +2771,15 @@ fn s5_ore_ceiling_at_zero_is_a_noop() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // S7 GATE (CONSUMPTION_REBUILD_PLAN.md) · household monetization is dosed
-// from zero — the highest-risk lever in the plan. Assert the shipped constant
-// IS zero, then prove a real (nonzero) household_wealth injected directly
-// makes NO measurable difference: consumption, stock and the household
-// balance itself must all be unaffected at the shipped dose.
+// from zero — the highest-risk lever in the plan. A real dose walk was
+// attempted and REVERTED (see `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
+// for the full finding: `update_food_and_starvation` reads raw stock, so a
+// priced-out household's uneaten ration reads as the CITY being better fed,
+// silencing `unrest_topples_councils` — a real prerequisite gap, not a
+// tuning miss). Assert the shipped constant IS zero, then prove a real
+// (nonzero) household_wealth injected directly makes NO measurable
+// difference: consumption, stock and the household balance itself must all
+// be unaffected at the shipped dose.
 // ─────────────────────────────────────────────────────────────────────────────
 #[test]
 fn s7_household_monetization_at_zero_is_a_noop() {

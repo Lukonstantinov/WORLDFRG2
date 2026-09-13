@@ -7492,16 +7492,17 @@
             "price exactly at base must leave output unchanged");
     }
 
-    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · `household_priced_out` must be
-    /// EXACTLY 0.0 at the shipped dose, and — once dosed — must price out a
-    /// household that cannot afford its ration while leaving an affluent one
-    /// untouched.
+    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · `household_priced_out` at
+    /// `dose = 0.0` is a true no-op — a property of the PURE FUNCTION itself
+    /// (mirrors `charter_bars_sale_is_a_pure_noop_at_dose_zero`), not a claim
+    /// about today's shipped constant, which every abstract fixture built
+    /// through `sim()` relies on regardless of what `HOUSEHOLD_MONETIZATION_
+    /// DOSE` ships at. Once dosed, it must price out a household that cannot
+    /// afford its ration while leaving an affluent one untouched.
     #[test]
-    fn household_priced_out_is_a_noop_at_zero_and_correctly_signed() {
-        assert_eq!(HOUSEHOLD_MONETIZATION_DOSE, 0.0);
+    fn household_priced_out_is_a_pure_noop_at_dose_zero() {
         assert_eq!(household_priced_out(10.0, 0.0, 1.0, 0.0), 0.0,
-            "at HOUSEHOLD_MONETIZATION_DOSE = 0.0, a penniless household must still \
-             eat its full ration");
+            "at dose 0.0, a penniless household must still eat its full ration");
         // Dosed: wants 10 units at price 1.0 (needs 10 money), has only 3.
         let out = household_priced_out(10.0, 3.0, 1.0, 1.0);
         assert!((out - 7.0).abs() < 1e-4, "expected 7 units priced out, got {out}");

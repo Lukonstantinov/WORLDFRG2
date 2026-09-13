@@ -2469,15 +2469,50 @@ pub(crate) const ORE_CEILING_DOSE: f32 = 0.0;
 /// jump.
 pub(crate) const PROD_ELASTICITY: f32 = 0.0;
 
-/// S7 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero, the highest-risk lever
-/// in the plan — the merchant layer holds ALL the money in this model by
-/// construction today, and giving households a monetary existence
-/// redistributes wealth away from it, against the hard-won top-10% share
-/// band (Phase 4.3/Phase 5 of the house series). 0.0 is a verified
-/// bit-identical no-op (`s7_household_monetization_at_zero_is_a_noop`); the
-/// real dose walk — how large a wage, how hard a shortfall should bite — is
-/// its own future measured, multi-commit work, re-run against `econ_` and
-/// the dynamics run per step, exactly like S3/S5.
+/// S7 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero — the highest-risk lever
+/// in the plan, because the merchant layer holds ALL the money in this model
+/// by construction, and giving households a monetary existence redistributes
+/// wealth away from it, against the hard-won top-10% share band (Phase
+/// 4.3/Phase 5 of the house series). `household_priced_out`'s own pure-decision
+/// no-op at `dose = 0.0` is unconditional (`household_priced_out_is_a_pure_
+/// noop_at_dose_zero`) regardless of what the shipped constant is — that
+/// property, not this constant, is what every fixture opting out relies on.
+///
+/// **A real dose walk was attempted (user-requested: ordinary consumption
+/// should be a real transaction, not the unconditional no-counterparty draw
+/// `docs/CONSUMPTION_AND_GOODS_REVIEW.md` names) and REVERTED — a genuine
+/// prerequisite gap, not a tuning miss, blocks it.**
+///
+/// `update_food_and_starvation` (`disease.rs`) reads `food_have = stock +
+/// production` — RAW STOCK, never `eat`. A household priced out of its
+/// ration is not fed, but the grain it couldn't afford stays physically
+/// sitting in the warehouse, so `food_have` reads UNCHANGED or higher and
+/// the city's own starvation/dearth signal — the thing `update_unrest`'s
+/// sentiment and every revolt roll are keyed on — reads as BETTER fed, not
+/// worse. This is a real, structural entitlement-failure gap (the Amartya
+/// Sen case: a famine with grain on hand, because the poor cannot buy it)
+/// that the sim does not yet model on the demand side, however small the
+/// dose.
+///
+/// Measured (`cargo test --lib tick::tests`, `sim()` fixtures, all fixed
+/// seeds): at **0.1**, 5 failures incl. a severe trade collapse on the dense-
+/// world fixture (`the_dosed_economy_stays_healthy_on_a_realistically_dense_
+/// world`: 557,598 vs a ~2.4M floor) — clearly too strong. At **0.02**, 2
+/// failures (`unrest_topples_councils` — a chronically poor city stops
+/// revolting, exactly the mechanism above; `the_relay_carries_long_lanes...`).
+/// At **0.005**, 3 failures, and NOT a strict subset of 0.02's — `a_house_
+/// records_every_head_it_has_had` reappeared while `unrest_topples_councils`
+/// still failed. A smaller dose making MORE single-trajectory threshold tests
+/// fail, not fewer, is the signature of chaotic sensitivity (every tick's
+/// state feeds the next day's hash-based rolls) compounding a real bug, not
+/// a magnitude that merely needs to be turned down further.
+///
+/// **Reverted to 0.0.** The fix this needs is `update_food_and_starvation`
+/// reading the SPENDING side (the post-price-out shortfall — `lack_basic` and
+/// the day loop's own `eat` already carry it) rather than raw stock, so a
+/// household priced out reads as genuinely underfed. That is real, separate,
+/// gated work — not a side effect of raising this constant — and is the
+/// prerequisite before this dose walk can be resumed.
 pub(crate) const HOUSEHOLD_MONETIZATION_DOSE: f32 = 0.0;
 /// Share of a hub's `trade_wealth` paid out monthly as household wages —
 /// the WAGE half of the design fork CONSUMPTION_REBUILD_PLAN.md's S7 leaves

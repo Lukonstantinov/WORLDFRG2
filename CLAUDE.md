@@ -974,7 +974,18 @@ serde-defaulted so old saves load). Grouped by theme:
   (`mine_geology_at`), rather than letting output scale with population alone;
   **S7** (`HOUSEHOLD_MONETIZATION_DOSE = 0.0`) — `household_priced_out` would
   let a poor `household_wealth` (new `TickHub` field, `household_income_pass`)
-  price a household out of its own ration. Gates:
+  price a household out of its own ration. **A real dose was tried (0.1 →
+  0.02 → 0.005) and REVERTED**: `update_food_and_starvation` reads raw stock
+  (`food_have = stock + production`), never `eat`, so a priced-out household's
+  uneaten ration reads as the CITY being better fed, not worse — a real
+  entitlement-failure gap (grain on hand the poor cannot afford, silencing
+  `unrest_topples_councils`), not a tuning miss; 0.005 broke a DIFFERENT,
+  larger set of tests than 0.02 (non-monotonic), the signature of chaotic
+  single-trajectory sensitivity compounding a real bug rather than a pure
+  magnitude effect. Fixing `update_food_and_starvation` to read the spending
+  shortfall (`lack_basic`) instead of raw stock is the prerequisite before
+  this dose can be resumed — see the constant's own doc comment for the full
+  measured walk. Gates:
   `production_price_mult_is_a_noop_at_zero_and_correctly_signed`,
   `s5_ore_ceiling_at_zero_is_a_noop`,
   `s7_household_monetization_at_zero_is_a_noop`. **N6's own discipline
