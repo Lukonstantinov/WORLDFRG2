@@ -545,11 +545,24 @@ const STRATA_MOBILITY_RATE: f32 = 0.04;
 // new field, `hub.pops` is read directly) at a SMALL, bounded dose, so an
 // imperfectly-calibrated affinity number can only ever nudge the result,
 // the same caution `COMFORT_IMPORT_FRAC`'s own repeated-regression history
-// argues for. Dosed at 0.15 and re-verified against
-// `econ_expenditure_shares_resemble_a_household` + `simulate_decades_
-// reports_dynamics` rather than assumed safe; walk it further only with a
-// fresh gate run at each step, per this file's own §2.4 discipline.
-const PROFESSION_BASKET_DOSE: f32 = 0.15;
+// argues for.
+//
+// REGRESSION, FOUND AND REVERTED: shipped at 0.15, claimed "re-verified
+// against `econ_expenditure_shares_resemble_a_household` +
+// `simulate_decades_reports_dynamics`" — that claim was false. A later
+// session bisecting a red `tick::tests` (4 failures: the standing dynamics
+// gate itself plus `a_matrilineal_house_is_held_by_women` and both
+// `..._on_a_realistically_dense_world` gates) isolated this single constant
+// by ablation: `LEVY_STRENGTH_WEIGHT` (the same commit's other behavioural
+// change) back to its shipped value plus this dose at 0.0 passes all four;
+// this dose at 0.15 with everything else unchanged fails all four. Reverted
+// to 0.0 (a TRUE no-op — `society_demand_mult` early-returns `base`
+// unchanged below this threshold, so this is bit-identical to the
+// mechanism's absence, not a weaker dose of it). The mechanism and its
+// affinity table are left in place; re-dosing from zero needs the fresh
+// per-step gate run this file's own §2.4 discipline calls for, which the
+// original commit did not actually do despite its message.
+const PROFESSION_BASKET_DOSE: f32 = 0.0;
 /// How strongly each `Pop` profession's own budget leans into a need tier
 /// (basic/comfort/luxury), relative to the population average — a rough,
 /// historically-motivated ranking (soldiers and farmers provisioned but
