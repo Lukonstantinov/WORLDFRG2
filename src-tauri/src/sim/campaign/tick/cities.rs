@@ -535,7 +535,14 @@ impl CampaignSim {
                         .filter(|&ri| ri < self.realms.len() && self.realms[ri].fallen_tick == 0);
                     match realm_i {
                         Some(ri) => {
-                            let efficiency = self.realm_collection_efficiency(ri, seat);
+                            // 5.1 · a surveyed province collects at a real, lasting
+                            // bonus — "a state that knows what it owns collects
+                            // more". Absent (unsurveyed, or a pre-5.1 save) is
+                            // exactly 1.0 — today's efficiency, unchanged.
+                            let cadastre_mult = if self.prov_cadastre.get(p).copied().unwrap_or(false) {
+                                PROV_CADASTRE_EFFICIENCY_MULT
+                            } else { 1.0 };
+                            let efficiency = self.realm_collection_efficiency(ri, seat) * cadastre_mult;
                             // R5 · the autonomy axis's own "Revenue" column — a
                             // centralized crown squeezes harder, an autonomous one
                             // leaves more with its provinces.
@@ -1036,7 +1043,7 @@ impl CampaignSim {
     /// decays rather than failing outright — the same forgiving shape the satellite
     /// construction system uses, and for the same reason: a project the player cannot
     /// see failing is a project they cannot learn from.
-    fn advance_province_works(&mut self, p: usize, yr: u32) {
+    pub(crate) fn advance_province_works(&mut self, p: usize, yr: u32) {
         let idx: Vec<usize> = self.prov_works.iter().enumerate()
             .filter(|(_, w)| w.province as usize == p && w.progress < 1.0)
             .map(|(i, _)| i).collect();
@@ -1088,6 +1095,12 @@ impl CampaignSim {
                 WORK_IRRIGATE => {
                     self.prov_irrigated[p] = (self.prov_irrigated[p] + 0.25).min(1.0);
                 }
+                WORK_CADASTRE => {
+                    // 5.1 · permanent — read at the tithe by `province_land_pass`
+                    // via `PROV_CADASTRE_EFFICIENCY_MULT`.
+                    if self.prov_cadastre.len() <= p { self.prov_cadastre.resize(p + 1, false); }
+                    self.prov_cadastre[p] = true;
+                }
                 _ => {
                     // A made road: dues arrive instead of vanishing into arrears, and
                     // the countryside is less sullen about paying them.
@@ -1119,7 +1132,7 @@ impl CampaignSim {
         let size_factor = if area > 0.0 { (area / WORK_AREA_REFERENCE_KM2).clamp(0.5, 3.0) } else { 1.0 };
         let relief = self.prov_relief_m.get(p).copied().unwrap_or(0.0).max(0.0);
         let roughness = (relief / WORK_RELIEF_REFERENCE_M).clamp(0.0, 3.0);
-        let w = WORK_ROUGHNESS_WEIGHT[(kind as usize).min(3)];
+        let w = WORK_ROUGHNESS_WEIGHT[(kind as usize).min(WORK_ROUGHNESS_WEIGHT.len() - 1)];
         let terrain_factor = 1.0 + roughness * w * 0.5;
         base * size_factor * terrain_factor
     }
@@ -1172,6 +1185,11 @@ impl CampaignSim {
                 WORK_ROAD
             } else if under_realm && self.prov_irrigated[p] < 0.55 && self.prov_arable[p] > 0.15 {
                 WORK_IRRIGATE
+            } else if under_realm && !self.prov_cadastre.get(p).copied().unwrap_or(false) {
+                // 5.1 · once the province's more urgent needs (arrears/unrest, dry
+                // arable) are met, a crown surveys what it holds — administrative
+                // capital, built once a province is otherwise settled.
+                WORK_CADASTRE
             } else if waste > 0.15 {
                 WORK_DRAIN
             } else if self.prov_forest[p] > 0.18 && self.prov_arable[p] < 0.85 {
@@ -1821,7 +1839,7 @@ impl CampaignSim {
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
-            quality: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
+            quality: vec![0.0f32; ng], tradition: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,

@@ -591,6 +591,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 mint_bullion_ratio: 1.0,
                 has_mint: false,
                 quality: Vec::new(),
+                tradition: Vec::new(),
                 stolen_good: -1,
                 stolen_from: -1,
                 colony_kind: 0,
@@ -1026,6 +1027,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         prov_soil: vec![],
         prov_area_km2: vec![],
         prov_relief_m: vec![],
+        prov_cadastre: vec![],
         prov_tenure: vec![],
         suppress_realms: false,
         suppress_relief: false,
@@ -1048,6 +1050,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // `ensure_province_land`, so it stays −1 (free) for every province here.
         realms: vec![],
         leagues: vec![],
+        kontors: vec![],
         prov_realm: vec![],
         // Province trade flow — accumulated in play (`accrue_flow`), snapshotted
         // yearly; empty at start like every other in-year accumulator.

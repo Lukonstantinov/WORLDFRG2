@@ -1148,6 +1148,34 @@ const N2_BAN_PRICE_RATIO: f32 = f32::INFINITY;
 /// `RELIEF_EXPORT_LOCK_TICKS` — it re-imposes monthly while the scarcity lasts
 /// and lapses on its own once the price recovers.
 const N2_BAN_TICKS: u32 = 60;
+/// INSTITUTIONS_BUILD_ORDER.md 4.1 · WAR CONTRABAND — the goods a belligerent
+/// bars from its enemy specifically (checked in `dispatch` against `TickHub.
+/// war_with`, never against `export_ban_until` — that field bans a good to
+/// EVERY buyer, and a war ban must be lane-scoped, the same lesson N7.2's
+/// League boycott already learned about N2). Metalware and iron are the
+/// literal war material; timber, pitch and hemp are the naval stores
+/// `YARDS_VESSELS_AND_DEPOTS_PLAN` shipped — denying an enemy the means to
+/// build or repair a fleet. `TickGood.name` carries the good's id string
+/// (`campaign_start_sim` copies it straight from the worldgen spec id, not a
+/// display label — the same convention every `good("iron", …)` test fixture
+/// already relies on), so this is a plain string match, no id-resolution table.
+const CONTRABAND_GOODS: [&str; 5] = ["metalware", "iron", "timber", "pitch", "hemp"];
+/// INSTITUTIONS_BUILD_ORDER.md 4.2 · THE ROUTED BLOCKADE — a lane between two
+/// belligerents is diverted through a neutral port at extra cost, never
+/// refused outright. This is the SAME `staging_hop` relay N1/N1c already use
+/// (`production.rs::dispatch`), so a war blockade is not a new mechanism, it
+/// is a new REASON to take a detour that already exists and is already
+/// dosed live. Per shipment between two hubs actually `war_with` each other,
+/// a `hash01` roll under this dose diverts the leg's first hop through the
+/// nearest neutral stop on the way (`staging_hop`); with no reachable stop
+/// the cargo still sails direct — the plan's own governing rule for this
+/// phase (§0/Phase 4's header): every prohibition ROUTES, it never refuses,
+/// because this codebase has twice measured that a bare refusal at this kind
+/// of dose collapses `econ_inheritance_rules_fragment_differently`'s world
+/// (N1's own three-attempt history, and N2's market closure breaking the
+/// hard wealth bound twice). Shipped at 0.0 — a true no-op, exactly
+/// `N1_LOCAL_HAUL_BIND_DAYS`'s pattern: `hash01(..) < 0.0` can never hold.
+pub(crate) const BLOCKADE_STAGING_DOSE: f32 = 0.0;
 
 /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) · seasonal sailing/pass
 /// closures as a per-lane travel-time MULTIPLIER, never a wall (§1.5 — a hard
@@ -2762,6 +2790,25 @@ const BANK_RESERVE_MULT: f32 = 3.0;
 const BANK_RUN_RATIO: f32 = 0.22;
 /// Book value a counting-house branch adds to a bank's real-estate assets.
 const BANK_BRANCH_VALUE: f32 = 2.0;
+// ── INSTITUTIONS_BUILD_ORDER.md 1.1 · bank failure splits from contagion ────
+// A failing bank no longer always collapses into a regional crash. It is wound
+// down quietly if its liquidation value covers depositors, absorbed by a solvent
+// rival in the same trade component if one has room, and only COLLAPSES (the old
+// path, igniting `trigger_regional_crash`) when neither rescue is possible.
+/// Fire-sale discount applied to non-cash assets (loans/real estate/stakes) when
+/// valuing a failing bank for wind-down or absorption — a forced sale realizes
+/// less than book value.
+const BANK_LIQUIDATION_FRAC: f32 = 0.7;
+/// A rescuing bank must clear this reserve ratio to be considered sound enough
+/// to absorb a failing rival's book (well above the `BANK_RUN_RATIO` fragility
+/// floor — an absorber must be healthy, not merely solvent).
+const BANK_ABSORB_MIN_RATIO: f32 = 0.35;
+/// A rescuing bank must hold reserves at least this fraction of the failing
+/// bank's deposits to safely take them on.
+const BANK_ABSORB_RESERVE_FRAC: f32 = 0.5;
+/// Fraction of the failing bank's (discounted) book value the absorbing bank
+/// pays out to the failing bank's owning house — a buyout price, not a gift.
+const BANK_ABSORB_PRICE_FRAC: f32 = 0.4;
 /// Income share a bank's equity stake draws from a manufactory's owner-cut.
 const BANK_STAKE_SHARE: f32 = 0.25;
 /// Years of yearly balance-sheet snapshots kept per bank (bounds save size).
@@ -2804,6 +2851,14 @@ const DEBT_DEFAULT_TRUST_HIT: f32 = 0.04;
 const DEBT_DELEVERAGE_RATIO: f32 = 1.6;
 /// Max distinct bondholders tracked per city (bounds save size; new lenders merge).
 const DEBT_HOLDER_CAP: usize = 8;
+/// INSTITUTIONS_BUILD_ORDER.md 3.1 · while a hub is at war, its debt TARGET is
+/// raised by this multiple — the historically central linkage: a war spikes
+/// borrowing against throughput exactly as `update_public_debt`'s existing
+/// issuance mechanism already allows, still bounded by `DEBT_MAX_RATIO` and
+/// the same serviceability gate, so a war can push a city harder toward
+/// default but never past what the mechanism already guards. 1.0 (a no-op)
+/// at peace, by construction.
+const WAR_DEBT_TARGET_MULT: f32 = 1.3;
 /// Capital value of a manufactory per tier; a stake costs `share × tier × this`.
 const BANK_STAKE_VALUE_PER_TIER: f32 = 40_000.0;
 
@@ -3394,6 +3449,14 @@ pub struct TickHub {
     /// varies by settlement; manufactures climb via learning-by-doing and can be
     /// lifted by stealing a rival's technique. Empty until the one-time migration.
     #[serde(default)] pub quality: Vec<f32>,
+    /// INSTITUTIONS_BUILD_ORDER.md 2.1 · years of ACCUMULATED TRADITION producing
+    /// each good at this hub — replaces city SIZE as the term that sets the
+    /// quality ceiling (`update_good_quality`). Grows while producing (faster
+    /// under an active `CraftGuild`), decays slowly (never resets outright) when
+    /// production lapses, and can be lifted at a stroke by a defecting master
+    /// (2.2 · `maybe_poach_master`). Empty/zero on an old save — the honest
+    /// reading is "no known tradition yet", not "as much as its size implies".
+    #[serde(default)] pub tradition: Vec<f32>,
     /// Espionage record (manufactories): good index whose technique was STOLEN into
     /// this hub (−1 none) and the hub id it was taken from (−1 none).
     #[serde(default = "neg_one_i32")] pub stolen_good: i32,
@@ -3695,6 +3758,11 @@ pub(crate) const LAW_GRAIN: u8 = 4;
 /// `Law.kind` for a guild monopoly, `Law.good` naming the protected craft
 /// (read by `run_craft_guilds`).
 pub(crate) const LAW_GUILD_MONOPOLY: u8 = 5;
+/// INSTITUTIONS_BUILD_ORDER.md 2.4 · `Law.good` names the good this city
+/// refines from imported inputs (the entrepôt chronicle beat, `manufacture_
+/// pass`) — a fact, not a policy the council decided, but the same idempotent
+/// per-(hub,good) log the two kinds above already use rather than new state.
+pub(crate) const LAW_ENTREPOT: u8 = 7;
 
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
@@ -4772,6 +4840,13 @@ pub struct War {
     /// automatically committed as a backer. −1 for an ordinary rival-council war.
     /// Its own insolvency is the BACKERS WITHDRAW exhaustion path.
     #[serde(default = "neg_one_i32")] pub backer_house: i32,
+    /// INSTITUTIONS_BUILD_ORDER.md 4.2 · has the routed blockade already been
+    /// named in this war's own log? Fires the journal/war_log entry once per
+    /// war (on the FIRST shipment actually diverted through a neutral stop),
+    /// never once per shipment — a belligerent pair can trade hundreds of
+    /// times a year, and re-announcing the same detour on every one of them
+    /// would flood the chronicle rather than inform it (rule 20's spirit).
+    #[serde(default)] pub blockade_chronicled: bool,
 }
 
 /// §3.4a · one quarterly round of a war — a "battle" for the panel's history.
@@ -5711,6 +5786,55 @@ const GUILD_HALL_STRENGTH: f32 = 0.6;   // standing at which a guildhall is rais
 /// `econ_` gate to justify.
 const GUILD_MONOPOLY_QUALITY_CAP: f32 = 0.97;
 
+/// INSTITUTIONS_BUILD_ORDER.md 2.1 · accumulated-tradition quality-cap terms —
+/// see `TickHub.tradition`'s own doc comment and `update_good_quality`'s. Base
+/// is lowered from the old flat 0.62 (a new producer must earn its way up
+/// through practice, not start most of the way to the cap on population
+/// alone); the tradition term's own max (0.28) is wider than the size term it
+/// replaces (0.20), which is the "widen the spread" half of the plan's ask.
+const QUALITY_CAP_BASE: f32 = 0.58;
+const TRADITION_BONUS_MAX: f32 = 0.28;
+/// A hub producing this good gains this many tradition-years per MONTH (so a
+/// full year of continuous production is +1.0 year, the intuitive reading).
+const TRADITION_GROWTH_PER_MONTH: f32 = 1.0 / 12.0;
+/// Under an active `CraftGuild` for this (hub, good), tradition compounds this
+/// much faster — organised transmission of skill, not just individual practice.
+const TRADITION_GUILD_GROWTH_MULT: f32 = 2.0;
+/// Tradition decays this many years per month once production lapses — slow
+/// (a craft is not forgotten in a season) but real, so an abandoned works
+/// eventually loses its standing rather than keeping it forever idle.
+const TRADITION_DECAY_PER_MONTH: f32 = 0.02;
+/// Tradition-years at which the bonus reaches its max (`TRADITION_BONUS_MAX`).
+const TRADITION_YEARS_FULL: f32 = 60.0;
+/// 2.2 · SECRECY tuning. A guild with a hall accrues secrecy toward this cap;
+/// it is a straight subtraction from the thief's `QUALITY_STEAL_CHANCE` roll
+/// (so a fully secretive guild roughly halves the theft rate at these values,
+/// never eliminates it — the master can still be bribed away instead).
+const GUILD_SECRECY_GROWTH: f32 = 0.01;
+const GUILD_SECRECY_CAP: f32 = 0.5;
+/// 2.2 · a rival city may POACH the master of a guild's craft, reusing
+/// `STEWARD_POACH_CHANCE`'s exact shape (an office's steward defecting) at the
+/// same base rate — secrecy then subtracts from it, same as the theft roll.
+const MASTER_POACH_CHANCE: f32 = STEWARD_POACH_CHANCE;
+/// 2.2 · a defecting master carries a FRACTION of the source's tradition with
+/// him — the destination jumps toward, not to, the source's standing; quality
+/// itself still has to climb via `QUALITY_LEARN_RATE` from wherever it sits.
+const MASTER_POACH_TRADITION_FRAC: f32 = 0.4;
+/// 2.3 · a city's craft earns a named SIGNATURE once its tradition clears this
+/// many years (a lifetime of practice, not a single decade) AND its quality
+/// clears this floor — both gates, so a young workshop that got lucky on
+/// quality alone (a stolen technique, say) does not earn a signature it has
+/// not lived up to yet.
+const SIGNATURE_TRADITION_YEARS: f32 = 40.0;
+const SIGNATURE_QUALITY_FLOOR: f32 = 0.80;
+/// 2.4 · THE REFINING ENTRÉPOT — a high-throughput port with little or no local
+/// raw material gets a manufacturing bonus on goods whose inputs it IMPORTS
+/// (Amsterdam refining Caribbean sugar). Gated on real throughput and a real
+/// import dependency, not city size alone.
+const ENTREPOT_THROUGHPUT_FLOOR: f32 = 4000.0;
+const ENTREPOT_IMPORT_DEP_FLOOR: f32 = 0.6;
+const ENTREPOT_MANUFACTURE_BONUS: f32 = 0.15;
+
 /// Phase 5 (flavour) · fashion / wonders / piracy / diaspora tuning (all bounded).
 const FASHION_YEARLY_CHANCE: f32 = 0.35;
 const FASHION_MAG: f32 = 0.30;          // +30% demand for the vogue good
@@ -5829,6 +5953,19 @@ pub struct CraftGuild {
     pub strength: f32,
     /// A guildhall has been raised (a one-time civic monument).
     pub hall: bool,
+    /// INSTITUTIONS_BUILD_ORDER.md 2.2 · SECRECY 0..1 — a hall + a chartered
+    /// monopoly (`LAW_GUILD_MONOPOLY`) accrue this over time; it resists
+    /// `maybe_steal_quality` (the theft roll must clear it, in addition to its
+    /// own chance) and resists a master being poached away (`maybe_poach_
+    /// master`). Serde-defaulted → an old save's guild starts with none, which
+    /// is the honest reading: a guild that predates this slice never built a
+    /// secret to keep.
+    #[serde(default)] pub secrecy: f32,
+    /// INSTITUTIONS_BUILD_ORDER.md 2.3 · the SIGNATURE this city's craft has
+    /// earned once tradition + quality clear a threshold ("Muranese glass") —
+    /// `None` until then, set once, permanent (`is_house_milestone`'s own
+    /// discipline applied to a city rather than a house).
+    #[serde(default)] pub signature: Option<String>,
 }
 
 /// Phase 6 (observability) · one city struck by plague — recorded for the Plagues &
@@ -6481,6 +6618,13 @@ pub struct CampaignSim {
     /// or a drainage channel far more than flat acreage does. Same freeze/fallback
     /// discipline as `prov_area_km2`.
     #[serde(default)] pub prov_relief_m: Vec<f32>,
+    /// INSTITUTIONS_BUILD_ORDER.md 5.1 · THE CADASTRE (`WORK_CADASTRE`, Domesday /
+    /// the Ottoman *defter* / the Milanese *catasto*) — a fifth `ProvWork` kind,
+    /// completed once, permanent: a province a crown has surveyed collects at a
+    /// real, lasting bonus (`realm_collection_efficiency`'s reader). Absent/short
+    /// (an old save, or any province never reached) reads `false` — no bonus,
+    /// today's efficiency exactly, per rule 30's own discipline.
+    #[serde(default)] pub prov_cadastre: Vec<bool>,
     /// Tenure shares — [civic/crown, house/noble, temple, common], summing to ~1.
     #[serde(default)] pub prov_tenure: Vec<[f32; 4]>,
     /// Rural tax rate 0..`PROV_TAX_MAX` set by the holder polis (or a player).
@@ -6632,6 +6776,12 @@ pub struct CampaignSim {
     /// founded, dissolved ones kept (`dissolved_tick != 0`) exactly as a
     /// fallen `Realm` is. Membership lives on `TickHub.league`, never here.
     #[serde(default)] pub leagues: Vec<League>,
+    /// INSTITUTIONS_BUILD_ORDER.md 4.4 · every KONTOR a League has ever
+    /// established — a shared factory/depot at a host city that does NOT
+    /// itself belong to the League (Bruges, Bergen, Novgorod, the Steelyard).
+    /// Expelled ones are kept (`expelled_tick != 0`), the same "fallen but
+    /// remembered" discipline `leagues`/`realms` already use, never removed.
+    #[serde(default)] pub kontors: Vec<Kontor>,
     /// Per-province sovereignty: an index into `realms`, or −1 for free land.
     /// Sized alongside the rest of the land layer by `ensure_province_land`.
     #[serde(default)] pub prov_realm: Vec<i32>,
@@ -6976,6 +7126,15 @@ pub const TAX_FARM_DISCOUNT: f32 = 0.65;
 /// The crown only farms out the tithe when actually short of cash — a farm is a
 /// distress sale, not a standing policy (plan §3.3's own framing).
 pub const REALM_FARM_TREASURY_FLOOR: f32 = 400.0;
+/// INSTITUTIONS_BUILD_ORDER.md 5.2 · while a tax farm is active, rural unrest in
+/// every province under this realm rises by this much per year (the farmer
+/// squeezes harder than the crown itself would), and the crown's own `cohesion`
+/// decays toward `TAX_FARM_COHESION_FLOOR` — a real, bounded cost for the cash
+/// taken up front, not a free lunch. Both are small: a farm is meant to be a
+/// survivable emergency measure, not a death sentence for the realm.
+pub const TAX_FARM_UNREST_RATE: f32 = 0.015;
+pub const TAX_FARM_COHESION_DECAY: f32 = 0.01;
+pub const TAX_FARM_COHESION_FLOOR: f32 = 0.25;
 
 // ── R5 · the autonomy axis (`REALM_AND_GOVERNMENT_PLAN.md` §3.4) ──────────────
 // One policy tying revenue and cohesion-at-distance together — the DATA field
@@ -7167,8 +7326,31 @@ pub struct League {
     /// quiet world, mirroring `realm_secession_pass`'s own discipline.
     pub last_threat_tick: u32,
     #[serde(default)] pub boycotts: Vec<Boycott>,
+    /// INSTITUTIONS_BUILD_ORDER.md 1.3 · the purse's first reader — while the
+    /// current tick is under this, the league has fitted out a convoy for the
+    /// season: member-to-member voyages run a reduced loss rate. 0 = no
+    /// escort funded (the purse couldn't afford one, or nobody tried yet).
+    #[serde(default)] pub escort_until_tick: u32,
     /// Reuses `RealmEvent`'s exact shape — same cap discipline (rule 20).
     #[serde(default)] pub events: Vec<RealmEvent>,
+}
+
+/// INSTITUTIONS_BUILD_ORDER.md 4.4 · a shared factory/depot a League
+/// establishes at a host city it does NOT itself belong to — Bruges, Bergen,
+/// Novgorod, the Steelyard. `YARDS_VESSELS_AND_DEPOTS_PLAN.md`'s missing
+/// "fondaco" ownership class with a collective (League) owner rather than a
+/// single state. Members trading through the host get the SAME
+/// tariff/freight privilege a fellow member would (`LEAGUE_FREIGHT_DISCOUNT`/
+/// `LEAGUE_TARIFF_MULT`, 4.3); the host itself stays outside the League —
+/// no seat, no vote, no dues — and can expel it, a real political event.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Kontor {
+    pub league: u32,
+    pub host_hub: u32,
+    pub established_tick: u32,
+    /// 0 while it stands. An expelled Kontor is kept, not removed — the
+    /// same "fallen but remembered" discipline `League.dissolved_tick` uses.
+    #[serde(default)] pub expelled_tick: u32,
 }
 
 /// R2 · one member of a realm's dynasty. Distinct from `Kin` (a merchant house's
@@ -7305,11 +7487,19 @@ pub const WORK_CLEAR: u8 = 0;      // woodland → arable
 pub const WORK_DRAIN: u8 = 1;      // waste/marsh → arable, and a fever-risk cut
 pub const WORK_IRRIGATE: u8 = 2;   // raises the irrigated share
 pub const WORK_ROAD: u8 = 3;       // a made road to the seat — cheaper dues, less arrears
-pub const WORK_KINDS: [&str; 4] = ["clearance", "drainage", "irrigation", "road"];
+/// INSTITUTIONS_BUILD_ORDER.md 5.1 · a fifth kind, THE CADASTRE — Domesday, the
+/// Ottoman *defter*, the Milanese *catasto*. Expensive once, per province,
+/// crown-funded (state infrastructure, same tier gate as `WORK_ROAD`/
+/// `WORK_IRRIGATE`), permanently raising `prov_cadastre[p]` on completion — a
+/// state that knows what it owns collects more, the whole thesis of
+/// pre-modern fiscality, and until this the entire administrative model was
+/// `cohesion × distance_decay` with no way for a crown to invest in it.
+pub const WORK_CADASTRE: u8 = 4;
+pub const WORK_KINDS: [&str; 5] = ["clearance", "drainage", "irrigation", "road", "cadastre"];
 /// Years of funded work each kind takes.
-pub const WORK_YEARS: [f32; 4] = [6.0, 10.0, 8.0, 5.0];
+pub const WORK_YEARS: [f32; 5] = [6.0, 10.0, 8.0, 5.0, 12.0];
 /// Yearly cost (grain-eq) drawn from the funding treasury, per kind.
-pub const WORK_COST: [f32; 4] = [40.0, 70.0, 55.0, 45.0];
+pub const WORK_COST: [f32; 5] = [40.0, 70.0, 55.0, 45.0, 90.0];
 
 /// Province works v2.0 · these four kinds used to be startable ONLY by the player
 /// (`campaign_start_province_work` — one of just four mutating campaign verbs), so
@@ -7348,11 +7538,19 @@ const WORK_AREA_REFERENCE_KM2: f32 = 9000.0;
 /// starts to bite meaningfully — broken, mountainous country.
 const WORK_RELIEF_REFERENCE_M: f32 = 1200.0;
 /// How strongly each work kind's cost responds to terrain roughness — order matches
-/// `WORK_CLEAR`/`WORK_DRAIN`/`WORK_IRRIGATE`/`WORK_ROAD`. A road is carved through
-/// the relief itself (highest); clearing/draining are harder on a slope but not
-/// defined by it (moderate); an irrigation channel follows the easiest contour it
-/// can find (lowest — it avoids roughness rather than fighting it).
-const WORK_ROUGHNESS_WEIGHT: [f32; 4] = [0.9, 0.8, 0.5, 1.3];
+/// `WORK_CLEAR`/`WORK_DRAIN`/`WORK_IRRIGATE`/`WORK_ROAD`/`WORK_CADASTRE`. A road is
+/// carved through the relief itself (highest); clearing/draining are harder on a
+/// slope but not defined by it (moderate); an irrigation channel follows the
+/// easiest contour it can find (lowest — it avoids roughness rather than fighting
+/// it); a survey has to cross the roughness it's mapping either way, so it sits a
+/// little above a canal but well under a road.
+const WORK_ROUGHNESS_WEIGHT: [f32; 5] = [0.9, 0.8, 0.5, 1.3, 0.6];
+/// INSTITUTIONS_BUILD_ORDER.md 5.1 · the collection-efficiency multiplier a
+/// completed cadastre grants its province, permanently — read at the point
+/// `realm_collection_efficiency`'s own province-level caller (`province_land_
+/// pass`'s tithe) applies it. Modest and bounded: a survey helps a crown
+/// collect more of what it is OWED, it does not raise the rate charged.
+const PROV_CADASTRE_EFFICIENCY_MULT: f32 = 1.25;
 
 /// A land improvement under way in a province. Funded yearly out of the funder's
 /// treasury (a polis), wealth (a house), or — v2.0, when the province lies inside a
@@ -8270,6 +8468,9 @@ impl CampaignSim {
                 // and issue fresh bonds where the treasury is short (post-war financing).
                 self.update_public_debt(yr);
                 self.maybe_steal_quality(yr);
+                // 2.2 · a rival city may bribe away a guild's master (the OTHER half
+                // of the Murano story — theft above, defection here).
+                self.maybe_poach_master(yr);
                 self.compute_speculation(yr);
                 // Fold the year's trade flows into the Flows-subtab detail + trend graphs.
                 self.fold_trade_year();
@@ -9551,7 +9752,9 @@ mod yards;
 pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,
-    LEAGUE_BOYCOTT_TICKS,
+    LEAGUE_BOYCOTT_TICKS, LEAGUE_ESCORT_COST, LEAGUE_ESCORT_LOSS_MULT,
+    LEAGUE_FREIGHT_DISCOUNT, LEAGUE_TARIFF_MULT,
+    KONTOR_COST, KONTOR_EXPEL_CHANCE, KONTOR_EXPEL_CHANCE_AT_WAR, KONTOR_EXPEL_UNREST_MULT,
 };
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the

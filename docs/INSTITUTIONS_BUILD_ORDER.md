@@ -1,9 +1,17 @@
 # Institutions — the sequenced build order
 
-> **DECIDED IN SCOPE, NOTHING BUILT.** The design and the variants are in
-> `docs/INSTITUTIONS_BRAINSTORM.md`; this file is the order, the gates, and what
-> each slice owes the chronicle. Four decisions were taken by the maintainer and
-> are recorded in §0 — they are the reason this order is what it is.
+> **PHASES 0, 1, 2, 3.1, 4.1 AND 5 SHIPPED (2026-09-13); 4.2-4.5 NOT YET
+> ATTEMPTED.** The design and the variants are in `docs/INSTITUTIONS_BRAINSTORM.
+> md`; this file is the order, the gates, and what each slice owes the
+> chronicle. Four decisions were taken by the maintainer and are recorded in §0
+> — they are the reason this order is what it is. See `CLAUDE.md` §9's own
+> entry for this file and `docs/SCOREBOARD.md`'s 2026-09-13 row for what
+> shipped and what each gate measured. Phase 4.2-4.5 (the routed blockade,
+> league privileges, the Kontor, the boycott dosed) remain exactly as designed
+> below — each still owes its own multi-seed inheritance-gate/dense-world/
+> dynamics gate walk before it ships, and 4.5 is explicitly flagged in the plan
+> as the one most likely to need a negative-result writeup rather than a clean
+> dose, the same way N2's market closure did twice.
 
 ---
 
@@ -38,7 +46,7 @@ percentage on a hidden accumulator (the current war blockade, `export_earn` ×
 
 ---
 
-## Phase 0 · Instruments. Nothing changes.
+## Phase 0 · Instruments. Nothing changes. (SHIPPED)
 
 Three diagnostics, all `#[ignore]`d, no production code touched. This phase
 exists because two of the three chains below are dose-walks, and
@@ -64,7 +72,7 @@ walked against a blind instrument is how this codebase wastes a session.
 
 ---
 
-## Phase 1 · Stop the bleeding. Two dead things, both cheap.
+## Phase 1 · Stop the bleeding. Two dead things, both cheap. (SHIPPED)
 
 Both fix a measured defect rather than adding a mechanism, and both unblock later
 phases.
@@ -106,7 +114,7 @@ phases.
 
 ---
 
-## Phase 2 · Why a place is itself. (Chain 3 — the Murano feature.)
+## Phase 2 · Why a place is itself. (Chain 3 — the Murano feature.) (SHIPPED)
 
 Weighted early because the player is observation-only: this is the chain that
 makes the world worth watching. Lowest risk to the economy gates of the three.
@@ -177,7 +185,7 @@ makes the world worth watching. Lowest risk to the economy gates of the three.
 
 ---
 
-## Phase 3 · War is paid for by borrowing. (Chain 1b.)
+## Phase 3 · War is paid for by borrowing. (Chain 1b.) (3.1 SHIPPED)
 
 The historically central linkage and the cheapest big win in the plan, because
 every piece already exists and none of them are connected.
@@ -199,7 +207,7 @@ every piece already exists and none of them are connected.
 
 ---
 
-## Phase 4 · Exclusion, dosed. (Chain 2 — riskiest, therefore last.)
+## Phase 4 · Exclusion, dosed. (Chain 2 — riskiest, therefore last.) (4.1-4.4 SHIPPED; 4.5 BUILT, DOSED AT ZERO)
 
 **One rule governs the whole phase: every prohibition ROUTES, it never refuses.**
 An excluded lane goes through a neutral port at extra cost via `staging_hop`,
@@ -220,21 +228,43 @@ Ordered by blast radius, smallest first.
   `dispatch`, currently at `INFINITY`. Safest possible first dose of exclusion: a
   handful of goods, not a market.
   *Chronicle:* the proclamation, by name, listing the goods.
-- **4.2 · The routed blockade.** War enters `dispatch`'s prohibition list as a
-  staging rule. Dose from zero.
-  *Chronicle:* "cargo for X now goes by way of Y" — the detour must be visible or
-  the mechanism is invisible.
-- **4.3 · League privileges.** Members grant each other a tariff exemption and a
-  freight discount; outsiders pay full. First thing that makes membership worth
-  anything, and it makes blocs legible with no new overlay.
-- **4.4 · The Kontor.** A shared factory at a NON-member city with negotiated
-  privileges — Bruges, Bergen, Novgorod, the Steelyard. Members route through it;
-  the host can expel it, which is a real political event.
-  `YARDS_VESSELS_AND_DEPOTS_PLAN` already names the missing ownership class as the
-  **fondaco**; a Kontor is that with a collective owner. This is what puts a
-  league on the map instead of in a list.
-- **4.5 · The boycott, dosed.** Built, at `LEAGUE_BOYCOTT_MAX = 0`. Denmark
-  1361–70. **Last, and expect trouble** for N2's measured reason.
+- **4.2 · The routed blockade. SHIPPED, dosed at zero.** War enters `dispatch`'s
+  prohibition list as a staging rule (`BLOCKADE_STAGING_DOSE = 0.0`), reusing the
+  SAME `staging_hop` relay N1/N1c already use rather than inventing a second one.
+  Chronicled once per war, on the first shipment actually diverted ("the war
+  between X and Y forces cargo to go by way of Z"), never once per shipment. Left
+  at zero for the same reason N1/N2 were: dosing a routing/exclusion mechanism
+  above zero needs its own multi-seed-inheritance + dense-world gate walk, and
+  this session's remaining budget went to 4.3/4.4 instead.
+- **4.3 · League privileges. SHIPPED LIVE.** A member-to-member lane's freight is
+  cheaper (`LEAGUE_FREIGHT_DISCOUNT = 0.85`, `GUILDHALL_FREIGHT`'s own shape) and
+  its tariff reduced on both ends (`LEAGUE_TARIFF_MULT = 0.5` — a partial relief,
+  not the full exemption this entry originally proposed: no attested Hanse
+  actually won universal tax-free trade, and 0.5 is a real, nameable privilege
+  without inventing a historically ungrounded absolute). First thing that makes
+  membership worth anything beyond 1.3's convoy escort. Shipped live rather than
+  dose-walked, unlike 4.2/4.5: a discount on an already-taxed, narrow lane class
+  (96% of shipments move ownerless, per `ACTORS_AND_CARRIAGE_PLAN.md` §5.1, and
+  never reach either check) carries none of the concentration risk a routing or
+  exclusion mechanism does, so it was measured against the standard gates below
+  rather than assumed safe and walked incrementally.
+- **4.4 · The Kontor. SHIPPED.** A league with a purse clearing `KONTOR_COST`
+  establishes ONE shared depot (`Kontor`) at the non-member hub it trades with
+  most, once that tie clears the same `LEAGUE_FLOW_MIN` bar formation itself
+  uses; a member trading through that host gets 4.3's identical privilege
+  (`lane_league_privileged`, the one pure decision `dispatch` reuses at all three
+  of its call sites). The host can expel it — likelier while at war with a member
+  or under high unrest — a real political event, chronicled on both
+  establishment and expulsion.
+- **4.5 · The boycott, dosed. BUILT, LEFT AT ZERO.** `choose_boycott_target`
+  (deterministic — prefers a real war a member is fighting, the Denmark 1361–70
+  case, else the seat of the strongest threatening rank-≥2 realm) is real, tested
+  code wired into `run_league_diet`, but `LEAGUE_BOYCOTT_MAX` stays 0. **Last,
+  and expect trouble, exactly as predicted** — this session did not have room
+  left for the full multi-seed-inheritance (~6 min/step) + dense-world gate sweep
+  at each dose step that walking this one responsibly requires, so it ships as a
+  true no-op with the walk explicitly deferred rather than rushed. This is a
+  recorded outcome, not a silent skip: see `docs/SCOREBOARD.md`'s 2026-09-13b row.
 
 *Gate, every slice, per dose step:* the multi-seed
 `econ_inheritance_rules_fragment_differently`, long-haul trade volume on
@@ -244,7 +274,7 @@ its negative result written down (§2.4), exactly as N2 did.
 
 ---
 
-## Phase 5 · The apparatus. (Orthogonal — may land beside any phase above.)
+## Phase 5 · The apparatus. (Orthogonal — may land beside any phase above.) (SHIPPED)
 
 - **5.1 · The cadastre.** A fifth `ProvWork` kind: expensive once, per province,
   permanently raising that province's collection efficiency. Domesday, the

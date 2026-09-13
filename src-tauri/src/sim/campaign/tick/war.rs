@@ -4,6 +4,16 @@ use super::*;
 
 impl CampaignSim {
 
+    /// Find the live war (if any) between hubs `a` and `b`, in either order.
+    /// INSTITUTIONS_BUILD_ORDER.md 4.2 needs this to name the war a routed
+    /// blockade detour belongs to; nothing before this slice needed to look
+    /// a war up by its two hubs rather than by index.
+    pub(crate) fn war_index(&self, a: usize, b: usize) -> Option<usize> {
+        self.wars.iter().position(|w| {
+            (w.a as usize == a && w.b as usize == b) || (w.a as usize == b && w.b as usize == a)
+        })
+    }
+
     /// Raise a forced WAR LEVY from every house homed at `hub`: a slice of each
     /// fortune into the city's war chest (treasury). The core wealth sink of war.
     /// Returns the total raised.
@@ -801,6 +811,19 @@ impl CampaignSim {
         dx * dx + dy * dy <= cap * cap
     }
 
+    /// INSTITUTIONS_BUILD_ORDER.md 4.1 · the CONTRABAND proclamation appended to
+    /// a declare-war chronicle line — names which of `CONTRABAND_GOODS` this
+    /// world actually carries (a custom goods list may lack some of them, so
+    /// the proclamation never claims a ban on a good that doesn't exist here).
+    /// Empty string if none are present — appended, it is then simply a no-op.
+    fn contraband_proclamation(&self) -> String {
+        let present: Vec<&str> = CONTRABAND_GOODS.iter()
+            .filter(|&&cg| self.goods.iter().any(|g| g.name == cg))
+            .copied().collect();
+        if present.is_empty() { return String::new(); }
+        format!(" — the export of {} to the enemy is barred", present.join(", "))
+    }
+
     pub(crate) fn maybe_declare_war(&mut self, yr: u32) {
         if self.wars.len() >= MAX_ACTIVE_WARS { return; }
         let n = self.hubs.len();
@@ -860,15 +883,17 @@ impl CampaignSim {
         self.hubs[a].war_since = self.tick;
         self.hubs[b].war_since = self.tick;
         let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
+        let contraband = self.contraband_proclamation();
         self.journal.push(JournalEntry {
             tick: self.tick, kind: "war".into(), hub: a as i32, good: -1, value: 0.0,
-            text: format!("{} declares war on {} ({} · {})", an, bn, cause, war_goal_label(goal)),
+            text: format!("{} declares war on {} ({} · {}){}", an, bn, cause, war_goal_label(goal), contraband),
         });
         self.wars.push(War {
             a: a as u32, b: b as u32, start_tick: self.tick,
             chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
             battles: Vec::new(), cargo_lost: 0, cause: cause.into(), goal,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false,
         });
     }
 
@@ -886,7 +911,8 @@ impl CampaignSim {
         let (an, bn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone());
         let hn = self.houses[backer_house].name.clone();
         let rn = self.houses[rival_house].name.clone();
-        let text = format!("{}'s feud with {} drags {} into war against {}", hn, rn, an, bn);
+        let text = format!("{}'s feud with {} drags {} into war against {}{}",
+            hn, rn, an, bn, self.contraband_proclamation());
         self.journal.push(JournalEntry {
             tick: self.tick, kind: "war".into(), hub: a as i32, good: -1, value: 0.0, text,
         });
@@ -897,6 +923,7 @@ impl CampaignSim {
             cause: "a house's war".into(), goal: WAR_GOAL_TRADE_RIGHTS,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0,
             backer_house: backer_house as i32,
+            blockade_chronicled: false,
         });
     }
 
@@ -1058,10 +1085,12 @@ impl CampaignSim {
             chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
             battles: Vec::new(), cargo_lost: 0, cause: "independence".into(),
             goal: WAR_GOAL_PLUNDER,
-            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false });
         let (cn, mn) = (self.hubs[colony].name.clone(), self.hubs[metro].name.clone());
         self.journal.push(JournalEntry { tick: self.tick, kind: "war".into(), hub: colony as i32,
-            good: -1, value: 0.0, text: format!("{} rises in a war of independence against {}", cn, mn) });
+            good: -1, value: 0.0, text: format!("{} rises in a war of independence against {}{}",
+                cn, mn, self.contraband_proclamation()) });
     }
 
 
