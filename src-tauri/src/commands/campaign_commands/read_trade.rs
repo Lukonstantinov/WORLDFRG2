@@ -817,12 +817,12 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     };
 
     // ── Goods list: union of last-year flows + historical series ──
-    let mut hist_by_good: HashMap<u32, &Vec<f32>> = HashMap::new();
+    let mut hist_by_good: HashMap<u32, &TradeHist> = HashMap::new();
     // `trade_hist` is keyed by the sim's ARRAY INDEX (`hidx`), exactly like `trade_last`
     // above — NOT the external settlement `id`. Filtering by `id` here left the history
     // empty whenever id≠index, so the avg showed "0.0/yr" and a "0-yr trend" even though
     // last-year flows (3.4k) were present.
-    for h in sim.trade_hist.iter().filter(|h| h.hub == hidx) { hist_by_good.insert(h.good, &h.vols); }
+    for h in sim.trade_hist.iter().filter(|h| h.hub == hidx) { hist_by_good.insert(h.good, h); }
     let mut good_ids: std::collections::HashSet<u32> = std::collections::HashSet::new();
     for &g in g_in.keys().chain(g_out.keys()) { good_ids.insert(g); }
     for &g in hist_by_good.keys() { good_ids.insert(g); }
@@ -844,8 +844,16 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         s
     };
     let mut goods: Vec<TradeFlowGood> = good_ids.into_iter().map(|g| {
-        let history: Vec<f32> = hist_by_good.get(&g).map(|v| (*v).clone()).unwrap_or_default();
+        let hrow = hist_by_good.get(&g).copied();
+        let history: Vec<f32> = hrow.map(|h| h.vols.clone()).unwrap_or_default();
         let avg = if history.is_empty() { 0.0 } else { history.iter().sum::<f32>() / history.len() as f32 };
+        // Split-by-direction + own-production history — user request: "divide
+        // that chart by export/import ... and own production, if applicable".
+        // Tail-aligned with `history`, never back-filled (rule 29): an older
+        // save's `in_vols`/`out_vols`/`prod_vols` can be shorter than `vols`.
+        let in_history: Vec<f32> = hrow.map(|h| h.in_vols.clone()).unwrap_or_default();
+        let out_history: Vec<f32> = hrow.map(|h| h.out_vols.clone()).unwrap_or_default();
+        let prod_history: Vec<f32> = hrow.map(|h| h.prod_vols.clone()).unwrap_or_default();
         let iv = g_in.get(&g).copied().unwrap_or(0.0);
         let ov = g_out.get(&g).copied().unwrap_or(0.0);
         // TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — `production[g]` is the
@@ -890,6 +898,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             produced: produced_here.contains(&g),
             need_tier: sim.goods.get(g as usize).map(|x| x.need_tier).unwrap_or(0),
             base_value: sim.goods.get(g as usize).map(|x| x.base_value).unwrap_or(1.0),
+            in_history, out_history, prod_history,
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));

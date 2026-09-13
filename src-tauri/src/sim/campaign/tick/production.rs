@@ -2677,9 +2677,19 @@ impl CampaignSim {
             .collect();
         // Deterministic order (the panel re-sorts by volume anyway).
         last.sort_by(|a, b| (a.hub, a.good, a.dir, a.partner).cmp(&(b.hub, b.good, b.dir, b.partner)));
-        // Per-(hub,good) total volume this year.
+        // Per-(hub,good) total volume this year, plus the same split by
+        // DIRECTION — user request: "divide that chart by export/import so I
+        // can understand how they move along the years". `dir` is already
+        // carried on every `TradeFlowAgg` row (0 inbound, 1 outbound), so this
+        // is the same fold as `vol` below, just keyed one level finer.
         let mut vol: std::collections::HashMap<(u32, u32), f32> = std::collections::HashMap::new();
-        for f in &last { *vol.entry((f.hub, f.good)).or_insert(0.0) += f.amount; }
+        let mut vol_in: std::collections::HashMap<(u32, u32), f32> = std::collections::HashMap::new();
+        let mut vol_out: std::collections::HashMap<(u32, u32), f32> = std::collections::HashMap::new();
+        for f in &last {
+            *vol.entry((f.hub, f.good)).or_insert(0.0) += f.amount;
+            let dst = if f.dir == 0 { &mut vol_in } else { &mut vol_out };
+            *dst.entry((f.hub, f.good)).or_insert(0.0) += f.amount;
+        }
         // Extend existing series (0 for goods not traded this year → visible decline).
         // This hub's local price for the good, read fresh at the New Year. A pure
         // OBSERVATION: `prices` is written here and read nowhere in the tick, so it
@@ -2693,15 +2703,35 @@ impl CampaignSim {
                 .filter(|p| p.is_finite())
                 .unwrap_or(0.0)
         };
+        // This hub's own annualised OUTPUT of the good, same reading
+        // `own_production` already gives `read_trade.rs` live — sampled once a
+        // year here so the trend chart can show it alongside import/export
+        // (user request: "and own production, if applicable").
+        let prod_at = |hub: u32, good: u32| -> f32 {
+            hubs.get(hub as usize)
+                .and_then(|h| h.production.get(good as usize))
+                .copied()
+                .filter(|p| p.is_finite())
+                .unwrap_or(0.0)
+                .max(0.0)
+                * TICKS_PER_YEAR as f32
+        };
         let mut seen: std::collections::HashSet<(u32, u32)> = std::collections::HashSet::new();
         for h in self.trade_hist.iter_mut() {
             let v = vol.get(&(h.hub, h.good)).copied().unwrap_or(0.0);
             h.vols.push(v);
             if h.vols.len() > TRADE_HIST_CAP { let d = h.vols.len() - TRADE_HIST_CAP; h.vols.drain(0..d); }
-            // Pushed and drained in lockstep with `vols`, so the two stay
-            // TAIL-aligned even on a save whose `prices` started empty.
+            // Pushed and drained in lockstep with `vols`, so all four stay
+            // TAIL-aligned even on a save whose `prices`/`in_vols`/`out_vols`/
+            // `prod_vols` started empty (rule 29 — never back-filled).
             h.prices.push(price_at(h.hub, h.good));
             if h.prices.len() > TRADE_HIST_CAP { let d = h.prices.len() - TRADE_HIST_CAP; h.prices.drain(0..d); }
+            h.in_vols.push(vol_in.get(&(h.hub, h.good)).copied().unwrap_or(0.0));
+            if h.in_vols.len() > TRADE_HIST_CAP { let d = h.in_vols.len() - TRADE_HIST_CAP; h.in_vols.drain(0..d); }
+            h.out_vols.push(vol_out.get(&(h.hub, h.good)).copied().unwrap_or(0.0));
+            if h.out_vols.len() > TRADE_HIST_CAP { let d = h.out_vols.len() - TRADE_HIST_CAP; h.out_vols.drain(0..d); }
+            h.prod_vols.push(prod_at(h.hub, h.good));
+            if h.prod_vols.len() > TRADE_HIST_CAP { let d = h.prod_vols.len() - TRADE_HIST_CAP; h.prod_vols.drain(0..d); }
             seen.insert((h.hub, h.good));
         }
         // Brand-new (hub,good) trades start a fresh series. DETERMINISM: pushing in
@@ -2715,7 +2745,12 @@ impl CampaignSim {
                 let p = self.hubs.get(hub as usize)
                     .and_then(|h| h.price.get(good as usize))
                     .copied().filter(|p| p.is_finite()).unwrap_or(0.0);
-                self.trade_hist.push(TradeHist { hub, good, vols: vec![v], prices: vec![p] });
+                self.trade_hist.push(TradeHist {
+                    hub, good, vols: vec![v], prices: vec![p],
+                    in_vols: vec![vol_in.get(&(hub, good)).copied().unwrap_or(0.0)],
+                    out_vols: vec![vol_out.get(&(hub, good)).copied().unwrap_or(0.0)],
+                    prod_vols: vec![prod_at(hub, good)],
+                });
             }
         }
         // Bound memory: if over the row cap, drop the deadest trades (lowest peak).

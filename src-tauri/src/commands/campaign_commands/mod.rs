@@ -244,7 +244,7 @@ pub fn current_world_ref(conn: &Connection) -> Result<WorldRef, String> {
 // DLC 1 "Living Trade" — tick simulation commands.
 // ═══════════════════════════════════════════════════════════════════════════
 
-use crate::sim::tick::{CampaignSim, House, JournalEntry, MineSite, ORIGIN_NONE, SpecCenter, TickGood, TickHub};
+use crate::sim::tick::{CampaignSim, House, JournalEntry, MineSite, ORIGIN_NONE, SpecCenter, TickGood, TickHub, TradeHist};
 use crate::commands::query_commands::EconomySnapshot;
 
 /// Compact clock for the Campaign Clock UI.
@@ -2882,6 +2882,18 @@ pub struct TradeFlowGood {
     /// as raw volume, without re-deriving or hand-copying the price table.
     #[serde(default)]
     pub base_value: f32,
+    /// `history` split by direction, plus this hub's own annualised output —
+    /// user request: "divide that chart by export/import ... and own
+    /// production, if applicable". Tail-aligned with `history` and with each
+    /// other, exactly like `TradeHist.prices` (rule 29) — an older save's
+    /// shorter (or empty) tail here is real, not a bug, and must never be
+    /// back-filled.
+    #[serde(default)]
+    pub in_history: Vec<f32>,
+    #[serde(default)]
+    pub out_history: Vec<f32>,
+    #[serde(default)]
+    pub prod_history: Vec<f32>,
 }
 /// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
 /// that touched this city, by who financed it.

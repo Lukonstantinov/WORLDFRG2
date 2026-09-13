@@ -3997,6 +3997,28 @@ pub struct TradeHist {
     /// worse than a short one.
     #[serde(default)]
     pub prices: Vec<f32>,
+    /// This year's IMPORT volume only (`dir == 0`) — a further split of `vols`
+    /// (which is the two directions summed), so the Flows trend chart can show
+    /// import and export as separate lines instead of one blended total (user
+    /// request: "divide that chart by export/import so I can understand how
+    /// they move along the years"). Same tail-alignment discipline as `prices`
+    /// — serde-defaulted empty, pushed/drained in lockstep with `vols` from
+    /// here on, never back-filled for the years before this field existed.
+    #[serde(default)]
+    pub in_vols: Vec<f32>,
+    /// This year's EXPORT volume only (`dir == 1`) — `out_vols[i] + in_vols[i]
+    /// == vols[i]` for every year sampled after this field existed (not
+    /// guaranteed for older, shorter tails). Same tail-alignment as `prices`.
+    #[serde(default)]
+    pub out_vols: Vec<f32>,
+    /// This hub's own annualised OUTPUT of the good, sampled once a year
+    /// alongside the others — the same reading `TradeFlowGood::own_production`
+    /// already gives live, kept as a history so the trend chart can plot it
+    /// too (user request: "and own production, if applicable" — a good with no
+    /// local production here reads as an all-zero series, which is the honest
+    /// answer, not omitted). Same tail-alignment as `prices`.
+    #[serde(default)]
+    pub prod_vols: Vec<f32>,
 }
 
 /// One milestone in a house's chronicle (its timeline view).

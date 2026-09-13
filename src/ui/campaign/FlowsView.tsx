@@ -231,104 +231,199 @@ function seasonMetaFor(latFrac: number | undefined): SeasonMeta[] {
   return [TEMPERATE_SEASONS[2], TEMPERATE_SEASONS[3], TEMPERATE_SEASONS[0], TEMPERATE_SEASONS[1]];
 }
 
-/** The full-size redesign of the per-good trend chart — replaces both the
- *  original bare sparkline AND its first "labeled" revision, which was still
- *  fixed at 260×64px and impossible to read once embedded in a real panel row
- *  (user report: "no labels, don't understand anything", then "redesign the
- *  graph completely" on the follow-up). Now a real chart: fills the row's
- *  width (viewBox + width:100%, not a fixed pixel size), three gridlines (0 /
- *  half / peak) each carrying its own value label, a live CROSSHAIR that
- *  tracks the pointer with a floating tooltip box naming the exact year and
- *  value under it — not just a native `<title>` that only shows one point at
- *  a time with no visual continuity — and the final year's value still
- *  written directly beside its point when nothing is being hovered. Line/fill
- *  colour keeps reusing the app's own good/warn/bad semantic tones (rising /
- *  flat / fallen from peak) rather than inventing a new palette. */
-function TrendChart({ vals }: { vals: number[] }) {
+/** One drawable series in `TrendChart` — a label/colour pair plus its own
+ *  values, `null` where that series has no data at that year yet (an older
+ *  save's `in_history`/`out_history`/`prod_history` tail can be SHORTER than
+ *  `history` itself, rule 29 — never back-filled, so those early years simply
+ *  aren't drawn for that one series rather than faked as zero). */
+type TrendSeries = { key: string; label: string; color: string; vals: (number | null)[] };
+
+/** Right-aligns a shorter (or absent) series onto `n` years, so index `i`
+ *  always means "the same YEAR" across every series passed to `TrendChart`
+ *  regardless of which one started being recorded later. */
+function alignTail(n: number, series: number[] | undefined): (number | null)[] {
+  const s = series ?? [];
+  const pad = n - s.length;
+  return Array.from({ length: n }, (_, i) => (i < pad ? null : s[i - pad]));
+}
+
+/** The trend chart for one good — user request: "divide that chart by export/
+ *  import so I can understand how they move along the years", then "and own
+ *  production, if applicable". Replaces the single blended total line with up
+ *  to three real series (export / import / own production, the last one
+ *  included only when this city has actually produced any of the good —
+ *  "if applicable" means never drawing a flat zero line for a good it
+ *  doesn't make) plus a legend, since a multi-series chart needs one. Falls
+ *  back to the single combined line for a save whose split history hasn't
+ *  started accumulating yet (`in_history`/`out_history` both still empty),
+ *  which is the honest reading rather than pretending a split that isn't
+ *  there. Fills the row's width (viewBox + width:100%), three gridlines (0 /
+ *  half / peak), and a live crosshair + floating tooltip that lists every
+ *  series' value at the hovered year, not just one. */
+function TrendChart({ history, inHistory, outHistory, prodHistory }: {
+  history: number[]; inHistory?: number[]; outHistory?: number[]; prodHistory?: number[];
+}) {
   const [hoverI, setHoverI] = useState<number | null>(null);
-  if (vals.length < 2) return <span style={{ color: T.inkFaint, fontSize: FZ.micro }}>no history yet</span>;
-  const n = vals.length;
-  const max = Math.max(...vals, 1e-6);
-  const last = vals[n - 1];
-  const fallen = last < max * 0.6;
-  const rising = last >= vals[n - 2];
-  const color = fallen ? T.bad : rising ? T.good : T.warn;
+  if (history.length < 2) return <span style={{ color: T.inkFaint, fontSize: FZ.micro }}>no history yet</span>;
+  const n = history.length;
+
+  const inV = alignTail(n, inHistory);
+  const outV = alignTail(n, outHistory);
+  const prodV = alignTail(n, prodHistory);
+  const hasSplit = inV.some((v) => v != null) || outV.some((v) => v != null);
+  const hasProd = prodV.some((v) => (v ?? 0) > 0);
+
+  // The pre-split fallback keeps the original rising/falling/fallen-from-peak
+  // colour reading a single blended line had, rather than flattening it to
+  // one static colour now that most goods carry the real split.
+  const histMax = Math.max(...history, 1e-6);
+  const histLast = history[n - 1];
+  const fallbackColor = histLast < histMax * 0.6 ? T.bad
+    : histLast >= history[n - 2] ? T.good : T.warn;
+
+  const series: TrendSeries[] = hasSplit
+    ? [
+        { key: "out", label: "export", color: DIR_OUT, vals: outV },
+        { key: "in", label: "import", color: DIR_IN, vals: inV },
+        ...(hasProd ? [{ key: "prod", label: "own production", color: T.good, vals: prodV }] as TrendSeries[] : []),
+      ]
+    : [{ key: "total", label: "trade volume", color: fallbackColor, vals: history }];
+
+  const allVals = series.flatMap((s) => s.vals).filter((v): v is number => v != null);
+  const max = Math.max(...allVals, 1e-6);
+  const mid = max / 2;
 
   // A virtual coordinate space, scaled to the real rendered width via
   // `width="100%"` + `viewBox` below — this is what makes the chart fill its
   // row instead of sitting at a fixed 260px regardless of panel width.
   const W = 600, H = 132;
-  const padTop = 20, padBottom = 24, padLeft = 6, padRight = 56;
+  const padTop = 20, padBottom = 24, padLeft = 6, padRight = 60;
   const plotW = W - padLeft - padRight, plotH = H - padTop - padBottom;
   const x = (i: number) => padLeft + (n > 1 ? (i / (n - 1)) * plotW : 0);
   const y = (v: number) => padTop + plotH - (v / max) * plotH;
   const baseY = padTop + plotH;
-  const mid = max / 2;
 
-  const linePts = vals.map((v, i) => `${x(i)},${y(v)}`).join(" ");
-  const areaPts = `${x(0)},${baseY} ${linePts} ${x(n - 1)},${baseY}`;
+  // Draw only the runs where a series actually has data — a leading `null`
+  // stretch (an older save whose split hasn't started) simply isn't drawn,
+  // never faked as zero.
+  const linePathOf = (vals: (number | null)[]) => {
+    const segs: string[] = [];
+    let open = false;
+    vals.forEach((v, i) => {
+      if (v == null) { open = false; return; }
+      segs.push(`${open ? "L" : "M"}${x(i)},${y(v)}`);
+      open = true;
+    });
+    return segs.join(" ");
+  };
 
   const nearestIndex = (clientX: number, rect: DOMRect) => {
     const relX = ((clientX - rect.left) / Math.max(rect.width, 1)) * W;
     return Math.max(0, Math.min(n - 1, Math.round(((relX - padLeft) / plotW) * (n - 1))));
   };
+  const lastIdxOf = (vals: (number | null)[]) => {
+    for (let i = vals.length - 1; i >= 0; i--) if (vals[i] != null) return i;
+    return -1;
+  };
 
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
-      style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
-      onMouseMove={(e) => setHoverI(nearestIndex(e.clientX, e.currentTarget.getBoundingClientRect()))}
-      onMouseLeave={() => setHoverI(null)}
-    >
-      {/* Three gridlines — 0 / half / peak — each carrying its own value label,
-          the scale the very first sparkline never showed at all. */}
-      {[0, mid, max].map((v, i) => (
-        <g key={i}>
-          <line x1={padLeft} y1={y(v)} x2={padLeft + plotW} y2={y(v)} stroke={T.lineSoft} strokeWidth={1}
-            strokeDasharray={v === 0 ? undefined : "2,4"} />
-          <text x={padLeft} y={y(v) - (v === 0 ? -14 : 5)} fontSize={FZ.small} fill={T.inkFaint}>{fmt(v)}</text>
-        </g>
-      ))}
-      {/* x-axis: which year is which end of the line. */}
-      <text x={padLeft} y={H - 4} fontSize={FZ.small} fill={T.inkFaint}>{n - 1} yr ago</text>
-      <text x={padLeft + plotW} y={H - 4} fontSize={FZ.small} fill={T.inkFaint} textAnchor="end">last yr</text>
-      {/* The area + line itself. */}
-      <polygon points={areaPts} fill={color} opacity={0.16} />
-      <polyline points={linePts} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
-      {/* Crosshair + hover dot — follows the pointer continuously rather than
-          only answering one point at a time via a native tooltip. */}
-      {hoverI != null && (
-        <>
-          <line x1={x(hoverI)} y1={padTop} x2={x(hoverI)} y2={baseY} stroke={T.inkFaint} strokeWidth={1} strokeDasharray="2,3" />
-          <circle cx={x(hoverI)} cy={y(vals[hoverI])} r={4.5} fill={color} stroke={T.bg} strokeWidth={1.5} />
-        </>
+    <div>
+      {/* A legend is required once a chart carries more than one series — a
+          reader must not have to guess which colour is which. */}
+      {series.length > 1 && (
+        <div style={{ display: "flex", gap: SPACE.md, marginBottom: 3, flexWrap: "wrap" }}>
+          {series.map((s) => (
+            <span key={s.key} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: FZ.small, color: T.inkMid }}>
+              <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
+              {s.label}
+            </span>
+          ))}
+        </div>
       )}
-      {hoverI == null && <circle cx={x(n - 1)} cy={y(last)} r={3.5} fill={color} />}
-      {/* The floating tooltip, clamped inside the plot area so it never spills
-          off either edge. */}
-      {hoverI != null && (() => {
-        const tw = 96, th = 34;
-        const cx = Math.max(padLeft, Math.min(padLeft + plotW - tw, x(hoverI) - tw / 2));
-        const above = y(vals[hoverI]) - th - 10;
-        const cy = above < 0 ? y(vals[hoverI]) + 10 : above;
-        const yearsAgo = n - 1 - hoverI;
-        return (
-          <g>
-            <rect x={cx} y={cy} width={tw} height={th} rx={5} fill={T.panel} stroke={T.line} strokeWidth={1} />
-            <text x={cx + tw / 2} y={cy + 14} textAnchor="middle" fontSize={FZ.small} fill={T.inkMid}>
-              {yearsAgo === 0 ? "last yr" : `${yearsAgo} yr ago`}
-            </text>
-            <text x={cx + tw / 2} y={cy + 28} textAnchor="middle" fontSize={FZ.base} fontWeight={700} fill={color}>
-              {fmt(vals[hoverI])}/yr
-            </text>
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+        style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
+        onMouseMove={(e) => setHoverI(nearestIndex(e.clientX, e.currentTarget.getBoundingClientRect()))}
+        onMouseLeave={() => setHoverI(null)}
+      >
+        {/* Three gridlines — 0 / half / peak — each carrying its own value
+            label, the scale the very first sparkline never showed at all. */}
+        {[0, mid, max].map((v, i) => (
+          <g key={i}>
+            <line x1={padLeft} y1={y(v)} x2={padLeft + plotW} y2={y(v)} stroke={T.lineSoft} strokeWidth={1}
+              strokeDasharray={v === 0 ? undefined : "2,4"} />
+            <text x={padLeft} y={y(v) - (v === 0 ? -14 : 5)} fontSize={FZ.small} fill={T.inkFaint}>{fmt(v)}</text>
           </g>
-        );
-      })()}
-      {/* The last point's value, written directly beside it, when nothing else
-          is being hovered — the one number worth reading without interacting. */}
-      {hoverI == null && (
-        <text x={x(n - 1) + 8} y={y(last) + 4} fontSize={FZ.base} fill={color} fontWeight={700}>{fmt(last)}</text>
-      )}
-    </svg>
+        ))}
+        {/* x-axis: which year is which end of the line. */}
+        <text x={padLeft} y={H - 4} fontSize={FZ.small} fill={T.inkFaint}>{n - 1} yr ago</text>
+        <text x={padLeft + plotW} y={H - 4} fontSize={FZ.small} fill={T.inkFaint} textAnchor="end">last yr</text>
+        {/* One line per series — no area fill once there's more than one, since
+            overlapping fills read as mud; a single fallback series (the
+            pre-split, combined-total reading) keeps its fill so it still
+            reads as a real chart, not a bare line. `history` itself never has
+            gaps, unlike a split series on an older save. */}
+        {series.length === 1 && (
+          <polygon points={`${x(0)},${baseY} ${history.map((v, i) => `${x(i)},${y(v)}`).join(" ")} ${x(n - 1)},${baseY}`}
+            fill={series[0].color} opacity={0.16} />
+        )}
+        {series.map((s) => (
+          <path key={s.key} d={linePathOf(s.vals)} fill="none" stroke={s.color} strokeWidth={2.25}
+            strokeLinejoin="round" strokeLinecap="round" />
+        ))}
+        {/* Crosshair — follows the pointer continuously across every series at
+            once, rather than answering one point at a time via a native
+            tooltip. */}
+        {hoverI != null && (
+          <line x1={x(hoverI)} y1={padTop} x2={x(hoverI)} y2={baseY} stroke={T.inkFaint} strokeWidth={1} strokeDasharray="2,3" />
+        )}
+        {series.map((s) => {
+          const v = hoverI != null ? s.vals[hoverI] : null;
+          if (v != null) {
+            return <circle key={`h-${s.key}`} cx={x(hoverI!)} cy={y(v)} r={4} fill={s.color} stroke={T.bg} strokeWidth={1.5} />;
+          }
+          // Nothing hovered: mark + label each series' own LAST real point,
+          // so a shorter series (a good with no recorded production, say)
+          // still ends its line legibly instead of at an unlabeled float.
+          const li = lastIdxOf(s.vals);
+          if (hoverI == null && li >= 0) {
+            const lv = s.vals[li]!;
+            return (
+              <g key={`e-${s.key}`}>
+                <circle cx={x(li)} cy={y(lv)} r={3} fill={s.color} />
+                <text x={x(li) + 7} y={y(lv) + 3} fontSize={FZ.small} fill={s.color} fontWeight={700}>{fmt(lv)}</text>
+              </g>
+            );
+          }
+          return null;
+        })}
+        {/* The floating tooltip — lists every series with data at the hovered
+            year, clamped inside the plot area so it never spills off either
+            edge. */}
+        {hoverI != null && (() => {
+          const rows = series.filter((s) => s.vals[hoverI!] != null);
+          if (rows.length === 0) return null;
+          const tw = 118, th = 16 + rows.length * 14;
+          const cx = Math.max(padLeft, Math.min(padLeft + plotW - tw, x(hoverI) - tw / 2));
+          const topY = Math.min(...rows.map((s) => y(s.vals[hoverI!]!)));
+          const above = topY - th - 10;
+          const cy = above < 0 ? topY + 10 : above;
+          const yearsAgo = n - 1 - hoverI;
+          return (
+            <g>
+              <rect x={cx} y={cy} width={tw} height={th} rx={5} fill={T.panel} stroke={T.line} strokeWidth={1} />
+              <text x={cx + tw / 2} y={cy + 13} textAnchor="middle" fontSize={FZ.small} fill={T.inkMid}>
+                {yearsAgo === 0 ? "last yr" : `${yearsAgo} yr ago`}
+              </text>
+              {rows.map((s, i) => (
+                <text key={s.key} x={cx + 8} y={cy + 27 + i * 14} fontSize={FZ.small} fill={s.color} fontWeight={700}>
+                  {s.label} {fmt(s.vals[hoverI!]!)}/yr
+                </text>
+              ))}
+            </g>
+          );
+        })()}
+      </svg>
+    </div>
   );
 }
 
@@ -967,7 +1062,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                     <div style={{ color: T.inkFaint, fontSize: FZ.micro, marginBottom: 2 }}>
                       TRADE VOLUME, LAST {g.history.length} YEARS
                     </div>
-                    <TrendChart vals={g.history} />
+                    <TrendChart history={g.history} inHistory={g.in_history} outHistory={g.out_history} prodHistory={g.prod_history} />
                   </div>
                   {/* TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — own produce vs
                       passing-through vs bought-for-itself, derived with no new

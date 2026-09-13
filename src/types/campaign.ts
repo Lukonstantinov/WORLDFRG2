@@ -688,6 +688,14 @@ export interface TradeFlowGood {
   /** The good's `base_value` (grain-equivalent numeraire price) — lets the
    *  frontend rank by trade VALUE (volume × base_value) as well as raw volume. */
   base_value?: number;
+  /** `history` split by direction, plus this hub's own annualised output —
+   *  each entry lines up with the SAME index of `history` (both grow/drain in
+   *  lockstep server-side), but an older save's tail here can be SHORTER than
+   *  `history` (this field didn't always exist) — zip from the END, never the
+   *  start, and never assume equal length. */
+  in_history?: number[];
+  out_history?: number[];
+  prod_history?: number[];
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {
