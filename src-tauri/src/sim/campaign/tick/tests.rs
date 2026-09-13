@@ -138,7 +138,7 @@
             // a campaign with no province layer can never see a proclamation (a
             // realm is founded on a province writ), so the realm layer is a
             // structural no-op here and the dynamics run stays bit-identical.
-            realms: vec![], leagues: vec![], prov_realm: vec![],
+            realms: vec![], leagues: vec![], kontors: vec![], prov_realm: vec![],
             prov_export_accum: vec![], prov_import_accum: vec![],
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
@@ -466,6 +466,144 @@
         // cannot move within a single `dispatch` call.
         assert!(s.in_transit.iter().any(|c| c.to == 1 && c.good == 0),
             "at peace, iron trades normally");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 4.2 · `BLOCKADE_STAGING_DOSE == 0.0` must
+    /// leave a war between two hubs' own trade UNCHANGED — same ship-direct
+    /// behaviour as if there were no war at all, even with a real neutral
+    /// stop on the way that the mechanism COULD use at a nonzero dose.
+    #[test]
+    fn blockade_staging_is_a_noop_at_zero_dose() {
+        assert_eq!(BLOCKADE_STAGING_DOSE, 0.0);
+        // NOT a good in `CONTRABAND_GOODS` — this test is about 4.2's routed
+        // blockade specifically, and iron/timber/etc would be blocked by 4.1's
+        // own contraband mechanism regardless of anything 4.2 does.
+        let goods = vec![good("wool", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),   // seller, at war with hub 2
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),     // a neutral stop on the way
+            hub(2, 10.0, 0.0, 9000.0, vec![10.0], 0),    // the enemy / buyer
+        ];
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        stock_set_total(&mut s.hubs[0].stock, 0, 5000.0);
+        s.hubs[0].war_with = 2;
+        s.hubs[2].war_with = 0;
+        s.wars.push(War {
+            a: 0, b: 2, start_tick: s.tick, chest_a: 0.0, chest_b: 0.0, levies: 0.0,
+            levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0,
+            cause: "test".into(), goal: 0, score: 0.0, round: 0,
+            peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1, blockade_chronicled: false,
+        });
+        // A real stop exists (hub 1 is on the way from 0 to 2), so at any
+        // nonzero dose the mechanism WOULD have something to use.
+        assert_eq!(s.staging_hop(0, 2, s.ship_leg_max_km, s.caravan_leg_max_km), Some(1),
+            "sanity check: a real neutral stop exists for this fixture");
+        let needs = vec![vec![0.0], vec![0.0], vec![50.0]];
+        let journal0 = s.journal.len();
+        s.dispatch(&needs);
+        assert!(s.in_transit.iter().any(|c| c.to == 2 && c.via < 0 && c.good == 0),
+            "at zero dose, cargo for the enemy must still sail DIRECT, not staged");
+        assert!(!s.in_transit.iter().any(|c| c.to == 1),
+            "at zero dose, nothing is diverted through the neutral stop");
+        assert_eq!(s.journal.len(), journal0, "a no-op mechanism chronicles nothing");
+        assert!(!s.wars[0].blockade_chronicled, "never chronicled at zero dose");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 4.3 — the pure decision `dispatch` reuses
+    /// at all three of its call sites: two hubs sharing a live League, or
+    /// either trading through the OTHER's standing Kontor, are privileged;
+    /// two unleagued hubs, or two DIFFERENT leagues, are not.
+    #[test]
+    fn lane_league_privileged_covers_membership_and_kontor_both_ways() {
+        assert!(CampaignSim::lane_league_privileged(0, 0, -1, -1), "same league ⇒ privileged");
+        assert!(!CampaignSim::lane_league_privileged(-1, -1, -1, -1), "no league anywhere ⇒ not privileged");
+        assert!(!CampaignSim::lane_league_privileged(0, 1, -1, -1), "different leagues ⇒ not privileged");
+        assert!(CampaignSim::lane_league_privileged(0, -1, -1, 0),
+            "a member trading through the OTHER end's Kontor of its own league ⇒ privileged");
+        assert!(CampaignSim::lane_league_privileged(-1, 0, 0, -1),
+            "…and symmetrically from the other side");
+        assert!(!CampaignSim::lane_league_privileged(-1, -1, 0, 0),
+            "a Kontor host trading with ANOTHER unleagued hub is not itself a member");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 4.4 · a league with a real external trade
+    /// tie above `LEAGUE_FLOW_MIN` and a purse that can afford `KONTOR_COST`
+    /// establishes a Kontor at that partner — never at a member, never at a
+    /// hub already hosting one.
+    #[test]
+    fn a_league_establishes_a_kontor_at_its_best_external_trade_tie() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0), // member/seat
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),   // member
+            hub(2, 10.0, 0.0, 9000.0, vec![10.0], 0),  // non-member, weak tie
+            hub(3, 15.0, 0.0, 9000.0, vec![10.0], 0),  // non-member, STRONG tie — the pick
+        ];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].league = 0;
+        s.hubs[1].league = 0;
+        s.leagues.push(League {
+            id: 0, name: "T".into(), seat_hub: 0, purse: KONTOR_COST + 10.0, founded_tick: 0,
+            dissolved_tick: 0, last_threat_tick: s.tick, boycotts: vec![], escort_until_tick: 0, events: vec![],
+        });
+        s.flow_year = vec![(0, 2, LEAGUE_FLOW_MIN + 1.0), (1, 3, LEAGUE_FLOW_MIN + 100.0)];
+        let journal0 = s.journal.len();
+        s.maybe_establish_kontors();
+        assert_eq!(s.kontors.len(), 1, "one Kontor must be established");
+        assert_eq!(s.kontors[0].host_hub, 3, "the STRONGEST external tie must be picked, not merely the first");
+        assert_eq!(s.kontors[0].league, 0);
+        assert_eq!(s.kontors[0].expelled_tick, 0);
+        assert!(s.leagues[0].purse < KONTOR_COST + 10.0, "establishing it must actually spend the purse");
+        assert!(s.journal.len() > journal0, "establishing a Kontor is chronicled");
+        assert_eq!(s.kontor_league_at(3), 0, "the read `dispatch` uses must see it");
+        assert_eq!(s.kontor_league_at(2), -1, "…and see nothing at a hub with no Kontor");
+
+        // A second call must not establish a SECOND Kontor for the same league.
+        s.maybe_establish_kontors();
+        assert_eq!(s.kontors.len(), 1, "one league holds at most one standing Kontor at a time");
+    }
+
+    /// A host already at war with a member of the League holding its Kontor
+    /// is far more likely to expel it than an ordinary yearly roll would —
+    /// the political-event half of 4.4.
+    #[test]
+    fn a_host_at_war_with_a_member_is_likelier_to_expel_its_kontor() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0), // member
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),   // host, at war with hub 0
+        ];
+        let mut s = sim(hubs, goods);
+        s.tick = 1000; // NOT zero — `expelled_tick` is set to `self.tick`, and
+                       // 0 is also the "never expelled" sentinel this test
+                       // reads, so an expulsion at tick 0 would be invisible.
+        s.hubs[0].league = 0;
+        s.leagues.push(League {
+            id: 0, name: "T".into(), seat_hub: 0, purse: 0.0, founded_tick: 0,
+            dissolved_tick: 0, last_threat_tick: s.tick, boycotts: vec![], escort_until_tick: 0, events: vec![],
+        });
+        s.kontors.push(Kontor { league: 0, host_hub: 1, established_tick: 0, expelled_tick: 0 });
+        s.hubs[1].war_with = 0;
+        // Sweep enough seeds that a real difference in EXPECTED expulsion
+        // rate (not a single lucky roll) shows up — mirrors how other
+        // probabilistic gates in this file avoid asserting on one draw.
+        let mut expelled_at_war = 0;
+        let mut expelled_at_peace = 0;
+        for seed in 0..200u32 {
+            let mut sw = s.clone();
+            sw.seed = seed as u64;
+            sw.maybe_expel_kontors();
+            if sw.kontors[0].expelled_tick != 0 { expelled_at_war += 1; }
+
+            let mut sp = s.clone();
+            sp.seed = seed as u64;
+            sp.hubs[1].war_with = -1;
+            sp.maybe_expel_kontors();
+            if sp.kontors[0].expelled_tick != 0 { expelled_at_peace += 1; }
+        }
+        assert!(expelled_at_war > expelled_at_peace,
+            "war with a member must raise the expulsion rate ({expelled_at_war} vs {expelled_at_peace} of 200)");
     }
 
     /// Charter exclusivity (`CHARTER_EXCLUSIVE_DOSE`) — the pure decision at
@@ -3224,7 +3362,8 @@
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
             levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
-            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false });
         let w0 = s.houses[0].wealth;
         s.tick = 0;
         s.update_wars(0); // wage the first year — levy, no quarterly round due yet
@@ -3295,7 +3434,8 @@
         s.hubs[0].war_with = 1; s.hubs[1].war_with = 0;
         s.wars.push(War { a: 0, b: 1, start_tick: 0, chest_a: 0.0, chest_b: 0.0,
             levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0, cause: "test".into(), goal: WAR_GOAL_PLUNDER,
-            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false });
         // Advance year by year (each year runs ~4 quarterly rounds of catch-up); the war
         // must never exceed the HARD cap, and must be gone by the time we pass it.
         for yr in 1..=(WAR_ROUND_HARD_CAP as u32 / 4 + 3) {
@@ -7113,7 +7253,8 @@
         s.wars.push(War { a: 0, b: 1, start_tick: s.tick, chest_a: 0.0, chest_b: 0.0,
             levies: 0.0, levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0,
             cause: "test".into(), goal: WAR_GOAL_PLUNDER,
-            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false });
 
         s.maybe_form_leagues(start_yr);
         assert_eq!(s.leagues.len(), 1, "a threatened, tiered, well-traded seat must found a league");
@@ -7196,6 +7337,91 @@
             "a boycotted target must receive nothing from the boycotting hub");
         assert_eq!(stock_of(&s.hubs[0].stock, 0), stock0,
             "the boycotted lane being the only target, the seller's stock must not move either");
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 4.5 · the boycott mechanism, dosed at
+    /// `LEAGUE_BOYCOTT_MAX == 0`, is a true no-op — the diet's own vote
+    /// branch never fires, whatever war or realm the world carries.
+    #[test]
+    fn n7_3_boycott_vote_is_a_noop_at_zero_dose() {
+        assert_eq!(LEAGUE_BOYCOTT_MAX, 0, "4.5 ships the boycott VOTE at zero dose");
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0), // league seat/member
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),   // a second member, at war
+            hub(2, 10.0, 0.0, 9000.0, vec![10.0], 0),  // the enemy — a real boycott candidate
+        ];
+        let mut s = sim(hubs, goods);
+        s.leagues.push(League {
+            id: 0, name: "T".into(), seat_hub: 0, purse: 1000.0, founded_tick: 0,
+            dissolved_tick: 0, last_threat_tick: s.tick, boycotts: vec![], escort_until_tick: 0, events: vec![],
+        });
+        s.hubs[0].league = 0;
+        s.hubs[1].league = 0;
+        s.hubs[1].war_with = 2;
+        s.hubs[2].war_with = 1;
+        s.wars.push(War {
+            a: 1, b: 2, start_tick: s.tick, chest_a: 0.0, chest_b: 0.0, levies: 0.0,
+            levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0,
+            cause: "test".into(), goal: 0, score: 0.0, round: 0,
+            peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1, blockade_chronicled: false,
+        });
+        // A real candidate exists (`choose_boycott_target` would pick hub 2),
+        // so the ONLY thing stopping a vote is the dose itself.
+        assert_eq!(s.choose_boycott_target(0, 0), Some(2),
+            "sanity check: a real target exists for this fixture");
+        s.run_league_diet();
+        assert!(s.leagues[0].boycotts.is_empty(), "zero dose must vote no boycott, whatever the threat");
+    }
+
+    /// The target-selection rule itself (`choose_boycott_target`), factored
+    /// out and tested as a pure decision independent of the dose — the same
+    /// discipline `charter_bars_sale`/`leg_exceeds_range` already apply.
+    /// Prefers a real war a member is fighting over a merely-threatening
+    /// great power, and never names a member of its own league.
+    #[test]
+    fn choose_boycott_target_prefers_a_real_war() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),
+            hub(2, 10.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].league = 0;
+        s.hubs[1].league = 0;
+        s.wars.push(War {
+            a: 1, b: 2, start_tick: s.tick, chest_a: 0.0, chest_b: 0.0, levies: 0.0,
+            levies_a: 0.0, levies_b: 0.0, battles: Vec::new(), cargo_lost: 0,
+            cause: "test".into(), goal: 0, score: 0.0, round: 0,
+            peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1, blockade_chronicled: false,
+        });
+        assert_eq!(s.choose_boycott_target(0, 0), Some(2),
+            "a war between a member and a non-member must name the non-member");
+    }
+
+    /// With no war anywhere, the fallback names a threatening great power's
+    /// capital instead of returning nothing.
+    #[test]
+    fn choose_boycott_target_falls_back_to_a_threatening_realm() {
+        let goods = vec![good("iron", 2, 1, 5.0, 0.45, false)];
+        let hubs = vec![
+            hub(0, 0.0, 0.0, 9000.0, vec![5000.0], 0),
+            hub(1, 5.0, 0.0, 9000.0, vec![10.0], 0),
+        ];
+        let mut s = sim(hubs, goods);
+        s.hubs[0].league = 0;
+        s.realms.push(Realm {
+            id: 0, name: "Rival".into(), title: "Kingdom".into(), capital_hub: 1,
+            origin_realm: -1, ruling_house: 0, rank: 2, autonomy: 0,
+            provinces: vec![], vassals: vec![], treasury: 0.0, debts: 0.0,
+            legitimacy: 0.5, cohesion: 0.5, founded_tick: 0, fallen_tick: 0,
+            events: vec![], ruler: -1, regent: -1, family: vec![],
+            tax_rates: [0.0, 0.0], tithe_last_year: 0.0, tax_farm: None,
+            founding_path: 0, government: 0,
+        });
+        assert_eq!(s.choose_boycott_target(0, 0), Some(1),
+            "no war anywhere ⇒ fall back to the threatening realm's capital");
     }
 
     /// INSTITUTIONS_BUILD_ORDER.md 1.3 · a league whose purse can afford it fits

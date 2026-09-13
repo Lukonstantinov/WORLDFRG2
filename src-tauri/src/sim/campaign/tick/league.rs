@@ -53,6 +53,45 @@ pub(crate) const LEAGUE_ESCORT_COST: f32 = 20.0;
 /// Multiplier on voyage loss probability for a lane between two hubs of the
 /// SAME league while its escort is active this year.
 pub(crate) const LEAGUE_ESCORT_LOSS_MULT: f32 = 0.5;
+/// INSTITUTIONS_BUILD_ORDER.md 4.3 · League privileges — the first thing that
+/// makes membership worth anything beyond the convoy escort (1.3). A
+/// member-to-member lane's FREIGHT is cheaper than an ordinary lane's, the
+/// same shape `GUILDHALL_FREIGHT` (0.85) already uses at a hub's own
+/// warehouse. Applied only to the house-carried leg (the tariff below is the
+/// same restriction) — 96% of shipments move ownerless and never reach
+/// either check (`ACTORS_AND_CARRIAGE_PLAN.md` §5.1), so this is a real but
+/// narrow privilege, not a market-wide rewrite. Shipped LIVE rather than
+/// dose-walked from a no-op: unlike 4.2's routed blockade (a routing
+/// decision that could, at a large enough dose, concentrate trade toward
+/// whichever member happens to be richest — the N2/N4 lesson) or 4.5's
+/// boycott (an EXCLUSION), a discount on a narrow, already-taxed lane class
+/// carries none of that shape; it is measured against the same gates below
+/// rather than assumed safe.
+pub(crate) const LEAGUE_FREIGHT_DISCOUNT: f32 = 0.85;
+/// The tariff half of 4.3 — a multiplier on BOTH the export and import
+/// tariff rate for a member-to-member sale (1.0 = full rate = no privilege).
+/// A real exemption (0.0) would let two members trade entirely tax-free,
+/// which is a stronger claim than any attested medieval Hanse actually won
+/// (partial toll relief, not universal free trade) — `0.5` is a real,
+/// nameable privilege without inventing a historically ungrounded absolute.
+pub(crate) const LEAGUE_TARIFF_MULT: f32 = 0.5;
+
+/// INSTITUTIONS_BUILD_ORDER.md 4.4 · THE KONTOR — one per league at a time,
+/// established at the non-member hub the league trades with most, once that
+/// tie clears the same `LEAGUE_FLOW_MIN` threshold formation itself uses (a
+/// Kontor is a trading-post decision, not a diplomatic one — the flow tie is
+/// the right signal for both). Costs the purse a one-off outlay; a league
+/// that never accrues enough dues never establishes one — bit-identical to
+/// before this slice (`n7_a_world_with_no_leagues_is_bit_identical` still
+/// holds: zero members ⇒ zero purse ⇒ never affords one).
+pub(crate) const KONTOR_COST: f32 = 40.0;
+/// A host city already fighting a member, or one whose own unrest is high,
+/// may expel a standing Kontor — a small yearly roll, scaled up by either
+/// condition. Kept small: a Kontor that vanished as often as it formed
+/// would never accumulate the trade history that makes it worth building.
+pub(crate) const KONTOR_EXPEL_CHANCE: f32 = 0.02;
+pub(crate) const KONTOR_EXPEL_CHANCE_AT_WAR: f32 = 0.25;
+pub(crate) const KONTOR_EXPEL_UNREST_MULT: f32 = 0.5;
 
 /// A pure yearly decision for one league — dues to collect, who leaves, who
 /// the seat becomes if it fell, and (once dosed) a boycott to open. Split
@@ -83,6 +122,30 @@ impl CampaignSim {
                 && (self.hubs[w.a as usize].component == comp || self.hubs[w.b as usize].component == comp)
         });
         war_here || self.realms.iter().any(|r| r.fallen_tick == 0 && r.rank >= 2)
+    }
+
+    /// INSTITUTIONS_BUILD_ORDER.md 4.5 — the deterministic target-selection
+    /// rule N7.3 left open: which rival does the diet name? Prefers a real
+    /// war a member is fighting (the Denmark 1361-70 case — a war IS the
+    /// concrete threat `component_threatened` reads); falls back to the
+    /// seat hub of the strongest threatening great power (rank ≥ 2) when no
+    /// member is at war. Neither `self.wars` nor `self.realms` is a
+    /// `HashMap`, so scanning in index order is already deterministic.
+    pub(crate) fn choose_boycott_target(&self, li: usize, seat: usize) -> Option<usize> {
+        let n = self.hubs.len();
+        for w in &self.wars {
+            let (a, b) = (w.a as usize, w.b as usize);
+            if a >= n || b >= n { continue; }
+            let a_member = self.hubs[a].league == li as i32;
+            let b_member = self.hubs[b].league == li as i32;
+            if a_member && !b_member { return Some(b); }
+            if b_member && !a_member { return Some(a); }
+        }
+        self.realms.iter()
+            .filter(|r| r.fallen_tick == 0 && r.rank >= 2)
+            .map(|r| r.capital_hub as usize)
+            .filter(|&h| h < n && h != seat)
+            .min() // deterministic: lowest capital hub index among qualifying realms
     }
 
     /// Is hub `h` free to join a league right now — no league already, and
@@ -156,7 +219,13 @@ impl CampaignSim {
                 boycotts: vec![], escort_until_tick: 0,
                 events: vec![RealmEvent {
                     tick: self.tick, kind: "league_founded".into(),
-                    text: format!("{} founded with {} members", name, member_count),
+                    // 4.3 · names the privilege in the founding line itself, since a
+                    // per-shipment chronicle entry for a discount that applies to
+                    // every member-to-member sale would flood the journal rather
+                    // than inform it — the founding is the one legible moment.
+                    text: format!(
+                        "{} founded with {} members, trading between themselves at reduced tariff and freight",
+                        name, member_count),
                 }],
             });
         }
@@ -210,15 +279,21 @@ impl CampaignSim {
         } else {
             (None, false)
         };
-        // N7.3 (§4.1) — the diet MAY vote ONE boycott, walked from
-        // `LEAGUE_BOYCOTT_MAX = 0`: the branch is real code, but at zero it
-        // never fires, so this is a true no-op rather than a disabled
-        // feature (`n7_boycott_is_inert_at_zero`).
-        let boycott = if LEAGUE_BOYCOTT_MAX > 0 {
-            // Not yet chosen: the target-selection rule (which rival to name,
-            // vote weight, cause) is deliberately left for the walk above
-            // zero dose — see §4.1/§4.2 of the plan.
-            None::<Boycott>
+        // N7.3 (§4.1, closed by INSTITUTIONS_BUILD_ORDER.md 4.5) — the diet
+        // MAY vote ONE boycott, walked from `LEAGUE_BOYCOTT_MAX`: at 0 the
+        // branch is real code that never fires (`n7_boycott_is_inert_at_
+        // zero`); above zero, the diet names a target and votes it, up to
+        // `LEAGUE_BOYCOTT_MAX` STANDING boycotts at once (never re-voting a
+        // target it already boycotts). Deterministic target selection,
+        // mirroring §3.2's own "the trigger is about the actual threat, not
+        // an abstract set": the enemy hub of a war touching this league's
+        // seat's component, if one exists, else the seat hub of the
+        // strongest threatening rank-≥2 realm.
+        let active_boycotts = league.boycotts.iter().filter(|b| b.until_tick > self.tick).count();
+        let boycott = if LEAGUE_BOYCOTT_MAX > 0 && (active_boycotts as u32) < LEAGUE_BOYCOTT_MAX {
+            self.choose_boycott_target(li, seat)
+                .filter(|&t| !league.boycotts.iter().any(|b| b.until_tick > self.tick && b.target == t as u32))
+                .map(|target| Boycott { target: target as u32, good: -1, until_tick: self.tick + LEAGUE_BOYCOTT_TICKS })
         } else {
             None
         };
@@ -258,6 +333,23 @@ impl CampaignSim {
             self.leagues[li].last_threat_tick = self.tick;
         }
         if let Some(b) = c.boycott {
+            // 4.5 · a real, nameable vote — the whole point of dosing this
+            // above zero rather than leaving it structurally present and
+            // silent. Chronicled once, at the vote itself, never per
+            // shipment refused (`dispatch`'s own `hub_boycotts` check is
+            // silent by design — see that check's own doc comment).
+            let target = b.target as usize;
+            if target < self.hubs.len() {
+                let (ln, tn) = (self.leagues[li].name.clone(), self.hubs[target].name.clone());
+                self.leagues[li].events.push(RealmEvent {
+                    tick: self.tick, kind: "boycott_voted".into(),
+                    text: format!("{ln} votes to boycott {tn}"),
+                });
+                self.journal.push(JournalEntry {
+                    tick: self.tick, kind: "boycott_voted".into(), hub: target as i32, good: -1, value: 0.0,
+                    text: format!("{ln} votes to boycott {tn}"),
+                });
+            }
             self.leagues[li].boycotts.push(b);
         }
         self.leagues[li].boycotts.retain(|b| b.until_tick > self.tick);
@@ -309,5 +401,104 @@ impl CampaignSim {
             let choice = self.decide_league_diet_one(li);
             self.apply_league_diet_one(choice);
         }
+    }
+
+    /// Is hub `h` currently hosting an ACTIVE Kontor for league `li` — used
+    /// both to skip a league that already has one (one Kontor at a time,
+    /// §4.4's own minimal scope) and to skip a hub already hosting one for
+    /// ANOTHER league (a host may not double-book).
+    fn hosts_active_kontor(&self, h: usize) -> Option<u32> {
+        self.kontors.iter()
+            .find(|k| k.expelled_tick == 0 && k.host_hub as usize == h)
+            .map(|k| k.league)
+    }
+
+    /// Yearly · INSTITUTIONS_BUILD_ORDER.md 4.4 — a league with no standing
+    /// Kontor and a purse that can afford one establishes it at the
+    /// non-member hub it trades with most, once that tie clears the same
+    /// `LEAGUE_FLOW_MIN` bar formation itself uses. Deterministic (`self.
+    /// leagues`/`self.hubs` are plain `Vec`s, `flow_year` sorted by hub
+    /// index before ranking, the same discipline `maybe_form_leagues` uses).
+    pub(crate) fn maybe_establish_kontors(&mut self) {
+        for li in 0..self.leagues.len() {
+            if self.leagues[li].dissolved_tick != 0 { continue; }
+            if self.leagues[li].purse < KONTOR_COST { continue; }
+            if self.kontors.iter().any(|k| k.league == li as u32 && k.expelled_tick == 0) { continue; }
+            let members: Vec<usize> = (0..self.hubs.len()).filter(|&h| self.hubs[h].league == li as i32).collect();
+            let mut ties: Vec<(usize, f32)> = self.flow_year.iter().filter_map(|&(a, b, v)| {
+                let (a, b) = (a as usize, b as usize);
+                if members.contains(&a) && !members.contains(&b) { Some((b, v)) }
+                else if members.contains(&b) && !members.contains(&a) { Some((a, v)) }
+                else { None }
+            }).collect();
+            ties.sort_by_key(|&(h, _)| h); // determinism (flow_year order is not guaranteed)
+            let mut best: Option<(usize, f32)> = None;
+            for (h, v) in ties {
+                if v < LEAGUE_FLOW_MIN || h >= self.hubs.len() { continue; }
+                if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+                if self.hosts_active_kontor(h).is_some() { continue; }
+                if best.map_or(true, |(_, bv)| v > bv) { best = Some((h, v)); }
+            }
+            let Some((host, _)) = best else { continue };
+            self.leagues[li].purse -= KONTOR_COST;
+            self.kontors.push(Kontor {
+                league: li as u32, host_hub: host as u32,
+                established_tick: self.tick, expelled_tick: 0,
+            });
+            let (ln, hn) = (self.leagues[li].name.clone(), self.hubs[host].name.clone());
+            self.leagues[li].events.push(RealmEvent {
+                tick: self.tick, kind: "kontor_established".into(),
+                text: format!("{ln} establishes a Kontor at {hn}"),
+            });
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "kontor_established".into(), hub: host as i32, good: -1, value: 0.0,
+                text: format!("{ln} establishes a Kontor at {hn}"),
+            });
+        }
+    }
+
+    /// Yearly · a host may expel a standing Kontor — a real political event,
+    /// not a mechanical lapse. More likely while at war with a member of the
+    /// league that holds it, and scaled up by the host's own unrest (an
+    /// unstable council is readier to turn on a foreign trading post).
+    pub(crate) fn maybe_expel_kontors(&mut self) {
+        for ki in 0..self.kontors.len() {
+            if self.kontors[ki].expelled_tick != 0 { continue; }
+            let host = self.kontors[ki].host_hub as usize;
+            let li = self.kontors[ki].league as usize;
+            if host >= self.hubs.len() || li >= self.leagues.len() { continue; }
+            let at_war_with_member = (0..self.hubs.len())
+                .any(|m| self.hubs[m].league == li as i32 && self.hubs[host].war_with == m as i32);
+            let chance = if at_war_with_member { KONTOR_EXPEL_CHANCE_AT_WAR } else { KONTOR_EXPEL_CHANCE }
+                + self.hubs[host].society.unrest.max(0.0) * KONTOR_EXPEL_UNREST_MULT;
+            let roll = hash01(self.seed, (self.tick as u64) ^ 0x40470E ^ (ki as u64), host as u64);
+            if roll >= chance { continue; }
+            self.kontors[ki].expelled_tick = self.tick;
+            let (ln, hn) = (self.leagues[li].name.clone(), self.hubs[host].name.clone());
+            self.leagues[li].events.push(RealmEvent {
+                tick: self.tick, kind: "kontor_expelled".into(),
+                text: format!("{hn} expels {ln}'s Kontor"),
+            });
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "kontor_expelled".into(), hub: host as i32, good: -1, value: 0.0,
+                text: format!("{hn} expels {ln}'s Kontor"),
+            });
+        }
+    }
+
+    /// Yearly entry point for 4.4, called alongside `run_league_diet`.
+    pub(crate) fn run_kontors(&mut self) {
+        self.maybe_establish_kontors();
+        self.maybe_expel_kontors();
+    }
+
+    /// Which league (if any) holds a standing Kontor at hub `h` — the read
+    /// `dispatch` uses to extend the member-to-member privilege (4.3) to a
+    /// member trading through a Kontor's host. −1 if none.
+    pub(crate) fn kontor_league_at(&self, h: usize) -> i32 {
+        self.kontors.iter()
+            .find(|k| k.expelled_tick == 0 && k.host_hub as usize == h)
+            .map(|k| k.league as i32)
+            .unwrap_or(-1)
     }
 }

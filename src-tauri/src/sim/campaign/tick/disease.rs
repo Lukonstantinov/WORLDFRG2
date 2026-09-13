@@ -634,6 +634,10 @@ impl CampaignSim {
             // No-op before `LEAGUE_YEAR_FLOOR` or with no eligible seats.
             self.maybe_form_leagues(yr_now);
             self.run_league_diet();
+            // 4.4 · the Kontor — a shared depot at a non-member host,
+            // after the diet so a league's freshly-collected dues (this
+            // year's, just banked above) can fund it the same year.
+            self.run_kontors();
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

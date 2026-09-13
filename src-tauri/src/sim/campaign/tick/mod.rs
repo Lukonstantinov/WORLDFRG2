@@ -1139,6 +1139,22 @@ const N2_BAN_TICKS: u32 = 60;
 /// display label — the same convention every `good("iron", …)` test fixture
 /// already relies on), so this is a plain string match, no id-resolution table.
 const CONTRABAND_GOODS: [&str; 5] = ["metalware", "iron", "timber", "pitch", "hemp"];
+/// INSTITUTIONS_BUILD_ORDER.md 4.2 · THE ROUTED BLOCKADE — a lane between two
+/// belligerents is diverted through a neutral port at extra cost, never
+/// refused outright. This is the SAME `staging_hop` relay N1/N1c already use
+/// (`production.rs::dispatch`), so a war blockade is not a new mechanism, it
+/// is a new REASON to take a detour that already exists and is already
+/// dosed live. Per shipment between two hubs actually `war_with` each other,
+/// a `hash01` roll under this dose diverts the leg's first hop through the
+/// nearest neutral stop on the way (`staging_hop`); with no reachable stop
+/// the cargo still sails direct — the plan's own governing rule for this
+/// phase (§0/Phase 4's header): every prohibition ROUTES, it never refuses,
+/// because this codebase has twice measured that a bare refusal at this kind
+/// of dose collapses `econ_inheritance_rules_fragment_differently`'s world
+/// (N1's own three-attempt history, and N2's market closure breaking the
+/// hard wealth bound twice). Shipped at 0.0 — a true no-op, exactly
+/// `N1_LOCAL_HAUL_BIND_DAYS`'s pattern: `hash01(..) < 0.0` can never hold.
+pub(crate) const BLOCKADE_STAGING_DOSE: f32 = 0.0;
 
 /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) · seasonal sailing/pass
 /// closures as a per-lane travel-time MULTIPLIER, never a wall (§1.5 — a hard
@@ -4732,6 +4748,13 @@ pub struct War {
     /// automatically committed as a backer. −1 for an ordinary rival-council war.
     /// Its own insolvency is the BACKERS WITHDRAW exhaustion path.
     #[serde(default = "neg_one_i32")] pub backer_house: i32,
+    /// INSTITUTIONS_BUILD_ORDER.md 4.2 · has the routed blockade already been
+    /// named in this war's own log? Fires the journal/war_log entry once per
+    /// war (on the FIRST shipment actually diverted through a neutral stop),
+    /// never once per shipment — a belligerent pair can trade hundreds of
+    /// times a year, and re-announcing the same detour on every one of them
+    /// would flood the chronicle rather than inform it (rule 20's spirit).
+    #[serde(default)] pub blockade_chronicled: bool,
 }
 
 /// §3.4a · one quarterly round of a war — a "battle" for the panel's history.
@@ -6651,6 +6674,12 @@ pub struct CampaignSim {
     /// founded, dissolved ones kept (`dissolved_tick != 0`) exactly as a
     /// fallen `Realm` is. Membership lives on `TickHub.league`, never here.
     #[serde(default)] pub leagues: Vec<League>,
+    /// INSTITUTIONS_BUILD_ORDER.md 4.4 · every KONTOR a League has ever
+    /// established — a shared factory/depot at a host city that does NOT
+    /// itself belong to the League (Bruges, Bergen, Novgorod, the Steelyard).
+    /// Expelled ones are kept (`expelled_tick != 0`), the same "fallen but
+    /// remembered" discipline `leagues`/`realms` already use, never removed.
+    #[serde(default)] pub kontors: Vec<Kontor>,
     /// Per-province sovereignty: an index into `realms`, or −1 for free land.
     /// Sized alongside the rest of the land layer by `ensure_province_land`.
     #[serde(default)] pub prov_realm: Vec<i32>,
@@ -7202,6 +7231,24 @@ pub struct League {
     #[serde(default)] pub escort_until_tick: u32,
     /// Reuses `RealmEvent`'s exact shape — same cap discipline (rule 20).
     #[serde(default)] pub events: Vec<RealmEvent>,
+}
+
+/// INSTITUTIONS_BUILD_ORDER.md 4.4 · a shared factory/depot a League
+/// establishes at a host city it does NOT itself belong to — Bruges, Bergen,
+/// Novgorod, the Steelyard. `YARDS_VESSELS_AND_DEPOTS_PLAN.md`'s missing
+/// "fondaco" ownership class with a collective (League) owner rather than a
+/// single state. Members trading through the host get the SAME
+/// tariff/freight privilege a fellow member would (`LEAGUE_FREIGHT_DISCOUNT`/
+/// `LEAGUE_TARIFF_MULT`, 4.3); the host itself stays outside the League —
+/// no seat, no vote, no dues — and can expel it, a real political event.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Kontor {
+    pub league: u32,
+    pub host_hub: u32,
+    pub established_tick: u32,
+    /// 0 while it stands. An expelled Kontor is kept, not removed — the
+    /// same "fallen but remembered" discipline `League.dissolved_tick` uses.
+    #[serde(default)] pub expelled_tick: u32,
 }
 
 /// R2 · one member of a realm's dynasty. Distinct from `Kin` (a merchant house's
@@ -9604,6 +9651,8 @@ pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,
     LEAGUE_BOYCOTT_TICKS, LEAGUE_ESCORT_COST, LEAGUE_ESCORT_LOSS_MULT,
+    LEAGUE_FREIGHT_DISCOUNT, LEAGUE_TARIFF_MULT,
+    KONTOR_COST, KONTOR_EXPEL_CHANCE, KONTOR_EXPEL_CHANCE_AT_WAR, KONTOR_EXPEL_UNREST_MULT,
 };
 
 /// Milestone journal kinds form a city/house's PERMANENT record and survive the

@@ -1118,6 +1118,19 @@ impl CampaignSim {
         dist_km > if sea { ship_cap_km } else { caravan_cap_km }
     }
 
+    /// INSTITUTIONS_BUILD_ORDER.md 4.3/4.4 — is a lane from a hub whose
+    /// league is `la` to one whose league is `lb` (both −1 if unleagued)
+    /// entitled to the League privilege (freight discount, tariff
+    /// exemption)? True if both ends share a live league, OR either end is
+    /// a member trading through the OTHER end's Kontor (`kl_a`/`kl_b`= the
+    /// league, if any, that holds a standing Kontor at that hub). A pure
+    /// decision, factored out the same way `charter_bars_sale`/
+    /// `leg_exceeds_range` are, so it is one thing to test and reuse across
+    /// the three call sites in `dispatch` that all need the identical rule.
+    pub(crate) fn lane_league_privileged(la: i32, lb: i32, kl_a: i32, kl_b: i32) -> bool {
+        (la >= 0 && (la == lb || la == kl_b)) || (lb >= 0 && lb == kl_a)
+    }
+
     /// The real distance between two hubs in KILOMETRES — `hub_cell_dist`
     /// converted through the world's own scale, which is the unit every range
     /// rule here is stated in (rule 25: a threshold about the world is stated
@@ -1225,6 +1238,11 @@ impl CampaignSim {
         // DLC 3.5 · per-destination reserve-coin freight discount, precomputed once
         // (it's constant across this dispatch round and read in the hot inner loop).
         let coin_disc: Vec<f32> = (0..n).map(|d| self.coin_discount(d)).collect();
+        // 4.4 · which League (if any) holds a standing Kontor at each hub,
+        // precomputed once for the same reason `hub_boycotts`/`coin_disc`
+        // are. −1 almost everywhere (a Kontor is one per league, and most
+        // worlds carry none at all), so this is a true no-op absent one.
+        let hub_kontor_league: Vec<i32> = (0..n).map(|h| self.kontor_league_at(h)).collect();
         // 4.1 · which goods are WAR CONTRABAND, resolved by name once per dispatch
         // rather than string-comparing inside the hot loop.
         let contraband_good: Vec<bool> = (0..ng)
@@ -1376,8 +1394,22 @@ impl CampaignSim {
                     // label just past it all want the identical test).
                     let sea = self.hubs[a].coastal && self.hubs[b].coastal;
                     let pb = self.live_price(stock_of(&self.hubs[b].stock, g), needs[b][g], base);
+                    // 4.3 · a member-to-member League lane pays a cheaper freight
+                    // rate — the SAME discount `GUILDHALL_FREIGHT` already applies
+                    // for a warehouse's own exports, extended to a shared League
+                    // instead of a single hub. `LEAGUE_FREIGHT_DISCOUNT == 1.0`
+                    // (no leagues, or neither end is a member of the SAME one)
+                    // leaves this a true no-op.
+                    // 4.4 · the same privilege extends to a member trading
+                    // through a KONTOR — a shared depot at a non-member host
+                    // (`hub_kontor_league`) — on either end of the lane.
+                    let league_mult = if Self::lane_league_privileged(
+                        self.hubs[a].league, self.hubs[b].league, hub_kontor_league[a], hub_kontor_league[b],
+                    ) {
+                        LEAGUE_FREIGHT_DISCOUNT
+                    } else { 1.0 };
                     // A trusted reserve coin at the buyer `b` shaves freight (DLC 3.5).
-                    let freight = self.good_freight(g, freight_rate * coin_disc[b], days, sea);
+                    let freight = self.good_freight(g, freight_rate * coin_disc[b] * league_mult, days, sea);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
                         // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 named this a double
@@ -1454,8 +1486,19 @@ impl CampaignSim {
                     // (moved up from just past the delivered-cost cap) so C1b's freight
                     // call below reads the same mode label the capacity pool does.
                     let sea = self.hubs[a].coastal && self.hubs[b].coastal;
+                    // 4.3 · the same member-to-member discount used to rank this
+                    // target above, reapplied here so the price actually charged
+                    // agrees with the price that made the lane attractive.
+                    // 4.4 · the same privilege extends to a member trading
+                    // through a KONTOR — a shared depot at a non-member host
+                    // (`hub_kontor_league`) — on either end of the lane.
+                    let league_mult = if Self::lane_league_privileged(
+                        self.hubs[a].league, self.hubs[b].league, hub_kontor_league[a], hub_kontor_league[b],
+                    ) {
+                        LEAGUE_FREIGHT_DISCOUNT
+                    } else { 1.0 };
                     // Don't overfill b past delivered-cost parity.
-                    let delivered = pa + self.good_freight(g, freight_rate, days, sea);
+                    let delivered = pa + self.good_freight(g, freight_rate * league_mult, days, sea);
                     let max_stock =
                         needs[b][g] * (base / delivered.max(EPS)).powf(1.0 / self.k);
                     let room = (max_stock - stock_of(&self.hubs[b].stock, g)).max(0.0);
@@ -1528,6 +1571,39 @@ impl CampaignSim {
                     // to the SAME relay N1c uses below rather than inventing a second
                     // one; N1c's own check then simply skips a leg N1 already staged.
                     let mut staged: i32 = -1;
+                    // INSTITUTIONS_BUILD_ORDER.md 4.2 · THE ROUTED BLOCKADE — a lane
+                    // between two hubs actually at war with EACH OTHER is diverted
+                    // through the same neutral-stop relay N1/N1c already use, never
+                    // refused (Phase 4's own governing rule). Checked before N1's own
+                    // bind so a blockaded leg that would ALSO clear the local-haul
+                    // threshold isn't double-staged. `BLOCKADE_STAGING_DOSE == 0.0`
+                    // ships as a true no-op: the roll can never clear a dose of zero.
+                    if BLOCKADE_STAGING_DOSE > 0.0 && self.hubs[a].war_with == b as i32
+                        && hash01(self.seed, (tick as u64) ^ 0xB10CADE ^ ((a as u64) << 8) ^ (b as u64), g as u64)
+                            < BLOCKADE_STAGING_DOSE
+                    {
+                        if let Some(p) = self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                            staged = p as i32;
+                            self.diag_relay_staged += 1;
+                            // Chronicle ONCE per war, on the first shipment actually
+                            // diverted — not once per shipment, or a busy trade lane
+                            // between belligerents would flood the journal with the
+                            // identical line every single day of the war.
+                            if let Some(wi) = self.war_index(a, b) {
+                                if !self.wars[wi].blockade_chronicled {
+                                    self.wars[wi].blockade_chronicled = true;
+                                    let (an, bn, pn) = (self.hubs[a].name.clone(), self.hubs[b].name.clone(), self.hubs[p].name.clone());
+                                    self.journal.push(JournalEntry {
+                                        tick, kind: "blockade".into(), hub: a as i32, good: -1, value: 0.0,
+                                        text: format!("The war between {an} and {bn} forces cargo to go by way of {pn}"),
+                                    });
+                                }
+                            }
+                        }
+                        // No neutral stop reachable — the cargo still sails direct,
+                        // the same "genuinely cannot happen" fallback N1c reserves
+                        // for a leg with no port at all on the way.
+                    }
                     if owner < 0 {
                         if _why_nohouse { self.diag_why_nohouse += 1; }
                         else if _why_slot { self.diag_why_slot += 1; }
@@ -1880,8 +1956,19 @@ impl CampaignSim {
                         // tariff (0 = no policy yet → the global default rate); a
                         // per-city prosperity bracket then scales it — rich cities tax
                         // harder, poor ones stay cheap to trade through.
-                        let exp_rate = if self.hubs[a].tariff_export > 0.0 { self.hubs[a].tariff_export } else { EXPORT_TAX_RATE };
-                        let imp_rate = if self.hubs[b].tariff_import > 0.0 { self.hubs[b].tariff_import } else { IMPORT_TAX_RATE };
+                        let mut exp_rate = if self.hubs[a].tariff_export > 0.0 { self.hubs[a].tariff_export } else { EXPORT_TAX_RATE };
+                        let mut imp_rate = if self.hubs[b].tariff_import > 0.0 { self.hubs[b].tariff_import } else { IMPORT_TAX_RATE };
+                        // INSTITUTIONS_BUILD_ORDER.md 4.3/4.4 · a member-to-member
+                        // (or member-to-Kontor-host) League sale is levied at a
+                        // reduced tariff on BOTH ends — the second named privilege
+                        // beside the freight discount above. `LEAGUE_TARIFF_MULT
+                        // == 1.0` (no shared League) is a no-op.
+                        if Self::lane_league_privileged(
+                            self.hubs[a].league, self.hubs[b].league, hub_kontor_league[a], hub_kontor_league[b],
+                        ) {
+                            exp_rate *= LEAGUE_TARIFF_MULT;
+                            imp_rate *= LEAGUE_TARIFF_MULT;
+                        }
                         // Bailo concession / dominance edge for the carrying house at each end.
                         let export_tax = value * exp_rate * tax_mult * self.city_tax_factor(a) * self.house_city_tax_mult(oi, a);
                         let import_tax = value * imp_rate * tax_mult * self.city_tax_factor(b) * self.house_city_tax_mult(oi, b);

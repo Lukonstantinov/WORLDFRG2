@@ -822,21 +822,37 @@ serde-defaulted so old saves load). Grouped by theme:
   `INSTITUTIONS_BUILD_ORDER.md` Phase 1.1/1.2, §9. A bank may also hold the
   Monte now (`update_public_debt`'s `kind == 1` holder class) and `League.
   purse` funds a real convoy escort (Phase 1.3).
-- **Institutions (`INSTITUTIONS_BUILD_ORDER.md`, Phases 1/2/3.1/4.1/5 shipped,
-  4.2-4.5 not yet attempted — full detail in §9's own entry):** bank rescue
-  splits from contagion and a bank may hold public debt (above); the Murano
-  feature — quality's ceiling comes from accumulated `TickHub.tradition`
-  (practice, not population), a guildhall's `secrecy` resists theft
+- **Institutions (`INSTITUTIONS_BUILD_ORDER.md`, Phases 1/2/3.1/4.1/4.2/4.3/
+  4.4/5 shipped; 4.5 built but dosed at zero — full detail in §9's own entry):**
+  bank rescue splits from contagion and a bank may hold public debt (above);
+  the Murano feature — quality's ceiling comes from accumulated `TickHub.
+  tradition` (practice, not population), a guildhall's `secrecy` resists theft
   (`maybe_steal_quality`) and resists `maybe_poach_master` (a defecting master
   carrying tradition to a rival city), a named signature is earned once
   tradition+quality both clear a floor, and a high-throughput import-dependent
   hub becomes a refining entrepôt (`LAW_ENTREPOT`); war spending issues public
   debt (`WAR_DEBT_TARGET_MULT`), closing the war→debt→bank→crash chain; war
   CONTRABAND (`CONTRABAND_GOODS`) bans a short list of war-material goods to
-  the actual enemy only, checked live in `dispatch` against `war_with`; and a
-  fifth `ProvWork` kind, the CADASTRE (`WORK_CADASTRE`), permanently raises a
-  surveyed province's tithe collection, with an active tax farm now costing
-  real unrest+cohesion every year it stands.
+  the actual enemy only, checked live in `dispatch` against `war_with`; a
+  ROUTED BLOCKADE (`BLOCKADE_STAGING_DOSE`, shipped at 0.0 — a true no-op)
+  diverts a lane between two actual belligerents through the same neutral-stop
+  `staging_hop` relay N1/N1c already use, never a refusal, per this phase's own
+  governing rule; LEAGUE PRIVILEGES (`LEAGUE_FREIGHT_DISCOUNT`/
+  `LEAGUE_TARIFF_MULT`, shipped LIVE) cheapen a member-to-member lane's freight
+  and tariff — the first thing beyond the Phase 1.3 convoy escort that makes
+  membership matter; the KONTOR (`Kontor`, `tick/league.rs`) lets a league
+  establish a shared depot at a non-member host city once their trade tie
+  clears `LEAGUE_FLOW_MIN`, extending the same privilege through that host, and
+  the host may expel it (a real chronicled event, likelier while at war with a
+  member or under high unrest); and a fifth `ProvWork` kind, the CADASTRE
+  (`WORK_CADASTRE`), permanently raises a surveyed province's tithe collection,
+  with an active tax farm now costing real unrest+cohesion every year it
+  stands. **4.5's boycott target-selection (`choose_boycott_target`) is built
+  and tested but `LEAGUE_BOYCOTT_MAX` remains 0** — the plan's own text calls
+  dosing it "last, and expect trouble" (N2's related cargo-ban mechanism broke
+  the hard wealth bound twice at low doses), and walking it above zero is left
+  for a session with room for the full multi-seed inheritance + dense-world
+  gate sweep at each step, per §9's own entry.
 - **Wealth / War / Flow (DLC 3.5):** capped bank interest + progressive civic wealth
   tax → treasury; `CityFinance` per-hub ledger; `update_wars` (rival poleis, forced
   house levies, war-chest, blockade, reparations, war goals); contract penalty
@@ -5498,9 +5514,9 @@ CONSUMPTION_AND_GOODS_REVIEW.md   ← ⭐ MEASURED ANALYSIS, NOTHING BUILT (one
                                     Ends with 8 gated proposals in build order
                                     and 6 questions that need a decision before
                                     any of it starts
-INSTITUTIONS_BUILD_ORDER.md       ← ⭐ PHASES 0, 1, 2, 3.1, 4.1 AND 5 BUILT AND
-                                    GATED; 4.2-4.5 NOT YET ATTEMPTED. The
-                                    sequenced order for the brainstorm below,
+INSTITUTIONS_BUILD_ORDER.md       ← ⭐ PHASES 0, 1, 2, 3.1, 4.1, 4.2, 4.3, 4.4
+                                    AND 5 BUILT AND GATED; 4.5 BUILT BUT DOSED
+                                    AT ZERO. The sequenced order for the brainstorm below,
                                     after four maintainer decisions: the player
                                     stays OBSERVATION-ONLY (so "play the bank" is
                                     REJECTED, not deferred) · all three chains
@@ -5567,14 +5583,61 @@ INSTITUTIONS_BUILD_ORDER.md       ← ⭐ PHASES 0, 1, 2, 3.1, 4.1 AND 5 BUILT A
                                     `export_ban_until`'s blanket ban — and every
                                     declare-war chronicle line names which of the
                                     goods this world carries are barred. **Phase
-                                    4.2-4.5 (routed blockade / league privileges /
-                                    the Kontor / the boycott dosed) are NOT YET
-                                    ATTEMPTED** — the plan's own text calls 4.5
-                                    "last, and expect trouble", and each slice owes
-                                    the same three expensive gates (multi-seed
-                                    inheritance, `dense_world` volume, the
-                                    dynamics sustained-richest bound). **Phase 5
-                                    (shipped)**: a fifth `ProvWork` kind
+                                    4.2 (shipped)**: a lane between two hubs
+                                    actually `war_with` each other is diverted
+                                    through the SAME neutral-stop `staging_hop`
+                                    relay N1/N1c already use (`BLOCKADE_STAGING_
+                                    DOSE`, shipped at 0.0 — a true no-op, since
+                                    a bare refusal at this shape of dose has
+                                    twice collapsed the inheritance gate's world
+                                    per N1/N2's own history), chronicled once per
+                                    war on the first shipment actually diverted
+                                    ("the war between X and Y forces cargo to go
+                                    by way of Z"), never once per shipment.
+                                    **Phase 4.3 (shipped LIVE, not dosed)**: a
+                                    member-to-member League lane pays cheaper
+                                    freight (`LEAGUE_FREIGHT_DISCOUNT` 0.85, the
+                                    same shape `GUILDHALL_FREIGHT` already uses)
+                                    and a reduced tariff on both ends
+                                    (`LEAGUE_TARIFF_MULT` 0.5) — the first thing
+                                    beyond Phase 1.3's convoy escort that makes
+                                    League membership matter, shipped live rather
+                                    than dose-walked because a discount on an
+                                    already-taxed, narrow lane class (96% of
+                                    shipments move ownerless and never reach
+                                    either check) carries none of the
+                                    concentration risk a routing or exclusion
+                                    mechanism does. **Phase 4.4 (shipped)**: THE
+                                    KONTOR — a league with a purse that clears
+                                    `KONTOR_COST` establishes one shared depot at
+                                    the non-member hub it trades with most, once
+                                    that tie clears the same `LEAGUE_FLOW_MIN`
+                                    threshold formation itself uses; members
+                                    trading through that host get the SAME 4.3
+                                    privilege as a fellow member would
+                                    (`lane_league_privileged`, the one pure
+                                    decision `dispatch` reuses across all three
+                                    call sites); the host may expel it
+                                    (`maybe_expel_kontors`, likelier while at war
+                                    with a member or under high unrest),
+                                    chronicled on both establishment and
+                                    expulsion. **Phase 4.5 built, dosed at zero**:
+                                    the diet's target-selection rule
+                                    (`choose_boycott_target` — prefers a real war
+                                    a member is fighting, the Denmark 1361-70
+                                    case, else the seat of the strongest
+                                    threatening rank-≥2 realm) is real code,
+                                    tested, and wired into `run_league_diet`, but
+                                    `LEAGUE_BOYCOTT_MAX` remains 0 — the plan's
+                                    own text calls dosing this "last, and expect
+                                    trouble" (N2's related cargo-ban mechanism
+                                    broke the hard wealth bound twice at low
+                                    doses), and walking it above zero needs its
+                                    own session with room for the full
+                                    multi-seed-inheritance + dense-world gate
+                                    sweep per dose step, which this one did not
+                                    have left. **Phase 5 (shipped)**: a fifth
+                                    `ProvWork` kind
                                     (`WORK_CADASTRE`, crown-funded, state-
                                     infrastructure-tier) permanently multiplies a
                                     surveyed province's tithe collection by

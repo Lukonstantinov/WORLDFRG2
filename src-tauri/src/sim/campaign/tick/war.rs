@@ -4,6 +4,16 @@ use super::*;
 
 impl CampaignSim {
 
+    /// Find the live war (if any) between hubs `a` and `b`, in either order.
+    /// INSTITUTIONS_BUILD_ORDER.md 4.2 needs this to name the war a routed
+    /// blockade detour belongs to; nothing before this slice needed to look
+    /// a war up by its two hubs rather than by index.
+    pub(crate) fn war_index(&self, a: usize, b: usize) -> Option<usize> {
+        self.wars.iter().position(|w| {
+            (w.a as usize == a && w.b as usize == b) || (w.a as usize == b && w.b as usize == a)
+        })
+    }
+
     /// Raise a forced WAR LEVY from every house homed at `hub`: a slice of each
     /// fortune into the city's war chest (treasury). The core wealth sink of war.
     /// Returns the total raised.
@@ -883,6 +893,7 @@ impl CampaignSim {
             chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
             battles: Vec::new(), cargo_lost: 0, cause: cause.into(), goal,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false,
         });
     }
 
@@ -912,6 +923,7 @@ impl CampaignSim {
             cause: "a house's war".into(), goal: WAR_GOAL_TRADE_RIGHTS,
             score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0,
             backer_house: backer_house as i32,
+            blockade_chronicled: false,
         });
     }
 
@@ -1073,7 +1085,8 @@ impl CampaignSim {
             chest_a: 0.0, chest_b: 0.0, levies: 0.0, levies_a: 0.0, levies_b: 0.0,
             battles: Vec::new(), cargo_lost: 0, cause: "independence".into(),
             goal: WAR_GOAL_PLUNDER,
-            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1 });
+            score: 0.0, round: 0, peak_effort_a: 0.0, peak_effort_b: 0.0, backer_house: -1,
+            blockade_chronicled: false });
         let (cn, mn) = (self.hubs[colony].name.clone(), self.hubs[metro].name.clone());
         self.journal.push(JournalEntry { tick: self.tick, kind: "war".into(), hub: colony as i32,
             good: -1, value: 0.0, text: format!("{} rises in a war of independence against {}{}",

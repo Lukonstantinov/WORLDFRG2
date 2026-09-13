@@ -1049,6 +1049,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // `ensure_province_land`, so it stays −1 (free) for every province here.
         realms: vec![],
         leagues: vec![],
+        kontors: vec![],
         prov_realm: vec![],
         // Province trade flow — accumulated in play (`accrue_flow`), snapshotted
         // yearly; empty at start like every other in-year accumulator.
