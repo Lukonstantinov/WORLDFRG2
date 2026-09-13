@@ -168,8 +168,11 @@ interface UIStore {
    *  list panel's filter and by city/warehouse selection. */
   futuresFocus: { city?: string; holder?: string; good?: string } | null;
   /** Trade ▸ Flows highlight: glowing arrows from a settlement to its partners on
-   *  the map (set by the Flows subtab; [] clears it). dir 0 = inbound, 1 = outbound. */
-  flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[];
+   *  the map (set by the Flows subtab; [] clears it). dir 0 = inbound, 1 = outbound.
+   *  `relayX`/`relayY` (set on both legs of a relayed/break-of-bulk route) mark the
+   *  real transshipment point so the map can ring it, rather than leaving a reader
+   *  to notice a bend in the line. */
+  flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[];
   /** Highlighted supply-chain id (Phase 3): traced on the map, or null. */
   selectedChain: number | null;
   /** Per-good reach view: highlight which hubs a chosen good reaches, or null. */

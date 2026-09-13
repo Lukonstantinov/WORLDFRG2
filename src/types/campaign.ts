@@ -336,6 +336,19 @@ export interface HubGoodDetail {
   depot_stock?: number;
   /** The depots that hold it, largest first: [owner name, is_guild, amount]. */
   depot_holders?: [string, boolean, number][];
+  /** The council's own secured reserve of this good (right-of-first-buy),
+   *  distinct from `stock` (open market) and `depot_stock` (a private depot). */
+  civic_goods?: number;
+  /** Needs-ladder tier: 0 basic, 1 comfort, 2 luxury (mirrors TradeFlowGood). */
+  need_tier?: number;
+  /** A chartered STAPLE RIGHT at this hub — the holder's name, or "" for none.
+   *  Charters sit at the holder's own seat, so non-empty only when this hub
+   *  IS that house's/guild's seat. */
+  charter_holder?: string;
+  charter_is_guild?: boolean;
+  /** The charter holder's measured monopoly SHARE of local trade in this good
+   *  (0..1); 0 when there is no charter or it hasn't been measured yet. */
+  charter_share?: number;
 }
 /** One good's world-wide quality + trade picture (the floating Goods window). */
 export interface GoodMarketRow {
@@ -670,6 +683,11 @@ export interface TradeFlowGood {
    *  actually MAKES this good — the same "made here" reading the Market tab
    *  shows. `false` for a good this city only ever resells. */
   produced?: boolean;
+  /** Needs-ladder tier (`GoodSpec.need_tier`): 0 basic, 1 comfort, 2 luxury. */
+  need_tier?: number;
+  /** The good's `base_value` (grain-equivalent numeraire price) — lets the
+   *  frontend rank by trade VALUE (volume × base_value) as well as raw volume. */
+  base_value?: number;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {
@@ -907,6 +925,11 @@ export interface MerchantRoute {
   out_goods: [string, number][]; // goods a→b
   ret_goods: [string, number][]; // goods b→a
   path?: [number, number][]; // routed a→b polyline (roads/sea); skipped if no corridor
+  /** THE MAIN ROUTE'S LEGS — the Ostia case. When this pair's cheapest path
+   *  relays through a coastal outlet, it arrives as TWO entries meeting at
+   *  that hub rather than one straight line. 0 = ordinary direct route,
+   *  1 = the relay/transshipment point is at `a`, 2 = it's at `b`. */
+  relay_at?: number;
 }
 /** One active futures contract as a directional supply lane (source → buyer). */
 export interface FuturesLane {

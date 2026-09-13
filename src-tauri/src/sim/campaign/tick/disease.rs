@@ -686,8 +686,12 @@ impl CampaignSim {
                 self.maybe_found_house_outpost();
                 self.maybe_graduate_outpost(); // a thriving old outpost matures into a colony
             }
-            if expansion_ok && self.tick >= ROUTE_POST_START_TICK {
-                self.maybe_found_route_post(); // TRADE_STAGING_AND_POSTS_PLAN.md slice 5
+            if self.tick >= ROUTE_POST_START_TICK {
+                if expansion_ok { self.maybe_found_route_post(); } // TRADE_STAGING_AND_POSTS_PLAN.md slice 5
+                // Growth + independence run regardless of `expansion_ok` — a post
+                // already founded keeps maturing even in a year no NEW venture is
+                // funded, exactly like `colony_pass` below for settlement colonies.
+                self.route_post_pass();
             }
             if expansion_ok && self.tick >= COLONY_START_TICK {
                 self.maybe_found_settlement_colony();

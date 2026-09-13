@@ -441,6 +441,30 @@ pub struct HubGoodDetail {
     #[serde(default)] pub depot_stock: f32,
     /// The depots that hold it, largest first: `(owner name, is_guild, amount)`.
     #[serde(default)] pub depot_holders: Vec<(String, bool, f32)>,
+    /// The council's own secured reserve of this good (`TickHub.civic_goods[g]`)
+    /// — what `council_provision_pass`'s right-of-first-buy has already pulled
+    /// off the open market into the civic warehouse, distinct from `stock`
+    /// (still on the open market) and `depot_stock` (a private house/guild
+    /// depot). Zero on a good the council never provisions (non-food, no
+    /// colony/satellite dependents).
+    #[serde(default)] pub civic_goods: f32,
+    /// Needs-ladder tier (`GoodSpec.need_tier`): 0 basic, 1 comfort, 2 luxury —
+    /// mirrored here exactly as `TradeFlowGood.need_tier` is, so a good's kind
+    /// reads the same on the Market tab as on Flows.
+    #[serde(default)] pub need_tier: u8,
+    /// A CHARTERED STAPLE RIGHT at THIS hub (`House.charters`, granted to a
+    /// political house or guild that dominates its own seat — houses.rs — and
+    /// enforced live in `dispatch` via `CHARTER_EXCLUSIVE_DOSE`): the holder's
+    /// name, or empty when nobody holds one here. Charters are implicitly at
+    /// the holder's OWN seat, so this is only ever non-empty when `hub` IS
+    /// that house's seat.
+    #[serde(default)] pub charter_holder: String,
+    #[serde(default)] pub charter_is_guild: bool,
+    /// The charter holder's measured trade-volume monopoly SHARE on this good
+    /// (`House.monopoly`, 0..1) — the same figure that decided whether it ever
+    /// won the "monopoly" chronicle event. 0 when there is no charter, or the
+    /// share hasn't been measured yet.
+    #[serde(default)] pub charter_share: f32,
 }
 
 /// One live city in the Markets window's picker.
@@ -2129,6 +2153,14 @@ pub struct MerchantRoute {
     /// Goods flowing a→b and b→a (name, volume), each sorted by volume.
     pub out_goods: Vec<(String, f32)>,
     pub ret_goods: Vec<(String, f32)>,
+    /// THE MAIN ROUTE'S LEGS — the Ostia case. When this pair's cheapest path
+    /// composes through a coastal outlet (`CampaignSim::route_outlet`, #6d),
+    /// it is served as TWO `MerchantRoute` entries meeting at that hub rather
+    /// than one straight line; this names which of THIS entry's own two
+    /// endpoints is the transshipment point, so the map can mark it — 0 =
+    /// this is an ordinary direct route, 1 = the relay sits at `a`, 2 = the
+    /// relay sits at `b`.
+    #[serde(default)] pub relay_at: u8,
 }
 
 /// One active FUTURES CONTRACT as a directional supply lane for the Futures map
@@ -2839,6 +2871,17 @@ pub struct TradeFlowGood {
     /// than merely resold. `false` for a good this city only ever moves through.
     #[serde(default)]
     pub produced: bool,
+    /// The needs-ladder tier this good sits on (`GoodSpec::need_tier`, mirrored
+    /// onto `TickGood`): 0 basic, 1 comfort, 2 luxury — so the Flows tab can
+    /// filter "what kind of good is this" without a second, hand-copied table
+    /// (§8.18's discipline applied to a category rather than a colour ramp).
+    #[serde(default)]
+    pub need_tier: u8,
+    /// The good's `base_value` (the grain-equivalent numeraire price), so the
+    /// frontend can rank goods by trade VALUE (`volume × base_value`) as well
+    /// as raw volume, without re-deriving or hand-copying the price table.
+    #[serde(default)]
+    pub base_value: f32,
 }
 /// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
 /// that touched this city, by who financed it.

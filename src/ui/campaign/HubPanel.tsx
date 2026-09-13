@@ -19,6 +19,7 @@ import { CityView, BUILDING_INFO } from "@ui/campaign/CityView";
 import { FlowsView } from "@ui/campaign/FlowsView";
 import { TradersView } from "@ui/campaign/TradersView";
 import { CityMarketView } from "@ui/campaign/CityMarketView";
+import { InternalMarketView } from "@ui/campaign/InternalMarketView";
 import { CultureDonut } from "@ui/campaign/CultureDonut";
 import { CityWarehousePanel } from "@ui/campaign/CityWarehousePanel";
 import { WorksCard } from "@ui/campaign/WorksCard";
@@ -287,7 +288,7 @@ export function HubPanel() {
   });
 
   const [tab, setTab] = useState<Tab>("summary");
-  const [tradeView, setTradeView] = useState<"market" | "flows" | "traders">("market");
+  const [tradeView, setTradeView] = useState<"market" | "flows" | "internal" | "traders">("market");
   const [detail, setDetail] = useState<HubDetail | null>(null);
   const [colony, setColony] = useState<ColonyDetail | null>(null);
   const [prov, setProv] = useState<ProvisioningBrief | null>(null);
@@ -844,13 +845,13 @@ export function HubPanel() {
               (docs/CITY_TRADERS_PANEL_PLAN.md — who moves cargo here vs who is
               established here, a third question Market/Flows cannot answer). */}
           <div style={{ display: "flex", gap: 4, marginBottom: 5 }}>
-            {(["market", "flows", "traders"] as const).map((v) => (
+            {(["market", "flows", "internal", "traders"] as const).map((v) => (
               <div key={v} onClick={() => setTradeView(v)} style={{
                 padding: "2px 10px", cursor: "pointer", fontSize: 10, borderRadius: 4,
                 background: tradeView === v ? "#21344a" : "#16202c",
                 color: tradeView === v ? "#cfe2f6" : "#6a86a6",
                 border: tradeView === v ? "1px solid #3a80c0" : "1px solid #1e2e42",
-              }}>{v === "market" ? "Market" : v === "flows" ? "Flows" : "Traders"}</div>
+              }}>{v === "market" ? "Market" : v === "flows" ? "Flows" : v === "internal" ? "Internal" : "Traders"}</div>
             ))}
           </div>
           {/* BARRED HERE — the inverse of a house's own "shut out of N markets"
@@ -905,6 +906,9 @@ export function HubPanel() {
           {tradeView === "flows" && (
             <FlowsView hubId={hub.id} active={campActive} tick={campTick} setFlowHighlight={setFlowHighlight}
               tariffIncome={detail ? (detail.finance?.prev ?? detail.finance ?? null)?.tax_trade : undefined} />
+          )}
+          {tradeView === "internal" && (
+            <InternalMarketView hubId={hub.id} active={campActive} tick={campTick} detail={detail} />
           )}
           {tradeView === "traders" && (
             <TradersView hubId={hub.id} active={campActive} tick={campTick} />

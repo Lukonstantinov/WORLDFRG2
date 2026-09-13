@@ -83,6 +83,7 @@
             // staging relay existed.
             ship_leg_max_km: f32::INFINITY, caravan_leg_max_km: f32::INFINITY,
             local_haul_bind_days: f32::INFINITY,
+            route_post_max_home_km: f32::INFINITY,
             recent_trades: vec![],
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
@@ -2337,6 +2338,48 @@
             "route post should site at the farther CHOKEPOINT ({}, {}), not the nearer plain site", p.x, p.y);
         assert!(!p.is_estate, "a route post is a real hub, not an estate");
         assert_eq!(p.owner_house, 0);
+    }
+
+    /// User-reported: a route post could found itself thousands of km from the
+    /// house that paid for it, because `maybe_found_route_post` picked the
+    /// single longest same-component gap in the WHOLE WORLD with no ceiling at
+    /// all. `route_post_max_home_km` (opt-out `INFINITY` in every other test
+    /// fixture, per the `sim()` helper's own doc comment) must actually block a
+    /// site far from the founding house's seat, and a nearby-enough cap must
+    /// let the identical venture through — the same site, the same gap, only
+    /// the cap differs.
+    #[test]
+    fn route_post_founding_respects_the_home_distance_cap() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut h0 = hub(0, 5.0, 50.0, 3000.0, vec![80.0, 40.0], 0);
+        h0.koppen = 22; // EF ice cap — terrain_route_mult = 2.2, same as the junction test
+        let h1 = hub(1, 105.0, 50.0, 3000.0, vec![60.0, 30.0], 0);
+        let mut s = sim(vec![h0, h1], goods);
+        s.world_w = 200.0; s.world_h = 200.0;
+        s.houses = vec![house_at(0, vec![1], 4)];
+        s.houses[0].wealth = 50_000.0;
+        s.seed_house_count = 1;
+        s.colonizable.push(ColonizeSite {
+            x: 57.5, y: 50.0, koppen: 11, elevation: 0.2, fertility: 0.5, coastal: true,
+            kind_hint: 1, trade_value: 0.5, delta: false, chokepoint: true, province: -1, belt: vec![], river: false,
+        });
+        s.rebuild_routes();
+        let gap_days = s.days[0 * s.hubs.len() + 1];
+        assert!(gap_days >= 25.0, "fixture gap must clear ROUTE_POST_MIN_GAP_DAYS, got {gap_days}");
+        // Home (5,50) to the site (57.5,50) is ~52.5 cells — at world_w=200 that is
+        // ~10,520 km (52.5 * 40075/200), comfortably past any real dose.
+        s.route_post_max_home_km = 5_000.0;
+        s.maybe_found_route_post();
+        assert_eq!(s.hubs.iter().filter(|h| h.colony_kind == 4).count(), 0,
+            "a site ~10,500 km from the founder's home must be rejected at a 5,000 km cap");
+
+        s.route_post_max_home_km = 20_000.0;
+        s.maybe_found_route_post();
+        assert_eq!(s.hubs.iter().filter(|h| h.colony_kind == 4).count(), 1,
+            "the identical site must found once the cap actually reaches it");
     }
 
     /// A wealthy house develops an EXISTING under-traded small city into a TRADE BASE:
@@ -8247,16 +8290,17 @@
             "price exactly at base must leave output unchanged");
     }
 
-    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · `household_priced_out` must be
-    /// EXACTLY 0.0 at the shipped dose, and — once dosed — must price out a
-    /// household that cannot afford its ration while leaving an affluent one
-    /// untouched.
+    /// S7 (CONSUMPTION_REBUILD_PLAN.md) · `household_priced_out` at
+    /// `dose = 0.0` is a true no-op — a property of the PURE FUNCTION itself
+    /// (mirrors `charter_bars_sale_is_a_pure_noop_at_dose_zero`), not a claim
+    /// about today's shipped constant, which every abstract fixture built
+    /// through `sim()` relies on regardless of what `HOUSEHOLD_MONETIZATION_
+    /// DOSE` ships at. Once dosed, it must price out a household that cannot
+    /// afford its ration while leaving an affluent one untouched.
     #[test]
-    fn household_priced_out_is_a_noop_at_zero_and_correctly_signed() {
-        assert_eq!(HOUSEHOLD_MONETIZATION_DOSE, 0.0);
+    fn household_priced_out_is_a_pure_noop_at_dose_zero() {
         assert_eq!(household_priced_out(10.0, 0.0, 1.0, 0.0), 0.0,
-            "at HOUSEHOLD_MONETIZATION_DOSE = 0.0, a penniless household must still \
-             eat its full ration");
+            "at dose 0.0, a penniless household must still eat its full ration");
         // Dosed: wants 10 units at price 1.0 (needs 10 money), has only 3.
         let out = household_priced_out(10.0, 3.0, 1.0, 1.0);
         assert!((out - 7.0).abs() < 1e-4, "expected 7 units priced out, got {out}");

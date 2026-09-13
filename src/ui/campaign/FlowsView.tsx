@@ -40,7 +40,14 @@ import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat,
          Donut, DonutKey, SplitBar, type Slice } from "@ui/kit";
 import { T, SPACE, FZ, RADIUS, SERIF, type Tone } from "@ui/campaign/chronicleTheme";
 
-type Seg = { ax: number; ay: number; bx: number; by: number; dir: number; w: number };
+type Seg = {
+  ax: number; ay: number; bx: number; by: number; dir: number; w: number;
+  /** BREAK OF BULK — set on both legs of a relayed route (the Ostia case), so
+   *  the map can mark the real transshipment point instead of leaving it to a
+   *  reader to notice a bend in the line. User request: show this on the map
+   *  when a trade good's import/export is clicked, not as a text line in a list. */
+  relayX?: number; relayY?: number;
+};
 
 const GOOD_META = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 function fmt(n: number): string {
@@ -65,7 +72,7 @@ function riskColor(risk: number): string {
  *  itself — the same derivation `TradeFlowGood`'s own doc comment gives
  *  (`transit = max(0, out_volume - own_production)`). Shared by the collapsed
  *  row's badge and the expanded row's bar so the two never disagree. */
-function goodSplit(g: TradeFlowGood) {
+export function goodSplit(g: TradeFlowGood) {
   const transit = Math.max(0, g.out_volume - (g.own_production ?? 0));
   const ownExport = g.out_volume - transit;
   const forUs = Math.max(0, g.in_volume - transit);
@@ -246,8 +253,24 @@ function BalanceBar({ inV, outV, max }: { inV: number; outV: number; max: number
   );
 }
 
-type Sort = "unusual" | "volume";
+type Sort = "unusual" | "volume" | "reward" | "cost" | "value";
 type GoodFilter = "all" | "produced" | "imported";
+/** The needs-ladder tier (`GoodSpec.need_tier`): 0 basic, 1 comfort, 2 luxury.
+ *  `null` = no tier filter. A separate dimension from `GoodFilter` above — a
+ *  good can be both luxury AND produced here, so the two filters compose
+ *  rather than one replacing the other. */
+type TierFilter = 0 | 1 | 2 | null;
+const TIER_LABELS = ["Basic needs", "Comfort", "Luxury"] as const;
+
+/** This good's trade VALUE at base price — `volume × base_value`, the same
+ *  grain-equivalent reading `TradeRouteFlow.value` already gives per route,
+ *  folded to the whole-good level so a trickle of a precious good and a flood
+ *  of grain can be ranked on one scale. `reward` is what selling it earns
+ *  (export value), `cost` is what buying it costs (import value), `value` is
+ *  the total turnover either way. */
+function goodReward(g: TradeFlowGood): number { return g.out_volume * (g.base_value ?? 1); }
+function goodCost(g: TradeFlowGood): number { return g.in_volume * (g.base_value ?? 1); }
+function goodValue(g: TradeFlowGood): number { return (g.in_volume + g.out_volume) * (g.base_value ?? 1); }
 
 /** A partner city expanded inline — which goods move each way, largest first.
  *  Built straight from `flows.routes` (already per-good, per-partner, per-
@@ -308,6 +331,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
   const [selPartner, setSelPartner] = useState<number | null>(null);
   const [sort, setSort] = useState<Sort>("unusual");
   const [goodFilter, setGoodFilter] = useState<GoodFilter>("all");
+  // Basic/comfort/luxury — a separate axis from `goodFilter` (produced/imported),
+  // so the two compose rather than one replacing the other. User request: filter
+  // Trade Flow by need tier to see which partner cities supply each kind of good.
+  const [tierFilter, setTierFilter] = useState<TierFilter>(null);
   // How the selected good's per-partner route list is ordered — volume (the
   // default), voyage RISK (riskiest lane first) or REWARD (highest value first,
   // `amount × base_value` — a trickle of a precious good can outrank a flood of
@@ -353,10 +380,11 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
     const bx = r.px + 0.5, by = r.py + 0.5;
     if ((r.relay_hub ?? -1) >= 0 && r.relay_px != null && r.relay_py != null) {
       const rx = r.relay_px + 0.5, ry = r.relay_py + 0.5;
+      const relay = { relayX: rx, relayY: ry };
       if (r.dir === 1) {
-        return [{ ax, ay, bx: rx, by: ry, dir: 1, w }, { ax: rx, ay: ry, bx, by, dir: 1, w }];
+        return [{ ax, ay, bx: rx, by: ry, dir: 1, w, ...relay }, { ax: rx, ay: ry, bx, by, dir: 1, w, ...relay }];
       }
-      return [{ ax: rx, ay: ry, bx, by, dir: 0, w }, { ax, ay, bx: rx, by: ry, dir: 0, w }];
+      return [{ ax: rx, ay: ry, bx, by, dir: 0, w, ...relay }, { ax, ay, bx: rx, by: ry, dir: 0, w, ...relay }];
     }
     return [{ ax, ay, bx, by, dir: r.dir, w }];
   };
@@ -551,14 +579,39 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
     // short of local demand), so these two filters are not each other's
     // strict opposite by volume — only by whether anything is grown/mined here.
     const gs = flows.goods.filter((g) =>
-      goodFilter === "produced" ? !!g.produced :
-      goodFilter === "imported" ? !g.produced :
-      true);
-    gs.sort(sort === "volume"
-      ? (a, b) => b.avg_volume - a.avg_volume
-      : (a, b) => unusualness(b) - unusualness(a));
+      (goodFilter === "produced" ? !!g.produced :
+       goodFilter === "imported" ? !g.produced :
+       true) &&
+      (tierFilter == null || (g.need_tier ?? 0) === tierFilter));
+    const key = sort === "volume" ? (g: TradeFlowGood) => g.avg_volume
+      : sort === "reward" ? goodReward
+      : sort === "cost" ? goodCost
+      : sort === "value" ? goodValue
+      : unusualness;
+    gs.sort((a, b) => key(b) - key(a));
     return gs;
-  }, [flows, sort, goodFilter]);
+  }, [flows, sort, goodFilter, tierFilter]);
+
+  // ── Top sources for a filtered TIER — user request: "see from which cities
+  // settlement takes the largest amounts of these types of goods". Aggregates
+  // `flows.routes` (already per-good, per-partner, per-direction) by partner,
+  // restricted to imports (dir 0) of the selected tier's goods — no new query.
+  const tierImportSources = useMemo(() => {
+    if (!flows || tierFilter == null) return null;
+    const tierOf = new Map(flows.goods.map((g) => [g.good, g.need_tier ?? 0]));
+    const byPartner = new Map<number, { name: string; amount: number }>();
+    for (const r of flows.routes) {
+      if (r.dir !== 0) continue;
+      if ((tierOf.get(r.good) ?? 0) !== tierFilter) continue;
+      const row = byPartner.get(r.partner) ?? { name: r.partner_name, amount: 0 };
+      row.amount += r.amount;
+      byPartner.set(r.partner, row);
+    }
+    return [...byPartner.entries()]
+      .map(([hub, v]) => ({ hub, ...v }))
+      .sort((a, b) => b.amount - a.amount)
+      .slice(0, 10);
+  }, [flows, tierFilter]);
 
   if (!active) return <EmptyNote>Realized trade appears once a campaign is running.</EmptyNote>;
   if (loading && !flows) return <EmptyNote>Loading trade flows…</EmptyNote>;
@@ -632,8 +685,19 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
               onClick={() => setGoodFilter((f) => f === "imported" ? "all" : "imported")}>
               imported only
             </Chip>
+            {/* Basic/comfort/luxury — a separate axis from produced/imported above,
+                so a luxury good that also happens to be produced here still shows. */}
+            {TIER_LABELS.map((label, t) => (
+              <Chip key={t} on={tierFilter === t}
+                onClick={() => setTierFilter((f) => f === t ? null : (t as TierFilter))}>
+                {label}
+              </Chip>
+            ))}
             <Chip on={sort === "unusual"} onClick={() => setSort("unusual")}>unusual</Chip>
             <Chip on={sort === "volume"} onClick={() => setSort("volume")}>volume</Chip>
+            <Chip on={sort === "reward"} onClick={() => setSort("reward")}>reward</Chip>
+            <Chip on={sort === "cost"} onClick={() => setSort("cost")}>cost</Chip>
+            <Chip on={sort === "value"} onClick={() => setSort("value")}>value</Chip>
             {sortedGoods.length > 16 && (
               <Chip on={showAllGoods} onClick={() => setShowAllGoods((v) => !v)}>
                 {showAllGoods ? "top 16" : `all ${sortedGoods.length}`}
@@ -644,10 +708,38 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
       >
         {sortedGoods.length === 0 && (
           <FootNote>
-            {goodFilter === "produced"
+            {tierFilter != null
+              ? `Nothing on the ${TIER_LABELS[tierFilter].toLowerCase()} tier is currently traded here.`
+              : goodFilter === "produced"
               ? "Nothing this city produces itself is currently traded."
               : "Everything this city trades, it also produces some of itself."}
           </FootNote>
+        )}
+        {/* Top sources for the selected tier — answers "which cities does this
+            settlement import the most basic/comfort/luxury goods from". */}
+        {tierImportSources && tierImportSources.length > 0 && (
+          <Card style={{ marginBottom: SPACE.sm }}>
+            <div style={{ color: T.inkFaint, fontSize: FZ.micro, letterSpacing: 0.5, marginBottom: 4 }}>
+              ◀ TOP SOURCES — {TIER_LABELS[tierFilter as 0 | 1 | 2].toUpperCase()}
+            </div>
+            {(() => {
+              const max = Math.max(...tierImportSources.map((p) => p.amount), 1e-6);
+              return tierImportSources.map((p) => (
+                <div key={p.hub} data-no-drag
+                  onClick={() => { setSelPartner(selPartner === p.hub ? null : p.hub); setSelGood(null); setSelRoute(null); }}
+                  style={{
+                    display: "flex", alignItems: "center", gap: SPACE.sm, padding: "2px 4px", cursor: "pointer",
+                    borderRadius: RADIUS.sm, background: selPartner === p.hub ? T.card : "transparent",
+                  }}>
+                  <span style={{ flex: 1, minWidth: 60, color: selPartner === p.hub ? T.gold : T.ink,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</span>
+                  <Meter value={p.amount} max={max} color={DIR_IN} height={6} />
+                  <span style={{ width: 50, textAlign: "right", color: T.inkMid, fontSize: FZ.tiny }}>{fmt(p.amount)}/yr</span>
+                </div>
+              ));
+            })()}
+            <FootNote>Every good on this tier this city buys in, summed by supplier city.</FootNote>
+          </Card>
         )}
         {(showAllGoods ? sortedGoods : sortedGoods.slice(0, 16)).map((g) => {
           const meta = GOOD_META.get(g.name);
@@ -814,7 +906,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
           );
         })}
         <FootNote>Click a good to map its routes. Bar shows the in/out split; length is total volume.
-          ⚒ made here marks a good this city actually produces (fields or estates), not merely resells.</FootNote>
+          ⚒ made here marks a good this city actually produces (fields or estates), not merely resells.
+          Sorting by <b>reward</b>/<b>cost</b>/<b>value</b> ranks by grain-equivalent worth (export/import/total
+          volume × the good&apos;s base price) rather than raw unit count, so a trickle of a precious good can
+          outrank a flood of grain.</FootNote>
       </Section>
 
       {/* ── Selected good's routes ───────────────────────────────────────────── */}
@@ -907,12 +1002,6 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                     upstream of a transit partner is named here since the map
                     has no room to draw a third leg without real per-shipment
                     provenance data the sim doesn't keep. */}
-                {(r.relay_hub ?? -1) >= 0 && (
-                  <span style={{ width: "100%", fontSize: FZ.tiny, color: "#2fd1c9", paddingLeft: 34 }}
-                    title={`this route's cheapest path relays through ${r.relay_name} — two legs, not one`}>
-                    ⚓ via {r.relay_name}
-                  </span>
-                )}
                 {(r.origin_hub ?? -1) >= 0 && (
                   <span style={{ width: "100%", fontSize: FZ.tiny, color: T.inkDim, paddingLeft: 34 }}
                     title="one hop upstream of the transit partner — not chased further">
@@ -927,8 +1016,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
             <FootNote>
               Click a route to isolate it on the map. The dot is voyage risk (green→red); the gold
               figure is the route's value. 🔀 transit hub · ⚒ producer · 🏠 terminal consumer — what
-              the PARTNER itself does with this good. ⚓ via names a real relay leg; 🔎 traces one hop
-              past a transit partner toward where the good is actually made.
+              the PARTNER itself does with this good. A route that breaks bulk through a relay port
+              shows a <span style={{ color: "#2fd1c9" }}>⚓ teal ring</span> on the map at the
+              transshipment city; 🔎 traces one hop past a transit partner toward where the good is
+              actually made.
             </FootNote>
           )}
         </Section>

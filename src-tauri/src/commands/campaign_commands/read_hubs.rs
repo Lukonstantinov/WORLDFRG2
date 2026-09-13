@@ -55,6 +55,7 @@ pub fn campaign_market_cities(db: State<'_, WorldDb>) -> Result<Vec<MarketCity>,
 
 #[tauri::command]
 pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDetail>, String> {
+    use std::collections::HashMap;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? {
         Some(s) => s,
@@ -75,6 +76,20 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         if th.hub as usize != hi { continue; }
         let g = th.good as usize;
         if g < ng { price_hist[g] = &th.prices; vol_hist[g] = &th.vols; }
+    }
+    // Chartered STAPLE RIGHTS at this hub — `House.charters` is implicitly at
+    // the holder's own seat (`houses.rs`'s settlement grant), so only a house
+    // seated exactly here can hold one; a live sim keeps `charters` small and
+    // rarely more than one house per hub, so this is a cheap one-pass build
+    // rather than a per-good scan (the same `charter_owner` convention
+    // `dispatch` itself uses in production.rs).
+    let mut charter_by_good: HashMap<usize, (String, bool, f32)> = HashMap::new();
+    for h in &sim.houses {
+        if h.defunct || h.hub as usize != hi || h.charters.is_empty() { continue; }
+        for &g in &h.charters {
+            let share = h.monopoly.iter().find(|(mg, _)| *mg == g).map(|(_, s)| *s).unwrap_or(0.0);
+            charter_by_good.insert(g, (h.name.clone(), h.is_guild, share));
+        }
     }
     // Per-good world cheapest/dearest (×-world price) across hubs.
     let goods: Vec<HubGoodDetail> = (0..ng)
@@ -152,6 +167,11 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                     rows.truncate(6);
                     rows
                 },
+                civic_goods: hub.civic_goods.get(g).copied().unwrap_or(0.0),
+                need_tier: sim.goods[g].need_tier,
+                charter_holder: charter_by_good.get(&g).map(|(n, ..)| n.clone()).unwrap_or_default(),
+                charter_is_guild: charter_by_good.get(&g).map(|(_, ig, _)| *ig).unwrap_or(false),
+                charter_share: charter_by_good.get(&g).map(|(_, _, s)| *s).unwrap_or(0.0),
             }
         })
         .collect();

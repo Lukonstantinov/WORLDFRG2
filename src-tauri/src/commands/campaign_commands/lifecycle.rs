@@ -956,6 +956,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         ship_leg_max_km: crate::sim::tick::ship_leg_max_km_default(),
         caravan_leg_max_km: crate::sim::tick::caravan_leg_max_km_default(),
         local_haul_bind_days: crate::sim::tick::local_haul_bind_days_default(),
+        route_post_max_home_km: crate::sim::tick::route_post_max_home_km_default(),
         diag_lost: 0,
         diag_volume: 0.0,
         recent_trades: vec![],

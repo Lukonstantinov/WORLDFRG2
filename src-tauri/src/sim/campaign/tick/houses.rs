@@ -1086,37 +1086,32 @@ impl CampaignSim {
         if self.hubs.iter().filter(|h| h.colony_kind == 4 && !h.abandoned).count() >= MAX_ROUTE_POSTS {
             return;
         }
-        // The single longest same-component real-hub gap with no friendly outlet
-        // already serving it — "the longest gap without a friendly port" (§5 slice
-        // 5), read straight off the days matrix and the entrepôt composition §6d
-        // already maintains, rather than scored by resource richness.
+        // Every same-component real-hub gap with no friendly outlet already
+        // serving it — "a gap without a friendly port" (§5 slice 5) — ranked
+        // longest first, not just the single longest. A ranked shortlist is what
+        // lets the loop below fall through to a nearer, still-real gap when the
+        // world's single longest one sits too far from every wealthy house,
+        // instead of either planting a post with no real connection to its
+        // founder or silently founding nothing at all (`ROUTE_POST_GAP_
+        // CANDIDATES`'s own doc comment).
         let real: Vec<usize> = (0..n).filter(|&i| !self.hubs[i].is_estate && !self.hubs[i].abandoned).collect();
-        let mut best: (usize, usize, f32) = (usize::MAX, usize::MAX, 0.0);
+        let mut gaps: Vec<(usize, usize, f32)> = Vec::new();
         for &a in &real {
             for &b in &real {
                 if b <= a || self.hubs[a].component != self.hubs[b].component { continue; }
                 let d = self.days[a * n + b];
                 if !d.is_finite() || d < ROUTE_POST_MIN_GAP_DAYS { continue; }
                 if self.route_outlet.get(a * n + b).copied().unwrap_or(-1) >= 0 { continue; }
-                if d > best.2 { best = (a, b, d); }
+                gaps.push((a, b, d));
             }
         }
-        let (ga, gb) = (best.0, best.1);
-        if ga == usize::MAX { return; }
-        // Cylindrical midpoint (X wraps).
-        let mut dx = self.hubs[gb].x - self.hubs[ga].x;
-        if self.world_w > 1.0 {
-            if dx > self.world_w * 0.5 { dx -= self.world_w; }
-            if dx < -self.world_w * 0.5 { dx += self.world_w; }
-        }
-        let mut mx = self.hubs[ga].x + dx * 0.5;
-        if self.world_w > 1.0 {
-            mx = ((mx % self.world_w) + self.world_w) % self.world_w;
-        }
-        let my = (self.hubs[ga].y + self.hubs[gb].y) * 0.5;
+        if gaps.is_empty() { return; }
+        gaps.sort_by(|x, y| y.2.partial_cmp(&x.2).unwrap_or(std::cmp::Ordering::Equal));
+        gaps.truncate(ROUTE_POST_GAP_CANDIDATES);
 
         // Founder: the richest house that clears a route post's (much lighter than
-        // an outpost's) wealth bar.
+        // an outpost's) wealth bar — chosen once, same house tries every gap
+        // candidate in turn below.
         let mut candidates: Vec<(usize, f32)> = self.houses.iter().enumerate()
             .filter(|(_, hh)| !hh.defunct && hh.wealth > ROUTE_POST_FOUND_WEALTH)
             .map(|(hi, hh)| (hi, hh.wealth))
@@ -1124,47 +1119,118 @@ impl CampaignSim {
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
         let Some(&(hi, _)) = candidates.first() else { return };
         if self.houses[hi].wealth < ROUTE_POST_FOUND_COST { return; }
-
-        // Site: prefer a genuine transhipment point — a river-mouth delta or a
-        // land/sea chokepoint (the world's own step-7a junction survey) — within
-        // ROUTE_POST_JUNCTION_KM of the gap's midpoint; only fall back to the
-        // plain nearest-surveyed-site pick when no such junction is in reach, so a
-        // gap with no real geographic pinch point still gets a post rather than
-        // none. Historically this is how a trade city actually forms: at the point
-        // cargo must change carrier, not at an arbitrary midpoint.
-        let nodes = [(mx, my)];
+        let home = self.houses[hi].hub as usize;
+        if home >= n { return; }
+        let home_node = [(self.hubs[home].x, self.hubs[home].y)];
+        let max_home_cells = self.route_post_max_home_km * self.world_w / EARTH_EQUATOR_KM;
         let junction_cells = ROUTE_POST_JUNCTION_KM * self.world_w / EARTH_EQUATOR_KM;
-        let mut best_junction = (usize::MAX, f32::MAX);
-        let mut best_any = (usize::MAX, f32::MAX);
-        for (i, s) in self.colonizable.iter().enumerate() {
-            if !self.house_knows(hi, s.province) { continue; }
-            let d = self.nearest_node_dist(&nodes, s.x, s.y);
-            if d < best_any.1 { best_any = (i, d); }
-            if (s.delta || s.chokepoint) && d <= junction_cells && d < best_junction.1 {
-                best_junction = (i, d);
+
+        for (ga, gb, _d) in gaps {
+            // Cylindrical midpoint (X wraps).
+            let mut dx = self.hubs[gb].x - self.hubs[ga].x;
+            if self.world_w > 1.0 {
+                if dx > self.world_w * 0.5 { dx -= self.world_w; }
+                if dx < -self.world_w * 0.5 { dx += self.world_w; }
+            }
+            let mut mx = self.hubs[ga].x + dx * 0.5;
+            if self.world_w > 1.0 {
+                mx = ((mx % self.world_w) + self.world_w) % self.world_w;
+            }
+            let my = (self.hubs[ga].y + self.hubs[gb].y) * 0.5;
+
+            // Site: prefer a genuine transhipment point — a river-mouth delta or a
+            // land/sea chokepoint (the world's own step-7a junction survey) — within
+            // ROUTE_POST_JUNCTION_KM of the gap's midpoint; only fall back to the
+            // plain nearest-surveyed-site pick when no such junction is in reach, so a
+            // gap with no real geographic pinch point still gets a post rather than
+            // none. Historically this is how a trade city actually forms: at the point
+            // cargo must change carrier, not at an arbitrary midpoint. **The site must
+            // also stand within ROUTE_POST_MAX_HOME_KM of the founding house's own
+            // seat** — the hard cap this file's own doc comment always claimed but
+            // never enforced, without which "the longest gap in the world" could plant
+            // a waystation a continent from whoever paid for it.
+            let nodes = [(mx, my)];
+            let mut best_junction = (usize::MAX, f32::MAX);
+            let mut best_any = (usize::MAX, f32::MAX);
+            for (i, s) in self.colonizable.iter().enumerate() {
+                if !self.house_knows(hi, s.province) { continue; }
+                if self.nearest_node_dist(&home_node, s.x, s.y) > max_home_cells { continue; }
+                let d = self.nearest_node_dist(&nodes, s.x, s.y);
+                if d < best_any.1 { best_any = (i, d); }
+                if (s.delta || s.chokepoint) && d <= junction_cells && d < best_junction.1 {
+                    best_junction = (i, d);
+                }
+            }
+            let bi = if best_junction.0 != usize::MAX { best_junction } else { best_any };
+            let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { continue };
+            let site = self.colonizable.swap_remove(si);
+
+            self.houses[hi].wealth -= ROUTE_POST_FOUND_COST;
+            // Fully house-funded, same as a resource outpost — no city/bank required.
+            let backers = vec![(1u8, hi as u32, 1.0f32)];
+            let new = self.create_market_colony(home, &site, backers, ROUTE_POST_SEED_POP);
+            self.hubs[new].colony_kind = 4;
+            self.hubs[new].owner_house = hi as i32;
+            self.hubs[new].name = format!("{} (post)",
+                self.hubs[new].name.replace(" (colony)", ""));
+            let (hn, ga_n, gb_n, cn) = (self.houses[hi].name.clone(),
+                self.hubs[ga].name.clone(), self.hubs[gb].name.clone(), self.hubs[new].name.clone());
+            self.houses[hi].events.push(HouseEvent { tick: self.tick, kind: "colony".into(),
+                text: format!("founds the waystation {} on the {}–{} road", cn, ga_n, gb_n) });
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
+                text: format!("{} plants the trade post {} to shorten the {}–{} run", hn, cn, ga_n, gb_n),
+            });
+            return; // at most one per call
+        }
+    }
+
+    /// Yearly: a route post grows and matures like any real settlement, and —
+    /// user-requested — eventually wins independence exactly as a full
+    /// settlement colony does. Before this a post's `colony_stage` never left
+    /// its founding 1 and the independence gate could never fire, because both
+    /// live in `colony_pass`, which is filtered to `colony_kind == 1` only —
+    /// a route post has no dedicated food lifeline to gate on (`ROUTE_POST_
+    /// SEED_POP`'s own doc comment: "it grows from real traffic afterward
+    /// ...or it stays a hamlet forever"), so `supply_years` stays exactly 0.0
+    /// at its founding value forever and `colony_pass`'s `supplied` gate could
+    /// never pass even if the filter were simply widened. This is therefore a
+    /// SEPARATE, deliberately lighter pass: population decides the stage (no
+    /// supply-years/building gate to measure), and the SAME age/stage bar
+    /// `colony_pass` uses for a settlement colony's independence, minus the
+    /// `supplied` term, substituted with a plain "not currently starving
+    /// badly" check.
+    pub(crate) fn route_post_pass(&mut self) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].colony_kind != 4 || self.hubs[h].autonomous || self.hubs[h].abandoned { continue; }
+            let pop = self.hubs[h].population;
+            let pop_stage: u8 = if pop >= 40_000.0 { 4 } else if pop >= 15_000.0 { 3 }
+                else if pop >= 4_000.0 { 2 } else { 1 };
+            if pop_stage > self.hubs[h].colony_stage {
+                self.hubs[h].colony_stage = pop_stage;
+                let nm = self.hubs[h].name.clone();
+                let label = ["", "outpost", "colony", "town", "city"][pop_stage as usize];
+                self.journal.push(JournalEntry { tick, kind: "colony".into(), hub: h as i32,
+                    good: -1, value: pop_stage as f32, text: format!("{} grows into a {}", nm, label) });
+            }
+            // INDEPENDENCE — a mature (≥50y), TOWN-stage-or-better post that is
+            // not currently starving badly rebels: war if its founding house's
+            // own seat still stands, peaceful drift if it has fallen. Same shape
+            // as `colony_pass`'s settlement-colony independence block.
+            let age = tick.saturating_sub(self.hubs[h].colony_founded_tick) / TICKS_PER_YEAR;
+            if age >= 50 && self.hubs[h].colony_stage >= 3 && self.hubs[h].starving < 0.3
+                && tick > self.hubs[h].indep_cooldown_until && self.hubs[h].war_with < 0 {
+                let m = self.hubs[h].founder_hub;
+                let metro_alive = m >= 0 && (m as usize) < self.hubs.len()
+                    && self.hubs[m as usize].population >= 100.0 && self.hubs[m as usize].war_with < 0;
+                if metro_alive {
+                    self.declare_independence_war(h, m as usize);
+                } else {
+                    self.make_colony_independent(h, false);
+                }
             }
         }
-        let bi = if best_junction.0 != usize::MAX { best_junction } else { best_any };
-        let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
-        let site = self.colonizable.swap_remove(si);
-
-        self.houses[hi].wealth -= ROUTE_POST_FOUND_COST;
-        // Fully house-funded, same as a resource outpost — no city/bank required.
-        let backers = vec![(1u8, hi as u32, 1.0f32)];
-        let home = self.houses[hi].hub as usize;
-        let new = self.create_market_colony(home, &site, backers, ROUTE_POST_SEED_POP);
-        self.hubs[new].colony_kind = 4;
-        self.hubs[new].owner_house = hi as i32;
-        self.hubs[new].name = format!("{} (post)",
-            self.hubs[new].name.replace(" (colony)", ""));
-        let (hn, ga_n, gb_n, cn) = (self.houses[hi].name.clone(),
-            self.hubs[ga].name.clone(), self.hubs[gb].name.clone(), self.hubs[new].name.clone());
-        self.houses[hi].events.push(HouseEvent { tick: self.tick, kind: "colony".into(),
-            text: format!("founds the waystation {} on the {}–{} road", cn, ga_n, gb_n) });
-        self.journal.push(JournalEntry {
-            tick: self.tick, kind: "colony".into(), hub: new as i32, good: -1, value: 1.0,
-            text: format!("{} plants the trade post {} to shorten the {}–{} run", hn, cn, ga_n, gb_n),
-        });
     }
 
     /// Per-good total per-capita output across every hub — the cheap proxy the
@@ -1235,7 +1301,19 @@ impl CampaignSim {
             nodes.push((h.x, h.y));
             network_coastal |= h.coastal;
         }
-        let cap = COLONY_MAX_KM * self.world_w / EARTH_EQUATOR_KM; // ≤ 2500 km from the metropolis
+        // Player-requested tightening (2026-09): a trade post's own tolerable
+        // distance from its FOUNDING house's home city depends on whether the
+        // journey there is shippable. `OUTPOST_MAX_KM_LAND` (1200) applies by
+        // default; `OUTPOST_MAX_KM_SEA` (3000) applies only when BOTH ends
+        // have a real sea connection (both coastal) or a real river
+        // connection (both river-linked) — an actual shippable leg, not just
+        // "the house owns a port somewhere else in its network"
+        // (`network_coastal` above still gates whether a COASTAL SITE can be
+        // reached at all; this decides how FAR either kind of site may sit).
+        // Replaces the old flat `COLONY_MAX_KM` (2500) for house outposts
+        // only — mining/settlement colonies are untouched.
+        let cap_land = OUTPOST_MAX_KM_LAND * self.world_w / EARTH_EQUATOR_KM;
+        let cap_sea = OUTPOST_MAX_KM_SEA * self.world_w / EARTH_EQUATOR_KM;
         // D1 (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) — the minimum gap, in
         // the same cell units `cap`/`nearest_node_dist` already use.
         let min_gap = OUTPOST_MIN_GAP_KM * self.world_w / EARTH_EQUATOR_KM;
@@ -1256,15 +1334,18 @@ impl CampaignSim {
             // plant an outpost in a province it has never surveyed. Seeded from
             // day-one holdings (§3.1), so this constrains expansion only.
             if !self.house_knows(hi, s.province) { continue; }
+            let sea_linked = (self.hubs[home].coastal && s.coastal)
+                || (self.hubs[home].river && s.river);
+            let cap = if sea_linked { cap_sea } else { cap_land };
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
             // D1 — a real outer bound from the METROPOLIS specifically, not the
             // nearest network node: without this a chain of estates each up to
             // `cap` from the last lets a house's total reach from home compound
-            // past `COLONY_MAX_KM` indefinitely. The office/estate relay above
-            // still governs which node a site is SCORED against (a real regional
-            // foothold legitimately shortens the practical distance); this only
-            // stops the compounding.
+            // indefinitely. The office/estate relay above still governs which
+            // node a site is SCORED against (a real regional foothold
+            // legitimately shortens the practical distance); this only stops
+            // the compounding.
             let d_home = self.nearest_node_dist(
                 &[(self.hubs[home].x, self.hubs[home].y)], s.x, s.y);
             if d_home > cap { continue; }

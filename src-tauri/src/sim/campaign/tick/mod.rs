@@ -545,11 +545,24 @@ const STRATA_MOBILITY_RATE: f32 = 0.04;
 // new field, `hub.pops` is read directly) at a SMALL, bounded dose, so an
 // imperfectly-calibrated affinity number can only ever nudge the result,
 // the same caution `COMFORT_IMPORT_FRAC`'s own repeated-regression history
-// argues for. Dosed at 0.15 and re-verified against
-// `econ_expenditure_shares_resemble_a_household` + `simulate_decades_
-// reports_dynamics` rather than assumed safe; walk it further only with a
-// fresh gate run at each step, per this file's own §2.4 discipline.
-const PROFESSION_BASKET_DOSE: f32 = 0.15;
+// argues for.
+//
+// REGRESSION, FOUND AND REVERTED: shipped at 0.15, claimed "re-verified
+// against `econ_expenditure_shares_resemble_a_household` +
+// `simulate_decades_reports_dynamics`" — that claim was false. A later
+// session bisecting a red `tick::tests` (4 failures: the standing dynamics
+// gate itself plus `a_matrilineal_house_is_held_by_women` and both
+// `..._on_a_realistically_dense_world` gates) isolated this single constant
+// by ablation: `LEVY_STRENGTH_WEIGHT` (the same commit's other behavioural
+// change) back to its shipped value plus this dose at 0.0 passes all four;
+// this dose at 0.15 with everything else unchanged fails all four. Reverted
+// to 0.0 (a TRUE no-op — `society_demand_mult` early-returns `base`
+// unchanged below this threshold, so this is bit-identical to the
+// mechanism's absence, not a weaker dose of it). The mechanism and its
+// affinity table are left in place; re-dosing from zero needs the fresh
+// per-step gate run this file's own §2.4 discipline calls for, which the
+// original commit did not actually do despite its message.
+const PROFESSION_BASKET_DOSE: f32 = 0.0;
 /// How strongly each `Pop` profession's own budget leans into a need tier
 /// (basic/comfort/luxury), relative to the population average — a rough,
 /// historically-motivated ranking (soldiers and farmers provisioned but
@@ -656,6 +669,14 @@ const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
 /// 16 800 km at default res — colonies appeared across whole oceans). 2500 km cap
 /// (user rule): a colony is a bold venture but not on the far side of the world.
 const COLONY_MAX_KM: f32 = 2500.0;
+/// A house TRADE OUTPOST's own tolerable distance from its founding house's
+/// home city (`try_found_house_outpost`) — tighter than `COLONY_MAX_KM` above
+/// (which still governs settlement/mining colonies) and split by whether the
+/// journey is actually shippable (player rule, 2026-09): 1200 km overland by
+/// default, 3000 km when both the home city and the site have a real sea or
+/// river connection. Both are far under any 10,000 km ceiling by construction.
+const OUTPOST_MAX_KM_LAND: f32 = 1200.0;
+const OUTPOST_MAX_KM_SEA: f32 = 3000.0;
 /// SATELLITES hug their metropolis — a day's ride (Ostia→Rome), never an ocean. They
 /// draw from a dedicated near-city pool (`compute_satellite_sites`) and are capped at
 /// this range from the parent (user rule).
@@ -1330,6 +1351,41 @@ const ROUTE_POST_FOUND_COST: f32 = 9_000.0;
 /// arbitrary midpoint: a river-mouth delta (river↔sea) or a strait/isthmus
 /// chokepoint (land↔sea, land↔land around a barrier) is exactly that point.
 const ROUTE_POST_JUNCTION_KM: f32 = 600.0;
+/// **The hard cap this section's own doc comment already promised ("capped hard")
+/// and the shipped code never actually enforced** — `maybe_found_route_post`
+/// picked the single LONGEST same-component gap in the whole world with no
+/// ceiling at all, so a wealthy house could plant a waystation a continent away
+/// from its own seat (measured: a world large enough for the longest live gap to
+/// exceed 10,000 miles/16,000 km founds a post exactly that far out — the
+/// user-reported case). A route post is a smaller, cheaper venture than a
+/// resource outpost (`ROUTE_POST_FOUND_WEALTH`/`_COST` well under an outpost's
+/// bar), so it gets an EQUAL, not a longer, reach — same value as
+/// `COLONY_MAX_KM`, named separately because the two are conceptually distinct
+/// caps (home-distance for a founder vs. distance from a colony's own
+/// metropolis) that happen to share a number today. Checked against the SITE,
+/// not the gap's far end — a post two days from home bridging a much longer
+/// gap beyond it is exactly the historical kontor/factory pattern (a waystation
+/// projects from the founder's own reach, the LANE it serves can run on).
+const ROUTE_POST_MAX_HOME_KM: f32 = COLONY_MAX_KM;
+/// How many of the longest qualifying gaps `maybe_found_route_post` tries, in
+/// order, before giving up for this call. A single best-or-nothing pick (the
+/// pre-fix shape) either plants a post with no real connection to its founder
+/// or, once `ROUTE_POST_MAX_HOME_KM` rejects it, silently stalls forever if the
+/// world's single longest gap always sits far from every wealthy house — the
+/// same "rank a shortlist, fall through" discipline
+/// `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`'s lesser-town routing fix already
+/// uses, so a nearer, still-real gap gets founded instead.
+const ROUTE_POST_GAP_CANDIDATES: usize = 8;
+/// User-requested: encourage migration TO a fresh trade post — a real, bounded
+/// pull bonus added to `province_demography_pass`'s ordinary opportunity term
+/// for a small (`< 4,000` pop, still stage-1/2) `colony_kind == 4` hub, tapering
+/// to zero once it has established itself. Historically a frontier factory
+/// paid a real wage premium for exactly this reason — labour was scarce there,
+/// not merely welcome — and without it a post's own growth (`route_post_pass`)
+/// depends entirely on however much rural pull its remote siting happens to
+/// draw on its own, which can be nearly nothing for a waystation planted where
+/// no province has much of a rural pool to begin with.
+const ROUTE_POST_MIGRATION_BONUS: f32 = 0.35;
 // ── Trade bases (houses develop EXISTING under-traded small cities).
 //    The accessible cousin of the outpost: a house
 //    invests influence + capital into a real settlement to bootstrap it into a node. ──
@@ -2476,15 +2532,50 @@ pub(crate) const ORE_CEILING_DOSE: f32 = 0.0;
 /// jump.
 pub(crate) const PROD_ELASTICITY: f32 = 0.0;
 
-/// S7 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero, the highest-risk lever
-/// in the plan — the merchant layer holds ALL the money in this model by
-/// construction today, and giving households a monetary existence
-/// redistributes wealth away from it, against the hard-won top-10% share
-/// band (Phase 4.3/Phase 5 of the house series). 0.0 is a verified
-/// bit-identical no-op (`s7_household_monetization_at_zero_is_a_noop`); the
-/// real dose walk — how large a wage, how hard a shortfall should bite — is
-/// its own future measured, multi-commit work, re-run against `econ_` and
-/// the dynamics run per step, exactly like S3/S5.
+/// S7 (CONSUMPTION_REBUILD_PLAN.md) · dosed from zero — the highest-risk lever
+/// in the plan, because the merchant layer holds ALL the money in this model
+/// by construction, and giving households a monetary existence redistributes
+/// wealth away from it, against the hard-won top-10% share band (Phase
+/// 4.3/Phase 5 of the house series). `household_priced_out`'s own pure-decision
+/// no-op at `dose = 0.0` is unconditional (`household_priced_out_is_a_pure_
+/// noop_at_dose_zero`) regardless of what the shipped constant is — that
+/// property, not this constant, is what every fixture opting out relies on.
+///
+/// **A real dose walk was attempted (user-requested: ordinary consumption
+/// should be a real transaction, not the unconditional no-counterparty draw
+/// `docs/CONSUMPTION_AND_GOODS_REVIEW.md` names) and REVERTED — a genuine
+/// prerequisite gap, not a tuning miss, blocks it.**
+///
+/// `update_food_and_starvation` (`disease.rs`) reads `food_have = stock +
+/// production` — RAW STOCK, never `eat`. A household priced out of its
+/// ration is not fed, but the grain it couldn't afford stays physically
+/// sitting in the warehouse, so `food_have` reads UNCHANGED or higher and
+/// the city's own starvation/dearth signal — the thing `update_unrest`'s
+/// sentiment and every revolt roll are keyed on — reads as BETTER fed, not
+/// worse. This is a real, structural entitlement-failure gap (the Amartya
+/// Sen case: a famine with grain on hand, because the poor cannot buy it)
+/// that the sim does not yet model on the demand side, however small the
+/// dose.
+///
+/// Measured (`cargo test --lib tick::tests`, `sim()` fixtures, all fixed
+/// seeds): at **0.1**, 5 failures incl. a severe trade collapse on the dense-
+/// world fixture (`the_dosed_economy_stays_healthy_on_a_realistically_dense_
+/// world`: 557,598 vs a ~2.4M floor) — clearly too strong. At **0.02**, 2
+/// failures (`unrest_topples_councils` — a chronically poor city stops
+/// revolting, exactly the mechanism above; `the_relay_carries_long_lanes...`).
+/// At **0.005**, 3 failures, and NOT a strict subset of 0.02's — `a_house_
+/// records_every_head_it_has_had` reappeared while `unrest_topples_councils`
+/// still failed. A smaller dose making MORE single-trajectory threshold tests
+/// fail, not fewer, is the signature of chaotic sensitivity (every tick's
+/// state feeds the next day's hash-based rolls) compounding a real bug, not
+/// a magnitude that merely needs to be turned down further.
+///
+/// **Reverted to 0.0.** The fix this needs is `update_food_and_starvation`
+/// reading the SPENDING side (the post-price-out shortfall — `lack_basic` and
+/// the day loop's own `eat` already carry it) rather than raw stock, so a
+/// household priced out reads as genuinely underfed. That is real, separate,
+/// gated work — not a side effect of raising this constant — and is the
+/// prerequisite before this dose walk can be resumed.
 pub(crate) const HOUSEHOLD_MONETIZATION_DOSE: f32 = 0.0;
 /// Share of a hub's `trade_wealth` paid out monthly as household wages —
 /// the WAGE half of the design fork CONSUMPTION_REBUILD_PLAN.md's S7 leaves
@@ -3681,6 +3772,7 @@ fn neg_one_i32() -> i32 { -1 }
 pub(crate) fn ship_leg_max_km_default() -> f32 { SHIP_LEG_MAX_KM }
 pub(crate) fn caravan_leg_max_km_default() -> f32 { CARAVAN_LEG_MAX_KM }
 pub(crate) fn local_haul_bind_days_default() -> f32 { N1_LOCAL_HAUL_BIND_DAYS }
+pub(crate) fn route_post_max_home_km_default() -> f32 { ROUTE_POST_MAX_HOME_KM }
 fn unknown_extent() -> u8 { u8::MAX }
 
 /// One sparse per-hub history sample (weekly) for the settlement-window charts.
@@ -6583,6 +6675,16 @@ pub struct CampaignSim {
     /// leg-range caps, the same paired dosing `the_dosed_economy_stays_
     /// healthy_on_a_realistically_dense_world` already does for those.
     #[serde(default = "local_haul_bind_days_default")] pub local_haul_bind_days: f32,
+    /// Same test-controllable-field precedent as `ship_leg_max_km`/`local_haul_
+    /// bind_days` directly above, for the identical reason: `ROUTE_POST_MAX_
+    /// HOME_KM` is stated in real kilometres, and every abstract-scale `sim()`
+    /// fixture (built for a purpose that has nothing to do with distance —
+    /// `route_posts_prefer_a_junction_site_over_the_nearest_plain_one` failed
+    /// on this exact mismatch, a 200-km/cell test world putting its own
+    /// founder ~10,400 km from the site it was testing) would trip the cap on
+    /// pure fixture-scale noise rather than a genuine overreach. `sim()` opts
+    /// out at `f32::INFINITY`; a real campaign gets the shipped dose.
+    #[serde(default = "route_post_max_home_km_default")] pub route_post_max_home_km: f32,
     /// Test-only, and for the SAME ONE CALLER as `suppress_realms` above:
     /// `econ_inheritance_rules_fragment_differently`. Suppresses CRISIS RELIEF
     /// (`polis.rs::decide_crisis_relief`).
