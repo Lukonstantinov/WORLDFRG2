@@ -54,6 +54,17 @@ function fmt(n: number): string {
   if (n >= 1000) return `${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}k`;
   return n.toFixed(n >= 100 ? 0 : 1);
 }
+/** Deterministic per-city colour for the "who dominates this tier's trade"
+ *  donut — a partner city carries no colour of its own anywhere in this
+ *  payload, unlike a good (which has one in `GOOD_DEFS`) or a house/guild
+ *  carrier (which gets `distinct_color` server-side). Same FNV hash → HSL
+ *  fallback `CultureDonut.tsx` already uses for an uncatalogued culture, so a
+ *  city's wedge colour is at least stable across renders and tiers. */
+function cityHashColor(s: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return `hsl(${Math.abs(h) % 360} 48% 56%)`;
+}
 /** Green → yellow → red for a 0..1 voyage-loss risk — the SAME ramp and the
  *  same reference scale (0.15) `OverlayManager.riskColor` uses for the map's
  *  risk-coloured merchant routes, so a route reads the same risk colour here
@@ -220,17 +231,21 @@ function seasonMetaFor(latFrac: number | undefined): SeasonMeta[] {
   return [TEMPERATE_SEASONS[2], TEMPERATE_SEASONS[3], TEMPERATE_SEASONS[0], TEMPERATE_SEASONS[1]];
 }
 
-/** A labeled trend chart of a good's yearly trade volume — replaces the old bare
- *  sparkline (a squiggly line with no scale, no year markers and no way to read
- *  an individual year off it, which is exactly what made it unreadable). Now a
- *  real small chart: a 0 baseline and a peak gridline, each with its own value
- *  label, "N yr ago" / "last yr" on the x-axis, the final year's value written
- *  directly beside its point, and a per-year hover tooltip (native <title>, the
- *  same pattern this file already uses for badge tooltips) so every point is
- *  readable without adding visual clutter for all of them at once. Line colour
- *  reuses the app's own good/warn/bad semantic tones (rising / flat / fallen
- *  from peak) rather than inventing a new palette. */
-function Spark({ vals }: { vals: number[] }) {
+/** The full-size redesign of the per-good trend chart — replaces both the
+ *  original bare sparkline AND its first "labeled" revision, which was still
+ *  fixed at 260×64px and impossible to read once embedded in a real panel row
+ *  (user report: "no labels, don't understand anything", then "redesign the
+ *  graph completely" on the follow-up). Now a real chart: fills the row's
+ *  width (viewBox + width:100%, not a fixed pixel size), three gridlines (0 /
+ *  half / peak) each carrying its own value label, a live CROSSHAIR that
+ *  tracks the pointer with a floating tooltip box naming the exact year and
+ *  value under it — not just a native `<title>` that only shows one point at
+ *  a time with no visual continuity — and the final year's value still
+ *  written directly beside its point when nothing is being hovered. Line/fill
+ *  colour keeps reusing the app's own good/warn/bad semantic tones (rising /
+ *  flat / fallen from peak) rather than inventing a new palette. */
+function TrendChart({ vals }: { vals: number[] }) {
+  const [hoverI, setHoverI] = useState<number | null>(null);
   if (vals.length < 2) return <span style={{ color: T.inkFaint, fontSize: FZ.micro }}>no history yet</span>;
   const n = vals.length;
   const max = Math.max(...vals, 1e-6);
@@ -239,43 +254,80 @@ function Spark({ vals }: { vals: number[] }) {
   const rising = last >= vals[n - 2];
   const color = fallen ? T.bad : rising ? T.good : T.warn;
 
-  const W = 260, H = 64;
-  const padTop = 13, padBottom = 15, padLeft = 2, padRight = 46;
+  // A virtual coordinate space, scaled to the real rendered width via
+  // `width="100%"` + `viewBox` below — this is what makes the chart fill its
+  // row instead of sitting at a fixed 260px regardless of panel width.
+  const W = 600, H = 132;
+  const padTop = 20, padBottom = 24, padLeft = 6, padRight = 56;
   const plotW = W - padLeft - padRight, plotH = H - padTop - padBottom;
   const x = (i: number) => padLeft + (n > 1 ? (i / (n - 1)) * plotW : 0);
   const y = (v: number) => padTop + plotH - (v / max) * plotH;
   const baseY = padTop + plotH;
+  const mid = max / 2;
 
   const linePts = vals.map((v, i) => `${x(i)},${y(v)}`).join(" ");
   const areaPts = `${x(0)},${baseY} ${linePts} ${x(n - 1)},${baseY}`;
 
+  const nearestIndex = (clientX: number, rect: DOMRect) => {
+    const relX = ((clientX - rect.left) / Math.max(rect.width, 1)) * W;
+    return Math.max(0, Math.min(n - 1, Math.round(((relX - padLeft) / plotW) * (n - 1))));
+  };
+
   return (
-    <svg width={W} height={H} style={{ display: "block", overflow: "visible" }}>
-      {/* Gridlines: the 0 baseline and the peak (max) line, each labeled — the
-          scale the old sparkline never showed. */}
-      <line x1={padLeft} y1={baseY} x2={padLeft + plotW} y2={baseY} stroke={T.lineSoft} strokeWidth={1} />
-      <line x1={padLeft} y1={padTop} x2={padLeft + plotW} y2={padTop} stroke={T.lineSoft} strokeWidth={1} strokeDasharray="2,3" />
-      <text x={padLeft} y={baseY + 11} fontSize={FZ.micro} fill={T.inkFaint}>0</text>
-      <text x={padLeft} y={padTop - 3} fontSize={FZ.micro} fill={T.inkFaint}>{fmt(max)}</text>
-      {/* x-axis: which year is which end of the line. */}
-      <text x={padLeft} y={H - 2} fontSize={FZ.micro} fill={T.inkFaint}>{n - 1} yr ago</text>
-      <text x={padLeft + plotW} y={H - 2} fontSize={FZ.micro} fill={T.inkFaint} textAnchor="end">last yr</text>
-      {/* The area + line itself. */}
-      <polygon points={areaPts} fill={color} opacity={0.12} />
-      <polyline points={linePts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-      {/* One hoverable hit-target per year — a real number on demand, not printed
-          for all of them at once (a bigger, invisible circle than the visible dot,
-          per the "hit targets bigger than the mark" rule). */}
-      {vals.map((v, i) => (
-        <circle key={i} cx={x(i)} cy={y(v)} r={7} fill="transparent">
-          <title>{n - 1 - i === 0 ? "last yr" : `${n - 1 - i} yr ago`}: {fmt(v)}/yr</title>
-        </circle>
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+      style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
+      onMouseMove={(e) => setHoverI(nearestIndex(e.clientX, e.currentTarget.getBoundingClientRect()))}
+      onMouseLeave={() => setHoverI(null)}
+    >
+      {/* Three gridlines — 0 / half / peak — each carrying its own value label,
+          the scale the very first sparkline never showed at all. */}
+      {[0, mid, max].map((v, i) => (
+        <g key={i}>
+          <line x1={padLeft} y1={y(v)} x2={padLeft + plotW} y2={y(v)} stroke={T.lineSoft} strokeWidth={1}
+            strokeDasharray={v === 0 ? undefined : "2,4"} />
+          <text x={padLeft} y={y(v) - (v === 0 ? -14 : 5)} fontSize={FZ.small} fill={T.inkFaint}>{fmt(v)}</text>
+        </g>
       ))}
-      {/* The last point is the one worth reading without hovering — a real dot
-          plus its value, directly labeled (selective direct labels, not one per
-          point). */}
-      <circle cx={x(n - 1)} cy={y(last)} r={2.5} fill={color} />
-      <text x={x(n - 1) + 6} y={y(last) + 3} fontSize={FZ.small} fill={color} fontWeight={700}>{fmt(last)}</text>
+      {/* x-axis: which year is which end of the line. */}
+      <text x={padLeft} y={H - 4} fontSize={FZ.small} fill={T.inkFaint}>{n - 1} yr ago</text>
+      <text x={padLeft + plotW} y={H - 4} fontSize={FZ.small} fill={T.inkFaint} textAnchor="end">last yr</text>
+      {/* The area + line itself. */}
+      <polygon points={areaPts} fill={color} opacity={0.16} />
+      <polyline points={linePts} fill="none" stroke={color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+      {/* Crosshair + hover dot — follows the pointer continuously rather than
+          only answering one point at a time via a native tooltip. */}
+      {hoverI != null && (
+        <>
+          <line x1={x(hoverI)} y1={padTop} x2={x(hoverI)} y2={baseY} stroke={T.inkFaint} strokeWidth={1} strokeDasharray="2,3" />
+          <circle cx={x(hoverI)} cy={y(vals[hoverI])} r={4.5} fill={color} stroke={T.bg} strokeWidth={1.5} />
+        </>
+      )}
+      {hoverI == null && <circle cx={x(n - 1)} cy={y(last)} r={3.5} fill={color} />}
+      {/* The floating tooltip, clamped inside the plot area so it never spills
+          off either edge. */}
+      {hoverI != null && (() => {
+        const tw = 96, th = 34;
+        const cx = Math.max(padLeft, Math.min(padLeft + plotW - tw, x(hoverI) - tw / 2));
+        const above = y(vals[hoverI]) - th - 10;
+        const cy = above < 0 ? y(vals[hoverI]) + 10 : above;
+        const yearsAgo = n - 1 - hoverI;
+        return (
+          <g>
+            <rect x={cx} y={cy} width={tw} height={th} rx={5} fill={T.panel} stroke={T.line} strokeWidth={1} />
+            <text x={cx + tw / 2} y={cy + 14} textAnchor="middle" fontSize={FZ.small} fill={T.inkMid}>
+              {yearsAgo === 0 ? "last yr" : `${yearsAgo} yr ago`}
+            </text>
+            <text x={cx + tw / 2} y={cy + 28} textAnchor="middle" fontSize={FZ.base} fontWeight={700} fill={color}>
+              {fmt(vals[hoverI])}/yr
+            </text>
+          </g>
+        );
+      })()}
+      {/* The last point's value, written directly beside it, when nothing else
+          is being hovered — the one number worth reading without interacting. */}
+      {hoverI == null && (
+        <text x={x(n - 1) + 8} y={y(last) + 4} fontSize={FZ.base} fill={color} fontWeight={700}>{fmt(last)}</text>
+      )}
     </svg>
   );
 }
@@ -378,6 +430,11 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
   // so the two compose rather than one replacing the other. User request: filter
   // Trade Flow by need tier to see which partner cities supply each kind of good.
   const [tierFilter, setTierFilter] = useState<TierFilter>(null);
+  // Which tier's pair of donuts ("Trade by category") is showing — independent
+  // of `tierFilter` above (that one filters the Traded goods LIST; this picks
+  // which of the three always-available category breakdowns to display, so
+  // browsing one doesn't fight the other's chip state).
+  const [catTier, setCatTier] = useState<0 | 1 | 2>(0);
   // How the selected good's per-partner route list is ordered — volume (the
   // default), voyage RISK (riskiest lane first) or REWARD (highest value first,
   // `amount × base_value` — a trickle of a precious good can outrank a flood of
@@ -656,6 +713,48 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
       .slice(0, 10);
   }, [flows, tierFilter]);
 
+  // ── Trade by category — user request: "circular diagrams for basic, comfort
+  // and luxury goods to see which trades and which cities dominate that
+  // trade". Two part-of-a-whole readings per tier, computed for all three
+  // tiers at once (not just whichever the Traded-goods list happens to be
+  // filtered to): the GOODS that make up that tier's trade here, and the
+  // PARTNER CITIES that dominate it — both folds of state already on hand
+  // (`flows.goods` for the tier split, `flows.routes` — already per-good,
+  // per-partner, per-direction — for the city split, both DIRECTIONS this
+  // time, not just imports like `tierImportSources` above, since "dominates
+  // the trade" is a relationship, not only a source). No new query.
+  const tierCategoryTrade = useMemo(() => {
+    if (!flows) return null;
+    const tierOf = new Map(flows.goods.map((g) => [g.good, g.need_tier ?? 0]));
+    return ([0, 1, 2] as const).map((t) => {
+      const goods: Slice[] = flows.goods
+        .filter((g) => (g.need_tier ?? 0) === t)
+        .map((g) => ({
+          label: GOOD_META.get(g.name)?.label ?? g.name,
+          value: g.in_volume + g.out_volume,
+          color: GOOD_META.get(g.name)?.color ?? T.inkDim,
+        }))
+        .filter((s) => s.value > 0);
+      const byCity = new Map<number, { name: string; value: number }>();
+      for (const r of flows.routes) {
+        if ((tierOf.get(r.good) ?? 0) !== t) continue;
+        const row = byCity.get(r.partner) ?? { name: r.partner_name, value: 0 };
+        row.value += r.amount;
+        byCity.set(r.partner, row);
+      }
+      const hubOfLabel = new Map<string, number>();
+      const cities: Slice[] = [...byCity.entries()].map(([hub, v]) => {
+        hubOfLabel.set(v.name, hub);
+        return { label: v.name, value: v.value, color: cityHashColor(v.name) };
+      });
+      return {
+        goods, cities, hubOfLabel,
+        goodsTotal: goods.reduce((a, b) => a + b.value, 0),
+        citiesTotal: cities.reduce((a, b) => a + b.value, 0),
+      };
+    });
+  }, [flows]);
+
   if (!active) return <EmptyNote>Realized trade appears once a campaign is running.</EmptyNote>;
   if (loading && !flows) return <EmptyNote>Loading trade flows…</EmptyNote>;
   if (!flows) return <EmptyNote>No trade data for this settlement yet.</EmptyNote>;
@@ -868,7 +967,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                     <div style={{ color: T.inkFaint, fontSize: FZ.micro, marginBottom: 2 }}>
                       TRADE VOLUME, LAST {g.history.length} YEARS
                     </div>
-                    <Spark vals={g.history} />
+                    <TrendChart vals={g.history} />
                   </div>
                   {/* TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — own produce vs
                       passing-through vs bought-for-itself, derived with no new
@@ -1134,6 +1233,75 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
             )}
           </div>
           <FootNote>⚒ marks a good this city actually produces — the rest is re-exported, not grown or mined here.</FootNote>
+        </Section>
+      )}
+
+      {/* ── Trade by category ─────────────────────────────────────────────────
+          User request: "circular diagrams for basic, comfort and luxury goods
+          to see which trades and which cities dominate that trade". One tier
+          at a time (three donuts of six side by side reads as noise), each
+          answering two different questions from the same tier's trade: which
+          GOODS make it up, and which PARTNER CITIES carry most of it. */}
+      {tierCategoryTrade && tierCategoryTrade.some((c) => c.goods.length > 0) && (
+        <Section
+          title="Trade by category"
+          right={
+            <span style={{ display: "flex", gap: 4 }}>
+              {TIER_LABELS.map((label, t) => (
+                <Chip key={t} on={catTier === t} onClick={() => setCatTier(t as 0 | 1 | 2)}>
+                  {label}
+                </Chip>
+              ))}
+            </span>
+          }
+        >
+          {(() => {
+            const cat = tierCategoryTrade[catTier];
+            if (!cat || cat.goods.length === 0) {
+              return (
+                <EmptyNote>
+                  Nothing on the {TIER_LABELS[catTier].toLowerCase()} tier is currently traded here.
+                </EmptyNote>
+              );
+            }
+            return (
+              <div style={{ display: "flex", gap: SPACE.lg, flexWrap: "wrap", alignItems: "flex-start" }}>
+                <div style={{ display: "flex", gap: SPACE.md, alignItems: "center", minWidth: 260, flex: 1 }}>
+                  <Donut slices={cat.goods} size={112} center={fmt(cat.goodsTotal)} sub="TRADED /yr" />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ color: T.gold, fontSize: FZ.micro, letterSpacing: 0.6, marginBottom: 2 }}>
+                      WHICH GOODS DOMINATE — {TIER_LABELS[catTier].toUpperCase()}
+                    </div>
+                    <DonutKey slices={cat.goods} fmt={fmt} onPick={(lbl) => {
+                      const g = flows.goods.find((x) => (GOOD_META.get(x.name)?.label ?? x.name) === lbl);
+                      setSelGood(g && selGood !== g.good ? g.good : null);
+                      setSelDir(null); setSelPartner(null); setSelRoute(null);
+                    }} />
+                  </div>
+                </div>
+                {cat.cities.length > 0 && (
+                  <div style={{ display: "flex", gap: SPACE.md, alignItems: "center", minWidth: 260, flex: 1 }}>
+                    <Donut slices={cat.cities} size={112} center={fmt(cat.citiesTotal)} sub="TRADED /yr" />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ color: DIR_IN, fontSize: FZ.micro, letterSpacing: 0.6, marginBottom: 2 }}>
+                        WHICH CITIES DOMINATE — {TIER_LABELS[catTier].toUpperCase()}
+                      </div>
+                      <DonutKey slices={cat.cities} fmt={fmt} onPick={(lbl) => {
+                        const hub = lbl ? cat.hubOfLabel.get(lbl) : undefined;
+                        setSelPartner(hub != null && selPartner !== hub ? hub : null);
+                        setSelGood(null); setSelDir(null); setSelRoute(null);
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+          <FootNote>
+            Left: this tier&apos;s trade broken down by good. Right: broken down by the partner city on the
+            other end — imports and exports together, so a city this settlement both buys from and sells to
+            counts once, at its full combined share. Click a wedge to isolate it on the map.
+          </FootNote>
         </Section>
       )}
 
