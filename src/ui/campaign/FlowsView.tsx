@@ -40,7 +40,14 @@ import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat,
          Donut, DonutKey, SplitBar, type Slice } from "@ui/kit";
 import { T, SPACE, FZ, RADIUS, SERIF, type Tone } from "@ui/campaign/chronicleTheme";
 
-type Seg = { ax: number; ay: number; bx: number; by: number; dir: number; w: number };
+type Seg = {
+  ax: number; ay: number; bx: number; by: number; dir: number; w: number;
+  /** BREAK OF BULK — set on both legs of a relayed route (the Ostia case), so
+   *  the map can mark the real transshipment point instead of leaving it to a
+   *  reader to notice a bend in the line. User request: show this on the map
+   *  when a trade good's import/export is clicked, not as a text line in a list. */
+  relayX?: number; relayY?: number;
+};
 
 const GOOD_META = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 function fmt(n: number): string {
@@ -373,10 +380,11 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
     const bx = r.px + 0.5, by = r.py + 0.5;
     if ((r.relay_hub ?? -1) >= 0 && r.relay_px != null && r.relay_py != null) {
       const rx = r.relay_px + 0.5, ry = r.relay_py + 0.5;
+      const relay = { relayX: rx, relayY: ry };
       if (r.dir === 1) {
-        return [{ ax, ay, bx: rx, by: ry, dir: 1, w }, { ax: rx, ay: ry, bx, by, dir: 1, w }];
+        return [{ ax, ay, bx: rx, by: ry, dir: 1, w, ...relay }, { ax: rx, ay: ry, bx, by, dir: 1, w, ...relay }];
       }
-      return [{ ax: rx, ay: ry, bx, by, dir: 0, w }, { ax, ay, bx: rx, by: ry, dir: 0, w }];
+      return [{ ax: rx, ay: ry, bx, by, dir: 0, w, ...relay }, { ax, ay, bx: rx, by: ry, dir: 0, w, ...relay }];
     }
     return [{ ax, ay, bx, by, dir: r.dir, w }];
   };
@@ -994,12 +1002,6 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                     upstream of a transit partner is named here since the map
                     has no room to draw a third leg without real per-shipment
                     provenance data the sim doesn't keep. */}
-                {(r.relay_hub ?? -1) >= 0 && (
-                  <span style={{ width: "100%", fontSize: FZ.tiny, color: "#2fd1c9", paddingLeft: 34 }}
-                    title={`this route's cheapest path relays through ${r.relay_name} — two legs, not one`}>
-                    ⚓ via {r.relay_name}
-                  </span>
-                )}
                 {(r.origin_hub ?? -1) >= 0 && (
                   <span style={{ width: "100%", fontSize: FZ.tiny, color: T.inkDim, paddingLeft: 34 }}
                     title="one hop upstream of the transit partner — not chased further">
@@ -1014,8 +1016,10 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
             <FootNote>
               Click a route to isolate it on the map. The dot is voyage risk (green→red); the gold
               figure is the route's value. 🔀 transit hub · ⚒ producer · 🏠 terminal consumer — what
-              the PARTNER itself does with this good. ⚓ via names a real relay leg; 🔎 traces one hop
-              past a transit partner toward where the good is actually made.
+              the PARTNER itself does with this good. A route that breaks bulk through a relay port
+              shows a <span style={{ color: "#2fd1c9" }}>⚓ teal ring</span> on the map at the
+              transshipment city; 🔎 traces one hop past a transit partner toward where the good is
+              actually made.
             </FootNote>
           )}
         </Section>

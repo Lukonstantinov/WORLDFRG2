@@ -2003,8 +2003,8 @@ export class OverlayManager {
   /** Transient highlight of one settlement's trade flows (Trade ▸ Flows subtab):
    *  glowing arrows between the city and its partners. dir 0 = inbound (arrow → city),
    *  1 = outbound (arrow → partner). Drawn whenever set; cleared with []. */
-  flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[] = [];
-  setFlowHighlight(segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[], gridW: number) {
+  flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[] = [];
+  setFlowHighlight(segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[], gridW: number) {
     this.flowHighlight = segs;
     if (gridW > 0) this.worldW = gridW;
   }
@@ -4471,6 +4471,17 @@ export class OverlayManager {
     const W = this.worldW;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
+    // BREAK OF BULK — user request: this must be visible on the MAP when a
+    // good's import/export is clicked, not only as a text line in the Flows
+    // list. A relayed route contributes two legs sharing the same relay
+    // point (`legSegs` in FlowsView.tsx), so dedupe before drawing — the
+    // same ring convention `renderMerchantRoutes` already uses for the
+    // standing Merchant Routes layer, so the two read as one language.
+    const relayPts = new Map<string, [number, number]>();
+    for (const s of this.flowHighlight) {
+      if (s.relayX == null || s.relayY == null) continue;
+      relayPts.set(`${s.relayX.toFixed(2)},${s.relayY.toFixed(2)}`, [s.relayX, s.relayY]);
+    }
     for (let idx = 0; idx < this.flowHighlight.length; idx++) {
       const s = this.flowHighlight[idx];
       const inbound = s.dir === 0;
@@ -4567,6 +4578,21 @@ export class OverlayManager {
         ctx.lineTo(tx - ah * Math.cos(ang - 0.4), ty - ah * Math.sin(ang - 0.4));
         ctx.lineTo(tx - ah * Math.cos(ang + 0.4), ty - ah * Math.sin(ang + 0.4));
         ctx.closePath(); ctx.fill();
+      }
+    }
+    // BREAK OF BULK marker — same teal ring `renderMerchantRoutes` draws for a
+    // relayed route's transshipment point, drawn once per unique relay city
+    // (see the dedupe above) rather than once per leg.
+    if (relayPts.size > 0) {
+      const ringR = Math.max(1.6, 3.2 * inv);
+      ctx.globalAlpha = 0.95;
+      ctx.strokeStyle = "#2fd1c9";
+      ctx.lineWidth = Math.max(0.6, 1.2 * inv);
+      ctx.setLineDash([]);
+      for (const [rx, ry] of relayPts.values()) {
+        ctx.beginPath();
+        ctx.arc(rx, ry, ringR, 0, Math.PI * 2);
+        ctx.stroke();
       }
     }
     ctx.globalAlpha = 1;
