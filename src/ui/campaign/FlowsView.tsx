@@ -220,19 +220,62 @@ function seasonMetaFor(latFrac: number | undefined): SeasonMeta[] {
   return [TEMPERATE_SEASONS[2], TEMPERATE_SEASONS[3], TEMPERATE_SEASONS[0], TEMPERATE_SEASONS[1]];
 }
 
-/** A tiny trend sparkline of a good's yearly trade volume. Green when rising into
- *  the last year, red when it has fallen from its peak. */
+/** A labeled trend chart of a good's yearly trade volume — replaces the old bare
+ *  sparkline (a squiggly line with no scale, no year markers and no way to read
+ *  an individual year off it, which is exactly what made it unreadable). Now a
+ *  real small chart: a 0 baseline and a peak gridline, each with its own value
+ *  label, "N yr ago" / "last yr" on the x-axis, the final year's value written
+ *  directly beside its point, and a per-year hover tooltip (native <title>, the
+ *  same pattern this file already uses for badge tooltips) so every point is
+ *  readable without adding visual clutter for all of them at once. Line colour
+ *  reuses the app's own good/warn/bad semantic tones (rising / flat / fallen
+ *  from peak) rather than inventing a new palette. */
 function Spark({ vals }: { vals: number[] }) {
   if (vals.length < 2) return <span style={{ color: T.inkFaint, fontSize: FZ.micro }}>no history yet</span>;
-  const w = 150, h = 30, max = Math.max(...vals, 1e-6);
-  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - (v / max) * (h - 3) - 1.5}`).join(" ");
-  const last = vals[vals.length - 1];
+  const n = vals.length;
+  const max = Math.max(...vals, 1e-6);
+  const last = vals[n - 1];
   const fallen = last < max * 0.6;
-  const color = fallen ? "#e06a5a" : last >= vals[vals.length - 2] ? "#6fce8f" : "#d9c46a";
+  const rising = last >= vals[n - 2];
+  const color = fallen ? T.bad : rising ? T.good : T.warn;
+
+  const W = 260, H = 64;
+  const padTop = 13, padBottom = 15, padLeft = 2, padRight = 46;
+  const plotW = W - padLeft - padRight, plotH = H - padTop - padBottom;
+  const x = (i: number) => padLeft + (n > 1 ? (i / (n - 1)) * plotW : 0);
+  const y = (v: number) => padTop + plotH - (v / max) * plotH;
+  const baseY = padTop + plotH;
+
+  const linePts = vals.map((v, i) => `${x(i)},${y(v)}`).join(" ");
+  const areaPts = `${x(0)},${baseY} ${linePts} ${x(n - 1)},${baseY}`;
+
   return (
-    <svg width={w} height={h} style={{ display: "block" }}>
-      <polyline points={pts} fill="none" stroke={color} strokeWidth={1.4} />
-      <circle cx={w} cy={h - (last / max) * (h - 3) - 1.5} r={2} fill={color} />
+    <svg width={W} height={H} style={{ display: "block", overflow: "visible" }}>
+      {/* Gridlines: the 0 baseline and the peak (max) line, each labeled — the
+          scale the old sparkline never showed. */}
+      <line x1={padLeft} y1={baseY} x2={padLeft + plotW} y2={baseY} stroke={T.lineSoft} strokeWidth={1} />
+      <line x1={padLeft} y1={padTop} x2={padLeft + plotW} y2={padTop} stroke={T.lineSoft} strokeWidth={1} strokeDasharray="2,3" />
+      <text x={padLeft} y={baseY + 11} fontSize={FZ.micro} fill={T.inkFaint}>0</text>
+      <text x={padLeft} y={padTop - 3} fontSize={FZ.micro} fill={T.inkFaint}>{fmt(max)}</text>
+      {/* x-axis: which year is which end of the line. */}
+      <text x={padLeft} y={H - 2} fontSize={FZ.micro} fill={T.inkFaint}>{n - 1} yr ago</text>
+      <text x={padLeft + plotW} y={H - 2} fontSize={FZ.micro} fill={T.inkFaint} textAnchor="end">last yr</text>
+      {/* The area + line itself. */}
+      <polygon points={areaPts} fill={color} opacity={0.12} />
+      <polyline points={linePts} fill="none" stroke={color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+      {/* One hoverable hit-target per year — a real number on demand, not printed
+          for all of them at once (a bigger, invisible circle than the visible dot,
+          per the "hit targets bigger than the mark" rule). */}
+      {vals.map((v, i) => (
+        <circle key={i} cx={x(i)} cy={y(v)} r={7} fill="transparent">
+          <title>{n - 1 - i === 0 ? "last yr" : `${n - 1 - i} yr ago`}: {fmt(v)}/yr</title>
+        </circle>
+      ))}
+      {/* The last point is the one worth reading without hovering — a real dot
+          plus its value, directly labeled (selective direct labels, not one per
+          point). */}
+      <circle cx={x(n - 1)} cy={y(last)} r={2.5} fill={color} />
+      <text x={x(n - 1) + 6} y={y(last) + 3} fontSize={FZ.small} fill={color} fontWeight={700}>{fmt(last)}</text>
     </svg>
   );
 }
@@ -821,11 +864,11 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                       </div>
                     ))}
                   </div>
-                  <div style={{ width: "100%", display: "flex", alignItems: "center", gap: SPACE.md, padding: "4px 0 2px 28px" }}>
+                  <div style={{ width: "100%", padding: "4px 0 2px 28px" }}>
+                    <div style={{ color: T.inkFaint, fontSize: FZ.micro, marginBottom: 2 }}>
+                      TRADE VOLUME, LAST {g.history.length} YEARS
+                    </div>
                     <Spark vals={g.history} />
-                    <span style={{ color: T.inkDim, fontSize: FZ.tiny }}>
-                      last year {fmt(g.last_volume)} · {g.history.length}-year trend
-                    </span>
                   </div>
                   {/* TRADE_STAGING_AND_POSTS_PLAN.md slice 1 — own produce vs
                       passing-through vs bought-for-itself, derived with no new
