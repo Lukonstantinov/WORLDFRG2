@@ -586,8 +586,9 @@ serde-defaulted so old saves load). Grouped by theme:
   closed heads in `line` who each left the house richer than they found it — chronicled
   once per streak (`dynasty_chronicled`). All three are milestones (`is_house_milestone`),
   so the events cap can't prune them. Two of the design's five positive events are
-  deliberately NOT built: a great partnership needs alliance-linked tier rises, a legendary
-  head needs goals (Phase 3, unbuilt) — both deferred, not built silently short.
+  still QUEUED, with a named prerequisite each: a great partnership needs
+  alliance-linked tier rises, a legendary head needs goals to be wired to decisions
+  (Phase 3.1 ships goals as read-only tracking). Both are owed, not waived.
 - **The `Kin` roster (Phase 2.1/2.2/2.3/2.6):** each non-guild house carries `kin:
   Vec<Kin>`, (re)generated at every founding/succession by `ensure_kin_roster`.
   `kin[0]` always mirrors the current head (role 0); 2–4 siblings follow, up to two
@@ -5087,8 +5088,10 @@ MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ AGREED IN SCOPE, NOTHING BUILT. One ca
                                     mines with shallow self-funding and deep credit ·
                                     historical + area-scaled district counts · the
                                     three province-view fixes), each with its gate and
-                                    its dose. Decisions recorded in §2; "deliberately
-                                    not built" in §5
+                                    its dose. Decisions recorded in §2; §5 is a
+                                    NUMBERED QUEUE of the work that follows slices
+                                    0-7, each item naming what it waits for — a
+                                    schedule, never a refusal
 PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ AGREED IN SCOPE, NOTHING BUILT. The companion:
                                     where towns are · how big they get · why anyone
                                     trades. **Settlements are ONE flat greedy pass**
@@ -5143,9 +5146,11 @@ PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ AGREED IN SCOPE, NOTHING BUILT. The co
                                     is walked ONE AT A TIME (they multiply the same
                                     expression), gated by
                                     `econ_expenditure_shares_resemble_a_household`.
-                                    Per-culture demand profiles are named and
-                                    DELIBERATELY NOT BUILT (§5) — they would move
-                                    every price in the world on top of two other doses
+                                    Per-culture demand profiles are §5's item 8 —
+                                    the largest remaining demand item, QUEUED rather
+                                    than dropped: all three terms multiply the same
+                                    expression, so they are dose-walked one at a
+                                    time and 8 begins once 6 and 7 are live
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
 DEPOSITS_AND_MINING_PLAN.md       ← ⭐ BUILT — all five slices, gated. Ore
@@ -5177,8 +5182,8 @@ DEPOSITS_AND_MINING_PLAN.md       ← ⭐ BUILT — all five slices, gated. Ore
                                     and served; no new canvas layer renders it)
                                     and the Mons Claudianus treasury-quarry edge
                                     case. Carries the measured findings that
-                                    motivated it and its own
-                                    "deliberately not built" list
+                                    motivated it and its own list of the work
+                                    still owed
 WORLD_AND_TRADE_MASTER_PLAN.md    ← ⭐ THE ACTIVE PLAN. Three parts, one
                                     dependency chain (the land decides where
                                     trade can go). Part I tectonics/rivers/
@@ -5243,7 +5248,7 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     city tiers, the city-as-state, and war). Carries its
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
-                                    and its own "deliberately not built" list (§6)
+                                    and its own §6 list of the work still owed
 TRADE_STAGING_AND_POSTS_PLAN.md   ← ⭐ APPROVED, NOTHING BUILT. Seven slices that
                                     make a long lane a RELAY instead of a teleport.
                                     Premise: a 7,000 km lane is historically ordinary;
@@ -5313,7 +5318,7 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md
                                     with no downside. Carries its own gates per stage
                                     — including the companion gate that matters most,
                                     that long-haul trade VOLUME must not collapse —
-                                    and its own "deliberately not built" list. Four
+                                    and its own list of the work still owed. Four
                                     design decisions are recorded at the top
                                     (individual vessels · houses+guilds only ·
                                     privilege staged as terms-then-price · no code yet)
@@ -5501,7 +5506,7 @@ REALM_AND_GOVERNMENT_PLAN.md      ← ⭐ R1-R5 BUILT, each partially. THE FIRST
                                     a speculative "chase prosperity" AI). REVERSES
                                     CITY_PROVINCE_WAR_PLAN §6's deferral of a realm
                                     entity above cities. Carries its own caveats (§5)
-                                    and "deliberately not built" list (§6); §7's
+                                    and §6 list of the work still owed; §7's
                                     order table records exactly what each phase shipped
 TWO_APPS_AND_FILE_UPLOAD_PLAN.md  ← ⭐ SLICES 1-2 BUILT + the campaign LIBRARY and
                                     START OVER; slices 3-5 unbuilt. The audit found
@@ -6444,3 +6449,17 @@ Three rules:
     and a remote outpost denied it is dropped from the map/lifelines entirely — the
     Dynamic Trade Flow overlay and `rebuild_routes`' three no-dead-city guarantees
     both did the latter until this rule was written.
+36. **A plan may not close its scope by declaring work "deliberately not built."**
+    That phrase used to end a section in most planning docs here, and it reads as
+    settled when it is only unstarted — a future session finds a tidy refusal where
+    it should find a task. Every item a plan does not do in its own slices is
+    QUEUED instead: a numbered entry that names the SLICE OR MEASUREMENT it waits
+    for and the gate it will need, so the queue can be picked up in order. "Out of
+    scope for this plan" is a statement about sequencing, never about whether the
+    work is owed. The two legitimate ways to close an item permanently are
+    different and must say which they are: it is **already shipped** (name where),
+    or it is a **measured negative result** (§2.4 — it was built, it was measured,
+    it regressed a gate, and the table showing that is in the doc). A third
+    category — "nobody will do this" — does not exist; if a thing genuinely should
+    never be built, the reason is a measurement or a rule, and that is what gets
+    written down.

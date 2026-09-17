@@ -470,11 +470,12 @@ expensive*, and the market bears it because the distance is itself the status.
 - `distance_prestige_never_touches_a_basic_good`
 - `an_old_save_with_no_origin_data_is_bit_identical`
 
-**Deliberately NOT in this slice:** a per-culture demand profile. A vector over
-categories per people, resolved once like `culture_rules`, is a real and attractive
-idea — and it would move every price in the world at once, on top of two other
-demand doses in the same plan. It belongs in its own plan with its own measurement.
-Named here so it is not assumed done. See §5.
+**Next after this slice — item 8, the per-culture demand profile.** A vector over
+need categories per people, resolved once like `culture_rules`. It is the third term
+multiplying the same luxury/comfort expression as slices 6 and 7, which is the only
+reason it is not IN this slice: three simultaneous doses on one term cannot be
+attributed to anything. Build it as soon as 6 and 7 are live and the expenditure
+shares have settled — §5 item 8 carries its trigger and its gate.
 
 ---
 
@@ -492,24 +493,22 @@ Named here so it is not assumed done. See §5.
 
 ---
 
-## 5 · Deliberately NOT built
+## 5 · Deferred work — scheduled, not refused
 
-- **Per-culture demand profiles.** Real, wanted, and out of scope here — it would
-  move every price in the world on top of two other demand doses. Its own plan.
-- **A provenance × grade stock matrix** (7b option ii). The parallel accumulator
-  buys the effect at a fraction of the risk.
-- **Founding a settlement as a player verb.** The campaign stays observation-only
-  plus the province tax verb. The *worldgen* placement tool is a different thing and
-  is what slice 3b extends.
-- **Re-siting an existing capital.** Slice 2 guarantees a seat on generation; it does
-  not move a seat that already exists. `repair_province_settlements` remains the tool
-  for an old world.
-- **Making `Pop` the demographic model.** `Society` shares remain the live model;
-  `Pop` keeps its three real consumers (militancy, the levy, craftsmen labour).
-- **Price-elastic aggregate demand.** `DEMAND_ELASTICITY` is built and shipped at
-  zero (N6). Dosing it is separate, unstarted work and must not be folded in here —
-  it multiplies the same term slices 6 and 7 touch.
-- **Seasonal demand.** N5 gives lanes a season; demand has none. Not opened.
+Every item below is real work with a real reason to come AFTER slices 1-7, and a
+named thing it waits for. It is a queue, not a refusal. **The whole demand half of
+this plan converges on item 8**, which is the one the user asked for directly and
+the one the earlier slices exist to make safe.
+
+| # | Item | Why it waits, and what it waits FOR |
+|---|---|---|
+| 8 | **Per-culture demand profiles** — a vector over need categories per people, resolved once like `culture_rules` | The single largest remaining demand item, and the reason slices 6 and 7 are dosed one at a time: all three multiply the same luxury/comfort term, and walking three doses simultaneously is untestable. Build it once slices 6 and 7 are at live doses and `econ_expenditure_shares_resemble_a_household` has settled, so its own dose walk starts from a known baseline. The mechanism (`culture_rules`, resolved once, never re-rolled) already exists to copy. |
+| 9 | **Price-elastic aggregate demand** (`DEMAND_ELASTICITY`, N6) | Already BUILT and shipped at zero. It multiplies the same term as slices 6-8, so it is the fourth dose in that queue, not a parallel one. Walk it after 8. |
+| 10 | **Seasonal demand** | N5 already gives every lane a season; demand has none, so a city's wants are flat across the year while its supply is not. Needs slices 6-9's demand terms settled first, since a seasonal swing on top of three unsettled doses cannot be attributed. |
+| 11 | **A provenance × grade stock matrix** (7b option ii) | Slice 7b ships the parallel `stock_origin` accumulator because it buys the effect at a fraction of the risk. Upgrade to a true per-parcel matrix if and when a mechanism needs to distinguish two specific consignments — a staple right or a house's own reserve would be the trigger. Until one does, the accumulator is the correct model, not a compromise. |
+| 12 | **Re-siting an existing capital** | Slice 2 guarantees a seat on generation. Moving a seat that already exists is a different verb with campaign-state consequences (`prov_seat`, `prov_holder`, realm capitals), and `repair_province_settlements` covers the old-world case meanwhile. Build after slice 2 has produced worlds worth re-siting. |
+| 13 | **Founding a settlement as a campaign player verb** | Slice 3b builds the *worldgen* placement tool, which is the half that needs no new campaign state. The campaign verb needs `INSTITUTIONS_BUILD_ORDER.md`'s observation-only decision revisited; the three province verbs are the pattern to copy when it is. |
+| 14 | **`Pop` as the demographic model** | `Society` shares are the live model and `Pop` has three real consumers (militancy, the levy, craftsmen labour). Slice 4 re-anchors capacity on `prov_cap`, which is the first change to make headcount structurally load-bearing — reassess after it is at a live dose, since that is when the two models start to disagree usefully. |
 
 ---
 

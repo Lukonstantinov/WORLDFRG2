@@ -608,26 +608,23 @@ forget.
 
 ---
 
-## 5 · Deliberately NOT built
+## 5 · Deferred work — scheduled, not refused
 
-Named so a future session does not assume they were silently done.
+Everything below is real work this plan does not do in slices 0-7 **because it
+depends on them landing first**. It is a queue with an order, not a list of
+things nobody will do. A session finishing slice 7 should start at 8.
 
-- **A mining labour market.** Mines will scale with capital and geology, not with a
-  contested workforce. Labour is FIX_PLAN Part C and is not a finance change.
-- **Mercury → silver amalgamation beyond what slice 4-5 of
-  `DEPOSITS_AND_MINING_PLAN.md` already shipped.** Already real; not re-opened.
-- **A live share exchange.** `Share.paid` is a price anchor; nothing trades shares
-  on a market, and §6 of `ESTATES_SHARES_AND_WAREHOUSE_PLAN.md` already says so.
-- **Realm coin / a state mint financing mines.** Deferred in
-  `REALM_AND_GOVERNMENT_PLAN.md` §7 and left deferred.
-- **Ore exhaustion.** v2.0 deliberately made a mine NOT accrue depletion — an ore
-  body's grade and extent are a worldgen-frozen geological fact (§5). This plan
-  does not reopen that; the `EXTENT_WEAK` decline path (D3) already covers the one
-  case where it is right.
-- **Player verbs for any of this.** The campaign stays observation-only plus the
-  existing province tax verb. `INSTITUTIONS_BUILD_ORDER.md`'s own decision.
-- **A second financier class beyond banks and city treasuries.** Temple banking,
-  bottomry loans and the *commenda* are all real and all out of scope.
+| # | Item | Why it waits, and what it waits FOR |
+|---|---|---|
+| 8 | **A second financier class** — temple banking, bottomry loans, the *commenda* | Wants the demanded-loan instrument slice 5c introduces to exist and be measured first. A second lender competing with banks is only meaningful once one lender demonstrably works. |
+| 9 | **A mining labour market** | Slices 5-6 make a mine scale with capital and geology. Labour is the third input and is the largest single item in FIX_PLAN Part C — it wants the whole of Part C's scope, not a finance slice's corner of it. |
+| 10 | **A live share exchange** | `Share.paid` is already a price anchor and slice 4 starts populating extraction-work shares. Once mines, manufactories and fisheries all carry real share rows, a secondary market for them has something to trade. Doing it before slice 4 would list an empty exchange. |
+| 11 | **Realm coin / a state mint financing mines** | Needs `REALM_AND_GOVERNMENT_PLAN.md` §7's realm coin, which is itself waiting on the tuned `money.rs` coinage system. Slice 5c's city-treasury financier path is the piece of this that lands here; the minting half follows realm coin. |
+| 12 | **Ore exhaustion as a general mechanic** | Currently correct as-is (an ore body's grade and extent are a worldgen-frozen geological fact, §5; the `EXTENT_WEAK` decline path covers the one case where wear is right). Revisit only if slice 6's raised district counts make world-wide ore supply read as inexhaustible — which is a measurement, not an assumption. |
+| 13 | **Player verbs for financing and mining** | `INSTITUTIONS_BUILD_ORDER.md`'s standing decision is observation-only, and the province verbs are the pattern to copy when that changes. Every `decide_*` here is written as a latent player verb (FIX_PLAN B2) so this is a UI slice, not a rewrite. |
+
+**Already shipped, listed so it is not rebuilt:** mercury → silver amalgamation
+(`DEPOSITS_AND_MINING_PLAN.md` slices 4-5).
 
 ---
 
