@@ -5029,6 +5029,123 @@ SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md
                                     last, because a boycott is N2's market
                                     closure × members and N2's single-city
                                     version broke the hard wealth bound twice
+MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ AGREED IN SCOPE, NOTHING BUILT. One causal
+                                    chain: banks survive → mines get financed → ore
+                                    becomes an industry → deposit goods show up in
+                                    the province view. Six measured findings, of
+                                    which three are outright bugs. **F1a — a
+                                    DEFAULTED note-funded loan never retires its
+                                    notes** (`money.rs:612-626` writes off the asset
+                                    but `notes_issued` is reduced only on the
+                                    REPAYMENT path at `:624`), so every default
+                                    destroys 0.6 × principal of equity permanently:
+                                    the same hole the comment at `money.rs:604`
+                                    records closing for repayment, never closed for
+                                    default. That, plus one missed payment killing
+                                    the whole loan (no arrears state at all, while
+                                    the borrowing house gets a one-year grace),
+                                    every loan going to the single richest resident,
+                                    and half of reserves in one loan at 3× leverage
+                                    against a 0.6%/month spread, is why banks fail in
+                                    ~5 years. **F2 — every gemstone is a QUARRY**:
+                                    `estate_kind_for_good` (`mod.rs:2112`) still
+                                    decides mine-vs-quarry by SUBSTRING MATCH on the
+                                    good's name even inside the post-S4 DIST_DEPOSITS
+                                    branch, so diamond/ruby/sapphire/emerald/jade/
+                                    lapis/turquoise/marble/salt all fall to kind 8 and
+                                    the ENTIRE mining mechanic (`mine_depth`,
+                                    drainage, flooded-body unlocking) is structurally
+                                    unreachable for them — self-sealingly, since both
+                                    `workable` (`province.rs:767`) and `served`
+                                    (`colonies.rs:1524`) hard-code `estate_kind == 2`.
+                                    **F3 — an estate is never sited on ore**:
+                                    `maybe_found_estate` maximises `base_per_capita ×
+                                    demand_pressure` (so a deposit good never wins)
+                                    and places at a hash offset from the parent
+                                    (`houses.rs:792`), never consulting
+                                    `mine_deposits` — so §8.16's eleven deposit
+                                    models are generated and then read by almost
+                                    nothing. **F4 — deposit goods are FILTERED OUT of
+                                    the province list**: `Province.good_belt` is a
+                                    coverage MEAN, so a 1-3 cell diamond district in
+                                    a 3,000-cell province lands at ≈0.0318 against a
+                                    `PROV_GOOD_ABSENT_BELT` of 0.0314 — a LARGER
+                                    province hides a RICHER mine, while
+                                    `ProvincePotential.deposits` draws the working
+                                    anyway, so the plate and the list disagree.
+                                    **F5 — the manufactured filter runs in 1 of 4
+                                    exits** (`get_province_layer` only), which is why
+                                    manufactured goods appear right after generation
+                                    and vanish after a reload. **F6 — deposit counts**
+                                    put diamond/jade at 2 districts and lapis/
+                                    ambergris at 1 on a default world, while amethyst,
+                                    topaz, garnet and carnelian each get TWICE copper's
+                                    6. Eight slices (constant-split refactor · notes
+                                    bug · arrears · book diversification · offtake
+                                    stakes in extraction works, reusing the already-
+                                    typed `Share.payout == 0` · ore-sited financed
+                                    mines with shallow self-funding and deep credit ·
+                                    historical + area-scaled district counts · the
+                                    three province-view fixes), each with its gate and
+                                    its dose. Decisions recorded in §2; "deliberately
+                                    not built" in §5
+PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ AGREED IN SCOPE, NOTHING BUILT. The companion:
+                                    where towns are · how big they get · why anyone
+                                    trades. **Settlements are ONE flat greedy pass**
+                                    (`settlements.rs:509`) with a single spacing
+                                    radius and tier assigned afterwards, so a
+                                    "capital" is just a town that scored well; and
+                                    provinces (phase 7b, seeded FROM settlements at
+                                    `provinces.rs:1181`) fall back to jittered FILLER
+                                    seeds, so a province may hold zero settlements or
+                                    five of equal rank. Plan inverts the order —
+                                    PRIMARY sites → provinces → SECONDARY settlements
+                                    placed inside them, every filler province given a
+                                    seat at its best `trade`-scoring cell (never its
+                                    centroid) — which makes one main hub per province
+                                    true by CONSTRUCTION rather than by
+                                    `repair_province_settlements`. Old `.worldforge`
+                                    files keep their partition untouched (the new
+                                    order runs only on regeneration, so no campaign's
+                                    `prov_*`/`prov_holder`/`prov_realm` indices
+                                    shift). A `Settlement.primary` flag plus an
+                                    explicit UI choice lets the user hand-place the
+                                    province capitals and generate around them —
+                                    `manual`/`edited` settlements ALREADY survive
+                                    regeneration (`StepSettlements.tsx:90`), so only
+                                    the flag and the order are new. **Growth: a city's
+                                    ceiling is a multiple of `founding_pop`**
+                                    (`disease.rs:509`), so the founding roll decides
+                                    the ranking forever and a perfectly-sited small
+                                    town can never overtake a badly-sited large one —
+                                    re-anchored on `prov_cap`, the province's real
+                                    carrying capacity, which already exists and which
+                                    nothing in the growth pass reads; plus a small
+                                    capped `works_dev` term so founding estates and
+                                    raising structures lift the ceiling. **Demand: the
+                                    foreign-craving term is a BINARY SWITCH**
+                                    (`production.rs:895` — a city producing ANY amount
+                                    of a luxury gets ZERO import craving) with no
+                                    gradient, no distance and no provenance, and
+                                    NOTHING anywhere knows where a good came from
+                                    (`stock` is a flat pool; imported salt is
+                                    indistinguishable from local salt the moment it
+                                    lands). Made continuous, plus a new
+                                    `LOCAL_SATIETY` so a city awash in a luxury it
+                                    makes itself wants less per head — the direct
+                                    answer to a luxury producer retaining ~30% of its
+                                    own output, which is far too high (Moluccan clove
+                                    growers did not eat cloves; Venice sold salt it
+                                    did not eat) — and a `stock_origin` provenance
+                                    accumulator so a far-travelled good is wanted MORE
+                                    as well as costing more, which is the amber-in-
+                                    Rome case. Every demand term ships at dose 0 and
+                                    is walked ONE AT A TIME (they multiply the same
+                                    expression), gated by
+                                    `econ_expenditure_shares_resemble_a_household`.
+                                    Per-culture demand profiles are named and
+                                    DELIBERATELY NOT BUILT (§5) — they would move
+                                    every price in the world on top of two other doses
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
 DEPOSITS_AND_MINING_PLAN.md       ← ⭐ BUILT — all five slices, gated. Ore
