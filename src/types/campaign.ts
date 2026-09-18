@@ -417,6 +417,18 @@ export interface CultureMood {
 export interface CorridorWaystation { x: number; y: number; kind: number }
 /** A campaign trade corridor — a long river/terrain-routed haul between a home city
  *  and a distant one, owned by a house and strung with waystations. */
+/** One resolved lane over the coarse cost grid (`compute_coarse_route`), with the
+ *  MEDIUM of every point. `sea[i]` is true where `points[i]` is water — open sea,
+ *  shelf or coastal. Same length as `points`; empty when no legal route exists.
+ *
+ *  A lane is not one medium end to end: it runs overland to a port, crosses, and
+ *  runs overland again. The renderer splits the line into runs of one medium and
+ *  draws each in its own convention (solid on a road, dashed on open water). */
+export interface CoarseRoute {
+  points: [number, number][];
+  sea: boolean[];
+}
+
 export interface TradeCorridor {
   origin: string;
   dest: string;

@@ -2261,6 +2261,38 @@ an ocean. `SEA_CAP_KM` in `StepBiological.tsx` bounds the SLIDER only; the
 backend clamps regardless, so drift between them stops the slider short rather
 than breaking the rule.
 
+**A LANE IS NOT ONE MEDIUM END TO END.** `compute_coarse_route` returned a bare
+`Vec<[f32; 2]>` and the renderer styled the whole lane from a single flag —
+`openWater`, meaning "did anything route this at all". So a haul that runs
+overland to a port, crosses, and runs overland again was drawn end to end as one
+thing, and read as a straight sea slash between two cities even where it followed
+a real road. It returns `CoarseRoute { points, sea }` now, with the medium of
+EVERY point, and `OverlayManager.mediumRuns` splits a lane into consecutive runs
+of one medium (breaking at the wrap seam too, rule 6) so each is stroked in its
+own convention: **dashed on open water, solid wherever the cargo is on a road or
+a navigable river**.
+
+Four things to keep true here:
+- **`sea` and `openWater` answer different questions and both are needed.**
+  `openWater` decides whether a lane earns direction arrows and full opacity —
+  a straight line with arrows every few cells reads as a drawn road, which is
+  exactly what an unroutable claim is not. `sea[i]` decides how each stretch is
+  stroked. A lane nothing could route is all-sea AND `openWater`, so it stays
+  dashed end to end, which is the honest reading of a claim.
+- **A segment is sea when EITHER endpoint is water**, so the landing legs belong
+  to the crossing and no solid stub pokes out into the sea. Consecutive runs
+  share their boundary point, so there is no gap where the medium changes.
+- **The worldgen trade-route graph carries medium too.** `ensureTradeGraph`'s
+  edges take `TradeRoute.kind` (0 land · 1 sea · 2 river), so a path assembled
+  out of that graph knows its stretches as well as a coarse-grid route does —
+  otherwise a worldgen sea lane drew solid while an identical campaign one drew
+  dashed.
+- Applied so far to the **Flows highlight** (`renderFlowHighlight`) and the
+  **Goods Atlas flows** (`drawGoodFlows`). Merchant routes, the house trading
+  web and futures lanes all go through `laneBetween` and so already HAVE the
+  per-point medium available — they just still draw with the old whole-lane
+  styling. Extending them is queued, not done.
+
 **This is also what finally produces coast-hugging**, and it is worth recording
 that it did NOT come from the cost ramp. `OPEN_SEA_COST` (2.2) is only 1.375x
 `COASTAL_SEA_COST` (1.6) while a coast-hugging detour is routinely 2-4x longer

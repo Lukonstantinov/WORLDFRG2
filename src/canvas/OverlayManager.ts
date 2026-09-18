@@ -1,5 +1,16 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute } from "@types";
 import type { ClimateBands } from "@bridge";
+
+/** A drawable lane: the points, the MEDIUM of each point, and whether the whole
+ *  thing is a claimed direct crossing rather than a routed path.
+ *
+ *  `sea` and `openWater` answer different questions and both are needed.
+ *  `openWater` is "did anything route this at all" — it decides whether the lane
+ *  earns direction arrows and full opacity. `sea[i]` is "is THIS point on water"
+ *  — it decides how each stretch is stroked, so a haul that runs overland to a
+ *  port, crosses, and runs overland again draws solid-dashed-solid instead of
+ *  being styled end to end by one flag. */
+type Lane = { pts: [number, number][]; sea: boolean[]; openWater: boolean };
 import { GOOD_DEFS, goodOverlayKey, goodSubtypes, type SubtypeDef } from "@goods";
 import { drawGoodIcon } from "./goodIcons";
 import { latLineY } from "./projection";
@@ -704,7 +715,7 @@ export class OverlayManager {
   // unroutable long haul dashed — the two used to be drawn identically, which was
   // the "goods don't follow trade routes, direct city-to-city lines" report: a
   // real route and a claimed open-water crossing were visually indistinguishable.
-  private goodFlows: { path: [number, number][]; amount: number; openWater: boolean }[] = [];
+  private goodFlows: { path: [number, number][]; sea: boolean[]; amount: number; openWater: boolean }[] = [];
   private goodFlowColor = "#e0b24a";
   private goodFlowMax = 0;
   // ── Trade-route graph (lazily built from `this.tradeRoutes`) so house-network and
@@ -712,7 +723,7 @@ export class OverlayManager {
   //    or independently-routed lines. Rebuilt only when the routes array changes. ──
   private tgRef: TradeRoute[] | null = null;     // identity of the built graph's source
   private tgNodes: [number, number][] = [];      // settlement junctions (route endpoints)
-  private tgAdj: { to: number; pts: [number, number][]; len: number }[][] = [];
+  private tgAdj: { to: number; pts: [number, number][]; len: number; sea: boolean }[][] = [];
   private chokepoints: EconChokepoint[] = [];
   private corridors: EconCorridor[] = [];
   private econRegions: EconRegion[] = [];
@@ -985,7 +996,7 @@ export class OverlayManager {
     const out: [number, number][] = [];
     for (let i = 1; i < r.path.length; i++) {
       const a = r.path[i - 1], b = r.path[i];
-      const seg = this.routeAlongTradeRoutes(a, b) ?? [a, b];
+      const seg = this.routeAlongTradeRoutes(a, b)?.pts ?? [a, b];
       // Drop the duplicated junction shared with the previous segment.
       for (let k = out.length ? 1 : 0; k < seg.length; k++) out.push(seg[k]);
     }
@@ -1310,7 +1321,7 @@ export class OverlayManager {
     if (this.tgRef === this.tradeRoutes) return;
     this.tgRef = this.tradeRoutes;
     const nodes: [number, number][] = [];
-    const adj: { to: number; pts: [number, number][]; len: number }[][] = [];
+    const adj: { to: number; pts: [number, number][]; len: number; sea: boolean }[][] = [];
     const idOf = new Map<string, number>();
     const W = this.worldW;
     const key = (p: [number, number]) => `${Math.round(p[0])},${Math.round(p[1])}`;
@@ -1336,8 +1347,13 @@ export class OverlayManager {
       const b = getNode(pts[pts.length - 1]);
       if (a === b) continue;
       const len = plen(pts);
-      adj[a].push({ to: b, pts, len });
-      adj[b].push({ to: a, pts: [...pts].slice().reverse(), len });
+      // `TradeRoute.kind`: 0 land · 1 sea · 2 river. Carried onto the edge so a
+      // path assembled out of this graph knows the MEDIUM of each stretch, the
+      // same way a coarse-grid route does — otherwise a worldgen sea lane would
+      // draw solid while an identical campaign one drew dashed.
+      const sea = r.kind === 1;
+      adj[a].push({ to: b, pts, len, sea });
+      adj[b].push({ to: a, pts: [...pts].slice().reverse(), len, sea });
     }
     this.tgNodes = nodes;
     this.tgAdj = adj;
@@ -1367,8 +1383,7 @@ export class OverlayManager {
    *  open-water shipping lane, which claims a crossing rather than a road). The
    *  direct lane takes the shorter way round the cylinder (rule 6); callers break
    *  the stroke at the seam as they already do. */
-  private laneBetween(a: [number, number], b: [number, number]):
-      { pts: [number, number][]; openWater: boolean } {
+  private laneBetween(a: [number, number], b: [number, number]): Lane {
     // Part A3, extended to every lane: a route over the SAME coarse cost grid the
     // Dynamic Trade Flow layer uses, when one has been resolved for this pair.
     // The worldgen trade-route graph below cannot express a campaign sea lane, so
@@ -1379,15 +1394,52 @@ export class OverlayManager {
     // recorded so it can be fetched and this lane redrawn.
     const key = this.laneKey(a, b);
     const cached = this.laneRoutes.get(key);
-    if (cached && cached.length >= 2) return { pts: cached, openWater: false };
+    if (cached && cached.pts.length >= 2) return cached;
     if (!this.laneRoutes.has(key)) this.laneWanted.add(key);
 
     const path = this.routeAlongTradeRoutes(a, b);
-    if (path && path.length >= 2) return { pts: path, openWater: false };
+    if (path && path.pts.length >= 2) return path;
     const W = this.worldW;
     let bx = b[0];
     if (W > 0 && Math.abs(bx - a[0]) > W / 2) bx += a[0] > bx ? W : -W;
-    return { pts: [[a[0], a[1]], [bx, b[1]]], openWater: true };
+    // Nothing routed: a CLAIMED crossing, not a road. All-sea so it draws dashed
+    // end to end, which is both the atlas convention and honest about what it is.
+    return { pts: [[a[0], a[1]], [bx, b[1]]], sea: [true, true], openWater: true };
+  }
+
+  /** Split a lane into consecutive runs of ONE medium, breaking at the
+   *  cylindrical wrap seam (rule 6) as well.
+   *
+   *  A lane is not one medium end to end — it runs overland to a port, crosses,
+   *  and runs overland again — so styling the whole thing by a single flag drew
+   *  an overland haul as a straight open-water slash, which is the report this
+   *  exists to answer. A SEGMENT counts as sea when EITHER endpoint is water, so
+   *  the landing legs belong to the crossing and no solid stub pokes out into
+   *  the sea. Consecutive runs share their boundary point, so the line has no
+   *  gap where the medium changes. */
+  private mediumRuns(pts: [number, number][], sea: boolean[], W: number):
+      { pts: [number, number][]; sea: boolean }[] {
+    const runs: { pts: [number, number][]; sea: boolean }[] = [];
+    if (pts.length < 2) return runs;
+    const segSea = (i: number) => (sea[i] ?? false) || (sea[i + 1] ?? false);
+    let cur: [number, number][] = [pts[0]];
+    let curSea = segSea(0);
+    for (let i = 0; i < pts.length - 1; i++) {
+      const seam = W > 0 && Math.abs(pts[i + 1][0] - pts[i][0]) > W / 2;
+      const m = segSea(i);
+      if (seam) {
+        if (cur.length >= 2) runs.push({ pts: cur, sea: curSea });
+        cur = [pts[i + 1]]; curSea = segSea(i + 1 < pts.length - 1 ? i + 1 : i);
+        continue;
+      }
+      if (m !== curSea) {
+        if (cur.length >= 2) runs.push({ pts: cur, sea: curSea });
+        cur = [pts[i]]; curSea = m;
+      }
+      cur.push(pts[i + 1]);
+    }
+    if (cur.length >= 2) runs.push({ pts: cur, sea: curSea });
+    return runs;
   }
 
   /** Endpoint-pair key for the coarse-route cache. Rounded to whole cells: the
@@ -1399,7 +1451,7 @@ export class OverlayManager {
   /** Resolved coarse-grid routes, keyed by endpoint pair. An entry present but
    *  EMPTY means "asked, and there is genuinely no legal route" — cached exactly
    *  so it is not re-fetched every redraw; that lane keeps the dashed fallback. */
-  private laneRoutes = new Map<string, [number, number][]>();
+  private laneRoutes = new Map<string, Lane>();
   private laneWanted = new Set<string>();
 
   /** Drain the pairs `laneBetween` wanted and could not serve from cache, for
@@ -1419,11 +1471,13 @@ export class OverlayManager {
   /** Fill the cache with resolved routes and re-snap everything drawn from it.
    *  Returns true when anything actually changed, so the caller can skip a
    *  redraw it does not need. */
-  setLaneRoutes(entries: { key: string; path: [number, number][] }[]): boolean {
+  setLaneRoutes(entries: { key: string; path: CoarseRoute }[]): boolean {
     let changed = false;
     for (const e of entries) {
       if (!this.laneRoutes.has(e.key)) changed = true;
-      this.laneRoutes.set(e.key, e.path);
+      this.laneRoutes.set(e.key, {
+        pts: e.path.points, sea: e.path.sea, openWater: false,
+      });
     }
     if (changed) {
       // The same three re-snaps `drawTradeRoutes` does when the road network
@@ -1435,7 +1489,7 @@ export class OverlayManager {
     return changed;
   }
 
-  private routeAlongTradeRoutes(a: [number, number], b: [number, number]): [number, number][] | null {
+  private routeAlongTradeRoutes(a: [number, number], b: [number, number]): Lane | null {
     this.ensureTradeGraph();
     const n = this.tgNodes.length;
     if (n === 0) return null;
@@ -1457,6 +1511,7 @@ export class OverlayManager {
     const dist = new Float64Array(n).fill(Infinity);
     const prev = new Int32Array(n).fill(-1);
     const prevPts: ([number, number][] | null)[] = new Array(n).fill(null);
+    const prevSea: boolean[] = new Array(n).fill(false);
     dist[s] = 0;
     const heap: number[] = [s];        // node ids, ordered by dist
     const hpush = (node: number) => {
@@ -1492,21 +1547,26 @@ export class OverlayManager {
       // every node's distance to pick the best reachable junction to ride toward.
       for (const e of this.tgAdj[u]) {
         const nd = dist[u] + e.len;
-        if (nd < dist[e.to]) { dist[e.to] = nd; prev[e.to] = u; prevPts[e.to] = e.pts; hpush(e.to); }
+        if (nd < dist[e.to]) {
+          dist[e.to] = nd; prev[e.to] = u; prevPts[e.to] = e.pts; prevSea[e.to] = e.sea;
+          hpush(e.to);
+        }
       }
     }
     // The line must follow the corridor network end-to-end. If the partner's junction
     // isn't reachable along existing routes, return null so the caller SKIPS it —
     // we never bridge with a straight line.
     if (!isFinite(dist[t])) return null;
-    const segs: [number, number][][] = [];
+    const segs: { pts: [number, number][]; sea: boolean }[] = [];
     let cur = t;
-    while (cur !== s && prev[cur] >= 0) { segs.push(prevPts[cur]!); cur = prev[cur]; }
+    while (cur !== s && prev[cur] >= 0) { segs.push({ pts: prevPts[cur]!, sea: prevSea[cur] }); cur = prev[cur]; }
     segs.reverse();
-    const out: [number, number][] = [a];
-    for (const seg of segs) for (const p of seg) out.push(p);
-    out.push(b);
-    return out;
+    const pts: [number, number][] = [a];
+    const sea: boolean[] = [false]; // the origin settlement itself stands on land
+    for (const seg of segs) for (const p of seg.pts) { pts.push(p); sea.push(seg.sea); }
+    pts.push(b);
+    sea.push(false);
+    return { pts, sea, openWater: false };
   }
 
   /** Re-snap the focused house's seat→city web onto the current trade routes. */
@@ -1595,7 +1655,7 @@ export class OverlayManager {
   drawGoodFlows(flows: AtlasFlow[], gridW: number, color: string) {
     if (gridW > 0) this.worldW = gridW;
     this.goodFlowColor = color || "#e0b24a";
-    const out: { path: [number, number][]; amount: number; openWater: boolean }[] = [];
+    const out: { path: [number, number][]; sea: boolean[]; amount: number; openWater: boolean }[] = [];
     let max = 0;
     for (const f of flows) {
       // Rule 35 — an off-corridor flow is drawn direct, never dropped. This one
@@ -1603,8 +1663,8 @@ export class OverlayManager {
       // trade with every sea leg missing. `openWater` is kept (not discarded,
       // as it used to be) so the render can tell a real corridor from a
       // claimed direct crossing.
-      const { pts: path, openWater } = this.laneBetween([f.from_x, f.from_y], [f.to_x, f.to_y]);
-      out.push({ path, amount: f.amount, openWater });
+      const { pts: path, sea, openWater } = this.laneBetween([f.from_x, f.from_y], [f.to_x, f.to_y]);
+      out.push({ path, sea, amount: f.amount, openWater });
       if (f.amount > max) max = f.amount;
     }
     this.goodFlows = out;
@@ -2013,8 +2073,8 @@ export class OverlayManager {
    *  MapCanvas via `compute_coarse_route`. Empty/missing entry = no legal route
    *  found (or still pending) — `renderFlowHighlight` falls back to
    *  `laneBetween`'s worldgen-graph-or-dashed-direct behaviour for that segment. */
-  private flowHighlightPaths: [number, number][][] = [];
-  setFlowHighlightPaths(paths: [number, number][][]) {
+  private flowHighlightPaths: CoarseRoute[] = [];
+  setFlowHighlightPaths(paths: CoarseRoute[]) {
     this.flowHighlightPaths = paths;
   }
 
@@ -4506,37 +4566,45 @@ export class OverlayManager {
       // because it crosses oceans" report this fallback itself was built to fix).
       const coarsePath = this.flowHighlightPaths[idx];
       let pts: [number, number][];
+      let seaAt: boolean[];
       let openWater: boolean;
-      if (coarsePath && coarsePath.length >= 2) {
-        pts = coarsePath;
+      if (coarsePath && coarsePath.points.length >= 2) {
+        pts = coarsePath.points;
+        seaAt = coarsePath.sea;
         openWater = false;
       } else {
         // The direct lane takes the SHORTEST way round a cylindrical world
         // (rule 6): a partner 20 cells east across the antimeridian is 20
-        // cells away, not worldW − 20 the other way. `drawPolyline` breaks
+        // cells away, not worldW − 20 the other way. `mediumRuns` breaks
         // the stroke at the seam.
         const lane = this.laneBetween([s.ax, s.ay], [s.bx, s.by]);
         pts = lane.pts;
+        seaAt = lane.sea;
         openWater = lane.openWater;
       }
-      const drawPolyline = () => {
+      // ── STROKED ONE MEDIUM AT A TIME ────────────────────────────────────────
+      // The whole lane used to take a single style from `openWater`, so a haul
+      // that ran overland to a port, crossed, and ran overland again was drawn
+      // end to end as one thing — reading as a straight sea slash between two
+      // cities even where it followed a real road. Each run is stroked in its
+      // own convention now: DASHED on open water (the atlas convention, and the
+      // treatment that reads well here), SOLID wherever the cargo is on a road
+      // or a navigable river. A lane nothing could route stays all-dashed,
+      // because that is what it is — a claim, not a road.
+      const seaDash = [Math.max(3, 6 * inv), Math.max(3, 5 * inv)];
+      const runs = this.mediumRuns(pts, seaAt, W);
+      const strokeRun = (run: [number, number][]) => {
         ctx.beginPath();
-        let started = false;
-        for (let i = 0; i < pts.length; i++) {
-          let [px, py] = pts[i];
-          if (i > 0 && W > 0 && Math.abs(px - pts[i - 1][0]) > W / 2) {
-            // Seam crossing — break the stroke rather than slash across the map.
-            ctx.stroke(); ctx.beginPath(); started = false;
-          }
-          if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
-        }
+        ctx.moveTo(run[0][0], run[0][1]);
+        for (let i = 1; i < run.length; i++) ctx.lineTo(run[i][0], run[i][1]);
         ctx.stroke();
       };
       ctx.strokeStyle = color;
-      // Dashed for an open-water lane, solid where the flow rides a real corridor.
-      ctx.setLineDash(openWater ? [Math.max(3, 6 * inv), Math.max(3, 5 * inv)] : []);
-      ctx.globalAlpha = openWater ? 0.14 : 0.22; ctx.lineWidth = w * 3; drawPolyline();
-      ctx.globalAlpha = openWater ? 0.85 : 0.95; ctx.lineWidth = w; drawPolyline();
+      for (const run of runs) {
+        ctx.setLineDash(run.sea ? seaDash : []);
+        ctx.globalAlpha = run.sea ? 0.14 : 0.22; ctx.lineWidth = w * 3; strokeRun(run.pts);
+        ctx.globalAlpha = run.sea ? 0.85 : 0.95; ctx.lineWidth = w; strokeRun(run.pts);
+      }
       ctx.setLineDash([]);
       // Directional chevrons ALONG the line (-->-- inbound · --<-- outbound) so the
       // flow direction reads at a glance, not just at the endpoint.
@@ -4689,23 +4757,35 @@ export class OverlayManager {
       //    (cotton, pearls, ivory) still reads against a light map, the user's
       //    "some colours are seen very faintly" report. Independent of the chosen hue.
       //    Fainter for an unroutable claim, so it doesn't compete with real corridors.
-      ctx.setLineDash([]);
-      ctx.globalAlpha = (fl.openWater ? 0.22 : 0.4) + 0.25 * norm;
-      ctx.strokeStyle = "rgba(0,0,0,0.85)";
-      ctx.lineWidth = w + 2.4 * inv;
-      this.strokeFlowPolyline(ctx, pts, W);
-      // 2) The coloured lane on top — dash-dot when it rides a real corridor,
-      //    a plain sparser dash when it is only a claimed crossing.
-      ctx.setLineDash(fl.openWater ? openDash : dashDot);
-      ctx.globalAlpha = (fl.openWater ? 0.5 : 0.8) + 0.2 * norm;
-      ctx.strokeStyle = col;
-      ctx.lineWidth = fl.openWater ? Math.max(0.6, w * 0.75) : w;
-      this.strokeFlowPolyline(ctx, pts, W);
+      // Stroked one MEDIUM at a time (see `mediumRuns`): the OVERLAND stretches
+      // ride their real road as a dash-dot directed route, the sea stretches
+      // take the plain open-water dash. A lane nothing could route is all-sea,
+      // so it stays dashed end to end — the honest reading of a claim.
+      const runs = this.mediumRuns(pts, fl.sea, W);
+      for (const run of runs) {
+        const open = fl.openWater || run.sea;
+        ctx.setLineDash([]);
+        ctx.globalAlpha = (open ? 0.22 : 0.4) + 0.25 * norm;
+        ctx.strokeStyle = "rgba(0,0,0,0.85)";
+        ctx.lineWidth = w + 2.4 * inv;
+        this.strokeFlowPolyline(ctx, run.pts, W);
+        // 2) The coloured lane on top — dash-dot when it rides a real corridor,
+        //    a plain sparser dash when it is on open water or only a claim.
+        ctx.setLineDash(open ? openDash : dashDot);
+        ctx.globalAlpha = (open ? 0.5 : 0.8) + 0.2 * norm;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = open ? Math.max(0.6, w * 0.75) : w;
+        this.strokeFlowPolyline(ctx, run.pts, W);
+      }
       ctx.setLineDash([]);
       // 3) PERIODIC direction arrows exporter → importer along the whole lane, so the
       //    trade DIRECTION is legible even on a long routed haul (not just one head).
       //    Skipped for an open-water claim — a straight line with arrows every few
       //    cells reads as a drawn road, which is exactly what it is not.
+      // Arrows only where the lane is a real road: a straight open-water line
+      // with arrows every few cells reads as a drawn road, which is exactly what
+      // it is not. The SEA stretches of a routed lane keep them, though — there
+      // the line IS the traced sea-lane, and the direction is the point.
       if (!fl.openWater) this.drawFlowArrows(ctx, pts, W, col, Math.max(2.4, (3.2 + norm * 3.6) * inv));
     }
     ctx.globalAlpha = 1;
@@ -5770,8 +5850,8 @@ export class OverlayManager {
       // RULE: connection lines ALWAYS follow the existing route network — snap onto
       // the already-drawn roads. NEVER draw a straight line: skip if unrouteable.
       const routed = this.routeAlongTradeRoutes(from, to);
-      if (!routed || routed.length < 2) continue;
-      const path: [number, number][] = routed;
+      if (!routed || routed.pts.length < 2) continue;
+      const path: [number, number][] = routed.pts;
       ctx.globalAlpha = 0.4 + 0.5 * norm;
       ctx.strokeStyle = lineColors.corridor;
       ctx.lineWidth = Math.max(0.5, (1.0 + norm * 5.0) * inv);

@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
+import type { CoarseRoute, BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildBrief, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -20,15 +20,20 @@ export async function campaignGetTradeFlow(
  *  the same coarse cost grid + crossing rule `campaignGetTradeFlow` uses, so the
  *  Flows highlight can ride a real legal route instead of falling back to a
  *  dashed direct line for every campaign sea lane the worldgen trade-route graph
- *  never joined. Empty array = no route within the crossing rule (caller keeps
- *  its existing dashed-direct fallback, rule 35). */
+ *  never joined. Empty `points` = no route within the crossing rule (caller keeps
+ *  its existing dashed-direct fallback, rule 35).
+ *
+ *  `sea` carries the MEDIUM of every point (same length as `points`), because a
+ *  lane is not one medium end to end — it runs overland to a port, crosses, and
+ *  runs overland again. Styling a whole lane by one flag is what drew an
+ *  overland route as a straight open-water slash. */
 export async function computeCoarseRoute(
   a: [number, number],
   b: [number, number],
   rivers: { points: [number, number][] }[],
   reach: number,
   maxCrossing: number,
-): Promise<[number, number][]> {
+): Promise<CoarseRoute> {
   return invoke("compute_coarse_route", {
     ax: a[0], ay: a[1], bx: b[0], by: b[1],
     riversJson: JSON.stringify(rivers),

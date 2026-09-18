@@ -13,7 +13,7 @@ import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt } from "@bridge";
-import type { MerchantRoute, FuturesLane, Toponym } from "@types";
+import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
 
@@ -44,6 +44,9 @@ import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types
  *  crossing limit, so two shores that far apart no longer share a market to
  *  generate the flow in the first place. */
 const CAMPAIGN_ROUTE_REACH = 0;
+/** "Asked, and there is genuinely no legal route." Cached as-is so the pair is
+ *  not re-fetched every poll; that lane keeps the dashed fallback (rule 35). */
+const EMPTY_ROUTE: CoarseRoute = { points: [], sea: [] };
 const CAMPAIGN_ROUTE_MAX_CROSSING = 1.0;
 
 /** Must mirror the backend's tile grid (`TILE_SIZE` in `tile/coords.rs` /
@@ -1161,7 +1164,7 @@ export function MapCanvas() {
     let alive = true;
     Promise.all(flowHighlight.map((s) =>
       computeCoarseRoute([s.ax, s.ay], [s.bx, s.by], rivers.map((r) => ({ points: r.points })),
-        CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING).catch(() => [] as [number, number][]),
+        CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING).catch(() => EMPTY_ROUTE),
     )).then((paths) => {
       if (!alive) return;
       om.setFlowHighlightPaths(paths);
@@ -1196,7 +1199,7 @@ export function MapCanvas() {
         // and caching it is what stops this re-fetching the same dead pair on
         // every poll. That lane keeps the dashed fallback (rule 35).
         path: await computeCoarseRoute(want.a, want.b, rv,
-          CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING).catch(() => [] as [number, number][]),
+          CAMPAIGN_ROUTE_REACH, CAMPAIGN_ROUTE_MAX_CROSSING).catch(() => EMPTY_ROUTE),
       })));
       if (!alive) return;
       if (om.setLaneRoutes(resolved)) requestRender();

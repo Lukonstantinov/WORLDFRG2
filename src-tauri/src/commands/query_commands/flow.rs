@@ -120,6 +120,21 @@ pub fn campaign_get_trade_flow(
 /// only once. Empty when the two points land in the same coarse cell, no path
 /// exists, or the path would cross more open water than `max_crossing` allows
 /// — the frontend's own existing dashed-direct fallback (rule 35: a flow that
+/// One resolved lane over the coarse cost grid, with the MEDIUM of every point.
+///
+/// It used to be a bare `Vec<[f32; 2]>`, and the renderer styled the whole lane
+/// by a single "did this resolve at all" flag — so a route that runs overland to
+/// a port, crosses, and runs overland again was drawn entirely one way. A lane is
+/// not one medium end to end, and drawing it as if it were is what made overland
+/// trade read as straight open-water slashes.
+#[derive(Serialize, Default)]
+pub struct CoarseRoute {
+    pub points: Vec<[f32; 2]>,
+    /// Per-point: true where the cell is water (open sea, shelf or coastal).
+    /// Same length as `points`.
+    pub sea: Vec<bool>,
+}
+
 /// exists must stay visible) covers all three the same way it always has.
 #[tauri::command]
 pub fn compute_coarse_route(
@@ -131,13 +146,14 @@ pub fn compute_coarse_route(
     reach: u8,
     max_crossing: f32,
     db: State<'_, WorldDb>,
-) -> Result<Vec<[f32; 2]>, String> {
+) -> Result<CoarseRoute, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let empty = CoarseRoute::default();
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
+    if grid_w == 0 || grid_h == 0 { return Ok(empty); }
     let world = db.cached_tiles_with_conn(&conn)?;
     let cc = cached_coarse_cost(&db, &world, world.fingerprint, grid_w, grid_h,
         &rivers_json, reach == 2, true, 0.0, -1, 12)?;
@@ -147,11 +163,20 @@ pub fn compute_coarse_route(
         cc.cidx(cx, cy)
     };
     let (s, g) = (node_at(ax, ay), node_at(bx, by));
-    if s == g { return Ok(vec![]); }
-    let path = match coarse_dijkstra(&cc, s, g) { Some(p) => p, None => return Ok(vec![]) };
-    if path.len() < 2 { return Ok(vec![]); }
-    if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { return Ok(vec![]); }
-    Ok(path.iter().map(|&c| cc.world_of(c)).collect())
+    if s == g { return Ok(empty); }
+    let path = match coarse_dijkstra(&cc, s, g) { Some(p) => p, None => return Ok(empty) };
+    if path.len() < 2 { return Ok(empty); }
+    if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { return Ok(empty); }
+    // A lane is not one medium end to end: a route out of an inland town runs
+    // overland to a port, then by sea, then overland again. Returning the medium
+    // PER POINT is what lets the renderer draw each stretch in its own
+    // convention — solid where the cargo is on a road, dashed where it is on
+    // open water — instead of styling the whole lane by a single flag, which
+    // made a mostly-overland route read as a sea crossing and vice versa.
+    Ok(CoarseRoute {
+        sea: path.iter().map(|&c| !cc.is_land[c]).collect(),
+        points: path.iter().map(|&c| cc.world_of(c)).collect(),
+    })
 }
 
 
