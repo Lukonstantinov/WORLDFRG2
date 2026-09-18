@@ -1431,7 +1431,7 @@ impl CampaignSim {
             self.banks[bank_idx].loans.push(Loan {
                 borrower_house: -1, borrower_polis: founder as i32, principal: bank_lend,
                 outstanding: bank_lend, rate: BANK_LOAN_RATE, start_tick: self.tick,
-                term_ticks: TICKS_PER_YEAR * 8, purpose: "colony".into(),
+                term_ticks: TICKS_PER_YEAR * 8, purpose: "colony".into(), arrears_months: 0,
             });
         }
         // The bank is always a backer (its family will mint the colony's coin).
@@ -1517,9 +1517,14 @@ impl CampaignSim {
             // mining settlement already sits on it — NOT merely that an ordinary
             // city happens to be within founding range (that's normal; a founder
             // has to be near enough to reach the site at all).
+            // MONEY_MINES_AND_GOODS_PLAN.md slice 5d · this used to hard-code
+            // `estate_kind == 2` (Mine), so a body worked as an open-pit
+            // QUARRY could never be "already served" and a founder would keep
+            // trying to plant a redundant mining settlement on it forever.
+            let expect_kind = d.working.estate_kind();
             let served = self.hubs.iter().any(|h| {
                 if h.abandoned { return false; }
-                if !((h.is_estate && h.estate_kind == 2) || h.is_mining_settlement) { return false; }
+                if !((h.is_estate && h.estate_kind == expect_kind) || h.is_mining_settlement) { return false; }
                 let mut hdx = (h.x - d.x).abs();
                 if ww > 1.0 { hdx = hdx.min(ww - hdx); }
                 let hdy = h.y - d.y;
@@ -1551,7 +1556,7 @@ impl CampaignSim {
             self.banks[bank_idx].loans.push(Loan {
                 borrower_house: -1, borrower_polis: founder as i32, principal: bank_lend,
                 outstanding: bank_lend, rate: BANK_LOAN_RATE, start_tick: self.tick,
-                term_ticks: TICKS_PER_YEAR * 8, purpose: "colony".into(),
+                term_ticks: TICKS_PER_YEAR * 8, purpose: "colony".into(), arrears_months: 0,
             });
         }
         backers.push((2, bank_idx as u32, (bank_lend.max(0.1)) / raised));

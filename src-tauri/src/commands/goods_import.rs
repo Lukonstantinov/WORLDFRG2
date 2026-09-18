@@ -216,6 +216,7 @@ fn build_good(sec: &RawSection, report: &mut ImportReport) -> Option<GoodSpec> {
             model,
             placer_frac,
             parent,
+            working: None,
         })
     } else {
         None

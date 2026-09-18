@@ -384,6 +384,25 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                     crate::sim::goods_spec::Distribution::Endemic => crate::sim::tick::DIST_ENDEMIC,
                     crate::sim::goods_spec::Distribution::Manufactured => crate::sim::tick::DIST_MANUFACTURED,
                 }).unwrap_or(crate::sim::tick::DIST_UNKNOWN),
+                // MONEY_MINES_AND_GOODS_PLAN.md slice 5a · the real extraction
+                // method for a Deposits good, mirrored the same way
+                // `distribution` is — read once here, never re-queried. A good
+                // with no spec, or one whose `distribution` isn't Deposits,
+                // degrades to `WORK_UNKNOWN`, which keeps `estate_kind_for_good`'s
+                // substring cascade as the fallback.
+                working: spec.and_then(|s| match s.distribution {
+                    crate::sim::goods_spec::Distribution::Deposits => {
+                        let w = s.deposit.as_ref().and_then(|d| d.working)
+                            .unwrap_or_else(|| crate::sim::deposits::default_working_for(&s.id));
+                        Some(match w {
+                            crate::sim::deposits::WorkingKind::Shaft => crate::sim::tick::WORK_SHAFT,
+                            crate::sim::deposits::WorkingKind::Open => crate::sim::tick::WORK_OPEN,
+                            crate::sim::deposits::WorkingKind::Placer => crate::sim::tick::WORK_PLACER,
+                            crate::sim::deposits::WorkingKind::Pan => crate::sim::tick::WORK_PAN,
+                        })
+                    }
+                    _ => None,
+                }).unwrap_or(crate::sim::tick::WORK_UNKNOWN),
             }
         })
         .collect();
@@ -1326,7 +1345,7 @@ fn seed_mine_deposits(conn: &Connection, sim: &mut CampaignSim) {
     let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(conn, "deposits")
         .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     sim.mine_deposits = deposits.into_iter()
-        .map(|d| MineSite { good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth, extent: d.extent, district: d.district })
+        .map(|d| MineSite { good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth, extent: d.extent, district: d.district, working: d.working })
         .collect();
 }
 

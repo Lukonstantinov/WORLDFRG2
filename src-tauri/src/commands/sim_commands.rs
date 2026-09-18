@@ -1542,6 +1542,12 @@ fn generate_and_persist_provinces(
     let (provinces, province_id) = crate::sim::provinces::merge_small_provinces_wh(
         &province_id, &provinces, min_cells, w, h, None);
 
+    // MONEY_MINES_AND_GOODS_PLAN.md slice 7c · strip manufactured goods from
+    // the frozen shortlist ONCE, here, before it is ever persisted — one
+    // writer, so `get_provinces`/`get_province_layer`'s own calls exist only
+    // to fix a world saved before this line landed, never as the primary fix.
+    let provinces = strip_manufactured_from_province_goods(conn, provinces);
+
     // Persist the province list (frozen partition; campaign state layers on top later).
     metadata::set_meta(conn, "provinces",
         &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
@@ -1607,9 +1613,13 @@ pub fn sim_generate_provinces(
 #[tauri::command]
 pub fn get_provinces(db: State<'_, WorldDb>) -> Result<Vec<crate::sim::provinces::Province>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    Ok(metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .unwrap_or_default())
+    let provinces: Vec<crate::sim::provinces::Province> =
+        metadata::get_meta(&conn, "provinces").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default();
+    // MONEY_MINES_AND_GOODS_PLAN.md slice 7c · a no-op for any world generated
+    // after the writer-side fix above; fixes a world saved before it.
+    Ok(strip_manufactured_from_province_goods(&conn, provinces))
 }
 
 /// Read back the FULL province layer (list + downsampled id raster) so reopening a
