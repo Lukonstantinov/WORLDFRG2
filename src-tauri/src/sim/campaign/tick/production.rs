@@ -858,6 +858,42 @@ impl CampaignSim {
     }
 
 
+    /// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 6 (F9) · `self_supply` compares
+    /// a hub's own per-capita production (`base_per_capita`) against the
+    /// per-capita need implied by the SAME terms `base_need` uses (tier
+    /// weight · desire · cadence · need_scale · demand pressure), so the
+    /// ratio is unit-consistent with `base_need` without calling it (which
+    /// would be circular — `base_need` feeds both `needs` and `needs_struct`,
+    /// and satiety must reach only the former). Saturates at 1.0 = fully
+    /// self-sufficient.
+    fn self_supply_of(&self, h: usize, g: usize) -> f32 {
+        let tg = &self.goods[g];
+        let interval = if tg.consumption_interval > 0.0 { tg.consumption_interval } else { 30.0 };
+        let cadence = (30.0 / interval).clamp(0.30, 1.8);
+        let value = tg.base_value.max(BUDGET_VALUE_FLOOR);
+        let per_capita_need = TIER_WEIGHT[tg.need_tier.min(2) as usize]
+            * tg.desire.max(0.0)
+            / value
+            * cadence
+            * self.need_scale
+            * DEMAND_PRESSURE;
+        if per_capita_need <= 1e-6 { return 0.0; }
+        let local = self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0).max(0.0);
+        (local / per_capita_need).clamp(0.0, 1.0)
+    }
+
+    /// How jaded a hub's population is with a comfort/luxury good it largely
+    /// makes itself — the shipped dose (`local_satiety_mult_e`, parametrized
+    /// on `dose` for testing, mirrors N6's `elastic_aggregate_mult`/`_e`
+    /// split). Returns 1.0 (no effect) for a basic good or at the shipped
+    /// zero dose.
+    pub(crate) fn local_satiety_mult(&self, h: usize, g: usize) -> f32 {
+        if LOCAL_SATIETY <= 0.0 { return 1.0; }
+        let tier = self.goods[g].need_tier;
+        let supply = self.self_supply_of(h, g);
+        local_satiety_mult_e(LOCAL_SATIETY, tier, supply)
+    }
+
     pub(crate) fn base_need(&self, h: usize, g: usize) -> f32 {
         let tg = &self.goods[g];
         // Demand cadence: a good consumed every N days exerts ~30/N of the daily

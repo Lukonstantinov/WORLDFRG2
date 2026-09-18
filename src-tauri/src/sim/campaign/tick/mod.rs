@@ -93,6 +93,24 @@ const LUX_IMPORT_DESIRE: f32 = 0.7;
 /// scarcity for a gradient to form against) rather than paying for integration with a
 /// demand constant. Reproduce with the sweep recipe in `docs/SCOREBOARD.md` 2026-08-20d.
 const COMFORT_IMPORT_FRAC: f32 = 0.30;
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 6 (F9) · a city AWASH in a comfort/
+/// luxury good it makes itself wants less of it per head — the Moluccan clove
+/// grower, the Baltic amber gatherer, the Venetian salt merchant who ate no
+/// more salt than anyone else. `local_satiety_mult` reads `self_supply`
+/// (local per-capita production against the per-capita need, saturated at
+/// 1.0 = fully self-sufficient) and shaves the MARKET-FACING `needs[h][g]`
+/// by up to this fraction as supply approaches full — never `needs_struct`
+/// (rule 2 below), so the structural ration `lack_basic`/starvation/crisis
+/// relief read is untouched, the same discipline N6's `elastic_aggregate_
+/// mult` already keeps outside `base_need`.
+///
+/// Ships at 0.0 — a true no-op (`local_satiety_is_a_noop_at_zero`), the
+/// N1/N6/S3 pattern. Applies to COMFORT/LUXURY tiers only
+/// (`a_basic_good_is_never_subject_to_satiety`) — nobody is jaded with
+/// bread. Dose-walk against `econ_expenditure_shares_resemble_a_household`
+/// before raising it, since it directly moves the luxury share S1 spent a
+/// whole slice calibrating.
+const LOCAL_SATIETY: f32 = 0.0;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2) · own-price elasticity of a
@@ -130,6 +148,16 @@ fn elastic_aggregate_mult_e(e: f32, tier: usize, rel: f32) -> f32 {
 /// true no-op: see `elastic_aggregate_mult_e`).
 fn elastic_aggregate_mult(tier: usize, rel: f32) -> f32 {
     elastic_aggregate_mult_e(DEMAND_ELASTICITY[tier.min(2)], tier, rel)
+}
+
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 6 (F9) · `LOCAL_SATIETY`'s own pure
+/// shape, parametrized on `dose` — the same testability split
+/// `elastic_aggregate_mult_e` uses. A basic good (`tier == 0`) is never
+/// subject to satiety (rule 1: nobody is jaded with bread); `dose <= 0.0` or
+/// `self_supply <= 0.0` is a true no-op.
+fn local_satiety_mult_e(dose: f32, tier: u8, self_supply: f32) -> f32 {
+    if dose <= 0.0 || tier < 1 { return 1.0; }
+    (1.0 - dose * self_supply.clamp(0.0, 1.0)).max(0.0)
 }
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
 /// need is comparable to total production (an average good ~ slight shortage).
@@ -8802,6 +8830,19 @@ impl CampaignSim {
                 for &(gi, b) in &hub_desire[h] {
                     needs[h][gi] *= 1.0 + b;
                     needs_struct[h][gi] *= 1.0 + b;
+                }
+                // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 6 (F9) · local satiety —
+                // a hub awash in a comfort/luxury good it makes itself wants less
+                // of it per head. MARKET-FACING `needs` only, never `needs_struct`
+                // (the structural ration `lack_basic`/starvation/crisis relief
+                // read must stay untouched — the same discipline N6 already keeps
+                // outside `base_need`). A true no-op at the shipped zero dose.
+                if LOCAL_SATIETY > 0.0 {
+                    for g in 0..ng {
+                        if self.goods[g].need_tier >= 1 {
+                            needs[h][g] *= self.local_satiety_mult(h, g);
+                        }
+                    }
                 }
                 // Eat down stock; track unmet demand per need-tier for the
                 // "% population lacking goods" graph (basic / comfort / luxury).

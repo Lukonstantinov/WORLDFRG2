@@ -7239,6 +7239,70 @@
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Local satiety (`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 6, F9)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The shipped dose, `LOCAL_SATIETY = 0.0`, must be a true no-op at every
+    /// tier and every supply ratio.
+    #[test]
+    fn local_satiety_is_a_noop_at_zero() {
+        assert_eq!(LOCAL_SATIETY, 0.0, "local satiety ships at zero dose");
+        for tier in 0..3u8 {
+            for supply in [0.0f32, 0.25, 0.5, 1.0] {
+                assert_eq!(local_satiety_mult_e(LOCAL_SATIETY, tier, supply), 1.0,
+                    "tier {tier} at supply {supply} must be an exact no-op at zero dose");
+            }
+        }
+        let goods = vec![good("silk", 0, 2, 8.0, 0.5, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 1000.0, vec![900.0], 0)];
+        let s = sim(hubs, goods);
+        assert_eq!(s.local_satiety_mult(0, 0), 1.0,
+            "a fully self-sufficient hub must still see a no-op at the shipped dose");
+    }
+
+    /// The claim: at a live dose, a hub that supplies more of its own
+    /// comfort/luxury good from home wants proportionally less of it.
+    #[test]
+    fn a_producing_city_wants_less_of_its_own_luxury() {
+        let self_sufficient = local_satiety_mult_e(0.7, 2, 1.0);
+        let import_dependent = local_satiety_mult_e(0.7, 2, 0.0);
+        assert!(self_sufficient < import_dependent,
+            "a self-sufficient producer must be jaded relative to one that imports everything");
+        assert!(self_sufficient >= 1.0 - 0.7 - 1e-6,
+            "the dose bounds how far satiety can shave demand");
+    }
+
+    /// Rule 1: nobody is jaded with bread — a basic good (tier 0) must never
+    /// be subject to satiety, however dosed or however self-sufficient.
+    #[test]
+    fn a_basic_good_is_never_subject_to_satiety() {
+        for supply in [0.0f32, 0.5, 1.0] {
+            assert_eq!(local_satiety_mult_e(0.9, 0, supply), 1.0,
+                "a basic good must be a no-op at any dose or supply level");
+        }
+    }
+
+    /// Rule 2: local satiety must reach only the MARKET-FACING `needs`
+    /// buffer, never `needs_struct` — the same shape `n6_the_ration_is_not_
+    /// elastic` already asserts for N6's elasticity. Even at a hypothetical
+    /// live dose the structural ration a starving population's food balance
+    /// and crisis relief read must stay well-formed and untouched by this
+    /// mechanism, since the wiring site (`mod.rs`) applies it only to
+    /// `needs[h][g]` and only for `need_tier >= 1`.
+    #[test]
+    fn the_structural_ration_is_not_affected_by_satiety() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 8.0, 0.5, false),
+        ];
+        let hubs = vec![hub(0, 0.0, 0.0, 2000.0, vec![1800.0, 1900.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.advance(30);
+        assert!(s.hubs[0].lack_basic.is_finite() && s.hubs[0].lack_basic >= 0.0,
+            "the structural ration must remain well-formed regardless of local satiety");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // N7 · the League (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §3-4)
     // ─────────────────────────────────────────────────────────────────────
 

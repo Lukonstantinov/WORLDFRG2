@@ -5092,9 +5092,37 @@ MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ AGREED IN SCOPE, NOTHING BUILT. One ca
                                     NUMBERED QUEUE of the work that follows slices
                                     0-7, each item naming what it waits for — a
                                     schedule, never a refusal
-PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ AGREED IN SCOPE, NOTHING BUILT. The companion:
+PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ SLICE 6 BUILT AND DOSED AT ZERO; slices
+                                    1-5 and 7 NOT built. The companion:
                                     where towns are · how big they get · why anyone
-                                    trades. **Settlements are ONE flat greedy pass**
+                                    trades. **Slice 6 (F9, the cheap keystone) is
+                                    live in code**: `LOCAL_SATIETY`
+                                    (`tick/mod.rs`) is a hub's own jading toward a
+                                    comfort/luxury good it largely makes itself —
+                                    `self_supply_of` compares per-capita production
+                                    against the per-capita need `base_need` itself
+                                    uses, and `local_satiety_mult`/its pure,
+                                    testable twin `local_satiety_mult_e` (the same
+                                    split N6's `elastic_aggregate_mult`/`_e` uses)
+                                    shave the MARKET-FACING `needs[h][g]` by up to
+                                    the dose as self-supply approaches 1.0 — never
+                                    `needs_struct` (the structural ration
+                                    `lack_basic`/starvation/crisis relief read is
+                                    untouched, applied at the wiring site in
+                                    `mod.rs` alongside fashion/cultural-taste, not
+                                    inside `base_need`), and never a basic good
+                                    (`need_tier < 1` is a hard no-op). Ships at
+                                    `LOCAL_SATIETY = 0.0` — a true no-op, gated by
+                                    `local_satiety_is_a_noop_at_zero`,
+                                    `a_producing_city_wants_less_of_its_own_
+                                    luxury`, `a_basic_good_is_never_subject_to_
+                                    satiety`, `the_structural_ration_is_not_
+                                    affected_by_satiety` — and is the one term to
+                                    dose-walk before the continuous `foreign_lux`
+                                    rewrite and the `stock_origin` provenance
+                                    accumulator (still item 7 below) land, since
+                                    those compound with it on the same expression.
+                                    **Settlements are ONE flat greedy pass**
                                     (`settlements.rs:509`) with a single spacing
                                     radius and tier assigned afterwards, so a
                                     "capital" is just a town that scored well; and
@@ -5133,18 +5161,22 @@ PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ AGREED IN SCOPE, NOTHING BUILT. The co
                                     NOTHING anywhere knows where a good came from
                                     (`stock` is a flat pool; imported salt is
                                     indistinguishable from local salt the moment it
-                                    lands). Made continuous, plus a new
+                                    lands). Plan calls for making it continuous
+                                    (still queued — `foreign_lux` in `base_need`
+                                    is still the binary switch) plus a new
                                     `LOCAL_SATIETY` so a city awash in a luxury it
-                                    makes itself wants less per head — the direct
-                                    answer to a luxury producer retaining ~30% of its
-                                    own output, which is far too high (Moluccan clove
-                                    growers did not eat cloves; Venice sold salt it
-                                    did not eat) — and a `stock_origin` provenance
-                                    accumulator so a far-travelled good is wanted MORE
-                                    as well as costing more, which is the amber-in-
-                                    Rome case. Every demand term ships at dose 0 and
-                                    is walked ONE AT A TIME (they multiply the same
-                                    expression), gated by
+                                    makes itself wants less per head — **the
+                                    `LOCAL_SATIETY` half is BUILT** (slice 6,
+                                    above), the direct answer to a luxury producer
+                                    retaining ~30% of its own output, which is far
+                                    too high (Moluccan clove growers did not eat
+                                    cloves; Venice sold salt it did not eat) — and
+                                    a `stock_origin` provenance accumulator (slice
+                                    7, NOT built) so a far-travelled good is wanted
+                                    MORE as well as costing more, which is the
+                                    amber-in-Rome case. Every demand term ships at
+                                    dose 0 and is walked ONE AT A TIME (they
+                                    multiply the same expression), gated by
                                     `econ_expenditure_shares_resemble_a_household`.
                                     Per-culture demand profiles are §5's item 8 —
                                     the largest remaining demand item, QUEUED rather
