@@ -2755,6 +2755,7 @@ fn s5_ore_ceiling_at_zero_is_a_noop() {
         good: "gemstones".into(), x: 0.0, y: 0.0,
         depth: crate::sim::deposits::DEPTH_SURFACE,
         extent: crate::sim::deposits::EXTENT_WEAK, district: 0,
+        working: crate::sim::deposits::WorkingKind::Open,
     });
     s.advance(30);
     let big_gems = s.hubs[0].production[1];

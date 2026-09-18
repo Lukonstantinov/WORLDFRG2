@@ -4,7 +4,7 @@
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
             fungible_input: false,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
-            distribution: DIST_UNKNOWN }
+            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN }
     }
 
     pub(super) fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
@@ -2982,7 +2982,7 @@
         s.banks.push(Bank {
             name: "Banco".into(), house: 0, seat: 0, founded_tick: 0, defunct: false,
             reserves: 30.0, loans: vec![Loan { borrower_house: -1, borrower_polis: 1, principal: 10.0,
-                outstanding: 10.0, rate: 0.01, start_tick: 0, term_ticks: 3650, purpose: "colony".into() }],
+                outstanding: 10.0, rate: 0.01, start_tick: 0, term_ticks: 3650, purpose: "colony".into(), arrears_months: 0 }],
             real_estate: 1.0, deposits: 0.0, notes_issued: 0.0, branches: vec![0], prestige: 0.5,
             interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
         });
@@ -5532,7 +5532,7 @@
             name: "Banco Test".into(), house: 1, seat: 0, founded_tick: 0, defunct: false,
             reserves: 80.0, loans: vec![Loan {
                 borrower_house: 0, borrower_polis: -1, principal: 100.0, outstanding: 80.0,
-                rate: 0.01, start_tick: 0, term_ticks: 1000, purpose: "trade".into(),
+                rate: 0.01, start_tick: 0, term_ticks: 1000, purpose: "trade".into(), arrears_months: 0,
             }], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
             branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![],
             dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
@@ -5555,6 +5555,175 @@
         let ev = s.houses[0].events.iter().find(|e| e.kind == "dissolved").unwrap();
         assert!(!ev.text.contains("owed"), "no bank was owed anything ⇒ no fabricated creditor line");
     }
+
+    // ── MONEY_MINES_AND_GOODS_PLAN.md slices 1-4 · banking ──────────────────
+
+    fn test_bank(loans: Vec<Loan>, reserves: f32) -> Bank {
+        Bank {
+            name: "Banco".into(), house: 1, seat: 0, founded_tick: 0, defunct: false,
+            reserves, loans, real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
+            branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0,
+            stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
+        }
+    }
+
+    /// Slice 1 (F1a) · a note-funded loan that DEFAULTS must retire the notes
+    /// it created, not leave a permanent phantom liability. Verified against
+    /// the unfixed code by inspection: the old default branch never touched
+    /// `notes_issued` at all, so this would have failed with `notes_issued`
+    /// unchanged at 200.0.
+    #[test]
+    fn a_defaulted_note_funded_loan_retires_its_notes() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.houses[0].wealth = HOUSE_BANKRUPT; // avail = 0 ⇒ cannot pay anything
+        let mut loan = Loan { borrower_house: 0, borrower_polis: -1, principal: 80.0, outstanding: 80.0,
+            rate: 0.01, start_tick: 0, term_ticks: 1000, purpose: "trade".into(), arrears_months: LOAN_ARREARS_LIMIT };
+        let due = 80.0 * 0.01;
+        // Unpaid interest is capitalized onto the written-off balance, so the
+        // amount actually written off (`rem`) is slightly more than the
+        // original principal.
+        let rem = 80.0 + due;
+        loan.arrears_months = LOAN_ARREARS_LIMIT; // one more miss ⇒ default this pass
+        // Ample reserves and `notes_issued` set to EXACTLY this loan's own
+        // principal (as if the bank had issued no other credit) — the
+        // clamped case, which gives an exact, unambiguous expected delta:
+        // notes retirement (80, clamped from `rem`) exactly cancels the
+        // loan's own write-off (80), leaving only the foreclosure recovery
+        // as equity's net change. Reserves are large enough that the bank
+        // stays solvent throughout, so `resolve_bank_failure` never fires
+        // and cannot confound the assertions below.
+        s.banks.push(test_bank(vec![loan], 1000.0));
+        s.banks[0].notes_issued = 80.0;
+        // Freeze new lending/investing for this pass (a real panic event, the
+        // same mechanism `bank_pass` already checks) so the assertions below
+        // measure ONLY the default's own effect on the balance sheet, not a
+        // second loan this same `bank_pass` call might otherwise originate
+        // once the default frees up headroom.
+        s.active_events.push(ActiveEvent { kind: "panic".into(), hub: 0, good: -1,
+            magnitude: 1.0, until_tick: s.tick + 1 });
+        let equity_before = s.banks[0].equity();
+        s.bank_pass();
+        assert!(!s.banks[0].defunct, "the bank must stay solvent through this default");
+        assert!(s.banks[0].loans.is_empty(), "the defaulted loan is removed from the book");
+        assert!(s.banks[0].notes_issued < 1.0,
+            "notes_issued must fall by the written-off principal (was {}, expected ~0)",
+            s.banks[0].notes_issued);
+        let recovery = BANK_FORECLOSURE_RECOVERY;
+        let expected_equity_delta = rem * recovery; // notes/loan cancel exactly (both 80)
+        assert!((s.banks[0].equity() - (equity_before + expected_equity_delta)).abs() < 1.0,
+            "equity must move by exactly the foreclosure recovery once the note is retired \
+             (was {}, expected {})", s.banks[0].equity(), equity_before + expected_equity_delta);
+    }
+
+    /// Slice 2 (F1b) · a borrower who cannot pay one month keeps the loan (in
+    /// arrears), and only defaults once forbearance (`LOAN_ARREARS_LIMIT`) is
+    /// exhausted. Both directions matter — a forbearance with no end is as
+    /// wrong as no forbearance.
+    #[test]
+    fn a_borrower_that_misses_one_payment_is_not_ruined() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.houses[0].wealth = HOUSE_BANKRUPT; // permanently unable to pay
+        let loan = Loan { borrower_house: 0, borrower_polis: -1, principal: 20.0, outstanding: 20.0,
+            rate: 0.01, start_tick: 0, term_ticks: 3650, purpose: "trade".into(), arrears_months: 0 };
+        s.banks.push(test_bank(vec![loan], 50.0));
+        // One missed month: still on the book, in arrears, not defaulted.
+        s.bank_pass();
+        assert_eq!(s.banks[0].loans.len(), 1, "one missed payment must not destroy the loan");
+        assert_eq!(s.banks[0].loans[0].arrears_months, 1);
+        assert!(!s.banks[0].events.iter().any(|e| e.kind == "default"));
+        // Exhaust the forbearance window.
+        for _ in 0..LOAN_ARREARS_LIMIT {
+            s.bank_pass();
+        }
+        assert!(s.banks[0].loans.is_empty(), "arrears past the limit must default the loan");
+        assert!(s.banks[0].events.iter().any(|e| e.kind == "default"));
+    }
+
+    /// Slice 3 · no single borrower may claim more than `BANK_MAX_BORROWER_SHARE`
+    /// of a bank's book, even when one resident is far richer (and so far more
+    /// track-record-worthy) than every other eligible borrower.
+    #[test]
+    fn a_banks_book_is_never_concentrated_in_one_borrower() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = (0..1u32).map(|i| hub(i, 0.0, 0.0, 9000.0, vec![9000.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        // One dominant house plus several ordinary ones, all resident at the seat.
+        s.houses.push(house_at(0, vec![0], 1));
+        s.houses[0].wealth = 100_000.0;
+        for _ in 0..4 {
+            let mut h = house_at(0, vec![0], 1);
+            h.wealth = 50.0;
+            s.houses.push(h);
+        }
+        s.banks.push(test_bank(vec![], 40_000.0));
+        s.banks[0].house = 99; // owner is nobody resident here
+        for tick in 0..3650u32 {
+            s.tick = tick;
+            s.bank_maybe_lend(0);
+        }
+        // The cap is checked on the FINAL book, not after every origination —
+        // a book of one or two loans is unavoidably concentrated by simple
+        // arithmetic (§ the `bootstrap_floor` doc comment in `bank_maybe_lend`),
+        // and that transient state is correct, not a violation. What must be
+        // true once the book has had years to grow is that it actually
+        // DIVERSIFIED rather than stacking everything onto one borrower.
+        let total: f32 = s.banks[0].loans.iter().map(|l| l.outstanding).sum();
+        assert!(s.banks[0].loans.len() > 1, "the book never grew past its first loan");
+        assert!(total > EPS, "the bank never lent anything");
+        for hi in 0..s.houses.len() {
+            let held: f32 = s.banks[0].loans.iter()
+                .filter(|l| l.borrower_house == hi as i32).map(|l| l.outstanding).sum();
+            assert!(held / total <= BANK_MAX_BORROWER_SHARE + 1e-3,
+                "house {hi} holds {held}/{total} of the final book, over the cap");
+        }
+    }
+
+    /// Slice 4 · a bank may now stake an extraction works (mine/quarry), paid
+    /// as OFFTAKE (`payout: 0`) rather than dividend — a claim on physical
+    /// output, not on profit.
+    #[test]
+    fn a_bank_may_take_an_offtake_stake_in_a_mine() {
+        let goods = vec![good("iron", 0, 0, 1.0, 0.5, false)];
+        let mut hubs = vec![hub(0, 0.0, 0.0, 9000.0, vec![9000.0], 0)];
+        let mut mine = hub(1, 0.0, 0.0, 100.0, vec![0.0], 0);
+        mine.is_estate = true;
+        mine.estate_kind = 2; // Mine
+        mine.estate_tier = 3;
+        mine.parent = 0;
+        mine.owner_house = 0;
+        mine.stake_bank = -1;
+        hubs.push(mine);
+        let mut s = sim(hubs, goods);
+        s.houses.push(house_at(0, vec![0], 1));
+        s.banks.push(test_bank(vec![], BANK_FOUND_RESERVE));
+        s.tick = 0;
+        // Force the roll through by calling directly (bypasses the monthly dice).
+        // Retry a handful of ticks since `bank_maybe_invest` still rolls its own dice.
+        let mut staked = false;
+        for tick in 0..2000u32 {
+            s.tick = tick;
+            s.bank_maybe_invest(0);
+            if s.banks[0].stakes.iter().any(|st| st.estate_hub == 1) { staked = true; break; }
+        }
+        assert!(staked, "the bank never staked the mine over 2000 ticks of rolls");
+        let offtake_row = s.hubs[1].shares.iter().find(|sh| sh.holder_kind == 3)
+            .expect("the bank's share row must exist");
+        assert_eq!(offtake_row.payout, 0, "a mine/quarry stake must pay OFFTAKE (physical output), not dividend");
+    }
+
+    /// Slice 5a (F2) is covered by `a_gem_body_is_worked_as_a_mine_not_a_quarry`
+    /// above. Slice 5d (self-sealing checks) is exercised end-to-end by
+    /// `maybe_found_mining_colony`'s own existing tests plus the `expect_kind`
+    /// plumbing added to both call sites — a dedicated fixture for a QUARRY
+    /// body specifically is deferred (both checks are now a single generic
+    /// `d.working.estate_kind()` comparison, so the Mine-body coverage those
+    /// existing tests already give exercises the same code path).
 
     // ── Phase 4.3 · plague as a lineage event ────────────────────────────────
     #[test]
@@ -7985,9 +8154,9 @@
         // No data at all ⇒ ungated.
         assert_eq!(s.mine_depth_at("iron", 0.0, 0.0), crate::sim::deposits::DEPTH_SURFACE);
         s.mine_deposits = vec![
-            MineSite { good: "iron".into(), x: 2.0, y: 0.0, depth: crate::sim::deposits::DEPTH_DEEP, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0 },
-            MineSite { good: "iron".into(), x: 500.0, y: 0.0, depth: crate::sim::deposits::DEPTH_FLOODED, extent: crate::sim::deposits::EXTENT_MODERATE, district: 1 },
-            MineSite { good: "silver".into(), x: 0.0, y: 0.0, depth: crate::sim::deposits::DEPTH_SHALLOW, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0 },
+            MineSite { good: "iron".into(), x: 2.0, y: 0.0, depth: crate::sim::deposits::DEPTH_DEEP, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft },
+            MineSite { good: "iron".into(), x: 500.0, y: 0.0, depth: crate::sim::deposits::DEPTH_FLOODED, extent: crate::sim::deposits::EXTENT_MODERATE, district: 1, working: crate::sim::deposits::WorkingKind::Shaft },
+            MineSite { good: "silver".into(), x: 0.0, y: 0.0, depth: crate::sim::deposits::DEPTH_SHALLOW, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft },
         ];
         // The nearest IRON working wins over a farther one and over a
         // same-position working of a different good.
@@ -8055,14 +8224,39 @@
     #[test]
     fn estate_kind_splits_mine_from_quarry() {
         // DIST_UNKNOWN — the pre-S4 substring cascade, unchanged.
-        assert_eq!(estate_kind_for_good("iron", false, DIST_UNKNOWN), 2);
-        assert_eq!(estate_kind_for_good("silver", false, DIST_UNKNOWN), 2);
-        assert_eq!(estate_kind_for_good("mercury", false, DIST_UNKNOWN), 2);
-        assert_eq!(estate_kind_for_good("ruby", false, DIST_UNKNOWN), 8);
-        assert_eq!(estate_kind_for_good("marble", false, DIST_UNKNOWN), 8);
-        assert_eq!(estate_kind_for_good("salt", false, DIST_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("iron", false, DIST_UNKNOWN, WORK_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("silver", false, DIST_UNKNOWN, WORK_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("mercury", false, DIST_UNKNOWN, WORK_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("ruby", false, DIST_UNKNOWN, WORK_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("marble", false, DIST_UNKNOWN, WORK_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("salt", false, DIST_UNKNOWN, WORK_UNKNOWN), 8);
         assert_eq!(estate_kind_label(2), "Mine");
         assert_eq!(estate_kind_label(8), "Quarry");
+    }
+
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5a (F2) · a gem body is worked as a
+    /// MINE, not a quarry — the old substring cascade called every gem a
+    /// "stone quarry" and made `mine_depth`/drainage/flooded-body unlocking
+    /// structurally unreachable for diamond/ruby/etc. The real extraction
+    /// method (`working`, from the SPEC) decides now, not the name.
+    #[test]
+    fn a_gem_body_is_worked_as_a_mine_not_a_quarry() {
+        assert_eq!(estate_kind_for_good("diamond", false, DIST_DEPOSITS, WORK_SHAFT), 2);
+        assert_eq!(estate_kind_for_good("ruby", false, DIST_DEPOSITS, WORK_SHAFT), 2);
+        assert_eq!(estate_kind_for_good("marble", false, DIST_DEPOSITS, WORK_OPEN), 8);
+        assert_eq!(estate_kind_for_good("alum", false, DIST_DEPOSITS, WORK_OPEN), 8);
+        // A placer working is still a MINE (surface, but a mine in the
+        // campaign's two-kind vocabulary); a pan working is a QUARRY.
+        assert_eq!(estate_kind_for_good("gold", false, DIST_DEPOSITS, WORK_PLACER), 2);
+        assert_eq!(estate_kind_for_good("bay_salt", false, DIST_DEPOSITS, WORK_PAN), 8);
+        // `deposits::default_working_for` itself must agree with the table.
+        use crate::sim::deposits::{default_working_for, WorkingKind};
+        assert_eq!(default_working_for("diamond"), WorkingKind::Shaft);
+        assert_eq!(default_working_for("ruby"), WorkingKind::Shaft);
+        assert_eq!(default_working_for("marble"), WorkingKind::Open);
+        assert_eq!(default_working_for("alum"), WorkingKind::Open);
+        assert_eq!(default_working_for("gold"), WorkingKind::Placer);
+        assert_eq!(default_working_for("bay_salt"), WorkingKind::Pan);
     }
 
     /// S4 (CONSUMPTION_REBUILD_PLAN.md) · a `DIST_DEPOSITS` good the substring
@@ -8073,10 +8267,10 @@
     /// substring, since `distribution` now decides the branch, not the name.
     #[test]
     fn deposits_distribution_never_falls_through_to_plantation() {
-        assert_eq!(estate_kind_for_good("a_future_custom_mineral", false, DIST_DEPOSITS), 8);
-        assert_eq!(estate_kind_for_good("cobalt", false, DIST_DEPOSITS), 8);
-        assert_eq!(estate_kind_for_good("cobalt_ore", false, DIST_DEPOSITS), 2);
-        assert_eq!(estate_kind_for_good("goldenrod", false, DIST_LOCAL), 3);
+        assert_eq!(estate_kind_for_good("a_future_custom_mineral", false, DIST_DEPOSITS, WORK_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("cobalt", false, DIST_DEPOSITS, WORK_UNKNOWN), 8);
+        assert_eq!(estate_kind_for_good("cobalt_ore", false, DIST_DEPOSITS, WORK_UNKNOWN), 2);
+        assert_eq!(estate_kind_for_good("goldenrod", false, DIST_LOCAL, WORK_UNKNOWN), 3);
     }
 
     /// D3 · a body of UNKNOWN or real moderate/great/world-class extent never
@@ -8164,7 +8358,7 @@
         s.mine_deposits = vec![MineSite {
             good: "silver".into(), x: 2.0, y: 0.0,
             depth: crate::sim::deposits::DEPTH_SHALLOW, extent: crate::sim::deposits::EXTENT_WORLD_CLASS,
-            district: 0,
+            district: 0, working: crate::sim::deposits::WorkingKind::Shaft,
         }];
         s.world_w = 3600.0;
         s.tick = COLONY_START_TICK;

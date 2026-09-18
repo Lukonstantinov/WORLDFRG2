@@ -574,54 +574,83 @@ impl CampaignSim {
             let mut writeoff = 0.0f32;
             let mut principal_repaid = 0.0f32; // note-funded credit returned → retire notes
             let mut cash_repaid = 0.0f32;      // specie returned on a cash-funded loan
+            let mut notes_retired = 0.0f32;    // note-funded credit DESTROYED on default → retire notes
             let mut keep = vec![true; nloans];
             for li in 0..nloans {
-                let (bh, bp, outstanding, principal, rate, term, cash_funded) = {
+                let (bh, bp, outstanding, principal, rate, term, cash_funded, arrears) = {
                     let l = &self.banks[bi].loans[li];
                     // Colony ventures are staked with hard specie OUT of reserves; every
                     // other loan is funded by ISSUING NOTES (credit creation).
                     (l.borrower_house, l.borrower_polis, l.outstanding, l.principal, l.rate,
-                     l.term_ticks, l.purpose == "colony")
+                     l.term_ticks, l.purpose == "colony", l.arrears_months)
                 };
                 if outstanding <= EPS { keep[li] = false; continue; }
                 let due = outstanding * rate;
                 let amort = (principal / (term.max(30) as f32 / 30.0)).min(outstanding);
                 let pay = due + amort;
-                let paid = if bh >= 0 && (bh as usize) < self.houses.len() && !self.houses[bh as usize].defunct {
-                    if self.houses[bh as usize].wealth > pay * 1.2 {
-                        self.houses[bh as usize].wealth -= pay; true
-                    } else { false }
+                // MONEY_MINES_AND_GOODS_PLAN.md slice 2 · a solvency test, not a
+                // wealth-LEVEL test: how much can the borrower pay without being
+                // pushed under its own bankruptcy floor (HOUSE_BANKRUPT)? A city
+                // treasury has no such floor.
+                let avail: Option<f32> = if bh >= 0 && (bh as usize) < self.houses.len() && !self.houses[bh as usize].defunct {
+                    Some((self.houses[bh as usize].wealth - HOUSE_BANKRUPT).max(0.0))
                 } else if bp >= 0 && (bp as usize) < self.hubs.len() {
-                    if self.hubs[bp as usize].treasury > pay * 1.2 {
-                        self.hubs[bp as usize].treasury -= pay; true
-                    } else { false }
-                } else { false };
-                if paid {
-                    interest_income += due;
-                    // The borrower returns principal. A note-funded loan RETIRES the
-                    // notes it created (liability ↓); a cash loan returns specie to
-                    // reserves (asset ↑). Either way equity is conserved and only the
-                    // INTEREST is profit. (Previously the principal repayment simply
-                    // vanished — neither booked to reserves nor used to retire notes —
-                    // so equity bled ~`amort` per loan per month and EVERY bank went
-                    // insolvent within a few years, then its failure cascaded a crash.)
-                    if cash_funded { cash_repaid += amort; } else { principal_repaid += amort; }
-                    let rem = (outstanding - amort).max(0.0);
-                    self.banks[bi].loans[li].outstanding = rem;
-                    if rem <= EPS { keep[li] = false; }
-                } else {
-                    // Default: write off the balance; the bank seizes property worth a
-                    // fraction of the loan (a foreclosed asset on its books).
+                    Some(self.hubs[bp as usize].treasury.max(0.0))
+                } else { None };
+                let Some(avail) = avail else {
+                    // No valid borrower left (house dissolved etc.) — treat as a
+                    // silent default with no recovery to charge anyone.
                     writeoff += outstanding;
-                    self.banks[bi].real_estate += outstanding * 0.4;
+                    if !cash_funded { notes_retired += outstanding; }
                     self.banks[bi].loans[li].outstanding = 0.0;
                     keep[li] = false;
-                    self.banks[bi].events.push(HouseEvent { tick, kind: "default".into(),
-                        text: format!("writes off a loan of {:.0} in default", outstanding) });
+                    continue;
+                };
+                let paid_cash = avail.min(pay);
+                let full = paid_cash >= pay - EPS;
+                if bh >= 0 && (bh as usize) < self.houses.len() {
+                    self.houses[bh as usize].wealth -= paid_cash;
+                } else if bp >= 0 && (bp as usize) < self.hubs.len() {
+                    self.hubs[bp as usize].treasury -= paid_cash;
+                }
+                // Interest actually collected is real income; interest the borrower
+                // could not cover is CAPITALIZED (added back onto the principal)
+                // rather than silently forgiven — standard pre-modern practice.
+                let interest_collected = paid_cash.min(due);
+                let unpaid_interest = due - interest_collected;
+                let amort_paid = (paid_cash - interest_collected).max(0.0);
+                interest_income += interest_collected;
+                if cash_funded { cash_repaid += amort_paid; } else { principal_repaid += amort_paid; }
+                let rem = (outstanding - amort_paid + unpaid_interest).max(0.0);
+                if full {
+                    self.banks[bi].loans[li].outstanding = rem;
+                    self.banks[bi].loans[li].arrears_months = 0;
+                    if rem <= EPS { keep[li] = false; }
+                } else {
+                    let new_arrears = arrears + 1;
+                    if new_arrears > LOAN_ARREARS_LIMIT {
+                        // Forbearance is exhausted: default as before, capitalization
+                        // and all — the bank seizes property worth a fraction of the
+                        // loan (a foreclosed asset on its books).
+                        writeoff += rem;
+                        self.banks[bi].real_estate += rem * BANK_FORECLOSURE_RECOVERY;
+                        if !cash_funded { notes_retired += rem; }
+                        self.banks[bi].loans[li].outstanding = 0.0;
+                        keep[li] = false;
+                        self.banks[bi].events.push(HouseEvent { tick, kind: "default".into(),
+                            text: format!("writes off a loan of {:.0} after {} months in arrears", rem, new_arrears) });
+                    } else {
+                        self.banks[bi].loans[li].outstanding = rem;
+                        self.banks[bi].loans[li].arrears_months = new_arrears;
+                        self.banks[bi].events.push(HouseEvent { tick, kind: "arrears".into(),
+                            text: format!("a loan of {:.0} falls into arrears ({} month{})",
+                                rem, new_arrears, if new_arrears == 1 { "" } else { "s" }) });
+                    }
                 }
             }
             self.banks[bi].reserves += interest_income + cash_repaid;
-            self.banks[bi].notes_issued = (self.banks[bi].notes_issued - principal_repaid).max(0.0);
+            self.banks[bi].notes_issued =
+                (self.banks[bi].notes_issued - principal_repaid - notes_retired).max(0.0);
             self.banks[bi].interest_earned += interest_income;
             self.banks[bi].losses += writeoff;
             let mut idx = 0;
@@ -747,29 +776,40 @@ impl CampaignSim {
         if headroom < 1.0 { return; }
         if hash01(self.seed, tick as u64 ^ 0x10A40, bi as u64) > 0.3 { return; }
         let seat = self.banks[bi].seat as usize;
-        let amt = headroom.min(self.banks[bi].reserves * 0.5).max(1.0);
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 3 · a smaller loan than the old
+        // "up to half of reserves" — a bank should build a BOOK of several
+        // loans, not stake its solvency on one.
+        let amt = headroom.min(self.banks[bi].reserves * BANK_MAX_LOAN_FRAC).max(1.0);
         let owner = self.banks[bi].house;
-        // Richest non-defunct resident borrower of the requested kind (guild or house),
-        // homed at the seat and not the bank's own owner.
-        let richest_resident = |guild: bool, this: &Self| -> usize {
-            let mut best = (usize::MAX, 0.0f32);
-            for (hi, h) in this.houses.iter().enumerate() {
-                if h.defunct || h.is_guild != guild || hi as u32 == owner { continue; }
-                if h.hub as usize != seat { continue; }
-                if h.wealth > best.1 { best = (hi, h.wealth); }
-            }
-            best.0
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 3 · a WIDER borrower pool: draw
+        // from the top-K eligible residents by TRACK RECORD
+        // (`stable_growth_years`), never by raw wealth — weighting by wealth
+        // (or by `political_power`, which wealth itself grows) measurably
+        // inverted `econ_inheritance_rules_fragment_differently` when N4 tried
+        // it, because the weight and the wealth feed each other.
+        let eligible_resident = |guild: bool, this: &Self, draw: f32| -> usize {
+            let mut pool: Vec<(usize, u32)> = this.houses.iter().enumerate()
+                .filter(|(hi, h)| !h.defunct && h.is_guild == guild && *hi as u32 != owner
+                    && h.hub as usize == seat)
+                .map(|(hi, _)| (hi, this.stable_growth_years(hi)))
+                .collect();
+            if pool.is_empty() { return usize::MAX; }
+            pool.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+            pool.truncate(BANK_BORROWER_POOL_K);
+            let idx = ((draw * pool.len() as f32) as usize).min(pool.len() - 1);
+            pool[idx].0
         };
         // Pick a borrower: most often a resident merchant house (trade venture);
         // sometimes a resident GUILD financing a factory or civic works; sometimes the
         // seat city's treasury (public works).
         let pick = hash01(self.seed, tick as u64 ^ 0x77B10, bi as u64);
+        let draw = hash01(self.seed, tick as u64 ^ 0x8081A, bi as u64);
         let (bh, bp, purpose) = if pick < 0.55 {
-            let h = richest_resident(false, self);
+            let h = eligible_resident(false, self, draw);
             if h == usize::MAX { return; }
             (h as i32, -1i32, "trade")
         } else if pick < 0.80 {
-            let g = richest_resident(true, self);
+            let g = eligible_resident(true, self, draw);
             if g == usize::MAX {
                 (-1i32, seat as i32, "treasury") // no guild here → fund public works instead
             } else {
@@ -779,6 +819,29 @@ impl CampaignSim {
         } else {
             (-1i32, seat as i32, "treasury")
         };
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 3 · a CONCENTRATION LIMIT — no
+        // single borrower may hold more than `BANK_MAX_BORROWER_SHARE` of this
+        // bank's outstanding book. Reject the loan rather than shrinking it: a
+        // bank that cannot lend safely to this borrower should not lend to it.
+        // Below `bootstrap_floor`, a loan to a borrower with NO existing
+        // exposure is exempt, not just the bank's very first loan: every loan
+        // this bank writes is close to the same size (`BANK_MAX_LOAN_FRAC` of
+        // reserves), so two loans of equal size to two DIFFERENT borrowers are
+        // unavoidably a 50/50 split of a 2-loan book — a share no cap under
+        // 50% could ever pass. Enforcing the cap before the book is even large
+        // enough to admit one compliant loan would freeze every bank at a
+        // single loan forever. The floor is the book size at which a fresh
+        // loan of this size to a NEW borrower would land exactly on the cap.
+        // A borrower who ALREADY holds a loan never gets the exemption — that
+        // is what stops the bootstrap window itself from being used to stack
+        // two loans onto the one borrower who happens to be drawn twice.
+        let total_book: f32 = self.banks[bi].loans.iter().map(|l| l.outstanding).sum();
+        let existing: f32 = self.banks[bi].loans.iter()
+            .filter(|l| (bh >= 0 && l.borrower_house == bh) || (bp >= 0 && l.borrower_polis == bp))
+            .map(|l| l.outstanding).sum();
+        let bootstrap_floor = amt * (1.0 - BANK_MAX_BORROWER_SHARE) / BANK_MAX_BORROWER_SHARE;
+        let bootstrapping = total_book <= bootstrap_floor && existing <= EPS;
+        if !bootstrapping && (existing + amt) / (total_book + amt) > BANK_MAX_BORROWER_SHARE { return; }
         // v2.1 · ENDOGENOUS rate — priced per loan instead of a flat house rate:
         //   base × (1 + scarcity·K_s + risk·K_r) + panic premium, capped.
         //   • scarcity = how little lending headroom is left (tight credit → dearer);
@@ -794,7 +857,7 @@ impl CampaignSim {
         self.banks[bi].loans.push(Loan {
             borrower_house: bh, borrower_polis: bp,
             principal: amt, outstanding: amt, rate,
-            start_tick: tick, term_ticks: 1825, purpose: purpose.into(),
+            start_tick: tick, term_ticks: 1825, purpose: purpose.into(), arrears_months: 0,
         });
         self.banks[bi].notes_issued += amt;
         if bh >= 0 { self.houses[bh as usize].wealth += amt; }
@@ -813,18 +876,25 @@ impl CampaignSim {
         if self.banks[bi].reserves < BANK_FOUND_RESERVE * 0.5 { return; }
         if hash01(self.seed, tick as u64 ^ 0x57A4E, bi as u64) > 0.10 { return; }
         let branches = self.banks[bi].branches.clone();
-        // The highest-tier un-staked manufactory in the branch network whose owner is solvent.
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 4 · a bank may now stake a
+        // manufactory (6, dividend) OR an extraction works — mine (2) or
+        // quarry (8), paid as OFFTAKE (payout 0) rather than dividend, the
+        // historical Fugger/publicani instrument: a claim on a fraction of
+        // physical OUTPUT, paid whether or not the works shows a "profit".
+        // The highest-tier un-staked eligible works in the branch network
+        // whose owner is solvent (or is the city itself, owner_house == -1).
         let mut best: (usize, u8) = (usize::MAX, 0);
         for ei in 0..self.hubs.len() {
             let e = &self.hubs[ei];
-            if !e.is_estate || e.estate_kind != 6 || e.stake_bank >= 0 { continue; }
+            if !e.is_estate || !matches!(e.estate_kind, 6 | 2 | 8) || e.stake_bank >= 0 { continue; }
             if e.parent < 0 || !branches.contains(&(e.parent as u32)) { continue; }
             let oh = e.owner_house;
-            if oh < 0 || (oh as usize) >= self.houses.len() || self.houses[oh as usize].defunct { continue; }
+            if oh >= 0 && ((oh as usize) >= self.houses.len() || self.houses[oh as usize].defunct) { continue; }
             if e.estate_tier > best.1 { best = (ei, e.estate_tier); }
         }
         let ei = best.0;
         if ei == usize::MAX { return; }
+        let is_extraction = matches!(self.hubs[ei].estate_kind, 2 | 8);
         let tier = self.hubs[ei].estate_tier.max(1);
         let price = (tier as f32 * BANK_STAKE_VALUE_PER_TIER * BANK_STAKE_SHARE)
             .min(self.banks[bi].reserves * 0.4);
@@ -832,27 +902,38 @@ impl CampaignSim {
         let good = self.hubs[ei].base_per_capita.iter().enumerate()
             .max_by(|a, b| a.1.partial_cmp(b.1).unwrap_or(std::cmp::Ordering::Equal))
             .map(|(g, _)| g as u32).unwrap_or(0);
-        let oh = self.hubs[ei].owner_house as usize;
+        let oh = self.hubs[ei].owner_house;
         self.banks[bi].reserves -= price;        // specie out
-        self.houses[oh].wealth += price;          // capital injected into the works
+        // Capital injected into the works: its owning house, or the seat
+        // treasury when the city itself holds the works (the *publicani* case).
+        let parent = self.hubs[ei].parent;
+        if oh >= 0 { self.houses[oh as usize].wealth += price; }
+        else if parent >= 0 { self.hubs[parent as usize].treasury += price; }
         self.hubs[ei].stake_bank = bi as i32;
         self.hubs[ei].stake_share = BANK_STAKE_SHARE;
         self.banks[bi].stakes.push(BankStake {
             estate_hub: ei as u32, share: BANK_STAKE_SHARE, basis: price, good });
         // ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.5 (D1) · the share table is now
         // the payout source of truth; stake_bank/stake_share above stay as the
-        // cheap presence marker only.
+        // cheap presence marker only. `payout: 0` (offtake) for a mine/quarry,
+        // `payout: 1` (dividend) for a manufactory — D1's own split.
+        let payout = if is_extraction { 0 } else { 1 };
         self.hubs[ei].shares.push(Share {
-            holder_kind: 3, holder: bi as u32, frac: BANK_STAKE_SHARE, payout: 1,
+            holder_kind: 3, holder: bi as u32, frac: BANK_STAKE_SHARE, payout,
             acquired_tick: tick, paid: price, instrument: 0, term_years: 0, neglect_years: 0,
         });
-        self.hubs[ei].shares.push(Share {
-            holder_kind: 1, holder: oh as u32, frac: 1.0 - BANK_STAKE_SHARE, payout: 1,
-            acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
-        });
+        if oh >= 0 {
+            self.hubs[ei].shares.push(Share {
+                holder_kind: 1, holder: oh as u32, frac: 1.0 - BANK_STAKE_SHARE, payout,
+                acquired_tick: tick, paid: 0.0, instrument: 0, term_years: 0, neglect_years: 0,
+            });
+        }
+        // A remaining unclaimed fraction with no row (city-held, oh < 0) still
+        // belongs to the city by the table's own "unclaimed ⇒ owner" convention.
         let en = self.hubs[ei].name.clone();
+        let verb = if is_extraction { "takes an offtake stake in" } else { "takes a stake in" };
         self.banks[bi].events.push(HouseEvent { tick, kind: "stake".into(),
-            text: format!("takes a {:.0}% stake in {} for {:.0}", BANK_STAKE_SHARE * 100.0, en, price) });
+            text: format!("{} {:.0}% of {} for {:.0}", verb, BANK_STAKE_SHARE * 100.0, en, price) });
         let bn = self.banks[bi].name.clone();
         self.journal.push(JournalEntry { tick, kind: "bank".into(), hub: self.hubs[ei].parent,
             good: good as i32, value: price, text: format!("{} buys into {}", bn, en) });

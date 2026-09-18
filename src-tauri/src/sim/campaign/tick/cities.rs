@@ -721,6 +721,21 @@ impl CampaignSim {
     fn province_good_potential_base(&self, p: usize, g: usize) -> f32 {
         let ng = self.goods.len();
         if ng == 0 { return 0.0; }
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 7b · a deposit good's potential
+        // comes from its own real workings, never from `prov_cap`/land-use
+        // share — ore output has nothing to do with how many farmers a
+        // province feeds or how much of it is ploughed (F4).
+        if self.goods.get(g).map(|tg| tg.distribution) == Some(DIST_DEPOSITS) {
+            let name = self.goods[g].name.as_str();
+            let mut sum = 0.0f32;
+            for d in &self.mine_deposits {
+                if d.good != name { continue; }
+                if self.province_at(d.x, d.y) != p as i32 { continue; }
+                let extent_mult = ore_extent_ceiling_mult(d.extent).min(8.0);
+                sum += extent_mult * crate::sim::deposits::depth_workability(d.depth);
+            }
+            return sum;
+        }
         let belt = self.prov_good_belt.get(p * ng + g).copied().unwrap_or(0.0);
         if belt <= 0.0 { return 0.0; }
         let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(0.0);

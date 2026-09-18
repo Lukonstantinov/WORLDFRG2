@@ -392,15 +392,48 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     let is_manufactured: std::collections::HashMap<String, bool> = mspecs.iter()
         .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Manufactured)))
         .collect();
+    let is_deposit: std::collections::HashMap<String, bool> = mspecs.iter()
+        .map(|s| (s.id.clone(), matches!(s.distribution, crate::sim::goods_spec::Distribution::Deposits)))
+        .collect();
+    // MONEY_MINES_AND_GOODS_PLAN.md slice 7a · a deposit is a POINT, not an
+    // area — `belt` is a province-wide MEAN, so a 1-3 cell district inside a
+    // large province scrapes past or falls under `PROV_GOOD_ABSENT_BELT`
+    // depending on the province's SIZE, which is backwards. A deposit good's
+    // presence is decided by real workings in this province instead.
+    let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits")
+        .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    let (rw, rh, gw, gh, mut raster): (u32, u32, u32, u32, Vec<u32>) =
+        metadata::get_meta(&conn, "province_raster").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or((0, 0, 0, 0, Vec::new()));
+    crate::sim::provinces::migrate_raster_sentinel(&mut raster);
+    let prov_at = |x: u32, y: u32| -> i32 {
+        if raster.is_empty() || gw == 0 || gh == 0 { return -1; }
+        let rx = ((x as u64 * rw as u64) / gw as u64).min(rw as u64 - 1) as usize;
+        let ry = ((y as u64 * rh as u64) / gh as u64).min(rh as u64 - 1) as usize;
+        match raster.get(ry * rw as usize + rx).copied() {
+            Some(v) if v != crate::sim::provinces::NO_PROVINCE => v as i32,
+            _ => -1,
+        }
+    };
+    let mut working_counts: std::collections::HashMap<String, u32> = std::collections::HashMap::new();
+    for d in &deposits {
+        if prov_at(d.x, d.y) != p as i32 { continue; }
+        *working_counts.entry(d.good.clone()).or_insert(0) += 1;
+    }
     let mut out = Vec::new();
     for g in 0..ng {
-        if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
+        let name = &sim.goods[g].name;
+        if is_manufactured.get(name).copied().unwrap_or(false) { continue; }
         let idx = p * ng + g;
         let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
+        let has_working = is_deposit.get(name).copied().unwrap_or(false)
+            && working_counts.get(name).copied().unwrap_or(0) > 0;
         // A good ABSENT from the whole province sits at the exact belt-histogram bin-0
         // floor (`PROV_GOOD_ABSENT_BELT` ≈ 8/255); any real presence is strictly above it.
         // The old `<= 0.001` gate let that floor through → pepper on arctic provinces.
-        if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
+        // A deposit good with a real working here bypasses the floor entirely (7a).
+        if !has_working && belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
         let actual = actual_all.get(idx).copied().unwrap_or(0.0);
         let depletion = sim.prov_good_depletion.get(idx).copied().unwrap_or(0.0);
         // §5.5 (simplified — no separate "last produced" year is tracked): a good
@@ -764,8 +797,13 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
         // gone in — i.e. a Mine estate is already established at/near it. Every
         // shallower depth is workable by construction (that's what the depth
         // ladder itself means).
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 5d · a self-sealing check fixed —
+        // this used to hard-code `estate_kind == 2` (Mine), so a flooded QUARRY
+        // body (an open-pit working, e.g. an amethyst/marble body worked as
+        // `WorkingKind::Open`) could never become workable by any code path.
+        let expect_kind = d.working.estate_kind();
         let workable = d.depth != crate::sim::deposits::DEPTH_FLOODED || sim.hubs.iter().any(|h| {
-            if !h.is_estate || h.abandoned || h.estate_kind != 2 { return false; }
+            if !h.is_estate || h.abandoned || h.estate_kind != expect_kind { return false; }
             let mut hdx = (h.x - d.x as f32).abs();
             if sim.world_w > 1.0 { hdx = hdx.min(sim.world_w - hdx); }
             let hdy = h.y - d.y as f32;
@@ -871,10 +909,17 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
     let mut goods: Vec<ProvinceGoodPotential> = Vec::new();
     if ng > 0 && p < np {
         for g in 0..ng {
-            if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
+            let name = &sim.goods[g].name;
+            if is_manufactured.get(name).copied().unwrap_or(false) { continue; }
             let idx = p * ng + g;
             let belt = sim.prov_good_belt.get(idx).copied().unwrap_or(0.0);
-            if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
+            // MONEY_MINES_AND_GOODS_PLAN.md slice 7a · a deposit good bypasses
+            // the belt-mean floor entirely when this province holds a real
+            // working — the floor is right for an area-distributed belt and
+            // backwards for a point (F4).
+            let has_working = is_deposit.get(name).copied().unwrap_or(false)
+                && agg.get(name).map(|&(_, n, _)| n > 0).unwrap_or(false);
+            if !has_working && belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
             goods.push(build_good(g, belt, sim.province_good_potential(p, g), actual_all.get(idx).copied().unwrap_or(0.0)));
         }
     } else {
@@ -892,8 +937,11 @@ pub fn campaign_province_potential(id: u32, db: State<'_, WorldDb>) -> Result<Pr
                 if let Some(wp) = provs.get(p) {
                     for (g, &belt) in wp.good_belt.iter().enumerate() {
                         if g >= ng { break; }
-                        if is_manufactured.get(&sim.goods[g].name).copied().unwrap_or(false) { continue; }
-                        if belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
+                        let name = &sim.goods[g].name;
+                        if is_manufactured.get(name).copied().unwrap_or(false) { continue; }
+                        let has_working = is_deposit.get(name).copied().unwrap_or(false)
+                            && agg.get(name).map(|&(_, n, _)| n > 0).unwrap_or(false);
+                        if !has_working && belt <= crate::sim::tick::PROV_GOOD_ABSENT_BELT { continue; }
                         goods.push(build_good(g, belt, belt, 0.0));
                     }
                 }

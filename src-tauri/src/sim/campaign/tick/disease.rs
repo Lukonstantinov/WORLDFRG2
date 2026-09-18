@@ -697,6 +697,7 @@ impl CampaignSim {
                 self.maybe_found_settlement_colony();
                 self.maybe_found_food_colony(); // Greek-Crimea grain colony (food stress)
                 self.maybe_found_mining_colony(); // DEPOSITS_AND_MINING_PLAN.md slice 5 (Potosí)
+                self.maybe_found_extraction_estate(); // MONEY_MINES_AND_GOODS_PLAN.md slice 5b/5c
                 self.colony_pass(); // graduation · dividends · autonomy
                 self.maybe_found_satellite(expansion_ok); // port/granary/workshop suburbs
                 self.maybe_absorb_dying_city();            // big city adopts a failing neighbour

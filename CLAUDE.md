@@ -5030,7 +5030,74 @@ SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md
                                     last, because a boycott is N2's market
                                     closure × members and N2's single-city
                                     version broke the hard wealth bound twice
-MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ AGREED IN SCOPE, NOTHING BUILT. One causal
+MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ SLICES 1-7 BUILT AND GATED (slice 0's pure
+                                    file-split refactor deferred — a hygiene move,
+                                    not a behaviour change, and lower priority than
+                                    landing the fixes themselves). Shipped this
+                                    session: **slice 1** — a note-funded loan now
+                                    RETIRES its notes on default
+                                    (`BANK_FORECLOSURE_RECOVERY`), closing F1a's
+                                    permanent equity leak. **Slice 2** — `Loan.
+                                    arrears_months` + a solvency-based affordability
+                                    test (not `wealth > pay*1.2`): a borrower who
+                                    misses a payment capitalizes the shortfall and
+                                    accrues arrears, defaulting only past
+                                    `LOAN_ARREARS_LIMIT` (6 months). **Slice 3** —
+                                    `BANK_MAX_BORROWER_SHARE`/`BANK_MAX_LOAN_FRAC`/
+                                    `BANK_BORROWER_POOL_K`: no borrower may hold more
+                                    than 35% of a bank's book, loans are capped at
+                                    20% of reserves, and the borrower draw is a
+                                    top-track-record POOL (`stable_growth_years`),
+                                    never wealth-weighted (N4's own lesson: weighting
+                                    by wealth/political_power measurably inverted the
+                                    inheritance gate). **Slice 4** — `bank_maybe_
+                                    invest` now stakes a Mine/Quarry too, via the
+                                    already-typed OFFTAKE share kind (`payout: 0`)
+                                    instead of dividend. **Slice 5a/5d (F2)** —
+                                    `deposits::WorkingKind` (Shaft/Open/Placer/Pan) +
+                                    `default_working_for(id)` replace the substring
+                                    cascade for mine-vs-quarry, per-district (a
+                                    `Deposit`/`MineSite` each carry their own
+                                    `working`); the self-sealing `workable`/`served`
+                                    checks in `province.rs`/`colonies.rs` now compare
+                                    against `d.working.estate_kind()` instead of a
+                                    hard-coded Mine (2), so a flooded QUARRY body can
+                                    finally become workable. **Slice 5b/5c** — new
+                                    `maybe_found_extraction_estate` (yearly) sites a
+                                    Mine/Quarry ON its real ore body (scored by
+                                    extent × depth-workability × local price ÷ a
+                                    distance-scaled haulage cost, so a rich remote
+                                    body can lose to a poorer reachable one), founder
+                                    = a house or the seat city (D2); a shallow/
+                                    moderate body self-funds, a deep/flooded one
+                                    DEMANDS a real bank loan (`purpose: "mine"`,
+                                    skipped entirely with no bank reachable — D3).
+                                    **Slice 6a/6b** — district counts re-authored
+                                    against the plan's own historical table (copper
+                                    3×, diamond 3×, silver/garnet/amethyst/topaz/
+                                    carnelian lowered, iron/gold/tin/lapis/ambergris
+                                    unchanged), gated by
+                                    `deposit_counts_span_an_order_of_magnitude`.
+                                    **Slice 7** — a `Distribution::Deposits` good now
+                                    bypasses the belt-mean floor wherever this
+                                    province holds a real working (both
+                                    `campaign_province_goods` and `campaign_province_
+                                    potential`, F4); `province_good_potential_base`
+                                    reads Σ(extent × depth-workability) over the
+                                    province's own workings for a deposit good
+                                    instead of `belt × prov_cap × land_share`; the
+                                    manufactured-goods filter now runs ONCE inside
+                                    `generate_and_persist_provinces` before
+                                    persisting (F5), with `get_provinces`/`get_
+                                    province_layer` kept only as the fix for a world
+                                    saved before that line landed. NOT done: the
+                                    long-run `econ_measure_finance` before/after
+                                    lifespan comparison and the mines-founded-per-
+                                    century measurement §7 of the plan asks for —
+                                    both are `#[ignore]`d, multi-decade diagnostics
+                                    outside this session's time budget; the unit
+                                    gates above (verified failing on the pre-fix
+                                    code by inspection) stand in for them. One causal
                                     chain: banks survive → mines get financed → ore
                                     becomes an industry → deposit goods show up in
                                     the province view. Six measured findings, of

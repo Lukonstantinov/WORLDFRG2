@@ -199,6 +199,62 @@ impl DepositModel {
     }
 }
 
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 5a · how a working was actually
+/// extracted — the fact that decides mine-vs-quarry, not a substring match on
+/// the good's NAME. A `placer_frac` split means the same good (diamond, gold)
+/// can carry BOTH a lode and a gravel working, so this lives per-WORKING, not
+/// per-good.
+#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkingKind {
+    /// Deep underground working, drainage-limited (`mine_depth`,
+    /// `MINE_UPGRADE_COST_MULT`). Kimberlite pipes, Mogok ruby, Rammelsberg,
+    /// Kutná Hora, Almadén, Wieliczka.
+    Shaft,
+    /// Near-surface working, TRANSPORT-limited rather than depth-limited.
+    /// Carrara marble, Tolfa alum, salt pans, agate/amygdule gravels.
+    Open,
+    /// Alluvial gravel working — cheap to start, no drainage, exhausts fast.
+    /// Always at surface depth. Golconda diamond gravel, stream tin, Ratnapura
+    /// sapphire gravel, placer gold.
+    Placer,
+    /// Solar/wetland harvest — neither a shaft nor a pit. Bay salt pans, bog
+    /// iron.
+    Pan,
+}
+
+impl WorkingKind {
+    /// The estate kind (`TickHub.estate_kind`) this working founds as: a Shaft
+    /// or Placer working is a MINE (2, depth/drainage-limited); an Open or Pan
+    /// working is a QUARRY (8, transport-limited).
+    pub fn estate_kind(self) -> u8 {
+        match self {
+            WorkingKind::Shaft | WorkingKind::Placer => 2,
+            WorkingKind::Open | WorkingKind::Pan => 8,
+        }
+    }
+}
+
+/// The historically correct default working for a mineral good NOT overridden
+/// by `DepositSpec.working` — see the table in
+/// `docs/MONEY_MINES_AND_GOODS_PLAN.md` slice 5a for the reasoning per entry.
+/// Anything not named here (a future custom mineral) defaults to `Open` — the
+/// least capital-intensive assumption, never `Shaft` (which would silently
+/// claim a body needs drainage capital it may not).
+pub fn default_working_for(id: &str) -> WorkingKind {
+    use WorkingKind::*;
+    match id {
+        "diamond" | "ruby" | "sapphire" | "emerald" | "lapis_lazuli" | "jade"
+        | "silver" | "copper" | "tin" | "lead" | "mercury" | "iron" | "coal"
+        | "salt" | "calamine" | "cobalt" => Shaft,
+        "gold" | "turquoise" => Placer,
+        "bay_salt" | "bog_iron" => Pan,
+        // marble, granite, slate, alabaster, amethyst, topaz, garnet, carnelian,
+        // alum, tyrian_purple, ambergris, gemstones (legacy) and anything unknown.
+        _ => Open,
+    }
+}
+
 /// One WORKING — a single mine, quarry or gravel field. The discrete record the
 /// u8 belt column cannot carry.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -214,7 +270,15 @@ pub struct Deposit {
     pub extent: u8,
     pub depth: u8,
     pub model: DepositModel,
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5a · how THIS working was actually
+    /// extracted (per-district, since `placer_frac` can split one good between
+    /// a lode and a gravel working). Serde-defaulted to `Open` for a pre-slice-5
+    /// save; every live placement path sets it explicitly.
+    #[serde(default = "default_open_working")]
+    pub working: WorkingKind,
 }
+
+fn default_open_working() -> WorkingKind { WorkingKind::Open }
 
 impl Deposit {
     /// How much this working contributes to the belt column BEFORE any mining
@@ -817,6 +881,11 @@ pub(crate) fn hash01(mut x: u64) -> f32 {
 pub struct MineralPlan<'a> {
     pub id: &'a str,
     pub model: DepositModel,
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5a · how a LODE/in-situ working of
+    /// this mineral is extracted (a `Placer` district below it is always
+    /// `WorkingKind::Placer` regardless of this value — see `make_working` and
+    /// the placer/weathering construction sites).
+    pub working: WorkingKind,
     /// Fraction of districts placed as river placers below a lode district.
     pub placer_frac: f32,
     /// Parent good id for a `Weathering` mineral.
@@ -899,6 +968,7 @@ pub fn place_mineral(
                 },
                 depth: DEPTH_SURFACE,
                 model: DepositModel::Weathering,
+                working: plan.working,
             };
             write_belt(&mut belt, i, &dep);
             out.push(dep);
@@ -1118,6 +1188,7 @@ pub fn place_mineral(
                     // reason it is the deposit a world discovers first.
                     depth: DEPTH_SURFACE,
                     model: DepositModel::Placer,
+                    working: WorkingKind::Placer,
                 };
                 write_belt(&mut belt, t, &dep);
                 out.push(dep);
@@ -1186,6 +1257,7 @@ fn make_working(
         extent,
         depth,
         model: plan.model,
+        working: plan.working,
     }
 }
 
@@ -1363,6 +1435,7 @@ mod tests {
         MineralPlan {
             id,
             model,
+            working: default_working_for(id),
             placer_frac,
             parent: default_parent_for(id),
             districts,
@@ -1472,6 +1545,7 @@ mod tests {
             extent: EXTENT_MODERATE,
             depth,
             model: DepositModel::CollisionalOrogen,
+            working: WorkingKind::Shaft,
         };
         let s = mk(DEPTH_SURFACE).workable_intensity();
         let d = mk(DEPTH_DEEP).workable_intensity();

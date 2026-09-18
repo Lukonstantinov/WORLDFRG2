@@ -299,13 +299,18 @@ pub struct DepositParams {
 /// WHERE a mineral goes is decided by its `DepositModel`, not by `min_elev`.
 pub fn deposit_params(g: usize) -> Option<DepositParams> {
     match g {
+        // MONEY_MINES_AND_GOODS_PLAN.md slice 6a · counts re-authored against
+        // the real historical pattern (see the plan's own table). Copper was
+        // the most under-placed mineral in the roster (Cyprus, Rio Tinto,
+        // Anatolia, Oman, the Tyrol, Falun) and is raised 3×; salt is lowered
+        // a touch below iron, which was already correctly the most ubiquitous.
         GOOD_GEMSTONES => Some(DepositParams { min_elev: GEM_MIN_ELEV, salt: 0xA1B2C3D4E5F60718, count_num: 1, count_den: 1 }),
-        GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 1, count_den: 1 }),
+        GOOD_COPPER    => Some(DepositParams { min_elev: 0.30, salt: 0xC0FFEE_1234_5678, count_num: 3, count_den: 1 }),
         GOOD_TIN       => Some(DepositParams { min_elev: 0.35, salt: 0x7117_BEEF_D00D_F00D, count_num: 2, count_den: 3 }),
         GOOD_GOLD      => Some(DepositParams { min_elev: 0.45, salt: 0x901D_901D_901D_901D, count_num: 3, count_den: 2 }),
         // Salt (arid-coast pans) and iron (hill country) are now scattered sporadic
         // deposits driven by their suitability score, not continuous belts.
-        GOOD_SALT      => Some(DepositParams { min_elev: 0.0, salt: 0x5A17_5A17_5A17_5A17, count_num: 6, count_den: 1 }),
+        GOOD_SALT      => Some(DepositParams { min_elev: 0.0, salt: 0x5A17_5A17_5A17_5A17, count_num: 5, count_den: 1 }),
         GOOD_IRON      => Some(DepositParams { min_elev: 0.0, salt: 0x1804_1804_1804_1804, count_num: 5, count_den: 1 }),
         _ => None,
     }
@@ -1185,6 +1190,11 @@ pub fn compute_trade_goods(
                 let parent = spec.deposit.as_ref()
                     .and_then(|d| d.parent.clone())
                     .or_else(|| deposits::default_parent_for(&spec.id).map(|s| s.to_string()));
+                // MONEY_MINES_AND_GOODS_PLAN.md slice 5a · how a LODE working of
+                // this mineral is extracted, from the spec (`DepositSpec.working`)
+                // or the historical default table.
+                let working = spec.deposit.as_ref().and_then(|d| d.working)
+                    .unwrap_or_else(|| deposits::default_working_for(&spec.id));
 
                 // A derived mineral needs its parent placed first — defer it.
                 if model.is_derived() && model != DepositModel::Placer {
@@ -1200,6 +1210,7 @@ pub fn compute_trade_goods(
                 let plan = MineralPlan {
                     id: &spec.id,
                     model,
+                    working,
                     placer_frac,
                     parent: parent.as_deref(),
                     districts: (gem_deposits * num / den).max(1),
@@ -1300,9 +1311,12 @@ pub fn compute_trade_goods(
             let (num, den) = spec.deposit.as_ref()
                 .map(|d| (d.count_num.max(1), d.count_den.max(1)))
                 .unwrap_or((1, 1));
+            let working = spec.deposit.as_ref().and_then(|d| d.working)
+                .unwrap_or_else(|| deposits::default_working_for(&spec.id));
             let plan = MineralPlan {
                 id: &spec.id,
                 model,
+                working,
                 placer_frac,
                 parent: parent_id.as_deref(),
                 districts: (gem_deposits * num / den).max(1),

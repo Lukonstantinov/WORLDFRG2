@@ -658,6 +658,24 @@ const CERT_FEE_FRAC: f32 = 0.04;
 /// A resident house this wealthy (or richer) takes ownership of a new estate its
 /// city founds; below it, the city owns the estate.
 const ESTATE_HOUSE_OWNER_WEALTH: f32 = 6.0;
+// ── MONEY_MINES_AND_GOODS_PLAN.md slice 5b/5c · extraction-estate founding ──
+/// A candidate founder city must sit within this many km of the deposit body —
+/// small enough that ore genuinely reaches it, wide enough that most real ore
+/// belts have SOME nearby town (roughly a caravan/short-sea range).
+const EXTRACTION_FOUNDER_REACH_KM: f32 = 600.0;
+/// Minimum population for a city to found (and staff) an extraction estate.
+const EXTRACTION_FOUNDER_MIN_POP: f32 = 800.0;
+/// Reference distance the haulage-cost term is scaled against (§5b's "a rich
+/// remote body loses to a poorer reachable one" — this is what makes distance
+/// bite at all).
+const EXTRACTION_HAULAGE_REFERENCE_KM: f32 = 300.0;
+/// D3 · a shallow/moderate-depth working is ALWAYS self-fundable — a deep or
+/// flooded one requires real bank credit instead (`EXTRACTION_LOAN_AMOUNT`).
+const EXTRACTION_SELF_FUND_COST: f32 = 8.0;
+/// D3 · the real, DEMANDED loan a deep/flooded body's founder takes out
+/// (`purpose: "mine"`) — sized like an ordinary bank loan, not a colony-scale
+/// venture, so it doesn't by itself strain `BANK_MAX_BORROWER_SHARE`.
+const EXTRACTION_LOAN_AMOUNT: f32 = 500.0;
 /// Max distance (fraction of world width) a new colony/route may hop from the
 /// founder OR any of its offices — offices CHAIN the reach (an office is a relay
 /// "ground" from which the next hop is measured), so a network projects far while
@@ -2105,13 +2123,22 @@ const POLITICAL_POWER_BONUS: f32 = 0.15;
 /// however a future custom mineral happens to be named — closing the whole class
 /// of bug the substring table's own history already recorded once (the gem
 /// split, tin, lead, mercury, alum, lapis, turquoise all silently mis-filed).
-/// The substring table still decides the FINER mine-vs-quarry split (ore metal
-/// vs. gem/stone/salt/amber — a distinction `Distribution` alone doesn't carry)
-/// and still handles `DIST_UNKNOWN` (an old save, pre-this-field) exactly as
-/// before, so an old save's classification is byte-identical.
-fn estate_kind_for_good(name: &str, food: bool, distribution: u8) -> u8 {
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 5a · the mine-vs-quarry split now reads
+/// the good's real EXTRACTION METHOD (`working`, mirrored from the world-side
+/// `DepositSpec.working`/`deposits::default_working_for`) instead of guessing
+/// from a substring match on its NAME — a diamond pipe is a Shaft, not a
+/// "stone quarry" just because it isn't named like a metal ore. The substring
+/// cascade survives ONLY as the `WORK_UNKNOWN` fallback (a save from before
+/// this field, or `DIST_UNKNOWN` predating even the distribution field), so an
+/// old save's classification is byte-identical.
+fn estate_kind_for_good(name: &str, food: bool, distribution: u8, working: u8) -> u8 {
     let n = name.to_ascii_lowercase();
     if distribution == DIST_DEPOSITS {
+        match working {
+            WORK_SHAFT | WORK_PLACER => return 2,
+            WORK_OPEN | WORK_PAN => return 8,
+            _ => {}
+        }
         // Mine vs quarry (DEPOSITS_AND_MINING_PLAN.md slice 4) — a MINE (2) is a
         // deep-shaft body constrained by depth/drainage (`mine_depth`/
         // `MINE_UPGRADE_COST_MULT`); a QUARRY (8) is a near-surface working
@@ -2801,6 +2828,29 @@ const BANK_LOAN_RATE_MAX: f32 = 0.028;
 const BANK_RESERVE_MULT: f32 = 3.0;
 /// Below this reserve ratio (reserves ÷ liabilities) a bank is fragile → run risk.
 const BANK_RUN_RATIO: f32 = 0.22;
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 1 · fraction of a defaulted loan's
+/// principal the bank recovers as foreclosed real estate. Named so slice 1's
+/// notes-retirement fix and slice 5's mine-financing default path share one
+/// constant instead of a repeated magic `0.4`.
+const BANK_FORECLOSURE_RECOVERY: f32 = 0.4;
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 2 · consecutive missed months a loan may
+/// carry in arrears (capitalizing the unpaid interest each month) before the
+/// bank forecloses. Historical Florentine practice was a few payment cycles,
+/// not indefinite forbearance — start here and re-measure with
+/// `econ_measure_finance` before moving it.
+const LOAN_ARREARS_LIMIT: u32 = 6;
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 3 · a single loan may claim at most this
+/// fraction of a bank's reserves (well under `BANK_MAX_BORROWER_SHARE`, so a
+/// bank naturally builds a book of several loans instead of one that decides
+/// its solvency alone). Down from the old `reserves * 0.5`.
+const BANK_MAX_LOAN_FRAC: f32 = 0.20;
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 3 · no single borrower may hold more
+/// than this share of a bank's outstanding book (a bank's very first loan is
+/// exempt — see `bank_maybe_lend`).
+const BANK_MAX_BORROWER_SHARE: f32 = 0.35;
+/// MONEY_MINES_AND_GOODS_PLAN.md slice 3 · size of the top-track-record pool a
+/// new borrower is drawn from (uniformly by draw, not weighted by wealth).
+const BANK_BORROWER_POOL_K: usize = 5;
 /// Book value a counting-house branch adds to a bank's real-estate assets.
 const BANK_BRANCH_VALUE: f32 = 2.0;
 // ── INSTITUTIONS_BUILD_ORDER.md 1.1 · bank failure splits from contagion ────
@@ -3207,6 +3257,13 @@ pub struct TickGood {
     /// `DIST_UNKNOWN` (the serde default, for a save from before this field) keeps
     /// the substring guess as an honest fallback — never a hard error.
     #[serde(default = "default_distribution")] pub distribution: u8,
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5a · for a `DIST_DEPOSITS` good, how
+    /// it is worked (`WORK_*` below), read from the world-side `DepositSpec.working`
+    /// (or its historical default) at campaign start — the real answer, in place
+    /// of `estate_kind_for_good`'s old substring guess at mine-vs-quarry.
+    /// `WORK_UNKNOWN` (the serde default, for a save from before this field, or a
+    /// non-deposit good) keeps that substring guess as the fallback.
+    #[serde(default = "default_working")] pub working: u8,
 }
 
 pub(crate) const DIST_GLOBAL: u8 = 0;
@@ -3216,6 +3273,13 @@ pub(crate) const DIST_ENDEMIC: u8 = 3;
 pub(crate) const DIST_MANUFACTURED: u8 = 4;
 pub(crate) const DIST_UNKNOWN: u8 = 255;
 fn default_distribution() -> u8 { DIST_UNKNOWN }
+
+pub(crate) const WORK_SHAFT: u8 = 1;
+pub(crate) const WORK_OPEN: u8 = 2;
+pub(crate) const WORK_PLACER: u8 = 3;
+pub(crate) const WORK_PAN: u8 = 4;
+pub(crate) const WORK_UNKNOWN: u8 = 0;
+fn default_working() -> u8 { WORK_UNKNOWN }
 
 /// One settlement participating in the living economy.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -4640,8 +4704,13 @@ pub struct Loan {
     pub rate: f32,
     pub start_tick: u32,
     pub term_ticks: u32,
-    /// "estate" | "structure" | "treasury" | "trade".
+    /// "estate" | "structure" | "treasury" | "trade" | "mine".
     pub purpose: String,
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 2 · consecutive months this loan has
+    /// missed a full payment. Reset to 0 on any full payment; a default is
+    /// only triggered past `LOAN_ARREARS_LIMIT`, not on the first missed month.
+    #[serde(default)]
+    pub arrears_months: u32,
 }
 
 /// A bank's EQUITY STAKE in a manufactory — the bank put capital into the works in
@@ -6873,6 +6942,18 @@ pub struct MineSite {
     pub depth: u8,
     #[serde(default = "unknown_extent")] pub extent: u8,
     #[serde(default)] pub district: u32,
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5d · this working's real extraction
+    /// method, mirrored from the world's own `deposits::Deposit.working` — what
+    /// lets a self-sealing "is this served/workable" check accept a QUARRY
+    /// (open-pit) body as well as a MINE (shaft) one, instead of hard-coding
+    /// `estate_kind == 2`. Serde-defaulted to `Open` for a pre-slice-5 save,
+    /// same convention as `Deposit.working`.
+    #[serde(default = "default_open_mine_working")]
+    pub working: crate::sim::deposits::WorkingKind,
+}
+
+fn default_open_mine_working() -> crate::sim::deposits::WorkingKind {
+    crate::sim::deposits::WorkingKind::Open
 }
 
 fn one_f32() -> f32 { 1.0 }

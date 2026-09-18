@@ -772,7 +772,7 @@ impl CampaignSim {
         }
         let Some(mut g0) = (bestg.0 != usize::MAX).then_some(bestg.0) else { return };
         let mut eff_percap = bestg.2;
-        let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food, self.goods[g0].distribution);
+        let mut kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food, self.goods[g0].distribution, self.goods[g0].working);
         // A fishery needs a coast; inland, fall back to the strongest food good (a farm).
         if kind == 4 && !self.hubs[parent].coastal {
             let mut bf = (g0, 0.0f32);
@@ -804,6 +804,144 @@ impl CampaignSim {
             component, est_pop, percap);
     }
 
+
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5b/5c · founds a Mine/Quarry estate
+    /// starting from the ORE (`mine_deposits`), not from a per-capita score
+    /// that a sparse deposit good can never win (F3a) and not at a hash offset
+    /// that geology almost never falls near (F3b). Yearly — an extraction
+    /// working is a much larger, rarer commitment than an ordinary farm/
+    /// plantation estate, so it does not compete in the monthly
+    /// `maybe_found_estate` roll.
+    pub(crate) fn maybe_found_extraction_estate(&mut self) {
+        if self.estate_count() >= MAX_TOTAL_ESTATES.saturating_sub(OUTPOST_RESERVED_ESTATES) { return; }
+        if self.mine_deposits.is_empty() { return; }
+        let ww = self.world_w.max(1.0);
+        let served_reach = MINE_DEPOSIT_SEARCH_KM * ww / EARTH_EQUATOR_KM;
+        let founder_reach = EXTRACTION_FOUNDER_REACH_KM * ww / EARTH_EQUATOR_KM;
+
+        // Score every unworked deposit body against its best reachable founder —
+        // "reachable" reuses the same mode-legal range ordinary trade uses
+        // (`leg_exceeds_range`), so a mine is never founded somewhere its ore
+        // cannot leave by any legal route.
+        let mut best: Option<(usize, usize, f32)> = None; // (deposit idx, founder hub, score)
+        for (di, d) in self.mine_deposits.iter().enumerate() {
+            let Some(g) = self.goods.iter().position(|tg| tg.name.eq_ignore_ascii_case(&d.good)) else { continue };
+            let expect_kind = d.working.estate_kind();
+            let served = self.hubs.iter().any(|h| {
+                if h.abandoned || !h.is_estate || h.estate_kind != expect_kind { return false; }
+                if h.base_per_capita.get(g).copied().unwrap_or(0.0) <= 0.0 { return false; }
+                let mut hdx = (h.x - d.x as f32).abs();
+                if ww > 1.0 { hdx = hdx.min(ww - hdx); }
+                let hdy = h.y - d.y as f32;
+                (hdx * hdx + hdy * hdy).sqrt() < served_reach
+            });
+            if served { continue; }
+            let mut founder_best: Option<(usize, f32)> = None;
+            for h in 0..self.hubs.len() {
+                let hub = &self.hubs[h];
+                if hub.is_estate || hub.abandoned { continue; }
+                if hub.population < EXTRACTION_FOUNDER_MIN_POP { continue; }
+                let mut dx = (hub.x - d.x as f32).abs();
+                if ww > 1.0 { dx = dx.min(ww - dx); }
+                let dy = hub.y - d.y as f32;
+                let dist = (dx * dx + dy * dy).sqrt();
+                if dist > founder_reach { continue; }
+                // Richness (extent × depth-workability) × how dear this good sells
+                // at the founder's own market ÷ a distance-scaled haulage cost —
+                // what makes a rich REMOTE body lose to a mediocre coastal one.
+                let extent_mult = ore_extent_ceiling_mult(d.extent).min(8.0);
+                let richness = extent_mult * crate::sim::deposits::depth_workability(d.depth);
+                let base = self.goods[g].base_value.max(0.01);
+                let price = hub.price.get(g).copied().unwrap_or(base).max(0.01);
+                let value_ratio = (price / base).clamp(0.2, 5.0);
+                let dist_km = dist * EARTH_EQUATOR_KM / ww;
+                let bulk = if self.goods[g].bulk > 0.0 { self.goods[g].bulk } else { 1.0 };
+                let haulage_cost = 1.0 + (dist_km / EXTRACTION_HAULAGE_REFERENCE_KM) * bulk;
+                let score = richness * value_ratio / haulage_cost;
+                if founder_best.map(|(_, s)| score > s).unwrap_or(true) { founder_best = Some((h, score)); }
+            }
+            if let Some((h, score)) = founder_best {
+                if best.map(|(_, _, s)| score > s).unwrap_or(true) { best = Some((di, h, score)); }
+            }
+        }
+        let Some((di, parent, _)) = best else { return };
+        let d = self.mine_deposits[di].clone();
+        let Some(g0) = self.goods.iter().position(|tg| tg.name.eq_ignore_ascii_case(&d.good)) else { return };
+        let kind = d.working.estate_kind();
+
+        // D2: the founder is a house resident at `parent`, OR the seat city
+        // itself (`owner_house = -1`, the *publicani* case).
+        let owner_house = self.strongest_house_at(parent)
+            .filter(|&hi| self.houses[hi].wealth >= ESTATE_HOUSE_OWNER_WEALTH)
+            .map(|hi| hi as i32).unwrap_or(-1);
+
+        // D3: self-fund a shallow working; DEMAND a loan to reach a deep one —
+        // the first genuinely demanded loan in the model, a real project (this
+        // exact working) with real collateral (the estate `create_estate` is
+        // about to found) rather than a die roll pushing cash at a borrower.
+        let deep = matches!(d.depth, crate::sim::deposits::DEPTH_DEEP | crate::sim::deposits::DEPTH_FLOODED);
+        if deep {
+            let Some(bi) = self.nearest_bank_with_headroom(parent, EXTRACTION_LOAN_AMOUNT) else { return; };
+            self.originate_extraction_loan(bi, owner_house, parent, EXTRACTION_LOAN_AMOUNT);
+        } else {
+            let cost = EXTRACTION_SELF_FUND_COST;
+            if owner_house >= 0 {
+                if self.houses[owner_house as usize].wealth < cost { return; }
+                self.houses[owner_house as usize].wealth -= cost;
+            } else {
+                if self.hubs[parent].treasury < cost { return; }
+                self.hubs[parent].treasury -= cost;
+            }
+        }
+
+        let est_pop = self.hubs[parent].founding_pop * 0.12;
+        // A self-funded shallow working starts modest; a loan-financed deep one
+        // starts stronger (real capital went in) — never as strong as a mature,
+        // tier-upgraded working (`maybe_house_invests` still gates deepening).
+        let percap = if deep { 0.10 } else { 0.05 };
+        let (koppen, coastal, river, component) = (self.hubs[parent].koppen, self.hubs[parent].coastal,
+            self.hubs[parent].river, self.hubs[parent].component);
+        // 5b: place the estate AT the deposit's own cell (not a hash offset from
+        // the parent) — `create_estate` still co-locates it with `parent` for
+        // trade/routing purposes exactly as every other estate does, but passing
+        // the deposit's real coordinates here is what lets `mine_geology_at`
+        // (called inside `create_estate`, searching from the CO-LOCATED point)
+        // resolve this exact body correctly whenever the founder itself sits
+        // within `MINE_DEPOSIT_SEARCH_KM` of it — guaranteed by `served_reach`/
+        // `founder_reach` both being checked against the SAME deposit above.
+        self.create_estate(parent as i32, d.x as f32, d.y as f32, g0, kind, owner_house,
+            koppen, coastal, river, component, est_pop, percap);
+    }
+
+    /// A bank whose branch network reaches `hub` and has at least `amount` of
+    /// lending headroom, if one exists (closest match: highest headroom first).
+    fn nearest_bank_with_headroom(&self, hub: usize, amount: f32) -> Option<usize> {
+        let mut best: Option<(usize, f32)> = None;
+        for (bi, b) in self.banks.iter().enumerate() {
+            if b.defunct { continue; }
+            if !(b.seat as usize == hub || b.branches.contains(&(hub as u32))) { continue; }
+            let headroom = b.reserves * BANK_RESERVE_MULT - b.liabilities();
+            if headroom < amount { continue; }
+            if best.map(|(_, h)| headroom > h).unwrap_or(true) { best = Some((bi, headroom)); }
+        }
+        best.map(|(bi, _)| bi)
+    }
+
+    /// Originate a real, DEMANDED loan (`purpose: "mine"`) against a specific
+    /// extraction project, rather than `bank_maybe_lend`'s die-roll push.
+    fn originate_extraction_loan(&mut self, bi: usize, owner_house: i32, parent: usize, amount: f32) {
+        let tick = self.tick;
+        let (bh, bp) = if owner_house >= 0 { (owner_house, -1i32) } else { (-1i32, parent as i32) };
+        self.banks[bi].loans.push(Loan {
+            borrower_house: bh, borrower_polis: bp,
+            principal: amount, outstanding: amount, rate: BANK_LOAN_RATE,
+            start_tick: tick, term_ticks: TICKS_PER_YEAR * 10, purpose: "mine".into(),
+            arrears_months: 0,
+        });
+        self.banks[bi].notes_issued += amount;
+        if bh >= 0 { self.houses[bh as usize].wealth += amount; }
+        else { self.hubs[parent].treasury += amount; }
+    }
 
     /// Monthly: a wealthy house invests its surplus capital into a new estate (raw
     /// production) or a manufactory (a luxury good), in a city it trades with —
@@ -935,7 +1073,7 @@ impl CampaignSim {
                     if score > bg.1 { bg = (g, score); }
                 }
                 if bg.0 == usize::MAX { continue; }
-                let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food, self.goods[bg.0].distribution);
+                let k = estate_kind_for_good(&self.goods[bg.0].name, self.goods[bg.0].food, self.goods[bg.0].distribution, self.goods[bg.0].working);
                 (bg.0, k, self.hubs[target].base_per_capita.get(bg.0).copied().unwrap_or(0.05).max(0.05) * 1.5)
             };
             // A fishery needs a coast; inland fall back to a farm of the city's good.
@@ -1429,7 +1567,7 @@ impl CampaignSim {
         // but bias hard toward a SCARCE manufacturing input the site can yield.
         let (mut g0, mut gbest) = (usize::MAX, 0.0f32);
         for g in 0..ng {
-            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food, self.goods[g].distribution) == self.colonizable[si].kind_hint {
+            if estate_kind_for_good(&self.goods[g].name, self.goods[g].food, self.goods[g].distribution, self.goods[g].working) == self.colonizable[si].kind_hint {
                 let mut s = self.hubs[home].base_per_capita.get(g).copied().unwrap_or(0.0) + 0.001;
                 if short_input(g, self) { s += OUTPOST_INPUT_BIAS; } // resource-colony pull
                 if s > gbest { gbest = s; g0 = g; }
@@ -1453,7 +1591,7 @@ impl CampaignSim {
         let cost = OUTPOST_FOUND_COST;
         if self.houses[hi].wealth < cost { return false; }
         let site = self.colonizable.swap_remove(si);
-        let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food, self.goods[g0].distribution);
+        let kind = estate_kind_for_good(&self.goods[g0].name, self.goods[g0].food, self.goods[g0].distribution, self.goods[g0].working);
         let founder_max_pc = self.hubs[home].base_per_capita.iter().cloned().fold(0.0f32, f32::max).max(0.1);
         let percap = founder_max_pc * (0.4 + site.fertility);
         let est_pop = OUTPOST_MAX_POP; // a small trade post (hard-capped, never grows into a city)

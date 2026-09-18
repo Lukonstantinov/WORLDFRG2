@@ -124,6 +124,13 @@ pub struct DepositSpec {
     /// a copper orebody weathers in a desert. `None` = the shipped default.
     #[serde(default)]
     pub parent: Option<String>,
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 5a · how a LODE working of this
+    /// mineral is extracted (Shaft/Open/Pan — a `Placer` district is always
+    /// `WorkingKind::Placer` regardless). `None` = fall back to
+    /// `deposits::default_working_for(id)`, the historically correct default
+    /// for every shipped mineral.
+    #[serde(default)]
+    pub working: Option<crate::sim::deposits::WorkingKind>,
 }
 
 /// Declarative scoring envelope for custom (and overridden) goods. Every term is
@@ -426,6 +433,7 @@ pub fn default_list() -> Vec<GoodSpec> {
                     model: None,
                     placer_frac: None,
                     parent: None,
+                    working: None,
                 }),
                 scoring: None,
                 marine_band: default_marine_band_for(GOOD_NAMES[g]),
@@ -575,7 +583,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
     }
     let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec {
         min_elev, count_num: num, count_den: den, province_scale: default_province_scale(),
-        model: None, placer_frac: None, parent: None,
+        model: None, placer_frac: None, parent: None, working: None,
     });
     let env = |climate: Vec<(u8, f32)>, temp: Option<[f32; 2]>, precip: Option<[f32; 3]>,
                elevation: Option<[f32; 3]>, abs_lat: Option<[f32; 3]>, fertility: f32, coast_bonus: f32| Envelope {
@@ -607,7 +615,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             deposit: Some(DepositSpec {
                 min_elev: 0.0, count_num: num, count_den: den,
                 province_scale: default_province_scale(),
-                model: None, placer_frac: None, parent: None,
+                model: None, placer_frac: None, parent: None, working: None,
             }),
             scoring: Some(env),
             category: category.into(), need_tier, base_value, bulk, perishable: 0.0,
@@ -622,7 +630,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // frontend goods.ts), so they are NOT duplicated as separate goods here.
         // ── Salt types — built-in "salt" is now Rock Salt; this is coastal bay salt ──
         cg("bay_salt", "Bay Salt", "\u{1F9C2}", "#e8e0d0", Domain::Coastal, Distribution::Deposits, 0.45, 0.55, false,
-            dep(0.0, 2, 1), env(vec![(4,1.0),(5,0.9),(6,0.9),(7,0.8),(8,0.6),(9,0.6)], Some([24.0,14.0]), Some([0.0,500.0,300.0]), None, Some([8.0,45.0,12.0]), 0.0, 1.0)),
+            dep(0.0, 3, 1), env(vec![(4,1.0),(5,0.9),(6,0.9),(7,0.8),(8,0.6),(9,0.6)], Some([24.0,14.0]), Some([0.0,500.0,300.0]), None, Some([8.0,45.0,12.0]), 0.0, 1.0)),
         // ── Regionally-distinct commodities ──
         cg("citrus", "Citrus", "\u{1F34A}", "#f4a33a", Domain::Coastal, Distribution::Local, 0.55, 0.45, false,
             None, env(vec![(8,1.0),(9,1.0),(11,0.7)], Some([19.0,7.0]), Some([400.0,1100.0,300.0]), None, Some([25.0,40.0,8.0]), 0.4, 0.5)),
@@ -702,11 +710,11 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         cg("saffron", "Saffron", "\u{1F33C}", "#f4c430", Domain::Continental, Distribution::Local, 0.88, 0.55, true,
             None, env(vec![(8,1.0),(9,0.9),(7,0.7),(19,0.6)], Some([18.0,7.0]), Some([300.0,700.0,200.0]), Some([0.12,0.45,0.15]), Some([30.0,42.0,7.0]), 0.0, 0.0)),
         cg("tyrian_purple", "Tyrian Purple", "\u{1F40C}", "#6a0dad", Domain::Coastal, Distribution::Deposits, 0.90, 0.55, true,
-            dep(0.0, 1, 3), env(vec![(8,1.0),(9,1.0),(11,0.7),(4,0.6)], Some([22.0,8.0]), None, None, Some([28.0,42.0,6.0]), 0.0, 1.0)),
+            dep(0.0, 1, 2), env(vec![(8,1.0),(9,1.0),(11,0.7),(4,0.6)], Some([22.0,8.0]), None, None, Some([28.0,42.0,6.0]), 0.0, 1.0)),
         cg("ambergris", "Ambergris", "\u{1F40B}", "#cfc0a0", Domain::Marine, Distribution::Deposits, 0.92, 0.60, true,
             dep(0.0, 1, 4), env(vec![], Some([12.0,10.0]), None, None, Some([30.0,65.0,12.0]), 0.0, 0.0)),
         cg("jade", "Jade", "\u{2618}", "#00a86b", Domain::Continental, Distribution::Deposits, 0.90, 0.55, true,
-            dep(0.40, 1, 3), env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
+            dep(0.40, 2, 3), env(vec![], None, None, Some([0.40,1.0,0.12]), None, 0.0, 0.0)),
         // ── Gem types — the generic "gemstones" belt SPLIT into distinct gems, each
         //    a deposit good with its OWN ore-province noise (`province_scale`) +
         //    elevation floor, so ruby ranges ≠ sapphire ranges (real gem geology).
@@ -714,25 +722,25 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         //    them. Each is terroir-graded (clarity) by the quality system. Disable the
         //    generic "gemstones" in the editor to show only these. ──
         cg("ruby", "Ruby", "\u{1F534}", "#e0294a", Domain::Continental, Distribution::Deposits, 0.80, 0.62, true,
-            dep(0.42, 1, 2), env(vec![], Some([26.0,12.0]), None, Some([0.42,1.0,0.14]), None, 0.0, 0.0)),
+            dep(0.42, 1, 1), env(vec![], Some([26.0,12.0]), None, Some([0.42,1.0,0.14]), None, 0.0, 0.0)),
         cg("sapphire", "Sapphire", "\u{1F537}", "#2a5fd0", Domain::Continental, Distribution::Deposits, 0.80, 0.60, true,
-            dep(0.46, 1, 2), env(vec![], None, None, Some([0.46,1.0,0.13]), None, 0.0, 0.0)),
+            dep(0.46, 1, 1), env(vec![], None, None, Some([0.46,1.0,0.13]), None, 0.0, 0.0)),
         cg("emerald", "Emerald", "\u{1F49A}", "#1ea866", Domain::Continental, Distribution::Deposits, 0.82, 0.60, true,
-            dep(0.38, 1, 2), env(vec![], Some([22.0,14.0]), None, Some([0.38,0.9,0.14]), None, 0.0, 0.0)),
+            dep(0.38, 2, 3), env(vec![], Some([22.0,14.0]), None, Some([0.38,0.9,0.14]), None, 0.0, 0.0)),
         cg("diamond", "Diamond", "\u{1F48E}", "#dfe6ee", Domain::Continental, Distribution::Deposits, 0.90, 0.70, true,
-            dep(0.55, 1, 3), env(vec![], None, None, Some([0.55,1.0,0.12]), None, 0.0, 0.0)),
+            dep(0.55, 1, 1), env(vec![], None, None, Some([0.55,1.0,0.12]), None, 0.0, 0.0)),
         cg("amethyst", "Amethyst", "\u{1F49C}", "#9b59d0", Domain::Continental, Distribution::Deposits, 0.66, 0.48, false,
-            dep(0.34, 2, 1), env(vec![], None, None, Some([0.34,0.85,0.16]), None, 0.0, 0.0)),
+            dep(0.34, 1, 1), env(vec![], None, None, Some([0.34,0.85,0.16]), None, 0.0, 0.0)),
         cg("topaz", "Topaz", "\u{1F538}", "#e0a92a", Domain::Continental, Distribution::Deposits, 0.62, 0.46, false,
-            dep(0.30, 2, 1), env(vec![], None, None, Some([0.30,0.8,0.16]), None, 0.0, 0.0)),
+            dep(0.30, 1, 1), env(vec![], None, None, Some([0.30,0.8,0.16]), None, 0.0, 0.0)),
         // ── Precious metals & quarried stone (high-desire deposit goods) ──
         // Silver: a prized monetary metal, a touch commoner than gold. Hill/mountain
         // deposits. High desire — every wealthy market wants coin metal.
         cg("silver", "Silver", "\u{1F948}", "#c8ccd6", Domain::Continental, Distribution::Deposits, 0.74, 0.65, true,
-            dep(0.30, 2, 1), env(vec![], None, None, Some([0.30,1.0,0.16]), None, 0.0, 0.0)),
+            dep(0.30, 3, 2), env(vec![], None, None, Some([0.30,1.0,0.16]), None, 0.0, 0.0)),
         // Marble: quarried building/sculpture stone of the uplands.
         cg("marble", "Marble", "\u{1F3DB}\u{FE0F}", "#e8e6e0", Domain::Continental, Distribution::Deposits, 0.62, 0.45, false,
-            dep(0.28, 1, 1), env(vec![], None, None, Some([0.28,0.9,0.14]), None, 0.0, 0.0)),
+            dep(0.28, 3, 1), env(vec![], None, None, Some([0.28,0.9,0.14]), None, 0.0, 0.0)),
         // Lead / tin-grey base metal (pewter, pipes, shot): low hills.
         cg("lead", "Lead", "\u{1F529}", "#8a8e96", Domain::Continental, Distribution::Deposits, 0.55, 0.40, false,
             dep(0.26, 2, 1), env(vec![], None, None, Some([0.26,0.85,0.16]), None, 0.0, 0.0)),
@@ -750,7 +758,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // adding a hard input dependency to an existing manufactured good needs its
         // own econ_ measurement, which is slice 4 territory, not an add-only slice.
         dg("alum", "Alum", "\u{2697}\u{FE0F}", "#e8e0c0", Domain::Continental,
-            0.50, 0.35, false, 1, 1, "craft", 1, 4.0, 2.0,
+            0.50, 0.35, false, 1, 2, "craft", 1, 4.0, 2.0,
             env(vec![], None, None, Some([0.25,0.80,0.15]), None, 0.0, 0.0)),
         // Lapis lazuli: contact-metamorphic, and famously ONE source for four
         // thousand years (Sar-i-Sang) — districts=1 at the default deposit slider.
@@ -761,7 +769,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         // copper body under an arid climate (Nishapur, Sinai). No independent
         // search: `place_mineral` walks `default_parent_for("turquoise")` == copper.
         dg("turquoise", "Turquoise", "\u{1F4A0}", "#30d5c8", Domain::Continental,
-            0.75, 0.50, true, 1, 3, "gem", 2, 18.0, 1.0,
+            0.75, 0.50, true, 1, 2, "gem", 2, 18.0, 1.0,
             env(vec![(4,1.0),(5,0.9),(6,0.8),(7,0.7)], None, None, Some([0.15,0.55,0.15]), None, 0.0, 0.0)),
         // Bog iron: wetland precipitate iron, structurally impossible under an
         // elevation-floor placer — the iron source of early medieval N. Europe.
@@ -775,12 +783,12 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             env(vec![], None, None, Some([0.0,0.30,0.15]), None, 0.0, 0.0)),
         // Garnet: the bottom rung of the gem ladder — common orogenic gem gravel.
         dg("garnet", "Garnet", "\u{2666}\u{FE0F}", "#8b0000", Domain::Continental,
-            0.45, 0.42, false, 2, 1, "gem", 1, 6.0, 1.0,
+            0.45, 0.42, false, 3, 2, "gem", 1, 6.0, 1.0,
             env(vec![], None, None, Some([0.30,0.80,0.16]), None, 0.0, 0.0)),
         // Carnelian: agate's warm cousin, filling the same basalt amygdules — the
         // great Khambhat bead trade.
         dg("carnelian", "Carnelian", "\u{1F53B}", "#b33009", Domain::Continental,
-            0.50, 0.40, false, 2, 1, "gem", 1, 5.0, 1.0,
+            0.50, 0.40, false, 1, 1, "gem", 1, 5.0, 1.0,
             env(vec![], None, None, Some([0.20,0.70,0.18]), None, 0.0, 0.0)),
 
         // ── Manufactured chain goods (the shipped recipe LIBRARY) — made in cities
@@ -920,4 +928,34 @@ pub fn id_salt(id: &str) -> u64 {
         h = h.wrapping_mul(0x100000001b3);
     }
     h
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// MONEY_MINES_AND_GOODS_PLAN.md slice 6a/6b · the district-count spread
+    /// must stay WIDE — Cornwall mattered BECAUSE tin was nowhere else. A
+    /// table where everything lands between 6 and 12 would be "visible" and
+    /// worthless (the same discipline `plate_sizes_span_an_order_of_magnitude`
+    /// already applies to plate sizes).
+    #[test]
+    fn deposit_counts_span_an_order_of_magnitude() {
+        let gem_deposits: u32 = 6; // the shipped UI default
+        let list = default_list();
+        let mut min = u32::MAX;
+        let mut max = 0u32;
+        for spec in &list {
+            if !matches!(spec.distribution, Distribution::Deposits) { continue; }
+            let Some(d) = &spec.deposit else { continue };
+            let districts = (gem_deposits * d.count_num.max(1) / d.count_den.max(1)).max(1);
+            min = min.min(districts);
+            max = max.max(districts);
+        }
+        assert!(min < u32::MAX, "no deposit goods found in the default list");
+        assert!(
+            max >= min * 20,
+            "district counts must span at least 20×: min={min} max={max}"
+        );
+    }
 }
