@@ -5092,8 +5092,12 @@ MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ AGREED IN SCOPE, NOTHING BUILT. One ca
                                     NUMBERED QUEUE of the work that follows slices
                                     0-7, each item naming what it waits for — a
                                     schedule, never a refusal
-PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ SLICE 6 BUILT AND DOSED AT ZERO; slices
-                                    1-5 and 7 NOT built. The companion:
+PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ SLICES 4, 5, 6, 7 BUILT (all dosed at
+                                    zero where the plan calls for a dose);
+                                    slices 1-3 (the settlement/province
+                                    pipeline restructuring) NOT built —
+                                    deliberately deferred, see below. The
+                                    companion:
                                     where towns are · how big they get · why anyone
                                     trades. **Slice 6 (F9, the cheap keystone) is
                                     live in code**: `LOCAL_SATIETY`
@@ -5120,69 +5124,126 @@ PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ SLICE 6 BUILT AND DOSED AT ZERO; slice
                                     affected_by_satiety` — and is the one term to
                                     dose-walk before the continuous `foreign_lux`
                                     rewrite and the `stock_origin` provenance
-                                    accumulator (still item 7 below) land, since
-                                    those compound with it on the same expression.
-                                    **Settlements are ONE flat greedy pass**
+                                    accumulator now compound on the SAME expression
+                                    — see slice 7 below.
+                                    **Settlements are still ONE flat greedy pass**
                                     (`settlements.rs:509`) with a single spacing
                                     radius and tier assigned afterwards, so a
                                     "capital" is just a town that scored well; and
                                     provinces (phase 7b, seeded FROM settlements at
-                                    `provinces.rs:1181`) fall back to jittered FILLER
-                                    seeds, so a province may hold zero settlements or
-                                    five of equal rank. Plan inverts the order —
-                                    PRIMARY sites → provinces → SECONDARY settlements
-                                    placed inside them, every filler province given a
-                                    seat at its best `trade`-scoring cell (never its
-                                    centroid) — which makes one main hub per province
-                                    true by CONSTRUCTION rather than by
-                                    `repair_province_settlements`. Old `.worldforge`
-                                    files keep their partition untouched (the new
-                                    order runs only on regeneration, so no campaign's
-                                    `prov_*`/`prov_holder`/`prov_realm` indices
-                                    shift). A `Settlement.primary` flag plus an
-                                    explicit UI choice lets the user hand-place the
-                                    province capitals and generate around them —
-                                    `manual`/`edited` settlements ALREADY survive
-                                    regeneration (`StepSettlements.tsx:90`), so only
-                                    the flag and the order are new. **Growth: a city's
-                                    ceiling is a multiple of `founding_pop`**
-                                    (`disease.rs:509`), so the founding roll decides
-                                    the ranking forever and a perfectly-sited small
-                                    town can never overtake a badly-sited large one —
-                                    re-anchored on `prov_cap`, the province's real
-                                    carrying capacity, which already exists and which
-                                    nothing in the growth pass reads; plus a small
-                                    capped `works_dev` term so founding estates and
-                                    raising structures lift the ceiling. **Demand: the
-                                    foreign-craving term is a BINARY SWITCH**
+                                    `provinces.rs:1181`) still fall back to jittered
+                                    FILLER seeds, so a province may hold zero
+                                    settlements or five of equal rank. **Slices 1-3
+                                    (the primary/secondary settlement split,
+                                    provinces-from-primaries with a guaranteed seat,
+                                    the capital UI flag + route re-verification) are
+                                    DELIBERATELY NOT built.** They are a different
+                                    KIND of change from 4/5/6/7 — a worldgen
+                                    PIPELINE reorder (settlement generation order,
+                                    a new frontend flag, province re-seeding, route
+                                    fall-through re-verification) that changes
+                                    default behaviour for every world generated
+                                    from that point on, not a dosed constant that
+                                    ships inert. The plan's own risk register
+                                    requires measuring province count/mean-area/
+                                    settlements-per-province before and after on a
+                                    fixed seed and tuning `PRIMARY_MIN_DIST`
+                                    against the result — empirical, visual
+                                    cartography work this text-only pass cannot
+                                    verify (no way to render or inspect a generated
+                                    world here). Attempting it blind risks a silent
+                                    regression to worldgen, which this codebase
+                                    treats as its most protected subsystem (§2.3).
+                                    Queued for a session that can generate and
+                                    inspect real worlds.
+                                    **Slice 4 (D5/D6, F4) is BUILT.** `CAPACITY_
+                                    LAND_WEIGHT` (`tick/mod.rs`) replaces a city's
+                                    `founding_pop`-only growth ceiling with a blend
+                                    toward `land_capacity_blend(founding_pop,
+                                    land_capacity, weight)`, where `land_capacity`
+                                    is the hub's own province's `prov_cap` shared
+                                    among the province's live hubs by trade weight
+                                    (`disease.rs::update_food_and_starvation`,
+                                    precomputed `prov_trade_weight` map, skipped
+                                    entirely without a province layer). D6's
+                                    `works_dev_mult` (a hub's own estates +
+                                    structures, capped at `WORKS_DEV_CAP`) is
+                                    gated behind the SAME dose flag rather than
+                                    shipped live, so the whole slice moves as one
+                                    unit. Ships at `CAPACITY_LAND_WEIGHT = 0.0` —
+                                    a true no-op — gated by
+                                    `capacity_land_weight_is_a_noop_at_zero`,
+                                    `a_well_sited_small_town_can_overtake_a_badly_
+                                    sited_large_one`, `works_capacity_is_bounded`.
+                                    **Raising the dose is real future work, NOT
+                                    done here**: CLAUDE.md's own record for the
+                                    adjacent `WORLD_AGE_DEV_CAP` shows this growth
+                                    pass is CHAOTIC-SENSITIVE to uniform per-hub
+                                    capacity nudges — re-run
+                                    `simulate_decades_reports_dynamics`'s
+                                    sustained-runaway-wealth guard per dose step.
+                                    **Slice 5 (F5) was already PARTLY built**
+                                    (`EMPTY_PROVINCE_FOUND_BONUS` existed for
+                                    `maybe_found_settlement_colony` alone) — now
+                                    extended to `maybe_found_food_colony` and
+                                    `maybe_found_house_outpost` too, through one
+                                    shared pure helper (`province_founding_bonus`,
+                                    a PREFERENCE never a rule — an unknown
+                                    province, -1, or an already-settled one is an
+                                    exact 0.0). `province_is_settled` widened to
+                                    `pub(crate)` for the cross-module call. Gated
+                                    by `colonisation_prefers_an_empty_province_
+                                    but_is_not_forced_into_one` and
+                                    `province_is_settled_reads_hub_province`.
+                                    `maybe_found_mining_colony` (scored off real ore
+                                    deposits, not the fertile-land list) and
+                                    `maybe_found_estate`/`maybe_found_route_post`
+                                    (hinterland estates, not new hubs) are
+                                    deliberately left untouched — the bonus is
+                                    about where a new HUB forms, not an estate.
+                                    **Growth: a city's ceiling is a multiple of
+                                    `founding_pop`** (`disease.rs:509`) is now
+                                    FIXED by slice 4 above (at a live dose). **Demand:
+                                    the foreign-craving term is a BINARY SWITCH**
                                     (`production.rs:895` — a city producing ANY amount
                                     of a luxury gets ZERO import craving) with no
-                                    gradient, no distance and no provenance, and
-                                    NOTHING anywhere knows where a good came from
-                                    (`stock` is a flat pool; imported salt is
-                                    indistinguishable from local salt the moment it
-                                    lands). Plan calls for making it continuous
-                                    (still queued — `foreign_lux` in `base_need`
-                                    is still the binary switch) plus a new
-                                    `LOCAL_SATIETY` so a city awash in a luxury it
-                                    makes itself wants less per head — **the
-                                    `LOCAL_SATIETY` half is BUILT** (slice 6,
-                                    above), the direct answer to a luxury producer
-                                    retaining ~30% of its own output, which is far
-                                    too high (Moluccan clove growers did not eat
-                                    cloves; Venice sold salt it did not eat) — and
-                                    a `stock_origin` provenance accumulator (slice
-                                    7, NOT built) so a far-travelled good is wanted
-                                    MORE as well as costing more, which is the
-                                    amber-in-Rome case. Every demand term ships at
+                                    gradient, no distance and no provenance —
+                                    **`foreign_lux` in `base_need` is STILL the
+                                    binary switch** (continuity was judged too
+                                    high-risk to rewrite blind — it's the one
+                                    other term `COMFORT_IMPORT_FRAC`'s own
+                                    five-time-broken-gate history already warns is
+                                    fragile — left QUEUED, not attempted). **Slice
+                                    6 (`LOCAL_SATIETY`) and slice 7 (provenance +
+                                    distance prestige) are BOTH BUILT.** Slice 7:
+                                    `InTransit.origin_km` (real routed distance,
+                                    accumulated across relay hops in the arrivals
+                                    pass, `mod.rs`) feeds `TickHub.stock_origin[g]`
+                                    (a decaying EMA, `STOCK_ORIGIN_DECAY`, per
+                                    arrival — option (i) from the plan, not the
+                                    heavier grade×provenance matrix); `FOREIGN_
+                                    PRESTIGE`/`PRESTIGE_REF_KM` fold
+                                    `foreign_prestige_mult_e` into the same
+                                    MARKET-FACING `needs` term slice 6 uses (never
+                                    `needs_struct`; never a basic good). Ships at
+                                    `FOREIGN_PRESTIGE = 0.0`, gated by
+                                    `foreign_prestige_is_a_noop_at_zero`,
+                                    `a_far_travelled_luxury_is_wanted_more_than_a_
+                                    near_one`, `distance_prestige_never_touches_a_
+                                    basic_good`, `an_old_save_with_no_origin_data_
+                                    is_bit_identical`. Every demand term ships at
                                     dose 0 and is walked ONE AT A TIME (they
                                     multiply the same expression), gated by
-                                    `econ_expenditure_shares_resemble_a_household`.
-                                    Per-culture demand profiles are §5's item 8 —
-                                    the largest remaining demand item, QUEUED rather
-                                    than dropped: all three terms multiply the same
-                                    expression, so they are dose-walked one at a
-                                    time and 8 begins once 6 and 7 are live
+                                    `econ_expenditure_shares_resemble_a_household`
+                                    — NEITHER has been dose-walked yet; that is the
+                                    next session's job, one dose at a time with
+                                    the other pinned at zero (ACTORS_AND_CARRIAGE_
+                                    PLAN.md §5.2's lesson). Per-culture demand
+                                    profiles are §5's item 8 — the largest
+                                    remaining demand item, QUEUED rather than
+                                    dropped: all three terms multiply the same
+                                    expression, so 8 begins once 6 and 7 are
+                                    dose-walked live
 PROVINCE_SYSTEM_PLAN.md           ← The province layer's design + status (see FIX_PLAN B1);
                                     the shipped algorithm itself is §8.10 above
 DEPOSITS_AND_MINING_PLAN.md       ← ⭐ BUILT — all five slices, gated. Ore

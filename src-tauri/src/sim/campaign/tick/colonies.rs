@@ -1348,7 +1348,7 @@ impl CampaignSim {
     /// under-detects "already settled" for a province a colony claimed earlier in
     /// THIS run, which just makes the empty-province bonus fire a little more
     /// often than strictly necessary, never incorrectly withholds it).
-    fn province_is_settled(&self, p: i32) -> bool {
+    pub(crate) fn province_is_settled(&self, p: i32) -> bool {
         if p < 0 { return true; }
         self.hub_province.iter().enumerate()
             .any(|(h, &hp)| hp == p && self.hubs.get(h).map(|x| !x.abandoned).unwrap_or(false))
@@ -1401,9 +1401,7 @@ impl CampaignSim {
             // better site inside an already-settled one. `s.province` is a one-time
             // snapshot from generation time (-1 = unknown, e.g. no province layer —
             // never bonused, so a provinceless world is bit-identical to before).
-            let province_bonus = if s.province >= 0 && !self.province_is_settled(s.province) {
-                EMPTY_PROVINCE_FOUND_BONUS
-            } else { 0.0 };
+            let province_bonus = province_founding_bonus(s.province, self.province_is_settled(s.province));
             let score = (0.25 + 0.35 * s.fertility + 1.0 * s.trade_value + site_bonus + province_bonus) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
@@ -1637,7 +1635,14 @@ impl CampaignSim {
             if !self.hub_knows(founder, s.province) { continue; }
             let d = self.nearest_node_dist(&nodes, s.x, s.y);
             if d > cap { continue; }
-            let score = (0.2 + 1.6 * s.fertility) * (1.0 - d / cap);
+            // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 5 (F5) — same EMPTY-PROVINCE
+            // preference `maybe_found_settlement_colony` already applies: a
+            // hunger-driven grain colony still prefers to fill a genuinely empty
+            // province over a marginally better field inside an already-settled
+            // one, never a rule (a starving city still founds on the best land it
+            // can reach if every reachable province already has a hub).
+            let province_bonus = province_founding_bonus(s.province, self.province_is_settled(s.province));
+            let score = (0.2 + 1.6 * s.fertility + province_bonus) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return };
@@ -1763,7 +1768,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
         });
         self.total_foundings += 1; // Atlas 2.0 lifecycle counter (colony ventures too)
         self.routes_dirty = true;

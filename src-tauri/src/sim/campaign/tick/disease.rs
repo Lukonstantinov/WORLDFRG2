@@ -336,6 +336,23 @@ impl CampaignSim {
         let health_dev = if has_prov { HEALTH_CAP_DEV } else { 0.0 };
         let colony_dev = if has_prov { COLONY_CAP_DEV } else { 15.0 };
         let birth_rate = if has_prov { BIRTH_RATE } else { 0.00006 };
+        // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 4 (D5) · each province's real
+        // carrying capacity (`prov_cap`) split among its live hubs by TRADE
+        // WEIGHT, so a province's capital carries more of its hinterland than a
+        // secondary town. Precomputed once (cheap — one pass over live hubs),
+        // and skipped entirely (stays an empty map) when there is no province
+        // layer or the dose is zero, so a province-less campaign never pays for
+        // this even in principle.
+        let mut prov_trade_weight: std::collections::HashMap<i32, f32> = std::collections::HashMap::new();
+        if has_prov && CAPACITY_LAND_WEIGHT > 0.0 {
+            for i in 0..n {
+                if self.hubs[i].is_estate || self.hubs[i].abandoned { continue; }
+                let p = self.hub_province.get(i).copied().unwrap_or(-1);
+                if p < 0 { continue; }
+                let w = self.hubs[i].trade_last_year.max(1.0) + self.hubs[i].population.max(1.0) * 0.01;
+                *prov_trade_weight.entry(p).or_insert(0.0) += w;
+            }
+        }
         for h in 0..n {
             // A dead settlement stays dead — the founding-pop floor below must
             // never resurrect an abandoned ruin (or a collapsed colony).
@@ -503,10 +520,36 @@ impl CampaignSim {
             // hospitals) survives at a higher population instead of the urban graveyard
             // pinning it near ~20-25k. This is the "fighting disease grows the world" lever.
             let public_health = self.hubs[h].public_health.clamp(0.0, 1.0);
+            // D6 · a city that BUILDS earns a small, bounded headroom nudge —
+            // founding an estate in its own hinterland, or raising a structure,
+            // lifts the ceiling slightly. Gated behind the SAME dose flag as D5
+            // (`CAPACITY_LAND_WEIGHT`) rather than shipped live on its own —
+            // one dose, one re-verification, the whole slice moves together —
+            // so a province-less or zero-dosed campaign is untouched.
+            let own_estates = self.hubs.iter().filter(|e| e.is_estate && e.parent == h as i32).count();
+            let works_dev = if CAPACITY_LAND_WEIGHT > 0.0 {
+                works_dev_mult(own_estates, self.hubs[h].structures.len())
+            } else { 0.0 };
             let cap_mult = (0.35 + 2.0 * food_sec)
                 * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev
-                    + colony_cap_dev + world_age_dev + health_dev * public_health);
-            let capacity = (self.hubs[h].founding_pop * cap_mult)
+                    + colony_cap_dev + world_age_dev + health_dev * public_health + works_dev);
+            // D5 · the growth CEILING blends founding size with the hub's own
+            // province's real carrying capacity (shared by trade weight among
+            // the hubs sharing it), instead of being anchored on `founding_pop`
+            // alone forever. `land_capacity_blend` is an exact no-op at the
+            // shipped `CAPACITY_LAND_WEIGHT = 0.0`.
+            let land_capacity = if CAPACITY_LAND_WEIGHT > 0.0 {
+                let p = self.hub_province.get(h).copied().unwrap_or(-1);
+                if p >= 0 {
+                    if let Some(&pc) = self.prov_cap.get(p as usize) {
+                        let total_w = prov_trade_weight.get(&p).copied().unwrap_or(0.0).max(EPS);
+                        let own_w = self.hubs[h].trade_last_year.max(1.0) + self.hubs[h].population.max(1.0) * 0.01;
+                        (pc * (own_w / total_w)).max(0.0)
+                    } else { self.hubs[h].founding_pop }
+                } else { self.hubs[h].founding_pop }
+            } else { self.hubs[h].founding_pop };
+            let base_pop = land_capacity_blend(self.hubs[h].founding_pop, land_capacity, CAPACITY_LAND_WEIGHT);
+            let capacity = (base_pop * cap_mult)
                 .max(self.hubs[h].founding_pop * 0.15);
             // Logistic step: approach capacity from below, decline when above it.
             // Slower organic growth (~5%/yr peak at low pop, was ~24%). Young

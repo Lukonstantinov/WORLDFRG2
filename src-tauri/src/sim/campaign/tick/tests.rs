@@ -31,7 +31,7 @@
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             yard_progress: 0.0,
         }
     }
@@ -7300,6 +7300,165 @@
         s.advance(30);
         assert!(s.hubs[0].lack_basic.is_finite() && s.hubs[0].lack_basic >= 0.0,
             "the structural ration must remain well-formed regardless of local satiety");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // City capacity from the land (`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 4, D5/D6)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The shipped dose, `CAPACITY_LAND_WEIGHT = 0.0`, must be a true no-op:
+    /// the blend returns `founding_pop` verbatim regardless of `land_capacity`.
+    #[test]
+    fn capacity_land_weight_is_a_noop_at_zero() {
+        assert_eq!(CAPACITY_LAND_WEIGHT, 0.0, "slice 4 ships at zero dose");
+        for land_cap in [0.0f32, 500.0, 50_000.0, 1.0] {
+            assert_eq!(land_capacity_blend(1234.0, land_cap, CAPACITY_LAND_WEIGHT), 1234.0,
+                "land_capacity {land_cap} must be a no-op at zero dose");
+        }
+        // Live-dose end-to-end proof, via the sim: a province-less campaign
+        // (the dynamics fixture's own shape) must produce identical capacity
+        // whatever CAPACITY_LAND_WEIGHT nominally is, since `has_prov` is
+        // false and `hub_province`/`prov_cap` are both empty.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 1000.0, vec![900.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.advance(60);
+        assert!(s.hubs[0].population.is_finite() && s.hubs[0].population > 0.0,
+            "population must remain well-formed with no province layer");
+    }
+
+    /// The claim (D5): at a live dose, two hubs with REVERSED `founding_pop`
+    /// and REVERSED land capacity must have their growth ceilings cross —
+    /// the well-sited small town can overtake the badly-sited large one.
+    /// Tested via the pure blend directly (the shape), since exercising this
+    /// through a live campaign needs a real province layer this fixture
+    /// harness doesn't build.
+    #[test]
+    fn a_well_sited_small_town_can_overtake_a_badly_sited_large_one() {
+        let dose = 0.7; // a hypothetical live dose
+        let small_town_founding = 500.0;
+        let small_town_land_cap = 50_000.0; // rich hinterland
+        let large_town_founding = 20_000.0;
+        let large_town_land_cap = 1_000.0; // poor hinterland
+
+        let small_base = land_capacity_blend(small_town_founding, small_town_land_cap, dose);
+        let large_base = land_capacity_blend(large_town_founding, large_town_land_cap, dose);
+        assert!(small_base > large_base,
+            "a well-sited small town's blended base ({small_base}) must overtake a badly-sited \
+             large one's ({large_base}) once land capacity dominates the founding anchor");
+
+        // And at the shipped zero dose the ranking must NOT cross — founding
+        // population alone still decides, exactly as before this slice.
+        let small_base_0 = land_capacity_blend(small_town_founding, small_town_land_cap, 0.0);
+        let large_base_0 = land_capacity_blend(large_town_founding, large_town_land_cap, 0.0);
+        assert!(small_base_0 < large_base_0,
+            "at zero dose the founding-population ranking must be unchanged");
+    }
+
+    /// D6: a hub with many estates/structures must never exceed a stated
+    /// ceiling multiple — the headroom is bounded, not a second exponential.
+    #[test]
+    fn works_capacity_is_bounded() {
+        assert_eq!(works_dev_mult(0, 0), 0.0, "no estates or structures must be an exact no-op");
+        let capped = works_dev_mult(1000, 1000);
+        assert!(capped <= WORKS_DEV_CAP + 1e-6, "works_dev must never exceed its stated cap");
+        assert!(works_dev_mult(1, 0) > 0.0, "a single estate must nudge the ceiling upward");
+        assert!(works_dev_mult(10, 0) > works_dev_mult(1, 0),
+            "more estates must give more headroom, up to the cap");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Province-aware founding (`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 5, F5)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The claim, both directions: a founding path PREFERS an empty province
+    /// over a settled one, but is never FORCED into one — an unknown
+    /// province (-1, no province layer / an old world) never bonuses, so a
+    /// province-less campaign is byte-identical to before this slice.
+    #[test]
+    fn colonisation_prefers_an_empty_province_but_is_not_forced_into_one() {
+        assert!(province_founding_bonus(3, false) > 0.0,
+            "a known, unsettled province must be preferred");
+        assert_eq!(province_founding_bonus(3, true), 0.0,
+            "an already-settled province must draw no bonus");
+        assert_eq!(province_founding_bonus(-1, false), 0.0,
+            "an unknown province (-1) must never bonus, whatever `settled` reads");
+        assert_eq!(province_founding_bonus(-1, true), 0.0,
+            "an unknown province (-1) must never bonus, whatever `settled` reads");
+    }
+
+    /// `province_is_settled` is the live predicate every founding path reads
+    /// (via `province_founding_bonus`): true the instant any hub maps to
+    /// that province id, unconditionally true (never bonused) for -1.
+    #[test]
+    fn province_is_settled_reads_hub_province() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut hubs = vec![hub(0, 0.0, 0.0, 1000.0, vec![900.0], 0)];
+        hubs.push(hub(1, 10.0, 10.0, 1000.0, vec![900.0], 0));
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![5, -1];
+        assert!(s.province_is_settled(5), "province 5 has a live hub");
+        assert!(!s.province_is_settled(2), "province 2 has no hub at all");
+        assert!(s.province_is_settled(-1), "an unknown province reads settled (never bonused)");
+        s.hubs[0].abandoned = true;
+        assert!(!s.province_is_settled(5), "an abandoned hub no longer counts as settling its province");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Provenance + distance prestige (`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 7, D7)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The shipped dose, `FOREIGN_PRESTIGE = 0.0`, must be a true no-op at
+    /// every tier and every origin distance.
+    #[test]
+    fn foreign_prestige_is_a_noop_at_zero() {
+        assert_eq!(FOREIGN_PRESTIGE, 0.0, "slice 7 ships at zero dose");
+        for tier in 0..3u8 {
+            for origin_km in [0.0f32, 500.0, 3000.0, 9000.0] {
+                assert_eq!(foreign_prestige_mult_e(FOREIGN_PRESTIGE, PRESTIGE_REF_KM, tier, origin_km), 1.0,
+                    "tier {tier} at {origin_km}km must be an exact no-op at zero dose");
+            }
+        }
+    }
+
+    /// The claim: at a live dose, a good that travelled farther is wanted
+    /// MORE than an otherwise-identical one that travelled less — the
+    /// amber-in-Rome case.
+    #[test]
+    fn a_far_travelled_luxury_is_wanted_more_than_a_near_one() {
+        let dose = 0.5;
+        let near = foreign_prestige_mult_e(dose, PRESTIGE_REF_KM, 2, 200.0);
+        let far = foreign_prestige_mult_e(dose, PRESTIGE_REF_KM, 2, PRESTIGE_REF_KM * 2.0);
+        assert!(far > near, "a far-travelled good ({far}) must be wanted more than a near one ({near})");
+        assert!(near >= 1.0, "even a near good must never be wanted LESS for its distance");
+        assert!(far <= 1.0 + dose + 1e-6, "the dose bounds how far prestige can raise demand");
+    }
+
+    /// Rule: distance does not make a BASIC good more desirable — it only
+    /// makes it dearer (already true via freight), which is correct and
+    /// untouched by this mechanism.
+    #[test]
+    fn distance_prestige_never_touches_a_basic_good() {
+        for origin_km in [0.0f32, 3000.0, 9000.0] {
+            assert_eq!(foreign_prestige_mult_e(0.8, PRESTIGE_REF_KM, 0, origin_km), 1.0,
+                "a basic good must be a no-op at any dose or distance");
+        }
+    }
+
+    /// An old save with no `stock_origin` data (every good reads 0.0 km, the
+    /// serde default) must be bit-identical to a fresh campaign at the
+    /// shipped zero dose, and must not blow up or read as "maximally
+    /// prestigious" even at a hypothetical live dose (0 km = wholly local).
+    #[test]
+    fn an_old_save_with_no_origin_data_is_bit_identical() {
+        let goods = vec![good("silk", 0, 2, 8.0, 0.5, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 1000.0, vec![100.0], 0)];
+        let s = sim(hubs, goods);
+        assert!(s.hubs[0].stock_origin.is_empty(), "a fresh fixture carries no origin history yet");
+        let origin_km = s.hubs[0].stock_origin.get(0).copied().unwrap_or(0.0);
+        assert_eq!(origin_km, 0.0);
+        assert_eq!(foreign_prestige_mult_e(0.8, PRESTIGE_REF_KM, 2, origin_km), 1.0,
+            "no origin history must read as wholly local (no prestige bonus), even at a live dose");
     }
 
     // ─────────────────────────────────────────────────────────────────────

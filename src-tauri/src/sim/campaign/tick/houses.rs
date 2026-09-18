@@ -274,6 +274,7 @@ impl CampaignSim {
                 local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
                 via: -1, // a standing contract delivers direct, never composed through an outlet
                 hops: 0,
+                origin_km: self.hub_km(src, buyer), // slice 7 — a futures delivery's own real distance
             });
             self.bump_trade_at(seller, src, delivered_qty);
             self.bump_trade_at(seller, buyer, delivered_qty);
@@ -618,7 +619,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -1403,7 +1404,13 @@ impl CampaignSim {
                 + if s.chokepoint { 0.80 } else { 0.0 };
             let exploit_bonus = self.prov_best_unexploited_good(s.province, &world_out)
                 .map(|(_, v)| v * OUTPOST_EXPLOIT_SITE_BONUS).unwrap_or(0.0);
-            let score = (trade_score + exploit_bonus) * (1.0 - d / cap);
+            // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 5 (F5) — same EMPTY-PROVINCE
+            // preference the colony paths already apply: a house outpost prefers
+            // to open a genuinely hub-less province over a marginally richer site
+            // inside one already settled, never a rule that could force an
+            // outpost onto ground with no trade goods at all.
+            let province_bonus = province_founding_bonus(s.province, self.province_is_settled(s.province));
+            let score = (trade_score + exploit_bonus + province_bonus) * (1.0 - d / cap);
             if score > bi.1 { bi = (i, score); }
         }
         let Some(si) = (bi.0 != usize::MAX).then_some(bi.0) else { return false };

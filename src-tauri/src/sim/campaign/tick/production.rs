@@ -2104,6 +2104,10 @@ impl CampaignSim {
                         local: owner < 0 && days <= LOCAL_HAUL_DAYS,
                         via: leg_via,
                         hops: 0,
+                        // Slice 7 (F7) · this leg's own real routed distance — the
+                        // origin distance chain starts here and accumulates further
+                        // at each relay hop (mod.rs's arrivals pass).
+                        origin_km: self.hub_km(a, leg_to as usize),
                     });
                     self.log_trade(a as u32, leg_to, g, amount, owner, leg_sea, leg_river, pa);
                 }
@@ -2230,6 +2234,7 @@ impl CampaignSim {
             local: false, // always a house owner (owner >= 0 here) — books SUPPLY_HOUSE regardless
             via: -1, // the return leg is not routed through the composed-pricing outlet
             hops: 0,
+            origin_km: self.hub_km(b, a), // slice 7 — the return leg's own real distance
         });
         self.log_trade(b as u32, a as u32, g, amount, owner as i32, sea, river, pb_buy);
     }

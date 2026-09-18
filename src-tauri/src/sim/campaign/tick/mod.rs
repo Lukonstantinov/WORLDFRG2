@@ -111,6 +111,28 @@ const COMFORT_IMPORT_FRAC: f32 = 0.30;
 /// before raising it, since it directly moves the luxury share S1 spent a
 /// whole slice calibrating.
 const LOCAL_SATIETY: f32 = 0.0;
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 7 (F7/F8, D7) · the amber-in-Rome
+/// mechanism — a far-travelled comfort/luxury good is wanted MORE, not just
+/// dearer (already true via `good_freight`). `import_prestige = 1 +
+/// FOREIGN_PRESTIGE * saturate(stock_origin_km / PRESTIGE_REF_KM)`, folded
+/// into the same market-facing `needs` term as `LOCAL_SATIETY` (never
+/// `needs_struct` — rule 2 of that slice applies identically here; distance
+/// does not make grain more desirable, only dearer, which is already true
+/// and correct).
+///
+/// Ships at 0.0 — a true no-op (`foreign_prestige_is_a_noop_at_zero`), the
+/// same N1/N6/S3 pattern. **Compounds with `LOCAL_SATIETY` on the same
+/// expression** (ACTORS_AND_CARRIAGE_PLAN.md §5.2's lesson: re-run the gate
+/// per dose step, not per phase) — dose-walk the two ONE AT A TIME, with the
+/// other pinned at zero, against `econ_expenditure_shares_resemble_a_
+/// household`.
+const FOREIGN_PRESTIGE: f32 = 0.0;
+/// Reference distance (km, rule 25) at which `import_prestige` saturates —
+/// a good arriving from this far or farther earns the full prestige bonus.
+const PRESTIGE_REF_KM: f32 = 3000.0;
+/// How fast a hub's `stock_origin[g]` EMA responds to a fresh arrival's own
+/// origin distance — a weight per arrival event, not a time constant.
+const STOCK_ORIGIN_DECAY: f32 = 0.15;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2) · own-price elasticity of a
@@ -158,6 +180,16 @@ fn elastic_aggregate_mult(tier: usize, rel: f32) -> f32 {
 fn local_satiety_mult_e(dose: f32, tier: u8, self_supply: f32) -> f32 {
     if dose <= 0.0 || tier < 1 { return 1.0; }
     (1.0 - dose * self_supply.clamp(0.0, 1.0)).max(0.0)
+}
+
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 7 (D7) · `FOREIGN_PRESTIGE`'s own
+/// pure shape, parametrized on `dose` and `ref_km` — same split. A basic
+/// good (`tier == 0`) never earns prestige from distance (distance makes it
+/// dearer, never more desired); `dose <= 0.0`, `ref_km <= 0.0` or
+/// `origin_km <= 0.0` is a true no-op.
+fn foreign_prestige_mult_e(dose: f32, ref_km: f32, tier: u8, origin_km: f32) -> f32 {
+    if dose <= 0.0 || tier < 1 || ref_km <= 0.0 { return 1.0; }
+    1.0 + dose * (origin_km / ref_km).clamp(0.0, 1.0)
 }
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
 /// need is comparable to total production (an average good ~ slight shortage).
@@ -794,6 +826,16 @@ const COLONY_MIN_TRADE: f32 = 0.18;
 /// on the map competes with (but doesn't automatically beat) a genuinely better
 /// site inside land that's already settled.
 const EMPTY_PROVINCE_FOUND_BONUS: f32 = 0.6;
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 5 (F5) · the shared shape behind
+/// `EMPTY_PROVINCE_FOUND_BONUS`, used by every founding path that scores a
+/// `ColonizeSite` (settlement/food colonies, house outposts) — a
+/// PREFERENCE, never a rule (the same discipline §8.20's endemic-good
+/// chooser uses): `province < 0` (unknown — no province layer, or an old
+/// world) or an already-settled province is an exact 0.0, so a genuinely
+/// uninhabitable province is never FORCED onto a founder, only preferred.
+fn province_founding_bonus(province: i32, settled: bool) -> f32 {
+    if province >= 0 && !settled { EMPTY_PROVINCE_FOUND_BONUS } else { 0.0 }
+}
 /// Daily logistic population-growth rate below carrying capacity (~5%/yr peak at
 /// low population; eases to 0 at capacity). Was 0.0006 (~24%/yr — too fast).
 const POP_GROWTH_RATE: f32 = 0.0003;
@@ -894,6 +936,56 @@ const WORLD_AGE_DEV_REF_YEARS: f32 = 260.0;
 /// ~20-25k ceiling instead of being pinned there by the urban graveyard. Modest on
 /// purpose: capacity feeds trade wealth, which the dynamics gate bounds.
 const HEALTH_CAP_DEV: f32 = 0.8;
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 4 (F4, D5) · a city's growth
+/// CEILING stops being anchored purely on `founding_pop` (a town founded at
+/// 500 has its ceiling pinned to 500 forever, however good its site or its
+/// trade become). `capacity = lerp(founding_pop, land_capacity, CAPACITY_
+/// LAND_WEIGHT) * cap_mult` — `land_capacity` is the hub's own province's
+/// real rural carrying capacity (`prov_cap`, already computed yearly by
+/// `province_land_pass`), shared among the hubs sharing that province by
+/// TRADE WEIGHT, so a province's capital carries more of its hinterland
+/// than its secondary towns (`disease.rs::update_food_and_starvation`).
+///
+/// Ships at 0.0 — a true no-op, bit-identical (`capacity_land_weight_is_a_
+/// noop_at_zero`), the N1/N6/S3 pattern. **Raising it is real future work,
+/// NOT done here**: CLAUDE.md's own record for the adjacent `WORLD_AGE_DEV_
+/// CAP` shows this growth pass is CHAOTIC-SENSITIVE to uniform per-hub
+/// capacity nudges (a smaller nudge at one setting produced a WORSE wealth
+/// outlier than a larger one at another) — `simulate_decades_reports_
+/// dynamics`' sustained-runaway-wealth guard must be re-run per dose step,
+/// not assumed safe from the shape alone. A province-less campaign (incl.
+/// the dynamics fixture, which seeds no `prov_cap`) takes the `founding_pop`
+/// branch unconditionally regardless of this constant, the same `has_prov`
+/// guard `world_age_cap`/`health_dev` above already use.
+const CAPACITY_LAND_WEIGHT: f32 = 0.0;
+/// D6 · a bounded, capped headroom for a city that BUILDS — founding an
+/// estate in its own hinterland or raising a structure lifts its growth
+/// ceiling slightly ("a city that builds, grows"), never a second
+/// exponential. Kept small relative to the earned-headroom terms above
+/// (`TRADE_DEV_CAP` 20 / `PRIMACY_DEV` 45) on purpose — this must read as a
+/// modest nudge, not a second growth engine an estate-spamming house could
+/// exploit for unbounded population.
+const WORKS_DEV_PER_ESTATE: f32 = 0.03;
+const WORKS_DEV_PER_STRUCTURE: f32 = 0.05;
+const WORKS_DEV_CAP: f32 = 0.6;
+
+/// Slice 4's pure blend, parametrized for testing without a live sim — the
+/// same split `elastic_aggregate_mult`/`_e` and `local_satiety_mult`/`_e`
+/// already use. `weight <= 0.0` is an exact no-op (returns `founding_pop`
+/// verbatim) regardless of `land_capacity`.
+fn land_capacity_blend(founding_pop: f32, land_capacity: f32, weight: f32) -> f32 {
+    if weight <= 0.0 { return founding_pop; }
+    let w = weight.clamp(0.0, 1.0);
+    founding_pop * (1.0 - w) + land_capacity * w
+}
+
+/// D6's pure shape: a bounded, capped ADDITIVE nudge to `cap_mult` from a
+/// hub's own estates + structures — exactly 0.0 (a no-op) with neither.
+fn works_dev_mult(estate_count: usize, structure_count: usize) -> f32 {
+    (estate_count as f32 * WORKS_DEV_PER_ESTATE + structure_count as f32 * WORKS_DEV_PER_STRUCTURE)
+        .min(WORKS_DEV_CAP)
+        .max(0.0)
+}
 /// ── Trade GRAVITY ── how strongly a big / high-class hub PULLS trade from farther
 /// afield and is preferred by merchants. A hub's `hub_pull` ≥ 1; its EFFECTIVE distance
 /// to every other city = real distance ÷ pull, so a great entrepôt enters the partner
@@ -3689,6 +3781,18 @@ pub struct TickHub {
     /// UNATTRIBUTED — `eat = need.min(stock)` has no counterparty to book,
     /// and inventing one here would misstate what the model actually knows.
     #[serde(default)] pub demand_accum: Vec<f32>,
+    /// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 7 (F7, option (i) — the
+    /// recommended `stock_origin` accumulator rather than a full grade ×
+    /// provenance stock matrix, D7). One f32 per good — a decaying weighted
+    /// mean of `InTransit.origin_km` for arrivals of that good, i.e. "how
+    /// foreign is this market's supply, right now". Updated at every
+    /// arrival (`origin_km_pass` below); cheap (`ng` floats, no change to
+    /// the stock layout, no serialization risk to `stock`/`stock_of`/
+    /// `stock_take`). `#[serde(default)]` — an old save reads every good as
+    /// 0.0 km (maximally local), which is the honest reading of "we have no
+    /// provenance history for this good" and is what keeps
+    /// `foreign_prestige_mult` a true no-op there too.
+    #[serde(default)] pub stock_origin: Vec<f32>,
     /// An ESTATE's own running production total for the CURRENT month, one
     /// slot per good — accumulated daily, read and zeroed by
     /// `works_monthly_pass`. Exists because `production[g]` (above) is a
@@ -3911,6 +4015,14 @@ pub struct InTransit {
     /// reads 0, i.e. "this is its first leg", which is exactly right for a
     /// cargo dispatched before relaying existed.
     #[serde(default)] pub hops: u8,
+    /// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 7 (F7/F8, D7) · the real routed
+    /// distance (km) this cargo travelled from its ORIGINAL dispatch point —
+    /// what feeds the destination's `stock_origin` accumulator (how foreign
+    /// its supply reads) and, via `FOREIGN_PRESTIGE`, why a far-travelled
+    /// luxury is wanted MORE, not just costs more (the amber-in-Rome case).
+    /// `#[serde(default)]` — an old save's in-flight cargo reads 0.0 (local),
+    /// the same convention `InTransit.local` itself uses.
+    #[serde(default)] pub origin_km: f32,
 }
 
 /// One recently completed trade (for the Market tab "recent deals" rows). A small
@@ -8844,6 +8956,19 @@ impl CampaignSim {
                         }
                     }
                 }
+                // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 7 (D7) · foreign prestige
+                // — a far-travelled comfort/luxury good is wanted MORE, the amber-
+                // in-Rome case. Same MARKET-FACING `needs`-only placement as local
+                // satiety, above. A true no-op at the shipped zero dose.
+                if FOREIGN_PRESTIGE > 0.0 {
+                    for g in 0..ng {
+                        let tier = self.goods[g].need_tier;
+                        if tier >= 1 {
+                            let origin_km = self.hubs[h].stock_origin.get(g).copied().unwrap_or(0.0);
+                            needs[h][g] *= foreign_prestige_mult_e(FOREIGN_PRESTIGE, PRESTIGE_REF_KM, tier, origin_km);
+                        }
+                    }
+                }
                 // Eat down stock; track unmet demand per need-tier for the
                 // "% population lacking goods" graph (basic / comfort / luxury).
                 // N6 · reads `needs_struct` (the ration), never the elastic
@@ -8930,16 +9055,16 @@ impl CampaignSim {
             // short haul; `via` (TRADE_STAGING_AND_POSTS_PLAN.md slice 4) names a
             // REAL destination beyond this arrival when the leg that just landed was
             // only the first hop of a composed entrepôt route.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32, u8)> = Vec::new();
+            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32, u8, f32)> = Vec::new();
             self.in_transit.retain(|c| {
                 if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price, c.hops));
+                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price, c.hops, c.origin_km));
                     false
                 } else {
                     true
                 }
             });
-            for (to, g, amt, sea, phase, home, owner, local, via, price, hops) in landed {
+            for (to, g, amt, sea, phase, home, owner, local, via, price, hops, origin_km) in landed {
                 // TRADE_STAGING_AND_POSTS_PLAN.md slice 4 — a leg composed through
                 // an entrepôt outlet (`via >= 0`) does NOT take delivery here: the
                 // buyer at the real destination already settled this trade at
@@ -8994,6 +9119,10 @@ impl CampaignSim {
                         // (§1 above) — a relayed voyage's vessel does not sail home.
                         phase, home: -1, contract: false, price, local, via: next_via,
                         hops: hops.saturating_add(1),
+                        // Slice 7 (F7/F8) · a relayed cargo's origin distance keeps
+                        // accumulating leg by leg, so a multi-stop long lane reads
+                        // as genuinely far-travelled, not reset at each stop.
+                        origin_km: origin_km + self.hub_km(to, next_to),
                     });
                     continue;
                 }
@@ -9017,6 +9146,16 @@ impl CampaignSim {
                         else { SUPPLY_FOREIGN };
                     supply_add(&mut self.hubs[to].supply_accum, g, sclass, amt);
                     if sea { self.hubs[to].in_by_sea += amt; } else { self.hubs[to].in_by_land += amt; }
+                    // Slice 7 (F7) · roll this arrival's origin distance into the
+                    // hub's `stock_origin[g]` decaying weighted mean — "how foreign
+                    // is this market's supply, right now". Cheap (one f32 EMA per
+                    // arrival); harmless when nothing reads it (the shipped
+                    // `FOREIGN_PRESTIGE = 0.0`).
+                    if self.hubs[to].stock_origin.len() != ng {
+                        self.hubs[to].stock_origin.resize(ng, 0.0);
+                    }
+                    let so = &mut self.hubs[to].stock_origin[g];
+                    *so = *so * (1.0 - STOCK_ORIGIN_DECAY) + origin_km * STOCK_ORIGIN_DECAY;
                 }
                 // Round trip: an OUTBOUND (phase 0) house cargo that just sold at `to`
                 // now buys `to`'s surplus and carries it home for a second profit.
