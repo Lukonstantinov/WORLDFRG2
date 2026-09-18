@@ -2222,19 +2222,61 @@ lane reads as no trade. Lanes are ranked among the lanes arriving at the SAME
 second and later sources — every buyer keeps one supplier before anyone keeps
 two.
 
-**NOT changed, and why** (queued, not waived): `OPEN_SEA_COST` (2.2) is only
-1.375x `COASTAL_SEA_COST` (1.6) while a coast-hugging detour is routinely 2-4x
-longer in cells, so a least-cost path essentially always cuts straight across
-open ocean rather than following a coast or rounding an island — and because
-open sea is cost-UNIFORM, Dijkstra's cheapest path across it is a literal
-straight line, which is what those ruler-straight ocean lanes on the map are.
-Getting historical coast-hugging needs the ratio nearer 3-5x, but `cost_to_days`
-(`query_commands/mod.rs`) makes these same constants double as travel SPEED, so
-raising `OPEN_SEA_COST` also reprices every voyage and would move the
-price/distance gradient C1 just tuned. That conflation is C2 in
-`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`. It waits on C2, and on a
-before/after run of `real_world_price_distance_gradient`, which is the
-instrument that can tell the two effects apart.
+**THE OPEN-WATER CROSSING IS A WORLD RULE, NOT A PREFERENCE**
+(`MAX_OPEN_SEA_CROSSING_KM` = 800 km, `query_commands/mod.rs`). Pre-modern trade
+is coastal navigation punctuated by SHORT blue-water hops — Sicily to Cape Bon
+~150 km, Greece to Italy ~150, Norway to Shetland ~300, and the longest routine
+classical crossing, Crete to Egypt, ~500 km, written about precisely because it
+was exceptional. Nothing routine crosses an ocean. The limit used to be a user
+preference ALONE (`max_crossing`, a fraction of map width, shipped at 0.12 =
+**4,809 km**), so an ocean traversal was the default rather than an opt-in.
+
+Three things make it a rule rather than a setting:
+- **The clamp lives in `path_allowed`**, the one chokepoint every route, flow,
+  economy, political and component query already funnels through. A per-command
+  clamp across the nine entry points that take `max_crossing` is a rule with
+  nine ways to be missed. A caller may only ever ask for something SHORTER.
+- **It binds at EVERY reach except 2.** Reach 0 used to be an unconditional
+  `true` (the UI called it "Global — cross any ocean"), so one caller passing
+  reach 0 put every trans-oceanic lane straight back — and `MapCanvas.tsx`'s
+  `CAMPAIGN_ROUTE_REACH` is exactly such a caller. Reach 2 stays land-only.
+- **`compute_routed_components` uses the SAME constant.** It passed
+  `TRADE_COMPONENT_HORIZON_KM` (3,000 km), which said two landmasses shared a
+  market across water no route could actually cross — the B2 inconsistency one
+  layer up. The two constants are now distinct things and say so: this one is an
+  unbroken open-water RUN, `TRADE_COMPONENT_HORIZON_KM` is a straight-line lane
+  LENGTH bounding `compute_economy`'s candidate links.
+
+**It removes oceans, not the sea.** Shelf and coastal water reset the run (see
+`is_open_sea`), so coast-hugging is unlimited and an island chain is crossed one
+hop at a time — which is how a pre-modern network reaches a long way without
+ever losing sight of land. A rule that forbade all sea would just be reach 2
+under another name, and the gate asserts BOTH halves for that reason.
+Gate: `no_caller_can_ask_its_way_across_an_ocean` (0.12 and 1.0 both refused at
+reach 1, reach 0 refused too, a short hop still allowed), plus the two component
+gates re-pointed at this constant. The frontend default is ~400 km and its
+slider is stated in KM over a 50-800 km range — "% of map width" is not a
+distance anyone can reason about, and reading it as one is how 12% came to mean
+an ocean. `SEA_CAP_KM` in `StepBiological.tsx` bounds the SLIDER only; the
+backend clamps regardless, so drift between them stops the slider short rather
+than breaking the rule.
+
+**This is also what finally produces coast-hugging**, and it is worth recording
+that it did NOT come from the cost ramp. `OPEN_SEA_COST` (2.2) is only 1.375x
+`COASTAL_SEA_COST` (1.6) while a coast-hugging detour is routinely 2-4x longer
+in cells, so on cost alone a least-cost path always cuts straight across — and
+because open sea is cost-UNIFORM, Dijkstra's cheapest path across it is a
+literal straight line, which is what the ruler-straight ocean lanes were.
+Fixing that by raising the ratio to 3-5x was the obvious move and is still NOT
+done, because `cost_to_days` makes these same constants double as travel SPEED
+(C2's conflation in `ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`), so it would
+reprice every voyage and move the price/distance gradient C1 just tuned. A
+ROUTING rule achieves the same visible outcome at zero cost to the speed
+calibration: forbid the long crossing and the cheapest legal path is the
+coastal one. Prefer a routing rule over a cost nudge wherever the cost constant
+is load-bearing for something else — and the cost-ratio work stays queued, with
+`real_world_price_distance_gradient` as the instrument that can tell the freight
+effect from the speed effect if anyone does take it on.
 Related finding, left as a finding: the piracy surcharge charges COASTAL water
 4.0 against open sea 1.5, which pushes routes AWAY from the coast — the opposite
 of what its own comment claims it does. Inert at the default `piracy = 0`.

@@ -31,10 +31,18 @@ import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types
  *  the longest, most interesting flows. This is a DISPLAY-ONLY lookup (it
  *  finds the best physical path for a trade the sim already decided
  *  happened; it creates no new trade and changes no economics), so it asks
- *  unrestricted: reach 0 ("global" — no open-water-crossing cap) with a
- *  maxCrossing that's moot at reach 0. Worldgen's own trade-route graph
- *  (Toolbar → Trade Goods → routes) still honours `bioParams` — this only
- *  changes how a campaign's own realized flows are drawn. */
+ *  for the widest reach available: reach 0, with a maxCrossing that is moot
+ *  there. Worldgen's own trade-route graph (Toolbar → Trade Goods → routes)
+ *  still honours `bioParams` — this only changes how a campaign's own
+ *  realized flows are drawn.
+ *
+ *  NOTE — reach 0 is no longer "no cap". `MAX_OPEN_SEA_CROSSING_KM` is a WORLD
+ *  RULE and binds at every reach except 2, so a flow needing more than that of
+ *  unbroken open water resolves no path and falls back to the dashed direct
+ *  line (rule 35's honest rendering of an open-water lane). Such a flow should
+ *  now be rare rather than routine: trade COMPONENTS are built across the same
+ *  crossing limit, so two shores that far apart no longer share a market to
+ *  generate the flow in the first place. */
 const CAMPAIGN_ROUTE_REACH = 0;
 const CAMPAIGN_ROUTE_MAX_CROSSING = 1.0;
 

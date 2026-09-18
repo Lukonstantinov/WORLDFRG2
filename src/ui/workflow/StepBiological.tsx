@@ -13,7 +13,17 @@ interface Props {
   invalidateTiles: () => void;
 }
 
-const REACH_LABELS = ["Global (cross any ocean)", "Coastal + short crossings", "Continental only"];
+/*  Trade reach. "Global (cross any ocean)" is gone: an unbroken open-water run is
+ *  capped by a WORLD RULE now (`MAX_OPEN_SEA_CROSSING_KM`, query_commands/mod.rs),
+ *  which binds at every reach except 2, so no setting can put a trans-oceanic lane
+ *  back. Reach 1 may only ask for something SHORTER than the rule.
+ *
+ *  `SEA_CAP_KM` mirrors that Rust constant for the SLIDER BOUND only — the backend
+ *  clamps regardless (gated by `no_caller_can_ask_its_way_across_an_ocean`), so if
+ *  the two ever drift the rule still holds and the slider merely stops short. */
+const REACH_LABELS = ["Sea trade — short crossings only", "Coastal — custom crossing limit", "Continental only — no sea legs"];
+const KM_EQUATOR = 40075;
+const SEA_CAP_KM = 800;
 
 export function StepBiological({ seed, invalidateTiles }: Props) {
   const simRunning = useUIStore((s) => s.simRunning);
@@ -175,11 +185,21 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       {bioParams.tradeReach === 1 && (
         <>
           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
-            <span>Max sea crossing</span><span style={{ color: "#8aa0c0" }}>{Math.round(bioParams.maxCrossing * 100)}% width</span>
+            <span>Max open-water crossing</span>
+            <span style={{ color: "#8aa0c0" }}>{Math.round(bioParams.maxCrossing * KM_EQUATOR)} km</span>
           </div>
-          <input type="range" min={1} max={40} value={Math.round(bioParams.maxCrossing * 100)}
-            onChange={(e) => setBioParams({ maxCrossing: Number(e.target.value) / 100 })}
+          {/* Stated in KM, not "% of map width" — a fraction of the map is not a
+              distance anyone can reason about, and reading it as one is how the
+              shipped 12% came to mean a 4,809 km ocean traversal. */}
+          <input type="range" min={50} max={SEA_CAP_KM} step={25}
+            value={Math.round(bioParams.maxCrossing * KM_EQUATOR)}
+            onChange={(e) => setBioParams({ maxCrossing: Number(e.target.value) / KM_EQUATOR })}
             style={{ width: "100%" }} />
+          <div style={{ fontSize: 9, color: "#5a7090" }}>
+            The longest stretch of OPEN water a route may cross without sight of land.
+            Coast-hugging and island-hopping are unlimited — shelf and coastal water
+            reset the run — so a network still reaches a long way, one hop at a time.
+          </div>
         </>
       )}
 

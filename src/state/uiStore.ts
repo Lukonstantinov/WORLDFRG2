@@ -51,7 +51,12 @@ export interface RiverParamsState {
 export interface BioParamsState {
   gemDeposits: number;   // number of highland gemstone deposits
   tradeReach: number;    // 0 = global, 1 = coastal+short, 2 = continental only
-  maxCrossing: number;   // max open-water crossing as fraction of map width
+  /** Longest UNBROKEN open-water run a route may cross, as a fraction of map
+   *  width (x KM_EQUATOR for km). Shipped at 0.12 = ~4,809 km, i.e. an ocean
+   *  traversal by default; now ~400 km, and the backend caps every request at
+   *  `MAX_OPEN_SEA_CROSSING_KM` regardless. Shelf/coastal water resets the run,
+   *  so coast-hugging and island-hopping are unaffected. */
+  maxCrossing: number;
   desertRoutes: boolean; // Silk-Road mode: prefer overland steppe/desert caravans when seas are dangerous
   calendarMonths: number; // length of the seasonal calendar ("moons"), default 12
   stormMonth: number;    // storm overlay viewing month: 0 = combined, 1..months
@@ -513,7 +518,7 @@ export const useUIStore = create<UIStore>((set) => ({
   plateSeedDraft: { sizeClass: 2, isOceanic: false },
   ridgeParams: { width: 8, height: 0.7, character: 0.5, noise: 0.4 },
   riverParams: { density: 0.5, width: 1.0, lakeFillDepth: 0.006, lakeMaxFraction: 0.0001 },
-  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.12, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
+  bioParams: { gemDeposits: 6, tradeReach: 1, maxCrossing: 0.00998 /* ~400 km of open water */, desertRoutes: false, calendarMonths: 12, stormMonth: 0, economicRegions: 14, luxuryBias: 0.5, climateStrictness: 0.5, piracyLevel: 0, tradeSeason: 0 },
   showTradeMatrix: false,
   selectedHub: null,
   selectedMerchantRoute: null,

@@ -829,13 +829,17 @@ pub(crate) fn compute_route_days_matrix_for_season(
 }
 
 /// B2 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §5/§9) — the regional trade
-/// horizon: a single contiguous open-water crossing longer than this is not a
-/// leg any pre-modern trade network sailed direct, so it is what a "trade
-/// component" (§5/§10 Q3) and the tiny-component rescue (below) are both
-/// bounded by. Coastal hugging is unrelated to this and stays unlimited —
-/// `path_allowed`'s reach-1 rule only counts a run of OPEN (non-shelf,
-/// non-coastal) sea cells — so a long coastal or staged route can still
-/// compose an arbitrarily long network out of hops each within this bound.
+/// horizon: the longest STRAIGHT-LINE span a single trade link may cover,
+/// however it is routed. It bounds `compute_economy`'s candidate links, so a
+/// lone island never wires itself to a far continent on a ruler-straight lane.
+///
+/// **This is a total lane LENGTH, not an open-water crossing** — the two were
+/// once conflated, with this constant serving as both. A crossing is bounded
+/// separately and much more tightly by `MAX_OPEN_SEA_CROSSING_KM`, because a
+/// 3,000 km lane hugging a coast the whole way is ordinary while 3,000 km of
+/// unbroken blue water is not a leg any pre-modern network sailed direct.
+/// Coastal hugging stays unlimited under BOTH: a long staged network composes
+/// out of hops each within these bounds.
 pub(crate) const TRADE_COMPONENT_HORIZON_KM: f32 = 3000.0;
 
 /// A component is a claim about REACHABILITY and must be built from
@@ -852,7 +856,7 @@ pub(crate) const TRADE_COMPONENT_HORIZON_KM: f32 = 3000.0;
 /// number of distinct components — never one per hub-PAIR, and not even one
 /// per hub. Each unassigned hub becomes a seed in turn: run ONE search from
 /// it, then assign every OTHER still-unassigned hub reachable under
-/// `path_allowed`'s coastal-crossing rule (reach 1, `TRADE_COMPONENT_HORIZON_KM`)
+/// `path_allowed`'s coastal-crossing rule (reach 1, `MAX_OPEN_SEA_CROSSING_KM`)
 /// to that same component. Symmetric (the coarse grid is an undirected cost
 /// graph, so reachability from the seed is reachability to it), which is what
 /// lets a later seed's inner loop skip every index already resolved by an
@@ -873,7 +877,12 @@ pub(crate) fn compute_routed_components(
     let rivers_json = metadata::get_meta(conn, "rivers").ok().flatten().unwrap_or_default();
     let cc = cached_coarse_cost(db, &world, world.fingerprint, grid_w, grid_h,
         &rivers_json, false, true, 0.0, -1, 12)?;
-    let max_crossing_frac = TRADE_COMPONENT_HORIZON_KM / KM_EQUATOR;
+    // The crossing a component may be built across is the SAME world rule every
+    // drawn route obeys (`MAX_OPEN_SEA_CROSSING_KM`), not a separate, laxer
+    // horizon. It used to pass `TRADE_COMPONENT_HORIZON_KM` (3,000 km) here,
+    // which said two landmasses shared a market across water no route could
+    // actually cross — the B2 inconsistency one layer up.
+    let max_crossing_frac = MAX_OPEN_SEA_CROSSING_KM / KM_EQUATOR;
     let cell = |x: f32, y: f32| -> usize {
         let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
         let cy = ((y / cc.f as f32) as i32).clamp(0, cc.ch - 1);
@@ -975,19 +984,44 @@ fn coarse_dijkstra_batch(
 /// Is a path acceptable under the chosen trade reach?
 ///   reach 0 = global (any crossing) · 1 = coastal+short crossings (open-water
 ///   run capped at `max_crossing_frac` of the width) · 2 = continental (no sea).
+/// THE HARD CEILING ON AN UNBROKEN OPEN-WATER RUN. Pre-modern trade is coastal
+/// navigation punctuated by SHORT blue-water hops: Sicily to Cape Bon is ~150 km,
+/// Greece to Italy ~150, Norway to Shetland ~300, and the longest routine classical
+/// crossing — Crete to Egypt, a run sailors wrote about precisely because it was
+/// exceptional — is ~500 km. Nothing routine crosses an ocean.
+///
+/// The crossing limit was a USER PREFERENCE alone (`max_crossing`, a fraction of map
+/// width, shipped at 0.12 = **4,809 km** on the default grid), so an ocean traversal
+/// was the default behaviour rather than an opt-in. It is a WORLD RULE now: the
+/// caller's preference may only ever make a crossing SHORTER than this, never longer,
+/// and the clamp lives in `path_allowed` because that is the one chokepoint every
+/// route, flow, economy, political and component query already funnels through — a
+/// per-command clamp across nine entry points is a rule with nine ways to be missed.
+///
+/// This bounds an UNBROKEN run of OPEN sea only. Shelf and coastal water reset the
+/// run (see `is_open_sea`), so coast-hugging stays unlimited and an island chain is
+/// crossed one hop at a time — which is exactly how a pre-modern network reaches a
+/// long way without ever losing sight of land.
+pub(crate) const MAX_OPEN_SEA_CROSSING_KM: f32 = 800.0;
+
 fn path_allowed(cc: &CoarseCost, path: &[usize], reach: u8, max_crossing_frac: f32, grid_w: u32) -> bool {
-    match reach {
-        2 => path.iter().all(|&c| cc.is_land[c]),
-        1 => {
-            let mut run = 0u32;
-            let mut best = 0u32;
-            for &c in path {
-                if cc.is_open_sea[c] { run += 1; best = best.max(run); } else { run = 0; }
-            }
-            (best * cc.f) as f32 <= max_crossing_frac.max(0.0) * grid_w as f32
-        }
-        _ => true,
+    // Reach 2 is land only. EVERY other reach — including reach 0, which used to
+    // be an unconditional `true` labelled "cross any ocean" in the UI — is bounded
+    // by the world rule; reach 1 may additionally ask for something SHORTER via
+    // the caller's own preference, never longer. An unbounded arm here is a hole
+    // straight through the rule, since a single caller passing reach 0 puts the
+    // trans-oceanic lanes back.
+    if reach == 2 {
+        return path.iter().all(|&c| cc.is_land[c]);
     }
+    let mut run = 0u32;
+    let mut best = 0u32;
+    for &c in path {
+        if cc.is_open_sea[c] { run += 1; best = best.max(run); } else { run = 0; }
+    }
+    let cap = MAX_OPEN_SEA_CROSSING_KM / KM_EQUATOR;
+    let allowed = if reach == 1 { max_crossing_frac.max(0.0).min(cap) } else { cap };
+    (best * cc.f) as f32 <= allowed * grid_w as f32
 }
 
 /// A point-to-point journey over the shared coarse movement-cost grid: the routed
@@ -3489,37 +3523,99 @@ mod component_tests {
 
     /// B2 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §5/§9/§10 Q3) — a component
     /// must be built from real reachability: two landmasses separated by open
-    /// water WIDER than `TRADE_COMPONENT_HORIZON_KM` must come out as two
-    /// components, and the same two landmasses separated by a gap narrower
-    /// than the horizon must come out as one. A gate that only ever produced
-    /// two components regardless of distance would pass the first half and
-    /// prove nothing; a gate that always merged would pass the second half
-    /// and prove nothing — this checks both directions on purpose.
+    /// water WIDER than `MAX_OPEN_SEA_CROSSING_KM` must come out as two
+    /// components, and the same two landmasses separated by a narrower gap
+    /// must come out as one. A gate that only ever produced two components
+    /// regardless of distance would pass the first half and prove nothing; a
+    /// gate that always merged would pass the second half and prove nothing —
+    /// this checks both directions on purpose.
+    ///
+    /// The multipliers leave room for the coarse grid's own quantisation: a
+    /// coarse cell is ~56 km at this width and the coastal ring on each shore
+    /// is excluded from `is_open_sea`, so a gap loses ~111 km of its measured
+    /// run before the rule ever sees it.
     #[test]
     fn components_split_across_an_ocean_wider_than_the_horizon() {
         let km_per_cell = KM_EQUATOR / 3600.0;
-        let far_gap = ((TRADE_COMPONENT_HORIZON_KM / km_per_cell) * 1.3) as u32; // clearly over
+        let far_gap = ((MAX_OPEN_SEA_CROSSING_KM / km_per_cell) * 1.6) as u32; // clearly over
         let (db, west_x, east_x) = two_landmasses(far_gap);
         let conn = db.conn.lock().unwrap();
         let comps = compute_routed_components(&db, &conn, &[(west_x, 10.0), (east_x, 10.0)])
             .expect("component build failed");
         assert_ne!(comps[0], comps[1],
-            "a gap of {far_gap} fine cells (~{:.0} km, over the {TRADE_COMPONENT_HORIZON_KM} \
-             km horizon) must NOT be unioned into one component",
+            "a gap of {far_gap} fine cells (~{:.0} km, over the {MAX_OPEN_SEA_CROSSING_KM} \
+             km crossing limit) must NOT be unioned into one component",
             far_gap as f32 * km_per_cell);
+    }
+
+    /// "Remove open sea, only short travel is accepted" — the crossing limit is a
+    /// WORLD RULE, not a user preference. A caller asking for an absurd crossing
+    /// (here the old shipped default of 0.12 of map width = 4,809 km, and then a
+    /// deliberately impossible 1.0 = the whole equator) must still not get an
+    /// ocean traversal: `path_allowed` clamps every request to
+    /// `MAX_OPEN_SEA_CROSSING_KM`. Verified failing with the `.min(..)` clamp
+    /// removed — both requests union the two landmasses.
+    #[test]
+    fn no_caller_can_ask_its_way_across_an_ocean() {
+        let km_per_cell = KM_EQUATOR / 3600.0;
+        let ocean = ((MAX_OPEN_SEA_CROSSING_KM / km_per_cell) * 1.6) as u32;
+        let (db, west_x, east_x) = two_landmasses(ocean);
+        let conn = db.conn.lock().unwrap();
+        let world = db.cached_tiles_with_conn(&conn).unwrap();
+        let cc = cached_coarse_cost(&db, &world, world.fingerprint, 3600, 20, "", false, true, 0.0, -1, 12).unwrap();
+        let cell = |x: f32| -> usize {
+            let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
+            (10 / cc.f as i32 * cc.cw + cx) as usize
+        };
+        let path = coarse_dijkstra(&cc, cell(west_x), cell(east_x))
+            .expect("the two shores must be connected on the cost grid at all");
+        for asked in [0.12f32, 1.0] {
+            assert!(
+                !path_allowed(&cc, &path, 1, asked, 3600),
+                "a caller asking for {asked} of map width (~{:.0} km) crossed a \
+                 ~{:.0} km ocean — the {MAX_OPEN_SEA_CROSSING_KM} km cap is not binding",
+                asked * KM_EQUATOR,
+                ocean as f32 * km_per_cell
+            );
+        }
+        // Reach 0 ("global") used to be an unconditional `true`, so it was a hole
+        // straight through the rule whatever reach 1 did.
+        assert!(
+            !path_allowed(&cc, &path, 0, 1.0, 3600),
+            "reach 0 crossed a ~{:.0} km ocean — the cap must bind at every reach \
+             except 2 (land only), not just at reach 1",
+            ocean as f32 * km_per_cell
+        );
+        // …and the cap must still ALLOW a short hop, or it is just reach 2 by
+        // another name and island chains stop trading.
+        let short = ((MAX_OPEN_SEA_CROSSING_KM / km_per_cell) * 0.3) as u32;
+        let (db2, w2, e2) = two_landmasses(short);
+        let conn2 = db2.conn.lock().unwrap();
+        let world2 = db2.cached_tiles_with_conn(&conn2).unwrap();
+        let cc2 = cached_coarse_cost(&db2, &world2, world2.fingerprint, 3600, 20, "", false, true, 0.0, -1, 12).unwrap();
+        let cell2 = |x: f32| -> usize {
+            let cx = ((x / cc2.f as f32) as i32).clamp(0, cc2.cw - 1);
+            (10 / cc2.f as i32 * cc2.cw + cx) as usize
+        };
+        let short_path = coarse_dijkstra(&cc2, cell2(w2), cell2(e2)).expect("short hop unreachable");
+        assert!(
+            path_allowed(&cc2, &short_path, 1, 0.12, 3600),
+            "a ~{:.0} km hop must still be legal — the rule removes OCEANS, not the sea",
+            short as f32 * km_per_cell
+        );
     }
 
     #[test]
     fn components_merge_across_an_ocean_narrower_than_the_horizon() {
         let km_per_cell = KM_EQUATOR / 3600.0;
-        let near_gap = ((TRADE_COMPONENT_HORIZON_KM / km_per_cell) * 0.3) as u32; // clearly under
+        let near_gap = ((MAX_OPEN_SEA_CROSSING_KM / km_per_cell) * 0.3) as u32; // clearly under
         let (db, west_x, east_x) = two_landmasses(near_gap);
         let conn = db.conn.lock().unwrap();
         let comps = compute_routed_components(&db, &conn, &[(west_x, 10.0), (east_x, 10.0)])
             .expect("component build failed");
         assert_eq!(comps[0], comps[1],
-            "a gap of {near_gap} fine cells (~{:.0} km, well under the {TRADE_COMPONENT_HORIZON_KM} \
-             km horizon) must be unioned into one component",
+            "a gap of {near_gap} fine cells (~{:.0} km, well under the {MAX_OPEN_SEA_CROSSING_KM} \
+             km crossing limit) must be unioned into one component",
             near_gap as f32 * km_per_cell);
     }
 }
