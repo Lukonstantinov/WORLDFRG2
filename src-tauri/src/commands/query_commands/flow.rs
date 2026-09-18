@@ -164,9 +164,18 @@ pub fn compute_coarse_route(
     };
     let (s, g) = (node_at(ax, ay), node_at(bx, by));
     if s == g { return Ok(empty); }
-    let path = match coarse_dijkstra(&cc, s, g) { Some(p) => p, None => return Ok(empty) };
+    // The crossing rule is part of the SEARCH (`coarse_dijkstra_legal`), not a verdict
+    // passed over the finished path. Searching for the cheapest route and then
+    // REJECTING it for crossing too much water threw away the whole lane whenever the
+    // cheapest line cut across a gulf — so a pair of ports with a perfectly ordinary
+    // coastal route between them resolved nothing and fell back to a dashed straight
+    // line. The legal route existed; it was simply never looked for.
+    let path = match coarse_dijkstra_legal(&cc, s, g, reach, max_crossing, grid_w) {
+        Some(p) => p,
+        None => return Ok(empty),
+    };
     if path.len() < 2 { return Ok(empty); }
-    if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { return Ok(empty); }
+    debug_assert!(path_allowed(&cc, &path, reach, max_crossing, grid_w));
     // A lane is not one medium end to end: a route out of an inland town runs
     // overland to a port, then by sea, then overland again. Returning the medium
     // PER POINT is what lets the renderer draw each stretch in its own

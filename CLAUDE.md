@@ -2261,6 +2261,48 @@ an ocean. `SEA_CAP_KM` in `StepBiological.tsx` bounds the SLIDER only; the
 backend clamps regardless, so drift between them stops the slider short rather
 than breaking the rule.
 
+**THE CROSSING RULE IS PART OF THE SEARCH, NEVER A VERDICT ON THE FINISHED PATH.**
+`coarse_dijkstra` returns the globally CHEAPEST path, and every caller used to run
+`path_allowed` over it as a POST-FILTER. So a lane whose cheapest line cut across a
+gulf had the WHOLE route discarded and fell back to a dashed straight line — while
+an ordinary coast-hugging route between the same two ports existed the entire time
+and was never searched for. That is the "trade routes are straight lines instead of
+following the trade routes" report, and tightening `MAX_OPEN_SEA_CROSSING_KM` made
+it fire MORE often rather than less: the stricter the rule, the more often the one
+path considered is the one rejected.
+
+A crossing limit is not a property of a PATH, it is a property of a path PREFIX —
+how much unbroken open water you have already crossed to arrive somewhere — so it
+belongs in the search STATE. `coarse_dijkstra_legal` makes a node `(cell, run)`:
+`run` counts consecutive open-sea cells ending at this one, resets to 0 on shelf,
+coastal water or land, and a step that would push it past the cap is simply NOT AN
+EDGE. The search therefore returns the cheapest LEGAL route, which for two ports
+either side of a gulf is the one that follows the shore.
+
+Three things that make this safe:
+- **The state space is bounded at every world size.** `run` is capped (~14 coarse
+  cells at the shipped 800 km) and the coarse grid is ~720 cells wide whatever the
+  world, because `f = grid_w / 700`. A Large map does not enlarge it.
+- **Reach 2 needs no run state** — land-only is a plain mask
+  (`coarse_dijkstra_masked`), so it does not pay for lanes it cannot use.
+- **`path_allowed` survives as a `debug_assert!`** at the call site, not as control
+  flow: the searched route must satisfy the very rule it searched under, and if it
+  ever does not, that is a bug in the search rather than a lane to discard.
+Gate: `a_lane_follows_the_coast_instead_of_being_thrown_away`, which asserts BOTH
+halves on ONE fixture so it cannot pass vacuously — the old search-then-filter must
+FAIL on that fjord, and the new search must return a longer, legal, coastal route.
+Writing it took two fixtures: the first was a shallow bay where going round was
+already cheapest, so search-then-filter would have kept the path and the gate proved
+nothing. **A routing gate needs a geometry where the illegal line genuinely WINS.**
+
+**Still post-filtered, and why** (queued, not waived): `coarse_dijkstra_batch` —
+which feeds `compute_trade_routes`' drawn road network and `compute_economy`'s
+candidate edges — still searches then filters, so a rejected pair there is a route
+that simply is not drawn (never a straight line). Giving the batch the same
+treatment means carrying `(cell, run)` dist/prev per SOURCE while rayon fans sources
+out in parallel, which is tens of MB per in-flight source — a real memory question
+that needs its own measurement, not a copy of this change.
+
 **A LANE IS NOT ONE MEDIUM END TO END.** `compute_coarse_route` returned a bare
 `Vec<[f32; 2]>` and the renderer styled the whole lane from a single flag —
 `openWater`, meaning "did anything route this at all". So a haul that runs

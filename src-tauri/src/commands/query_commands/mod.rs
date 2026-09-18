@@ -647,6 +647,142 @@ fn cached_coarse_cost(
 }
 
 /// Least-cost path (coarse indices, start→goal) over a CoarseCost grid, or None.
+/// Dijkstra that obeys the crossing rule DURING the search, not after it.
+///
+/// `coarse_dijkstra` returns the globally CHEAPEST path and every caller then ran
+/// `path_allowed` over it as a post-filter — so a lane whose cheapest path cut
+/// straight across open water had the WHOLE route thrown away and fell back to a
+/// dashed direct line, even where a perfectly ordinary coast-hugging route existed.
+/// The legal route was never searched for. That is the "trade routes are straight
+/// lines instead of following the trade routes" report, and tightening the crossing
+/// cap made it fire far more often rather than less: the stricter the rule, the more
+/// often the one path considered is rejected.
+///
+/// A crossing limit is not a property of a PATH, it is a property of a path PREFIX —
+/// how much unbroken open water you have already crossed to arrive somewhere — so it
+/// belongs in the search STATE. A node here is `(cell, run)`: `run` counts the
+/// consecutive open-sea cells ending at this one, resets to 0 on shelf, coastal water
+/// or land, and a step that would push it past the cap simply is not an edge. The
+/// search therefore finds the cheapest LEGAL route — which, for two ports either side
+/// of a wide gulf, is the one that follows the shore.
+///
+/// `run` is bounded by the cap (about 14 coarse cells at the shipped 800 km), and the
+/// coarse grid is ~720 cells wide at EVERY world size (`f = grid_w / 700`), so the
+/// state space is bounded regardless of the world — this cannot blow up on a Large map.
+fn coarse_dijkstra_legal(
+    cc: &CoarseCost, start: usize, goal: usize,
+    reach: u8, max_crossing_frac: f32, grid_w: u32,
+) -> Option<Vec<usize>> {
+    let (cw, ch) = (cc.cw, cc.ch);
+    let cn = (cw * ch) as usize;
+    if start >= cn || goal >= cn { return None; }
+
+    // Reach 2 is land only — a plain mask, no run state needed.
+    if reach == 2 {
+        if !cc.is_land[start] || !cc.is_land[goal] { return None; }
+        return coarse_dijkstra_masked(cc, start, goal, |c| cc.is_land[c]);
+    }
+    // The same clamp `path_allowed` applies, in COARSE cells: a run of `cap` cells
+    // spans `cap * cc.f` fine cells, which is what the rule is stated in.
+    let allowed = max_crossing_frac.max(0.0).min(MAX_OPEN_SEA_CROSSING_KM / KM_EQUATOR);
+    let cap = ((allowed * grid_w as f32) / cc.f.max(1) as f32).floor().max(0.0) as usize;
+    let lanes = cap + 1; // run ∈ 0..=cap
+    let sidx = |cell: usize, run: usize| cell * lanes + run;
+
+    let mut dist = vec![i64::MAX; cn * lanes];
+    let mut prev = vec![u32::MAX; cn * lanes];
+    let mut heap: BinaryHeap<Reverse<(i64, u32)>> = BinaryHeap::new();
+
+    let start_run = if cc.is_open_sea[start] { 1 } else { 0 };
+    if start_run > cap { return None; } // the start itself is past the cap (cap == 0)
+    dist[sidx(start, start_run)] = 0;
+    heap.push(Reverse((0, sidx(start, start_run) as u32)));
+
+    let mut best_goal = usize::MAX;
+    while let Some(Reverse((d, su))) = heap.pop() {
+        let su = su as usize;
+        if d > dist[su] { continue; }
+        let (u, run) = (su / lanes, su % lanes);
+        if u == goal { best_goal = su; break; }
+        let ux = (u as i32) % cw;
+        let uy = (u as i32) / cw;
+        for &(dx, dy, mult) in &COARSE_DIRS {
+            let ny = uy + dy;
+            if ny < 0 || ny >= ch { continue; }
+            let v = cc.cidx(ux + dx, ny);
+            // THE RULE, as an edge condition rather than a verdict on the finished path.
+            let nrun = if cc.is_open_sea[v] { run + 1 } else { 0 };
+            if nrun > cap { continue; }
+            let step = ((cc.cost[u] + cc.cost[v]) * 0.5 * mult * 100.0) as i64;
+            let nd = d.saturating_add(step.max(1));
+            let sv = sidx(v, nrun);
+            if nd < dist[sv] {
+                dist[sv] = nd;
+                prev[sv] = su as u32;
+                heap.push(Reverse((nd, sv as u32)));
+            }
+        }
+    }
+    if best_goal == usize::MAX {
+        // The goal may have been settled without being popped as the break target.
+        let mut best = i64::MAX;
+        for r in 0..lanes {
+            let s = sidx(goal, r);
+            if dist[s] < best { best = dist[s]; best_goal = s; }
+        }
+        if best == i64::MAX { return None; }
+    }
+    let mut path = Vec::new();
+    let mut cur = best_goal;
+    loop {
+        path.push(cur / lanes);
+        if cur / lanes == start { break; }
+        let p = prev[cur];
+        if p == u32::MAX { break; }
+        cur = p as usize;
+    }
+    path.reverse();
+    if path.len() < 2 || path[0] != start { None } else { Some(path) }
+}
+
+/// Plain Dijkstra restricted to cells a predicate admits (reach 2's land-only case).
+fn coarse_dijkstra_masked(
+    cc: &CoarseCost, start: usize, goal: usize, ok: impl Fn(usize) -> bool,
+) -> Option<Vec<usize>> {
+    let (cw, ch) = (cc.cw, cc.ch);
+    let cn = (cw * ch) as usize;
+    let mut dist = vec![i64::MAX; cn];
+    let mut prev = vec![usize::MAX; cn];
+    let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+    dist[start] = 0;
+    heap.push(Reverse((0, start)));
+    while let Some(Reverse((d, u))) = heap.pop() {
+        if u == goal { break; }
+        if d > dist[u] { continue; }
+        let ux = (u as i32) % cw;
+        let uy = (u as i32) / cw;
+        for &(dx, dy, mult) in &COARSE_DIRS {
+            let ny = uy + dy;
+            if ny < 0 || ny >= ch { continue; }
+            let v = cc.cidx(ux + dx, ny);
+            if !ok(v) { continue; }
+            let step = ((cc.cost[u] + cc.cost[v]) * 0.5 * mult * 100.0) as i64;
+            let nd = d.saturating_add(step.max(1));
+            if nd < dist[v] { dist[v] = nd; prev[v] = u; heap.push(Reverse((nd, v))); }
+        }
+    }
+    if dist[goal] == i64::MAX { return None; }
+    let mut path = Vec::new();
+    let mut cur = goal;
+    while cur != usize::MAX {
+        path.push(cur);
+        if cur == start { break; }
+        cur = prev[cur];
+    }
+    path.reverse();
+    if path.len() < 2 { None } else { Some(path) }
+}
+
 fn coarse_dijkstra(cc: &CoarseCost, start: usize, goal: usize) -> Option<Vec<usize>> {
     let cw = cc.cw;
     let ch = cc.ch;
@@ -3555,6 +3691,86 @@ mod component_tests {
     /// ocean traversal: `path_allowed` clamps every request to
     /// `MAX_OPEN_SEA_CROSSING_KM`. Verified failing with the `.min(..)` clamp
     /// removed — both requests union the two landmasses.
+    /// A land mass with a long FJORD cut into it — narrow enough that cutting across
+    /// is much the shortest line, wide enough that the crossing breaks the cap — and a
+    /// port on each shore. Going round the head is a long detour, so the cheapest path
+    /// is unambiguously the illegal one: exactly the case the old search-then-filter
+    /// threw away.
+    fn bay_world() -> (WorldDb, f32, f32, u32, u32) {
+        let (w, h) = (3600u32, 200u32);
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                // Sea only inside the fjord: x in [1000, 1100), y < 190. Closed at the
+                // south, so the only way round is the whole length of it and back.
+                let bay = (1000..1100).contains(&x) && y < 190;
+                buf.terrain[idx] = if bay { 0 } else { 1 };
+                buf.elevation[idx] = if bay { 0.0 } else { 0.1 };
+                buf.koppen[idx] = 12;        // Cfb, no surcharge
+                buf.temperature[idx] = 18.0; // above every freeze threshold
+                buf.distance_to_ocean[idx] = 1.0;
+            }
+        }
+        buf.save(&conn, "test").unwrap();
+        (WorldDb::new(conn), 990.0, 1110.0, w, h)
+    }
+
+    /// THE STRAIGHT-LINE BUG. `coarse_dijkstra` returns the globally cheapest path and
+    /// every caller then ran `path_allowed` over it as a POST-FILTER, so a lane whose
+    /// cheapest line cut across the bay had the whole route discarded and fell back to
+    /// a dashed straight line — while the coastal route round the bay existed the
+    /// entire time and was never searched for. Tightening the crossing cap made this
+    /// fire MORE often, not less.
+    ///
+    /// The gate asserts both halves on ONE fixture, so it cannot pass vacuously: the
+    /// old approach (search then filter) must FAIL here, and the new one
+    /// (`coarse_dijkstra_legal`, the rule as an edge condition) must return a real
+    /// route that respects the cap.
+    #[test]
+    fn a_lane_follows_the_coast_instead_of_being_thrown_away() {
+        let (db, ax, bx, w, h) = bay_world();
+        let conn = db.conn.lock().unwrap();
+        let world = db.cached_tiles_with_conn(&conn).unwrap();
+        let cc = cached_coarse_cost(&db, &world, world.fingerprint, w, h, "", false, true, 0.0, -1, 12).unwrap();
+        let cell = |x: f32, y: f32| -> usize {
+            let cx = ((x / cc.f as f32) as i32).clamp(0, cc.cw - 1);
+            let cy = ((y / cc.f as f32) as i32).clamp(0, cc.ch - 1);
+            (cy * cc.cw + cx) as usize
+        };
+        let (s, g) = (cell(ax, 5.0), cell(bx, 5.0));
+        let asked = MAX_OPEN_SEA_CROSSING_KM / KM_EQUATOR;
+
+        // 1) The OLD behaviour must genuinely fail here, or this fixture proves nothing.
+        let cheapest = coarse_dijkstra(&cc, s, g).expect("the two headlands must be connected at all");
+        assert!(
+            !path_allowed(&cc, &cheapest, 1, asked, w),
+            "fixture is not exercising the bug: the cheapest path already clears the \
+             crossing rule, so search-then-filter would have kept it"
+        );
+
+        // 2) The NEW search must find the coastal route the old one discarded.
+        let legal = coarse_dijkstra_legal(&cc, s, g, 1, asked, w)
+            .expect("a route round the head of the bay exists and must be found");
+        assert!(
+            path_allowed(&cc, &legal, 1, asked, w),
+            "the searched route must satisfy the very rule it searched under"
+        );
+        // …and it must actually go ROUND, not across: the detour is longer than the
+        // rejected straight line, which is what following a coast costs.
+        assert!(
+            legal.len() > cheapest.len(),
+            "a coastal detour must be longer than the straight crossing it replaces \
+             (legal {} cells vs cheapest {})",
+            legal.len(), cheapest.len()
+        );
+    }
+
     #[test]
     fn no_caller_can_ask_its_way_across_an_ocean() {
         let km_per_cell = KM_EQUATOR / 3600.0;
