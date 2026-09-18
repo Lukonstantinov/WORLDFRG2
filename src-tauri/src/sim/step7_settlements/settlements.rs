@@ -31,6 +31,19 @@ pub struct Settlement {
     /// so the UI can say "you changed this" even for an otherwise-ordinary
     /// generated town.
     #[serde(default)] pub edited: bool,
+    // ── PLACES_DEMAND_AND_GROWTH_PLAN.md slices 1-3 (F1/F2/F5) ──
+    /// True for a REGIONAL CENTRE — a place goods pass through, not merely a
+    /// fertile local maximum — marked by `mark_primary_settlements` (a
+    /// trade-access-weighted, WIDELY-spaced pass over the already-generated
+    /// site list) or set explicitly by a hand-placed "province capital"
+    /// (the UI flag, D3). Provinces seed from PRIMARIES ONLY when any exist
+    /// (`generate_provinces`), so a capital two valleys over can never steal
+    /// a lesser town's province. `#[serde(default)]` — an old save (or any
+    /// settlement list built before this slice) loads every settlement as
+    /// `false`, which `generate_provinces` reads as "no primaries marked"
+    /// and falls back to seeding from the WHOLE list — its pre-slice-2
+    /// behaviour, unchanged.
+    #[serde(default)] pub primary: bool,
 }
 
 /// Classify a cell's site type from terrain (for settlement labels / search rows).
@@ -497,6 +510,64 @@ pub fn compute_food_capacity(buf: &WorldBuffer, rivers: &[River]) -> Vec<f32> {
     food
 }
 
+/// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 1 (F1) — mark a widely-spaced,
+/// TRADE-weighted subset of `settlements` as `.primary` (regional centres),
+/// in place. Deliberately a POST-HOC classification over the already-final
+/// site list (unchanged positions/populations/counts) rather than a second
+/// generation pass with its own spacing law: the settlement list itself,
+/// and every gate/consumer downstream of it (Earth fidelity has none, but
+/// goods catchments, routes, and settlement counts all do), stays exactly
+/// what it was before this slice — only which sites carry `primary = true`
+/// is new.
+///
+/// Ranks by `0.65 * access + 0.35 * habitability score` — access (coast /
+/// river-mouth / navigable / crossroads) dominates, per the plan's own "a
+/// regional centre is a place goods pass through; a fertile valley is not
+/// automatically one" — and greedily takes the highest scorers under a WIDE
+/// spacing radius (`PRIMARY_SPACING_MULT × min_dist`, deliberately NOT
+/// halved on a river cell the way ordinary/secondary spacing is — the plan
+/// is explicit that stringing several capitals down one valley is a
+/// SECONDARY behaviour). Always marks at least one settlement (the single
+/// highest scorer) on a non-empty list, so `generate_provinces` never sees
+/// zero primaries on a real world.
+const PRIMARY_SPACING_MULT: i32 = 5;
+
+pub(crate) fn mark_primary_settlements(settlements: &mut [Settlement], w: u32, min_dist: i32, access_scores: &[f32]) {
+    if settlements.is_empty() { return; }
+    let primary_min_dist = (min_dist * PRIMARY_SPACING_MULT).max(min_dist + 1);
+    let req2 = (primary_min_dist as i64) * (primary_min_dist as i64);
+    let mut ranked: Vec<(usize, f32)> = (0..settlements.len())
+        .map(|i| {
+            let access = access_scores.get(i).copied().unwrap_or(0.0);
+            (i, 0.65 * access + 0.35 * settlements[i].score)
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a.0.cmp(&b.0)));
+    let mut chosen: Vec<(i32, i32)> = Vec::new();
+    for &(i, _) in &ranked {
+        let (sx, sy) = (settlements[i].x as i32, settlements[i].y as i32);
+        let far = chosen.iter().all(|&(ex, ey)| {
+            let mut dx = (sx - ex).abs();
+            if dx > w as i32 / 2 { dx = w as i32 - dx; }
+            let dy = sy - ey;
+            (dx * dx + dy * dy) as i64 >= req2
+        });
+        if far {
+            settlements[i].primary = true;
+            chosen.push((sx, sy));
+        }
+    }
+    // Guarantee: a non-empty list always has at least one primary — the
+    // single highest ranked site, even if it somehow lost the spacing pass
+    // (it never should, being first, but this is the load-bearing invariant
+    // `generate_provinces` relies on, so it is asserted structurally here
+    // rather than merely expected).
+    if chosen.is_empty() {
+        if let Some(&(i, _)) = ranked.first() { settlements[i].primary = true; }
+    }
+}
+
 /// Generate settlements at local maxima of habitability, then size each by
 /// EMERGENT carrying capacity: the food its catchment (farmland + fisheries) can
 /// feed, plus a trade-access premium (ports / navigable rivers / crossroads).
@@ -652,6 +723,12 @@ pub fn generate_settlements(
     let mid = (min_dist * 4) as i64;
     let mid2 = mid * mid;
     let mut settlements: Vec<Settlement> = Vec::with_capacity(sites.len());
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 1 (F1) — each base site's own
+    // `access` (coast + river-mouth/nav + crossroads), captured here so
+    // `mark_primary_settlements` below can rank REGIONAL CENTRES by the same
+    // trade term this loop already computes, without a second field or a
+    // second pass over the world.
+    let mut access_scores: Vec<f32> = Vec::with_capacity(sites.len());
     for (si, &(idx, sx, sy, score)) in sites.iter().enumerate() {
         let near_coast = buf.distance_to_ocean[idx] < 0.05;
         let mouth = mouth_mask[idx];
@@ -670,6 +747,7 @@ pub fn generate_settlements(
             + (if mouth { 0.45 } else if nav { 0.3 } else { 0.0 })
             + 0.3 * crossroads)
             .clamp(0.0, 1.0);
+        access_scores.push(access);
 
         let pop_agri = k_food[si] * FOOD_TO_POP;
         // Extra multiplicative port premium so a great natural harbour (coast +
@@ -724,11 +802,20 @@ pub fn generate_settlements(
             culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
             region: crate::sim::names::region_name(sx, sy, w, h),
             site: site_label(buf, idx, is_river_cell[idx]).to_string(),
-            manual: false, edited: false,
+            manual: false, edited: false, primary: false,
         });
     }
 
-    // â”€â”€ Trading outposts â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 1 (F1) — mark REGIONAL CENTRES
+    // among the base sites just generated: a trade-access-weighted, WIDELY
+    // spaced greedy pass over the same list, run AFTER generation rather
+    // than as a literal separate pass, so it can never change a single
+    // settlement's position, population or count — only which ones carry
+    // `.primary = true`. Outposts and trade/junction sites (below) are
+    // never primary; they are small supply nodes, not regional centres.
+    mark_primary_settlements(&mut settlements, w, min_dist, &access_scores);
+
+    // ── Trading outposts ─â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     // Small supply-settlements (same Settlement type, tiny population) in the
     // HARSH zones where ordinary towns won't form â€” hot deserts and cold
     // subarctic/tundra â€” but where a resource worth shipping downstream exists (a
@@ -813,7 +900,7 @@ pub fn generate_settlements(
                 culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
                 region: crate::sim::names::region_name(sx, sy, w, h),
                 site: site_label(buf, idx, river_near[idx]).to_string(),
-                manual: false, edited: false,
+                manual: false, edited: false, primary: false,
             });
         }
     }
@@ -1055,7 +1142,7 @@ pub fn generate_trade_sites(
             culture: crate::sim::names::culture_label(sx, sy, w, h).to_string(),
             region: crate::sim::names::region_name(sx, sy, w, h),
             site: "port".to_string(),
-            manual: false, edited: false,
+            manual: false, edited: false, primary: false,
         });
     }
     out
@@ -1079,6 +1166,10 @@ pub fn generate_trade_sites(
 /// pass would use.
 pub fn place_settlement_at(
     buf: &WorldBuffer, x: u32, y: u32, rivers: &[River], existing: &[(u32, u32)],
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 3b (D3) — an EXPLICIT UI choice,
+    // never an implicit "manual ⇒ capital" rule: a hand-placed settlement is
+    // marked `.primary` only when the placer chose "province capital".
+    is_capital: bool,
 ) -> Result<Settlement, String> {
     let w = buf.width;
     let h = buf.height;
@@ -1174,7 +1265,7 @@ pub fn place_settlement_at(
         culture: crate::sim::names::culture_label(x, y, w, h).to_string(),
         region: crate::sim::names::region_name(x, y, w, h),
         site: site_label(buf, idx, is_river_cell[idx]).to_string(),
-        manual: true, edited: false,
+        manual: true, edited: false, primary: is_capital,
     })
 }
 

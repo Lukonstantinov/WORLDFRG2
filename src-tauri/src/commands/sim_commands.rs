@@ -725,7 +725,12 @@ pub fn sim_run_all(
     // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
     // province-granularity slider, read back instead of hardcoded.
     let province_granularity = meta_f32(&conn, "province_granularity", 0.5);
-    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, province_granularity)?;
+    let province_result = generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, province_granularity)?;
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) / rule 34 — a run-all
+    // must fold any newly-founded province seats into the settlement list
+    // it returns, or they exist only in the persisted province metadata and
+    // never become a real place on the map/routes/goods catchments.
+    generated_settlements.extend(province_result.founded_settlements);
 
     let modified = buf.save(&conn, "Full world generation")?;
 
@@ -1137,7 +1142,10 @@ pub fn sim_run_all_from_terrain(
     // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
     // province-granularity slider, read back instead of hardcoded.
     let province_granularity = meta_f32(&conn, "province_granularity", 0.5);
-    generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, province_granularity)?;
+    let province_result = generate_and_persist_provinces(&conn, &buf, &extracted_rivers, &generated_settlements, province_granularity)?;
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) / rule 34 — see the
+    // identical fold in `sim_run_all`.
+    generated_settlements.extend(province_result.founded_settlements);
 
     let modified = buf.save(&conn, "Full generation from template")?;
 
@@ -1264,13 +1272,19 @@ pub fn sim_generate_settlements(
 /// queries elsewhere.
 #[tauri::command]
 pub fn place_settlement_at(
-    x: u32, y: u32, rivers_json: String, existing_json: String, db: State<'_, WorldDb>,
+    x: u32, y: u32, rivers_json: String, existing_json: String,
+    #[allow(unused_variables)] is_capital: Option<bool>,
+    db: State<'_, WorldDb>,
 ) -> Result<settlements::Settlement, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_SETTLEMENTS)?;
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json).unwrap_or_default();
     let existing: Vec<(u32, u32)> = serde_json::from_str(&existing_json).unwrap_or_default();
-    settlements::place_settlement_at(&buf, x, y, &river_data, &existing)
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 3b (D3) — `Option<bool>` so an
+    // older frontend build (or any other existing caller) that doesn't pass
+    // this argument still compiles against the same command name and reads
+    // as "town", not "capital" — the safe default.
+    settlements::place_settlement_at(&buf, x, y, &river_data, &existing, is_capital.unwrap_or(false))
 }
 
 #[derive(serde::Serialize)]
@@ -1354,6 +1368,13 @@ pub struct SimProvincesResult {
     /// tiny). Decoded on the frontend to a full grid_w×grid_h map → pixel-exact borders
     /// that follow the coastline, with no cell grid.
     pub raster_rle: Vec<u32>,
+    /// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — any NEWLY FOUNDED
+    /// province seats (one per province that had no settlement of its own),
+    /// so the caller can fold them into its own settlement list — the same
+    /// "generating data is not loading it" discipline rule 34 already
+    /// established for `generate_and_persist_provinces`'s own callers.
+    /// Empty on the ordinary case where every province already had a seat.
+    pub founded_settlements: Vec<settlements::Settlement>,
 }
 
 /// Run-length encode a full-resolution province-id map into a flat `[val, count, …]`
@@ -1512,7 +1533,7 @@ fn generate_and_persist_provinces(
 
     let lakes = load_lakes(conn, buf, &hydro.filled);
 
-    let (provinces, province_id) = crate::sim::provinces::generate_provinces(
+    let (provinces, province_id, founded_settlements) = crate::sim::provinces::generate_provinces(
         buf, river_data, &lakes, settle, granularity);
 
     const KM_EQUATOR: f32 = 40075.0;
@@ -1551,7 +1572,7 @@ fn generate_and_persist_provinces(
     let rle_blob = serde_json::to_string(&(w, h, &raster_rle)).map_err(|e| e.to_string())?;
     metadata::set_meta(conn, "province_raster_rle", &rle_blob).map_err(|e| e.to_string())?;
 
-    Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h, raster_rle })
+    Ok(SimProvincesResult { provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h, raster_rle, founded_settlements })
 }
 
 /// Partition all land into provinces (watershed / cost-flood). Seeds from the
@@ -1610,7 +1631,10 @@ pub fn get_province_layer(db: State<'_, WorldDb>) -> Result<SimProvincesResult, 
             .unwrap_or((0, 0, Vec::new()));
     crate::sim::provinces::migrate_rle_sentinel(&mut raster_rle);
     let provinces = strip_manufactured_from_province_goods(&conn, provinces);
-    Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle })
+    // A re-open reads the ALREADY-persisted layer, which already merged any
+    // founded seats into the world's own settlement list at generation time —
+    // never re-founded here.
+    Ok(SimProvincesResult { provinces, raster, raster_w, raster_h, grid_w, grid_h, raster_rle, founded_settlements: Vec::new() })
 }
 
 /// What `repair_province_settlements` changed.
@@ -1813,6 +1837,7 @@ pub fn sim_merge_small_provinces(
     Ok(SimProvincesResult {
         provinces: new_provinces, raster, raster_w: rw, raster_h: rh,
         grid_w: w, grid_h: h, raster_rle,
+        founded_settlements: Vec::new(), // a merge founds nothing new
     })
 }
 
@@ -1904,6 +1929,7 @@ pub fn sim_split_large_provinces(
     Ok(SimProvincesResult {
         provinces: new_provinces, raster, raster_w: rw, raster_h: rh,
         grid_w: w, grid_h: h, raster_rle,
+        founded_settlements: Vec::new(), // a split founds nothing new
     })
 }
 

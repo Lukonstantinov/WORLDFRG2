@@ -2373,6 +2373,11 @@ export interface Settlement {
   // GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — the settlement editor.
   manual?: boolean; // hand-placed via placeSettlementAt, not from a generated batch
   edited?: boolean; // any field of a generated settlement has been hand-overridden
+  // PLACES_DEMAND_AND_GROWTH_PLAN.md slices 1-3 — a REGIONAL CENTRE (a place
+  // goods pass through), marked by the generator's trade-weighted, widely-
+  // spaced pass, or set explicitly by a hand-placed "province capital".
+  // Provinces seed from primaries only when any exist.
+  primary?: boolean;
 }
 
 /** #26 · a named geographic feature. Mirrors the Rust `Toponym` struct.
@@ -2601,6 +2606,12 @@ export interface SimProvincesResult {
   grid_h: number;
   /** Full-resolution province-id map, run-length encoded as [val, count, …]. */
   raster_rle: number[];
+  /** PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 — any newly FOUNDED province
+   *  seats (one per province that had no settlement of its own). The caller
+   *  must fold these into its own settlement array (rule 34's own
+   *  "generating data is not loading it" discipline) — empty on the
+   *  ordinary case where every province already had a seat. */
+  founded_settlements: Settlement[];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

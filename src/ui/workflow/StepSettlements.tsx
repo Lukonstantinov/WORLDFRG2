@@ -25,6 +25,8 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
   const setSettlementRealism = useUIStore((s) => s.setSettlementRealism);
   const settlementCap = useUIStore((s) => s.settlementCap);
   const setSettlementCap = useUIStore((s) => s.setSettlementCap);
+  const placeSettlementIsCapital = useUIStore((s) => s.placeSettlementIsCapital);
+  const setPlaceSettlementIsCapital = useUIStore((s) => s.setPlaceSettlementIsCapital);
   const focusOn = useViewportStore((s) => s.focusOn);
   const { rivers, settlements, setSettlements, setProvinces, provinces } = useWorldStore();
 
@@ -123,8 +125,16 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
     try {
       const res = await simGenerateProvinces(settlements, rivers, provGranularity);
       setProvinces(res.provinces, decodeProvinceRaster(res));
+      // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — rule 34's own
+      // "generating data is not loading it": a filler province with no
+      // settlement of its own gets a real FOUNDED seat back from the
+      // backend, which must be folded into the settlement list here or it
+      // never becomes a real place beyond owning the province's coordinates.
+      const founded = res.founded_settlements ?? [];
+      if (founded.length > 0) setSettlements([...settlements, ...founded]);
       setOverlayVisible("provinces", true);
-      setStatus(`Generated ${res.provinces.length} provinces`);
+      setStatus(`Generated ${res.provinces.length} provinces`
+        + (founded.length > 0 ? ` (founded ${founded.length} new seat${founded.length === 1 ? "" : "s"})` : ""));
     } catch (e) {
       setStatus(`Province generation failed: ${e}`);
     } finally {
@@ -201,12 +211,23 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
           appropriate name, population derived from the same food-capacity
           chain a generated site uses) — editing below is opt-in on top. */}
       {step6Done && (
-        <button onClick={() => setTool(activeTool === "placeSettlement" ? "select" : "placeSettlement")}
-          style={{ ...genBtn, marginBottom: 0,
-            background: activeTool === "placeSettlement" ? "#2a5080" : undefined,
-            color: activeTool === "placeSettlement" ? "#fff" : undefined }}>
-          {activeTool === "placeSettlement" ? "📍 Click the map to place…" : "📍 Place Settlement"}
-        </button>
+        <>
+          <button onClick={() => setTool(activeTool === "placeSettlement" ? "select" : "placeSettlement")}
+            style={{ ...genBtn, marginBottom: 0,
+              background: activeTool === "placeSettlement" ? "#2a5080" : undefined,
+              color: activeTool === "placeSettlement" ? "#fff" : undefined }}>
+            {activeTool === "placeSettlement" ? "📍 Click the map to place…" : "📍 Place Settlement"}
+          </button>
+          {/* PLACES_DEMAND_AND_GROWTH_PLAN.md slice 3b (D3) — an EXPLICIT
+              choice, never an implicit "manual ⇒ capital" rule: this settlement
+              only guarantees its own province (marked `.primary`) when the
+              placer says so. */}
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#7a8aa0", marginTop: 2 }}>
+            <input type="checkbox" checked={placeSettlementIsCapital}
+              onChange={(e) => setPlaceSettlementIsCapital(e.target.checked)} />
+            Place as province capital
+          </label>
+        </>
       )}
 
       {settlements.length > 0 && (

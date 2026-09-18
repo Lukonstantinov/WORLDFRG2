@@ -106,7 +106,7 @@ fn reference_world(w: u32, h: u32, seed: u64) -> (
     let settled = settlements::generate_settlements(&buf, &habitability, &extracted_rivers, seed, 0.95, None);
     settlements::write_habitability(&mut buf, &habitability);
 
-    let (_provinces, province_id) = provinces::generate_provinces(&buf, &extracted_rivers, &lakes, &settled, 0.5);
+    let (_provinces, province_id, _founded) = provinces::generate_provinces(&buf, &extracted_rivers, &lakes, &settled, 0.5);
 
     biological::compute_shark_risk(&mut buf, &extracted_rivers);
     biological::compute_shipworm_risk(&mut buf, &extracted_rivers);

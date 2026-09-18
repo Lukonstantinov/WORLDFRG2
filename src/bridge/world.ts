@@ -255,11 +255,16 @@ export async function simGenerateSettlements(
 // generated one uses. Read-only on the backend; the caller adds the result to
 // its own settlement array. `existing` is the settlement list already held
 // (for a real crossroads/access read against real neighbours).
+// PLACES_DEMAND_AND_GROWTH_PLAN.md slice 3b (D3) — `isCapital` is an EXPLICIT
+// choice, never inferred from `manual`: a hand-placed settlement is marked
+// `.primary` (a province capital, guaranteed its own province seed) only
+// when the placer chose that, never merely because it was hand-placed.
 export async function placeSettlementAt(
   x: number, y: number, riversJson: string, existing: { x: number; y: number }[],
+  isCapital = false,
 ): Promise<import("@types").Settlement> {
   const existingJson = JSON.stringify(existing.map((s) => [s.x, s.y]));
-  return invoke("place_settlement_at", { x, y, riversJson, existingJson });
+  return invoke("place_settlement_at", { x, y, riversJson, existingJson, isCapital });
 }
 
 export async function simBiological(

@@ -49,6 +49,7 @@ export function ProvincePanel() {
   const settlements = useWorldStore((s) => s.settlements);
   const rivers = useWorldStore((s) => s.rivers);
   const setProvinces = useWorldStore((s) => s.setProvinces);
+  const setSettlements = useWorldStore((s) => s.setSettlements);
 
   const [sort, setSort] = useState<SortKey>("total");
   const [desc, setDesc] = useState(true);
@@ -220,9 +221,15 @@ export function ProvincePanel() {
     try {
       const res = await simGenerateProvinces(settlements, rivers, granularity);
       setProvinces(res.provinces, decodeProvinceRaster(res));
+      // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — see StepSettlements'
+      // own copy of this comment: a filler province's founded seat must be
+      // folded into the settlement list or it's not a real place.
+      const founded = res.founded_settlements ?? [];
+      if (founded.length > 0) setSettlements([...settlements, ...founded]);
       setOverlayVisible("provinces", true);
       setSelId(res.provinces[0]?.id ?? null);
-      setStatus(`Generated ${res.provinces.length} provinces`);
+      setStatus(`Generated ${res.provinces.length} provinces`
+        + (founded.length > 0 ? ` (founded ${founded.length} new seat${founded.length === 1 ? "" : "s"})` : ""));
     } catch (e) {
       setStatus(`Province generation failed: ${e}`);
     } finally {

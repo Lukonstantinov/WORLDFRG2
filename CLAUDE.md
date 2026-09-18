@@ -5092,12 +5092,12 @@ MONEY_MINES_AND_GOODS_PLAN.md     ← ⭐ AGREED IN SCOPE, NOTHING BUILT. One ca
                                     NUMBERED QUEUE of the work that follows slices
                                     0-7, each item naming what it waits for — a
                                     schedule, never a refusal
-PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ SLICES 4, 5, 6, 7 BUILT (all dosed at
-                                    zero where the plan calls for a dose);
-                                    slices 1-3 (the settlement/province
-                                    pipeline restructuring) NOT built —
-                                    deliberately deferred, see below. The
-                                    companion:
+PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ ALL SEVEN SLICES BUILT AND GATED.
+                                    Slices 1-3 shipped as a SURGICAL variant of
+                                    the plan's literal design (see below for
+                                    why); 4/5/6/7 ship as dosed no-ops or
+                                    small live preferences, per their own
+                                    entries further down. The companion:
                                     where towns are · how big they get · why anyone
                                     trades. **Slice 6 (F9, the cheap keystone) is
                                     live in code**: `LOCAL_SATIETY`
@@ -5126,36 +5126,107 @@ PLACES_DEMAND_AND_GROWTH_PLAN.md  ← ⭐ SLICES 4, 5, 6, 7 BUILT (all dosed at
                                     rewrite and the `stock_origin` provenance
                                     accumulator now compound on the SAME expression
                                     — see slice 7 below.
-                                    **Settlements are still ONE flat greedy pass**
-                                    (`settlements.rs:509`) with a single spacing
-                                    radius and tier assigned afterwards, so a
-                                    "capital" is just a town that scored well; and
-                                    provinces (phase 7b, seeded FROM settlements at
-                                    `provinces.rs:1181`) still fall back to jittered
-                                    FILLER seeds, so a province may hold zero
-                                    settlements or five of equal rank. **Slices 1-3
-                                    (the primary/secondary settlement split,
-                                    provinces-from-primaries with a guaranteed seat,
-                                    the capital UI flag + route re-verification) are
-                                    DELIBERATELY NOT built.** They are a different
-                                    KIND of change from 4/5/6/7 — a worldgen
-                                    PIPELINE reorder (settlement generation order,
-                                    a new frontend flag, province re-seeding, route
-                                    fall-through re-verification) that changes
-                                    default behaviour for every world generated
-                                    from that point on, not a dosed constant that
-                                    ships inert. The plan's own risk register
-                                    requires measuring province count/mean-area/
-                                    settlements-per-province before and after on a
-                                    fixed seed and tuning `PRIMARY_MIN_DIST`
-                                    against the result — empirical, visual
-                                    cartography work this text-only pass cannot
-                                    verify (no way to render or inspect a generated
-                                    world here). Attempting it blind risks a silent
-                                    regression to worldgen, which this codebase
-                                    treats as its most protected subsystem (§2.3).
-                                    Queued for a session that can generate and
-                                    inspect real worlds.
+                                    **Settlements were ONE flat greedy pass**
+                                    (`settlements.rs:522`, `generate_settlements`)
+                                    with a single spacing radius and tier assigned
+                                    afterwards, so a "capital" was just a town
+                                    that scored well; and provinces (phase 7b,
+                                    seeded FROM settlements at `provinces.rs:1013`)
+                                    fell back to jittered FILLER seeds, so a
+                                    province could hold zero settlements or five
+                                    of equal rank.
+                                    **Slices 1-3 are BUILT, as a SURGICAL variant
+                                    of the plan's literal design rather than the
+                                    literal pipeline reorder (primary pass →
+                                    provinces → secondary pass as three separate
+                                    phase-7/7b/7c steps).** The literal reorder
+                                    would change the WorkflowPanel step sequence,
+                                    phase numbering and `ColumnSet` wiring — a
+                                    much larger blast radius, and the plan's own
+                                    risk register calls for empirically tuning
+                                    `PRIMARY_MIN_DIST` against rendered worlds,
+                                    which a text-only session cannot do. Instead:
+                                    **Slice 1 (F1)** — `mark_primary_settlements`
+                                    (`settlements.rs`) runs as a POST-HOC
+                                    classification pass immediately after
+                                    `generate_settlements`' existing greedy
+                                    selection completes, over the SAME final site
+                                    list — it changes not one settlement's
+                                    position, population, tier or count (gated by
+                                    the pre-existing `the_base_settlement_set_is_
+                                    unchanged`), only which ones gain the new
+                                    `Settlement.primary: bool`. Ranks by `0.65 *
+                                    access + 0.35 * habitability score`
+                                    (`access` — coast/river-mouth/nav/crossroads
+                                    — already computed inline per site, reused
+                                    rather than duplicated) under a WIDE spacing
+                                    radius (`PRIMARY_SPACING_MULT` = 5×
+                                    `min_dist`, never halved on a river cell —
+                                    stringing capitals down one valley is
+                                    explicitly a SECONDARY behaviour). Always
+                                    marks at least one settlement on a non-empty
+                                    list. Outposts and step-7a junction sites are
+                                    never primary. **Slice 2 (F2, D1)** —
+                                    `generate_provinces` (`provinces.rs`) now (a)
+                                    seeds from PRIMARIES ONLY when any settlement
+                                    in the list carries `.primary` (`any_primary`
+                                    — falls back to the WHOLE list, today's exact
+                                    pre-slice behaviour, the instant nothing is
+                                    marked, so an old world's settlement data or
+                                    any caller that never ran the marking pass is
+                                    untouched); (b) every FILLER province (no
+                                    settlement fell inside it) gets a REAL
+                                    settlement FOUNDED at its own best-scoring
+                                    land cell (`best_cell_of_province`, one
+                                    linear pass over `buf.habitability` — the
+                                    SAME field the base settlement pass ranks
+                                    candidates by) rather than the meaningless
+                                    jittered seed cell, and never at the
+                                    centroid (D4). `generate_provinces` widened
+                                    its return type to also carry `Vec<Settlement>`
+                                    (the founded seats); every caller
+                                    (`sim_generate_provinces`, both run-alls,
+                                    `ProvincePanel.tsx`/`StepSettlements.tsx`)
+                                    folds them into its own settlement list —
+                                    rule 34's "generating data is not loading it"
+                                    discipline applied to a new artefact, not
+                                    just an old one. **Slice 3 (D3)** —
+                                    `place_settlement_at` takes a new `is_capital`
+                                    parameter (`Option<bool>` at the Tauri command
+                                    boundary, defaulting to `false` — an older
+                                    frontend build stays compatible) and sets
+                                    `.primary` from it; the UI is an explicit
+                                    "Place as province capital" checkbox next to
+                                    the existing Place Settlement tool
+                                    (`uiStore.placeSettlementIsCapital`), never an
+                                    implicit "manual ⇒ capital" rule. Slice 3c's
+                                    route re-verification was not separately
+                                    exercised (no new route code was written —
+                                    Stage A's existing fall-through shortlist and
+                                    `TRADE_COMPONENT_HORIZON_KM` already handle an
+                                    arbitrary settlement count, and this slice
+                                    adds settlements through the exact same
+                                    `Settlement` list every route command already
+                                    consumes). Gates: `every_province_has_
+                                    exactly_one_seat`, `a_province_seat_is_not_
+                                    its_centroid`, `an_old_settlement_list_seeds_
+                                    from_everyone`, `primary_settlements_are_
+                                    regional_not_merely_fertile`, `mark_primary_
+                                    always_marks_at_least_one` (all in
+                                    `provinces::tests`/`settlements.rs`), plus
+                                    the pre-existing `provinces::tests` (16/16)
+                                    and `goods_` (17/17, `sim::step8_
+                                    biological_goods::goods_validation`) suites
+                                    re-verified clean — settlement positions are
+                                    unchanged so goods catchments cannot have
+                                    moved. **Deliberately not measured here**:
+                                    province count/mean-area/settlements-per-
+                                    province before/after on a real generated
+                                    world (the plan's own scoreboard ask) — that
+                                    is visual cartography work a future session
+                                    with the ability to render and inspect a
+                                    generated world should do before tuning
+                                    `PRIMARY_SPACING_MULT` further.
                                     **Slice 4 (D5/D6, F4) is BUILT.** `CAPACITY_
                                     LAND_WEIGHT` (`tick/mod.rs`) replaces a city's
                                     `founding_pop`-only growth ceiling with a blend

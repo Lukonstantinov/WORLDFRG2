@@ -1016,7 +1016,14 @@ pub fn generate_provinces(
     lakes: &[Lake],
     settlements: &[Settlement],
     granularity: f32,
-) -> (Vec<Province>, Vec<u32>) {
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — the return also
+    // carries any newly-FOUNDED seats (`Vec<Settlement>`), one per province
+    // that had no settlement of its own; a caller must fold these into its
+    // own settlement list (routes, goods catchments, campaign start) or
+    // they simply won't be a real place beyond owning the province's seat
+    // coordinates. Always empty when `settlements` already covers every
+    // province — the ordinary case once slice 1's primaries exist.
+) -> (Vec<Province>, Vec<u32>, Vec<Settlement>) {
     let w = buf.width;
     let h = buf.height;
     let wi = w as i32;
@@ -1179,9 +1186,21 @@ pub fn generate_provinces(
     };
     let mut seed_cells: Vec<u32> = Vec::new();
     let mut is_seed = vec![false; total];
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2, D1) — seed from PRIMARIES
+    // ONLY when the settlement list carries any (`mark_primary_settlements`
+    // or a hand-placed "province capital"), so a secondary town two valleys
+    // over can never steal a regional capital's own province. Falls back to
+    // the WHOLE list — today's exact pre-slice-2 behaviour — the moment no
+    // settlement is marked primary: an old save's settlement list, a world
+    // whose settlements predate this slice, or any other caller that never
+    // ran `mark_primary_settlements` all read here as "no primaries", never
+    // as "an empty world".
+    let any_primary = settlements.iter().any(|s| s.primary);
     // Biggest cities first so the important ones win a seat; nearby smaller towns are
     // absorbed into that province (a metro region = ONE province with several towns).
-    let mut sorted_settle: Vec<&Settlement> = settlements.iter().collect();
+    let mut sorted_settle: Vec<&Settlement> = settlements.iter()
+        .filter(|s| !any_primary || s.primary)
+        .collect();
     sorted_settle.sort_by(|a, b| b.population.cmp(&a.population).then_with(|| a.id.cmp(&b.id)));
     for s in sorted_settle {
         let i = buf.idx(s.x.min(w - 1), s.y.min(h - 1));
@@ -1233,7 +1252,7 @@ pub fn generate_provinces(
         }
         gy += bspacing;
     }
-    if seed_cells.is_empty() { return (Vec::new(), vec![NO_PROVINCE; total]); }
+    if seed_cells.is_empty() { return (Vec::new(), vec![NO_PROVINCE; total], Vec::new()); }
 
     // ── Multi-source cost-flood (Dijkstra) over land. Sets province COUNT, SIZE and
     //    TOPOLOGY; the border LINES are re-placed afterwards by the snap stage. ──
@@ -1410,7 +1429,7 @@ pub fn generate_provinces(
         province_id[c] = nid;
     }
     let n = old_to_new.len();
-    if n == 0 { return (Vec::new(), province_id); }
+    if n == 0 { return (Vec::new(), province_id, Vec::new()); }
     // Map new id → an old owner value (to recover the seed cell for naming).
     let mut new_to_old = vec![0u32; n];
     for (&old, &nid) in old_to_new.iter() { new_to_old[nid as usize] = old; }
@@ -1439,7 +1458,7 @@ pub fn generate_provinces(
         province_id[c] = nid;
     }
     let n = remap2.len();
-    if n == 0 { return (Vec::new(), province_id); }
+    if n == 0 { return (Vec::new(), province_id, Vec::new()); }
     let new_to_old = {
         let mut nto = vec![0u32; n];
         for (&old, &nid) in remap2.iter() { nto[nid as usize] = new_to_old[old as usize]; }
@@ -1555,6 +1574,31 @@ pub fn generate_provinces(
         b.sort_by(|x, y| y.cells.cmp(&x.cells).then_with(|| x.neighbor.cmp(&y.neighbor)));
     }
 
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — the best-scoring LAND
+    // cell inside EACH province's own footprint, one linear pass over the
+    // whole raster (never per-province — that would be O(n_provinces ×
+    // total) on a world that can hold hundreds of provinces). Feeds the
+    // GUARANTEED SEAT below: a filler province (no settlement fell inside
+    // it) gets a real settlement founded here — not at its jittered seed
+    // cell (meaningless — a filler seed is an artefact of the flood, not a
+    // judgement about where people would actually settle) and not at its
+    // centroid (D4 — "never recentred"; a real town sits where the land is
+    // good, which is rarely dead centre of an irregular province). Reuses
+    // `buf.habitability`, the SAME field `generate_settlements` itself
+    // ranks candidates by, so a founded seat is chosen by the identical
+    // standard a real settlement would be.
+    let mut best_cell_of_province: Vec<(f32, u32)> = vec![(-1.0, u32::MAX); n];
+    if !buf.habitability.is_empty() {
+        for c in 0..total {
+            if buf.terrain[c] != 1 || is_lake[c] { continue; }
+            let pid = province_id[c];
+            if pid == NO_PROVINCE { continue; }
+            let hab = buf.habitability[c] as f32 / 255.0;
+            let slot = &mut best_cell_of_province[pid as usize];
+            if hab > slot.0 { *slot = (hab, c as u32); }
+        }
+    }
+
     // Settlements per province (seat = largest population).
     let mut prov_settlements: Vec<Vec<(String, u32)>> = vec![Vec::new(); n];
     for s in settlements {
@@ -1566,6 +1610,14 @@ pub fn generate_provinces(
 
     let mut provinces: Vec<Province> = Vec::with_capacity(n);
     let mut used_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — every filler-seeded
+    // province (no settlement of ANY kind fell inside it) gets a REAL,
+    // founded settlement as its seat, collected here and returned alongside
+    // the provinces so every caller can fold it into the world's settlement
+    // list (the same discipline `generate_trade_sites`'s junction sites
+    // already established — an additional, additive settlement batch a
+    // caller appends, not a silent side effect).
+    let mut new_settlements: Vec<Settlement> = Vec::new();
     for pid in 0..n {
         let a = &accs[pid];
         if a.cells == 0 { continue; }
@@ -1587,7 +1639,9 @@ pub fn generate_provinces(
         // Desert/steppe share (Köppen BW*/BS* occupy codes 4..7).
         let arid_frac = (4..8).map(|k| a.koppen[k]).sum::<u32>() as f32 / a.cells as f32;
 
-        // Seat: largest settlement, else the seed cell.
+        // Seat: largest settlement, else a REAL settlement FOUNDED here (slice
+        // 2, F2) — never the bare seed cell, which is a jittered artefact of
+        // the flood with no claim to being where people would actually live.
         let mut towns = prov_settlements[pid].clone();
         towns.sort_by(|x, y| y.1.cmp(&x.1).then_with(|| x.0.cmp(&y.0)));
         let (seat_cell, settlement_ids): (u32, Vec<String>) = if !towns.is_empty() {
@@ -1598,7 +1652,40 @@ pub fn generate_provinces(
                 .unwrap_or_else(|| seed_of(new_to_old[pid]));
             (seat, towns.iter().map(|t| t.0.clone()).collect())
         } else {
-            (seed_of(new_to_old[pid]), Vec::new())
+            // The province's own best-scoring land cell (D4 — not the
+            // centroid, not the jittered seed) — falls back to the seed cell
+            // only when there is genuinely no habitability field to read
+            // (an old world, or a template/painted world with none computed
+            // yet), so this can never place a "founded" town on the wrong
+            // land for lack of data.
+            let (best_hab, best_c) = best_cell_of_province[pid];
+            let seat_c = if best_c != u32::MAX { best_c } else { seed_of(new_to_old[pid]) };
+            let sx0 = seat_c % w;
+            let sy0 = seat_c / w;
+            // A modest seed population from the province's OWN rural
+            // capacity — a founded seat is a real but small town, not
+            // instantly a metropolis; the campaign's own demography pass
+            // grows it from here exactly as it grows any other settlement.
+            let population = ((a.food as f32 * 18.0) * 0.05).clamp(80.0, 3000.0) as u32;
+            let size = if population >= 5_000 { "town" } else { "village" };
+            let name = crate::sim::names::gen_name_epithet(sx0, sy0, w, h, 0);
+            let id = format!("p-{}-{}", pid, new_settlements.len());
+            new_settlements.push(Settlement {
+                id: id.clone(),
+                x: sx0, y: sy0,
+                name,
+                size: size.to_string(),
+                population,
+                score: if best_c != u32::MAX { best_hab } else { 0.0 },
+                culture: crate::sim::names::culture_label(sx0, sy0, w, h).to_string(),
+                region: crate::sim::names::region_name(sx0, sy0, w, h),
+                site: (if buf.distance_to_ocean[seat_c as usize] < 0.05 { "coast" }
+                    else if river_any[seat_c as usize] { "river" }
+                    else if buf.elevation[seat_c as usize] > 0.40 { "hills" }
+                    else { "plain" }).to_string(),
+                manual: false, edited: false, primary: true,
+            });
+            (seat_c, vec![id])
         };
         let sx = seat_cell % w;
         let sy = seat_cell / w;
@@ -1750,7 +1837,7 @@ pub fn generate_provinces(
     // stats above untouched.
     assign_lakes_to_nearest(buf, &mut province_id, &is_lake);
 
-    (provinces, province_id)
+    (provinces, province_id, new_settlements)
 }
 
 /// Fill lake cells by nearest-shore province (multi-source BFS from every province-
@@ -2245,7 +2332,7 @@ mod tests {
         Settlement {
             id: id.to_string(), x, y, name: id.to_string(), size: "town".into(),
             population: pop, score: 1.0, culture: String::new(), region: String::new(),
-            site: String::new(), manual: false, edited: false,
+            site: String::new(), manual: false, edited: false, primary: false,
         }
     }
 
@@ -2318,8 +2405,8 @@ mod tests {
         let towns = vec![settle("a", 12, 12, 9000), settle("b", 60, 40, 7000),
                          settle("c", 80, 18, 5000)];
         let rivers = vec![river((0..TH).map(|y| (48u32, y)).collect(), 3.0, true, true)];
-        let (p1, r1) = generate_provinces(&buf, &rivers, &[], &towns, 0.5);
-        let (p2, r2) = generate_provinces(&buf, &rivers, &[], &towns, 0.5);
+        let (p1, r1, _) = generate_provinces(&buf, &rivers, &[], &towns, 0.5);
+        let (p2, r2, _) = generate_provinces(&buf, &rivers, &[], &towns, 0.5);
         assert_eq!(r1, r2, "per-cell province map must be identical across runs");
         assert_eq!(p1.len(), p2.len());
         for (a, b) in p1.iter().zip(p2.iter()) {
@@ -2347,7 +2434,7 @@ mod tests {
         // A rich, uniform good over the whole province footprint.
         buf.goods[0] = vec![220u8; buf.total()];
         let towns = vec![settle("a", 40, 32, 9000)];
-        let (provs_after, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        let (provs_after, _, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
         let belt_after = provs_after[0].good_belt[0];
         assert!(belt_after > 0.5,
             "a province generated AFTER the good is placed must read a rich belt, got {belt_after}");
@@ -2355,7 +2442,7 @@ mod tests {
         // The same world, but generated BEFORE the good is placed (the bug: an
         // identical buffer with the goods column still at its pre-Phase-8 zero).
         let buf_before = blank_world();
-        let (provs_before, _) = generate_provinces(&buf_before, &[], &[], &towns, 0.5);
+        let (provs_before, _, _) = generate_provinces(&buf_before, &[], &[], &towns, 0.5);
         let belt_before = provs_before[0].good_belt[0];
         assert!(belt_before <= crate::sim::tick::PROV_GOOD_ABSENT_BELT,
             "sanity: a province generated before any good exists must read as absent, got {belt_before}");
@@ -2376,7 +2463,7 @@ mod tests {
             }
         }
         let towns = vec![settle("a", 4, 10, 9000), settle("b", 52, 40, 6000)];
-        let (_, ids) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        let (_, ids, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
         let ridge = compute_ridge(&buf);
         let mask = border_mask(&buf, &ids);
 
@@ -2413,7 +2500,7 @@ mod tests {
         let pts: Vec<(u32, u32)> = (0..TH).map(|k| (k, k)).collect();
         let towns = vec![settle("a", 10, 40, 9000), settle("b", 60, 20, 6000)];
         let rivers = vec![river(pts.clone(), 4.0, true, true)];
-        let (_, ids) = generate_provinces(&buf, &rivers, &[], &towns, 0.4);
+        let (_, ids, _) = generate_provinces(&buf, &rivers, &[], &towns, 0.4);
         let mask = border_mask(&buf, &ids);
 
         let mut on_river = 0u32;
@@ -2457,7 +2544,7 @@ mod tests {
             }
         }
         let towns = vec![settle("a", 20, 20, 9000), settle("b", 60, 44, 4000)];
-        let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 0.35);
+        let (provs, ids, _) = generate_provinces(&buf, &[], &[], &towns, 0.35);
         assert!(provs.len() > 3, "need several provinces to compare, got {}", provs.len());
 
         for p in &provs {
@@ -2494,7 +2581,7 @@ mod tests {
             }
         }
         let towns = vec![settle("a", 12, 12, 9000), settle("b", 560, 380, 7000)];
-        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 1.0);
+        let (provs, _, _) = generate_provinces(&buf, &[], &[], &towns, 1.0);
         assert!(provs.len() > 20, "need a crowded map to exercise collisions, got {}", provs.len());
         let mut seen = std::collections::HashSet::new();
         for p in &provs {
@@ -2535,7 +2622,7 @@ mod tests {
             }
         }
         let towns = vec![settle("a", 20, 20, 9000), settle("b", 60, 44, 4000)];
-        let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        let (provs, ids, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
         assert!(!provs.is_empty());
         let mut counted = vec![0u32; provs.len()];
         for i in 0..buf.total() {
@@ -2587,7 +2674,7 @@ mod tests {
         let towns = vec![settle("a", 40, 20, 9000), settle("b", 70, 44, 4000),
                          settle("isle", 6, 6, 300)];
         // Fine granularity → many small provinces to exercise the merge.
-        let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 1.0);
+        let (provs, ids, _) = generate_provinces(&buf, &[], &[], &towns, 1.0);
         let w = buf.width; let h = buf.height;
         let min_cells = 40u32;
         let land_before = ids.iter().filter(|&&p| p != NO_PROVINCE).count();
@@ -2651,7 +2738,7 @@ mod tests {
         let towns = vec![settle("a", 30, 60, 9000), settle("b", 90, 70, 4000), settle("pole", 60, 12, 2000)];
         // Coarse granularity → a few big provinces, so both a desert and a polar one
         // clear the split threshold.
-        let (provs, ids) = generate_provinces(&buf, &[], &[], &towns, 0.0);
+        let (provs, ids, _) = generate_provinces(&buf, &[], &[], &towns, 0.0);
         let land_before = ids.iter().filter(|&&p| p != NO_PROVINCE).count();
         let n_before = provs.len();
         let polar_before = provs.iter().filter(|p| p.koppen == kp::EF).count();
@@ -2701,7 +2788,7 @@ mod tests {
             settle("c", 20, 50, 5000), settle("d", 80, 45, 7000),
             settle("e", 45, 30, 4000),
         ];
-        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.85);
+        let (provs, _, _) = generate_provinces(&buf, &[], &[], &towns, 0.85);
         assert!(provs.len() > 4, "need several provinces to exercise adjacency, got {}", provs.len());
 
         let mut per_island: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
@@ -2760,7 +2847,7 @@ mod tests {
             gx += 40;
             tid += 1;
         }
-        let (provs, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        let (provs, _, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
         assert!(provs.len() > 4, "need several provinces to report on, got {}", provs.len());
 
         let class_name = |k: u8| -> &'static str {
@@ -2796,5 +2883,161 @@ mod tests {
         ) {
             eprintln!("  hostile/fertile mean-area ratio ≈ {:.1}×", hi / lo.max(1.0));
         }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 2 (F2) — the guaranteed seat
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// With NO settlements at all, every province generated is a filler
+    /// province — and slice 2 says every one of them must still get a REAL
+    /// founded seat, never an empty `.settlements` list. `new_settlements`
+    /// must carry exactly one entry per province, and every province's own
+    /// `.settlements` must name it.
+    #[test]
+    fn every_province_has_exactly_one_seat() {
+        let buf = blank_world();
+        let (provs, _, founded) = generate_provinces(&buf, &[], &[], &[], 0.5);
+        assert!(provs.len() > 1, "need multiple filler provinces to test, got {}", provs.len());
+        assert_eq!(founded.len(), provs.len(),
+            "every filler province must found exactly one new seat");
+        for p in &provs {
+            assert!(!p.settlements.is_empty(),
+                "province {} ({}) has no settlement at all", p.id, p.name);
+            assert_eq!(p.settlements.len(), 1,
+                "a filler province with no pre-existing town must have exactly its one founded seat");
+        }
+        // Every province's named seat settlement must actually exist in `founded`.
+        let founded_ids: std::collections::HashSet<&str> =
+            founded.iter().map(|s| s.id.as_str()).collect();
+        for p in &provs {
+            assert!(founded_ids.contains(p.settlements[0].as_str()),
+                "province {}'s seat {} is not in the founded list", p.id, p.settlements[0]);
+        }
+    }
+
+    /// The founded seat sits on the province's own best-scoring LAND cell
+    /// (D4), not its jittered seed cell and not its geometric centroid. Build
+    /// a world where ONE cell has sharply higher habitability than the rest
+    /// of a small, isolated landmass (so it forms its own province with no
+    /// pre-existing settlement), and confirm the founded seat lands there —
+    /// nowhere near the province's centroid, which by construction sits
+    /// elsewhere on the landmass.
+    #[test]
+    fn a_province_seat_is_not_its_centroid() {
+        let mut buf = blank_world_sized(40, 40);
+        // A small landmass in the corner, surrounded by sea, so it forms its
+        // own single province regardless of seed jitter elsewhere.
+        for i in 0..buf.total() { buf.terrain[i] = 0; }
+        for y in 0..20u32 {
+            for x in 0..20u32 {
+                let i = buf.idx(x, y);
+                buf.terrain[i] = 1;
+                buf.elevation[i] = 0.0;
+                buf.fertility[i] = 0.5;
+                buf.habitability[i] = 100.0;
+                buf.distance_to_ocean[i] = 0.5;
+                buf.temperature[i] = 12.0;
+                buf.precipitation[i] = 800.0;
+                buf.koppen[i] = 12;
+            }
+        }
+        // A single sharp habitability spike in the far corner (0,0) — nowhere
+        // near this landmass's centroid (~(9.5, 9.5)).
+        let spike = buf.idx(0, 0);
+        buf.habitability[spike] = 255.0;
+
+        let (provs, raster, founded) = generate_provinces(&buf, &[], &[], &[], 0.5);
+        // Find the province owning the spike cell.
+        let pid = raster[spike];
+        assert_ne!(pid, NO_PROVINCE, "the spike cell must belong to a province");
+        let p = provs.iter().find(|p| p.id == pid).expect("province exists");
+        assert!(!founded.is_empty(), "a filler landmass must found a seat");
+        let seat = founded.iter().find(|s| p.settlements.contains(&s.id))
+            .expect("this province's founded seat must be in the list");
+        assert_eq!((seat.x, seat.y), (0, 0),
+            "the seat must land on the sharp habitability spike, got ({}, {})", seat.x, seat.y);
+        // Centroid of the 20x20 landmass is ~(9.5, 9.5) — nowhere near (0, 0).
+        let dist2 = (seat.x as f32 - 9.5).powi(2) + (seat.y as f32 - 9.5).powi(2);
+        assert!(dist2 > 50.0, "the seat must not sit near the landmass centroid");
+    }
+
+    /// An OLD-style settlement list (nothing marked `.primary` — every save
+    /// and every caller that predates slice 1) must seed provinces from the
+    /// WHOLE list, unchanged from before slice 2: the `any_primary` fallback.
+    #[test]
+    fn an_old_settlement_list_seeds_from_everyone() {
+        let buf = blank_world_sized(96, 64);
+        let towns = vec![
+            settle("a", 10, 10, 5000),
+            settle("b", 60, 40, 3000),
+        ];
+        // Neither is marked .primary (the pre-slice-1 shape).
+        let (provs, raster, _) = generate_provinces(&buf, &[], &[], &towns, 0.5);
+        // Both settlements must have won their own province seed — i.e. each
+        // sits in a DIFFERENT province, exactly as the un-filtered seeding
+        // loop would have placed them before this slice existed.
+        let pa = raster[buf.idx(10, 10)];
+        let pb = raster[buf.idx(60, 40)];
+        assert_ne!(pa, NO_PROVINCE);
+        assert_ne!(pb, NO_PROVINCE);
+        assert_ne!(pa, pb, "two well-separated unmarked settlements must still seed distinct provinces");
+        let prov_a = provs.iter().find(|p| p.id == pa).unwrap();
+        assert!(prov_a.settlements.contains(&"a".to_string()));
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 1 (F1) — primary marking
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// A trade-access-weighted, widely-spaced pass must prefer real REGIONAL
+    /// CENTRES (coastal/river-access) over a merely fertile inland site, and
+    /// space its picks far apart — never simply "the top N by habitability".
+    #[test]
+    fn primary_settlements_are_regional_not_merely_fertile() {
+        use crate::sim::step7_settlements::settlements::{mark_primary_settlements, Settlement};
+        let mk = |id: &str, x: u32, y: u32, score: f32| Settlement {
+            id: id.into(), x, y, name: id.into(), size: "town".into(),
+            population: 1000, score, culture: String::new(), region: String::new(),
+            site: String::new(), manual: false, edited: false, primary: false,
+        };
+        // Two clusters of 3 close-together sites each, far apart from one
+        // another. Cluster A's sites have HIGH habitability score but LOW
+        // access (inland); cluster B's have LOWER score but HIGH access
+        // (coastal/crossroads). A pass that only chased habitability score
+        // would mark all of cluster A; a real regional-centre pass should
+        // mark at least one of cluster B despite its lower raw score.
+        let mut settlements = vec![
+            mk("a1", 10, 10, 0.9), mk("a2", 12, 10, 0.85), mk("a3", 10, 12, 0.88),
+            mk("b1", 200, 200, 0.5), mk("b2", 202, 200, 0.48), mk("b3", 200, 202, 0.52),
+        ];
+        let access = vec![0.05, 0.05, 0.05, 0.9, 0.9, 0.9];
+        mark_primary_settlements(&mut settlements, 400, 20, &access);
+        let primaries: Vec<&str> = settlements.iter().filter(|s| s.primary).map(|s| s.id.as_str()).collect();
+        assert!(!primaries.is_empty(), "at least one settlement must be marked primary");
+        assert!(primaries.iter().any(|&id| id.starts_with('b')),
+            "a high-access cluster must be able to win a primary slot over a merely fertile one, got {:?}", primaries);
+        // Wide spacing: no two primaries from the SAME cluster (they sit
+        // well within the wide primary spacing radius of each other).
+        let a_primaries = primaries.iter().filter(|id| id.starts_with('a')).count();
+        let b_primaries = primaries.iter().filter(|id| id.starts_with('b')).count();
+        assert!(a_primaries <= 1, "the wide spacing must reject a second primary inside cluster A");
+        assert!(b_primaries <= 1, "the wide spacing must reject a second primary inside cluster B");
+    }
+
+    /// A non-empty settlement list always yields at least one primary, even
+    /// when every site is identical (the guarantee `generate_provinces`
+    /// structurally relies on).
+    #[test]
+    fn mark_primary_always_marks_at_least_one() {
+        use crate::sim::step7_settlements::settlements::{mark_primary_settlements, Settlement};
+        let mk = |id: &str, x: u32, y: u32| Settlement {
+            id: id.into(), x, y, name: id.into(), size: "town".into(),
+            population: 1000, score: 0.5, culture: String::new(), region: String::new(),
+            site: String::new(), manual: false, edited: false, primary: false,
+        };
+        let mut settlements = vec![mk("x", 5, 5)];
+        mark_primary_settlements(&mut settlements, 100, 10, &[0.5]);
+        assert!(settlements[0].primary, "a single settlement must always be marked primary");
     }
 }

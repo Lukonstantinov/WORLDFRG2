@@ -2097,10 +2097,14 @@ export function MapCanvas() {
           const wrappedY = Math.floor(wy);
           const currentRivers = useWorldStore.getState().rivers;
           const currentSettlements = useWorldStore.getState().settlements;
-          placeSettlementAt(wrappedX, wrappedY, JSON.stringify(currentRivers), currentSettlements)
+          // PLACES_DEMAND_AND_GROWTH_PLAN.md slice 3b (D3) — the explicit
+          // "province capital" toggle, read at click time.
+          const isCapital = useUIStore.getState().placeSettlementIsCapital;
+          placeSettlementAt(wrappedX, wrappedY, JSON.stringify(currentRivers), currentSettlements, isCapital)
             .then((s) => {
               useWorldStore.getState().setSettlements([...currentSettlements, s]);
-              setStatus(`Placed ${s.name} (${s.size}, ~${s.population.toLocaleString()}) — the world's own figure.`);
+              setStatus(`Placed ${s.name} (${s.size}, ~${s.population.toLocaleString()})`
+                + (isCapital ? " as a province capital" : "") + " — the world's own figure.");
               requestRender();
             })
             .catch((err) => setStatus(`Cannot place a settlement there: ${err}`));

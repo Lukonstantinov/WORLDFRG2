@@ -189,6 +189,10 @@ interface UIStore {
   settlementRealism: number;
   /** Hard cap on total settlements (20..1000); 0 = auto (realism-driven). */
   settlementCap: number;
+  /** PLACES_DEMAND_AND_GROWTH_PLAN.md slice 3b (D3) — the EXPLICIT choice
+   *  behind the "Place Settlement" tool: place a "province capital" (marked
+   *  `.primary`, guaranteed its own province seed) or an ordinary town. */
+  placeSettlementIsCapital: boolean;
   /** Goods-browser panel open (toolbar button → browse all goods by origin). */
   showGoodsBrowser: boolean;
   /** Id of the good whose seeding/climate detail panel is open (null = closed). */
@@ -371,6 +375,7 @@ interface UIStore {
   setHubDisplay: (p: Partial<{ size: number; intensity: number }>) => void;
   setSettlementRealism: (v: number) => void;
   setSettlementCap: (v: number) => void;
+  setPlaceSettlementIsCapital: (v: boolean) => void;
   setShowGoodsBrowser: (v: boolean) => void;
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
@@ -525,6 +530,7 @@ export const useUIStore = create<UIStore>((set) => ({
   hubDisplay: { size: 1, intensity: 1 },
   settlementRealism: 0.55,
   settlementCap: 0,
+  placeSettlementIsCapital: false,
   showGoodsBrowser: false,
   goodDetailId: null,
   showHouses: false,
@@ -687,6 +693,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setHubDisplay: (p) => set((state) => ({ hubDisplay: { ...state.hubDisplay, ...p } })),
   setSettlementRealism: (v) => set({ settlementRealism: v }),
   setSettlementCap: (v) => set({ settlementCap: v }),
+  setPlaceSettlementIsCapital: (v) => set({ placeSettlementIsCapital: v }),
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
