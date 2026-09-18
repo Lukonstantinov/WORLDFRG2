@@ -20,6 +20,30 @@ pub fn compute_economy(
     db: State<'_, WorldDb>,
 ) -> Result<EconomySnapshot, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    compute_economy_impl(
+        &db, &conn, &settlements_json, &rivers_json, reach, max_crossing,
+        desert_routes, economic_regions, luxury_bias, piracy, season, months,
+    )
+}
+
+/// The logic behind `compute_economy`, extracted so it can be exercised directly
+/// in tests without a Tauri-managed `State` — the same split `routing.rs` already
+/// uses for `compute_trade_routes_impl`, and for the same reason: B2/B3's gates
+/// need to call this with a hand-built world.
+fn compute_economy_impl(
+    db: &WorldDb,
+    conn: &rusqlite::Connection,
+    settlements_json: &str,
+    rivers_json: &str,
+    reach: u8,
+    max_crossing: f32,
+    desert_routes: bool,
+    economic_regions: u32,
+    luxury_bias: f32,
+    piracy: f32,
+    season: i32,
+    months: u32,
+) -> Result<EconomySnapshot, String> {
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
     let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
@@ -113,8 +137,18 @@ pub fn compute_economy(
     // regardless of reach (the user: "no trade routes to far away islands which do
     // not adhere to trade distance"). The crossing-fraction reach test still applies
     // on top of this via path_allowed.
+    // B2 — this ceiling was `grid_w * 0.30`, i.e. **12,022 km** on the default
+    // 3600 grid: wider than any ocean on Earth, so two continents always wired
+    // themselves into one trade graph and the `comp[a] == comp[b]` guard below
+    // could never fire. `compute_routed_components` already fixed exactly this
+    // for the CAMPAIGN (`campaign_commands/lifecycle.rs`) against the project's
+    // declared ~3,000 km trade horizon; the worldgen economy kept its own magic
+    // fraction and so showed lanes the campaign it seeds would then refuse.
+    // Both now read the one named constant, which is what lets genuinely
+    // isolated continents form and trade internally.
     let max_link2: i64 = {
-        let d = (grid_w as f32 * 0.30).max(60.0);
+        let km_per_cell = KM_EQUATOR / grid_w.max(1) as f32;
+        let d = (TRADE_COMPONENT_HORIZON_KM / km_per_cell.max(1e-3)).max(60.0);
         (d * d) as i64
     };
     let node_dist2 = |i: usize, j: usize| -> i64 {
@@ -130,10 +164,25 @@ pub fn compute_economy(
             if node_dist2(i, j) <= max_link2 { cand.insert((i.min(j), i.max(j))); }
         }
     }
+    // B3 — a lesser town used to get exactly ONE candidate link, its single
+    // nearest major hub. If that edge's Dijkstra missed, or `path_allowed`
+    // rejected it under the chosen reach, or it exceeded the ceiling, the town
+    // was left with ZERO edges: isolated from the trade graph forever, reading 0
+    // throughput and 0 partners while the map still drew a road to it. That is
+    // the same bug `compute_trade_routes` fixed with a ranked fall-through
+    // shortlist (`routing.rs`, MINOR_FALLBACK_K); the fix never reached here, so
+    // the drawn routes and the ledger could disagree about the same town.
+    // Candidates are collected in rank order and resolved AFTER routing, taking
+    // the first that is actually accepted — so the topology still mirrors
+    // `compute_trade_routes` (one road per lesser town), it just no longer gives
+    // up after the first failure.
+    const MINOR_FALLBACK_K: usize = 5;
+    let mut town_candidates: Vec<Vec<usize>> = vec![Vec::new(); nn];
     for i in major_n..nn {
-        if let Some(&j) = nearest_k(i, 1, major_n).first() {
-            if node_dist2(i, j) <= max_link2 { cand.insert((i.min(j), i.max(j))); }
-        }
+        town_candidates[i] = nearest_k(i, MINOR_FALLBACK_K, major_n)
+            .into_iter()
+            .filter(|&j| node_dist2(i, j) <= max_link2)
+            .collect();
     }
     // Direct maritime bypass legs: a ship can sail between two coastal hubs
     // WITHOUT calling at every intermediate port. Without these the hub graph is
@@ -162,18 +211,58 @@ pub fn compute_economy(
     // `(a.min(b), a.max(b))`, so batching by that smaller-index source collapses the
     // per-candidate whole-grid search to one per distinct source node.
     let cand_vec: Vec<(usize, usize)> = cand.iter().copied().collect();
-    let coarse_pairs: Vec<(usize, usize)> = cand_vec.iter().map(|&(a, b)| (cnode[a], cnode[b])).collect();
-    let paths = coarse_dijkstra_batch(&cc, &coarse_pairs);
+    // Every lesser town's whole fall-through shortlist joins the SAME batch, so
+    // testing five candidates per town costs nothing beyond testing one already
+    // did — the batch is one Dijkstra per distinct coarse SOURCE, not per pair.
+    let mut town_pairs: Vec<(usize, usize)> = Vec::new();
+    for (i, cands) in town_candidates.iter().enumerate() {
+        for &j in cands { town_pairs.push((i, j)); }
+    }
+    let mut coarse_pairs: Vec<(usize, usize)> = cand_vec.iter().map(|&(a, b)| (cnode[a], cnode[b])).collect();
+    coarse_pairs.extend(town_pairs.iter().map(|&(a, b)| (cnode[a], cnode[b])));
+    let all_paths = coarse_dijkstra_batch(&cc, &coarse_pairs);
+    let (cand_paths, town_paths) = all_paths.split_at(cand_vec.len());
     let mut adj: Vec<Vec<(usize, f32, usize)>> = vec![Vec::new(); nn]; // (to, cost, edge_id)
     let mut edge_paths: Vec<Vec<usize>> = Vec::new();
-    for (&(a, b), path) in cand_vec.iter().zip(paths.into_iter()) {
-        let path = match path { Some(p) => p, None => continue };
-        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+    let add_edge = |a: usize, b: usize, path: Vec<usize>,
+                    adj: &mut Vec<Vec<(usize, f32, usize)>>,
+                    edge_paths: &mut Vec<Vec<usize>>| {
         let cost = coarse_path_cost(&cc, &path).max(0.01);
         let eid = edge_paths.len();
         edge_paths.push(path);
         adj[a].push((b, cost, eid));
         adj[b].push((a, cost, eid));
+    };
+    for (&(a, b), path) in cand_vec.iter().zip(cand_paths.iter()) {
+        let path = match path { Some(p) => p.clone(), None => continue };
+        if !path_allowed(&cc, &path, reach, max_crossing, grid_w) { continue; }
+        add_edge(a, b, path, &mut adj, &mut edge_paths);
+    }
+    // Take the FIRST candidate that both routed and cleared the reach; a rejected
+    // top pick now falls through instead of leaving the town with no edge at all.
+    let mut unlinked = 0usize;
+    let mut cursor = 0usize;
+    for i in major_n..nn {
+        let k = town_candidates[i].len();
+        let mut linked = false;
+        for (off, path) in town_paths[cursor..cursor + k].iter().enumerate() {
+            if let Some(p) = path {
+                if path_allowed(&cc, p, reach, max_crossing, grid_w) {
+                    add_edge(i, town_candidates[i][off], p.clone(), &mut adj, &mut edge_paths);
+                    linked = true;
+                    break;
+                }
+            }
+        }
+        if !linked && k > 0 { unlinked += 1; }
+        cursor += k;
+    }
+    if unlinked > 0 {
+        log::warn!(
+            "compute_economy: {unlinked} of {} lesser towns reach none of their \
+             {MINOR_FALLBACK_K} nearest hubs under the current trade reach",
+            nn - major_n
+        );
     }
     // Centrality = reachable degree in the trade graph.
     let centrality: Vec<f32> = (0..nn).map(|i| adj[i].len() as f32).collect();
@@ -812,11 +901,38 @@ pub fn compute_economy(
     // multiplier vs the origin — replacing per-hop markup compounding.
     let mut lanes: Vec<&market::MarketFlow> =
         mkt.flows.iter().filter(|fl| fl.amount > 0.01).collect();
-    // Largest lanes first per good, capped so the snapshot stays legible.
-    lanes.sort_by(|a, b| {
-        a.good.cmp(&b.good).then(
-            b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal))
-    });
+    // Largest lanes first per good, capped so the snapshot stays legible. The
+    // per-hub exports/imports/receives totals are accumulated INSIDE this loop,
+    // so a lane the cap drops reads as no trade at all — and sorting purely by
+    // amount dropped the smallest lanes, which are systematically the small
+    // towns' only imports. Rank each lane among the lanes arriving at the SAME
+    // (good, destination) first, so the cap can only ever trim a hub's second
+    // and later sources and never its first: every buyer keeps at least one
+    // supplier before anyone keeps two.
+    {
+        let mut seen: std::collections::HashMap<(usize, usize), u32> =
+            std::collections::HashMap::new();
+        lanes.sort_by(|a, b| {
+            a.good.cmp(&b.good).then(
+                b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal))
+        });
+        let dest_rank: std::collections::HashMap<(usize, usize, usize), u32> = lanes
+            .iter()
+            .map(|fl| {
+                let e = seen.entry((fl.good, fl.to)).or_insert(0);
+                let r = *e;
+                *e += 1;
+                ((fl.from, fl.to, fl.good), r)
+            })
+            .collect();
+        lanes.sort_by(|a, b| {
+            let ra = dest_rank[&(a.from, a.to, a.good)];
+            let rb = dest_rank[&(b.from, b.to, b.good)];
+            a.good.cmp(&b.good)
+                .then(ra.cmp(&rb))
+                .then(b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal))
+        });
+    }
     let mut lanes_per_good = vec![0u32; gc];
 
     for fl in lanes {
@@ -1422,5 +1538,164 @@ pub fn get_economy(db: State<'_, WorldDb>) -> Result<EconomySnapshot, String> {
                 hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names.clone(), colonizable_sites: vec![],
             })),
         None => Ok(EconomySnapshot { hubs: vec![], chains: vec![], chokepoints: vec![], regions: vec![], corridors: vec![], good_stats: vec![], class_stats: vec![], goods: goods_names, colonizable_sites: vec![] }),
+    }
+}
+
+
+#[cfg(test)]
+mod economy_connectivity_tests {
+    use super::*;
+    use crate::db::{schema, WorldDb};
+    use crate::sim::world_buffer::{ColumnSet, WorldBuffer};
+    use rusqlite::Connection;
+
+    /// Mainland (`x < 3000`) plus a small island at `[3200, 3240)`, separated by
+    /// a 200-cell strait — about 10 OPEN-sea coarse cells once the coastal ring
+    /// is excluded, i.e. ~160 fine cells, comfortably past the 72-cell crossing
+    /// limit the B3 gate uses. Same shape as `routing.rs`'s own B3 fixture,
+    /// because the two commands must agree about the same town.
+    ///
+    /// `distance_to_ocean` is deliberately set to 1.0 EVERYWHERE. It defaults to
+    /// 0.0, and `node_sea` is `d < 0.06`, so a fixture that leaves it alone marks
+    /// every settlement a sea port — which lets the maritime-bypass block wire
+    /// each coastal MAJOR to its five nearest coastal hubs, lesser towns
+    /// included. That silently hands the town an edge by another route and makes
+    /// a B3 gate pass on the unfixed code. Holding every node inland is what
+    /// leaves the lesser-town path as the only way in.
+    fn strait_world() -> (WorldDb, u32) {
+        let (w, h) = (3600u32, 20u32);
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            metadata::set_meta(&conn, k, v).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        for y in 0..h {
+            for x in 0..w {
+                let idx = buf.idx(x, y);
+                let land = x < 3000 || (3200..3240).contains(&x);
+                buf.terrain[idx] = if land { 1 } else { 0 };
+                buf.elevation[idx] = if land { 0.1 } else { 0.0 };
+                buf.koppen[idx] = 12; // Cfb, no surcharge
+                buf.temperature[idx] = 18.0; // above every freeze threshold
+                buf.distance_to_ocean[idx] = 1.0; // see the doc comment above
+            }
+        }
+        buf.save(&conn, "test").unwrap();
+        (WorldDb::new(conn), w)
+    }
+
+    /// The straight-line link ceiling in fine cells, so a fixture places its hubs
+    /// against the real horizon instead of a hard-coded distance that silently
+    /// stops meaning anything if the constant moves.
+    fn ceiling_cells(w: u32) -> f32 {
+        TRADE_COMPONENT_HORIZON_KM / (KM_EQUATOR / w as f32)
+    }
+
+    /// B3 — the economy's own fall-through. A lesser town whose geometrically
+    /// NEAREST major hub sits across an impassable strait must still be wired
+    /// into the trade graph via its next-nearest hub. Before this, `compute_
+    /// economy` gave a lesser town exactly ONE candidate link and dropped it with
+    /// ZERO edges when that one failed — so the town read 0 partners and 0
+    /// throughput while `compute_trade_routes`, which HAS the fall-through, still
+    /// drew it a road. Verified failing with the shortlist reverted to a single
+    /// `nearest_k(i, 1, major_n)` pick: T's only candidate is the island and
+    /// nothing replaces it.
+    #[test]
+    fn a_lesser_town_still_joins_the_trade_graph_when_its_nearest_hub_is_unreachable() {
+        let (db, w) = strait_world();
+        let conn = db.conn.lock().unwrap();
+        let ceiling = ceiling_cells(w);
+
+        // T at 2995. Its NEAREST major is the island hub A at 3220 (225 cells,
+        // inside the ceiling but across the strait); next-nearest is the mainland
+        // hub B at 2740 (255 cells, also inside). Both must be inside the ceiling
+        // or this would measure the ceiling rather than the fall-through, so both
+        // facts are asserted rather than assumed.
+        let (t_x, a_x, b_x) = (2995u32, 3220u32, 2740u32);
+        assert!(
+            (a_x - t_x) as f32 <= ceiling && (t_x - b_x) as f32 <= ceiling,
+            "both candidates must sit inside the {ceiling:.0}-cell link ceiling"
+        );
+        assert!(a_x - t_x < t_x - b_x, "the unreachable hub must be the NEARER one");
+
+        // The major network must not pick T up incidentally: a major links to
+        // its 4 nearest neighbours among ALL nodes, lesser towns included, so a
+        // town sitting alone beside a hub gets an edge whichever way the
+        // lesser-town path behaves. Five majors are packed at 2550..2740 so each
+        // of their four nearest is another cluster member, and six fillers sit
+        // far west. The island hub A DOES pick T as its nearest — but that edge
+        // is the one that fails the crossing limit, so it grants nothing. That
+        // leaves the lesser-town shortlist as the only way T can join the graph,
+        // which is the point of the fixture.
+        let cluster = [2550u32, 2600, 2650, 2700, b_x];
+        let fillers = [1000u32, 1200, 1400, 1600, 1800, 2000];
+        let mut json = String::from("[");
+        for x in fillers { json += &format!(r#"{{"x":{x},"y":10,"score":100,"population":9000}},"#); }
+        for x in cluster { json += &format!(r#"{{"x":{x},"y":10,"score":100,"population":9000}},"#); }
+        json += &format!(r#"{{"x":{a_x},"y":10,"score":100,"population":9000}},"#);
+        json += &format!(r#"{{"x":{t_x},"y":10,"score":1,"population":3000}}"#);
+        json += "]";
+
+        // reach=1, max_crossing=0.02 → 72 fine cells; the strait is ~160.
+        let snap = compute_economy_impl(
+            &db, &conn, &json, "", 1, 0.02, false, 2, 0.5, 0.0, -1, 12,
+        ).expect("compute_economy_impl failed");
+
+        // Hubs come back in node (score-sorted) order, so T is last.
+        let t = snap.hubs.last().expect("no hubs returned");
+        assert_eq!(t.x as u32, t_x, "the last hub must be the lesser town");
+        assert!(
+            t.partners > 0,
+            "the lesser town must fall through to the mainland hub once the island \
+             hub fails the crossing limit, not be left with zero edges"
+        );
+    }
+
+    /// B2 — the link ceiling is the declared trade horizon, not a magic fraction
+    /// of the map. A landmass separated from the mainland by more than
+    /// `TRADE_COMPONENT_HORIZON_KM` must come out as its OWN trade component, so
+    /// an isolated continent trades internally instead of wiring itself into
+    /// another continent's market. `reach = 0` disables the crossing test
+    /// entirely, so ONLY the ceiling can keep the island out — which is exactly
+    /// the claim under test. The island is placed INSIDE the old `grid_w * 0.30`
+    /// ceiling (1,080 cells here) and outside the new one, so reverting the
+    /// constant fails this.
+    #[test]
+    fn a_landmass_past_the_trade_horizon_keeps_its_own_market() {
+        let (db, w) = strait_world();
+        let conn = db.conn.lock().unwrap();
+        let ceiling = ceiling_cells(w);
+        let (near_x, far_x, island_x) = (2700u32, 2900u32, 3220u32);
+        let gap = (island_x - far_x) as f32;
+        assert!(
+            gap > ceiling && gap < w as f32 * 0.30,
+            "the island must sit outside the new {ceiling:.0}-cell ceiling but inside \
+             the old 0.30 * grid_w one, or this gate cannot tell them apart"
+        );
+        assert!((far_x - near_x) as f32 <= ceiling, "the two mainland hubs must link");
+
+        let json = format!(r#"[
+            {{"x":{near_x},"y":10,"score":100,"population":40000}},
+            {{"x":{far_x},"y":10,"score":99,"population":40000}},
+            {{"x":{island_x},"y":10,"score":98,"population":40000}}
+        ]"#);
+        let snap = compute_economy_impl(
+            &db, &conn, &json, "", 0, 1.0, false, 2, 0.5, 0.0, -1, 12,
+        ).expect("compute_economy_impl failed");
+
+        // `partners` is edge count, so the island having none is the direct
+        // statement of "it is its own component" — and the two mainland hubs
+        // having some keeps the assertion from passing on an empty graph.
+        assert_eq!(
+            snap.hubs[2].partners, 0,
+            "a landmass past the {TRADE_COMPONENT_HORIZON_KM} km trade horizon must not \
+             be wired into the mainland trade graph"
+        );
+        assert!(
+            snap.hubs[0].partners > 0 && snap.hubs[1].partners > 0,
+            "the mainland pair must still be linked — otherwise this gate would pass \
+             on a graph with no edges at all"
+        );
     }
 }

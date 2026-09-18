@@ -2155,6 +2155,90 @@ terminal cap. `compute_economy` feeds travel-days and emits `EconHub.market`. Hu
 customs incl. 4 Manufactured chain goods. `backfill_market_fields` fills
 category/tier/base_value/bulk/perishable on pre-market saves.
 
+**A SELLER RANKS ITS BUYERS BY ARBITRAGE GAP, NEVER BY INDEX.** Each arbitrage
+shipment takes `surplus * 0.5` and re-reads `surplus` from the seller's stock
+every time, so the k-th destination a seller is offered receives on the order of
+**2^-k** of its output — a geometric cascade down the iteration order, not the
+gentle `break` the code reads as. Stocks are seeded once from production at the
+top of `solve` and never replenished, so the cascade repeats identically every
+round. Walking `b` in plain index order therefore made that cascade follow the
+SETTLEMENT RANK ORDER, because `compute_economy` sorts its nodes by score
+(strongest first) and market hub index IS that rank: every supplier served the
+great cities first and had nothing measurable left for a small town, which read
+**0 throughput however close or hungry it was**, and strictly worse the more
+settlements a world had. Destinations are ranked by the gap they offer now,
+which is rank-BLIND — an unsupplied small town sits at `PRICE_CEIL_MULT` exactly
+as a large one does, and among ceiling-priced buyers freight decides, so the
+NEAREST buyer wins. Ties break on index so `converges_and_stays_finite`'s
+determinism assertion still holds. Gate:
+`a_near_buyer_is_served_before_far_ones_whatever_its_index`.
+**The halving itself is left alone and is a named open item**: "half-steps
+toward parity per round" is applied per (seller, buyer) PAIR, so it compounds
+ACROSS destinations within one round rather than once per round as the comment
+intends. Ordering was the targeted fix; changing the step size is a real
+economic change needing its own dose walk.
+
+**`compute_economy` is where two shipped Stage-A/B fixes had never been ported**
+(`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`), which is why the drawn map and the
+ledger could disagree about the same town:
+- **B3, the lesser-town fall-through.** A settlement past `major_n` got exactly
+  ONE candidate link — its single nearest major hub. A Dijkstra miss, a
+  `path_allowed` rejection or an over-ceiling pair left it with ZERO edges and
+  no trade at all, while `compute_trade_routes` (`routing.rs`) had already
+  fixed this with a ranked `MINOR_FALLBACK_K` shortlist. `compute_economy`
+  now collects the same 5-candidate shortlist, batches it into the SAME
+  `coarse_dijkstra_batch` (one Dijkstra per coarse SOURCE, so five candidates
+  cost what one did) and takes the first accepted — topology still mirrors the
+  drawn routes, it just no longer gives up after one failure.
+- **B2, the link ceiling.** `max_link2` was a magic `grid_w * 0.30` =
+  **12,022 km** on the default grid, wider than any ocean on Earth, so two
+  continents always wired into one trade graph and the `comp[a] == comp[b]`
+  guard below it could never fire. It reads `TRADE_COMPONENT_HORIZON_KM`
+  (3,000 km) now — the same constant `compute_routed_components` already
+  applies on the campaign side, so the worldgen economy stops promising lanes
+  the campaign it seeds would refuse, and **genuinely isolated continents can
+  form and trade internally**.
+Note `EconHub.partners` is `centrality[hh]`, i.e. EDGE COUNT, not distinct trade
+partners — a lesser town reads "1" structurally, by topology, not measurement.
+
+**TWO WAYS A CONNECTIVITY GATE HERE SILENTLY PASSES**, both of which the first
+cut of these two gates did (§8.24a3's rule — always verify a new gate fails on
+the unfixed code — caught them):
+- **`distance_to_ocean` defaults to 0.0 and `node_sea` is `d < 0.06`.** A fixture
+  that does not set it marks EVERY settlement a sea port, and the maritime-bypass
+  block then wires each coastal MAJOR to its five nearest coastal hubs — lesser
+  towns included. The town gets an edge by another route entirely and the gate
+  passes on the broken code. Hold every node inland unless the test is about
+  ports.
+- **A major links to its 4 nearest among ALL nodes**, not just other majors, so a
+  lesser town sitting alone beside a hub is picked up incidentally however the
+  lesser-town path behaves. Pack enough majors around the intended fallback hub
+  that none of them has the town in its top 4.
+
+The per-good lane cap (220) trims the display snapshot, but the per-hub
+exports/imports/receives totals accumulate inside that same loop, so a trimmed
+lane reads as no trade. Lanes are ranked among the lanes arriving at the SAME
+(good, destination) before the cap applies, so it can only ever trim a hub's
+second and later sources — every buyer keeps one supplier before anyone keeps
+two.
+
+**NOT changed, and why** (queued, not waived): `OPEN_SEA_COST` (2.2) is only
+1.375x `COASTAL_SEA_COST` (1.6) while a coast-hugging detour is routinely 2-4x
+longer in cells, so a least-cost path essentially always cuts straight across
+open ocean rather than following a coast or rounding an island — and because
+open sea is cost-UNIFORM, Dijkstra's cheapest path across it is a literal
+straight line, which is what those ruler-straight ocean lanes on the map are.
+Getting historical coast-hugging needs the ratio nearer 3-5x, but `cost_to_days`
+(`query_commands/mod.rs`) makes these same constants double as travel SPEED, so
+raising `OPEN_SEA_COST` also reprices every voyage and would move the
+price/distance gradient C1 just tuned. That conflation is C2 in
+`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md`. It waits on C2, and on a
+before/after run of `real_world_price_distance_gradient`, which is the
+instrument that can tell the two effects apart.
+Related finding, left as a finding: the piracy surcharge charges COASTAL water
+4.0 against open sea 1.5, which pushes routes AWAY from the coast — the opposite
+of what its own comment claims it does. Inert at the default `piracy = 0`.
+
 ### 8.6 Köppen current overrides
 Mediterranean (Cs) only forms on **windward (west-facing) coasts** beside a cold
 offshore current (`cold_override` gated on `is_windward_ocean` + no warm influence);

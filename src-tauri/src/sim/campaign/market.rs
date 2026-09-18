@@ -274,18 +274,65 @@ pub fn solve(
         for g in 0..ng {
             let base = goods[g].base_value;
             for a in 0..n {
+                // THE ORDER DESTINATIONS ARE OFFERED IN DECIDES WHO IS SERVED AT ALL.
+                // Each shipment below takes `surplus * 0.5` — a half-step toward
+                // parity — and `surplus` is re-read from the seller's stock every
+                // time, so the k-th destination offered receives on the order of
+                // 2^-k of the seller's output. That is a geometric cascade DOWN the
+                // iteration order, not the gentle `break` the old code read as.
+                //
+                // Walking `b` in plain index order made that iteration order the
+                // settlement RANK order — `compute_economy` sorts its nodes by score,
+                // strongest first, so hub index IS rank. Every supplier therefore
+                // served the great cities first and had nothing measurable left by
+                // the time it reached a small town, in every round (stocks are seeded
+                // once from production at the top of `solve` and never replenished).
+                // A low-ranked town read 0 throughput however close or hungry it was,
+                // and it got strictly worse the more settlements a world had.
+                //
+                // Destinations are now ranked by the ARBITRAGE GAP they offer, which
+                // is what a merchant actually sorts by. It is rank-blind: an unsupplied
+                // small town sits at the price ceiling exactly as a large one does, and
+                // among ceiling-priced buyers the gap is then decided by freight — so
+                // the NEAREST buyer wins the tie, which is both correct and independent
+                // of settlement score. Ranking is done from the round's opening state;
+                // each shipment still recomputes its own live gap and amount below, so
+                // the delivered-cost-parity convergence is unchanged.
+                let surplus_open = stocks[a][g] - needs[a][g];
+                if surplus_open <= EPS {
+                    continue;
+                }
+                let pa_open = live(stocks[a][g], needs[a][g], base);
+                let mut order: Vec<(usize, f32)> = Vec::new();
                 for b in 0..n {
                     if b == a {
                         continue;
-                    }
-                    let surplus = stocks[a][g] - needs[a][g];
-                    if surplus <= EPS {
-                        break; // sold out for this round
                     }
                     let days = routes.days[routes.idx(a, b)];
                     if !days.is_finite() {
                         continue; // sea-impassable under the chosen reach
                     }
+                    let pb = live(stocks[b][g], needs[b][g], base);
+                    let freight = freight_of(&goods[g], params.freight_per_day, days);
+                    let delivered = pa_open + freight + routes.toll[routes.idx(a, b)];
+                    let gap = pb - delivered - params.margin * base;
+                    if gap > 0.0 {
+                        order.push((b, gap));
+                    }
+                }
+                // Widest gap first; ties broken on index so the solve stays
+                // deterministic (`converges_and_stays_finite` asserts it).
+                order.sort_by(|x, y| {
+                    y.1.partial_cmp(&x.1)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                        .then(x.0.cmp(&y.0))
+                });
+                for &(b, _) in &order {
+                    let surplus = stocks[a][g] - needs[a][g];
+                    if surplus <= EPS {
+                        break; // sold out for this round
+                    }
+                    let days = routes.days[routes.idx(a, b)];
                     let pa = live(stocks[a][g], needs[a][g], base);
                     let pb = live(stocks[b][g], needs[b][g], base);
                     let freight = freight_of(&goods[g], params.freight_per_day, days);
@@ -523,6 +570,48 @@ mod tests {
             "fed {} vs starving {}", fed.hubs[1].grain_wealth, starving.hubs[1].grain_wealth);
         // The cut-off hub's unmet basic cereal need is severe.
         assert!(starving.unmet[1][0].max(starving.unmet[1][1]) > 0.8);
+    }
+
+    /// A seller allocates its surplus in the order it offers destinations, and
+    /// each shipment takes HALF of what is left, so destination #k receives on
+    /// the order of 2^-k of the producer's output. When that order was plain
+    /// index order it was the settlement RANK order, so a small town late in the
+    /// list got a vanishing share however close or however hungry it was — the
+    /// "0 throughput on a town beside a major hub" report.
+    ///
+    /// Destinations are ranked by arbitrage gap now, so the NEAR hub (cheap
+    /// freight, widest gap) is served first even though it sits LAST in index
+    /// order. Reverting `solve`'s ordering fails this: hub 4 is offered after
+    /// three far hubs have each halved the surplus.
+    #[test]
+    fn a_near_buyer_is_served_before_far_ones_whatever_its_index() {
+        let hubs = vec![
+            hub(10_000.0, vec![40.0, 0.0, 60.0, 10.0]), // 0: the only silk producer
+            hub(10_000.0, vec![40.0, 0.0, 0.0, 10.0]),  // 1..3: FAR, but low index
+            hub(10_000.0, vec![40.0, 0.0, 0.0, 10.0]),
+            hub(10_000.0, vec![40.0, 0.0, 0.0, 10.0]),
+            hub(10_000.0, vec![40.0, 0.0, 0.0, 10.0]),  // 4: NEAR, but last index
+        ];
+        let mut routes = RouteMatrix::new(5);
+        for far in 1..=3 {
+            routes.set(0, far, 60.0, 0.0);
+        }
+        routes.set(0, 4, 4.0, 0.0);
+        let res = solve(&hubs, &goods(), &routes, &MarketParams::default());
+        let silk = 2;
+        let got = |h: usize| -> f32 {
+            res.flows.iter().filter(|f| f.good == silk && f.to == h).map(|f| f.amount).sum()
+        };
+        assert!(got(4) > 0.0, "the near hub must be supplied at all");
+        for far in 1..=3usize {
+            assert!(
+                got(4) > got(far),
+                "near hub 4 got {} but far hub {far} got {} — index order is still \
+                 deciding who gets served",
+                got(4),
+                got(far)
+            );
+        }
     }
 
     #[test]
