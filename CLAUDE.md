@@ -1608,8 +1608,28 @@ state/  (Zustand)
 
 canvas/
   PixiApp.ts                    ← PixiJS 8 application init
-  TileViewport.ts               ← Pan/zoom, screenToWorld, getVisibleTileRange
-  TileManager.ts                ← LRU tile cache, base64→texture, sprite management
+  TileViewport.ts               ← Pan/zoom, screenToWorld, getVisibleTileRange. A
+                                  wheel tick only moves a TARGET x/y/scale (`onWheel`);
+                                  `update(dt)`, called every render-loop frame, eases
+                                  the displayed values toward it (EU4/CK3-style smooth
+                                  zoom glide, in place of the old jump-straight-to-
+                                  target). `centerOn`/`fitWorld`/drag panning stay
+                                  instantaneous — they set target = displayed in the
+                                  same call, so only the wheel takes the eased path.
+  TileManager.ts                ← LRU tile cache, base64→texture, sprite management.
+                                  `draw()` never leaves a missing supertile blank —
+                                  `drawFallback` stands in with whatever the SAME
+                                  ground is already cached as at a different LOD
+                                  (a coarser tile cropped+scaled, or a mosaic of finer
+                                  ones), the "hold the old mip until the new one
+                                  arrives" trick every tile map renderer uses. Before
+                                  this, zooming or panning into not-yet-fetched
+                                  territory flashed the canvas background through —
+                                  worst right at a world-wrap seam, since those tiles
+                                  are the least likely to already be cached at a
+                                  freshly-picked LOD, which read as a "gap between the
+                                  west and east halves" that grew the further out you
+                                  zoomed.
   OverlayManager.ts             ← ALL vector overlays, drawn in CANVAS 2D — not Pixi
                                   (~4.6k lines: rivers, settlements, wind,
                                   trunks, routes, dynamic flow, regions). visibility[type] gates

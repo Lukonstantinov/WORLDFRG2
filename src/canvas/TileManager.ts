@@ -108,7 +108,17 @@ export class TileManager {
 
   /** Draw the cached tiles of the current layer/LOD overlapping the visible
    *  range. `range` arrives in BASE-tile coords; at LOD L each cached image is
-   *  a supertile covering S=2^L base tiles per side, blitted scaled up. */
+   *  a supertile covering S=2^L base tiles per side, blitted scaled up.
+   *
+   *  A supertile that hasn't arrived yet (still in flight, or not even
+   *  requested) is never left blank — `drawFallback` stands in with whatever
+   *  the cache already holds for that same ground at a DIFFERENT LOD, exactly
+   *  the "hold the old mip until the new one arrives" trick every tile-based
+   *  map renderer (Google Maps, an EU4-style strategy map) uses. Before this,
+   *  every zoom step or pan into unfetched territory flashed the canvas
+   *  background through — worst right at a world-wrap seam, since the tiles
+   *  there are the least likely to already be cached at a freshly-picked LOD,
+   *  which read as a growing "gap" the more the view zoomed out. */
   draw(
     ctx: CanvasRenderingContext2D,
     range: { txMin: number; txMax: number; tyMin: number; tyMax: number },
@@ -129,10 +139,69 @@ export class TileManager {
     for (let sty = styMin; sty <= styMax; sty++) {
       for (let stx = stxMin; stx <= stxMax; stx++) {
         const tile = this.cache.get(this.key(layer, lod, stx, sty));
-        if (!tile) continue;
-        ctx.drawImage(tile.img, stx * size, sty * size, size, size);
-        tile.lastUsed = now; // keep visible tiles hot for LRU eviction
+        if (tile) {
+          ctx.drawImage(tile.img, stx * size, sty * size, size, size);
+          tile.lastUsed = now; // keep visible tiles hot for LRU eviction
+          continue;
+        }
+        this.drawFallback(ctx, layer, lod, stx, sty, stx * size, sty * size, size, now);
       }
+    }
+  }
+
+  /** Stand in for a missing `(layer, lod, stx, sty)` supertile with whatever
+   *  the cache already has for the same ground. Every cached tile's source
+   *  image is a fixed 128×128 px raster (`TILE_SIZE`, regardless of LOD — see
+   *  `get_tiles_packed`'s own doc comment), so cropping/scaling between LODs
+   *  is a plain pixel-space rectangle, no world-coordinate math needed beyond
+   *  picking which cached tile(s) cover the target rect.
+   *
+   *  Tries COARSER cached lods first (one draw call, a blurry-but-complete
+   *  placeholder — the zoomed-OUT case, where the old finer tiles a moment
+   *  ago don't tile evenly into the new coarser slot but a single already-seen
+   *  ancestor tile usually does), then mosaics from FINER cached lods (several
+   *  draw calls, exact resolution wherever one happened to be cached — the
+   *  zoomed-IN case). Draws nothing (leaves the slot for the caller's own
+   *  background) if neither exists yet. */
+  private drawFallback(
+    ctx: CanvasRenderingContext2D,
+    layer: string, lod: number, stx: number, sty: number,
+    dx: number, dy: number, size: number, now: number,
+  ): void {
+    const sizeL = TILE_SIZE * (1 << lod);
+    for (let ld = lod + 1; ld <= MAX_LOD; ld++) {
+      const sizeLd = TILE_SIZE * (1 << ld);
+      const tx = Math.floor((stx * sizeL) / sizeLd);
+      const ty = Math.floor((sty * sizeL) / sizeLd);
+      const tile = this.cache.get(this.key(layer, ld, tx, ty));
+      if (!tile) continue;
+      // Crop the ancestor tile's own 128px raster to the sub-rect covering
+      // our target ground, then scale that crop up to fill the slot.
+      const px = tile.img.width / sizeLd;
+      const cropX = (stx * sizeL - tx * sizeLd) * px;
+      const cropY = (sty * sizeL - ty * sizeLd) * px;
+      const cropSize = sizeL * px;
+      ctx.drawImage(tile.img, cropX, cropY, cropSize, cropSize, dx, dy, size, size);
+      tile.lastUsed = now;
+      return;
+    }
+    for (let ld = lod - 1; ld >= 0; ld--) {
+      const sizeLd = TILE_SIZE * (1 << ld);
+      const n = sizeL / sizeLd; // whole number: sizeL is always a multiple of sizeLd
+      const sub = size / n;
+      let any = false;
+      for (let j = 0; j < n; j++) {
+        for (let i = 0; i < n; i++) {
+          const tx = stx * n + i;
+          const ty = sty * n + j;
+          const tile = this.cache.get(this.key(layer, ld, tx, ty));
+          if (!tile) continue;
+          ctx.drawImage(tile.img, dx + i * sub, dy + j * sub, sub, sub);
+          tile.lastUsed = now;
+          any = true;
+        }
+      }
+      if (any) return;
     }
   }
 
