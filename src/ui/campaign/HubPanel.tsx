@@ -4,7 +4,7 @@ import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples } from "@bridge";
-import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples } from "@types";
+import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -884,7 +884,13 @@ export function HubPanel() {
               throughput/hub_class — a modest port can be everyone else's
               waypoint, and a huge trading city can never be anyone's. Shown
               as a standing fact above all three sub-views, same convention
-              as "barred here" above. */}
+              as "barred here" above. Each example is CLICKABLE — user report:
+              "still shows only information, no on map data" — and draws the
+              two real legs (origin → this hub → destination) through the
+              same relay-ring convention the Flows tab's own relayed routes
+              use (`OverlayManager.renderFlowHighlight`'s teal ring), reusing
+              `campHubs` for the other two cities' coordinates since this
+              banner only ever carries hub ids/names, not positions. */}
           {(detail?.relay_count ?? 0) > 0 && (
             <div style={{
               display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6,
@@ -896,8 +902,27 @@ export function HubPanel() {
                 ⚓ break-of-bulk relay — {detail!.relay_count} route{detail!.relay_count === 1 ? "" : "s"}
               </span>
               {(detail?.relay_examples?.length ?? 0) > 0 && (
-                <span style={{ color: "#9fd6d2" }}>
-                  e.g. {detail!.relay_examples!.join(" · ")}
+                <span style={{ color: "#9fd6d2", display: "flex", flexWrap: "wrap", gap: "0 4px" }}>
+                  e.g.
+                  {detail!.relay_examples!.map((ex: RelayExample, i: number) => (
+                    <span
+                      key={i}
+                      onClick={() => {
+                        const from = campHubs.find((h) => h.id === ex.from_id);
+                        const to = campHubs.find((h) => h.id === ex.to_id);
+                        if (!from || !to || !hub) return;
+                        const rx = hub.x + 0.5, ry = hub.y + 0.5;
+                        setFlowHighlight([
+                          { ax: from.x + 0.5, ay: from.y + 0.5, bx: rx, by: ry, dir: 1, w: 2.5, relayX: rx, relayY: ry },
+                          { ax: rx, ay: ry, bx: to.x + 0.5, by: to.y + 0.5, dir: 1, w: 2.5, relayX: rx, relayY: ry },
+                        ]);
+                      }}
+                      style={{ cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}
+                      title="Show this route's legs on the map"
+                    >
+                      {ex.from_name} → {ex.to_name}{i < detail!.relay_examples!.length - 1 ? " ·" : ""}
+                    </span>
+                  ))}
                   {(detail!.relay_count ?? 0) > (detail!.relay_examples?.length ?? 0) ? ", …" : ""}
                 </span>
               )}
