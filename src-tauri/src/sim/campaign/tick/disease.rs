@@ -554,8 +554,21 @@ impl CampaignSim {
             // Logistic step: approach capacity from below, decline when above it.
             // Slower organic growth (~5%/yr peak at low pop, was ~24%). Young
             // SETTLEMENT colonies grow faster (frontier boom + sponsored migration on
-            // top) so they still mature into cities within a campaign.
-            let colony_boom = if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous { POP_GROWTH_COLONY_MULT } else { 1.0 };
+            // top) so they still mature into cities within a campaign — but ONLY while
+            // the metropolis's own lifeline is actually feeding them. User report: a
+            // colony chronically at "food 0.0/365 · supplied 0y" (the lifeline snapped —
+            // reserve empty, delivery short of the deficit every day, `supply_years`
+            // reset to 0.0 above) kept growing into the hundreds of thousands anyway.
+            // The boom used to apply unconditionally, so a starving colony got the SAME
+            // 2.2× growth-rate multiplier as a well-fed one, dwarfing the much weaker
+            // famine decline term below (`0.0016 * (starving-0.5)`, at most ~0.08%/day
+            // even at starving=1.0) — "frontier boom + sponsored migration" is not a real
+            // description of a settlement whose sponsor stopped shipping it grain.
+            // Gated on `starving` (already smoothed above, not the instantaneous
+            // per-tick lifeline flags) below the same qualitative band the founding/
+            // collapse checks elsewhere in this file use for "not in real distress".
+            let colony_boom = if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous
+                && self.hubs[h].starving < 0.4 { POP_GROWTH_COLONY_MULT } else { 1.0 };
             // DEPOSITS_AND_MINING_PLAN.md slice 5 · a mining settlement (the
             // Potosí case) booms on top of the ordinary colony boom above.
             let mining_boom = if self.hubs[h].is_mining_settlement { MINING_SETTLEMENT_GROWTH_MULT } else { 1.0 };

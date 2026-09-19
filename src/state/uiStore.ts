@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import { setProgress } from "@bridge";
 import type { MerchantRoute, FuturesLane, CellInfo } from "@types";
+import { useCampaignStore } from "@state/campaignStore";
 
 /** Persist step completion: steps 1-6 travel with the world file, 7-10 with
  *  the campaign. Fire-and-forget — a failed write only loses the checkmarks. */
@@ -609,7 +610,23 @@ export const useUIStore = create<UIStore>((set) => ({
   setElevationValue: (v) => set({ elevationValue: v }),
   setStatus: (text) => set({ statusText: text }),
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
-  setSelectedHub: (id) => set({ selectedHub: id, selectedChain: null, selectedExport: null }),
+  setSelectedHub: (id) => {
+    set({ selectedHub: id, selectedChain: null, selectedExport: null });
+    // A dependent colony (colony_kind 1) or house outpost (2) has no normal city
+    // panel — HubPanel deliberately renders nothing for one, since it has its own
+    // Colonial Office window instead. MapCanvas's own map-click handler already
+    // opens that window when the clicked marker is one of these, but every OTHER
+    // way to jump to a hub (news feed, landmarks, guilds, dynasties, war, city
+    // ranking, trade matrix, immigration corridors, key figures, plague...) called
+    // this setter directly and left the window closed — a click that silently did
+    // nothing (user report: "I click on them, I do not see settlement/outpost UI").
+    // Centralized here instead of re-adding the same guard at each call site, so a
+    // future new jump-to-hub link can't reintroduce the same gap.
+    if (id != null) {
+      const h = useCampaignStore.getState().snapshot?.hubs.find((x) => x.id === id);
+      if (h && (h.colony_kind === 1 || h.colony_kind === 2)) set({ showColonial: true });
+    }
+  },
   setSelectedMerchantRoute: (r) => set({ selectedMerchantRoute: r }),
   setSelectedFuturesLane: (r) => set({ selectedFuturesLane: r }),
   setFlowHighlight: (segs) => set({ flowHighlight: segs }),

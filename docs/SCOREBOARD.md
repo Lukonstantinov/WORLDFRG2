@@ -9,6 +9,46 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-19b — A starving colony got the SAME growth boom as a well-fed one, plus clicking one from a list opened nothing
+
+Two more reports on the same session's colony/outpost work, with a screenshot: a
+settlement colony reached ~300k population while its own Colonial Office row read
+"food 0.0/365 mo · supplied 0y" (the dedicated grain lifeline chronically snapped),
+and clicking a colony/outpost marker sometimes opened no panel at all.
+
+**Runaway colony growth.** `POP_GROWTH_COLONY_MULT` (2.2×) — the "frontier boom +
+sponsored migration" bonus every settlement colony (`colony_kind == 1`) got on its
+population growth RATE — applied UNCONDITIONALLY, with no check on whether the
+colony's own lifeline was actually feeding it. The only counter-pressure was the
+famine decline term (`0.0016 * (starving - 0.5)`, at most ~0.08%/day even at
+starving=1.0), which a 2.2× rate multiplier on the logistic growth term swamps long
+before it can bite. `colony_boom` (`disease.rs`, inside `update_food_and_starvation`)
+now also requires `starving < 0.4` — the same "not in real distress" band the
+founding/collapse checks elsewhere in this file already use — so a colony chronically
+past its lifeline's capacity stops earning the frontier bonus instead of ballooning
+through it. Note `sent_food` (which still gates the underlying `capacity` ceiling
+itself, independent of this fix) already eases toward `1 - starving` — so sustained
+starvation was already meant to shrink the ceiling, just not fast enough against an
+unconditional 2.2× rate on top of it. Verified: `cargo test --lib tick::tests`
+(260/260, incl. `outposts_and_colonies_past_year_30_dont_crash`),
+`simulate_decades_reports_dynamics` (wealth bounded [-294, 1316351], houses/banks/
+wars/crashes/turnover all present, unchanged in kind from before this fix), and
+`cargo test --lib econ_` per §2.5.
+
+**Clicking a colony/outpost from a list opened nothing.** HubPanel deliberately
+renders null for `colony_kind` 1 (dependent colony) or 2 (house outpost) — those
+have their own Colonial Office window instead of a normal city panel. Only the
+direct map-click handler (`MapCanvas.tsx`) and three UI-internal jumps
+(`HousesPanel`, `HubPanel`'s own satellite-village drill-down, `ColonialPanel`'s
+own row click) paired `setSelectedHub` with `setShowColonial(true)`; eleven OTHER
+jump-to-hub call sites (News Feed, Landmarks, Guilds, Dynasties, War, City Ranking,
+Trade Matrix, Immigration corridors, Key Figures, States, Plague) called
+`setSelectedHub` alone — so a colony/outpost reached from any of those read as a
+click that silently did nothing. Centralized in `uiStore.setSelectedHub` itself
+(reads `useCampaignStore` for the clicked hub's `colony_kind`) instead of patching
+eleven call sites one at a time, so a future new jump-to-hub link can't reintroduce
+the same gap. Verified: `npx tsc --noEmit` clean.
+
 ## 2026-09-19 — Half a dense world's real towns were structurally excluded from the campaign sim
 
 User report, with a screenshot: "Timbubafing" (a lake-shore town) showed "No trade
