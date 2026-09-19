@@ -283,16 +283,22 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     let (relay_count, relay_examples) = {
         let n = sim.hubs.len();
         let mut count = 0u32;
-        let mut examples: Vec<String> = Vec::new();
+        let mut examples: Vec<crate::commands::campaign_commands::RelayExample> = Vec::new();
         if !sim.route_outlet.is_empty() {
             for a in 0..n {
                 for b in 0..n {
                     if a == b { continue; }
                     if sim.route_outlet.get(a * n + b).copied().unwrap_or(-1) != hi as i32 { continue; }
                     count += 1;
-                    if examples.len() < 4 {
+                    // Capped at 12 (was 4) — enough for the reader to click through
+                    // several real routes without shipping the whole relay list
+                    // (which can run into the hundreds on a well-connected hub).
+                    if examples.len() < 12 {
                         if let (Some(ha), Some(hb)) = (sim.hubs.get(a), sim.hubs.get(b)) {
-                            examples.push(format!("{} → {}", ha.name, hb.name));
+                            examples.push(crate::commands::campaign_commands::RelayExample {
+                                from_id: ha.id, from_name: ha.name.clone(),
+                                to_id: hb.id, to_name: hb.name.clone(),
+                            });
                         }
                     }
                 }

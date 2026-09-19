@@ -334,7 +334,7 @@ interface UIStore {
   setSelectedHub: (id: number | null) => void;
   setSelectedMerchantRoute: (r: MerchantRoute | null) => void;
   setSelectedFuturesLane: (r: FuturesLane | null) => void;
-  setFlowHighlight: (segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number }[]) => void;
+  setFlowHighlight: (segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[]) => void;
   setShowFutures: (open: boolean) => void;
   setShowWarehouses: (open: boolean) => void;
   setFuturesFocus: (f: { city?: string; holder?: string; good?: string } | null) => void;

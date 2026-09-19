@@ -550,8 +550,8 @@ export interface HubDetail {
   /** The real Ostia-style break-of-bulk count — how many OTHER hub-pairs'
    *  cheapest route relays through this hub. 0 for an ordinary city. */
   relay_count?: number;
-  /** A few example "A → B" pair names this hub relays for. */
-  relay_examples?: string[];
+  /** A few example hub-pairs this hub relays for (clickable — see HubPanel). */
+  relay_examples?: RelayExample[];
   /** DLC 3 · the polis government of this seat (null for estates). */
   government?: Government | null;
   treasury?: number;                 // retained civic treasury
@@ -1086,6 +1086,16 @@ export interface PopBrief {
 export interface BarredHouse {
   name: string;
   is_guild: boolean;
+}
+
+/** One OTHER hub-pair whose cheapest route relays through this hub (the
+ *  break-of-bulk banner). Carries both ids so the frontend can draw the
+ *  actual relay legs on the map when the reader clicks one. */
+export interface RelayExample {
+  from_id: number;
+  from_name: string;
+  to_id: number;
+  to_name: string;
 }
 
 export interface HouseBrief {

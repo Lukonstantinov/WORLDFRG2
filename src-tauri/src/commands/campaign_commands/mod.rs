@@ -837,9 +837,9 @@ pub struct HubDetail {
     /// cheapest route relays through this hub (`CampaignSim::relay_counts`),
     /// distinct from raw trade throughput. 0 for an ordinary city.
     #[serde(default)] pub relay_count: u32,
-    /// A few example "A → B" pair names this hub relays for, so the panel can
-    /// say WHAT it is a waypoint between, not just a bare count.
-    #[serde(default)] pub relay_examples: Vec<String>,
+    /// A few example hub-pairs this hub relays for, so the panel can say WHAT
+    /// it is a waypoint between (and draw it), not just a bare count.
+    #[serde(default)] pub relay_examples: Vec<RelayExample>,
     // ── DLC 3.5 · treasury, finances, war, and the carrying trade ──
     /// Retained civic treasury (grain-eq).
     #[serde(default)] pub treasury: f32,
@@ -1766,6 +1766,20 @@ const GRADE_NAMES: [&str; 5] = ["Coarse", "Common", "Standard", "Fine", "Exquisi
 pub struct BarredHouse {
     pub name: String,
     pub is_guild: bool,
+}
+
+/// One OTHER hub-pair whose cheapest route relays through this hub (the
+/// break-of-bulk banner, `HubDetail.relay_examples`). Carries both ids, not
+/// just the formatted name, so the frontend can draw the ACTUAL relay legs
+/// on the map when the reader clicks one — the banner used to be text-only,
+/// with no coordinates for the map to plot (user report: "still shows only
+/// information, no on map data").
+#[derive(Serialize, Clone)]
+pub struct RelayExample {
+    pub from_id: u32,
+    pub from_name: String,
+    pub to_id: u32,
+    pub to_name: String,
 }
 
 /// One merchant family for the Houses panel / settlement window.
