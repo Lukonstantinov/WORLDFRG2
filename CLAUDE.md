@@ -2323,6 +2323,27 @@ Writing it took two fixtures: the first was a shallow bay where going round was
 already cheapest, so search-then-filter would have kept the path and the gate proved
 nothing. **A routing gate needs a geometry where the illegal line genuinely WINS.**
 
+**THE RULE DID NOT REACH THE CAMPAIGN'S OWN ROUTING, only the map query layer.**
+`CampaignSim.days`/`route_outlet` — which decide every relay assignment, dispatch
+choice and freight cost inside a running campaign — were priced by
+`compute_route_days_matrix_for_season` calling the plain unconstrained
+`coarse_dijkstra_dist_prev`, never `coarse_dijkstra_legal`. So a relay pair could
+be internally "legal" by the campaign's own accounting while the map's own
+resolver (correctly enforcing the rule) found no legal route for it and fell back
+to the dashed-direct convention — the straight line was the render being honest
+about upstream data, not a rendering bug. Fixed with `coarse_dijkstra_legal_dist`,
+the same `(cell, run)` state extended to a full single-source-to-everywhere
+search (§8.5's `route_days_matrix` fix, 2026-09-19c). A SECOND, LIVE injection
+point had the same gap with a worse unit error: `production.rs`'s periodic
+`rebuild_routes` (`#6c` coastal cabotage) wrote raw Euclidean distance straight
+into `days` with no pathfinder and no crossing check, and its own
+`CABOTAGE_SEA_FRAC` constant computed to ~3,206 km against a doc comment claiming
+"a deliberately SHORT crossing" (~1,000 km) — 4× the real 800 km cap. Now derived
+directly from `MAX_OPEN_SEA_CROSSING_KM`. `#6`/`#6b` (the guaranteed-partners and
+market-lifeline rescues) share the same unconstrained-Euclidean shape but are
+same-component-only (land routes have no crossing cap to violate) — named as a
+queued, unmeasured follow-up rather than silently assumed clean (rule 36).
+
 **Still post-filtered, and why** (queued, not waived): `coarse_dijkstra_batch` —
 which feeds `compute_trade_routes`' drawn road network and `compute_economy`'s
 candidate edges — still searches then filters, so a rejected pair there is a route

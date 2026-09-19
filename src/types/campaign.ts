@@ -1096,6 +1096,12 @@ export interface RelayExample {
   from_name: string;
   to_id: number;
   to_name: string;
+  /** The pair's real routed travel time (days) — the sim's own pathfound
+   *  distance, not a straight-line guess. */
+  days: number;
+  /** Annual grain-eq trade actually flowing between the two (0 if the
+   *  cheapest path relays here but nothing currently moves that way). */
+  volume: number;
 }
 
 export interface HouseBrief {

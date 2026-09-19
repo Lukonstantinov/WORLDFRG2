@@ -1780,6 +1780,15 @@ pub struct RelayExample {
     pub from_name: String,
     pub to_id: u32,
     pub to_name: String,
+    /// The pair's real routed travel time (`CampaignSim.days`), in days — the
+    /// pathfound distance the sim itself uses, not a straight-line guess. User
+    /// request: "additional information as distance of route".
+    pub days: f32,
+    /// Annual grain-eq trade actually flowing between the two (both directions
+    /// summed, from `trade_last`) — 0 when the pair's cheapest path happens to
+    /// relay through here but no goods currently move between them. User
+    /// request: "and volume".
+    pub volume: f32,
 }
 
 /// One merchant family for the Houses panel / settlement window.

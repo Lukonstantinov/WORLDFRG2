@@ -2621,11 +2621,28 @@ const MARKET_REACH_FRAC: f32 = 0.5;
 /// the start even though the mainland is a short crossing away. Pre-modern economies ran
 /// SHORT sea hops constantly (cabotage, coastal and inter-island trade); only the long
 /// ocean crossing didn't exist. So a COASTAL hub is linked to the nearest coastal hubs of
-/// OTHER components within `CABOTAGE_SEA_FRAC` of world width — a deliberately SHORT
-/// crossing (a third of the #4 horizon), so a near-shore island joins the mainland's
-/// trade while two continents an ocean apart still do not. Cross-component only, so on a
-/// single-component world (the econ-fidelity reference) it is a strict no-op.
-const CABOTAGE_SEA_FRAC: f32 = 0.08;
+/// OTHER components within `CABOTAGE_SEA_FRAC` of world width. Cross-component only, so
+/// on a single-component world (the econ-fidelity reference) it is a strict no-op.
+///
+/// User report, with a screenshot: a break-of-bulk relay leg drew as a dead-straight
+/// dashed line spanning most of the visible map, far past any legal open-water
+/// crossing. This constant was the second of TWO places the campaign's own route-days
+/// matrix could inject an illegally long "route" with no crossing check at all — the
+/// first was `compute_route_days_matrix_for_season`'s own base pathfinder, fixed to
+/// use `coarse_dijkstra_legal_dist` (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9/C4).
+/// This one is worse in one way: it runs PERIODICALLY inside a LIVE campaign
+/// (`rebuild_routes`, production.rs), not just once at start, and it never ran the
+/// pathfinder at all — it wrote a raw EUCLIDEAN straight-line distance straight into
+/// `days[a*n+b]`, with the "SHORT crossing" claim resting on the doc's own (wrong)
+/// arithmetic: "a third of the #4 [3,000 km] horizon" implies ~1,000 km, but the
+/// shipped `0.08` fraction of a 40,075 km equator is ~3,206 km — four times the real
+/// 800 km hard cap every other crossing check in this codebase enforces, and even
+/// wider than `ISOLATION_RESCUE_MAX_KM` (1,800 km), the constant right below this one
+/// that explicitly says cabotage should stay SHORTER than. Derived from
+/// `MAX_OPEN_SEA_CROSSING_KM` directly now, so cabotage can never exceed the same
+/// legal crossing every other route in the game already obeys — one authoritative
+/// number instead of a second one that drifted from it.
+const CABOTAGE_SEA_FRAC: f32 = crate::commands::query_commands::MAX_OPEN_SEA_CROSSING_KM / KM_EQUATOR;
 /// TECTONICS_AND_ISOLATION_PLAN.md Part A — the maximum distance `rescue_tiny_
 /// components` may fold a tiny (<3-hub) component into a substantial one. Set
 /// well above `CABOTAGE_SEA_FRAC`'s short hop (that pass already covers near-shore
