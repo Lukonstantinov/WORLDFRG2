@@ -81,16 +81,24 @@ It prints a scorecard + confusion matrix and HARD-ASSERTS a floor
 (`EARTH_MAIN_FLOOR`), so a change that breaks the global pattern fails the build.
 **Raise the floor after an improvement** so it always guards the current best.
 
-Measured baseline: **main-class 70.2%**, **exact-zone 39.0%** (was 66.2 / 29.0 at
+Measured baseline: **main-class 68.8%**, **exact-zone 37.9%** (was 66.2 / 29.0 at
 `d53fdc9`; main-class was 70.1 before Terrain 2.0 slice 5's seafloor
 structure — the one part of that plan touching `compute_sea_depth`/`generate_shelves`
-— nudged it to 70.2, floor raised to 70.15). BOTH are now asserted — `EARTH_MAIN_FLOOR`
-**and** `EARTH_EXACT_FLOOR`.
+— nudged it to 70.2, floor raised to 70.15; then LOWERED a second time, 70.15 → 68.5
+and 38.8 → 37.6, when `MONSOON_LAND_PULL` was raised 1.0 → 2.2 so the Arabian Sea and
+Bay of Bengal — the two of `earth_monsoon_wind_reverses`' seven monsoon sites still
+not turning onshore — finally do, flipping India-Mumbai `B → A` (161mm → 1046mm,
+tropical/monsoon instead of desert). See `docs/SCOREBOARD.md` 2026-09-19 and
+`seasonal.rs`'s own doc comment on that constant for the full dose walk and what it
+does NOT fix — Bangladesh/China-South's precipitation did not move at all). BOTH are
+still asserted — `EARTH_MAIN_FLOOR` **and** `EARTH_EXACT_FLOOR`.
 A third gate, `earth_monsoon_wind_reverses`, asserts the PHYSICS rather than the
 score: monsoon winds must reverse between the two seasons and the mid-latitude
-controls must not. It exists because the main-class floor was deliberately lowered
-once (70.6 → 70.0) to adopt the seasonal monsoon, and a point spent on realism has
-to be defended by something.
+controls must not (now 6/7 monsoon sites, floor raised 4/7 → 5/7 to match). It
+exists because the main-class floor was deliberately lowered twice — once (70.6 →
+70.0) to adopt the seasonal monsoon in the first place, once more (70.15 → 68.5)
+to make it actually reach the two sites it was still missing — and a point spent
+on realism has to be defended by something.
 Track **exact-zone** — main-class is inflated by class E scoring 99.1% for free
 (polar is just "cold"). Known open errors and the plan to fix them: `docs/FIX_PLAN.md`.
 
