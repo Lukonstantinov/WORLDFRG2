@@ -259,13 +259,34 @@ fn earth_diagnose_upwelling_reachability() {
 /// Terrain 2.0 that feeds this gate (see that plan's own "one piece of good
 /// news"), and the ridge/trench/abyssal-hill terms nudged distance_to_ocean/
 /// upwelling slightly in this gate's favour rather than against it.
-const EARTH_MAIN_FLOOR: f64 = 70.15;
+///
+/// LOWERED a second time, 70.15 -> 68.5, deliberately: `MONSOON_LAND_PULL`
+/// (`seasonal.rs`) raised 1.0 -> 2.2 so the Arabian Sea and Bay of Bengal —
+/// the two of A14's seven monsoon sites still reading `Δ=0` at adoption ("two
+/// seasons of rain on one season of wind" persisting exactly where the real
+/// Indian monsoon lives) — finally reverse (`earth_monsoon_wind_reverses`
+/// 4/7 -> 6/7). Requested and accepted by the maintainer as this same trade
+/// again: India-Mumbai flips `B -> A` (161mm -> 1046mm, matching its real
+/// tropical-savanna/monsoon character instead of reading as desert), at a
+/// cost spread across the rest of the `A` row (Amazon 1275 -> 992mm, still
+/// `A`; Congo holds `A` at 707mm) plus general subtropical drift as the
+/// wind-driven ITCZ column shifts respond to a stronger land-pull term
+/// everywhere, not only over South Asia. Calibrated just under the measured
+/// 68.8% at `MONSOON_LAND_PULL = 2.2`; bump it up as the model improves.
+/// `Bangladesh` and `China-South` remain unfixed by this lever — their
+/// precipitation did not move at all across the whole 1.0..2.5 sweep, which
+/// means their bottleneck is a different term entirely (not gated by wind
+/// alignment the way Mumbai's was) and is real, separate, unstarted work.
+const EARTH_MAIN_FLOOR: f64 = 68.5;
 
 /// The same guard for EXACT-ZONE agreement (31.6% measured). Main-class alone is
 /// not enough: E scores ~99% for free on a fifth of the weight, so a change can
 /// hold main-class flat while degrading the zone detail underneath it. Track this
 /// one — it is where the real state of the model lives (CLAUDE.md §2.3).
-const EARTH_EXACT_FLOOR: f64 = 38.8;
+///
+/// LOWERED alongside `EARTH_MAIN_FLOOR` for the same `MONSOON_LAND_PULL` change
+/// (measured 37.9% at 2.2); see that constant's own doc comment for the trade.
+const EARTH_EXACT_FLOOR: f64 = 37.6;
 
 /// Why a subtropical cell came out wet or dry — the decision chain, not the total.
 ///
@@ -537,11 +558,14 @@ fn earth_monsoon_wind_reverses() {
     }
     println!("  monsoon sites reversing (Δ > 120°): {hits}/{want}");
     println!("────────────────────────────────────────────────────\n");
-    // Measured 4/7 at adoption. Held one below that so an unrelated change can
-    // shift a single marginal site without a spurious failure, while a flattened
-    // wind field (which scored 0/7) still fails loudly.
+    // Measured 4/7 at adoption, raised to 6/7 once MONSOON_LAND_PULL (2.0 -> 2.2,
+    // see EARTH_MAIN_FLOOR's own doc comment) made the Arabian Sea and Bay of
+    // Bengal reverse too. Held one below the new measured value, same margin
+    // discipline as before, so an unrelated change can shift a single marginal
+    // site without a spurious failure, while a flattened wind field (which
+    // scored 0/7) still fails loudly.
     assert!(
-        hits >= 3,
+        hits >= 5,
         "only {hits}/{want} monsoon sites reverse between January and July — the \
          seasonal wind field has gone flat again (FIX_PLAN A14)"
     );

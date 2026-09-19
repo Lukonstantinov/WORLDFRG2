@@ -56,7 +56,31 @@ pub const MONSOON_BELT_MIGRATE: f32 = 8.0;
 /// reaches ~10°N in July; over Asia the monsoon trough reaches ~25-30°N, which is
 /// why the Bay of Bengal reverses and the central Pacific at the same latitude
 /// does not.
-pub const MONSOON_LAND_PULL: f32 = 1.0;
+///
+/// Raised 1.0 -> 2.2 (requested by the maintainer, "push the ITCZ boundaries" —
+/// see `docs/FIX_PLAN.md` A4/A14's own history first). At 1.0 the wind at the
+/// Arabian Sea and the Bay of Bengal never reversed at all
+/// (`earth_monsoon_wind_reverses` measured `Δ=0°` at both, the exact two sites
+/// A14 shipped still broken), so the archetypal Indian monsoon ran on a WIND that
+/// never turned onshore even though `monsoon_onshore`'s rain-side gate was ready
+/// to receive it — the reversal that already worked for Somalia/SE Asia/Sahel/
+/// N-Australia was landing short of the one place the whole mechanism exists for.
+/// Dose-walked 1.0 → 1.5 → 1.8 → 2.0 → 2.2 → 2.5 against `cargo test --lib earth_`:
+/// 2.2 is the highest value that keeps every existing named-region assertion
+/// passing (Amazon/Congo/Indonesia/Sahara/Arabia all hold their reference class);
+/// 2.5 overshoots and flips Congo `A -> B` (the same "push the SH-summer ITCZ too
+/// far poleward" failure mode `ITCZ_SEASONAL_MIGRATE`'s own doc comment records).
+/// At 2.2, Bay of Bengal and India-west-coast both reverse (6/7 monsoon sites,
+/// up from 4/7) and **India-Mumbai flips `B -> A`** (161mm -> 1046mm) — the
+/// concrete "India reads as desert instead of monsoon/savanna" report this was
+/// aimed at. Costs main-class 70.2% -> 68.8% and exact-zone 39.0% -> 37.9%
+/// (`EARTH_MAIN_FLOOR`/`EARTH_EXACT_FLOOR` lowered to match, same considered-trade
+/// precedent as A14's own 70.6 -> 70.0 lowering — see that constant's own doc
+/// comment for the full accounting). **The Arabian Sea itself still does not
+/// reverse even at 2.2**, and neither `Bangladesh` nor `China-South`'s
+/// precipitation moved AT ALL across the entire 1.0..2.5 sweep — proof their
+/// bottleneck is a different mechanism, not this one, and real follow-up work.
+pub const MONSOON_LAND_PULL: f32 = 2.2;
 
 /// Latitude (°) up to which the belts migrate at full amplitude, and the latitude
 /// by which the migration has died away entirely.
