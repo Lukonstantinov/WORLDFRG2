@@ -291,8 +291,15 @@ const ITCZ_COLOR = "#39d6e0"; // annual-mean fallback (old saves with no seasona
 const ITCZ_JULY_COLOR = "#e8556e";
 const ITCZ_JAN_COLOR = "#4f9bea";
 // Half-width of the drawn convergence belt, in degrees of latitude (±, so the core
-// band is twice this). The real ITCZ rain belt is ~5-10° wide.
-const ITCZ_BAND_HALF_DEG = 6;
+// band is twice this). The real ITCZ rain belt itself is ~5-10° wide in a given
+// month, but the reference cartographic convention (e.g. the Wikipedia July/January
+// ITCZ map) draws each season's band a good deal broader than that bare figure —
+// it reads as the belt's own width PLUS the fact that a real monthly ITCZ position
+// wanders during the season it nominally represents, so the printed band is closer
+// to 15-20° wide than to a literal 5-10°. Widened from 6 (a 12°-wide core that read
+// as thin/hairline-adjacent next to that convention) to 9 (18° core, 30° with the
+// halo) to match.
+const ITCZ_BAND_HALF_DEG = 9;
 const SUBTROPICAL_COLOR = "#e0a83a";
 // The polar front used to be "#6a9cf0" — a mid blue within a few percent of the
 // river stroke. Drawn as a DEAD-STRAIGHT full-width line at a fixed latitude, it
@@ -2850,10 +2857,10 @@ export class OverlayManager {
         // core — so each belt reads as a soft-edged swath. Halos first so the cores
         // and centre lines sit crisply on top; January under July, since the
         // boreal-summer belt is the more prominent one over the continents.
-        ribbon(janLats, halo, 0.11, janColor);
-        ribbon(julLats, halo, 0.11, julColor);
-        ribbon(janLats, ITCZ_BAND_HALF_DEG, 0.28, janColor);
-        ribbon(julLats, ITCZ_BAND_HALF_DEG, 0.28, julColor);
+        ribbon(janLats, halo, 0.14, janColor);
+        ribbon(julLats, halo, 0.14, julColor);
+        ribbon(janLats, ITCZ_BAND_HALF_DEG, 0.34, janColor);
+        ribbon(julLats, ITCZ_BAND_HALF_DEG, 0.34, julColor);
 
         trace(janLats, janColor, hasSeasons ? [
           Math.max(3, 7 / Math.sqrt(this.currentScale)),
