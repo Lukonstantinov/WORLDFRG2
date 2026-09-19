@@ -9,6 +9,89 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-19c — The campaign's OWN route-days matrix never enforced the open-water crossing rule
+
+User report, with two screenshots: clicking a break-of-bulk relay drew a dead-straight
+dashed line spanning most of the visible map, far past any legal crossing — and,
+after the first fix below landed, several routes STILL drew straight. Both were
+real: the crossing rule (`MAX_OPEN_SEA_CROSSING_KM` = 800 km, §8.5) was fully
+enforced at the MAP query layer (`compute_coarse_route`, `compute_trade_routes`,
+`compute_economy` — all fixed earlier this week) but never reached the CAMPAIGN's
+own internal routing, which decides `CampaignSim.days`/`route_outlet` and so every
+relay assignment, dispatch decision and freight cost in a running campaign. The
+dashed line was never a rendering bug — the map's own resolver correctly found no
+legal route for an already-illegal relay pair and fell back to the honest dashed-
+direct convention (rule 35), exposing upstream data the campaign itself computed
+without the rule.
+
+**Cause 1 — the base matrix.** `compute_route_days_matrix_for_season`
+(`query_commands/mod.rs`, built once at campaign start) priced every hub pair with
+`coarse_dijkstra_dist_prev`, the plain UNCONSTRAINED single-source Dijkstra —
+never the crossing-aware `coarse_dijkstra_legal` the map layer already used. A new
+`coarse_dijkstra_legal_dist` extends the SAME `(cell, run)` crossing-rule state
+space to a full single-source-to-everywhere search (reduced to one distance per
+real coarse cell, the minimum over every `run` lane that reached it), and the
+matrix builder now calls that instead — so a pair `compute_routed_components`
+already split apart for crossing too much open water gets `INFINITY` here too,
+instead of a finite but illegally-routed number of days.
+
+**Cause 2 — a second, LIVE injection point with a broken unit conversion.**
+`route_outlet`/`days` are also patched PERIODICALLY inside a running campaign
+(`rebuild_routes`, `production.rs`), not just once at start — so cause 1 alone
+would not explain lines still appearing after that fix. `#6c` coastal cabotage
+(`CABOTAGE_SEA_FRAC`) writes a raw EUCLIDEAN straight-line distance straight into
+`days[a*n+b]` with no pathfinder and no crossing check at all, and its own doc
+comment's claimed intent ("a deliberately SHORT crossing, a third of the 3,000 km
+#4 horizon" ≈1,000 km) never matched its shipped value: `0.08` of a 40,075 km
+equator is **~3,206 km** — 4× the real 800 km hard cap enforced everywhere else,
+and even wider than the neighbouring `ISOLATION_RESCUE_MAX_KM` (1,800 km) constant
+that explicitly says cabotage should stay shorter than it. Now derived directly
+from `MAX_OPEN_SEA_CROSSING_KM` instead of carrying its own drifted fraction.
+
+Two pre-existing tests broke from cause 1's fix, both diagnosed as fixture bugs,
+not regressions: `an_all_sea_route_keeps_roughly_its_old_travel_time` measured a
+40-cell gap at `w=200` — 8,015 km on a fixed-cell-count fixture, an order of
+magnitude past the now-enforced cap (test world widened, same relative claim).
+`coastal_sea_speed_matches_the_historical_effective_average` built a ONE-FINE-ROW
+land strip at `w=3600` (`f=5`) — `build_coarse_cost` classifies a whole coarse
+block from its own CENTRE fine cell alone, so a 1-row strip almost never lands on
+that sample and was entirely invisible to the coarse grid, making the "coastal"
+hub two rows off it read as plain open sea to the crossing-legal search (rejected
+outright, "no coastal route found"). Thickened to one full coarse block and the
+sea hub moved to the genuinely adjacent block — the same underlying-classification
+lesson §8.24a3/§8.24c's own "always verify a new gate fails on the unfixed code"
+already recorded, just found here by a test rather than a screenshot.
+
+Verified: `cargo test --lib query_commands` (20/20, both repaired fixtures pass),
+`cargo test --lib tick::tests` (260/260, incl. `simulate_decades_reports_dynamics`
+and `the_dosed_economy_stays_healthy_on_a_realistically_dense_world`), `cargo test
+--lib econ_` per §2.5. Existing campaigns keep whatever `route_outlet`/`days` they
+computed at start (§5.1's "route matrix... derived on load, not serialized" note —
+this is a one-time build per `campaign_start_sim`, not a per-tick recompute); only
+a freshly-started campaign gets the fix for cause 1. Cause 2 (`rebuild_routes`) DOES
+re-run periodically inside a live campaign, so a running game should self-correct
+its cabotage-sourced illegal links over time even without restarting.
+
+**Also shipped, same session, user-requested:** the break-of-bulk banner
+(2026-09-19's "clickable relay" entry) is now COLLAPSED by default (a hub can
+carry hundreds of routes) with a show/hide toggle, and each row states its real
+routed DAYS (`CampaignSim.days`, not a straight-line guess) and annual trade
+VOLUME between the pair (0 when the relay is purely a cheapest-path artifact with
+no goods currently moving that way) — `RelayExample` gained both fields,
+`campaign_trade_flows`'s sibling `campaign_get_hub` builder aggregates `volume`
+from `trade_last` once per call, reused across all 12 examples rather than
+rescanned per row. Gates: `npx tsc --noEmit` clean.
+
+**Not addressed this pass, named rather than silently left**: `#6` (guaranteed-
+partners rescue, no distance cap at all) and `#6b` (market lifeline, `MARKET_
+REACH_FRAC` = 0.5 → ~20,037 km) are the SAME class of unconstrained straight-line
+injection, same-component only. Lower priority and lower confidence than the
+cross-component cabotage case fixed here — same-component connectivity is real
+(built from the crossing-legal search), so these can at most draw an implausibly
+direct SAME-LANDMASS shortcut, not an ocean crossing, and land routes have no
+crossing cap to violate in the first place. Queued (rule 36): re-measure whether
+either actually produces a visibly-illegal line before touching either constant.
+
 ## 2026-09-19b — A starving colony got the SAME growth boom as a well-fed one, plus clicking one from a list opened nothing
 
 Two more reports on the same session's colony/outpost work, with a screenshot: a

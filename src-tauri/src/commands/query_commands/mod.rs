@@ -856,6 +856,114 @@ fn coarse_dijkstra_dist_prev(cc: &CoarseCost, start: usize) -> (Vec<i64>, Vec<us
     (dist, prev)
 }
 
+/// `coarse_dijkstra_dist_prev`'s SAME single-source-to-everywhere shape, but under
+/// the crossing rule DURING the search (`coarse_dijkstra_legal`'s `(cell, run)`
+/// state), not the unconstrained cost `coarse_dijkstra_dist_prev` computes.
+///
+/// User report, with a screenshot: a break-of-bulk relay leg drew as a dead-
+/// straight dashed line spanning most of the visible map — far past any
+/// legal open-water crossing. The MAP's own routing (`compute_coarse_route`)
+/// already obeys `MAX_OPEN_SEA_CROSSING_KM`, so it correctly found no legal
+/// path and fell back to the honest dashed-direct convention (rule 35) — the
+/// straight line was not a rendering bug, it was the render being honest
+/// about upstream data: `compute_route_days_matrix_for_season` (below), which
+/// decides `CampaignSim.days`/`route_outlet` and so the ENTIRE campaign's
+/// trade/migration/relay assignment, priced its routes with the plain
+/// unconstrained `coarse_dijkstra_dist_prev` and never enforced the crossing
+/// rule at all. `compute_routed_components` already builds components FROM
+/// this exact rule (reach 1, `path_allowed`), so two hubs already known to be
+/// unreachable of each other under the rule could still receive a finite,
+/// illegally-routed `days` entry here — the rule bound the MAP query layer
+/// and the component split, but not the campaign's own core routing table.
+///
+/// Reduced to one entry per real coarse CELL (never per search state) by
+/// taking the MINIMUM over every `run` lane that reached it — a caller
+/// pricing a lane only cares about the cheapest LEGAL way to get there, not
+/// which lane of the search state space found it.
+fn coarse_dijkstra_legal_dist(
+    cc: &CoarseCost, start: usize,
+    reach: u8, max_crossing_frac: f32, grid_w: u32,
+) -> Vec<i64> {
+    let (cw, ch) = (cc.cw, cc.ch);
+    let cn = (cw * ch) as usize;
+    if start >= cn { return vec![i64::MAX; cn]; }
+
+    // Reach 2 is land only — a plain mask, no run state needed, exactly
+    // mirroring `coarse_dijkstra_masked`'s own reach-2 shortcut.
+    if reach == 2 {
+        let mut dist = vec![i64::MAX; cn];
+        if !cc.is_land[start] { return dist; }
+        let mut heap: BinaryHeap<Reverse<(i64, usize)>> = BinaryHeap::new();
+        dist[start] = 0;
+        heap.push(Reverse((0, start)));
+        while let Some(Reverse((d, u))) = heap.pop() {
+            if d > dist[u] { continue; }
+            let ux = (u as i32) % cw;
+            let uy = (u as i32) / cw;
+            for &(dx, dy, mult) in &COARSE_DIRS {
+                let ny = uy + dy;
+                if ny < 0 || ny >= ch { continue; }
+                let v = cc.cidx(ux + dx, ny);
+                if !cc.is_land[v] { continue; }
+                let step = ((cc.cost[u] + cc.cost[v]) * 0.5 * mult * 100.0) as i64;
+                let nd = d.saturating_add(step.max(1));
+                if nd < dist[v] { dist[v] = nd; heap.push(Reverse((nd, v))); }
+            }
+        }
+        return dist;
+    }
+
+    // The same clamp `path_allowed`/`coarse_dijkstra_legal` apply, in COARSE cells.
+    let allowed = max_crossing_frac.max(0.0).min(MAX_OPEN_SEA_CROSSING_KM / KM_EQUATOR);
+    let cap = ((allowed * grid_w as f32) / cc.f.max(1) as f32).floor().max(0.0) as usize;
+    let lanes = cap + 1; // run ∈ 0..=cap
+    let sidx = |cell: usize, run: usize| cell * lanes + run;
+
+    let mut dist = vec![i64::MAX; cn * lanes];
+    let mut heap: BinaryHeap<Reverse<(i64, u32)>> = BinaryHeap::new();
+
+    let start_run = if cc.is_open_sea[start] { 1 } else { 0 };
+    if start_run <= cap {
+        dist[sidx(start, start_run)] = 0;
+        heap.push(Reverse((0, sidx(start, start_run) as u32)));
+    }
+
+    while let Some(Reverse((d, su))) = heap.pop() {
+        let su = su as usize;
+        if d > dist[su] { continue; }
+        let (u, run) = (su / lanes, su % lanes);
+        let ux = (u as i32) % cw;
+        let uy = (u as i32) / cw;
+        for &(dx, dy, mult) in &COARSE_DIRS {
+            let ny = uy + dy;
+            if ny < 0 || ny >= ch { continue; }
+            let v = cc.cidx(ux + dx, ny);
+            // THE RULE, as an edge condition rather than a verdict on the finished path.
+            let nrun = if cc.is_open_sea[v] { run + 1 } else { 0 };
+            if nrun > cap { continue; }
+            let step = ((cc.cost[u] + cc.cost[v]) * 0.5 * mult * 100.0) as i64;
+            let nd = d.saturating_add(step.max(1));
+            let sv = sidx(v, nrun);
+            if nd < dist[sv] {
+                dist[sv] = nd;
+                heap.push(Reverse((nd, sv as u32)));
+            }
+        }
+    }
+
+    // Per-cell result: the cheapest LEGAL arrival, whichever run-lane found it.
+    let mut out = vec![i64::MAX; cn];
+    for cell in 0..cn {
+        let mut best = i64::MAX;
+        for r in 0..lanes {
+            let d = dist[sidx(cell, r)];
+            if d < best { best = d; }
+        }
+        out[cell] = best;
+    }
+    out
+}
+
 /// Precompute the campaign's REAL pathfound route-days matrix (n·n) over the coarse cost
 /// grid: mountain passes, rivers, coast-hugging and sea crossings are all priced in, so
 /// campaign trade/migration follow real lanes and NEVER draw a straight line.
@@ -951,8 +1059,13 @@ pub(crate) fn compute_route_days_matrix_for_season(
         // Run Dijkstra for every hub regardless of component so that sea lanes
         // connect cities on different geographic components (separate continents).
         // The component filter was the reason isolated continents could never trade
-        // even when the sea cost grid had a viable route between them.
-        let (dist, _prev) = coarse_dijkstra_dist_prev(&cc, nodes[a]);
+        // even when the sea cost grid had a viable route between them. Legality now
+        // comes from the crossing rule itself (reach 1, the same hard
+        // `MAX_OPEN_SEA_CROSSING_KM` every map query already obeys), not from a
+        // component check — a pair `compute_routed_components` already split apart
+        // for crossing too much open water gets `INFINITY` here too, instead of a
+        // finite but illegally-routed number of days.
+        let dist = coarse_dijkstra_legal_dist(&cc, nodes[a], 1, 1.0, grid_w);
         for b in 0..n {
             if b == a { continue; }
             let d = dist.get(nodes[b]).copied().unwrap_or(i64::MAX);
@@ -3341,13 +3454,23 @@ mod route_pricing_tests {
         WorldDb::new(conn)
     }
 
-    /// An all-open-sea world of the same size as `uniform_world`'s land case —
-    /// far enough from land that the coastal-shipping discount never applies, so
-    /// every sea cell prices at exactly `OPEN_SEA_COST`, the value the calibration
-    /// is anchored to.
+    /// An all-open-sea world far enough from land that the coastal-shipping
+    /// discount never applies, so every sea cell prices at exactly
+    /// `OPEN_SEA_COST`, the value the calibration is anchored to.
+    ///
+    /// A wider world than `uniform_world`'s other 200-cell callers, deliberately:
+    /// `MAX_OPEN_SEA_CROSSING_KM` (800 km) is a real, enforced-during-search world
+    /// rule now (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9/C4), not merely a
+    /// post-filter, and a fixed CELL distance implies a wildly different real
+    /// distance depending on grid resolution — 40 cells at `w=200` is ~8,015 km,
+    /// ten times the legal crossing, which is why this used to pass (nothing
+    /// enforced the cap on the campaign's own route-days matrix) and now fails
+    /// with "no route found" once it did. `w=10000` keeps the SAME 124-cell gap
+    /// comfortably under the cap (~497 km) while staying wide enough for the
+    /// ratio assertion below to have real resolution.
     #[test]
     fn an_all_sea_route_keeps_roughly_its_old_travel_time() {
-        let w = 200u32;
+        let w = 10000u32;
         let h = 100u32;
         let db = uniform_world(w, h, false, 12, 0.0); // Cfb, all sea
         let conn = db.conn.lock().unwrap();
@@ -3355,7 +3478,7 @@ mod route_pricing_tests {
         // Well under half the world's width apart, so the cylindrical X-wrap can
         // never make "the other way around" the shorter path — this test wants the
         // ordinary straight route, not a wraparound shortcut.
-        let hub_xy = vec![(20.0f32, 50.0f32), (60.0f32, 50.0f32)];
+        let hub_xy = vec![(200.0f32, 50.0f32), (324.0f32, 50.0f32)];
         let components = vec![0u32, 0u32];
         let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)
             .expect("route matrix build failed");
@@ -3405,7 +3528,7 @@ mod route_pricing_tests {
     /// C1 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §9) — calm coastal sea's
     /// DERIVED speed must land inside the real pre-modern effective average
     /// (~50-100 km/day, fast passage ~150 — the review doc's own table). Builds a
-    /// thin land strip with two hubs in the water immediately alongside it, far
+    /// land strip with two hubs in the water immediately alongside it, far
     /// enough apart that the shortest route hugs the coast the whole way (every
     /// cell it crosses prices at `COASTAL_SEA_COST` — land is dearer per cell, so
     /// the pathfinder never detours onto it), and converts the resulting `days` to
@@ -3414,16 +3537,38 @@ mod route_pricing_tests {
     /// shipped default grid width (3600) — not the arbitrary `0.2` this file's
     /// other route-day tests use, since THIS claim is about a real km/day figure,
     /// not a ratio to an old placeholder.
+    ///
+    /// The land strip is ONE FULL COARSE BLOCK THICK (`f` fine rows), not one bare
+    /// fine row. `build_coarse_cost` classifies a whole coarse cell from its own
+    /// CENTRE fine cell alone (§9 B1/A3's own sampling discipline), so a one-row
+    /// strip at `f=5` (the shipped width's own block size) almost never lands on
+    /// that centre sample — every coarse row containing it reads as plain sea, the
+    /// land is entirely invisible to the coarse grid, and the "coastal" hub two
+    /// rows off it is `is_open_sea` from the crossing-legal pathfinder's point of
+    /// view (`coarse_dijkstra_legal_dist`, ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md
+    /// §9/C4) exactly like the deep ocean it is meant to hug rather than cross —
+    /// so this whole 1400-cell "coastal" route got rejected outright as an illegal
+    /// >800 km open-water crossing once that pathfinder started enforcing the rule
+    /// DURING the campaign's own route-days matrix, not just at the map query
+    /// layer. Thickening the strip to a real coarse block, and reading the sea hub
+    /// from the block immediately AFTER it, makes the land block land-classified
+    /// and the hub's own block correctly `coastal` (adjacent to a land block) for
+    /// every x along the whole route, matching what the test's own premise always
+    /// intended.
     #[test]
     fn coastal_sea_speed_matches_the_historical_effective_average() {
         let w = 3600u32;
-        let h = 80u32; // narrow: two rows off the land strip is already open sea
+        let h = 80u32;
+        let f = (w / 700).max(1); // mirrors build_coarse_cost's own block size
         let conn = Connection::open_in_memory().unwrap();
         schema::create_tables(&conn).unwrap();
         for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
             metadata::set_meta(&conn, k, v).unwrap();
         }
         let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        // A land BAND aligned to its own coarse block (h/2 is already a multiple
+        // of f at this world size), so the block's centre-sampled fine cell
+        // (`land_y + f/2`) is guaranteed to land on real land.
         let land_y = h / 2;
         for i in 0..buf.total() {
             buf.terrain[i] = 0;
@@ -3431,19 +3576,24 @@ mod route_pricing_tests {
             buf.koppen[i] = 12; // Cfb — no koppen surcharge
         }
         for x in 0..w {
-            let idx = buf.idx(x, land_y);
-            buf.terrain[idx] = 1;
-            buf.elevation[idx] = 0.05;
+            for dy in 0..f {
+                let idx = buf.idx(x, land_y + dy);
+                buf.terrain[idx] = 1;
+                buf.elevation[idx] = 0.05;
+            }
         }
         buf.save(&conn, "test").unwrap();
         let db = WorldDb::new(conn);
         let conn = db.conn.lock().unwrap();
 
         let days_per_cell = (40075.0f32 / w as f32) / 55.0; // the real production formula
-        // Two hubs in the coastal water row immediately south of the land strip,
-        // well under half the world's width apart so the cylindrical wrap can
-        // never make "the other way around" the shorter path.
-        let sea_y = (land_y + 1) as f32;
+        // Two hubs in the NEXT coarse block south of the land band — genuinely
+        // adjacent to a land-classified coarse cell for every x, so the whole
+        // route reads `coastal` (COASTAL_SEA_COST, never counted against the
+        // open-water crossing run) rather than open sea — well under half the
+        // world's width apart so the cylindrical wrap can never make "the other
+        // way around" the shorter path.
+        let sea_y = (land_y + f + f / 2) as f32;
         let hub_xy = vec![(200.0f32, sea_y), (1600.0f32, sea_y)];
         let components = vec![0u32, 0u32];
         let days = compute_route_days_matrix(&db, &conn, &hub_xy, &components, days_per_cell)

@@ -294,12 +294,13 @@ export function HubPanel() {
   const [prov, setProv] = useState<ProvisioningBrief | null>(null);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const [expandedEstate, setExpandedEstate] = useState<number | null>(null);
+  const [relayExpanded, setRelayExpanded] = useState(false);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const setFlowHighlight = useUIStore((s) => s.setFlowHighlight);
 
   // Reset to the Overview tab whenever a different hub is opened.
-  useEffect(() => { setTab("summary"); setTradeView("market"); setExpandedEstate(null); }, [selectedHub]);
+  useEffect(() => { setTab("summary"); setTradeView("market"); setExpandedEstate(null); setRelayExpanded(false); }, [selectedHub]);
   // Clear any map flow-highlight when leaving the Flows view (or the panel).
   useEffect(() => {
     if (!(tab === "trade" && tradeView === "flows")) setFlowHighlight([]);
@@ -882,30 +883,45 @@ export function HubPanel() {
               onto a caravan, or vice versa), read off `route_outlet`
               (`relay_count`/`relay_examples`). Distinct from raw trade
               throughput/hub_class — a modest port can be everyone else's
-              waypoint, and a huge trading city can never be anyone's. Shown
-              as a standing fact above all three sub-views, same convention
-              as "barred here" above. Each example is CLICKABLE — user report:
-              "still shows only information, no on map data" — and draws the
-              two real legs (origin → this hub → destination) through the
-              same relay-ring convention the Flows tab's own relayed routes
-              use (`OverlayManager.renderFlowHighlight`'s teal ring), reusing
-              `campHubs` for the other two cities' coordinates since this
-              banner only ever carries hub ids/names, not positions. */}
+              waypoint, and a huge trading city can never be anyone's.
+              EXPANDABLE (user request) — collapsed to a one-line count by
+              default (a hub can carry hundreds of these), a chevron opens
+              the real list. Each row is CLICKABLE (user report: "still
+              shows only information, no on map data") and draws the two
+              real legs (origin → this hub → destination) through the same
+              relay-ring convention the Flows tab's own relayed routes use
+              (`OverlayManager.renderFlowHighlight`'s teal ring). Each row
+              also states its DAYS (the sim's own real routed travel time —
+              not a straight-line guess) and VOLUME (actual annual trade
+              between the two, 0 when the pair's cheapest path just happens
+              to relay here with nothing currently moving that way) —
+              both user-requested. */}
           {(detail?.relay_count ?? 0) > 0 && (
             <div style={{
-              display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6,
               margin: "0 0 6px", padding: "5px 8px", borderRadius: 5,
               background: "rgba(47,209,201,0.08)", border: "1px solid rgba(47,209,201,0.35)",
               fontSize: 10,
             }}>
-              <span style={{ color: "#2fd1c9", fontWeight: 700 }}>
-                ⚓ break-of-bulk relay — {detail!.relay_count} route{detail!.relay_count === 1 ? "" : "s"}
-              </span>
-              {(detail?.relay_examples?.length ?? 0) > 0 && (
-                <span style={{ color: "#9fd6d2", display: "flex", flexWrap: "wrap", gap: "0 4px" }}>
-                  e.g.
+              <div
+                onClick={() => setRelayExpanded((v) => !v)}
+                style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}
+                title={relayExpanded ? "Collapse" : "Show the routes"}
+              >
+                <span style={{ color: "#2fd1c9", fontWeight: 700, flex: 1 }}>
+                  ⚓ break-of-bulk relay — {detail!.relay_count} route{detail!.relay_count === 1 ? "" : "s"}
+                </span>
+                <span style={{ color: "#6a9c98" }}>{relayExpanded ? "▲ hide" : "▼ show"}</span>
+              </div>
+              {!relayExpanded && (detail?.relay_examples?.length ?? 0) > 0 && (
+                <div style={{ color: "#9fd6d2", marginTop: 3 }}>
+                  e.g. {detail!.relay_examples!.slice(0, 3).map((ex) => `${ex.from_name} → ${ex.to_name}`).join(" · ")}
+                  {(detail!.relay_count ?? 0) > 3 ? ", …" : ""}
+                </div>
+              )}
+              {relayExpanded && (detail?.relay_examples?.length ?? 0) > 0 && (
+                <div style={{ marginTop: 4, display: "flex", flexDirection: "column", gap: 3 }}>
                   {detail!.relay_examples!.map((ex: RelayExample, i: number) => (
-                    <span
+                    <div
                       key={i}
                       onClick={() => {
                         const from = campHubs.find((h) => h.id === ex.from_id);
@@ -917,14 +933,29 @@ export function HubPanel() {
                           { ax: rx, ay: ry, bx: to.x + 0.5, by: to.y + 0.5, dir: 1, w: 2.5, relayX: rx, relayY: ry },
                         ]);
                       }}
-                      style={{ cursor: "pointer", textDecoration: "underline dotted", textUnderlineOffset: 2 }}
+                      style={{
+                        display: "flex", alignItems: "baseline", gap: 6, cursor: "pointer",
+                        padding: "2px 4px", borderRadius: 3,
+                      }}
                       title="Show this route's legs on the map"
                     >
-                      {ex.from_name} → {ex.to_name}{i < detail!.relay_examples!.length - 1 ? " ·" : ""}
-                    </span>
+                      <span style={{ color: "#9fd6d2", textDecoration: "underline dotted", textUnderlineOffset: 2, flex: 1 }}>
+                        {ex.from_name} → {ex.to_name}
+                      </span>
+                      <span style={{ color: "#6a9c98", whiteSpace: "nowrap" }}>
+                        {Number.isFinite(ex.days) ? `${ex.days.toFixed(0)}d` : "—"}
+                      </span>
+                      <span style={{ color: ex.volume > 0 ? "#c9a24a" : "#4a6764", whiteSpace: "nowrap" }}>
+                        {ex.volume > 0 ? `${Math.round(ex.volume).toLocaleString()}/yr` : "no direct trade"}
+                      </span>
+                    </div>
                   ))}
-                  {(detail!.relay_count ?? 0) > (detail!.relay_examples?.length ?? 0) ? ", …" : ""}
-                </span>
+                  {(detail!.relay_count ?? 0) > (detail!.relay_examples?.length ?? 0) && (
+                    <div style={{ color: "#6a9c98", padding: "2px 4px" }}>
+                      + {(detail!.relay_count ?? 0) - (detail!.relay_examples?.length ?? 0)} more not shown
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           )}

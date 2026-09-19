@@ -285,6 +285,16 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
         let mut count = 0u32;
         let mut examples: Vec<crate::commands::campaign_commands::RelayExample> = Vec::new();
         if !sim.route_outlet.is_empty() {
+            // Real annual trade actually moving between an (a,b) pair — a relay
+            // pair is only the cheapest PATH between them, which says nothing
+            // about whether goods currently move that way at all. One pass over
+            // `trade_last` (both directions folded into an unordered pair key),
+            // reused for every example below rather than re-scanned per pair.
+            let mut pair_volume: std::collections::HashMap<(u32, u32), f32> = std::collections::HashMap::new();
+            for f in &sim.trade_last {
+                let key = if f.hub <= f.partner { (f.hub, f.partner) } else { (f.partner, f.hub) };
+                *pair_volume.entry(key).or_insert(0.0) += f.amount;
+            }
             for a in 0..n {
                 for b in 0..n {
                     if a == b { continue; }
@@ -295,9 +305,12 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                     // (which can run into the hundreds on a well-connected hub).
                     if examples.len() < 12 {
                         if let (Some(ha), Some(hb)) = (sim.hubs.get(a), sim.hubs.get(b)) {
+                            let key = if a as u32 <= b as u32 { (a as u32, b as u32) } else { (b as u32, a as u32) };
                             examples.push(crate::commands::campaign_commands::RelayExample {
                                 from_id: ha.id, from_name: ha.name.clone(),
                                 to_id: hb.id, to_name: hb.name.clone(),
+                                days: sim.days.get(a * n + b).copied().unwrap_or(f32::INFINITY),
+                                volume: pair_volume.get(&key).copied().unwrap_or(0.0),
                             });
                         }
                     }
