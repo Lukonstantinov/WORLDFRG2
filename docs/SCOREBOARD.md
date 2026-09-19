@@ -9,6 +9,58 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-19d — Break-of-bulk relays must be REAL: filtered to actual trade, outlets to established markets
+
+Two follow-on user reports on top of 2026-09-19c's crossing-rule fix. First: a
+relay row read "206d, no direct trade" — the pair's cheapest theoretical PATH
+happened to route through this hub, but no cargo had ever actually moved that
+way, so the row was a routing hypothesis dressed as a route with no way for a
+reader to tell the two apart. Second, after that: "the bulk of break still
+cheats… trade over 10,000 km of a leg after break of bulk" — a relay's own two
+composed legs could still be implausibly long even with both open-water
+crossing rules enforced, because neither leg actually crossed illegal open
+water; they were just routed to/from an outlet chosen by raw distance alone,
+with no requirement that the outlet was a real, established trading place.
+
+**Fix 1 — the relay LIST only reports real traffic.**
+`campaign_commands/read_hubs.rs`'s relay-example builder counted a pair the
+moment `route_outlet[a*n+b] == hi`, regardless of whether `trade_last` (real
+annual volume) showed anything moving between `a` and `b`. Now requires
+`pair_volume > 0.0` before a pair counts toward `relay_count` or appears in
+`relay_examples` at all. `HubPanel.tsx`'s "no direct trade" branch is now
+unreachable (every listed row has real volume) and was removed.
+
+**Fix 2 — the entrepôt MECHANISM only routes through real markets.**
+`production.rs`'s `#6d` (`rebuild_routes`) picked its outlet as "whichever
+real coastal hub minimises raw travel days" — a purely geometric choice with
+no connection to whether merchants had ever actually traded there. A hub
+sitting on the shortest line between two distant points, doing zero trade of
+its own, could still be selected as the transshipment point for both of them,
+composing two long, individually-legal-but-implausible legs. `hub_trade_volume`
+(summed per-hub from `trade_last`, both directions folding onto the same hub
+index there — the identical shape `read_hubs.rs`'s own `pair_volume` already
+uses) now gates outlet eligibility: a candidate outlet must show real annual
+trade, UNLESS no hub anywhere has any yet (a brand-new campaign's very first
+`rebuild_routes`, before `fold_trade_year` has ever run once) — that bootstrap
+case keeps the old coastal-only rule so a fresh campaign still has entrepôts to
+grow from rather than none at all.
+
+Both fixes are query/composition-side only — no change to `dispatch`, pricing,
+or any mechanism `econ_`/`simulate_decades_reports_dynamics` scores — and this
+was verified rather than assumed: `cargo test --lib tick::tests` (260/260,
+`simulate_decades_reports_dynamics`'s bounded/turnover asserts all held) and
+`cargo test --lib econ_` (6/6) both pass unchanged on the fixed code.
+
+**Named but NOT fixed this pass** (queued, rule 36): `#6`/`#6b`
+(`MIN_GUARANTEED_PARTNERS`/`MARKET_REACH_FRAC`) still have no absolute distance
+cap on their own rescue legs (same-component only, so no crossing-rule
+violation, but nothing stops a rescue picking a partner on the far side of a
+large continent). Re-measure whether either produces a visibly-implausible
+line before touching either constant — see 2026-09-19c's own entry for the
+same caveat, still standing.
+
+---
+
 ## 2026-09-19c — The campaign's OWN route-days matrix never enforced the open-water crossing rule
 
 User report, with two screenshots: clicking a break-of-bulk relay drew a dead-straight

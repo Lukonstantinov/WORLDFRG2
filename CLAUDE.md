@@ -2344,6 +2344,26 @@ market-lifeline rescues) share the same unconstrained-Euclidean shape but are
 same-component-only (land routes have no crossing cap to violate) — named as a
 queued, unmeasured follow-up rather than silently assumed clean (rule 36).
 
+**AN ENTREPÔT PICKED BY RAW DISTANCE ALONE IS NOT A REAL PLACE MERCHANTS STOP.**
+`#6d`'s outlet was "any real coastal hub, whichever minimises `days_before[a][p]`" —
+purely geometric, with no requirement that anyone actually traded there. Composed
+with an unconstrained rescue leg (the `#6`/`#6b` gap named above), this is exactly
+what let a relay's OWN two legs come out implausibly long even after both crossing-
+rule fixes landed: neither leg crosses open water illegally, so the map draws it as
+a real solid line, but a "break of bulk" at a hub with zero actual trade volume is
+not a transshipment, it is a coincidence of geometry. `hub_trade_volume` (summed
+from `trade_last`, both directions folding onto the same hub index there) now
+gates outlet eligibility: a candidate outlet must already show real annual trade,
+unless NO hub anywhere has any yet (a brand-new campaign's first `rebuild_routes`,
+before `fold_trade_year` has ever run), which keeps the old coastal-only rule as
+the bootstrap case so a fresh campaign still has entrepôts to grow from. The same
+session also fixed the break-of-bulk relay LIST (`read_hubs.rs`) to only report
+pairs with real trade volume between them — a pair whose cheapest theoretical path
+happens to relay through this hub, with nothing ever shipped that way, was showing
+in the panel as "206d, no direct trade", which read as a route when it was only a
+hypothesis. `#6`/`#6b`'s own unconstrained-distance gap (named above) is unchanged
+by either fix and remains queued.
+
 **Still post-filtered, and why** (queued, not waived): `coarse_dijkstra_batch` —
 which feeds `compute_trade_routes`' drawn road network and `compute_economy`'s
 candidate edges — still searches then filters, so a rejected pair there is a route

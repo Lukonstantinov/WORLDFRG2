@@ -419,7 +419,28 @@ impl CampaignSim {
         // next pair's outlet leg (which would silently chain transshipments).
         let route_outlet = {
             let mut route_outlet = vec![-1i32; n * n];
-            let outlets: Vec<usize> = real.iter().cloned().filter(|&i| self.hubs[i].coastal).collect();
+            // An outlet must be a place merchants ALREADY stop — not merely the
+            // geometrically nearest coastal town. `days_before` alone cannot tell
+            // "a real crossroads with a market" from "an empty shore that happens
+            // to sit on the shortest line", so the entrepôt used to pick whichever
+            // coastal hub minimised raw travel cost, however little (or no) actual
+            // trade passed through it — a route that "breaks bulk" at a place with
+            // no bulk to break. `hub_trade_volume` sums each hub's own real annual
+            // traffic from `trade_last` (both directions fold onto the SAME hub
+            // index there, so one sum captures a hub's total activity); an outlet
+            // must clear it, unless NO hub anywhere has any yet (a brand-new
+            // campaign's first `rebuild_routes`, before `fold_trade_year` has ever
+            // run) — the old coastal-only rule survives as that one bootstrap case
+            // so a fresh campaign is not left with zero entrepôts to grow from.
+            let mut hub_trade_volume = vec![0.0f32; n];
+            for f in &self.trade_last {
+                if let Some(v) = hub_trade_volume.get_mut(f.hub as usize) { *v += f.amount; }
+            }
+            let any_established = hub_trade_volume.iter().any(|&v| v > 0.0);
+            let outlets: Vec<usize> = real.iter().cloned()
+                .filter(|&i| self.hubs[i].coastal
+                    && (!any_established || hub_trade_volume[i] > 0.0))
+                .collect();
             if !outlets.is_empty() {
                 let days_before = days.clone();
                 for &a in &real {
