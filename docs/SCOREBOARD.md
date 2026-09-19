@@ -9,6 +9,64 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-19e — The campaign tick's hot loop: `house_for` was 10.6-14.9s of an 18-25s trade budget
+
+User report: "each monthly step feels laggy" on a real, large campaign. Measured
+first rather than guessed at, with the existing `WF2_PROFILE=1` per-year
+breakdown plus a new production-scale bench (`bench_campaign_tick_large`,
+`#[ignore]`d, ~1,200 hubs/30 goods — the scale a real 3600×1800 world reaches
+once colonies and estates have grown; the old `bench_campaign_tick` fixture at
+160 hubs never exercised this regime): `dispatch()` (called once/day) was
+**18,000-26,000 ms per simulated year**, over 99% of the whole tick, and finer
+timers inside it found `house_for` — a five-filtered-pass whole-house-list scan
+called twice per shipment for a value that changes only when the house list
+itself changes within a round — at **10.6-14.9 s of that budget alone**.
+
+**Fix: memoise the pure part, cache the per-round invariants, don't
+parallelise.** `house_for_indexed` re-expresses the identical five-tier pick
+over a pre-built per-hub index (`seat_at`/`office_at`, O(houses+offices) once
+per round) behind a flat `house_for_memo` cache; the per-seller neighbour scan
+resolves each lane's days/coin-discount/league-multiplier/pull ONCE per round
+into a flat `Lane` array instead of once per (good × seller × neighbour); each
+hub's live price is cached and updated in place at the one point `dispatch`
+ever writes a hub's stock. Parallelising the outer goods loop with rayon was
+considered and set aside — `dispatch` interleaves stock/wealth/journal writes
+within a round in an order §8.5 already documents as load-bearing (the
+2^-k arbitrage cascade), so it would need real synchronisation to stay
+bit-identical; memoising a function nothing in the round mutates carries none
+of that risk. Full account, including the deliberately-stripped temporary
+profiling timers used to LOCATE the cost (never shipped — an always-on atomic
+counter in the hottest loop in the tick would be a permanent tax, which is
+exactly what §8.9's "off → ~zero cost" rule forbids): CLAUDE.md §5.5.
+
+**Measured, same fixture, same seed:**
+
+| | before | after |
+|---|---|---|
+| `house_for` cost/yr | 10.6-14.9 s | 350-390 ms (≈30-40×) |
+| `dispatch` (`trade`) cost/yr | 18,000-26,000 ms | 8,300-10,200 ms (≈2.2-2.6×) |
+| whole-tick bench | 68.7 ms/tick | 37.5 ms/tick (≈1.83×) |
+
+Bit-exactness is PROVEN, not claimed: `sim_fingerprint` (a bit-pattern fold
+over every hub's stock/price/population/treasury/export/import and every
+house's wealth/volume/prestige/defunct, fixed index order — the same
+discipline as phase-3's `ocean_atmosphere_field_checksums`, §8.9) printed
+`8094efedaa8d67fb` before AND after the optimisation, and again after
+stripping the temporary profiling instrumentation — unchanged all three times.
+
+Gates run: `cargo check --lib --tests`, `cargo test --lib tick::tests`
+(261/261 — the new `the_indexed_carrier_pick_matches_the_reference_scan` gate
+included; `simulate_decades_reports_dynamics` unchanged, sustained richest
+486401 over 50y, identical to the pre-optimisation figure), `cargo test --lib
+econ_` (6/6).
+
+**Named but not attempted this pass**: the remaining largest cost inside
+`dispatch` is the shipment EXECUTION loop itself (fleet-capacity checks,
+contract bookkeeping, ledger updates, journal writes — 5.8-7.6 s/yr on the
+same fixture) — real further speedup, left for a future session per rule 36.
+
+---
+
 ## 2026-09-19d — Break-of-bulk relays must be REAL: filtered to actual trade, outlets to established markets
 
 Two follow-on user reports on top of 2026-09-19c's crossing-rule fix. First: a

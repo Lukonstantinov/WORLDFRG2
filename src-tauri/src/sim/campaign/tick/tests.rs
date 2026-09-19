@@ -777,6 +777,90 @@
     }
 
     /// N4 (`ACTORS_AND_CARRIAGE_PLAN.md` §3.4) · `house_for`'s within-tier pick
+    /// CLAUDE.md §5.5 · `house_for_indexed` is a PERFORMANCE re-expression of
+    /// `house_for`, not a second opinion: the hot loop resolves a carrier
+    /// through a per-hub index instead of five filtered passes over the whole
+    /// house list, and the two must agree on every (hub, good) pair at every
+    /// tick — including the tie-breaks, which `pick_weighted_house` decides by
+    /// `max_by` (the LAST of several equal draws wins, so candidate ORDER is
+    /// load-bearing). A fixture deliberately built to exercise every one of the
+    /// five tiers at once: seated specialists, an office-holding specialist, a
+    /// seated generalist, a chartered guild, and a bare office-holder — plus a
+    /// defunct house and a duplicated office entry, the two cases where a naive
+    /// index would silently drift from the reference.
+    #[test]
+    fn the_indexed_carrier_pick_matches_the_reference_scan() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 4.0, 0.50, false),
+        ];
+        let hubs: Vec<_> = (0..4u32)
+            .map(|i| hub(i, i as f32 * 10.0, 0.0, 6000.0, vec![40.0, 5.0, 9.0], 0))
+            .collect();
+        let mut s = sim(hubs, goods);
+        // Tier 0 — two seated specialists at hub 0 in the same good (a real tie
+        // to break), plus one at hub 1.
+        s.houses.push(house_at(0, vec![1], 2));
+        s.houses.push(house_at(0, vec![1], 2));
+        s.houses.push(house_at(1, vec![0], 1));
+        // Tier 1 — a specialist seated elsewhere but holding an office at hub 0.
+        let mut off_spec = house_at(2, vec![1], 1);
+        off_spec.offices = vec![0];
+        s.houses.push(off_spec);
+        // Tier 2 — a seated generalist (no spec at all) at hub 0.
+        s.houses.push(house_at(0, vec![], 1));
+        // Tier 3 — a chartered GUILD seated at hub 0.
+        let mut guild = house_at(0, vec![2], 1);
+        guild.is_guild = true;
+        s.houses.push(guild);
+        // Tier 4 — a bare office-holder at hub 3, with the SAME office listed
+        // twice (the reference filter matches such a house once, so the index
+        // must not enter it twice and change the tie-break).
+        let mut bare = house_at(1, vec![], 1);
+        bare.offices = vec![3, 3];
+        s.houses.push(bare);
+        // A DEFUNCT house seated at hub 0 in the hottest good — it must be
+        // invisible to both, or the index would hand cargo to a dead firm.
+        let mut dead = house_at(0, vec![1], 1);
+        dead.defunct = true;
+        s.houses.push(dead);
+
+        let n = s.hubs.len();
+        let ng = s.goods.len();
+        let mut any_positive = false;
+        for t in 0..60u32 {
+            s.tick = t;
+            // The index `dispatch` builds, rebuilt here by the identical rule.
+            let mut seat_at: Vec<Vec<u32>> = vec![Vec::new(); n];
+            let mut office_at: Vec<Vec<u32>> = vec![Vec::new(); n];
+            for (hi, h) in s.houses.iter().enumerate() {
+                if h.defunct { continue; }
+                let hu = h.hub as usize;
+                if hu < n { seat_at[hu].push(hi as u32); }
+                for &o in &h.offices {
+                    let oi = o as usize;
+                    if oi < n && office_at[oi].last() != Some(&(hi as u32)) {
+                        office_at[oi].push(hi as u32);
+                    }
+                }
+            }
+            for hub_i in 0..n {
+                for g in 0..ng {
+                    let reference = s.house_for(hub_i, g);
+                    let indexed = s.house_for_indexed(hub_i, g, &seat_at[hub_i], &office_at[hub_i]);
+                    assert_eq!(reference, indexed,
+                        "the indexed carrier pick disagreed with the reference scan at \
+                         tick {t}, hub {hub_i}, good {g}: {reference} vs {indexed}");
+                    if reference >= 0 { any_positive = true; }
+                }
+            }
+        }
+        assert!(any_positive,
+            "the fixture never resolved a carrier at all — the gate would pass \
+             vacuously on any implementation, including a `-1` stub");
+    }
+
     /// must not always resolve to the lowest house index. Five equally-weighted
     /// (`political_power: 0.0` for all — house_at's default) specialist houses at
     /// one hub, sampled across many ticks: the old `.position()` pick would return
@@ -3118,6 +3202,99 @@
         println!(
             "[campaign-bench hubs={nhubs} goods={ng}] {days} ticks: {total:.1}ms total, {:.3}ms/tick",
             total / days as f64
+        );
+    }
+
+    /// A whole-sim state fingerprint, in the same spirit as phase-3's
+    /// `ocean_atmosphere_field_checksums` (CLAUDE.md §8.9): an aggregate that
+    /// is cheap to print and impossible to match by accident, so a PERFORMANCE
+    /// change to the tick can be proven output-preserving rather than merely
+    /// "close". Folded over the f32 BIT PATTERNS, never the values, because a
+    /// float sum would hide exactly the last-ulp drift this exists to catch,
+    /// and in a FIXED index order (hubs, then goods, then houses) so it never
+    /// depends on iteration or thread scheduling.
+    pub(super) fn sim_fingerprint(s: &CampaignSim) -> u64 {
+        let mut acc: u64 = 0xcbf2_9ce4_8422_2325;
+        let mut mix = |v: u64| {
+            acc ^= v;
+            acc = acc.wrapping_mul(0x1000_0000_01b3);
+        };
+        mix(s.tick as u64);
+        for h in &s.hubs {
+            for v in &h.stock { mix(v.to_bits() as u64); }
+            for v in &h.price { mix(v.to_bits() as u64); }
+            mix(h.population.to_bits() as u64);
+            mix(h.treasury.to_bits() as u64);
+            mix(h.export_earn.to_bits() as u64);
+            mix(h.import_spend.to_bits() as u64);
+        }
+        for hh in &s.houses {
+            mix(hh.wealth.to_bits() as u64);
+            mix(hh.volume.to_bits() as u64);
+            mix(hh.prestige.to_bits() as u64);
+            mix(hh.defunct as u64);
+        }
+        mix(s.in_transit.len() as u64);
+        mix(s.diag_shipments as u64);
+        mix(s.diag_lost as u64);
+        mix(s.diag_by_house as u64);
+        mix(s.diag_volume.to_bits() as u64);
+        mix(s.journal.len() as u64);
+        acc
+    }
+
+    /// Build the LARGE campaign the perf bench below runs on: ~1,000 hubs and
+    /// 30 goods, the scale a real world reaches (a default 3600×1800 world
+    /// carries 1,000-1,200 settlements once colonies and estates have grown),
+    /// as against `bench_campaign_tick`'s 160. The tick's hot loop is
+    /// O(goods × sellers × neighbours), so 160 hubs measures a regime the
+    /// shipped product never runs in.
+    pub(super) fn large_bench_sim(nhubs: u32, ng: usize) -> CampaignSim {
+        let goods: Vec<TickGood> = (0..ng)
+            .map(|g| good(&format!("g{g}"), (g % 12) as i32, (g % 3) as u8,
+                          1.0 + g as f32, 0.30 + 0.5 * ((g % 5) as f32 / 5.0), g < 8))
+            .collect();
+        let cols = 40u32;
+        let mut hubs = Vec::new();
+        for i in 0..nhubs {
+            let x = (i % cols) as f32 * 2.4;
+            let y = (i / cols) as f32 * 2.4;
+            let pop = 2000.0 + (i as f32 * 137.0) % 9000.0;
+            let prod: Vec<f32> = (0..ng)
+                .map(|g| if (g + i as usize) % 7 == 0 { pop * 0.02 } else { pop * 0.002 })
+                .collect();
+            let mut h = hub(i, x, y, pop, prod, 0); // one component → trade flows
+            h.coastal = i % 3 == 0;
+            hubs.push(h);
+        }
+        let mut s = sim(hubs, goods);
+        for i in (0..nhubs).step_by(4) {
+            s.houses.push(house_at(i, vec![i as usize % ng], 3));
+        }
+        s.rebuild_routes();
+        s
+    }
+
+    /// The per-day campaign tick at PRODUCTION scale. Run explicitly:
+    ///   `cargo test --release --lib bench_campaign_tick_large -- --ignored --nocapture`
+    /// Set `WF2_PROFILE=1` alongside it for `advance`'s own per-in-game-year
+    /// breakdown (trade / houses / events / rebuild), which is what localises a
+    /// regression to a pass rather than merely reporting that the tick got
+    /// slower. Prints a state FINGERPRINT too: an optimisation here must leave
+    /// that number unchanged (CLAUDE.md §5.5).
+    #[test]
+    #[ignore]
+    fn bench_campaign_tick_large() {
+        use std::time::Instant;
+        let (nhubs, ng) = (1000u32, 30usize);
+        let mut s = large_bench_sim(nhubs, ng);
+        let days = 365u32 * 3;
+        let t0 = Instant::now();
+        s.advance(days);
+        let total = t0.elapsed().as_secs_f64() * 1000.0;
+        println!(
+            "[large-bench hubs={} goods={ng}] {days} ticks: {total:.1}ms total, {:.3}ms/tick, fingerprint={:016x}",
+            s.hubs.len(), total / days as f64, sim_fingerprint(&s)
         );
     }
 

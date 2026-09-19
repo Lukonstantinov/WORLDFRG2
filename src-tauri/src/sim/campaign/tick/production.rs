@@ -1380,6 +1380,102 @@ impl CampaignSim {
                 cap_land[oi] -= (c.monthly_qty / land_per).ceil() as i32;
             }
         }
+        // ── §5.5 · THE PER-ROUND CACHES ────────────────────────────────────
+        // Everything below is a pure function of state that `dispatch` itself
+        // never writes, so each is resolved ONCE per round instead of once per
+        // (good × seller × neighbour) — the shape CLAUDE.md §8.9 rule 4 states
+        // for the phase-3 jet pass, applied to the campaign's own hot loop.
+        // Measured: the ranking scan runs ~100M times per simulated year at
+        // 1,200 hubs, and every term hoisted here was being recomputed on each
+        // of them.
+        //
+        // `house_for(hub, good)` — WHICH house carries a lane's cargo. Five
+        // filtered passes over the whole house list plus a `hash01` draw per
+        // candidate, and it was measured at 10.6-14.9 s of an 18-25 s trade
+        // budget: the single largest cost in the campaign tick. It is constant
+        // for the whole round because it reads only `defunct`/`is_guild`/`hub`/
+        // `spec`/`offices` (none of which dispatch writes — dispatch touches
+        // wealth, volume, events, ledgers, trade ties and fleet counts alone)
+        // and hashes on `(seed, tick, hub, good, tier)`, both fixed here.
+        // `i32::MIN` is the not-yet-resolved sentinel; `-1` is a real answer
+        // ("nobody"), so the two must stay distinct.
+        let mut house_for_memo: Vec<i32> = vec![i32::MIN; n * ng];
+        // …and the index it resolves a COLD entry through: which live houses sit
+        // at each hub, and which hold an office there, in ascending house order
+        // so `pick_weighted_house`'s tie-break is untouched. Built in
+        // O(houses + offices) once, in place of five filtered passes over the
+        // whole house list on every cold lookup.
+        let mut seat_at: Vec<Vec<u32>> = vec![Vec::new(); n];
+        let mut office_at: Vec<Vec<u32>> = vec![Vec::new(); n];
+        for (hi, h) in self.houses.iter().enumerate() {
+            if h.defunct { continue; }
+            let hu = h.hub as usize;
+            if hu < n { seat_at[hu].push(hi as u32); }
+            for &o in &h.offices {
+                let oi = o as usize;
+                // A house listing the same office twice was matched ONCE by the
+                // reference scan's per-house filter, so it is pushed once here.
+                if oi < n && office_at[oi].last() != Some(&(hi as u32)) {
+                    office_at[oi].push(hi as u32);
+                }
+            }
+        }
+        // The CERTIFYING guild at a hub (4.12/A2's fee), same argument: another
+        // whole-house-list scan, on the estate-sale path, constant for the round.
+        let mut cert_guild_memo: Vec<i32> = vec![i32::MIN; n];
+        // Destination trade pull — reads population/class/abandoned, none of
+        // which move inside a round.
+        let hub_pull_c: Vec<f32> = (0..n).map(|b| self.hub_pull(b)).collect();
+        // N7.2 · at the shipped zero dose no hub carries a boycott at all, so
+        // the per-lane scan below is skipped outright rather than run empty.
+        let any_boycott = hub_boycotts.iter().any(|v| !v.is_empty());
+        // Each hub's own neighbour shortlist, resolved to everything the
+        // ranking scan needs: the lane's seasonal travel days, its mode, its
+        // two freight multipliers and the destination's pull. `days` alone was
+        // two random reads into n²-sized tables (`days`, `base_days_season`) —
+        // 5.8 MB each at 1,200 hubs, so a cache miss apiece — repeated for
+        // every good. Flat, with a per-hub offset, so there is one allocation
+        // rather than one per hub.
+        //
+        // The two freight multipliers are kept SEPARATE deliberately: the
+        // ranking scan charges `freight_rate * coin_disc[b] * league_mult` and
+        // float multiplication is not associative, so folding them into one
+        // product would move the last ulp and stop this being bit-identical.
+        #[derive(Clone, Copy)]
+        struct Lane { b: u32, days: f32, coin: f32, lmult: f32, pull: f32, sea: bool, blocked: bool, war: bool }
+        let mut lane_off: Vec<u32> = Vec::with_capacity(n + 1);
+        let mut lanes: Vec<Lane> = Vec::with_capacity(n * NEIGHBOR_K);
+        for a in 0..n {
+            lane_off.push(lanes.len() as u32);
+            for ti in 0..self.neighbors[a].len() {
+                let b = self.neighbors[a][ti] as usize;
+                let days = if b == a || b >= n { f32::INFINITY } else { self.lane_days(a, b) };
+                // Fold the three unconditional `continue`s of the old scan — self,
+                // quarantined destination, unreachable lane — into one flag. All
+                // three are side-effect-free skips, so merging them is exact.
+                let blocked = b == a || b >= n || quarantined[b] || !days.is_finite();
+                let bb = if b < n { b } else { a };
+                let lmult = if Self::lane_league_privileged(
+                    self.hubs[a].league, self.hubs[bb].league, hub_kontor_league[a], hub_kontor_league[bb],
+                ) { LEAGUE_FREIGHT_DISCOUNT } else { 1.0 };
+                lanes.push(Lane {
+                    b: b as u32, days, coin: coin_disc[bb], lmult, pull: hub_pull_c[bb],
+                    sea: self.hubs[a].coastal && self.hubs[bb].coastal,
+                    blocked, war: self.hubs[a].war_with == b as i32,
+                });
+            }
+        }
+        lane_off.push(lanes.len() as u32);
+        // One reused scratch buffer for the per-seller shortlist, in place of a
+        // fresh `Vec` per (good × seller) — the same scratch-buffer convention
+        // `rebuild_neighbors` already uses one level up.
+        let mut targets: Vec<(usize, f32, f32, f32)> = Vec::with_capacity(NEIGHBOR_K + 8);
+        // Each hub's live price for the good currently being traded, refreshed
+        // in place whenever a seller's stock is drawn down below. `live_price`
+        // is a `powf`, and it was being evaluated once per neighbour scanned;
+        // the destination's price depends on `(b, g)` alone, never on which
+        // seller is looking at it.
+        let mut price_g: Vec<f32> = vec![0.0; n];
         // Snapshot stocks so a single round's decisions use consistent prices.
         for g in 0..ng {
             let base = self.goods[g].base_value;
@@ -1388,7 +1484,9 @@ impl CampaignSim {
             let mut sellers: Vec<(usize, f32)> = Vec::new();
             for a in 0..n {
                 // Keep a reserve (a granary for food) before exporting the rest.
-                let surplus = stock_of(&self.hubs[a].stock, g) - needs[a][g] * reserve_mult;
+                let stk = stock_of(&self.hubs[a].stock, g);
+                price_g[a] = self.live_price(stk, needs[a][g], base);
+                let surplus = stk - needs[a][g] * reserve_mult;
                 if surplus > EPS {
                     sellers.push((a, surplus));
                 }
@@ -1415,18 +1513,18 @@ impl CampaignSim {
                 // Find the best deficit hubs among a's NEAREST reachable markets.
                 // (Capping to the K nearest keeps this O(K) rather than O(n); the
                 // 3 hungriest are kept below, so far-flung hubs never mattered.)
-                let mut targets: Vec<(usize, f32, f32, f32)> = Vec::new(); // (b, weighted_gap, raw_gap, days)
-                for ti in 0..self.neighbors[a].len() {
-                    let b = self.neighbors[a][ti] as usize;
-                    if b == a {
-                        continue;
-                    }
-                    // A quarantined city takes no imports either.
-                    if quarantined[b] { continue; }
+                targets.clear(); // (b, weighted_gap, raw_gap, days)
+                for li in lane_off[a] as usize..lane_off[a + 1] as usize {
+                    let ln = lanes[li];
+                    // Self, a quarantined destination and an unreachable lane are
+                    // all pre-resolved into one flag by the per-round cache above.
+                    if ln.blocked { continue; }
+                    let b = ln.b as usize;
                     // N7.2 — a boycotting seller (or buyer, checked symmetrically
                     // since a boycott is mutual non-trade) will not ship this lane.
-                    if hub_boycotts[a].iter().any(|bo| bo.until_tick > tick && bo.target == b as u32 && (bo.good < 0 || bo.good as usize == g))
-                        || hub_boycotts[b].iter().any(|bo| bo.until_tick > tick && bo.target == a as u32 && (bo.good < 0 || bo.good as usize == g)) {
+                    if any_boycott
+                        && (hub_boycotts[a].iter().any(|bo| bo.until_tick > tick && bo.target == b as u32 && (bo.good < 0 || bo.good as usize == g))
+                            || hub_boycotts[b].iter().any(|bo| bo.until_tick > tick && bo.target == a as u32 && (bo.good < 0 || bo.good as usize == g))) {
                         continue;
                     }
                     // INSTITUTIONS_BUILD_ORDER.md 4.1 · CONTRABAND — a war bans a
@@ -1436,21 +1534,18 @@ impl CampaignSim {
                     // Everything else keeps flowing at full volume; this is the
                     // safest possible first dose of wartime exclusion (§4's own
                     // "smallest blast radius first").
-                    if contraband_good[g] && self.hubs[a].war_with == b as i32 {
+                    if contraband_good[g] && ln.war {
                         continue;
                     }
                     // N5 — the annual mean scaled by this lane's seasonal
                     // multiplier RIGHT NOW (a true no-op while no seasonal
                     // data is stored).
-                    let days = self.lane_days(a, b);
-                    if !days.is_finite() {
-                        continue;
-                    }
+                    let days = ln.days;
                     // C1b — computed once here and reused below (the ranking gap,
                     // the delivered-cost-parity cap, and the display-only `sea`
                     // label just past it all want the identical test).
-                    let sea = self.hubs[a].coastal && self.hubs[b].coastal;
-                    let pb = self.live_price(stock_of(&self.hubs[b].stock, g), needs[b][g], base);
+                    let sea = ln.sea;
+                    let pb = price_g[b];
                     // 4.3 · a member-to-member League lane pays a cheaper freight
                     // rate — the SAME discount `GUILDHALL_FREIGHT` already applies
                     // for a warehouse's own exports, extended to a shared League
@@ -1460,13 +1555,9 @@ impl CampaignSim {
                     // 4.4 · the same privilege extends to a member trading
                     // through a KONTOR — a shared depot at a non-member host
                     // (`hub_kontor_league`) — on either end of the lane.
-                    let league_mult = if Self::lane_league_privileged(
-                        self.hubs[a].league, self.hubs[b].league, hub_kontor_league[a], hub_kontor_league[b],
-                    ) {
-                        LEAGUE_FREIGHT_DISCOUNT
-                    } else { 1.0 };
+                    let league_mult = ln.lmult;
                     // A trusted reserve coin at the buyer `b` shaves freight (DLC 3.5).
-                    let freight = self.good_freight(g, freight_rate * coin_disc[b] * league_mult, days, sea);
+                    let freight = self.good_freight(g, freight_rate * ln.coin * league_mult, days, sea);
                     let gap = pb - (pa + freight) - self.margin * base;
                     if gap > 0.0 {
                         // TRADE_STAGING_AND_POSTS_PLAN.md §1.4 named this a double
@@ -1502,7 +1593,7 @@ impl CampaignSim {
                         // (CLAUDE.md §2.4). The small-city exclusion this was meant to
                         // fix is real (§1.4) but needs a mechanism that doesn't touch
                         // this wealth-dispersion effect — real future work.
-                        targets.push((b, gap * self.hub_pull(b), gap, days));
+                        targets.push((b, gap * ln.pull, gap, days));
                     }
                 }
                 if targets.is_empty() {
@@ -1529,7 +1620,8 @@ impl CampaignSim {
                         targets.push(rescue);
                     }
                 }
-                for (b, _gap, _raw_gap, days) in targets {
+                for ti in 0..targets.len() {
+                    let (b, _gap, _raw_gap, days) = targets[ti];
                     if surplus <= EPS {
                         break;
                     }
@@ -1583,7 +1675,15 @@ impl CampaignSim {
                     let mut bypassing = false;
                     let mut _why_nohouse = true;
                     let (mut _why_slot, mut _why_cash, mut _why_bar) = (false, false, false);
-                    for cand in [self.house_for(a, g), self.house_for(b, g)] {
+                    let mut carrier = [0i32; 2];
+                    for (slot, hub) in [a, b].into_iter().enumerate() {
+                        let mi = hub * ng + g;
+                        if house_for_memo[mi] == i32::MIN {
+                            house_for_memo[mi] = self.house_for_indexed(hub, g, &seat_at[hub], &office_at[hub]);
+                        }
+                        carrier[slot] = house_for_memo[mi];
+                    }
+                    for cand in carrier {
                         if cand < 0 { continue; }
                         _why_nohouse = false;
                         let oi = cand as usize;
@@ -1746,6 +1846,11 @@ impl CampaignSim {
                     }
                     surplus -= amount;
                     stock_take(&mut self.hubs[a].stock, g, amount);
+                    // The cached live price above is now stale for this seller
+                    // alone — `stock_take` here is the ONLY write to any hub's
+                    // stock in the whole round, which is what makes the cache
+                    // exact rather than approximate.
+                    price_g[a] = self.live_price(stock_of(&self.hubs[a].stock, g), needs[a][g], base);
                     let sale = amount * pa;
                     self.hubs[a].export_earn += sale;
                     // TRADE_STAGING_AND_POSTS_PLAN.md §5 slice 3 — the fixed
@@ -1774,8 +1879,16 @@ impl CampaignSim {
                             let parent = self.hubs[a].parent;
                             let fee = cut * CERT_FEE_FRAC;
                             if fee > 0.0 {
-                                let guild = self.houses.iter().position(|h|
-                                    h.is_guild && !h.defunct && parent >= 0 && h.hub == parent as u32);
+                                let guild = if parent >= 0 && (parent as usize) < n {
+                                    let pi = parent as usize;
+                                    if cert_guild_memo[pi] == i32::MIN {
+                                        cert_guild_memo[pi] = self.houses.iter().position(|h|
+                                            h.is_guild && !h.defunct && h.hub == parent as u32)
+                                            .map(|x| x as i32).unwrap_or(-1);
+                                    }
+                                    let v = cert_guild_memo[pi];
+                                    if v >= 0 { Some(v as usize) } else { None }
+                                } else { None };
                                 match guild {
                                     Some(gi) => { self.houses[gi].wealth += fee; cut -= fee; }
                                     None => if parent >= 0 && (parent as usize) < self.hubs.len() {
@@ -1988,7 +2101,14 @@ impl CampaignSim {
                         // never called there, it slipped past under real risk
                         // (the extra loss chance above), so the port earns nothing
                         // from a passage it tried to forbid.
-                        if let Some(&p) = self.route_outlet.get(a * n + b) {
+                        {
+                            // Slice C1's outlet fee reads the same `route_outlet`
+                            // entry already resolved into `outlet` above: an
+                            // out-of-range probe yielded `None` there and `-1`
+                            // here, and both fail the `p >= 0` test below, so
+                            // this is the identical decision without a second
+                            // random probe into an n²-sized table.
+                            let p = outlet;
                             if !bypassing && p >= 0 && (p as usize) < self.hubs.len() && p as usize != a && p as usize != b {
                                 let fee = profit * ENTREPOT_FEE_FRAC;
                                 if fee > 0.0 {

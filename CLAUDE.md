@@ -1325,6 +1325,113 @@ assumed clean.
 
 ---
 
+### 5.5 The campaign tick's own performance shape
+
+A user report that "each monthly step feels laggy" on a real, large campaign
+(~1,100-1,200 settlements) led to actually profiling it — the existing opt-in
+`WF2_PROFILE=1` per-year breakdown in `advance()` (`mod.rs`) already separated
+`trade`/`houses`/`events`/`rebuild`, and it named the culprit immediately:
+**`dispatch()` (`production.rs`, called once per DAY) was 18,000-26,000 ms per
+simulated YEAR** at that hub count — over 99% of the whole tick's cost, against
+under 100 ms/yr combined for everything else. `bench_campaign_tick`'s existing
+160-hub fixture never exercised this regime; `bench_campaign_tick_large`
+(`tests.rs`, `#[ignore]`d, `large_bench_sim` at ~1,200 hubs / 30 goods, the scale
+a real 3600×1800 world actually reaches once colonies and estates have grown)
+does.
+
+**The single largest cost was `house_for`, not the ranking scan.** Finer timers
+inside `dispatch` (temporary, stripped before shipping — see below) found
+`house_for(hub, good)` — which decides which house's account a shipment is
+carried on — at 10.6-14.9 s of the 18-25 s trade budget. It is five FILTERED
+PASSES over the WHOLE house list plus a `hash01` draw per candidate, called
+twice per shipment (once for the seller's hub, once for the buyer's), and nothing
+it reads (`defunct`/`is_guild`/`hub`/`spec`/`offices`) is written anywhere inside
+`dispatch` itself — `dispatch` touches wealth, volume, events, ledgers, trade
+ties and fleet counts, never a house's seat or specialisation. So the same
+`(hub, good)` answer was being recomputed from scratch, by a whole-house-list
+scan, potentially millions of times a year.
+
+**The fix is memoisation over a per-round index, not parallelism.** Before
+touching this, the natural instinct is to reach for rayon (§8.9's own playbook
+for the worldgen phases) — parallelising the outer `for g in 0..ng` loop was
+considered and set aside: `dispatch` interleaves reads and writes to hub stock,
+house wealth and the trade journal within a single round in an order that
+matters for who gets served first (§8.5's own "a seller ranks its buyers by
+arbitrage gap, never by index" — the geometric 2^-k cascade down iteration
+order), so parallelising across goods would need real synchronisation to stay
+bit-identical, not just a `par_iter`. Memoising a PURE function that nothing in
+the round mutates carries none of that risk:
+
+- **`house_for_indexed(hub, good, seated, officed)`** (`houses.rs`) is the
+  identical five-tier decision as `house_for`, re-expressed to read from two
+  pre-built per-hub lists (`seat_at`/`office_at`: which live houses sit at, or
+  hold an office at, each hub — built once per `dispatch` round in
+  O(houses + offices) instead of five filtered whole-list scans per call) —
+  never a second opinion. `house_for_memo: Vec<i32>` (flat, `n × ng`, `i32::MIN`
+  = not yet resolved, `-1` = a real "nobody" answer, so the two stay distinct)
+  caches the result the first time a round asks for a given `(hub, good)`.
+  Gated by `the_indexed_carrier_pick_matches_the_reference_scan`, which walks
+  EVERY `(hub, good)` pair across 60 ticks on a fixture built to exercise all
+  five tiers at once (seated specialists with a real tie to break, an
+  office-holding specialist, a seated generalist, a chartered guild, a bare
+  office-holder with a DUPLICATED office entry, and a DEFUNCT house seated in
+  the hottest good) and asserts `house_for(..) == house_for_indexed(..)` on
+  every one — including the tie-breaks, since `pick_weighted_house`'s `max_by`
+  keeps the LAST of several equal draws, so candidate ORDER is load-bearing and
+  a naive index could silently drift from the reference on exactly a duplicate
+  or a dead house.
+- **Per-round lane cache.** Each hub's `NEIGHBOR_K`-bounded neighbour shortlist
+  is resolved ONCE per round (not once per good) into a flat `Lane` array
+  (`b`/`days`/`coin`/`lmult`/`pull`/`sea`/`blocked`/`war`) — `self.lane_days(a,b)`
+  and `hub_pull(b)` were two random reads into `n²`-sized tables per (good,
+  seller, neighbour) triple, a cache miss apiece at 1,200 hubs. The two freight
+  multipliers (`coin_disc`, `league_mult`) are kept as SEPARATE fields rather
+  than pre-folded into one product: float multiplication is not associative, so
+  folding them would move the last ulp and break bit-identity with the
+  unmemoised path.
+- **Per-good live-price cache**, updated in place at the ONE point `dispatch`
+  ever writes a hub's stock (`stock_take` after a sale) — `live_price` is a
+  `powf` and was being evaluated once per neighbour scanned, though the
+  destination's price for a given `(hub, good)` cannot change until that hub
+  itself sells something.
+- **A reused scratch buffer for `targets`** (the per-seller candidate list),
+  cleared each iteration in place of a fresh heap `Vec` per (good × seller) —
+  the same convention `rebuild_neighbors` (§ above) already uses one level up.
+
+**Measured, same seed, same `bench_campaign_tick_large` fixture, `WF2_PROFILE=1`
+breakdown of `dispatch` itself:** `house_for` collapsed from 10.6-14.9 s/yr to
+350-390 ms/yr (roughly 30-40×); the whole `trade` phase fell from 18,000-26,000
+ms/yr to 8,300-10,200 ms/yr (roughly 2.2-2.6×); the whole-tick bench went from
+68.7 ms/tick to 37.5 ms/tick. The largest remaining cost is the shipment
+EXECUTION loop itself (fleet-capacity checks, contract bookkeeping, ledger
+updates, journal writes — 5.8-7.6 s/yr), which was measured and left alone
+this pass: real further speedup, not attempted here.
+
+**Bit-exactness is proven, not claimed.** `sim_fingerprint(&CampaignSim)`
+(`tests.rs`, in the spirit of phase-3's `ocean_atmosphere_field_checksums`,
+§8.9) folds every hub's stock/price/population/treasury/export/import, every
+house's wealth/volume/prestige/defunct flag, and the sim's own counters over
+their f32 BIT PATTERNS (never the values — a float sum would hide exactly the
+last-ulp drift this exists to catch) in a FIXED index order, so it cannot
+depend on iteration or scheduling. `bench_campaign_tick_large` prints it
+alongside the timing; it must not change across a performance-only edit here,
+and the fingerprint was confirmed identical (`8094efedaa8d67fb`) before and
+after this optimisation, and again after stripping the temporary per-phase
+timers used to LOCATE `house_for` as the cost (five `AtomicU64` counters plus
+one `eprintln!` under `WF2_PROFILE`, deliberately not shipped — an always-on
+atomic increment in the hottest loop in the tick is a permanent tax for a
+debug-only feature, which is exactly what §8.9's own "off → ~zero cost"
+discipline forbids). If `house_for`'s own cost needs relocating again later,
+re-add the same shape of timer, measure, then strip it again before commit —
+it is not meant to be a standing instrument, `bench_campaign_tick_large` is.
+
+Gates run: `cargo check --lib --tests`, `cargo test --lib tick::tests`
+(261/261, `simulate_decades_reports_dynamics` unchanged — sustained richest
+486401 over 50y, identical to the pre-optimisation run), `cargo test --lib
+econ_` (6/6) — per §2.8's own routing table for a `sim/campaign/tick/` change.
+
+---
+
 ## 6. Rust Backend Map (`src-tauri/src/`)
 
 ```

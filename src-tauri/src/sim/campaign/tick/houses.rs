@@ -545,6 +545,36 @@ impl CampaignSim {
     }
 
 
+    /// CLAUDE.md §5.5 · `house_for` over a PRE-BUILT per-hub index, for the one
+    /// caller that asks it millions of times a simulated year. `seated` is the
+    /// ascending list of live house indices whose seat is this hub; `officed`
+    /// the ascending list holding an office here. Both are built once per
+    /// `dispatch` round in O(houses + offices), which replaces five filtered
+    /// passes over the WHOLE house list per call.
+    ///
+    /// It must stay a pure re-expression of `house_for` above, never a second
+    /// opinion — same five tiers, same order, so `pick_weighted_house`'s
+    /// `max_by` (which keeps the LAST of several equal draws) resolves ties
+    /// identically. Gated by `the_indexed_carrier_pick_matches_the_reference_scan`,
+    /// which walks every (hub, good) pair of a fixture and asserts equality;
+    /// if the two ever disagree, THIS one is wrong.
+    pub(crate) fn house_for_indexed(&self, hub: usize, good: usize, seated: &[u32], officed: &[u32]) -> i32 {
+        let seat = || seated.iter().map(|&i| i as usize);
+        let off = || officed.iter().map(|&i| i as usize);
+        self.pick_weighted_house(
+            seat().filter(|&i| !self.houses[i].is_guild && self.houses[i].spec.contains(&good)), hub, good, 0)
+            .or_else(|| self.pick_weighted_house(
+                off().filter(|&i| !self.houses[i].is_guild && self.houses[i].spec.contains(&good)), hub, good, 1))
+            .or_else(|| self.pick_weighted_house(
+                seat().filter(|&i| !self.houses[i].is_guild), hub, good, 2))
+            .or_else(|| self.pick_weighted_house(
+                seat().filter(|&i| self.houses[i].is_guild && self.houses[i].spec.contains(&good)), hub, good, 3))
+            .or_else(|| self.pick_weighted_house(off(), hub, good, 4))
+            .map(|i| i as i32)
+            .unwrap_or(-1)
+    }
+
+
     /// The strongest resident house at `hub` (richest, non-defunct), if any.
     pub(crate) fn strongest_house_at(&self, hub: usize) -> Option<usize> {
         let mut best = (usize::MAX, 0.0f32);
