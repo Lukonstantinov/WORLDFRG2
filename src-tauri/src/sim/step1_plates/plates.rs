@@ -203,6 +203,11 @@ const PLATE_WARP_AMP_FRAC_WEIGHTED: f32 = 0.08;
 /// constant at all (a power diagram's cells are convex at any offset), so it
 /// only has to satisfy the area target.
 const POWER_DIAGRAM_OFFSET_SCALE: f32 = 2.2;
+/// Perpendicular jitter applied once to a class-nudged seed (see the note at
+/// its own call site), as a fraction of `plate_spacing`. Perpendicular to the
+/// push rather than added to its magnitude, so it cannot re-open the class
+/// separation the push exists to guarantee, however large this gets.
+const SIZE_NUDGE_TANGENT_JITTER_FRAC: f32 = 0.35;
 /// The ocean-fill trial loop below already tries `OCEAN_FILL_TRIALS`
 /// independent shuffle orders and used to keep whichever came closest to the
 /// area target alone — which is blind to CONNECTIVITY: two large continental
@@ -606,6 +611,12 @@ pub fn generate_plates_and_landmass_from_seeds(
         let mut cx = raw[i].cx;
         let mut cy = raw[i].cy;
         let wt = raw[i].size_weight;
+        // Sum of push normals, so a site nudged by more than one bigger
+        // neighbour gets ONE tangential jitter afterward rather than one per
+        // constraint (see the note below on why this needs to exist at all).
+        let mut push_nx = 0.0f32;
+        let mut push_ny = 0.0f32;
+        let mut pushed = false;
         for &j in &placed {
             let wt_j = raw[j].size_weight;
             if wt_j <= wt { continue; }
@@ -631,6 +642,30 @@ pub fn generate_plates_and_landmass_from_seeds(
             let push = min_dist - dist;
             cx = (cx + nx * push).clamp(cell_x0, (cell_x1 - 0.001).max(cell_x0));
             cy = (cy + ny * push).clamp(cell_y0, (cell_y1 - 0.001).max(cell_y0));
+            push_nx += nx;
+            push_ny += ny;
+            pushed = true;
+        }
+        // A pure radial push-and-clamp is a DETERMINISTIC function of the
+        // neighbours' own positions: a small site boxed by 2-3 bigger ones on
+        // a still-fairly-regular jittered grid lands at the SAME geometric
+        // point a symmetric layout would place it at by construction, and a
+        // power diagram's cells around a symmetric point cluster are regular
+        // polygons — this is what a diamond/square-shaped small plate in the
+        // rendered map actually is, not a warp-amplitude shortfall (measured:
+        // raising `PLATE_WARP_AMP_FRAC_WEIGHTED` softens it but breaks
+        // `a_pangaea_target_fuses_the_continents_an_archipelago_target_does_
+        // not`, see that constant's own doc comment). A small TANGENTIAL
+        // jitter — perpendicular to the net push direction, so it can't undo
+        // the class separation the push exists to guarantee — breaks that
+        // determinism at its source, for exactly the sites it affects,
+        // without touching the warp field every other plate is judged by.
+        if pushed {
+            let len = (push_nx * push_nx + push_ny * push_ny).sqrt().max(1e-4);
+            let (tx, ty) = (-push_ny / len, push_nx / len);
+            let jitter = (rng.gen::<f32>() - 0.5) * plate_spacing * SIZE_NUDGE_TANGENT_JITTER_FRAC;
+            cx = (cx + tx * jitter).clamp(cell_x0, (cell_x1 - 0.001).max(cell_x0));
+            cy = (cy + ty * jitter).clamp(cell_y0, (cell_y1 - 0.001).max(cell_y0));
         }
         raw[i].cx = cx;
         raw[i].cy = cy;
