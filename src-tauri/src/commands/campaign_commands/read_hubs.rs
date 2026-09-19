@@ -299,18 +299,28 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 for b in 0..n {
                     if a == b { continue; }
                     if sim.route_outlet.get(a * n + b).copied().unwrap_or(-1) != hi as i32 { continue; }
+                    // A relay pair is only the cheapest PATH — that says nothing
+                    // about whether any cargo actually moves that way. Listing a
+                    // pair with zero real trade is worse than useless: it reads as
+                    // "this is a route" when it is only "this is a hypothesis",
+                    // and there is no way for a reader to tell the two apart from
+                    // the row alone. Require real volume before it counts as a
+                    // relay at all — this hub is not credited as a waypoint for
+                    // traffic that has never once used it.
+                    let key = if a as u32 <= b as u32 { (a as u32, b as u32) } else { (b as u32, a as u32) };
+                    let volume = pair_volume.get(&key).copied().unwrap_or(0.0);
+                    if volume <= 0.0 { continue; }
                     count += 1;
                     // Capped at 12 (was 4) — enough for the reader to click through
                     // several real routes without shipping the whole relay list
                     // (which can run into the hundreds on a well-connected hub).
                     if examples.len() < 12 {
                         if let (Some(ha), Some(hb)) = (sim.hubs.get(a), sim.hubs.get(b)) {
-                            let key = if a as u32 <= b as u32 { (a as u32, b as u32) } else { (b as u32, a as u32) };
                             examples.push(crate::commands::campaign_commands::RelayExample {
                                 from_id: ha.id, from_name: ha.name.clone(),
                                 to_id: hb.id, to_name: hb.name.clone(),
                                 days: sim.days.get(a * n + b).copied().unwrap_or(f32::INFINITY),
-                                volume: pair_volume.get(&key).copied().unwrap_or(0.0),
+                                volume,
                             });
                         }
                     }

@@ -893,9 +893,10 @@ export function HubPanel() {
               (`OverlayManager.renderFlowHighlight`'s teal ring). Each row
               also states its DAYS (the sim's own real routed travel time —
               not a straight-line guess) and VOLUME (actual annual trade
-              between the two, 0 when the pair's cheapest path just happens
-              to relay here with nothing currently moving that way) —
-              both user-requested. */}
+              between the two). A pair whose cheapest PATH merely happens to
+              relay here, with no cargo actually moving that way, is filtered
+              out backend-side (read_hubs.rs) — a routing hypothesis nobody
+              ships on is not a "route" and was confusing to show as one. */}
           {(detail?.relay_count ?? 0) > 0 && (
             <div style={{
               margin: "0 0 6px", padding: "5px 8px", borderRadius: 5,
@@ -945,8 +946,8 @@ export function HubPanel() {
                       <span style={{ color: "#6a9c98", whiteSpace: "nowrap" }}>
                         {Number.isFinite(ex.days) ? `${ex.days.toFixed(0)}d` : "—"}
                       </span>
-                      <span style={{ color: ex.volume > 0 ? "#c9a24a" : "#4a6764", whiteSpace: "nowrap" }}>
-                        {ex.volume > 0 ? `${Math.round(ex.volume).toLocaleString()}/yr` : "no direct trade"}
+                      <span style={{ color: "#c9a24a", whiteSpace: "nowrap" }}>
+                        {Math.round(ex.volume).toLocaleString()}/yr
                       </span>
                     </div>
                   ))}
