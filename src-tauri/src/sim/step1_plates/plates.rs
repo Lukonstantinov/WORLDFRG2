@@ -175,6 +175,25 @@ const SIZE_CLASS_PROPORTIONS: [f32; 4] = [0.10, 0.25, 0.40, 0.25];
 /// otherwise-convex cell enough to sever it at full amplitude (measured: 0.25
 /// reproduces the multiplicative failure, 0.08 does not, over the same 3 seeds
 /// `plate_territory_stays_connected` checks).
+///
+/// **NEGATIVE RESULT, recorded so a future "plates look too straight/blocky"
+/// report doesn't re-attempt this (§2.4).** A user complaint that plates render
+/// as near-square/diamond polygons prompted trying 0.12 (up from 0.08) — a real
+/// visible softening of the margins, and `plate_territory_stays_connected`
+/// still passed (worst connectivity stayed comfortably above the 0.90 bar).
+/// But `a_pangaea_target_fuses_the_continents_an_archipelago_target_does_not`
+/// then FAILED: at 0.12 the extra fragmentation makes `continent_goal`
+/// "decorative" (no measurable pangaea-vs-archipelago difference on 5 of 6
+/// seeds) — the ocean-fill trial selection's continent-count comparison gets
+/// swamped by warp-driven partition noise before the goal's own signal shows
+/// through. A spot-check win (softer boundaries) with an aggregate loss
+/// (a different, already-shipped knob stops working) is a revert, not a
+/// judgement call. Reverted to 0.08. The blocky look at low plate counts is a
+/// genuine property of a Voronoi/power-diagram partition with few seeds and a
+/// deliberately small warp — more plates (a finer partition) softens it far
+/// more safely than more warp does; that is the workaround until a future
+/// session has room to widen `CONTINENT_AREA_TOLERANCE_FRAC`'s own selection
+/// logic to tolerate more warp instead of touching this constant again.
 const PLATE_WARP_AMP_FRAC_WEIGHTED: f32 = 0.08;
 /// Scales the power-diagram offset as a fraction of `plate_spacing²`, so the
 /// offset is dimensionally a squared distance regardless of world size or plate

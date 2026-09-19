@@ -540,9 +540,12 @@ export function MapCanvas() {
 
       mapApp.canvas.addEventListener("wheel", (e) => {
         e.preventDefault();
+        // Only moves the viewport's wheel-zoom TARGET — the render loop's own
+        // `viewport.update` call eases the displayed scale/position toward it
+        // every frame from here, fetching tiles and updating overlay scale as
+        // it goes (see the loop's own comment), so nothing needs doing here
+        // beyond waking the loop up.
         viewport.onWheel(e);
-        overlayManager.updateScale(viewport.scale);
-        refreshTiles();
         requestRender();
       }, { passive: false });
 
@@ -587,9 +590,24 @@ export function MapCanvas() {
       });
       if (pane) paneObserver.observe(pane);
 
-      // Render loop
-      const loop = () => {
+      // Render loop. Also drives the wheel-zoom EASE (`viewport.update`) every
+      // frame: a wheel tick only moves the viewport's TARGET (see
+      // `TileViewport.onWheel`), so something has to step the displayed
+      // scale/position toward it each frame for the EU4/CK3-style smooth-zoom
+      // glide to actually appear, instead of the old jump-straight-to-target
+      // behaviour. `dt` is clamped so a backgrounded-tab stall (or any long
+      // gap between frames) can't make the very next frame leap the ease
+      // forward as if a huge amount of time passed.
+      let lastFrameTime = 0;
+      const loop = (time: number) => {
         if (destroyed) return;
+        const dt = lastFrameTime ? Math.min(0.05, (time - lastFrameTime) / 1000) : 0;
+        lastFrameTime = time;
+        if (viewport.update(dt)) {
+          overlayManager.updateScale(viewport.scale);
+          refreshTiles();
+          needsRenderRef.current = true;
+        }
         if (needsRenderRef.current) {
           needsRenderRef.current = false;
           renderFrame();
