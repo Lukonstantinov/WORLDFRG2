@@ -408,16 +408,27 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         .collect();
 
     // ── Hubs ── (cap to the strongest `LIVE_HUB_CAP` to bound tick cost + state size).
-    // Raised 150→250→500: a small town beyond the cap is an inert `HinterlandTown`
+    // Raised 150→250→500→1000: a small town beyond the cap is an inert `HinterlandTown`
     // (drawn + clickable but NOT simulated — it can never trade, grow, or be felt, so it
     // reads as "dead from the start" with only the frozen worldgen economy behind it).
-    // The player wants those small cities alive, and on a typical world 500 covers every
-    // real town, leaving only true hamlets inert. The cost is per-tick CPU (many passes
-    // are O(hubs)) + the O(hubs²) route matrix — 500² is ~1 MB and a fast, infrequent
-    // rebuild, so memory is a non-issue; if a very large world's daily tick feels slow,
-    // this is the single knob to lower. (The dynamics/econ gates build their own sims,
-    // not via `campaign_start_sim`, so this cap never touches them.)
-    const LIVE_HUB_CAP: usize = 500;
+    // 500 was set on the premise that "on a typical world 500 covers every real town,
+    // leaving only true hamlets inert" — but `generate_settlements` (settlements.rs) has
+    // its OWN ceiling of up to 1000 (an explicit user cap clamps to 20..1000, and even
+    // with no cap the realism slider alone reaches 1000 at d=1), so on any world using
+    // more than half of that range, a genuinely populous, well-connected town — not a
+    // hamlet — fell below the live cap and read as permanently "not connected to trade
+    // routes" (user report: a lake town with 30+ visible, apparently-thriving neighbours
+    // showed "No trade data for this settlement yet", because `campaign_get_hub`/
+    // `campaign_trade_flows` both key off `sim.hubs`, not the frozen worldgen `EconHub`
+    // list the map panel falls back to for its name/tabs). Matching the two ceilings is
+    // what makes "every settlement the generator actually placed gets simulated" true
+    // again, rather than true only up to whatever settlement count happened to be ≤500.
+    // The cost is per-tick CPU (many passes are O(hubs)) + the O(hubs²) route matrix —
+    // 1000² is ~4 MB and still a fast, infrequent rebuild, so memory is a non-issue; if a
+    // very large world's daily tick feels slow, this is the single knob to lower. (The
+    // dynamics/econ gates build their own sims, not via `campaign_start_sim`, so this cap
+    // never touches them.)
+    const LIVE_HUB_CAP: usize = 1000;
     let mut order: Vec<usize> = (0..econ.hubs.len()).collect();
     order.sort_by(|&a, &b| econ.hubs[b].population.cmp(&econ.hubs[a].population));
     // DECOUPLE: settlements ranked below the live cap aren't simulated, but they're

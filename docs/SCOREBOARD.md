@@ -9,6 +9,47 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-19 — Half a dense world's real towns were structurally excluded from the campaign sim
+
+User report, with a screenshot: "Timbubafing" (a lake-shore town) showed "No trade
+data for this settlement yet" despite sitting among 30+ other named, apparently
+thriving settlements. This is NOT a routing bug — `campaign_get_hub`/
+`campaign_trade_flows` both key off `sim.hubs` (the live, ticked `TickHub` list),
+while the map panel's name/tabs fall back to the frozen worldgen `EconHub` list
+(`economy.hubs`, built for every settlement) when the live lookup misses — so a
+settlement can render a full panel and still read "no trade data" if it was never
+promoted into the live sim at all.
+
+Cause: `campaign_start_sim` (`lifecycle.rs`) caps the live, simulated hub count at
+`LIVE_HUB_CAP` (500, ranked by worldgen population) — everything below the cut
+becomes an inert `HinterlandTown` (drawn/clickable, never simulated, can never
+trade). That cap was set on the premise "on a typical world 500 covers every real
+town, leaving only true hamlets inert" — but `generate_settlements` (settlements.rs)
+has its OWN ceiling of up to **1000** (an explicit user cap clamps to 20..1000, and
+even uncapped the realism slider alone reaches 1000 at its maximum), so any world
+using more than half that range silently stranded genuinely populous, well-connected
+towns as permanently inert from day one. Fixed by raising `LIVE_HUB_CAP` to 1000 to
+match the settlement generator's own ceiling — every settlement the generator
+actually placed is now live-simulated, not just the top half of them. The dynamics/
+econ gates build their own sims directly (never via `campaign_start_sim`), so this
+constant cannot move any asserted score; verified with `cargo check --lib --tests`
+(clean) per §2.8's routing-table row for wiring-only `commands/**` changes.
+
+Two other user asks in the same report turned out to be **already shipped and
+working**, verified by re-reading the code rather than re-implementing:
+- **Break-of-bulk relay on the map** (`8810574`, 2026-09-13): a relayed trade flow
+  already draws as two real legs through a teal ring at the transshipment city
+  (`FlowsView.tsx`'s `relayX`/`relayY` → `OverlayManager.renderFlowHighlight`), and
+  composes correctly with this session's later routing fixes (`flowHighlightPaths`
+  resolves each leg through the same crossing-constrained coarse route).
+- **Trade posts at real sea/land/river transition points** (`9757e4c`, 2026-09-13):
+  `maybe_found_route_post` (`houses.rs`) already founds a settlement at a genuine
+  modal-mismatch gap (coastal↔inland, river-linked↔not) — but ONLY at a real
+  surveyed junction site (a delta or chokepoint) within `ROUTE_POST_JUNCTION_KM`
+  (600 km) of the gap, never an arbitrary nearest site, which is why it fires
+  rarely rather than at every mode change. Raising `LIVE_HUB_CAP` above also feeds
+  this mechanism more real hub-pairs to find gaps between.
+
 ## 2026-09-05 — Two carriage/monopoly knobs dosed up from `ACTORS_AND_CARRIAGE_PLAN.md`'s zero
 
 User-requested: local merchants (the ownerless residual, §5.1) were carrying
