@@ -27,7 +27,7 @@
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
             quality: Vec::new(), tradition: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
-            reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
+            reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, supply_shortfall_days: 0.0, colony_founded_tick: 0,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
@@ -3074,6 +3074,87 @@
         s.colony_pass();
         assert!(s.hubs[1].colony_kind == 0 && s.hubs[1].population <= 1.0, "starved colony collapsed");
         assert!(s.banks[0].losses > 0.0 && s.banks[0].loans.is_empty(), "bank wrote off the defaulted colony loan");
+    }
+
+    /// User report: a settlement colony chronically unsupplied — "food 0.0/365 ·
+    /// supplied 0y" for its whole life, `supply_years` never once completing an
+    /// unbroken run — nonetheless grew into the hundreds of thousands off trade/
+    /// age headroom, and never collapsed because the fragile, smoothed
+    /// `starving > 0.8` trigger never quite fired (it decays back down 0.02/day
+    /// the moment `food_balance` recovers even briefly, which an oscillating
+    /// real supply/production picture does often — a lifeline that is never once
+    /// actually closed can still dodge a signal built to reward RECENT relief).
+    /// `supply_shortfall_days` fixes this at the root: a plain day-count of real
+    /// undelivered deficit that only resets on an ACTUAL full delivery, giving a
+    /// deterministic bound (`COLONY_UNSUPPLIED_COLLAPSE_YEARS`) instead of a
+    /// signal that can be nursed along indefinitely. Here nobody else in the
+    /// world has any food to spare and the colony is also given a MASSIVE
+    /// trade/primacy capacity headroom (exactly what let the real colony balloon
+    /// while starved), so the only thing standing between it and unbounded
+    /// growth is this mechanism.
+    #[test]
+    fn an_unsupplied_colony_cannot_grow_and_eventually_collapses() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true), good("silk", 1, 2, 20.0, 0.35, false)];
+        let ng = goods.len();
+        // Nobody ELSE in the world produces food, so no source can ever be
+        // designated — whatever the colony can't grow itself, it never gets.
+        let metro = hub(0, 0.0, 0.0, 20_000.0, vec![0.0, 400.0], 0);
+        let mut colony = hub(1, 4.0, 0.0, 3_000.0, vec![0.0, 60.0], 0);
+        colony.colony_kind = 1;
+        colony.founder_hub = 0;
+        colony.founding_pop = 3_000.0;
+        colony.backers = vec![(1, 0, 1.0)];
+        colony.reserve_cap = 365.0;
+        colony.colony_founded_tick = 0;
+        let founding_pop = colony.founding_pop;
+        // A MASSIVE trade/primacy headroom source — exactly what let the reported
+        // colony balloon to 444k while "supplied 0y": a coastal, capital-ranked
+        // entrepôt earns `PRIMACY_DEV` (45.0) of extra capacity-multiplier headroom
+        // in `update_food_and_starvation`, completely independent of whether it is
+        // actually fed. Picked as its component's capital via the highest treasury.
+        colony.coastal = true;
+        colony.hub_class = 1;
+        colony.treasury = 1_000_000.0;
+        let mut s = sim(vec![metro, colony], goods);
+        let mut rich = house_at(0, vec![], 0);
+        rich.wealth = 500_000.0; // affordability is never the bottleneck here
+        s.houses.push(rich);
+        s.rebuild_routes();
+        // A MILD, chronic shortfall, held CONSTANT as a fraction of need (the
+        // colony's own farms scale with its population the same way its need
+        // does, exactly as the real per-capita production model does — a fixed
+        // 10% shortfall never closes on its own just because the town grows):
+        // the colony grows ~90% of its own daily wheat need, recomputed every
+        // day from its CURRENT population, and nobody else has any to spare.
+        let per_cap_need = s.base_need(1, 0) / founding_pop;
+
+        let mut collapsed_by_year: Option<u32> = None;
+        for day in 1..=(5 * 365u32) {
+            s.tick = day;
+            s.hubs[1].production[0] = per_cap_need * 0.90 * s.hubs[1].population;
+            let needs: Vec<Vec<f32>> = (0..s.hubs.len())
+                .map(|h| (0..ng).map(|g| s.base_need(h, g)).collect())
+                .collect();
+            s.update_food_and_starvation(&needs);
+            if day % 365 == 0 {
+                s.colony_pass();
+                let yr = day / 365;
+                if s.hubs[1].colony_kind != 1 {
+                    collapsed_by_year.get_or_insert(yr);
+                }
+            }
+        }
+        assert!(collapsed_by_year.is_some(),
+            "a colony with an unmet daily food deficit and no source must eventually fail — it never did in 5 simulated years");
+        // The new mechanism's whole point is a DETERMINISTIC bound: a colony whose
+        // lifeline never once closes the deficit must fail within
+        // `COLONY_UNSUPPLIED_COLLAPSE_YEARS`, regardless of how much unrelated
+        // trade/primacy headroom it earns — not merely "eventually, whenever the
+        // slow, smoothed `starving` signal happens to cross 0.8".
+        assert!(collapsed_by_year.unwrap() <= 4,
+            "an unsupplied colony must collapse within COLONY_UNSUPPLIED_COLLAPSE_YEARS (+1y grace), \
+             not merely whenever `starving` happens to catch up: collapsed at year {}", collapsed_by_year.unwrap());
+        assert!(s.hubs[1].population <= 1.0 && s.hubs[1].abandoned, "the collapsed colony is truly gone");
     }
 
     /// CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 6 (F6) — a colony founded on

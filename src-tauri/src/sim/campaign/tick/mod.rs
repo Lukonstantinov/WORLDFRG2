@@ -783,8 +783,22 @@ pub const SUPPLY_SHIP_CAPACITY: f32 = 900.0;
 /// the colony's backers (metropolis treasury, then the backing bank/house) when the
 /// colony runs short, so the metropolis INVESTS in steady supply.
 const SUPPLY_SHIP_COST: f32 = 3.0;
-/// A colony's dedicated supply fleet never grows past this (bounds the investment).
-const MAX_SUPPLY_SHIPS: u32 = 12;
+/// A colony's dedicated supply fleet never grows past this — a sanity ceiling far
+/// above what any real deficit demands, not a practical bottleneck. Used to be a
+/// tight 12 (≈360/day delivered), which silently capped how much food a metropolis
+/// could EVER ship regardless of wealth — a colony that outgrew that ceiling was
+/// stuck chronically unsupplied forever, however rich its backers. Raised so the
+/// real limit is what the backers can actually AFFORD (`buy_colony_supply_ship`),
+/// not an arbitrary fleet count — "make it possible to feed a growing colony".
+const MAX_SUPPLY_SHIPS: u32 = 400;
+/// Consecutive years a settlement colony's food lifeline may run short before the
+/// settlement is deemed unsustainable and collapses (`colony_pass`). A colony
+/// eating into `reserve_food` or receiving less than its `deficit` every day for
+/// this long has no realistic path to recovery on its own — "if there's no supply
+/// for some time, the colony fails and dies" — independent of the (fragile,
+/// smoothed) `starving > 0.8` collapse trigger, which a chronic-but-mild shortfall
+/// can dodge indefinitely (see `supply_shortfall_days`'s own doc comment).
+const COLONY_UNSUPPLIED_COLLAPSE_YEARS: f32 = 3.0;
 // ── Atlas 2.0 · organic city LIFECYCLE ──────────────────────────────────────
 /// Years of TERMINAL decline before a settlement is abandoned. Terminal means
 /// FAMINE-driven: severe sustained starvation while shrunk BELOW the natural
@@ -3700,6 +3714,18 @@ pub struct TickHub {
     /// Consecutive years the colony has been FULLY supplied (food deficit covered).
     /// Resets to 0 on any break — gates growth (needs ≥5) and is the supply record.
     #[serde(default)] pub supply_years: f32,
+    /// Consecutive DAYS the colony's food lifeline has fallen short of its deficit
+    /// (`update_food_and_starvation`) — resets to 0 the moment a day's delivery
+    /// (or the colony's own production) fully covers it. Unlike `supply_years`
+    /// (an unbroken-run counter that any single bad day already resets to 0, so it
+    /// says almost nothing about how UNDERFED a colony has chronically been), this
+    /// is what actually gates population growth (`update_food_and_starvation`'s
+    /// `colony_supply_health`) and triggers collapse past
+    /// `COLONY_UNSUPPLIED_COLLAPSE_YEARS` (`colony_pass`) — a colony cannot grow on
+    /// the back of trade/prosperity headroom while its own people are starving, and
+    /// a metropolis that never manages to feed it eventually loses it.
+    /// `#[serde(default)]` → old saves = 0 (a fully-supplied colony, correctly).
+    #[serde(default)] pub supply_shortfall_days: f32,
     /// Tick the colony was founded (for the year-70 independence check).
     #[serde(default)] pub colony_founded_tick: u32,
     /// The colony's main bank (index) — set at founding; its loan defaults on collapse.

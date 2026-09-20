@@ -393,6 +393,7 @@ impl CampaignSim {
                     self.hubs[h].reserve_food = (self.hubs[h].reserve_food + 1.0).min(self.hubs[h].reserve_cap);
                     self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;
                     self.hubs[h].supply_delivered = 0.0;
+                    self.hubs[h].supply_shortfall_days = 0.0;
                 } else {
                     let fleet_daily = self.hubs[h].supply_ships as f32 * SUPPLY_SHIP_CAPACITY / 30.0;
                     let mut delivered = deficit.min(fleet_daily);
@@ -438,6 +439,7 @@ impl CampaignSim {
                     if short <= EPS {
                         self.hubs[h].reserve_food = (self.hubs[h].reserve_food + 0.5).min(self.hubs[h].reserve_cap);
                         self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;
+                        self.hubs[h].supply_shortfall_days = 0.0;
                     } else if self.hubs[h].reserve_food > 0.0 {
                         // Eat into the reserve to stay fed; the supply record continues.
                         self.hubs[h].reserve_food -= 1.0;
@@ -446,10 +448,16 @@ impl CampaignSim {
                             food_have += short;
                         }
                         self.hubs[h].supply_years += 1.0 / TICKS_PER_YEAR as f32;
+                        // The reserve is papering over a REAL shortfall — the dedicated
+                        // fleet is not actually keeping up, so this still counts toward
+                        // `COLONY_UNSUPPLIED_COLLAPSE_YEARS` even though `supply_years`
+                        // (an unbroken-run display counter) doesn't reset on it.
+                        self.hubs[h].supply_shortfall_days += 1.0;
                     } else {
                         // Lifeline snapped: reserve empty AND supply short → the record
                         // breaks and the colony starves (handled below by food balance).
                         self.hubs[h].supply_years = 0.0;
+                        self.hubs[h].supply_shortfall_days += 1.0;
                     }
                 }
             }
@@ -530,9 +538,29 @@ impl CampaignSim {
             let works_dev = if CAPACITY_LAND_WEIGHT > 0.0 {
                 works_dev_mult(own_estates, self.hubs[h].structures.len())
             } else { 0.0 };
-            let cap_mult = (0.35 + 2.0 * food_sec)
+            let mut cap_mult = (0.35 + 2.0 * food_sec)
                 * (0.60 + 5.0 * prosperity * prosperity + trade_dev + primacy_dev
                     + colony_cap_dev + world_age_dev + health_dev * public_health + works_dev);
+            // A settlement colony's headroom terms above (trade/primacy/world-age/
+            // health) are earned from trade wealth and elapsed time, NOT from being
+            // fed — so a colony with real trade income but a broken food lifeline
+            // could ratchet its capacity up on those alone while chronically
+            // starved (user report: an "outpost"-stage colony reading "food
+            // 0.0/365 · supplied 0y" for its whole life still grew past 400k).
+            // `colony_supply_health` reins in the WHOLE multiplier — not just the
+            // colony-specific `colony_cap_dev` term — proportionally to how long
+            // the lifeline has actually been failing (`supply_shortfall_days`),
+            // reaching the same floor `capacity`'s own `founding_pop * 0.15` clamp
+            // already uses once the colony has gone chronically unsupplied for
+            // `COLONY_UNSUPPLIED_COLLAPSE_YEARS` (at which point `colony_pass`
+            // collapses it outright — see that constant's own doc comment). A
+            // colony that IS being fed (shortfall days near 0) sees no change.
+            if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous {
+                let shortfall_years = self.hubs[h].supply_shortfall_days / TICKS_PER_YEAR as f32;
+                let colony_supply_health = (1.0
+                    - shortfall_years / COLONY_UNSUPPLIED_COLLAPSE_YEARS).clamp(0.15, 1.0);
+                cap_mult *= colony_supply_health;
+            }
             // D5 · the growth CEILING blends founding size with the hub's own
             // province's real carrying capacity (shared by trade weight among
             // the hubs sharing it), instead of being anchored on `founding_pop`
@@ -568,7 +596,11 @@ impl CampaignSim {
             // per-tick lifeline flags) below the same qualitative band the founding/
             // collapse checks elsewhere in this file use for "not in real distress".
             let colony_boom = if self.hubs[h].colony_kind == 1 && !self.hubs[h].autonomous
-                && self.hubs[h].starving < 0.4 { POP_GROWTH_COLONY_MULT } else { 1.0 };
+                && self.hubs[h].starving < 0.4
+                // Also requires the lifeline to be genuinely current — `starving` is
+                // smoothed and can lag a chronic-but-mild shortfall (the case that
+                // never reset `supply_years` cleanly) for a long time.
+                && self.hubs[h].supply_shortfall_days < 90.0 { POP_GROWTH_COLONY_MULT } else { 1.0 };
             // DEPOSITS_AND_MINING_PLAN.md slice 5 · a mining settlement (the
             // Potosí case) booms on top of the ordinary colony boom above.
             let mining_boom = if self.hubs[h].is_mining_settlement { MINING_SETTLEMENT_GROWTH_MULT } else { 1.0 };
