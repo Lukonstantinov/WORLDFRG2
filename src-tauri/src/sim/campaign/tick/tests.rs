@@ -8466,17 +8466,16 @@
             "even a huge shipment must need zero extra slots at zero dose");
     }
 
-    /// PORT_COMPETITION_PLAN.md Slice 1, dose-walked · at
-    /// `PORT_TOLL_COMPETITION_DOSE == 0.0` every hub's toll target is exactly
-    /// 1.0 regardless of its relay traffic, applying it leaves `transit_toll_
-    /// mult` at exactly 1.0, and the wiring into `route_outlet`'s outlet
-    /// selection (`production.rs::rebuild_routes`) must not move that table
-    /// at all — a real fixture with two coastal outlets on the same
-    /// component, so the outlet-selection branch this dose feeds is actually
-    /// exercised rather than short-circuited by "no outlets exist".
+    /// PORT_COMPETITION_PLAN.md Slice 1/2 · the zero-dose half of the claim,
+    /// checked directly against the literal value `0.0` (never against
+    /// `PORT_TOLL_COMPETITION_DOSE`, which Slice 2 dosed to 0.3 — this test
+    /// must keep proving the mechanism CAN be a no-op, independent of what
+    /// the shipped dose currently is): `decide_port_tolls_at(0.0, ..)`
+    /// returns exactly 1.0 for every hub regardless of relay traffic, and
+    /// `route_outlet`'s outlet selection under it is bit-identical to a run
+    /// with the toll mechanism's bias term removed entirely.
     #[test]
-    fn port_toll_competition_is_a_noop_at_zero_dose() {
-        assert_eq!(PORT_TOLL_COMPETITION_DOSE, 0.0);
+    fn port_toll_at_zero_dose_is_a_true_noop() {
         let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
         let mut h0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
         let mut h1 = hub(1, 30.0, 0.0, 15_000.0, vec![10.0], 0);
@@ -8485,17 +8484,63 @@
         let mut s = sim(vec![h0, h1, h2], goods);
         s.rebuild_routes();
 
-        let tolls = s.decide_port_tolls();
+        let tolls = s.decide_port_tolls_at(0.0);
         assert!(tolls.iter().all(|&t| t == 1.0),
             "every hub's toll target must be exactly 1.0 at zero dose, got {tolls:?}");
-        s.apply_port_tolls(&tolls);
-        assert!(s.hubs.iter().all(|h| h.transit_toll_mult == 1.0),
-            "transit_toll_mult must stay exactly 1.0 after applying the zero-dose target");
+    }
 
-        let outlets_before = s.route_outlet.clone();
+    /// PORT_COMPETITION_PLAN.md Slice 2 — the DOSED behaviour, measured
+    /// safe by `econ_measure_port_competition` before this dose was raised
+    /// (48.1% of a realistically dense world's hubs contestable). At the
+    /// shipped `PORT_TOLL_COMPETITION_DOSE` (0.3), a hub sitting on many
+    /// other pairs' relay route must charge MORE than one that sits on
+    /// none, both within `[PORT_TOLL_MIN, PORT_TOLL_MAX]`, and applying the
+    /// target must ease `transit_toll_mult` toward it rather than snap.
+    #[test]
+    fn port_toll_competition_biases_toll_by_relay_traffic_within_bounds() {
+        assert!(PORT_TOLL_COMPETITION_DOSE > 0.0,
+            "this test exercises the shipped dose — update it if the dose ever returns to 0.0");
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 30.0, 0.0, 20_000.0, vec![10.0], 0);
+        let h1 = hub(1, 0.0, 0.0, 12_000.0, vec![10.0], 0);
+        let h2 = hub(2, 60.0, 0.0, 12_000.0, vec![10.0], 0);
+        let mut h3 = hub(3, 200.0, 200.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h3.coastal = true;
+        let mut s = sim(vec![h0, h1, h2, h3], goods);
         s.rebuild_routes();
-        assert_eq!(s.route_outlet, outlets_before,
-            "route_outlet's outlet selection must be bit-identical with the toll mechanism wired in at zero dose");
+
+        // `relay_counts()` reads `route_outlet` directly (§ its own doc
+        // comment) — set it by hand rather than relying on this tiny
+        // fixture's own geometry to produce a genuine composed relay (a
+        // real entrepôt only wins when it beats an existing direct route,
+        // which four closely-spaced hubs rarely need). h0 is made the
+        // outlet for every OTHER pair; h3 is never anyone's outlet.
+        let n = s.n();
+        s.route_outlet = vec![-1; n * n];
+        for a in 0..n {
+            for b in 0..n {
+                if a != b && a != 0 && b != 0 { s.route_outlet[a * n + b] = 0; }
+            }
+        }
+        let counts = s.relay_counts();
+        assert!(counts[0] > counts[3],
+            "fixture must actually give h0 more relay traffic than h3, got {counts:?}");
+
+        let tolls = s.decide_port_tolls();
+        for &t in &tolls {
+            assert!(t >= PORT_TOLL_MIN && t <= PORT_TOLL_MAX,
+                "toll target {t} must stay within [{PORT_TOLL_MIN}, {PORT_TOLL_MAX}]");
+        }
+        assert!(tolls[0] > tolls[3],
+            "the busier relay (h0) must target a higher toll than the never-relayed \
+             outlet (h3): got {:?} vs {:?}", tolls[0], tolls[3]);
+
+        s.apply_port_tolls(&tolls);
+        for h in 0..s.hubs.len() {
+            let eased = 1.0 + (tolls[h] - 1.0) * 0.5;
+            assert!((s.hubs[h].transit_toll_mult - eased).abs() < 1e-4,
+                "apply_port_tolls must EASE toward the target, not snap to it");
+        }
     }
 
     /// C1b, dose-walked (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) · at

@@ -1,7 +1,8 @@
 # Port hubs, break-of-bulk legibility, and port competition — plan
 
-> **Status: Slice 1 BUILT AND GATED (dosed at zero — a true no-op). Slices 2-3
-> not built.** Written after a live user report ("I don't see any city port
+> **Status: Slice 1 BUILT AND GATED. Slice 2's diagnostic BUILT and the dose
+> walked one step (0.0 → 0.3), gated. Slice 3 not built.** Written after a
+> live user report ("I don't see any city port
 > where ships can land and unload cargo to caravans… I need to see the exact
 > transshipment happening") turned into three rounds of investigation across
 > one session. Two of the three things asked for turned out to already exist;
@@ -173,22 +174,78 @@ nothing (the exact "post owner deletes a rival's lane" failure mode
 `TRADE_STAGING_AND_POSTS_PLAN.md` §4.1 Brake 2 already warns against), nor
 pay cargo to stop.
 
-### Slice 2 — QUEUED, not built. Raising the dose.
+### Slice 2 — BUILT: the diagnostic, and the first dose step (0.0 → 0.3)
 
-Waits on: a `#[ignore]`d diagnostic measuring how OFTEN two real ports are
-actually close enough in cost to be swayed by a toll difference on a real
-generated world (the `maybe_grant_provinces`/R4-style precedent —
-`TRADE_STAGING_AND_POSTS_PLAN.md` R4 — a mechanism that never fires on a
-real world is not proven safe by a unit gate alone). Then a dose walk exactly
-like every other `*_DOSE` constant in this codebase: one step, re-run
-`tick::tests` + `econ_` + the multi-seed inheritance gate, record the table,
-raise again only if nothing broke. The two numbers most likely to move are
-top-10% wealth share (a port that starts winning trade compounds — `hub_
-class` rises, `hub_pull` rises, it wins even more) and house turnover, the
-same two the closure risk register in `TRADE_STAGING_AND_POSTS_PLAN.md` §4.1
-already names for the adjacent embargo mechanic. Do not raise this dose
-without that measurement; a spot-check win with an aggregate loss is a
-revert, not a judgement call (CLAUDE.md §2.4).
+The R2 risk this doc itself named — "the toll mechanism never actually
+matters on a real world" — is now measured rather than assumed either way.
+`econ_measure_port_competition` (`economy_validation.rs`, `#[ignore]`d)
+builds `tests::dense_world()` (60 hubs at real ~445 km spacing, 20 of them
+coastal — the established stand-in for "a realistically dense settled
+world" this codebase already uses for the N1c/C4 staging dose walks;
+`reference_world()`, tried first, has only ONE coastal hub and measures
+0% trivially — a fixture problem, not a finding), runs it 60 years, and for
+every hub with 2+ same-component coastal outlet candidates measures the
+travel-day gap between its best and second-best outlet against
+`MAX_TOLL_SWING = ENTREPOT_DWELL_DAYS × (PORT_TOLL_MAX − PORT_TOLL_MIN)`
+(2.70 days — the largest bias two rival ports could ever separate by at the
+plan's own bounds).
+
+**Measured: 54 of 54 real hubs had 2+ coastal outlet candidates, and 26 of
+54 (48.1%) were CONTESTABLE** (top-2 margin ≤ the swing; median margin
+3.35 days, mean 4.04 days). R2 is refuted — on a realistically dense world
+roughly half of all hubs sit close enough to a second port that a toll
+difference could genuinely decide which one wins their relay trade. That
+justifies raising the dose off zero; it says nothing about how HIGH is
+safe, which is what the gate suite below exists to check.
+
+Dosed to **0.3** — a conservative first step (`PORT_TOLL_MIN` = 0.7 /
+`PORT_TOLL_MAX` = 1.6; at 0.3 the raw pre-clamp toll target already spans
+0.70..1.30, i.e. the full downward range and over half the upward one, so
+this is not a token move). `decide_port_tolls` was split into a thin
+`decide_port_tolls()` (reads the shipped constant) over a parametrized
+`decide_port_tolls_at(dose)`, so the original zero-dose no-op claim stays
+checked against the literal value `0.0` (`port_toll_at_zero_dose_is_a_true_
+noop`) independent of what ships; a new
+`port_toll_competition_biases_toll_by_relay_traffic_within_bounds` checks
+the dosed behaviour (a busier relay targets a higher toll than a
+never-relayed one, both bounded, `apply_port_tolls` still eases rather than
+snaps).
+
+**Gates run at the 0.3 step** (per §2.8 — this touched
+`sim/campaign/tick/{mod,polis,tests,economy_validation}.rs`):
+`cargo check --lib --tests` clean · `cargo test --lib tick::tests` 263/263
+(incl. `simulate_decades_reports_dynamics` and both dense-world staging
+gates) · `cargo test --lib econ_` 6/6, including the hard-asserted
+multi-seed `econ_inheritance_rules_fragment_differently` ·
+`simulate_decades_reports_dynamics` read directly: sustained richest
+**486,401** over 50y — bit-identical to the pre-existing documented baseline
+(`CLAUDE.md` §5.5). That exact match is itself a finding worth recording,
+not just a clean pass: `simulate_decades_reports_dynamics`'s own fixture
+has too few coastal hubs for this mechanism to engage at all (the same
+"abstract world, wrong instrument" gap the diagnostic itself exists to
+route around) — so this run proves NO REGRESSION on that world, not that
+the toll mechanism is exercised there. The 48.1%-contestable measurement on
+`dense_world()` is what shows the mechanism matters; this run is what shows
+it doesn't break anything. No `npx tsc --noEmit` needed — nothing in
+`src/` changed.
+
+### Slice 2, continued — QUEUED. Raising the dose further.
+
+0.3 is one step, not the ceiling. Raising it again needs the identical
+recipe: one step, re-run `tick::tests` + `econ_` + the multi-seed
+inheritance gate, record the table, raise again only if nothing broke — and
+this time also read `econ_measure_port_competition`'s own numbers again
+after several dose steps, since a toll mechanism that is actually moving
+trade should, in principle, start closing some of those 48.1% margins as
+ports adjust (a feedback the diagnostic does not yet measure — it is a
+static snapshot, not a before/after). The two numbers most likely to move
+on a further raise are top-10% wealth share (a port that starts winning
+trade compounds — `hub_class` rises, `hub_pull` rises, it wins even more)
+and house turnover, the same two the closure risk register in
+`TRADE_STAGING_AND_POSTS_PLAN.md` §4.1 already names for the adjacent
+embargo mechanic. Do not raise this dose without re-running the full gate
+recipe at each step; a spot-check win with an aggregate loss is a revert,
+not a judgement call (CLAUDE.md §2.4).
 
 ### Slice 3 — QUEUED, not built. An active response.
 
@@ -233,6 +290,6 @@ since it is explicitly `O(NEIGHBOR_K)` by design for dispatch's hot loop
 
 | # | Risk | Slice | Mitigation |
 |---|---|---|---|
-| R1 | Raising the toll dose lets one port's winning streak compound into a wealth-concentration spiral (same shape as `TRADE_STAGING_AND_POSTS_PLAN.md`'s embargo risk) | 2 | `PORT_TOLL_MIN`/`_MAX` bound the toll; mandatory before/after `econ_` + multi-seed inheritance gate before any dose above 0 |
-| R2 | The toll mechanism never actually matters on a real world (two competing ports never sit close enough in cost) | 2 | Measure with a diagnostic BEFORE dosing, the R4 precedent |
+| R1 | Raising the toll dose lets one port's winning streak compound into a wealth-concentration spiral (same shape as `TRADE_STAGING_AND_POSTS_PLAN.md`'s embargo risk) | 2 | `PORT_TOLL_MIN`/`_MAX` bound the toll; `econ_` + multi-seed inheritance gate re-run at each dose step — checked clean at 0.3, still open at any dose above it |
+| R2 | The toll mechanism never actually matters on a real world (two competing ports never sit close enough in cost) | 2 | **RESOLVED, measured 2026-09-20**: `econ_measure_port_competition` on `dense_world()` found 48.1% of hubs contestable — the mechanism matters |
 | R3 | The medium-transition ring (§1) over-fires on a route whose corridor merely hugs the coast in and out of many small bays, cluttering the map with rings that aren't real stops | — | Not yet measured on a real world; if this turns out to be noisy, the fix is a minimum-run-length filter in `drawMediumTransitionRings`, not removing the feature — left as a finding to watch, not fixed pre-emptively |

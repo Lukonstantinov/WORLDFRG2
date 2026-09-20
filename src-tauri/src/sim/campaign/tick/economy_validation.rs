@@ -46,7 +46,7 @@
 //! cargo test --lib econ_ -- --nocapture
 //! ```
 
-use super::tests::{good, house_at, hub, sim};
+use super::tests::{good, house_at, hub, sim, dense_world};
 use super::*;
 
 // ── Asserted floors ─────────────────────────────────────────────────────────
@@ -1744,6 +1744,97 @@ fn econ_measure_realm_formation() {
     println!("    untiered {}  ·  tier1 {}  ·  tier2 {}  ·  tier3 {}  ·  tier4 {}",
         govern_tier_hist[0], govern_tier_hist[1], govern_tier_hist[2], govern_tier_hist[3], govern_tier_hist[4]);
     println!("═══════════════════════════════════════════════════════════════════════");
+}
+
+/// `PORT_COMPETITION_PLAN.md` Slice 2 — the diagnostic that gates whether
+/// `PORT_TOLL_COMPETITION_DOSE` is ever safe to raise above its shipped 0.0.
+/// The mechanism biases `route_outlet`'s entrepôt search: for hub `a`, the
+/// winning outlet is whichever coastal candidate `p` minimises `d(a,p) +
+/// ENTREPOT_DWELL_DAYS * (toll_mult(p) - 1)`. A toll can only ever matter if
+/// there are TWO real candidate outlets close enough in raw travel days that
+/// the toll's own achievable swing could flip which one wins — otherwise the
+/// lever moves a number nobody's route ever reads. This measures exactly that
+/// margin, per the `maybe_grant_provinces`/R4 precedent CLAUDE.md §2.4 and
+/// the plan itself require before any dose walk.
+///
+/// Runs on `tests::dense_world()` rather than `reference_world()` — this
+/// diagnostic is a question about GEOMETRY at real km scale (how close are
+/// two ports in travel days), and `reference_world()`'s coordinates are
+/// abstract cell counts with only ONE hub ever marked coastal (the same
+/// "abstract world, wrong instrument" trap `CLAUDE.md` §5.1 documents for
+/// `ship_leg_max_km`/`caravan_leg_max_km`: measured on `reference_world()`
+/// first, this printed 0 hubs with 2+ coastal candidates and 0% contestable
+/// — not because the mechanism cannot matter, but because the fixture has
+/// no second port to contest with). `dense_world()` is the established
+/// stand-in for "a realistically dense settled world" this codebase already
+/// uses for exactly this class of km-based routing question (the N1c/C4
+/// staging dose walks) — 60 hubs at ~445 km spacing, world_w = 3600, with a
+/// full top row AND bottom row of coastal hubs (20 of 60), a real multi-port
+/// coastline rather than one lonely outlet.
+///
+/// For every non-estate, non-abandoned hub `a`, collect every coastal,
+/// same-component candidate outlet `p != a` with a finite `days[a][p]`, sort
+/// by that raw distance, and take the gap between the best and second-best.
+/// `MAX_TOLL_SWING = ENTREPOT_DWELL_DAYS * (PORT_TOLL_MAX - PORT_TOLL_MIN)`
+/// is the largest day-equivalent bias two rival ports could ever separate by
+/// at the plan's own proposed bounds — a hub whose top-two margin is under
+/// that swing is CONTESTABLE (a toll difference between those two ports could
+/// change which one wins `a`'s trade); one at or above it is not, whatever
+/// dose is chosen.
+#[test]
+#[ignore]
+fn econ_measure_port_competition() {
+    let mut s = dense_world();
+    let years = 60u32;
+    for _ in 0..years {
+        s.advance(TICKS_PER_YEAR);
+    }
+    s.rebuild_routes();
+
+    let n = s.n();
+    let real: Vec<usize> = (0..n)
+        .filter(|&i| (!s.hubs[i].is_estate || s.is_remote_site(i)) && !s.hubs[i].abandoned)
+        .collect();
+    let outlets: Vec<usize> = real.iter().cloned().filter(|&i| s.hubs[i].coastal).collect();
+
+    const MAX_TOLL_SWING: f32 = ENTREPOT_DWELL_DAYS * (PORT_TOLL_MAX - PORT_TOLL_MIN);
+
+    let mut hubs_with_2_plus_outlets = 0usize;
+    let mut contestable = 0usize;
+    let mut margins: Vec<f32> = Vec::new();
+    for &a in &real {
+        let mut cand: Vec<f32> = outlets.iter().cloned()
+            .filter(|&p| p != a && s.hubs[p].component == s.hubs[a].component)
+            .filter_map(|p| {
+                let d = s.days[a * n + p];
+                d.is_finite().then_some(d)
+            })
+            .collect();
+        if cand.len() < 2 { continue; }
+        cand.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+        hubs_with_2_plus_outlets += 1;
+        let margin = cand[1] - cand[0];
+        margins.push(margin);
+        if margin <= MAX_TOLL_SWING {
+            contestable += 1;
+        }
+    }
+
+    margins.sort_by(|x, y| x.partial_cmp(y).unwrap_or(std::cmp::Ordering::Equal));
+    let median = margins.get(margins.len() / 2).copied().unwrap_or(f32::NAN);
+    let mean = if margins.is_empty() { f32::NAN } else { margins.iter().sum::<f32>() / margins.len() as f32 };
+
+    println!();
+    println!("═══ port competition — outlet margin diagnostic ({years}y, {} real hubs, {} coastal outlets) ═══",
+        real.len(), outlets.len());
+    println!("  MAX_TOLL_SWING (ENTREPOT_DWELL_DAYS × (PORT_TOLL_MAX−PORT_TOLL_MIN))   {:>8.2} days", MAX_TOLL_SWING);
+    println!("  hubs with 2+ same-component coastal outlet candidates                  {:>8}", hubs_with_2_plus_outlets);
+    println!("  ...of which CONTESTABLE (top-2 margin ≤ swing)                         {:>8} ({:.1}%)",
+        contestable,
+        if hubs_with_2_plus_outlets > 0 { 100.0 * contestable as f64 / hubs_with_2_plus_outlets as f64 } else { 0.0 });
+    println!("  top-2 margin — median {:.2}d, mean {:.2}d", median, mean);
+    println!("═══════════════════════════════════════════════════════════════════════════════════════");
+    assert!(years > 0, "diagnostic only — never fails the build");
 }
 
 /// Player-reported: "no outposts are created" over the course of ordinary play.

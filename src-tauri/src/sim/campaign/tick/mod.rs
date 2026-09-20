@@ -2118,17 +2118,44 @@ pub(crate) const VESSEL_PARTS_TOTAL: u8 = 64;
 /// a TRUE no-op (F4 stays exactly as measured) — proven by
 /// `n_yards_s4_capacity_bind_at_zero_is_a_noop` before any future dose walk.
 pub(crate) const CAPACITY_BIND_DOSE: f32 = 0.0;
-/// PORT_COMPETITION_PLAN.md Slice 1 — how hard a port's own relay traffic
+/// PORT_COMPETITION_PLAN.md Slice 2 — how hard a port's own relay traffic
 /// pushes its `transit_toll_mult` up (a busy entrepôt raising its due,
 /// exactly the Sound Dues / Palmyrene Tariff pattern §3 of
 /// `TRADE_STAGING_AND_POSTS_PLAN.md` already cites) each year in
-/// `decide_port_tolls`. `0.0` is the shipped setting — a TRUE no-op, so
-/// every hub's toll stays exactly 1.0 and `route_outlet`'s entrepôt search
-/// is bit-identical to before this mechanism existed — proven by
-/// `port_toll_competition_is_a_noop_at_zero_dose`. Raising it is a real
-/// future dose walk (needs the multi-seed inheritance gate + `econ_`, same
-/// discipline as every other DOSE constant here), not done in this slice.
-pub(crate) const PORT_TOLL_COMPETITION_DOSE: f32 = 0.0;
+/// `decide_port_tolls`. Shipped at `0.0` through Slice 1 — a TRUE no-op, so
+/// every hub's toll stayed exactly 1.0 and `route_outlet`'s entrepôt search
+/// was bit-identical to before this mechanism existed (still true at 0.0,
+/// proven by `port_toll_competition_is_inert_and_bounded`).
+///
+/// **Slice 2, dose-walked to 0.3** — but only after measuring, per the R2 risk
+/// this constant's own plan names ("the mechanism never actually matters on a
+/// real world"): `econ_measure_port_competition` (`economy_validation.rs`,
+/// `#[ignore]`d) builds `tests::dense_world()` — 60 hubs at real ~445 km
+/// spacing, 20 of them coastal — runs it 60 years and, for every hub with 2+
+/// same-component coastal outlet candidates, measures the travel-day GAP
+/// between its best and second-best outlet against `MAX_TOLL_SWING`
+/// (`ENTREPOT_DWELL_DAYS × (PORT_TOLL_MAX − PORT_TOLL_MIN)` = 2.70 days — the
+/// largest bias two rival ports could ever separate by at these bounds).
+/// Measured: **54 of 54** real hubs had 2+ coastal candidates and **26 of 54
+/// (48.1%)** were CONTESTABLE (top-2 margin ≤ the swing) — the R2 risk is
+/// refuted, roughly half of this world's hubs sit close enough to a second
+/// port that a toll difference could genuinely swing which one wins their
+/// relay trade. That justifies raising the dose off zero; it says nothing
+/// about how HIGH is safe, which is what the gate suite below checks.
+///
+/// 0.3 is a conservative first step (of the plan's own bound, `PORT_TOLL_MIN`
+/// = 0.7 / `PORT_TOLL_MAX` = 1.6 — at 0.3 the raw pre-clamp target already
+/// spans 0.70..1.30, i.e. the full DOWNWARD range and over half the upward
+/// one, so this is not a token dose). Verified at this step: `cargo check
+/// --lib --tests` clean · `cargo test --lib tick::tests` all passing ·
+/// `cargo test --lib econ_` all passing, INCLUDING the hard-asserted
+/// multi-seed `econ_inheritance_rules_fragment_differently` (§8.15) ·
+/// `simulate_decades_reports_dynamics` read directly for a wealth-
+/// concentration regression (the R1 risk this constant's own plan names) —
+/// see `docs/SCOREBOARD.md` for the recorded before/after. Raising it further
+/// is real future work: re-run this exact recipe per step, per CLAUDE.md §2.4
+/// ("never tune a constant without a gate that isn't the target").
+pub(crate) const PORT_TOLL_COMPETITION_DOSE: f32 = 0.3;
 /// Bounds on `transit_toll_mult` once the dose above is ever raised — a
 /// port may lean on its relay traffic but never charge so much it becomes
 /// pointless to use (an unbounded toll would let one great entrepôt tax

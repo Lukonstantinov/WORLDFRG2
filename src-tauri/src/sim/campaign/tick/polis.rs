@@ -183,8 +183,16 @@ impl CampaignSim {
     /// `PORT_TOLL_COMPETITION_DOSE = 0.0` this returns exactly 1.0 for every
     /// hub, a true no-op proven by `port_toll_competition_is_a_noop_at_zero_dose`.
     pub(crate) fn decide_port_tolls(&self) -> Vec<f32> {
+        self.decide_port_tolls_at(PORT_TOLL_COMPETITION_DOSE)
+    }
+
+    /// The dose-parametrized core of `decide_port_tolls`, split out so the
+    /// zero-dose no-op claim (`port_toll_at_zero_dose_is_a_true_noop`) can be
+    /// checked against the literal value `0.0` rather than against whatever
+    /// `PORT_TOLL_COMPETITION_DOSE` currently ships as.
+    pub(crate) fn decide_port_tolls_at(&self, dose: f32) -> Vec<f32> {
         let n = self.hubs.len();
-        if PORT_TOLL_COMPETITION_DOSE <= 0.0 {
+        if dose <= 0.0 {
             return vec![1.0; n];
         }
         let counts = self.relay_counts();
@@ -192,7 +200,7 @@ impl CampaignSim {
         counts.iter().map(|&c| {
             // -1 (no relay traffic at all) .. +1 (the world's single busiest relay).
             let pressure = (c as f32 / max_count) * 2.0 - 1.0;
-            (1.0 + PORT_TOLL_COMPETITION_DOSE * pressure).clamp(PORT_TOLL_MIN, PORT_TOLL_MAX)
+            (1.0 + dose * pressure).clamp(PORT_TOLL_MIN, PORT_TOLL_MAX)
         }).collect()
     }
 
