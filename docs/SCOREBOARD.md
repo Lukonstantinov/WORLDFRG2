@@ -9,6 +9,53 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-20 — Port competition (`PORT_COMPETITION_PLAN.md` Slice 2): measured, then dosed 0.0 → 0.3
+
+Slice 1 shipped `TickHub.transit_toll_mult` — a port's own anchorage/staple
+due, biasing which coastal outlet wins `route_outlet`'s entrepôt role — dosed
+at exactly zero, with its own risk register naming R2 ("the mechanism never
+actually matters on a real world") as the reason it had to wait on a
+measurement before any dose walk. Built that measurement:
+`econ_measure_port_competition` (`economy_validation.rs`, `#[ignore]`d) runs
+`tests::dense_world()` (60 hubs, real ~445 km spacing, 20 coastal — the
+established "realistically dense world" fixture, not `reference_world()`,
+which was tried first and has only ONE coastal hub, so it trivially measures
+0% and would have looked like R2 confirmed when it was really a fixture
+problem) 60 years and, for every hub with 2+ same-component coastal outlet
+candidates, measures the travel-day gap between its best and second-best
+outlet against `MAX_TOLL_SWING` (2.70 days, the largest bias two rival ports
+could ever separate by at the plan's own `PORT_TOLL_MIN`/`_MAX` bounds).
+
+**Measured: 54 of 54 real hubs had 2+ coastal candidates; 26 of 54 (48.1%)
+were CONTESTABLE** (median top-2 margin 3.35 days, mean 4.04 days). R2 is
+refuted — roughly half a dense world's hubs sit close enough to a second
+port for a toll difference to swing which one wins their relay trade.
+
+Dosed `PORT_TOLL_COMPETITION_DOSE` 0.0 → 0.3 (one conservative step; at 0.3
+the raw pre-clamp toll target already spans the plan's full 0.7..1.3 down
+range and over half the 1.6 up range). `decide_port_tolls` split into a
+parametrized `decide_port_tolls_at(dose)` so the original zero-dose no-op
+claim stays checked against the literal `0.0`, independent of the shipped
+constant; a new fixture test checks the dosed behaviour directly (relay
+traffic biases the toll, within bounds, eased not snapped).
+
+**Gates at the 0.3 step**: `cargo check --lib --tests` clean ·
+`cargo test --lib tick::tests` **263/263** · `cargo test --lib econ_`
+**6/6**, including the hard-asserted multi-seed
+`econ_inheritance_rules_fragment_differently` (176s) ·
+`simulate_decades_reports_dynamics` sustained richest **486,401** over
+50y — bit-identical to the documented pre-existing baseline. That exact
+match is a finding in its own right: the dynamics-test fixture has too few
+coastal hubs for this mechanism to engage at all, so this run proves no
+regression on that world rather than exercising the mechanism — the 48.1%
+figure on `dense_world()` is what shows it matters, this run is what shows
+it doesn't break anything (yet, at this dose). No frontend touched.
+
+Slice 2 is not finished at this row — 0.3 is one step of an unknown number.
+Raising it further needs the identical recipe re-run at each step (CLAUDE.md
+§2.4), watching top-10% wealth share and house turnover in particular, the
+same two the adjacent embargo mechanic's own risk register already names.
+
 ## 2026-09-19e — The campaign tick's hot loop: `house_for` was 10.6-14.9s of an 18-25s trade budget
 
 User report: "each monthly step feels laggy" on a real, large campaign. Measured

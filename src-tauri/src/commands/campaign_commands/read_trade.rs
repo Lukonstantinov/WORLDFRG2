@@ -203,19 +203,38 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
     use std::collections::HashMap;
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
-    struct Agg { vol: f32, sea: bool, river: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32> }
+    struct Agg {
+        vol: f32, sea: bool, river: bool, out: HashMap<usize, f32>, ret: HashMap<usize, f32>,
+        // Real break-of-bulk, read straight off the shipments actually in flight on
+        // this leg — never a re-guessed lookup. `InTransit.via` is set at dispatch
+        // whenever THIS leg is not the cargo's final one (TRADE_STAGING_AND_POSTS_
+        // PLAN.md slice 4: composed through a cheaper entrepôt outlet, OR staged
+        // because it exceeded its mode's range — both compose identically, so one
+        // flag covers both). A relayed journey already arrives here as SEPARATE
+        // groups per real hop (each stage is its own `InTransit` record with its
+        // own real `from`/`to`, written by `dispatch` and by the arrivals pass'
+        // re-embarkation), so no synthetic splitting is needed — only marking
+        // WHICH end of an already-real leg is the one cargo continues past.
+        relay_hi: bool, // an lo→hi shipment on this leg has `via >= 0`: hi relays
+        relay_lo: bool, // an hi→lo shipment on this leg has `via >= 0`: lo relays
+    }
     let mut groups: HashMap<(usize, u32, u32), Agg> = HashMap::new();
     for s in &sim.in_transit {
         if s.owner < 0 { continue; }
         let (lo, hi) = (s.from.min(s.to), s.from.max(s.to));
         let e = groups.entry((s.owner as usize, lo, hi))
-            .or_insert_with(|| Agg { vol: 0.0, sea: false, river: false, out: HashMap::new(), ret: HashMap::new() });
+            .or_insert_with(|| Agg { vol: 0.0, sea: false, river: false, out: HashMap::new(), ret: HashMap::new(), relay_hi: false, relay_lo: false });
         let amt = s.amount.max(0.0);
         e.vol += amt;
         e.sea |= s.sea;
         e.river |= s.river;
-        if s.from == lo { *e.out.entry(s.good).or_insert(0.0) += amt; }
-        else { *e.ret.entry(s.good).or_insert(0.0) += amt; }
+        if s.from == lo {
+            *e.out.entry(s.good).or_insert(0.0) += amt;
+            if s.via >= 0 { e.relay_hi = true; }
+        } else {
+            *e.ret.entry(s.good).or_insert(0.0) += amt;
+            if s.via >= 0 { e.relay_lo = true; }
+        }
     }
     let gname = |g: usize| sim.goods.get(g).map(|x| x.name.clone()).unwrap_or_default();
     // Estates are INTERNAL to their parent city — collapse an estate endpoint to
@@ -235,19 +254,26 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
     };
     // THE MAIN ROUTE'S LEGS — the Ostia case, on the STANDING Merchant Routes
     // overlay this time (not just the Flows tab's one-off highlight, which
-    // only ever drew while a route was clicked). If a pair's cheapest path
-    // composes through a coastal outlet (`CampaignSim::route_outlet`, #6d),
-    // draw TWO segments meeting at the relay instead of one straight line —
-    // which is also what makes a real sea<->caravan mode CHANGE at the relay
-    // city visible: each leg gets its own sea/river classification from its
-    // own two endpoints, not the one classification the whole corridor used
-    // to share end-to-end.
+    // only ever drew while a route was clicked).
+    //
+    // This used to re-derive a SEPARATE, guessed relay by re-checking
+    // `CampaignSim::route_outlet` for the emitted (lo, hi) pair and, if
+    // present, artificially splitting it into two synthetic legs meeting at
+    // that outlet. That was redundant with reality and could disagree with
+    // it: a genuinely staged/relayed journey ALREADY arrives here as
+    // separate (owner, lo, hi) groups, one per real hop — each stage is its
+    // own `InTransit` record with its own real `from`/`to`, written by
+    // `dispatch` at first dispatch and by the arrivals pass at every
+    // re-embarkation (`mod.rs`'s "THE RELAY CHAINS HERE"). Re-guessing a
+    // relay for an already-real short leg from a table that is recomputed
+    // independently (and only periodically, by `rebuild_routes`) could mark
+    // a stop that never happened for THIS cargo, or miss one that did — the
+    // guess and the shipment's own recorded path are two different sources
+    // of truth for the same fact. `Agg.relay_hi`/`relay_lo` (above) is the
+    // single correct source: it reads whether the actual shipments on this
+    // actual leg carry `via >= 0`, i.e. really do continue past this hub.
     let n = sim.hubs.len();
-    let leg_mode = |x: usize, y: usize| -> (bool, bool, f32) {
-        let sea = sim.hubs[x].coastal && sim.hubs[y].coastal;
-        let river = !sea && sim.hubs[x].river && sim.hubs[y].river;
-        (sea, river, sim.lane_risk(x, y, sea, river))
-    };
+    use crate::sim::tick::{EXPORT_TAX_RATE, IMPORT_TAX_RATE};
     let mut out: Vec<MerchantRoute> = Vec::new();
     for ((owner, lo, hi), a) in groups {
         let h = sim.houses.get(owner);
@@ -257,42 +283,24 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
         let out_goods = sort_goods(a.out);
         let ret_goods = sort_goods(a.ret);
         let (city_lo, city_hi) = (city_of(lo) as usize, city_of(hi) as usize);
-        // `route_outlet` is direction-aware and not necessarily symmetric —
-        // check both directions of this undirected pair, since a merchant
-        // corridor's own recorded shipments may run either way.
-        let relay = sim.route_outlet.get(city_lo * n + city_hi).copied()
-            .filter(|&p| p >= 0 && p as usize != city_lo && p as usize != city_hi)
-            .or_else(|| sim.route_outlet.get(city_hi * n + city_lo).copied()
-                .filter(|&p| p >= 0 && p as usize != city_lo && p as usize != city_hi));
-        if let Some(p) = relay {
-            let p = p as usize;
-            let (sea1, river1, risk1) = leg_mode(city_lo, p);
-            let (sea2, river2, risk2) = leg_mode(p, city_hi);
-            let pname = sim.hubs.get(p).map(|x| x.name.clone()).unwrap_or_default();
-            let ppos = sim.hubs.get(p).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
-            out.push(MerchantRoute {
-                a: pos(lo), b: ppos, a_name: hname(lo), b_name: pname.clone(),
-                holder: holder.clone(), color: color.clone(), is_guild,
-                sea: sea1, river: river1, risk: risk1, volume: a.vol,
-                out_goods: out_goods.clone(), ret_goods: ret_goods.clone(),
-                relay_at: 2, // relay sits at this leg's `b`
-            });
-            out.push(MerchantRoute {
-                a: ppos, b: pos(hi), a_name: pname, b_name: hname(hi),
-                holder, color, is_guild,
-                sea: sea2, river: river2, risk: risk2, volume: a.vol,
-                out_goods, ret_goods,
-                relay_at: 1, // relay sits at this leg's `a`
-            });
-        } else {
-            out.push(MerchantRoute {
-                a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
-                holder, color, is_guild,
-                sea: a.sea, river: a.river,
-                risk: sim.lane_risk(city_lo, city_hi, a.sea, a.river),
-                volume: a.vol, out_goods, ret_goods, relay_at: 0,
-            });
-        }
+        let km = sim.hub_km(city_lo, city_hi);
+        let days = sim.days.get(city_lo * n + city_hi).copied().unwrap_or(0.0);
+        let texp = if sim.hubs[city_lo].tariff_export > 0.0 { sim.hubs[city_lo].tariff_export } else { EXPORT_TAX_RATE };
+        let timp = if sim.hubs[city_hi].tariff_import > 0.0 { sim.hubs[city_hi].tariff_import } else { IMPORT_TAX_RATE };
+        out.push(MerchantRoute {
+            a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
+            holder, color, is_guild,
+            sea: a.sea, river: a.river,
+            risk: sim.lane_risk(city_lo, city_hi, a.sea, a.river),
+            volume: a.vol, out_goods, ret_goods,
+            // 2 = the relay sits at `b` (hi) — an outbound leg continues past it;
+            // 1 = it sits at `a` (lo) — a return/reverse leg continues past it;
+            // both can never legitimately point the same physical stop two ways
+            // for one undirected pair, so outbound takes priority on the rare
+            // tick where a round-trip has both directions in flight at once.
+            relay_at: if a.relay_hi { 2 } else if a.relay_lo { 1 } else { 0 },
+            km, days, tariff_export: texp, tariff_import: timp,
+        });
     }
     out.sort_by(|x, y| y.volume.partial_cmp(&x.volume).unwrap_or(std::cmp::Ordering::Equal));
     out.truncate(220);

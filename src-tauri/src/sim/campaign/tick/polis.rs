@@ -162,6 +162,63 @@ impl CampaignSim {
     pub(crate) fn run_polis_policy(&mut self, year: u32) {
         let choices = self.decide_polis_policy(year);
         self.apply_polis_policy(&choices);
+        self.run_port_tolls();
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 1 — one seat's TRANSIT TOLL for the coming
+    /// year: what it charges cargo that merely breaks bulk here, as opposed to
+    /// `PolisChoice`'s ordinary import/export tariff on goods this city itself
+    /// trades. Read-only proposal (FIX_PLAN B2's decide/apply split, mirrored
+    /// from `decide_polis_policy` above); `apply_port_tolls` is the only mutator.
+    ///
+    /// The signal is `relay_counts()` — how many OTHER hub-pairs' cheapest route
+    /// already transships through this hub — normalized against the world's own
+    /// busiest relay (never an absolute count, so it reads the same on a small
+    /// world as a large one, the `median_pop`/`prov_good_yield_scale`
+    /// self-calibration convention). A hub well above the world's own median
+    /// relay traffic leans on that demand and raises its toll; one below it
+    /// cuts, trying to draw transshipment away from a busier rival — which is
+    /// the entire mechanism by which two nearby ports can compete on PRICE for
+    /// the same trade, not just win it by raw geometry. At
+    /// `PORT_TOLL_COMPETITION_DOSE = 0.0` this returns exactly 1.0 for every
+    /// hub, a true no-op proven by `port_toll_competition_is_a_noop_at_zero_dose`.
+    pub(crate) fn decide_port_tolls(&self) -> Vec<f32> {
+        self.decide_port_tolls_at(PORT_TOLL_COMPETITION_DOSE)
+    }
+
+    /// The dose-parametrized core of `decide_port_tolls`, split out so the
+    /// zero-dose no-op claim (`port_toll_at_zero_dose_is_a_true_noop`) can be
+    /// checked against the literal value `0.0` rather than against whatever
+    /// `PORT_TOLL_COMPETITION_DOSE` currently ships as.
+    pub(crate) fn decide_port_tolls_at(&self, dose: f32) -> Vec<f32> {
+        let n = self.hubs.len();
+        if dose <= 0.0 {
+            return vec![1.0; n];
+        }
+        let counts = self.relay_counts();
+        let max_count = counts.iter().copied().max().unwrap_or(0).max(1) as f32;
+        counts.iter().map(|&c| {
+            // -1 (no relay traffic at all) .. +1 (the world's single busiest relay).
+            let pressure = (c as f32 / max_count) * 2.0 - 1.0;
+            (1.0 + dose * pressure).clamp(PORT_TOLL_MIN, PORT_TOLL_MAX)
+        }).collect()
+    }
+
+    /// Carries out a year's toll targets. Eased toward, not snapped to — a toll
+    /// schedule is a standing policy, not a die roll reset every year — the same
+    /// discipline `apply_polis_policy` already uses for `mint_fineness`. An
+    /// estate has no market of its own to charge a toll on and is left alone.
+    pub(crate) fn apply_port_tolls(&mut self, tolls: &[f32]) {
+        for h in 0..self.hubs.len().min(tolls.len()) {
+            if self.hubs[h].is_estate { continue; }
+            let cur = self.hubs[h].transit_toll_mult;
+            self.hubs[h].transit_toll_mult = cur + (tolls[h] - cur) * 0.5;
+        }
+    }
+
+    pub(crate) fn run_port_tolls(&mut self) {
+        let tolls = self.decide_port_tolls();
+        self.apply_port_tolls(&tolls);
     }
 
 

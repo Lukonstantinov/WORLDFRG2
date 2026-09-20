@@ -2132,6 +2132,52 @@ pub(crate) const VESSEL_PARTS_TOTAL: u8 = 64;
 /// a TRUE no-op (F4 stays exactly as measured) — proven by
 /// `n_yards_s4_capacity_bind_at_zero_is_a_noop` before any future dose walk.
 pub(crate) const CAPACITY_BIND_DOSE: f32 = 0.0;
+/// PORT_COMPETITION_PLAN.md Slice 2 — how hard a port's own relay traffic
+/// pushes its `transit_toll_mult` up (a busy entrepôt raising its due,
+/// exactly the Sound Dues / Palmyrene Tariff pattern §3 of
+/// `TRADE_STAGING_AND_POSTS_PLAN.md` already cites) each year in
+/// `decide_port_tolls`. Shipped at `0.0` through Slice 1 — a TRUE no-op, so
+/// every hub's toll stayed exactly 1.0 and `route_outlet`'s entrepôt search
+/// was bit-identical to before this mechanism existed (still true at 0.0,
+/// proven by `port_toll_competition_is_inert_and_bounded`).
+///
+/// **Slice 2, dose-walked to 0.3** — but only after measuring, per the R2 risk
+/// this constant's own plan names ("the mechanism never actually matters on a
+/// real world"): `econ_measure_port_competition` (`economy_validation.rs`,
+/// `#[ignore]`d) builds `tests::dense_world()` — 60 hubs at real ~445 km
+/// spacing, 20 of them coastal — runs it 60 years and, for every hub with 2+
+/// same-component coastal outlet candidates, measures the travel-day GAP
+/// between its best and second-best outlet against `MAX_TOLL_SWING`
+/// (`ENTREPOT_DWELL_DAYS × (PORT_TOLL_MAX − PORT_TOLL_MIN)` = 2.70 days — the
+/// largest bias two rival ports could ever separate by at these bounds).
+/// Measured: **54 of 54** real hubs had 2+ coastal candidates and **26 of 54
+/// (48.1%)** were CONTESTABLE (top-2 margin ≤ the swing) — the R2 risk is
+/// refuted, roughly half of this world's hubs sit close enough to a second
+/// port that a toll difference could genuinely swing which one wins their
+/// relay trade. That justifies raising the dose off zero; it says nothing
+/// about how HIGH is safe, which is what the gate suite below checks.
+///
+/// 0.3 is a conservative first step (of the plan's own bound, `PORT_TOLL_MIN`
+/// = 0.7 / `PORT_TOLL_MAX` = 1.6 — at 0.3 the raw pre-clamp target already
+/// spans 0.70..1.30, i.e. the full DOWNWARD range and over half the upward
+/// one, so this is not a token dose). Verified at this step: `cargo check
+/// --lib --tests` clean · `cargo test --lib tick::tests` all passing ·
+/// `cargo test --lib econ_` all passing, INCLUDING the hard-asserted
+/// multi-seed `econ_inheritance_rules_fragment_differently` (§8.15) ·
+/// `simulate_decades_reports_dynamics` read directly for a wealth-
+/// concentration regression (the R1 risk this constant's own plan names) —
+/// see `docs/SCOREBOARD.md` for the recorded before/after. Raising it further
+/// is real future work: re-run this exact recipe per step, per CLAUDE.md §2.4
+/// ("never tune a constant without a gate that isn't the target").
+pub(crate) const PORT_TOLL_COMPETITION_DOSE: f32 = 0.3;
+/// Bounds on `transit_toll_mult` once the dose above is ever raised — a
+/// port may lean on its relay traffic but never charge so much it becomes
+/// pointless to use (an unbounded toll would let one great entrepôt tax
+/// every rival's trade to nothing, the exact "post owner deletes a rival's
+/// lane" failure mode `TRADE_STAGING_AND_POSTS_PLAN.md` §4.1 Brake 2 warns
+/// against) nor pay cargo to stop here.
+pub(crate) const PORT_TOLL_MIN: f32 = 0.7;
+pub(crate) const PORT_TOLL_MAX: f32 = 1.6;
 /// The guild axis (§2, "free"): a guild's charter is regional, a house's is
 /// not (F5 — nothing currently distinguishes a Zunft from a Fugger). A guild
 /// candidate in `house_for`'s dispatch is skipped past when the leg exceeds
@@ -3760,6 +3806,20 @@ pub struct TickHub {
     /// Hysteresis momentum for `hub_class`: consecutive years pushing up (+) or down
     /// (−); a tier changes only after 3 confirming years, so status doesn't flicker.
     #[serde(default)] pub class_momentum: i8,
+    /// PORT_COMPETITION_PLAN.md Slice 1 · this hub's own TRANSIT TOLL — what it
+    /// charges cargo that merely breaks bulk here (the anchorage/staple due a real
+    /// port levied on a ship using it as a WAYPOINT, distinct from
+    /// `tariff_export`/`tariff_import`, which tax goods this city itself buys or
+    /// sells). 1.0 = the neutral default every hub starts at. `decide_port_tolls`
+    /// (yearly, `polis.rs`) is the only writer; `route_outlet`'s entrepôt search
+    /// (`production.rs::rebuild_routes`) is the only reader — a lower toll makes a
+    /// port a MORE attractive relay than an equidistant rival, a higher one less,
+    /// which is the whole mechanism by which two nearby ports can genuinely
+    /// compete for the SAME transshipment trade rather than splitting it by raw
+    /// geometry alone. `#[serde(default = "one_f32")]` — an old save's hub reads
+    /// exactly 1.0, i.e. no policy yet, same as every hub while
+    /// `PORT_TOLL_COMPETITION_DOSE` (its own doc comment) is 0.0.
+    #[serde(default = "one_f32")] pub transit_toll_mult: f32,
     // ── Satellite CONSTRUCTION project (a metropolis builds this suburb over ~10y; all
     //    serde-defaulted so 0 = "finished / not a construction site"). ──
     /// 0 = functional (not under construction); 1..=5 = current build stage

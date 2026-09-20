@@ -28,7 +28,7 @@
             quality: Vec::new(), tradition: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, supply_shortfall_days: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -8545,6 +8545,83 @@
         let s = sim(hubs, goods);
         assert_eq!(s.capacity_bind_extra_slots(1_000_000.0, SHIP_CAPACITY), 0,
             "even a huge shipment must need zero extra slots at zero dose");
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 1/2 · the zero-dose half of the claim,
+    /// checked directly against the literal value `0.0` (never against
+    /// `PORT_TOLL_COMPETITION_DOSE`, which Slice 2 dosed to 0.3 — this test
+    /// must keep proving the mechanism CAN be a no-op, independent of what
+    /// the shipped dose currently is): `decide_port_tolls_at(0.0, ..)`
+    /// returns exactly 1.0 for every hub regardless of relay traffic, and
+    /// `route_outlet`'s outlet selection under it is bit-identical to a run
+    /// with the toll mechanism's bias term removed entirely.
+    #[test]
+    fn port_toll_at_zero_dose_is_a_true_noop() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut h1 = hub(1, 30.0, 0.0, 15_000.0, vec![10.0], 0);
+        let h2 = hub(2, 60.0, 0.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h1.coastal = true;
+        let mut s = sim(vec![h0, h1, h2], goods);
+        s.rebuild_routes();
+
+        let tolls = s.decide_port_tolls_at(0.0);
+        assert!(tolls.iter().all(|&t| t == 1.0),
+            "every hub's toll target must be exactly 1.0 at zero dose, got {tolls:?}");
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 2 — the DOSED behaviour, measured
+    /// safe by `econ_measure_port_competition` before this dose was raised
+    /// (48.1% of a realistically dense world's hubs contestable). At the
+    /// shipped `PORT_TOLL_COMPETITION_DOSE` (0.3), a hub sitting on many
+    /// other pairs' relay route must charge MORE than one that sits on
+    /// none, both within `[PORT_TOLL_MIN, PORT_TOLL_MAX]`, and applying the
+    /// target must ease `transit_toll_mult` toward it rather than snap.
+    #[test]
+    fn port_toll_competition_biases_toll_by_relay_traffic_within_bounds() {
+        assert!(PORT_TOLL_COMPETITION_DOSE > 0.0,
+            "this test exercises the shipped dose — update it if the dose ever returns to 0.0");
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 30.0, 0.0, 20_000.0, vec![10.0], 0);
+        let h1 = hub(1, 0.0, 0.0, 12_000.0, vec![10.0], 0);
+        let h2 = hub(2, 60.0, 0.0, 12_000.0, vec![10.0], 0);
+        let mut h3 = hub(3, 200.0, 200.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h3.coastal = true;
+        let mut s = sim(vec![h0, h1, h2, h3], goods);
+        s.rebuild_routes();
+
+        // `relay_counts()` reads `route_outlet` directly (§ its own doc
+        // comment) — set it by hand rather than relying on this tiny
+        // fixture's own geometry to produce a genuine composed relay (a
+        // real entrepôt only wins when it beats an existing direct route,
+        // which four closely-spaced hubs rarely need). h0 is made the
+        // outlet for every OTHER pair; h3 is never anyone's outlet.
+        let n = s.n();
+        s.route_outlet = vec![-1; n * n];
+        for a in 0..n {
+            for b in 0..n {
+                if a != b && a != 0 && b != 0 { s.route_outlet[a * n + b] = 0; }
+            }
+        }
+        let counts = s.relay_counts();
+        assert!(counts[0] > counts[3],
+            "fixture must actually give h0 more relay traffic than h3, got {counts:?}");
+
+        let tolls = s.decide_port_tolls();
+        for &t in &tolls {
+            assert!(t >= PORT_TOLL_MIN && t <= PORT_TOLL_MAX,
+                "toll target {t} must stay within [{PORT_TOLL_MIN}, {PORT_TOLL_MAX}]");
+        }
+        assert!(tolls[0] > tolls[3],
+            "the busier relay (h0) must target a higher toll than the never-relayed \
+             outlet (h3): got {:?} vs {:?}", tolls[0], tolls[3]);
+
+        s.apply_port_tolls(&tolls);
+        for h in 0..s.hubs.len() {
+            let eased = 1.0 + (tolls[h] - 1.0) * 0.5;
+            assert!((s.hubs[h].transit_toll_mult - eased).abs() < 1e-4,
+                "apply_port_tolls must EASE toward the target, not snap to it");
+        }
     }
 
     /// C1b, dose-walked (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) · at

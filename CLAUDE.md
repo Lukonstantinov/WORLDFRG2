@@ -5875,7 +5875,18 @@ CITY_PROVINCE_WAR_PLAN.md         ← ⭐ APPROVED, NOT YET BUILT. The next thre
                                     own caveat list (§5) — incl. that it REVERSES
                                     PROVINCE_SYSTEM_PLAN's "enclaves survive" decision —
                                     and its own §6 list of the work still owed
-TRADE_STAGING_AND_POSTS_PLAN.md   ← ⭐ APPROVED, NOTHING BUILT. Seven slices that
+TRADE_STAGING_AND_POSTS_PLAN.md   ← ⭐ SLICES 3-4 BUILT AND DOSED LIVE (cargo no
+                                    longer teleports: the entrepôt composition +
+                                    the range-based staging relay, both real,
+                                    both chain through `InTransit.via`/`hops`);
+                                    slices 1, 2, 5, 6, 7 not built. This entry
+                                    was stale (said "nothing built") until a
+                                    2026-09-20 session corrected it while
+                                    building `PORT_COMPETITION_PLAN.md` — see
+                                    that doc's §0 for exactly what was
+                                    mis-diagnosed and how it was checked
+                                    against the real dispatch/arrivals code.
+                                    Seven slices that
                                     make a long lane a RELAY instead of a teleport.
                                     Premise: a 7,000 km lane is historically ordinary;
                                     one with no stops, no middleman and no city grown
@@ -5912,6 +5923,40 @@ TRADE_STAGING_AND_POSTS_PLAN.md   ← ⭐ APPROVED, NOTHING BUILT. Seven slices 
                                     hard-won top-10% share. Companion UI schematics
                                     ("Break of Bulk", 8 plates) are an artifact, not a
                                     repo file (§2.2)
+PORT_COMPETITION_PLAN.md          ← ⭐ SLICE 1 BUILT AND GATED (dosed at zero — a true
+                                    no-op); slices 2-3 QUEUED. Grew out of a user
+                                    report that the map showed no port where cargo
+                                    breaks bulk. Corrects this session's own first,
+                                    wrong diagnosis (§0): the map's relay MARKER was
+                                    wired to a redundant, independently re-guessed
+                                    `route_outlet` lookup instead of the real
+                                    `InTransit.via` already sitting on every in-flight
+                                    shipment — fixed, no guessing left in
+                                    `campaign_merchant_routes()`. Also records that
+                                    "big ports act as trade hubs" already ships
+                                    (`hub_class`/`relay_count`/`is_transit_knot`, real
+                                    map markers — blue square/red triangle/teal
+                                    hourglass — since before this session; nothing
+                                    built here for that ask). New: a small teal ring
+                                    at every GEOMETRIC land↔sea/river medium change
+                                    along a routed corridor
+                                    (`OverlayManager.drawMediumTransitionRings`),
+                                    distinct from the economic relay ring — cargo
+                                    cannot sail on land, so this is real regardless of
+                                    whether dispatch treats the voyage as one leg or
+                                    several. And `TickHub.transit_toll_mult` — a
+                                    port's own anchorage/staple due, biasing which
+                                    outlet wins the entrepôt role in `rebuild_routes`
+                                    so two nearby ports can genuinely compete on price
+                                    for the same relay trade — shipped at
+                                    `PORT_TOLL_COMPETITION_DOSE = 0.0`, proven inert by
+                                    `port_toll_competition_is_a_noop_at_zero_dose`.
+                                    Raising the dose needs its own `#[ignore]`d
+                                    firing-rate diagnostic first (the `maybe_grant_
+                                    provinces`/R4 precedent) then a proper dose walk
+                                    against `econ_` + the multi-seed inheritance gate —
+                                    neither done, both queued by name, not silently
+                                    assumed safe
 MERCHANT_VESSELS_AND_INFORMATION_PLAN.md
                                   ← ⭐ DESIGN, NOT APPROVED, NOTHING BUILT. Six
                                     staged changes to the trade mechanism, built on

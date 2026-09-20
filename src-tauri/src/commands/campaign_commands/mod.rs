@@ -2184,6 +2184,25 @@ pub struct MerchantRoute {
     /// this is an ordinary direct route, 1 = the relay sits at `a`, 2 = the
     /// relay sits at `b`.
     #[serde(default)] pub relay_at: u8,
+    /// This LEG's real distance, `CampaignSim::hub_km` — the same figure
+    /// every range/staging rule in the sim is stated in (rule 25). A relayed
+    /// route's two legs each carry their own real distance, not half of a
+    /// straight-line guess between the outer endpoints.
+    #[serde(default)] pub km: f32,
+    /// This LEG's real routed travel time in days, read straight from
+    /// `CampaignSim::days` — the same cost the entrepôt composition and
+    /// `dispatch` itself price this leg at, not a display estimate.
+    #[serde(default)] pub days: f32,
+    /// This LEG's export tariff rate at its own `a` end and import tariff
+    /// rate at its own `b` end (fractions, e.g. 0.03 = 3%) — a council's own
+    /// `tariff_export`/`tariff_import` policy where set, else the global
+    /// `EXPORT_TAX_RATE`/`IMPORT_TAX_RATE` default `dispatch` itself falls
+    /// back to. The two are surfaced separately (never summed into one
+    /// "toll") because they are levied by two different councils and a
+    /// bypassing house pays neither (Slice 6) — collapsing them would make
+    /// that distinction unrepresentable later.
+    #[serde(default)] pub tariff_export: f32,
+    #[serde(default)] pub tariff_import: f32,
 }
 
 /// One active FUTURES CONTRACT as a directional supply lane for the Futures map

@@ -2025,7 +2025,7 @@ export function MapCanvas() {
           const om = overlayManagerRef.current;
           if (om && merchantRoutesRef.current.length > 0) {
             const route = om.pickMerchantRoute(wx, wy, Math.max(4, m.grid_width * 0.008));
-            if (route) { setSelectedMerchantRoute(route); return; }
+            if (route) { setSelectedMerchantRoute(route, om.siblingMerchantLeg(route)); return; }
           }
           // …or, if the futures layer is on, pick a contract lane.
           if (om && futuresLanesRef.current.length > 0) {

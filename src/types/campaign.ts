@@ -950,6 +950,18 @@ export interface MerchantRoute {
    *  that hub rather than one straight line. 0 = ordinary direct route,
    *  1 = the relay/transshipment point is at `a`, 2 = it's at `b`. */
   relay_at?: number;
+  /** This LEG's real distance in km (`CampaignSim::hub_km`) — a relayed
+   *  route's two entries each carry their own real leg distance. */
+  km?: number;
+  /** This LEG's real routed travel time in days — the same cost `dispatch`
+   *  and the entrepôt composition price this exact leg at. */
+  days?: number;
+  /** This LEG's export tariff rate at its `a` end / import tariff rate at
+   *  its `b` end (fractions, e.g. 0.03 = 3%) — a council policy where set,
+   *  else the global default. Kept separate: two different councils levy
+   *  them, and a bypassing house (Slice 6) pays neither. */
+  tariff_export?: number;
+  tariff_import?: number;
 }
 /** One active futures contract as a directional supply lane (source → buyer). */
 export interface FuturesLane {
