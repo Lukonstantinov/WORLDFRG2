@@ -643,6 +643,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 transit_year: 0.0,
                 hub_class: 0,
                 class_momentum: 0,
+                transit_toll_mult: 1.0,
                 build_stage: 0,
                 build_progress: 0.0,
                 build_supply: [0.0; 3],

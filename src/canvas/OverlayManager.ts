@@ -2113,19 +2113,29 @@ export class OverlayManager {
     return best;
   }
 
-  /** The OTHER leg of a relayed route (`relay_at !== 0`) — same holder, meeting
-   *  at the same break-of-bulk point (this leg's relay-side endpoint equals
-   *  the sibling's own relay-side endpoint), so a click on either half of the
-   *  Ostia case can show the whole journey. Null for an ordinary direct route
-   *  (`relay_at === 0`) or if no match is found (a stale/partial fetch). */
+  /** The NEXT leg of a relayed route — same holder, continuing on from this
+   *  leg's own break-of-bulk point, so a click on the FIRST half of a relay
+   *  can show the whole journey. Null for an ordinary direct route
+   *  (`relay_at === 0`) or if no match is found (a stale/partial fetch).
+   *
+   *  Only the CONTINUING end of a relay carries `relay_at` — the final leg
+   *  after the last stop has nothing past it, so `relay_at` there is
+   *  genuinely 0 (a real fact, not a missing one: `via < 0` means exactly
+   *  "no further relay"). The sibling lookup must therefore accept an
+   *  `o.relay_at` of 0 — requiring it non-zero, as the old two-entries-
+   *  always-paired convention did, would silently fail to find a real
+   *  chain's own final leg. Matched by touching the same relay point under
+   *  the SAME holder; a house that happens to run two unrelated lanes
+   *  through its own hub city could rarely match the wrong one, which is an
+   *  acceptable display-only imprecision — it never affects either leg's
+   *  own real km/days/tariff/risk. */
   siblingMerchantLeg(r: MerchantRoute): MerchantRoute | null {
     if (!r.relay_at) return null;
     const relayPt = r.relay_at === 1 ? r.a : r.b;
     const near = (p: [number, number]) => Math.abs(p[0] - relayPt[0]) < 0.01 && Math.abs(p[1] - relayPt[1]) < 0.01;
     for (const o of this.merchantRoutes) {
-      if (o === r || !o.relay_at || o.holder !== r.holder) continue;
-      const oRelayPt = o.relay_at === 1 ? o.a : o.b;
-      if (near(oRelayPt) && o.relay_at !== r.relay_at) return o;
+      if (o === r || o.holder !== r.holder) continue;
+      if (near(o.a) || near(o.b)) return o;
     }
     return null;
   }
@@ -4640,6 +4650,7 @@ export class OverlayManager {
         ctx.globalAlpha = run.sea ? 0.85 : 0.95; ctx.lineWidth = w; strokeRun(run.pts);
       }
       ctx.setLineDash([]);
+      this.drawMediumTransitionRings(ctx, runs, Math.max(1.4, 2.6 * inv), true);
       // Directional chevrons ALONG the line (-->-- inbound · --<-- outbound) so the
       // flow direction reads at a glance, not just at the endpoint.
       {
@@ -4700,6 +4711,49 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
   }
 
+  /** A ring at every point along a routed polyline where the medium actually
+   *  changes (land/river ↔ sea) — the user's own request: "I need to see the
+   *  exact transshipment happening", not just the ONE economic break-of-bulk
+   *  point a house's own account happens to record. Cargo cannot sail on land,
+   *  so a land↔sea boundary on the drawn corridor IS a real transshipment
+   *  point regardless of whether the sim's own dispatch treats the voyage as
+   *  one continuous leg or a staged one — this is a GEOMETRIC fact read
+   *  straight off `mediumRuns`' own boundaries (which already share their
+   *  point between consecutive runs, so there is no gap to reconstruct),
+   *  never a re-guess. Deliberately a distinct, smaller ring from the
+   *  economic relay/break-of-bulk marker (drawn separately, in the same
+   *  teal) so the two questions — "cargo physically changes carrier here"
+   *  vs. "this house's account records a stop here" — stay visually apart
+   *  even though they very often coincide. */
+  private drawMediumTransitionRings(
+    ctx: CanvasRenderingContext2D,
+    runs: { pts: [number, number][]; sea: boolean }[],
+    ringR: number,
+    // Some callers' `runs` already carry the +0.5 cell-centre offset in their
+    // points (`renderFlowHighlight`'s, built from pre-offset settlement
+    // coords); others (`renderMerchantRoutes`'s, straight off the backend's
+    // raw hub `[x,y]`) do not. Pass whichever this caller's own `runs` are.
+    preOffset = false,
+  ) {
+    if (runs.length < 2) return;
+    ctx.save();
+    ctx.globalAlpha = 0.9;
+    ctx.strokeStyle = "#2fd1c9";
+    ctx.fillStyle = "rgba(47,209,201,0.25)";
+    ctx.lineWidth = Math.max(0.4, 0.8 / Math.sqrt(this.currentScale));
+    ctx.setLineDash([]);
+    const off = preOffset ? 0 : 0.5;
+    for (let i = 0; i < runs.length - 1; i++) {
+      if (runs[i].sea === runs[i + 1].sea) continue;
+      const p = runs[i].pts[runs[i].pts.length - 1];
+      ctx.beginPath();
+      ctx.arc(p[0] + off, p[1] + off, ringR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
   private renderMerchantRoutes(ctx: CanvasRenderingContext2D) {
     let maxVol = 0;
     for (const r of this.merchantRoutes) maxVol = Math.max(maxVol, r.volume);
@@ -4740,6 +4794,10 @@ export class OverlayManager {
         ctx.stroke();
       }
       ctx.setLineDash([]);
+      // Every GEOMETRIC medium change along this route's own corridor (rings),
+      // independent of and in addition to the single ECONOMIC relay ring
+      // drawn below.
+      this.drawMediumTransitionRings(ctx, runs, Math.max(1.2, 2.2 / Math.sqrt(this.currentScale)));
       const dotR = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
       ctx.globalAlpha = 0.85;
       ctx.fillStyle = r.color || "#cccccc";

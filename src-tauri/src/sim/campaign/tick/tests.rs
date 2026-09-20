@@ -28,7 +28,7 @@
             quality: Vec::new(), tradition: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 0, colony_stage: 0, autonomous: false, founder_hub: -1, backers: Vec::new(),
             reserve_food: 0.0, reserve_cap: 0.0, supply_years: 0.0, colony_founded_tick: 0,
-            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
+            main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: 0, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
@@ -8464,6 +8464,38 @@
         let s = sim(hubs, goods);
         assert_eq!(s.capacity_bind_extra_slots(1_000_000.0, SHIP_CAPACITY), 0,
             "even a huge shipment must need zero extra slots at zero dose");
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 1, dose-walked · at
+    /// `PORT_TOLL_COMPETITION_DOSE == 0.0` every hub's toll target is exactly
+    /// 1.0 regardless of its relay traffic, applying it leaves `transit_toll_
+    /// mult` at exactly 1.0, and the wiring into `route_outlet`'s outlet
+    /// selection (`production.rs::rebuild_routes`) must not move that table
+    /// at all — a real fixture with two coastal outlets on the same
+    /// component, so the outlet-selection branch this dose feeds is actually
+    /// exercised rather than short-circuited by "no outlets exist".
+    #[test]
+    fn port_toll_competition_is_a_noop_at_zero_dose() {
+        assert_eq!(PORT_TOLL_COMPETITION_DOSE, 0.0);
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut h1 = hub(1, 30.0, 0.0, 15_000.0, vec![10.0], 0);
+        let h2 = hub(2, 60.0, 0.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h1.coastal = true;
+        let mut s = sim(vec![h0, h1, h2], goods);
+        s.rebuild_routes();
+
+        let tolls = s.decide_port_tolls();
+        assert!(tolls.iter().all(|&t| t == 1.0),
+            "every hub's toll target must be exactly 1.0 at zero dose, got {tolls:?}");
+        s.apply_port_tolls(&tolls);
+        assert!(s.hubs.iter().all(|h| h.transit_toll_mult == 1.0),
+            "transit_toll_mult must stay exactly 1.0 after applying the zero-dose target");
+
+        let outlets_before = s.route_outlet.clone();
+        s.rebuild_routes();
+        assert_eq!(s.route_outlet, outlets_before,
+            "route_outlet's outlet selection must be bit-identical with the toll mechanism wired in at zero dose");
     }
 
     /// C1b, dose-walked (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) · at

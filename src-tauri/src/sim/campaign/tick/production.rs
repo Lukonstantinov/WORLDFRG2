@@ -444,14 +444,25 @@ impl CampaignSim {
             if !outlets.is_empty() {
                 let days_before = days.clone();
                 for &a in &real {
-                    let mut best_out: Option<(usize, f32)> = None;
+                    // (outlet, its SELECTION score, its REAL unbiased distance)
+                    let mut best_out: Option<(usize, f32, f32)> = None;
                     for &p in &outlets {
                         if p == a || self.hubs[p].component != self.hubs[a].component { continue; }
                         let d = days_before[a * n + p];
                         if !d.is_finite() { continue; }
-                        if best_out.map_or(true, |(_, bd)| d < bd) { best_out = Some((p, d)); }
+                        // PORT_COMPETITION_PLAN.md Slice 1 — a port's own
+                        // `transit_toll_mult` biases which outlet WINS the role,
+                        // not the real travel cost recorded below: two similarly
+                        // placed rivals can now genuinely compete on price for
+                        // the same relay traffic rather than splitting it by
+                        // raw distance alone. Exactly 0 at the shipped dose
+                        // (every hub's toll is universally 1.0), so `d_eff == d`
+                        // and outlet selection is bit-identical to before this
+                        // existed.
+                        let d_eff = d + ENTREPOT_DWELL_DAYS * (self.hubs[p].transit_toll_mult - 1.0);
+                        if best_out.map_or(true, |(_, bd, _)| d_eff < bd) { best_out = Some((p, d_eff, d)); }
                     }
-                    let Some((p, d_ap)) = best_out else { continue };
+                    let Some((p, _, d_ap)) = best_out else { continue };
                     for &b in &real {
                         if b == a || b == p { continue; }
                         let d_pb = days_before[p * n + b];
