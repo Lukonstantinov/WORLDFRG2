@@ -1,7 +1,10 @@
 # Port hubs, break-of-bulk legibility, and port competition — plan
 
-> **Status: Slice 1 BUILT AND GATED. Slice 2's diagnostic BUILT and the dose
-> walked one step (0.0 → 0.3), gated. Slice 3 not built.** Written after a
+> **Status: Slices 1 and 3 BUILT AND GATED. Slice 2's diagnostic BUILT and the
+> dose walked two steps (0.0 → 0.3 → 0.6), gated at each step; Slice 3 built
+> and gated but shipped UNDOSED (0.0). The staging_hop neighbour-list item is
+> MEASURED (0% forced-fail, 16.9% suboptimal-but-staged) and deliberately left
+> unfixed — see its own section.** Written after a
 > live user report ("I don't see any city port
 > where ships can land and unload cargo to caravans… I need to see the exact
 > transshipment happening") turned into three rounds of investigation across
@@ -229,46 +232,111 @@ the toll mechanism is exercised there. The 48.1%-contestable measurement on
 it doesn't break anything. No `npx tsc --noEmit` needed — nothing in
 `src/` changed.
 
-### Slice 2, continued — QUEUED. Raising the dose further.
+### Slice 2, continued — dosed a second step (0.3 → 0.6); further raises QUEUED
 
-0.3 is one step, not the ceiling. Raising it again needs the identical
-recipe: one step, re-run `tick::tests` + `econ_` + the multi-seed
-inheritance gate, record the table, raise again only if nothing broke — and
-this time also read `econ_measure_port_competition`'s own numbers again
-after several dose steps, since a toll mechanism that is actually moving
-trade should, in principle, start closing some of those 48.1% margins as
-ports adjust (a feedback the diagnostic does not yet measure — it is a
-static snapshot, not a before/after). The two numbers most likely to move
-on a further raise are top-10% wealth share (a port that starts winning
-trade compounds — `hub_class` rises, `hub_pull` rises, it wins even more)
-and house turnover, the same two the closure risk register in
-`TRADE_STAGING_AND_POSTS_PLAN.md` §4.1 already names for the adjacent
-embargo mechanic. Do not raise this dose without re-running the full gate
-recipe at each step; a spot-check win with an aggregate loss is a revert,
-not a judgement call (CLAUDE.md §2.4).
+Raised once more with the identical recipe: `cargo check --lib --tests` ·
+`cargo test --lib tick::tests` (266/266) · `cargo test --lib econ_` (6/6,
+multi-seed inheritance gate included) · a direct read of both `econ_`
+scorecards' top-10% wealth share, **unchanged** at 0.716 (large world) /
+0.622 (reference world) from the 0.3 step — see `docs/SCOREBOARD.md` for the
+full table.
 
-### Slice 3 — QUEUED, not built. An active response.
+**0.6 is close to this formula's practical ceiling, not an arbitrary stop.**
+`decide_port_tolls_at`'s raw pre-clamp target is `1.0 + dose·pressure` with
+`pressure ∈ [-1, 1]`; at `dose = 0.6` that already spans the full
+`[PORT_TOLL_MIN, PORT_TOLL_MAX]` = `[0.7, 1.6]` band at both relay-traffic
+extremes. Raising the dose further only steepens the middle of that range —
+it cannot push the endpoints past the clamp — so it buys diminishing real
+effect for the same regression risk. Both scorecard runs measuring
+*unchanged* wealth share at 0.6 is consistent with that: `reference_world()`
+(the scorecard fixture) has too few coastal hubs to exercise this mechanism
+at all (§ its own note in the Slice 2 section above), so a truly meaningful
+before/after on wealth concentration still needs a `dense_world()`-scale
+`econ_`-style measurement that does not yet exist — named here as the real
+prerequisite for a THIRD dose step, not assumed clean just because two
+under-powered fixtures read unchanged.
 
-Today the toll target is a pure function of relay traffic — a hub cannot
-choose to fight for a specific rival's business, only drift its own toll
-with its own volume. A real "port A undercuts port B because B is winning
-its trade" story needs the decision to read a NAMED rival (the busiest
-nearby outlet actually competing for the same (a, b) pairs), which
-`route_outlet`'s per-pair table can answer but nothing currently aggregates
-into "who is MY rival". Waits on Slice 2 landing first (no point building a
-sharper decision on a lever not yet known to matter), and on a chronicle
-line so a toll war is a story the player can read, not a silent number
-(CLAUDE.md's own "every mechanism must produce a legible story" rule,
-`INSTITUTIONS_BUILD_ORDER.md`'s governing rule, applies here too).
+Raising it again — or widening `PORT_TOLL_MIN`/`_MAX`, since 0.6 already
+saturates the current band — needs the identical recipe: re-run
+`tick::tests` + `econ_` + the multi-seed inheritance gate, record the table,
+raise again only if nothing broke. Watch top-10% wealth share (a port that
+starts winning trade compounds — `hub_class` rises, `hub_pull` rises, it
+wins even more) and house turnover, the two the adjacent embargo mechanic's
+own risk register already names. Do not raise this dose without re-running
+the full gate recipe at each step; a spot-check win with an aggregate loss
+is a revert, not a judgement call (CLAUDE.md §2.4).
 
-### Staging_hop's neighbour-list limitation — QUEUED, not built.
+### Slice 3 — BUILT AND GATED, shipped undosed (`PORT_RIVAL_UNDERCUT_DOSE = 0.0`)
 
-Named in §1 above. Waits on a `#[ignore]`d diagnostic on a real generated
-world measuring how often a leg is forced into a longer/costlier stage
-because its nearest geometric stop wasn't in the departing hub's own
-`NEIGHBOR_K` trade-neighbour list — before touching `staging_hop` itself,
-since it is explicitly `O(NEIGHBOR_K)` by design for dispatch's hot loop
-(§8.9 rule 1's spirit) and any fix has to keep that bound.
+The active response. `contested_rivals()` (`production.rs`) is a live
+re-derivation of the SAME margin test `econ_measure_port_competition` uses
+for measurement, run yearly against `self.days`: for every hub, the one
+other coastal hub it is most often top-2-contested against for a third
+hub's outlet choice — a real, geometry-derived "who am I actually fighting
+for trade against", not a standing config. `apply_rival_undercut_at(base,
+rivals, dose)` then lets a port carrying FEWER relays than its own named
+rival (it is losing that fight) pull its toll target DOWN toward `rival's
+current toll − PORT_UNDERCUT_MARGIN` (0.05) — never up, and never past
+`PORT_TOLL_MIN` — blended by dose so `0.0` returns the base target
+completely unchanged. `chronicle_toll_wars` writes the story (CLAUDE.md's
+own "every mechanism must produce a legible story" rule): once, the moment a
+hub's toll crosses DOWNWARD through `PORT_TOLL_WAR_ANNOUNCE` (`PORT_TOLL_MIN
++ 0.05`) while genuinely being undercut — a hub trimming its due a little is
+not news, one visibly racing a named rival toward the floor is.
+
+Wired into `run_port_tolls`: `decide_port_tolls` → `contested_rivals` →
+`apply_rival_undercut` → `chronicle_toll_wars` → `apply_port_tolls`, in that
+order, so the chronicle compares the SAME before/after the toll actually
+applies.
+
+Shipped at `PORT_RIVAL_UNDERCUT_DOSE = 0.0` — deliberately UNDOSED. Slice 2
+only just landed its own second dose step in this same session; layering a
+second, sharper competitive mechanic on top before Slice 2's own ceiling and
+regression story are fully settled would make any future finding
+impossible to attribute to one cause or the other. Gated:
+`contested_rivals_names_the_real_top_2_outlet_pair` (the rival identification
+itself, on a real composed-relay fixture), `port_rival_undercut_is_a_noop_
+at_zero_dose` (checked against the literal `0.0` via
+`apply_rival_undercut_at`, independent of the shipped constant — the same
+split Slice 2's own zero-dose test uses), `port_rival_undercut_pulls_the_
+loser_toward_its_rival` (the dosed behaviour: the losing side moves down
+toward the rival's toll, the winning side is untouched). Full suite verified
+at this state: `cargo check --lib --tests` clean · `cargo test --lib
+tick::tests` 266/266 · `cargo test --lib econ_` 6/6, multi-seed inheritance
+gate included.
+
+**Dosing Slice 3 is real future work**, queued rather than attempted here:
+it needs its OWN measurement (how often does a losing port actually exist
+under the Slice-2-dosed formula — `contested_rivals` plus `relay_counts`
+together, not yet run as a diagnostic) and its own gate table, kept SEPARATE
+from Slice 2's dose steps so a regression can be attributed to the right
+mechanism.
+
+### Staging_hop's neighbour-list limitation — MEASURED, left unfixed
+
+`econ_measure_staging_hop_neighbor_limit` (`economy_validation.rs`,
+`#[ignore]`d) compares `staging_hop`'s real, `NEIGHBOR_K`-bounded answer
+against the TRUE best stop found by scanning every real hub under the
+identical selection rule, for every over-range leg on `tests::dense_world()`
+after 20 years. Measured (56 real hubs, 2,472 over-range legs sampled):
+
+| outcome | count | share |
+|---|---|---|
+| AGREE with the unbounded truth | 2,054 | 83.1% |
+| WORSE (still stages, through a less-optimal stop) | 418 | 16.9% |
+| FORCED-FAIL (no legal stop existed on the shortlist at all) | 0 | 0.0% |
+
+The risk the plan named is real but bounded: the neighbour shortlist never
+once causes a leg to fail that a wider search would have staged — it only
+lengthens roughly one in six already-staged legs. **Left deliberately
+unfixed.** `staging_hop` is explicitly `O(NEIGHBOR_K)` by design, inside
+`dispatch`'s hot per-shipment loop (§8.9 rule 1's spirit); any fix that
+widens the candidate search would trade away that bound, and a 0%
+forced-failure rate does not justify that cost for a 16.9% "somewhat
+longer, not broken" effect. Re-measure if `NEIGHBOR_K` (32) or the
+trade-neighbour ranking (`rebuild_neighbors`' `hub_pull`-weighted distance,
+not pure geometric distance) ever changes — either could move this number
+in either direction.
 
 ---
 
@@ -290,6 +358,8 @@ since it is explicitly `O(NEIGHBOR_K)` by design for dispatch's hot loop
 
 | # | Risk | Slice | Mitigation |
 |---|---|---|---|
-| R1 | Raising the toll dose lets one port's winning streak compound into a wealth-concentration spiral (same shape as `TRADE_STAGING_AND_POSTS_PLAN.md`'s embargo risk) | 2 | `PORT_TOLL_MIN`/`_MAX` bound the toll; `econ_` + multi-seed inheritance gate re-run at each dose step — checked clean at 0.3, still open at any dose above it |
+| R1 | Raising the toll dose lets one port's winning streak compound into a wealth-concentration spiral (same shape as `TRADE_STAGING_AND_POSTS_PLAN.md`'s embargo risk) | 2 | `PORT_TOLL_MIN`/`_MAX` bound the toll; `econ_` + multi-seed inheritance gate re-run at each dose step — checked clean at both 0.3 and 0.6 on the two scorecard fixtures (top-10% wealth share unchanged), still genuinely open past 0.6 and on a fixture with enough coastal hubs to exercise the mechanism (neither scorecard fixture has one — see Slice 2's own doc comment) |
 | R2 | The toll mechanism never actually matters on a real world (two competing ports never sit close enough in cost) | 2 | **RESOLVED, measured 2026-09-20**: `econ_measure_port_competition` on `dense_world()` found 48.1% of hubs contestable — the mechanism matters |
 | R3 | The medium-transition ring (§1) over-fires on a route whose corridor merely hugs the coast in and out of many small bays, cluttering the map with rings that aren't real stops | — | Not yet measured on a real world; if this turns out to be noisy, the fix is a minimum-run-length filter in `drawMediumTransitionRings`, not removing the feature — left as a finding to watch, not fixed pre-emptively |
+| R4 | `staging_hop`'s `NEIGHBOR_K` shortlist forces a worse-than-necessary or outright failed stage on a long lane | staging_hop item | **RESOLVED, measured 2026-09-20**: `econ_measure_staging_hop_neighbor_limit` found 0.0% forced-fail, 16.9% suboptimal-but-staged — real but bounded, deliberately left unfixed rather than trading away the O(`NEIGHBOR_K`) hot-loop bound for a 0%-failure risk |
+| R5 | Slice 3's rival-aware undercut compounds the SAME wealth-concentration risk as R1, on top of it, before R1 itself is settled | 3 | Mitigated by construction: shipped at `PORT_RIVAL_UNDERCUT_DOSE = 0.0`, a proven no-op (`port_rival_undercut_is_a_noop_at_zero_dose`); dosing it is explicitly queued as separate future work with its own measurement, not bundled into any Slice 2 dose step |

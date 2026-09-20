@@ -217,7 +217,14 @@ impl CampaignSim {
     }
 
     pub(crate) fn run_port_tolls(&mut self) {
-        let tolls = self.decide_port_tolls();
+        let base = self.decide_port_tolls();
+        // PORT_COMPETITION_PLAN.md Slice 3 — a true no-op chain at
+        // `PORT_RIVAL_UNDERCUT_DOSE == 0.0` (`contested_rivals` still runs,
+        // cheaply, but `apply_rival_undercut` returns `base` unchanged and
+        // `chronicle_toll_wars` early-returns before doing anything).
+        let rivals = self.contested_rivals();
+        let tolls = self.apply_rival_undercut(&base, &rivals);
+        self.chronicle_toll_wars(&base, &tolls, &rivals);
         self.apply_port_tolls(&tolls);
     }
 

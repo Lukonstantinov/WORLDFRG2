@@ -501,6 +501,120 @@ impl CampaignSim {
         counts
     }
 
+    /// PORT_COMPETITION_PLAN.md Slice 3 — for every hub, the ONE other
+    /// coastal hub it is named most often as top-2-CONTESTING for a third
+    /// hub's outlet choice. Live re-derivation of exactly
+    /// `econ_measure_port_competition`'s own margin test (§ `MAX_TOLL_SWING`'s
+    /// doc comment): for every real hub `a`, rank its same-component coastal
+    /// candidates by `self.days[a][p]`; if the gap between the best and
+    /// second-best is within `MAX_TOLL_SWING`, that PAIR of ports is
+    /// contesting `a`'s trade. Tallying that pair across every hub `a` and
+    /// keeping each port's most-frequent partner gives a real, geometry-
+    /// derived "who am I actually fighting for trade against" — not a
+    /// standing config, so a rivalry moves if the map's own connectivity
+    /// does. Returns one hub index per hub (`-1` = no contested rival).
+    /// `n × candidates` per call, yearly only (never per-tick), the same
+    /// cost class `relay_counts` already pays every year.
+    pub(crate) fn contested_rivals(&self) -> Vec<i32> {
+        let n = self.hubs.len();
+        let real: Vec<usize> = (0..n)
+            .filter(|&i| (!self.hubs[i].is_estate || self.is_remote_site(i)) && !self.hubs[i].abandoned)
+            .collect();
+        let outlets: Vec<usize> = real.iter().cloned().filter(|&i| self.hubs[i].coastal).collect();
+
+        let mut contest_count: std::collections::HashMap<(usize, usize), u32> = std::collections::HashMap::new();
+        for &a in &real {
+            let mut cand: Vec<(f32, usize)> = outlets.iter().cloned()
+                .filter(|&p| p != a && self.hubs[p].component == self.hubs[a].component)
+                .filter_map(|p| {
+                    let d = self.days[a * n + p];
+                    d.is_finite().then_some((d, p))
+                })
+                .collect();
+            if cand.len() < 2 { continue; }
+            cand.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap_or(std::cmp::Ordering::Equal));
+            let (best, second) = (cand[0].1, cand[1].1);
+            if cand[1].0 - cand[0].0 <= MAX_TOLL_SWING {
+                let key = if best < second { (best, second) } else { (second, best) };
+                *contest_count.entry(key).or_insert(0) += 1;
+            }
+        }
+
+        let mut rivals = vec![-1i32; n];
+        let mut best_count = vec![0u32; n];
+        for (&(p, q), &c) in contest_count.iter() {
+            if c > best_count[p] { best_count[p] = c; rivals[p] = q as i32; }
+            if c > best_count[q] { best_count[q] = c; rivals[q] = p as i32; }
+        }
+        rivals
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 3 — turns `decide_port_tolls`' base
+    /// target into an ACTIVE response against a named rival, PURE (no
+    /// mutation, so it composes cleanly with the chronicle pass which needs
+    /// to compare before/after). A port currently carrying FEWER relays than
+    /// its own contested rival (`relay_counts`) is losing that fight, and
+    /// pulls its target down toward `rival's CURRENT toll − PORT_UNDERCUT_
+    /// MARGIN` — never up, and never past `PORT_TOLL_MIN`. Blended by
+    /// `PORT_RIVAL_UNDERCUT_DOSE` so `0.0` returns `base` completely
+    /// unchanged — a true no-op regardless of how `contested_rivals`/
+    /// `relay_counts` read, proven by
+    /// `port_rival_undercut_is_a_noop_at_zero_dose`.
+    pub(crate) fn apply_rival_undercut(&self, base: &[f32], rivals: &[i32]) -> Vec<f32> {
+        self.apply_rival_undercut_at(base, rivals, PORT_RIVAL_UNDERCUT_DOSE)
+    }
+
+    /// The dose-parametrized core, split out the same way `decide_port_tolls`
+    /// delegates to `decide_port_tolls_at` — so the zero-dose no-op claim
+    /// (`port_rival_undercut_is_a_noop_at_zero_dose`) checks the literal
+    /// value `0.0`, and the DOSED behaviour is directly testable
+    /// (`port_rival_undercut_pulls_the_loser_toward_its_rival`) without
+    /// needing `PORT_RIVAL_UNDERCUT_DOSE` itself to ship non-zero first.
+    pub(crate) fn apply_rival_undercut_at(&self, base: &[f32], rivals: &[i32], dose: f32) -> Vec<f32> {
+        if dose <= 0.0 { return base.to_vec(); }
+        let counts = self.relay_counts();
+        base.iter().enumerate().map(|(h, &target)| {
+            let r = rivals.get(h).copied().unwrap_or(-1);
+            if r < 0 { return target; }
+            let r = r as usize;
+            if r >= counts.len() || counts[h] >= counts[r] { return target; }
+            let rival_toll = self.hubs.get(r).map(|hh| hh.transit_toll_mult).unwrap_or(1.0);
+            let undercut_target = (rival_toll - PORT_UNDERCUT_MARGIN).max(PORT_TOLL_MIN);
+            // Only ever pull DOWN from the base target, scaled by dose.
+            target + (undercut_target - target).min(0.0) * dose
+        }).collect()
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 3 — the story `apply_rival_undercut`'s
+    /// number needs (CLAUDE.md's own "every mechanism must produce a legible
+    /// STORY, not a decision" rule, `INSTITUTIONS_BUILD_ORDER.md`'s governing
+    /// rule, applies here as much as anywhere it's been cited). Fires once, at
+    /// the moment a hub's `transit_toll_mult` crosses DOWNWARD through
+    /// `PORT_TOLL_WAR_ANNOUNCE` while genuinely being undercut (not merely a
+    /// low toll for some other reason) — a hub trimming its due a little is
+    /// not news; one visibly racing a named rival toward the floor is. A true
+    /// no-op at `PORT_RIVAL_UNDERCUT_DOSE == 0.0` since `tolls` then equals
+    /// `base` exactly and no hub is ever "genuinely undercut".
+    pub(crate) fn chronicle_toll_wars(&mut self, base: &[f32], tolls: &[f32], rivals: &[i32]) {
+        if PORT_RIVAL_UNDERCUT_DOSE <= 0.0 { return; }
+        let tick = self.tick;
+        for h in 0..self.hubs.len().min(tolls.len()).min(base.len()) {
+            if (tolls[h] - base[h]).abs() < 1e-6 { continue; } // not actually undercutting
+            let prev = self.hubs[h].transit_toll_mult;
+            if prev < PORT_TOLL_WAR_ANNOUNCE || tolls[h] >= PORT_TOLL_WAR_ANNOUNCE { continue; }
+            let r = rivals.get(h).copied().unwrap_or(-1);
+            if r < 0 { continue; }
+            let (city, rival_city) = (self.hubs[h].name.clone(),
+                self.hubs.get(r as usize).map(|hh| hh.name.clone()).unwrap_or_default());
+            self.journal.push(JournalEntry {
+                tick, kind: "toll_war".into(), hub: h as i32, good: -1, value: tolls[h],
+                text: format!(
+                    "{} slashes its transit toll to draw trade away from {}.",
+                    city, rival_city),
+            });
+        }
+    }
+
 
     /// Build each hub's nearest reachable trade partners (sorted nearest first,
     /// capped to `NEIGHBOR_K`). Estates are kept as candidates (they have a
@@ -1248,6 +1362,23 @@ impl CampaignSim {
     /// distance — with the hub index as a deterministic tie-break, because a
     /// tie broken by iteration order is how a "deterministic per (seed, tick)"
     /// sim quietly stops being one.
+    ///
+    /// **The `NEIGHBOR_K` shortlist limitation is measured, per
+    /// `PORT_COMPETITION_PLAN.md`'s own queued item.**
+    /// `econ_measure_staging_hop_neighbor_limit` (`economy_validation.rs`,
+    /// `#[ignore]`d) compares this bounded answer against the TRUE best stop
+    /// found by scanning every real hub under the identical rule, over every
+    /// over-range leg on `tests::dense_world()`. Measured (60-hub world, 20
+    /// years, 2,472 over-range legs sampled): **0.0% FORCED-FAIL** — the
+    /// shortlist never once has NO candidate when a real one existed
+    /// elsewhere — and **16.9% WORSE** — a leg still stages, just through a
+    /// stop that makes less progress than the true nearest one would have.
+    /// The risk named in the plan is real but bounded: this never breaks a
+    /// lane, it occasionally lengthens one. Left unfixed — a mechanism fix
+    /// here would trade away the O(`NEIGHBOR_K`) bound this function's own
+    /// doc comment relies on (§8.9 rule 1), and 0% forced failure does not
+    /// justify that cost. Re-measure if `NEIGHBOR_K` or the trade-neighbour
+    /// ranking (`hub_pull`-weighted, not pure distance) ever changes.
     pub(crate) fn staging_hop(&self, a: usize, b: usize, ship_cap_km: f32, caravan_cap_km: f32) -> Option<usize> {
         let n = self.hubs.len();
         if a >= n || b >= n || a == b { return None; }

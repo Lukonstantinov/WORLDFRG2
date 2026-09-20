@@ -1797,8 +1797,8 @@ fn econ_measure_port_competition() {
         .collect();
     let outlets: Vec<usize> = real.iter().cloned().filter(|&i| s.hubs[i].coastal).collect();
 
-    const MAX_TOLL_SWING: f32 = ENTREPOT_DWELL_DAYS * (PORT_TOLL_MAX - PORT_TOLL_MIN);
-
+    // `MAX_TOLL_SWING` now lives once, in `mod.rs`, shared with the live
+    // `contested_rivals` (Slice 3) — no local copy to drift.
     let mut hubs_with_2_plus_outlets = 0usize;
     let mut contestable = 0usize;
     let mut margins: Vec<f32> = Vec::new();
@@ -1833,6 +1833,91 @@ fn econ_measure_port_competition() {
         contestable,
         if hubs_with_2_plus_outlets > 0 { 100.0 * contestable as f64 / hubs_with_2_plus_outlets as f64 } else { 0.0 });
     println!("  top-2 margin — median {:.2}d, mean {:.2}d", median, mean);
+    println!("═══════════════════════════════════════════════════════════════════════════════════════");
+    assert!(years > 0, "diagnostic only — never fails the build");
+}
+
+/// `PORT_COMPETITION_PLAN.md`'s own named, queued item: `staging_hop`'s
+/// candidate stops are the departing hub's own bounded `NEIGHBOR_K` (32)
+/// trade-neighbour shortlist — "a captain makes for a port he already trades
+/// with" by design (its own doc comment). The plan flags, but never measures,
+/// the obvious risk: a geometrically obvious stop that ISN'T in that
+/// shortlist is never offered, so an over-range leg might stage worse than it
+/// has to, or fail to stage at all when a real stop existed off-list.
+///
+/// For every ordered pair `(a, b)` whose DIRECT leg exceeds its mode's range
+/// cap, this compares `staging_hop`'s real answer (`NEIGHBOR_K`-bounded)
+/// against the TRUE best stop found by scanning every hub in the world under
+/// the IDENTICAL rule (strict progress + a legal, lane-connected hop,
+/// nearest-by-remaining-distance, index tie-break) — the same selection
+/// `staging_hop` itself implements, just unbounded. Three outcomes: AGREE
+/// (identical answer), WORSE (staged, but the true stop makes more progress),
+/// FORCED-FAIL (the shortlist finds nothing when a real stop existed).
+#[test]
+#[ignore]
+fn econ_measure_staging_hop_neighbor_limit() {
+    let mut s = dense_world();
+    s.ship_leg_max_km = SHIP_LEG_MAX_KM;
+    s.caravan_leg_max_km = CARAVAN_LEG_MAX_KM;
+    let years = 20u32;
+    for _ in 0..years {
+        s.advance(TICKS_PER_YEAR);
+    }
+    s.rebuild_routes();
+
+    let n = s.n();
+    let real: Vec<usize> = (0..n)
+        .filter(|&i| (!s.hubs[i].is_estate || s.is_remote_site(i)) && !s.hubs[i].abandoned)
+        .collect();
+
+    // The TRUE best stop for (a, b) — `staging_hop`'s own selection rule,
+    // scanning every real hub instead of just `self.neighbors[a]`.
+    let true_best = |s: &CampaignSim, a: usize, b: usize, remaining: f32| -> Option<(usize, f32)> {
+        let mut best: Option<(usize, f32)> = None;
+        for &p in &real {
+            if p == a || p == b { continue; }
+            let rest = s.hub_km(p, b);
+            if !(rest < remaining) { continue; }
+            if !s.lane_days(a, p).is_finite() { continue; }
+            let hop_sea = s.hubs[a].coastal && s.hubs[p].coastal;
+            if CampaignSim::leg_exceeds_range(s.hub_km(a, p), hop_sea, s.ship_leg_max_km, s.caravan_leg_max_km) { continue; }
+            if best.map_or(true, |(bp, br)| rest < br || (rest == br && p < bp)) { best = Some((p, rest)); }
+        }
+        best
+    };
+
+    let (mut over_range_legs, mut agree, mut worse, mut forced_fail) = (0usize, 0usize, 0usize, 0usize);
+    for &a in &real {
+        for &b in &real {
+            if a == b { continue; }
+            let remaining = s.hub_km(a, b);
+            let direct_sea = s.hubs[a].coastal && s.hubs[b].coastal;
+            if !CampaignSim::leg_exceeds_range(remaining, direct_sea, s.ship_leg_max_km, s.caravan_leg_max_km) { continue; }
+            over_range_legs += 1;
+            let actual = s.staging_hop(a, b, s.ship_leg_max_km, s.caravan_leg_max_km);
+            let truth = true_best(&s, a, b, remaining);
+            match (actual, truth) {
+                (None, Some(_)) => forced_fail += 1,
+                (Some(ap), Some((_, tr))) => {
+                    let ar = s.hub_km(ap, b);
+                    if ar > tr + 1e-3 { worse += 1; } else { agree += 1; }
+                }
+                (None, None) => agree += 1, // both correctly find nothing
+                (Some(_), None) => agree += 1, // staged found something true_best's stricter scan missed — cannot happen given true_best is a superset, but never fail the build over it
+            }
+        }
+    }
+
+    println!();
+    println!("═══ staging_hop neighbour-shortlist diagnostic ({years}y, {} real hubs, NEIGHBOR_K={}) ═══",
+        real.len(), NEIGHBOR_K);
+    println!("  over-range direct legs sampled                {:>8}", over_range_legs);
+    println!("  ...AGREE with the unbounded truth              {:>8} ({:.1}%)",
+        agree, if over_range_legs > 0 { 100.0 * agree as f64 / over_range_legs as f64 } else { 0.0 });
+    println!("  ...WORSE (staged, but off-list stop was better) {:>8} ({:.1}%)",
+        worse, if over_range_legs > 0 { 100.0 * worse as f64 / over_range_legs as f64 } else { 0.0 });
+    println!("  ...FORCED-FAIL (off-list stop was the ONLY one) {:>8} ({:.1}%)",
+        forced_fail, if over_range_legs > 0 { 100.0 * forced_fail as f64 / over_range_legs as f64 } else { 0.0 });
     println!("═══════════════════════════════════════════════════════════════════════════════════════");
     assert!(years > 0, "diagnostic only — never fails the build");
 }

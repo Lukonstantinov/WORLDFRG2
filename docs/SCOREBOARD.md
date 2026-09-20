@@ -9,6 +9,74 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-20b — Port competition finished: Slice 2 dosed to 0.6, Slice 3 built (undosed), staging_hop measured
+
+Continuation of the same session's `PORT_COMPETITION_PLAN.md` work (see
+2026-09-20 below), finishing the plan's three remaining named items.
+
+**Slice 2, second dose step (0.3 → 0.6).** Same recipe as the first step:
+`cargo check --lib --tests` clean · `cargo test --lib tick::tests`
+**266/266** (263 plus Slice 3's three new tests) · `cargo test --lib econ_`
+**6/6**, multi-seed inheritance gate included (498.79s) · both `econ_`
+scorecards' top-10% wealth share read **unchanged** from the 0.3 step:
+0.716 (large world, was 0.716) / 0.622 (reference world, was 0.622). At
+`dose = 0.6` the raw pre-clamp toll target already spans the FULL
+`PORT_TOLL_MIN..PORT_TOLL_MAX` (0.7..1.6) band at both relay-traffic
+extremes — close to this formula's practical ceiling, since a further raise
+can only steepen the middle, not widen the endpoints. Caveat carried
+forward honestly: neither scorecard fixture has enough coastal hubs to
+actually exercise this mechanism (the same "abstract world, wrong
+instrument" gap the Slice 2 diagnostic itself exists to route around), so
+"unchanged" here is a no-regression proof on those two worlds, not evidence
+the mechanism is inert at 0.6 — the 48.1%-contestable number from
+`dense_world()` remains the only evidence it matters at all.
+
+**Slice 3 — the active response — built and gated, shipped undosed.**
+`contested_rivals()` (`production.rs`) names, for every hub, the one other
+coastal hub it is most often top-2-contested against — a live
+re-derivation of the exact margin test Slice 2's diagnostic uses, read off
+`self.days` every year instead of measured once. `apply_rival_undercut_at`
+lets a port carrying fewer relays than its named rival (losing that fight)
+pull its toll DOWN toward `rival's current toll − PORT_UNDERCUT_MARGIN`
+(0.05) — never up, never past `PORT_TOLL_MIN` — blended by
+`PORT_RIVAL_UNDERCUT_DOSE`. `chronicle_toll_wars` writes a journal entry
+once, the moment a hub's toll crosses downward through
+`PORT_TOLL_WAR_ANNOUNCE` while genuinely being undercut. Wired into
+`run_port_tolls` as `decide_port_tolls → contested_rivals →
+apply_rival_undercut → chronicle_toll_wars → apply_port_tolls`. Shipped at
+`PORT_RIVAL_UNDERCUT_DOSE = 0.0` — deliberately undosed, so this session's
+Slice 2 dose findings stay attributable to Slice 2 alone. Three new gates,
+all passing: `contested_rivals_names_the_real_top_2_outlet_pair` (a real
+composed-relay fixture — two close coastal ports both correctly name each
+other), `port_rival_undercut_is_a_noop_at_zero_dose` (checked against the
+literal `0.0`, independent of the shipped constant), `port_rival_undercut_
+pulls_the_loser_toward_its_rival` (the dosed behaviour: loser moves down,
+winner untouched, bounded).
+
+**Staging_hop's `NEIGHBOR_K` shortlist limitation — measured, left
+unfixed.** `econ_measure_staging_hop_neighbor_limit` compares
+`staging_hop`'s real bounded answer against the true unbounded-search best
+stop, over every over-range leg on `tests::dense_world()` (56 hubs, 20
+years): **2,472 over-range legs sampled — 83.1% agree with the unbounded
+truth, 16.9% stage through a suboptimal stop, 0.0% forced-fail** (the
+shortlist never once has zero candidates when a wider search would have
+found one). The risk the plan named is real but bounded — no lane is ever
+broken by it, about one in six is lengthened. Deliberately left unfixed:
+`staging_hop` is `O(NEIGHBOR_K)` by design inside `dispatch`'s hot loop
+(§8.9 rule 1), and a 0% forced-failure rate does not justify trading that
+bound away for a 16.9% "somewhat longer, not broken" effect.
+
+`docs/PORT_COMPETITION_PLAN.md` updated throughout: Slice 2's dose-comment
+in `mod.rs` now documents both steps; the risk register gained two rows
+(R4 staging_hop — resolved by measurement; R5 Slice 3's own compounding
+risk — mitigated by shipping undosed). Real future work, explicitly queued
+rather than assumed done: a third Slice 2 dose step (needs either a wider
+`PORT_TOLL_MIN`/`_MAX` band or a different response shape, since 0.6
+already saturates the current one, AND a `dense_world()`-scale wealth
+measurement, which does not yet exist); Slice 3's own dose walk, with its
+own diagnostic measuring how often a losing port actually exists under the
+Slice-2-dosed formula.
+
 ## 2026-09-20 — Port competition (`PORT_COMPETITION_PLAN.md` Slice 2): measured, then dosed 0.0 → 0.3
 
 Slice 1 shipped `TickHub.transit_toll_mult` — a port's own anchorage/staple

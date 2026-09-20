@@ -8543,6 +8543,96 @@
         }
     }
 
+    /// PORT_COMPETITION_PLAN.md Slice 3 — `contested_rivals` names, for every
+    /// hub, the ONE other coastal hub it is most often top-2-contested
+    /// against. Build a fixture with a genuine composed relay (unlike the
+    /// toll-bias test above, this one needs REAL `route_outlet`/`days`
+    /// geometry, not a hand-set array, since the rival relation is read live
+    /// off `self.days`) and check the two ports the diagnostic-style margin
+    /// test would flag as contesting each other actually come back paired.
+    #[test]
+    fn contested_rivals_names_the_real_top_2_outlet_pair() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        // Two close coastal ports (0, 1) both plausible outlets for an
+        // inland hub (2); a third, far coastal hub (3) with no contest.
+        let mut h0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut h1 = hub(1, 2.0, 0.0, 18_000.0, vec![10.0], 0);
+        let h2 = hub(2, 1.0, 5.0, 15_000.0, vec![10.0], 0);
+        let mut h3 = hub(3, 500.0, 500.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h1.coastal = true; h3.coastal = true;
+        let mut s = sim(vec![h0, h1, h2, h3], goods);
+        s.rebuild_routes();
+
+        let rivals = s.contested_rivals();
+        assert!(rivals[0] == 1 || rivals[1] == 0,
+            "hubs 0 and 1 sit close enough that at least one must name the \
+             other as its contested rival, got {rivals:?}");
+        assert_eq!(rivals[3], -1,
+            "the far, uncontested hub must have no named rival, got {:?}", rivals[3]);
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 3, dose-walked (§2.8) · at
+    /// `PORT_RIVAL_UNDERCUT_DOSE == 0.0` (the shipped setting — Slice 3 is
+    /// built and gated but not yet dosed) `apply_rival_undercut` must return
+    /// its `base` input completely unchanged, whatever `contested_rivals`/
+    /// `relay_counts` say — checked against the literal `0.0` via
+    /// `apply_rival_undercut_at`, independent of the shipped constant, the
+    /// same split `port_toll_at_zero_dose_is_a_true_noop` uses.
+    #[test]
+    fn port_rival_undercut_is_a_noop_at_zero_dose() {
+        assert_eq!(PORT_RIVAL_UNDERCUT_DOSE, 0.0,
+            "Slice 3 ships undosed — update this test's premise if that changes");
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut h1 = hub(1, 30.0, 0.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h1.coastal = true;
+        h0.transit_toll_mult = 1.6; // deliberately the LOSING side's toll is high
+        let s = sim(vec![h0, h1], goods);
+        let base = vec![1.6f32, 0.7f32];
+        let rivals = vec![1i32, 0i32];
+        let out = s.apply_rival_undercut_at(&base, &rivals, 0.0);
+        assert_eq!(out, base, "dose 0.0 must return `base` completely unchanged");
+    }
+
+    /// PORT_COMPETITION_PLAN.md Slice 3 — the dosed behaviour. Hub 0 has
+    /// FEWER relays than its named rival hub 1 (it is losing that fight) and
+    /// hub 1's current toll is 0.7; at full dose hub 0's target must move
+    /// DOWN toward `0.7 − PORT_UNDERCUT_MARGIN`, never up, and never below
+    /// `PORT_TOLL_MIN`. The WINNING side (hub 1, more relays than its
+    /// rival) must be left exactly at its base target — undercutting is a
+    /// response to LOSING, not a universal race to the bottom.
+    #[test]
+    fn port_rival_undercut_pulls_the_loser_toward_its_rival() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut h1 = hub(1, 30.0, 0.0, 12_000.0, vec![10.0], 0);
+        h0.coastal = true; h1.coastal = true;
+        h1.transit_toll_mult = 0.7; // the WINNING rival's current toll
+        let mut s = sim(vec![h0, h1], goods);
+        s.rebuild_routes();
+        // Manually give hub 1 more relay traffic than hub 0, so hub 0 is the
+        // loser in this pair. `relay_counts` just tallies VALUES in
+        // `route_outlet` (`n×n` of them, index is `a*n+b`), so any slot set
+        // to `1` counts as one relay through hub 1 — position `1` (i.e.
+        // `a=0, b=1`) is as good as any (`route_outlet reads directly, same
+        // trick the toll-bias test above uses).
+        let n = s.n();
+        s.route_outlet = vec![-1; n * n];
+        s.route_outlet[1] = 1; // counts[1] = 1, counts[0] = 0
+
+        let base = vec![1.0f32, 1.0f32];
+        let rivals = vec![1i32, 0i32];
+        let out = s.apply_rival_undercut_at(&base, &rivals, 1.0);
+
+        let expected_loser_target = (0.7f32 - PORT_UNDERCUT_MARGIN).max(PORT_TOLL_MIN);
+        assert!((out[0] - expected_loser_target).abs() < 1e-4,
+            "the losing hub's target must move to rival_toll - margin, got {} want {}",
+            out[0], expected_loser_target);
+        assert!(out[0] < base[0], "the loser's target must move DOWN from base");
+        assert_eq!(out[1], base[1],
+            "the winning side (more relays than its rival) must be untouched: got {}", out[1]);
+    }
+
     /// C1b, dose-walked (`ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md` §9) · at
     /// `LAND_BULK_PENALTY == 0.0` a LAND leg's freight for a bulky good must be
     /// IDENTICAL to what the same good would cost over the same distance at SEA
