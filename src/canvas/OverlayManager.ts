@@ -704,6 +704,14 @@ export class OverlayManager {
   private expeditions: ExpeditionView[] = [];
   private expeditionFails: ExpeditionFail[] = [];
   private merchantRoutes: MerchantRoute[] = [];
+  /** Per-point medium for each entry of `merchantRoutes` (same index), from the
+   *  SAME `laneBetween` call that resolves `.path` — kept apart from the
+   *  serialized `MerchantRoute` because it is a render-only derivation, not
+   *  sim data. Lets `renderMerchantRoutes` stroke each run in its own medium
+   *  (rule 35) instead of styling the WHOLE lane from one aggregate `r.sea`
+   *  flag, which used to draw a single house's route as one uniform dash
+   *  style end to end even where it crossed both land and open water. */
+  private merchantLaneSea: boolean[][] = [];
   private futuresLanes: FuturesLane[] = [];
   private selectedFuturesLane: FuturesLane | null = null;
   private futuresFocus: { city?: string; holder?: string; good?: string } | null = null;
@@ -1609,10 +1617,12 @@ export class OverlayManager {
    *  changes — never per frame. A route with no corridor path is left `path`-less
    *  and SKIPPED at draw time (we never bridge with a straight slash). */
   private routeMerchantRoutes() {
-    for (const r of this.merchantRoutes) {
+    this.merchantLaneSea = this.merchantRoutes.map((r) => {
       // Rule 35 — an off-corridor route is drawn direct, never dropped.
-      r.path = this.laneBetween(r.a, r.b).pts;
-    }
+      const lane = this.laneBetween(r.a, r.b);
+      r.path = lane.pts;
+      return lane.sea;
+    });
   }
 
   drawFisheryBanks(banks: FisheryBank[]) {
@@ -2101,6 +2111,23 @@ export class OverlayManager {
       if (d < bestD) { bestD = d; best = r; }
     }
     return best;
+  }
+
+  /** The OTHER leg of a relayed route (`relay_at !== 0`) — same holder, meeting
+   *  at the same break-of-bulk point (this leg's relay-side endpoint equals
+   *  the sibling's own relay-side endpoint), so a click on either half of the
+   *  Ostia case can show the whole journey. Null for an ordinary direct route
+   *  (`relay_at === 0`) or if no match is found (a stale/partial fetch). */
+  siblingMerchantLeg(r: MerchantRoute): MerchantRoute | null {
+    if (!r.relay_at) return null;
+    const relayPt = r.relay_at === 1 ? r.a : r.b;
+    const near = (p: [number, number]) => Math.abs(p[0] - relayPt[0]) < 0.01 && Math.abs(p[1] - relayPt[1]) < 0.01;
+    for (const o of this.merchantRoutes) {
+      if (o === r || !o.relay_at || o.holder !== r.holder) continue;
+      const oRelayPt = o.relay_at === 1 ? o.a : o.b;
+      if (near(oRelayPt) && o.relay_at !== r.relay_at) return o;
+    }
+    return null;
   }
 
   drawFutures(lanes: FuturesLane[], gridW: number, selected: FuturesLane | null,
@@ -4681,28 +4708,37 @@ export class OverlayManager {
     ctx.lineJoin = "round";
     const W = this.worldW;
     const dash = Math.max(1.5, 3 / Math.sqrt(this.currentScale));
-    for (const r of this.merchantRoutes) {
+    for (let ri = 0; ri < this.merchantRoutes.length; ri++) {
+      const r = this.merchantRoutes[ri];
       // Stroke the ACTUAL corridor (roads/sea-lanes), never a straight slash. If no
       // path could be snapped (trade-routes layer not built / endpoints off-network)
       // we skip the route rather than draw a diagonal line across the terrain.
       const pts = r.path;
       if (!pts || pts.length < 2) continue;
       const norm = r.volume / maxVol;
-      ctx.globalAlpha = 0.5 + 0.4 * norm;
       ctx.strokeStyle = this.merchantRouteRisk
         ? OverlayManager.riskColor(r.risk ?? 0) : (r.color || "#cccccc");
       ctx.lineWidth = Math.max(0.5, (0.8 + norm * 4.0) / Math.sqrt(this.currentScale));
-      ctx.setLineDash(r.sea ? [] : [dash, dash]);
-      ctx.beginPath();
-      let started = false;
-      for (let i = 0; i < pts.length; i++) {
-        const px = pts[i][0] + 0.5, py = pts[i][1] + 0.5;
-        if (i > 0 && W > 0 && Math.abs(px - (pts[i - 1][0] + 0.5)) > W / 2) {
-          ctx.stroke(); ctx.beginPath(); started = false; // break at the wrap seam
+      // Stroked one MEDIUM at a time (rule 35/§8.5's mediumRuns discipline): a
+      // house's own account often carries cargo overland to a port, by sea,
+      // then overland again, and drawing that as ONE uniform dash style is
+      // exactly what hid every real break-of-bulk on this layer — the whole
+      // corridor used to take a single style from the aggregate `r.sea` flag.
+      // DASHED on open water, SOLID on a road or navigable river, matching
+      // every other routed layer in the app.
+      const seaAt = this.merchantLaneSea[ri] ?? pts.map(() => r.sea);
+      const runs = this.mediumRuns(pts, seaAt, W);
+      for (const run of runs) {
+        ctx.globalAlpha = (0.5 + 0.4 * norm) * (run.sea ? 0.85 : 1.0);
+        ctx.setLineDash(run.sea ? [dash, dash] : []);
+        ctx.beginPath();
+        let started = false;
+        for (const [px0, py0] of run.pts) {
+          const px = px0 + 0.5, py = py0 + 0.5;
+          if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
         }
-        if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+        ctx.stroke();
       }
-      ctx.stroke();
       ctx.setLineDash([]);
       const dotR = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
       ctx.globalAlpha = 0.85;

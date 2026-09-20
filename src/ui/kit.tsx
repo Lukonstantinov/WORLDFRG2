@@ -204,6 +204,82 @@ export function SplitBar({
   );
 }
 
+// ── Tabular data ─────────────────────────────────────────────────────────────
+//
+// Most dense panels here are really TABLES: a name, then several numbers a
+// reader compares DOWN the page. Flex-packed spans cannot do that — every row
+// sizes its own cells, so nothing lines up and the eye re-finds each column on
+// every row. `ColHead` + `DataRow` share ONE `grid-template-columns` string, so
+// the numbers form real columns and the header says what each one is.
+
+/** The column-label line above a run of `DataRow`s. Pass the SAME `cols` string
+ *  the rows use, and one cell per column (empty strings for unlabelled ones). */
+export function ColHead({ cols, gap = SPACE.sm, children, style }: {
+  cols: string; gap?: number; children: ReactNode; style?: CSSProperties;
+}) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: cols, gap, alignItems: "end",
+      padding: "0 5px 2px", borderBottom: `1px solid ${T.line}`,
+      color: T.inkFaint, fontSize: FZ.micro, textTransform: "uppercase", letterSpacing: 0.5,
+      ...style,
+    }}>
+      {children}
+    </div>
+  );
+}
+
+/** One fixed-column row. `rail` paints a 3px identity stripe down the left edge
+ *  (a house's own map colour) without spending a grid column on it; `zebra`
+ *  tints alternating rows so a wide row stays scannable end to end.
+ *
+ *  The zebra tint is a TRANSLUCENT wash rather than a token colour on purpose —
+ *  a solid `T.card` stripe disappears the moment the table is nested inside a
+ *  `Card`, which is exactly where dense sub-tables live. */
+export function DataRow({
+  cols, gap = SPACE.sm, rail, railDashed, zebra, selected, onClick, title, children, style,
+}: {
+  cols: string; gap?: number; rail?: string; railDashed?: boolean; zebra?: boolean;
+  selected?: boolean; onClick?: () => void; title?: string; children: ReactNode; style?: CSSProperties;
+}) {
+  return (
+    <div
+      data-no-drag={onClick ? "" : undefined}
+      onClick={onClick}
+      title={title}
+      style={{
+        display: "grid", gridTemplateColumns: cols, gap, alignItems: "center",
+        padding: "3px 5px", minHeight: 22,
+        borderBottom: `1px solid ${T.lineSoft}`,
+        borderLeft: `3px ${railDashed ? "dotted" : "solid"} ${rail ?? "transparent"}`,
+        background: selected ? T.raised : zebra ? "rgba(255,255,255,0.022)" : "transparent",
+        cursor: onClick ? "pointer" : undefined,
+        ...style,
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** A right-aligned, tabular-figures cell — the default for any number that has
+ *  to line up with the one above it. */
+export function NumCell({ children, tone, dim, strong, style }: {
+  children: ReactNode; tone?: string; dim?: boolean; strong?: boolean; style?: CSSProperties;
+}) {
+  return (
+    <span style={{
+      textAlign: "right", fontVariantNumeric: "tabular-nums",
+      color: tone ?? (dim ? T.inkFaint : T.inkMid),
+      fontWeight: strong ? 700 : 400,
+      overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+      ...style,
+    }}>
+      {children}
+    </span>
+  );
+}
+
 /** One slice of a `Donut`. `textColor` is optional and affects only the LABEL in
  *  `DonutKey` (the wedge/swatch always draws `color`, so a slice's true identity
  *  color is never lost to a highlight) — e.g. tinting a produced-here good's name

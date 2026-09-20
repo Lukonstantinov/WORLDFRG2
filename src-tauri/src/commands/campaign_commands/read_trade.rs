@@ -242,11 +242,23 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
     // city visible: each leg gets its own sea/river classification from its
     // own two endpoints, not the one classification the whole corridor used
     // to share end-to-end.
+    use crate::sim::tick::{EXPORT_TAX_RATE, IMPORT_TAX_RATE};
     let n = sim.hubs.len();
     let leg_mode = |x: usize, y: usize| -> (bool, bool, f32) {
         let sea = sim.hubs[x].coastal && sim.hubs[y].coastal;
         let river = !sea && sim.hubs[x].river && sim.hubs[y].river;
         (sea, river, sim.lane_risk(x, y, sea, river))
+    };
+    // Real per-leg distance/time/tariff, so the route panel can show what a
+    // shipment actually pays and how far it actually travels — not a guess
+    // from the straight-line endpoints. `days` reads the SAME matrix
+    // `dispatch`/the entrepôt pass price this exact leg at.
+    let leg_stats = |x: usize, y: usize| -> (f32, f32, f32, f32) {
+        let km = sim.hub_km(x, y);
+        let days = sim.days.get(x * n + y).copied().unwrap_or(0.0);
+        let texp = if sim.hubs[x].tariff_export > 0.0 { sim.hubs[x].tariff_export } else { EXPORT_TAX_RATE };
+        let timp = if sim.hubs[y].tariff_import > 0.0 { sim.hubs[y].tariff_import } else { IMPORT_TAX_RATE };
+        (km, days, texp, timp)
     };
     let mut out: Vec<MerchantRoute> = Vec::new();
     for ((owner, lo, hi), a) in groups {
@@ -268,6 +280,8 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
             let p = p as usize;
             let (sea1, river1, risk1) = leg_mode(city_lo, p);
             let (sea2, river2, risk2) = leg_mode(p, city_hi);
+            let (km1, days1, texp1, timp1) = leg_stats(city_lo, p);
+            let (km2, days2, texp2, timp2) = leg_stats(p, city_hi);
             let pname = sim.hubs.get(p).map(|x| x.name.clone()).unwrap_or_default();
             let ppos = sim.hubs.get(p).map(|x| [x.x, x.y]).unwrap_or([0.0, 0.0]);
             out.push(MerchantRoute {
@@ -276,6 +290,7 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
                 sea: sea1, river: river1, risk: risk1, volume: a.vol,
                 out_goods: out_goods.clone(), ret_goods: ret_goods.clone(),
                 relay_at: 2, // relay sits at this leg's `b`
+                km: km1, days: days1, tariff_export: texp1, tariff_import: timp1,
             });
             out.push(MerchantRoute {
                 a: ppos, b: pos(hi), a_name: pname, b_name: hname(hi),
@@ -283,14 +298,17 @@ pub fn campaign_merchant_routes(db: State<'_, WorldDb>) -> Result<Vec<MerchantRo
                 sea: sea2, river: river2, risk: risk2, volume: a.vol,
                 out_goods, ret_goods,
                 relay_at: 1, // relay sits at this leg's `a`
+                km: km2, days: days2, tariff_export: texp2, tariff_import: timp2,
             });
         } else {
+            let (km, days, texp, timp) = leg_stats(city_lo, city_hi);
             out.push(MerchantRoute {
                 a: pos(lo), b: pos(hi), a_name: hname(lo), b_name: hname(hi),
                 holder, color, is_guild,
                 sea: a.sea, river: a.river,
                 risk: sim.lane_risk(city_lo, city_hi, a.sea, a.river),
                 volume: a.vol, out_goods, ret_goods, relay_at: 0,
+                km, days, tariff_export: texp, tariff_import: timp,
             });
         }
     }

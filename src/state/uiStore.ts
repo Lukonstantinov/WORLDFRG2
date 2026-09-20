@@ -163,6 +163,11 @@ interface UIStore {
   selectedHub: number | null;
   /** Merchant layer: a clicked active route whose round-trip details are shown. */
   selectedMerchantRoute: MerchantRoute | null;
+  /** The OTHER leg of a relayed route (`relay_at !== 0`), so the panel can show
+   *  the whole journey — origin → break-of-bulk port → destination — as one
+   *  story instead of just the leg that was actually clicked. Null for an
+   *  ordinary direct route or when no sibling leg was found. */
+  selectedMerchantRouteSibling: MerchantRoute | null;
   /** Futures layer: a clicked contract lane whose detail is shown. */
   selectedFuturesLane: FuturesLane | null;
   /** Futures contracts list panel open. */
@@ -332,7 +337,7 @@ interface UIStore {
   setStatus: (text: string) => void;
   setInspectedCell: (cell: { wx: number; wy: number } | null) => void;
   setSelectedHub: (id: number | null) => void;
-  setSelectedMerchantRoute: (r: MerchantRoute | null) => void;
+  setSelectedMerchantRoute: (r: MerchantRoute | null, sibling?: MerchantRoute | null) => void;
   setSelectedFuturesLane: (r: FuturesLane | null) => void;
   setFlowHighlight: (segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[]) => void;
   setShowFutures: (open: boolean) => void;
@@ -523,6 +528,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showTradeMatrix: false,
   selectedHub: null,
   selectedMerchantRoute: null,
+  selectedMerchantRouteSibling: null,
   selectedFuturesLane: null,
   showFutures: false,
   showWarehouses: false,
@@ -627,7 +633,7 @@ export const useUIStore = create<UIStore>((set) => ({
       if (h && (h.colony_kind === 1 || h.colony_kind === 2)) set({ showColonial: true });
     }
   },
-  setSelectedMerchantRoute: (r) => set({ selectedMerchantRoute: r }),
+  setSelectedMerchantRoute: (r, sibling) => set({ selectedMerchantRoute: r, selectedMerchantRouteSibling: sibling ?? null }),
   setSelectedFuturesLane: (r) => set({ selectedFuturesLane: r }),
   setFlowHighlight: (segs) => set({ flowHighlight: segs }),
   setShowFutures: (open) => set({ showFutures: open }),
