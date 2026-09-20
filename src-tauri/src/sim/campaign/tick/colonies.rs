@@ -1769,7 +1769,7 @@ impl CampaignSim {
             coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], tradition: vec![0.0f32; ng], stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
-            reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, colony_founded_tick: self.tick,
+            reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, supply_shortfall_days: 0.0, colony_founded_tick: self.tick,
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
@@ -1936,7 +1936,16 @@ impl CampaignSim {
             // (The food source + dedicated fleet are refreshed monthly by the daily
             // lifeline in `update_food_and_starvation`, so no yearly re-sign here.)
             // COLLAPSE: empty reserve + severe sustained starvation → the lifeline failed.
-            if self.hubs[h].reserve_food <= 0.0 && self.hubs[h].starving > 0.8 {
+            // OR the lifeline has simply been coming up short for too long
+            // (`COLONY_UNSUPPLIED_COLLAPSE_YEARS`) — a separate, more reliable trigger
+            // than `starving > 0.8`, which a chronic-but-mild shortfall (one that keeps
+            // topping up via the fleet/reserve most days without ever fully closing the
+            // gap) can dodge indefinitely while `supply_years` never once reaches its
+            // own ≥5yr growth bar either. "If there's no supply for some time, the
+            // colony fails and dies" — this is that rule, stated directly.
+            let sustained_unsupplied = self.hubs[h].supply_shortfall_days
+                >= COLONY_UNSUPPLIED_COLLAPSE_YEARS * TICKS_PER_YEAR as f32;
+            if (self.hubs[h].reserve_food <= 0.0 && self.hubs[h].starving > 0.8) || sustained_unsupplied {
                 // DEPOSITS_AND_MINING_PLAN.md D3 · a mining settlement DECLINES
                 // instead — the ore body is still there even when the food
                 // lifeline falters, so the town shrinks toward a floor rather

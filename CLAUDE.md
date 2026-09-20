@@ -892,6 +892,25 @@ serde-defaulted so old saves load). Grouped by theme:
   outposts also no longer compete for the same slots: `OUTPOST_RESERVED_ESTATES`=20
   of `MAX_TOTAL_ESTATES` are held back so outpost founding can't be starved by the
   much-more-frequent ordinary-estate path saturating the shared cap early.
+  **A settlement colony's food lifeline is now growth-gating, not just cosmetic**
+  (user report: a colony reading "food 0.0/365 · supplied 0y" for its whole life
+  had still grown past 400k). `TickHub.supply_shortfall_days` counts consecutive
+  DAYS the lifeline actually fell short of the deficit — distinct from the
+  pre-existing `supply_years` (an unbroken-run display counter any single bad day
+  already resets to 0, so it says almost nothing about how underfed a colony has
+  chronically been) — and resets only on a day the deficit is genuinely fully
+  covered. `update_food_and_starvation`'s population-capacity multiplier
+  (`cap_mult`) is now scaled down by `colony_supply_health` as this counter grows,
+  so a colony cannot ratchet its capacity up on unrelated trade/primacy/world-age
+  headroom while its own people are structurally starving; `colony_pass` collapses
+  the colony outright once it passes `COLONY_UNSUPPLIED_COLLAPSE_YEARS` (3),
+  independent of the older, fragile `starving > 0.8` trigger (which a chronic-but-
+  mild shortfall can dodge indefinitely, since `starving` decays back down 0.02/day
+  the moment `food_balance` recovers even briefly). `MAX_SUPPLY_SHIPS` was also
+  raised 12 → 400 (a sanity ceiling, not a practical one) so a wealthy metropolis
+  can actually keep pace with a growing colony's real deficit — the true limit is
+  now what backers can afford (`buy_colony_supply_ship`), not an arbitrary fleet
+  count. Gated by `an_unsupplied_colony_cannot_grow_and_eventually_collapses`.
 - **Satellite construction:** a metropolis builds a suburb over ~10 years (with decay).
 - **Provinces (Phase 2b · watershed demography + LAND STATE):** the ONLY campaign state
   carried at world granularity, and the world↔campaign join (FIX_PLAN B1).

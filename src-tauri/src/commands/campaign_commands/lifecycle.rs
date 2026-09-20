@@ -632,6 +632,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 reserve_food: 0.0,
                 reserve_cap: 0.0,
                 supply_years: 0.0,
+                supply_shortfall_days: 0.0,
                 colony_founded_tick: 0,
                 main_bank: -1,
                 indep_cooldown_until: 0,
