@@ -1,7 +1,12 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: APPROVED, NOTHING BUILT.** Written 2026-09-22 from a measured
-brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
+**Status: S4 AND S7 BUILT AND GATED; S1/S2/S3/S5/S6/S8-S12 QUEUED.** Written
+2026-09-22 from a measured brainstorm over `sim/campaign/tick/`, `render/`,
+`src/ui/campaign/`. See `CLAUDE.md` §5.6 for what shipped and why the dose
+walks + atlas/window redesign did not land in the same session (§9's own risk
+register: three doses against one fragile shared instrument is the ceiling,
+and this session spent its budget on the two free, independent slices
+instead of starting a dose walk it could not finish and verify in full).
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,

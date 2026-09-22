@@ -430,6 +430,10 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
   const goodMeta = useGoodsStore((s) => s.meta);
   const icon = (id: string) => goodMeta(id).icon;
   const label = (id: string) => goodMeta(id).name;
+  // HOUSES_GUILDS_AND_MARKET_PLAN.md S4 — an earned craft signature ("Ypres
+  // broadcloth") reads in place of the plain good name; quiet (the plain name)
+  // wherever no guild here has earned one.
+  const goodLabel = (g: HubGoodDetail) => g.signature || label(g.name);
   const [sort, setSort] = useState<Sort>("odd");
   const [open, setOpen] = useState<string | null>(null);
   const [focus, setFocus] = useState<string | null>(null); // filter deals to one good
@@ -630,7 +634,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
                   >
                     <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       <span style={{ color: C.faint, fontSize: 8 }}>{isOpen ? "▾ " : "▸ "}</span>
-                      {icon(r.g.name)} {label(r.g.name)}
+                      {icon(r.g.name)} {goodLabel(r.g)}
                     </span>
                     {/* UNITS — the quantity actually standing on the stall. It has
                         always been in `HubGoodDetail.stock` and was never shown. */}
@@ -707,7 +711,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
             >
               <span style={{ flex: "0 0 108px", color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 <span style={{ color: C.faint, fontSize: 8 }}>{isOpen ? "▾ " : "▸ "}</span>
-                {icon(r.g.name)} {label(r.g.name)}
+                {icon(r.g.name)} {goodLabel(r.g)}
               </span>
               <span style={{ width: 74, textAlign: "right", color: r.buy.units > 0 ? C.buy : C.faint }}>
                 {r.buy.units > 0.01 ? `${fmt(r.buy.units)} @ ${avgOf(r.buy).toFixed(2)}` : "—"}
@@ -798,7 +802,7 @@ function BookDetail({ r, buys, sells, icon, label }: {
   return (
     <div style={{ background: C.card, border: `1px solid ${C.line}`, borderRadius: 4, padding: "5px 7px", margin: "2px 0 4px" }}>
       <div style={{ color: C.head, fontSize: 10, marginBottom: 3 }}>
-        {icon(g.name)} {label(g.name)} — {r.xw.toFixed(2)}× world standard
+        {icon(g.name)} {g.signature || label(g.name)} — {r.xw.toFixed(2)}× world standard
         {g.grade ? <span style={{ color: C.inkMid }}> · we make it {g.grade.toLowerCase()}</span> : null}
       </div>
       <Line k="bought from">

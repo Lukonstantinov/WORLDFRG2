@@ -361,7 +361,14 @@ fn custom_category(id: &str) -> &'static str {
         "brandy" | "mead" => "drink",
         "perfume" => "aromatic",
         "soap" | "candles" | "books" | "furniture" => "craft",
-        "statuary" | "clay" => "construction",
+        "statuary" | "clay" | "ceramics" => "construction",
+        // HOUSES_GUILDS_AND_MARKET_PLAN.md S7 — the orphan-raw recipes.
+        "glassware" => "craft",
+        "fixed_dye" => "dye",
+        "sailcloth" | "cordage" => "fiber",
+        "armour" => "metal",
+        "garum" => "preservative",
+        "parchment" => "craft",
         _ => "misc",
     }
 }
@@ -876,6 +883,42 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             vec![("ivory", 1.0)]),
         mg("statuary", "Statuary", "\u{1F5FF}", "#e8e6e0", 8.0, 3.0, 0.0, false, 1.0,
             vec![("marble", 1.0)]),
+
+        // ── HOUSES_GUILDS_AND_MARKET_PLAN.md S7 · the orphan raws' first consumers.
+        //    Five shipped raws — clay, coal, alum, hemp, pitch — are placed, mined
+        //    and shipped and used by NOTHING downstream. Wiring their first recipe
+        //    is worth more than inventing new goods; appended last, never reordered
+        //    (rule 7 — a good's index is a fixed position in `TileData.goods`). ──
+        // Ceramics ← clay's first consumer. Roman *terra sigillata* — a craft that
+        // MIGRATED between provinces, the showcase for S3 (guild founding) + S4
+        // (earned signatures).
+        mg("ceramics", "Ceramics", "\u{1FED9}", "#b8734a", 3.0, 1.8, 0.0, false, 1.0,
+            vec![("clay", 1.0), ("timber", 0.2)]),
+        // Glassware ← bay salt (flux) + timber (furnace fuel) — the Murano case the
+        // design docs already name.
+        mg("glassware", "Glassware", "\u{1F9EA}", "#a8d8e0", 12.0, 1.0, 0.0, true, 1.1,
+            vec![("bay_salt", 0.6), ("timber", 0.5)]),
+        // Fixed Dye ← alum (the mordant) + raw dye — `DEPOSITS_AND_MINING_PLAN.md`
+        // explicitly deferred wiring alum to a recipe; this is that recipe.
+        mg("fixed_dye", "Fixed Dye", "\u{1F9F5}", "#7a3a8a", 9.0, 0.6, 0.0, false, 1.0,
+            vec![("alum", 0.3), ("dyes", 1.0)]),
+        // Sailcloth ← hemp, woven. `YARDS_VESSELS_AND_DEPOTS_PLAN.md` needs it.
+        mg("sailcloth", "Sailcloth", "\u{26F5}", "#d8d0b8", 4.0, 1.2, 0.0, false, 1.0,
+            vec![("hemp", 1.0)]),
+        // Cordage ← hemp + a little pitch (tarred rope). Ditto — rigging's other half.
+        mg("cordage", "Cordage", "\u{1FAA2}", "#8a7a4a", 3.5, 1.3, 0.0, false, 1.0,
+            vec![("hemp", 0.8), ("pitch", 0.1)]),
+        // Armour ← iron + coal — coal's first consumer (fuel for the forge).
+        mg("armour", "Armour", "\u{1F6E1}\u{FE0F}", "#6a7078", 11.0, 1.6, 0.0, false, 1.2,
+            vec![("iron", 1.0), ("coal", 0.4)]),
+        // Garum ← salted fish sauce, the most distinctive Roman manufactured good —
+        // a genuine prestige export (Pompeian garum reached Gaul and Britain).
+        mg("garum", "Garum", "\u{1F3FA}", "#8a4a3a", 13.0, 1.1, 0.12, true, 0.9,
+            vec![("herring", 1.0), ("bay_salt", 0.4)]),
+        // Parchment ← hides + alum (used in the curing) — feeds the existing
+        // `books` chain (paper's animal-skin alternative, never wired before now).
+        mg("parchment", "Parchment", "\u{1F4DC}", "#e8dcc0", 7.0, 0.4, 0.0, false, 1.0,
+            vec![("hides", 1.0), ("alum", 0.1)]),
     ]
 }
 

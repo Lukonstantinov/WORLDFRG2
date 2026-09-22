@@ -672,6 +672,7 @@ pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, St
             strength: g.strength, hall: g.hall,
             luxury: spec.need_tier >= 2,
             exceptional, brand, culture,
+            signature: g.signature.clone().unwrap_or_default(),
         })
     }).collect();
     out.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));

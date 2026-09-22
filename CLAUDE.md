@@ -1451,6 +1451,53 @@ econ_` (6/6) — per §2.8's own routing table for a `sim/campaign/tick/` change
 
 ---
 
+### 5.6 `docs/HOUSES_GUILDS_AND_MARKET_PLAN.md` — S4 and S7 shipped; the dose walks and the atlas/window redesign are queued
+
+The plan's own build order (§7) puts S4 (craft signatures) and S7 (the orphan
+raws' first recipes) first because both are FREE — S4 touches no sim state at
+all, S7 is a pure goods-catalog addition independent of everything else in the
+plan. Both shipped this session; the plan's three real DOSE WALKS (S1 ownerless
+voyage loss, S3 the guild roster cap, S6 the wartime blockade) and the frontend
+window/atlas redesign (S8-S12) did **not** — each needs its own multi-run gate
+sequence against `econ_inheritance_rules_fragment_differently` (~6 min/run,
+flipped inside its own noise band five times on record) that a single sitting
+cannot responsibly absorb alongside everything else, per the plan's own §9 risk
+register ("three doses in one session is the ceiling"). They remain queued
+exactly as the plan's own §8 numbers them (S1/S2/S3/S5/S6 as dose steps, S8-S12
+as the atlas queries + window split + Houses redesign) — not silently dropped.
+
+- **S4 — craft signatures served, not just earned.** `CraftGuild.signature`
+  (set once tradition + quality both clear their threshold, §8's Institutions
+  entry) existed and was read by nothing. `HubGoodDetail.signature` and
+  `GuildBrief.signature` now carry it (`read_hubs.rs`/`read_trade.rs`); the City
+  Market's row label and open-book header read *"Ypres broadcloth"* in place of
+  *"Woolen Cloth"* wherever a hub's guild has earned one, plain name otherwise —
+  quiet when ordinary, §6's own principle. No sim change; the gate is `cargo
+  check` + `tsc` alone.
+- **S7 — eight new `Distribution::Manufactured` goods**, appended last in
+  `default_custom_goods()` (rule 7 — a good's index is a fixed `TileData.goods`
+  position, never reordered): `ceramics` (clay + timber), `glassware` (bay_salt +
+  timber, the Murano case), `fixed_dye` (alum + dyes, the mordant trade
+  `DEPOSITS_AND_MINING_PLAN.md` deferred), `sailcloth`/`cordage` (hemp [+
+  pitch] — the yards plan's rigging), `armour` (iron + coal), `garum` (herring +
+  bay_salt, the distinctive Roman export), `parchment` (hides + alum, an
+  alternative books input). Each gives one of the five previously-orphaned raws
+  (`clay`/`coal`/`alum`/`hemp`/`pitch` — placed, mined, shipped, consumed by
+  nothing) its first downstream consumer. Categories set explicitly
+  (`custom_category`) rather than left to fall to `"misc"`, so market-needs
+  substitution treats them sensibly (ceramics/parchment as construction/craft,
+  sailcloth/cordage as fiber, armour as metal, fixed_dye as dye, garum as
+  preservative). Gate: `cargo test --lib goods_ -- --nocapture`, read per-good.
+- **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
+  S1/S2/S3/S5/S6 (the dose walks — ownerless voyage risk, the *annona* carrier
+  class, the guild-roster unfreeze, transit demand, the wartime blockade), S8/S9
+  (the house/guild atlas queries), S10-S12 (the four-window split, the two
+  atlases with map labelling, the Houses redesign). Each waits on exactly what
+  the plan's own §7/§8 already say it waits on — nothing here changes that
+  sequencing, this entry only records which end of it landed.
+
+---
+
 ## 6. Rust Backend Map (`src-tauri/src/`)
 
 ```
@@ -5305,7 +5352,12 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
-HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ APPROVED, NOTHING BUILT. The one-session build
+HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S4 (craft signatures served) + S7 (eight
+                                    orphan-raw recipes) BUILT AND GATED — see
+                                    CLAUDE.md §5.6. S1/S2/S3/S5/S6 (the dose
+                                    walks) and S8-S12 (the atlas queries + the
+                                    four-window/Houses redesign) QUEUED, per the
+                                    plan's own §9 risk register. The one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

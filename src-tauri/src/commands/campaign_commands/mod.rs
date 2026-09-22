@@ -404,6 +404,13 @@ pub struct HubGoodDetail {
     /// DLC 4 · this hub's production quality 0..1 for the good + its grade label.
     #[serde(default)] pub quality: f32,
     #[serde(default)] pub grade: String,
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S4 · the craft guild's earned SIGNATURE at
+    /// this hub for this good ("Ypres broadcloth"), once one clears
+    /// `SIGNATURE_TRADITION_YEARS` + `SIGNATURE_QUALITY_FLOOR` — `CraftGuild.
+    /// signature` already existed and was never served. Empty for the ordinary
+    /// case (no guild here, or one that hasn't earned a name yet); the frontend
+    /// reads the plain good name in that case, quiet when there is nothing to say.
+    #[serde(default)] pub signature: String,
     /// The PERSISTED yearly price series for this (hub, good) — `TradeHist.prices`,
     /// grain-equivalent, most recent last. Empty for a good this hub has never
     /// traded (no `TradeHist` row exists), and short in the years right after a
@@ -2794,6 +2801,12 @@ pub struct GuildBrief {
     /// Damascus steel), else "". `culture` names the people whose style it is.
     pub brand: String,
     pub culture: String,
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S4 · the guild's real EARNED signature
+    /// (`CraftGuild.signature`, permanent once set — tradition + quality both
+    /// clear their own thresholds). Distinct from `brand` above, which is an
+    /// ad-hoc "exceptional this instant" label recomputed from quality alone;
+    /// `signature` never un-earns itself even if quality later dips.
+    #[serde(default)] pub signature: String,
 }
 
 /// Quality at/above which a guild's craft earns a place-brand (renowned).

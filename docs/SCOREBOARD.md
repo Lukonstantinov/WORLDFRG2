@@ -9,6 +9,34 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22 — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S4 (signatures served) + S7 (eight orphan-raw recipes) shipped
+
+The plan's own build order (§7) names S4 and S7 as the two FREE slices — S4
+touches no sim state, S7 is a pure goods-catalog addition independent of
+everything else — and puts them first for exactly that reason. Shipped both
+this session; the plan's three real dose walks (S1/S3/S6) and the atlas/window
+frontend work (S8-S12) are queued per the plan's own §9 risk register, not
+attempted partially.
+
+**S4** — `CraftGuild.signature` (earned once tradition + quality both clear
+their threshold) existed and was read by nothing. Now served on
+`HubGoodDetail`/`GuildBrief`; the City Market reads *"Ypres broadcloth"* in
+place of *"Woolen Cloth"* wherever a hub's guild has earned a name, plain
+otherwise. No sim change — gate is `cargo check`/`tsc` alone.
+
+**S7** — eight new `Distribution::Manufactured` goods appended to
+`default_custom_goods()` (never reordered — rule 7): `ceramics`, `glassware`,
+`fixed_dye`, `sailcloth`, `cordage`, `armour`, `garum`, `parchment`. Each gives
+one of the five orphaned raws (`clay`/`coal`/`alum`/`hemp`/`pitch` — placed,
+mined, shipped, consumed by nothing before this) a first downstream consumer.
+
+Gates: `cargo check --lib` clean, `cargo test --lib goods_ -- --nocapture`
+clean (all pre-existing goods-placement assertions unaffected — new goods are
+`Manufactured`, so `goods_validation`'s belt-coverage floor does not apply to
+them), `npx tsc --noEmit` clean.
+
+---
+
 ## 2026-09-20b — Port competition finished: Slice 2 dosed to 0.6, Slice 3 built (undosed), staging_hop measured
 
 Continuation of the same session's `PORT_COMPETITION_PLAN.md` work (see
