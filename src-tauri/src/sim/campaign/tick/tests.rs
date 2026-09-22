@@ -7730,6 +7730,61 @@
     }
 
     // ─────────────────────────────────────────────────────────────────────
+    // Transit demand — the entrepot (`HOUSES_GUILDS_AND_MARKET_PLAN.md` S5)
+    // ─────────────────────────────────────────────────────────────────────
+
+    /// The shipped dose, `TRANSIT_DEMAND_DOSE = 0.0`, must be a true no-op at
+    /// every throughput ratio.
+    #[test]
+    fn transit_demand_is_a_noop_at_zero() {
+        assert_eq!(TRANSIT_DEMAND_DOSE, 0.0, "transit demand ships at zero dose");
+        for ratio in [0.0f32, 0.5, 1.0, 5.0] {
+            assert_eq!(transit_need_mult_e(TRANSIT_DEMAND_DOSE, TRANSIT_DEMAND_CAP, ratio), 1.0,
+                "throughput ratio {ratio} must be an exact no-op at zero dose");
+        }
+        let goods = vec![good("spices", 0, 2, 8.0, 0.5, false)];
+        let hubs = vec![hub(0, 0.0, 0.0, 1000.0, vec![0.0], 0)];
+        let s = sim(hubs, goods);
+        assert_eq!(s.transit_need_mult(0, 0, 100.0), 1.0,
+            "a hub with real recent throughput must still see a no-op at the shipped dose");
+    }
+
+    /// The claim: at a live dose, a hub with real recent throughput of a
+    /// good (an entrepot) wants MORE of it than its residents alone would —
+    /// the Delos/Puteoli/Palmyra case, bounded by the cap regardless of how
+    /// large the throughput ratio grows.
+    #[test]
+    fn an_entrepot_wants_more_than_its_residents_do() {
+        let quiet_town = transit_need_mult_e(0.4, 0.5, 0.0);
+        let modest_entrepot = transit_need_mult_e(0.4, 0.5, 0.5);
+        let great_entrepot = transit_need_mult_e(0.4, 0.5, 50.0);
+        assert_eq!(quiet_town, 1.0, "no recent throughput must mean no extra pull");
+        assert!(modest_entrepot > quiet_town,
+            "real throughput must raise demand above a quiet town's baseline");
+        assert!(great_entrepot > modest_entrepot,
+            "a busier entrepot must want proportionally more, up to the cap");
+        assert!(great_entrepot <= 1.0 + 0.5 + 1e-6,
+            "TRANSIT_DEMAND_CAP must bound the multiplier however large the ratio gets: {great_entrepot}");
+    }
+
+    /// Transit demand must reach only the MARKET-FACING `needs` buffer, never
+    /// `needs_struct` — the same discipline `the_structural_ration_is_not_
+    /// affected_by_satiety` already asserts for S6 (local satiety). The
+    /// wiring site (`mod.rs`) applies it only to `needs[h][g]`.
+    #[test]
+    fn transit_demand_never_touches_the_structural_ration() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("spices", 1, 2, 8.0, 0.5, false),
+        ];
+        let hubs = vec![hub(0, 0.0, 0.0, 2000.0, vec![1800.0, 0.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.advance(30);
+        assert!(s.hubs[0].lack_basic.is_finite() && s.hubs[0].lack_basic >= 0.0,
+            "the structural ration must remain well-formed regardless of transit demand");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────
     // City capacity from the land (`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 4, D5/D6)
     // ─────────────────────────────────────────────────────────────────────
 

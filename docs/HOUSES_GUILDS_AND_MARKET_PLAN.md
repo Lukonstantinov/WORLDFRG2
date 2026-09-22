@@ -1,7 +1,7 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S2/S3/S4/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
-result, not merely undosed); S5/S6/S8-S12 QUEUED.** Written 2026-09-22 from
+**Status: S2/S3/S4/S5/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
+result, not merely undosed); S6/S8-S12 QUEUED.** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -17,7 +17,9 @@ fixture (`reference_world`/`reference_world_large`/`dense_world`/
 `simulate_decades_reports_dynamics`) carries zero manufactured goods, so
 guild founding is structurally inert on all of them regardless of the cap —
 recorded at the constant's own doc comment rather than silently shipped as a
-validated dose.
+validated dose. S5 (transit demand) shipped exactly as the plan specifies —
+inert at `TRANSIT_DEMAND_DOSE = 0.0`, its own dose walk explicitly deferred
+to queue item Q2.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,

@@ -1547,11 +1547,29 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   validated. A future session that wants to genuinely dose this needs a
   fixture with real recipe goods run through `advance` far enough to show a
   wealth effect — queue item, see the constant's own doc comment.
+- **S5 — transit demand, shipped inert at zero (no dose walk this session, per
+  the plan's own build order).** `transit_need_mult` reads a hub's recent
+  throughput of a good (`TickHub.supply_accum`, summed across all
+  `SUPPLY_CLASSES`) against its CURRENT resident need (the `needs[h][g]`
+  value the wiring site already holds — never recomputed via `base_need`,
+  which would be both wasteful and circular), bounded by `TRANSIT_DEMAND_CAP`
+  so the feedback loop (more demand → wider arbitrage gap → more transit →
+  more demand) cannot run away. Wired at `mod.rs`'s demand-multiplier site
+  beside `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` — MARKET-FACING `needs[h][g]`
+  only, never `needs_struct` (merchants passing through are not mouths; S7's
+  household-monetization dose already hit and reverted exactly this bug once).
+  Double-gated inert (`TRANSIT_DEMAND_DOSE <= 0.0` short-circuits both the
+  wiring-site loop and the pure `transit_need_mult_e` function), so `tick::
+  tests` (273/273, 3 new) and `econ_` (6/6, multi-seed inheritance gate
+  included, 513.13s) confirming bit-identical output is closer to a
+  formality than a real test — the genuine dose walk is queue item Q2,
+  waiting on `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` being walked first since all
+  three now multiply the same expression.
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
-  S1 (blocked — see above, waits on the room/deficit fix), S5/S6 (the
-  remaining dose walks — transit demand, the wartime blockade), S8/S9 (the
-  house/guild atlas queries), S10-S12 (the four-window split, the two atlases
-  with map labelling, the Houses redesign). Each waits on exactly what the
+  S1 (blocked — see above, waits on the room/deficit fix), S6 (the remaining
+  dose walk — the wartime blockade), S8/S9 (the house/guild atlas queries),
+  S10-S12 (the four-window split, the two atlases with map labelling, the
+  Houses redesign). Each waits on exactly what the
   plan's own §7/§8 already say it waits on (S1 additionally waits on the
   newly-found room/deficit fix) — nothing here changes that sequencing, this
   entry only records which end of it landed.
@@ -5414,18 +5432,19 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 ```
 HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     guild roster unfreeze) + S4 (craft
-                                    signatures served) + S7 (eight orphan-raw
-                                    recipes) BUILT AND GATED — see CLAUDE.md
-                                    §5.6. S1 is BLOCKED (a pre-existing,
-                                    already-measured negative result, not
-                                    merely undosed — see queue item Q14). S3's
-                                    own 1→3 dose walk measured UNTESTABLE by
-                                    the standing gates (they carry zero
-                                    manufactured goods). S5/S6 (the remaining
-                                    dose walks) and S8-S12 (the atlas queries +
-                                    the four-window/Houses redesign) QUEUED,
-                                    per the plan's own §9 risk register. The
-                                    one-session build
+                                    signatures served) + S5 (transit demand,
+                                    shipped inert at zero) + S7 (eight
+                                    orphan-raw recipes) BUILT AND GATED — see
+                                    CLAUDE.md §5.6. S1 is BLOCKED (a
+                                    pre-existing, already-measured negative
+                                    result, not merely undosed — see queue
+                                    item Q14). S3's own 1→3 dose walk measured
+                                    UNTESTABLE by the standing gates (they
+                                    carry zero manufactured goods). S6 (the
+                                    remaining dose walk) and S8-S12 (the atlas
+                                    queries + the four-window/Houses redesign)
+                                    QUEUED, per the plan's own §9 risk
+                                    register. The one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

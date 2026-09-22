@@ -133,6 +133,36 @@ const PRESTIGE_REF_KM: f32 = 3000.0;
 /// How fast a hub's `stock_origin[g]` EMA responds to a fresh arrival's own
 /// origin distance — a weight per arrival event, not a time constant.
 const STOCK_ORIGIN_DECAY: f32 = 0.15;
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · TRANSIT DEMAND — the entrepot case.
+/// `base_need` is entirely about RESIDENTS (population × budget share ×
+/// cadence × `foreign_lux`); nothing anywhere says "a merchant came here
+/// because this is where the pepper is", yet Delos, Puteoli and Palmyra
+/// produced almost nothing and were the busiest markets in the world.
+/// `transit_need_mult` reads the hub's own recent THROUGHPUT of a good
+/// (`TickHub.supply_accum`, already tracked and decayed — summed across all
+/// `SUPPLY_CLASSES` sellers, since a transit hub's trade may arrive by any
+/// carrier) against its resident need, bounded by `TRANSIT_DEMAND_CAP` so the
+/// feedback loop (more demand → a wider arbitrage gap → more transit →
+/// more demand) cannot run away.
+///
+/// Applied to the MARKET-FACING `needs[h][g]` only, at the wiring site
+/// beside `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` — never inside `base_need`,
+/// never to `needs_struct`. Merchants passing through are not mouths; if
+/// transit demand ever reached the structural ration, `lack_basic`,
+/// starvation and crisis relief would all start lying about who actually
+/// needs feeding, the exact bug the S7 (`CONSUMPTION_REBUILD_PLAN.md`)
+/// household-monetization dose hit and had to revert.
+///
+/// Ships at 0.0 — a true no-op, the N1/N6/S3 pattern. **Do not dose in the
+/// same session as `LOCAL_SATIETY`/`FOREIGN_PRESTIGE`** — all three multiply
+/// the same `needs[h][g]` expression now; walk ONE at a time with the others
+/// pinned at zero, against `econ_expenditure_shares_resemble_a_household`
+/// (`ACTORS_AND_CARRIAGE_PLAN.md` §5.2's lesson).
+const TRANSIT_DEMAND_DOSE: f32 = 0.0;
+/// A hard ceiling on how much transit throughput may inflate resident need —
+/// the mechanism this cap exists to guard against is named in
+/// `TRANSIT_DEMAND_DOSE`'s own doc comment.
+const TRANSIT_DEMAND_CAP: f32 = 0.5;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2) · own-price elasticity of a
@@ -190,6 +220,16 @@ fn local_satiety_mult_e(dose: f32, tier: u8, self_supply: f32) -> f32 {
 fn foreign_prestige_mult_e(dose: f32, ref_km: f32, tier: u8, origin_km: f32) -> f32 {
     if dose <= 0.0 || tier < 1 || ref_km <= 0.0 { return 1.0; }
     1.0 + dose * (origin_km / ref_km).clamp(0.0, 1.0)
+}
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · `TRANSIT_DEMAND_DOSE`'s own pure
+/// shape, same split. `throughput_ratio` is recent throughput ÷ resident
+/// need — 0 for a hub nothing passes through, growing past 1.0 for a genuine
+/// entrepot. Bounded by `cap` regardless of how large the ratio gets, so a
+/// runaway arbitrage loop cannot push demand past a fixed ceiling.
+/// `dose <= 0.0` or `throughput_ratio <= 0.0` is a true no-op.
+fn transit_need_mult_e(dose: f32, cap: f32, throughput_ratio: f32) -> f32 {
+    if dose <= 0.0 || throughput_ratio <= 0.0 { return 1.0; }
+    1.0 + (dose * throughput_ratio).clamp(0.0, cap.max(0.0))
 }
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
 /// need is comparable to total production (an average good ~ slight shortage).
@@ -9292,6 +9332,15 @@ impl CampaignSim {
                             let origin_km = self.hubs[h].stock_origin.get(g).copied().unwrap_or(0.0);
                             needs[h][g] *= foreign_prestige_mult_e(FOREIGN_PRESTIGE, PRESTIGE_REF_KM, tier, origin_km);
                         }
+                    }
+                }
+                // HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · transit demand — the
+                // entrepot case (Delos/Puteoli/Palmyra). Same MARKET-FACING
+                // `needs`-only placement as satiety/prestige above. A true
+                // no-op at the shipped zero dose.
+                if TRANSIT_DEMAND_DOSE > 0.0 {
+                    for g in 0..ng {
+                        needs[h][g] *= self.transit_need_mult(h, g, needs[h][g]);
                     }
                 }
                 // Eat down stock; track unmet demand per need-tier for the

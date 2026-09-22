@@ -1040,6 +1040,22 @@ impl CampaignSim {
         local_satiety_mult_e(LOCAL_SATIETY, tier, supply)
     }
 
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · the entrepot's extra pull — the
+    /// shipped dose (`transit_need_mult_e`, parametrized for testing). Takes
+    /// the hub's CURRENT resident need for `g` (the caller already has it —
+    /// `needs[h][g]` at the wiring site — so this avoids recomputing
+    /// `base_need`, which would be both wasteful and circular). Returns 1.0
+    /// (no effect) at the shipped zero dose or when nothing has arrived
+    /// recently.
+    pub(crate) fn transit_need_mult(&self, h: usize, g: usize, resident_need: f32) -> f32 {
+        if TRANSIT_DEMAND_DOSE <= 0.0 || resident_need <= EPS { return 1.0; }
+        let sbase = g * SUPPLY_CLASSES;
+        let throughput: f32 = (0..SUPPLY_CLASSES)
+            .map(|c| self.hubs[h].supply_accum.get(sbase + c).copied().unwrap_or(0.0).max(0.0))
+            .sum();
+        transit_need_mult_e(TRANSIT_DEMAND_DOSE, TRANSIT_DEMAND_CAP, throughput / resident_need)
+    }
+
     pub(crate) fn base_need(&self, h: usize, g: usize) -> f32 {
         let tg = &self.goods[g];
         // Demand cadence: a good consumed every N days exerts ~30/N of the daily

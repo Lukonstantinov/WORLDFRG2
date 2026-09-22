@@ -9,6 +9,33 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22d — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S5 (transit demand) shipped inert at zero
+
+Continuation of the same day's session (see 2026-09-22c below). `transit_need_
+mult` (`production.rs`) reads a hub's recent throughput of a good
+(`TickHub.supply_accum`, summed across all `SUPPLY_CLASSES`) against its
+current resident need, bounded by `TRANSIT_DEMAND_CAP` (0.5) — the Delos/
+Puteoli/Palmyra case: an entrepot wants more of a good than its residents
+alone would. Wired at `mod.rs`'s demand-multiplier site beside `LOCAL_
+SATIETY`/`FOREIGN_PRESTIGE`, MARKET-FACING `needs[h][g]` only, never
+`needs_struct`. Ships at `TRANSIT_DEMAND_DOSE = 0.0`, per the plan's own
+instruction ("the walk is Q2, not today") — no dose walk attempted this
+session.
+
+Double-gated inert (the dose check short-circuits both the wiring-site loop
+and the pure `transit_need_mult_e` function), so this is the cheapest, safest
+kind of change in the plan — closer in risk profile to S4 than to S2/S3.
+Three new gates: `transit_demand_is_a_noop_at_zero`, `an_entrepot_wants_more_
+than_its_residents_do`, `transit_demand_never_touches_the_structural_ration`.
+
+Gates run: `cargo check --lib --tests` clean, `cargo test --lib tick::tests`
+273/273 (3 new), `cargo test --lib econ_ -- --nocapture` 6/6 including the
+multi-seed inheritance gate (513.13s, bit-identical to the pre-S5 baseline —
+confirms the no-op rather than meaningfully stress-testing it, given the
+double gate).
+
+---
+
 ## 2026-09-22c — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S3 (craft guild roster unfreeze) shipped; its dose walk found untestable
 
 Continuation of the same day's session (see 2026-09-22b below). `GUILD_MAX`
