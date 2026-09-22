@@ -9,6 +9,43 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22f — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S8/S9 (house & craft atlas queries) shipped
+
+Continuation of the same day's session (see 2026-09-22e below), picked up
+after the session's three-dose ceiling (S1/S3/S6) was reached — S8/S9 are
+pure derived reads, not doses, so the plan's own risk register doesn't cap
+them.
+
+**S8 — `campaign_house_atlas(idx)`** (`read_houses.rs`): `partners` from
+`House.trade_at`'s persisted weight, enriched with a live `in_transit` scan
+for real current in/out volume; `goods` from `House.good_volume`/
+`good_profit` with bought-at/sold-at hubs from the same scan; `holdings`
+(seat/offices/bailos/estates/held provinces, real map coordinates — a
+province's from `prov_seat`, since a province has no hub of its own);
+`seasons` (`[f32; 12]`, `trade_at`-weighted over `CampaignSim::season_mult`
+— a real live favorability curve, not a recorded volume-by-month series,
+since no such history is tracked per house). `season_mult` widened from
+private to `pub(crate)` for this one caller.
+
+**S9 — `campaign_guild_atlas(guild_idx)`** (`read_trade.rs`): `inputs`/
+`outputs` from a live `in_transit` scan at the guild's hub; `reach` (hubs
+with real `SUPPLY_FOREIGN` throughput of the good — a documented proxy, not
+an exact attribution); `signature` straight from `CraftGuild.signature`;
+`tradition_by_year` (length 0 or 1 — only the current sample; no history is
+persisted, so this is honestly not yet a real series).
+
+Both registered in `lib.rs`, wrapped in `bridge/campaign.ts`
+(`campaignHouseAtlas`/`campaignGuildAtlas`), typed in `types/campaign.ts`
+(`HouseAtlas`/`GuildAtlas`/`AtlasPartner`/`AtlasGoodBook`/`AtlasHolding`).
+Neither UI window consuming them exists yet (S11, queued) — the queries are
+ready for it.
+
+Gates: `cargo check --lib --tests` clean, `npx tsc --noEmit` clean. Per the
+plan's own §4 note, neither query touches tile or sim state, so neither can
+move `tick::tests`/`econ_` — no run owed beyond compile-checking.
+
+---
+
 ## 2026-09-22e — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S6 dose-walked to 0.3 and REVERTED
 
 Continuation of the same day's session (see 2026-09-22d below), the plan's

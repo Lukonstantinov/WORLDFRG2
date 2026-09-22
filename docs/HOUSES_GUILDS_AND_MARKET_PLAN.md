@@ -1,8 +1,8 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S2/S3/S4/S5/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
-result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real negative result, see
-below); S8-S12 QUEUED.** Written 2026-09-22 from
+**Status: S2/S3/S4/S5/S7/S8/S9 BUILT AND GATED; S1 BLOCKED (pre-existing
+negative result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real negative
+result, see below); S10-S12 QUEUED.** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -30,7 +30,11 @@ fixture never accounted for. Recorded at `BLOCKADE_STAGING_DOSE`'s own doc
 comment (`mod.rs`) rather than silently reverted with no trace — new queue
 item Q16. This plan's own §9 risk register names three doses as the session
 ceiling; S1 (investigated, found already blocked), S3 (walked, found
-untestable) and S6 (walked, reverted) are the three spent here.
+untestable) and S6 (walked, reverted) are the three spent here — S8/S9 (the
+house/craft atlas queries, `campaign_house_atlas`/`campaign_guild_atlas`)
+shipped afterward in the same session since neither is a dose: both are
+pure derived reads touching no tile/sim state, gated by `cargo check`/`tsc`
+alone per this plan's own §4 note.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,

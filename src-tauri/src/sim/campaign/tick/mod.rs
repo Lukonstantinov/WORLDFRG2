@@ -8272,7 +8272,7 @@ impl CampaignSim {
     /// 1.0 when nothing was ever quantised there (an old save, or a hub pair
     /// added after `base_n`, both index out of range).
     #[inline]
-    fn season_mult(&self, a: usize, b: usize, s: usize) -> f32 {
+    pub(crate) fn season_mult(&self, a: usize, b: usize, s: usize) -> f32 {
         if self.base_n == 0 || a >= self.base_n || b >= self.base_n { return 1.0; }
         let idx = s * self.base_n * self.base_n + a * self.base_n + b;
         match self.base_days_season.get(idx) {

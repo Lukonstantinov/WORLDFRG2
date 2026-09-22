@@ -2134,6 +2134,64 @@ export interface GuildBrief {
   signature?: string;
 }
 
+// ── HOUSES_GUILDS_AND_MARKET_PLAN.md S8/S9 — the house & craft atlases ──────
+
+/** One partner city a house's or guild's trade actually touches. */
+export interface AtlasPartner {
+  hub: number;
+  name: string;
+  x: number;
+  y: number;
+  volume_in: number;
+  volume_out: number;
+  /** The persisted `House.trade_at` weight (0 for a guild-atlas partner —
+   *  guilds have no `trade_at`, so this is always the live `amount` there). */
+  weight: number;
+  goods: number[];
+}
+
+/** One good in a house's portfolio. */
+export interface AtlasGoodBook {
+  good: number;
+  name: string;
+  volume: number;
+  profit: number;
+  bought_at: number[];
+  sold_at: number[];
+}
+
+/** One place a house holds something. `hub` is -1 for a province writ. */
+export interface AtlasHolding {
+  kind: "seat" | "office" | "bailo" | "estate" | "province";
+  hub: number;
+  x: number;
+  y: number;
+  label: string;
+}
+
+/** S8 · a house's trade-flow atlas (`campaign_house_atlas`). */
+export interface HouseAtlas {
+  partners: AtlasPartner[];
+  goods: AtlasGoodBook[];
+  holdings: AtlasHolding[];
+  /** Relative EASE of this house's own lanes by calendar month (index 0 =
+   *  January) — not a recorded volume-by-month series (none is tracked). */
+  seasons: number[]; // length 12
+}
+
+/** S9 · a craft guild's atlas (`campaign_guild_atlas`). */
+export interface GuildAtlas {
+  inputs: AtlasPartner[];
+  outputs: AtlasPartner[];
+  /** Hubs with real recent FOREIGN-sourced supply of this good — a rough
+   *  proxy for "who this craft's name reaches", not a exact attribution. */
+  reach: number[];
+  signature: string | null;
+  /** Length 0 or 1 — only the CURRENT tradition-years sample; no history is
+   *  persisted per good/hub, so this is never a real time series yet. */
+  tradition_by_year: number[];
+}
+
 /** Phase 6 · a notable figure (Great Lives roster). */
 export interface FigureBrief {
   name: string;

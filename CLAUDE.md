@@ -1582,13 +1582,38 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   Recorded at `BLOCKADE_STAGING_DOSE`'s own doc comment; walking this further
   needs `the_relay_carries_long_lanes_…`'s fixture updated to account for a
   live war before the two effects can even be told apart.
+- **S8 — `campaign_house_atlas(idx)`.** A pure derived read
+  (`read_houses.rs`): `partners` (from `House.trade_at`'s persisted weight,
+  enriched with a live `in_transit` scan for real current in/out volume and
+  which goods are moving), `goods` (from `House.good_volume`/`good_profit`,
+  with bought-at/sold-at hubs from the same live scan), `holdings` (seat ·
+  offices · bailos · owned estates · held provinces, each with real map
+  coordinates — a province's from `prov_seat`, since a province has no hub of
+  its own), and `seasons` (a `[f32; 12]` relative-ease curve, `trade_at`-
+  weighted over `CampaignSim::season_mult` — real live seasonal data, but a
+  favorability curve, not a recorded volume-by-month series, since no such
+  history is tracked per house). `season_mult` widened from private to
+  `pub(crate)` for this one caller.
+- **S9 — `campaign_guild_atlas(guild_idx)`.** Same shape, a craft's question
+  instead of a house's: `inputs`/`outputs` from a live `in_transit` scan at
+  the guild's own hub (inputs = arrivals of any of the good's own recipe
+  inputs; outputs = departures of the guild's own good), `reach` (every OTHER
+  hub currently showing real `SUPPLY_FOREIGN` throughput of the good — a
+  rough proxy, documented as such, since no arrival is tagged back to a
+  specific guild), `signature` (served straight from `CraftGuild.signature`),
+  and `tradition_by_year` (length 0 or 1 — only the CURRENT sample, since no
+  year-by-year tradition history is persisted anywhere; a real series is
+  future work, not silently faked).
+  Both S8/S9 are read-only and touch no tile/sim state, so — per the plan's
+  own note — neither can move a gate; verified by `cargo check --lib --tests`
+  and `npx tsc --noEmit` alone, both clean.
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
   S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
   see above, waits on the relay-fixture fix before its own dose walk can be
-  re-attempted), S8/S9 (the house/guild atlas queries), S10-S12 (the
-  four-window split, the two atlases with map labelling, the Houses
-  redesign). Each waits on exactly what the plan's own §7/§8 already say it
-  waits on (S1/S6 additionally wait on their own newly-found fixture/
+  re-attempted), S10-S12 (the four-window split, the two atlases with map
+  labelling using S8/S9 above, the Houses redesign). Each waits on exactly
+  what the plan's own §7/§8 already say it waits on (S1/S6 additionally wait
+  on their own newly-found fixture/
   mechanism fixes) — nothing here changes that sequencing, this entry only
   records which end of it landed.
 
@@ -1625,6 +1650,8 @@ commands/
                                   persisted per-(hub, good) yearly series
       read_people.rs · read_colonies.rs  cultures/pops/figures/dynasties; colonies/migration
       read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
+                                  + campaign_guild_atlas (S9 — a craft's inputs/
+                                  outputs/reach, pure derived read, §5.6)
       read_houses.rs              House Dossier reads: the five STABILITY gauges
                                   (campaign_house_stability) + the FEUD board
                                   (campaign_get_feuds) + the KIN roster
@@ -1640,7 +1667,11 @@ commands/
                                   this house's own offshoots found by scanning for
                                   `origin_house == this`; each hop's `origin_kind` says
                                   WHY: guild-seeded / branch / Partible division /
-                                  Departure schism / independent founding). Four
+                                  Departure schism / independent founding) + the
+                                  ATLAS (`campaign_house_atlas`, HOUSES_GUILDS_
+                                  AND_MARKET_PLAN.md S8 — partner cities, goods
+                                  portfolio, holdings, seasonal lane ease; pure
+                                  derived read, §5.6). Four
                                   of five gauges are pure derivations of state the sim
                                   already held; kin_power_shares/character_phrase
                                   (Phase 2.6/2.3) and the whole crisis engine live in
@@ -5452,7 +5483,8 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     guild roster unfreeze) + S4 (craft
                                     signatures served) + S5 (transit demand,
                                     shipped inert at zero) + S7 (eight
-                                    orphan-raw recipes) BUILT AND GATED — see
+                                    orphan-raw recipes) + S8/S9 (the house/
+                                    craft atlas queries) BUILT AND GATED — see
                                     CLAUDE.md §5.6. S1 is BLOCKED (a
                                     pre-existing, already-measured negative
                                     result, not merely undosed — see queue
@@ -5464,13 +5496,14 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     breach and a relay-fixture assumption the
                                     dose invalidates), recorded at
                                     `BLOCKADE_STAGING_DOSE`'s own doc comment.
-                                    S8-S12 (the atlas queries + the
-                                    four-window/Houses redesign) QUEUED, per
-                                    the plan's own §9 risk register — THREE
-                                    doses attempted this session (S1
-                                    investigated/blocked, S3 walked/
-                                    untestable, S6 walked/reverted), at the
-                                    plan's own stated ceiling. The
+                                    S10-S12 (the four-window split, the map
+                                    labelling for S8/S9's atlases, the Houses
+                                    redesign) QUEUED, per the plan's own §9
+                                    risk register — THREE doses attempted this
+                                    session (S1 investigated/blocked, S3
+                                    walked/untestable, S6 walked/reverted), at
+                                    the plan's own stated ceiling; S8/S9
+                                    shipped after since neither is a dose. The
                                     one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
