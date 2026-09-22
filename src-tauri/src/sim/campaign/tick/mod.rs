@@ -1385,6 +1385,32 @@ const CONTRABAND_GOODS: [&str; 5] = ["metalware", "iron", "timber", "pitch", "he
 /// (N1's own three-attempt history, and N2's market closure breaking the
 /// hard wealth bound twice). Shipped at 0.0 — a true no-op, exactly
 /// `N1_LOCAL_HAUL_BIND_DAYS`'s pattern: `hash01(..) < 0.0` can never hold.
+///
+/// **Dose walk attempted at 0.3 (`HOUSES_GUILDS_AND_MARKET_PLAN.md` S6) and
+/// REVERTED — two real regressions, not one.** `cargo test --lib tick::tests`
+/// at 0.3: `simulate_decades_reports_dynamics` failed its bounded-wealth
+/// assertion (a house at −521.4, breaching the limited-liability floor the
+/// dynamics run hard-asserts), and `the_relay_carries_long_lanes_in_stages_
+/// on_a_realistically_dense_world` failed its own "the relay is provably
+/// inert with the range caps off" assertion — `diag_relay_staged` read 2, not
+/// 0, on that test's own "loose" (uncapped) `dense_world` copy. The second
+/// failure names the mechanism: `BLOCKADE_STAGING_DOSE` reuses `staging_hop`,
+/// the SAME relay N1/N1c gate with their own range caps, but it is triggered
+/// by `war_with` — a condition those tests never disable. So a test built to
+/// prove the relay dormant absent N1/N1c's caps is no longer dormant once a
+/// war is live and this dose is nonzero: the relay now has a THIRD,
+/// independent trigger the "caps off ⇒ zero staged legs" fixtures never
+/// accounted for. Whether that is only a test-assumption gap or a genuine
+/// economic effect (a diverted wartime lane changing who profits enough to
+/// tip a house under the limited-liability floor) was not disentangled before
+/// reverting — both readings are consistent with the same two failures, and
+/// §2.4 says a spot failure on the aggregate gate is a revert, not a
+/// judgement call, regardless of which reading turns out to be right. Walking
+/// this further needs, at minimum, `the_relay_carries_long_lanes_…`'s own
+/// "loose" fixture updated to also disable war (or accept a nonzero staged
+/// count when a war is live), before the dynamics-run wealth-bound failure
+/// can even be isolated from that test assumption. Not attempted further
+/// this session — recorded so it is not re-attempted blind.
 pub(crate) const BLOCKADE_STAGING_DOSE: f32 = 0.0;
 
 /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) · seasonal sailing/pass

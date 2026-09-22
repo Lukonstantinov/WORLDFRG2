@@ -9,6 +9,42 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22e — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S6 dose-walked to 0.3 and REVERTED
+
+Continuation of the same day's session (see 2026-09-22d below), the plan's
+own third and final named dose walk for this session (S1 investigated/
+blocked, S3 walked/untestable, S6 walked below — the plan's §9 ceiling).
+
+`BLOCKADE_STAGING_DOSE` set to 0.3 (the plan's own first step). `cargo test
+--lib tick::tests` at that dose: **two real failures**, not the target's own
+`blockade_staging_is_a_noop_at_zero_dose` (expected to fail — it asserts the
+constant equals zero). `simulate_decades_reports_dynamics` failed its
+bounded-wealth assertion — a house at **−521.4**, past the hard-asserted
+limited-liability floor. `the_relay_carries_long_lanes_in_stages_on_a_
+realistically_dense_world` failed its own "the relay is provably inert with
+the range caps off" assertion — `diag_relay_staged` read **2**, expected
+**0**, on that test's "loose" (N1/N1c-caps-disabled) copy of `dense_world`.
+
+The cause, isolated by re-running the second failure alone: `BLOCKADE_
+STAGING_DOSE` reuses the exact same `staging_hop` relay N1/N1c dose, but
+triggers it on `war_with` rather than a range cap — a THIRD, independent
+trigger that test's "loose" fixture (which disables N1/N1c's caps but never
+disables war) was never built to account for. Whether the wealth-bound
+failure is a genuine economic consequence of the blockade or a downstream
+artefact of that same test-assumption gap was **not disentangled** before
+reverting — both readings are consistent with the same two failures, and
+§2.4's own rule holds regardless: a spot failure on the aggregate gate is a
+revert, not a judgement call.
+
+Reverted to 0.0; `tick::tests` re-confirmed clean at 273/273. Recorded at
+`BLOCKADE_STAGING_DOSE`'s own doc comment (`mod.rs`) rather than silently
+reverted with no trace — new queue item Q16 (`docs/HOUSES_GUILDS_AND_MARKET_
+PLAN.md`) names the prerequisite (a war-aware variant of the relay test's
+"loose" fixture) before this dose can be re-attempted and the two effects
+told apart.
+
+---
+
 ## 2026-09-22d — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S5 (transit demand) shipped inert at zero
 
 Continuation of the same day's session (see 2026-09-22c below). `transit_need_

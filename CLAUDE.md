@@ -1565,14 +1565,32 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   formality than a real test — the genuine dose walk is queue item Q2,
   waiting on `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` being walked first since all
   three now multiply the same expression.
+- **S6 — dose walk attempted at 0.3, REVERTED (two real regressions).**
+  `BLOCKADE_STAGING_DOSE` reuses the SAME `staging_hop` relay N1/N1c already
+  use, triggered by `war_with` rather than a range cap. At 0.3:
+  `simulate_decades_reports_dynamics` failed its bounded-wealth assertion (a
+  house at −521.4, past the limited-liability floor), and
+  `the_relay_carries_long_lanes_in_stages_on_a_realistically_dense_world`
+  failed its own "the relay is provably inert with the range caps off"
+  assertion (`diag_relay_staged` read 2, not 0) — because that test's "loose"
+  fixture disables N1/N1c's caps but never disables war, and this dose gives
+  the shared relay a third, independent trigger those fixtures never
+  accounted for. Whether the wealth-bound failure is a genuine economic
+  effect or downstream of the same test-assumption gap was not disentangled
+  before reverting — §2.4's own rule: a spot failure on the aggregate gate is
+  a revert, not a judgement call, regardless of which reading is right.
+  Recorded at `BLOCKADE_STAGING_DOSE`'s own doc comment; walking this further
+  needs `the_relay_carries_long_lanes_…`'s fixture updated to account for a
+  live war before the two effects can even be told apart.
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
-  S1 (blocked — see above, waits on the room/deficit fix), S6 (the remaining
-  dose walk — the wartime blockade), S8/S9 (the house/guild atlas queries),
-  S10-S12 (the four-window split, the two atlases with map labelling, the
-  Houses redesign). Each waits on exactly what the
-  plan's own §7/§8 already say it waits on (S1 additionally waits on the
-  newly-found room/deficit fix) — nothing here changes that sequencing, this
-  entry only records which end of it landed.
+  S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
+  see above, waits on the relay-fixture fix before its own dose walk can be
+  re-attempted), S8/S9 (the house/guild atlas queries), S10-S12 (the
+  four-window split, the two atlases with map labelling, the Houses
+  redesign). Each waits on exactly what the plan's own §7/§8 already say it
+  waits on (S1/S6 additionally wait on their own newly-found fixture/
+  mechanism fixes) — nothing here changes that sequencing, this entry only
+  records which end of it landed.
 
 ---
 
@@ -5440,11 +5458,20 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     result, not merely undosed — see queue
                                     item Q14). S3's own 1→3 dose walk measured
                                     UNTESTABLE by the standing gates (they
-                                    carry zero manufactured goods). S6 (the
-                                    remaining dose walk) and S8-S12 (the atlas
-                                    queries + the four-window/Houses redesign)
-                                    QUEUED, per the plan's own §9 risk
-                                    register. The one-session build
+                                    carry zero manufactured goods). **S6
+                                    dose-walked to 0.3 and REVERTED** — two
+                                    real gate failures (a limited-liability
+                                    breach and a relay-fixture assumption the
+                                    dose invalidates), recorded at
+                                    `BLOCKADE_STAGING_DOSE`'s own doc comment.
+                                    S8-S12 (the atlas queries + the
+                                    four-window/Houses redesign) QUEUED, per
+                                    the plan's own §9 risk register — THREE
+                                    doses attempted this session (S1
+                                    investigated/blocked, S3 walked/
+                                    untestable, S6 walked/reverted), at the
+                                    plan's own stated ceiling. The
+                                    one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

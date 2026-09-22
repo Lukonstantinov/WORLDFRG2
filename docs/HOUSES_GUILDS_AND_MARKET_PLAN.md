@@ -1,7 +1,8 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
 **Status: S2/S3/S4/S5/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
-result, not merely undosed); S6/S8-S12 QUEUED.** Written 2026-09-22 from
+result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real negative result, see
+below); S8-S12 QUEUED.** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -19,7 +20,17 @@ guild founding is structurally inert on all of them regardless of the cap —
 recorded at the constant's own doc comment rather than silently shipped as a
 validated dose. S5 (transit demand) shipped exactly as the plan specifies —
 inert at `TRANSIT_DEMAND_DOSE = 0.0`, its own dose walk explicitly deferred
-to queue item Q2.
+to queue item Q2. S6 (the routed wartime blockade) was walked to 0.3 (this
+plan's own §3 instruction) and REVERTED: `simulate_decades_reports_dynamics`
+failed its bounded-wealth assertion and `the_relay_carries_long_lanes_in_
+stages_on_a_realistically_dense_world` failed its own "the relay is inert
+with the caps off" assertion, because `BLOCKADE_STAGING_DOSE` gives the
+shared `staging_hop` relay a THIRD trigger (`war_with`) that test's "loose"
+fixture never accounted for. Recorded at `BLOCKADE_STAGING_DOSE`'s own doc
+comment (`mod.rs`) rather than silently reverted with no trace — new queue
+item Q16. This plan's own §9 risk register names three doses as the session
+ceiling; S1 (investigated, found already blocked), S3 (walked, found
+untestable) and S6 (walked, reverted) are the three spent here.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -509,6 +520,21 @@ Each item names what it waits for and the gate it will need.
     this codebase has ever shipped dosed-from-zero — against real evidence
     instead of shipping a plan's target value unvalidated, as S3 had to here.
     Waits on: nothing technical: it's a fixture-building session.
+16. **Q16 · Give `the_relay_carries_long_lanes_in_stages_on_a_realistically_
+    dense_world`'s "loose" fixture a war-free variant before re-attempting
+    S6.** The dose walk to 0.3 failed that test's own "the relay is provably
+    inert with the range caps off" assertion (`diag_relay_staged` read 2, not
+    0) because `BLOCKADE_STAGING_DOSE` triggers the same shared `staging_hop`
+    relay via `war_with`, independent of the N1/N1c range caps the fixture
+    disables — a trigger that test was never built to account for. It ALSO
+    failed `simulate_decades_reports_dynamics`'s bounded-wealth assertion (a
+    house past the limited-liability floor), and the two failures were not
+    disentangled before reverting: it is not yet known whether the wealth
+    failure is a genuine economic effect of the blockade or a downstream
+    consequence of the same test-assumption gap. Waits on: updating that
+    fixture to either disable war or accept a nonzero staged count when one
+    is live, so the wealth-bound failure can be isolated and re-measured on
+    its own. Gate: both tests, re-dosed at 0.3, one change at a time.
 
 ---
 
