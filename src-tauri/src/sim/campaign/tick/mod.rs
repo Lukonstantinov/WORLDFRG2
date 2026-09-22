@@ -133,6 +133,36 @@ const PRESTIGE_REF_KM: f32 = 3000.0;
 /// How fast a hub's `stock_origin[g]` EMA responds to a fresh arrival's own
 /// origin distance — a weight per arrival event, not a time constant.
 const STOCK_ORIGIN_DECAY: f32 = 0.15;
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · TRANSIT DEMAND — the entrepot case.
+/// `base_need` is entirely about RESIDENTS (population × budget share ×
+/// cadence × `foreign_lux`); nothing anywhere says "a merchant came here
+/// because this is where the pepper is", yet Delos, Puteoli and Palmyra
+/// produced almost nothing and were the busiest markets in the world.
+/// `transit_need_mult` reads the hub's own recent THROUGHPUT of a good
+/// (`TickHub.supply_accum`, already tracked and decayed — summed across all
+/// `SUPPLY_CLASSES` sellers, since a transit hub's trade may arrive by any
+/// carrier) against its resident need, bounded by `TRANSIT_DEMAND_CAP` so the
+/// feedback loop (more demand → a wider arbitrage gap → more transit →
+/// more demand) cannot run away.
+///
+/// Applied to the MARKET-FACING `needs[h][g]` only, at the wiring site
+/// beside `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` — never inside `base_need`,
+/// never to `needs_struct`. Merchants passing through are not mouths; if
+/// transit demand ever reached the structural ration, `lack_basic`,
+/// starvation and crisis relief would all start lying about who actually
+/// needs feeding, the exact bug the S7 (`CONSUMPTION_REBUILD_PLAN.md`)
+/// household-monetization dose hit and had to revert.
+///
+/// Ships at 0.0 — a true no-op, the N1/N6/S3 pattern. **Do not dose in the
+/// same session as `LOCAL_SATIETY`/`FOREIGN_PRESTIGE`** — all three multiply
+/// the same `needs[h][g]` expression now; walk ONE at a time with the others
+/// pinned at zero, against `econ_expenditure_shares_resemble_a_household`
+/// (`ACTORS_AND_CARRIAGE_PLAN.md` §5.2's lesson).
+const TRANSIT_DEMAND_DOSE: f32 = 0.0;
+/// A hard ceiling on how much transit throughput may inflate resident need —
+/// the mechanism this cap exists to guard against is named in
+/// `TRANSIT_DEMAND_DOSE`'s own doc comment.
+const TRANSIT_DEMAND_CAP: f32 = 0.5;
 const PRICE_FLOOR_MULT: f32 = 0.15;
 const PRICE_CEIL_MULT: f32 = 12.0;
 /// N6 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §2) · own-price elasticity of a
@@ -190,6 +220,16 @@ fn local_satiety_mult_e(dose: f32, tier: u8, self_supply: f32) -> f32 {
 fn foreign_prestige_mult_e(dose: f32, ref_km: f32, tier: u8, origin_km: f32) -> f32 {
     if dose <= 0.0 || tier < 1 || ref_km <= 0.0 { return 1.0; }
     1.0 + dose * (origin_km / ref_km).clamp(0.0, 1.0)
+}
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · `TRANSIT_DEMAND_DOSE`'s own pure
+/// shape, same split. `throughput_ratio` is recent throughput ÷ resident
+/// need — 0 for a hub nothing passes through, growing past 1.0 for a genuine
+/// entrepot. Bounded by `cap` regardless of how large the ratio gets, so a
+/// runaway arbitrage loop cannot push demand past a fixed ceiling.
+/// `dose <= 0.0` or `throughput_ratio <= 0.0` is a true no-op.
+fn transit_need_mult_e(dose: f32, cap: f32, throughput_ratio: f32) -> f32 {
+    if dose <= 0.0 || throughput_ratio <= 0.0 { return 1.0; }
+    1.0 + (dose * throughput_ratio).clamp(0.0, cap.max(0.0))
 }
 /// Per-capita appetite scale; multiplied by the seed-time balance factor so total
 /// need is comparable to total production (an average good ~ slight shortage).
@@ -376,6 +416,24 @@ const N1_LOCAL_HAUL_BIND_DAYS: f32 = 90.0;
 /// §2.4: a 6.4× swing on the very gate meant to catch a collapse is a
 /// structural finding, not a value to tune around.
 const N1B_OWNERLESS_LOSS_RATE: f32 = 0.0;
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* reframe applies to BIG
+/// CITIES ONLY (§0 decision 2): an ownerless shipment whose DESTINATION clears
+/// this population is STATE CARRIAGE, not an ordinary anonymous haul — exempt
+/// from N1b's voyage-loss roll (`production.rs::dispatch`) the way grain into
+/// Rome or Constantinople was underwritten rather than left to chance.
+/// Everywhere else the residual takes N1b's full rate. Same order the old
+/// `size_bonus` population term saturated at (§8.16-adjacent city-scale
+/// convention) — a genuine metropolis on a real generated world, not an
+/// arbitrary round number.
+///
+/// This is what is meant to make N1b safe to dose harder in a future session:
+/// the lanes that genuinely must not be disrupted (grain into the great
+/// cities) are explicitly protected before that dose is raised again. It does
+/// **not** by itself fix N1b's own measured blocker (the comment above this
+/// constant) — the room/deficit reopening a lost shipment invites is a
+/// per-buyer feedback independent of which lanes are annona-exempt, and would
+/// still fire on every non-metropolitan buyer at any nonzero N1b rate.
+const ANNONA_MIN_POP: f32 = 60_000.0;
 /// A world's equatorial circumference in km — the same conversion every other
 /// module states locally per rule 25 (`localities.rs`, `deposits.rs`,
 /// `landform.rs`, `landmass_ops.rs`), so a cell-space distance can be read as
@@ -1327,6 +1385,32 @@ const CONTRABAND_GOODS: [&str; 5] = ["metalware", "iron", "timber", "pitch", "he
 /// (N1's own three-attempt history, and N2's market closure breaking the
 /// hard wealth bound twice). Shipped at 0.0 — a true no-op, exactly
 /// `N1_LOCAL_HAUL_BIND_DAYS`'s pattern: `hash01(..) < 0.0` can never hold.
+///
+/// **Dose walk attempted at 0.3 (`HOUSES_GUILDS_AND_MARKET_PLAN.md` S6) and
+/// REVERTED — two real regressions, not one.** `cargo test --lib tick::tests`
+/// at 0.3: `simulate_decades_reports_dynamics` failed its bounded-wealth
+/// assertion (a house at −521.4, breaching the limited-liability floor the
+/// dynamics run hard-asserts), and `the_relay_carries_long_lanes_in_stages_
+/// on_a_realistically_dense_world` failed its own "the relay is provably
+/// inert with the range caps off" assertion — `diag_relay_staged` read 2, not
+/// 0, on that test's own "loose" (uncapped) `dense_world` copy. The second
+/// failure names the mechanism: `BLOCKADE_STAGING_DOSE` reuses `staging_hop`,
+/// the SAME relay N1/N1c gate with their own range caps, but it is triggered
+/// by `war_with` — a condition those tests never disable. So a test built to
+/// prove the relay dormant absent N1/N1c's caps is no longer dormant once a
+/// war is live and this dose is nonzero: the relay now has a THIRD,
+/// independent trigger the "caps off ⇒ zero staged legs" fixtures never
+/// accounted for. Whether that is only a test-assumption gap or a genuine
+/// economic effect (a diverted wartime lane changing who profits enough to
+/// tip a house under the limited-liability floor) was not disentangled before
+/// reverting — both readings are consistent with the same two failures, and
+/// §2.4 says a spot failure on the aggregate gate is a revert, not a
+/// judgement call, regardless of which reading turns out to be right. Walking
+/// this further needs, at minimum, `the_relay_carries_long_lanes_…`'s own
+/// "loose" fixture updated to also disable war (or accept a nonzero staged
+/// count when a war is live), before the dynamics-run wealth-bound failure
+/// can even be isolated from that test assumption. Not attempted further
+/// this session — recorded so it is not re-attempted blind.
 pub(crate) const BLOCKADE_STAGING_DOSE: f32 = 0.0;
 
 /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1) · seasonal sailing/pass
@@ -3621,6 +3705,14 @@ pub struct TickHub {
     #[serde(default)] pub tw_house: f32,
     #[serde(default)] pub tw_local: f32,
     #[serde(default)] pub tw_guild: f32,
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* class: an ownerless
+    /// shipment whose DESTINATION clears `ANNONA_MIN_POP` is state carriage
+    /// into a metropolis. Tracked ADDITIVELY alongside `tw_house`/`tw_local`/
+    /// `tw_guild` (not carved out of `tw_local`) so `merchant_population_
+    /// estimate`'s existing three-way split — which reads those three fields'
+    /// sum as its total — is provably unaffected; a future atlas reads this
+    /// field on its own. `#[serde(default)]` — an old save reads 0.0 here.
+    #[serde(default)] pub tw_state: f32,
     /// Estate type (0 none / 1 farm / 2 mine / 3 plantation / 4 fishery / 5 vineyard).
     /// Non-zero only when `is_estate`; drives its produced good + the inspector label.
     #[serde(default)] pub estate_kind: u8,
@@ -6175,7 +6267,50 @@ pub fn feud_stage(intensity: f32, current: u8) -> u8 {
 
 /// Phase 5 (flavour) · craft-guild tuning (bounded quality lift; a strike is a
 /// short, capped manufacture dent via the existing production-shock path).
-const GUILD_MAX: usize = 12;
+///
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S3 — `GUILD_MAX` used to be the WORLD
+/// cap: 12 guilds seeded once at tick 0, `guilds_seeded` never cleared, no
+/// founding or dissolution pass ever ran, against 23 manufactured goods. It is
+/// now a sanity bound only (a guild count that could never legitimately be
+/// reached on any realistic world), and `GUILD_MAX_PER_CITY` is the real,
+/// per-hub cap `maybe_found_craft_guild` enforces.
+const GUILD_MAX: usize = 400;
+/// S3 — the real per-city cap. Intended as a DOSE (guild count feeds
+/// `update_good_quality`'s tradition-growth multiplier and, via `hall`, civic
+/// stability, so raising it could in principle move wealth) — but walking it
+/// 1 → 3 against `tick::tests` + `econ_` (both runs, `econ_` including the
+/// multi-seed inheritance gate) measured **bit-identical** results at both
+/// values, because `reference_world`/`reference_world_large`/`dense_world`/
+/// `simulate_decades_reports_dynamics`'s own fixture all build their goods
+/// through the plain `good()` helper, whose `inputs` is always empty — every
+/// standing gate in this codebase carries ZERO manufactured goods, so
+/// `maybe_found_craft_guild` is structurally a no-op on all of them regardless
+/// of this cap. The dose walk this constant's own history asks for cannot be
+/// performed by the existing instruments; shipping the plan's target value (3)
+/// is not validated by `econ_` so much as UNTESTED by it. A future session
+/// that wants to actually dose this needs a fixture carrying real recipe
+/// goods run through `advance` (my own new unit tests exercise founding/
+/// dissolution directly, which is real coverage, but not through the dynamics
+/// run that would show a wealth effect). See `docs/SCOREBOARD.md`'s dated
+/// entry.
+const GUILD_MAX_PER_CITY: usize = 3;
+/// S3 — a hub producing a manufactured good for at least this many tradition-
+/// years (`TickHub.tradition`, independent of any guild — it accrues on raw
+/// practice too, just slower) is organised enough to found a guild. Far below
+/// `TRADITION_YEARS_FULL` (60, the years for the QUALITY ceiling to fill) —
+/// forming a guild is a much lower bar than mastering a craft, historically
+/// (guilds organised early; excellence came later, sometimes generations on).
+const GUILD_FOUND_TRADITION_YEARS: f32 = 3.0;
+/// S3 — a yearly, per-eligible-(hub,good) chance of actually founding, so a
+/// world crossing the threshold on many cities at once doesn't found a dozen
+/// guilds in a single year. Same shape as every other yearly `maybe_*` roll
+/// in this file (`STEWARD_POACH_CHANCE`, `PIRACY_YEARLY_CHANCE`, …).
+const GUILD_FOUND_CHANCE: f32 = 0.20;
+/// S3 — consecutive years with zero production of the guild's own good before
+/// it dissolves (`CraftGuild.idle_years`). Longer than a single bad harvest or
+/// a strike (`GUILD_STRIKE_CHANCE`'s dent lasts weeks, not years), short
+/// enough that a genuinely abandoned craft does not haunt the roster forever.
+const GUILD_DISSOLVE_IDLE_YEARS: f32 = 15.0;
 const GUILD_QUALITY_STEP: f32 = 0.03;
 const GUILD_QUALITY_CAP: f32 = 0.92;
 const GUILD_STRIKE_CHANCE: f32 = 0.10;
@@ -6371,6 +6506,14 @@ pub struct CraftGuild {
     /// `None` until then, set once, permanent (`is_house_milestone`'s own
     /// discipline applied to a city rather than a house).
     #[serde(default)] pub signature: Option<String>,
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S3 — consecutive YEARS this guild's
+    /// good has gone unmade at its own hub, read by `maybe_dissolve_craft_
+    /// guild`. Resets to 0 the moment production resumes; a guild past
+    /// `GUILD_DISSOLVE_IDLE_YEARS` dissolves. `#[serde(default)]` — an old
+    /// save's guild (seeded once at tick 0, never dissolved before this
+    /// slice) starts at 0, the honest reading for a guild nobody was
+    /// tracking idleness on.
+    #[serde(default)] pub idle_years: f32,
 }
 
 /// Phase 6 (observability) · one city struck by plague — recorded for the Plagues &
@@ -8129,7 +8272,7 @@ impl CampaignSim {
     /// 1.0 when nothing was ever quantised there (an old save, or a hub pair
     /// added after `base_n`, both index out of range).
     #[inline]
-    fn season_mult(&self, a: usize, b: usize, s: usize) -> f32 {
+    pub(crate) fn season_mult(&self, a: usize, b: usize, s: usize) -> f32 {
         if self.base_n == 0 || a >= self.base_n || b >= self.base_n { return 1.0; }
         let idx = s * self.base_n * self.base_n + a * self.base_n + b;
         match self.base_days_season.get(idx) {
@@ -8904,8 +9047,14 @@ impl CampaignSim {
                 self.arbitrate_feuds(yr);
                 // Phase 5 (flavour) · dynastic marriages/alliances between houses.
                 self.arrange_marriages(yr);
+                // HOUSES_GUILDS_AND_MARKET_PLAN.md S3 · dissolve first (a dead or
+                // idle guild should not run this year), then the existing pass,
+                // then found any new ones — a freshly founded guild gets no
+                // same-year head start on quality/hall/secrecy.
+                self.maybe_dissolve_craft_guild();
                 // Phase 5 (flavour) · craft guilds master their craft, strike, build.
                 self.run_craft_guilds(yr);
+                self.maybe_found_craft_guild(yr);
                 // Standing laws (kinds 4-5) — a grain law after a real famine, a guild
                 // monopoly once a guild's hall stands. Reads this year's `starving`/
                 // guild state, so runs right after both are updated above.
@@ -9209,6 +9358,15 @@ impl CampaignSim {
                             let origin_km = self.hubs[h].stock_origin.get(g).copied().unwrap_or(0.0);
                             needs[h][g] *= foreign_prestige_mult_e(FOREIGN_PRESTIGE, PRESTIGE_REF_KM, tier, origin_km);
                         }
+                    }
+                }
+                // HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · transit demand — the
+                // entrepot case (Delos/Puteoli/Palmyra). Same MARKET-FACING
+                // `needs`-only placement as satiety/prestige above. A true
+                // no-op at the shipped zero dose.
+                if TRANSIT_DEMAND_DOSE > 0.0 {
+                    for g in 0..ng {
+                        needs[h][g] *= self.transit_need_mult(h, g, needs[h][g]);
                     }
                 }
                 // Eat down stock; track unmet demand per need-tier for the

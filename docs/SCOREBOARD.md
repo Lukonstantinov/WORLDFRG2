@@ -9,6 +9,246 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22g — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S10 (the four-window split) shipped
+
+Continuation of the same day's session (see 2026-09-22f below). User explicitly
+chose "attempt it blind, carefully" over stopping, given this environment has
+no display to verify a UI change in (confirmed in CLAUDE.md's own §1 quick-start
+note: "the GUI can't be launched" on a headless box).
+
+`HousesPanel.tsx` (1,455 lines — a list, tier grouping, a feuds board, a compare
+launcher and an 11-subtab dossier, against `GuildsPanel.tsx`'s 125 — the exact
+asymmetry §1 of the plan names) is now **338 lines, browse-only**: the
+tier-grouped list, the Compare launcher, and a "🏛 Companies" FILTER CHIP in
+place of the old "guilds" TAB (`House.is_guild` firms are firms, not a
+different kind of thing — keeping them in a tab beside `CraftGuild` under one
+word was the naming collision the plan's §1 names). `HouseDetail` and its ten
+subtabs (Chronicle/Summary/Kin/Goals/Crisis/Lineage/Expeditions/Standing/
+Feuds/Bank/Accountant) moved VERBATIM (no rendering logic changed in the move)
+into `HouseDossier.tsx` (now 1,433 lines), which already held
+`HouseStandingView`/`FeudsView` — genuinely "one house, everything about it"
+now rather than split across the browse file. A new `FeudsAlliancesPanel.tsx`
+(33 lines, built on the shared `@ui/kit`) wraps `FeudsView` with no house
+focus as its own window (`uiStore.showFeuds`), opened from a new "⚔ Feuds"
+button in `HousesPanel` and from the Society menu (`CampaignTopBar.tsx`).
+`GuildsPanel.tsx` relabelled "🔨 Crafts & Guilds". Shared helpers
+(`TIER_META`/`tierOf`/`dull`/`goodIcon`/`familyRunAt`) split into a new
+`houseShared.ts` (42 lines) rather than duplicated or cross-imported, which
+would create a HousesPanel ↔ HouseDossier import cycle.
+
+**Verification, stated exactly as it was done**: `npx tsc --noEmit` clean,
+`npx vite build` clean (181 modules, 3.68s — the one pre-existing chunk-size
+warning is unrelated to this change). Neither is a claim that the four windows
+actually open, position, or read correctly in the running app — this session
+could not check that. New queue item Q17 (`docs/HOUSES_GUILDS_AND_MARKET_
+PLAN.md`) names exactly what a session with a browser needs to check before
+this is trusted beyond "it compiles and bundles."
+
+---
+
+## 2026-09-22f — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S8/S9 (house & craft atlas queries) shipped
+
+Continuation of the same day's session (see 2026-09-22e below), picked up
+after the session's three-dose ceiling (S1/S3/S6) was reached — S8/S9 are
+pure derived reads, not doses, so the plan's own risk register doesn't cap
+them.
+
+**S8 — `campaign_house_atlas(idx)`** (`read_houses.rs`): `partners` from
+`House.trade_at`'s persisted weight, enriched with a live `in_transit` scan
+for real current in/out volume; `goods` from `House.good_volume`/
+`good_profit` with bought-at/sold-at hubs from the same scan; `holdings`
+(seat/offices/bailos/estates/held provinces, real map coordinates — a
+province's from `prov_seat`, since a province has no hub of its own);
+`seasons` (`[f32; 12]`, `trade_at`-weighted over `CampaignSim::season_mult`
+— a real live favorability curve, not a recorded volume-by-month series,
+since no such history is tracked per house). `season_mult` widened from
+private to `pub(crate)` for this one caller.
+
+**S9 — `campaign_guild_atlas(guild_idx)`** (`read_trade.rs`): `inputs`/
+`outputs` from a live `in_transit` scan at the guild's hub; `reach` (hubs
+with real `SUPPLY_FOREIGN` throughput of the good — a documented proxy, not
+an exact attribution); `signature` straight from `CraftGuild.signature`;
+`tradition_by_year` (length 0 or 1 — only the current sample; no history is
+persisted, so this is honestly not yet a real series).
+
+Both registered in `lib.rs`, wrapped in `bridge/campaign.ts`
+(`campaignHouseAtlas`/`campaignGuildAtlas`), typed in `types/campaign.ts`
+(`HouseAtlas`/`GuildAtlas`/`AtlasPartner`/`AtlasGoodBook`/`AtlasHolding`).
+Neither UI window consuming them exists yet (S11, queued) — the queries are
+ready for it.
+
+Gates: `cargo check --lib --tests` clean, `npx tsc --noEmit` clean. Per the
+plan's own §4 note, neither query touches tile or sim state, so neither can
+move `tick::tests`/`econ_` — no run owed beyond compile-checking.
+
+---
+
+## 2026-09-22e — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S6 dose-walked to 0.3 and REVERTED
+
+Continuation of the same day's session (see 2026-09-22d below), the plan's
+own third and final named dose walk for this session (S1 investigated/
+blocked, S3 walked/untestable, S6 walked below — the plan's §9 ceiling).
+
+`BLOCKADE_STAGING_DOSE` set to 0.3 (the plan's own first step). `cargo test
+--lib tick::tests` at that dose: **two real failures**, not the target's own
+`blockade_staging_is_a_noop_at_zero_dose` (expected to fail — it asserts the
+constant equals zero). `simulate_decades_reports_dynamics` failed its
+bounded-wealth assertion — a house at **−521.4**, past the hard-asserted
+limited-liability floor. `the_relay_carries_long_lanes_in_stages_on_a_
+realistically_dense_world` failed its own "the relay is provably inert with
+the range caps off" assertion — `diag_relay_staged` read **2**, expected
+**0**, on that test's "loose" (N1/N1c-caps-disabled) copy of `dense_world`.
+
+The cause, isolated by re-running the second failure alone: `BLOCKADE_
+STAGING_DOSE` reuses the exact same `staging_hop` relay N1/N1c dose, but
+triggers it on `war_with` rather than a range cap — a THIRD, independent
+trigger that test's "loose" fixture (which disables N1/N1c's caps but never
+disables war) was never built to account for. Whether the wealth-bound
+failure is a genuine economic consequence of the blockade or a downstream
+artefact of that same test-assumption gap was **not disentangled** before
+reverting — both readings are consistent with the same two failures, and
+§2.4's own rule holds regardless: a spot failure on the aggregate gate is a
+revert, not a judgement call.
+
+Reverted to 0.0; `tick::tests` re-confirmed clean at 273/273. Recorded at
+`BLOCKADE_STAGING_DOSE`'s own doc comment (`mod.rs`) rather than silently
+reverted with no trace — new queue item Q16 (`docs/HOUSES_GUILDS_AND_MARKET_
+PLAN.md`) names the prerequisite (a war-aware variant of the relay test's
+"loose" fixture) before this dose can be re-attempted and the two effects
+told apart.
+
+---
+
+## 2026-09-22d — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S5 (transit demand) shipped inert at zero
+
+Continuation of the same day's session (see 2026-09-22c below). `transit_need_
+mult` (`production.rs`) reads a hub's recent throughput of a good
+(`TickHub.supply_accum`, summed across all `SUPPLY_CLASSES`) against its
+current resident need, bounded by `TRANSIT_DEMAND_CAP` (0.5) — the Delos/
+Puteoli/Palmyra case: an entrepot wants more of a good than its residents
+alone would. Wired at `mod.rs`'s demand-multiplier site beside `LOCAL_
+SATIETY`/`FOREIGN_PRESTIGE`, MARKET-FACING `needs[h][g]` only, never
+`needs_struct`. Ships at `TRANSIT_DEMAND_DOSE = 0.0`, per the plan's own
+instruction ("the walk is Q2, not today") — no dose walk attempted this
+session.
+
+Double-gated inert (the dose check short-circuits both the wiring-site loop
+and the pure `transit_need_mult_e` function), so this is the cheapest, safest
+kind of change in the plan — closer in risk profile to S4 than to S2/S3.
+Three new gates: `transit_demand_is_a_noop_at_zero`, `an_entrepot_wants_more_
+than_its_residents_do`, `transit_demand_never_touches_the_structural_ration`.
+
+Gates run: `cargo check --lib --tests` clean, `cargo test --lib tick::tests`
+273/273 (3 new), `cargo test --lib econ_ -- --nocapture` 6/6 including the
+multi-seed inheritance gate (513.13s, bit-identical to the pre-S5 baseline —
+confirms the no-op rather than meaningfully stress-testing it, given the
+double gate).
+
+---
+
+## 2026-09-22c — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S3 (craft guild roster unfreeze) shipped; its dose walk found untestable
+
+Continuation of the same day's session (see 2026-09-22b below). `GUILD_MAX`
+(12, world-wide, seeded once at tick 0, never founded or dissolved again) is
+now a sanity bound only (400); `GUILD_MAX_PER_CITY` (3) is the real per-hub
+cap. `maybe_found_craft_guild` (yearly) founds a guild at a hub past
+`GUILD_FOUND_TRADITION_YEARS` (3) tradition-years in a manufactured good,
+gated by a yearly per-candidate roll (`GUILD_FOUND_CHANCE` = 0.20) so many
+eligible cities don't all found in the same year; `maybe_dissolve_craft_guild`
+removes a guild whose hub has died or whose good has gone unmade for
+`GUILD_DISSOLVE_IDLE_YEARS` (15) years (new `CraftGuild.idle_years` field).
+Both chronicled. New gates: `a_craft_guild_is_founded_and_dissolved_over_a_
+century`, `guild_count_per_city_is_bounded`.
+
+**The dose walk itself (1 → 3, per the plan's own §7 instruction) measured
+BIT-IDENTICAL at both values on `tick::tests` (270/270) and `econ_` (6/6,
+multi-seed inheritance gate included, ~515s each run) — not because the
+mechanism is safe, but because it never fires.** `reference_world`/
+`reference_world_large`/`dense_world`/`simulate_decades_reports_dynamics`'s
+own fixture all build their goods through the plain `good()` helper, whose
+`inputs` is always `vec![]` — every world these gates ever run carries ZERO
+manufactured goods, so `maybe_found_craft_guild`'s `!self.goods[g].inputs.
+is_empty()` check is never once true on any of them. The shipped value (3,
+the plan's own target) is therefore UNVALIDATED by `econ_`, not merely
+under-dosed — a genuinely different finding from "we walked it and it was
+safe." New queue item Q15 (`docs/HOUSES_GUILDS_AND_MARKET_PLAN.md`) names
+what a future session needs: a fixture with real recipe goods run through
+`advance` long enough to show a wealth effect, which does not exist anywhere
+in this codebase's standing test suite today.
+
+Gates run: `cargo check --lib --tests` clean, `cargo test --lib tick::tests`
+270/270 (2 new) at both `GUILD_MAX_PER_CITY = 1` and `= 3`, `cargo test --lib
+econ_ -- --nocapture` 6/6 at both values (514.87s / — both runs bit-identical
+to each other and to the pre-S3 baseline), `cargo test --lib goods_` 18/18
+(unaffected, as expected — S3 touches no goods placement).
+
+---
+
+## 2026-09-22b — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S2 (annona) shipped; S1 found already-blocked
+
+Continuation of the same day's session (see 2026-09-22 below). Next in the
+plan's own build order after S4/S7 was S1 (dose ownerless voyage risk) — before
+writing any dose-walk code, `N1B_OWNERLESS_LOSS_RATE`'s own doc comment (which
+pre-dates this plan) turned out to already record a dose walk attempted at
+0.01: `dense_world`'s uncapped trade volume ROSE 6.4× (781,472 → 4,991,590 over
+40 years) instead of falling, because `dispatch`'s room/deficit calculation
+reopens a buyer's deficit the moment a shipment is lost, so a sunk cargo
+invites more dispatch rather than less. This is a structural feedback, not a
+tunable collapse — S1 is **blocked**, not merely undosed, and re-running the
+same failed walk this session would only have re-spent a ~6-minute multi-seed
+gate run to relearn a fact already on record. New queue item Q14 names the fix
+it actually needs (the room/deficit calculation accounting for cargo already
+lost this cycle).
+
+Shipped **S2** instead (the plan's own next item, and what the *annona*
+exemption is meant to protect once S1 is unblocked): `ANNONA_MIN_POP` = 60,000
+marks a destination as a metropolis; an ownerless shipment bound for one is
+exempt from N1b's loss roll and tracked in a new `TickHub.tw_state`. Checking
+the plan's own text against the code changed the implementation: it says
+`tw_state` is "split out of `tw_local`", but `merchant_population_estimate`
+already reads `tw_house + tw_local + tw_guild` as its total, so a literal split
+would have moved the displayed merchant-population breakdown on any world with
+a metropolis — a real behaviour change, not the "provably inert" decision 4
+requires. Shipped additively instead (`tw_state` tracked alongside the
+existing three, their sum untouched).
+
+Gates: `cargo check --lib --tests` clean, `cargo test --lib tick::tests`
+268/268 (1 new: `annona_carriage_is_tracked_additively_and_only_for_great_
+cities`), `cargo test --lib econ_ -- --nocapture` 6/6 including the multi-seed
+`econ_inheritance_rules_fragment_differently` (522.82s) — partible
+alive-by-seed 45/55/44, matching the table already on record, confirming S2 is
+inert on the gate that matters most here.
+
+---
+
+## 2026-09-22 — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S4 (signatures served) + S7 (eight orphan-raw recipes) shipped
+
+The plan's own build order (§7) names S4 and S7 as the two FREE slices — S4
+touches no sim state, S7 is a pure goods-catalog addition independent of
+everything else — and puts them first for exactly that reason. Shipped both
+this session; the plan's three real dose walks (S1/S3/S6) and the atlas/window
+frontend work (S8-S12) are queued per the plan's own §9 risk register, not
+attempted partially.
+
+**S4** — `CraftGuild.signature` (earned once tradition + quality both clear
+their threshold) existed and was read by nothing. Now served on
+`HubGoodDetail`/`GuildBrief`; the City Market reads *"Ypres broadcloth"* in
+place of *"Woolen Cloth"* wherever a hub's guild has earned a name, plain
+otherwise. No sim change — gate is `cargo check`/`tsc` alone.
+
+**S7** — eight new `Distribution::Manufactured` goods appended to
+`default_custom_goods()` (never reordered — rule 7): `ceramics`, `glassware`,
+`fixed_dye`, `sailcloth`, `cordage`, `armour`, `garum`, `parchment`. Each gives
+one of the five orphaned raws (`clay`/`coal`/`alum`/`hemp`/`pitch` — placed,
+mined, shipped, consumed by nothing before this) a first downstream consumer.
+
+Gates: `cargo check --lib` clean, `cargo test --lib goods_ -- --nocapture`
+clean (all pre-existing goods-placement assertions unaffected — new goods are
+`Manufactured`, so `goods_validation`'s belt-coverage floor does not apply to
+them), `npx tsc --noEmit` clean.
+
+---
+
 ## 2026-09-20b — Port competition finished: Slice 2 dosed to 0.6, Slice 3 built (undosed), staging_hop measured
 
 Continuation of the same session's `PORT_COMPETITION_PLAN.md` work (see

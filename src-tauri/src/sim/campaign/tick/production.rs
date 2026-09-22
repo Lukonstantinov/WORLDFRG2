@@ -1040,6 +1040,22 @@ impl CampaignSim {
         local_satiety_mult_e(LOCAL_SATIETY, tier, supply)
     }
 
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S5 · the entrepot's extra pull — the
+    /// shipped dose (`transit_need_mult_e`, parametrized for testing). Takes
+    /// the hub's CURRENT resident need for `g` (the caller already has it —
+    /// `needs[h][g]` at the wiring site — so this avoids recomputing
+    /// `base_need`, which would be both wasteful and circular). Returns 1.0
+    /// (no effect) at the shipped zero dose or when nothing has arrived
+    /// recently.
+    pub(crate) fn transit_need_mult(&self, h: usize, g: usize, resident_need: f32) -> f32 {
+        if TRANSIT_DEMAND_DOSE <= 0.0 || resident_need <= EPS { return 1.0; }
+        let sbase = g * SUPPLY_CLASSES;
+        let throughput: f32 = (0..SUPPLY_CLASSES)
+            .map(|c| self.hubs[h].supply_accum.get(sbase + c).copied().unwrap_or(0.0).max(0.0))
+            .sum();
+        transit_need_mult_e(TRANSIT_DEMAND_DOSE, TRANSIT_DEMAND_CAP, throughput / resident_need)
+    }
+
     pub(crate) fn base_need(&self, h: usize, g: usize) -> f32 {
         let tg = &self.goods[g];
         // Demand cadence: a good consumed every N days exerts ~30/N of the daily
@@ -2157,6 +2173,12 @@ impl CampaignSim {
                         // sink too, dosed independently from the house rates above.
                         // Shipped at N1B_OWNERLESS_LOSS_RATE = 0.0, so this roll never
                         // fires and the branch is dead code today.
+                        //
+                        // HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — state carriage into a
+                        // metropolis (destination `b` clears ANNONA_MIN_POP) never
+                        // rolls at all, exactly as underwritten grain shipments were
+                        // in the real *annona*. Inert at N1B = 0.0 either way.
+                        self.hubs[b].population < ANNONA_MIN_POP &&
                         N1B_OWNERLESS_LOSS_RATE > 0.0 && hash01(self.seed,
                             (tick as u64) ^ 0x0E15E ^ ((a as u64) << 8) ^ (b as u64),
                             g as u64) < N1B_OWNERLESS_LOSS_RATE
@@ -2207,6 +2229,19 @@ impl CampaignSim {
                             1 => self.hubs[hh].tw_local += amount,
                             _ => self.hubs[hh].tw_guild += amount,
                         }
+                    }
+                    // HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* class.
+                    // ADDITIVE, not a subtraction from the match above: `total =
+                    // tw_house + tw_local + tw_guild` in `merchant_population_
+                    // estimate` (mod.rs) already reads `tw_local`, so stealing
+                    // from it here would move the displayed merchant-population
+                    // split for any world with a metropolis — a real behaviour
+                    // change, not the "cannot move a number by construction"
+                    // the plan's own text asks this slice to be. Tracked
+                    // alongside instead, for a future atlas to read (S8/S11,
+                    // queued) without touching what already reads tw_local.
+                    if owner < 0 && self.hubs[b].population >= ANNONA_MIN_POP {
+                        self.hubs[b].tw_state += amount;
                     }
                     let value = amount * delivered;
                     self.hubs[b].import_spend += value;

@@ -65,8 +65,9 @@ export function CampaignTopBar() {
       key: "society", label: "⚜️ Society",
       items: [
         { label: "⚜️ Merchant Houses", on: ui.showHouses, set: ui.setShowHouses },
+        { label: "⚔ Feuds & Alliances", on: ui.showFeuds, set: ui.setShowFeuds },
         { label: "⚭ Dynasties & Alliances", on: ui.showDynasties, set: ui.setShowDynasties },
-        { label: "🏛 Guilds & Crafts", on: ui.showGuilds, set: ui.setShowGuilds },
+        { label: "🔨 Crafts & Guilds", on: ui.showGuilds, set: ui.setShowGuilds },
         { label: "👤 Notable Figures", on: ui.showFigures, set: ui.setShowFigures },
         { label: "🗿 Landmarks & Sites", on: ui.showLandmarks, set: ui.setShowLandmarks },
         { label: "☠ Plagues & Epidemics", on: ui.showPlagues, set: ui.setShowPlagues },

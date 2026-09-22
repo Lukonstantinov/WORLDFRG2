@@ -1451,6 +1451,201 @@ econ_` (6/6) — per §2.8's own routing table for a `sim/campaign/tick/` change
 
 ---
 
+### 5.6 `docs/HOUSES_GUILDS_AND_MARKET_PLAN.md` — S4 and S7 shipped; the dose walks and the atlas/window redesign are queued
+
+The plan's own build order (§7) puts S4 (craft signatures) and S7 (the orphan
+raws' first recipes) first because both are FREE — S4 touches no sim state at
+all, S7 is a pure goods-catalog addition independent of everything else in the
+plan. Both shipped this session; the plan's three real DOSE WALKS (S1 ownerless
+voyage loss, S3 the guild roster cap, S6 the wartime blockade) and the frontend
+window/atlas redesign (S8-S12) did **not** — each needs its own multi-run gate
+sequence against `econ_inheritance_rules_fragment_differently` (~6 min/run,
+flipped inside its own noise band five times on record) that a single sitting
+cannot responsibly absorb alongside everything else, per the plan's own §9 risk
+register ("three doses in one session is the ceiling"). They remain queued
+exactly as the plan's own §8 numbers them (S1/S2/S3/S5/S6 as dose steps, S8-S12
+as the atlas queries + window split + Houses redesign) — not silently dropped.
+
+- **S4 — craft signatures served, not just earned.** `CraftGuild.signature`
+  (set once tradition + quality both clear their threshold, §8's Institutions
+  entry) existed and was read by nothing. `HubGoodDetail.signature` and
+  `GuildBrief.signature` now carry it (`read_hubs.rs`/`read_trade.rs`); the City
+  Market's row label and open-book header read *"Ypres broadcloth"* in place of
+  *"Woolen Cloth"* wherever a hub's guild has earned one, plain name otherwise —
+  quiet when ordinary, §6's own principle. No sim change; the gate is `cargo
+  check` + `tsc` alone.
+- **S7 — eight new `Distribution::Manufactured` goods**, appended last in
+  `default_custom_goods()` (rule 7 — a good's index is a fixed `TileData.goods`
+  position, never reordered): `ceramics` (clay + timber), `glassware` (bay_salt +
+  timber, the Murano case), `fixed_dye` (alum + dyes, the mordant trade
+  `DEPOSITS_AND_MINING_PLAN.md` deferred), `sailcloth`/`cordage` (hemp [+
+  pitch] — the yards plan's rigging), `armour` (iron + coal), `garum` (herring +
+  bay_salt, the distinctive Roman export), `parchment` (hides + alum, an
+  alternative books input). Each gives one of the five previously-orphaned raws
+  (`clay`/`coal`/`alum`/`hemp`/`pitch` — placed, mined, shipped, consumed by
+  nothing) its first downstream consumer. Categories set explicitly
+  (`custom_category`) rather than left to fall to `"misc"`, so market-needs
+  substitution treats them sensibly (ceramics/parchment as construction/craft,
+  sailcloth/cordage as fiber, armour as metal, fixed_dye as dye, garum as
+  preservative). Gate: `cargo test --lib goods_ -- --nocapture`, read per-good.
+- **S2 — the *annona* carrier class, shipped as a SAFER shape than the plan's
+  own text.** `ANNONA_MIN_POP` (60,000, the same order the old `size_bonus`
+  saturation used) marks a destination as a metropolis; an ownerless shipment
+  bound for one is exempt from N1b's voyage-loss roll (`production.rs::
+  dispatch`) and tracked in a new `TickHub.tw_state`. The plan's own text says
+  `tw_state` is "split out of `tw_local`" — checked, and that would NOT have
+  been inert: `merchant_population_estimate` (mod.rs) already reads `tw_house +
+  tw_local + tw_guild` as its total, so carving state carriage out of `tw_local`
+  would have moved the displayed merchant-population split on any world with a
+  metropolis, which is a real behaviour change, not the "cannot move a number
+  by construction" decision 4 asks for. Shipped ADDITIVELY instead — `tw_state`
+  accrues alongside the existing three, which keeps their sum exactly what it
+  was. Gate: `annona_carriage_is_tracked_additively_and_only_for_great_cities`
+  (`tick::tests`) plus the full `tick::tests` (268/268) and `econ_` (6/6,
+  multi-seed inheritance gate included, 522.82s) — both bit-identical in
+  direction/shape to their pre-S2 numbers (partible 45/32/27 alive by seed,
+  matching the table already on record).
+- **S1 is BLOCKED, not merely undosed — found before writing a line for it.**
+  `N1B_OWNERLESS_LOSS_RATE`'s own doc comment (pre-dating this plan) already
+  records a dose walk attempted at 0.01: `dense_world`'s uncapped trade volume
+  did not fall, it rose **6.4×** (781,472 → 4,991,590 over 40 years), because
+  `dispatch`'s target-room calculation reopens a buyer's deficit the moment a
+  shipment is lost, so a sunk cargo invites MORE dispatch rather than less — a
+  structural feedback, not a tunable collapse. S2's annona exemption protects
+  the metropolitan lanes but does nothing about this: the feedback fires on
+  every NON-metropolitan buyer at any nonzero rate regardless. Fixing it needs
+  the room/deficit calculation to account for cargo already lost this cycle —
+  real, separate work, not attempted here. Re-running the same failed dose
+  walk this session would have cost a multi-seed gate run to relearn a fact
+  already on record; the honest thing was to read the constant's own comment
+  first (§2.4's own discipline: a negative result already written down is not
+  re-litigated without new information).
+- **S3 — the craft guild roster unfreeze.** `GUILD_MAX` (12, world-wide,
+  `guilds_seeded` at tick 0, never founded or dissolved again) is now a sanity
+  bound only (raised to 400); `GUILD_MAX_PER_CITY` (3) is the real per-hub cap.
+  `maybe_found_craft_guild` (yearly, houses.rs) founds a guild at a hub that
+  has practised a manufactured craft past `GUILD_FOUND_TRADITION_YEARS` (3
+  tradition-years — far below `TRADITION_YEARS_FULL`'s 60, since organising a
+  guild is a much lower bar than mastering a craft), gated by a per-candidate
+  yearly roll (`GUILD_FOUND_CHANCE` = 0.20) so a world crossing the threshold
+  on many cities at once doesn't found a dozen guilds in one year.
+  `maybe_dissolve_craft_guild` (yearly) removes a guild whose hub has died, or
+  whose good has gone unmade for `GUILD_DISSOLVE_IDLE_YEARS` (15) consecutive
+  years (`CraftGuild.idle_years`, new field). Both chronicled
+  (`"guild_founded"`/`"guild_dissolved"`), per `INSTITUTIONS_BUILD_ORDER.md`'s
+  governing rule. Gates: `a_craft_guild_is_founded_and_dissolved_over_a_
+  century`, `guild_count_per_city_is_bounded` (both new, `tick::tests`).
+  **The dose walk itself (1 → 3) turned out UNTESTABLE by the standing
+  gates**: `reference_world`/`reference_world_large`/`dense_world`/
+  `simulate_decades_reports_dynamics`'s own fixture all build goods through
+  the plain `good()` helper, whose `inputs` is always empty — every world
+  `tick::tests`/`econ_` runs carries ZERO manufactured goods, so guild
+  founding is structurally a no-op on all of them regardless of the cap.
+  `tick::tests` (270/270) and `econ_` (6/6, multi-seed inheritance gate
+  included) measured bit-identical at `GUILD_MAX_PER_CITY` = 1 and = 3; the
+  shipped value of 3 is the plan's own target, not a value `econ_` actually
+  validated. A future session that wants to genuinely dose this needs a
+  fixture with real recipe goods run through `advance` far enough to show a
+  wealth effect — queue item, see the constant's own doc comment.
+- **S5 — transit demand, shipped inert at zero (no dose walk this session, per
+  the plan's own build order).** `transit_need_mult` reads a hub's recent
+  throughput of a good (`TickHub.supply_accum`, summed across all
+  `SUPPLY_CLASSES`) against its CURRENT resident need (the `needs[h][g]`
+  value the wiring site already holds — never recomputed via `base_need`,
+  which would be both wasteful and circular), bounded by `TRANSIT_DEMAND_CAP`
+  so the feedback loop (more demand → wider arbitrage gap → more transit →
+  more demand) cannot run away. Wired at `mod.rs`'s demand-multiplier site
+  beside `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` — MARKET-FACING `needs[h][g]`
+  only, never `needs_struct` (merchants passing through are not mouths; S7's
+  household-monetization dose already hit and reverted exactly this bug once).
+  Double-gated inert (`TRANSIT_DEMAND_DOSE <= 0.0` short-circuits both the
+  wiring-site loop and the pure `transit_need_mult_e` function), so `tick::
+  tests` (273/273, 3 new) and `econ_` (6/6, multi-seed inheritance gate
+  included, 513.13s) confirming bit-identical output is closer to a
+  formality than a real test — the genuine dose walk is queue item Q2,
+  waiting on `LOCAL_SATIETY`/`FOREIGN_PRESTIGE` being walked first since all
+  three now multiply the same expression.
+- **S6 — dose walk attempted at 0.3, REVERTED (two real regressions).**
+  `BLOCKADE_STAGING_DOSE` reuses the SAME `staging_hop` relay N1/N1c already
+  use, triggered by `war_with` rather than a range cap. At 0.3:
+  `simulate_decades_reports_dynamics` failed its bounded-wealth assertion (a
+  house at −521.4, past the limited-liability floor), and
+  `the_relay_carries_long_lanes_in_stages_on_a_realistically_dense_world`
+  failed its own "the relay is provably inert with the range caps off"
+  assertion (`diag_relay_staged` read 2, not 0) — because that test's "loose"
+  fixture disables N1/N1c's caps but never disables war, and this dose gives
+  the shared relay a third, independent trigger those fixtures never
+  accounted for. Whether the wealth-bound failure is a genuine economic
+  effect or downstream of the same test-assumption gap was not disentangled
+  before reverting — §2.4's own rule: a spot failure on the aggregate gate is
+  a revert, not a judgement call, regardless of which reading is right.
+  Recorded at `BLOCKADE_STAGING_DOSE`'s own doc comment; walking this further
+  needs `the_relay_carries_long_lanes_…`'s fixture updated to account for a
+  live war before the two effects can even be told apart.
+- **S8 — `campaign_house_atlas(idx)`.** A pure derived read
+  (`read_houses.rs`): `partners` (from `House.trade_at`'s persisted weight,
+  enriched with a live `in_transit` scan for real current in/out volume and
+  which goods are moving), `goods` (from `House.good_volume`/`good_profit`,
+  with bought-at/sold-at hubs from the same live scan), `holdings` (seat ·
+  offices · bailos · owned estates · held provinces, each with real map
+  coordinates — a province's from `prov_seat`, since a province has no hub of
+  its own), and `seasons` (a `[f32; 12]` relative-ease curve, `trade_at`-
+  weighted over `CampaignSim::season_mult` — real live seasonal data, but a
+  favorability curve, not a recorded volume-by-month series, since no such
+  history is tracked per house). `season_mult` widened from private to
+  `pub(crate)` for this one caller.
+- **S9 — `campaign_guild_atlas(guild_idx)`.** Same shape, a craft's question
+  instead of a house's: `inputs`/`outputs` from a live `in_transit` scan at
+  the guild's own hub (inputs = arrivals of any of the good's own recipe
+  inputs; outputs = departures of the guild's own good), `reach` (every OTHER
+  hub currently showing real `SUPPLY_FOREIGN` throughput of the good — a
+  rough proxy, documented as such, since no arrival is tagged back to a
+  specific guild), `signature` (served straight from `CraftGuild.signature`),
+  and `tradition_by_year` (length 0 or 1 — only the CURRENT sample, since no
+  year-by-year tradition history is persisted anywhere; a real series is
+  future work, not silently faked).
+  Both S8/S9 are read-only and touch no tile/sim state, so — per the plan's
+  own note — neither can move a gate; verified by `cargo check --lib --tests`
+  and `npx tsc --noEmit` alone, both clean.
+- **S10 — the window split.** `HousesPanel.tsx` (§6/§7's own asymmetry
+  complaint: 1,455 lines carrying a list, tier grouping, a feuds board, a
+  compare launcher and an 11-subtab dossier, against `GuildsPanel.tsx`'s 125)
+  is now BROWSE-ONLY (338 lines): the tier-grouped list, the Compare launcher,
+  and a "🏛 Companies" FILTER CHIP in place of the old "guilds" tab
+  (`House.is_guild` firms are firms, not a different kind of thing — keeping
+  them in a tab beside `CraftGuild` under one word was the naming collision
+  §1 of the plan names). `HouseDetail` and its ten subtabs moved VERBATIM
+  (no rendering logic changed in the move itself) into `HouseDossier.tsx`,
+  which already held `HouseStandingView`/`FeudsView` — now genuinely "one
+  house, everything about it" rather than split across the file that browses
+  ALL of them. A new `FeudsAlliancesPanel.tsx` wraps `FeudsView` with no
+  house focus as its own window (`uiStore.showFeuds`), opened from a new
+  "⚔ Feuds" button in `HousesPanel` and from the Society menu
+  (`CampaignTopBar.tsx`) — a feud belongs to two houses, not one, and was
+  never really a house's tab. `GuildsPanel.tsx` relabelled "🔨 Crafts &
+  Guilds". Shared helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`/
+  `familyRunAt`, used by both the browser and the dossier) split into
+  `houseShared.ts` rather than duplicated or cross-imported, which would
+  create a HousesPanel ↔ HouseDossier import cycle.
+  **Verification caveat, stated plainly**: this environment cannot launch
+  the Tauri GUI (no display), so this was verified by `npx tsc --noEmit`
+  (clean) and a full `vite build` (clean, 181 modules) — type-correctness
+  and bundling, not a human looking at the running window. The user chose
+  to accept this risk explicitly rather than defer S10 to a session that
+  can open a browser; visually exercising the four windows before trusting
+  them is still owed.
+- **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
+  S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
+  see above, waits on the relay-fixture fix before its own dose walk can be
+  re-attempted), S11/S12 (the two atlases with real on-map lane labelling
+  using S8/S9's queries, and the Houses three-band redesign — bump chart,
+  sparkline strips, event ticker). Each waits on exactly what the plan's
+  own §7/§8 already say it waits on (S1/S6 additionally wait on their own
+  newly-found fixture/mechanism fixes) — nothing here changes that
+  sequencing, this entry only records which end of it landed.
+
+---
+
 ## 6. Rust Backend Map (`src-tauri/src/`)
 
 ```
@@ -1482,6 +1677,8 @@ commands/
                                   persisted per-(hub, good) yearly series
       read_people.rs · read_colonies.rs  cultures/pops/figures/dynasties; colonies/migration
       read_trade.rs               goods/routes/futures/warehouses/guilds/schematics/diagnostics
+                                  + campaign_guild_atlas (S9 — a craft's inputs/
+                                  outputs/reach, pure derived read, §5.6)
       read_houses.rs              House Dossier reads: the five STABILITY gauges
                                   (campaign_house_stability) + the FEUD board
                                   (campaign_get_feuds) + the KIN roster
@@ -1497,7 +1694,11 @@ commands/
                                   this house's own offshoots found by scanning for
                                   `origin_house == this`; each hop's `origin_kind` says
                                   WHY: guild-seeded / branch / Partible division /
-                                  Departure schism / independent founding). Four
+                                  Departure schism / independent founding) + the
+                                  ATLAS (`campaign_house_atlas`, HOUSES_GUILDS_
+                                  AND_MARKET_PLAN.md S8 — partner cities, goods
+                                  portfolio, holdings, seasonal lane ease; pure
+                                  derived read, §5.6). Four
                                   of five gauges are pure derivations of state the sim
                                   already held; kin_power_shares/character_phrase
                                   (Phase 2.6/2.3) and the whole crisis engine live in
@@ -2027,27 +2228,41 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   from `detail.culture`/`.minorities`, wares ranked by
                                   value on hand, chip prices from `price/base_value`, no
                                   new IPC
-  HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
-                                  HousesPanel has a world ⚔ Feuds tab; the list is
-                                  GROUPED BY TIER (Phase 1.1, Tier 3/4 collapsed by
-                                  default). A ⚖ Compare button opens `HouseCompareWindow`
-                                  (`HouseCompare.tsx`) — a search-bar-driven two-house
-                                  side-by-side: ruler figures, every stat (standing ·
-                                  trade/transport · trading strategy · monopolies),
-                                  and a minimal `OperationsMap` plotting both houses'
-                                  seat/offices/controlled settlements so a rivalry's
-                                  footprint reads at a glance. Pure frontend aggregation
-                                  of `HouseBrief` fields already fetched — no new backend
-                                  command. Its per-house detail (`HouseDetail`) opens as
-                                  a BIG FLOATING WINDOW (~2.5x the old size, still
-                                  draggable) on a portrait — `cultureFigureSVG` in the
-                                  seat culture's kit and the head's own sex, now with
-                                  POSE (tilt/mirror) and ACCESSORY (pin) variation axes
-                                  on top of the existing build/skin-tone jitter, so two
-                                  heads read as two different people at a glance — a
-                                  coloured frame standing in for a garment recolour, a
-                                  `CoatOfArms` badge at the shoulder, occasion set by
-                                  tier (Phase 1.2) — and its subtabs are
+  HousesPanel/FeudsAlliancesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses,
+                                  feuds, dynasties, crafts — FOUR windows now, not two
+                                  (HOUSES_GUILDS_AND_MARKET_PLAN.md S10, §5.6). `HousesPanel.tsx`
+                                  (338 lines, was 1,455) is BROWSE-ONLY: the tier-grouped
+                                  list (Phase 1.1, Tier 3/4 collapsed by default), the
+                                  ⚖ Compare launcher (`HouseCompareWindow`, `HouseCompare.tsx`
+                                  — a search-bar-driven two-house side-by-side: ruler
+                                  figures, every stat, a minimal `OperationsMap` plotting
+                                  both houses' seat/offices/controlled settlements), and a
+                                  "🏛 Companies" FILTER CHIP in place of the old "guilds"
+                                  TAB — `House.is_guild` firms are firms, not a different
+                                  kind of thing, and keeping them in a tab beside `CraftGuild`
+                                  ("Guilds & Crafts") was what made the naming collision
+                                  visible to users in the first place. An "⚔ Feuds" button
+                                  opens the new `FeudsAlliancesPanel.tsx` — the world's
+                                  quarrels as their OWN window (a feud belongs to two
+                                  houses, not one; it was never a house's tab), wrapping
+                                  `FeudsView` with no house focus. `GuildsPanel.tsx`
+                                  relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts").
+                                  Split helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`,
+                                  used by both the browser and the dossier) live in
+                                  `houseShared.ts` rather than being duplicated or
+                                  cross-imported, which would make a HousesPanel ↔
+                                  HouseDossier import cycle.
+  HouseDossier.tsx              ← The big per-house window — `HouseDetail` (moved here
+                                  verbatim from HousesPanel.tsx in the S10 split) plus its
+                                  ten subtabs, alongside this file's original two views
+                                  (`HouseStandingView`/`FeudsView`). Opens as a BIG FLOATING
+                                  WINDOW (~2.5x the old size, still draggable) on a portrait
+                                  — `cultureFigureSVG` in the seat culture's kit and the
+                                  head's own sex, POSE/ACCESSORY variation axes on top of
+                                  build/skin-tone jitter so two heads read as two different
+                                  people, a coloured frame standing in for a garment
+                                  recolour, a `CoatOfArms` badge at the shoulder, occasion
+                                  set by tier (Phase 1.2) — and its subtabs are
                                   CHRONICLE-FIRST (Phase 1.4, the default tab):
                                   the Phase 0.4 succession line inline, then the
                                   year-grouped event log (`ChronicleTab`), before
@@ -2074,14 +2289,16 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   risings" list; observation only, Phase 3.2-3.6)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
-                                  ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant
-  HouseDossier.tsx              ← The House Dossier's two views: `HouseStandingView`
-                                  (five stability gauges — solvency COUNTDOWN, liquidity
-                                  runway, concentration exposure, succession, cohesion —
-                                  plus liabilities) and `FeudsView` (cause · temperature
-                                  · stage · ending, with each feud's episode log).
-                                  Pips + a PHRASE, never a raw 0..1; a healthy gauge
-                                  stays quiet so the warning colour still means something
+                                  ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant.
+                                  `HouseStandingView` (five stability gauges — solvency
+                                  COUNTDOWN, liquidity runway, concentration exposure,
+                                  succession, cohesion — plus liabilities) and `FeudsView`
+                                  (cause · temperature · stage · ending, with each feud's
+                                  episode log — `house < 0` shows every quarrel in the
+                                  world, which is what `FeudsAlliancesPanel.tsx` calls it
+                                  with) are unchanged from before the split. Pips + a
+                                  PHRASE, never a raw 0..1; a healthy gauge stays quiet so
+                                  the warning colour still means something
   BankPanel/MoneyFinancePanel.tsx ← Bank T-accounts, currencies/mints/monetary chronicle
   SpeculationPanel.tsx          ← DLC 3: Speculation why-chain / Poleis (treasury/tariff/mint/coin)
   CoinCreditPanel.tsx           ← Currencies / Banks / Wars / Crashes / Schematics tabs
@@ -5305,7 +5522,37 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
-HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ APPROVED, NOTHING BUILT. The one-session build
+HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
+                                    guild roster unfreeze) + S4 (craft
+                                    signatures served) + S5 (transit demand,
+                                    shipped inert at zero) + S7 (eight
+                                    orphan-raw recipes) + S8/S9 (the house/
+                                    craft atlas queries) + S10 (the four-
+                                    window split) BUILT AND GATED — see
+                                    CLAUDE.md §5.6. S1 is BLOCKED (a
+                                    pre-existing, already-measured negative
+                                    result, not merely undosed — see queue
+                                    item Q14). S3's own 1→3 dose walk measured
+                                    UNTESTABLE by the standing gates (they
+                                    carry zero manufactured goods). **S6
+                                    dose-walked to 0.3 and REVERTED** — two
+                                    real gate failures (a limited-liability
+                                    breach and a relay-fixture assumption the
+                                    dose invalidates), recorded at
+                                    `BLOCKADE_STAGING_DOSE`'s own doc comment.
+                                    S10 could only be verified by `tsc`/
+                                    `vite build` in this session — no display
+                                    to actually open the four windows in, said
+                                    plainly rather than claimed as tested.
+                                    S11/S12 (the map labelling for S8/S9's
+                                    atlases, the Houses three-band redesign)
+                                    QUEUED, per the plan's own §9 risk
+                                    register — THREE doses attempted this
+                                    session (S1 investigated/blocked, S3
+                                    walked/untestable, S6 walked/reverted), at
+                                    the plan's own stated ceiling; S8/S9/S10
+                                    shipped after since none is a dose. The
+                                    one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

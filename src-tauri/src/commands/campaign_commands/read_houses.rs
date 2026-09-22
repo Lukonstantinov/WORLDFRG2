@@ -734,3 +734,176 @@ pub fn campaign_get_house_lineage(idx: u32, db: State<'_, WorldDb>) -> Result<Ho
 
     Ok(HouseLineage { ancestors, offshoots })
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  HOUSES_GUILDS_AND_MARKET_PLAN.md S8 · THE HOUSE ATLAS
+//
+//  A pure derived read, no new persisted state — every figure below already lives
+//  on `House`/`TickHub`/`CampaignSim.in_transit`. Built for the trade-flow map
+//  window (S11, queued); the query itself is cheap and useful on its own.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/// One partner city this house's trade actually touches.
+#[derive(Serialize)]
+pub struct AtlasPartner {
+    pub hub: u32,
+    pub name: String,
+    pub x: f32,
+    pub y: f32,
+    /// Cargo currently inbound to this hub on this house's own account (a live
+    /// snapshot of `in_transit`, not a history).
+    pub volume_in: f32,
+    /// Cargo currently outbound from this hub on this house's own account.
+    pub volume_out: f32,
+    /// The `House.trade_at` decaying weight for this hub — the persisted,
+    /// slower-moving signal `volume_in`/`volume_out` are a live snapshot of.
+    pub weight: f32,
+    /// Good indices seen moving to/from this hub right now.
+    pub goods: Vec<u32>,
+}
+
+/// One good in this house's portfolio.
+#[derive(Serialize)]
+pub struct AtlasGoodBook {
+    pub good: u32,
+    pub name: String,
+    /// `House.good_volume`/`good_profit` — cumulative, not a rate.
+    pub volume: f32,
+    pub profit: f32,
+    /// Hubs this good is currently arriving FROM on this house's account.
+    pub bought_at: Vec<u32>,
+    /// Hubs this good is currently heading TO on this house's account.
+    pub sold_at: Vec<u32>,
+}
+
+/// One place this house holds something — a seat, an office, a bailo, an
+/// estate, or a province writ (`kind`). `hub` is −1 for a province (a
+/// province is not a hub); `x`/`y` are always real map coordinates.
+#[derive(Serialize)]
+pub struct AtlasHolding {
+    pub kind: String,
+    pub hub: i32,
+    pub x: f32,
+    pub y: f32,
+    pub label: String,
+}
+
+#[derive(Serialize)]
+pub struct HouseAtlas {
+    pub partners: Vec<AtlasPartner>,
+    pub goods: Vec<AtlasGoodBook>,
+    pub holdings: Vec<AtlasHolding>,
+    /// Relative EASE of this house's own lanes by calendar month (0 = January),
+    /// derived live from `CampaignSim::season_mult` on each partner hub's own
+    /// lane, trade_at-weighted, inverted so a HIGHER number means a cheaper/
+    /// faster month to trade — not a recorded volume-by-month series, since no
+    /// such history is tracked per house. All 1.0 on a campaign with no
+    /// seasonal data (`season_slices == 0`, N5 never dosed/an old save).
+    pub seasons: [f32; 12],
+}
+
+#[tauri::command]
+pub fn campaign_house_atlas(idx: u32, db: State<'_, WorldDb>) -> Result<Option<HouseAtlas>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let hi = idx as usize;
+    let house = match sim.houses.get(hi) { Some(h) => h, None => return Ok(None) };
+    let n = sim.hubs.len();
+
+    // Live in_transit scan for THIS house's own cargo — one pass, bucketed by
+    // partner hub and by good, real "what is moving right now" detail on top
+    // of `trade_at`'s slower persisted weight.
+    let mut in_by_hub: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    let mut out_by_hub: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    let mut goods_by_hub: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut bought_at_by_good: std::collections::HashMap<usize, Vec<u32>> = std::collections::HashMap::new();
+    let mut sold_at_by_good: std::collections::HashMap<usize, Vec<u32>> = std::collections::HashMap::new();
+    for t in &sim.in_transit {
+        if t.owner != idx as i32 { continue; }
+        *out_by_hub.entry(t.from).or_insert(0.0) += t.amount;
+        *in_by_hub.entry(t.to).or_insert(0.0) += t.amount;
+        for h in [t.from, t.to] {
+            let v = goods_by_hub.entry(h).or_default();
+            if !v.contains(&(t.good as u32)) { v.push(t.good as u32); }
+        }
+        let bv = bought_at_by_good.entry(t.good).or_default();
+        if !bv.contains(&t.from) { bv.push(t.from); }
+        let sv = sold_at_by_good.entry(t.good).or_default();
+        if !sv.contains(&t.to) { sv.push(t.to); }
+    }
+
+    let partners: Vec<AtlasPartner> = house.trade_at.iter()
+        .filter_map(|&(h, weight)| {
+            let hub = sim.hubs.get(h as usize)?;
+            Some(AtlasPartner {
+                hub: h, name: hub.name.clone(), x: hub.x, y: hub.y,
+                volume_in: in_by_hub.get(&h).copied().unwrap_or(0.0),
+                volume_out: out_by_hub.get(&h).copied().unwrap_or(0.0),
+                weight,
+                goods: goods_by_hub.get(&h).cloned().unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    let goods: Vec<AtlasGoodBook> = house.good_volume.iter().enumerate()
+        .filter(|&(_, &v)| v > 0.0)
+        .filter_map(|(g, &volume)| {
+            let spec = sim.goods.get(g)?;
+            Some(AtlasGoodBook {
+                good: g as u32, name: spec.name.clone(), volume,
+                profit: house.good_profit.get(g).copied().unwrap_or(0.0),
+                bought_at: bought_at_by_good.get(&g).cloned().unwrap_or_default(),
+                sold_at: sold_at_by_good.get(&g).cloned().unwrap_or_default(),
+            })
+        })
+        .collect();
+
+    let mut holdings: Vec<AtlasHolding> = Vec::new();
+    if let Some(seat) = sim.hubs.get(house.hub as usize) {
+        holdings.push(AtlasHolding {
+            kind: "seat".into(), hub: house.hub as i32, x: seat.x, y: seat.y,
+            label: seat.name.clone(),
+        });
+    }
+    for &h in &house.offices {
+        if let Some(hub) = sim.hubs.get(h as usize) {
+            holdings.push(AtlasHolding { kind: "office".into(), hub: h as i32, x: hub.x, y: hub.y, label: hub.name.clone() });
+        }
+    }
+    for &h in &house.bailos {
+        if let Some(hub) = sim.hubs.get(h as usize) {
+            holdings.push(AtlasHolding { kind: "bailo".into(), hub: h as i32, x: hub.x, y: hub.y, label: hub.name.clone() });
+        }
+    }
+    for (h, hub) in sim.hubs.iter().enumerate() {
+        if hub.is_estate && hub.owner_house == idx as i32 {
+            holdings.push(AtlasHolding { kind: "estate".into(), hub: h as i32, x: hub.x, y: hub.y, label: hub.name.clone() });
+        }
+    }
+    for (p, &holder) in sim.prov_holder_house.iter().enumerate() {
+        if holder != idx as i32 { continue; }
+        if let Some(&[x, y]) = sim.prov_seat.get(p) {
+            holdings.push(AtlasHolding { kind: "province".into(), hub: -1, x, y, label: format!("Province {p}") });
+        }
+    }
+
+    // Seasonal ease — trade_at-weighted mean of 1/season_mult across this
+    // house's own partner lanes, sampled at each calendar month's slice.
+    let mut seasons = [1.0f32; 12];
+    if sim.season_slices > 0 && !house.trade_at.is_empty() {
+        let wsum: f32 = house.trade_at.iter().map(|&(_, w)| w.max(0.0)).sum::<f32>().max(1e-6);
+        for month in 0..12usize {
+            let slice = (month * sim.season_slices as usize) / 12;
+            let ease: f32 = house.trade_at.iter()
+                .filter(|&&(h, _)| (h as usize) < n)
+                .map(|&(h, w)| {
+                    let mult = sim.season_mult(house.hub as usize, h as usize, slice).max(0.1);
+                    w.max(0.0) / mult
+                })
+                .sum();
+            seasons[month] = ease / wsum;
+        }
+    }
+
+    Ok(Some(HouseAtlas { partners, goods, holdings, seasons }))
+}

@@ -581,6 +581,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tw_house: 0.0,
                 tw_local: 0.0,
                 tw_guild: 0.0,
+                tw_state: 0.0,
                 estate_kind: 0,
                 estate_tier: 0,
                 mine_depth: 0,

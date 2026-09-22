@@ -91,6 +91,17 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             charter_by_good.insert(g, (h.name.clone(), h.is_guild, share));
         }
     }
+    // HOUSES_GUILDS_AND_MARKET_PLAN.md S4 · this hub's earned craft signatures,
+    // by good. A hub carries at most a handful of guilds, so a linear scan per
+    // hub (not per good) is cheap; `signature` is `None` until the guild clears
+    // both thresholds (`update_craft_guilds`), so most entries stay absent.
+    let mut signature_by_good: HashMap<usize, String> = HashMap::new();
+    for gu in &sim.guilds {
+        if gu.hub as usize != hi { continue; }
+        if let Some(sig) = &gu.signature {
+            signature_by_good.insert(gu.good as usize, sig.clone());
+        }
+    }
     // Per-good world cheapest/dearest (×-world price) across hubs.
     let goods: Vec<HubGoodDetail> = (0..ng)
         .map(|g| {
@@ -134,6 +145,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 grade: if hub.production[g] > 0.0 {
                     crate::sim::tick::quality_grade(hub.quality.get(g).copied().unwrap_or(0.0)).to_string()
                 } else { String::new() },
+                signature: signature_by_good.get(&g).cloned().unwrap_or_default(),
                 price_hist: price_hist[g].to_vec(),
                 vol_hist: vol_hist[g].to_vec(),
                 supply_shares: {

@@ -30,6 +30,7 @@ export const PANEL_TINTS = {
   immigration: "rgba(14,20,26,0.97)", // 🧭 Migration & Immigration — dusk indigo
   province: "rgba(16,22,18,0.97)",  // 🏞 Province Inspector — moss-slate
   war: "rgba(26,15,13,0.97)",       // ⚔ War Council — iron-crimson
+  feuds: "rgba(24,14,14,0.97)",     // ⚔ Feuds & Alliances — a shade off war's crimson
 } as const;
 
 /** Interactive descendants that must NEVER start a window drag — a press on any of

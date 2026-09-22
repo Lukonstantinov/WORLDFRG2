@@ -1,7 +1,50 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: APPROVED, NOTHING BUILT.** Written 2026-09-22 from a measured
-brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
+**Status: S2/S3/S4/S5/S7/S8/S9/S10 BUILT AND GATED; S1 BLOCKED (pre-existing
+negative result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real negative
+result, see below); S11/S12 QUEUED.** Written 2026-09-22 from
+a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
+See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
+`N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
+attempted before this plan existed — 0.01 made `dense_world`'s uncapped
+trade volume rise 6.4× rather than fall, a structural feedback in the
+target-room calculation, not a tunable collapse. S2 (the *annona* carrier
+class) is what the plan asked S1 to be protected by; it shipped, verified
+additive (not a subtraction from `tw_local`, which the plan's own text implied
+but which checking showed would NOT have been inert), and does not by itself
+unblock S1. S3 (the craft guild roster unfreeze) shipped, but its own dose
+walk (`GUILD_MAX_PER_CITY` 1 → 3) turned out UNTESTABLE: every standing gate
+fixture (`reference_world`/`reference_world_large`/`dense_world`/
+`simulate_decades_reports_dynamics`) carries zero manufactured goods, so
+guild founding is structurally inert on all of them regardless of the cap —
+recorded at the constant's own doc comment rather than silently shipped as a
+validated dose. S5 (transit demand) shipped exactly as the plan specifies —
+inert at `TRANSIT_DEMAND_DOSE = 0.0`, its own dose walk explicitly deferred
+to queue item Q2. S6 (the routed wartime blockade) was walked to 0.3 (this
+plan's own §3 instruction) and REVERTED: `simulate_decades_reports_dynamics`
+failed its bounded-wealth assertion and `the_relay_carries_long_lanes_in_
+stages_on_a_realistically_dense_world` failed its own "the relay is inert
+with the caps off" assertion, because `BLOCKADE_STAGING_DOSE` gives the
+shared `staging_hop` relay a THIRD trigger (`war_with`) that test's "loose"
+fixture never accounted for. Recorded at `BLOCKADE_STAGING_DOSE`'s own doc
+comment (`mod.rs`) rather than silently reverted with no trace — new queue
+item Q16. This plan's own §9 risk register names three doses as the session
+ceiling; S1 (investigated, found already blocked), S3 (walked, found
+untestable) and S6 (walked, reverted) are the three spent here — S8/S9 (the
+house/craft atlas queries, `campaign_house_atlas`/`campaign_guild_atlas`)
+shipped afterward in the same session since neither is a dose: both are
+pure derived reads touching no tile/sim state, gated by `cargo check`/`tsc`
+alone per this plan's own §4 note. S10 (the four-window split) shipped in
+the same pass — asked for explicitly by the maintainer despite this
+environment having no display to open the app in (the "attempt it blind,
+carefully" choice, over stopping or a narrower slice): `HousesPanel.tsx`
+went 1,455 → 338 lines (browse-only), `HouseDetail` and its ten subtabs
+moved verbatim into `HouseDossier.tsx`, a new `FeudsAlliancesPanel.tsx`
+wraps the existing `FeudsView` as its own window, and `House.is_guild`
+became a filter chip instead of a tab. Verified by `npx tsc --noEmit` and a
+full `vite build` (both clean) — type-correctness and bundling, never a
+human looking at the running window, which is owed before trusting the
+four windows visually.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -464,6 +507,60 @@ Each item names what it waits for and the gate it will need.
     `MERCHANT_VESSELS_AND_INFORMATION_PLAN` stage 4; the most plausible
     remaining fix for the price/distance gradient, and the prerequisite for
     the staple right.
+14. **Q14 · Fix `dispatch`'s room/deficit reopening before S1 can be dosed at
+    all.** `N1B_OWNERLESS_LOSS_RATE`'s own doc comment records the finding
+    (pre-dating this plan, re-confirmed rather than re-run this session): a
+    lost ownerless shipment does not reduce recorded trade, it reopens the
+    buyer's deficit and invites MORE dispatch, so `dense_world`'s volume rose
+    6.4× at a dose of 0.01 instead of falling. S2 (this session, shipped)
+    protects the metropolitan lanes but cannot touch this — it fires on every
+    non-metropolitan buyer regardless. The room/deficit calculation
+    (`max_stock`/`room` in `production.rs`) needs to account for cargo already
+    lost this cycle (or an equivalent brake) before S1 is safe to dose at any
+    rate. Gate: `n1_bind_stays_healthy_on_a_realistically_dense_world`'s own
+    `dense_world` fixture, re-dosed at the same 0.01 token rate used to find
+    this, must show volume falling rather than rising before raising it
+    further.
+15. **Q15 · Give the standing gates a manufactured-goods fixture.**
+    `reference_world`/`reference_world_large`/`dense_world`/`simulate_decades_
+    reports_dynamics` all build goods through the plain `good()` helper, whose
+    `inputs` is always empty — every craft-guild mechanism (founding,
+    dissolution, quality/tradition, secrecy, signatures) is structurally a
+    no-op on the entire standing `tick::tests`/`econ_` suite, discovered while
+    trying to dose `GUILD_MAX_PER_CITY`. A `manufacturing_world()` fixture (a
+    couple of raws + one manufactured good with real recipe `inputs`, run
+    through `advance` for decades) would let a future session actually dose
+    guild-related constants — and every OTHER manufactured-goods behaviour
+    this codebase has ever shipped dosed-from-zero — against real evidence
+    instead of shipping a plan's target value unvalidated, as S3 had to here.
+    Waits on: nothing technical: it's a fixture-building session.
+16. **Q16 · Give `the_relay_carries_long_lanes_in_stages_on_a_realistically_
+    dense_world`'s "loose" fixture a war-free variant before re-attempting
+    S6.** The dose walk to 0.3 failed that test's own "the relay is provably
+    inert with the range caps off" assertion (`diag_relay_staged` read 2, not
+    0) because `BLOCKADE_STAGING_DOSE` triggers the same shared `staging_hop`
+    relay via `war_with`, independent of the N1/N1c range caps the fixture
+    disables — a trigger that test was never built to account for. It ALSO
+    failed `simulate_decades_reports_dynamics`'s bounded-wealth assertion (a
+    house past the limited-liability floor), and the two failures were not
+    disentangled before reverting: it is not yet known whether the wealth
+    failure is a genuine economic effect of the blockade or a downstream
+    consequence of the same test-assumption gap. Waits on: updating that
+    fixture to either disable war or accept a nonzero staged count when one
+    is live, so the wealth-bound failure can be isolated and re-measured on
+    its own. Gate: both tests, re-dosed at 0.3, one change at a time.
+17. **Q17 · Visually verify S10 in a real browser.** The four-window split
+    (`HousesPanel.tsx`/`HouseDossier.tsx`/`FeudsAlliancesPanel.tsx`/
+    `GuildsPanel.tsx`) was built and verified by `tsc`/`vite build` alone —
+    this session's environment has no display to launch the Tauri app in.
+    Type-correctness and a clean bundle are not the same claim as "the four
+    windows open, position, and read correctly together" (§8.11-adjacent —
+    layout, z-index stacking against the other ~30 windows, the new filter
+    chip's interaction, the Feuds button). Waits on: a session with a
+    browser/dev server. Gate: `npm run tauri dev`, open Houses, toggle the
+    Companies chip, open a house dossier from a card, open Feuds from both
+    the new button and the Society menu, confirm nothing regressed for an
+    existing player save.
 
 ---
 

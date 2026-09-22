@@ -672,10 +672,100 @@ pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, St
             strength: g.strength, hall: g.hall,
             luxury: spec.need_tier >= 2,
             exceptional, brand, culture,
+            signature: g.signature.clone().unwrap_or_default(),
         })
     }).collect();
     out.sort_by(|a, b| b.quality.partial_cmp(&a.quality).unwrap_or(std::cmp::Ordering::Equal));
     Ok(out)
+}
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  HOUSES_GUILDS_AND_MARKET_PLAN.md S9 · THE CRAFT ATLAS
+//
+//  A guild has a craft and a reach, not partners — where the raws come from,
+//  where the finished good goes, and which hubs actually buy the marked good.
+//  Pure derived read, no new persisted state, same discipline as S8.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+#[derive(Serialize)]
+pub struct GuildAtlas {
+    /// Hubs currently shipping one of this good's recipe inputs INTO the
+    /// guild's own hub (a live `in_transit` snapshot).
+    pub inputs: Vec<AtlasPartner>,
+    /// Hubs currently receiving the guild's own finished good FROM its hub.
+    pub outputs: Vec<AtlasPartner>,
+    /// Every OTHER hub with real recent supply of this good attributed to
+    /// FOREIGN sellers (`SUPPLY_FOREIGN` in `TickHub.supply_accum`) — the
+    /// guild's own hub excluded. A rough proxy for "who this craft's name
+    /// actually reaches", since nothing ties a specific arrival back to a
+    /// specific guild once it is on the open market.
+    pub reach: Vec<u32>,
+    pub signature: Option<String>,
+    /// Just the CURRENT tradition-years sample — no year-by-year history is
+    /// persisted anywhere (`TickHub.tradition` is a live value, not a
+    /// series), so this is length 0 or 1, never a real time series. A future
+    /// session wanting a real curve needs to start sampling it yearly.
+    pub tradition_by_year: Vec<f32>,
+}
+
+#[tauri::command]
+pub fn campaign_guild_atlas(guild_idx: u32, db: State<'_, WorldDb>) -> Result<Option<GuildAtlas>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let gu = match sim.guilds.get(guild_idx as usize) { Some(g) => g, None => return Ok(None) };
+    let (hub, good) = (gu.hub as usize, gu.good as usize);
+    let Some(spec) = sim.goods.get(good) else { return Ok(None) };
+
+    let recipe_inputs: std::collections::HashSet<usize> =
+        spec.inputs.iter().map(|&(g, _)| g).collect();
+
+    let mk_partner = |h: u32, amount: f32, goods: Vec<u32>| -> Option<AtlasPartner> {
+        let hb = sim.hubs.get(h as usize)?;
+        Some(AtlasPartner {
+            hub: h, name: hb.name.clone(), x: hb.x, y: hb.y,
+            volume_in: 0.0, volume_out: 0.0, weight: amount, goods,
+        })
+    };
+
+    let mut in_amount: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    let mut in_goods: std::collections::HashMap<u32, Vec<u32>> = std::collections::HashMap::new();
+    let mut out_amount: std::collections::HashMap<u32, f32> = std::collections::HashMap::new();
+    for t in &sim.in_transit {
+        if t.to as usize == hub && recipe_inputs.contains(&t.good) {
+            *in_amount.entry(t.from).or_insert(0.0) += t.amount;
+            let v = in_goods.entry(t.from).or_default();
+            if !v.contains(&(t.good as u32)) { v.push(t.good as u32); }
+        }
+        if t.from as usize == hub && t.good == good {
+            *out_amount.entry(t.to).or_insert(0.0) += t.amount;
+        }
+    }
+    let inputs: Vec<AtlasPartner> = in_amount.into_iter()
+        .filter_map(|(h, amt)| mk_partner(h, amt, in_goods.get(&h).cloned().unwrap_or_default()))
+        .collect();
+    let outputs: Vec<AtlasPartner> = out_amount.into_iter()
+        .filter_map(|(h, amt)| mk_partner(h, amt, vec![good as u32]))
+        .collect();
+
+    let ng = sim.goods.len();
+    let mut reach: Vec<u32> = Vec::new();
+    for (h, hb) in sim.hubs.iter().enumerate() {
+        if h == hub { continue; }
+        if hb.supply_accum.len() != ng * crate::sim::tick::SUPPLY_CLASSES { continue; }
+        let foreign = hb.supply_accum.get(good * crate::sim::tick::SUPPLY_CLASSES + crate::sim::tick::SUPPLY_FOREIGN).copied().unwrap_or(0.0);
+        if foreign > 0.0 { reach.push(h as u32); }
+    }
+
+    let tradition_by_year: Vec<f32> = sim.hubs.get(hub)
+        .and_then(|hb| hb.tradition.get(good))
+        .map(|&t| vec![t])
+        .unwrap_or_default();
+
+    Ok(Some(GuildAtlas {
+        inputs, outputs, reach,
+        signature: gu.signature.clone(),
+        tradition_by_year,
+    }))
 }
 
 
