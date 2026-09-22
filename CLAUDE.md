@@ -5305,6 +5305,44 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
+HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ APPROVED, NOTHING BUILT. The one-session build
+                                    plan for houses, guilds and the settlement
+                                    market, after four decisions: the era is a
+                                    Roman/medieval MIX (no `EraProfile` switch built
+                                    yet — every Roman-flavoured slice ships
+                                    era-NEUTRAL so the axis can be added later, queue
+                                    Q1); the *annona* reframe applies to BIG CITIES
+                                    ONLY; the player stays OBSERVATION-ONLY (so every
+                                    item is a SPECTACLE problem, which is why half the
+                                    plan is atlas and UI); and every behavioural change
+                                    ships dosed from zero. Its cheapness comes from one
+                                    finding: **four mechanisms in it are already fully
+                                    wired and dead at a zero dose** —
+                                    `N1B_OWNERLESS_LOSS_RATE` (the ownerless-cargo loss
+                                    roll, its consequence and its `diag_lost` counter
+                                    all built, constant `0.0`), `BLOCKADE_STAGING_DOSE`,
+                                    `CAPACITY_BIND_DOSE`, and the house trading web on
+                                    the map (`OverlayManager.ts:1602` already routes
+                                    seat→city lanes through the real corridor
+                                    resolver — undirected, unlabelled, no goods in
+                                    it). Twelve slices: signatures (no sim change at
+                                    all) · eight new manufactured goods wiring the
+                                    five ORPHAN RAWS that today have zero downstream
+                                    consumers (clay, coal, alum, hemp, pitch) · the
+                                    annona carrier-class split · three dose walks
+                                    (ownerless loss, a per-city guild cap, the routed
+                                    blockade) · transit demand built inert · two
+                                    atlas queries · the four-window split · the
+                                    House/Craft Atlas with real on-map lane labelling
+                                    · the Houses redesign (bump chart, sparkline
+                                    strips, event ticker, dossier timeline). Carries a
+                                    STOP MARKER (§7) so a short session still lands
+                                    something coherent, a 13-item numbered QUEUE
+                                    (§8, rule 36 — each naming what it waits for),
+                                    and a risk register whose first line is that three
+                                    doses in one session is the ceiling against an
+                                    instrument that has flipped inside its own noise
+                                    band five times
 ACTORS_AND_CARRIAGE_PLAN.md       ← ⭐ MEASURED + PLANNED, one diagnostic built,
                                     no proposal implemented. WHO MOVES THE CARGO:
                                     `econ_measure_carrier_mix` finds **95.7% of all
