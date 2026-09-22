@@ -1520,14 +1520,41 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   already on record; the honest thing was to read the constant's own comment
   first (§2.4's own discipline: a negative result already written down is not
   re-litigated without new information).
+- **S3 — the craft guild roster unfreeze.** `GUILD_MAX` (12, world-wide,
+  `guilds_seeded` at tick 0, never founded or dissolved again) is now a sanity
+  bound only (raised to 400); `GUILD_MAX_PER_CITY` (3) is the real per-hub cap.
+  `maybe_found_craft_guild` (yearly, houses.rs) founds a guild at a hub that
+  has practised a manufactured craft past `GUILD_FOUND_TRADITION_YEARS` (3
+  tradition-years — far below `TRADITION_YEARS_FULL`'s 60, since organising a
+  guild is a much lower bar than mastering a craft), gated by a per-candidate
+  yearly roll (`GUILD_FOUND_CHANCE` = 0.20) so a world crossing the threshold
+  on many cities at once doesn't found a dozen guilds in one year.
+  `maybe_dissolve_craft_guild` (yearly) removes a guild whose hub has died, or
+  whose good has gone unmade for `GUILD_DISSOLVE_IDLE_YEARS` (15) consecutive
+  years (`CraftGuild.idle_years`, new field). Both chronicled
+  (`"guild_founded"`/`"guild_dissolved"`), per `INSTITUTIONS_BUILD_ORDER.md`'s
+  governing rule. Gates: `a_craft_guild_is_founded_and_dissolved_over_a_
+  century`, `guild_count_per_city_is_bounded` (both new, `tick::tests`).
+  **The dose walk itself (1 → 3) turned out UNTESTABLE by the standing
+  gates**: `reference_world`/`reference_world_large`/`dense_world`/
+  `simulate_decades_reports_dynamics`'s own fixture all build goods through
+  the plain `good()` helper, whose `inputs` is always empty — every world
+  `tick::tests`/`econ_` runs carries ZERO manufactured goods, so guild
+  founding is structurally a no-op on all of them regardless of the cap.
+  `tick::tests` (270/270) and `econ_` (6/6, multi-seed inheritance gate
+  included) measured bit-identical at `GUILD_MAX_PER_CITY` = 1 and = 3; the
+  shipped value of 3 is the plan's own target, not a value `econ_` actually
+  validated. A future session that wants to genuinely dose this needs a
+  fixture with real recipe goods run through `advance` far enough to show a
+  wealth effect — queue item, see the constant's own doc comment.
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
-  S1 (blocked — see above, waits on the room/deficit fix), S3/S5/S6 (the
-  remaining dose walks — the guild-roster unfreeze, transit demand, the
-  wartime blockade), S8/S9 (the house/guild atlas queries), S10-S12 (the
-  four-window split, the two atlases with map labelling, the Houses redesign).
-  Each waits on exactly what the plan's own §7/§8 already say it waits on
-  (S1 additionally waits on the newly-found room/deficit fix) — nothing here
-  changes that sequencing, this entry only records which end of it landed.
+  S1 (blocked — see above, waits on the room/deficit fix), S5/S6 (the
+  remaining dose walks — transit demand, the wartime blockade), S8/S9 (the
+  house/guild atlas queries), S10-S12 (the four-window split, the two atlases
+  with map labelling, the Houses redesign). Each waits on exactly what the
+  plan's own §7/§8 already say it waits on (S1 additionally waits on the
+  newly-found room/deficit fix) — nothing here changes that sequencing, this
+  entry only records which end of it landed.
 
 ---
 
@@ -5385,16 +5412,20 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
-HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S4 (craft
+HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
+                                    guild roster unfreeze) + S4 (craft
                                     signatures served) + S7 (eight orphan-raw
                                     recipes) BUILT AND GATED — see CLAUDE.md
                                     §5.6. S1 is BLOCKED (a pre-existing,
                                     already-measured negative result, not
-                                    merely undosed — see queue item Q14).
-                                    S3/S5/S6 (the remaining dose walks) and
-                                    S8-S12 (the atlas queries + the
-                                    four-window/Houses redesign) QUEUED, per the
-                                    plan's own §9 risk register. The one-session build
+                                    merely undosed — see queue item Q14). S3's
+                                    own 1→3 dose walk measured UNTESTABLE by
+                                    the standing gates (they carry zero
+                                    manufactured goods). S5/S6 (the remaining
+                                    dose walks) and S8-S12 (the atlas queries +
+                                    the four-window/Houses redesign) QUEUED,
+                                    per the plan's own §9 risk register. The
+                                    one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

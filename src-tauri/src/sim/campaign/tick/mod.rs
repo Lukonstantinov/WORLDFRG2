@@ -6201,7 +6201,50 @@ pub fn feud_stage(intensity: f32, current: u8) -> u8 {
 
 /// Phase 5 (flavour) · craft-guild tuning (bounded quality lift; a strike is a
 /// short, capped manufacture dent via the existing production-shock path).
-const GUILD_MAX: usize = 12;
+///
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S3 — `GUILD_MAX` used to be the WORLD
+/// cap: 12 guilds seeded once at tick 0, `guilds_seeded` never cleared, no
+/// founding or dissolution pass ever ran, against 23 manufactured goods. It is
+/// now a sanity bound only (a guild count that could never legitimately be
+/// reached on any realistic world), and `GUILD_MAX_PER_CITY` is the real,
+/// per-hub cap `maybe_found_craft_guild` enforces.
+const GUILD_MAX: usize = 400;
+/// S3 — the real per-city cap. Intended as a DOSE (guild count feeds
+/// `update_good_quality`'s tradition-growth multiplier and, via `hall`, civic
+/// stability, so raising it could in principle move wealth) — but walking it
+/// 1 → 3 against `tick::tests` + `econ_` (both runs, `econ_` including the
+/// multi-seed inheritance gate) measured **bit-identical** results at both
+/// values, because `reference_world`/`reference_world_large`/`dense_world`/
+/// `simulate_decades_reports_dynamics`'s own fixture all build their goods
+/// through the plain `good()` helper, whose `inputs` is always empty — every
+/// standing gate in this codebase carries ZERO manufactured goods, so
+/// `maybe_found_craft_guild` is structurally a no-op on all of them regardless
+/// of this cap. The dose walk this constant's own history asks for cannot be
+/// performed by the existing instruments; shipping the plan's target value (3)
+/// is not validated by `econ_` so much as UNTESTED by it. A future session
+/// that wants to actually dose this needs a fixture carrying real recipe
+/// goods run through `advance` (my own new unit tests exercise founding/
+/// dissolution directly, which is real coverage, but not through the dynamics
+/// run that would show a wealth effect). See `docs/SCOREBOARD.md`'s dated
+/// entry.
+const GUILD_MAX_PER_CITY: usize = 3;
+/// S3 — a hub producing a manufactured good for at least this many tradition-
+/// years (`TickHub.tradition`, independent of any guild — it accrues on raw
+/// practice too, just slower) is organised enough to found a guild. Far below
+/// `TRADITION_YEARS_FULL` (60, the years for the QUALITY ceiling to fill) —
+/// forming a guild is a much lower bar than mastering a craft, historically
+/// (guilds organised early; excellence came later, sometimes generations on).
+const GUILD_FOUND_TRADITION_YEARS: f32 = 3.0;
+/// S3 — a yearly, per-eligible-(hub,good) chance of actually founding, so a
+/// world crossing the threshold on many cities at once doesn't found a dozen
+/// guilds in a single year. Same shape as every other yearly `maybe_*` roll
+/// in this file (`STEWARD_POACH_CHANCE`, `PIRACY_YEARLY_CHANCE`, …).
+const GUILD_FOUND_CHANCE: f32 = 0.20;
+/// S3 — consecutive years with zero production of the guild's own good before
+/// it dissolves (`CraftGuild.idle_years`). Longer than a single bad harvest or
+/// a strike (`GUILD_STRIKE_CHANCE`'s dent lasts weeks, not years), short
+/// enough that a genuinely abandoned craft does not haunt the roster forever.
+const GUILD_DISSOLVE_IDLE_YEARS: f32 = 15.0;
 const GUILD_QUALITY_STEP: f32 = 0.03;
 const GUILD_QUALITY_CAP: f32 = 0.92;
 const GUILD_STRIKE_CHANCE: f32 = 0.10;
@@ -6397,6 +6440,14 @@ pub struct CraftGuild {
     /// `None` until then, set once, permanent (`is_house_milestone`'s own
     /// discipline applied to a city rather than a house).
     #[serde(default)] pub signature: Option<String>,
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S3 — consecutive YEARS this guild's
+    /// good has gone unmade at its own hub, read by `maybe_dissolve_craft_
+    /// guild`. Resets to 0 the moment production resumes; a guild past
+    /// `GUILD_DISSOLVE_IDLE_YEARS` dissolves. `#[serde(default)]` — an old
+    /// save's guild (seeded once at tick 0, never dissolved before this
+    /// slice) starts at 0, the honest reading for a guild nobody was
+    /// tracking idleness on.
+    #[serde(default)] pub idle_years: f32,
 }
 
 /// Phase 6 (observability) · one city struck by plague — recorded for the Plagues &
@@ -8930,8 +8981,14 @@ impl CampaignSim {
                 self.arbitrate_feuds(yr);
                 // Phase 5 (flavour) · dynastic marriages/alliances between houses.
                 self.arrange_marriages(yr);
+                // HOUSES_GUILDS_AND_MARKET_PLAN.md S3 · dissolve first (a dead or
+                // idle guild should not run this year), then the existing pass,
+                // then found any new ones — a freshly founded guild gets no
+                // same-year head start on quality/hall/secrecy.
+                self.maybe_dissolve_craft_guild();
                 // Phase 5 (flavour) · craft guilds master their craft, strike, build.
                 self.run_craft_guilds(yr);
+                self.maybe_found_craft_guild(yr);
                 // Standing laws (kinds 4-5) — a grain law after a real famine, a guild
                 // monopoly once a guild's hall stands. Reads this year's `starving`/
                 // guild state, so runs right after both are updated above.

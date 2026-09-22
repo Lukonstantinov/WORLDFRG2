@@ -8234,7 +8234,7 @@
         ];
         for h in hubs.iter_mut() { h.quality = vec![0.0]; h.tradition = vec![0.0]; }
         let mut s = sim(hubs, goods);
-        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.3, hall: false, secrecy: 0.0, signature: None });
+        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.3, hall: false, secrecy: 0.0, signature: None, idle_years: 0.0 });
         for _ in 0..120 { s.update_good_quality(); } // 10 years
         assert!(s.hubs[0].tradition[0] > s.hubs[1].tradition[0],
             "the guilded hub must accumulate tradition faster over the same decade");
@@ -8266,7 +8266,7 @@
                 s.hubs[h].owner_house = h as i32;
             }
             s.hubs[0].quality[0] = 0.95; // the leader, far ahead
-            s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.6, hall: true, secrecy, signature: None });
+            s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.6, hall: true, secrecy, signature: None, idle_years: 0.0 });
             s.houses = (0..n).map(|h| {
                 let mut ho = house_at(h as u32, vec![0], 0);
                 ho.archetype = 0; // not ARCH_FLEET, which is excluded from spying
@@ -8316,7 +8316,7 @@
         hubs[0].production = vec![1.0]; hubs[0].tradition = vec![40.0]; hubs[0].treasury = 10.0;
         hubs[1].production = vec![1.0]; hubs[1].tradition = vec![2.0]; hubs[1].treasury = 5000.0; // rich enough to bribe
         let mut s = sim(hubs, goods);
-        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.6, hall: true, secrecy: 0.0, signature: None });
+        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.6, hall: true, secrecy: 0.0, signature: None, idle_years: 0.0 });
         let mut poached = false;
         for yr in 0..2000u32 {
             let strength_before = s.guilds[0].strength;
@@ -9148,6 +9148,75 @@
         assert!((out - 7.0).abs() < 1e-4, "expected 7 units priced out, got {out}");
         // Affluent household, same ration: nothing priced out.
         assert_eq!(household_priced_out(10.0, 1000.0, 1.0, 1.0), 0.0);
+    }
+
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S3 — the roster unfreeze. A hub that
+    /// practises a manufactured craft long enough founds a guild (was:
+    /// world-capped at 12, seeded once at tick 0, never founded or dissolved
+    /// again); once it stops producing for long enough, the guild dissolves.
+    #[test]
+    fn a_craft_guild_is_founded_and_dissolved_over_a_century() {
+        let mut g = good("glass", 1, 2, 10.0, 0.4, false);
+        g.inputs = vec![(0, 1.0)]; // manufactured (self-referential dummy input)
+        let goods = vec![g];
+        let mut h = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        h.quality = vec![0.0];
+        h.tradition = vec![0.0];
+        let mut s = sim(vec![h], goods);
+
+        // Accumulate tradition past the founding threshold by producing for
+        // enough months (`update_good_quality` is what `advance` calls monthly).
+        for _ in 0..((GUILD_FOUND_TRADITION_YEARS as u32 + 1) * 12) {
+            s.update_good_quality();
+        }
+        assert!(s.hubs[0].tradition[0] >= GUILD_FOUND_TRADITION_YEARS,
+            "the fixture must actually clear the founding threshold");
+        assert!(s.guilds.is_empty(), "no guild should exist before founding runs");
+
+        // GUILD_FOUND_CHANCE is a yearly roll, not a certainty — try enough
+        // years that the ~0.8^n failure probability is negligible.
+        let mut founded = false;
+        for yr in 0..60u32 {
+            s.maybe_found_craft_guild(yr);
+            if !s.guilds.is_empty() { founded = true; break; }
+        }
+        assert!(founded, "a hub well past the tradition threshold must found a guild within 60 yearly rolls");
+        assert_eq!(s.guilds[0].hub, 0);
+        assert_eq!(s.guilds[0].good, 0);
+
+        // Stop producing — the guild must dissolve once GUILD_DISSOLVE_IDLE_YEARS
+        // of idleness pass, and not a moment before.
+        s.hubs[0].production[0] = 0.0;
+        for _ in 0..(GUILD_DISSOLVE_IDLE_YEARS as u32 - 1) {
+            s.maybe_dissolve_craft_guild();
+        }
+        assert!(!s.guilds.is_empty(), "a guild must survive short of the idle threshold");
+        s.maybe_dissolve_craft_guild();
+        assert!(s.guilds.is_empty(), "a guild whose good has gone unmade long enough must dissolve");
+    }
+
+    /// S3 companion — `GUILD_MAX_PER_CITY` is a real cap, not a suggestion.
+    /// One hub with far more eligible manufactured goods than the cap allows.
+    #[test]
+    fn guild_count_per_city_is_bounded() {
+        const NG: usize = 8;
+        let goods: Vec<TickGood> = (0..NG).map(|i| {
+            let mut g = good(&format!("craft{i}"), 1, 2, 10.0, 0.4, false);
+            g.inputs = vec![(i, 1.0)]; // manufactured
+            g
+        }).collect();
+        let mut h = hub(0, 0.0, 0.0, 50_000.0, vec![10.0; NG], 0);
+        h.quality = vec![0.0; NG];
+        h.tradition = vec![GUILD_FOUND_TRADITION_YEARS + 1.0; NG]; // already past threshold
+        let mut s = sim(vec![h], goods);
+        for yr in 0..200u32 {
+            s.maybe_found_craft_guild(yr);
+        }
+        let per_hub = s.guilds.iter().filter(|g| g.hub == 0).count();
+        assert!(per_hub <= GUILD_MAX_PER_CITY,
+            "a single hub must never exceed GUILD_MAX_PER_CITY guilds, got {per_hub}");
+        assert_eq!(per_hub, GUILD_MAX_PER_CITY,
+            "with {NG} eligible goods over 200 yearly rolls, the cap must actually bind");
     }
 
     /// HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* class is tracked

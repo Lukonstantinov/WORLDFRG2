@@ -1,7 +1,7 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S2/S4/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
-result, not merely undosed); S3/S5/S6/S8-S12 QUEUED.** Written 2026-09-22 from
+**Status: S2/S3/S4/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
+result, not merely undosed); S5/S6/S8-S12 QUEUED.** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -11,7 +11,13 @@ target-room calculation, not a tunable collapse. S2 (the *annona* carrier
 class) is what the plan asked S1 to be protected by; it shipped, verified
 additive (not a subtraction from `tw_local`, which the plan's own text implied
 but which checking showed would NOT have been inert), and does not by itself
-unblock S1.
+unblock S1. S3 (the craft guild roster unfreeze) shipped, but its own dose
+walk (`GUILD_MAX_PER_CITY` 1 → 3) turned out UNTESTABLE: every standing gate
+fixture (`reference_world`/`reference_world_large`/`dense_world`/
+`simulate_decades_reports_dynamics`) carries zero manufactured goods, so
+guild founding is structurally inert on all of them regardless of the cap —
+recorded at the constant's own doc comment rather than silently shipped as a
+validated dose.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -488,6 +494,19 @@ Each item names what it waits for and the gate it will need.
     `dense_world` fixture, re-dosed at the same 0.01 token rate used to find
     this, must show volume falling rather than rising before raising it
     further.
+15. **Q15 · Give the standing gates a manufactured-goods fixture.**
+    `reference_world`/`reference_world_large`/`dense_world`/`simulate_decades_
+    reports_dynamics` all build goods through the plain `good()` helper, whose
+    `inputs` is always empty — every craft-guild mechanism (founding,
+    dissolution, quality/tradition, secrecy, signatures) is structurally a
+    no-op on the entire standing `tick::tests`/`econ_` suite, discovered while
+    trying to dose `GUILD_MAX_PER_CITY`. A `manufacturing_world()` fixture (a
+    couple of raws + one manufactured good with real recipe `inputs`, run
+    through `advance` for decades) would let a future session actually dose
+    guild-related constants — and every OTHER manufactured-goods behaviour
+    this codebase has ever shipped dosed-from-zero — against real evidence
+    instead of shipping a plan's target value unvalidated, as S3 had to here.
+    Waits on: nothing technical: it's a fixture-building session.
 
 ---
 

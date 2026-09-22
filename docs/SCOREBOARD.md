@@ -9,6 +9,44 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22c — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S3 (craft guild roster unfreeze) shipped; its dose walk found untestable
+
+Continuation of the same day's session (see 2026-09-22b below). `GUILD_MAX`
+(12, world-wide, seeded once at tick 0, never founded or dissolved again) is
+now a sanity bound only (400); `GUILD_MAX_PER_CITY` (3) is the real per-hub
+cap. `maybe_found_craft_guild` (yearly) founds a guild at a hub past
+`GUILD_FOUND_TRADITION_YEARS` (3) tradition-years in a manufactured good,
+gated by a yearly per-candidate roll (`GUILD_FOUND_CHANCE` = 0.20) so many
+eligible cities don't all found in the same year; `maybe_dissolve_craft_guild`
+removes a guild whose hub has died or whose good has gone unmade for
+`GUILD_DISSOLVE_IDLE_YEARS` (15) years (new `CraftGuild.idle_years` field).
+Both chronicled. New gates: `a_craft_guild_is_founded_and_dissolved_over_a_
+century`, `guild_count_per_city_is_bounded`.
+
+**The dose walk itself (1 → 3, per the plan's own §7 instruction) measured
+BIT-IDENTICAL at both values on `tick::tests` (270/270) and `econ_` (6/6,
+multi-seed inheritance gate included, ~515s each run) — not because the
+mechanism is safe, but because it never fires.** `reference_world`/
+`reference_world_large`/`dense_world`/`simulate_decades_reports_dynamics`'s
+own fixture all build their goods through the plain `good()` helper, whose
+`inputs` is always `vec![]` — every world these gates ever run carries ZERO
+manufactured goods, so `maybe_found_craft_guild`'s `!self.goods[g].inputs.
+is_empty()` check is never once true on any of them. The shipped value (3,
+the plan's own target) is therefore UNVALIDATED by `econ_`, not merely
+under-dosed — a genuinely different finding from "we walked it and it was
+safe." New queue item Q15 (`docs/HOUSES_GUILDS_AND_MARKET_PLAN.md`) names
+what a future session needs: a fixture with real recipe goods run through
+`advance` long enough to show a wealth effect, which does not exist anywhere
+in this codebase's standing test suite today.
+
+Gates run: `cargo check --lib --tests` clean, `cargo test --lib tick::tests`
+270/270 (2 new) at both `GUILD_MAX_PER_CITY = 1` and `= 3`, `cargo test --lib
+econ_ -- --nocapture` 6/6 at both values (514.87s / — both runs bit-identical
+to each other and to the pre-S3 baseline), `cargo test --lib goods_` 18/18
+(unaffected, as expected — S3 touches no goods placement).
+
+---
+
 ## 2026-09-22b — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S2 (annona) shipped; S1 found already-blocked
 
 Continuation of the same day's session (see 2026-09-22 below). Next in the

@@ -2517,7 +2517,7 @@ impl CampaignSim {
             }
             if best_hub != usize::MAX && best > 0.0 {
                 guilds.push(CraftGuild { hub: best_hub as u32, good: g as u32, strength: 0.3, hall: false,
-                    secrecy: 0.0, signature: None });
+                    secrecy: 0.0, signature: None, idle_years: 0.0 });
             }
         }
         // Keep the strongest guilds (by their host city's output) if we overflow.
@@ -2531,6 +2531,86 @@ impl CampaignSim {
         self.guilds = guilds;
     }
 
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S3 · the roster unfreeze. A hub that
+    /// has practised a manufactured craft long enough (`GUILD_FOUND_TRADITION_
+    /// YEARS`, far below what it takes to MASTER one — see that constant's own
+    /// doc) and carries no guild in it yet may found one, bounded by a real
+    /// per-city cap (`GUILD_MAX_PER_CITY`) and a world sanity bound
+    /// (`GUILD_MAX`, no longer the binding constraint it used to be at 12).
+    /// A yearly per-candidate roll (`GUILD_FOUND_CHANCE`) keeps a world that
+    /// crosses the threshold on many cities at once from founding a dozen
+    /// guilds in the same year.
+    pub(crate) fn maybe_found_craft_guild(&mut self, yr: u32) {
+        if self.guilds.len() >= GUILD_MAX { return; }
+        let ng = self.goods.len();
+        let n = self.hubs.len();
+        let mut per_hub = vec![0u32; n];
+        for gd in &self.guilds {
+            if (gd.hub as usize) < n { per_hub[gd.hub as usize] += 1; }
+        }
+        let mut founded: Vec<(usize, usize)> = Vec::new();
+        'hubs: for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if self.hubs[h].tradition.len() != ng { continue; }
+            for g in 0..ng {
+                if per_hub[h] as usize >= GUILD_MAX_PER_CITY { continue 'hubs; }
+                if self.goods[g].inputs.is_empty() { continue; } // manufactured only
+                if self.hubs[h].production.get(g).copied().unwrap_or(0.0) <= 0.0 { continue; }
+                if self.hubs[h].tradition[g] < GUILD_FOUND_TRADITION_YEARS { continue; }
+                if self.guilds.iter().any(|gd| gd.hub as usize == h && gd.good as usize == g) { continue; }
+                if hash01(self.seed, yr as u64 ^ 0x6D1D, (h * ng + g) as u64) >= GUILD_FOUND_CHANCE { continue; }
+                founded.push((h, g));
+                per_hub[h] += 1;
+                if self.guilds.len() + founded.len() >= GUILD_MAX { break 'hubs; }
+            }
+        }
+        for (h, g) in founded {
+            self.guilds.push(CraftGuild { hub: h as u32, good: g as u32, strength: 0.15, hall: false,
+                secrecy: 0.0, signature: None, idle_years: 0.0 });
+            let (city, gn) = (self.hubs[h].name.clone(), self.goods[g].name.clone());
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "guild_founded".into(), hub: h as i32, good: g as i32,
+                value: 0.0, text: format!("The masters of {} in {} found a guild.", gn, city),
+            });
+        }
+    }
+
+    /// S3 · the roster's other missing half. A guild whose hub has died, or
+    /// whose good has gone unmade for `GUILD_DISSOLVE_IDLE_YEARS` consecutive
+    /// years, dissolves — chronicled the same way founding is
+    /// (`INSTITUTIONS_BUILD_ORDER.md`'s governing rule: a slice names what it
+    /// writes to the chronicle or it is not done).
+    pub(crate) fn maybe_dissolve_craft_guild(&mut self) {
+        let ng = self.goods.len();
+        let mut dissolved: Vec<usize> = Vec::new();
+        for gi in 0..self.guilds.len() {
+            let (hub, good) = (self.guilds[gi].hub as usize, self.guilds[gi].good as usize);
+            if hub >= self.hubs.len() || self.hubs[hub].abandoned {
+                dissolved.push(gi);
+                continue;
+            }
+            let producing = good < ng && self.hubs[hub].production.get(good).copied().unwrap_or(0.0) > 0.0;
+            if producing {
+                self.guilds[gi].idle_years = 0.0;
+            } else {
+                self.guilds[gi].idle_years += 1.0;
+                if self.guilds[gi].idle_years >= GUILD_DISSOLVE_IDLE_YEARS {
+                    dissolved.push(gi);
+                }
+            }
+        }
+        // Highest index first so removing one never invalidates an earlier index.
+        for &gi in dissolved.iter().rev() {
+            let (hub, good) = (self.guilds[gi].hub as usize, self.guilds[gi].good as usize);
+            let city = self.hubs.get(hub).map(|h| h.name.clone()).unwrap_or_else(|| "a lost city".into());
+            let gn = self.goods.get(good).map(|g| g.name.clone()).unwrap_or_default();
+            self.guilds.remove(gi);
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "guild_dissolved".into(), hub: hub as i32, good: good as i32,
+                value: 0.0, text: format!("The {} guild of {} dissolves.", gn, city),
+            });
+        }
+    }
 
     /// Phase 5 (flavour) · run the CRAFT GUILDS yearly: lift their good's local
     /// quality, occasionally strike (a short manufacture dent), and raise a guildhall
