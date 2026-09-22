@@ -376,6 +376,24 @@ const N1_LOCAL_HAUL_BIND_DAYS: f32 = 90.0;
 /// §2.4: a 6.4× swing on the very gate meant to catch a collapse is a
 /// structural finding, not a value to tune around.
 const N1B_OWNERLESS_LOSS_RATE: f32 = 0.0;
+/// HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* reframe applies to BIG
+/// CITIES ONLY (§0 decision 2): an ownerless shipment whose DESTINATION clears
+/// this population is STATE CARRIAGE, not an ordinary anonymous haul — exempt
+/// from N1b's voyage-loss roll (`production.rs::dispatch`) the way grain into
+/// Rome or Constantinople was underwritten rather than left to chance.
+/// Everywhere else the residual takes N1b's full rate. Same order the old
+/// `size_bonus` population term saturated at (§8.16-adjacent city-scale
+/// convention) — a genuine metropolis on a real generated world, not an
+/// arbitrary round number.
+///
+/// This is what is meant to make N1b safe to dose harder in a future session:
+/// the lanes that genuinely must not be disrupted (grain into the great
+/// cities) are explicitly protected before that dose is raised again. It does
+/// **not** by itself fix N1b's own measured blocker (the comment above this
+/// constant) — the room/deficit reopening a lost shipment invites is a
+/// per-buyer feedback independent of which lanes are annona-exempt, and would
+/// still fire on every non-metropolitan buyer at any nonzero N1b rate.
+const ANNONA_MIN_POP: f32 = 60_000.0;
 /// A world's equatorial circumference in km — the same conversion every other
 /// module states locally per rule 25 (`localities.rs`, `deposits.rs`,
 /// `landform.rs`, `landmass_ops.rs`), so a cell-space distance can be read as
@@ -3621,6 +3639,14 @@ pub struct TickHub {
     #[serde(default)] pub tw_house: f32,
     #[serde(default)] pub tw_local: f32,
     #[serde(default)] pub tw_guild: f32,
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* class: an ownerless
+    /// shipment whose DESTINATION clears `ANNONA_MIN_POP` is state carriage
+    /// into a metropolis. Tracked ADDITIVELY alongside `tw_house`/`tw_local`/
+    /// `tw_guild` (not carved out of `tw_local`) so `merchant_population_
+    /// estimate`'s existing three-way split — which reads those three fields'
+    /// sum as its total — is provably unaffected; a future atlas reads this
+    /// field on its own. `#[serde(default)]` — an old save reads 0.0 here.
+    #[serde(default)] pub tw_state: f32,
     /// Estate type (0 none / 1 farm / 2 mine / 3 plantation / 4 fishery / 5 vineyard).
     /// Non-zero only when `is_estate`; drives its produced good + the inspector label.
     #[serde(default)] pub estate_kind: u8,

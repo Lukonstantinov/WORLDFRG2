@@ -1,12 +1,17 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S4 AND S7 BUILT AND GATED; S1/S2/S3/S5/S6/S8-S12 QUEUED.** Written
-2026-09-22 from a measured brainstorm over `sim/campaign/tick/`, `render/`,
-`src/ui/campaign/`. See `CLAUDE.md` §5.6 for what shipped and why the dose
-walks + atlas/window redesign did not land in the same session (§9's own risk
-register: three doses against one fragile shared instrument is the ceiling,
-and this session spent its budget on the two free, independent slices
-instead of starting a dose walk it could not finish and verify in full).
+**Status: S2/S4/S7 BUILT AND GATED; S1 BLOCKED (pre-existing negative
+result, not merely undosed); S3/S5/S6/S8-S12 QUEUED.** Written 2026-09-22 from
+a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
+See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
+`N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
+attempted before this plan existed — 0.01 made `dense_world`'s uncapped
+trade volume rise 6.4× rather than fall, a structural feedback in the
+target-room calculation, not a tunable collapse. S2 (the *annona* carrier
+class) is what the plan asked S1 to be protected by; it shipped, verified
+additive (not a subtraction from `tw_local`, which the plan's own text implied
+but which checking showed would NOT have been inert), and does not by itself
+unblock S1.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -469,6 +474,20 @@ Each item names what it waits for and the gate it will need.
     `MERCHANT_VESSELS_AND_INFORMATION_PLAN` stage 4; the most plausible
     remaining fix for the price/distance gradient, and the prerequisite for
     the staple right.
+14. **Q14 · Fix `dispatch`'s room/deficit reopening before S1 can be dosed at
+    all.** `N1B_OWNERLESS_LOSS_RATE`'s own doc comment records the finding
+    (pre-dating this plan, re-confirmed rather than re-run this session): a
+    lost ownerless shipment does not reduce recorded trade, it reopens the
+    buyer's deficit and invites MORE dispatch, so `dense_world`'s volume rose
+    6.4× at a dose of 0.01 instead of falling. S2 (this session, shipped)
+    protects the metropolitan lanes but cannot touch this — it fires on every
+    non-metropolitan buyer regardless. The room/deficit calculation
+    (`max_stock`/`room` in `production.rs`) needs to account for cargo already
+    lost this cycle (or an equivalent brake) before S1 is safe to dose at any
+    rate. Gate: `n1_bind_stays_healthy_on_a_realistically_dense_world`'s own
+    `dense_world` fixture, re-dosed at the same 0.01 token rate used to find
+    this, must show volume falling rather than rising before raising it
+    further.
 
 ---
 

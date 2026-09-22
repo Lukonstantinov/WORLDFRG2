@@ -1488,13 +1488,46 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   substitution treats them sensibly (ceramics/parchment as construction/craft,
   sailcloth/cordage as fiber, armour as metal, fixed_dye as dye, garum as
   preservative). Gate: `cargo test --lib goods_ -- --nocapture`, read per-good.
+- **S2 — the *annona* carrier class, shipped as a SAFER shape than the plan's
+  own text.** `ANNONA_MIN_POP` (60,000, the same order the old `size_bonus`
+  saturation used) marks a destination as a metropolis; an ownerless shipment
+  bound for one is exempt from N1b's voyage-loss roll (`production.rs::
+  dispatch`) and tracked in a new `TickHub.tw_state`. The plan's own text says
+  `tw_state` is "split out of `tw_local`" — checked, and that would NOT have
+  been inert: `merchant_population_estimate` (mod.rs) already reads `tw_house +
+  tw_local + tw_guild` as its total, so carving state carriage out of `tw_local`
+  would have moved the displayed merchant-population split on any world with a
+  metropolis, which is a real behaviour change, not the "cannot move a number
+  by construction" decision 4 asks for. Shipped ADDITIVELY instead — `tw_state`
+  accrues alongside the existing three, which keeps their sum exactly what it
+  was. Gate: `annona_carriage_is_tracked_additively_and_only_for_great_cities`
+  (`tick::tests`) plus the full `tick::tests` (268/268) and `econ_` (6/6,
+  multi-seed inheritance gate included, 522.82s) — both bit-identical in
+  direction/shape to their pre-S2 numbers (partible 45/32/27 alive by seed,
+  matching the table already on record).
+- **S1 is BLOCKED, not merely undosed — found before writing a line for it.**
+  `N1B_OWNERLESS_LOSS_RATE`'s own doc comment (pre-dating this plan) already
+  records a dose walk attempted at 0.01: `dense_world`'s uncapped trade volume
+  did not fall, it rose **6.4×** (781,472 → 4,991,590 over 40 years), because
+  `dispatch`'s target-room calculation reopens a buyer's deficit the moment a
+  shipment is lost, so a sunk cargo invites MORE dispatch rather than less — a
+  structural feedback, not a tunable collapse. S2's annona exemption protects
+  the metropolitan lanes but does nothing about this: the feedback fires on
+  every NON-metropolitan buyer at any nonzero rate regardless. Fixing it needs
+  the room/deficit calculation to account for cargo already lost this cycle —
+  real, separate work, not attempted here. Re-running the same failed dose
+  walk this session would have cost a multi-seed gate run to relearn a fact
+  already on record; the honest thing was to read the constant's own comment
+  first (§2.4's own discipline: a negative result already written down is not
+  re-litigated without new information).
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
-  S1/S2/S3/S5/S6 (the dose walks — ownerless voyage risk, the *annona* carrier
-  class, the guild-roster unfreeze, transit demand, the wartime blockade), S8/S9
-  (the house/guild atlas queries), S10-S12 (the four-window split, the two
-  atlases with map labelling, the Houses redesign). Each waits on exactly what
-  the plan's own §7/§8 already say it waits on — nothing here changes that
-  sequencing, this entry only records which end of it landed.
+  S1 (blocked — see above, waits on the room/deficit fix), S3/S5/S6 (the
+  remaining dose walks — the guild-roster unfreeze, transit demand, the
+  wartime blockade), S8/S9 (the house/guild atlas queries), S10-S12 (the
+  four-window split, the two atlases with map labelling, the Houses redesign).
+  Each waits on exactly what the plan's own §7/§8 already say it waits on
+  (S1 additionally waits on the newly-found room/deficit fix) — nothing here
+  changes that sequencing, this entry only records which end of it landed.
 
 ---
 
@@ -5352,10 +5385,14 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
-HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S4 (craft signatures served) + S7 (eight
-                                    orphan-raw recipes) BUILT AND GATED — see
-                                    CLAUDE.md §5.6. S1/S2/S3/S5/S6 (the dose
-                                    walks) and S8-S12 (the atlas queries + the
+HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S4 (craft
+                                    signatures served) + S7 (eight orphan-raw
+                                    recipes) BUILT AND GATED — see CLAUDE.md
+                                    §5.6. S1 is BLOCKED (a pre-existing,
+                                    already-measured negative result, not
+                                    merely undosed — see queue item Q14).
+                                    S3/S5/S6 (the remaining dose walks) and
+                                    S8-S12 (the atlas queries + the
                                     four-window/Houses redesign) QUEUED, per the
                                     plan's own §9 risk register. The one-session build
                                     plan for houses, guilds and the settlement

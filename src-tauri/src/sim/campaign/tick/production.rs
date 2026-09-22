@@ -2157,6 +2157,12 @@ impl CampaignSim {
                         // sink too, dosed independently from the house rates above.
                         // Shipped at N1B_OWNERLESS_LOSS_RATE = 0.0, so this roll never
                         // fires and the branch is dead code today.
+                        //
+                        // HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — state carriage into a
+                        // metropolis (destination `b` clears ANNONA_MIN_POP) never
+                        // rolls at all, exactly as underwritten grain shipments were
+                        // in the real *annona*. Inert at N1B = 0.0 either way.
+                        self.hubs[b].population < ANNONA_MIN_POP &&
                         N1B_OWNERLESS_LOSS_RATE > 0.0 && hash01(self.seed,
                             (tick as u64) ^ 0x0E15E ^ ((a as u64) << 8) ^ (b as u64),
                             g as u64) < N1B_OWNERLESS_LOSS_RATE
@@ -2207,6 +2213,19 @@ impl CampaignSim {
                             1 => self.hubs[hh].tw_local += amount,
                             _ => self.hubs[hh].tw_guild += amount,
                         }
+                    }
+                    // HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* class.
+                    // ADDITIVE, not a subtraction from the match above: `total =
+                    // tw_house + tw_local + tw_guild` in `merchant_population_
+                    // estimate` (mod.rs) already reads `tw_local`, so stealing
+                    // from it here would move the displayed merchant-population
+                    // split for any world with a metropolis — a real behaviour
+                    // change, not the "cannot move a number by construction"
+                    // the plan's own text asks this slice to be. Tracked
+                    // alongside instead, for a future atlas to read (S8/S11,
+                    // queued) without touching what already reads tw_local.
+                    if owner < 0 && self.hubs[b].population >= ANNONA_MIN_POP {
+                        self.hubs[b].tw_state += amount;
                     }
                     let value = amount * delivered;
                     self.hubs[b].import_spend += value;

@@ -9,6 +9,43 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22b — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S2 (annona) shipped; S1 found already-blocked
+
+Continuation of the same day's session (see 2026-09-22 below). Next in the
+plan's own build order after S4/S7 was S1 (dose ownerless voyage risk) — before
+writing any dose-walk code, `N1B_OWNERLESS_LOSS_RATE`'s own doc comment (which
+pre-dates this plan) turned out to already record a dose walk attempted at
+0.01: `dense_world`'s uncapped trade volume ROSE 6.4× (781,472 → 4,991,590 over
+40 years) instead of falling, because `dispatch`'s room/deficit calculation
+reopens a buyer's deficit the moment a shipment is lost, so a sunk cargo
+invites more dispatch rather than less. This is a structural feedback, not a
+tunable collapse — S1 is **blocked**, not merely undosed, and re-running the
+same failed walk this session would only have re-spent a ~6-minute multi-seed
+gate run to relearn a fact already on record. New queue item Q14 names the fix
+it actually needs (the room/deficit calculation accounting for cargo already
+lost this cycle).
+
+Shipped **S2** instead (the plan's own next item, and what the *annona*
+exemption is meant to protect once S1 is unblocked): `ANNONA_MIN_POP` = 60,000
+marks a destination as a metropolis; an ownerless shipment bound for one is
+exempt from N1b's loss roll and tracked in a new `TickHub.tw_state`. Checking
+the plan's own text against the code changed the implementation: it says
+`tw_state` is "split out of `tw_local`", but `merchant_population_estimate`
+already reads `tw_house + tw_local + tw_guild` as its total, so a literal split
+would have moved the displayed merchant-population breakdown on any world with
+a metropolis — a real behaviour change, not the "provably inert" decision 4
+requires. Shipped additively instead (`tw_state` tracked alongside the
+existing three, their sum untouched).
+
+Gates: `cargo check --lib --tests` clean, `cargo test --lib tick::tests`
+268/268 (1 new: `annona_carriage_is_tracked_additively_and_only_for_great_
+cities`), `cargo test --lib econ_ -- --nocapture` 6/6 including the multi-seed
+`econ_inheritance_rules_fragment_differently` (522.82s) — partible
+alive-by-seed 45/55/44, matching the table already on record, confirming S2 is
+inert on the gate that matters most here.
+
+---
+
 ## 2026-09-22 — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S4 (signatures served) + S7 (eight orphan-raw recipes) shipped
 
 The plan's own build order (§7) names S4 and S7 as the two FREE slices — S4

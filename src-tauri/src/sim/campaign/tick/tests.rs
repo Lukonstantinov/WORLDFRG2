@@ -20,7 +20,7 @@
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
             base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
-            tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0,
+            tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0, tw_state: 0.0,
             estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: 255, is_mining_settlement: false, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
@@ -9148,4 +9148,39 @@
         assert!((out - 7.0).abs() < 1e-4, "expected 7 units priced out, got {out}");
         // Affluent household, same ration: nothing priced out.
         assert_eq!(household_priced_out(10.0, 1000.0, 1.0, 1.0), 0.0);
+    }
+
+    /// HOUSES_GUILDS_AND_MARKET_PLAN.md S2 — the *annona* class is tracked
+    /// ADDITIVELY (never carved out of `tw_local`/`tw_guild`, per the doc
+    /// comment on `TickHub.tw_state`) and only for a destination that clears
+    /// `ANNONA_MIN_POP`. Three hubs, no houses (guarantees every shipment is
+    /// ownerless): a producer, a metropolis (pop well above the threshold)
+    /// and an ordinary small town at the same distance from the producer.
+    #[test]
+    fn annona_carriage_is_tracked_additively_and_only_for_great_cities() {
+        // Built on `dense_world()` (proven to actually trade — the N1 gates
+        // above already exercise it) rather than a bespoke fixture, so this
+        // test inherits real routing instead of guessing at one: hub 0 is
+        // bumped to metropolis scale, every other hub stays ordinary.
+        let mut s = dense_world();
+        s.houses.clear(); // no houses — guarantees every shipment is ownerless
+        s.seed_house_count = 0;
+        s.hubs[0].population = 90_000.0;
+        s.hubs[0].founding_pop = 90_000.0;
+        s.advance(365 * 2);
+
+        assert!(s.diag_shipments > 0, "the fixture must actually trade");
+        assert_eq!(s.diag_by_house, 0, "no house exists — every shipment must be ownerless");
+        assert!(s.hubs[0].tw_state > 0.0,
+            "an ownerless shipment into a hub clearing ANNONA_MIN_POP must be tracked as state carriage");
+        let ordinary_total: f32 = s.hubs.iter().skip(1).map(|h| h.tw_state).sum();
+        assert_eq!(ordinary_total, 0.0,
+            "an ordinary town must never accrue tw_state, however much it trades");
+        // Additive, not subtractive: the pre-existing three-way split
+        // (tw_house + tw_local + tw_guild) must still equal the hub's real
+        // ownerless throughput — S2 must not have stolen from it.
+        let metro_classified = s.hubs[0].tw_house + s.hubs[0].tw_local + s.hubs[0].tw_guild;
+        assert!(metro_classified > 0.0,
+            "tw_house/tw_local/tw_guild must still see the metropolis's ownerless \
+             throughput — S2 tracks tw_state ALONGSIDE them, never instead of them");
     }
