@@ -210,6 +210,10 @@ interface UIStore {
   goodDetailId: string | null;
   /** Merchant-houses panel open. */
   showHouses: boolean;
+  /** HOUSES_GUILDS_AND_MARKET_PLAN.md S10 · the world Feuds & Alliances board —
+   *  split out of HousesPanel's old "feuds" tab into its own window, since a
+   *  feud belongs to two houses, not one. */
+  showFeuds: boolean;
   showCityRanking: boolean;
   /** v2.0 · the unified Money & Finance panel (mints · banks · bubbles · shocks · schematics). */
   showMoneyFinance: boolean;
@@ -390,6 +394,7 @@ interface UIStore {
   setShowGoodsBrowser: (v: boolean) => void;
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
+  setShowFeuds: (v: boolean) => void;
   setShowCityRanking: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
   setShowAtlas: (v: boolean) => void;
@@ -546,6 +551,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showGoodsBrowser: false,
   goodDetailId: null,
   showHouses: false,
+  showFeuds: false,
   showCityRanking: false,
   showMoneyFinance: false,
   showItinerary: false,
@@ -725,6 +731,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowGoodsBrowser: (v) => set({ showGoodsBrowser: v }),
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
+  setShowFeuds: (v) => set({ showFeuds: v }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowMoneyFinance: (v) => set({ showMoneyFinance: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),

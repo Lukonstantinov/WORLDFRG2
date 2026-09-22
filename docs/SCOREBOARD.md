@@ -9,6 +9,43 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-22g — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S10 (the four-window split) shipped
+
+Continuation of the same day's session (see 2026-09-22f below). User explicitly
+chose "attempt it blind, carefully" over stopping, given this environment has
+no display to verify a UI change in (confirmed in CLAUDE.md's own §1 quick-start
+note: "the GUI can't be launched" on a headless box).
+
+`HousesPanel.tsx` (1,455 lines — a list, tier grouping, a feuds board, a compare
+launcher and an 11-subtab dossier, against `GuildsPanel.tsx`'s 125 — the exact
+asymmetry §1 of the plan names) is now **338 lines, browse-only**: the
+tier-grouped list, the Compare launcher, and a "🏛 Companies" FILTER CHIP in
+place of the old "guilds" TAB (`House.is_guild` firms are firms, not a
+different kind of thing — keeping them in a tab beside `CraftGuild` under one
+word was the naming collision the plan's §1 names). `HouseDetail` and its ten
+subtabs (Chronicle/Summary/Kin/Goals/Crisis/Lineage/Expeditions/Standing/
+Feuds/Bank/Accountant) moved VERBATIM (no rendering logic changed in the move)
+into `HouseDossier.tsx` (now 1,433 lines), which already held
+`HouseStandingView`/`FeudsView` — genuinely "one house, everything about it"
+now rather than split across the browse file. A new `FeudsAlliancesPanel.tsx`
+(33 lines, built on the shared `@ui/kit`) wraps `FeudsView` with no house
+focus as its own window (`uiStore.showFeuds`), opened from a new "⚔ Feuds"
+button in `HousesPanel` and from the Society menu (`CampaignTopBar.tsx`).
+`GuildsPanel.tsx` relabelled "🔨 Crafts & Guilds". Shared helpers
+(`TIER_META`/`tierOf`/`dull`/`goodIcon`/`familyRunAt`) split into a new
+`houseShared.ts` (42 lines) rather than duplicated or cross-imported, which
+would create a HousesPanel ↔ HouseDossier import cycle.
+
+**Verification, stated exactly as it was done**: `npx tsc --noEmit` clean,
+`npx vite build` clean (181 modules, 3.68s — the one pre-existing chunk-size
+warning is unrelated to this change). Neither is a claim that the four windows
+actually open, position, or read correctly in the running app — this session
+could not check that. New queue item Q17 (`docs/HOUSES_GUILDS_AND_MARKET_
+PLAN.md`) names exactly what a session with a browser needs to check before
+this is trusted beyond "it compiles and bundles."
+
+---
+
 ## 2026-09-22f — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S8/S9 (house & craft atlas queries) shipped
 
 Continuation of the same day's session (see 2026-09-22e below), picked up

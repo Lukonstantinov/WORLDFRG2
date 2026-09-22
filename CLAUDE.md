@@ -1607,15 +1607,42 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   Both S8/S9 are read-only and touch no tile/sim state, so — per the plan's
   own note — neither can move a gate; verified by `cargo check --lib --tests`
   and `npx tsc --noEmit` alone, both clean.
+- **S10 — the window split.** `HousesPanel.tsx` (§6/§7's own asymmetry
+  complaint: 1,455 lines carrying a list, tier grouping, a feuds board, a
+  compare launcher and an 11-subtab dossier, against `GuildsPanel.tsx`'s 125)
+  is now BROWSE-ONLY (338 lines): the tier-grouped list, the Compare launcher,
+  and a "🏛 Companies" FILTER CHIP in place of the old "guilds" tab
+  (`House.is_guild` firms are firms, not a different kind of thing — keeping
+  them in a tab beside `CraftGuild` under one word was the naming collision
+  §1 of the plan names). `HouseDetail` and its ten subtabs moved VERBATIM
+  (no rendering logic changed in the move itself) into `HouseDossier.tsx`,
+  which already held `HouseStandingView`/`FeudsView` — now genuinely "one
+  house, everything about it" rather than split across the file that browses
+  ALL of them. A new `FeudsAlliancesPanel.tsx` wraps `FeudsView` with no
+  house focus as its own window (`uiStore.showFeuds`), opened from a new
+  "⚔ Feuds" button in `HousesPanel` and from the Society menu
+  (`CampaignTopBar.tsx`) — a feud belongs to two houses, not one, and was
+  never really a house's tab. `GuildsPanel.tsx` relabelled "🔨 Crafts &
+  Guilds". Shared helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`/
+  `familyRunAt`, used by both the browser and the dossier) split into
+  `houseShared.ts` rather than duplicated or cross-imported, which would
+  create a HousesPanel ↔ HouseDossier import cycle.
+  **Verification caveat, stated plainly**: this environment cannot launch
+  the Tauri GUI (no display), so this was verified by `npx tsc --noEmit`
+  (clean) and a full `vite build` (clean, 181 modules) — type-correctness
+  and bundling, not a human looking at the running window. The user chose
+  to accept this risk explicitly rather than defer S10 to a session that
+  can open a browser; visually exercising the four windows before trusting
+  them is still owed.
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
   S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
   see above, waits on the relay-fixture fix before its own dose walk can be
-  re-attempted), S10-S12 (the four-window split, the two atlases with map
-  labelling using S8/S9 above, the Houses redesign). Each waits on exactly
-  what the plan's own §7/§8 already say it waits on (S1/S6 additionally wait
-  on their own newly-found fixture/
-  mechanism fixes) — nothing here changes that sequencing, this entry only
-  records which end of it landed.
+  re-attempted), S11/S12 (the two atlases with real on-map lane labelling
+  using S8/S9's queries, and the Houses three-band redesign — bump chart,
+  sparkline strips, event ticker). Each waits on exactly what the plan's
+  own §7/§8 already say it waits on (S1/S6 additionally wait on their own
+  newly-found fixture/mechanism fixes) — nothing here changes that
+  sequencing, this entry only records which end of it landed.
 
 ---
 
@@ -2201,27 +2228,41 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   from `detail.culture`/`.minorities`, wares ranked by
                                   value on hand, chip prices from `price/base_value`, no
                                   new IPC
-  HousesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses, dynasties, guilds.
-                                  HousesPanel has a world ⚔ Feuds tab; the list is
-                                  GROUPED BY TIER (Phase 1.1, Tier 3/4 collapsed by
-                                  default). A ⚖ Compare button opens `HouseCompareWindow`
-                                  (`HouseCompare.tsx`) — a search-bar-driven two-house
-                                  side-by-side: ruler figures, every stat (standing ·
-                                  trade/transport · trading strategy · monopolies),
-                                  and a minimal `OperationsMap` plotting both houses'
-                                  seat/offices/controlled settlements so a rivalry's
-                                  footprint reads at a glance. Pure frontend aggregation
-                                  of `HouseBrief` fields already fetched — no new backend
-                                  command. Its per-house detail (`HouseDetail`) opens as
-                                  a BIG FLOATING WINDOW (~2.5x the old size, still
-                                  draggable) on a portrait — `cultureFigureSVG` in the
-                                  seat culture's kit and the head's own sex, now with
-                                  POSE (tilt/mirror) and ACCESSORY (pin) variation axes
-                                  on top of the existing build/skin-tone jitter, so two
-                                  heads read as two different people at a glance — a
-                                  coloured frame standing in for a garment recolour, a
-                                  `CoatOfArms` badge at the shoulder, occasion set by
-                                  tier (Phase 1.2) — and its subtabs are
+  HousesPanel/FeudsAlliancesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses,
+                                  feuds, dynasties, crafts — FOUR windows now, not two
+                                  (HOUSES_GUILDS_AND_MARKET_PLAN.md S10, §5.6). `HousesPanel.tsx`
+                                  (338 lines, was 1,455) is BROWSE-ONLY: the tier-grouped
+                                  list (Phase 1.1, Tier 3/4 collapsed by default), the
+                                  ⚖ Compare launcher (`HouseCompareWindow`, `HouseCompare.tsx`
+                                  — a search-bar-driven two-house side-by-side: ruler
+                                  figures, every stat, a minimal `OperationsMap` plotting
+                                  both houses' seat/offices/controlled settlements), and a
+                                  "🏛 Companies" FILTER CHIP in place of the old "guilds"
+                                  TAB — `House.is_guild` firms are firms, not a different
+                                  kind of thing, and keeping them in a tab beside `CraftGuild`
+                                  ("Guilds & Crafts") was what made the naming collision
+                                  visible to users in the first place. An "⚔ Feuds" button
+                                  opens the new `FeudsAlliancesPanel.tsx` — the world's
+                                  quarrels as their OWN window (a feud belongs to two
+                                  houses, not one; it was never a house's tab), wrapping
+                                  `FeudsView` with no house focus. `GuildsPanel.tsx`
+                                  relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts").
+                                  Split helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`,
+                                  used by both the browser and the dossier) live in
+                                  `houseShared.ts` rather than being duplicated or
+                                  cross-imported, which would make a HousesPanel ↔
+                                  HouseDossier import cycle.
+  HouseDossier.tsx              ← The big per-house window — `HouseDetail` (moved here
+                                  verbatim from HousesPanel.tsx in the S10 split) plus its
+                                  ten subtabs, alongside this file's original two views
+                                  (`HouseStandingView`/`FeudsView`). Opens as a BIG FLOATING
+                                  WINDOW (~2.5x the old size, still draggable) on a portrait
+                                  — `cultureFigureSVG` in the seat culture's kit and the
+                                  head's own sex, POSE/ACCESSORY variation axes on top of
+                                  build/skin-tone jitter so two heads read as two different
+                                  people, a coloured frame standing in for a garment
+                                  recolour, a `CoatOfArms` badge at the shoulder, occasion
+                                  set by tier (Phase 1.2) — and its subtabs are
                                   CHRONICLE-FIRST (Phase 1.4, the default tab):
                                   the Phase 0.4 succession line inline, then the
                                   year-grouped event log (`ChronicleTab`), before
@@ -2248,14 +2289,16 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   risings" list; observation only, Phase 3.2-3.6)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
-                                  ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant
-  HouseDossier.tsx              ← The House Dossier's two views: `HouseStandingView`
-                                  (five stability gauges — solvency COUNTDOWN, liquidity
-                                  runway, concentration exposure, succession, cohesion —
-                                  plus liabilities) and `FeudsView` (cause · temperature
-                                  · stage · ending, with each feud's episode log).
-                                  Pips + a PHRASE, never a raw 0..1; a healthy gauge
-                                  stays quiet so the warning colour still means something
+                                  ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant.
+                                  `HouseStandingView` (five stability gauges — solvency
+                                  COUNTDOWN, liquidity runway, concentration exposure,
+                                  succession, cohesion — plus liabilities) and `FeudsView`
+                                  (cause · temperature · stage · ending, with each feud's
+                                  episode log — `house < 0` shows every quarrel in the
+                                  world, which is what `FeudsAlliancesPanel.tsx` calls it
+                                  with) are unchanged from before the split. Pips + a
+                                  PHRASE, never a raw 0..1; a healthy gauge stays quiet so
+                                  the warning colour still means something
   BankPanel/MoneyFinancePanel.tsx ← Bank T-accounts, currencies/mints/monetary chronicle
   SpeculationPanel.tsx          ← DLC 3: Speculation why-chain / Poleis (treasury/tariff/mint/coin)
   CoinCreditPanel.tsx           ← Currencies / Banks / Wars / Crashes / Schematics tabs
@@ -5484,7 +5527,8 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     signatures served) + S5 (transit demand,
                                     shipped inert at zero) + S7 (eight
                                     orphan-raw recipes) + S8/S9 (the house/
-                                    craft atlas queries) BUILT AND GATED — see
+                                    craft atlas queries) + S10 (the four-
+                                    window split) BUILT AND GATED — see
                                     CLAUDE.md §5.6. S1 is BLOCKED (a
                                     pre-existing, already-measured negative
                                     result, not merely undosed — see queue
@@ -5496,14 +5540,18 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     breach and a relay-fixture assumption the
                                     dose invalidates), recorded at
                                     `BLOCKADE_STAGING_DOSE`'s own doc comment.
-                                    S10-S12 (the four-window split, the map
-                                    labelling for S8/S9's atlases, the Houses
-                                    redesign) QUEUED, per the plan's own §9
-                                    risk register — THREE doses attempted this
+                                    S10 could only be verified by `tsc`/
+                                    `vite build` in this session — no display
+                                    to actually open the four windows in, said
+                                    plainly rather than claimed as tested.
+                                    S11/S12 (the map labelling for S8/S9's
+                                    atlases, the Houses three-band redesign)
+                                    QUEUED, per the plan's own §9 risk
+                                    register — THREE doses attempted this
                                     session (S1 investigated/blocked, S3
                                     walked/untestable, S6 walked/reverted), at
-                                    the plan's own stated ceiling; S8/S9
-                                    shipped after since neither is a dose. The
+                                    the plan's own stated ceiling; S8/S9/S10
+                                    shipped after since none is a dose. The
                                     one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
