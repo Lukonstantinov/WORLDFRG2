@@ -51,12 +51,14 @@
 //! **M8** adds the household purse (§3.9), scoped DOWN from its real design:
 //! `household_ledger_pass` mirrors a hub's existing wage (`household_income_
 //! pass`'s own formula) as a coin deposit, then immediately spends the
-//! identical amount on the ration via the new `take_coin` (M3's missing
-//! spend side) — a closed loop, so this needs no dose gate at all, the same
-//! reason M3 shipped without one. What it does NOT build: a household that
-//! saves, borrows, or is priced out of its ration when the wage falls short
-//! (§3.9's own R6-flagged risk) — that is queued behind `FOOD_AFFORDABILITY_
-//! DOSE` (M7) actually being walked, per the plan's own R6.
+//! identical amount on the ration via `take_coin_issue` (M3's missing spend
+//! side, ISSUE-TARGETED — see that function's own doc comment for why a
+//! plain `take_coin` was wrong here) — a closed loop, so this needs no dose
+//! gate at all, the same reason M3 shipped without one. What it does NOT
+//! build: a household that saves, borrows, or is priced out of its ration
+//! when the wage falls short (§3.9's own R6-flagged risk) — that is queued
+//! behind `FOOD_AFFORDABILITY_DOSE` (M7) actually being walked, per the
+//! plan's own R6.
 //!
 //! Culture-rooted currency naming beyond today's flat 10-name
 //! `coin_denomination` list (§3.3), the real three-stage diffusion of §3.6,
@@ -339,31 +341,44 @@ impl CampaignSim {
             .unwrap_or(0.0)
     }
 
-    /// M8 · remove up to `amount` of coin from a purse, across whichever
-    /// issues it holds (in `coins` vector order — deterministic; order
-    /// cannot affect the TOTAL removed, and a purse's issue mix carries no
-    /// meaning yet, so there is nothing to prefer). Clamped to what the
-    /// purse actually holds — never goes negative, the same discipline
-    /// `stock_take` already uses for goods. Returns the amount actually
-    /// removed, which a caller mirrors into whichever purse receives it (a
-    /// debit with no matching credit would silently destroy coin).
-    pub(crate) fn take_coin(&mut self, kind: u8, id: i32, hub: u32, amount: f32) -> f32 {
+    /// M8 · remove up to `amount` of `issue_id` coin from a purse — the
+    /// ISSUE-TARGETED spend side `add_coin` was missing, for a caller that
+    /// must spend the SAME issue it just deposited (`household_ledger_
+    /// pass`, below) rather than "whichever coin the purse happens to hold
+    /// first".
+    ///
+    /// **A first cut drained a purse's `coins` list in plain VECTOR order,
+    /// with no regard for `issue_id`, and was wrong** — found by measurement,
+    /// not review (2026-09-23d). A household purse can already hold an OLDER
+    /// issue's coin (M3's `strike_issue` credits brassage into the SAME
+    /// `HOLDER_HOUSEHOLD` purse at the mint's own hub) by the time
+    /// `household_ledger_pass` deposits this month's wage under the CURRENT
+    /// issue and immediately withdraws the identical amount — an
+    /// issue-blind take could drain the OLDER issue's entry instead, while
+    /// the fresh deposit sits untouched, and the withdrawn amount was still
+    /// re-credited to the merchant purse under the CURRENT issue (`add_
+    /// coin`'s own `issue_id` argument) — silently relabelling coin from one
+    /// issue to another, conserved in TOTAL but not PER ISSUE, which is
+    /// exactly what `the_coin_ledger_conserves_every_struck_coin` checks
+    /// (measured drift: issue 6 short by ~0.003 out of ~34). Targeting the
+    /// SAME issue that was just deposited is what keeps a closed add/take
+    /// loop closed under its own tag; clamped to what that ONE entry holds,
+    /// never negative, the same discipline `stock_take` uses for goods.
+    fn take_coin_issue(&mut self, kind: u8, id: i32, hub: u32, issue_id: u32, amount: f32) -> f32 {
         if !(amount > 0.0) { return 0.0; }
         let pi = match self.purses.iter().position(|p| p.holder_kind == kind && p.holder_id == id && p.hub == hub) {
             Some(i) => i,
             None => return 0.0,
         };
-        let mut remaining = amount;
-        let mut taken = 0.0;
-        for (_, count) in self.purses[pi].coins.iter_mut() {
-            if remaining <= 0.0 { break; }
-            let take = count.min(remaining);
-            *count -= take;
-            remaining -= take;
-            taken += take;
+        let Some(entry) = self.purses[pi].coins.iter_mut().find(|(iid, _)| *iid == issue_id) else {
+            return 0.0;
+        };
+        let take = entry.1.min(amount);
+        entry.1 -= take;
+        if entry.1 <= 1e-9 {
+            self.purses[pi].coins.retain(|(iid, c)| *iid != issue_id || *c > 1e-9);
         }
-        self.purses[pi].coins.retain(|(_, c)| *c > 1e-9);
-        taken
+        take
     }
 
     /// M8 (§3.9) · the household purse — a PARALLEL LEDGER pass on exactly
@@ -407,7 +422,7 @@ impl CampaignSim {
             if wage <= 0.0 { continue; }
             let h32 = h as u32;
             self.add_coin(HOLDER_HOUSEHOLD, -1, h32, issue_id, wage);
-            let taken = self.take_coin(HOLDER_HOUSEHOLD, -1, h32, wage);
+            let taken = self.take_coin_issue(HOLDER_HOUSEHOLD, -1, h32, issue_id, wage);
             if taken > 0.0 {
                 self.add_coin(HOLDER_LOCAL_MERCHANT, -1, h32, issue_id, taken);
             }

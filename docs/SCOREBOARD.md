@@ -9,6 +9,64 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23e — Two real bugs found and FIXED behind 2026-09-23d's dose walk
+
+Continuation of the same session's dose-walk trial: rather than accept
+"not disentangled" for why `unrest_topples_councils` still failed, traced
+the mechanism through `update_unrest`'s actual formula (`cities.rs`) and
+found two genuine bugs, one pre-existing and one this session's own.
+
+**Bug 1 (pre-existing, S7's `household_income_pass`): money created from
+nothing.** `civic_pool += spend` credited the FULL ration cost every day
+regardless of what `household_wealth` actually held (which was merely
+clamped to 0), striking the shortfall as fresh civic money — rule 18's
+forbidden pattern, alive since S7 shipped, invisible because the dose has
+always been 0.0. `civic_pool` feeds BOTH `sent_prosperity` and `commoner_
+wealth`, both NEGATIVE terms in `update_unrest`'s target. Measured with a
+new permanent diagnostic (`diag_household_wage_civic_pool_offset`, `tick::
+tests`, `#[ignore]`d): at dose 0.02 (buggy), `civic_pool` reached 197,485
+over 5 years off a wage of a few units a month, `sent_prosperity` saturated
+to 1.000, `commoner_wealth` to 950.897, and unrest fell from a dose-0
+baseline of 0.803 to 0.353 — exactly why zero revolts fired. **Fixed**:
+`paid = spend.min(household_wealth)` before crediting `civic_pool`.
+
+**Bug 2 (this session's own M8 code): `take_coin` drained the wrong
+issue.** It walked a purse's `coins` list in plain vector order, ignoring
+`issue_id` — so `household_ledger_pass`'s same-month deposit-then-withdraw
+could drain an OLDER issue already sitting in the purse (from M3's mint
+brassage) while the fresh deposit sat untouched, then re-credit the
+withdrawn amount to the merchant purse under the CURRENT issue. Coin
+conserved in total, not per issue — exactly what `the_coin_ledger_
+conserves_every_struck_coin` checks (measured: issue 6 short by ~0.003 of
+~34). **Fixed**: new `take_coin_issue`, targeting only the entry for the
+issue just deposited; the now-unused generic `take_coin` deleted.
+
+**Result: with both fixes, `unrest_topples_councils` now PASSES at
+`HOUSEHOLD_MONETIZATION_DOSE = 0.02` alone** (`FOOD_AFFORDABILITY_DOSE`
+still 0.0) — the fix alone resolves the exact failure the original S7 walk
+hit, with no M7 involvement needed. But the full `tick::tests` suite at
+this dose still shows 2 remaining failures — `simulate_decades_reports_
+dynamics` (a house at -527.5, past the -500 floor by a small margin) and
+`the_coin_ledger_conserves_every_struck_coin` (a SMALLER residual drift on
+a different, debasement-created issue, ~0.0027 of ~52 — not yet
+root-caused, not confirmed to be the same bug class as either fix above).
+So the dose is not yet safe to raise.
+
+**Both fixes are shipped now at the unchanged `HOUSEHOLD_MONETIZATION_
+DOSE = 0.0`**, since they are general correctness improvements to code
+that runs regardless of dose (`household_ledger_pass` has no gate of its
+own). Gates at the shipped dose: `cargo check --lib --tests` clean, full
+`cargo test --lib tick::tests` 283/283, full `cargo test --lib econ_` 6/6
+(212.18s) — both bit-identical to every prior M7/M8 run.
+
+**What's next**: root-cause the remaining `the_coin_ledger_conserves_
+every_struck_coin` drift (debasement-issue-specific, smaller than bug 2)
+and the `simulate_decades_reports_dynamics` insolvency-floor overshoot
+before `HOUSEHOLD_MONETIZATION_DOSE` can actually be raised — both queued,
+not attempted further this session.
+
+---
+
 ## 2026-09-23d — M7/M8 dose walk attempted (0.02/0.02), REVERTED — a negative result
 
 Continuing `MONEY_AND_COINAGE_PLAN.md` per R6 ("M7 before M8, no exceptions")

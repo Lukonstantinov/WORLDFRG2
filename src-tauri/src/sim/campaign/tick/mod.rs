@@ -9466,9 +9466,27 @@ impl CampaignSim {
                         eat -= household_priced_out(eat, self.hubs[h].household_wealth, price,
                             HOUSEHOLD_MONETIZATION_DOSE);
                         eat = eat.max(0.0);
+                        // BUG (found 2026-09-23d dose-walk trial, SCOREBOARD.md): `spend`
+                        // is what the ration WOULD cost; `household_wealth` is what the
+                        // household actually HAS. At a small dose `household_priced_out`
+                        // only shaves a little off `eat`, so `spend` stays close to the
+                        // full ration value even when `household_wealth` cannot cover it
+                        // — the old code credited `civic_pool` with the FULL `spend`
+                        // regardless, while `household_wealth` was merely clamped to 0,
+                        // so the shortfall was struck as money from nothing every single
+                        // day (rule 18). Measured: civic_pool reached 197,485 over 5
+                        // years on a population earning a wage of a few units a month,
+                        // which alone explains why raising this dose never widens
+                        // unrest — the fabricated prosperity signal (civic_pool feeds
+                        // BOTH sent_prosperity and commoner_wealth, cities.rs, both
+                        // NEGATIVE terms in update_unrest) swamps the real lack_basic/
+                        // starving distress the dose is supposed to create. `paid` is
+                        // capped at what the household purse actually holds — the same
+                        // clamp `stock_take` already uses for goods, applied to money.
                         let spend = eat * price;
-                        self.hubs[h].household_wealth = (self.hubs[h].household_wealth - spend).max(0.0);
-                        self.hubs[h].civic_pool += spend; // the money reaches somewhere real
+                        let paid = spend.min(self.hubs[h].household_wealth.max(0.0));
+                        self.hubs[h].household_wealth = (self.hubs[h].household_wealth - paid).max(0.0);
+                        self.hubs[h].civic_pool += paid; // the money reaches somewhere real
                     }
                     stock_take(&mut self.hubs[h].stock, g, eat);
                     let t = self.goods[g].need_tier.min(2) as usize;

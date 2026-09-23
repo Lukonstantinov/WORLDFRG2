@@ -3818,6 +3818,55 @@
     }
 
     #[test]
+    #[ignore]
+    fn diag_household_wage_civic_pool_offset() {
+        // DIAGNOSTIC, not a gate — root-causing why unrest_topples_councils
+        // still fails at HOUSEHOLD_MONETIZATION_DOSE = 0.02 even with M7's
+        // food_afford_adjusted_bal fix live (SCOREBOARD.md 2026-09-23d).
+        // Hypothesis: household_priced_out's own `spend` (mod.rs, the S7
+        // day-loop block) routes into civic_pool every day at ANY nonzero
+        // dose — a channel that does not exist at dose 0 — and civic_pool
+        // feeds BOTH sent_prosperity (update_sentiment) and commoner_wealth
+        // (society_metrics), both of which are NEGATIVE terms in
+        // update_unrest's target. So turning the dose on could inject a new
+        // prosperity signal that cancels the very lack_basic/starving
+        // distress it was meant to reveal — not a household ever affording
+        // more food, just the city reading richer because the household's
+        // wage (however small) now visibly changes hands every day.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.9, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..6u32 {
+            let x = (i % 3) as f32 * 8.0;
+            let y = (i / 3) as f32 * 8.0;
+            let pop = 12000.0;
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { pop * 0.004 } else { pop * 0.002 }).collect();
+            hubs.push(hub(i, x, y, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..6u32 {
+            let mut h = house_at(i, vec![2], 2);
+            h.wealth = 800.0;
+            h.dominant_seat = true;
+            h.archetype = ARCH_POLITICAL;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.rebuild_routes();
+
+        s.advance(TICKS_PER_YEAR * 5);
+        println!("[diag] after 5y at dose 0.0 (baseline): hub0 civic_pool={:.3} sent_prosperity={:.3} \
+            commoner_wealth={:.3} lack_basic={:.3} starving={:.3} unrest={:.3}",
+            s.hubs[0].civic_pool, s.hubs[0].sent_prosperity, s.hubs[0].society.commoner_wealth,
+            s.hubs[0].lack_basic, s.hubs[0].starving, s.hubs[0].society.unrest);
+    }
+
+    #[test]
     fn a_coin_never_reaches_a_city_nothing_trades_with() {
         // MONEY_AND_COINAGE_PLAN.md M6 (§3.6) · real coin DIFFUSION between
         // cities (a chest riding a real trade leg) is not built yet — M3's
