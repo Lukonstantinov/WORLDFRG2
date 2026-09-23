@@ -1644,16 +1644,16 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   newly-found fixture/mechanism fixes) — nothing here changes that
   sequencing, this entry only records which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L4 shipped (L0-L3 the STOP MARKER, L4 past it)
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L5 shipped (L0-L3 the STOP MARKER, L4-L5 past it)
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
 in a follow-up session, so the STOP MARKER was reached in full — the hidden
 famine is measured, the welfare ratio exists AND is visible, and the player can
-see how a city lives. A further session then shipped **L4** (vital rates + age
-bands) at its own dose of zero, per the plan's own explicit permission to
-continue past the marker one gated slice at a time. L5 onward remain queued
-(see below).
+see how a city lives. Further sessions then shipped **L4** (vital rates + age
+bands) and **L5** (welfare into behaviour), each at its own dose of zero, per
+the plan's own explicit permission to continue past the marker one gated slice
+at a time. L6 onward remain queued (see below).
 
 - **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
   `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
@@ -1764,14 +1764,40 @@ continue past the marker one gated slice at a time. L5 onward remain queued
   (the urban-graveyard gate the plan's own build-order table names) is
   unwritten, queued alongside the dose walk itself rather than built ahead of
   having a live effect to test.
-- **What did NOT ship, and why (rule 36 — queued, not waived)**: L5 onward
-  (welfare-into-behaviour, housing, the settlement year, urban hazards, the
-  church, the watch, persistent pops, townspeople, Life tab v2) are each their
-  own dose walk per the plan's own build order and are unstarted. Gates run
-  across all sessions: `cargo check --lib --tests` (clean), `cargo test --lib
-  tick::tests` (283/283, ~42s), `cargo test --lib econ_ -- --nocapture` (6/6
-  incl. the multi-seed inheritance gate), `npx tsc --noEmit` + `npx vite build`
-  (clean).
+- **L5 — welfare into behaviour** (§3.4). Once L2 gave a real welfare ratio,
+  three sentiment-only readers blend toward it, all sharing ONE lever
+  (`WELFARE_BEHAVIOUR_DOSE`) so a single gate run walks the whole slice:
+  `derive_pops`' per-pop `militancy` blends toward `welfare_militancy_e`
+  (`mod.rs`) — a labourer earning under bare subsistence reads more militant
+  than the SAME city's comfortable burghers in the SAME year, which
+  `hub.lack_basic` (a city-wide average) cannot express; `update_society`'s
+  hardship drain (the term that skews strata shares toward the underclass)
+  blends toward `welfare_hardship_e`, clamped to the same 0.7 ceiling the
+  sentiment-only term already used; and BOTH migration readers —
+  `province_demography_pass`'s rural-pull weighting and `urban_exodus_pass`'s
+  destination ranking — blend their prosperity term toward
+  `welfare_opportunity_e` (welfare ratio rescaled onto the same 0..1 the old
+  term used, Allen's ~2.0 "comfortable" band mapping to 1.0), so people move
+  toward wages rather than sentiment. All three helpers share the identical
+  early-return shape `entitlement_bal_e`/`vital_net_rate_e` already use:
+  `if dose <= 0.0 { return old_value; }`. Shipped at
+  **`WELFARE_BEHAVIOUR_DOSE = 0.0`** — a true no-op
+  (`welfare_behaviour_dose_zero_is_a_noop`); `labourers_riot_before_burghers`
+  proves the militancy/hardship blend direction (a labourer at 0.4× 
+  subsistence reads markedly more militant than one at 2.5×, and a hub with a
+  collapsed welfare ratio reads more hardship than a prosperous one);
+  `welfare_opportunity_prefers_higher_wages_and_stays_bounded` proves the
+  migration blend both prefers real wage gaps and stays within the 0..1 band
+  the downstream ranking logic assumes. **Raising the dose is unstarted,
+  separate work** — needs `unrest_topples_councils` and the `EXODUS_*`
+  migration gates re-verified per dose step.
+- **What did NOT ship, and why (rule 36 — queued, not waived)**: L6 onward
+  (housing, the settlement year, urban hazards, the church, the watch,
+  persistent pops, townspeople, Life tab v2) are each their own dose walk per
+  the plan's own build order and are unstarted. Gates run across all sessions:
+  `cargo check --lib --tests` (clean), `cargo test --lib tick::tests`
+  (286/286, ~26s), `cargo test --lib econ_ -- --nocapture` (6/6 incl. the
+  multi-seed inheritance gate), `npx tsc --noEmit` + `npx vite build` (clean).
 
 ---
 

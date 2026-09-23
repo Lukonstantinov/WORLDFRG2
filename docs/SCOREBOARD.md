@@ -9,6 +9,32 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23e — `SETTLEMENT_LIFE_PLAN.md`: L5 (welfare into behaviour) shipped at dose 0
+
+Follow-up session to 2026-09-23d. Once L2 gave a real welfare ratio, three
+sentiment-only readers now blend toward it, all sharing ONE lever
+(`WELFARE_BEHAVIOUR_DOSE`): `derive_pops`' per-pop `militancy` blends toward
+`welfare_militancy_e` (a labourer under bare subsistence reads more militant
+than a comfortable burgher in the SAME city, which `hub.lack_basic`'s
+city-wide average cannot express); `update_society`'s hardship drain blends
+toward `welfare_hardship_e`; and both migration readers —
+`province_demography_pass`'s rural pull and `urban_exodus_pass`'s destination
+ranking — blend their prosperity term toward `welfare_opportunity_e`, so
+people move toward wages rather than sentiment. Every helper shares the same
+`if dose <= 0.0 { return old_value; }` shape L1/L4 already established.
+
+**Gates**: `cargo check --lib --tests` clean; `cargo test --lib tick::tests`
+286/286 in 25.62s (3 new: `welfare_behaviour_dose_zero_is_a_noop`,
+`labourers_riot_before_burghers`,
+`welfare_opportunity_prefers_higher_wages_and_stays_bounded`); `cargo test
+--lib econ_ -- --nocapture` 6/6 bit-identical in 301.56s, multi-seed
+inheritance gate included.
+
+Raising the dose is unstarted, separate work — needs `unrest_topples_councils`
+and the `EXODUS_*` migration gates re-verified per dose step.
+
+---
+
 ## 2026-09-23d — `SETTLEMENT_LIFE_PLAN.md`: L4 (vital rates + age bands) shipped past the STOP MARKER
 
 Follow-up session to 2026-09-23c. `TickHub.ages: [f32; 3]` (children/adults/elders

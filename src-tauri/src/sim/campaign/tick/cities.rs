@@ -266,7 +266,11 @@ impl CampaignSim {
             let mut total = 0.0f32;
             for &h in &members[p] {
                 let hub = &self.hubs[h];
-                let prosp = hub.sent_prosperity.clamp(0.0, 1.0);
+                // SETTLEMENT_LIFE_PLAN.md L5 (§3.4) · people move toward
+                // WAGES, not vibes — blend in the destination's own welfare
+                // ratio. True no-op at `WELFARE_BEHAVIOUR_DOSE = 0.0`.
+                let prosp = welfare_opportunity_e(
+                    hub.sent_prosperity.clamp(0.0, 1.0), hub.welfare_ratio, WELFARE_BEHAVIOUR_DOSE);
                 let fed = (1.0 - hub.starving).clamp(0.0, 1.0);
                 // A young trade post pays a real frontier premium for labour —
                 // user-requested — tapering to nothing once it clears stage 2
@@ -342,14 +346,21 @@ impl CampaignSim {
         for h in 0..n {
             if push[h] <= 0.0 { continue; }
             let comp = self.hubs[h].component;
-            let here_opp = self.hubs[h].sent_prosperity.clamp(0.0, 1.0)
-                * (1.0 - self.hubs[h].starving.clamp(0.0, 1.0));
+            // SETTLEMENT_LIFE_PLAN.md L5 (§3.4) · the exodus destination
+            // ranking blends in each city's own welfare ratio, same as the
+            // rural pull above — people leave for wages. True no-op at
+            // `WELFARE_BEHAVIOUR_DOSE = 0.0`.
+            let here_prosp = welfare_opportunity_e(
+                self.hubs[h].sent_prosperity.clamp(0.0, 1.0), self.hubs[h].welfare_ratio, WELFARE_BEHAVIOUR_DOSE);
+            let here_opp = here_prosp * (1.0 - self.hubs[h].starving.clamp(0.0, 1.0));
             let mut candidates: Vec<(usize, f32)> = (0..n).filter_map(|o| {
                 if o == h { return None; }
                 let ob = &self.hubs[o];
                 if ob.is_estate || ob.abandoned || ob.population < 1.0 { return None; }
                 if ob.component != comp { return None; }
-                let opp = ob.sent_prosperity.clamp(0.0, 1.0) * (1.0 - ob.starving.clamp(0.0, 1.0));
+                let prosp = welfare_opportunity_e(
+                    ob.sent_prosperity.clamp(0.0, 1.0), ob.welfare_ratio, WELFARE_BEHAVIOUR_DOSE);
+                let opp = prosp * (1.0 - ob.starving.clamp(0.0, 1.0));
                 if opp <= here_opp + EXODUS_MIN_OPPORTUNITY_GAIN { return None; }
                 Some((o, opp))
             }).collect();
@@ -1351,6 +1362,11 @@ impl CampaignSim {
             // Hardship (famine / dearth / disaster) skews the target DOWN: it drains the
             // upper tiers toward the underclass for as long as the hard times last.
             let hard = (starv * 0.6 + lackb * 0.4 + shock * 0.3).clamp(0.0, 0.7);
+            // SETTLEMENT_LIFE_PLAN.md L5 (§3.4) · blend in last year's
+            // welfare ratio (L2) so the strata drain reflects what
+            // commoners actually earned, not sentiment alone. True no-op
+            // at `WELFARE_BEHAVIOUR_DOSE = 0.0`.
+            let hard = welfare_hardship_e(hard, self.hubs[h].welfare_ratio, WELFARE_BEHAVIOUR_DOSE);
             let (tp, tb, tc, _tu) = self.target_shares(h);
             let drain = hard * 0.5;
             let (mut p, mut b, mut c) = (tp * (1.0 - drain), tb * (1.0 - drain), tc * (1.0 - drain * 0.5));
@@ -1490,6 +1506,20 @@ impl CampaignSim {
         }
         let labourer_income = pops.iter().find(|p| p.profession == 1).map(|p| p.income).unwrap_or(0.0);
         self.hubs[h].welfare_ratio = if basket > EPS { labourer_income / basket } else { 0.0 };
+        // SETTLEMENT_LIFE_PLAN.md L5 (§3.4) · each pop's OWN welfare ratio
+        // (income ÷ THIS city's subsistence basket, just computed above)
+        // can raise or lower its militancy — a starving labourer reads
+        // more militant than a comfortable burgher in the SAME city, which
+        // `hard` (a city-wide average) cannot express. True no-op at
+        // `WELFARE_BEHAVIOUR_DOSE = 0.0`.
+        if WELFARE_BEHAVIOUR_DOSE > 0.0 {
+            for p in &mut pops {
+                if p.size >= 1.0 && basket > EPS {
+                    let welfare_pop = p.income / basket;
+                    p.militancy = welfare_militancy_e(p.militancy, welfare_pop, WELFARE_BEHAVIOUR_DOSE);
+                }
+            }
+        }
         self.hubs[h].pops = pops;
     }
 

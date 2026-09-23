@@ -9584,3 +9584,54 @@
         assert!(s.hubs[0].deaths_by_cause[CAUSE_WAR] > 0.0,
             "a levy casualty must be tagged CAUSE_WAR, got {:?}", s.hubs[0].deaths_by_cause);
     }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L5 ──────────────────────────────────────────
+
+    /// L5 (§3.4) · `WELFARE_BEHAVIOUR_DOSE = 0.0` must be a TRUE no-op for
+    /// all three blend helpers — the same value in, the same value out,
+    /// whatever the welfare reading says.
+    #[test]
+    fn welfare_behaviour_dose_zero_is_a_noop() {
+        assert_eq!(welfare_hardship_e(0.3, 0.2, 0.0), 0.3);
+        assert_eq!(welfare_militancy_e(4.0, 0.5, 0.0), 4.0);
+        assert_eq!(welfare_opportunity_e(0.6, 3.0, 0.0), 0.6);
+    }
+
+    /// L5 · at full dose, a labourer earning under bare subsistence must
+    /// read MORE militant than one earning comfortably (Allen's ~2.0+
+    /// "comfortable" band), and `update_society`'s hardship term must rise
+    /// for a hub whose welfare ratio has collapsed even with no famine or
+    /// disaster shock of its own.
+    #[test]
+    fn labourers_riot_before_burghers() {
+        let starving_mil = welfare_militancy_e(0.0, 0.4, 1.0); // 0.4x subsistence
+        let comfortable_mil = welfare_militancy_e(0.0, 2.5, 1.0); // 2.5x subsistence
+        assert!(starving_mil > comfortable_mil,
+            "an underfed labourer must read more militant than a comfortable one, \
+             got {starving_mil} vs {comfortable_mil}");
+        assert!(starving_mil > 5.0, "a labourer well under subsistence must read genuinely militant, got {starving_mil}");
+        assert!(comfortable_mil < 1.0, "a comfortable pop must read near-zero militancy, got {comfortable_mil}");
+
+        let hard_poor = welfare_hardship_e(0.0, 0.5, 1.0);
+        let hard_rich = welfare_hardship_e(0.0, 2.0, 1.0);
+        assert!(hard_poor > hard_rich,
+            "a hub with a collapsed welfare ratio must read more hardship than a prosperous one, \
+             got {hard_poor} vs {hard_rich}");
+    }
+
+    /// L5 · the migration opportunity blend must prefer a destination with
+    /// a genuinely higher welfare ratio, and must never let the blended
+    /// score run outside the 0..1 band the pre-existing prosperity term
+    /// already used (or the exodus/rural-pull ranking logic downstream
+    /// would misbehave).
+    #[test]
+    fn welfare_opportunity_prefers_higher_wages_and_stays_bounded() {
+        let low = welfare_opportunity_e(0.3, 0.5, 1.0);
+        let high = welfare_opportunity_e(0.3, 3.0, 1.0);
+        assert!(high > low, "a destination with higher wages must score higher opportunity, got {low} vs {high}");
+        for &wr in &[0.0, 0.1, 1.0, 5.0, 50.0] {
+            let v = welfare_opportunity_e(0.5, wr, 1.0);
+            assert!((0.0..=1.0).contains(&v), "welfare_opportunity_e must stay in 0..1, got {v} for welfare_ratio {wr}");
+        }
+    }
+

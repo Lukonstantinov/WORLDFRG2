@@ -4375,6 +4375,58 @@ pub(crate) fn vital_net_rate_e(
     old_net * (1.0 - dose) + vital_net * dose
 }
 
+/// Dosed from zero (SETTLEMENT_LIFE_PLAN.md L5, §3.4). Once L2 gave a real
+/// welfare ratio, three existing sentiment-only readers can switch to it:
+/// `derive_pops`' militancy (per-pop), `update_society`'s hardship drain
+/// (hub-level), and the migration opportunity terms in
+/// `urban_exodus_pass`/`province_demography_pass` (hub-level). All three
+/// share this ONE lever so a single gate run walks the whole slice; `0.0`
+/// is a true no-op everywhere it is used (every helper below early-returns
+/// the old value unchanged).
+pub(crate) const WELFARE_BEHAVIOUR_DOSE: f32 = 0.0;
+
+/// L5 · blends `update_society`'s sentiment-only hardship term with a
+/// welfare-ratio read: a labourer earning under bare subsistence is real
+/// hardship no sentiment formula on its own captures. `welfare_ratio` at
+/// 0.0 (unmeasured) reads neutral (no added hardship), never manufactured
+/// crisis on a hub L2 hasn't derived yet. Clamped to the SAME 0.7 ceiling
+/// `update_society` already uses, so a full-dose hub cannot exceed what a
+/// sentiment-only one could.
+pub(crate) fn welfare_hardship_e(old_hard: f32, welfare_ratio: f32, dose: f32) -> f32 {
+    if dose <= 0.0 { return old_hard; }
+    let w = if welfare_ratio > 0.0 { welfare_ratio } else { 1.0 };
+    let welfare_hard = (1.0 - w).clamp(0.0, 1.0) * 0.7;
+    (old_hard * (1.0 - dose) + welfare_hard * dose).clamp(0.0, 0.7)
+}
+
+/// L5 · blends a `Pop`'s sentiment-derived militancy with its OWN welfare
+/// ratio (income ÷ its city's subsistence basket): a labourer below bare
+/// subsistence reads more militant than the SAME city's comfortable
+/// burghers in the SAME year — `hub.lack_basic`, a city-wide average,
+/// cannot draw that distinction on its own. `welfare_pop` at 0.0 (no
+/// income basis — an estate hub, or before the first yearly derive) reads
+/// neutral (~1.0, comfortable). Below 1.0 raises militancy toward the
+/// ceiling; at/above 1.5 (Allen's "comfortable" band) it falls to 0.
+pub(crate) fn welfare_militancy_e(old_mil: f32, welfare_pop: f32, dose: f32) -> f32 {
+    if dose <= 0.0 { return old_mil; }
+    let w = if welfare_pop > 0.0 { welfare_pop } else { 1.0 };
+    let welfare_mil = ((1.5 - w) * (10.0 / 1.5)).clamp(0.0, 10.0);
+    (old_mil * (1.0 - dose) + welfare_mil * dose).clamp(0.0, 10.0)
+}
+
+/// L5 · blends a migration destination's sentiment-derived prosperity term
+/// (used by both `urban_exodus_pass` and `province_demography_pass` to
+/// rank where people go) with a welfare-ratio read, rescaled onto the same
+/// 0..1 the prosperity term already uses (Allen's ~2.0 "comfortable" band
+/// maps to 1.0 here). People move toward WAGES, not vibes.
+/// `welfare_ratio` at 0.0 reads neutral (0.5 — the old term's own rough
+/// midpoint), never as a reason to leave OR stay.
+pub(crate) fn welfare_opportunity_e(old_prosp: f32, welfare_ratio: f32, dose: f32) -> f32 {
+    if dose <= 0.0 { return old_prosp; }
+    let w = if welfare_ratio > 0.0 { (welfare_ratio / 2.0).clamp(0.0, 1.0) } else { 0.5 };
+    (old_prosp * (1.0 - dose) + w * dose).clamp(0.0, 1.0)
+}
+
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
 /// bribery or intimidation; at `control ≥ OFFICIAL_CAPTURE` the figure serves `house`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
