@@ -15,7 +15,7 @@ import {
 import type {
   FeudRow, Gauge, HouseStability, HouseHistory, HouseBrief, MerchantRoute, HouseLedger,
   BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief,
-  HouseAtlas,
+  HouseAtlas, HouseTimelineEvent,
 } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
@@ -395,6 +395,19 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
   // larger and harder-to-verify-blind piece than this tab, so it stays
   // queued (Q19) rather than attempted partially and left half-working.
   const [atlas, setAtlas] = useState<HouseAtlas | null>(null);
+  // S12b · the timeline plate's own feud brackets (independent of the Feuds
+  // tab's own fetch, which only runs while that tab is selected).
+  const [timelineFeuds, setTimelineFeuds] = useState<FeudRow[]>([]);
+  // The scrub cursor — a year the reader is pointing at on the timeline.
+  // Scoping note (rule 36 discipline): the plan's own text says "scrub it
+  // and the tabs below re-read to that year." No per-tab historical state
+  // exists anywhere in the sim to make that literal — Kin/Goals/Crisis/etc.
+  // all read LIVE state only. What the timeline CAN honestly show at a
+  // scrubbed year — which head ruled then, their wealth then (linearly
+  // interpolated between that head's own recorded start/end), which
+  // feuds/milestones were live then — it does; a true year-travel view
+  // across every tab is queue item Q20, not attempted here.
+  const [scrubYear, setScrubYear] = useState<number | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
   const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions" | "atlas">("chronicle");
@@ -426,6 +439,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       campaignGetHouseLineage(h.idx).then((l) => { if (alive) setLineage(l); }).catch(() => {});
       // S11 · the trade-flow atlas (partners/goods/holdings/seasons).
       campaignHouseAtlas(h.idx).then((a) => { if (alive) setAtlas(a); }).catch(() => {});
+      // S12b · feud brackets for the timeline plate.
+      campaignGetFeuds(h.idx).then((fs) => { if (alive) setTimelineFeuds(fs); }).catch(() => {});
     }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
@@ -574,6 +589,13 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       </div>
         </div>
       </div>
+
+      {/* S12b · the life of the house as one horizontal timeline: every head a
+          segment, milestones as marks above, feuds as brackets below, the
+          wealth curve running through as a filled area. Scrubbable — see the
+          scoping note at `scrubYear`'s own declaration above. */}
+      <TimelinePlate line={chron?.line ?? []} events={chron?.events ?? []} feuds={timelineFeuds}
+        houseIdx={h.idx ?? -1} scrubYear={scrubYear} onScrub={setScrubYear} fmt={fmtW} />
 
       {/* Subtabs — Chronicle first (§2.3: the dossier has nothing to DECIDE, so the
           record is the primary artefact). Accountant gets its own roomy view so
@@ -881,6 +903,144 @@ function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) =
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** S12b (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the house's life as one
+ *  horizontal timeline: every head a segment (coloured by sex, labelled when
+ *  wide enough), milestones as marks above (founding/succession/monopoly/
+ *  branch/dissolution only — chatter is deliberately excluded, the same
+ *  "quiet unless it matters" discipline rule 20 already applies to the
+ *  chronicle itself), feuds as brackets below, and the head-to-head
+ *  wealth_start/wealth_end run as a filled area threading through. Built
+ *  entirely from data every other tab already fetches — `chron.line`
+ *  (Phase 0.4's own succession record), `chron.events`, and this house's
+ *  feuds — so it adds no new query.
+ *
+ *  Scrubbable: dragging sets `scrubYear`, and the plate answers what it
+ *  honestly can from that data alone (which head ruled, their wealth then,
+ *  linearly interpolated between their own recorded start/end). It does
+ *  NOT rewrite the tabs below to that year — no per-tab historical state
+ *  exists in the sim for Kin/Goals/Crisis/etc. to read from, so a genuine
+ *  year-travel view is queue item Q20, not attempted here. */
+const MILESTONE_KINDS = new Set(["founded", "succession", "monopoly", "branch", "dissolved"]);
+
+function TimelinePlate({
+  line, events, feuds, houseIdx, scrubYear, onScrub, fmt,
+}: {
+  line: HeadBrief[]; events: HouseTimelineEvent[]; feuds: FeudRow[]; houseIdx: number;
+  scrubYear: number | null; onScrub: (y: number | null) => void; fmt: (v: number) => string;
+}) {
+  const milestones = events.filter((e) => MILESTONE_KINDS.has(e.kind));
+  if (line.length === 0 && milestones.length === 0) return null;
+
+  const W = 680, H = 74, PAD = 6, BAND_TOP = 30, BAND_H = 12;
+  const years: number[] = [];
+  line.forEach((h) => { years.push(h.since_year); if (h.until_year > 0) years.push(h.until_year); });
+  milestones.forEach((e) => years.push(e.year));
+  feuds.forEach((f) => { years.push(f.started_year); years.push(f.started_year + f.years); });
+  if (years.length === 0) return null;
+  const minY = Math.min(...years);
+  const maxY = Math.max(minY + 1, ...years);
+  const xAt = (y: number) => PAD + ((y - minY) / (maxY - minY)) * (W - PAD * 2);
+  const yearAt = (px: number) => Math.round(minY + ((px - PAD) / (W - PAD * 2)) * (maxY - minY));
+
+  const segEnd = (h: HeadBrief) => h.until_year > 0 ? h.until_year : maxY;
+  const maxWealth = Math.max(1, ...line.flatMap((h) => [h.wealth_start, h.wealth_end]));
+  const wealthAt = (y: number) => {
+    const h = line.find((hh) => y >= hh.since_year && y <= segEnd(hh));
+    if (!h) return null;
+    const span = Math.max(1, segEnd(h) - h.since_year);
+    const t = (y - h.since_year) / span;
+    return h.wealth_start + (h.wealth_end - h.wealth_start) * t;
+  };
+  const wealthPath = (() => {
+    const pts = line.flatMap((h) => [
+      `${xAt(h.since_year).toFixed(1)},${(H - 4 - (h.wealth_start / maxWealth) * 16).toFixed(1)}`,
+      `${xAt(segEnd(h)).toFixed(1)},${(H - 4 - (h.wealth_end / maxWealth) * 16).toFixed(1)}`,
+    ]);
+    if (pts.length === 0) return "";
+    return `M${xAt(minY).toFixed(1)},${H - 4} L${pts.join(" L")} L${xAt(maxY).toFixed(1)},${H - 4} Z`;
+  })();
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const scrub = (clientX: number) => {
+    const el = svgRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * W;
+    onScrub(Math.min(maxY, Math.max(minY, yearAt(px))));
+  };
+
+  const scrubHead = scrubYear != null ? line.find((h) => scrubYear >= h.since_year && scrubYear <= segEnd(h)) : null;
+  const scrubWealth = scrubYear != null ? wealthAt(scrubYear) : null;
+
+  return (
+    <div style={{ marginTop: 6, marginBottom: 2 }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+        style={{ display: "block", cursor: "crosshair" }}
+        onMouseDown={(e) => { scrub(e.clientX); }}
+        onMouseMove={(e) => { if (e.buttons === 1) scrub(e.clientX); }}
+        onMouseLeave={() => {}}>
+        {/* Wealth curve, a filled area running through the whole life */}
+        {wealthPath && <path d={wealthPath} fill="#c9a22733" stroke="#c9a227" strokeWidth={1} />}
+        {/* Head segments */}
+        {line.map((h, i) => (
+          <rect key={i} x={xAt(h.since_year)} y={BAND_TOP} width={Math.max(1, xAt(segEnd(h)) - xAt(h.since_year))}
+            height={BAND_H} fill={h.female ? "#b06fa0" : "#4a7ab0"} opacity={h.until_year === 0 ? 0.9 : 0.65}
+            stroke="#0c141e" strokeWidth={0.5}>
+            <title>{`${h.name}${h.epithet ? ` "${h.epithet}"` : ""} — ${h.since_year}–${h.until_year > 0 ? h.until_year : "present"} (${h.accession})`}</title>
+          </rect>
+        ))}
+        {/* Segment name labels, only where a segment is wide enough */}
+        {line.map((h, i) => {
+          const w = xAt(segEnd(h)) - xAt(h.since_year);
+          if (w < 34) return null;
+          return (
+            <text key={i} x={xAt(h.since_year) + w / 2} y={BAND_TOP + BAND_H - 3} textAnchor="middle"
+              fontSize={7.5} fill="#f0e4c8" style={{ pointerEvents: "none" }}>{h.name}</text>
+          );
+        })}
+        {/* Milestone marks, above the band */}
+        {milestones.map((e, i) => (
+          <g key={i}>
+            <line x1={xAt(e.year)} x2={xAt(e.year)} y1={BAND_TOP - 8} y2={BAND_TOP} stroke="#e8c860" strokeWidth={1} />
+            <text x={xAt(e.year)} y={BAND_TOP - 10} textAnchor="middle" fontSize={7}>
+              <title>{`${e.text} (year ${e.year})`}</title>
+              {EVENT_ICON[e.kind] ?? "•"}
+            </text>
+          </g>
+        ))}
+        {/* Feud brackets, below the band */}
+        {feuds.map((f, i) => {
+          const x1 = xAt(f.started_year), x2 = xAt(f.started_year + f.years);
+          const y = BAND_TOP + BAND_H + 6 + (i % 2) * 5;
+          return (
+            <g key={i} opacity={0.8}>
+              <line x1={x1} x2={x2} y1={y} y2={y} stroke="#c06868" strokeWidth={1.2} />
+              <line x1={x1} x2={x1} y1={y - 2} y2={y + 2} stroke="#c06868" strokeWidth={1} />
+              <line x1={x2} x2={x2} y1={y - 2} y2={y + 2} stroke="#c06868" strokeWidth={1} />
+              <title>{`Feud vs ${f.a === houseIdx ? f.b_name : f.a_name} — ${f.cause}, ${f.outcome}`}</title>
+            </g>
+          );
+        })}
+        {/* Scrub cursor */}
+        {scrubYear != null && (
+          <line x1={xAt(scrubYear)} x2={xAt(scrubYear)} y1={2} y2={H - 2} stroke="#7fd0c0" strokeWidth={1} strokeDasharray="2,2" />
+        )}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#4a5c72", padding: "0 2px" }}>
+        <span>{minY}</span>
+        {scrubYear != null ? (
+          <span style={{ color: "#7fd0c0" }} data-no-drag onClick={() => onScrub(null)} title="Clear the scrub cursor">
+            yr {scrubYear} — {scrubHead ? scrubHead.name : "no head on record"}{scrubWealth != null ? ` · wealth ≈ ${fmt(scrubWealth)}` : ""} ✕
+          </span>
+        ) : (
+          <span title="Drag along the timeline to inspect a year">drag to inspect a year</span>
+        )}
+        <span>{maxY}</span>
+      </div>
     </div>
   );
 }
