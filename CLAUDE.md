@@ -1665,11 +1665,36 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   move a tile/sim gate. Same no-display verification caveat as S10 — not
   opened in a real browser this session (queue item Q17, widened to cover
   this).
+- **S11 — the two atlases, TEXT/TABLE form (shipped in the same follow-up
+  session as S12a).** The S8/S9 atlas queries were built and unused by any
+  UI. `HouseDossier` gains a "🗺 Atlas" tab: partner cities ranked by
+  volume with an in/out two-tone bar, the goods portfolio (bought-at/
+  sold-at cities resolved from the atlas's own partner list), and a
+  seasonal lane-ease bar chart (`season_slices` finally has a reader).
+  `GuildsPanel` gains a per-row "🗺" toggle that expands an inline Craft
+  Atlas strip: inputs/outputs by city, reach (hubs currently buying the
+  good), the earned signature when one exists — needed one new field,
+  `GuildBrief.idx` (index into `sim.guilds`, enumerated before the
+  quality-sort so it stays stable), since the browse query never carried a
+  key `campaign_guild_atlas` could use. Both S8/S9 queries were already
+  gated as pure derived reads touching no tile/sim state (§4's own note),
+  so this needed no `econ_`/`tick::tests` run — `cargo check --lib --tests`
+  + `npx tsc --noEmit` + a clean `vite build` (181 modules, unchanged)
+  alone. **Deliberately NOT attempted**: the plan's own richer on-map
+  version — lane thickness ∝ volume, colour = the dominant good's
+  `GOOD_DEFS` hue, direction arrows, the `mediumRuns` dashed/solid split, a
+  `drawGoodIcon` medallion at the midpoint, a far-end label through
+  `drawLabel`, rivals' lanes ghosted. That is real new canvas rendering on
+  `OverlayManager`'s `laneBetween`/`mediumRuns` machinery — far larger and
+  far harder to verify blind than a text tab reusing an already-gated
+  query — so it is queue item Q19, not a half-built map feature. Same
+  no-display verification caveat as everything else this session shipped
+  in the UI (queue item Q17, widened to cover this too).
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
   S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
   see above, waits on the relay-fixture fix before its own dose walk can be
-  re-attempted), S11 (the two atlases with real on-map lane labelling using
-  S8/S9's queries), S12b/S12c (the Dossier plate and the per-tab graphs).
+  re-attempted), the ON-MAP LANE half of S11 (queue item Q19), S12b/S12c
+  (the Dossier plate and the per-tab graphs).
   Each waits on exactly what the plan's own §7/§8 already say it waits on
   (S1/S6 additionally wait on their own newly-found fixture/mechanism
   fixes) — nothing here changes that sequencing, this entry only records
@@ -2281,7 +2306,12 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   quarrels as their OWN window (a feud belongs to two
                                   houses, not one; it was never a house's tab), wrapping
                                   `FeudsView` with no house focus. `GuildsPanel.tsx`
-                                  relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts").
+                                  relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts"),
+                                  and (S11, text form) each row carries a "🗺"
+                                  toggle expanding an inline Craft Atlas strip —
+                                  inputs/outputs by city, reach, signature —
+                                  reading `campaign_guild_atlas` (S9's own
+                                  query) keyed by the row's new `idx` field.
                                   Split helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`,
                                   used by both the browser and the dossier) live in
                                   `houseShared.ts` rather than being duplicated or
@@ -2336,6 +2366,11 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   risings" list; observation only, Phase 3.2-3.6)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
+                                  🗺 Atlas (S11, text form — partner cities by
+                                  volume, the goods portfolio with bought-at/
+                                  sold-at cities, a seasonal lane-ease bar
+                                  chart; reads `campaign_house_atlas`, S8's
+                                  own query)/
                                   ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant.
                                   `HouseStandingView` (five stability gauges — solvency
                                   COUNTDOWN, liquidity runway, concentration exposure,
@@ -5587,21 +5622,22 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     breach and a relay-fixture assumption the
                                     dose invalidates), recorded at
                                     `BLOCKADE_STAGING_DOSE`'s own doc comment.
-                                    S10 (and, in a follow-up session, S12a —
-                                    the bump chart + quiet gauges + pulse
-                                    ticker) could only be verified by `tsc`/
-                                    `vite build` — no display to actually open
-                                    the windows in, said plainly rather than
-                                    claimed as tested (queue item Q17).
-                                    S11/S12b/S12c (the map labelling for
-                                    S8/S9's atlases, the Dossier plate, one
-                                    graph per tab) QUEUED, per the plan's own
-                                    §9 risk register — THREE doses attempted
+                                    S10 (and, in a follow-up session, S11 in
+                                    TEXT form + S12a — the two atlas tabs, the
+                                    bump chart + quiet gauges + pulse ticker)
+                                    could only be verified by `tsc`/`vite
+                                    build` — no display to actually open the
+                                    windows in, said plainly rather than
+                                    claimed as tested (queue item Q17). The
+                                    ON-MAP LANE half of S11 (Q19) and
+                                    S12b/S12c (the Dossier plate, one graph
+                                    per tab) QUEUED, per the plan's own §9
+                                    risk register — THREE doses attempted
                                     in the first session (S1
                                     investigated/blocked, S3 walked/untestable,
                                     S6 walked/reverted), at the plan's own
-                                    stated ceiling; S8/S9/S10/S12a shipped
-                                    since none is a dose. The one-session build
+                                    stated ceiling; S8/S9/S10/S11(text)/S12a
+                                    shipped since none is a dose. The one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

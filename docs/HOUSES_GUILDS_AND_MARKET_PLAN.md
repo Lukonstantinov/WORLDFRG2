@@ -1,8 +1,9 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S2/S3/S4/S5/S7/S8/S9/S10/S12a BUILT AND GATED; S1 BLOCKED
-(pre-existing negative result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real
-negative result, see below); S11/S12b/S12c QUEUED.** Written 2026-09-22 from
+**Status: S2/S3/S4/S5/S7/S8/S9/S10/S11(text form)/S12a BUILT AND GATED;
+S1 BLOCKED (pre-existing negative result); S6 DOSE-WALKED TO 0.3 AND
+REVERTED (a real negative result, see below); the on-map lane half of S11
+plus S12b/S12c QUEUED (Q19).** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -61,7 +62,20 @@ to house-ish kinds — the plan's own §7 build-order table already named this
 lanes; the same discipline applies here to an existing query. Pure derived
 read, gated by `cargo check --lib --tests` + `npx tsc --noEmit` + a clean
 `vite build` alone (§4's own note: neither can move a tile/sim gate) — same
-no-display caveat as S10, folded into queue item Q17.
+no-display caveat as S10, folded into queue item Q17. S11 shipped in the
+SAME follow-up session, in TEXT/TABLE form only: `HouseDossier` gained a
+"🗺 Atlas" tab (partner cities by volume, the goods portfolio with
+bought-at/sold-at cities, a seasonal lane-ease bar chart) and
+`GuildsPanel` gained a per-row expandable Craft Atlas strip (inputs/
+outputs by city, reach, signature) — both reusing the already-built,
+already-gated S8/S9 queries with zero sim-side change (`GuildBrief`
+gained one new `idx` field so the browse list can key into
+`campaign_guild_atlas`). The plan's own richer on-map lane rendering
+(thickness/colour by volume, direction arrows, a medallion at the
+midpoint, a far-end label, rivals' lanes ghosted) is DELIBERATELY NOT
+attempted — real new canvas code on `OverlayManager`'s `laneBetween`/
+`mediumRuns` machinery, much larger and much harder to verify blind than
+a text tab, so it is queue item Q19 rather than a half-built map feature.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -458,7 +472,7 @@ S8  house atlas query
 S9  guild atlas query
 S10 window split                    ── ■ STOP HERE IF SHORT ──
 S12a Houses three bands             ✓ shipped (bump chart + gauges + pulse)
-S11 the two atlases + map labelling
+S11 the two atlases + map labelling ✓ shipped in TEXT form; map labelling → Q19
 S12b Dossier plate
 ```
 
@@ -597,6 +611,23 @@ Each item names what it waits for and the gate it will need.
     year — it would need `founded_this_year`/`died_this_year` fields added
     there instead of only cumulative `active`). Gate: `cargo check` alone —
     it is a pure read/derivation, not a dose.
+19. **Q19 · The on-map lane half of S11.** The House/Craft Atlas tabs ship
+    text/table only (partner lists, a goods book, a season bar). The plan's
+    fuller design — lane thickness ∝ volume, colour = the dominant good's
+    `GOOD_DEFS` hue, direction arrows (outbound/inbound drawn differently),
+    dashed-vs-solid via the existing `mediumRuns` split, a `drawGoodIcon`
+    medallion at the lane midpoint, a far-end label through `drawLabel` (per
+    §8.11 — never a raw `ctx.font`), and rivals' lanes ghosted behind the
+    focused house's own — is real new canvas rendering layered onto
+    `OverlayManager`'s `laneBetween`/`mediumRuns` machinery (§8.5's "a sixth
+    caller of an existing mechanism, not a new system"). Waits on: nothing
+    technical — it is simply a much larger, much harder to verify blind
+    piece of work than the text tabs, and was deliberately left for a
+    session that can open a browser and actually look at the drawn lanes
+    (the same caveat Q17 already names for every other UI slice this plan
+    shipped). Gate: `npx tsc --noEmit` + `npm run tauri dev`, confirm a
+    house's lanes draw with real thickness/colour/direction and a rival's
+    lanes ghost correctly.
 
 ---
 

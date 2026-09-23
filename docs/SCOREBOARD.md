@@ -9,6 +9,44 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23b — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S11 (the two atlases, text form) shipped
+
+Continuation of the same follow-up session (see 2026-09-23 below, S12a).
+Picked S11 next per the plan's own §7 build order.
+
+The S8/S9 atlas queries (`campaign_house_atlas`, `campaign_guild_atlas`)
+were built in the first session and read by no UI. `HouseDossier` gains a
+"🗺 Atlas" tab: partner cities ranked by combined in/out volume with a
+two-tone bar, the goods portfolio (bought-at/sold-at cities resolved from
+the atlas's own partner names), and a 12-bar seasonal lane-ease chart —
+`season_slices` finally has a reader. `GuildsPanel` gains a per-row "🗺"
+toggle expanding an inline Craft Atlas strip: inputs/outputs by city,
+reach (hubs currently buying the good), the earned signature when one
+exists. This needed one small backend addition — `GuildBrief.idx` (index
+into `sim.guilds`, taken via `.enumerate()` before the quality sort so it
+stays a stable key) — since the browse query never carried anything
+`campaign_guild_atlas(guild_idx)` could use.
+
+**Deliberately NOT attempted**: the plan's fuller on-map lane design (lane
+thickness ∝ volume, colour = the dominant good's `GOOD_DEFS` hue,
+direction arrows, the `mediumRuns` dashed/solid medium split, a
+`drawGoodIcon` medallion at the lane midpoint, a far-end label through
+`drawLabel`, rivals' lanes ghosted behind the focused house's own). That
+is real new canvas rendering on `OverlayManager`'s `laneBetween`/
+`mediumRuns` machinery — a much larger and much harder to verify blind
+piece of work than a text tab reusing an already-gated query — recorded
+as new queue item Q19 rather than silently left out.
+
+**Verification, stated exactly as it was done**: both S8/S9 queries are
+pure derived reads (§4's own note — neither can move a tile/sim gate), so
+no `econ_`/`tick::tests` run was owed. `cargo check --lib --tests` clean,
+`npx tsc --noEmit` clean, `npx vite build` clean (181 modules, unchanged
+from S10/S12a's count). Same caveat as everything else this session
+shipped in the UI — not opened in a real browser; folded into the already
+-widened queue item Q17.
+
+---
+
 ## 2026-09-23 — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S12a (the Houses bump chart) shipped
 
 Follow-up session on the same branch, picked up after 2026-09-22g (S10) below.
