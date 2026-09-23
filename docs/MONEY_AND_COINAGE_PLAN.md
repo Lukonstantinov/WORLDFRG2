@@ -391,6 +391,39 @@ with the simulation bit-identical. Everything from M5 changes the economy.
   break (§8.15).
 - **R6 · Households priced out of food** — the reverted S7 walk. M7 before M8,
   no exceptions.
+  **Tried again 2026-09-23 with M7's own fix live** (`HOUSEHOLD_MONETIZATION_
+  DOSE` and `FOOD_AFFORDABILITY_DOSE` both raised to 0.02, `cargo test --lib
+  tick::tests`) — REVERTED. `unrest_topples_councils` still failed, the
+  IDENTICAL failure mode the original S7 walk hit, meaning M7's affordability
+  fix is not by itself sufficient to close the gap at this dose (either the
+  dose pairing is wrong, or `lack_basic`'s own smoothing lags too far behind
+  the priced-out shortfall for `update_food_and_starvation` to catch it in
+  time — not disentangled). Two OTHER real gate failures surfaced at the same
+  trial and are recorded separately since they are not specific to this dose
+  pairing: `n1_bind_stays_healthy_on_a_realistically_dense_world` (a
+  wealth-concentration regression on the N1 staging gate — plausibly the
+  same "everything is chaotic-sensitive" effect §8.15 already documents for
+  this exact pair of constants, not confirmed) and, more concerning,
+  `the_coin_ledger_conserves_every_struck_coin` failed on a **pure f32
+  summation drift** (purses held 51.98718 against a stamped `circulating` of
+  51.990627 — 0.007% relative, past the test's 1e-3 absolute tolerance) with
+  NO logic bug found in `add_coin`/`take_coin`/`household_ledger_pass` (each
+  add/take pair in M8's own loop is bit-exact by construction — `count.min(
+  remaining)` never performs arithmetic when the purse was just topped up by
+  the exact amount being taken). This is very likely ordinary f32 rounding
+  error compounding over many more `household_ledger_pass` cycles than the
+  standard M7/M8 gate run exercises (the dose change ripples chaotically into
+  `trade_wealth`, which sizes M8's own wage, and so how many hubs run a
+  nonzero-wage cycle each month) — a latent numerical fragility in the
+  Purse ledger's f32 accumulators, not a conservation LOGIC bug, and real
+  regardless of whether this dose walk is ever resumed. Reverted both
+  constants to 0.0; `tick::tests` re-confirmed 283/283 clean immediately
+  after. Queued, not chased further this session: (a) a genuinely different
+  dose pairing or a fix to `lack_basic`'s lag before re-attempting the walk,
+  (b) tightening `the_coin_ledger_conserves_every_struck_coin`'s tolerance
+  or moving the Purse ledger's running totals to f64 if heavier exercise
+  (M9's eventual switch-over will run this ledger far harder than M8 ever
+  does today) makes the drift worse.
 
 ---
 

@@ -9,6 +9,55 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23d — M7/M8 dose walk attempted (0.02/0.02), REVERTED — a negative result
+
+Continuing `MONEY_AND_COINAGE_PLAN.md` per R6 ("M7 before M8, no exceptions")
+now that M7's mechanism exists: raised `HOUSEHOLD_MONETIZATION_DOSE` and
+`FOOD_AFFORDABILITY_DOSE` together to 0.02 (matching the original S7 walk's
+own middle trial point) and ran `cargo test --lib tick::tests`.
+
+**Result: `unrest_topples_councils` still fails — the identical failure mode
+the original S7 walk hit before M7 existed.** M7's fix alone is not
+sufficient at this dose to let a chronically priced-out city register as
+discontented enough to revolt. Whether that's the wrong dose pairing or a
+real lag in `lack_basic`'s own smoothing outrunning `update_food_and_
+starvation`'s read of it was not disentangled this session.
+
+**A second, more useful finding fell out of the same trial**: `the_coin_
+ledger_conserves_every_struck_coin` (M3's own conservation gate) also
+failed — purses held 51.98718 against a stamped `circulating` of
+51.990627, a ~0.007% drift past the gate's 1e-3 absolute tolerance. Read
+through `add_coin`/`take_coin`/`household_ledger_pass` (M8) line by line —
+no logic bug: every add/take pair in the household ledger's own loop is
+bit-exact by construction (the purse is topped up by exactly the amount
+about to be taken, so `count.min(remaining)` never performs arithmetic).
+The likely cause is ordinary f32 summation rounding compounding over far
+more `household_ledger_pass` cycles than the M7/M8 shipping gate run
+exercises — raising the dose ripples chaotically into `trade_wealth` (which
+sizes M8's wage), changing how many hubs run a nonzero cycle each month.
+This is a **latent numerical fragility in the Purse ledger's f32
+accumulators**, real independent of whether this dose walk is ever
+resumed, and worth a look before M9's switch-over runs the same ledger
+much harder.
+
+Also failed at this trial, not disentangled from the dose pair itself:
+`n1_bind_stays_healthy_on_a_realistically_dense_world` (a wealth-
+concentration regression on the N1 staging gate).
+
+**Reverted both constants to 0.0 immediately** (§2.4: a spot regression on
+the target gate is a revert, not a judgement call). `tick::tests`
+re-confirmed 283/283 clean at 0.0/0.0. `git status` confirmed zero net
+code diff — nothing to commit for this trial, the finding lives in
+`MONEY_AND_COINAGE_PLAN.md`'s own R6 entry and here.
+
+**What's next**, queued per rule 36: (a) a different dose pairing, or fixing
+`lack_basic`'s lag, before re-attempting the M7/M8 walk; (b) either
+tightening the coin-ledger conservation gate's tolerance or moving the
+Purse ledger's accumulators to f64, whichever the next session judges
+right, before M9 exercises this ledger at real scale.
+
+---
+
 ## 2026-09-23c — Campaign tick performance: measured, not touched (a diagnosis, per §2.4)
 
 User asked to check campaign performance and improve it if possible. Ran the
