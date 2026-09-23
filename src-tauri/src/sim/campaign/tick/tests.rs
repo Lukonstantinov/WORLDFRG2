@@ -34,6 +34,7 @@
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             yard_progress: 0.0,
             food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
+            ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT],
         }
     }
 
@@ -9503,4 +9504,83 @@
             assert!(y.population.is_finite() && y.welfare_ratio.is_finite() && y.lack_basic.is_finite(),
                 "every annal field must be finite");
         }
+    }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L4 ──────────────────────────────────────────
+
+    /// L4 (§3.3) · `VITAL_RATES_DOSE = 0.0` must be a TRUE no-op — the same
+    /// `old_net` in, `old_net` out, whatever the food/welfare/starving inputs
+    /// say. This is the ONE lever from vital rates into `population`; the
+    /// age-band bookkeeping in `update_vital_rates` is unconditional but
+    /// never itself writes `population`.
+    #[test]
+    fn vital_rates_dose_zero_is_a_noop() {
+        assert_eq!(vital_net_rate_e(0.0002, 1.0, 1.0, 0.0, 0.0), 0.0002);
+        assert_eq!(vital_net_rate_e(-0.0001, 0.2, 0.0, 0.9, 0.0), -0.0001);
+    }
+
+    /// L4 · a famine year (high `starving`) must both raise the death rate
+    /// AND tag those deaths as `CAUSE_FAMINE` in the annual bookkeeping — the
+    /// "missing generation" a famine leaves behind.
+    #[test]
+    fn a_famine_leaves_a_missing_generation() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h = hub(0, 0.0, 0.0, 5000.0, vec![50.0], 0);
+        h.starving = 0.9; // a hub deep in famine
+        h.sent_food = 0.1;
+        let mut s = sim(vec![h], goods);
+        s.update_vital_rates();
+        let hub0 = &s.hubs[0];
+        assert!(hub0.deaths_by_cause[CAUSE_FAMINE] > 0.0,
+            "a hub with starving=0.9 must accrue famine deaths, got {:?}", hub0.deaths_by_cause);
+        // A well-fed hub run the same way must accrue no famine deaths at all.
+        let goods2 = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h2 = hub(0, 0.0, 0.0, 5000.0, vec![50.0], 0);
+        h2.starving = 0.0;
+        h2.sent_food = 1.0;
+        let mut s2 = sim(vec![h2], goods2);
+        s2.update_vital_rates();
+        assert_eq!(s2.hubs[0].deaths_by_cause[CAUSE_FAMINE], 0.0,
+            "a well-fed hub must accrue zero famine deaths");
+    }
+
+    /// L4 · the age pyramid must actually move over time — children age into
+    /// adults, adults into elders — rather than sitting frozen at the seed.
+    #[test]
+    fn ages_move_over_time() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let h = hub(0, 0.0, 0.0, 5000.0, vec![50.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.update_vital_rates();
+        let seeded = s.hubs[0].ages;
+        assert!((seeded[0] + seeded[1] + seeded[2] - 1.0).abs() < 1e-3,
+            "ages must sum to ~1.0 on first seeding, got {seeded:?}");
+        for _ in 0..40 {
+            s.update_vital_rates();
+        }
+        let later = s.hubs[0].ages;
+        assert!((later[0] + later[1] + later[2] - 1.0).abs() < 1e-3,
+            "ages must keep summing to ~1.0 after many years, got {later:?}");
+        assert!((later[0] - seeded[0]).abs() > 1e-4 || (later[2] - seeded[2]).abs() > 1e-4,
+            "the age pyramid must move over 40 years of bookkeeping, seeded {seeded:?} later {later:?}");
+    }
+
+    /// L4 · war deaths must fall on the ADULT MALE band, not the population
+    /// uniformly — `male_adult_frac` must drop after a levy takes real
+    /// casualties (`spend_levy_casualties`, `war.rs`), and the loss must be
+    /// tagged `CAUSE_WAR`.
+    #[test]
+    fn war_deaths_fall_on_adult_men() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 0.0, 0.0, 20000.0, vec![200.0], 0);
+        h0.war_manpower = 500.0;
+        let mut s = sim(vec![h0], goods);
+        s.update_vital_rates(); // seed ages/male_adult_frac deterministically first
+        let before = s.hubs[0].male_adult_frac;
+        s.spend_levy_casualties(0, 0.4);
+        let after = s.hubs[0].male_adult_frac;
+        assert!(after < before,
+            "a real levy casualty must lower male_adult_frac, {before} -> {after}");
+        assert!(s.hubs[0].deaths_by_cause[CAUSE_WAR] > 0.0,
+            "a levy casualty must be tagged CAUSE_WAR, got {:?}", s.hubs[0].deaths_by_cause);
     }

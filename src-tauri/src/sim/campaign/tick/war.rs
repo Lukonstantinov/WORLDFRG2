@@ -95,7 +95,7 @@ impl CampaignSim {
         self.spend_levy_casualties(b, loss_b * scale);
     }
 
-    fn spend_levy_casualties(&mut self, hub: usize, frac: f32) {
+    pub(crate) fn spend_levy_casualties(&mut self, hub: usize, frac: f32) {
         let wm = self.hubs[hub].war_manpower;
         if wm <= EPS { return; }
         let lost = wm * frac;
@@ -104,6 +104,20 @@ impl CampaignSim {
         let death_frac = ((lost * LEVY_DEATH_FRAC) / pop).clamp(0.0, 0.5);
         if death_frac > 0.0 {
             self.hubs[hub].population *= 1.0 - death_frac;
+            // SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · route the death into the
+            // adult-male band and the cause tally — observational
+            // bookkeeping only ("war widows"); the population effect above
+            // is unchanged from before this slice.
+            if ages_needs_seeding(&self.hubs[hub].ages) {
+                self.hubs[hub].ages = AGES_SEED;
+                self.hubs[hub].male_adult_frac = 0.5;
+            }
+            let died = pop * death_frac;
+            self.hubs[hub].deaths_by_cause[CAUSE_WAR] += died;
+            let adults = (pop * self.hubs[hub].ages[1]).max(1.0);
+            let male_adults = adults * self.hubs[hub].male_adult_frac;
+            let new_male_adults = (male_adults - died).max(0.0);
+            self.hubs[hub].male_adult_frac = (new_male_adults / adults).clamp(0.0, 1.0);
         }
     }
 

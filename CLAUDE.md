@@ -1644,13 +1644,16 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   newly-found fixture/mechanism fixes) — nothing here changes that
   sequencing, this entry only records which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L3 shipped: the STOP MARKER is reached
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L4 shipped (L0-L3 the STOP MARKER, L4 past it)
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
-in a follow-up session, so the STOP MARKER is now reached in full — the hidden
+in a follow-up session, so the STOP MARKER was reached in full — the hidden
 famine is measured, the welfare ratio exists AND is visible, and the player can
-see how a city lives. L4 onward remain queued (see below).
+see how a city lives. A further session then shipped **L4** (vital rates + age
+bands) at its own dose of zero, per the plan's own explicit permission to
+continue past the marker one gated slice at a time. L5 onward remain queued
+(see below).
 
 - **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
   `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
@@ -1720,14 +1723,55 @@ see how a city lives. L4 onward remain queued (see below).
   `dense_world()` and took 437s on its own, since the whole gate row exists to be
   run every `tick/` change, per §2.8's own "narrowest thing that could fail"
   rule); `npx tsc --noEmit` and `npx vite build` both clean.
-- **What did NOT ship, and why (rule 36 — queued, not waived)**: L4 onward
-  (vital rates + age bands, welfare-into-behaviour, housing, the settlement year,
-  urban hazards, the church, the watch, persistent pops, townspeople, Life tab v2)
-  are each their own dose walk per the plan's own build order and are unstarted.
-  Gates run across both sessions: `cargo check --lib --tests` (clean), `cargo test
-  --lib tick::tests` (279/279, ~45s), `cargo test --lib econ_ -- --nocapture`
-  (6/6, ~540s incl. the multi-seed inheritance gate), `npx tsc --noEmit` +
-  `npx vite build` (clean).
+- **L4 — vital rates + age bands** (§3.3). `TickHub.ages: [f32; 3]`
+  (children/adults/elders shares, seeded `AGES_SEED` ≈35/50/15 — Wrigley &
+  Schofield's stationary pre-transition pyramid), `male_adult_frac` (seeded 0.5),
+  `deaths_by_cause: [f32; DEATH_CAUSE_COUNT]` (8, indices `CAUSE_FAMINE`/
+  `_PLAGUE`/`_FEVER`/`_WAR`/`_FIRE`/`_FLOOD`/`_OLD_AGE`/`_INFANCY` — a plain index
+  table, never an enum, so the array stays positionally serialized; `_FIRE`/
+  `_FLOOD` stay at 0.0 until L8 exists to write them). `update_vital_rates`
+  (yearly, `cities.rs`, called before `update_society` so this year's ageing is
+  in place for the strata/pops it feeds) is UNCONDITIONAL bookkeeping, never
+  gated by a dose, because it never itself writes `population`: fixed transfer
+  rates age children into adults and adults into elders
+  (`CHILD_TO_ADULT_RATE`/`ADULT_TO_ELDER_RATE`), a births share re-enters the
+  children band, and the year's ordinary deaths — from the same crude-rate
+  calculation the dosed path below uses — are drawn down weighted toward
+  children and elders (0.45/0.40/0.15 — "infants and the elderly carry most of
+  ordinary mortality") and tagged by cause: `CAUSE_FAMINE` above the same
+  starvation floor `update_food_and_starvation` already uses to raise
+  `starving`, `CAUSE_OLD_AGE`/`CAUSE_INFANCY` otherwise. **War deaths are tagged
+  separately, at the moment they happen** — `spend_levy_casualties` (`war.rs`,
+  widened `pub(crate)` for this) now thins `male_adult_frac` by the real
+  casualty count and tags `CAUSE_WAR`, so a war visibly widows a city's adult
+  band instead of shrinking `population` uniformly (§3.3's "war widows" effect).
+  **The ONE path from vital rates into `population`** is `vital_net_rate_e`
+  (`mod.rs`), blended into the existing daily net-growth term
+  (`birth_rate * food_sec - DEATH_RATE_BASE`) at `VITAL_RATES_DOSE` — a real
+  CBR/CDR calculation off food security, welfare ratio and starvation, with an
+  early return at `dose <= 0.0` that hands back the untouched old formula, the
+  same shape `entitlement_bal_e` already uses. Shipped at
+  **`VITAL_RATES_DOSE = 0.0`** — a true no-op (`vital_rates_dose_zero_is_a_noop`).
+  `a_famine_leaves_a_missing_generation` proves a starving hub accrues famine
+  deaths and a well-fed one accrues none; `ages_move_over_time` proves the
+  pyramid actually ages rather than sitting frozen at the seed;
+  `war_deaths_fall_on_adult_men` proves a real levy casualty lowers
+  `male_adult_frac` and tags `CAUSE_WAR`. **Raising the dose is unstarted,
+  separate work**, and per the plan's own §0 cross-reference must be walked
+  with `CAPACITY_LAND_WEIGHT` (`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 4)
+  PINNED at 0.0 — two capacity/growth-shaping doses moving together cannot be
+  told apart by a single gate run. `big_cities_die_faster_than_they_breed`
+  (the urban-graveyard gate the plan's own build-order table names) is
+  unwritten, queued alongside the dose walk itself rather than built ahead of
+  having a live effect to test.
+- **What did NOT ship, and why (rule 36 — queued, not waived)**: L5 onward
+  (welfare-into-behaviour, housing, the settlement year, urban hazards, the
+  church, the watch, persistent pops, townspeople, Life tab v2) are each their
+  own dose walk per the plan's own build order and are unstarted. Gates run
+  across all sessions: `cargo check --lib --tests` (clean), `cargo test --lib
+  tick::tests` (283/283, ~42s), `cargo test --lib econ_ -- --nocapture` (6/6
+  incl. the multi-seed inheritance gate), `npx tsc --noEmit` + `npx vite build`
+  (clean).
 
 ---
 

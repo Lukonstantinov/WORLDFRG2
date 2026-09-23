@@ -9,6 +9,42 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23d — `SETTLEMENT_LIFE_PLAN.md`: L4 (vital rates + age bands) shipped past the STOP MARKER
+
+Follow-up session to 2026-09-23c. `TickHub.ages: [f32; 3]` (children/adults/elders
+shares, seeded ≈35/50/15 — Wrigley & Schofield's stationary pre-transition
+pyramid), `male_adult_frac` (seeded 0.5), `deaths_by_cause: [f32; 8]` (famine ·
+plague · fever · war · fire · flood · old age · infancy — fire/flood stay at 0.0
+until L8). `update_vital_rates` (yearly, `cities.rs`, before `update_society`) is
+UNCONDITIONAL bookkeeping: fixed ageing transfer between bands, births into the
+children band, and a real CBR/CDR calculation off food security/welfare/starving
+draws down ordinary deaths weighted toward children and elders, tagged by cause.
+War deaths are tagged separately at the moment they happen —
+`spend_levy_casualties` (`war.rs`) now thins `male_adult_frac` on a real levy
+casualty and tags `CAUSE_WAR`, the "war widows" effect.
+
+The ONE path from vital rates into `population` is `vital_net_rate_e`, blended
+into the existing daily net-growth term at `VITAL_RATES_DOSE` — a true no-op at
+0.0, same shape as L1's `entitlement_bal_e` (early return on `dose <= 0.0`).
+
+**Gates**: `cargo check --lib --tests` clean; `cargo test --lib tick::tests`
+283/283 in 42.44s (4 new: `vital_rates_dose_zero_is_a_noop`,
+`a_famine_leaves_a_missing_generation`, `ages_move_over_time`,
+`war_deaths_fall_on_adult_men`); `cargo test --lib econ_ -- --nocapture` 6/6
+bit-identical in 543.35s, multi-seed inheritance gate included (identical
+partible/primogeniture/ultimogeniture/seniority tables across all 3 seeds vs.
+the pre-L4 run).
+
+**Raising the dose is unstarted, separate work** — per the plan's own §0
+cross-reference, must be walked with `CAPACITY_LAND_WEIGHT`
+(`PLACES_DEMAND_AND_GROWTH_PLAN.md` slice 4) PINNED at 0.0, since two
+capacity/growth-shaping doses moving together cannot be told apart by one gate
+run. `big_cities_die_faster_than_they_breed` (the urban-graveyard gate the
+plan's own table names) is unwritten, queued with the dose walk rather than
+built ahead of a live effect to test against.
+
+---
+
 ## 2026-09-23c — `SETTLEMENT_LIFE_PLAN.md`: L3 (annals + Life tab) shipped — the STOP MARKER is reached
 
 Follow-up session to 2026-09-23b. `TickHub.annals: Vec<CityYear>` (population ·

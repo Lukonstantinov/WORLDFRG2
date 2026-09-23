@@ -634,6 +634,15 @@ impl CampaignSim {
             // so it can't overshoot — total population stays bounded and finite.
             if pop < capacity {
                 let net = birth_rate * food_sec - DEATH_RATE_BASE;
+                // SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · blends the flat net
+                // above with a real crude-rate calculation off food
+                // security, welfare and starvation. A true no-op at
+                // `VITAL_RATES_DOSE = 0.0` — `net` reaches `vital_net_rate_e`
+                // unchanged and returns unchanged.
+                let net = vital_net_rate_e(
+                    net, food_sec, self.hubs[h].welfare_ratio, self.hubs[h].starving,
+                    VITAL_RATES_DOSE,
+                );
                 new_pop += net * pop * (1.0 - pop / capacity);
             }
             // Famine empties a city faster than trade decline alone.
@@ -739,6 +748,10 @@ impl CampaignSim {
             // after the diet so a league's freshly-collected dues (this
             // year's, just banked above) can fund it the same year.
             self.run_kontors();
+            // SETTLEMENT_LIFE_PLAN.md L4 · age-band bookkeeping, before
+            // `update_society` so this year's ageing is in place for the
+            // strata/pops it feeds.
+            self.update_vital_rates();
             // Yearly social mobility: strata shift with prosperity / hardship.
             self.update_society();
             // Then the people may stir: unrest builds, riots flare, revolts topple

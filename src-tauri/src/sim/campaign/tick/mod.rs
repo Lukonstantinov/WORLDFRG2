@@ -3038,6 +3038,16 @@ pub(crate) const ENTITLEMENT_DOSE: f32 = 0.0;
 /// amount the day this dose is first raised above zero.
 pub(crate) const ENTITLEMENT_MARGIN: f32 = 0.15;
 
+/// Dosed from zero (SETTLEMENT_LIFE_PLAN.md L4). At 0.0 `vital_net_rate_e`
+/// always returns the old flat net-growth term unchanged, so the daily
+/// population step is bit-identical to before this slice. Walk this with
+/// `CAPACITY_LAND_WEIGHT` PINNED at 0.0 — two capacity/growth-shaping doses
+/// moving together cannot be told apart by a single gate run (the plan's own
+/// §0 cross-reference). `ages`/`male_adult_frac`/`deaths_by_cause`
+/// bookkeeping in `update_vital_rates` is unconditional and observational —
+/// it never feeds `population` on its own, only this dose does.
+pub(crate) const VITAL_RATES_DOSE: f32 = 0.0;
+
 /// `price / base_value`, clamped, run through a monotone dampened response and
 /// blended in by `PROD_ELASTICITY` — at 0.0 this returns EXACTLY 1.0 for any
 /// input, which is what makes the dose provably inert rather than merely
@@ -4259,6 +4269,110 @@ pub struct TickHub {
     /// `ANNALS_CAP`. Served by `campaign_city_life`; the Life tab's data
     /// source. `#[serde(default)]` — empty on an old save until next year end.
     #[serde(default)] pub annals: Vec<CityYear>,
+    /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) — the age pyramid as shares
+    /// (children, adults, elders) summing to 1.0, seeded from a stationary
+    /// pre-modern pyramid (≈35/50/15). Updated yearly by
+    /// `update_vital_rates`, purely OBSERVATIONAL: nothing in the tick reads
+    /// it back into `population`/`capacity` (that is what `VITAL_RATES_DOSE`
+    /// gates, separately, inside the existing daily growth step).
+    /// `#[serde(default)]` reads `[0.0,0.0,0.0]` on an old save until the
+    /// next yearly pass reseeds it (guarded in `update_vital_rates`).
+    #[serde(default)] pub ages: [f32; 3],
+    /// SETTLEMENT_LIFE_PLAN.md L4 — what share of the ADULT band is male,
+    /// seeded 0.5. Levy deaths (war) draw down this share before the
+    /// ordinary band mortality below does, so "war widows" — a thinned male
+    /// adult band — is a real, visible consequence instead of population
+    /// shrinking uniformly. `#[serde(default)]` reads 0.0 on an old save
+    /// until the next yearly reseed.
+    #[serde(default)] pub male_adult_frac: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L4 — a running, cumulative count of deaths by
+    /// cause since the campaign began, indexed by `CAUSE_*` (famine · plague
+    /// · fever · war · fire · flood · old age · infancy). Fire/flood stay at
+    /// 0.0 until L8 exists to write them. OBSERVATIONAL — no reader yet;
+    /// L13's Life tab v2 is the first. `#[serde(default)]` — zeros on an old
+    /// save, which is the honest answer ("unrecorded before this version").
+    #[serde(default)] pub deaths_by_cause: [f32; DEATH_CAUSE_COUNT],
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
+/// `TickHub.deaths_by_cause`. A plain index table rather than an enum: the
+/// array is serialized positionally (rule 7's discipline applied to a
+/// per-hub array instead of a tile column), so the ORDER here is load-bearing
+/// and must never be reshuffled — only appended, and there is no slot left
+/// to append into (`DEATH_CAUSE_COUNT` names the tail).
+pub(crate) const CAUSE_FAMINE: usize = 0;
+pub(crate) const CAUSE_PLAGUE: usize = 1;
+pub(crate) const CAUSE_FEVER: usize = 2;
+pub(crate) const CAUSE_WAR: usize = 3;
+pub(crate) const CAUSE_FIRE: usize = 4;
+pub(crate) const CAUSE_FLOOD: usize = 5;
+pub(crate) const CAUSE_OLD_AGE: usize = 6;
+pub(crate) const CAUSE_INFANCY: usize = 7;
+pub(crate) const DEATH_CAUSE_COUNT: usize = 8;
+
+/// SETTLEMENT_LIFE_PLAN.md L4 · the stationary pre-modern pyramid new hubs
+/// (and old saves, on their first `update_vital_rates` pass) seed `ages`
+/// from — roughly Wrigley & Schofield's pre-transition England.
+pub(crate) const AGES_SEED: [f32; 3] = [0.35, 0.50, 0.15];
+
+/// L4 · a hub's `ages`/`male_adult_frac` reads all-zero exactly once: a
+/// fresh construction site (whose literal has not been touched to seed it)
+/// or an old save loaded before this slice existed. Both cases want the
+/// same stationary pyramid, so `update_vital_rates` reseeds through this
+/// helper rather than requiring every construction site to repeat the
+/// constant — the same "reseed lazily, once" pattern `Kin`'s empty-roster
+/// check already uses (§5.4 of CLAUDE.md).
+pub(crate) fn ages_needs_seeding(ages: &[f32; 3]) -> bool {
+    (ages[0] + ages[1] + ages[2]) < 0.5
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L4 · fixed annual transfer rates between age
+/// bands — a child becomes an adult, on average, after `1/CHILD_TO_ADULT_
+/// RATE` years in the band; likewise adult → elder. Pre-modern life-cycle
+/// scale (Wrigley & Schofield): a stationary pyramid holds children ~15
+/// years, adults ~35, before ageing on.
+pub(crate) const CHILD_TO_ADULT_RATE: f32 = 1.0 / 15.0;
+pub(crate) const ADULT_TO_ELDER_RATE: f32 = 1.0 / 35.0;
+
+/// SETTLEMENT_LIFE_PLAN.md L4 · baseline crude birth/death rates (per head,
+/// per year) at `food_sec = welfare_ratio = 1.0`, `starving = 0.0` — the
+/// centre of the historical pre-modern band (Wrigley & Schofield: CBR
+/// ~35-45‰, CDR ~30-40‰ in ordinary years). `VITAL_BIRTH_FOOD_GAIN`/
+/// `VITAL_DEATH_STARVE_GAIN` scale the response to food security and
+/// starvation; both are ordinary multipliers, not new mechanisms.
+pub(crate) const VITAL_BASE_CBR: f32 = 0.038;
+pub(crate) const VITAL_BASE_CDR: f32 = 0.033;
+pub(crate) const VITAL_BIRTH_FOOD_GAIN: f32 = 0.6;
+pub(crate) const VITAL_DEATH_STARVE_GAIN: f32 = 3.0;
+pub(crate) const VITAL_DEATH_WELFARE_GAIN: f32 = 0.5;
+
+/// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · blends the OLD flat net-growth term
+/// (`birth_rate * food_sec - DEATH_RATE_BASE`) with a real crude-rate
+/// calculation read from food security, welfare and starvation. A true
+/// no-op at `dose <= 0.0` — `old_net` is returned untouched, so the existing
+/// daily growth step is bit-for-bit unchanged until the dose is raised.
+/// `VITAL_RATES_DOSE` is the ONE lever; `CAPACITY_LAND_WEIGHT` (PLACES_
+/// DEMAND_AND_GROWTH_PLAN.md slice 4) must stay pinned at 0.0 while this is
+/// walked (CLAUDE.md §0 of the plan) — two capacity-shaping doses moving
+/// together cannot be told apart by a single gate run.
+pub(crate) fn vital_net_rate_e(
+    old_net: f32,
+    food_sec: f32,
+    welfare_ratio: f32,
+    starving: f32,
+    dose: f32,
+) -> f32 {
+    if dose <= 0.0 { return old_net; }
+    let cbr = VITAL_BASE_CBR * (1.0 + VITAL_BIRTH_FOOD_GAIN * (food_sec - 1.0)).max(0.0);
+    // welfare_ratio of 0.0 (unmeasured, e.g. before the first yearly derive)
+    // must read as neutral (1.0), never as a starving population — L2 is
+    // observe-only and may not yet have run on a fresh hub.
+    let w = if welfare_ratio > 0.0 { welfare_ratio } else { 1.0 };
+    let cdr = VITAL_BASE_CDR
+        * (1.0 + VITAL_DEATH_STARVE_GAIN * starving)
+        * (1.0 + VITAL_DEATH_WELFARE_GAIN * (1.0 - w).max(0.0));
+    let vital_net = cbr - cdr;
+    old_net * (1.0 - dose) + vital_net * dose
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by

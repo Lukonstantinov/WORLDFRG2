@@ -1494,6 +1494,78 @@ impl CampaignSim {
     }
 
 
+    /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · yearly age-band bookkeeping —
+    /// OBSERVATIONAL, purely additive: it never writes `population`/
+    /// `capacity` itself (the daily `vital_net_rate_e` blend, gated by
+    /// `VITAL_RATES_DOSE`, is the only path from vital rates to population,
+    /// wired separately in `disease.rs`). Reseeds a hub's `ages`/
+    /// `male_adult_frac` from `AGES_SEED` the first time they're touched (a
+    /// fresh hub, or an old save's first pass after this slice), then:
+    ///   - transfers a fixed share of children into adults and adults into
+    ///     elders (a stationary-pyramid ageing clock);
+    ///   - a births share re-enters the children band;
+    ///   - the year's ordinary deaths (from the SAME crude-rate calculation
+    ///     `vital_net_rate_e` uses) are drawn down weighted toward children
+    ///     and elders — the real pre-modern mortality shape — and tagged by
+    ///     cause into `deaths_by_cause` (`famine` above the starvation
+    ///     floor, `old_age`/`infancy` otherwise). War deaths are tagged
+    ///     separately, at the moment they happen, by
+    ///     `spend_levy_casualties` (`war.rs`).
+    /// Called yearly, before `update_society`, so this year's ageing is in
+    /// place before the strata/pops it feeds are computed.
+    pub(crate) fn update_vital_rates(&mut self) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if ages_needs_seeding(&self.hubs[h].ages) {
+                self.hubs[h].ages = AGES_SEED;
+                self.hubs[h].male_adult_frac = 0.5;
+            }
+            let pop = self.hubs[h].population.max(1.0);
+            let food_sec = self.hubs[h].sent_food.clamp(0.0, 1.0);
+            let welfare = self.hubs[h].welfare_ratio;
+            let starving = self.hubs[h].starving;
+            let w = if welfare > 0.0 { welfare } else { 1.0 };
+            let cbr = VITAL_BASE_CBR * (1.0 + VITAL_BIRTH_FOOD_GAIN * (food_sec - 1.0)).max(0.0);
+            let cdr = VITAL_BASE_CDR
+                * (1.0 + VITAL_DEATH_STARVE_GAIN * starving)
+                * (1.0 + VITAL_DEATH_WELFARE_GAIN * (1.0 - w).max(0.0));
+            let births = pop * cbr;
+            let deaths = pop * cdr;
+            // Famine's share of this year's deaths — above the same
+            // starvation floor `update_food_and_starvation` uses to raise
+            // `starving` in the first place.
+            let famine_share = (starving - 0.3).max(0.0).min(1.0);
+            let famine_deaths = deaths * famine_share;
+            let ordinary_deaths = deaths - famine_deaths;
+            // The real pre-modern mortality shape: infants and the elderly
+            // carry most of ordinary mortality, adults the least.
+            let infant_deaths = ordinary_deaths * 0.45;
+            let elder_deaths = ordinary_deaths * 0.40;
+            let adult_deaths = ordinary_deaths - infant_deaths - elder_deaths;
+            self.hubs[h].deaths_by_cause[CAUSE_FAMINE] += famine_deaths;
+            self.hubs[h].deaths_by_cause[CAUSE_INFANCY] += infant_deaths;
+            self.hubs[h].deaths_by_cause[CAUSE_OLD_AGE] += elder_deaths;
+            // Ageing: a fixed share of children become adults, adults become
+            // elders, before this year's births/deaths are folded in.
+            let [c0, a0, e0] = self.hubs[h].ages;
+            let c_to_a = c0 * CHILD_TO_ADULT_RATE;
+            let a_to_e = a0 * ADULT_TO_ELDER_RATE;
+            let mut children = c0 - c_to_a;
+            let mut adults = a0 + c_to_a - a_to_e;
+            let mut elders = e0 + a_to_e;
+            children += births / pop;
+            children -= infant_deaths / pop;
+            adults -= adult_deaths / pop;
+            elders -= elder_deaths / pop;
+            let total = (children + adults + elders).max(EPS);
+            self.hubs[h].ages = [
+                (children / total).clamp(0.0, 1.0),
+                (adults / total).clamp(0.0, 1.0),
+                (elders / total).clamp(0.0, 1.0),
+            ];
+        }
+    }
+
     /// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) · one annual record per live hub, over
     /// what L0-L2 made real (population, welfare, hunger, mood, unrest). Called
     /// yearly, AFTER `update_society`/`update_unrest` so this year's welfare
@@ -1942,7 +2014,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT],
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
