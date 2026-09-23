@@ -86,6 +86,7 @@ const LABEL_GROUPS: { label: string; keys: { k: LabelKey; label: string }[] }[] 
       { k: "cultureRegion", label: "Culture region" },
       { k: "peopleTerritory", label: "People territory" },
       { k: "tradeBasin", label: "Trade basin" },
+      { k: "tradeLane", label: "House trade lane" },
     ],
   },
 ];

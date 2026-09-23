@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute, HouseAtlas } from "@types";
 import type { ClimateBands } from "@bridge";
 
 /** A drawable lane: the points, the MEDIUM of each point, and whether the whole
@@ -394,7 +394,7 @@ export interface LabelStyle {
 export type LabelKey =
   | "province" | "settlement"
   | "river" | "lake" | "mountain" | "desert" | "forest" | "tundra"
-  | "cultureRegion" | "peopleTerritory" | "tradeBasin" | "state";
+  | "cultureRegion" | "peopleTerritory" | "tradeBasin" | "state" | "tradeLane";
 
 const F = LABEL_FONTS;
 /** The shipped baseline — the "Mixed Contrast" theme. */
@@ -417,6 +417,10 @@ export const LABEL_STYLE_DEFAULTS: Record<LabelKey, LabelStyle> = {
   // ── Political: a sovereignty label — bold, gold, tracked wider than a mere
   // ── settlement, since a state is a claim over land, not a place on it.
   state:           { family: F.sansHuman,  weight: 800, italic: false, caps: true,  tracking: 0.24, color: "#e0c878", size: 1.05 },
+  // A HOUSE's own trade lane (S11) — human works (a merchant's route), sans and
+  // upright per §8.11's own convention, small (a lane label sits ON the line,
+  // not naming a region), never tracked wide like the people/state labels above.
+  tradeLane:       { family: F.sansHuman,  weight: 500, italic: false, caps: false, tracking: 0,    color: "#e8dcc0", size: 0.72 },
 };
 
 /** Coordinated theme presets — sparse overrides on the defaults, exactly like
@@ -428,6 +432,7 @@ export const LABEL_THEMES: Record<string, Partial<Record<LabelKey, Partial<Label
   "Classic Atlas": {
     province: { family: F.serifNature }, settlement: { family: F.serifNature },
     cultureRegion: { family: F.serifNature }, peopleTerritory: { family: F.serifNature },
+    tradeLane: { family: F.serifNature },
   },
   // Copperplate for everything administrative/areal over a Garamond body.
   "Engraved Antique": {
@@ -440,6 +445,7 @@ export const LABEL_THEMES: Record<string, Partial<Record<LabelKey, Partial<Label
     peopleTerritory: { family: F.engraved, tracking: 0.30 },
     tradeBasin: { family: F.garamond },
     state: { family: F.engraved, tracking: 0.30 },
+    tradeLane: { family: F.garamond },
   },
   // Humanist sans throughout — the Ordnance-Survey register, cleanest zoomed out.
   "Modern Cartographic": {
@@ -723,6 +729,17 @@ export class OverlayManager {
   /** Seat→city polylines for the focused house, snapped onto the EXISTING trade
    *  routes (`routeAlongTradeRoutes`). Empty inner paths are skipped. */
   private houseNetwork: [number, number][][] = [];
+  /** Per-point medium for each `houseNetwork` entry (same index/shape as
+   *  `merchantLaneSea`) — S11's own dashed-open-water/solid-road split. */
+  private houseNetworkSea: boolean[][] = [];
+  /** S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the focused house's own trade
+   *  atlas (`campaign_house_atlas`), pushed in from React once fetched —
+   *  lets the web above be drawn with real per-lane volume (thickness) and
+   *  the dominant good's own colour, rather than one flat colour/width for
+   *  every lane. `houseAtlasFor` guards a stale fetch outliving a house
+   *  switch (the same discipline `selectedHouseIdx` itself already needs). */
+  private houseAtlas: HouseAtlas | null = null;
+  private houseAtlasFor: number | null = null;
   // Goods Atlas · one good's yearly trade flow, each lane routed via `laneBetween`
   // (coarse cost grid → worldgen trade-route graph → dashed direct fallback, rule
   // 35). `amount` drives arrow width; `goodFlowMax` normalises it. `openWater` is
@@ -1294,6 +1311,15 @@ export class OverlayManager {
     this.bankIcons = banks;
   }
 
+  /** S11 · the currently-focused house's trade atlas, so its map web can be
+   *  drawn with real per-lane volume/dominant-good instead of one flat
+   *  colour and width. Pass `null` to clear (house deselected, or fetch
+   *  failed) — the web still draws, just back to the plain style. */
+  setHouseAtlas(houseIdx: number | null, atlas: HouseAtlas | null) {
+    this.houseAtlasFor = houseIdx;
+    this.houseAtlas = atlas;
+  }
+
   /** Phase 6 · plague overlay: struck cities + contagion routes (pass [],[] to hide). */
   setEpidemics(
     cities: { x: number; y: number; active: boolean; deaths: number; origin: boolean }[],
@@ -1589,19 +1615,23 @@ export class OverlayManager {
     const sel = this.selectedHouseIdx != null
       ? this.allHouses.find((h) => h.idx === this.selectedHouseIdx) ?? null
       : null;
-    if (!sel || !sel.seat) { this.houseNetwork = []; return; }
+    if (!sel || !sel.seat) { this.houseNetwork = []; this.houseNetworkSea = []; return; }
     const cities: [number, number][] = [
       ...(sel.controls ?? []), ...(sel.partners ?? []),
       ...((sel.offices ?? []).map((o) => o[1]).filter(Boolean) as [number, number][]),
     ];
     const net: [number, number][][] = [];
+    const netSea: boolean[][] = [];
     for (const c of cities) {
       if (c[0] === sel.seat[0] && c[1] === sel.seat[1]) continue;
       // Rule 35: a link that exists must be visible. Off-corridor legs come back
       // as a direct open-water lane rather than being dropped.
-      net.push(this.laneBetween(sel.seat, c).pts);
+      const lane = this.laneBetween(sel.seat, c);
+      net.push(lane.pts);
+      netSea.push(lane.sea);
     }
     this.houseNetwork = net;
+    this.houseNetworkSea = netSea;
   }
 
   /** Snap every futures lane onto the existing trade routes (source→buyer). */
@@ -5571,24 +5601,64 @@ export class OverlayManager {
       }
     }
 
-    // ── Focused house: a glowing RED network web from the seat to every city it
-    //    works, snapped onto the EXISTING trade routes (`houseNetwork`, built by
-    //    `recomputeHouseNetwork` over the drawn road graph). Each entry already falls
-    //    back to a straight seat→city line when no road path exists. Under the pins. ──
+    // ── Focused house: a network web from the seat to every city it works,
+    //    snapped onto the EXISTING trade routes (`houseNetwork`, built by
+    //    `recomputeHouseNetwork` over the drawn road graph). Each entry already
+    //    falls back to a straight seat→city line when no road path exists.
+    //
+    //    S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md): when the focused house's own
+    //    atlas (`campaign_house_atlas`) has been fetched, a lane's WIDTH carries
+    //    its real volume and its COLOUR the dominant good's own `GOOD_DEFS` hue
+    //    (matched against `houseAtlas.partners` by destination position, the
+    //    same rounded-cell tolerance match `matches`/`d2` above already use) —
+    //    falling back to the plain red/uniform-width style when no atlas has
+    //    arrived yet or a destination isn't in it (an office/bailo city with no
+    //    recorded trade volume, say). Stroked one MEDIUM at a time
+    //    (`mediumRuns`, rule 35/§8.5's own discipline) so a lane that runs
+    //    overland to a port, crosses, and runs overland again reads as that,
+    //    not one uniform dash style — the same fix already applied to the
+    //    merchant-route layer. A small goods medallion + a `drawLabel` name
+    //    mark the lane's dominant good at the destination end. ──
     if (sel && sel.seat) {
       const dash = Math.max(2, 5 * inv);
       const RED = "rgba(235,70,70,0.95)";
-      const drawRedPath = (pts: [number, number][]) => {
-        ctx.strokeStyle = RED;
-        ctx.lineWidth = Math.max(0.7, 1.6 * inv);
-        ctx.setLineDash([dash, dash]);
-        let started = false;
-        for (let i = 0; i < pts.length; i++) {
-          if (i > 0 && worldW && Math.abs(pts[i][0] - pts[i - 1][0]) > worldW * 0.5) started = false; // seam
-          if (!started) { ctx.beginPath(); ctx.moveTo(pts[i][0] + 0.5, pts[i][1] + 0.5); started = true; }
-          else ctx.lineTo(pts[i][0] + 0.5, pts[i][1] + 0.5);
+      const atlasLive = this.houseAtlasFor === sel.idx ? this.houseAtlas : null;
+      const maxLaneVol = atlasLive
+        ? Math.max(1, ...atlasLive.partners.map((p) => p.volume_in + p.volume_out))
+        : 1;
+      const goodVolByIdx = new Map<number, number>();
+      if (atlasLive) for (const g of atlasLive.goods) goodVolByIdx.set(g.good, g.volume);
+      const laneMeta = (destPt: [number, number]): { color: string; width: number; good: string | null } => {
+        if (!atlasLive) return { color: RED, width: Math.max(0.7, 1.6 * inv), good: null };
+        const p = atlasLive.partners.find((pp) => d2(pp.x, pp.y, destPt[0], destPt[1]) <= TOL);
+        if (!p) return { color: RED, width: Math.max(0.7, 1.6 * inv), good: null };
+        const norm = (p.volume_in + p.volume_out) / maxLaneVol;
+        let dominant: { name: string; vol: number } | null = null;
+        for (const gi of p.goods) {
+          const vol = goodVolByIdx.get(gi) ?? 0;
+          const gb = atlasLive.goods.find((g) => g.good === gi);
+          if (gb && (!dominant || vol > dominant.vol)) dominant = { name: gb.name, vol };
         }
-        ctx.stroke();
+        const def = dominant ? GOOD_BY_NAME.get(dominant.name) : null;
+        return {
+          color: def ? def.color : RED,
+          width: Math.max(0.7, (1.0 + norm * 3.5) * inv),
+          good: dominant?.name ?? null,
+        };
+      };
+      const drawHouseLane = (pts: [number, number][], seaAt: boolean[], color: string, width: number, good: string | null) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        const runs = this.mediumRuns(pts, seaAt, worldW);
+        for (const run of runs) {
+          ctx.setLineDash(run.sea ? [dash, dash] : []);
+          let started = false;
+          for (const p of run.pts) {
+            if (!started) { ctx.beginPath(); ctx.moveTo(p[0] + 0.5, p[1] + 0.5); started = true; }
+            else ctx.lineTo(p[0] + 0.5, p[1] + 0.5);
+          }
+          ctx.stroke();
+        }
         ctx.setLineDash([]);
         // Bold directional chevron at the path MIDPOINT, pointing seat → city, so the
         // web reads clearly as MAIN city ──▶── city of trade (not just a faint line,
@@ -5611,7 +5681,7 @@ export class OverlayManager {
               let dx = sg.b[0] - sg.a[0], dy = sg.b[1] - sg.a[1];
               const m = Math.hypot(dx, dy) || 1; dx /= m; dy /= m;
               const hl = Math.max(3.5, 6 * inv); const px = -dy, py = dx;
-              ctx.fillStyle = RED;
+              ctx.fillStyle = color;
               ctx.beginPath();
               ctx.moveTo(mx + dx * hl, my + dy * hl);
               ctx.lineTo(mx - dx * hl * 0.35 + px * hl * 0.75, my - dy * hl * 0.35 + py * hl * 0.75);
@@ -5634,20 +5704,32 @@ export class OverlayManager {
         const hl = Math.max(2.5, 4.5 * inv);
         const px = -dy, py = dx;
         const tx = b[0] + 0.5, ty = b[1] + 0.5;
-        ctx.fillStyle = RED;
+        ctx.fillStyle = color;
         ctx.beginPath();
         ctx.moveTo(tx, ty);
         ctx.lineTo(tx - dx * hl + px * hl * 0.5, ty - dy * hl + py * hl * 0.5);
         ctx.lineTo(tx - dx * hl - px * hl * 0.5, ty - dy * hl - py * hl * 0.5);
         ctx.closePath();
         ctx.fill();
+        // The dominant good, named at the lane's far end — a small medallion +
+        // a tracked label through `drawLabel` (§8.11: never a raw `ctx.font`).
+        if (good) {
+          const lx = tx + px * hl * 2.2, ly = ty + py * hl * 2.2;
+          drawGoodIcon(ctx, good, lx, ly, Math.max(2.2, 4 * inv), color);
+          this.drawLabel(ctx, "tradeLane", good, lx + 5 * inv, ly + 2.2 * inv, Math.max(6, 11 * inv), "left", { color });
+        }
       };
       // Corridor-only: each path in `houseNetwork` is already snapped onto the trade
       // routes (`recomputeHouseNetwork`). We NEVER bridge with a straight slash — a
       // city whose corridor can't be snapped is simply not drawn (matches the merchant
       // and futures layers). The old straight-web fallback is what drew the wrong
       // diagonal lines the user saw.
-      for (const path of this.houseNetwork) { if (path.length >= 2) drawRedPath(path); }
+      this.houseNetwork.forEach((path, i) => {
+        if (path.length < 2) return;
+        const meta = laneMeta(path[path.length - 1]);
+        const seaAt = this.houseNetworkSea[i] ?? path.map(() => false);
+        drawHouseLane(path, seaAt, meta.color, meta.width, meta.good);
+      });
     }
 
     // ── Focused house markers: offices = small SQUARES, BAILOS = circle+triangle
