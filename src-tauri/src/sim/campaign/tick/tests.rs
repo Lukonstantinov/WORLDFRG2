@@ -3735,6 +3735,53 @@
     }
 
     #[test]
+    fn household_ledger_pass_deposits_and_immediately_spends_the_wage() {
+        // MONEY_AND_COINAGE_PLAN.md M8 (§3.9) · the scoped-down "paid
+        // consumption" this session ships: a wage minted into the household
+        // purse is spent on the ration in the same call, so the household
+        // purse ends the pass empty and the local-merchant purse holds
+        // exactly what was earned. Both purses are read by nothing else, so
+        // this is a closed, provably conserved loop regardless of dose.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 10000.0, vec![100.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.currencies.push(Currency {
+            mint_hub: 0, name: "Test Coin".into(), unit_of_account: u32::MAX,
+            denoms: vec![Denom {
+                tier: DENOM_SILVER, name: "Test Silver".into(), standard_grams: 3.0,
+                issues: vec![0],
+            }],
+            open: true, closed_year: 0, last_fineness: 1.0, below_share_years: 0,
+        });
+        s.issues.push(Issue {
+            id: 0, currency: 0, denom: 0, year: 1, authority: "Test".into(),
+            grams: 3.0, fineness: 1.0, struck: 0.0, circulating: 0.0,
+            hoarded: 0.0, melted: 0.0, lost: 0.0, cause: ISSUE_FIRST,
+            cognomen: "the First Silver".into(),
+        });
+        s.next_issue_id = 1;
+        s.hubs[0].trade_wealth = 500.0;
+
+        assert_eq!(s.purse_total_for_test(HOLDER_HOUSEHOLD, -1, 0), 0.0);
+        s.household_ledger_pass();
+
+        let expected_wage = 500.0f32.max(0.0) * HOUSEHOLD_WAGE_SHARE;
+        assert!(expected_wage > 0.0, "fixture must exercise a real nonzero wage");
+        assert!((s.purse_total_for_test(HOLDER_HOUSEHOLD, -1, 0)).abs() < 1e-6,
+            "the household purse is emptied by its own same-month consumption");
+        assert!((s.purse_total_for_test(HOLDER_LOCAL_MERCHANT, -1, 0) - expected_wage).abs() < 1e-3,
+            "the merchant purse receives exactly what the household earned and spent");
+
+        // A hub with no open currency must be skipped — never invented money.
+        let goods2 = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs2 = vec![hub(0, 0.0, 0.0, 10000.0, vec![100.0], 0)];
+        let mut s2 = sim(hubs2, goods2);
+        s2.hubs[0].trade_wealth = 500.0;
+        s2.household_ledger_pass();
+        assert!(s2.purses.is_empty(), "no currency at the hub means no purse is ever created");
+    }
+
+    #[test]
     fn food_affordability_is_a_noop_at_zero_dose() {
         // MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
         // change) · the shipped `FOOD_AFFORDABILITY_DOSE = 0.0` must leave

@@ -1,16 +1,20 @@
 # Money and Coinage Plan — real money, mints, banks and barter
 
-> **Status: M0-M7 SHIPPED (M4/M5/M6/M7 partial — see their own rows), gated,
-> bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. The plan's own "Stop
-> marker" landing is complete, M5/M7's mechanisms are real code shipped
-> inert, and M6's mint closure ships LIVE (catalogue-only, so it carries no
-> economic risk). M8-M11 (paid consumption, the wealth/purse switch-over,
-> banks on real reserves, price-level feedback) are each explicitly
-> dosed-from-zero work per §5's own build rule — rushing a dose walk without
-> its own gate sweep is the exact mistake §8.15 (CLAUDE.md) already recorded
-> this project making five times, so each is shipped MECHANISM-FIRST at an
-> inert dose (or, where provably risk-free like M6's closure, shipped live)
-> and walked up with its own gate run, never blind.**
+> **Status: M0-M8 SHIPPED (M4/M5/M6/M7/M8 partial — see their own rows),
+> gated, bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. The plan's own
+> "Stop marker" landing is complete, M5/M7's mechanisms are real code
+> shipped inert, M6's mint closure ships LIVE (catalogue-only, so it carries
+> no economic risk), and M8's household purse ships as a closed,
+> self-balancing parallel-ledger pass that needs no dose gate at all. M9-M11
+> (the wealth/purse switch-over, banks on real reserves, price-level
+> feedback) are each explicitly dosed-from-zero work per §5's own build
+> rule — rushing a dose walk without its own gate sweep is the exact mistake
+> §8.15 (CLAUDE.md) already recorded this project making five times, so
+> each is shipped MECHANISM-FIRST at an inert dose (or, where provably
+> risk-free like M6's closure and M8's closed loop, shipped live) and
+> walked up with its own gate run, never blind. The real behavioural half of
+> M8 (a household priced out of its ration) still waits on M7's own dose
+> being walked first, per the plan's own R6.**
 > Written from a brainstorm with the maintainer (2026-09-23). Supersedes
 > nothing — it extends `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1
 > relies on) and `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes
@@ -349,7 +353,7 @@ tick::tests` + `econ_`; every frontend slice runs `npx tsc --noEmit`.
 | **M5** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0. **Barter as a real settlement** (§3.5): `barter_settlement_pass` — goods-for-goods, the payment good leaving the buyer's own stock for the seller's, priced by `BARTER_SPREAD`. **Deliberately NOT woven into `dispatch`** (too fragile to touch blind — see the function's own doc comment); a wholly separate additive pass over the day's `recent_trades` instead, gated by `BARTER_DOSE = 0.0`. Commodity money (§3.5's other half) and the real `InTransit` return leg (this cut moves stock same-day, no transit time) are not built — queued. | shipped INERT (dose 0.0 = true no-op); walking the dose is real future work, not attempted | `sim_fingerprint`/`econ_` bit-identical at dose 0; new `barter_dose_is_a_noop_at_zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (all `tick::tests`, exercised via the pure-parameter twin `barter_settlement_pass_e` at dose 1.0) |
 | **M6** | ✅ MINT CLOSURE SHIPPED 2026-09-23 (partial), LIVE. `mark_mint_closures` (§3.7): reads the mint's own city's EXISTING `coin_basket` share (already computed by `update_currency_baskets`) and marks `Currency.open = false`/`closed_year` after `MINT_CLOSE_YEARS` (15) below `MINT_CLOSE_SHARE` (5%). Catalogue-only — does NOT touch `TickHub.has_mint`/`coin_name` (the real, live coinage mechanism), so it carries no economic-concentration risk and ships at its real dose rather than gated inert. **Not built**: the real economic effect of closure (the council actually stops striking / the city settles in a foreign coin), the three named STAGES (ledger houses, weighed bullion — §3.6's diffusion is still directly gated by the boundary the M6 test below locks down), and the extended mint charter. All queued. | closure LIVE (real dose, no risk); the stage/diffusion mechanism and the real striking-side effect are unbuilt | `an_unused_mint_closes`, `a_coin_never_reaches_a_city_nothing_trades_with` (both `tick::tests`) |
 | **M7** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0 (same change as `SETTLEMENT_LIFE_PLAN.md` L1). **Affordability fix**: `food_afford_adjusted_bal` blends `lack_basic` (the day loop's own smoothed spending-shortfall signal) into `update_food_and_starvation`'s `bal`, so a household priced out of its ration reads as genuinely underfed even when raw stock (`food_have`) shows a surplus — the exact prerequisite `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment named after its S7 revert. Gated by `FOOD_AFFORDABILITY_DOSE = 0.0`, since `lack_basic` (all basic-tier goods) and `bal` (food goods only) are different baskets and blending them is a real behavioural change even before S7's own dose is ever raised — not provably risk-free the way M6's catalogue-only closure was. | shipped INERT (dose 0.0 = true no-op, bit-for-bit); walking it together with `HOUSEHOLD_MONETIZATION_DOSE` is the real next dose-walk session, not attempted here | `sim_fingerprint`/`econ_`/`unrest_topples_councils` bit-identical at dose 0; new `food_affordability_is_a_noop_at_zero_dose`, `a_household_priced_out_reads_as_underfed` (both `tick::tests`, via the pure twin `food_afford_adjusted_bal`) |
-| **M8** | **Wages + paid consumption** (§3.9) in the ledger. | parallel, then dosed | household purses stay non-negative; no city starves with grain it could afford |
+| **M8** | ✅ PARALLEL LEDGER SHIPPED 2026-09-23 (scoped down). `household_ledger_pass` (§3.9): monthly, at every hub with an open mint currency, mirrors `household_income_pass`'s own wage formula as a coin deposit into the hub's household purse, then immediately debits the identical amount back out (via the new `take_coin`, M3's missing spend side) into the local-merchant purse — a household's wage spent on its ration in the same month, a closed loop by construction. A hub with no open currency is skipped, never invented money. **Scoped down from §3.9's real design**: this does NOT let a household save, run into debt, or be priced out of its ration when the wage can't cover it — the actual behavioural "paid consumption" R6 flags, which needs `FOOD_AFFORDABILITY_DOSE` (M7) walked FIRST per the plan's own R6 ("M7 before M8, no exceptions"). Because `purses` are read by nothing outside `coinage.rs` (same as M3), this is observe-only and needs no dose gate of its own. | observe only — bit-identical (purses read by nothing else) | `sim_fingerprint`/`econ_` bit-identical; new `household_ledger_pass_deposits_and_immediately_spends_the_wage` (`tick::tests`) — the household purse empties every pass, the merchant purse receives exactly the wage, no currency ⇒ no purse |
 | **M9** | **The switch-over**: house wealth / treasuries / bank reserves BECOME the ledger (coins + goods + claims), blended from the old numbers by a dose 0 → 1. | the big recalibration | `simulate_decades_reports_dynamics` (bounded, finite, turnover), full `econ_`, multi-seed inheritance gate, re-tuned at each step; SCOREBOARD row per step |
 | **M10** | **Banks on real reserves** (§3.10): requested loans, local rates, bills of exchange, branch specie settlement, money-changer spreads. | dosed from 0 | `econ_measure_finance` lifespan and failure rate; interest-rate trend against the historical band |
 | **M11** | **Price level into prices**: money scarcity and debasement move `live_price`; regional gold:silver ratios live. | last and riskiest, dosed from 0 | `econ_fidelity_scorecard` (grain CV, price/distance gradient) must not regress; may not ship |

@@ -195,13 +195,45 @@ the reading DOWN, never past what `lack_basic` licenses) both pass; full
 `simulate_decades_reports_dynamics` unchanged) and `econ_` (6/6, multi-seed
 inheritance gate included, 539s) both bit-identical.
 
-**What's next**: M8-M11 are each a dosed-from-zero economic change,
-shipped mechanism-first at an inert dose (or live, where provably risk-free
-like M6) and walked up one at a time with its own gate run per step, per
-§5's build rule. M8 (wages + paid consumption) needs M7's dose actually
-walked first, per the plan's own §6 risk R6 ("M7 before M8, no exceptions")
-— so the natural next real dose-walk session is M7/`HOUSEHOLD_
-MONETIZATION_DOSE` together, not M8's mechanism in isolation.
+**M8 (household purse, shipped closed-loop), same session**: `household_
+ledger_pass` (§3.9, `coinage.rs`) mirrors a hub's existing wage
+(`household_income_pass`'s own formula — read independently, not gated on
+that function's own zero-dosed `HOUSEHOLD_MONETIZATION_DOSE`) as a coin
+deposit into the hub's household purse, then immediately spends the
+identical amount on the ration via the new `take_coin` (M3's missing spend
+side) into the local-merchant purse. A hub with no open mint currency is
+skipped — never invented money.
+
+This is a CLOSED LOOP by construction (deposit and debit are the same
+float), so — exactly like M3 — it needed no dose gate at all: `purses` is
+read by nothing outside `coinage.rs`, so the pass is observe-only and
+bit-identical to every existing gate whatever it computes. What it
+deliberately does NOT build is the real, risky half of §3.9: a household
+that saves, borrows, or is priced out of its ration when the wage falls
+short — that is the actual "paid consumption" R6 flags, and it still waits
+on `FOOD_AFFORDABILITY_DOSE` (M7) being walked first, per the plan's own R6
+("M7 before M8, no exceptions"), which this slice does not violate since
+nothing behavioural moved.
+
+Gates: `cargo check --lib --tests` clean; new `household_ledger_pass_
+deposits_and_immediately_spends_the_wage` (`tick::tests` — the household
+purse empties every pass, the merchant purse receives exactly the wage, a
+currency-less hub creates no purse at all) passes; full `cargo test --lib
+tick::tests` (283/283, `unrest_topples_councils` and `simulate_decades_
+reports_dynamics` unchanged) and `econ_` (6/6, multi-seed inheritance gate
+included, 538.41s) both bit-identical — the existing `the_coin_ledger_
+conserves_every_struck_coin` (M3's own conservation gate) also re-verified
+unaffected, since moving coin between purses cannot change the per-issue
+total it checks.
+
+**What's next**: M9-M11 are each a dosed-from-zero economic change, shipped
+mechanism-first at an inert dose (or live, where provably risk-free like
+M6/M8) and walked up one at a time with its own gate run per step, per §5's
+build rule. The real behavioural half of M8 (paid consumption that can
+price a household out of its ration) needs M7's own dose actually walked
+first, per the plan's own §6 risk R6 — so the natural next real dose-walk
+session is M7/`HOUSEHOLD_MONETIZATION_DOSE` together, not M8/M9's mechanism
+in isolation.
 
 ---
 

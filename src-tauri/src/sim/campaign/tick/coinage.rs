@@ -48,6 +48,16 @@
 //! ship at its real dose rather than gated inert — see the constants' own
 //! doc comments.
 //!
+//! **M8** adds the household purse (§3.9), scoped DOWN from its real design:
+//! `household_ledger_pass` mirrors a hub's existing wage (`household_income_
+//! pass`'s own formula) as a coin deposit, then immediately spends the
+//! identical amount on the ration via the new `take_coin` (M3's missing
+//! spend side) — a closed loop, so this needs no dose gate at all, the same
+//! reason M3 shipped without one. What it does NOT build: a household that
+//! saves, borrows, or is priced out of its ration when the wage falls short
+//! (§3.9's own R6-flagged risk) — that is queued behind `FOOD_AFFORDABILITY_
+//! DOSE` (M7) actually being walked, per the plan's own R6.
+//!
 //! Culture-rooted currency naming beyond today's flat 10-name
 //! `coin_denomination` list (§3.3), the real three-stage diffusion of §3.6,
 //! and the REAL mint-closure economic effect all remain unbuilt, queued work.
@@ -306,14 +316,101 @@ impl CampaignSim {
 
     /// M3 · add `amount` of `issue_id` coin to a purse. The ONE place this
     /// file's parallel ledger creates money — a negative or zero amount is a
-    /// no-op, never a withdrawal (there is no spending mechanism yet, so a
-    /// purse's coin count only ever grows in this slice).
+    /// no-op, never a withdrawal. `take_coin` (M8, below) is the matching
+    /// spend side, added once a caller (the household ledger) actually
+    /// needed one.
     pub(crate) fn add_coin(&mut self, kind: u8, id: i32, hub: u32, issue_id: u32, amount: f32) {
         if !(amount > 0.0) { return; }
         let pi = self.purse_idx(kind, id, hub);
         match self.purses[pi].coins.iter_mut().find(|(iid, _)| *iid == issue_id) {
             Some(e) => e.1 += amount,
             None => self.purses[pi].coins.push((issue_id, amount)),
+        }
+    }
+
+    /// M8 · total coin a purse holds, across every issue — a read-only
+    /// convenience for callers (and tests) that don't care which issue a
+    /// coin belongs to, only how much is there.
+    #[cfg(test)]
+    pub(crate) fn purse_total_for_test(&self, kind: u8, id: i32, hub: u32) -> f32 {
+        self.purses.iter()
+            .find(|p| p.holder_kind == kind && p.holder_id == id && p.hub == hub)
+            .map(|p| p.coins.iter().map(|(_, c)| *c).sum())
+            .unwrap_or(0.0)
+    }
+
+    /// M8 · remove up to `amount` of coin from a purse, across whichever
+    /// issues it holds (in `coins` vector order — deterministic; order
+    /// cannot affect the TOTAL removed, and a purse's issue mix carries no
+    /// meaning yet, so there is nothing to prefer). Clamped to what the
+    /// purse actually holds — never goes negative, the same discipline
+    /// `stock_take` already uses for goods. Returns the amount actually
+    /// removed, which a caller mirrors into whichever purse receives it (a
+    /// debit with no matching credit would silently destroy coin).
+    pub(crate) fn take_coin(&mut self, kind: u8, id: i32, hub: u32, amount: f32) -> f32 {
+        if !(amount > 0.0) { return 0.0; }
+        let pi = match self.purses.iter().position(|p| p.holder_kind == kind && p.holder_id == id && p.hub == hub) {
+            Some(i) => i,
+            None => return 0.0,
+        };
+        let mut remaining = amount;
+        let mut taken = 0.0;
+        for (_, count) in self.purses[pi].coins.iter_mut() {
+            if remaining <= 0.0 { break; }
+            let take = count.min(remaining);
+            *count -= take;
+            remaining -= take;
+            taken += take;
+        }
+        self.purses[pi].coins.retain(|(_, c)| *c > 1e-9);
+        taken
+    }
+
+    /// M8 (§3.9) · the household purse — a PARALLEL LEDGER pass on exactly
+    /// M3's own terms: it only ever writes `purses`, which nothing outside
+    /// this file reads, so it is observe-only and bit-identical to every
+    /// existing gate (`tick::tests`, `econ_`) whatever it computes — no dose
+    /// constant needed for this half, the same reason M3 shipped without one.
+    ///
+    /// Monthly, at each hub with an open mint currency: mirrors `household_
+    /// income_pass`'s own wage formula (`trade_wealth * HOUSEHOLD_WAGE_
+    /// SHARE`, independent of that function's own `HOUSEHOLD_MONETIZATION_
+    /// DOSE` gate, which stays 0.0 and is irrelevant to this purely
+    /// observational ledger) as a coin deposit into the hub's household
+    /// purse, then immediately debits the SAME amount back out as a
+    /// consumption purchase into the local-merchant purse — the scoped-down
+    /// half of §3.9's "paid consumption": a household's wage is spent on its
+    /// ration in the same month it is earned, a closed loop that conserves
+    /// the coin ledger by construction (deposit and debit are the identical
+    /// float, taken through `take_coin` rather than assumed).
+    ///
+    /// **What this does NOT build**, named per rule 36: a household SAVING,
+    /// falling into debt, or being priced out of its ration when the wage
+    /// can't cover it (§3.9's own R6-flagged risk — the real "paid
+    /// consumption" that would feed back into `update_food_and_starvation`).
+    /// That is the actual M8 dose walk, and it waits on `FOOD_AFFORDABILITY_
+    /// DOSE` (M7) being raised first, per the plan's own R6 ("M7 before M8,
+    /// no exceptions").
+    pub(crate) fn household_ledger_pass(&mut self) {
+        let n = self.hubs.len();
+        for h in 0..n {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let ci = match self.currencies.iter().position(|c| c.mint_hub == h as u32 && c.open) {
+                Some(i) => i,
+                None => continue,
+            };
+            let issue_id = match self.currencies[ci].denoms.first().and_then(|d| d.issues.last()) {
+                Some(&id) => id,
+                None => continue,
+            };
+            let wage = self.hubs[h].trade_wealth.max(0.0) * HOUSEHOLD_WAGE_SHARE;
+            if wage <= 0.0 { continue; }
+            let h32 = h as u32;
+            self.add_coin(HOLDER_HOUSEHOLD, -1, h32, issue_id, wage);
+            let taken = self.take_coin(HOLDER_HOUSEHOLD, -1, h32, wage);
+            if taken > 0.0 {
+                self.add_coin(HOLDER_LOCAL_MERCHANT, -1, h32, issue_id, taken);
+            }
         }
     }
 
