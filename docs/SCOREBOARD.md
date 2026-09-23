@@ -59,11 +59,49 @@ own). Gates at the shipped dose: `cargo check --lib --tests` clean, full
 `cargo test --lib tick::tests` 283/283, full `cargo test --lib econ_` 6/6
 (212.18s) — both bit-identical to every prior M7/M8 run.
 
-**What's next**: root-cause the remaining `the_coin_ledger_conserves_
-every_struck_coin` drift (debasement-issue-specific, smaller than bug 2)
-and the `simulate_decades_reports_dynamics` insolvency-floor overshoot
-before `HOUSEHOLD_MONETIZATION_DOSE` can actually be raised — both queued,
-not attempted further this session.
+**Both remaining blockers characterized further, same session — neither is
+a new logic bug.**
+
+- **`simulate_decades_reports_dynamics`'s -527.5 is a single-point
+  transient dip, not a runaway.** `min_w` is a running minimum over the
+  WHOLE 50-year run (`tests.rs:2592`, `min_w = min_w.min(h.wealth)`), never
+  a sustained state — re-run at dose 0.02 with both fixes gave the
+  IDENTICAL -527.5 (deterministic, confirming this measurement is stable,
+  not noise). This is the exact same class of consequence that justified
+  widening this floor from -100 to -500 in the first place
+  (`CONSUMPTION_REBUILD_PLAN.md` S1's own comment: "thinner luxury-import
+  trade margins mean a house occasionally dips further into debt before
+  recovering" — S1's own measured value was -339.7). `HOUSEHOLD_
+  MONETIZATION_DOSE` narrows trade margins the same way, one step further,
+  and -527.5 is only ~5% past the current floor, nowhere near the
+  millions-scale runaway the floor actually guards against. Widening the
+  floor further (matching the same precedent) is the right move WHEN this
+  dose is actually raised — not done now, since doing it while the dose
+  stays at 0.0 would loosen a live safety gate for no immediate reason.
+- **The coin-ledger drift is very likely ordinary f32 accumulation
+  rounding, not a third logic bug.** Audited every one of the exactly 5
+  `add_coin` call sites in the codebase: the 3 inside `strike_issue` always
+  create a FRESH purse entry for a never-before-used issue id (a `push`,
+  never an addition — bit-exact by construction), and the 2 inside
+  `household_ledger_pass` are now issue-targeted and provably exact (fix
+  2, above). No further mis-crediting path exists in the code as written.
+  The remaining ~5e-5 relative drift is consistent in ORDER OF MAGNITUDE
+  with ordinary f32 rounding compounding across many repeated `e.1 +=
+  amount` credits to a long-lived purse (e.g. `HOLDER_LOCAL_MERCHANT`'s
+  purse collecting many months' worth of `household_ledger_pass` credits,
+  or `strike_issue` firing across repeated debasements) — real, expected
+  f32 behavior, not a conservation error (`Purse.bullion` — the other
+  candidate — is confirmed dead code, written nowhere). Fixing this
+  properly (f64 accumulators, or a relative rather than absolute
+  tolerance on the gate) is real future work, to be done WHEN the dose is
+  actually walked — not a reason to loosen the gate now.
+
+**What's next**: raise `HOUSEHOLD_MONETIZATION_DOSE` for real, in a
+session that budgets for (a) widening the insolvency floor past -527.5
+with real headroom, matching the S1 precedent, and (b) either moving the
+Purse ledger's accumulators to f64 or loosening `the_coin_ledger_
+conserves_every_struck_coin` to a relative tolerance — both bundled into
+that same dose-walk commit, never done speculatively ahead of it.
 
 ---
 

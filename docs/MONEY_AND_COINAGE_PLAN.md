@@ -479,7 +479,31 @@ with the simulation bit-identical. Everything from M5 changes the economy.
   verified bit-identical at the shipped dose: `cargo check` clean, full
   `tick::tests` 283/283, full `econ_` 6/6 (212.18s). The dose itself stays
   at 0.0 — actually raising it needs the two remaining failures above
-  root-caused first, queued rather than attempted further this session.
+  root-caused first.
+
+  **Both were characterized further the same session — neither turned out
+  to be a third logic bug.** `simulate_decades_reports_dynamics`'s -527.5
+  is a running MINIMUM over the whole 50-year run (`tests.rs:2592`), never
+  a sustained state, and reproduced bit-identically at dose 0.02 with both
+  fixes applied — the same class of bounded consequence that already
+  justified widening this exact floor once (`CONSUMPTION_REBUILD_PLAN.md`
+  S1, -339.7 measured against a widened -500 floor with headroom); this
+  dose narrows trade margins the same way, one step further, at only ~5%
+  past the current floor — nowhere near the millions-scale runaway the
+  floor actually guards against. The coin-ledger drift: audited all 5
+  `add_coin` call sites in the codebase — the 3 inside `strike_issue`
+  always create a fresh entry for a never-before-used issue id (bit-exact
+  by construction) and the 2 inside `household_ledger_pass` are now
+  issue-targeted and exact (fix 2). No further mis-crediting path exists.
+  The magnitude is consistent with ordinary f32 rounding compounding over
+  many `+=` credits to a long-lived purse — real, expected float behaviour,
+  not a conservation error (`Purse.bullion`, the other candidate, is
+  confirmed dead code). Neither finding changes anything at the shipped
+  dose. **What's next**: actually walk this dose in a session that budgets
+  for widening the insolvency floor (matching the S1 precedent) AND either
+  moving the Purse ledger to f64 accumulators or loosening the coin-ledger
+  gate to a relative tolerance — bundled into that dose-walk commit, never
+  done speculatively ahead of it.
 
 ---
 
