@@ -1,19 +1,79 @@
-//! coinage.rs — `docs/MONEY_AND_COINAGE_PLAN.md` M1: the coin CATALOGUE data
-//! model. Purely OBSERVATIONAL: it records what `decide_coinage`/`apply_coinage`
-//! (money.rs) already decide every year — a mint's fineness, trust and metal —
-//! as real countable objects (a `Currency` with 1-3 named `Denom`inations, each
-//! carrying a timeline of `Issue`s) instead of the bare `TickHub.coin_name`
-//! string F2 named. Nothing outside this file reads `currencies`/`issues` yet
-//! (the catalogue window is M2, unbuilt); `sim_fingerprint` (tests.rs) folds
-//! neither, so this whole slice is bit-identical to the sim it observes.
+//! coinage.rs — `docs/MONEY_AND_COINAGE_PLAN.md` M1 (the coin CATALOGUE) + M3
+//! (the PARALLEL LEDGER's mint-side half).
 //!
-//! What is NOT yet true, so a reader does not mistake this for more than it is:
-//! `Issue.struck/circulating/hoarded/melted/lost` are quantities that only mean
-//! something once real bullion moves through real purses (M3's parallel
-//! ledger); M1 ships them at `0.0` on every issue. Mint CLOSURE (D4/§3.7) and
-//! culture-rooted currency naming beyond today's flat 10-name `coin_denomination`
-//! list (§3.3) are both explicitly M6/M2 work, not this file's.
+//! **M1** records what `decide_coinage`/`apply_coinage` (money.rs) already
+//! decide every year — a mint's fineness, trust and metal — as real countable
+//! objects (a `Currency` with 1-3 named `Denom`inations, each carrying a
+//! timeline of `Issue`s) instead of the bare `TickHub.coin_name` string F2
+//! named. Nothing outside this file reads `currencies`/`issues` for economic
+//! effect (the catalogue WINDOW is M2, `commands/campaign_commands/read_
+//! money.rs::campaign_get_coin_catalogue`); `sim_fingerprint` (tests.rs) folds
+//! neither, so M1 itself is bit-identical to the sim it observes.
+//!
+//! **M3** adds `Purse`s (§3.1) and the mint-striking transaction (§3.2): every
+//! time a new `Issue` is recorded, a real STRUCK quantity is computed and
+//! split into seigniorage (→ the city treasury's OWN purse), brassage (→ a
+//! household purse at the mint — the mint workers' wages) and circulation (→
+//! a local-merchant purse at the mint — the sim has no tracked "who brought
+//! the bullion" yet, so this is the honest placeholder: `docs/ACTORS_AND_
+//! CARRIAGE_PLAN.md`'s own measured finding is that ~96% of trade already
+//! moves on no one's account). **This is additive, not a mirror of the
+//! existing `+=` sites** — `TickHub.treasury`/`House.wealth` etc. are
+//! completely untouched by this file; the purses are a SEPARATE ledger
+//! computed alongside them, exactly D10's "parallel ledger first" calls for.
+//! `sim_fingerprint` still folds none of `purses`/`currencies`/`issues`, so
+//! this remains bit-identical to every existing gate.
+//!
+//! **Scoped down from §3.2's own full design**, stated plainly: real bullion
+//! cargo (silver/gold mined, shipped to a mint, sometimes lost at sea) is NOT
+//! wired here — that needs new dispatch/production integration, real risk to
+//! measure, and is queued, not attempted. The STRUCK quantity below is sized
+//! from the mint's own already-computed regional throughput/bullion-ratio
+//! proxy (`decide_coinage`'s own inputs), not from a real cargo delivery.
+//! Melting, loss, hoarding and wear (§3.2's SINKS) are also not implemented —
+//! every issue's `circulating` equals its `struck` until a sink exists to
+//! move the difference, which is exactly what
+//! `the_coin_ledger_conserves_every_struck_coin` (tests.rs) asserts.
+//!
+//! Mint CLOSURE (D4/§3.7), barter (M5) and culture-rooted currency naming
+//! beyond today's flat 10-name `coin_denomination` list (§3.3) remain
+//! unbuilt, queued work.
 use super::*;
+
+/// §3.1 · who a purse belongs to.
+pub const HOLDER_CITY_TREASURY: u8 = 0;
+pub const HOLDER_HOUSE: u8 = 1;
+pub const HOLDER_BANK: u8 = 2;
+pub const HOLDER_HOUSEHOLD: u8 = 3;
+pub const HOLDER_LOCAL_MERCHANT: u8 = 4;
+#[allow(dead_code)]
+pub const HOLDER_MINT: u8 = 5;
+
+/// §3.1 · `(holder, hub) → coins/bullion`. Sparse: a purse is only created the
+/// first time something is added to it. `holder_id` is a house/bank index for
+/// `HOLDER_HOUSE`/`HOLDER_BANK`, `-1` for every per-hub-only holder (treasury,
+/// households, local merchants, the mint itself).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct Purse {
+    pub holder_kind: u8,
+    pub holder_id: i32,
+    pub hub: u32,
+    /// `(issue id, count)`, one entry per issue actually held.
+    pub coins: Vec<(u32, f32)>,
+    /// Raw metal awaiting striking: `[gold, silver, copper]`.
+    pub bullion: [f32; 3],
+}
+
+/// §3.2 · what share of a mint's yearly throughput becomes a fresh striking
+/// the year a new issue is recorded. A proxy for real bullion delivery
+/// (this file's own header comment) — small, so the parallel ledger's coin
+/// stock grows on a plausible order against `hub_throughput`, not a
+/// guessed absolute.
+const STRUCK_FRAC_OF_THROUGHPUT: f32 = 0.05;
+/// §3.2 · brassage — the minting cost, paid to the mint's own household purse
+/// as wages. Small and constant; debasement's extra seigniorage is what
+/// varies (mirrors `COIN_SEIGNIORAGE`'s own `(1 - fineness)` term).
+const BRASSAGE_FRAC: f32 = 0.03;
 
 /// §3.4/D6 · a people's unit of account — resolved once per culture, exactly
 /// like `CultureRule`, and never re-rolled. `ladder` is the ratio to the
@@ -192,6 +252,48 @@ impl CampaignSim {
         }
     }
 
+    /// M3 · find or create the purse for `(kind, id, hub)`.
+    fn purse_idx(&mut self, kind: u8, id: i32, hub: u32) -> usize {
+        if let Some(i) = self.purses.iter().position(|p| p.holder_kind == kind && p.holder_id == id && p.hub == hub) {
+            return i;
+        }
+        self.purses.push(Purse { holder_kind: kind, holder_id: id, hub, coins: Vec::new(), bullion: [0.0; 3] });
+        self.purses.len() - 1
+    }
+
+    /// M3 · add `amount` of `issue_id` coin to a purse. The ONE place this
+    /// file's parallel ledger creates money — a negative or zero amount is a
+    /// no-op, never a withdrawal (there is no spending mechanism yet, so a
+    /// purse's coin count only ever grows in this slice).
+    pub(crate) fn add_coin(&mut self, kind: u8, id: i32, hub: u32, issue_id: u32, amount: f32) {
+        if !(amount > 0.0) { return; }
+        let pi = self.purse_idx(kind, id, hub);
+        match self.purses[pi].coins.iter_mut().find(|(iid, _)| *iid == issue_id) {
+            Some(e) => e.1 += amount,
+            None => self.purses[pi].coins.push((issue_id, amount)),
+        }
+    }
+
+    /// §3.2 · strike a fresh issue: size it from the mint's own throughput,
+    /// split into seigniorage/brassage/circulation, credit the three purses,
+    /// and return `(struck, circulating)` for the caller to stamp onto the
+    /// `Issue` it is about to push. `fine` is this issue's OWN fineness (a
+    /// more debased strike skims more seigniorage, mirroring `COIN_SEIGNIORAGE`
+    /// in money.rs).
+    fn strike_issue(&mut self, hub: usize, issue_id: u32, fine: f32) -> (f32, f32) {
+        let through = self.hub_throughput(hub);
+        let struck = through * STRUCK_FRAC_OF_THROUGHPUT;
+        if struck <= 0.0 { return (0.0, 0.0); }
+        let seign = struck * (1.0 - fine).max(0.0);
+        let brassage = struck * BRASSAGE_FRAC;
+        let circulation = (struck - seign - brassage).max(0.0);
+        let h = hub as u32;
+        self.add_coin(HOLDER_CITY_TREASURY, -1, h, issue_id, seign);
+        self.add_coin(HOLDER_HOUSEHOLD, -1, h, issue_id, brassage);
+        self.add_coin(HOLDER_LOCAL_MERCHANT, -1, h, issue_id, circulation);
+        (struck, seign + brassage + circulation)
+    }
+
     /// M1 · record this year's coinage decisions into the catalogue. Called
     /// once a year AFTER `apply_coinage`/`maybe_reform_coinage` have settled
     /// (mirrors `snapshot_coins`'s own timing — see mod.rs's yearly hook), so
@@ -225,11 +327,12 @@ impl CampaignSim {
                     for &tier in tiers {
                         let id = self.next_issue_id;
                         self.next_issue_id += 1;
+                        let (struck, circulating) = self.strike_issue(h, id, fine);
                         self.issues.push(Issue {
                             id, currency: ci, denom: denoms.len() as u32, year,
                             authority: authority.clone(),
                             grams: denom_standard_grams(tier), fineness: fine,
-                            struck: 0.0, circulating: 0.0, hoarded: 0.0, melted: 0.0, lost: 0.0,
+                            struck, circulating, hoarded: 0.0, melted: 0.0, lost: 0.0,
                             cause: ISSUE_FIRST,
                             cognomen: format!("the First {}", denom_tier_label(tier)),
                         });
@@ -263,11 +366,12 @@ impl CampaignSim {
                         let tier = self.currencies[ci].denoms[di].tier;
                         let id = self.next_issue_id;
                         self.next_issue_id += 1;
+                        let (struck, circulating) = self.strike_issue(h, id, fine);
                         self.issues.push(Issue {
                             id, currency: ci as u32, denom: di as u32, year,
                             authority: authority.clone(),
                             grams: denom_standard_grams(tier), fineness: fine,
-                            struck: 0.0, circulating: 0.0, hoarded: 0.0, melted: 0.0, lost: 0.0,
+                            struck, circulating, hoarded: 0.0, melted: 0.0, lost: 0.0,
                             cause, cognomen: cognomen.clone(),
                         });
                         self.currencies[ci].denoms[di].issues.push(id);

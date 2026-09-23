@@ -1,14 +1,13 @@
 # Money and Coinage Plan — real money, mints, banks and barter
 
-> **Status: M0 (instrument) + M1 (coin catalogue data model) SHIPPED, gated,
-> bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. M2-M4 (the rest of the
-> plan's own §5 "Stop marker" — the catalogue window, the parallel ledger,
-> the market money band + dashboard) are real, still-safe, unbuilt work,
-> queued per rule 36. M5-M11 (barter, the monetary stages, paid consumption,
-> the wealth/purse switch-over, banks on real reserves, price-level feedback)
-> are each explicitly dosed-from-zero work per §5's own build rule and were
-> not attempted — rushing a dose walk without its own gate sweep is the exact
-> mistake §8.15 (CLAUDE.md) already recorded this project making five times.**
+> **Status: M0-M3 SHIPPED, gated, bit-identical — see `docs/SCOREBOARD.md`
+> 2026-09-23. M4 (the dashboard reading the parallel ledger) is real,
+> still-safe, unbuilt work, queued per rule 36. M5-M11 (barter, the monetary
+> stages, paid consumption, the wealth/purse switch-over, banks on real
+> reserves, price-level feedback) are each explicitly dosed-from-zero work
+> per §5's own build rule — rushing a dose walk without its own gate sweep is
+> the exact mistake §8.15 (CLAUDE.md) already recorded this project making
+> five times, so each is walked with its own gate run before the next.**
 > Written from a brainstorm with the maintainer (2026-09-23). Supersedes
 > nothing — it extends `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1
 > relies on) and `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes
@@ -341,8 +340,8 @@ tick::tests` + `econ_`; every frontend slice runs `npx tsc --noEmit`.
 |---|---|---|---|
 | **M0** | ✅ SHIPPED 2026-09-23. **Instrument**: `econ_measure_money_creation` (`#[ignore]`d). Scoped down from a literal per-SITE breakdown (~150 call sites — queued) to per HOLDER CLASS: house wealth / hub treasury / bank reserves. | none (diagnostic) | ran; number on `SCOREBOARD.md` 2026-09-23 |
 | **M1** | ✅ SHIPPED 2026-09-23. **Coin data model** (`coinage.rs`): `Currency`/`Denom`/`Issue` recorded from the decisions `decide_coinage` already makes; units of account per culture (§3.4). Currency naming still rides the existing `coin_name` string (deduplicated) — full culture-rooted naming (§3.3's own ask) is real M2 UI-adjacent polish, not done here. | observe only — bit-identical | `sim_fingerprint` unchanged (verified: no folded field touched); `every_currency_name_is_unique_in_a_world` (`tick::tests`) |
-| **M2** | **Catalogue window** (browse, card art, denomination + issue pages, follow a coin) over M1. | UI only | `tsc`; a `dump_coin_sheet` render of the card art, looked at (§8.21's rule) |
-| **M3** | **Parallel ledger**: purses (§3.1), bullion → mint → coin (§3.2), every existing `+=` mirrored as a TRANSFER between purses, coin chests on `InTransit`. The ledger reports; nothing reads it. | observe only — bit-identical | conservation invariant holds every year; `sim_fingerprint` unchanged |
+| **M2** | ✅ SHIPPED 2026-09-23. **Catalogue surface**: `campaign_get_coin_catalogue` (a pure read of `currencies`/`issues`/`units_of_account`) + a "📜 Catalogue" tab in `MoneyFinancePanel.tsx` — every currency, its denominations, and each denomination's dated issue timeline. **Scoped down**: a functional data listing, not the full Victorian-engraved obverse/reverse card art (D7) or a standalone floating window (§4.1's own design) — both real, separate, unbuilt illustration/layout work. | UI only | `tsc` clean; `cargo check --lib` clean |
+| **M3** | ✅ SHIPPED 2026-09-23. **Parallel ledger, mint side**: `Purse`s (§3.1) + the mint-striking transaction (§3.2) — every new `Issue` sizes a real STRUCK quantity from the mint's own throughput and splits it into seigniorage (city treasury purse) / brassage (household purse) / circulation (local-merchant purse). Additive — no existing `wealth`/`treasury` `+=` site is touched or mirrored; this is a genuinely separate ledger computed alongside them, per D10. **Scoped down**: real bullion CARGO (mined, shipped, sometimes lost at sea) is not wired — the struck quantity is sized from the mint's existing regional throughput/bullion-ratio proxy, not a real delivery; melting/loss/hoarding/wear (the sinks) are not implemented, so every issue's `circulating` still equals its `struck` exactly. | observe only — bit-identical (purses are read by nothing else) | `sim_fingerprint` unchanged; `the_coin_ledger_conserves_every_struck_coin` (tests.rs) — Σ purses == Σ struck == Σ circulating per issue, to the float ulp |
 | **M4** | **Market money band + dashboard** (§4.2, §4.3) reading the parallel ledger; prices in local money as DISPLAY (real price × price level × unit). | UI only | `tsc` |
 | **M5** | **Barter as a real settlement** (§3.5): goods-for-goods with the payment goods leaving the seller's stock on a return leg; commodity money; `BARTER_SPREAD`. | dosed from 0 | `econ_` per dose step; multi-seed `econ_inheritance_rules_fragment_differently`; new `barter_moves_stock_both_ways`, `barter_is_never_refused`, `money_beats_barter_when_available` |
 | **M6** | **Three stages**: ledger houses, weighed bullion, the extended mint charter; coin reaches a city only by purse/chest; mint closure on demand (§3.7). | the charter/closure logic live in the parallel ledger only | new `a_coin_never_reaches_a_city_nothing_trades_with`, `an_unused_mint_closes` |

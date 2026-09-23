@@ -70,6 +70,53 @@ Gates run: `cargo check --lib` clean; `cargo test --lib tick::tests` —
 unchanged); `cargo test --lib econ_` — 6/6 passed including the multi-seed
 inheritance gate (521s), bit-identical in shape to the pre-M1 baseline.
 
+## 2026-09-23b — `MONEY_AND_COINAGE_PLAN.md`: M2 (catalogue surface) + M3 (parallel ledger, mint side) shipped
+
+Continuation of the same day's session (see 2026-09-23 above).
+
+**M2 — the catalogue surface.** `campaign_get_coin_catalogue` (a pure read
+of `currencies`/`issues`/`units_of_account`) + a new "📜 Catalogue" tab in
+`MoneyFinancePanel.tsx` (was `CoinCreditPanel.tsx` in CLAUDE.md's own map —
+the panel was merged/renamed since; not fixed in this pass) listing every
+currency, its denominations, and each denomination's dated issue timeline
+(first striking / debasement / reform, coloured by cause). **Scoped down**
+from the plan's own §4.1 design: a functional data listing, not the full
+Victorian-engraved obverse/reverse card art (D7, `goodArt.ts`'s ledger
+treatment) and not a standalone floating window — both real, separate,
+unbuilt illustration/layout work, queued.
+
+**M3 — the parallel ledger's mint-side half.** `Purse`s (§3.1:
+`holder_kind`/`holder_id`/`hub` → coins + bullion) and the mint-striking
+transaction (§3.2): every time a new `Issue` is recorded, a real STRUCK
+quantity is sized from the mint's own throughput and split into seigniorage
+(→ the city treasury's own purse), brassage (→ a household purse at the
+mint — wages), and circulation (→ a local-merchant purse — the honest
+placeholder for "whoever brought the bullion", since `ACTORS_AND_CARRIAGE_
+PLAN.md` already measured ~96% of trade moving on no one's account).
+**Additive, not a mirror**: no existing `wealth`/`treasury` `+=` site is
+touched — this is a genuinely separate ledger computed alongside them,
+exactly D10's "parallel ledger first" calls for, so `sim_fingerprint`
+(which folds neither `purses` nor the catalogue) is unchanged.
+
+**Scoped down, stated plainly**: real bullion CARGO (mined, shipped to a
+mint, sometimes lost at sea — §3.2 step 1) is not wired; the struck
+quantity comes from the mint's already-computed regional throughput/
+bullion-ratio proxy, not a real delivery. Melting, loss, hoarding and wear
+(the sinks) are not implemented, so every issue's `circulating` still
+equals its `struck` exactly — asserted, not assumed, by the new
+`the_coin_ledger_conserves_every_struck_coin` gate (Σ purses == Σ struck ==
+Σ circulating per issue, to the float ulp).
+
+Gates run: `cargo check --lib` clean; `npx tsc --noEmit` clean; `cargo test
+--lib tick::tests` — 275/275 (`simulate_decades_reports_dynamics`
+unchanged); `cargo test --lib econ_` — 6/6 including the multi-seed
+inheritance gate (518s), bit-identical.
+
+**What's next**: M4 (the market money band + dashboard reading this ledger)
+is the last item of the plan's own "Stop marker" — real, still-safe,
+unbuilt. M5-M11 are each a dosed-from-zero economic change and are being
+walked one at a time with their own gate run per step, per §5's build rule.
+
 ---
 
 ## 2026-09-22g — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S10 (the four-window split) shipped

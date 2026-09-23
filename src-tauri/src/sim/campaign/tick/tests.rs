@@ -144,7 +144,7 @@
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
-            units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0,
+            units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![],
         };
         s.rebuild_routes();
         s
@@ -3500,9 +3500,7 @@
         // Several seats mint over a real run; every one of their catalogue
         // entries must carry a distinct name (F2's own complaint — "a large
         // world has several unrelated Ducats" — must not survive into the
-        // catalogue), every issue must point at a real currency/denom, and
-        // M1 ships every issue's struck/circulating/hoarded/melted/lost at
-        // exactly 0.0 (M3's parallel ledger is what populates them).
+        // catalogue), and every issue must point at a real currency/denom.
         let goods = vec![
             good("wheat", 0, 0, 1.0, 0.85, true),
             good("silk", 1, 2, 20.0, 0.35, false),
@@ -3552,9 +3550,10 @@
             assert!((iss.denom as usize) < cur.denoms.len(), "issue points at a real denom");
             assert!(iss.fineness.is_finite() && (0.0..=1.0).contains(&iss.fineness));
             assert!(iss.grams > 0.0);
-            // M1 is observe-only — the parallel ledger (M3) hasn't been built yet.
-            assert_eq!(iss.struck, 0.0);
-            assert_eq!(iss.circulating, 0.0);
+            // M3 · struck/circulating are real now; no sink exists yet (queued),
+            // so nothing has ever been hoarded/melted/lost.
+            assert!(iss.struck.is_finite() && iss.struck >= 0.0);
+            assert!(iss.circulating.is_finite() && iss.circulating >= 0.0);
             assert_eq!(iss.hoarded, 0.0);
             assert_eq!(iss.melted, 0.0);
             assert_eq!(iss.lost, 0.0);
@@ -3563,6 +3562,57 @@
         for u in &s.units_of_account {
             assert!(u.ladder.len() >= 2 && u.ladder.len() == u.names.len());
             assert!(u.ladder.windows(2).all(|w| w[0] > w[1]), "largest unit first: {:?}", u.ladder);
+        }
+    }
+
+    #[test]
+    fn the_coin_ledger_conserves_every_struck_coin() {
+        // MONEY_AND_COINAGE_PLAN.md M3 · §3.2's conservation invariant:
+        // Σ coins everywhere == Σ struck − Σ melted − Σ lost − Σ hoarded, per
+        // issue. No sink exists yet (queued — see coinage.rs's own header),
+        // so this reduces to Σ purses == Σ struck exactly, checked to the
+        // last float ulp: `add_coin` is the ONLY writer of `purses`, so any
+        // drift here is a real accounting bug, not noise.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = Vec::new();
+        for i in 0..4u32 {
+            hubs.push(hub(i, (i as f32) * 20.0, 10.0, 30000.0, vec![160.0, 16.0], 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..4u32 {
+            let mut h = house_at(i, vec![1], 3);
+            h.archetype = 2;
+            h.wealth = 300.0;
+            h.prestige = 0.6;
+            h.dominant_seat = true;
+            s.houses.push(h);
+        }
+        for hh in s.hubs.iter_mut() { hh.treasury = 200.0; }
+        s.rebuild_routes();
+
+        s.advance(TICKS_PER_YEAR * 5);
+
+        assert!(!s.issues.is_empty(), "at least one issue was struck over 5 years");
+        for iss in &s.issues {
+            let held: f32 = s.purses.iter()
+                .flat_map(|p| p.coins.iter())
+                .filter(|(id, _)| *id == iss.id)
+                .map(|(_, amt)| *amt)
+                .sum();
+            assert!((held - iss.circulating).abs() < 1e-3,
+                "issue {} ({}): purses hold {held}, circulating says {}", iss.id, iss.cognomen, iss.circulating);
+            assert!((iss.struck - iss.circulating).abs() < 1e-3,
+                "issue {} ({}): no sink exists yet, struck must equal circulating", iss.id, iss.cognomen);
+        }
+        // Every coin the ledger has ever struck sits in exactly one of the
+        // three transaction-side purses (treasury/household/local-merchant) —
+        // no fourth holder has been invented and nothing has vanished.
+        for p in &s.purses {
+            assert!(matches!(p.holder_kind, HOLDER_CITY_TREASURY | HOLDER_HOUSEHOLD | HOLDER_LOCAL_MERCHANT),
+                "M3's mint-side transaction only ever pays these three holders");
         }
     }
 

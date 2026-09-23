@@ -7392,6 +7392,11 @@ pub struct CampaignSim {
     #[serde(default)] pub issues: Vec<Issue>,
     /// Running id counter for `issues`, monotonic, never reused.
     #[serde(default)] pub next_issue_id: u32,
+    /// M3 · every purse that has ever held a coin (§3.1). Sparse — created
+    /// lazily by `add_coin`. Nothing outside `coinage.rs` reads or writes this
+    /// yet; it is a parallel ledger computed ALONGSIDE the existing wealth/
+    /// treasury numbers, not yet reconciled with them (D10, M9's own job).
+    #[serde(default)] pub purses: Vec<Purse>,
 }
 
 /// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
@@ -10388,8 +10393,10 @@ mod certification;
 mod league;
 mod yards;
 mod coinage;
-pub use coinage::{Currency, Denom, Issue, UnitOfAccount,
-    DENOM_GOLD, DENOM_SILVER, DENOM_PETTY, ISSUE_FIRST, ISSUE_DEBASEMENT, ISSUE_REFORM};
+pub use coinage::{Currency, Denom, Issue, UnitOfAccount, Purse,
+    DENOM_GOLD, DENOM_SILVER, DENOM_PETTY, ISSUE_FIRST, ISSUE_DEBASEMENT, ISSUE_REFORM,
+    HOLDER_CITY_TREASURY, HOLDER_HOUSE, HOLDER_BANK, HOLDER_HOUSEHOLD, HOLDER_LOCAL_MERCHANT,
+    HOLDER_MINT};
 pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,
