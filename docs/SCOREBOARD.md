@@ -9,6 +9,56 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23b — `SETTLEMENT_LIFE_PLAN.md`: L0 (instrument) + L1 (entitlement) + L2 (incomes/welfare ratio) shipped
+
+New plan, agreed and built the same day (CLAUDE.md §5.7). L0-L2 land the sim half
+of the plan's own STOP MARKER; L3 (the Life tab, frontend) is queued, not attempted
+this session (no React/frontend work done).
+
+**L0 — `econ_measure_settlement_life`** (`#[ignore]`d, `realm_reference_world` +
+`dense_world`, 60y each — never the province-less `reference_world`, §1 F10).
+Baseline measured:
+
+| metric | realm_reference (provinced) | dense_world |
+|---|---|---|
+| F1 hidden-hunger count (lack_basic>0.2 w/ >30d grain) | 0 / 4,263 (0.00%) | 0 / 3,503 (0.00%) |
+| lack_basic: mean / p50 / p90 / p99 | 0.886 / 0.993 / 0.994 / 0.996 | 0.743 / 0.977 / 0.998 / 0.999 |
+| famine (world-level) hub-years / episodes / mean length | 4,114 / 1 / 60.0y | 3,029 / 1 / 60.0y |
+| implied CAGR, smallest vs largest size tercile | −0.0007 vs −0.0156 | −0.0169 vs −0.0300 |
+| riots / revolts / plague strikes per century (journal-capped, lower bound) | 0.0 / 25.0 / 0.0 | 0.0 / 1.7 / 0.0 |
+
+**The F1 count reading exactly 0 is itself the finding, not a clean bill of
+health**: `lack_basic` already sits near its ceiling (0.98-0.99 at the median) on
+BOTH fixtures almost the entire run, so there is effectively no "well-supplied but
+still hungry" contrast for F1 to catch — a pre-existing, near-permanent basic-goods
+shortfall neither fixture's own gates flagged before this instrument existed.
+Plague recovery TIME (distinct from strike frequency) is not measured — needs
+per-tick population history this instrument does not keep; named as queued in the
+test's own doc comment rather than approximated.
+
+**L1 — the entitlement fix** (= `MONEY_AND_COINAGE_PLAN.md` M7, D1). Shipped at
+`ENTITLEMENT_DOSE = 0.0` (true no-op, `entitlement_dose_zero_is_a_noop`); the
+blend direction is proven by `a_priced_out_city_reads_as_hungry`. Raising the dose
+is unstarted — the plan's own §5 risk 1 says expect `unrest_topples_councils` to
+fire MORE (hidden hunger surfacing), not less, and to read the L0 baseline above
+before judging a walk.
+
+**L2 — incomes + the welfare ratio, OBSERVE ONLY.** `Pop.income`/`TickHub.
+welfare_ratio` computed yearly in `derive_pops`, read by nothing else in the tick.
+`economy_validation.rs`'s scorecard gains `labourer_welfare_ratio` beside the old
+`real_wage_index` (kept, reprinted as "commoner wealth index"). A simplified
+reading of §3.2's per-profession income-source table (production value, trade
+throughput, treasury, export earnings, civic pool — no province-surplus or house-
+ledger detail yet).
+
+**Gates**: `cargo check --lib --tests` clean; `cargo test --lib tick::tests`
+278/278 (incl. `simulate_decades_reports_dynamics`, `the_dosed_economy_stays_
+healthy_on_a_realistically_dense_world`); `cargo test --lib econ_ -- --nocapture`
+6/6 bit-identical, 308.34s (multi-seed inheritance gate included) — confirming L1
+at dose 0 and L2 observe-only cannot have moved anything.
+
+---
+
 ## 2026-09-23 — `MONEY_AND_COINAGE_PLAN.md`: M0 (instrument) + M1 (coin catalogue data model) shipped
 
 New plan, agreed in scope the same day. Built the two slices the plan's own

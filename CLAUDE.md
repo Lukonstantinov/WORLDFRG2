@@ -1644,6 +1644,72 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   newly-found fixture/mechanism fixes) — nothing here changes that
   sequencing, this entry only records which end of it landed.
 
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L2 shipped (the STOP MARKER's sim half; L3's tab is queued)
+
+The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
+at three doses. L0-L2 shipped this session — L3 (the Life tab) did not, so the
+new numbers exist in the sim but have no frontend reader yet; that is a queued
+follow-up (rule 36), not a refusal.
+
+- **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
+  `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
+  the province-less `reference_world`). Prints the F1 hidden-hunger count (how
+  often `lack_basic > 0.2` while a hub's own grain stock still covers 30+ days of
+  need), the `lack_basic` distribution, famine episode count/length, implied
+  natural growth by city-size tercile, and riot/revolt/plague-strike counts
+  (journal-capped, reported as a lower bound). **Baseline measured**: the F1 count
+  reads **0 of ~4,000-4,300 hub-year checks on both fixtures** — not because
+  hidden hunger is rare, but because `lack_basic` sits near its ceiling almost
+  everywhere already (mean 0.886/0.743, median 0.99/0.98 on the two fixtures) —
+  a pre-existing, near-permanent basic-goods shortfall this instrument surfaces
+  for the first time, not something L1 caused. Plague RECOVERY TIME (as opposed
+  to strike frequency) needs per-tick population history this instrument does not
+  keep; left unmeasured and named in the test's own doc comment rather than
+  approximated unreliably.
+- **L1 — entitlement** (= `MONEY_AND_COINAGE_PLAN.md` M7, one implementation,
+  D1). `TickHub.food_eaten`/`food_need_today` are written in the SAME eating loop
+  `lack_basic` already reads (`mod.rs`, just before `update_food_and_starvation`
+  runs), and `entitlement_bal_e` (`mod.rs`) blends them into the food balance —
+  `bal_eaten = (food_eaten − food_need) / food_need` (≤ 0 by construction) against
+  today's `bal_stock = (stock + production − need) / need`, via
+  `min(bal_stock, bal_eaten + ENTITLEMENT_MARGIN)`. A household priced out (S7) or
+  grain still locked in a warehouse now reads as genuinely underfed instead of
+  counting toward "the city is fed" — this is what S7's own `HOUSEHOLD_
+  MONETIZATION_DOSE` dose walk needed before it could be resumed (its doc comment
+  names this exact fix). Shipped at **`ENTITLEMENT_DOSE = 0.0`** — a true no-op
+  (`entitlement_dose_zero_is_a_noop`); `a_priced_out_city_reads_as_hungry` proves
+  the blend direction and that an ordinary fully-fed hub (`bal_stock` at the
+  margin) reads unchanged at full dose. **Raising the dose is unstarted, separate
+  work** — §5 risk 1 of the plan says to expect `unrest_topples_councils` to fire
+  MORE, not less, and to read the L0 count before judging a dose walk's result.
+- **L2 — incomes + the welfare ratio, OBSERVE ONLY** (§3.2). `Pop.income` and
+  `TickHub.welfare_ratio` are computed in `derive_pops` (`cities.rs`, yearly) from
+  real hub state — a farm/craft pool from production VALUE (food goods vs.
+  `Distribution::Manufactured`), a labour/soldier pool from `trade_last_year`, a
+  clerk pool from `treasury`, a merchant pool from `export_earn`, and clergy/elite
+  pools from `civic_pool` (a stand-in until L9 gives the church its own income and
+  L11 gives the house ledger a resident-dividend read) — divided by each
+  profession's live headcount (`INCOME_*_SHARE` constants, `mod.rs`). The welfare
+  ratio is Allen's measure: labourer income ÷ the cost of a bare subsistence
+  basket (`base_need` over basic-tier goods, priced locally) per head per year.
+  **Nothing in the tick reads either field** (`sim_fingerprint`/the dynamics run
+  are unchanged — verified: `cargo test --lib econ_` 6/6 bit-identical, incl. the
+  multi-seed inheritance gate, 308s). `economy_validation.rs`'s scorecard gains
+  `labourer_welfare_ratio` (printed, not asserted); the old `real_wage_index`
+  (a sentiment blend, never an income — §1 F2) is kept and reprinted as "commoner
+  wealth index" rather than removed, per the plan's own D1-adjacent continuity
+  note. Gated by `incomes_sum_to_what_the_city_earned` and
+  `welfare_ratio_is_finite_and_positive` (`tick::tests`).
+- **What did NOT ship, and why (rule 36 — queued, not waived)**: L3 (the Life
+  tab + `campaign_city_life`/wiring `campaign_get_pops`) — the STOP MARKER's own
+  frontend half, needed before L2's welfare ratio is visible to anyone in an
+  observation-only game (§5 risk 6 of the plan: legibility debt). L4 onward
+  (vital rates, welfare-into-behaviour, housing, the settlement year, urban
+  hazards, the church, the watch, persistent pops, townspeople, Life tab v2) are
+  each their own dose walk per the plan's own build order and are unstarted.
+  Gates run this session: `cargo check --lib --tests` (clean), `cargo test --lib
+  tick::tests` (278/278), `cargo test --lib econ_ -- --nocapture` (6/6, 308s).
+
 ---
 
 ## 6. Rust Backend Map (`src-tauri/src/`)
@@ -5522,9 +5588,10 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
-SETTLEMENT_LIFE_PLAN.md           ← ⭐ PLANNED, NOTHING BUILT. How people live,
-                                    earn, eat, die and make trouble in a campaign
-                                    city. Eleven measured findings, headed by F1:
+SETTLEMENT_LIFE_PLAN.md           ← ⭐ L0-L2 SHIPPED (§5.7), L3-L13 queued. How
+                                    people live, earn, eat, die and make trouble in
+                                    a campaign city. Eleven measured findings,
+                                    headed by F1:
                                     the famine check reads grain LEFT IN STOCK
                                     after eating (`update_food_and_starvation`
                                     runs after the eating loop), so grain the poor

@@ -2961,6 +2961,20 @@ pub(crate) const HOUSEHOLD_MONETIZATION_DOSE: f32 = 0.0;
 /// the shipped dose regardless of its exact value.
 const HOUSEHOLD_WAGE_SHARE: f32 = 0.02;
 
+/// SETTLEMENT_LIFE_PLAN.md L2 (§3.2) — the profession income pools
+/// `derive_pops` divides among each profession's live headcount, OBSERVE
+/// ONLY (nothing in the tick reads `Pop.income`/`TickHub.welfare_ratio`).
+/// Labourers/soldiers take a share of trade THROUGHPUT (porters, carters,
+/// dockers); clerks a share of treasury; merchants a share of retained
+/// export earnings; clergy and the elite a share of the civic pool (a
+/// stand-in until L9 gives the church its own real income and L11 gives the
+/// house ledger a per-resident dividend read).
+pub(crate) const INCOME_LABOUR_TRADE_SHARE: f32 = 0.15;
+pub(crate) const INCOME_CLERK_TREASURY_SHARE: f32 = 0.08;
+pub(crate) const INCOME_MERCHANT_EXPORT_SHARE: f32 = 0.25;
+pub(crate) const INCOME_CLERGY_CIVIC_SHARE: f32 = 0.05;
+pub(crate) const INCOME_ELITE_CIVIC_SHARE: f32 = 0.20;
+
 /// The amount of `eat` (units of the good) a household cannot afford at
 /// `household_wealth` / `price`, scaled by `dose` — split out as a pure
 /// function (the N6/S3 pattern) so a test can exercise a non-zero dose
@@ -2972,6 +2986,57 @@ pub(crate) fn household_priced_out(eat: f32, household_wealth: f32, price: f32, 
     let affordable = household_wealth.max(0.0) / price.max(0.01);
     (eat - affordable).max(0.0) * dose.clamp(0.0, 1.0)
 }
+
+/// SETTLEMENT_LIFE_PLAN.md L1 (§3.1) — the entitlement fix (= MONEY_AND_
+/// COINAGE_PLAN.md M7, one implementation, D1). `update_food_and_starvation`
+/// today reads `food_have = stock + production`: grain a priced-out
+/// household could not afford (S7) or that sits locked in a warehouse still
+/// counts as the city being fed — the measured cause of S7's own dose being
+/// reverted (see `HOUSEHOLD_MONETIZATION_DOSE`'s doc comment). This is
+/// **entitlement failure** (Sen): grain present, people starving anyway.
+///
+/// `bal_stock` is today's formula, unchanged. `bal_eaten` is what the eating
+/// loop actually delivered (`food_eaten`) against what it needed
+/// (`food_need`) — at most 0.0, since `eat = need.min(stock)` can never
+/// exceed `need`. Blending the two with `min` means a full-warehouse famine
+/// (`bal_stock` high, `bal_eaten` low) reads as hungry at full dose. `margin`
+/// is set to the balance an ORDINARY well-fed hub reads today (`bal_stock`
+/// hovering near its reserve buffer, not a large surplus) — a city that ate
+/// its FULL ration has `bal_eaten = 0`, so `min(bal_stock, margin)` leaves
+/// `bal_stock` exactly where it was whenever `bal_stock` is at or below
+/// `margin`, which is the common case (`a_priced_out_city_reads_as_hungry`
+/// tests exactly this). `ENTITLEMENT_DOSE = 0.0` is a true no-op regardless;
+/// raising it only ever LOWERS the reported balance for a hub whose eating
+/// loop fell short of its ration.
+#[inline]
+pub(crate) fn entitlement_bal_e(
+    bal_stock: f32,
+    food_eaten: f32,
+    food_need: f32,
+    margin: f32,
+    dose: f32,
+) -> f32 {
+    if dose <= 0.0 || food_need <= EPS {
+        return bal_stock;
+    }
+    let bal_eaten = (food_eaten - food_need) / food_need; // ≤ 0 by construction
+    let blended = bal_stock.min(bal_eaten + margin);
+    bal_stock + (blended - bal_stock) * dose.clamp(0.0, 1.0)
+}
+
+/// Dosed from zero (SETTLEMENT_LIFE_PLAN.md L1). At 0.0 `entitlement_bal_e`
+/// always returns `bal_stock` unchanged, so `update_food_and_starvation` is
+/// bit-identical to before this slice — `sim_fingerprint` unchanged. Walking
+/// this needs `unrest_topples_councils` to keep firing (MORE hidden hunger
+/// surfacing is the fix working, not a regression — read the L0 count before
+/// judging) and the dynamics run to stay bounded.
+pub(crate) const ENTITLEMENT_DOSE: f32 = 0.0;
+/// The balance a household that ate its FULL ration reads at, so
+/// `bal_eaten + ENTITLEMENT_MARGIN` matches an ordinary well-fed hub's
+/// `bal_stock` (which is normally small and positive from reserve buffers,
+/// not exactly 0) rather than dragging every hub in the world down by a flat
+/// amount the day this dose is first raised above zero.
+pub(crate) const ENTITLEMENT_MARGIN: f32 = 0.15;
 
 /// `price / base_value`, clamped, run through a monotone dampened response and
 /// blended in by `PROD_ELASTICITY` — at 0.0 this returns EXACTLY 1.0 for any
@@ -4169,6 +4234,27 @@ pub struct TickHub {
     /// from its parent city's local material surplus. Resets to 0 once a hull
     /// completes (`HULL_BUILD_POINTS`). Meaningless on any other estate kind.
     #[serde(default)] pub yard_progress: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L1 (§3.1) · what the eating loop actually
+    /// DELIVERED today, summed over food goods (`eat`, after any S7 household
+    /// budget shortfall) — distinct from `food_have` in
+    /// `update_food_and_starvation`, which counts stock+production whether or
+    /// not anyone could reach it. Written once per day in the eating loop,
+    /// read once per day by `update_food_and_starvation` to blend the
+    /// entitlement balance at `ENTITLEMENT_DOSE`. `#[serde(default)]` — an old
+    /// save reads 0.0 here for one tick until the next eating pass fills it.
+    #[serde(default)] pub food_eaten: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L1 · the STRUCTURAL food need the eating loop
+    /// measured `food_eaten` against (`needs_struct`'s food sum) — companion
+    /// to `food_eaten` above, so a reader never has to guess which need
+    /// figure a given `food_eaten` was measured against.
+    #[serde(default)] pub food_need_today: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L2 (§3.2), OBSERVE ONLY — nothing in the tick
+    /// reads this yet (`sim_fingerprint` is unchanged). The labourer-class
+    /// income ÷ the local cost of a bare subsistence basket (Allen's welfare
+    /// ratio): ~1.0 is bare subsistence. Recomputed yearly in `derive_pops`
+    /// alongside `Pop.income`. `#[serde(default)]` — 0.0 until the first
+    /// yearly derive.
+    #[serde(default)] pub welfare_ratio: f32,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -6053,6 +6139,11 @@ pub struct Pop {
     pub needs_luxury: f32,   // 0..1 luxury needs
     pub consciousness: f32,  // 0..10 political awareness
     pub militancy: f32,      // 0..10 willingness to revolt
+    /// SETTLEMENT_LIFE_PLAN.md L2 (§3.2), OBSERVE ONLY — grain-equivalent
+    /// income per head per YEAR, sourced from money this profession's own
+    /// pool actually earned at this hub (never a sentiment formula). Nothing
+    /// in the tick reads this yet; `sim_fingerprint` is unchanged.
+    #[serde(default)] pub income: f32,
 }
 
 /// Phase 5 (flavour) · CONTAGION tuning. Kept mild + capped so an outbreak spreads
@@ -9400,6 +9491,12 @@ impl CampaignSim {
                 // `decide_crisis_relief`, all trace back to this loop.
                 let mut tier_need = [0.0f32; 3];
                 let mut tier_unmet = [0.0f32; 3];
+                // SETTLEMENT_LIFE_PLAN.md L1 · what THIS loop actually delivers
+                // for food goods, read back by `update_food_and_starvation`
+                // (disease.rs) to compute the entitlement balance — see
+                // `entitlement_bal_e`'s own doc comment.
+                let mut food_eaten_today = 0.0f32;
+                let mut food_need_today = 0.0f32;
                 for g in 0..ng {
                     let need = needs_struct[h][g];
                     let mut eat = need.min(stock_of(&self.hubs[h].stock, g));
@@ -9424,12 +9521,18 @@ impl CampaignSim {
                     let t = self.goods[g].need_tier.min(2) as usize;
                     tier_need[t] += need;
                     tier_unmet[t] += (need - eat).max(0.0);
+                    if self.goods[g].food {
+                        food_eaten_today += eat;
+                        food_need_today += need;
+                    }
                 }
                 let frac = |t: usize| if tier_need[t] > EPS { tier_unmet[t] / tier_need[t] } else { 0.0 };
                 // Smooth so the graph drifts rather than flickers tick-to-tick.
                 self.hubs[h].lack_basic = 0.9 * self.hubs[h].lack_basic + 0.1 * frac(0);
                 self.hubs[h].lack_comfort = 0.9 * self.hubs[h].lack_comfort + 0.1 * frac(1);
                 self.hubs[h].lack_luxury = 0.9 * self.hubs[h].lack_luxury + 0.1 * frac(2);
+                self.hubs[h].food_eaten = food_eaten_today;
+                self.hubs[h].food_need_today = food_need_today;
             }
 
             // 2c) DERIVED (manufacturing) demand. A city that can weave/forge wants

@@ -131,7 +131,17 @@ pub struct EconScorecard {
     /// measures nothing; a general subsistence crisis is the historical event.
     pub crisis_year_share: f32,
     /// Mean real wage proxy: grain purchasable per unit of commoner wealth.
+    /// A sentiment blend, not an income (SETTLEMENT_LIFE_PLAN.md F2) — kept
+    /// for continuity, printed as "commoner wealth index" now that
+    /// `labourer_welfare_ratio` exists as the real Allen-comparable figure.
     pub real_wage_index: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L2 (§3.2) — mean labourer-class welfare ratio
+    /// (income ÷ the cost of a bare subsistence basket at local prices) over
+    /// live, non-estate hubs. ~1.0 is bare subsistence; Allen (2001) reports
+    /// ~1–1.5 for pre-industrial Florence/Delhi and ~2–3 for 17th-c. London/
+    /// Amsterdam. Printed, not asserted (§2.5) — `derive_pops` (cities.rs)
+    /// computes it OBSERVE ONLY, so this figure cannot move any other row.
+    pub labourer_welfare_ratio: f32,
     /// CV of land-use pressure (`prov_rural / prov_cap`) across provinces, final
     /// year. Workstream 2.5 has not landed yet, so there is no true potential/
     /// actual `exploitation` ratio per good to report; this is the best available
@@ -611,6 +621,13 @@ fn measure(s: &mut CampaignSim) -> EconScorecard {
         .collect();
     card.real_wage_index = mean(&wages);
 
+    // ── SETTLEMENT_LIFE_PLAN.md L2 · the real welfare ratio ─────────────────
+    let welfare: Vec<f32> = live.iter()
+        .map(|&i| s.hubs[i].welfare_ratio)
+        .filter(|w| w.is_finite() && *w > 0.0)
+        .collect();
+    card.labourer_welfare_ratio = mean(&welfare);
+
     // ── Regional dispersion (Step 0 — see the fields' own docs) ─────────────
     let pressures: Vec<f32> = (0..s.prov_cap.len())
         .map(|p| (s.prov_rural[p].max(0.0) / s.prov_cap[p].max(1.0)))
@@ -695,8 +712,11 @@ fn print_scorecard(c: &EconScorecard) {
              c.house_turnover_per_century);
     println!("  crisis (famine) year share      {:>9.3}     ~0.05 – 0.20        Livi-Bacci",
              c.crisis_year_share);
-    println!("  real wage index (grain-eq)      {:>9.3}     trend ≈ flat        Allen",
+    println!("  commoner wealth index (grain-eq){:>9.3}     trend ≈ flat        Allen",
              c.real_wage_index);
+    println!("  labourer welfare ratio          {:>9.3}     ~1.0–1.5 (poor) /   Allen",
+             c.labourer_welfare_ratio);
+    println!("                                                 ~2.0–3.0 (rich)");
     println!("  ── Step 0 · regional dispersion (province layer now heterogeneous) ──");
     println!("  province land-pressure CV       {:>9.3}     (exploitation stand-in, 2.5 pending)",
              c.prov_pressure_cv);
@@ -1049,6 +1069,7 @@ fn econ_scorecard_is_deterministic() {
     same!(wealth_gini);
     same!(top10_share);
     same!(real_wage_index);
+    same!(labourer_welfare_ratio);
     same!(prov_pressure_cv);
     same!(prov_output_cv);
     same!(wars_per_century);
@@ -1808,6 +1829,143 @@ fn econ_measure_realm_formation() {
     println!("    untiered {}  ·  tier1 {}  ·  tier2 {}  ·  tier3 {}  ·  tier4 {}",
         govern_tier_hist[0], govern_tier_hist[1], govern_tier_hist[2], govern_tier_hist[3], govern_tier_hist[4]);
     println!("═══════════════════════════════════════════════════════════════════════");
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L0 — the instrument. No mechanism changes; this
+/// only MEASURES what `update_food_and_starvation`/`update_unrest` already
+/// produce, before L1's `ENTITLEMENT_DOSE` (or any later slice) touches
+/// anything. Run on a PROVINCED fixture only (§1 F10) — `reference_world()`
+/// seeds no rural population, so it would measure an empty countryside.
+///
+/// The header figure is F1's own count: how often a hub's `lack_basic` read
+/// above 0.2 (real hunger the eating loop measured) while its OWN grain
+/// stock still covered more than 30 days of need — hidden hunger
+/// `update_food_and_starvation` cannot see today. L1's dose walk is judged
+/// against this count RISING (hidden hunger becoming visible), not falling
+/// (§5 risk 1 of the plan).
+///
+/// Riot/revolt/plague-strike counts read the world `journal`, which is
+/// capped (`JOURNAL_CAP`) and can drop its oldest entries over a 60-year
+/// run — printed as a lower bound, not claimed exact. Per-strike plague
+/// RECOVERY TIME (as opposed to strike frequency) needs per-tick population
+/// history this instrument does not keep; left unmeasured and named here
+/// rather than approximated unreliably (rule 36 — queued, not silently
+/// dropped).
+#[test]
+#[ignore]
+fn econ_measure_settlement_life() {
+    const GRAIN: usize = 0; // wheat — the numeraire good
+    for (label, mut s) in [
+        ("realm_reference (provinced)", realm_reference_world()),
+        ("dense_world", dense_world()),
+    ] {
+        let years = 60u32;
+        let live_idx: Vec<usize> = (0..s.hubs.len())
+            .filter(|&h| !s.hubs[h].is_estate && !s.hubs[h].abandoned)
+            .collect();
+        let start_pop: std::collections::HashMap<usize, f32> =
+            live_idx.iter().map(|&h| (h, s.hubs[h].population.max(1.0))).collect();
+
+        let mut lack_samples: Vec<f32> = Vec::new();
+        let mut f1_hits = 0u64;
+        let mut f1_checks = 0u64;
+        let mut famine_hub_years = 0u64;
+        let mut in_famine = false;
+        let mut famine_episodes = 0u32;
+        let mut famine_lengths: Vec<u32> = Vec::new();
+        let mut famine_start = 0u32;
+
+        for yr in 0..years {
+            s.advance(TICKS_PER_YEAR);
+            let mut any_famine = false;
+            for &h in &live_idx {
+                let lb = s.hubs[h].lack_basic;
+                lack_samples.push(lb);
+                if lb > 0.2 {
+                    any_famine = true;
+                    famine_hub_years += 1;
+                }
+                let need = s.hubs[h].food_need_today.max(0.0);
+                if need > 1.0 {
+                    f1_checks += 1;
+                    let stock_days = stock_of(&s.hubs[h].stock, GRAIN) / need.max(0.01);
+                    if lb > 0.2 && stock_days > 30.0 {
+                        f1_hits += 1;
+                    }
+                }
+            }
+            if any_famine {
+                if !in_famine {
+                    famine_episodes += 1;
+                    famine_start = yr;
+                    in_famine = true;
+                }
+            } else if in_famine {
+                famine_lengths.push(yr - famine_start);
+                in_famine = false;
+            }
+        }
+        if in_famine {
+            famine_lengths.push(years - famine_start);
+        }
+
+        // Implied natural growth by starting city size (terciles).
+        let mut by_size: Vec<(f32, f32, f32)> = live_idx.iter() // (start_pop, end_pop, cagr)
+            .map(|&h| {
+                let sp = start_pop[&h];
+                let ep = s.hubs[h].population.max(0.0);
+                let cagr = if sp > 1.0 && ep > 0.0 {
+                    (ep / sp).powf(1.0 / years as f32) - 1.0
+                } else {
+                    0.0
+                };
+                (sp, ep, cagr)
+            })
+            .collect();
+        by_size.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        let third = (by_size.len() / 3).max(1);
+        let band_cagr = |band: &[(f32, f32, f32)]| -> f32 {
+            if band.is_empty() { 0.0 } else { band.iter().map(|x| x.2).sum::<f32>() / band.len() as f32 }
+        };
+        let small = band_cagr(&by_size[..third.min(by_size.len())]);
+        let large = band_cagr(&by_size[by_size.len().saturating_sub(third)..]);
+
+        let riots = s.journal.iter().filter(|e| e.kind == "riot").count();
+        let revolts = s.journal.iter().filter(|e| e.kind == "revolt").count();
+        let plague_strikes = s.journal.iter().filter(|e| e.kind == "plague_lockup").count();
+        let centuries = years as f32 / 100.0;
+
+        let mean_lack = mean(&lack_samples);
+        let mut sorted_lack = lack_samples.clone();
+        sorted_lack.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        let pct = |p: f32| -> f32 {
+            if sorted_lack.is_empty() { return 0.0; }
+            sorted_lack[((sorted_lack.len() as f32 * p) as usize).min(sorted_lack.len() - 1)]
+        };
+        let famine_recovery = mean(&famine_lengths.iter().map(|&x| x as f32).collect::<Vec<_>>());
+
+        println!();
+        println!("═══ settlement life baseline · {label} · {years}y ═══════════════════");
+        println!("  hidden-hunger count (F1): lack_basic>0.2 with >30d grain on hand");
+        println!("    {f1_hits} of {f1_checks} hub-year checks ({:.2}%)",
+                 if f1_checks > 0 { 100.0 * f1_hits as f32 / f1_checks as f32 } else { 0.0 });
+        println!("  lack_basic distribution   mean {:.3}  p50 {:.3}  p90 {:.3}  p99 {:.3}",
+                 mean_lack, pct(0.50), pct(0.90), pct(0.99));
+        println!("  famine (any hub lack_basic>0.2) hub-years   {famine_hub_years}");
+        println!("  famine episodes (world-level)               {famine_episodes}");
+        println!("  mean famine episode length (years)          {:.1}", famine_recovery);
+        println!("  implied natural growth (CAGR): smallest tercile {:.4}  largest tercile {:.4}",
+                 small, large);
+        println!("  riots (lower bound, journal-capped)          {riots}   ({:.1}/century)",
+                 riots as f32 / centuries);
+        println!("  revolts (lower bound, journal-capped)        {revolts}   ({:.1}/century)",
+                 revolts as f32 / centuries);
+        println!("  plague strikes (lower bound, journal-capped) {plague_strikes}   ({:.1}/century)",
+                 plague_strikes as f32 / centuries);
+        println!("  plague recovery time: NOT MEASURED this session — needs per-tick");
+        println!("    population history; queued (rule 36), not approximated here.");
+        println!("═══════════════════════════════════════════════════════════════════");
+    }
 }
 
 /// `PORT_COMPETITION_PLAN.md` Slice 2 — the diagnostic that gates whether

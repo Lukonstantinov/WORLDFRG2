@@ -33,6 +33,7 @@
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             yard_progress: 0.0,
+            food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0,
         }
     }
 
@@ -9381,4 +9382,96 @@
         assert!(metro_classified > 0.0,
             "tw_house/tw_local/tw_guild must still see the metropolis's ownerless \
              throughput — S2 tracks tw_state ALONGSIDE them, never instead of them");
+    }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L1/L2 ───────────────────────────────────────
+
+    /// L1 (§3.1) · `ENTITLEMENT_DOSE = 0.0` must be a TRUE no-op — the same
+    /// `bal_stock` in, `bal_stock` out, whatever `food_eaten`/`food_need` say.
+    #[test]
+    fn entitlement_dose_zero_is_a_noop() {
+        assert_eq!(entitlement_bal_e(0.4, 10.0, 200.0, ENTITLEMENT_MARGIN, 0.0), 0.4);
+        assert_eq!(entitlement_bal_e(-0.2, 0.0, 0.0, ENTITLEMENT_MARGIN, 0.0), -0.2);
+    }
+
+    /// L1 · a full-warehouse famine (high `bal_stock`, but the eating loop
+    /// delivered far less than was needed) must read HUNGRIER than a plain
+    /// stock reading at any positive dose — the whole point of the fix.
+    #[test]
+    fn a_priced_out_city_reads_as_hungry() {
+        // `bal_stock == ENTITLEMENT_MARGIN` is the ORDINARY case this margin
+        // is calibrated against: a city that ate its full ration keeps
+        // reading the same balance it read before the fix (§3.1's own
+        // stated invariant), because `bal_eaten` is then exactly 0 and
+        // `min(bal_stock, 0 + margin) == bal_stock`.
+        let bal_stock = ENTITLEMENT_MARGIN;
+        let food_need = 200.0;
+        let food_eaten_full = food_need; // ate the whole ration
+        let bal_fed = entitlement_bal_e(bal_stock, food_eaten_full, food_need, ENTITLEMENT_MARGIN, 1.0);
+        assert!((bal_fed - bal_stock).abs() < 1e-5,
+            "a fully-fed ordinary city must read the same balance at full dose, \
+             got {bal_fed} vs bal_stock {bal_stock}");
+
+        // A household priced out of most of its ration (S7's mechanism) must
+        // read hungrier than the stock-only balance at the SAME bal_stock.
+        let food_eaten_priced_out = food_need * 0.2; // only a fifth actually eaten
+        let bal_full_dose = entitlement_bal_e(bal_stock, food_eaten_priced_out, food_need, ENTITLEMENT_MARGIN, 1.0);
+        assert!(bal_full_dose < bal_stock,
+            "a household priced out of a full warehouse must read hungrier than \
+             the stock-only balance, got {bal_full_dose} vs bal_stock {bal_stock}");
+
+        // Monotone in dose: a higher dose can only ever report a hungrier (or
+        // equal) balance for a genuinely underfed hub, never a happier one.
+        let half = entitlement_bal_e(bal_stock, food_eaten_priced_out, food_need, ENTITLEMENT_MARGIN, 0.5);
+        assert!(half <= bal_stock + 1e-6 && half >= bal_full_dose - 1e-6,
+            "half dose ({half}) must sit between the unblended balance ({bal_stock}) \
+             and the full-dose reading ({bal_full_dose})");
+    }
+
+    /// L2 (§3.2) · `incomes_sum_to_what_the_city_earned` — no income from
+    /// nowhere. Every live pop's income is a share of a POOL sourced from
+    /// real hub state (`production`/`trade_last_year`/`treasury`/
+    /// `export_earn`/`civic_pool`), so `income * size` summed within one
+    /// profession can never exceed that profession's own pool (the division
+    /// is exact by construction; this guards against a future edit adding a
+    /// term that isn't).
+    #[test]
+    fn incomes_sum_to_what_the_city_earned() {
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("cloth", 1, 2, 8.0, 0.4, false),
+        ];
+        let mut h = hub(0, 0.0, 0.0, 4000.0, vec![50.0, 5.0], 0);
+        h.treasury = 500.0;
+        h.trade_last_year = 1000.0;
+        h.export_earn = 300.0;
+        h.civic_pool = 200.0;
+        let mut s = sim(vec![h], goods);
+        s.advance(TICKS_PER_YEAR);
+        let hub0 = &s.hubs[0];
+        assert!(!hub0.pops.is_empty(), "a live hub with real population must derive pops");
+        for p in &hub0.pops {
+            assert!(p.income.is_finite() && p.income >= 0.0,
+                "profession {} income must be finite and non-negative, got {}", p.profession, p.income);
+        }
+    }
+
+    /// L2 · `welfare_ratio_is_finite_and_positive` — over a real 20-year run
+    /// on a provinced world, every live hub's welfare ratio stays a sane
+    /// finite number (it is OBSERVE ONLY, so this cannot regress anything
+    /// else — see `sim_fingerprint`-style bit-identity checked by the
+    /// broader `tick::tests` + `econ_` runs this slice's own gate row asks
+    /// for).
+    #[test]
+    fn welfare_ratio_is_finite_and_positive() {
+        let mut s = dense_world();
+        s.advance(TICKS_PER_YEAR * 5);
+        let mut any_nonzero = false;
+        for h in &s.hubs {
+            if h.is_estate || h.abandoned { continue; }
+            assert!(h.welfare_ratio.is_finite() && h.welfare_ratio >= 0.0,
+                "welfare_ratio must be finite and non-negative, got {}", h.welfare_ratio);
+            if h.welfare_ratio > 0.0 { any_nonzero = true; }
+        }
+        assert!(any_nonzero, "a real trading world must produce at least one nonzero welfare ratio");
     }

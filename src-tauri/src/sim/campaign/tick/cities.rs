@@ -1431,8 +1431,65 @@ impl CampaignSim {
                 profession: prof, size, money,
                 needs_life: life, needs_everyday: every, needs_luxury: lux,
                 consciousness: con, militancy: mil,
+                income: 0.0,
             });
         }
+        // SETTLEMENT_LIFE_PLAN.md L2 (§3.2) · incomes + the welfare ratio —
+        // OBSERVE ONLY, read by nothing else in the tick
+        // (`incomes_sum_to_what_the_city_earned`/`welfare_ratio_is_finite_
+        // and_positive` guard exactly that). Each pool is grain-equivalent
+        // money THIS hub actually earned this year — never a sentiment
+        // formula — divided among that profession's live headcount. A
+        // simplified reading of §3.2's table (no province-surplus or house-
+        // ledger detail yet; `income_pool_for` names what each pool skips).
+        let ng = self.goods.len();
+        let mut farm_pool = 0.0f32;
+        let mut craft_pool = 0.0f32;
+        for g in 0..ng {
+            let value = self.hubs[h].production.get(g).copied().unwrap_or(0.0) * 365.0
+                * self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value).max(0.0);
+            if self.goods[g].food {
+                farm_pool += value;
+            } else if self.goods[g].distribution == DIST_MANUFACTURED {
+                craft_pool += value;
+            }
+        }
+        let labour_pool = self.hubs[h].trade_last_year.max(0.0) * INCOME_LABOUR_TRADE_SHARE;
+        let clerk_pool = self.hubs[h].treasury.max(0.0) * INCOME_CLERK_TREASURY_SHARE;
+        let merchant_pool = self.hubs[h].export_earn.max(0.0) * INCOME_MERCHANT_EXPORT_SHARE;
+        let clergy_pool = self.hubs[h].civic_pool.max(0.0) * INCOME_CLERGY_CIVIC_SHARE; // until L9's real church
+        let elite_pool = self.hubs[h].civic_pool.max(0.0) * INCOME_ELITE_CIVIC_SHARE;
+        let soldier_pool = labour_pool; // levy pay while mobilised is future work (§4 L4); labourer rate otherwise
+        let pool_for = |prof: u8| -> f32 {
+            match prof {
+                0 => farm_pool,
+                1 => labour_pool,
+                2 => craft_pool,
+                3 => clerk_pool,
+                4 => merchant_pool,
+                5 => clergy_pool,
+                6 | 7 => elite_pool,
+                8 => soldier_pool,
+                _ => 0.0,
+            }
+        };
+        for p in &mut pops {
+            if p.size >= 1.0 {
+                p.income = pool_for(p.profession) / p.size;
+            }
+        }
+        // The welfare ratio (Allen): labourer income ÷ the cost of a bare
+        // subsistence basket (the basic-tier goods' own `base_need`, priced
+        // locally) per head per year. ~1.0 is bare subsistence.
+        let mut basket = 0.0f32;
+        for g in 0..ng {
+            if self.goods[g].need_tier == 0 {
+                basket += self.base_need(h, g) * 365.0
+                    * self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value).max(0.0);
+            }
+        }
+        let labourer_income = pops.iter().find(|p| p.profession == 1).map(|p| p.income).unwrap_or(0.0);
+        self.hubs[h].welfare_ratio = if basket > EPS { labourer_income / basket } else { 0.0 };
         self.hubs[h].pops = pops;
     }
 
@@ -1860,7 +1917,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1

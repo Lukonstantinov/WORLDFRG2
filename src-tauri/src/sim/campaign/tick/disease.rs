@@ -461,11 +461,24 @@ impl CampaignSim {
                     }
                 }
             }
-            let bal = if food_need > EPS {
+            let bal_stock = if food_need > EPS {
                 (food_have - food_need) / food_need
             } else {
                 1.0
             };
+            // SETTLEMENT_LIFE_PLAN.md L1 (§3.1) · entitlement failure — grain a
+            // priced-out household could not afford, or that never left a
+            // merchant's warehouse, still counted as `bal_stock` above. Blend
+            // in what the SAME day's eating loop actually delivered
+            // (`food_eaten`/`food_need_today`, written just before this call
+            // in `advance`). A true no-op at `ENTITLEMENT_DOSE = 0.0`.
+            let bal = entitlement_bal_e(
+                bal_stock,
+                self.hubs[h].food_eaten,
+                self.hubs[h].food_need_today,
+                ENTITLEMENT_MARGIN,
+                ENTITLEMENT_DOSE,
+            );
             // Smooth.
             self.hubs[h].food_balance = 0.85 * self.hubs[h].food_balance + 0.15 * bal;
             let fb = self.hubs[h].food_balance;
