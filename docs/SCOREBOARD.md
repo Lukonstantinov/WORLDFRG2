@@ -169,10 +169,39 @@ reaches_a_city_nothing_trades_with` (10-year `dense_world` run) both pass;
 full `cargo test --lib tick::tests` (280/280) and `econ_` (6/6, multi-seed
 inheritance gate included, 538s) both bit-identical.
 
-**What's next**: M7-M11 are each a dosed-from-zero economic change,
+**M7 (affordability fix mechanism, shipped inert), same session — the same
+change `SETTLEMENT_LIFE_PLAN.md` names as its own L1**: `food_afford_
+adjusted_bal` blends `lack_basic` (the day loop's own smoothed basic-tier
+spending-shortfall — already computed, no new signal) into `update_food_
+and_starvation`'s `bal`, so a household priced out of its ration reads as
+genuinely underfed even when raw stock (`food_have = stock + production`)
+shows a surplus. This is the exact prerequisite `HOUSEHOLD_MONETIZATION_
+DOSE`'s own doc comment names after S7's revert (CLAUDE.md's S7 entry): a
+priced-out household's uneaten ration used to read as the CITY being
+better fed, silencing `unrest_topples_councils`.
+
+Shipped at `FOOD_AFFORDABILITY_DOSE = 0.0` — NOT provably risk-free the way
+M6's closure was (`lack_basic` sums all basic-tier goods, `bal` sums food
+goods only, so blending them is a real behavioural change even before S7's
+own dose is ever raised) — exercised through the pure twin `food_afford_
+adjusted_bal(bal, lack_basic, dose)` at nonzero dose in the two new gates
+rather than touching the shipped constant.
+
+Gates: `cargo check --lib --tests` clean; new `food_affordability_is_a_
+noop_at_zero_dose` (bit-for-bit at every sampled `(bal, lack_basic)` pair)
+and `a_household_priced_out_reads_as_underfed` (the blend only ever pulls
+the reading DOWN, never past what `lack_basic` licenses) both pass; full
+`cargo test --lib tick::tests` (282/282, `unrest_topples_councils` and
+`simulate_decades_reports_dynamics` unchanged) and `econ_` (6/6, multi-seed
+inheritance gate included, 539s) both bit-identical.
+
+**What's next**: M8-M11 are each a dosed-from-zero economic change,
 shipped mechanism-first at an inert dose (or live, where provably risk-free
 like M6) and walked up one at a time with its own gate run per step, per
-§5's build rule.
+§5's build rule. M8 (wages + paid consumption) needs M7's dose actually
+walked first, per the plan's own §6 risk R6 ("M7 before M8, no exceptions")
+— so the natural next real dose-walk session is M7/`HOUSEHOLD_
+MONETIZATION_DOSE` together, not M8's mechanism in isolation.
 
 ---
 

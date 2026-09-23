@@ -2973,6 +2973,42 @@ pub(crate) fn household_priced_out(eat: f32, household_wealth: f32, price: f32, 
     (eat - affordable).max(0.0) * dose.clamp(0.0, 1.0)
 }
 
+/// MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
+/// change, named twice) · `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
+/// above names the exact prerequisite this is: `update_food_and_starvation`
+/// (disease.rs) reads `food_have = stock + production` — GRAIN LEFT IN
+/// STOCK, including grain nobody could afford to buy — so a household
+/// priced out of its own ration (whether by S7's dose, still 0.0, or any
+/// other future cause) reads as the city being BETTER fed, not worse. The
+/// SPENDING side already exists: `lack_basic` (mod.rs's day loop, computed
+/// earlier the same tick) is the smoothed fraction of BASIC-tier need that
+/// went unmet — food included, but also every other tier-0 good, so this is
+/// deliberately not a food-only signal; a household that cannot afford its
+/// grain is exactly the case this is meant to catch.
+///
+/// Shipped at `0.0` — a true no-op (`dose == 0.0` returns `bal` bit-for-bit,
+/// no arithmetic performed on it) — for the same reason `HOUSEHOLD_
+/// MONETIZATION_DOSE` sits at 0.0: `lack_basic` and the food-balance `bal`
+/// measure different baskets (all basic goods vs. food goods only), so
+/// blending them is a real behavioural change even before S7's own dose
+/// is ever raised, and it must be walked with the same care — `unrest_
+/// topples_councils` and the famine tests re-run per step, per §5's build
+/// rule — not shipped live the way M6's catalogue-only closure could be.
+pub(crate) const FOOD_AFFORDABILITY_DOSE: f32 = 0.0;
+
+/// The pure twin of the blend `update_food_and_starvation` applies to its
+/// own `bal` (food_have vs. food_need) — split out (the N6/S3 pattern) so a
+/// test can exercise a real dose without touching the shipped constant. At
+/// `dose = 0.0` this returns `bal` UNCHANGED; a household priced out of its
+/// ration (`lack_basic > 0`) only ever PULLS the balance down, never up, so
+/// this cannot manufacture a famine where the physical stock genuinely
+/// covers the need at full price.
+#[inline]
+pub(crate) fn food_afford_adjusted_bal(bal: f32, lack_basic: f32, dose: f32) -> f32 {
+    if dose == 0.0 { return bal; }
+    bal - lack_basic.clamp(0.0, 1.0) * dose.clamp(0.0, 1.0)
+}
+
 /// `price / base_value`, clamped, run through a monotone dampened response and
 /// blended in by `PROD_ELASTICITY` — at 0.0 this returns EXACTLY 1.0 for any
 /// input, which is what makes the dose provably inert rather than merely

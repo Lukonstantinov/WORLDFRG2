@@ -3735,6 +3735,42 @@
     }
 
     #[test]
+    fn food_affordability_is_a_noop_at_zero_dose() {
+        // MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
+        // change) · the shipped `FOOD_AFFORDABILITY_DOSE = 0.0` must leave
+        // `update_food_and_starvation`'s own `bal` untouched, bit-for-bit —
+        // not merely close — exactly like every other zero-dose mechanism.
+        assert_eq!(FOOD_AFFORDABILITY_DOSE, 0.0);
+        for bal in [-1.0f32, -0.3, 0.0, 0.5, 2.0] {
+            for lack in [0.0f32, 0.25, 0.8, 1.0] {
+                assert_eq!(food_afford_adjusted_bal(bal, lack, 0.0), bal,
+                    "bal={bal} lack_basic={lack} must pass through unchanged at dose 0.0");
+            }
+        }
+    }
+
+    #[test]
+    fn a_household_priced_out_reads_as_underfed() {
+        // M7/L1 · a city can hold plenty of grain (bal > 0, a physical
+        // surplus) while its poorest households still can't AFFORD it —
+        // `lack_basic` catches that and the blend must pull the reading
+        // down, never up, and never past what `lack_basic` itself licenses.
+        let bal = 0.5; // 50% more food in stock than the structural need
+        let adjusted = food_afford_adjusted_bal(bal, 0.8, 1.0);
+        assert!(adjusted < bal, "a real affordability shortfall must lower the food reading");
+        assert!((adjusted - (bal - 0.8)).abs() < 1e-6);
+
+        // A city with no affordability problem (lack_basic = 0) is untouched
+        // even at full dose — this can only ever make a reading WORSE.
+        assert_eq!(food_afford_adjusted_bal(bal, 0.0, 1.0), bal);
+
+        // A middling dose only ever moves the balance TOWARD, never past,
+        // what full dose would give.
+        let half = food_afford_adjusted_bal(bal, 0.8, 0.5);
+        assert!(half < bal && half > adjusted);
+    }
+
+    #[test]
     fn a_coin_never_reaches_a_city_nothing_trades_with() {
         // MONEY_AND_COINAGE_PLAN.md M6 (§3.6) · real coin DIFFUSION between
         // cities (a chest riding a real trade leg) is not built yet — M3's

@@ -466,6 +466,10 @@ impl CampaignSim {
             } else {
                 1.0
             };
+            // M7/L1 · a household priced out of its own ration still shows up
+            // here — dosed from zero (see `FOOD_AFFORDABILITY_DOSE`'s own doc
+            // comment), a true no-op at the shipped dose.
+            let bal = food_afford_adjusted_bal(bal, self.hubs[h].lack_basic, FOOD_AFFORDABILITY_DOSE);
             // Smooth.
             self.hubs[h].food_balance = 0.85 * self.hubs[h].food_balance + 0.15 * bal;
             let fb = self.hubs[h].food_balance;
