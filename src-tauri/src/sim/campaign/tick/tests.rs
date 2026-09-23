@@ -144,7 +144,7 @@
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
-            units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![],
+            units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
         };
         s.rebuild_routes();
         s
@@ -3614,6 +3614,85 @@
             assert!(matches!(p.holder_kind, HOLDER_CITY_TREASURY | HOLDER_HOUSEHOLD | HOLDER_LOCAL_MERCHANT),
                 "M3's mint-side transaction only ever pays these three holders");
         }
+    }
+
+    #[test]
+    fn barter_dose_is_a_noop_at_zero() {
+        // MONEY_AND_COINAGE_PLAN.md M5 · the shipped `BARTER_DOSE = 0.0` must
+        // be a true no-op — the mechanism is real code, gated inert, exactly
+        // like `LOCAL_SATIETY`/`CAPACITY_BIND_DOSE` before their own doses
+        // were ever raised.
+        let mut s = dense_world();
+        s.advance(TICKS_PER_YEAR * 2);
+        assert_eq!(s.diag_barter_trades, 0, "no barter settlement fires at dose 0");
+        assert_eq!(s.diag_barter_volume, 0.0);
+    }
+
+    #[test]
+    fn barter_moves_stock_both_ways() {
+        // MONEY_AND_COINAGE_PLAN.md M5 · §3.5's own requirement: a barter
+        // settlement must be visible on BOTH sides — the delivered good
+        // still lands at the buyer (dispatch's own job, untouched here) AND
+        // a payment good leaves the buyer's stock for the seller's. Exercised
+        // through the pure-parameter twin at dose 1.0 (every eligible trade
+        // barters), since the shipped constant stays 0.0.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 20000.0, vec![100.0, 5.0], 0),
+            hub(1, 10.0, 0.0, 20000.0, vec![5.0, 100.0], 0),
+        ];
+        // B (hub 1) holds a large surplus of silk relative to its own need,
+        // so barter has an obvious payment good to reach for.
+        hubs[1].stock[0 * GRADE_BANDS + 1] = 500.0; // good 0 (wheat), common band
+        let mut s = sim(hubs, goods);
+        s.recent_trades.push(RecentTrade {
+            from: 0, to: 1, good: 1, amount: 4.0, owner: -1, sea: false, river: false,
+            price: 20.0, tick: s.tick,
+        });
+        let before_a = stock_of(&s.hubs[0].stock, 0);
+        let before_b = stock_of(&s.hubs[1].stock, 0);
+
+        s.barter_settlement_pass_e(1.0, 0.25);
+
+        assert_eq!(s.diag_barter_trades, 1, "the one eligible trade settled by barter");
+        assert!(s.diag_barter_volume > 0.0);
+        let after_a = stock_of(&s.hubs[0].stock, 0);
+        let after_b = stock_of(&s.hubs[1].stock, 0);
+        assert!(after_a > before_a, "the seller receives a payment good");
+        assert!(after_b < before_b, "the payment good LEAVES the buyer's stock");
+        assert!((after_a - before_a - (before_b - after_b)).abs() < 1e-3,
+            "the same quantity that left B is what arrived at A — no goods are created or destroyed");
+    }
+
+    #[test]
+    fn barter_is_never_refused() {
+        // §3.5 · "nothing forbids barter in a monetised city; it just loses."
+        // At full dose (1.0), the pass has no coin-availability gate at all —
+        // it fires on every eligible trade regardless of how sound the local
+        // coin is. This is the honest reading of what the pass ACTUALLY does
+        // today (M6's real accept/reject-by-coin-reach logic is unbuilt): it
+        // is never itself the reason a barter settlement fails to happen.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 20000.0, vec![100.0, 5.0], 0),
+            hub(1, 10.0, 0.0, 20000.0, vec![5.0, 100.0], 0),
+        ];
+        hubs[1].stock[0 * GRADE_BANDS + 1] = 500.0;
+        hubs[1].coin_trust = 1.0;
+        hubs[1].coin_name = "Strong Ducat".into();
+        let mut s = sim(hubs, goods);
+        s.recent_trades.push(RecentTrade {
+            from: 0, to: 1, good: 1, amount: 4.0, owner: -1, sea: false, river: false,
+            price: 20.0, tick: s.tick,
+        });
+        s.barter_settlement_pass_e(1.0, 0.25);
+        assert_eq!(s.diag_barter_trades, 1, "a sound local coin does not, on its own, block this pass");
     }
 
     #[test]

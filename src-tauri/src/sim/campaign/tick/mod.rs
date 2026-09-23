@@ -7397,6 +7397,11 @@ pub struct CampaignSim {
     /// yet; it is a parallel ledger computed ALONGSIDE the existing wealth/
     /// treasury numbers, not yet reconciled with them (D10, M9's own job).
     #[serde(default)] pub purses: Vec<Purse>,
+    /// M5 · DIAGNOSTIC counters for `barter_settlement_pass` — zero while
+    /// `BARTER_DOSE` stays at 0.0, exactly like `diag_why_no_carrier_bind`
+    /// and friends before their own doses were ever raised.
+    #[serde(default)] pub diag_barter_trades: u32,
+    #[serde(default)] pub diag_barter_volume: f32,
 }
 
 /// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
@@ -9466,6 +9471,11 @@ impl CampaignSim {
             self.fulfill_contracts(&needs);
             // 4) Merchant dispatch (arbitrage → in-transit cargo).
             self.dispatch(&needs);
+            // M5 (MONEY_AND_COINAGE_PLAN.md §3.5) · barter as a real settlement,
+            // read straight off today's `recent_trades` — a wholly separate,
+            // additive pass, never woven into `dispatch` itself. Ships at
+            // `BARTER_DOSE = 0.0`, a true no-op (see `coinage.rs`'s own header).
+            self.barter_settlement_pass();
             t_trade += _s_trade.elapsed().as_secs_f32() * 1000.0;
 
             // 5) Arrivals. Decay each hub's by-sea/by-land supply tally, then add

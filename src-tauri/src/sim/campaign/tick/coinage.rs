@@ -75,6 +75,18 @@ const STRUCK_FRAC_OF_THROUGHPUT: f32 = 0.05;
 /// varies (mirrors `COIN_SEIGNIORAGE`'s own `(1 - fineness)` term).
 const BRASSAGE_FRAC: f32 = 0.03;
 
+/// M5 (§3.5) · the PROBABILITY a given shipment settles by barter instead of
+/// coin, per day. This is a placeholder for the real trigger M6 will add ("a
+/// trade chooses coin when both sides can use it and falls back to barter
+/// otherwise") — until mint reach/coin acceptance is modelled, there is no
+/// live signal to decide it on, so a flat dose is the honest stand-in. Ships
+/// at 0.0 — a true no-op, per this file's own header comment.
+const BARTER_DOSE: f32 = 0.0;
+/// §3.5 · the valuation loss a barter settlement takes vs. coin (goods
+/// carried and resold are worth less to the merchant than cash in hand).
+/// Inert while `BARTER_DOSE` is 0.0; walking it is queued alongside the dose.
+const BARTER_SPREAD: f32 = 0.25;
+
 /// §3.4/D6 · a people's unit of account — resolved once per culture, exactly
 /// like `CultureRule`, and never re-rolled. `ladder` is the ratio to the
 /// smallest coin, LARGEST unit first (e.g. `[240, 20, 1]` is a pound of 20
@@ -379,6 +391,84 @@ impl CampaignSim {
                     self.currencies[ci].last_fineness = fine;
                 }
             }
+        }
+    }
+
+    /// M5 (§3.5) · barter as a real settlement. Ships at `BARTER_DOSE = 0.0` —
+    /// a true no-op (the early return below), following this codebase's own
+    /// established pattern for a behavioural change too risky to dose blind
+    /// (`N1B_OWNERLESS_LOSS_RATE`/`CAPACITY_BIND_DOSE`/`LOCAL_SATIETY`/
+    /// `FOREIGN_PRESTIGE` all shipped the identical way — CLAUDE.md §5).
+    ///
+    /// **Deliberately NOT woven into `dispatch`'s own carrier cascade.** That
+    /// cascade is the single most fragile piece of this codebase — every one
+    /// of N1/N1c/N2/N4's dose walks broke the hard wealth bound or the
+    /// multi-seed inheritance gate on a much smaller change than a coin/
+    /// barter branch inside it would be (CLAUDE.md §8.5/§8.15). This is
+    /// instead a wholly SEPARATE, additive pass over the round's own
+    /// `recent_trades` — at any dose it can only ever ADD a counter-trade
+    /// alongside a shipment `dispatch` already made; it can never resize,
+    /// redirect or undo one.
+    ///
+    /// **Scoped down from §3.5's own design**: the payment good moves as an
+    /// IMMEDIATE stock transfer (both sides settle the same day), not a
+    /// separate `InTransit` return leg with its own travel time — modelling
+    /// a real return voyage, and the commodity-money naming §3.5 also asks
+    /// for, are real, separate work for when this is actually dosed.
+    /// `BARTER_SPREAD` still prices the valuation loss the real mechanism
+    /// will keep.
+    pub(crate) fn barter_settlement_pass(&mut self) {
+        self.barter_settlement_pass_e(BARTER_DOSE, BARTER_SPREAD);
+    }
+
+    /// The pure-parameter twin of `barter_settlement_pass`, in the same shape
+    /// `local_satiety_mult_e`/`transit_need_mult_e` already use — lets a test
+    /// exercise the real mechanism at a NONZERO dose while the shipped
+    /// constant stays 0.0.
+    pub(crate) fn barter_settlement_pass_e(&mut self, dose: f32, spread: f32) {
+        if dose <= 0.0 { return; }
+        let tick = self.tick;
+        let ng = self.goods.len();
+        let n = self.hubs.len();
+        // Only today's trades — `recent_trades` is a rolling 400-entry window
+        // that is never cleared, so an unfiltered walk would re-process the
+        // same historical trade every subsequent day.
+        let todays: Vec<RecentTrade> = self.recent_trades.iter()
+            .filter(|t| t.tick == tick).cloned().collect();
+        for t in todays {
+            let roll = hash01(self.seed, tick as u64 ^ 0xBA47E5,
+                ((t.from as u64) << 16) ^ (t.to as u64) ^ (t.good as u64));
+            if roll >= dose { continue; }
+            let (a, b) = (t.from as usize, t.to as usize);
+            if a >= n || b >= n || a == b { continue; }
+            // The staple B is most willing to pay away: highest stock relative
+            // to its own need, excluding the good just delivered (never pay a
+            // buyer back in the very good it just bought).
+            let mut best: Option<(usize, f32)> = None;
+            for g2 in 0..ng {
+                if g2 == t.good { continue; }
+                let st = stock_of(&self.hubs[b].stock, g2);
+                if st <= EPS { continue; }
+                let need = self.hubs[b].base_per_capita.get(g2).copied().unwrap_or(0.0)
+                    * self.hubs[b].population;
+                let ratio = st / need.max(1.0);
+                let better = match best { Some((_, r)) => ratio > r, None => true };
+                if better { best = Some((g2, ratio)); }
+            }
+            let Some((pg, _)) = best else { continue };
+            let base = self.goods[pg].base_value.max(EPS);
+            let need_pg = self.hubs[b].base_per_capita.get(pg).copied().unwrap_or(0.0)
+                * self.hubs[b].population;
+            let price_b = self.live_price(stock_of(&self.hubs[b].stock, pg), need_pg, base);
+            if price_b <= EPS { continue; }
+            let sale_value = t.amount * t.price * (1.0 - spread);
+            let cap = stock_of(&self.hubs[b].stock, pg) * 0.5;
+            let pay_qty = (sale_value / price_b).min(cap);
+            if pay_qty <= EPS { continue; }
+            stock_take(&mut self.hubs[b].stock, pg, pay_qty);
+            stock_add_ungraded(&mut self.hubs[a].stock, pg, pay_qty);
+            self.diag_barter_trades += 1;
+            self.diag_barter_volume += pay_qty * price_b;
         }
     }
 }

@@ -1,14 +1,15 @@
 # Money and Coinage Plan — real money, mints, banks and barter
 
-> **Status: M0-M4 SHIPPED (M4 partial — see its own row), gated,
+> **Status: M0-M5 SHIPPED (M4/M5 partial — see their own rows), gated,
 > bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. The plan's own "Stop
-> marker" landing is complete. M5-M11 (barter, the monetary stages, paid
-> consumption, the wealth/purse switch-over, banks on real reserves,
-> price-level feedback) are each explicitly dosed-from-zero work per §5's own
-> build rule — rushing a dose walk without its own gate sweep is the exact
-> mistake §8.15 (CLAUDE.md) already recorded this project making five times,
-> so each is shipped MECHANISM-FIRST at an inert dose and walked up with its
-> own gate run, never blind.**
+> marker" landing is complete and M5's mechanism is real code, shipped inert.
+> M6-M11 (the three monetary stages + mint closure, paid consumption, the
+> wealth/purse switch-over, banks on real reserves, price-level feedback) are
+> each explicitly dosed-from-zero work per §5's own build rule — rushing a
+> dose walk without its own gate sweep is the exact mistake §8.15 (CLAUDE.md)
+> already recorded this project making five times, so each is shipped
+> MECHANISM-FIRST at an inert dose and walked up with its own gate run, never
+> blind.**
 > Written from a brainstorm with the maintainer (2026-09-23). Supersedes
 > nothing — it extends `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1
 > relies on) and `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes
@@ -344,7 +345,7 @@ tick::tests` + `econ_`; every frontend slice runs `npx tsc --noEmit`.
 | **M2** | ✅ SHIPPED 2026-09-23. **Catalogue surface**: `campaign_get_coin_catalogue` (a pure read of `currencies`/`issues`/`units_of_account`) + a "📜 Catalogue" tab in `MoneyFinancePanel.tsx` — every currency, its denominations, and each denomination's dated issue timeline. **Scoped down**: a functional data listing, not the full Victorian-engraved obverse/reverse card art (D7) or a standalone floating window (§4.1's own design) — both real, separate, unbuilt illustration/layout work. | UI only | `tsc` clean; `cargo check --lib` clean |
 | **M3** | ✅ SHIPPED 2026-09-23. **Parallel ledger, mint side**: `Purse`s (§3.1) + the mint-striking transaction (§3.2) — every new `Issue` sizes a real STRUCK quantity from the mint's own throughput and splits it into seigniorage (city treasury purse) / brassage (household purse) / circulation (local-merchant purse). Additive — no existing `wealth`/`treasury` `+=` site is touched or mirrored; this is a genuinely separate ledger computed alongside them, per D10. **Scoped down**: real bullion CARGO (mined, shipped, sometimes lost at sea) is not wired — the struck quantity is sized from the mint's existing regional throughput/bullion-ratio proxy, not a real delivery; melting/loss/hoarding/wear (the sinks) are not implemented, so every issue's `circulating` still equals its `struck` exactly. | observe only — bit-identical (purses are read by nothing else) | `sim_fingerprint` unchanged; `the_coin_ledger_conserves_every_struck_coin` (tests.rs) — Σ purses == Σ struck == Σ circulating per issue, to the float ulp |
 | **M4** | ✅ SHIPPED 2026-09-23 (partial). **Money stock ledger** (§4.3's own bullet): `CoinLedgerSummary` — Σ purses by holder class, a snapshot of M3's ledger — served on `CoinCatalogue` and shown as a stat strip atop the Catalogue tab. **Not done**: the market money band in `CityMarketView` (§4.2 — coins-in-use table, prices in local money, the barter/coin split), the exchange-rate matrix and bullion-flow map (§4.3's other bullets), and a TIME SERIES for the ledger (today's snapshot only — no yearly sample is persisted). All real, unbuilt, queued. | UI only | `tsc` clean; `cargo check --lib` clean |
-| **M5** | **Barter as a real settlement** (§3.5): goods-for-goods with the payment goods leaving the seller's stock on a return leg; commodity money; `BARTER_SPREAD`. | dosed from 0 | `econ_` per dose step; multi-seed `econ_inheritance_rules_fragment_differently`; new `barter_moves_stock_both_ways`, `barter_is_never_refused`, `money_beats_barter_when_available` |
+| **M5** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0. **Barter as a real settlement** (§3.5): `barter_settlement_pass` — goods-for-goods, the payment good leaving the buyer's own stock for the seller's, priced by `BARTER_SPREAD`. **Deliberately NOT woven into `dispatch`** (too fragile to touch blind — see the function's own doc comment); a wholly separate additive pass over the day's `recent_trades` instead, gated by `BARTER_DOSE = 0.0`. Commodity money (§3.5's other half) and the real `InTransit` return leg (this cut moves stock same-day, no transit time) are not built — queued. | shipped INERT (dose 0.0 = true no-op); walking the dose is real future work, not attempted | `sim_fingerprint`/`econ_` bit-identical at dose 0; new `barter_dose_is_a_noop_at_zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (all `tick::tests`, exercised via the pure-parameter twin `barter_settlement_pass_e` at dose 1.0) |
 | **M6** | **Three stages**: ledger houses, weighed bullion, the extended mint charter; coin reaches a city only by purse/chest; mint closure on demand (§3.7). | the charter/closure logic live in the parallel ledger only | new `a_coin_never_reaches_a_city_nothing_trades_with`, `an_unused_mint_closes` |
 | **M7** | **Affordability fix**: `update_food_and_starvation` reads the spending shortfall, not raw stock (S7's prerequisite). | dosed from 0 | `unrest_topples_councils` and the famine tests still fire; `econ_expenditure_shares_resemble_a_household` |
 | **M8** | **Wages + paid consumption** (§3.9) in the ledger. | parallel, then dosed | household purses stay non-negative; no city starves with grain it could afford |

@@ -120,7 +120,28 @@ snapshot only (no time series persisted yet). The market money band
 (§4.3's other bullets) are real, unbuilt, queued — the plan's own "Stop
 marker" (M0-M4) is otherwise complete. Gates: `tsc`/`cargo check` clean.
 
-**What's next**: M5-M11 are each a dosed-from-zero economic change,
+**M5 (mechanism shipped, dose left at 0), same session**: `barter_settlement_
+pass` (§3.5) — a real settlement mechanism, not yet dosed. Deliberately NOT
+woven into `dispatch`'s own carrier cascade (CLAUDE.md §8.5/§8.15's own
+record of N1/N1c/N2/N4 each breaking the hard wealth bound on a smaller
+change than a coin/barter branch there would be) — a wholly separate,
+additive pass over the day's `recent_trades` instead: at `BARTER_DOSE > 0`
+it picks the buyer's own best-surplus good (excluding the one just
+delivered), moves a `BARTER_SPREAD`-discounted quantity of it from the
+buyer's stock to the seller's, and records `diag_barter_trades`/`diag_
+barter_volume`. Exercised through a pure-parameter twin
+(`barter_settlement_pass_e`, the same split N6's `elastic_aggregate_mult`/
+`_e` already uses) at dose 1.0 so the real mechanism is tested without
+touching the shipped constant. Scoped down from §3.5's literal design: the
+payment good moves same-day (no `InTransit` return leg with real transit
+time), and commodity-money naming is not built.
+
+Gates: `cargo check --lib --tests` clean; new `barter_dose_is_a_noop_at_
+zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (`tick::
+tests`) all pass; full `cargo test --lib tick::tests` (278/278) and `econ_`
+(6/6, multi-seed inheritance gate included) both bit-identical at dose 0.
+
+**What's next**: M6-M11 are each a dosed-from-zero economic change,
 shipped mechanism-first at an inert dose and walked up one at a time with
 its own gate run per step, per §5's build rule.
 
