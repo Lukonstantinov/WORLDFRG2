@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCampaignStore } from "@state/campaignStore";
 import { useUIStore } from "@state/uiStore";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
@@ -7,8 +7,8 @@ import { HouseDetail, HouseTimeline } from "@ui/campaign/HouseDossier";
 import { HouseCompareWindow } from "@ui/campaign/HouseCompare";
 import { goodIcon, TIER_META, tierOf, dull } from "@ui/campaign/houseShared";
 import { clarifyGemLabel } from "@goods";
-import { campaignGetHouseHistory } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief } from "@types";
+import { campaignGetHouseHistory, campaignHouseBumpChart, campaignGetInequality, campaignGetJournal } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, BumpChart, BumpLine, InequalitySnapshot, JournalEntry } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** ⚜️ Trading Families — HOUSES_GUILDS_AND_MARKET_PLAN.md S10's own BROWSE window:
@@ -36,6 +36,20 @@ export function HousesPanel() {
   const [collapsedTiers, setCollapsedTiers] = useState<Record<number, boolean>>({ 3: true, 4: true });
   const toggleTier = (t: number) => setCollapsedTiers((c) => ({ ...c, [t]: !c[t] }));
   const setSelectedHouse = useCampaignStore((s) => s.setSelectedHouse);
+  // S12a · the top band (bump chart + quiet gauges) and the bottom pulse ticker.
+  // Fetched only while the window is open, and re-fetched as the campaign year
+  // moves so the chart/ticker stay live without polling on every tick.
+  const [bump, setBump] = useState<BumpChart | null>(null);
+  const [ineq, setIneq] = useState<InequalitySnapshot | null>(null);
+  const [pulse, setPulse] = useState<JournalEntry[]>([]);
+  const year = diag?.year;
+  useEffect(() => {
+    if (!open) return;
+    campaignHouseBumpChart().then(setBump).catch(() => setBump(null));
+    campaignGetInequality().then(setIneq).catch(() => setIneq(null));
+    campaignGetJournal(-1, -1).then(setPulse).catch(() => setPulse([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, year]);
   // Focus a house: open its detail AND tell the map to highlight only it.
   const selectHouse = (h: HouseBrief | null) => {
     setSelected(h);
@@ -170,6 +184,12 @@ export function HousesPanel() {
         <span>⚜️ Trading Families</span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
+      {/* S12a · "stop showing state, start showing change" — the world of houses
+          as one picture before the list of individuals. */}
+      <BumpBand bump={bump} ineq={ineq} onSelect={(idx) => {
+        const h = houses.find((x) => x.idx === idx);
+        if (h) selectHouse(h);
+      }} />
       {/* The one remaining filter (private houses vs civic companies), plus quick
           entry points to the two windows this list used to embed as tabs. */}
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid #1e2e42", flexWrap: "wrap" }}>
@@ -254,6 +274,144 @@ export function HousesPanel() {
           </>
         )}
       </div>
+      {/* S12a · "the pulse" — a thin always-on heartbeat, not the chronicle. */}
+      <PulseTicker entries={pulse} />
+    </div>
+  );
+}
+
+/** S12a · the top band: a bump chart of the top houses' wealth RANK over the last
+ *  ~50 years (`campaign_house_bump_chart`), plus quiet gauges beside it. A line
+ *  climbing needs no caption; a line that stops is a house that died.
+ *
+ *  Scoping note (rule 36 discipline, matching this plan's own §9 risk-register
+ *  warning about the chart's own data window): the plan asks for FOUR sparkline
+ *  gauges — standing/founded/died/top-10% share. Only two of those have a real
+ *  YEARLY series behind them (`InequalitySnapshot.series`'s `active` and
+ *  `top10_share`); founded/died totals are cumulative counters with no per-year
+ *  series persisted anywhere. Rather than fabricate a history the data does not
+ *  hold, founded/died ship as plain totals and the two that DO have a series
+ *  ship as real sparklines — never the other way around. */
+function BumpBand({ bump, ineq, onSelect }: { bump: BumpChart | null; ineq: InequalitySnapshot | null; onSelect: (houseIdx: number) => void }) {
+  if (!bump || bump.years.length < 2) return null;
+  const W = 300, H = 92, PAD = 4;
+  const n = bump.years.length;
+  const maxRank = Math.max(1, ...bump.lines.flatMap((l) => l.ranks.filter((r) => r > 0)));
+  const xAt = (i: number) => PAD + (i / (n - 1)) * (W - PAD * 2);
+  const yAt = (r: number) => PAD + ((r - 1) / Math.max(1, maxRank - 1)) * (H - PAD * 2);
+  const pathOf = (ranks: number[]) => {
+    let d = "";
+    let drawing = false;
+    ranks.forEach((r, i) => {
+      if (r <= 0) { drawing = false; return; }
+      d += `${drawing ? "L" : "M"}${xAt(i).toFixed(1)},${yAt(r).toFixed(1)} `;
+      drawing = true;
+    });
+    return d.trim();
+  };
+  const lastRanked = (l: BumpLine) => {
+    for (let i = l.ranks.length - 1; i >= 0; i--) if (l.ranks[i] > 0) return i;
+    return -1;
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 8, padding: "8px 10px", borderBottom: "1px solid #1e2e42", background: "#0a1119" }}>
+      <div style={{ flex: "0 0 auto" }} title="The top houses' wealth rank over the last decades — a line crossing above another is a house overtaking it; a line that stops is a house that died">
+        <svg width={W} height={H} style={{ display: "block" }}>
+          {bump.lines.map((l) => {
+            const end = lastRanked(l);
+            return (
+              <g key={l.house} style={{ cursor: "pointer" }} onClick={() => onSelect(l.house)}>
+                <path d={pathOf(l.ranks)} fill="none" stroke={l.color} strokeWidth={l.tier === 1 ? 2 : 1.2}
+                  opacity={l.defunct ? 0.35 : 0.9} strokeLinecap="round" strokeLinejoin="round" />
+                {end >= 0 && (
+                  <circle cx={xAt(end)} cy={yAt(l.ranks[end])} r={l.defunct ? 2 : 2.6} fill={l.color}
+                    opacity={l.defunct ? 0.5 : 1}>
+                    <title>{`${l.name} — rank ${l.ranks[end]} in ${bump.years[end]}${l.defunct ? " (fallen)" : ""}`}</title>
+                  </circle>
+                )}
+              </g>
+            );
+          })}
+        </svg>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#4a5c72", padding: "0 4px" }}>
+          <span>{bump.years[0]}</span>
+          <span title="Wealth rank, oldest → newest">rank over time</span>
+          <span>{bump.years[n - 1]}</span>
+        </div>
+      </div>
+      {ineq && (
+        <div style={{ flex: 1, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5, minWidth: 0 }}>
+          <Gauge label="families" value={String(ineq.active_houses)} series={ineq.series.map((p) => p.active)} color="#8fc0e8" />
+          <Gauge label="top-10% share" value={`${Math.round(ineq.top10_share_now * 100)}%`} series={ineq.series.map((p) => p.top10_share)} color="#e0c060" />
+          <PlainStat label="founded (all-time)" value={String(ineq.founded_total)} color="#9fe0b8" />
+          <PlainStat label="fallen (all-time)" value={String(ineq.defunct_houses)} color="#e0a09a" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** A quiet stat WITH a history — never a number alone (§6 principle 1). */
+function Gauge({ label, value, series, color }: { label: string; value: string; series: number[]; color: string }) {
+  const w = 76, h = 22;
+  const vals = series.filter((v) => Number.isFinite(v));
+  const lo = Math.min(...vals, 0), hi = Math.max(...vals, 1);
+  const pts = vals.map((v, i) => {
+    const x = vals.length > 1 ? (i / (vals.length - 1)) * w : 0;
+    const y = h - ((v - lo) / Math.max(1e-6, hi - lo)) * h;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  }).join(" ");
+  return (
+    <div style={gaugeCell} title={`${label}, over the campaign so far`}>
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between" }}>
+        <span style={{ color, fontWeight: 700, fontSize: 12 }}>{value}</span>
+      </div>
+      {vals.length > 1 && (
+        <svg width={w} height={h} style={{ display: "block", marginTop: 1 }}>
+          <polyline points={pts} fill="none" stroke={color} strokeWidth={1.3} opacity={0.85} />
+        </svg>
+      )}
+      <div style={{ color: "#5a6a7e", fontSize: 8.5 }}>{label}</div>
+    </div>
+  );
+}
+
+/** A quiet stat with NO history to show (founded/fallen totals — see BumpBand's
+ *  own scoping note above for why these two are plain, not sparklines). */
+function PlainStat({ label, value, color }: { label: string; value: string; color: string }) {
+  return (
+    <div style={gaugeCell}>
+      <span style={{ color, fontWeight: 700, fontSize: 12 }}>{value}</span>
+      <div style={{ color: "#5a6a7e", fontSize: 8.5, marginTop: 1 }}>{label}</div>
+    </div>
+  );
+}
+
+/** S12a · the bottom pulse — a thin scroll of the last handful of house-ish
+ *  world events, colour-coded by kind. Not the chronicle (that is the per-house
+ *  Chronicle tab); a heartbeat so the window feels alive while time advances.
+ *  Reuses the SAME `campaign_get_journal(-1,-1)` world feed `NewsFeedPanel`
+ *  already reads — a sixth caller of an existing mechanism, not a new one. */
+const PULSE_KINDS = new Set(["house", "succession", "monopoly", "office", "feud", "guild_founded", "guild_dissolved"]);
+const PULSE_ICON: Record<string, string> = {
+  house: "🛡", succession: "🛡", monopoly: "👑", office: "🏛", feud: "⚔",
+  guild_founded: "🔨", guild_dissolved: "🔨",
+};
+function PulseTicker({ entries }: { entries: JournalEntry[] }) {
+  const recent = entries.filter((e) => PULSE_KINDS.has(e.kind)).slice(-8).reverse();
+  if (recent.length === 0) return null;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px",
+      borderTop: "1px solid #1a2a3e", background: "#080d13", overflowX: "auto", whiteSpace: "nowrap" }}
+      title="The pulse — recent house events world-wide">
+      <span style={{ color: "#3e4e64", fontSize: 9 }}>♥</span>
+      {recent.map((e, i) => (
+        <span key={i} style={{ fontSize: 9.5, color: "#7a90a8", display: "inline-flex", alignItems: "center", gap: 3 }}>
+          <span>{PULSE_ICON[e.kind] ?? "•"}</span>
+          <span style={{ color: "#9ab0c8" }}>{e.text}</span>
+        </span>
+      ))}
     </div>
   );
 }
@@ -335,4 +493,8 @@ const diagBar: React.CSSProperties = {
 const diagCell: React.CSSProperties = {
   flex: 1, textAlign: "center", padding: "4px 2px", borderRadius: 5,
   background: "#101c28", border: "1px solid #16222e",
+};
+const gaugeCell: React.CSSProperties = {
+  padding: "4px 6px", borderRadius: 5, background: "#101c28", border: "1px solid #16222e",
+  minWidth: 0,
 };

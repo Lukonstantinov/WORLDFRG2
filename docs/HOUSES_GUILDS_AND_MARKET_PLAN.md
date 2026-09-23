@@ -1,8 +1,11 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S2/S3/S4/S5/S7/S8/S9/S10 BUILT AND GATED; S1 BLOCKED (pre-existing
-negative result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real negative
-result, see below); S11/S12 QUEUED.** Written 2026-09-22 from
+**Status: S2/S3/S4/S5/S7/S8/S9/S10/S11(text+map)/S12a/S12b/S12c(3 of 5)
+BUILT AND GATED; S1 BLOCKED (pre-existing negative result); S6
+DOSE-WALKED TO 0.3 AND REVERTED (a real negative result, see below).
+Q19 (S11's on-map lane rendering) also shipped. Remaining: 2 of S12c's
+five graphs (Q21/Q22), full cross-tab year-travel on the timeline plate
+(Q20).** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -44,7 +47,48 @@ wraps the existing `FeudsView` as its own window, and `House.is_guild`
 became a filter chip instead of a tab. Verified by `npx tsc --noEmit` and a
 full `vite build` (both clean) — type-correctness and bundling, never a
 human looking at the running window, which is owed before trusting the
-four windows visually.
+four windows visually. S12a (the Houses bump chart) shipped in a follow-up
+session on the same branch: a new `campaign_house_bump_chart` query
+reconstructs each of the top ~12 houses' wealth RANK per year from its own
+`wealth_history` (checked first — 80 years capped, past the 50-year window
+this needs, per this plan's own §9 risk-register note), rendered as an SVG
+line chart above the house list with four quiet gauges beside it. Of those
+four, only TWO ship as real sparklines (`families`/`top-10% share`, sourced
+from `campaign_get_inequality`'s existing yearly `series`) — `founded`/
+`fallen` ship as plain totals rather than a fabricated history, because no
+per-year series for either exists anywhere in the sim (new queue item Q18).
+A bottom "pulse" ticker reuses the existing world journal query
+(`campaign_get_journal(-1,-1)`, `NewsFeedPanel`'s own data source) filtered
+to house-ish kinds — the plan's own §7 build-order table already named this
+"a sixth caller of an existing mechanism, not a new system" for S11's map
+lanes; the same discipline applies here to an existing query. Pure derived
+read, gated by `cargo check --lib --tests` + `npx tsc --noEmit` + a clean
+`vite build` alone (§4's own note: neither can move a tile/sim gate) — same
+no-display caveat as S10, folded into queue item Q17. S11 shipped in the
+SAME follow-up session, in TEXT/TABLE form only: `HouseDossier` gained a
+"🗺 Atlas" tab (partner cities by volume, the goods portfolio with
+bought-at/sold-at cities, a seasonal lane-ease bar chart) and
+`GuildsPanel` gained a per-row expandable Craft Atlas strip (inputs/
+outputs by city, reach, signature) — both reusing the already-built,
+already-gated S8/S9 queries with zero sim-side change (`GuildBrief`
+gained one new `idx` field so the browse list can key into
+`campaign_guild_atlas`). The plan's own richer on-map lane rendering
+(thickness/colour by volume, direction arrows, a medallion at the
+midpoint, a far-end label, rivals' lanes ghosted) was queue item Q19 at
+first — then shipped in a further follow-up session (the user's explicit
+"do all the steps, ignore risks"): the focused house's existing seat→city
+web now carries real per-lane width (volume) and colour (dominant good),
+stroked one medium at a time via the existing `mediumRuns` split, with a
+`drawGoodIcon` medallion + a `drawLabel` name at each lane's far end (a
+new "tradeLane" `LabelKey`, themed like every other place-name class).
+Direction arrows beyond the web's existing seat→city chevron, a per-good/
+partner toggle UI, and rivals' lanes ghosted remain unbuilt.
+
+S12b (the Dossier timeline plate) and three of S12c's five per-tab graphs
+also shipped in that same follow-up session — see CLAUDE.md §5.6 for the
+full account of what each one draws from and what it deliberately does
+not attempt (S12c's Kin tree and Lineage SVG diagram, queue items Q21/
+Q22; the timeline plate's full cross-tab year-travel, Q20).
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -440,9 +484,10 @@ S5  transit demand, at zero         (no-op; the walk is Q2, not today)
 S8  house atlas query
 S9  guild atlas query
 S10 window split                    ── ■ STOP HERE IF SHORT ──
-S11 the two atlases + map labelling
-S12a Houses three bands
-S12b Dossier plate
+S12a Houses three bands             ✓ shipped (bump chart + gauges + pulse)
+S11 the two atlases + map labelling ✓ shipped — text form, then Q19 (map lanes) too
+S12b Dossier plate                  ✓ shipped (timeline: heads/milestones/feuds/wealth)
+S12c one graph per tab              ✓ 3 of 5 shipped (waterfall/radar/feud line) — Q21/Q22
 ```
 
 Everything above the marker is coherent on its own: the economy is fairer,
@@ -549,18 +594,95 @@ Each item names what it waits for and the gate it will need.
     fixture to either disable war or accept a nonzero staged count when one
     is live, so the wealth-bound failure can be isolated and re-measured on
     its own. Gate: both tests, re-dosed at 0.3, one change at a time.
-17. **Q17 · Visually verify S10 in a real browser.** The four-window split
-    (`HousesPanel.tsx`/`HouseDossier.tsx`/`FeudsAlliancesPanel.tsx`/
-    `GuildsPanel.tsx`) was built and verified by `tsc`/`vite build` alone —
-    this session's environment has no display to launch the Tauri app in.
-    Type-correctness and a clean bundle are not the same claim as "the four
-    windows open, position, and read correctly together" (§8.11-adjacent —
-    layout, z-index stacking against the other ~30 windows, the new filter
-    chip's interaction, the Feuds button). Waits on: a session with a
+17. **Q17 · Visually verify S10 (and now S12a) in a real browser.** The
+    four-window split (`HousesPanel.tsx`/`HouseDossier.tsx`/
+    `FeudsAlliancesPanel.tsx`/`GuildsPanel.tsx`) and the bump-chart top band
+    + pulse ticker added on top of it were both built and verified by
+    `tsc`/`vite build` alone — this session's environment has no display to
+    launch the Tauri app in. Type-correctness and a clean bundle are not the
+    same claim as "the four windows open, position, and read correctly
+    together" (§8.11-adjacent — layout, z-index stacking against the other
+    ~30 windows, the new filter chip's interaction, the Feuds button) OR "the
+    bump chart's SVG scales sensibly at 300px wide with 1 house vs. 12, the
+    gauges don't overflow their cells, the pulse ticker's horizontal scroll
+    doesn't fight the panel's own drag handle". Waits on: a session with a
     browser/dev server. Gate: `npm run tauri dev`, open Houses, toggle the
     Companies chip, open a house dossier from a card, open Feuds from both
-    the new button and the Society menu, confirm nothing regressed for an
-    existing player save.
+    the new button and the Society menu, click a bump-chart line and confirm
+    it opens that house, confirm nothing regressed for an existing player
+    save. **Widened again** to cover every later UI slice built the same
+    blind way: S11's text atlas tabs, S12b's timeline plate (drag-to-scrub
+    interaction, whether the SVG scales sensibly with 1 head vs. 8), S12c's
+    three graphs (the waterfall's bar spacing at a wide portfolio, the
+    radar's pentagon at n=0/1/many tier-1 houses, the feud temperature
+    line's step rendering), and Q19's on-map lane rendering — the last of
+    these is the highest-risk single piece (real new canvas code, not a
+    text tab), so check it first.
+18. **Q18 · Give `founded`/`fallen` a real per-year series.** S12a's two
+    "plain total" gauges (`campaign_get_inequality`'s `founded_total`/
+    `defunct_houses`) have no yearly series to sparkline because neither is
+    sampled per year anywhere in the sim — only a running cumulative count.
+    A `founded_by_year`/`died_by_year` pair (derivable from each house's own
+    founding tick and, for a dead house, the tick it was marked `defunct` —
+    neither currently retained once a house's `wealth_history` stops being
+    sampled) would let both gauges become real sparklines like their two
+    siblings. Waits on: nothing technical, just deciding where that small
+    piece of state belongs (`InequalitySnapshot.series` is the natural home,
+    since `InequalityPoint` already carries `active`/`defunct` counts per
+    year — it would need `founded_this_year`/`died_this_year` fields added
+    there instead of only cumulative `active`). Gate: `cargo check` alone —
+    it is a pure read/derivation, not a dose.
+19. **Q19 · The on-map lane half of S11 — SHIPPED.** The focused house's
+    existing seat→city web (`OverlayManager.renderHouseControlLayer`) now
+    carries lane thickness ∝ volume, colour = the dominant good's
+    `GOOD_DEFS` hue, dashed-vs-solid via the existing `mediumRuns` split, a
+    `drawGoodIcon` medallion + a `drawLabel` name at the lane's far end (a
+    new "tradeLane" `LabelKey`, per §8.11). `MapCanvas` fetches
+    `campaign_house_atlas` for the focused house and pushes it into a new
+    `OverlayManager.setHouseAtlas`. **Not shipped, still queued** — distinct
+    outbound/inbound arrow styling (today's single chevron+arrowhead is
+    unchanged), a per-good/per-partner toggle UI, and rivals' lanes ghosted
+    behind the focused house's own; the Craft Atlas has no map presence at
+    all yet. Gate run: backend untouched (`cargo check --lib --tests`
+    clean, confirming no regression since this is a pure frontend change),
+    `npx tsc --noEmit` clean, `npx vite build` clean. Still owed:
+    `npm run tauri dev` to actually look at the drawn lanes — this is the
+    highest-risk piece of new canvas code this plan has shipped blind, so
+    it should be the FIRST thing checked in queue item Q17's session.
+20. **Q20 · Full cross-tab year-travel on the Dossier timeline plate.**
+    S12b's scrub cursor honestly answers what the data it was built from
+    can support (which head ruled at a scrubbed year, their interpolated
+    wealth) but does NOT rewrite Kin/Goals/Crisis/Ambitions/etc. to that
+    year — no per-tab historical state exists anywhere in the sim for any
+    of them to read from; they are all LIVE reads. Waits on: deciding
+    which tabs are worth a real historical snapshot (Kin roster history in
+    particular would need the sim to persist past rosters, a real state
+    addition, not a query) and building that state, one tab at a time.
+    Gate: whichever tab is tackled first needs its own `econ_`/
+    `tick::tests` re-run if it touches sim state at all.
+21. **Q21 · Kin as a real tree.** `KinBrief` carries a flat `role` (head/
+    heir/factor/idle/married out/dead) and no parent/child field anywhere.
+    A genuine family tree needs real generational edges the sim does not
+    persist; drawing a plausible-looking hierarchy from role alone would
+    be fabricating data this project's own rules forbid (§2.4 — never
+    invent what isn't measured). Waits on: the sim actually tracking
+    kinship edges (who is whose child), which is new persisted state, not
+    a query — likely alongside whatever `Kin` roster work a future
+    dynasty-focused session takes on. Gate: `cargo test --lib tick::tests`
+    + `econ_` once real state is added (a persisted field is a sim
+    change, unlike everything else this plan's S12c shipped).
+22. **Q22 · Lineage as a drawn SVG branching diagram.** The Lineage tab
+    already renders as an indented list with dashed connector lines
+    (ancestors → this house → offshoots) — a real branching STRUCTURE,
+    just not a node-link SVG picture. Judged not worth the layout/
+    collision risk of a from-scratch SVG tree (unverifiable blind, and
+    the existing view already conveys the same relationships) this
+    session. Waits on: nothing technical — a session that can actually
+    look at the result should judge whether the indented-list form reads
+    well enough to leave alone, or whether a drawn diagram earns its
+    complexity. Gate: `npx tsc --noEmit` + `npm run tauri dev` alone
+    (pure frontend, no new query needed — `HouseLineage` already carries
+    everything a diagram would need).
 
 ---
 

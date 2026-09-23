@@ -2174,6 +2174,8 @@ export interface EpidemicBrief {
 
 /** Phase 6 · one craft guild (Guilds & Crafts panel + map). */
 export interface GuildBrief {
+  /** Index into sim.guilds — the key for campaignGuildAtlas (S9). */
+  idx?: number;
   hub: number;
   x: number;
   y: number;
@@ -2249,6 +2251,26 @@ export interface GuildAtlas {
   /** Length 0 or 1 — only the CURRENT tradition-years sample; no history is
    *  persisted per good/hub, so this is never a real time series yet. */
   tradition_by_year: number[];
+}
+
+/** S12a · one house's thread through the Houses bump chart
+ *  (`campaign_house_bump_chart`). `ranks`/`wealth` are aligned 1:1 with
+ *  `BumpChart.years`; a rank of -1 means not ranked that year (not yet
+ *  founded, already dead, or outside the top field). */
+export interface BumpLine {
+  house: number;
+  name: string;
+  color: string;
+  tier: number;
+  defunct: boolean;
+  ranks: number[];
+  wealth: number[];
+}
+
+/** S12a · the top houses' wealth rank over the last N years. */
+export interface BumpChart {
+  years: number[];
+  lines: BumpLine[];
 }
 
 /** Phase 6 · a notable figure (Great Lives roster). */
@@ -2820,6 +2842,14 @@ export interface HouseStability {
   head_span_years: number;
   feuds_live: number;
   feuds_hot: number;
+}
+
+/** S12c · the world's tier-1 median for each stability gauge, for the
+ *  Standing tab's radar chart. `n` houses contributed; 0 means no tier-1
+ *  house exists yet, not an error. */
+export interface GaugeMedians {
+  medians: [string, number][];
+  n: number;
 }
 
 /** One flare in a feud's history. */
