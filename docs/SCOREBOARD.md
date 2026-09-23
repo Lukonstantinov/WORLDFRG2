@@ -9,6 +9,62 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23c — Campaign tick performance: measured, not touched (a diagnosis, per §2.4)
+
+User asked to check campaign performance and improve it if possible. Ran the
+existing production-scale instrument (`bench_campaign_tick_large`, 1200 hubs
+/ 30 goods, `WF2_PROFILE=1`, release) rather than guess:
+
+```
+[large-bench hubs=1200 goods=30] 1095 ticks: 101504.8ms total, 92.698ms/tick
+trade=22624-31942 ms/yr · houses=116-151 ms/yr · events=1-7 ms/yr · rebuild=0-248 ms/yr
+```
+
+Against CLAUDE.md §5.5's own recorded post-optimisation figures on the SAME
+fixture — trade 8,300-10,200 ms/yr, whole tick 37.5 ms/tick — this is a real
+**~2.5× regression on the trade (`dispatch`) phase and the whole tick**,
+`houses`/`events`/`rebuild` unchanged and negligible either way.
+
+**Checked whether the §5.5 fix itself regressed — it did not.** The
+`house_for_indexed`/`house_for_memo` memoisation (§5.5's own headline win) is
+still exactly in place and still the only path `dispatch` uses to resolve a
+carrier; no code was found calling the unmemoised `house_for` from inside the
+hot loop. Also checked every precompute array added to `dispatch` since
+§5.5 (`hub_boycotts`, `coin_disc`, `hub_kontor_league`, `contraband_good`,
+charter-exclusivity, `cert_guild_memo`) — each is built ONCE per dispatch
+round at O(n) or O(houses), exactly the discipline §5.5 itself established,
+not a re-introduced per-shipment scan. `staging_hop` (N1c relay) is bounded
+by `NEIGHBOR_K`, not `n`. No O(n²) scan was found by reading the code.
+
+**Reading, not measured with a profiler this session**: the more likely
+explanation is genuine accumulated cost, not a bug. Since §5.5 was written,
+a long list of real mechanisms were added directly to `dispatch`'s per-
+shipment path — war contraband (`INSTITUTIONS_BUILD_ORDER.md` Phase 4.1),
+the routed blockade (Phase 4.2), League freight/tariff privilege at up to
+three call sites (Phase 4.3), the Kontor (Phase 4.4), N1c range-based
+staging (`TRADE_STAGING_AND_POSTS_PLAN.md` slices 3-4), N1/N1b the local-
+haul bind, N5 season multipliers, N6 elasticity, `LOCAL_SATIETY`/
+`FOREIGN_PRESTIGE`, transit demand, the annona exemption, S2's carriage
+class — each individually O(1) per shipment, but a dozen-plus real checks
+now run per candidate where §5.5 profiled far fewer. A per-shipment cost
+that grew 2.5× over roughly that many real additions is not implausible on
+its face.
+
+**This is a diagnosis, not a fix, and deliberately so.** `dispatch` is
+named repeatedly through this file (§8.5, §8.15) as the single most
+fragile function in the codebase — every one of N1/N1c/N2/N4's dose walks
+broke a hard gate on a smaller change than blind surgery on a 1000-line hot
+loop would be. §5.5's own instrument (temporary `AtomicU64` counters around
+candidate phases, `WF2_PROFILE`-gated, stripped before shipping) is the
+right tool to actually LOCATE which of the dozen additions dominates before
+touching anything — that was not built this session (time budget), so no
+code changed. Queued: re-run §5.5's timer technique on `bench_campaign_
+tick_large` to name the actual largest phase, THEN decide whether it is a
+genuine algorithmic win (memoise/hoist) or the honest cost of real,
+already-shipped mechanism — per rule 36, this is owed, not waived.
+
+---
+
 ## 2026-09-23 — `MONEY_AND_COINAGE_PLAN.md`: M0 (instrument) + M1 (coin catalogue data model) shipped
 
 New plan, agreed in scope the same day. Built the two slices the plan's own
