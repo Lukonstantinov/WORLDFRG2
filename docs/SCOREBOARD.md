@@ -9,6 +9,48 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23 — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S12a (the Houses bump chart) shipped
+
+Follow-up session on the same branch, picked up after 2026-09-22g (S10) below.
+User asked to continue into the plan's own elastic tail; per §7's build order
+this is S12a, taken next since it was smaller and lower-risk than S11's map
+rendering work.
+
+`campaign_house_bump_chart` (new `#[tauri::command]`, `read_houses.rs`)
+reconstructs each of the top ~12 houses' wealth RANK per year from its own
+`wealth_history` — checked FIRST, per the plan's own §9 risk-register warning
+that a chart's window is bounded by data that may not exist at the right
+granularity: `WEALTH_HISTORY_CAP` = 80 years, comfortably past the plan's
+50-year window. A house stops being sampled the year it goes `defunct`, so
+its line in the chart simply STOPS rather than crawling to zero — the
+"a line that stops is a house that died" narrative the plan asked for falls
+out of existing data, no new field needed.
+
+`HousesPanel.tsx` gained a top band: an SVG bump chart (click a line to open
+that house's dossier), each house's existing `distinct_color` identity
+colour, a thicker stroke for Tier 1. Beside it, four "quiet gauge" cells —
+but only TWO are real sparklines. `families` and `top-10% share` reuse the
+EXISTING `campaign_get_inequality` query's per-year `series` (#29's own
+reads — a new caller, not new state). `founded`/`fallen` have no per-year
+series anywhere in the sim (only running cumulative totals), so they ship as
+plain numbers rather than a fabricated history — the exact discipline this
+plan's own §9 note was written to enforce, applied to a case the note didn't
+originally anticipate. New queue item Q18 names the small state addition
+(`InequalityPoint.founded_this_year`/`died_this_year`) that would close this
+gap. A bottom "pulse" ticker reuses the existing world journal query
+(`campaign_get_journal(-1,-1)`, the same one `NewsFeedPanel` already reads)
+filtered to house-ish event kinds — a sixth caller of an existing mechanism,
+matching the discipline the plan's own S11 section names for map lanes.
+
+**Verification, stated exactly as it was done**: pure derived read touching
+no tile/sim state, so per the plan's own §4 note this needed no `econ_`/
+`tick::tests` run. `cargo check --lib --tests` clean, `npx tsc --noEmit`
+clean, `npx vite build` clean (181 modules, unchanged from S10's count).
+Same caveat as S10 — not opened in a real browser this session; folded into
+the widened queue item Q17.
+
+---
+
 ## 2026-09-22g — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S10 (the four-window split) shipped
 
 Continuation of the same day's session (see 2026-09-22f below). User explicitly

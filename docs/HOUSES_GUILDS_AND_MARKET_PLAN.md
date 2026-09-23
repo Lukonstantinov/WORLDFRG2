@@ -1,8 +1,8 @@
 # Houses, Guilds & the Settlement Market — one-session build plan
 
-**Status: S2/S3/S4/S5/S7/S8/S9/S10 BUILT AND GATED; S1 BLOCKED (pre-existing
-negative result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real negative
-result, see below); S11/S12 QUEUED.** Written 2026-09-22 from
+**Status: S2/S3/S4/S5/S7/S8/S9/S10/S12a BUILT AND GATED; S1 BLOCKED
+(pre-existing negative result); S6 DOSE-WALKED TO 0.3 AND REVERTED (a real
+negative result, see below); S11/S12b/S12c QUEUED.** Written 2026-09-22 from
 a measured brainstorm over `sim/campaign/tick/`, `render/`, `src/ui/campaign/`.
 See `CLAUDE.md` §5.6 for what shipped, and for the discovery that
 `N1B_OWNERLESS_LOSS_RATE`'s own doc comment already records a dose walk
@@ -44,7 +44,24 @@ wraps the existing `FeudsView` as its own window, and `House.is_guild`
 became a filter chip instead of a tab. Verified by `npx tsc --noEmit` and a
 full `vite build` (both clean) — type-correctness and bundling, never a
 human looking at the running window, which is owed before trusting the
-four windows visually.
+four windows visually. S12a (the Houses bump chart) shipped in a follow-up
+session on the same branch: a new `campaign_house_bump_chart` query
+reconstructs each of the top ~12 houses' wealth RANK per year from its own
+`wealth_history` (checked first — 80 years capped, past the 50-year window
+this needs, per this plan's own §9 risk-register note), rendered as an SVG
+line chart above the house list with four quiet gauges beside it. Of those
+four, only TWO ship as real sparklines (`families`/`top-10% share`, sourced
+from `campaign_get_inequality`'s existing yearly `series`) — `founded`/
+`fallen` ship as plain totals rather than a fabricated history, because no
+per-year series for either exists anywhere in the sim (new queue item Q18).
+A bottom "pulse" ticker reuses the existing world journal query
+(`campaign_get_journal(-1,-1)`, `NewsFeedPanel`'s own data source) filtered
+to house-ish kinds — the plan's own §7 build-order table already named this
+"a sixth caller of an existing mechanism, not a new system" for S11's map
+lanes; the same discipline applies here to an existing query. Pure derived
+read, gated by `cargo check --lib --tests` + `npx tsc --noEmit` + a clean
+`vite build` alone (§4's own note: neither can move a tile/sim gate) — same
+no-display caveat as S10, folded into queue item Q17.
 
 This plan is scoped to **one working session**. It is ordered so that value
 lands early and the elastic work is at the end: if the session runs short,
@@ -440,8 +457,8 @@ S5  transit demand, at zero         (no-op; the walk is Q2, not today)
 S8  house atlas query
 S9  guild atlas query
 S10 window split                    ── ■ STOP HERE IF SHORT ──
+S12a Houses three bands             ✓ shipped (bump chart + gauges + pulse)
 S11 the two atlases + map labelling
-S12a Houses three bands
 S12b Dossier plate
 ```
 
@@ -549,18 +566,37 @@ Each item names what it waits for and the gate it will need.
     fixture to either disable war or accept a nonzero staged count when one
     is live, so the wealth-bound failure can be isolated and re-measured on
     its own. Gate: both tests, re-dosed at 0.3, one change at a time.
-17. **Q17 · Visually verify S10 in a real browser.** The four-window split
-    (`HousesPanel.tsx`/`HouseDossier.tsx`/`FeudsAlliancesPanel.tsx`/
-    `GuildsPanel.tsx`) was built and verified by `tsc`/`vite build` alone —
-    this session's environment has no display to launch the Tauri app in.
-    Type-correctness and a clean bundle are not the same claim as "the four
-    windows open, position, and read correctly together" (§8.11-adjacent —
-    layout, z-index stacking against the other ~30 windows, the new filter
-    chip's interaction, the Feuds button). Waits on: a session with a
+17. **Q17 · Visually verify S10 (and now S12a) in a real browser.** The
+    four-window split (`HousesPanel.tsx`/`HouseDossier.tsx`/
+    `FeudsAlliancesPanel.tsx`/`GuildsPanel.tsx`) and the bump-chart top band
+    + pulse ticker added on top of it were both built and verified by
+    `tsc`/`vite build` alone — this session's environment has no display to
+    launch the Tauri app in. Type-correctness and a clean bundle are not the
+    same claim as "the four windows open, position, and read correctly
+    together" (§8.11-adjacent — layout, z-index stacking against the other
+    ~30 windows, the new filter chip's interaction, the Feuds button) OR "the
+    bump chart's SVG scales sensibly at 300px wide with 1 house vs. 12, the
+    gauges don't overflow their cells, the pulse ticker's horizontal scroll
+    doesn't fight the panel's own drag handle". Waits on: a session with a
     browser/dev server. Gate: `npm run tauri dev`, open Houses, toggle the
     Companies chip, open a house dossier from a card, open Feuds from both
-    the new button and the Society menu, confirm nothing regressed for an
-    existing player save.
+    the new button and the Society menu, click a bump-chart line and confirm
+    it opens that house, confirm nothing regressed for an existing player
+    save.
+18. **Q18 · Give `founded`/`fallen` a real per-year series.** S12a's two
+    "plain total" gauges (`campaign_get_inequality`'s `founded_total`/
+    `defunct_houses`) have no yearly series to sparkline because neither is
+    sampled per year anywhere in the sim — only a running cumulative count.
+    A `founded_by_year`/`died_by_year` pair (derivable from each house's own
+    founding tick and, for a dead house, the tick it was marked `defunct` —
+    neither currently retained once a house's `wealth_history` stops being
+    sampled) would let both gauges become real sparklines like their two
+    siblings. Waits on: nothing technical, just deciding where that small
+    piece of state belongs (`InequalitySnapshot.series` is the natural home,
+    since `InequalityPoint` already carries `active`/`defunct` counts per
+    year — it would need `founded_this_year`/`died_this_year` fields added
+    there instead of only cumulative `active`). Gate: `cargo check` alone —
+    it is a pure read/derivation, not a dose.
 
 ---
 

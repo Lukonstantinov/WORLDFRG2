@@ -1634,15 +1634,46 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   to accept this risk explicitly rather than defer S10 to a session that
   can open a browser; visually exercising the four windows before trusting
   them is still owed.
+- **S12a — the Houses bump chart (shipped in a follow-up session, same
+  branch).** "Stop showing state, start showing change." A new
+  `campaign_house_bump_chart` query (`read_houses.rs`) reconstructs each of
+  the top ~12 houses' wealth RANK per year from its own `wealth_history`
+  (`WEALTH_HISTORY_CAP` = 80 years — checked first, per the plan's own §9
+  risk-register note, before building a 50-year-wide chart the data might
+  not have supported) and returns only the houses that were EVER in the top
+  field, never the whole roster. `HousesPanel` renders it as an SVG line
+  chart above the list — a house's own `distinct_color` (the one stable
+  app-wide identity colour), a thicker line for Tier 1, a dot at the last
+  ranked year, a line that simply STOPS the year a house dies rather than
+  crawling to zero (falls out of `wealth_history` no longer being sampled
+  once `defunct` — no special-casing needed) — with four quiet gauges beside
+  it. Only TWO of those four ship as real sparklines: `families`
+  (`InequalitySnapshot.series[].active`) and `top-10% share`
+  (`...top10_share`), both already-existing per-year series from
+  `campaign_get_inequality` (#29's own reads, reused rather than
+  duplicated). `founded`/`fallen` ship as plain totals — no per-year series
+  for either exists anywhere in the sim, and rather than fabricate a history
+  the data cannot support (the exact failure mode this plan's own §9 warns
+  against), they are shown honestly as cumulative counts; giving them a
+  real series is queue item Q18. A bottom "pulse" ticker reuses the
+  existing world journal query (`campaign_get_journal(-1,-1)`,
+  `NewsFeedPanel`'s own data source) filtered to house-ish event kinds — a
+  new CALLER of an existing mechanism, not new state. Pure derived read
+  (touches no tile/sim state), gated by `cargo check --lib --tests` +
+  `npx tsc --noEmit` + a clean `vite build` (181 modules, unchanged) alone,
+  per the plan's own §4 note that neither atlas query nor this chart can
+  move a tile/sim gate. Same no-display verification caveat as S10 — not
+  opened in a real browser this session (queue item Q17, widened to cover
+  this).
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
   S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
   see above, waits on the relay-fixture fix before its own dose walk can be
-  re-attempted), S11/S12 (the two atlases with real on-map lane labelling
-  using S8/S9's queries, and the Houses three-band redesign — bump chart,
-  sparkline strips, event ticker). Each waits on exactly what the plan's
-  own §7/§8 already say it waits on (S1/S6 additionally wait on their own
-  newly-found fixture/mechanism fixes) — nothing here changes that
-  sequencing, this entry only records which end of it landed.
+  re-attempted), S11 (the two atlases with real on-map lane labelling using
+  S8/S9's queries), S12b/S12c (the Dossier plate and the per-tab graphs).
+  Each waits on exactly what the plan's own §7/§8 already say it waits on
+  (S1/S6 additionally wait on their own newly-found fixture/mechanism
+  fixes) — nothing here changes that sequencing, this entry only records
+  which end of it landed.
 
 ---
 
@@ -1698,7 +1729,11 @@ commands/
                                   ATLAS (`campaign_house_atlas`, HOUSES_GUILDS_
                                   AND_MARKET_PLAN.md S8 — partner cities, goods
                                   portfolio, holdings, seasonal lane ease; pure
-                                  derived read, §5.6). Four
+                                  derived read, §5.6) + the BUMP CHART
+                                  (`campaign_house_bump_chart`, S12a — the top
+                                  houses' wealth rank per year, from each
+                                  house's own `wealth_history`; pure derived
+                                  read, §5.6). Four
                                   of five gauges are pure derivations of state the sim
                                   already held; kin_power_shares/character_phrase
                                   (Phase 2.6/2.3) and the whole crisis engine live in
@@ -2251,7 +2286,19 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   used by both the browser and the dossier) live in
                                   `houseShared.ts` rather than being duplicated or
                                   cross-imported, which would make a HousesPanel ↔
-                                  HouseDossier import cycle.
+                                  HouseDossier import cycle. S12a added a TOP BAND
+                                  above the list — an SVG bump chart of the top
+                                  ~12 houses' wealth rank over ~50 years
+                                  (`campaign_house_bump_chart`, click a line to
+                                  open that house), two real sparkline gauges
+                                  (families/top-10% share, from the existing
+                                  `campaign_get_inequality`) and two plain-total
+                                  gauges (founded/fallen — no per-year series
+                                  exists for either, so shown honestly rather
+                                  than invented, Q18) — and a bottom PULSE
+                                  ticker reusing `campaign_get_journal(-1,-1)`
+                                  (`NewsFeedPanel`'s own world feed) filtered to
+                                  house-ish kinds.
   HouseDossier.tsx              ← The big per-house window — `HouseDetail` (moved here
                                   verbatim from HousesPanel.tsx in the S10 split) plus its
                                   ten subtabs, alongside this file's original two views
@@ -5540,19 +5587,21 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     breach and a relay-fixture assumption the
                                     dose invalidates), recorded at
                                     `BLOCKADE_STAGING_DOSE`'s own doc comment.
-                                    S10 could only be verified by `tsc`/
-                                    `vite build` in this session — no display
-                                    to actually open the four windows in, said
-                                    plainly rather than claimed as tested.
-                                    S11/S12 (the map labelling for S8/S9's
-                                    atlases, the Houses three-band redesign)
-                                    QUEUED, per the plan's own §9 risk
-                                    register — THREE doses attempted this
-                                    session (S1 investigated/blocked, S3
-                                    walked/untestable, S6 walked/reverted), at
-                                    the plan's own stated ceiling; S8/S9/S10
-                                    shipped after since none is a dose. The
-                                    one-session build
+                                    S10 (and, in a follow-up session, S12a —
+                                    the bump chart + quiet gauges + pulse
+                                    ticker) could only be verified by `tsc`/
+                                    `vite build` — no display to actually open
+                                    the windows in, said plainly rather than
+                                    claimed as tested (queue item Q17).
+                                    S11/S12b/S12c (the map labelling for
+                                    S8/S9's atlases, the Dossier plate, one
+                                    graph per tab) QUEUED, per the plan's own
+                                    §9 risk register — THREE doses attempted
+                                    in the first session (S1
+                                    investigated/blocked, S3 walked/untestable,
+                                    S6 walked/reverted), at the plan's own
+                                    stated ceiling; S8/S9/S10/S12a shipped
+                                    since none is a dose. The one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built
