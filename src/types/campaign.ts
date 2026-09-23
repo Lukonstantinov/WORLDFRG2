@@ -1904,8 +1904,17 @@ export interface CatalogueCurrency {
   strength: number;          // headline 0..100, same scale as MintBrief.strength
 }
 
+/** M4 · Σ purses by holder class, today's snapshot (no time series yet). */
+export interface CoinLedgerSummary {
+  total_struck: number;
+  in_city_treasuries: number;
+  in_households: number;
+  in_local_merchants: number;
+}
+
 export interface CoinCatalogue {
   currencies: CatalogueCurrency[];
+  ledger: CoinLedgerSummary;
 }
 
 /** A3 · one yearly point in a coin's biography (Money panel sparklines). */

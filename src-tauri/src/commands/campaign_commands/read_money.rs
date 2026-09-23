@@ -288,7 +288,24 @@ pub fn campaign_get_coin_catalogue(db: State<'_, WorldDb>) -> Result<CoinCatalog
         }
     }).collect();
     currencies.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(CoinCatalogue { currencies })
+
+    // M4 · the ledger summary — Σ purses by holder class, read straight off
+    // M3's `sim.purses`. `HOLDER_BANK`/`HOLDER_HOUSE` never appear yet (M3's
+    // mint-striking transaction only ever pays the three classes below), so
+    // this is the whole of what the parallel ledger holds today.
+    let mut ledger = CoinLedgerSummary::default();
+    for p in &sim.purses {
+        let sum: f32 = p.coins.iter().map(|(_, amt)| *amt).sum();
+        match p.holder_kind {
+            crate::sim::tick::HOLDER_CITY_TREASURY => ledger.in_city_treasuries += sum,
+            crate::sim::tick::HOLDER_HOUSEHOLD => ledger.in_households += sum,
+            crate::sim::tick::HOLDER_LOCAL_MERCHANT => ledger.in_local_merchants += sum,
+            _ => {}
+        }
+    }
+    ledger.total_struck = sim.issues.iter().map(|i| i.struck).sum();
+
+    Ok(CoinCatalogue { currencies, ledger })
 }
 
 

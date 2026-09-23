@@ -112,10 +112,17 @@ Gates run: `cargo check --lib` clean; `npx tsc --noEmit` clean; `cargo test
 unchanged); `cargo test --lib econ_` — 6/6 including the multi-seed
 inheritance gate (518s), bit-identical.
 
-**What's next**: M4 (the market money band + dashboard reading this ledger)
-is the last item of the plan's own "Stop marker" — real, still-safe,
-unbuilt. M5-M11 are each a dosed-from-zero economic change and are being
-walked one at a time with their own gate run per step, per §5's build rule.
+**M4 (partial), same session**: `CoinLedgerSummary` (Σ purses by holder
+class, read off M3's ledger) served on `CoinCatalogue` and shown as a stat
+strip atop the Catalogue tab — §4.3's "money stock ledger" bullet, today's
+snapshot only (no time series persisted yet). The market money band
+(§4.2, `CityMarketView`), the exchange-rate matrix and bullion-flow map
+(§4.3's other bullets) are real, unbuilt, queued — the plan's own "Stop
+marker" (M0-M4) is otherwise complete. Gates: `tsc`/`cargo check` clean.
+
+**What's next**: M5-M11 are each a dosed-from-zero economic change,
+shipped mechanism-first at an inert dose and walked up one at a time with
+its own gate run per step, per §5's build rule.
 
 ---
 

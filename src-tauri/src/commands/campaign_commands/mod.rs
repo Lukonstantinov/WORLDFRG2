@@ -2611,10 +2611,23 @@ pub struct CatalogueCurrency {
     pub strength: f32,
 }
 
+/// MONEY_AND_COINAGE_PLAN.md M4 · §4.3's "money stock ledger" — struck vs
+/// held, split by holder class — read straight off M3's `purses`. A snapshot
+/// of TODAY's totals, not yet a time series (no yearly sample is persisted
+/// for this; queued alongside the rest of M4's dashboard).
+#[derive(Serialize, Clone, Default)]
+pub struct CoinLedgerSummary {
+    pub total_struck: f32,
+    pub in_city_treasuries: f32,
+    pub in_households: f32,
+    pub in_local_merchants: f32,
+}
+
 /// M2 · the whole served catalogue.
 #[derive(Serialize, Clone, Default)]
 pub struct CoinCatalogue {
     pub currencies: Vec<CatalogueCurrency>,
+    pub ledger: CoinLedgerSummary,
 }
 
 /// v2.0 · one entry in the MONETARY CHRONICLE — the dated story of money (mints,

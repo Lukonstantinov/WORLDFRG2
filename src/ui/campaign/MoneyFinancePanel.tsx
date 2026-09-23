@@ -36,7 +36,7 @@ export function MoneyFinancePanel() {
   const worldH = meta?.grid_height ?? 0;
   const [tab, setTab] = useState<"summary" | "mints" | "catalogue" | "reserves" | "banks" | "bubbles" | "shocks" | "schem">("summary");
   const [mints, setMints] = useState<MintBrief[]>([]);
-  const [catalogue, setCatalogue] = useState<CoinCatalogue>({ currencies: [] });
+  const [catalogue, setCatalogue] = useState<CoinCatalogue>({ currencies: [], ledger: { total_struck: 0, in_city_treasuries: 0, in_households: 0, in_local_merchants: 0 } });
   const [banks, setBanks] = useState<BankBrief[]>([]);
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const [schem, setSchem] = useState<CitySchematic[]>([]);
@@ -56,7 +56,7 @@ export function MoneyFinancePanel() {
   useEffect(() => {
     if (!open || !active) return;
     campaignGetMints().then(setMints).catch(() => setMints([]));
-    campaignGetCoinCatalogue().then(setCatalogue).catch(() => setCatalogue({ currencies: [] }));
+    campaignGetCoinCatalogue().then(setCatalogue).catch(() => setCatalogue({ currencies: [], ledger: { total_struck: 0, in_city_treasuries: 0, in_households: 0, in_local_merchants: 0 } }));
     campaignGetBanks().then(setBanks).catch(() => setBanks([]));
     campaignGetCrashes().then(setCrashes).catch(() => setCrashes([]));
     campaignGetSchematics().then(setSchem).catch(() => setSchem([]));
@@ -491,17 +491,27 @@ const DENOM_TIER_LABEL: Record<number, string> = { 0: "Gold", 1: "Silver", 2: "P
  *  own design calls for; that illustration work is real, separate, unbuilt
  *  effort (`goodArt.ts`'s ledger treatment, not `CoinIcon`'s flat heraldry). */
 function CatalogueTab({ catalogue }: { catalogue: CoinCatalogue }) {
+  const l = catalogue.ledger;
   return (
     <div style={scroll}>
       {catalogue.currencies.length === 0 && (
         <div style={empty}>No currency has been catalogued yet — a mint's first striking opens its entry here.</div>
       )}
       {catalogue.currencies.length > 0 && (
-        <div style={hint}>
-          Every mint that has ever struck a coin, with its denominations and the dated timeline of issues
-          behind each — first striking, debasement, reform. A first cut of the numismatic catalogue
-          (M2): the full engraved card art is separate, unbuilt work.
-        </div>
+        <>
+          <div style={hint}>
+            Every mint that has ever struck a coin, with its denominations and the dated timeline of issues
+            behind each — first striking, debasement, reform. A first cut of the numismatic catalogue
+            (M2): the full engraved card art is separate, unbuilt work.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "4px 4px 10px", borderBottom: "1px solid #131e2a", marginBottom: 6 }}
+            title="M3's parallel ledger (§3.1/§3.2) — real Purses computed alongside the existing wealth/treasury numbers, not yet reconciled with them. No coin has ever been spent, melted, lost or hoarded in this ledger yet, so struck and held always agree exactly.">
+            <Stat label="Struck (all-time)" value={fmtk(l.total_struck)} hint="Σ every issue's face value ever struck, this ledger's own count" />
+            <Stat label="In treasuries" value={fmtk(l.in_city_treasuries)} hint="seigniorage collected by minting cities" />
+            <Stat label="In households" value={fmtk(l.in_households)} hint="brassage — mint workers' wages" />
+            <Stat label="With merchants" value={fmtk(l.in_local_merchants)} hint="circulation — whoever brought the bullion (a placeholder; the sim does not yet track a specific bringer)" />
+          </div>
+        </>
       )}
       {catalogue.currencies.map((c) => <CurrencyCatalogueCard key={c.mint_hub} c={c} />)}
     </div>
