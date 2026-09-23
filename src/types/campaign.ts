@@ -1407,6 +1407,19 @@ export interface MarketCity {
   x: number;
   y: number;
 }
+/** SETTLEMENT_LIFE_PLAN.md L3 · one year of a city's annals (campaign_city_life).
+ *  Widens additively as later slices (L4+) land — never renumbered. */
+export interface CityYear {
+  year: number;
+  population: number;
+  /** Allen's welfare ratio (L2): labourer income ÷ a bare subsistence basket. */
+  welfare_ratio: number;
+  /** Shortfall fraction of basic-tier demand left unmet, 0..1. */
+  lack_basic: number;
+  grain_price: number;
+  mood: number;
+  unrest: number;
+}
 export interface CityPriceIndex {
   name: string;
   index: number; // need-weighted mean of price ÷ base_value, ×100 (100 = world standard)

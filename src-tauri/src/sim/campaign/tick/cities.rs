@@ -1494,6 +1494,31 @@ impl CampaignSim {
     }
 
 
+    /// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) · one annual record per live hub, over
+    /// what L0-L2 made real (population, welfare, hunger, mood, unrest). Called
+    /// yearly, AFTER `update_society`/`update_unrest` so this year's welfare
+    /// ratio and unrest are both fresh. Read-only over existing fields; adds no
+    /// new per-tick cost beyond the push+cap.
+    pub(crate) fn record_city_annals(&mut self, year: u32) {
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let entry = CityYear {
+                year,
+                population: self.hubs[h].population,
+                welfare_ratio: self.hubs[h].welfare_ratio,
+                lack_basic: self.hubs[h].lack_basic,
+                grain_price: self.hubs[h].price.first().copied().unwrap_or(0.0),
+                mood: self.hubs[h].mood,
+                unrest: self.hubs[h].society.unrest,
+            };
+            self.hubs[h].annals.push(entry);
+            if self.hubs[h].annals.len() > ANNALS_CAP {
+                let drop = self.hubs[h].annals.len() - ANNALS_CAP;
+                self.hubs[h].annals.drain(0..drop);
+            }
+        }
+    }
+
     /// It. 3 · Civil unrest. Each year every settled hub's `unrest` eases toward a
     /// target set by HOW THE PEOPLE LIVE — low mood, steep inequality, dearth of
     /// basics, famine and war push it up; prosperity and commoner welfare pull it
@@ -1917,7 +1942,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
         });
         self.routes_dirty = true;
         self.hubs.len() - 1

@@ -33,7 +33,7 @@
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             yard_progress: 0.0,
-            food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0,
+            food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
         }
     }
 
@@ -9474,4 +9474,33 @@
             if h.welfare_ratio > 0.0 { any_nonzero = true; }
         }
         assert!(any_nonzero, "a real trading world must produce at least one nonzero welfare ratio");
+    }
+
+    /// L3 (§3.12) · `TickHub.annals` fills yearly and stays capped at
+    /// `ANNALS_CAP`, oldest first (matching the doc's "the Vec is already
+    /// stored that way" claim the query command relies on).
+    #[test]
+    fn city_annals_fill_yearly_and_stay_capped() {
+        // A minimal 2-hub fixture, not `dense_world()` — this test only needs
+        // `advance` to run past `ANNALS_CAP` years, and the cheap fixture does
+        // that in milliseconds instead of minutes (`dense_world` over 320
+        // simulated years dominated this gate's own runtime).
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let h0 = hub(0, 0.0, 0.0, 500.0, vec![50.0], 0);
+        let h1 = hub(1, 5.0, 5.0, 500.0, vec![50.0], 0);
+        let mut s = sim(vec![h0, h1], goods);
+        let years = (ANNALS_CAP as u32) + 20;
+        s.advance(TICKS_PER_YEAR * years);
+        let live = s.hubs.iter().position(|h| !h.is_estate && !h.abandoned && h.population >= 1.0)
+            .expect("the fixture must have a live hub");
+        let annals = &s.hubs[live].annals;
+        assert!(!annals.is_empty(), "a real multi-decade run must record annals");
+        assert!(annals.len() <= ANNALS_CAP, "annals must stay capped at ANNALS_CAP, got {}", annals.len());
+        for w in annals.windows(2) {
+            assert!(w[1].year > w[0].year, "annals must stay in year order, oldest first");
+        }
+        for y in annals {
+            assert!(y.population.is_finite() && y.welfare_ratio.is_finite() && y.lack_basic.is_finite(),
+                "every annal field must be finite");
+        }
     }

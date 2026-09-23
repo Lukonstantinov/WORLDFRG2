@@ -53,6 +53,20 @@ pub fn campaign_market_cities(db: State<'_, WorldDb>) -> Result<Vec<MarketCity>,
 }
 
 
+/// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) — the Life tab's data source. A pure
+/// read of `TickHub.annals`, oldest year first (the Vec is already stored
+/// that way — the cap drains from the front). Empty on an estate, an
+/// abandoned hub, an unknown id, or a save from before this slice.
+#[tauri::command]
+pub fn campaign_city_life(hub: u32, db: State<'_, WorldDb>) -> Result<Vec<CityYear>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => return Ok(vec![]),
+    };
+    Ok(sim.hubs.get(hub as usize).map(|h| h.annals.clone()).unwrap_or_default())
+}
+
 #[tauri::command]
 pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDetail>, String> {
     use std::collections::HashMap;

@@ -744,6 +744,9 @@ impl CampaignSim {
             // Then the people may stir: unrest builds, riots flare, revolts topple
             // councils (reads the freshly-updated inequality / welfare above).
             self.update_unrest();
+            // SETTLEMENT_LIFE_PLAN.md L3 · one annual record per hub, now that
+            // this year's welfare ratio (L2) and unrest are both fresh.
+            self.record_city_annals(yr_now);
             // Estate/manufactory disasters strike + funded repairs progress (yearly).
             self.estate_condition_pass();
             self.manufactory_solvency_pass(); // shut works idle 4+ years

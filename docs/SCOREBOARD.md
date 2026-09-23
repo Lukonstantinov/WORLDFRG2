@@ -9,6 +9,43 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23c — `SETTLEMENT_LIFE_PLAN.md`: L3 (annals + Life tab) shipped — the STOP MARKER is reached
+
+Follow-up session to 2026-09-23b. `TickHub.annals: Vec<CityYear>` (population ·
+welfare ratio · lack_basic · grain price · mood · unrest), one record per year,
+capped at `ANNALS_CAP`=300, recorded yearly right after `update_unrest` so the
+figures are fresh. Served read-only by `campaign_city_life(hub)`. `HubPanel.tsx`
+gains a **Life** tab (shown only while a campaign runs, on a non-estate hub): a
+one-sentence headline built from the unusual figures only, population/grain/mood
+at a glance, and a bar chart of the welfare ratio over the last dozen recorded
+years against a bare-subsistence reference line. States plainly what it does not
+yet show (age pyramid, causes of death, housing, church, notables — L4/L9/L13)
+rather than rendering those sections empty.
+
+**A gate-authoring lesson, not just a feature**: the first cut of
+`city_annals_fill_yearly_and_stay_capped` ran 320 simulated years on
+`dense_world()` to exercise the cap, and that alone cost the `tick::tests` gate
+**437s** (vs. ~24s before) — a real regression to the row every future
+`sim/campaign/tick/` session has to run per §2.8. Rewritten against a 2-hub
+`sim()` fixture instead (the cap logic doesn't need a real economy to prove
+itself), the same test runs in **0.67s**. Caught only because the gate was
+re-timed before shipping, not assumed cheap because it looked like a small test.
+
+**Gates**: `cargo check --lib --tests` clean; `cargo test --lib tick::tests`
+279/279 in 44.96s (back to the pre-L3 baseline); `cargo test --lib econ_ --
+--nocapture` 6/6 bit-identical in 543.84s (multi-seed inheritance gate
+included — L3 is observe-only state, so this confirms nothing moved); `npx tsc
+--noEmit` clean; `npx vite build` clean (181 modules, 4.05s).
+
+With this the plan's own STOP MARKER (L0-L3, "a coherent landing") is fully
+reached: the hidden famine is measured (L0), the entitlement fix exists at
+dose 0 (L1), the welfare ratio is computed (L2), and it is now actually visible
+to a player (L3). L4 onward (vital rates, welfare-into-behaviour, housing, the
+settlement year, urban hazards, the church, the watch, persistent pops,
+townspeople, Life tab v2) remain queued, each its own future dose walk.
+
+---
+
 ## 2026-09-23b — `SETTLEMENT_LIFE_PLAN.md`: L0 (instrument) + L1 (entitlement) + L2 (incomes/welfare ratio) shipped
 
 New plan, agreed and built the same day (CLAUDE.md §5.7). L0-L2 land the sim half

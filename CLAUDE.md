@@ -1644,12 +1644,13 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   newly-found fixture/mechanism fixes) — nothing here changes that
   sequencing, this entry only records which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L2 shipped (the STOP MARKER's sim half; L3's tab is queued)
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L3 shipped: the STOP MARKER is reached
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
-at three doses. L0-L2 shipped this session — L3 (the Life tab) did not, so the
-new numbers exist in the sim but have no frontend reader yet; that is a queued
-follow-up (rule 36), not a refusal.
+at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
+in a follow-up session, so the STOP MARKER is now reached in full — the hidden
+famine is measured, the welfare ratio exists AND is visible, and the player can
+see how a city lives. L4 onward remain queued (see below).
 
 - **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
   `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
@@ -1700,15 +1701,33 @@ follow-up (rule 36), not a refusal.
   wealth index" rather than removed, per the plan's own D1-adjacent continuity
   note. Gated by `incomes_sum_to_what_the_city_earned` and
   `welfare_ratio_is_finite_and_positive` (`tick::tests`).
-- **What did NOT ship, and why (rule 36 — queued, not waived)**: L3 (the Life
-  tab + `campaign_city_life`/wiring `campaign_get_pops`) — the STOP MARKER's own
-  frontend half, needed before L2's welfare ratio is visible to anyone in an
-  observation-only game (§5 risk 6 of the plan: legibility debt). L4 onward
-  (vital rates, welfare-into-behaviour, housing, the settlement year, urban
-  hazards, the church, the watch, persistent pops, townspeople, Life tab v2) are
-  each their own dose walk per the plan's own build order and are unstarted.
-  Gates run this session: `cargo check --lib --tests` (clean), `cargo test --lib
-  tick::tests` (278/278), `cargo test --lib econ_ -- --nocapture` (6/6, 308s).
+- **L3 — annals + the Life tab v1** (§3.12). `TickHub.annals: Vec<CityYear>`
+  (`mod.rs`) — one record per year (population, `welfare_ratio`, `lack_basic`,
+  grain price, mood, unrest), capped at `ANNALS_CAP` (300, oldest dropped first,
+  same shape as `HOUSE_EVENTS_CAP`). Recorded by `record_city_annals` (`cities.rs`),
+  called yearly right after `update_unrest` so the year's welfare ratio and unrest
+  are both fresh. Served read-only by `campaign_city_life(hub)`
+  (`read_hubs.rs`/`lib.rs`), a plain clone of the stored Vec — no new query-side
+  computation. `HubPanel.tsx` gains a **Life** tab (shown only while a campaign is
+  running, on a non-estate hub): a one-sentence headline built from the unusual
+  figures only (welfare ratio, hunger, unrest — the CityMarketView "quiet when
+  ordinary" rule), population/grain/mood at a glance, and a welfare-ratio bar
+  chart over the last dozen recorded years with a bare-subsistence reference line.
+  Explicitly says what it does NOT yet show (age pyramid, causes of death,
+  housing, church, notables — L4/L9/L13) rather than rendering it empty. Gated by
+  `city_annals_fill_yearly_and_stay_capped` (`tick::tests` — a cheap 2-hub
+  fixture run past `ANNALS_CAP` years in well under a second; the first cut used
+  `dense_world()` and took 437s on its own, since the whole gate row exists to be
+  run every `tick/` change, per §2.8's own "narrowest thing that could fail"
+  rule); `npx tsc --noEmit` and `npx vite build` both clean.
+- **What did NOT ship, and why (rule 36 — queued, not waived)**: L4 onward
+  (vital rates + age bands, welfare-into-behaviour, housing, the settlement year,
+  urban hazards, the church, the watch, persistent pops, townspeople, Life tab v2)
+  are each their own dose walk per the plan's own build order and are unstarted.
+  Gates run across both sessions: `cargo check --lib --tests` (clean), `cargo test
+  --lib tick::tests` (279/279, ~45s), `cargo test --lib econ_ -- --nocapture`
+  (6/6, ~540s incl. the multi-seed inheritance gate), `npx tsc --noEmit` +
+  `npx vite build` (clean).
 
 ---
 
@@ -5588,7 +5607,8 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
-SETTLEMENT_LIFE_PLAN.md           ← ⭐ L0-L2 SHIPPED (§5.7), L3-L13 queued. How
+SETTLEMENT_LIFE_PLAN.md           ← ⭐ L0-L3 SHIPPED (§5.7, the STOP MARKER
+                                    reached), L4-L13 queued. How
                                     people live, earn, eat, die and make trouble in
                                     a campaign city. Eleven measured findings,
                                     headed by F1:

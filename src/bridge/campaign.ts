@@ -194,6 +194,11 @@ export async function campaignCityPriceIndex(): Promise<import("@types").CityPri
   return invoke("campaign_city_price_index");
 }
 
+/** SETTLEMENT_LIFE_PLAN.md L3 · one hub's annual annals — the Life tab's data source. */
+export async function campaignCityLife(hub: number): Promise<import("@types").CityYear[]> {
+  return invoke("campaign_city_life", { hub });
+}
+
 /** The Markets window's city picker — every LIVE city, including ones founded
  *  during the campaign (which the frozen worldgen economy snapshot cannot list). */
 export async function campaignMarketCities(): Promise<import("@types").MarketCity[]> {

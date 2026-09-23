@@ -3,8 +3,8 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples } from "@bridge";
-import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample } from "@types";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife } from "@bridge";
+import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -41,7 +41,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -293,6 +293,7 @@ export function HubPanel() {
   const [colony, setColony] = useState<ColonyDetail | null>(null);
   const [prov, setProv] = useState<ProvisioningBrief | null>(null);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
+  const [annals, setAnnals] = useState<CityYear[]>([]);
   const [expandedEstate, setExpandedEstate] = useState<number | null>(null);
   const [relayExpanded, setRelayExpanded] = useState(false);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
@@ -315,6 +316,15 @@ export function HubPanel() {
     campaignFuturesLanes().then((l) => { if (alive) setLanes(l); }).catch(() => {});
     return () => { alive = false; };
   }, [tab, campActive, campTick]);
+
+  // SETTLEMENT_LIFE_PLAN.md L3 · the Life tab's annals, refreshed on open and
+  // as the campaign advances while the tab is showing.
+  useEffect(() => {
+    if (tab !== "life" || selectedHub === null || !campActive) return;
+    let alive = true;
+    campaignCityLife(selectedHub).then((a) => { if (alive) setAnnals(a); }).catch(() => { if (alive) setAnnals([]); });
+    return () => { alive = false; };
+  }, [tab, selectedHub, campActive, campTick]);
 
   // Pull live per-hub detail (sentiment/market/history) while a campaign runs,
   // refreshed every time the campaign tick changes.
@@ -422,6 +432,7 @@ export function HubPanel() {
     { id: "estates", label: "Estates" },
     ...(campActive && detail ? [{ id: "warehouse" as Tab, label: "Warehouse" }] : []),
     { id: "people", label: "People" },
+    ...(campActive && detail && !detail.is_estate ? [{ id: "life" as Tab, label: "Life" }] : []),
   ];
 
   return (
@@ -1189,6 +1200,71 @@ export function HubPanel() {
             <div onClick={focusCity} style={{ marginTop: 6, cursor: "pointer", color: "#ffcf3f", fontSize: 10 }}
               title="Highlight this city's futures network on the map">
               📜 Show this city's futures network on the map
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ════════════ LIFE (SETTLEMENT_LIFE_PLAN.md L3) ════════════
+          Over what L0-L2 made real: population, Allen's welfare ratio, and
+          hunger/unrest — no age pyramid, causes of death, housing or church
+          yet (those are L4+, Life tab v2 per the plan). Quiet-when-ordinary,
+          same discipline as the stability gauges: only the unusual reads as
+          a callout, the rest is a plain trend table. */}
+      {tab === "life" && (() => {
+        if (annals.length === 0) {
+          return <div style={{ color: "#7a90a8", fontSize: 10 }}>No annals recorded yet — check back after the campaign has run a year.</div>;
+        }
+        const latest = annals[annals.length - 1];
+        const first = annals[0];
+        const popTrend = latest.population - first.population;
+        const wr = latest.welfare_ratio;
+        const wrWord = wr <= 0 ? "unmeasured" : wr < 1.0 ? "below bare subsistence" : wr < 1.5 ? "bare subsistence" : wr < 2.5 ? "comfortable" : "prosperous";
+        const hungry = latest.lack_basic > 0.2;
+        const restive = latest.unrest > 0.5;
+        // Headline: the unusual figures only (the CityMarketView rule).
+        const headlineBits: string[] = [];
+        if (wr > 0) headlineBits.push(`labourers earn ${wr.toFixed(2)}× subsistence (${wrWord})`);
+        if (hungry) headlineBits.push(`bread is scarce — ${Math.round(latest.lack_basic * 100)}% of basic needs go unmet`);
+        if (restive) headlineBits.push(`the streets are restive`);
+        const headline = headlineBits.length > 0
+          ? headlineBits.join("; ") + "."
+          : `An ordinary year — nothing here stands out.`;
+        const rows = annals.slice(-12); // last dozen recorded years
+        const maxWr = Math.max(1e-6, ...rows.map((y) => y.welfare_ratio));
+        return (
+          <>
+            <div style={sectionHdr}>Life in {hub.name}</div>
+            <div style={{ color: hungry || restive ? "#ff8a6a" : "#cfe2f6", fontSize: 11, marginBottom: 6, lineHeight: 1.4 }}>
+              {headline}
+            </div>
+            <div style={{ display: "flex", gap: 12, fontSize: 10, marginBottom: 6, flexWrap: "wrap" }}>
+              <span style={{ color: "#9ab0c8" }}>Population {Math.round(latest.population).toLocaleString()}
+                {popTrend !== 0 && <span style={{ color: popTrend > 0 ? "#7fcf8f" : "#e0a0a0" }}> ({popTrend > 0 ? "+" : ""}{Math.round(popTrend).toLocaleString()} since {first.year})</span>}
+              </span>
+              <span style={{ color: "#9ab0c8" }}>Grain {latest.grain_price.toFixed(2)}</span>
+              <span style={{ color: "#9ab0c8" }}>Mood {Math.round(latest.mood * 100)}%</span>
+            </div>
+            <div style={{ ...sectionHdr, marginTop: 4 }}>Bread against wages (welfare ratio, recent years)</div>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 40, marginBottom: 2 }}>
+              {rows.map((y) => {
+                const h = Math.max(2, Math.round((y.welfare_ratio / maxWr) * 38));
+                const below = y.welfare_ratio > 0 && y.welfare_ratio < 1.0;
+                return (
+                  <div key={y.year} title={`${y.year}: welfare ratio ${y.welfare_ratio.toFixed(2)} · lack_basic ${(y.lack_basic * 100).toFixed(0)}% · unrest ${(y.unrest * 100).toFixed(0)}%`}
+                    style={{ flex: 1, height: h, background: below ? "#c05a4a" : "#4a8a6a", borderRadius: "1px 1px 0 0", minWidth: 3 }} />
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#6a86a6" }}>
+              <span>{rows[0].year}</span>
+              <span title="1.0 = bare subsistence">— 1.0 ≈ bare subsistence —</span>
+              <span>{rows[rows.length - 1].year}</span>
+            </div>
+            <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
+              The people, by profession — and who died, and of what — are not yet
+              shown here: the age pyramid and causes of death wait on L4; this
+              is Life tab v1, over what L0-L2 already made real.
             </div>
           </>
         );

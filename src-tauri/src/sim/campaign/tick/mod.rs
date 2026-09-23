@@ -4255,6 +4255,10 @@ pub struct TickHub {
     /// alongside `Pop.income`. `#[serde(default)]` — 0.0 until the first
     /// yearly derive.
     #[serde(default)] pub welfare_ratio: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) — one record per year, capped at
+    /// `ANNALS_CAP`. Served by `campaign_city_life`; the Life tab's data
+    /// source. `#[serde(default)]` — empty on an old save until next year end.
+    #[serde(default)] pub annals: Vec<CityYear>,
 }
 
 /// A city's KEY FIGURE (elected/appointed official). Houses raise `control` of it by
@@ -6145,6 +6149,32 @@ pub struct Pop {
     /// in the tick reads this yet; `sim_fingerprint` is unchanged.
     #[serde(default)] pub income: f32,
 }
+
+/// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) — one annual record of a city's life, over
+/// exactly what L0-L2 have made real: population, the welfare ratio, hunger and
+/// unrest. L4+ (age bands, deaths by cause, crowding, fires) will widen this
+/// struct additively when those slices land; nothing here is removed or
+/// renumbered when they do (the same discipline rule 29 states for a parallel
+/// series). Capped at `ANNALS_CAP` years, oldest dropped first — a rolling
+/// living memory, not a permanent archive (unlike a house's milestones, rule 20,
+/// a city's ordinary year is not individually significant).
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+pub struct CityYear {
+    pub year: u32,
+    pub population: f32,
+    /// L2's welfare ratio (Allen), the labourer class's own reading.
+    pub welfare_ratio: f32,
+    /// The shortfall fraction of basic-tier demand left unmet (`TickHub.lack_basic`).
+    pub lack_basic: f32,
+    /// Grain price in the numeraire, at year end.
+    pub grain_price: f32,
+    pub mood: f32,
+    pub unrest: f32,
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L3 — a rolling cap on `TickHub.annals`, the same
+/// "capped, oldest dropped first" shape `HOUSE_EVENTS_CAP` uses for chatter.
+pub(crate) const ANNALS_CAP: usize = 300;
 
 /// Phase 5 (flavour) · CONTAGION tuning. Kept mild + capped so an outbreak spreads
 /// as a wave along the trade lanes and then burns out, and the world recovers (the
