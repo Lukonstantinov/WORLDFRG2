@@ -2115,6 +2115,8 @@ export interface EpidemicBrief {
 
 /** Phase 6 · one craft guild (Guilds & Crafts panel + map). */
 export interface GuildBrief {
+  /** Index into sim.guilds — the key for campaignGuildAtlas (S9). */
+  idx?: number;
   hub: number;
   x: number;
   y: number;

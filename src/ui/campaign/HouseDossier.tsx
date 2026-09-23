@@ -10,11 +10,12 @@ import { goodIcon, TIER_META, tierOf, dull, familyRunAt } from "@ui/campaign/hou
 import {
   campaignGetFeuds, campaignHouseStability, campaignGetHouseHistory, campaignMerchantRoutes,
   campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin,
-  campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage,
+  campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage, campaignHouseAtlas,
 } from "@bridge";
 import type {
   FeudRow, Gauge, HouseStability, HouseHistory, HouseBrief, MerchantRoute, HouseLedger,
   BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief,
+  HouseAtlas,
 } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
@@ -386,9 +387,17 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
   const [goals, setGoals] = useState<GoalsBrief | null>(null);
   const [crisis, setCrisis] = useState<CrisisBrief | null>(null);
   const [lineage, setLineage] = useState<HouseLineage | null>(null);
+  // S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the trade-flow atlas — partner
+  // cities, the goods portfolio, holdings, seasonal lane ease. Text/table
+  // only: the plan's own on-map lane labelling (thickness/colour/arrows) is
+  // deliberately NOT attempted here — that is real new canvas rendering code
+  // layered onto OverlayManager's laneBetween/mediumRuns machinery, a much
+  // larger and harder-to-verify-blind piece than this tab, so it stays
+  // queued (Q19) rather than attempted partially and left half-working.
+  const [atlas, setAtlas] = useState<HouseAtlas | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
+  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions" | "atlas">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -415,6 +424,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       campaignGetHouseCrisis(h.idx).then((c) => { if (alive) setCrisis(c); }).catch(() => {});
       // Lineage: the chain this house descends from + what split off it directly.
       campaignGetHouseLineage(h.idx).then((l) => { if (alive) setLineage(l); }).catch(() => {});
+      // S11 · the trade-flow atlas (partners/goods/holdings/seasons).
+      campaignHouseAtlas(h.idx).then((a) => { if (alive) setAtlas(a); }).catch(() => {});
     }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
@@ -573,6 +584,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
            ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
            ...((lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0)) || (chron?.line?.length ?? 0) > 0 ? ["lineage" as const] : []),
            ...(expeds.length > 0 ? ["expeditions" as const] : []),
+           ...(atlas && (atlas.partners.length > 0 || atlas.goods.length > 0) ? ["atlas" as const] : []),
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
@@ -585,6 +597,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
             : t === "crisis" ? `⚠ Crisis${crisis?.active ? ` r${crisis.active.round}/${crisis.active.round_cap}` : ""}`
             : t === "lineage" ? "🌳 Lineage"
             : t === "expeditions" ? `🧭 Expeditions (${expeds.length})`
+            : t === "atlas" ? "🗺 Atlas"
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
             : t === "bank" ? "🏦 Bank"
@@ -604,6 +617,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
         <LineageTab lineage={lineage} current={h} onJump={jumpTo} line={chron?.line ?? []} />
       ) : view === "expeditions" ? (
         <ExpeditionsTab expeds={expeds} fmt={fmtW} />
+      ) : view === "atlas" ? (
+        <AtlasTab atlas={atlas} fmt={fmtW} />
       ) : view === "standing" ? (
         // The five stability gauges. Everything here was already in the sim — the
         // solvency countdown in particular has always decided whether this family
@@ -787,6 +802,85 @@ function ExpeditionsTab({ expeds, fmt }: { expeds: ExpeditionView[]; fmt: (v: nu
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the trade-flow atlas, text/table
+ *  form — partner cities ranked by volume, the goods portfolio with where
+ *  each is bought/sold, and a seasonal-ease bar. `campaign_house_atlas` is a
+ *  pure derived read (§5.6 of CLAUDE.md), so this tab can never move a
+ *  gate. The plan's own richer on-map version (lane thickness/colour/arrows,
+ *  a medallion at the midpoint, a label at the far end) is deliberately NOT
+ *  attempted here — see this tab's call site for why. */
+function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) => string }) {
+  if (!atlas || (atlas.partners.length === 0 && atlas.goods.length === 0)) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No live trade to chart yet.</div>;
+  }
+  const hubName = (id: number) => atlas.partners.find((p) => p.hub === id)?.name ?? `hub #${id}`;
+  const partners = [...atlas.partners].sort((a, b) => (b.volume_in + b.volume_out) - (a.volume_in + a.volume_out)).slice(0, 10);
+  const goods = [...atlas.goods].sort((a, b) => b.volume - a.volume).slice(0, 8);
+  const maxVol = Math.max(1, ...partners.map((p) => p.volume_in + p.volume_out));
+  const monthNames = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  const maxEase = Math.max(0.01, ...atlas.seasons);
+  return (
+    <div>
+      {partners.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+            Partner cities — by volume
+          </div>
+          {partners.map((p) => (
+            <div key={p.hub} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0", fontSize: 10 }}>
+              <span style={{ flex: 1, minWidth: 0, color: "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.name}
+              </span>
+              <div style={{ width: 60, height: 5, background: "#0a1018", borderRadius: 3, overflow: "hidden", display: "flex" }}
+                title={`in ${fmt(p.volume_in)} · out ${fmt(p.volume_out)}`}>
+                <div style={{ width: `${Math.round((p.volume_in / maxVol) * 100)}%`, background: "#7fb0e0" }} />
+                <div style={{ width: `${Math.round((p.volume_out / maxVol) * 100)}%`, background: "#7fd0a0" }} />
+              </div>
+              <span style={{ color: "#7a90a8", fontSize: 9, width: 44, textAlign: "right" }}>
+                {fmt(p.volume_in + p.volume_out)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {goods.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+            Goods portfolio
+          </div>
+          {goods.map((g) => (
+            <div key={g.good} style={{ fontSize: 10, marginBottom: 3 }}>
+              <div style={{ color: "#e8dcc0" }}>{goodIcon(g.name)} {g.name} <span style={{ color: "#9ab0c8" }}>· {fmt(g.volume)} · profit {fmt(g.profit)}</span></div>
+              {(g.bought_at.length > 0 || g.sold_at.length > 0) && (
+                <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                  {g.bought_at.length > 0 && <>bought at {g.bought_at.slice(0, 3).map(hubName).join(", ")} </>}
+                  {g.sold_at.length > 0 && <>· sold at {g.sold_at.slice(0, 3).map(hubName).join(", ")}</>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {atlas.seasons.some((v) => v > 0) && (
+        <div>
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}
+            title="Relative ease of this house's own lanes by month — taller is cheaper/easier">
+            Seasonal lane ease
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 34 }}>
+            {atlas.seasons.map((v, i) => (
+              <div key={i} title={`${monthNames[i]}: ${(v).toFixed(2)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ width: "100%", height: Math.max(2, Math.round((v / maxEase) * 28)), background: "#7fb0e0", borderRadius: 2 }} />
+                <span style={{ color: "#5a6a7e", fontSize: 7.5, marginTop: 2 }}>{monthNames[i]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

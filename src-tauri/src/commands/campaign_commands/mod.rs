@@ -2784,6 +2784,8 @@ pub struct EpidemicBrief {
 /// Phase 6 · one craft guild (for the Guilds & Crafts panel + map).
 #[derive(Serialize, Clone)]
 pub struct GuildBrief {
+    /// Index into `sim.guilds` — the key for `campaign_guild_atlas` (S9).
+    #[serde(default)] pub idx: u32,
     pub hub: u32,
     pub x: f32,
     pub y: f32,
