@@ -144,6 +144,7 @@
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
+            units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
         };
         s.rebuild_routes();
         s
@@ -3489,6 +3490,403 @@
         assert_eq!(a.banks.len(), b.banks.len(), "bank count reproducible");
         for bank in &a.banks {
             assert!(bank.equity().is_finite() && bank.reserves.is_finite());
+        }
+    }
+
+    #[test]
+    fn every_currency_name_is_unique_in_a_world() {
+        // MONEY_AND_COINAGE_PLAN.md M1 · the coin catalogue records `decide_
+        // coinage`'s own decisions as real `Currency`/`Denom`/`Issue` objects.
+        // Several seats mint over a real run; every one of their catalogue
+        // entries must carry a distinct name (F2's own complaint — "a large
+        // world has several unrelated Ducats" — must not survive into the
+        // catalogue), and every issue must point at a real currency/denom.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = Vec::new();
+        for i in 0..6u32 {
+            hubs.push(hub(i, (i as f32) * 20.0, 10.0, 30000.0, vec![160.0, 16.0], 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..6u32 {
+            let mut h = house_at(i, vec![1], 3);
+            h.archetype = 2;
+            h.wealth = 300.0;
+            h.prestige = 0.6;
+            h.dominant_seat = true;
+            s.houses.push(h);
+        }
+        for hh in s.hubs.iter_mut() { hh.treasury = 200.0; }
+        // Two of the six share a culture, so `units_of_account` resolves for
+        // more than one hub off the same entry.
+        s.hub_culture = vec![
+            "Aiora".into(), "Aiora".into(), "Vexil".into(),
+            "Vexil".into(), "Korren".into(), "Korren".into(),
+        ];
+        s.rebuild_routes();
+        s.ensure_unit_of_account();
+
+        s.advance(TICKS_PER_YEAR * 5);
+
+        assert!(!s.currencies.is_empty(), "at least one seat minted a coin over 5 years");
+        let mut names: Vec<&str> = s.currencies.iter().map(|c| c.name.as_str()).collect();
+        names.sort();
+        let mut deduped = names.clone();
+        deduped.dedup();
+        assert_eq!(names.len(), deduped.len(), "every currency name is unique: {names:?}");
+
+        for c in &s.currencies {
+            assert!(!c.denoms.is_empty(), "{} has at least one denomination", c.name);
+            for d in &c.denoms {
+                assert!(!d.issues.is_empty(), "{} {} was struck at least once", c.name, d.name);
+                assert!(d.standard_grams > 0.0);
+            }
+        }
+        for iss in &s.issues {
+            assert!((iss.currency as usize) < s.currencies.len(), "issue points at a real currency");
+            let cur = &s.currencies[iss.currency as usize];
+            assert!((iss.denom as usize) < cur.denoms.len(), "issue points at a real denom");
+            assert!(iss.fineness.is_finite() && (0.0..=1.0).contains(&iss.fineness));
+            assert!(iss.grams > 0.0);
+            // M3 · struck/circulating are real now; no sink exists yet (queued),
+            // so nothing has ever been hoarded/melted/lost.
+            assert!(iss.struck.is_finite() && iss.struck >= 0.0);
+            assert!(iss.circulating.is_finite() && iss.circulating >= 0.0);
+            assert_eq!(iss.hoarded, 0.0);
+            assert_eq!(iss.melted, 0.0);
+            assert_eq!(iss.lost, 0.0);
+        }
+        assert!(!s.units_of_account.is_empty(), "the three seeded cultures resolved a unit of account");
+        for u in &s.units_of_account {
+            assert!(u.ladder.len() >= 2 && u.ladder.len() == u.names.len());
+            assert!(u.ladder.windows(2).all(|w| w[0] > w[1]), "largest unit first: {:?}", u.ladder);
+        }
+    }
+
+    #[test]
+    fn the_coin_ledger_conserves_every_struck_coin() {
+        // MONEY_AND_COINAGE_PLAN.md M3 · §3.2's conservation invariant:
+        // Σ coins everywhere == Σ struck − Σ melted − Σ lost − Σ hoarded, per
+        // issue. No sink exists yet (queued — see coinage.rs's own header),
+        // so this reduces to Σ purses == Σ struck exactly, checked to the
+        // last float ulp: `add_coin` is the ONLY writer of `purses`, so any
+        // drift here is a real accounting bug, not noise.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = Vec::new();
+        for i in 0..4u32 {
+            hubs.push(hub(i, (i as f32) * 20.0, 10.0, 30000.0, vec![160.0, 16.0], 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..4u32 {
+            let mut h = house_at(i, vec![1], 3);
+            h.archetype = 2;
+            h.wealth = 300.0;
+            h.prestige = 0.6;
+            h.dominant_seat = true;
+            s.houses.push(h);
+        }
+        for hh in s.hubs.iter_mut() { hh.treasury = 200.0; }
+        s.rebuild_routes();
+
+        s.advance(TICKS_PER_YEAR * 5);
+
+        assert!(!s.issues.is_empty(), "at least one issue was struck over 5 years");
+        for iss in &s.issues {
+            let held: f32 = s.purses.iter()
+                .flat_map(|p| p.coins.iter())
+                .filter(|(id, _)| *id == iss.id)
+                .map(|(_, amt)| *amt)
+                .sum();
+            assert!((held - iss.circulating).abs() < 1e-3,
+                "issue {} ({}): purses hold {held}, circulating says {}", iss.id, iss.cognomen, iss.circulating);
+            assert!((iss.struck - iss.circulating).abs() < 1e-3,
+                "issue {} ({}): no sink exists yet, struck must equal circulating", iss.id, iss.cognomen);
+        }
+        // Every coin the ledger has ever struck sits in exactly one of the
+        // three transaction-side purses (treasury/household/local-merchant) —
+        // no fourth holder has been invented and nothing has vanished.
+        for p in &s.purses {
+            assert!(matches!(p.holder_kind, HOLDER_CITY_TREASURY | HOLDER_HOUSEHOLD | HOLDER_LOCAL_MERCHANT),
+                "M3's mint-side transaction only ever pays these three holders");
+        }
+    }
+
+    #[test]
+    fn barter_dose_is_a_noop_at_zero() {
+        // MONEY_AND_COINAGE_PLAN.md M5 · the shipped `BARTER_DOSE = 0.0` must
+        // be a true no-op — the mechanism is real code, gated inert, exactly
+        // like `LOCAL_SATIETY`/`CAPACITY_BIND_DOSE` before their own doses
+        // were ever raised.
+        let mut s = dense_world();
+        s.advance(TICKS_PER_YEAR * 2);
+        assert_eq!(s.diag_barter_trades, 0, "no barter settlement fires at dose 0");
+        assert_eq!(s.diag_barter_volume, 0.0);
+    }
+
+    #[test]
+    fn barter_moves_stock_both_ways() {
+        // MONEY_AND_COINAGE_PLAN.md M5 · §3.5's own requirement: a barter
+        // settlement must be visible on BOTH sides — the delivered good
+        // still lands at the buyer (dispatch's own job, untouched here) AND
+        // a payment good leaves the buyer's stock for the seller's. Exercised
+        // through the pure-parameter twin at dose 1.0 (every eligible trade
+        // barters), since the shipped constant stays 0.0.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 20000.0, vec![100.0, 5.0], 0),
+            hub(1, 10.0, 0.0, 20000.0, vec![5.0, 100.0], 0),
+        ];
+        // B (hub 1) holds a large surplus of silk relative to its own need,
+        // so barter has an obvious payment good to reach for.
+        hubs[1].stock[0 * GRADE_BANDS + 1] = 500.0; // good 0 (wheat), common band
+        let mut s = sim(hubs, goods);
+        s.recent_trades.push(RecentTrade {
+            from: 0, to: 1, good: 1, amount: 4.0, owner: -1, sea: false, river: false,
+            price: 20.0, tick: s.tick,
+        });
+        let before_a = stock_of(&s.hubs[0].stock, 0);
+        let before_b = stock_of(&s.hubs[1].stock, 0);
+
+        s.barter_settlement_pass_e(1.0, 0.25);
+
+        assert_eq!(s.diag_barter_trades, 1, "the one eligible trade settled by barter");
+        assert!(s.diag_barter_volume > 0.0);
+        let after_a = stock_of(&s.hubs[0].stock, 0);
+        let after_b = stock_of(&s.hubs[1].stock, 0);
+        assert!(after_a > before_a, "the seller receives a payment good");
+        assert!(after_b < before_b, "the payment good LEAVES the buyer's stock");
+        assert!((after_a - before_a - (before_b - after_b)).abs() < 1e-3,
+            "the same quantity that left B is what arrived at A — no goods are created or destroyed");
+    }
+
+    #[test]
+    fn barter_is_never_refused() {
+        // §3.5 · "nothing forbids barter in a monetised city; it just loses."
+        // At full dose (1.0), the pass has no coin-availability gate at all —
+        // it fires on every eligible trade regardless of how sound the local
+        // coin is. This is the honest reading of what the pass ACTUALLY does
+        // today (M6's real accept/reject-by-coin-reach logic is unbuilt): it
+        // is never itself the reason a barter settlement fails to happen.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = vec![
+            hub(0, 0.0, 0.0, 20000.0, vec![100.0, 5.0], 0),
+            hub(1, 10.0, 0.0, 20000.0, vec![5.0, 100.0], 0),
+        ];
+        hubs[1].stock[0 * GRADE_BANDS + 1] = 500.0;
+        hubs[1].coin_trust = 1.0;
+        hubs[1].coin_name = "Strong Ducat".into();
+        let mut s = sim(hubs, goods);
+        s.recent_trades.push(RecentTrade {
+            from: 0, to: 1, good: 1, amount: 4.0, owner: -1, sea: false, river: false,
+            price: 20.0, tick: s.tick,
+        });
+        s.barter_settlement_pass_e(1.0, 0.25);
+        assert_eq!(s.diag_barter_trades, 1, "a sound local coin does not, on its own, block this pass");
+    }
+
+    #[test]
+    fn an_unused_mint_closes() {
+        // MONEY_AND_COINAGE_PLAN.md M6 (§3.7) · a mint whose own coin never
+        // clears MINT_CLOSE_SHARE of its own city's basket closes after
+        // MINT_CLOSE_YEARS consecutive years. Exercised directly against
+        // `mark_mint_closures` (a pure, deterministic function of its own
+        // inputs) rather than via emergent economic decline, which cannot be
+        // forced reliably inside a unit test.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 10000.0, vec![100.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.currencies.push(Currency {
+            mint_hub: 0, name: "Test Coin".into(), unit_of_account: u32::MAX,
+            denoms: vec![], open: true, closed_year: 0, last_fineness: 1.0,
+            below_share_years: 0,
+        });
+        // hub 0's coin_basket carries no entry for itself → share reads 0.0.
+        s.hubs[0].coin_basket = vec![];
+
+        for y in 1..MINT_CLOSE_YEARS {
+            s.mark_mint_closures(y);
+            assert!(s.currencies[0].open, "must not close before {MINT_CLOSE_YEARS} consecutive years");
+        }
+        s.mark_mint_closures(MINT_CLOSE_YEARS);
+        assert!(!s.currencies[0].open, "an unused mint closes after {MINT_CLOSE_YEARS} years");
+        assert_eq!(s.currencies[0].closed_year, MINT_CLOSE_YEARS);
+
+        // Recovery resets the counter — a healthy share must not be punished
+        // by stale history, and a closed currency (real behaviour: closure is
+        // one-way here, re-chartering is the ordinary mint-charter gate's
+        // job, not this function's) does not reopen on its own.
+        s.currencies[0].open = true;
+        s.currencies[0].below_share_years = MINT_CLOSE_YEARS - 1;
+        s.hubs[0].coin_basket = vec![(0, 1.0)];
+        s.mark_mint_closures(MINT_CLOSE_YEARS + 1);
+        assert_eq!(s.currencies[0].below_share_years, 0, "a recovered share resets the counter");
+        assert!(s.currencies[0].open);
+    }
+
+    #[test]
+    fn household_ledger_pass_deposits_and_immediately_spends_the_wage() {
+        // MONEY_AND_COINAGE_PLAN.md M8 (§3.9) · the scoped-down "paid
+        // consumption" this session ships: a wage minted into the household
+        // purse is spent on the ration in the same call, so the household
+        // purse ends the pass empty and the local-merchant purse holds
+        // exactly what was earned. Both purses are read by nothing else, so
+        // this is a closed, provably conserved loop regardless of dose.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 10000.0, vec![100.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.currencies.push(Currency {
+            mint_hub: 0, name: "Test Coin".into(), unit_of_account: u32::MAX,
+            denoms: vec![Denom {
+                tier: DENOM_SILVER, name: "Test Silver".into(), standard_grams: 3.0,
+                issues: vec![0],
+            }],
+            open: true, closed_year: 0, last_fineness: 1.0, below_share_years: 0,
+        });
+        s.issues.push(Issue {
+            id: 0, currency: 0, denom: 0, year: 1, authority: "Test".into(),
+            grams: 3.0, fineness: 1.0, struck: 0.0, circulating: 0.0,
+            hoarded: 0.0, melted: 0.0, lost: 0.0, cause: ISSUE_FIRST,
+            cognomen: "the First Silver".into(),
+        });
+        s.next_issue_id = 1;
+        s.hubs[0].trade_wealth = 500.0;
+
+        assert_eq!(s.purse_total_for_test(HOLDER_HOUSEHOLD, -1, 0), 0.0);
+        s.household_ledger_pass();
+
+        let expected_wage = 500.0f32.max(0.0) * HOUSEHOLD_WAGE_SHARE;
+        assert!(expected_wage > 0.0, "fixture must exercise a real nonzero wage");
+        assert!((s.purse_total_for_test(HOLDER_HOUSEHOLD, -1, 0)).abs() < 1e-6,
+            "the household purse is emptied by its own same-month consumption");
+        assert!((s.purse_total_for_test(HOLDER_LOCAL_MERCHANT, -1, 0) - expected_wage).abs() < 1e-3,
+            "the merchant purse receives exactly what the household earned and spent");
+
+        // A hub with no open currency must be skipped — never invented money.
+        let goods2 = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs2 = vec![hub(0, 0.0, 0.0, 10000.0, vec![100.0], 0)];
+        let mut s2 = sim(hubs2, goods2);
+        s2.hubs[0].trade_wealth = 500.0;
+        s2.household_ledger_pass();
+        assert!(s2.purses.is_empty(), "no currency at the hub means no purse is ever created");
+    }
+
+    #[test]
+    fn food_affordability_is_a_noop_at_zero_dose() {
+        // MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
+        // change) · the shipped `FOOD_AFFORDABILITY_DOSE = 0.0` must leave
+        // `update_food_and_starvation`'s own `bal` untouched, bit-for-bit —
+        // not merely close — exactly like every other zero-dose mechanism.
+        assert_eq!(FOOD_AFFORDABILITY_DOSE, 0.0);
+        for bal in [-1.0f32, -0.3, 0.0, 0.5, 2.0] {
+            for lack in [0.0f32, 0.25, 0.8, 1.0] {
+                assert_eq!(food_afford_adjusted_bal(bal, lack, 0.0), bal,
+                    "bal={bal} lack_basic={lack} must pass through unchanged at dose 0.0");
+            }
+        }
+    }
+
+    #[test]
+    fn a_household_priced_out_reads_as_underfed() {
+        // M7/L1 · a city can hold plenty of grain (bal > 0, a physical
+        // surplus) while its poorest households still can't AFFORD it —
+        // `lack_basic` catches that and the blend must pull the reading
+        // down, never up, and never past what `lack_basic` itself licenses.
+        let bal = 0.5; // 50% more food in stock than the structural need
+        let adjusted = food_afford_adjusted_bal(bal, 0.8, 1.0);
+        assert!(adjusted < bal, "a real affordability shortfall must lower the food reading");
+        assert!((adjusted - (bal - 0.8)).abs() < 1e-6);
+
+        // A city with no affordability problem (lack_basic = 0) is untouched
+        // even at full dose — this can only ever make a reading WORSE.
+        assert_eq!(food_afford_adjusted_bal(bal, 0.0, 1.0), bal);
+
+        // A middling dose only ever moves the balance TOWARD, never past,
+        // what full dose would give.
+        let half = food_afford_adjusted_bal(bal, 0.8, 0.5);
+        assert!(half < bal && half > adjusted);
+    }
+
+    #[test]
+    #[ignore]
+    fn diag_household_wage_civic_pool_offset() {
+        // DIAGNOSTIC, not a gate — root-causing why unrest_topples_councils
+        // still fails at HOUSEHOLD_MONETIZATION_DOSE = 0.02 even with M7's
+        // food_afford_adjusted_bal fix live (SCOREBOARD.md 2026-09-23d).
+        // Hypothesis: household_priced_out's own `spend` (mod.rs, the S7
+        // day-loop block) routes into civic_pool every day at ANY nonzero
+        // dose — a channel that does not exist at dose 0 — and civic_pool
+        // feeds BOTH sent_prosperity (update_sentiment) and commoner_wealth
+        // (society_metrics), both of which are NEGATIVE terms in
+        // update_unrest's target. So turning the dose on could inject a new
+        // prosperity signal that cancels the very lack_basic/starving
+        // distress it was meant to reveal — not a household ever affording
+        // more food, just the city reading richer because the household's
+        // wage (however small) now visibly changes hands every day.
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.9, true),
+            good("fish", 0, 0, 1.2, 0.7, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+            good("iron", 2, 1, 5.0, 0.45, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..6u32 {
+            let x = (i % 3) as f32 * 8.0;
+            let y = (i / 3) as f32 * 8.0;
+            let pop = 12000.0;
+            let prod: Vec<f32> = (0..ng).map(|g| if g == 0 { pop * 0.004 } else { pop * 0.002 }).collect();
+            hubs.push(hub(i, x, y, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..6u32 {
+            let mut h = house_at(i, vec![2], 2);
+            h.wealth = 800.0;
+            h.dominant_seat = true;
+            h.archetype = ARCH_POLITICAL;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.rebuild_routes();
+
+        s.advance(TICKS_PER_YEAR * 5);
+        println!("[diag] after 5y at dose 0.0 (baseline): hub0 civic_pool={:.3} sent_prosperity={:.3} \
+            commoner_wealth={:.3} lack_basic={:.3} starving={:.3} unrest={:.3}",
+            s.hubs[0].civic_pool, s.hubs[0].sent_prosperity, s.hubs[0].society.commoner_wealth,
+            s.hubs[0].lack_basic, s.hubs[0].starving, s.hubs[0].society.unrest);
+    }
+
+    #[test]
+    fn a_coin_never_reaches_a_city_nothing_trades_with() {
+        // MONEY_AND_COINAGE_PLAN.md M6 (§3.6) · real coin DIFFUSION between
+        // cities (a chest riding a real trade leg) is not built yet — M3's
+        // `strike_issue` is the only writer of `purses`, and it only ever
+        // credits purses at the STRIKING hub itself. This locks that boundary
+        // down so a future change cannot silently start teleporting money
+        // between cities with no trade relationship; when diffusion IS built
+        // it must go through a real corridor, not a bare balance update.
+        let mut s = dense_world();
+        s.advance(TICKS_PER_YEAR * 10);
+        assert!(!s.purses.is_empty(), "some mint struck coin over 10 years");
+        for p in &s.purses {
+            for &(issue_id, _) in &p.coins {
+                let iss = s.issues.iter().find(|i| i.id == issue_id)
+                    .expect("a purse holds only real, recorded issues");
+                let cur = &s.currencies[iss.currency as usize];
+                assert_eq!(cur.mint_hub, p.hub,
+                    "coin diffusion between cities is not yet built — every coin \
+                     still sits at its own mint's own hub");
+            }
         }
     }
 

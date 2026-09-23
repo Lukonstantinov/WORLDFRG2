@@ -140,6 +140,432 @@ no tile/sim state, so per the plan's own §4 note this needed no `econ_`/
 clean, `npx vite build` clean (181 modules, unchanged from S10's count).
 Same caveat as S10 — not opened in a real browser this session; folded into
 the widened queue item Q17.
+## 2026-09-23e — Two real bugs found and FIXED behind 2026-09-23d's dose walk
+
+Continuation of the same session's dose-walk trial: rather than accept
+"not disentangled" for why `unrest_topples_councils` still failed, traced
+the mechanism through `update_unrest`'s actual formula (`cities.rs`) and
+found two genuine bugs, one pre-existing and one this session's own.
+
+**Bug 1 (pre-existing, S7's `household_income_pass`): money created from
+nothing.** `civic_pool += spend` credited the FULL ration cost every day
+regardless of what `household_wealth` actually held (which was merely
+clamped to 0), striking the shortfall as fresh civic money — rule 18's
+forbidden pattern, alive since S7 shipped, invisible because the dose has
+always been 0.0. `civic_pool` feeds BOTH `sent_prosperity` and `commoner_
+wealth`, both NEGATIVE terms in `update_unrest`'s target. Measured with a
+new permanent diagnostic (`diag_household_wage_civic_pool_offset`, `tick::
+tests`, `#[ignore]`d): at dose 0.02 (buggy), `civic_pool` reached 197,485
+over 5 years off a wage of a few units a month, `sent_prosperity` saturated
+to 1.000, `commoner_wealth` to 950.897, and unrest fell from a dose-0
+baseline of 0.803 to 0.353 — exactly why zero revolts fired. **Fixed**:
+`paid = spend.min(household_wealth)` before crediting `civic_pool`.
+
+**Bug 2 (this session's own M8 code): `take_coin` drained the wrong
+issue.** It walked a purse's `coins` list in plain vector order, ignoring
+`issue_id` — so `household_ledger_pass`'s same-month deposit-then-withdraw
+could drain an OLDER issue already sitting in the purse (from M3's mint
+brassage) while the fresh deposit sat untouched, then re-credit the
+withdrawn amount to the merchant purse under the CURRENT issue. Coin
+conserved in total, not per issue — exactly what `the_coin_ledger_
+conserves_every_struck_coin` checks (measured: issue 6 short by ~0.003 of
+~34). **Fixed**: new `take_coin_issue`, targeting only the entry for the
+issue just deposited; the now-unused generic `take_coin` deleted.
+
+**Result: with both fixes, `unrest_topples_councils` now PASSES at
+`HOUSEHOLD_MONETIZATION_DOSE = 0.02` alone** (`FOOD_AFFORDABILITY_DOSE`
+still 0.0) — the fix alone resolves the exact failure the original S7 walk
+hit, with no M7 involvement needed. But the full `tick::tests` suite at
+this dose still shows 2 remaining failures — `simulate_decades_reports_
+dynamics` (a house at -527.5, past the -500 floor by a small margin) and
+`the_coin_ledger_conserves_every_struck_coin` (a SMALLER residual drift on
+a different, debasement-created issue, ~0.0027 of ~52 — not yet
+root-caused, not confirmed to be the same bug class as either fix above).
+So the dose is not yet safe to raise.
+
+**Both fixes are shipped now at the unchanged `HOUSEHOLD_MONETIZATION_
+DOSE = 0.0`**, since they are general correctness improvements to code
+that runs regardless of dose (`household_ledger_pass` has no gate of its
+own). Gates at the shipped dose: `cargo check --lib --tests` clean, full
+`cargo test --lib tick::tests` 283/283, full `cargo test --lib econ_` 6/6
+(212.18s) — both bit-identical to every prior M7/M8 run.
+
+**Both remaining blockers characterized further, same session — neither is
+a new logic bug.**
+
+- **`simulate_decades_reports_dynamics`'s -527.5 is a single-point
+  transient dip, not a runaway.** `min_w` is a running minimum over the
+  WHOLE 50-year run (`tests.rs:2592`, `min_w = min_w.min(h.wealth)`), never
+  a sustained state — re-run at dose 0.02 with both fixes gave the
+  IDENTICAL -527.5 (deterministic, confirming this measurement is stable,
+  not noise). This is the exact same class of consequence that justified
+  widening this floor from -100 to -500 in the first place
+  (`CONSUMPTION_REBUILD_PLAN.md` S1's own comment: "thinner luxury-import
+  trade margins mean a house occasionally dips further into debt before
+  recovering" — S1's own measured value was -339.7). `HOUSEHOLD_
+  MONETIZATION_DOSE` narrows trade margins the same way, one step further,
+  and -527.5 is only ~5% past the current floor, nowhere near the
+  millions-scale runaway the floor actually guards against. Widening the
+  floor further (matching the same precedent) is the right move WHEN this
+  dose is actually raised — not done now, since doing it while the dose
+  stays at 0.0 would loosen a live safety gate for no immediate reason.
+- **The coin-ledger drift is very likely ordinary f32 accumulation
+  rounding, not a third logic bug.** Audited every one of the exactly 5
+  `add_coin` call sites in the codebase: the 3 inside `strike_issue` always
+  create a FRESH purse entry for a never-before-used issue id (a `push`,
+  never an addition — bit-exact by construction), and the 2 inside
+  `household_ledger_pass` are now issue-targeted and provably exact (fix
+  2, above). No further mis-crediting path exists in the code as written.
+  The remaining ~5e-5 relative drift is consistent in ORDER OF MAGNITUDE
+  with ordinary f32 rounding compounding across many repeated `e.1 +=
+  amount` credits to a long-lived purse (e.g. `HOLDER_LOCAL_MERCHANT`'s
+  purse collecting many months' worth of `household_ledger_pass` credits,
+  or `strike_issue` firing across repeated debasements) — real, expected
+  f32 behavior, not a conservation error (`Purse.bullion` — the other
+  candidate — is confirmed dead code, written nowhere). Fixing this
+  properly (f64 accumulators, or a relative rather than absolute
+  tolerance on the gate) is real future work, to be done WHEN the dose is
+  actually walked — not a reason to loosen the gate now.
+
+**What's next**: raise `HOUSEHOLD_MONETIZATION_DOSE` for real, in a
+session that budgets for (a) widening the insolvency floor past -527.5
+with real headroom, matching the S1 precedent, and (b) either moving the
+Purse ledger's accumulators to f64 or loosening `the_coin_ledger_
+conserves_every_struck_coin` to a relative tolerance — both bundled into
+that same dose-walk commit, never done speculatively ahead of it.
+
+---
+
+## 2026-09-23d — M7/M8 dose walk attempted (0.02/0.02), REVERTED — a negative result
+
+Continuing `MONEY_AND_COINAGE_PLAN.md` per R6 ("M7 before M8, no exceptions")
+now that M7's mechanism exists: raised `HOUSEHOLD_MONETIZATION_DOSE` and
+`FOOD_AFFORDABILITY_DOSE` together to 0.02 (matching the original S7 walk's
+own middle trial point) and ran `cargo test --lib tick::tests`.
+
+**Result: `unrest_topples_councils` still fails — the identical failure mode
+the original S7 walk hit before M7 existed.** M7's fix alone is not
+sufficient at this dose to let a chronically priced-out city register as
+discontented enough to revolt. Whether that's the wrong dose pairing or a
+real lag in `lack_basic`'s own smoothing outrunning `update_food_and_
+starvation`'s read of it was not disentangled this session.
+
+**A second, more useful finding fell out of the same trial**: `the_coin_
+ledger_conserves_every_struck_coin` (M3's own conservation gate) also
+failed — purses held 51.98718 against a stamped `circulating` of
+51.990627, a ~0.007% drift past the gate's 1e-3 absolute tolerance. Read
+through `add_coin`/`take_coin`/`household_ledger_pass` (M8) line by line —
+no logic bug: every add/take pair in the household ledger's own loop is
+bit-exact by construction (the purse is topped up by exactly the amount
+about to be taken, so `count.min(remaining)` never performs arithmetic).
+The likely cause is ordinary f32 summation rounding compounding over far
+more `household_ledger_pass` cycles than the M7/M8 shipping gate run
+exercises — raising the dose ripples chaotically into `trade_wealth` (which
+sizes M8's wage), changing how many hubs run a nonzero cycle each month.
+This is a **latent numerical fragility in the Purse ledger's f32
+accumulators**, real independent of whether this dose walk is ever
+resumed, and worth a look before M9's switch-over runs the same ledger
+much harder.
+
+Also failed at this trial, not disentangled from the dose pair itself:
+`n1_bind_stays_healthy_on_a_realistically_dense_world` (a wealth-
+concentration regression on the N1 staging gate).
+
+**Reverted both constants to 0.0 immediately** (§2.4: a spot regression on
+the target gate is a revert, not a judgement call). `tick::tests`
+re-confirmed 283/283 clean at 0.0/0.0. `git status` confirmed zero net
+code diff — nothing to commit for this trial, the finding lives in
+`MONEY_AND_COINAGE_PLAN.md`'s own R6 entry and here.
+
+**What's next**, queued per rule 36: (a) a different dose pairing, or fixing
+`lack_basic`'s lag, before re-attempting the M7/M8 walk; (b) either
+tightening the coin-ledger conservation gate's tolerance or moving the
+Purse ledger's accumulators to f64, whichever the next session judges
+right, before M9 exercises this ledger at real scale.
+
+---
+
+## 2026-09-23c — Campaign tick performance: measured, not touched (a diagnosis, per §2.4)
+
+User asked to check campaign performance and improve it if possible. Ran the
+existing production-scale instrument (`bench_campaign_tick_large`, 1200 hubs
+/ 30 goods, `WF2_PROFILE=1`, release) rather than guess:
+
+```
+[large-bench hubs=1200 goods=30] 1095 ticks: 101504.8ms total, 92.698ms/tick
+trade=22624-31942 ms/yr · houses=116-151 ms/yr · events=1-7 ms/yr · rebuild=0-248 ms/yr
+```
+
+Against CLAUDE.md §5.5's own recorded post-optimisation figures on the SAME
+fixture — trade 8,300-10,200 ms/yr, whole tick 37.5 ms/tick — this is a real
+**~2.5× regression on the trade (`dispatch`) phase and the whole tick**,
+`houses`/`events`/`rebuild` unchanged and negligible either way.
+
+**Checked whether the §5.5 fix itself regressed — it did not.** The
+`house_for_indexed`/`house_for_memo` memoisation (§5.5's own headline win) is
+still exactly in place and still the only path `dispatch` uses to resolve a
+carrier; no code was found calling the unmemoised `house_for` from inside the
+hot loop. Also checked every precompute array added to `dispatch` since
+§5.5 (`hub_boycotts`, `coin_disc`, `hub_kontor_league`, `contraband_good`,
+charter-exclusivity, `cert_guild_memo`) — each is built ONCE per dispatch
+round at O(n) or O(houses), exactly the discipline §5.5 itself established,
+not a re-introduced per-shipment scan. `staging_hop` (N1c relay) is bounded
+by `NEIGHBOR_K`, not `n`. No O(n²) scan was found by reading the code.
+
+**Reading, not measured with a profiler this session**: the more likely
+explanation is genuine accumulated cost, not a bug. Since §5.5 was written,
+a long list of real mechanisms were added directly to `dispatch`'s per-
+shipment path — war contraband (`INSTITUTIONS_BUILD_ORDER.md` Phase 4.1),
+the routed blockade (Phase 4.2), League freight/tariff privilege at up to
+three call sites (Phase 4.3), the Kontor (Phase 4.4), N1c range-based
+staging (`TRADE_STAGING_AND_POSTS_PLAN.md` slices 3-4), N1/N1b the local-
+haul bind, N5 season multipliers, N6 elasticity, `LOCAL_SATIETY`/
+`FOREIGN_PRESTIGE`, transit demand, the annona exemption, S2's carriage
+class — each individually O(1) per shipment, but a dozen-plus real checks
+now run per candidate where §5.5 profiled far fewer. A per-shipment cost
+that grew 2.5× over roughly that many real additions is not implausible on
+its face.
+
+**This is a diagnosis, not a fix, and deliberately so.** `dispatch` is
+named repeatedly through this file (§8.5, §8.15) as the single most
+fragile function in the codebase — every one of N1/N1c/N2/N4's dose walks
+broke a hard gate on a smaller change than blind surgery on a 1000-line hot
+loop would be. §5.5's own instrument (temporary `AtomicU64` counters around
+candidate phases, `WF2_PROFILE`-gated, stripped before shipping) is the
+right tool to actually LOCATE which of the dozen additions dominates before
+touching anything — that was not built this session (time budget), so no
+code changed. Queued: re-run §5.5's timer technique on `bench_campaign_
+tick_large` to name the actual largest phase, THEN decide whether it is a
+genuine algorithmic win (memoise/hoist) or the honest cost of real,
+already-shipped mechanism — per rule 36, this is owed, not waived.
+
+---
+
+## 2026-09-23 — `MONEY_AND_COINAGE_PLAN.md`: M0 (instrument) + M1 (coin catalogue data model) shipped
+
+New plan, agreed in scope the same day. Built the two slices the plan's own
+"Stop marker" text calls safe to land without a dose walk — M0 is a pure
+diagnostic, M1 is observe-only and bit-identical (`sim_fingerprint` folds
+neither `currencies`/`issues`/`units_of_account`, and every existing test
+fixture built through `sim()` leaves the new fields empty).
+
+**M0 — `econ_measure_money_creation`** (`#[ignore]`d): the diagnosis in a
+number, for F1 ("money is created from nothing on every sale"). **Scoped down**
+from the plan's own literal ask (a per-SITE breakdown of ~150 `wealth/
+treasury +=` call sites — a much larger, separate instrumentation effort,
+queued rather than attempted) to the aggregate by HOLDER CLASS: `Σ house.
+wealth (live) + Σ hub.treasury + Σ bank.reserves`, sampled yearly over the
+60-city reference world for 100 years. Measured: **Δ/yr TOTAL ≈ 1,180,883**
+(house wealth 47,781/yr · hub treasury 885,434/yr · bank reserves 247,669/yr)
+against a year-0 total of 760 — three numbers that only ever go up, with no
+purse anywhere going down to match. This is the number M9's eventual
+switch-over has to reconcile.
+
+**M1 — the coin catalogue** (`sim/campaign/tick/coinage.rs`, new file):
+`Currency`/`Denom`/`Issue` structs recorded from what `decide_coinage`/
+`apply_coinage` (money.rs) already decide every year, replacing the bare
+`TickHub.coin_name` string (F2: "a large world has several unrelated
+Ducats") with real countable objects — a currency per mint, 1-3 named
+denominations by tier (Gold/Silver/Petty, read off the region's already-
+computed `coin_metal`), each carrying a permanent timeline of dated issues
+(First/Debasement/Reform, the latter two detected the same way `snapshot_
+coins` already reads a fineness move). `UnitOfAccount` (§3.4/D6) resolves
+one of three stylised ratio ladders per culture, exactly like `culture_
+rules` (same call sites: campaign start, and yearly for a culture new to the
+world). Currency names are deduplicated on creation
+(`unique_currency_name`), gated by `every_currency_name_is_unique_in_a_world`
+(`tick::tests`) — six mints over 5 years on a multi-culture fixture, every
+name distinct, every issue's `currency`/`denom` indices in range, and every
+issue's `struck`/`circulating`/`hoarded`/`melted`/`lost` at exactly `0.0`
+(M3's parallel ledger is what populates them — M1 ships the shape, not the
+quantities).
+
+**What did NOT ship, stated plainly (rule 36 — queued, not waived), because
+rushing it would violate this project's own explicit discipline**: M2 (the
+catalogue window), M3 (the parallel ledger of real purses), and M4 (the
+market money band + dashboard) are the rest of the plan's own "Stop marker"
+landing and are real, substantial, still-safe (bit-identical) work — not
+attempted this session for time, not for risk. M5-M11 (barter as a real
+settlement, the three monetary stages, paid consumption, the wealth/purse
+switch-over, banks on real reserves, price-level feedback) are explicitly
+NOT observe-only — the plan's own §5 requires each to be dosed from zero and
+walked up ONE STEP AT A TIME against `econ_` (521s/run) and the multi-seed
+`econ_inheritance_rules_fragment_differently` gate, "three doses per session
+is the ceiling" (`HOUSES_GUILDS_AND_MARKET_PLAN.md` §9's own rule, restated
+in this plan's §5). That gate has already been perturbed five times by
+exactly this shape of change (see §8.15's own cautionary tale) — dosing
+M5-M11 blind in one sitting is the precise mistake that history warns
+against, not a time-saving shortcut.
+
+Gates run: `cargo check --lib` clean; `cargo test --lib tick::tests` —
+274/274 passed (`simulate_decades_reports_dynamics` bounded/finite/turnover,
+unchanged); `cargo test --lib econ_` — 6/6 passed including the multi-seed
+inheritance gate (521s), bit-identical in shape to the pre-M1 baseline.
+
+## 2026-09-23b — `MONEY_AND_COINAGE_PLAN.md`: M2 (catalogue surface) + M3 (parallel ledger, mint side) shipped
+
+Continuation of the same day's session (see 2026-09-23 above).
+
+**M2 — the catalogue surface.** `campaign_get_coin_catalogue` (a pure read
+of `currencies`/`issues`/`units_of_account`) + a new "📜 Catalogue" tab in
+`MoneyFinancePanel.tsx` (was `CoinCreditPanel.tsx` in CLAUDE.md's own map —
+the panel was merged/renamed since; not fixed in this pass) listing every
+currency, its denominations, and each denomination's dated issue timeline
+(first striking / debasement / reform, coloured by cause). **Scoped down**
+from the plan's own §4.1 design: a functional data listing, not the full
+Victorian-engraved obverse/reverse card art (D7, `goodArt.ts`'s ledger
+treatment) and not a standalone floating window — both real, separate,
+unbuilt illustration/layout work, queued.
+
+**M3 — the parallel ledger's mint-side half.** `Purse`s (§3.1:
+`holder_kind`/`holder_id`/`hub` → coins + bullion) and the mint-striking
+transaction (§3.2): every time a new `Issue` is recorded, a real STRUCK
+quantity is sized from the mint's own throughput and split into seigniorage
+(→ the city treasury's own purse), brassage (→ a household purse at the
+mint — wages), and circulation (→ a local-merchant purse — the honest
+placeholder for "whoever brought the bullion", since `ACTORS_AND_CARRIAGE_
+PLAN.md` already measured ~96% of trade moving on no one's account).
+**Additive, not a mirror**: no existing `wealth`/`treasury` `+=` site is
+touched — this is a genuinely separate ledger computed alongside them,
+exactly D10's "parallel ledger first" calls for, so `sim_fingerprint`
+(which folds neither `purses` nor the catalogue) is unchanged.
+
+**Scoped down, stated plainly**: real bullion CARGO (mined, shipped to a
+mint, sometimes lost at sea — §3.2 step 1) is not wired; the struck
+quantity comes from the mint's already-computed regional throughput/
+bullion-ratio proxy, not a real delivery. Melting, loss, hoarding and wear
+(the sinks) are not implemented, so every issue's `circulating` still
+equals its `struck` exactly — asserted, not assumed, by the new
+`the_coin_ledger_conserves_every_struck_coin` gate (Σ purses == Σ struck ==
+Σ circulating per issue, to the float ulp).
+
+Gates run: `cargo check --lib` clean; `npx tsc --noEmit` clean; `cargo test
+--lib tick::tests` — 275/275 (`simulate_decades_reports_dynamics`
+unchanged); `cargo test --lib econ_` — 6/6 including the multi-seed
+inheritance gate (518s), bit-identical.
+
+**M4 (partial), same session**: `CoinLedgerSummary` (Σ purses by holder
+class, read off M3's ledger) served on `CoinCatalogue` and shown as a stat
+strip atop the Catalogue tab — §4.3's "money stock ledger" bullet, today's
+snapshot only (no time series persisted yet). The market money band
+(§4.2, `CityMarketView`), the exchange-rate matrix and bullion-flow map
+(§4.3's other bullets) are real, unbuilt, queued — the plan's own "Stop
+marker" (M0-M4) is otherwise complete. Gates: `tsc`/`cargo check` clean.
+
+**M5 (mechanism shipped, dose left at 0), same session**: `barter_settlement_
+pass` (§3.5) — a real settlement mechanism, not yet dosed. Deliberately NOT
+woven into `dispatch`'s own carrier cascade (CLAUDE.md §8.5/§8.15's own
+record of N1/N1c/N2/N4 each breaking the hard wealth bound on a smaller
+change than a coin/barter branch there would be) — a wholly separate,
+additive pass over the day's `recent_trades` instead: at `BARTER_DOSE > 0`
+it picks the buyer's own best-surplus good (excluding the one just
+delivered), moves a `BARTER_SPREAD`-discounted quantity of it from the
+buyer's stock to the seller's, and records `diag_barter_trades`/`diag_
+barter_volume`. Exercised through a pure-parameter twin
+(`barter_settlement_pass_e`, the same split N6's `elastic_aggregate_mult`/
+`_e` already uses) at dose 1.0 so the real mechanism is tested without
+touching the shipped constant. Scoped down from §3.5's literal design: the
+payment good moves same-day (no `InTransit` return leg with real transit
+time), and commodity-money naming is not built.
+
+Gates: `cargo check --lib --tests` clean; new `barter_dose_is_a_noop_at_
+zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (`tick::
+tests`) all pass; full `cargo test --lib tick::tests` (278/278) and `econ_`
+(6/6, multi-seed inheritance gate included) both bit-identical at dose 0.
+
+**M6 (mint closure, shipped LIVE — not gated inert), same session**:
+`mark_mint_closures` (§3.7) reads the mint's own city's EXISTING `coin_
+basket` share (already computed by `update_currency_baskets`, no new
+signal) and marks a currency `open = false`/`closed_year` once that share
+has sat below `MINT_CLOSE_SHARE` (5%) for `MINT_CLOSE_YEARS` (15) running.
+**Catalogue-only** — deliberately does NOT touch `TickHub.has_mint`/
+`coin_name` (the real, live coinage mechanism in `decide_coinage`/`apply_
+coinage`, which trust/seigniorage/freight-discount all key off), so unlike
+every other M-slice this one carries no economic-concentration risk and
+ships at its REAL constants rather than gated at an inert dose — the first
+M-slice to do so, and the reason it's safe: it only ever writes a field
+nothing else reads.
+
+Also added the boundary invariant M6's own §3.6 (coin diffusion between
+cities) will need to respect once built: `a_coin_never_reaches_a_city_
+nothing_trades_with` locks down that every purse M3's `strike_issue`
+creates today sits at its own currency's mint hub — real diffusion is
+unbuilt, and this gate is what stops a future change from silently
+teleporting money between cities with no trade relationship instead of
+routing it through a real corridor.
+
+Gates: `cargo check --lib --tests` clean; new `an_unused_mint_closes`
+(direct, deterministic — forces the mechanism via `mark_mint_closures`
+rather than relying on emergent economic decline) and `a_coin_never_
+reaches_a_city_nothing_trades_with` (10-year `dense_world` run) both pass;
+full `cargo test --lib tick::tests` (280/280) and `econ_` (6/6, multi-seed
+inheritance gate included, 538s) both bit-identical.
+
+**M7 (affordability fix mechanism, shipped inert), same session — the same
+change `SETTLEMENT_LIFE_PLAN.md` names as its own L1**: `food_afford_
+adjusted_bal` blends `lack_basic` (the day loop's own smoothed basic-tier
+spending-shortfall — already computed, no new signal) into `update_food_
+and_starvation`'s `bal`, so a household priced out of its ration reads as
+genuinely underfed even when raw stock (`food_have = stock + production`)
+shows a surplus. This is the exact prerequisite `HOUSEHOLD_MONETIZATION_
+DOSE`'s own doc comment names after S7's revert (CLAUDE.md's S7 entry): a
+priced-out household's uneaten ration used to read as the CITY being
+better fed, silencing `unrest_topples_councils`.
+
+Shipped at `FOOD_AFFORDABILITY_DOSE = 0.0` — NOT provably risk-free the way
+M6's closure was (`lack_basic` sums all basic-tier goods, `bal` sums food
+goods only, so blending them is a real behavioural change even before S7's
+own dose is ever raised) — exercised through the pure twin `food_afford_
+adjusted_bal(bal, lack_basic, dose)` at nonzero dose in the two new gates
+rather than touching the shipped constant.
+
+Gates: `cargo check --lib --tests` clean; new `food_affordability_is_a_
+noop_at_zero_dose` (bit-for-bit at every sampled `(bal, lack_basic)` pair)
+and `a_household_priced_out_reads_as_underfed` (the blend only ever pulls
+the reading DOWN, never past what `lack_basic` licenses) both pass; full
+`cargo test --lib tick::tests` (282/282, `unrest_topples_councils` and
+`simulate_decades_reports_dynamics` unchanged) and `econ_` (6/6, multi-seed
+inheritance gate included, 539s) both bit-identical.
+
+**M8 (household purse, shipped closed-loop), same session**: `household_
+ledger_pass` (§3.9, `coinage.rs`) mirrors a hub's existing wage
+(`household_income_pass`'s own formula — read independently, not gated on
+that function's own zero-dosed `HOUSEHOLD_MONETIZATION_DOSE`) as a coin
+deposit into the hub's household purse, then immediately spends the
+identical amount on the ration via the new `take_coin` (M3's missing spend
+side) into the local-merchant purse. A hub with no open mint currency is
+skipped — never invented money.
+
+This is a CLOSED LOOP by construction (deposit and debit are the same
+float), so — exactly like M3 — it needed no dose gate at all: `purses` is
+read by nothing outside `coinage.rs`, so the pass is observe-only and
+bit-identical to every existing gate whatever it computes. What it
+deliberately does NOT build is the real, risky half of §3.9: a household
+that saves, borrows, or is priced out of its ration when the wage falls
+short — that is the actual "paid consumption" R6 flags, and it still waits
+on `FOOD_AFFORDABILITY_DOSE` (M7) being walked first, per the plan's own R6
+("M7 before M8, no exceptions"), which this slice does not violate since
+nothing behavioural moved.
+
+Gates: `cargo check --lib --tests` clean; new `household_ledger_pass_
+deposits_and_immediately_spends_the_wage` (`tick::tests` — the household
+purse empties every pass, the merchant purse receives exactly the wage, a
+currency-less hub creates no purse at all) passes; full `cargo test --lib
+tick::tests` (283/283, `unrest_topples_councils` and `simulate_decades_
+reports_dynamics` unchanged) and `econ_` (6/6, multi-seed inheritance gate
+included, 538.41s) both bit-identical — the existing `the_coin_ledger_
+conserves_every_struck_coin` (M3's own conservation gate) also re-verified
+unaffected, since moving coin between purses cannot change the per-issue
+total it checks.
+
+**What's next**: M9-M11 are each a dosed-from-zero economic change, shipped
+mechanism-first at an inert dose (or live, where provably risk-free like
+M6/M8) and walked up one at a time with its own gate run per step, per §5's
+build rule. The real behavioural half of M8 (paid consumption that can
+price a household out of its ration) needs M7's own dose actually walked
+first, per the plan's own §6 risk R6 — so the natural next real dose-walk
+session is M7/`HOUSEHOLD_MONETIZATION_DOSE` together, not M8/M9's mechanism
+in isolation.
 
 ---
 

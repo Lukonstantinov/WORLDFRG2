@@ -1858,6 +1858,65 @@ export interface MintBrief {
   debt_holders: number;   // number of patrician bondholders
 }
 
+// ── MONEY_AND_COINAGE_PLAN.md M2 · the coin catalogue ─────────────────────────
+
+/** One dated striking of a `CatalogueDenom`. `cause`: 0 First · 1 Debasement ·
+ *  2 Reform (3 NewRuler / 4 WarIssue are queued, not yet produced). M1 ships
+ *  struck/circulating/hoarded/melted/lost at 0 — M3's parallel ledger is what
+ *  will populate them. */
+export interface CatalogueIssue {
+  id: number;
+  denom_tier: number;   // 0 Gold · 1 Silver · 2 Petty
+  denom_name: string;
+  year: number;
+  authority: string;
+  grams: number;
+  fineness: number;
+  struck: number;
+  circulating: number;
+  hoarded: number;
+  melted: number;
+  lost: number;
+  cause: number;
+  cognomen: string;
+}
+
+/** One denomination of a currency (its gold trade coin, silver everyday coin,
+ *  or petty billon), oldest-issue-first. */
+export interface CatalogueDenom {
+  tier: number;
+  name: string;
+  standard_grams: number;
+  issues: CatalogueIssue[];
+}
+
+/** One mint's whole currency card. */
+export interface CatalogueCurrency {
+  mint_hub: number;
+  mint_city: string;
+  name: string;
+  unit_of_account: string;   // e.g. "pound / shilling / penny", "" if unresolved
+  open: boolean;
+  closed_year: number;
+  denoms: CatalogueDenom[];
+  trust: number;
+  current_fineness: number;
+  strength: number;          // headline 0..100, same scale as MintBrief.strength
+}
+
+/** M4 · Σ purses by holder class, today's snapshot (no time series yet). */
+export interface CoinLedgerSummary {
+  total_struck: number;
+  in_city_treasuries: number;
+  in_households: number;
+  in_local_merchants: number;
+}
+
+export interface CoinCatalogue {
+  currencies: CatalogueCurrency[];
+  ledger: CoinLedgerSummary;
+}
+
 /** A3 · one yearly point in a coin's biography (Money panel sparklines). */
 export interface CoinSnapshot {
   year: number;

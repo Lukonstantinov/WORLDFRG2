@@ -241,6 +241,12 @@ export async function campaignGetMints(): Promise<MintBrief[]> {
   return invoke("campaign_get_mints");
 }
 
+/** MONEY_AND_COINAGE_PLAN.md M2 · the coin catalogue — every currency ever
+ *  struck, with its denominations' full issue timelines. */
+export async function campaignGetCoinCatalogue(): Promise<CoinCatalogue> {
+  return invoke("campaign_get_coin_catalogue");
+}
+
 /** v2.0 · the monetary chronicle (mints, debasements, reforms, runs, crashes), newest first. */
 export async function campaignMonetaryChronicle(): Promise<MonetaryEvent[]> {
   return invoke("campaign_monetary_chronicle");

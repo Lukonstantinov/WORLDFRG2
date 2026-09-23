@@ -5701,6 +5701,52 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
+SETTLEMENT_LIFE_PLAN.md           ← ⭐ PLANNED, NOTHING BUILT. How people live,
+                                    earn, eat, die and make trouble in a campaign
+                                    city. Eleven measured findings, headed by F1:
+                                    the famine check reads grain LEFT IN STOCK
+                                    after eating (`update_food_and_starvation`
+                                    runs after the eating loop), so grain the poor
+                                    cannot buy reads as the city being fed — the
+                                    bug that reverted S7, and entitlement failure
+                                    the model cannot express. Also: no wage exists
+                                    and `real_wage_index` is a sentiment blend, not
+                                    an income; population is one float with no
+                                    births, deaths, ages or causes; Pops are
+                                    re-derived yearly with no memory; no housing,
+                                    religion, watch or per-city notables. Fourteen
+                                    slices L0-L13 (instrument · entitlement = MONEY
+                                    M7, one shared change · incomes + Allen welfare
+                                    ratio · annals + a Life tab · STOP MARKER · vital
+                                    rates + age bands · welfare into behaviour ·
+                                    housing/crowding consuming real timber+stone ·
+                                    the settlement year · fire/flood/water · church
+                                    + alms · watch + crime · persistent pops
+                                    (shadowed first) · townspeople), every
+                                    behavioural one dosed from zero, demographic
+                                    gates on a PROVINCED fixture only
+MONEY_AND_COINAGE_PLAN.md         ← ⭐ AGREED IN SCOPE, NOTHING BUILT. Real,
+                                    CONSERVED money: coins are struck at a mint
+                                    from mined bullion, held in purses per holder
+                                    per city, carried in chests on real legs, and
+                                    spent — never `+=`'d into a vault. Measured
+                                    premise (F1): every sale today credits the
+                                    carrier (`production.rs:2297`) with no payer,
+                                    so money is created on every trade. Barter is
+                                    ALWAYS available and settles with real stock
+                                    moving both ways (the payment goods leave the
+                                    seller's stockpile); money just beats it.
+                                    Currencies with 2-3 denominations and dated
+                                    issues, culture-based units of account and
+                                    regional gold:silver ratios, mints that CLOSE
+                                    when their coin goes unused, a Victorian coin
+                                    catalogue with follow-a-coin, a market money
+                                    band, and banks on real reserves with bills
+                                    of exchange settled by specie shipments.
+                                    Slices M0-M11: a PARALLEL LEDGER observes
+                                    first (M0-M4 bit-identical), then barter,
+                                    affordability, wages and the switch-over are
+                                    each dosed from zero
 HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     guild roster unfreeze) + S4 (craft
                                     signatures served) + S5 (transit demand,

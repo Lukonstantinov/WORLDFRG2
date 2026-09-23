@@ -6,11 +6,12 @@ import { CoinMiniMap, CoinMiniMapLegend } from "@ui/campaign/CoinMiniMap";
 import {
   campaignGetMints, campaignGetBanks, campaignGetCrashes, campaignGetSchematics,
   campaignGetWars, campaignCoinUsage, campaignGetSpeculation, campaignMonetaryChronicle,
-  campaignReserves, campaignCoinHistory, previewLandGrid,
+  campaignReserves, campaignCoinHistory, previewLandGrid, campaignGetCoinCatalogue,
 } from "@bridge";
 import type {
   MintBrief, CoinUseCity, BankBrief, CrashRecord, CitySchematic, WarsPayload,
   HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder, CoinSnapshot,
+  CoinCatalogue, CatalogueCurrency, CatalogueIssue,
 } from "@types";
 import { CoinIcon, type CoinMetal } from "@ui/heraldry/CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
@@ -33,8 +34,9 @@ export function MoneyFinancePanel() {
   const meta = useWorldStore((s) => s.meta);
   const worldW = meta?.grid_width ?? 0;
   const worldH = meta?.grid_height ?? 0;
-  const [tab, setTab] = useState<"summary" | "mints" | "reserves" | "banks" | "bubbles" | "shocks" | "schem">("summary");
+  const [tab, setTab] = useState<"summary" | "mints" | "catalogue" | "reserves" | "banks" | "bubbles" | "shocks" | "schem">("summary");
   const [mints, setMints] = useState<MintBrief[]>([]);
+  const [catalogue, setCatalogue] = useState<CoinCatalogue>({ currencies: [], ledger: { total_struck: 0, in_city_treasuries: 0, in_households: 0, in_local_merchants: 0 } });
   const [banks, setBanks] = useState<BankBrief[]>([]);
   const [crashes, setCrashes] = useState<CrashRecord[]>([]);
   const [schem, setSchem] = useState<CitySchematic[]>([]);
@@ -54,6 +56,7 @@ export function MoneyFinancePanel() {
   useEffect(() => {
     if (!open || !active) return;
     campaignGetMints().then(setMints).catch(() => setMints([]));
+    campaignGetCoinCatalogue().then(setCatalogue).catch(() => setCatalogue({ currencies: [], ledger: { total_struck: 0, in_city_treasuries: 0, in_households: 0, in_local_merchants: 0 } }));
     campaignGetBanks().then(setBanks).catch(() => setBanks([]));
     campaignGetCrashes().then(setCrashes).catch(() => setCrashes([]));
     campaignGetSchematics().then(setSchem).catch(() => setSchem([]));
@@ -86,6 +89,7 @@ export function MoneyFinancePanel() {
   const tabs = [
     ["summary", "✦ Overview"],
     ["mints", "🪙 Coin & Mints"],
+    ["catalogue", "📜 Catalogue"],
     ["reserves", "💰 Reserves"],
     ["banks", "🏦 Banks"],
     ["bubbles", "🫧 Bubbles"],
@@ -138,6 +142,8 @@ export function MoneyFinancePanel() {
           ))}
         </div>
       )}
+
+      {active && tab === "catalogue" && <CatalogueTab catalogue={catalogue} />}
 
       {active && tab === "reserves" && <ReservesTab reserves={reserves} />}
 
@@ -469,6 +475,96 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+const ISSUE_CAUSE_LABEL: Record<number, string> = { 0: "first struck", 1: "debased", 2: "reformed" };
+const ISSUE_CAUSE_COLOR: Record<number, string> = { 0: "#8aa8c8", 1: "#e0a020", 2: "#7fd0a0" };
+const DENOM_TIER_LABEL: Record<number, string> = { 0: "Gold", 1: "Silver", 2: "Petty" };
+
+/** MONEY_AND_COINAGE_PLAN.md M2 · the coin CATALOGUE — a numismatic reference
+ *  listing of every currency ever struck, its denominations and their dated
+ *  issue timelines. A first, functional cut of the plan's own §4.1 —
+ *  browse + denomination + issue detail collapsed into one card rather than
+ *  the full Victorian-engraved obverse/reverse art treatment (D7) the plan's
+ *  own design calls for; that illustration work is real, separate, unbuilt
+ *  effort (`goodArt.ts`'s ledger treatment, not `CoinIcon`'s flat heraldry). */
+function CatalogueTab({ catalogue }: { catalogue: CoinCatalogue }) {
+  const l = catalogue.ledger;
+  return (
+    <div style={scroll}>
+      {catalogue.currencies.length === 0 && (
+        <div style={empty}>No currency has been catalogued yet — a mint's first striking opens its entry here.</div>
+      )}
+      {catalogue.currencies.length > 0 && (
+        <>
+          <div style={hint}>
+            Every mint that has ever struck a coin, with its denominations and the dated timeline of issues
+            behind each — first striking, debasement, reform. A first cut of the numismatic catalogue
+            (M2): the full engraved card art is separate, unbuilt work.
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "4px 4px 10px", borderBottom: "1px solid #131e2a", marginBottom: 6 }}
+            title="M3's parallel ledger (§3.1/§3.2) — real Purses computed alongside the existing wealth/treasury numbers, not yet reconciled with them. No coin has ever been spent, melted, lost or hoarded in this ledger yet, so struck and held always agree exactly.">
+            <Stat label="Struck (all-time)" value={fmtk(l.total_struck)} hint="Σ every issue's face value ever struck, this ledger's own count" />
+            <Stat label="In treasuries" value={fmtk(l.in_city_treasuries)} hint="seigniorage collected by minting cities" />
+            <Stat label="In households" value={fmtk(l.in_households)} hint="brassage — mint workers' wages" />
+            <Stat label="With merchants" value={fmtk(l.in_local_merchants)} hint="circulation — whoever brought the bullion (a placeholder; the sim does not yet track a specific bringer)" />
+          </div>
+        </>
+      )}
+      {catalogue.currencies.map((c) => <CurrencyCatalogueCard key={c.mint_hub} c={c} />)}
+    </div>
+  );
+}
+
+function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
+  const [open, setOpen] = useState(false);
+  const strengthColor = c.strength >= 55 ? "#37a05a" : c.strength >= 40 ? "#c8a23a" : "#d08a3a";
+  const totalIssues = c.denoms.reduce((n, d) => n + d.issues.length, 0);
+  return (
+    <div style={card} onClick={() => setOpen((v) => !v)}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+        <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{c.name}</span>
+        {!c.open && <span style={{ color: "#8a6a6a", fontSize: 9 }}>closed {c.closed_year}</span>}
+        <span style={{ flex: 1 }} />
+        <span style={{ color: strengthColor, fontSize: 11, fontWeight: 700 }}>{c.strength.toFixed(0)}</span>
+        <span style={{ color: "#5a7290", fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+      </div>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 3, fontSize: 9, color: "#8aa8c8" }}>
+        <span>{c.mint_city}</span>
+        {c.unit_of_account && <span title="Unit of account (§3.4)">reckoned in {c.unit_of_account}</span>}
+        <span>{c.denoms.length} denomination{c.denoms.length === 1 ? "" : "s"}</span>
+        <span>{totalIssues} issue{totalIssues === 1 ? "" : "s"} struck</span>
+        <span>fineness {(c.current_fineness * 100).toFixed(0)}% · trust {(c.trust * 100).toFixed(0)}%</span>
+      </div>
+      {open && (
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+          {c.denoms.map((d) => (
+            <div key={d.tier} style={{ marginBottom: 8 }}>
+              <div style={{ color: "#cbb88a", fontSize: 10, fontWeight: 700, marginBottom: 3 }}>
+                {DENOM_TIER_LABEL[d.tier] ?? "Denom"} — {d.name} <span style={{ color: "#5a7290", fontWeight: 400 }}>({d.standard_grams.toFixed(1)}g standard)</span>
+              </div>
+              {d.issues.map((iss) => <IssueRow key={iss.id} iss={iss} />)}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IssueRow({ iss }: { iss: CatalogueIssue }) {
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 9.5, padding: "2px 0 2px 8px", borderLeft: "2px solid #1b2a3c" }}>
+      <span style={{ color: "#7a90a8", width: 40, flex: "0 0 auto" }}>{iss.year}</span>
+      <span style={{ color: ISSUE_CAUSE_COLOR[iss.cause] ?? "#9ab0c8", width: 68, flex: "0 0 auto" }}>
+        {ISSUE_CAUSE_LABEL[iss.cause] ?? "issue"}
+      </span>
+      <span style={{ color: "#9ab0c8" }}>{iss.cognomen}</span>
+      <span style={{ flex: 1 }} />
+      <span style={{ color: "#8aa8c8" }}>{(iss.fineness * 100).toFixed(0)}% fine</span>
+      <span style={{ color: "#6a86a6" }} title="Struck by">{iss.authority}</span>
     </div>
   );
 }

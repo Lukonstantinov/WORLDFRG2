@@ -1,0 +1,535 @@
+# Money and Coinage Plan — real money, mints, banks and barter
+
+> **Status: M0-M8 SHIPPED (M4/M5/M6/M7/M8 partial — see their own rows),
+> gated, bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. The plan's own
+> "Stop marker" landing is complete, M5/M7's mechanisms are real code
+> shipped inert, M6's mint closure ships LIVE (catalogue-only, so it carries
+> no economic risk), and M8's household purse ships as a closed,
+> self-balancing parallel-ledger pass that needs no dose gate at all. M9-M11
+> (the wealth/purse switch-over, banks on real reserves, price-level
+> feedback) are each explicitly dosed-from-zero work per §5's own build
+> rule — rushing a dose walk without its own gate sweep is the exact mistake
+> §8.15 (CLAUDE.md) already recorded this project making five times, so
+> each is shipped MECHANISM-FIRST at an inert dose (or, where provably
+> risk-free like M6's closure and M8's closed loop, shipped live) and
+> walked up with its own gate run, never blind. The real behavioural half of
+> M8 (a household priced out of its ration) still waits on M7's own dose
+> being walked first, per the plan's own R6.**
+> Written from a brainstorm with the maintainer (2026-09-23). Supersedes
+> nothing — it extends `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1
+> relies on) and `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes
+> retired on default, arrears, book diversification — are prerequisites here,
+> already shipped).
+
+The premise, in one sentence: **a coin should be a thing that is struck from
+metal someone mined, carried by someone to somewhere, and spent by someone to
+someone — never a number that appears in a vault.**
+
+---
+
+## 1. What is true today (measured by reading the code)
+
+These are the findings this plan exists to answer. Each is stated with where it
+lives so it can be re-checked rather than trusted.
+
+- **F1 · Money is created from nothing on every sale.** `production.rs:2297`
+  (`self.houses[oi].wealth += profit`) and `production.rs:2516` (the round-trip
+  return leg) credit the carrying house. Nobody's purse goes DOWN:
+  `hubs[b].export_earn` / `hubs[a].import_spend` are counters, the destination's
+  population consumes without paying (`eat = need.min(stock)` has no
+  counterparty — `CONSUMPTION_AND_GOODS_REVIEW.md`), and treasuries, bank
+  reserves and seigniorage are all bare `+=`. There are ~150 `wealth/treasury
+  +=/-=` sites across 18 tick files. There is no *quantity* of money in the
+  world, only scores.
+- **F2 · A coin is not an object.** It is `TickHub.coin_name` on the minting
+  city, identified by that hub's index. One coin per mint, forever; a debased
+  coin and its reformed successor are the same coin; there are no
+  denominations. Names come from a 10-entry list (`money.rs::coin_denomination`),
+  so a large world has several unrelated "Ducats".
+- **F3 · Money never forms a price.** `live_price = base·(need/stock)^k`
+  (`production.rs:639`) is in grain-equivalents. `price_level` is computed by a
+  real quantity-theory loop (`update_price_levels`) and read by nothing except
+  the inflation tax on fortunes and the panels.
+- **F4 · Money's only effect on trade is usually off.** `coin_discount` shaves
+  ≤10% freight when trust ≥ `RESERVE_TRUST_MIN` (0.55); the standing run holds
+  average trust near 0.43 from year 30.
+- **F5 · Crossing currencies is free.** `coin_exchange` prices only a bank's own
+  bill income; a merchant pays no spread.
+- **F6 · Barter exists only as a label.** `settle_coin = -1` means "barter — no
+  coin physically reaches here" (`update_currency_baskets`), and it costs
+  nothing and does nothing.
+- **F7 · The coin basket is real and good.** `coin_basket` already spreads coins
+  along real trade partners with sticky adoption — the one piece of this system
+  that already obeys "coins travel". It is shown only as an overlay; the city
+  market never mentions money.
+- **F8 · Households have a purse field and nothing else.** `household_wealth`
+  exists; `household_income_pass` is gated by `HOUSEHOLD_MONETIZATION_DOSE = 0.0`,
+  whose dose walk was REVERTED because `update_food_and_starvation` reads raw
+  stock, not what households could afford (CLAUDE.md §5, S7). That fix is a
+  hard prerequisite for paid consumption here.
+
+---
+
+## 2. Decisions (maintainer, 2026-09-23)
+
+| # | Decision |
+|---|---|
+| D1 | **Display first, then dose.** Every behavioural change ships at a dose of zero and is walked up one step at a time against the gates (§6). |
+| D2 | **Issues + denominations.** A mint's currency has 2-3 denominations (gold trade coin / silver everyday coin / copper-billon petty); every debasement or reform is a new dated ISSUE. |
+| D3 | **All four surfaces**: the coin catalogue, the market money view, money statistics, the bank redesign. |
+| D4 | **Cities keep their own coins; only the successful mints survive.** A mint may CLOSE when demand for its coin falls. No realm-imposed royal coin in this plan (queued, §9). |
+| D5 | **No counterfeiting or clipping crimes** for now. Wear is allowed as a plain physical rate. |
+| D6 | **Units of account vary by culture/region**, and the gold:silver ratio in a region follows the metal actually present there. |
+| D7 | **Victorian engraved art** for the catalogue (the `goodArt.ts` ledger treatment, not the flat heraldic `CoinIcon`). |
+| D8 | **Follow a coin** from the catalogue — its events reach the news feed. |
+| D9 | **Money is real and conserved.** Coins are struck, travel, and are spent; nothing appears in a vault. |
+| D10 | **Parallel ledger first.** The conserved ledger runs beside today's wealth numbers until it is measured, then replaces them in dosed steps. |
+| D11 | **Purses per holder per city.** A house's coin is somewhere; moving it needs a shipment or a bill of exchange. |
+| D12 | **The full household loop.** Households are paid wages and pay for what they consume. |
+| D13 | **Barter is always available — money is simply better.** A world starts in barter; credit houses and mints arrive later and coin spreads by trade. Barter never disappears: a trade with no acceptable coin still happens as a goods-for-goods exchange, with REAL stock moving both ways. |
+
+On D13's order ("banks before coins"): it has a real precedent. Mesopotamian
+temples and palaces kept accounts in weighed silver and grain for two millennia
+before the first coin (Lydia, 7th c. BC), and Ptolemaic Egypt ran state grain
+banks. So the sequence **barter → weighed metal and ledger houses → coin** is
+modelled on history, not invented.
+
+---
+
+## 3. The model
+
+### 3.1 Holders and purses
+
+A **Purse** is `(holder, hub) → { coins: Vec<(issue_id, count)>, bullion: [f32; 3] }`
+— sparse, only non-empty entries stored. Holders:
+
+| Holder | Where its purses sit |
+|---|---|
+| City treasury | its own hub |
+| House | seat + every office/bailo/warehouse hub |
+| Bank | seat + every branch (these are its VAULTS; deposits are claims on them) |
+| Households | one purse per hub (`household_wealth` becomes its reading) |
+| Local merchants | one purse per hub — the carriers of today's ~96% ownerless trade (`econ_measure_carrier_mix`) |
+| Mint | its hub — holds bullion awaiting striking |
+| In transit | a coin chest riding an `InTransit` leg |
+
+Memory: ~1,200 hubs × a few holders × `COIN_BASKET_N` issues, sparse — well
+inside the budget `trade_last` already uses. Ordering of any fold over purses
+must be by key, never by HashMap iteration (the basket determinism lesson,
+`docs/SCOREBOARD.md`).
+
+### 3.2 Bullion → mint → coin (the ONLY source of money)
+
+1. Silver/gold (and copper for petty coin) are mined as goods (§8.16 deposits,
+   `Mine` estates). Bullion is ordinary cargo: it travels to a mint by the same
+   dispatch/relay machinery as any good, and can be lost at sea.
+2. A mint strikes what bullion it holds, at the fineness its council chooses
+   (`decide_coinage`'s existing decision, bounded by `mint_bullion_cap`). The
+   striking splits the metal into: **seigniorage** (the council's cut → treasury,
+   in coin), **brassage** (the cost of striking → mint workers' wages, i.e.
+   household purse), and **circulation** (to whoever brought the bullion).
+3. **Sinks** (the only ways money leaves): melting (a coin worth more as metal
+   than face — the D5-compatible form of Gresham), loss at sea with its chest,
+   hoards buried in sack or plague (§4.4), and a small wear rate per year.
+4. **Conservation invariant**: `Σ coins everywhere = Σ struck − Σ melted − Σ lost
+   − Σ buried`, per issue, checked every year in debug builds and by a gate.
+
+### 3.3 Denominations and issues
+
+```
+Currency   { mint_hub, name_root, unit_of_account, denominations: [Denom; 1..=3], open: bool, closed_year }
+Denom      { tier: Gold|Silver|Petty, name, standard_grams, issues: Vec<IssueId> }
+Issue      { id, denom, year, authority (council house / realm dynasty head),
+             grams, fineness, struck, circulating, hoarded, melted, lost,
+             cause: First|Debasement|Reform|NewRuler|WarIssue, cognomen }
+```
+
+- A small polis typically strikes only silver + petty and uses foreign gold for
+  large payments (historically correct — small cities rarely struck gold). The
+  tiers a mint can strike follow the metals its region's bullion supplies.
+- **Naming** replaces the 10-name list: a root from the culture's language kit
+  (`names.rs`, the same machinery settlements use) + a tier suffix, plus a
+  cognomen per issue ("the Lion Grosso", "Ducat of Doge Vitale", "the Black
+  Money of 1261"). No two currencies share a name within a world.
+
+### 3.4 Units of account and regional ratios (D6)
+
+- Each culture carries a unit-of-account ladder (e.g. 1 : 20 : 12 pound/shilling/
+  penny; 1 : 12 : 8; 1 : 60), resolved once per culture like `culture_rules`
+  (§8.15) and never re-rolled.
+- Prices are WRITTEN in the everyday silver coin's unit of account. Gold floats
+  against it: a region's gold:silver ratio is derived from the gold and silver
+  actually present in that region's purses (not a world constant), so a new
+  silver strike visibly moves the local price of gold, and money changers profit
+  from the gap between regions.
+
+### 3.5 Barter — always available, never free (D13)
+
+Barter is the fallback settlement of EVERY trade, not an era that ends. What
+changes over the campaign is how often money is available to beat it.
+
+**Mechanics of a barter trade.** A merchant delivering good X to hub B is paid
+not in coin but in goods FROM B's own stock — the goods B values least relative
+to what the merchant can sell at home (B's surplus, ranked by the same live price
+gap dispatch already reads). So a barter settlement **moves stock both ways**:
+
+- X is ADDED to B's stockpile (as today);
+- the payment goods LEAVE B's stock and ride home with the merchant as a return
+  cargo (an `InTransit` leg, `phase = 1`), where they are sold or bartered again.
+
+This is the requirement that barter must visibly feed some goods INTO a city's
+stockpile and send others OUT — a city in barter shows both columns in its
+market book, rather than trade silently happening with nothing handed back.
+
+**Why money is better** — barter carries three frictions that coin removes:
+
+1. **Double coincidence**: if B holds nothing the merchant can resell at a
+   margin, the trade is smaller (or does not happen). Measured by how much of the
+   delivered value found an acceptable payment good.
+2. **Valuation loss** (`BARTER_SPREAD`): goods-for-goods settles at a worse rate
+   than coin — the merchant discounts goods he must carry and resell.
+3. **Carriage of the payment**: the return cargo needs a hull/caravan slot; coin
+   in a purse does not.
+
+**Commodity money** emerges per market: the staple most often accepted as
+payment there (grain, cloth, salt, cattle — whichever has the widest acceptance
+in B's recent barter settlements) becomes the local unit, and a barter market's
+prices read "reckoned in measures of barley". This costs one argmax over the
+hub's recent settlements; nothing new is persisted beyond its name.
+
+A trade chooses coin when both sides can use it (the seller's hub accepts an
+issue the buyer holds) and falls back to barter otherwise. Nothing forbids
+barter in a monetised city; it just loses.
+
+### 3.6 The three monetary stages, spreading by trade
+
+| Stage | Where it exists | What it does |
+|---|---|---|
+| **Barter** | everywhere, always (§3.5) | goods-for-goods; commodity money emerges |
+| **Weighed metal + ledger houses** | where bullion reaches and a house/temple opens a credit house | settlement by ledger entry between ACCOUNT HOLDERS in that city and its branches; bullion changes hands by weight (with a weighing cost) |
+| **Coin** | a city holding a ledger house, reachable bullion, a solvent council and enough trade charters a mint (extends today's `has_mint` charter gate) | stamped coin removes the weighing cost; coin reaches other cities only in purses and chests |
+
+Coin use therefore diffuses outward from mints along real routes over decades;
+isolated regions stay in barter longer. The existing `coin_basket` (F7) becomes
+a READING of what the purses in a city actually hold, rather than an eased
+target.
+
+### 3.7 Mints close on demand (D4)
+
+A mint strikes only when bullion reaches it AND its coin is accepted. When its
+own coin's share of the purses in its own city stays below
+`MINT_CLOSE_SHARE` for `MINT_CLOSE_YEARS`, the mint closes: the council stops
+striking, the city settles in the foreign coin it actually holds, and the
+currency is marked closed in the catalogue (its surviving coins still circulate
+and wear out). A closed mint may re-charter later through the ordinary gate.
+Over centuries this concentrates the world onto a few reserve coins (bezant →
+dinar → florin → ducat) — the league table of §5.3.
+
+### 3.8 Every trade is a payment
+
+- **Buying at A**: the merchant's purse (at A — D11) pays A's sellers: local
+  merchants, estate owners, or the city (tariff). Coin moves between purses.
+- **Selling at B**: B's buyers pay the merchant from THEIR purses. Buyers with
+  no coin → B cannot absorb the cargo at that price → the price falls or the
+  trade falls back to barter.
+- **Returning home**: profit in coin rides home in a CHEST on the return leg, or
+  stays at B in the house's purse there (if it has an office), or is sent by a
+  bill of exchange (§3.10).
+- **Trade deficits drain coin.** A city that keeps importing more than it sells
+  sends its silver away: a real bullion famine, coin shortage, falling prices,
+  more barter.
+
+### 3.9 The household loop (D12)
+
+- **Wages**: estates, manufactories, mints, yards and fleets pay households for
+  labour, from the owner's purse at that hub.
+- **Consumption is a purchase**: households buy their ration from the city's
+  sellers out of the household purse.
+- **Prerequisite (S7's lesson)**: `update_food_and_starvation` must read what
+  households could AFFORD (the spending shortfall, `lack_basic`), not raw stock —
+  otherwise grain the poor cannot buy reads as the city being fed. This fix
+  lands BEFORE paid consumption is dosed.
+- The STRUCTURAL ration (`needs_struct`) stays untouched, as N6 requires.
+
+### 3.10 Banks on real reserves
+
+- **Deposits** are coins actually in the vault; **notes** and deposits are claims
+  on it. A loan hands out real coins, so reserves really fall; a run is a real
+  drain; a failure means depositors lose real coin.
+- **Loans are requested, not pushed**: a house applies for a named purpose
+  (fleet, estate, mine, war levy, ransom); the bank prices it by the borrower's
+  track record, collateral and the local rate, and may REFUSE — and a refusal is
+  chronicled. (Builds on `MONEY_MINES_AND_GOODS_PLAN.md` slices 2-3: arrears and
+  borrower-share caps, already shipped.)
+- **Local interest rates** emerge from vault depth, loan demand and coin trust,
+  per city. Historical check: rates falling from ~20% toward ~5% where banking
+  matured (Italy 13th-15th c., Amsterdam 17th c.).
+- **Bills of exchange**: a merchant pays coin into branch A and is paid at
+  branch B — no coin moves. Branches net their balances a few times a year and
+  settle the imbalance with a REAL specie shipment (a chest, which can be lost).
+  This is why banks exist, and the bills/branches network is the thing to watch.
+- **Money changers**: cross-currency payments pay a spread, to a bank where one
+  is present, else to local merchants. Fixes F5.
+
+---
+
+## 4. Surfaces (the UI)
+
+### 4.1 The coin catalogue (a new floating window)
+
+Modelled on a numismatic reference book, Victorian engraved treatment (D7).
+
+- **Browse**: a grid of coin cards grouped by currency; filters for metal,
+  region, realm, era and status (circulating / closed / debased / reserve coin).
+- **Coin card**: obverse and reverse drawn procedurally in the `goodArt.ts`
+  ledger style — obverse the city's arms (`CoatOfArms`) or the issuing ruler's
+  where a realm dynasty struck it, reverse a denomination motif, metal tint,
+  visible wear on old issues, the rim legend in the local language kit.
+- **Denomination page**: issue timeline (fineness steps down on debasement, back
+  up on reform), weight chart, struck-per-year, circulation map (the basket
+  overlay filtered to this coin), exchange value against the strongest reserve
+  coin, a one-line biography from `coin_history`.
+- **Issue page**: real figures — struck / circulating / hoarded / melted / lost —
+  and its problems: debased X% below the previous issue, worn to Y% of standard,
+  called in, demonetised, disappearing into hoards.
+- **Hoards**: a city sacked (`apply_war_defeat_consequences`) or struck by plague
+  buries part of the coin in its purses; the hoard is recorded ("Hoard of Vethra,
+  1312: 400 grossi, 12 foreign ducats") and those coins leave circulation.
+- **Follow a coin** (D8): a pin on any currency; its mintings, debasements,
+  large payments, drains from a city, hoards and mint closure go to the news feed.
+
+### 4.2 The market money band (`CityMarketView`)
+
+- **Money-changer's table**: coins in use here by denomination, their share of
+  payments, rate in the local unit of account, the changer's spread. The home
+  coin is marked; a dominant foreign coin reads "foreign money rules here".
+- **Prices in local money** ("Grain · 3 s 4 d / measure"), or in the commodity
+  money in a barter market, with a toggle back to grain-equivalents.
+- **Price breakdown** for any good: base value → scarcity (need/stock) → freight
+  → tariff → local price level → currency agio, each as a multiplier plus a
+  phrase ("scarce: ×1.8 · stock covers 40 days").
+- **How today's trade was paid**: gold / silver / petty / bills / BARTER — the
+  barter share shows which goods came in and which went out as payment (§3.5).
+- **Money health strip**, quiet unless wrong: coin shortage, debased home coin
+  (−18%), barter-dominant market, bank branch present.
+
+### 4.3 Money statistics (dashboard; extends `MoneyFinancePanel`)
+
+- **Exchange-rate matrix**: reserve coins as columns, each currency's rate and
+  year-on-year change as rows (a Rialto rate sheet).
+- **Per currency**: money stock, inflation, price level, seigniorage, gold:silver
+  ratio, all over time.
+- **Money stock ledger**: struck vs melted vs lost vs hoarded, world and per
+  currency — the conservation invariant as a chart.
+- **Bullion flows**: trade-balance arrows on the map, silver draining from
+  deficit to surplus cities; bullion famines as events.
+- **Monetisation map**: the share of each city's trade settled in coin vs barter
+  vs bills — the three stages spreading over the centuries.
+- **Reserve-coin league table** over centuries (§3.7).
+
+### 4.4 The bank redesign surfaces
+
+Loan book by purpose and borrower, refused applications, per-city interest rate
+chart, a live run panel (deposits draining day by day, reserve coverage, the
+outcome — rescued / wound down / collapsed — from the existing
+`resolve_bank_failure`), branch settlement map (net imbalances and the specie
+chests that settle them).
+
+---
+
+## 5. Slices
+
+Each slice: what it builds, its dose, and the gate that is NOT its own target
+(§2.4). Routing per §2.8: every slice touching `tick/` runs `cargo test --lib
+tick::tests` + `econ_`; every frontend slice runs `npx tsc --noEmit`.
+
+| # | Slice | Dose / effect | Gate |
+|---|---|---|---|
+| **M0** | ✅ SHIPPED 2026-09-23. **Instrument**: `econ_measure_money_creation` (`#[ignore]`d). Scoped down from a literal per-SITE breakdown (~150 call sites — queued) to per HOLDER CLASS: house wealth / hub treasury / bank reserves. | none (diagnostic) | ran; number on `SCOREBOARD.md` 2026-09-23 |
+| **M1** | ✅ SHIPPED 2026-09-23. **Coin data model** (`coinage.rs`): `Currency`/`Denom`/`Issue` recorded from the decisions `decide_coinage` already makes; units of account per culture (§3.4). Currency naming still rides the existing `coin_name` string (deduplicated) — full culture-rooted naming (§3.3's own ask) is real M2 UI-adjacent polish, not done here. | observe only — bit-identical | `sim_fingerprint` unchanged (verified: no folded field touched); `every_currency_name_is_unique_in_a_world` (`tick::tests`) |
+| **M2** | ✅ SHIPPED 2026-09-23. **Catalogue surface**: `campaign_get_coin_catalogue` (a pure read of `currencies`/`issues`/`units_of_account`) + a "📜 Catalogue" tab in `MoneyFinancePanel.tsx` — every currency, its denominations, and each denomination's dated issue timeline. **Scoped down**: a functional data listing, not the full Victorian-engraved obverse/reverse card art (D7) or a standalone floating window (§4.1's own design) — both real, separate, unbuilt illustration/layout work. | UI only | `tsc` clean; `cargo check --lib` clean |
+| **M3** | ✅ SHIPPED 2026-09-23. **Parallel ledger, mint side**: `Purse`s (§3.1) + the mint-striking transaction (§3.2) — every new `Issue` sizes a real STRUCK quantity from the mint's own throughput and splits it into seigniorage (city treasury purse) / brassage (household purse) / circulation (local-merchant purse). Additive — no existing `wealth`/`treasury` `+=` site is touched or mirrored; this is a genuinely separate ledger computed alongside them, per D10. **Scoped down**: real bullion CARGO (mined, shipped, sometimes lost at sea) is not wired — the struck quantity is sized from the mint's existing regional throughput/bullion-ratio proxy, not a real delivery; melting/loss/hoarding/wear (the sinks) are not implemented, so every issue's `circulating` still equals its `struck` exactly. | observe only — bit-identical (purses are read by nothing else) | `sim_fingerprint` unchanged; `the_coin_ledger_conserves_every_struck_coin` (tests.rs) — Σ purses == Σ struck == Σ circulating per issue, to the float ulp |
+| **M4** | ✅ SHIPPED 2026-09-23 (partial). **Money stock ledger** (§4.3's own bullet): `CoinLedgerSummary` — Σ purses by holder class, a snapshot of M3's ledger — served on `CoinCatalogue` and shown as a stat strip atop the Catalogue tab. **Not done**: the market money band in `CityMarketView` (§4.2 — coins-in-use table, prices in local money, the barter/coin split), the exchange-rate matrix and bullion-flow map (§4.3's other bullets), and a TIME SERIES for the ledger (today's snapshot only — no yearly sample is persisted). All real, unbuilt, queued. | UI only | `tsc` clean; `cargo check --lib` clean |
+| **M5** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0. **Barter as a real settlement** (§3.5): `barter_settlement_pass` — goods-for-goods, the payment good leaving the buyer's own stock for the seller's, priced by `BARTER_SPREAD`. **Deliberately NOT woven into `dispatch`** (too fragile to touch blind — see the function's own doc comment); a wholly separate additive pass over the day's `recent_trades` instead, gated by `BARTER_DOSE = 0.0`. Commodity money (§3.5's other half) and the real `InTransit` return leg (this cut moves stock same-day, no transit time) are not built — queued. | shipped INERT (dose 0.0 = true no-op); walking the dose is real future work, not attempted | `sim_fingerprint`/`econ_` bit-identical at dose 0; new `barter_dose_is_a_noop_at_zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (all `tick::tests`, exercised via the pure-parameter twin `barter_settlement_pass_e` at dose 1.0) |
+| **M6** | ✅ MINT CLOSURE SHIPPED 2026-09-23 (partial), LIVE. `mark_mint_closures` (§3.7): reads the mint's own city's EXISTING `coin_basket` share (already computed by `update_currency_baskets`) and marks `Currency.open = false`/`closed_year` after `MINT_CLOSE_YEARS` (15) below `MINT_CLOSE_SHARE` (5%). Catalogue-only — does NOT touch `TickHub.has_mint`/`coin_name` (the real, live coinage mechanism), so it carries no economic-concentration risk and ships at its real dose rather than gated inert. **Not built**: the real economic effect of closure (the council actually stops striking / the city settles in a foreign coin), the three named STAGES (ledger houses, weighed bullion — §3.6's diffusion is still directly gated by the boundary the M6 test below locks down), and the extended mint charter. All queued. | closure LIVE (real dose, no risk); the stage/diffusion mechanism and the real striking-side effect are unbuilt | `an_unused_mint_closes`, `a_coin_never_reaches_a_city_nothing_trades_with` (both `tick::tests`) |
+| **M7** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0 (same change as `SETTLEMENT_LIFE_PLAN.md` L1). **Affordability fix**: `food_afford_adjusted_bal` blends `lack_basic` (the day loop's own smoothed spending-shortfall signal) into `update_food_and_starvation`'s `bal`, so a household priced out of its ration reads as genuinely underfed even when raw stock (`food_have`) shows a surplus — the exact prerequisite `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment named after its S7 revert. Gated by `FOOD_AFFORDABILITY_DOSE = 0.0`, since `lack_basic` (all basic-tier goods) and `bal` (food goods only) are different baskets and blending them is a real behavioural change even before S7's own dose is ever raised — not provably risk-free the way M6's catalogue-only closure was. | shipped INERT (dose 0.0 = true no-op, bit-for-bit); walking it together with `HOUSEHOLD_MONETIZATION_DOSE` is the real next dose-walk session, not attempted here | `sim_fingerprint`/`econ_`/`unrest_topples_councils` bit-identical at dose 0; new `food_affordability_is_a_noop_at_zero_dose`, `a_household_priced_out_reads_as_underfed` (both `tick::tests`, via the pure twin `food_afford_adjusted_bal`) |
+| **M8** | ✅ PARALLEL LEDGER SHIPPED 2026-09-23 (scoped down). `household_ledger_pass` (§3.9): monthly, at every hub with an open mint currency, mirrors `household_income_pass`'s own wage formula as a coin deposit into the hub's household purse, then immediately debits the identical amount back out (via the new `take_coin`, M3's missing spend side) into the local-merchant purse — a household's wage spent on its ration in the same month, a closed loop by construction. A hub with no open currency is skipped, never invented money. **Scoped down from §3.9's real design**: this does NOT let a household save, run into debt, or be priced out of its ration when the wage can't cover it — the actual behavioural "paid consumption" R6 flags, which needs `FOOD_AFFORDABILITY_DOSE` (M7) walked FIRST per the plan's own R6 ("M7 before M8, no exceptions"). Because `purses` are read by nothing outside `coinage.rs` (same as M3), this is observe-only and needs no dose gate of its own. | observe only — bit-identical (purses read by nothing else) | `sim_fingerprint`/`econ_` bit-identical; new `household_ledger_pass_deposits_and_immediately_spends_the_wage` (`tick::tests`) — the household purse empties every pass, the merchant purse receives exactly the wage, no currency ⇒ no purse |
+| **M9** | **The switch-over**: house wealth / treasuries / bank reserves BECOME the ledger (coins + goods + claims), blended from the old numbers by a dose 0 → 1. | the big recalibration | `simulate_decades_reports_dynamics` (bounded, finite, turnover), full `econ_`, multi-seed inheritance gate, re-tuned at each step; SCOREBOARD row per step |
+| **M10** | **Banks on real reserves** (§3.10): requested loans, local rates, bills of exchange, branch specie settlement, money-changer spreads. | dosed from 0 | `econ_measure_finance` lifespan and failure rate; interest-rate trend against the historical band |
+| **M11** | **Price level into prices**: money scarcity and debasement move `live_price`; regional gold:silver ratios live. | last and riskiest, dosed from 0 | `econ_fidelity_scorecard` (grain CV, price/distance gradient) must not regress; may not ship |
+
+**Stop marker**: M0-M4 is a coherent landing on its own — the diagnosis measured,
+coins as real catalogued objects, and a market and dashboard that show money —
+with the simulation bit-identical. Everything from M5 changes the economy.
+
+**Build rule for M5-M11**: one dose at a time, the others pinned at zero
+(`ACTORS_AND_CARRIAGE_PLAN.md` §5.2). Three doses per session is the ceiling
+(`HOUSES_GUILDS_AND_MARKET_PLAN.md` §9).
+
+---
+
+## 6. Risks
+
+- **R1 · The switch-over (M9) moves every number.** House wealth, the wealth
+  bound, tiers, realms, wars and banks all rest on the created-from-nothing
+  profit (F1). A conserved economy is poorer until the money stock grows, so
+  expect deflation and fewer houses at first. Mitigation: the parallel ledger
+  runs long enough to show the gap before anything switches, and M9 is dosed.
+- **R2 · Deflation spiral.** If bullion supply lags trade growth, prices fall
+  and debts grow in real terms. This happened historically (the 15th-century
+  bullion famine) and is a feature to show, not to suppress — but the dynamics
+  test must not see houses wiped out en masse.
+- **R3 · Determinism.** Purses and baskets are maps; every fold iterates in key
+  order (the coin-basket bug on `SCOREBOARD.md` already paid for this lesson).
+- **R4 · Performance.** Every trade gains a payment. Keep purses sparse and
+  flat, resolve the payer/payee indices once per dispatch round (the
+  `house_for_indexed` memo pattern, §5.5), and confirm with
+  `bench_campaign_tick_large` and `sim_fingerprint`.
+- **R5 · The inheritance gate** has been perturbed five times; a coronation
+  moves a fortune at once, and now so will a bank failure. Isolate with a
+  `suppress_*` flag only if the effect is a confounder, never to hide a real
+  break (§8.15).
+- **R6 · Households priced out of food** — the reverted S7 walk. M7 before M8,
+  no exceptions.
+  **Tried again 2026-09-23 with M7's own fix live** (`HOUSEHOLD_MONETIZATION_
+  DOSE` and `FOOD_AFFORDABILITY_DOSE` both raised to 0.02, `cargo test --lib
+  tick::tests`) — REVERTED. `unrest_topples_councils` still failed, the
+  IDENTICAL failure mode the original S7 walk hit, meaning M7's affordability
+  fix is not by itself sufficient to close the gap at this dose (either the
+  dose pairing is wrong, or `lack_basic`'s own smoothing lags too far behind
+  the priced-out shortfall for `update_food_and_starvation` to catch it in
+  time — not disentangled). Two OTHER real gate failures surfaced at the same
+  trial and are recorded separately since they are not specific to this dose
+  pairing: `n1_bind_stays_healthy_on_a_realistically_dense_world` (a
+  wealth-concentration regression on the N1 staging gate — plausibly the
+  same "everything is chaotic-sensitive" effect §8.15 already documents for
+  this exact pair of constants, not confirmed) and, more concerning,
+  `the_coin_ledger_conserves_every_struck_coin` failed on a **pure f32
+  summation drift** (purses held 51.98718 against a stamped `circulating` of
+  51.990627 — 0.007% relative, past the test's 1e-3 absolute tolerance) with
+  NO logic bug found in `add_coin`/`take_coin`/`household_ledger_pass` (each
+  add/take pair in M8's own loop is bit-exact by construction — `count.min(
+  remaining)` never performs arithmetic when the purse was just topped up by
+  the exact amount being taken). This is very likely ordinary f32 rounding
+  error compounding over many more `household_ledger_pass` cycles than the
+  standard M7/M8 gate run exercises (the dose change ripples chaotically into
+  `trade_wealth`, which sizes M8's own wage, and so how many hubs run a
+  nonzero-wage cycle each month) — a latent numerical fragility in the
+  Purse ledger's f32 accumulators, not a conservation LOGIC bug, and real
+  regardless of whether this dose walk is ever resumed. Reverted both
+  constants to 0.0; `tick::tests` re-confirmed 283/283 clean immediately
+  after. Queued, not chased further this session: (a) a genuinely different
+  dose pairing or a fix to `lack_basic`'s lag before re-attempting the walk,
+  (b) tightening `the_coin_ledger_conserves_every_struck_coin`'s tolerance
+  or moving the Purse ledger's running totals to f64 if heavier exercise
+  (M9's eventual switch-over will run this ledger far harder than M8 ever
+  does today) makes the drift worse.
+
+  **Follow-up, same day: two real bugs found and FIXED, independent of the
+  dose walk itself.** Root-causing WHY `unrest_topples_councils` fails
+  (rather than accepting "not disentangled") found the actual mechanism,
+  and it was neither the dose pairing nor `lack_basic`'s lag:
+
+  1. **`household_income_pass`'s own S7 code (pre-existing, not new this
+     session) created money from nothing.** `civic_pool += spend` credited
+     the FULL ration cost unconditionally, while `household_wealth -= spend`
+     was merely clamped to 0 — so whenever a household couldn't afford the
+     full `spend`, the shortfall was struck as fresh civic money every
+     single day (rule 18). Measured directly (`diag_household_wage_civic_
+     pool_offset`, `tick::tests`, `#[ignore]`d): at dose 0.02, `civic_pool`
+     reached **197,485** over 5 years against a wage of a few units a month;
+     `sent_prosperity` saturated to **1.000** and `commoner_wealth` to
+     **950.897** (baseline, dose 0: 0.000 / 0.012 / 0.086). Both feed
+     NEGATIVE terms in `update_unrest`'s target (`cities.rs`), so the
+     fabricated prosperity signal swamped the real `lack_basic`/`starving`
+     distress — unrest fell from 0.803 (dose 0, no household mechanism at
+     all) to 0.353 (dose 0.02, buggy), which is exactly why zero revolts
+     fired. **Fixed**: `paid = spend.min(household_wealth)`, crediting
+     `civic_pool` only what the household purse actually held.
+  2. **`take_coin` (M8, this session's own code) drained a purse in plain
+     vector order with no regard for `issue_id`.** A household purse that
+     already held an older issue's coin (M3's mint brassage lands in the
+     same `HOLDER_HOUSEHOLD` purse) could have `household_ledger_pass`'s
+     same-month deposit-then-withdraw round trip drain the OLDER issue
+     instead of the one just deposited, while the fresh deposit sat
+     untouched — silently relabelling coin from one issue to another,
+     conserved in total but not per issue, exactly what `the_coin_ledger_
+     conserves_every_struck_coin` checks (measured: issue 6 short by ~0.003
+     of ~34). **Fixed**: `take_coin_issue`, targeting only the entry for
+     the issue just deposited; `household_ledger_pass` now uses it, and the
+     now-unused generic `take_coin` was deleted rather than left dead.
+
+  **With BOTH fixes, at `HOUSEHOLD_MONETIZATION_DOSE = 0.02` alone (`FOOD_
+  AFFORDABILITY_DOSE` left at 0.0)**: `unrest_topples_councils` now PASSES
+  — the fix alone (no M7 involvement) resolves the exact failure the
+  original S7 walk hit. `civic_pool`/`sent_prosperity`/`commoner_wealth`
+  read 0.000 / 0.116 / 0.118 (sane, bounded) and unrest reads 0.717 (close
+  to the honest dose-0 baseline of 0.803). But the FULL `tick::tests` suite
+  at this dose still shows **2 remaining failures**, so the dose is NOT yet
+  safe to ship: `simulate_decades_reports_dynamics` (a house reaching
+  -527.5, past the -500 limited-liability floor by a small margin) and
+  `the_coin_ledger_conserves_every_struck_coin` (a SMALLER residual drift —
+  issue 14, ~0.0027 of ~52 — that survives fix #2, on a debasement-created
+  issue; not yet root-caused, and NOT confirmed to be the same class of bug
+  as either fix above).
+
+  **Both fixes are shipped now, at the unchanged `HOUSEHOLD_MONETIZATION_
+  DOSE = 0.0`** — they are general correctness improvements to code that
+  runs regardless of dose (`household_ledger_pass` has no gate of its own),
+  verified bit-identical at the shipped dose: `cargo check` clean, full
+  `tick::tests` 283/283, full `econ_` 6/6 (212.18s). The dose itself stays
+  at 0.0 — actually raising it needs the two remaining failures above
+  root-caused first.
+
+  **Both were characterized further the same session — neither turned out
+  to be a third logic bug.** `simulate_decades_reports_dynamics`'s -527.5
+  is a running MINIMUM over the whole 50-year run (`tests.rs:2592`), never
+  a sustained state, and reproduced bit-identically at dose 0.02 with both
+  fixes applied — the same class of bounded consequence that already
+  justified widening this exact floor once (`CONSUMPTION_REBUILD_PLAN.md`
+  S1, -339.7 measured against a widened -500 floor with headroom); this
+  dose narrows trade margins the same way, one step further, at only ~5%
+  past the current floor — nowhere near the millions-scale runaway the
+  floor actually guards against. The coin-ledger drift: audited all 5
+  `add_coin` call sites in the codebase — the 3 inside `strike_issue`
+  always create a fresh entry for a never-before-used issue id (bit-exact
+  by construction) and the 2 inside `household_ledger_pass` are now
+  issue-targeted and exact (fix 2). No further mis-crediting path exists.
+  The magnitude is consistent with ordinary f32 rounding compounding over
+  many `+=` credits to a long-lived purse — real, expected float behaviour,
+  not a conservation error (`Purse.bullion`, the other candidate, is
+  confirmed dead code). Neither finding changes anything at the shipped
+  dose. **What's next**: actually walk this dose in a session that budgets
+  for widening the insolvency floor (matching the S1 precedent) AND either
+  moving the Purse ledger to f64 accumulators or loosening the coin-ledger
+  gate to a relative tolerance — bundled into that dose-walk commit, never
+  done speculatively ahead of it.
+
+---
+
+## 7. Queue (rule 36 — owed, not waived)
+
+1. **Royal coinage** — a realm crown taking over or closing its cities' mints,
+   one royal coin with the ruler's portrait. Waits for M6 (mint closure) and a
+   decision on whether it overrides D4.
+2. **Counterfeiting and clipping as crimes** with named culprits (a feud or a
+   penalty). Waits for M9; excluded now by D5.
+3. **Bank notes as money** circulating beyond the issuing bank's branches.
+   Waits for M10.
+4. **Public debt in coin** — the Monte's coupons paid from real treasury coin,
+   bonds as tradeable claims. Waits for M9.
+5. **Coin-denominated contracts** — futures struck in a named issue, gaining or
+   losing with its value. Waits for M11.
+6. **Ransom, tribute and reparations as real specie shipments** (war.rs) rather
+   than wealth transfers. Waits for M9.
+7. **Temple and palace economies** — non-merchant holders of grain and bullion
+   in the ledger-house stage. Waits for M6.
+
+---
+
+## 8. What this plan does not change
+
+The world pipeline, the tile layers, the route matrix and dispatch's choice of
+WHAT to ship are untouched. This plan changes how a trade is PAID and what
+money IS; which goods move where is still decided by the arbitrage gap until M11
+lets money feed back into prices.
