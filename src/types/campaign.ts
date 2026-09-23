@@ -2192,6 +2192,26 @@ export interface GuildAtlas {
   tradition_by_year: number[];
 }
 
+/** S12a · one house's thread through the Houses bump chart
+ *  (`campaign_house_bump_chart`). `ranks`/`wealth` are aligned 1:1 with
+ *  `BumpChart.years`; a rank of -1 means not ranked that year (not yet
+ *  founded, already dead, or outside the top field). */
+export interface BumpLine {
+  house: number;
+  name: string;
+  color: string;
+  tier: number;
+  defunct: boolean;
+  ranks: number[];
+  wealth: number[];
+}
+
+/** S12a · the top houses' wealth rank over the last N years. */
+export interface BumpChart {
+  years: number[];
+  lines: BumpLine[];
+}
+
 /** Phase 6 · a notable figure (Great Lives roster). */
 export interface FigureBrief {
   name: string;

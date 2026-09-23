@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CoarseRoute, BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
+import type { CoarseRoute, BankBrief, BumpChart, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -408,6 +408,12 @@ export async function campaignGetHouseLineage(idx: number): Promise<HouseLineage
  *  cities, its goods portfolio, its holdings, and its lanes' seasonal ease. */
 export async function campaignHouseAtlas(idx: number): Promise<HouseAtlas | null> {
   return invoke("campaign_house_atlas", { idx });
+}
+
+/** HOUSES_GUILDS_AND_MARKET_PLAN.md S12a · the top houses' wealth RANK over the
+ *  last ~50 years, for the Houses panel's bump chart. */
+export async function campaignHouseBumpChart(): Promise<BumpChart> {
+  return invoke("campaign_house_bump_chart", {});
 }
 
 // ── Province land state (FIX_PLAN B1) + the holder's control verbs ──────────

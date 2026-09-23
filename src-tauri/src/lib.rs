@@ -147,6 +147,7 @@ pub fn run() {
             campaign_commands::campaign_get_house_crisis,
             campaign_commands::campaign_get_house_lineage,
             campaign_commands::campaign_house_atlas,
+            campaign_commands::campaign_house_bump_chart,
             sim_commands::sim_run_all,
             file_commands::save_world_as,
             campaign_commands::finalize_world,

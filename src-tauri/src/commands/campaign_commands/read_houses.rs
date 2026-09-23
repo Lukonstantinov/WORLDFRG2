@@ -907,3 +907,121 @@ pub fn campaign_house_atlas(idx: u32, db: State<'_, WorldDb>) -> Result<Option<H
 
     Ok(Some(HouseAtlas { partners, goods, holdings, seasons }))
 }
+
+// ═════════════════════════════════════════════════════════════════════════════════
+//  BUMP CHART (HOUSES_GUILDS_AND_MARKET_PLAN.md S12a)
+//
+//  "Stop showing state, start showing change." The Houses panel showed a wealth
+//  NUMBER per house and nothing about how the field moved around it. Every house
+//  already samples its own closing wealth once a year into `wealth_history`
+//  (`WEALTH_HISTORY_CAP` = 80 years — checked before building this, per this
+//  plan's own §9 risk register note that a chart's window is bounded by what the
+//  data actually holds) and a dead house simply stops being sampled, so its own
+//  line in the chart below STOPS rather than crawling to zero — "a line that
+//  stops is a house that died" is the plan's own phrase and falls out of the
+//  data for free, no special-casing needed.
+// ═════════════════════════════════════════════════════════════════════════════════
+
+/// One house's thread through the bump chart: its RANK by wealth in each of the
+/// chart's years (oldest→newest, aligned 1:1 with `BumpChart.years`), and the raw
+/// wealth behind each rank for a tooltip. `-1` = not ranked that year (not yet
+/// founded, already dead, or outside the top field that year).
+#[derive(Serialize, Clone)]
+pub struct BumpLine {
+    pub house: u32,
+    pub name: String,
+    /// `distinct_color(house_index)` — the one stable, app-wide identity colour
+    /// (map overlay, Houses list, settlement pie all already use it).
+    pub color: String,
+    pub tier: u8,
+    pub defunct: bool,
+    pub ranks: Vec<i32>,
+    pub wealth: Vec<f32>,
+}
+
+#[derive(Serialize, Clone, Default)]
+pub struct BumpChart {
+    pub years: Vec<u32>,
+    /// Only houses that were EVER inside the top field during the window —
+    /// never the whole roster, which would make the chart unreadable.
+    pub lines: Vec<BumpLine>,
+}
+
+/// The top FIELD houses' wealth rank over the last SPAN years (or however much
+/// history the campaign has run, if shorter). A pure derived read — nothing here
+/// is persisted, so it cannot move any gate.
+#[tauri::command]
+pub fn campaign_house_bump_chart(db: State<'_, WorldDb>) -> Result<BumpChart, String> {
+    const FIELD: usize = 12;
+    const SPAN: usize = 50;
+
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(BumpChart::default()) };
+
+    let cur_year = sim.tick / TICKS_PER_YEAR;
+    let maxlen = sim.houses.iter().map(|h| h.wealth_history.len()).max().unwrap_or(0);
+    let span = maxlen.min(SPAN);
+    if span == 0 {
+        return Ok(BumpChart::default());
+    }
+
+    let mut years = Vec::with_capacity(span);
+    // Per year (oldest→newest), every house's (index, rank, wealth) that year.
+    let mut per_year: Vec<Vec<(usize, i32, f32)>> = Vec::with_capacity(span);
+    let mut ever_top: std::collections::HashSet<usize> = std::collections::HashSet::new();
+
+    for o in (0..span).rev() {
+        years.push(cur_year.saturating_sub(o as u32));
+        let mut vals: Vec<(usize, f32)> = Vec::new();
+        for (hi, h) in sim.houses.iter().enumerate() {
+            let len = h.wealth_history.len();
+            if len > o {
+                let w = h.wealth_history[len - 1 - o];
+                if w > 0.0 {
+                    vals.push((hi, w));
+                }
+            }
+        }
+        vals.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut row: Vec<(usize, i32, f32)> = Vec::with_capacity(vals.len());
+        for (rank, &(hi, w)) in vals.iter().enumerate() {
+            let r = rank as i32 + 1;
+            if r as usize <= FIELD {
+                ever_top.insert(hi);
+            }
+            row.push((hi, r, w));
+        }
+        per_year.push(row);
+    }
+
+    let mut lines: Vec<BumpLine> = Vec::new();
+    for &hi in &ever_top {
+        let Some(house) = sim.houses.get(hi) else { continue };
+        let mut ranks = vec![-1i32; span];
+        let mut wealth = vec![0.0f32; span];
+        for (i, row) in per_year.iter().enumerate() {
+            if let Some(&(_, r, w)) = row.iter().find(|&&(idx, _, _)| idx == hi) {
+                ranks[i] = r;
+                wealth[i] = w;
+            }
+        }
+        lines.push(BumpLine {
+            house: hi as u32,
+            name: house.name.clone(),
+            color: distinct_color(hi),
+            tier: house.tier,
+            defunct: house.defunct,
+            ranks,
+            wealth,
+        });
+    }
+    // Stable order: by most recent ranked position (still-ranked houses first),
+    // ties by name — so the legend/list reads top-to-bottom sensibly.
+    lines.sort_by(|a, b| {
+        let la = a.ranks.iter().rev().find(|&&r| r > 0).copied().unwrap_or(i32::MAX);
+        let lb = b.ranks.iter().rev().find(|&&r| r > 0).copied().unwrap_or(i32::MAX);
+        la.cmp(&lb).then_with(|| a.name.cmp(&b.name))
+    });
+
+    Ok(BumpChart { years, lines })
+}
