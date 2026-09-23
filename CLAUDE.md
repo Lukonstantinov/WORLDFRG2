@@ -5522,6 +5522,28 @@ SCOREBOARD.md                     ← ⭐ The project held as ~12 NUMBERS instea
 
 **Live operational docs** (these describe the project as it is)
 ```
+MONEY_AND_COINAGE_PLAN.md         ← ⭐ AGREED IN SCOPE, NOTHING BUILT. Real,
+                                    CONSERVED money: coins are struck at a mint
+                                    from mined bullion, held in purses per holder
+                                    per city, carried in chests on real legs, and
+                                    spent — never `+=`'d into a vault. Measured
+                                    premise (F1): every sale today credits the
+                                    carrier (`production.rs:2297`) with no payer,
+                                    so money is created on every trade. Barter is
+                                    ALWAYS available and settles with real stock
+                                    moving both ways (the payment goods leave the
+                                    seller's stockpile); money just beats it.
+                                    Currencies with 2-3 denominations and dated
+                                    issues, culture-based units of account and
+                                    regional gold:silver ratios, mints that CLOSE
+                                    when their coin goes unused, a Victorian coin
+                                    catalogue with follow-a-coin, a market money
+                                    band, and banks on real reserves with bills
+                                    of exchange settled by specie shipments.
+                                    Slices M0-M11: a PARALLEL LEDGER observes
+                                    first (M0-M4 bit-identical), then barter,
+                                    affordability, wages and the switch-over are
+                                    each dosed from zero
 HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     guild roster unfreeze) + S4 (craft
                                     signatures served) + S5 (transit demand,
