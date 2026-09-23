@@ -141,9 +141,38 @@ zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (`tick::
 tests`) all pass; full `cargo test --lib tick::tests` (278/278) and `econ_`
 (6/6, multi-seed inheritance gate included) both bit-identical at dose 0.
 
-**What's next**: M6-M11 are each a dosed-from-zero economic change,
-shipped mechanism-first at an inert dose and walked up one at a time with
-its own gate run per step, per §5's build rule.
+**M6 (mint closure, shipped LIVE — not gated inert), same session**:
+`mark_mint_closures` (§3.7) reads the mint's own city's EXISTING `coin_
+basket` share (already computed by `update_currency_baskets`, no new
+signal) and marks a currency `open = false`/`closed_year` once that share
+has sat below `MINT_CLOSE_SHARE` (5%) for `MINT_CLOSE_YEARS` (15) running.
+**Catalogue-only** — deliberately does NOT touch `TickHub.has_mint`/
+`coin_name` (the real, live coinage mechanism in `decide_coinage`/`apply_
+coinage`, which trust/seigniorage/freight-discount all key off), so unlike
+every other M-slice this one carries no economic-concentration risk and
+ships at its REAL constants rather than gated at an inert dose — the first
+M-slice to do so, and the reason it's safe: it only ever writes a field
+nothing else reads.
+
+Also added the boundary invariant M6's own §3.6 (coin diffusion between
+cities) will need to respect once built: `a_coin_never_reaches_a_city_
+nothing_trades_with` locks down that every purse M3's `strike_issue`
+creates today sits at its own currency's mint hub — real diffusion is
+unbuilt, and this gate is what stops a future change from silently
+teleporting money between cities with no trade relationship instead of
+routing it through a real corridor.
+
+Gates: `cargo check --lib --tests` clean; new `an_unused_mint_closes`
+(direct, deterministic — forces the mechanism via `mark_mint_closures`
+rather than relying on emergent economic decline) and `a_coin_never_
+reaches_a_city_nothing_trades_with` (10-year `dense_world` run) both pass;
+full `cargo test --lib tick::tests` (280/280) and `econ_` (6/6, multi-seed
+inheritance gate included, 538s) both bit-identical.
+
+**What's next**: M7-M11 are each a dosed-from-zero economic change,
+shipped mechanism-first at an inert dose (or live, where provably risk-free
+like M6) and walked up one at a time with its own gate run per step, per
+§5's build rule.
 
 ---
 

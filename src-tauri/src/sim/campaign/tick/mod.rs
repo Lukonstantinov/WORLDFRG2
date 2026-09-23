@@ -9071,6 +9071,10 @@ impl CampaignSim {
                 // into the coin catalogue — same timing as `snapshot_coins` above, for
                 // the same reason (fineness/trust/reform are all settled by now).
                 self.record_currencies(yr);
+                // M6 (MONEY_AND_COINAGE_PLAN.md §3.7) · catalogue-only mint
+                // closure — reads the coin_basket update_currency_baskets just
+                // ran above; writes only the catalogue's own Currency fields.
+                self.mark_mint_closures(yr);
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
@@ -10407,6 +10411,7 @@ pub use coinage::{Currency, Denom, Issue, UnitOfAccount, Purse,
     DENOM_GOLD, DENOM_SILVER, DENOM_PETTY, ISSUE_FIRST, ISSUE_DEBASEMENT, ISSUE_REFORM,
     HOLDER_CITY_TREASURY, HOLDER_HOUSE, HOLDER_BANK, HOLDER_HOUSEHOLD, HOLDER_LOCAL_MERCHANT,
     HOLDER_MINT};
+pub(crate) use coinage::{MINT_CLOSE_SHARE, MINT_CLOSE_YEARS};
 pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,

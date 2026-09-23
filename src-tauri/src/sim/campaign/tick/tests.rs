@@ -3696,6 +3696,69 @@
     }
 
     #[test]
+    fn an_unused_mint_closes() {
+        // MONEY_AND_COINAGE_PLAN.md M6 (§3.7) · a mint whose own coin never
+        // clears MINT_CLOSE_SHARE of its own city's basket closes after
+        // MINT_CLOSE_YEARS consecutive years. Exercised directly against
+        // `mark_mint_closures` (a pure, deterministic function of its own
+        // inputs) rather than via emergent economic decline, which cannot be
+        // forced reliably inside a unit test.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs = vec![hub(0, 0.0, 0.0, 10000.0, vec![100.0], 0)];
+        let mut s = sim(hubs, goods);
+        s.currencies.push(Currency {
+            mint_hub: 0, name: "Test Coin".into(), unit_of_account: u32::MAX,
+            denoms: vec![], open: true, closed_year: 0, last_fineness: 1.0,
+            below_share_years: 0,
+        });
+        // hub 0's coin_basket carries no entry for itself → share reads 0.0.
+        s.hubs[0].coin_basket = vec![];
+
+        for y in 1..MINT_CLOSE_YEARS {
+            s.mark_mint_closures(y);
+            assert!(s.currencies[0].open, "must not close before {MINT_CLOSE_YEARS} consecutive years");
+        }
+        s.mark_mint_closures(MINT_CLOSE_YEARS);
+        assert!(!s.currencies[0].open, "an unused mint closes after {MINT_CLOSE_YEARS} years");
+        assert_eq!(s.currencies[0].closed_year, MINT_CLOSE_YEARS);
+
+        // Recovery resets the counter — a healthy share must not be punished
+        // by stale history, and a closed currency (real behaviour: closure is
+        // one-way here, re-chartering is the ordinary mint-charter gate's
+        // job, not this function's) does not reopen on its own.
+        s.currencies[0].open = true;
+        s.currencies[0].below_share_years = MINT_CLOSE_YEARS - 1;
+        s.hubs[0].coin_basket = vec![(0, 1.0)];
+        s.mark_mint_closures(MINT_CLOSE_YEARS + 1);
+        assert_eq!(s.currencies[0].below_share_years, 0, "a recovered share resets the counter");
+        assert!(s.currencies[0].open);
+    }
+
+    #[test]
+    fn a_coin_never_reaches_a_city_nothing_trades_with() {
+        // MONEY_AND_COINAGE_PLAN.md M6 (§3.6) · real coin DIFFUSION between
+        // cities (a chest riding a real trade leg) is not built yet — M3's
+        // `strike_issue` is the only writer of `purses`, and it only ever
+        // credits purses at the STRIKING hub itself. This locks that boundary
+        // down so a future change cannot silently start teleporting money
+        // between cities with no trade relationship; when diffusion IS built
+        // it must go through a real corridor, not a bare balance update.
+        let mut s = dense_world();
+        s.advance(TICKS_PER_YEAR * 10);
+        assert!(!s.purses.is_empty(), "some mint struck coin over 10 years");
+        for p in &s.purses {
+            for &(issue_id, _) in &p.coins {
+                let iss = s.issues.iter().find(|i| i.id == issue_id)
+                    .expect("a purse holds only real, recorded issues");
+                let cur = &s.currencies[iss.currency as usize];
+                assert_eq!(cur.mint_hub, p.hub,
+                    "coin diffusion between cities is not yet built — every coin \
+                     still sits at its own mint's own hub");
+            }
+        }
+    }
+
+    #[test]
     fn regional_crash_is_confined_to_its_region() {
         // DLC 3.5 · a crash hits every city in the origin's connectivity component
         // and haircuts houses there, but leaves a separate region untouched.

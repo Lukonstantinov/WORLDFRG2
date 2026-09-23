@@ -35,9 +35,22 @@
 //! move the difference, which is exactly what
 //! `the_coin_ledger_conserves_every_struck_coin` (tests.rs) asserts.
 //!
-//! Mint CLOSURE (D4/§3.7), barter (M5) and culture-rooted currency naming
-//! beyond today's flat 10-name `coin_denomination` list (§3.3) remain
-//! unbuilt, queued work.
+//! **M6** adds mint CLOSURE (§3.7), CATALOGUE-ONLY: `mark_mint_closures`
+//! reads the mint's own city's EXISTING `coin_basket` share (a live,
+//! already-computed signal — no new mechanism to measure acceptance) and
+//! marks `Currency.open = false` once it has sat below `MINT_CLOSE_SHARE`
+//! for `MINT_CLOSE_YEARS` running. It deliberately does NOT touch `TickHub.
+//! has_mint`/`coin_name` — closing the REAL, live coinage mechanism
+//! (`decide_coinage`/`apply_coinage`, money.rs) is a further, separate
+//! change with real economic consequences (trust, seigniorage, freight
+//! discount all key off those fields) and is queued, not attempted here.
+//! Because it only ever writes fields nothing else reads, this is safe to
+//! ship at its real dose rather than gated inert — see the constants' own
+//! doc comments.
+//!
+//! Culture-rooted currency naming beyond today's flat 10-name
+//! `coin_denomination` list (§3.3), the real three-stage diffusion of §3.6,
+//! and the REAL mint-closure economic effect all remain unbuilt, queued work.
 use super::*;
 
 /// §3.1 · who a purse belongs to.
@@ -86,6 +99,19 @@ const BARTER_DOSE: f32 = 0.0;
 /// carried and resold are worth less to the merchant than cash in hand).
 /// Inert while `BARTER_DOSE` is 0.0; walking it is queued alongside the dose.
 const BARTER_SPREAD: f32 = 0.25;
+
+/// M6 (§3.7) · a mint's own coin must hold at least this share of its own
+/// city's `coin_basket` or it starts counting toward closure. Unlike M5's
+/// dose, this constant carries NO economic-concentration risk to walk
+/// carefully — `mark_mint_closures` only ever writes `Currency.open`/
+/// `closed_year`/`below_share_years`, never a hub or a house, so it is
+/// shipped LIVE at its real value rather than gated inert.
+pub(crate) const MINT_CLOSE_SHARE: f32 = 0.05;
+/// M6 (§3.7) · consecutive years below `MINT_CLOSE_SHARE` before a mint
+/// closes — long enough that an ordinary bad year or two doesn't shutter a
+/// real mint, short enough that a genuinely abandoned coin closes inside a
+/// human generation.
+pub(crate) const MINT_CLOSE_YEARS: u32 = 15;
 
 /// §3.4/D6 · a people's unit of account — resolved once per culture, exactly
 /// like `CultureRule`, and never re-rolled. `ladder` is the ratio to the
@@ -201,6 +227,11 @@ pub struct Currency {
     /// debasement/reform from a year where nothing changed. Mirrors
     /// `TickHub.mint_fineness_prev`'s own role in `decide_coinage`.
     pub last_fineness: f32,
+    /// M6 (§3.7) · consecutive years this currency's own `coin_basket` share
+    /// at its own mint city has sat below `MINT_CLOSE_SHARE`. Internal
+    /// bookkeeping, resets to 0 the moment the share recovers.
+    #[serde(default)]
+    pub below_share_years: u32,
 }
 
 fn fnv1a64(s: &str) -> u64 {
@@ -356,6 +387,7 @@ impl CampaignSim {
                     self.currencies.push(Currency {
                         mint_hub: h as u32, name: cur_name, unit_of_account: uoa_idx,
                         denoms, open: true, closed_year: 0, last_fineness: fine,
+                        below_share_years: 0,
                     });
                 }
                 Some(ci) => {
@@ -469,6 +501,34 @@ impl CampaignSim {
             stock_add_ungraded(&mut self.hubs[a].stock, pg, pay_qty);
             self.diag_barter_trades += 1;
             self.diag_barter_volume += pay_qty * price_b;
+        }
+    }
+
+    /// M6 (§3.7) · mint closure — CATALOGUE-ONLY, see this file's own header.
+    /// Called once a year. Reads `hub.coin_basket` (already computed by
+    /// `update_currency_baskets`, money.rs) for the mint's own share of its
+    /// own city's coin use; writes only `Currency.open`/`closed_year`/
+    /// `below_share_years`.
+    pub(crate) fn mark_mint_closures(&mut self, year: u32) {
+        for i in 0..self.currencies.len() {
+            if !self.currencies[i].open { continue; }
+            let hub = self.currencies[i].mint_hub as usize;
+            let share = match self.hubs.get(hub) {
+                Some(h) => h.coin_basket.iter()
+                    .find(|&&(k, _)| k as usize == hub)
+                    .map(|&(_, s)| s)
+                    .unwrap_or(0.0),
+                None => 0.0,
+            };
+            if share < MINT_CLOSE_SHARE {
+                self.currencies[i].below_share_years += 1;
+            } else {
+                self.currencies[i].below_share_years = 0;
+            }
+            if self.currencies[i].below_share_years >= MINT_CLOSE_YEARS {
+                self.currencies[i].open = false;
+                self.currencies[i].closed_year = year;
+            }
         }
     }
 }
