@@ -8,12 +8,12 @@ import { drawFigure, resolveKit, type Occasion } from "@ui/campaign/cultureDress
 import { clarifyGemLabel } from "@goods";
 import { goodIcon, TIER_META, tierOf, dull, familyRunAt } from "@ui/campaign/houseShared";
 import {
-  campaignGetFeuds, campaignHouseStability, campaignGetHouseHistory, campaignMerchantRoutes,
+  campaignGetFeuds, campaignHouseStability, campaignTier1GaugeMedians, campaignGetHouseHistory, campaignMerchantRoutes,
   campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin,
   campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage, campaignHouseAtlas,
 } from "@bridge";
 import type {
-  FeudRow, Gauge, HouseStability, HouseHistory, HouseBrief, MerchantRoute, HouseLedger,
+  FeudRow, Gauge, HouseStability, GaugeMedians, HouseHistory, HouseBrief, MerchantRoute, HouseLedger,
   BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief,
   HouseAtlas, HouseTimelineEvent,
 } from "@types";
@@ -80,13 +80,70 @@ function GaugeCard({ g }: { g: Gauge }) {
 
 const fmt = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(1));
 
+/** S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · Standing as a radar against the
+ *  tier-1 median — the plan's own ask. A house's five gauges (0..1, already
+ *  computed) plotted on a pentagon alongside the world's tier-1 MEDIAN for
+ *  each (`campaign_tier1_gauge_medians`, S12c's own new read, reusing
+ *  `campaign_house_stability` verbatim so the two numbers can never drift).
+ *  Quiet when there is nothing to compare against yet (`medians.n === 0` —
+ *  no tier-1 house exists on a young world) rather than drawing a pentagon
+ *  against zeros, which would read as "this house has no standing" when the
+ *  truth is "nobody does yet". */
+function GaugeRadar({ gauges, medians }: { gauges: Gauge[]; medians: GaugeMedians | null }) {
+  if (!medians || medians.n === 0 || gauges.length < 3) return null;
+  const medianOf = (key: string) => medians.medians.find(([k]) => k === key)?.[1] ?? null;
+  if (!gauges.some((g) => medianOf(g.key) != null)) return null;
+  const N = gauges.length, W = 140, H = 140, cx = W / 2, cy = H / 2, R = 52;
+  const angle = (i: number) => -Math.PI / 2 + (i / N) * Math.PI * 2;
+  const ptAt = (i: number, frac: number): [number, number] => {
+    const a = angle(i), r = R * Math.max(0, Math.min(1, frac));
+    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+  };
+  const path = (fracs: number[]) => fracs.map((f, i) => ptAt(i, f)).map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ") + "Z";
+  const selfPath = path(gauges.map((g) => g.score));
+  const medPath = path(gauges.map((g) => medianOf(g.key) ?? 0));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}
+      title={`Compared to the median of ${medians.n} tier-1 house${medians.n === 1 ? "" : "s"}`}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        {/* Grid rings */}
+        {[0.25, 0.5, 0.75, 1].map((f, i) => (
+          <polygon key={i} points={gauges.map((_, gi) => ptAt(gi, f).join(",")).join(" ")}
+            fill="none" stroke="#1c2c40" strokeWidth={0.6} />
+        ))}
+        {/* Spokes */}
+        {gauges.map((_, i) => {
+          const [x, y] = ptAt(i, 1);
+          return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#1c2c40" strokeWidth={0.6} />;
+        })}
+        {/* Tier-1 median, quiet grey fill */}
+        <path d={medPath} fill="rgba(150,160,175,0.14)" stroke="#7a8aa0" strokeWidth={1} strokeDasharray="2,2" />
+        {/* This house, gold */}
+        <path d={selfPath} fill="rgba(201,162,39,0.22)" stroke="#c9a227" strokeWidth={1.3} />
+        {gauges.map((g, i) => {
+          const [x, y] = ptAt(i, 1.14);
+          return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={8}>{GAUGE_ICON[g.key] ?? "•"}</text>;
+        })}
+      </svg>
+      <div style={{ fontSize: 9, color: "#8fa6be" }}>
+        <div><span style={{ color: "#c9a227" }}>■</span> this house</div>
+        <div><span style={{ color: "#7a8aa0" }}>┅</span> tier-1 median ({medians.n})</div>
+      </div>
+    </div>
+  );
+}
+
 export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey?: number }) {
   const [st, setSt] = useState<HouseStability | null>(null);
+  const [medians, setMedians] = useState<GaugeMedians | null>(null);
   useEffect(() => {
     let alive = true;
     campaignHouseStability(idx)
       .then((s) => { if (alive) setSt(s); })
       .catch(() => { if (alive) setSt(null); });
+    campaignTier1GaugeMedians()
+      .then((m) => { if (alive) setMedians(m); })
+      .catch(() => { if (alive) setMedians(null); });
     return () => { alive = false; };
   }, [idx, refreshKey]);
 
@@ -96,6 +153,7 @@ export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
         {st.gauges.map((g) => <GaugeCard key={g.key} g={g} />)}
       </div>
+      <GaugeRadar gauges={st.gauges} medians={medians} />
 
       {/* The countdown. This is the single highest-value number in the panel: the sim
           has always known it, and the player could never see it. */}
@@ -179,6 +237,42 @@ function OutcomeChip({ f }: { f: FeudRow }) {
   );
 }
 
+const STAGE_NAMES = ["cold rivalry", "open feud", "trade war", "vendetta"];
+const stageIdxOf = (s: string) => { const i = STAGE_NAMES.indexOf(s); return i >= 0 ? i : 0; };
+
+/** S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · Feuds as a temperature line with
+ *  stage transitions — the plan's own ask. Built from `f.log` (real recorded
+ *  flares, each carrying its own year + stage), stepped rather than
+ *  interpolated since a feud's stage is a genuine jump, not a smooth climb.
+ *  Quiet (not rendered) below two points — a single flare has no LINE to
+ *  draw, just a dot, which says nothing a bar didn't already. */
+function FeudTemperatureLine({ f }: { f: FeudRow }) {
+  const pts = [...f.log].sort((a, b) => a.year - b.year).map((l) => ({ year: l.year, stage: stageIdxOf(l.stage) }));
+  const nowYear = f.running ? f.started_year + f.years : f.ended_year;
+  if (pts.length === 0 || pts[pts.length - 1].year !== nowYear) pts.push({ year: nowYear, stage: f.stage_idx });
+  if (pts.length < 2) return null;
+  const W = 200, H = 26, PAD = 2;
+  const minY = pts[0].year, maxY = Math.max(minY + 1, pts[pts.length - 1].year);
+  const xAt = (y: number) => PAD + ((y - minY) / (maxY - minY)) * (W - PAD * 2);
+  const yAt = (s: number) => H - PAD - (s / 3) * (H - PAD * 2);
+  let d = "";
+  pts.forEach((p, i) => {
+    d += `${i === 0 ? "M" : "L"}${xAt(p.year).toFixed(1)},${yAt(p.stage).toFixed(1)} `;
+    if (i < pts.length - 1) d += `L${xAt(pts[i + 1].year).toFixed(1)},${yAt(p.stage).toFixed(1)} `; // step, not slope
+  });
+  return (
+    <svg width={W} height={H} style={{ display: "block", marginTop: 3 }}>
+      <title>Stage over time — a real jump, not a smooth climb</title>
+      <path d={d.trim()} fill="none" stroke={STAGE_COLOR[Math.max(...pts.map((p) => p.stage))]} strokeWidth={1.2} />
+      {pts.map((p, i) => (
+        <circle key={i} cx={xAt(p.year)} cy={yAt(p.stage)} r={1.6} fill={STAGE_COLOR[p.stage]}>
+          <title>{`yr ${p.year}: ${STAGE_NAMES[p.stage]}`}</title>
+        </circle>
+      ))}
+    </svg>
+  );
+}
+
 function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
   const [open, setOpen] = useState(false);
   const stage = Math.min(3, Math.max(0, f.stage_idx));
@@ -225,6 +319,7 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
           {f.stage}
         </span>
       </div>
+      <FeudTemperatureLine f={f} />
 
       <div style={{ color: "#6a86a6", fontSize: 8, marginTop: 2 }}>
         {f.running ? `running ${f.years}y` : `ran ${f.years}y from ${f.started_year}`}
@@ -1479,6 +1574,90 @@ function BankSheet({ b, fmt }: { b: BankBrief; fmt: (v: number) => string }) {
 /** The yearly ledger (Accountant view): Income then Expenditure stacked FULL-WIDTH
  *  (so nothing is clipped in the narrow panel) + NET + warehouse stock. Per-city
  *  tax/profit lines arrive sorted largest → lowest. */
+/** S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · Accountant as a waterfall — the
+ *  plan's own ask. Every step is a real line the Ledger tab already lists
+ *  above (top trade goods by |amount|, the rest bucketed so a house with a
+ *  wide portfolio doesn't fill the chart with slivers, then every expense
+ *  line), cascading from 0 to the year's real net. Quiet when there's
+ *  nothing recorded yet (year 0 / an empty ledger). */
+function WaterfallChart({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
+  type Step = { label: string; amount: number };
+  const income: Step[] = [];
+  const sortedTrade = [...l.trade_profit].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  sortedTrade.slice(0, 4).forEach((c) => income.push({ label: c.label, amount: c.amount }));
+  if (sortedTrade.length > 4) {
+    const rest = sortedTrade.slice(4).reduce((s, c) => s + c.amount, 0);
+    if (Math.abs(rest) > 0.01) income.push({ label: `+${sortedTrade.length - 4} more`, amount: rest });
+  }
+  if (l.office_income) income.push({ label: "Office income", amount: l.office_income });
+  if (l.estate_income) income.push({ label: "Estate income", amount: l.estate_income });
+
+  const expense: Step[] = [];
+  const pushExp = (label: string, amt: number) => { if (amt > 0.01) expense.push({ label, amount: -amt }); };
+  pushExp("Import tax", l.import_tax.reduce((s, c) => s + c.amount, 0));
+  pushExp("Export tax", l.export_tax.reduce((s, c) => s + c.amount, 0));
+  pushExp("Estate tax", l.estate_tax);
+  pushExp("Upkeep", l.upkeep);
+  pushExp("Fleet", l.fleet_cost);
+  pushExp("Lost cargo", l.lost_cargo);
+  pushExp("Misfortune", l.events);
+  pushExp("Consumption", l.consumption);
+  pushExp("Inflation", l.inflation);
+  pushExp("War levy", l.war_levy);
+  pushExp("War damage", l.war_damage);
+
+  const steps = [...income, ...expense];
+  if (steps.length === 0) return null;
+  let cum = 0;
+  const bars = steps.map((s) => {
+    const start = cum; cum += s.amount;
+    return { ...s, start, end: cum };
+  });
+  const allVals = [0, ...bars.flatMap((b) => [b.start, b.end])];
+  const lo = Math.min(...allVals), hi = Math.max(...allVals);
+  const span = Math.max(1e-6, hi - lo);
+  const W = 260, H = 92, padL = 4, padR = 4, padT = 6, padB = 20;
+  const n = bars.length + 1; // +1 for the NET bar
+  const slotW = (W - padL - padR) / n;
+  const barW = Math.max(3, slotW * 0.72);
+  const yAt = (v: number) => padT + (1 - (v - lo) / span) * (H - padT - padB);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
+        This year, step by step
+      </div>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        <line x1={0} y1={yAt(0)} x2={W} y2={yAt(0)} stroke="#1c2c40" strokeWidth={0.6} />
+        {bars.map((b, i) => {
+          const x = padL + i * slotW + (slotW - barW) / 2;
+          const up = b.amount >= 0;
+          const y = yAt(Math.max(b.start, b.end));
+          const h = Math.max(0.6, Math.abs(yAt(b.start) - yAt(b.end)));
+          return (
+            <g key={i}>
+              <rect x={x} y={y} width={barW} height={h} fill={up ? "#7fcf8f" : "#e0a0a0"} opacity={0.9}>
+                <title>{`${b.label}: ${up ? "+" : "−"}${fmt(Math.abs(b.amount))}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+        {/* NET — the final bar, from 0 to the year's real total, in gold */}
+        {(() => {
+          const x = padL + bars.length * slotW + (slotW - barW) / 2;
+          const y = yAt(Math.max(0, l.net));
+          const h = Math.max(0.6, Math.abs(yAt(0) - yAt(l.net)));
+          return (
+            <rect x={x} y={y} width={barW} height={h} fill="#c9a227">
+              <title>{`NET: ${l.net >= 0 ? "+" : "−"}${fmt(Math.abs(l.net))}`}</title>
+            </rect>
+          );
+        })()}
+      </svg>
+      <div style={{ color: "#4a5c72", fontSize: 7.5, textAlign: "right" }}>hover a bar for its line</div>
+    </div>
+  );
+}
+
 function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
   const head: React.CSSProperties = { color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 7, marginBottom: 2 };
   const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
@@ -1525,6 +1704,7 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
         <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>NET</span>
         <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 11 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
       </div>
+      <WaterfallChart l={l} fmt={fmt} />
       {((l.wealth_years?.length ?? 0) >= 2 || l.wealth_graph.length >= 2) && (
         <WealthGraph
           data={(l.wealth_years?.length ?? 0) >= 2 ? l.wealth_years : l.wealth_graph}

@@ -2785,6 +2785,14 @@ export interface HouseStability {
   feuds_hot: number;
 }
 
+/** S12c · the world's tier-1 median for each stability gauge, for the
+ *  Standing tab's radar chart. `n` houses contributed; 0 means no tier-1
+ *  house exists yet, not an error. */
+export interface GaugeMedians {
+  medians: [string, number][];
+  n: number;
+}
+
 /** One flare in a feud's history. */
 export interface FeudFlareRow {
   year: number;

@@ -377,6 +377,12 @@ export async function campaignHouseStability(idx: number): Promise<HouseStabilit
   return invoke("campaign_house_stability", { idx });
 }
 
+/** S12c · the world's tier-1 median for each stability gauge — what the
+ *  Standing tab's radar chart compares a house against. */
+export async function campaignTier1GaugeMedians(): Promise<import("@types").GaugeMedians> {
+  return invoke("campaign_tier1_gauge_medians");
+}
+
 /** Feuds, live first then settled. `house` < 0 = every feud in the world. */
 export async function campaignGetFeuds(house = -1): Promise<FeudRow[]> {
   return invoke("campaign_get_feuds", { house });

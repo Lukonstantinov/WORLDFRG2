@@ -141,6 +141,7 @@ pub fn run() {
             campaign_commands::campaign_realm_watch,
             // House Dossier: the stability gauges and the feud board.
             campaign_commands::campaign_house_stability,
+            campaign_commands::campaign_tier1_gauge_medians,
             campaign_commands::campaign_get_feuds,
             campaign_commands::campaign_get_house_kin,
             campaign_commands::campaign_get_house_goals,

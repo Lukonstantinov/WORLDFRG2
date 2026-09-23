@@ -300,6 +300,50 @@ impl GoodName for usize {
     }
 }
 
+/// S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the world's TIER-1 median for each
+/// of the five stability gauges — what the dossier's Standing tab can plot a
+/// radar chart against ("how does this house compare to its own peers"),
+/// which a single house's own gauges can never answer alone. Reuses
+/// `campaign_house_stability` VERBATIM (called once per tier-1 house) rather
+/// than re-deriving the five scores — the two must never be able to drift,
+/// and a single shared computation is the only way that's guaranteed.
+#[derive(Serialize, Clone, Default)]
+pub struct GaugeMedians {
+    /// (gauge key, median score 0..1) — one entry per gauge key seen.
+    pub medians: Vec<(String, f32)>,
+    /// How many tier-1 houses contributed. 0 means "no tier-1 house yet" —
+    /// the radar has nothing to compare against, not an error.
+    pub n: u32,
+}
+
+#[tauri::command]
+pub fn campaign_tier1_gauge_medians(db: State<'_, WorldDb>) -> Result<GaugeMedians, String> {
+    let idxs: Vec<u32> = {
+        let conn = db.conn.lock().map_err(|e| e.to_string())?;
+        let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(GaugeMedians::default()) };
+        sim.houses.iter().enumerate()
+            .filter(|(_, h)| h.is_merchant() && h.tier == 1)
+            .map(|(i, _)| i as u32)
+            .collect()
+        // `conn`'s lock is dropped here, before we re-lock it once per house
+        // inside `campaign_house_stability` below — never hold it recursively.
+    };
+    let mut by_key: std::collections::HashMap<String, Vec<f32>> = std::collections::HashMap::new();
+    for idx in &idxs {
+        if let Ok(Some(stab)) = campaign_house_stability(*idx, db.clone()) {
+            for g in stab.gauges {
+                by_key.entry(g.key).or_default().push(g.score);
+            }
+        }
+    }
+    let mut medians: Vec<(String, f32)> = by_key.into_iter().map(|(k, mut v)| {
+        v.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+        (k, v[v.len() / 2])
+    }).collect();
+    medians.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(GaugeMedians { medians, n: idxs.len() as u32 })
+}
+
 // ═════════════════════════════════════════════════════════════════════════════════
 //  FEUDS
 // ═════════════════════════════════════════════════════════════════════════════════
