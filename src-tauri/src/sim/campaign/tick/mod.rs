@@ -7373,6 +7373,25 @@ pub struct CampaignSim {
     /// save, a template/painted world, or a world generated before slice 1 — every
     /// reader treats that as "no depth data", never as "no deposit exists".
     #[serde(default)] pub mine_deposits: Vec<MineSite>,
+
+    // ── MONEY_AND_COINAGE_PLAN.md M1 — the coin CATALOGUE (see `coinage.rs`) ──
+    // Purely observational: recorded from what `decide_coinage`/`apply_coinage`
+    // already decide, read by nothing else yet. `#[serde(default)]` → empty on
+    // any save from before this shipped, and every test fixture built through
+    // `sim()` leaves these empty too — the catalogue only ever GROWS as a
+    // running campaign mints, never a precondition for anything downstream.
+    /// Each live culture's unit of account (§3.4/D6), resolved once like
+    /// `culture_rules` and never re-rolled.
+    #[serde(default)] pub units_of_account: Vec<UnitOfAccount>,
+    /// One `Currency` per mint that has ever struck a coin, keyed by
+    /// `mint_hub`. Never removed once created.
+    #[serde(default)] pub currencies: Vec<Currency>,
+    /// Every issue ever struck, flat and permanent — `Denom::issues` indexes
+    /// into this by `Issue.id`, not by position (an issue is never pruned, so
+    /// the two stay equal in practice, but the id is the contract).
+    #[serde(default)] pub issues: Vec<Issue>,
+    /// Running id counter for `issues`, monotonic, never reused.
+    #[serde(default)] pub next_issue_id: u32,
 }
 
 /// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
@@ -9038,6 +9057,10 @@ impl CampaignSim {
                 // A3 · snapshot each coin's yearly state (after crashes settle) for the
                 // Money panel's coin-biography sparklines.
                 self.snapshot_coins(yr);
+                // M1 (MONEY_AND_COINAGE_PLAN.md) · record this year's coinage decisions
+                // into the coin catalogue — same timing as `snapshot_coins` above, for
+                // the same reason (fineness/trust/reform are all settled by now).
+                self.record_currencies(yr);
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
@@ -10364,6 +10387,9 @@ mod offtake;
 mod certification;
 mod league;
 mod yards;
+mod coinage;
+pub use coinage::{Currency, Denom, Issue, UnitOfAccount,
+    DENOM_GOLD, DENOM_SILVER, DENOM_PETTY, ISSUE_FIRST, ISSUE_DEBASEMENT, ISSUE_REFORM};
 pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,

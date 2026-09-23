@@ -9,6 +9,69 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-23 — `MONEY_AND_COINAGE_PLAN.md`: M0 (instrument) + M1 (coin catalogue data model) shipped
+
+New plan, agreed in scope the same day. Built the two slices the plan's own
+"Stop marker" text calls safe to land without a dose walk — M0 is a pure
+diagnostic, M1 is observe-only and bit-identical (`sim_fingerprint` folds
+neither `currencies`/`issues`/`units_of_account`, and every existing test
+fixture built through `sim()` leaves the new fields empty).
+
+**M0 — `econ_measure_money_creation`** (`#[ignore]`d): the diagnosis in a
+number, for F1 ("money is created from nothing on every sale"). **Scoped down**
+from the plan's own literal ask (a per-SITE breakdown of ~150 `wealth/
+treasury +=` call sites — a much larger, separate instrumentation effort,
+queued rather than attempted) to the aggregate by HOLDER CLASS: `Σ house.
+wealth (live) + Σ hub.treasury + Σ bank.reserves`, sampled yearly over the
+60-city reference world for 100 years. Measured: **Δ/yr TOTAL ≈ 1,180,883**
+(house wealth 47,781/yr · hub treasury 885,434/yr · bank reserves 247,669/yr)
+against a year-0 total of 760 — three numbers that only ever go up, with no
+purse anywhere going down to match. This is the number M9's eventual
+switch-over has to reconcile.
+
+**M1 — the coin catalogue** (`sim/campaign/tick/coinage.rs`, new file):
+`Currency`/`Denom`/`Issue` structs recorded from what `decide_coinage`/
+`apply_coinage` (money.rs) already decide every year, replacing the bare
+`TickHub.coin_name` string (F2: "a large world has several unrelated
+Ducats") with real countable objects — a currency per mint, 1-3 named
+denominations by tier (Gold/Silver/Petty, read off the region's already-
+computed `coin_metal`), each carrying a permanent timeline of dated issues
+(First/Debasement/Reform, the latter two detected the same way `snapshot_
+coins` already reads a fineness move). `UnitOfAccount` (§3.4/D6) resolves
+one of three stylised ratio ladders per culture, exactly like `culture_
+rules` (same call sites: campaign start, and yearly for a culture new to the
+world). Currency names are deduplicated on creation
+(`unique_currency_name`), gated by `every_currency_name_is_unique_in_a_world`
+(`tick::tests`) — six mints over 5 years on a multi-culture fixture, every
+name distinct, every issue's `currency`/`denom` indices in range, and every
+issue's `struck`/`circulating`/`hoarded`/`melted`/`lost` at exactly `0.0`
+(M3's parallel ledger is what populates them — M1 ships the shape, not the
+quantities).
+
+**What did NOT ship, stated plainly (rule 36 — queued, not waived), because
+rushing it would violate this project's own explicit discipline**: M2 (the
+catalogue window), M3 (the parallel ledger of real purses), and M4 (the
+market money band + dashboard) are the rest of the plan's own "Stop marker"
+landing and are real, substantial, still-safe (bit-identical) work — not
+attempted this session for time, not for risk. M5-M11 (barter as a real
+settlement, the three monetary stages, paid consumption, the wealth/purse
+switch-over, banks on real reserves, price-level feedback) are explicitly
+NOT observe-only — the plan's own §5 requires each to be dosed from zero and
+walked up ONE STEP AT A TIME against `econ_` (521s/run) and the multi-seed
+`econ_inheritance_rules_fragment_differently` gate, "three doses per session
+is the ceiling" (`HOUSES_GUILDS_AND_MARKET_PLAN.md` §9's own rule, restated
+in this plan's §5). That gate has already been perturbed five times by
+exactly this shape of change (see §8.15's own cautionary tale) — dosing
+M5-M11 blind in one sitting is the precise mistake that history warns
+against, not a time-saving shortcut.
+
+Gates run: `cargo check --lib` clean; `cargo test --lib tick::tests` —
+274/274 passed (`simulate_decades_reports_dynamics` bounded/finite/turnover,
+unchanged); `cargo test --lib econ_` — 6/6 passed including the multi-seed
+inheritance gate (521s), bit-identical in shape to the pre-M1 baseline.
+
+---
+
 ## 2026-09-22g — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S10 (the four-window split) shipped
 
 Continuation of the same day's session (see 2026-09-22f below). User explicitly

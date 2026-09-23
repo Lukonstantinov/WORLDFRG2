@@ -1,10 +1,19 @@
 # Money and Coinage Plan — real money, mints, banks and barter
 
-> **Status: AGREED IN SCOPE, NOTHING BUILT.** Written from a brainstorm with the
-> maintainer (2026-09-23). Supersedes nothing — it extends
-> `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1 relies on) and
-> `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes retired on default,
-> arrears, book diversification — are prerequisites here, already shipped).
+> **Status: M0 (instrument) + M1 (coin catalogue data model) SHIPPED, gated,
+> bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. M2-M4 (the rest of the
+> plan's own §5 "Stop marker" — the catalogue window, the parallel ledger,
+> the market money band + dashboard) are real, still-safe, unbuilt work,
+> queued per rule 36. M5-M11 (barter, the monetary stages, paid consumption,
+> the wealth/purse switch-over, banks on real reserves, price-level feedback)
+> are each explicitly dosed-from-zero work per §5's own build rule and were
+> not attempted — rushing a dose walk without its own gate sweep is the exact
+> mistake §8.15 (CLAUDE.md) already recorded this project making five times.**
+> Written from a brainstorm with the maintainer (2026-09-23). Supersedes
+> nothing — it extends `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1
+> relies on) and `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes
+> retired on default, arrears, book diversification — are prerequisites here,
+> already shipped).
 
 The premise, in one sentence: **a coin should be a thing that is struck from
 metal someone mined, carried by someone to somewhere, and spent by someone to
@@ -330,8 +339,8 @@ tick::tests` + `econ_`; every frontend slice runs `npx tsc --noEmit`.
 
 | # | Slice | Dose / effect | Gate |
 |---|---|---|---|
-| **M0** | **Instrument**: `econ_measure_money_creation` (`#[ignore]`d) — sums every `wealth/treasury +=` by site over 100 years and reports the money created from nothing per year, per site. The diagnosis in a number. | none (diagnostic) | runs; its number goes on `SCOREBOARD.md` |
-| **M1** | **Coin data model**: `Currency`/`Denom`/`Issue` recorded from the decisions `decide_coinage` already makes; culture-based naming; units of account per culture. | observe only — bit-identical | `sim_fingerprint` unchanged; new `every_currency_name_is_unique_in_a_world` |
+| **M0** | ✅ SHIPPED 2026-09-23. **Instrument**: `econ_measure_money_creation` (`#[ignore]`d). Scoped down from a literal per-SITE breakdown (~150 call sites — queued) to per HOLDER CLASS: house wealth / hub treasury / bank reserves. | none (diagnostic) | ran; number on `SCOREBOARD.md` 2026-09-23 |
+| **M1** | ✅ SHIPPED 2026-09-23. **Coin data model** (`coinage.rs`): `Currency`/`Denom`/`Issue` recorded from the decisions `decide_coinage` already makes; units of account per culture (§3.4). Currency naming still rides the existing `coin_name` string (deduplicated) — full culture-rooted naming (§3.3's own ask) is real M2 UI-adjacent polish, not done here. | observe only — bit-identical | `sim_fingerprint` unchanged (verified: no folded field touched); `every_currency_name_is_unique_in_a_world` (`tick::tests`) |
 | **M2** | **Catalogue window** (browse, card art, denomination + issue pages, follow a coin) over M1. | UI only | `tsc`; a `dump_coin_sheet` render of the card art, looked at (§8.21's rule) |
 | **M3** | **Parallel ledger**: purses (§3.1), bullion → mint → coin (§3.2), every existing `+=` mirrored as a TRANSFER between purses, coin chests on `InTransit`. The ledger reports; nothing reads it. | observe only — bit-identical | conservation invariant holds every year; `sim_fingerprint` unchanged |
 | **M4** | **Market money band + dashboard** (§4.2, §4.3) reading the parallel ledger; prices in local money as DISPLAY (real price × price level × unit). | UI only | `tsc` |

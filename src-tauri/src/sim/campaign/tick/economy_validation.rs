@@ -1303,6 +1303,70 @@ fn econ_diagnose_house_turnover() {
     assert!(dead.len() + alive > 0, "the run produced no houses at all");
 }
 
+/// `MONEY_AND_COINAGE_PLAN.md` M0 · the diagnosis in a number. F1 claims money is
+/// created from nothing on every sale — nobody's purse goes down when a house's
+/// wealth, a treasury or a bank's reserves go up. This measures the AGGREGATE
+/// annual creation: `Σ house.wealth (live) + Σ hub.treasury + Σ bank.reserves`,
+/// sampled at each year boundary over a long run, split by which of the three
+/// holder classes the growth landed in.
+///
+/// **Scoped down from the plan's own text**, which asks for a literal per-SITE
+/// breakdown (~150 individual `wealth/treasury +=` call sites across 18 files).
+/// Instrumenting every one of those sites is a much larger, separate effort
+/// (CLAUDE.md rule 36 — queued, not silently dropped); what this measures
+/// instead is the same finding at holder-class granularity, which is enough to
+/// put a number on F1 and to size R1/R2 (the M9 switch-over's expected
+/// deflation) before any of the parallel ledger exists to measure it exactly.
+#[test]
+#[ignore]
+fn econ_measure_money_creation() {
+    let mut s = reference_world();
+    let years = 100u32;
+    // (house wealth, hub treasury, bank reserves, total) at each year boundary.
+    let mut samples: Vec<(f32, f32, f32, f32)> = Vec::with_capacity(years as usize + 1);
+    let sample = |s: &CampaignSim| -> (f32, f32, f32, f32) {
+        let w: f32 = s.houses.iter().filter(|h| !h.defunct).map(|h| h.wealth).sum();
+        let t: f32 = s.hubs.iter().filter(|h| !h.is_estate).map(|h| h.treasury).sum();
+        let r: f32 = s.banks.iter().filter(|b| !b.defunct).map(|b| b.reserves).sum();
+        (w, t, r, w + t + r)
+    };
+    samples.push(sample(&s));
+    for _ in 0..years {
+        s.advance(TICKS_PER_YEAR);
+        samples.push(sample(&s));
+    }
+
+    let first = samples.first().copied().unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let last = samples.last().copied().unwrap_or((0.0, 0.0, 0.0, 0.0));
+    let dw = (last.0 - first.0) / years as f32;
+    let dt = (last.1 - first.1) / years as f32;
+    let dr = (last.2 - first.2) / years as f32;
+    let dtot = (last.3 - first.3) / years as f32;
+
+    println!();
+    println!("═══ M0 · money created from nothing per year ({years}-year reference world) ═══");
+    println!("  house wealth     year {:>3}: {:>12.1}   year {:>3}: {:>12.1}   Δ/yr {:>10.1}",
+             0, first.0, years, last.0, dw);
+    println!("  hub treasury     year {:>3}: {:>12.1}   year {:>3}: {:>12.1}   Δ/yr {:>10.1}",
+             0, first.1, years, last.1, dt);
+    println!("  bank reserves    year {:>3}: {:>12.1}   year {:>3}: {:>12.1}   Δ/yr {:>10.1}",
+             0, first.2, years, last.2, dr);
+    println!("  ─────────────────────────────────────────────────────────────────");
+    println!("  TOTAL            year {:>3}: {:>12.1}   year {:>3}: {:>12.1}   Δ/yr {:>10.1}",
+             0, first.3, years, last.3, dtot);
+    println!();
+    println!("  Every one of these three numbers only ever goes up on a `+=` with no");
+    println!("  counterparty (F1) — there is no quantity of money in the world today,");
+    println!("  only scores. Δ/yr TOTAL is what M9's switch-over has to reconcile: a");
+    println!("  conserved economy is poorer than this by construction until the money");
+    println!("  stock (M3's purses) grows to match it.");
+    println!("═══════════════════════════════════════════════════════════════════════");
+    println!();
+
+    // Diagnostic only — it must not fail the build, per §2.5's printed-metric rule.
+    assert!(samples.len() as u32 == years + 1, "the run produced fewer samples than years");
+}
+
 /// `HOUSE_MASTER_PLAN.md` §2.5 · "The foreign hand may never fire — MEASURE BEFORE
 /// BUILDING": before writing the mechanism (4.4, still un-attempted), count how
 /// often its two channels' conjunction actually exists over a long run.

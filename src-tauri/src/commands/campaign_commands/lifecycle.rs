@@ -1093,6 +1093,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // just below) populates `vessels` from the fresh fleet counters.
         vessels: vec![], next_vessel_id: 0, fondacos: vec![],
         mine_deposits: vec![],
+        units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0,
     };
     seed_mine_deposits(&conn, &mut sim);
     // Backfill the colonization pool if the saved economy predates the feature (its
@@ -1177,6 +1178,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     // then open the founding head's record on every seeded house. Must run after the
     // cultures are known: the seat's rule decides the head's sex and accession age.
     sim.ensure_culture_rules();
+    // M1 (MONEY_AND_COINAGE_PLAN.md) · resolve each people's unit of account
+    // once, same discipline and same call site as the law of inheritance above.
+    sim.ensure_unit_of_account();
     sim.seed_house_lines();
     sim.seed_initial_guilds(); // civic guilds for cities already ≥ 50k people
     // YARDS_VESSELS_AND_DEPOTS_PLAN.md S2 · one `Vessel` per pre-existing

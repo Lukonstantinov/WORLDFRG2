@@ -144,6 +144,7 @@
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
+            units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0,
         };
         s.rebuild_routes();
         s
@@ -3489,6 +3490,79 @@
         assert_eq!(a.banks.len(), b.banks.len(), "bank count reproducible");
         for bank in &a.banks {
             assert!(bank.equity().is_finite() && bank.reserves.is_finite());
+        }
+    }
+
+    #[test]
+    fn every_currency_name_is_unique_in_a_world() {
+        // MONEY_AND_COINAGE_PLAN.md M1 · the coin catalogue records `decide_
+        // coinage`'s own decisions as real `Currency`/`Denom`/`Issue` objects.
+        // Several seats mint over a real run; every one of their catalogue
+        // entries must carry a distinct name (F2's own complaint — "a large
+        // world has several unrelated Ducats" — must not survive into the
+        // catalogue), every issue must point at a real currency/denom, and
+        // M1 ships every issue's struck/circulating/hoarded/melted/lost at
+        // exactly 0.0 (M3's parallel ledger is what populates them).
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let mut hubs = Vec::new();
+        for i in 0..6u32 {
+            hubs.push(hub(i, (i as f32) * 20.0, 10.0, 30000.0, vec![160.0, 16.0], 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..6u32 {
+            let mut h = house_at(i, vec![1], 3);
+            h.archetype = 2;
+            h.wealth = 300.0;
+            h.prestige = 0.6;
+            h.dominant_seat = true;
+            s.houses.push(h);
+        }
+        for hh in s.hubs.iter_mut() { hh.treasury = 200.0; }
+        // Two of the six share a culture, so `units_of_account` resolves for
+        // more than one hub off the same entry.
+        s.hub_culture = vec![
+            "Aiora".into(), "Aiora".into(), "Vexil".into(),
+            "Vexil".into(), "Korren".into(), "Korren".into(),
+        ];
+        s.rebuild_routes();
+        s.ensure_unit_of_account();
+
+        s.advance(TICKS_PER_YEAR * 5);
+
+        assert!(!s.currencies.is_empty(), "at least one seat minted a coin over 5 years");
+        let mut names: Vec<&str> = s.currencies.iter().map(|c| c.name.as_str()).collect();
+        names.sort();
+        let mut deduped = names.clone();
+        deduped.dedup();
+        assert_eq!(names.len(), deduped.len(), "every currency name is unique: {names:?}");
+
+        for c in &s.currencies {
+            assert!(!c.denoms.is_empty(), "{} has at least one denomination", c.name);
+            for d in &c.denoms {
+                assert!(!d.issues.is_empty(), "{} {} was struck at least once", c.name, d.name);
+                assert!(d.standard_grams > 0.0);
+            }
+        }
+        for iss in &s.issues {
+            assert!((iss.currency as usize) < s.currencies.len(), "issue points at a real currency");
+            let cur = &s.currencies[iss.currency as usize];
+            assert!((iss.denom as usize) < cur.denoms.len(), "issue points at a real denom");
+            assert!(iss.fineness.is_finite() && (0.0..=1.0).contains(&iss.fineness));
+            assert!(iss.grams > 0.0);
+            // M1 is observe-only — the parallel ledger (M3) hasn't been built yet.
+            assert_eq!(iss.struck, 0.0);
+            assert_eq!(iss.circulating, 0.0);
+            assert_eq!(iss.hoarded, 0.0);
+            assert_eq!(iss.melted, 0.0);
+            assert_eq!(iss.lost, 0.0);
+        }
+        assert!(!s.units_of_account.is_empty(), "the three seeded cultures resolved a unit of account");
+        for u in &s.units_of_account {
+            assert!(u.ladder.len() >= 2 && u.ladder.len() == u.names.len());
+            assert!(u.ladder.windows(2).all(|w| w[0] > w[1]), "largest unit first: {:?}", u.ladder);
         }
     }
 

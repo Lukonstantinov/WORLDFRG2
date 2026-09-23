@@ -744,6 +744,9 @@ impl CampaignSim {
             // Phase 0.4 · a people new to the world (a colony's creole, a resettled
             // hub) gets its law of inheritance resolved here, once, and keeps it.
             self.ensure_culture_rules();
+            // M1 (MONEY_AND_COINAGE_PLAN.md) · a culture new to the world gets a
+            // unit of account resolved here too, same call site as the law above.
+            self.ensure_unit_of_account();
             self.economic_migration_pass();
             self.diaspora_pass();
             // Which trade tongue dominates each region (drives the assimilation bridge).
