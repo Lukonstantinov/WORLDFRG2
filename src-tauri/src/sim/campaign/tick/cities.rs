@@ -1596,6 +1596,37 @@ impl CampaignSim {
         }
     }
 
+    /// SETTLEMENT_LIFE_PLAN.md L7 (§3.6) · monthly seasonal mortality. Unlike
+    /// L4's age-pyramid bookkeeping this DOES change real `population` (a
+    /// genuine economic-adjacent quantity, not just a label), so the whole
+    /// pass — not only a downstream reader — is gated by `CALENDAR_DOSE`,
+    /// the same lesson L6's construction step already paid for. The monthly
+    /// extra is signed (`mult - 1.0` swings both above and below zero across
+    /// the year) so the ANNUAL sum across 12 calls averages back to zero —
+    /// this REDISTRIBUTES mortality within the year onto its true season,
+    /// it does not add a new net death rate on top of `update_vital_rates`'s
+    /// own yearly total. `deaths_by_cause[CAUSE_FEVER]` only ever accrues the
+    /// POSITIVE (peak-season) excess, since it is a descriptive running tally
+    /// (§8.12's "nothing downstream may score off a descriptive field"
+    /// discipline applied here), not a value that must itself sum to zero.
+    pub(crate) fn update_seasonal_mortality(&mut self) {
+        if CALENDAR_DOSE <= 0.0 { return; }
+        let doy = self.day_of_year();
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let pop = self.hubs[h].population.max(0.0);
+            if pop <= 0.0 { continue; }
+            let north = self.hub_lat_frac(h) >= 0.0;
+            let cold = self.hubs[h].koppen >= 14;
+            let mult = seasonal_mortality_mult_e(doy, north, cold, CALENDAR_DOSE);
+            let extra = pop * (SEASONAL_MORTALITY_BASE / 12.0) * (mult - 1.0);
+            if extra > 0.0 {
+                self.hubs[h].deaths_by_cause[CAUSE_FEVER] += extra;
+            }
+            self.hubs[h].population = (pop - extra).max(0.0);
+        }
+    }
+
     /// SETTLEMENT_LIFE_PLAN.md L6 (§3.5) · monthly housing bookkeeping.
     /// Seeding, decay and the `crowding` READ are pure number bookkeeping —
     /// unconditional, the same discipline `update_vital_rates` uses for the

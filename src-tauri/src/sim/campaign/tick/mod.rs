@@ -3048,6 +3048,21 @@ pub(crate) const ENTITLEMENT_MARGIN: f32 = 0.15;
 /// it never feeds `population` on its own, only this dose does.
 pub(crate) const VITAL_RATES_DOSE: f32 = 0.0;
 
+/// SETTLEMENT_LIFE_PLAN.md L7 (§3.6) — the settlement year's seasonal
+/// mortality term. Dosed from zero, kept SEPARATE from `VITAL_RATES_DOSE`/
+/// `WELFARE_BEHAVIOUR_DOSE`/`CAPACITY_LAND_WEIGHT` per the "two doses moving
+/// together cannot be told apart by one gate run" rule (§0 of the plan). At
+/// `CALENDAR_DOSE <= 0.0`, `update_seasonal_mortality` is a true no-op (it
+/// returns before touching a single hub).
+pub(crate) const CALENDAR_DOSE: f32 = 0.0;
+/// How far the seasonal multiplier swings above/below 1.0 at full dose.
+pub(crate) const SEASONAL_MORTALITY_AMP: f32 = 0.6;
+/// The share of a hub's population, PER YEAR, subject to this seasonal
+/// swing — a small slice of `VITAL_BASE_CDR`'s 3.3%/yr, since fever/
+/// respiratory illness is one contributor among several to ordinary
+/// mortality, not the whole of it.
+pub(crate) const SEASONAL_MORTALITY_BASE: f32 = 0.006;
+
 /// MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
 /// change, named twice) · `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
 /// above names the exact prerequisite this is: `update_food_and_starvation`
@@ -4424,6 +4439,29 @@ pub(crate) fn vital_net_rate_e(
         * (1.0 + VITAL_DEATH_WELFARE_GAIN * (1.0 - w).max(0.0));
     let vital_net = cbr - cdr;
     old_net * (1.0 - dose) + vital_net * dose
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L7 (§3.6) — the settlement year's seasonal
+/// mortality curve. A hot/wet climate's fever toll peaks at ITS OWN
+/// hemisphere's summer; a cold climate's respiratory toll peaks at its own
+/// winter — there is no dedicated respiratory `CAUSE_*` slot (`DEATH_CAUSE_
+/// COUNT`'s own doc comment: append-only, no slot left), so both read onto
+/// `CAUSE_FEVER`, the closer of the two existing causes either way. Returns
+/// a MULTIPLIER on this month's seasonal-mortality slice — exactly 1.0 (a
+/// true no-op) at `dose <= 0.0`, the same shape `vital_net_rate_e` uses.
+#[inline]
+pub(crate) fn seasonal_mortality_mult_e(day_of_year: u32, north: bool, cold_climate: bool, dose: f32) -> f32 {
+    if dose <= 0.0 {
+        return 1.0;
+    }
+    let hemi_shift = if north { 0.0 } else { 0.5 };
+    // A cold climate peaks at the hub's own winter (day ~0/365, phase 0.0);
+    // a warm/wet one peaks at its own summer (~day 200, phase ~0.55) — the
+    // same late-summer phase `seasonal_mult`'s harvest peak already uses.
+    let peak_phase = if cold_climate { 0.0 } else { 0.55 };
+    let phase = (day_of_year as f32 / TICKS_PER_YEAR as f32 - peak_phase + hemi_shift)
+        * std::f32::consts::TAU;
+    (1.0 + dose.clamp(0.0, 1.0) * SEASONAL_MORTALITY_AMP * phase.cos()).max(0.1)
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L6 (§3.5) — housing & crowding. A hub's
@@ -10110,6 +10148,7 @@ impl CampaignSim {
                 self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
                 self.update_housing(); // SETTLEMENT_LIFE_PLAN.md L6: housing/crowding, consuming real goods
+                self.update_seasonal_mortality(); // SETTLEMENT_LIFE_PLAN.md L7: the settlement year's seasonal mortality curve
                 self.sample_hub_history();
                 self.sample_journal();
                 self.sample_world_chronicle();

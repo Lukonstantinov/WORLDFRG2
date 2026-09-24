@@ -1779,16 +1779,18 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   fixes) — nothing here changes that sequencing, this entry only records
   which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L6 shipped (L0-L3 the STOP MARKER, L4-L6 past it), L13 partly surfaced
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L7 shipped (L0-L3 the STOP MARKER, L4-L7 past it, L7 partial), L13 partly surfaced
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
 in a follow-up session, so the STOP MARKER was reached in full — the hidden
 famine is measured, the welfare ratio exists AND is visible, and the player can
 see how a city lives. Further sessions then shipped **L4** (vital rates + age
-bands), **L5** (welfare into behaviour) and **L6** (housing & crowding), each
+bands), **L5** (welfare into behaviour), **L6** (housing & crowding) and now
+**L7's first named part** (the settlement year's seasonal mortality), each
 at its own dose of zero, per the plan's own explicit permission to continue
-past the marker one gated slice at a time. L7 onward remain queued (see
+past the marker one gated slice at a time. L7's other three named parts (lean-
+months hoarding, harvest labour, feast days) and L8 onward remain queued (see
 below), with one exception: **the two L13 items that had real data already —
 the age pyramid and causes of death, both computed by L4 and sitting unused
 in `TickHub` — are now surfaced in the Life tab**, rather than waiting on
@@ -1991,13 +1993,41 @@ behind them yet (L9/L10/L12).
   `housing_dose_zero_is_a_noop`, `crowding_above_one_costs_more_than_housed_
   comfortably`, `housing_seeds_from_population_once`,
   `housing_build_persons_e_spends_real_stock_it_has` (`tick::tests`).
-- **What did NOT ship, and why (rule 36 — queued, not waived)**: L7 onward
-  (the settlement year, urban hazards, the church, the watch, persistent
-  pops, townspeople) are each their own dose walk per the plan's own build
-  order and are unstarted; L6's own rent/growth-ceiling sub-effects and the
-  rest of Life tab v2 (§3.13) wait as named above. Gates run across all
-  sessions: `cargo check --lib --tests` (clean), `cargo test --lib
-  tick::tests` (299/299, ~43s), `cargo test --lib econ_ -- --nocapture`
+- **L7 — the settlement year (§3.6), FIRST of its four named parts only:
+  seasonal mortality.** `seasonal_mortality_mult_e` (mod.rs) reads a hub's own
+  hemisphere (`hub_lat_frac`) and climate (`koppen >= 14` ⇒ cold) and returns
+  a multiplier peaking at a warm/wet hub's OWN summer (fever) or a cold hub's
+  OWN winter (respiratory) — both tag `CAUSE_FEVER`, since `DEATH_CAUSE_
+  COUNT`'s own doc comment leaves no slot for a dedicated respiratory cause.
+  `update_seasonal_mortality` (monthly, `cities.rs`) gates the WHOLE pass on
+  `CALENDAR_DOSE`, not just a downstream reader — L6's construction-gating
+  regression is exactly why: unlike L4's age-pyramid bookkeeping, this
+  changes real `population`, so it cannot be unconditional the way a pure
+  label can. The monthly extra is SIGNED (both above and below the year's
+  average), so the 12 monthly calls net close to zero over a year — a
+  REDISTRIBUTION of `update_vital_rates`'s own yearly total onto its true
+  season, never an added death rate stacked on top of it; only the POSITIVE
+  (peak-season) excess is tagged into `deaths_by_cause[CAUSE_FEVER]`, since
+  that tally is descriptive only. `CALENDAR_DOSE` is kept apart from
+  `VITAL_RATES_DOSE`/`WELFARE_BEHAVIOUR_DOSE`/`HOUSING_DOSE` per the same
+  "two doses moving together" rule. **Grain temporal CV was ALREADY printed**
+  before this slice (`economy_validation.rs`'s `temporal_cv`, "grain price CV
+  within a city", band 0.30–0.50) — nothing new needed there, and it is
+  unmoved by this change since seasonal mortality touches population, not
+  price. The other three named L7 parts — pre-harvest hoarding + `LAW_GRAIN`
+  calling dearth earlier, a harvest-labour dip in the manufacturing cap with
+  a seasonal wage bump, and a bounded feast-day calendar (folding the
+  existing fair/pilgrimage seasons in rather than duplicating them) — are
+  NOT built, queued. Gated by `calendar_dose_zero_is_a_noop`, `summer_fever_
+  in_the_south_winter_deaths_in_the_north`, `seasonal_mortality_redistributes_
+  rather_than_adds` (`tick::tests`, 302/302).
+- **What did NOT ship, and why (rule 36 — queued, not waived)**: L7's other
+  three named parts (above); L8 onward (urban hazards, the church, the
+  watch, persistent pops, townspeople) are each their own dose walk per the
+  plan's own build order and are unstarted; L6's own rent/growth-ceiling
+  sub-effects and the rest of Life tab v2 (§3.13) wait as named above. Gates
+  run across all sessions: `cargo check --lib --tests` (clean), `cargo test
+  --lib tick::tests` (302/302, ~42s), `cargo test --lib econ_ -- --nocapture`
   (6/6 incl. the multi-seed inheritance gate), `npx tsc --noEmit` (clean).
 
 ---
