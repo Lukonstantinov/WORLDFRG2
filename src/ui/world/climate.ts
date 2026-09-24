@@ -18,6 +18,20 @@ const KOPPEN: Record<number, [string, string]> = {
   30: ["dry-winter subarctic", "Oymyakon"], 31: ["dry-summer subarctic", "the cold steppe"], 32: ["alpine highland", "an alpine vale"],
 };
 
+/** Köppen zone letters by the backend's numeric code (`sim/step4_climate/koppen.rs`
+ *  ordering — the same table `InfoPanel.tsx` labels cells with). */
+const KOPPEN_CODE: Record<number, string> = {
+  1: "Af", 2: "Am", 3: "Aw", 4: "BWh", 5: "BWk", 6: "BSh", 7: "BSk", 8: "Csa", 9: "Csb", 10: "Csc",
+  11: "Cfa", 12: "Cfb", 13: "Cfc", 14: "Dfa", 15: "Dfb", 16: "Dfc", 17: "Dfd", 18: "Dsa", 19: "Dsb",
+  20: "Dsc", 21: "ET", 22: "EF", 23: "As", 24: "Cwa", 25: "Cwb", 26: "Cwc", 27: "Dwa", 28: "Dwb",
+  29: "Dwc", 30: "Dwd", 31: "Dsd", 32: "H",
+};
+
+/** Köppen letters for a zone code ("Csa"), or "" for an unclassified cell. */
+export function koppenCode(k: number): string {
+  return KOPPEN_CODE[k] ?? "";
+}
+
 /** Short climate name only (e.g. "humid subtropical"). */
 export function koppenName(k: number): string {
   return (KOPPEN[k] ?? ["temperate", "a familiar shore"])[0];
