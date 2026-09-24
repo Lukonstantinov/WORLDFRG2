@@ -215,6 +215,12 @@ function FigureCard({ f, year, selected, onClick }: {
             {f.legacy}
           </div>
         )}
+        {f.influence && (
+          <div style={{ marginTop: 4, fontSize: FZ.tiny, color: spec.color, display: "flex", gap: 4, alignItems: "baseline" }}>
+            <span style={{ fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.4, fontSize: FZ.micro }}>Now</span>
+            <span style={{ color: T.ink }}>{f.influence}</span>
+          </div>
+        )}
       </div>
       <div style={{ textAlign: "right", flex: "0 0 auto", minWidth: 58 }}>
         <div style={{ fontFamily: SERIF, color: f.alive ? T.gold : T.inkDim, fontSize: FZ.base, fontWeight: 700 }}>
@@ -274,6 +280,7 @@ export function CityNotables({ hubIdx, cityName }: { hubIdx: number; cityName: s
                   {spec.emoji} {f.role}{f.house ? ` · House ${f.house}` : ""} · {f.alive ? `since ${f.born_year} (${Math.max(0, year - f.born_year)} yrs)` : `${f.born_year}–${f.died_year}`}
                 </div>
                 {f.legacy && <div style={{ fontSize: FZ.tiny, color: T.inkMid, fontStyle: "italic", marginTop: 1 }}>{f.legacy}</div>}
+                {f.influence && <div style={{ fontSize: FZ.tiny, color: spec.color, marginTop: 1 }}>▸ {f.influence}</div>}
               </div>
             </div>
           );

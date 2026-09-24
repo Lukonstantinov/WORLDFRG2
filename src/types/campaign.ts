@@ -2313,6 +2313,8 @@ export interface FigureBrief {
   house: string;
   /** One sentence naming the figure's one real, capped effect on the world. */
   legacy: string;
+  /** What a living figure keeps doing every year — "" once dead. */
+  influence: string;
 }
 
 /** Phase 6 · a landmark / place of note. */

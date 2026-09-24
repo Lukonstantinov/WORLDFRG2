@@ -2904,6 +2904,9 @@ pub struct FigureBrief {
     /// moment they rose to prominence (mirrors the chronicle text `raise_notable_
     /// figures` writes once — never fabricated beyond that).
     pub legacy: String,
+    /// What a LIVING figure keeps doing every year (`living_figures_pass`,
+    /// `run_piracy`'s admiral shield) — "" once they are dead.
+    pub influence: String,
 }
 
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).

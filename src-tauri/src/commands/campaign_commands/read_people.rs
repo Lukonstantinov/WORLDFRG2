@@ -540,6 +540,13 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
                 format!("Charted distant shores, raising House {}'s standing.", house)
             } else { format!("Set out from {} to chart distant shores.", city) },
         };
+        let influence = if f.dead { String::new() } else { match f.kind {
+            0 if !house.is_empty() => format!("While at sea, corsairs leave House {}'s galleys alone.", house),
+            1 => format!("Keeps the streets of {} restless every year.", city),
+            2 if !good_name.is_empty() => format!("Refines {}'s {} a little more each year.", city, good_name),
+            3 | 4 if !house.is_empty() => format!("Adds to House {}'s prestige each year.", house),
+            _ => String::new(),
+        } };
         FigureBrief {
             name: f.name.clone(),
             role: FIGURE_KINDS.get(f.kind as usize).copied().unwrap_or("Figure").to_string(),
@@ -554,6 +561,7 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             culture,
             house,
             legacy,
+            influence,
         }
     }).collect();
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));
