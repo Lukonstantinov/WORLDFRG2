@@ -1933,6 +1933,11 @@ fn econ_measure_settlement_life() {
         let riots = s.journal.iter().filter(|e| e.kind == "riot").count();
         let revolts = s.journal.iter().filter(|e| e.kind == "revolt").count();
         let plague_strikes = s.journal.iter().filter(|e| e.kind == "plague_lockup").count();
+        // SETTLEMENT_LIFE_PLAN.md L8 (§3.7) — the world-level fire event's own
+        // journal kind is generic ("event"); its text is what names it a fire
+        // (the SAME string `roll_events` builds, "Fire ravages the warehouses
+        // of …"). A lower bound, journal-capped exactly like the three above.
+        let fires = s.journal.iter().filter(|e| e.kind == "event" && e.text.starts_with("Fire ravages")).count();
         let centuries = years as f32 / 100.0;
 
         let mean_lack = mean(&lack_samples);
@@ -1962,6 +1967,8 @@ fn econ_measure_settlement_life() {
                  revolts as f32 / centuries);
         println!("  plague strikes (lower bound, journal-capped) {plague_strikes}   ({:.1}/century)",
                  plague_strikes as f32 / centuries);
+        println!("  fires (lower bound, journal-capped, L8)      {fires}   ({:.1}/century)",
+                 fires as f32 / centuries);
         println!("  plague recovery time: NOT MEASURED this session — needs per-tick");
         println!("    population history; queued (rule 36), not approximated here.");
         println!("═══════════════════════════════════════════════════════════════════");

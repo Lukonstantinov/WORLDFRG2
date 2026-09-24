@@ -3048,6 +3048,76 @@ pub(crate) const ENTITLEMENT_MARGIN: f32 = 0.15;
 /// it never feeds `population` on its own, only this dose does.
 pub(crate) const VITAL_RATES_DOSE: f32 = 0.0;
 
+/// SETTLEMENT_LIFE_PLAN.md L7 (§3.6) — the settlement year's seasonal
+/// mortality term. Dosed from zero, kept SEPARATE from `VITAL_RATES_DOSE`/
+/// `WELFARE_BEHAVIOUR_DOSE`/`CAPACITY_LAND_WEIGHT` per the "two doses moving
+/// together cannot be told apart by one gate run" rule (§0 of the plan). At
+/// `CALENDAR_DOSE <= 0.0`, `update_seasonal_mortality` is a true no-op (it
+/// returns before touching a single hub).
+pub(crate) const CALENDAR_DOSE: f32 = 0.0;
+/// How far the seasonal multiplier swings above/below 1.0 at full dose.
+pub(crate) const SEASONAL_MORTALITY_AMP: f32 = 0.6;
+/// The share of a hub's population, PER YEAR, subject to this seasonal
+/// swing — a small slice of `VITAL_BASE_CDR`'s 3.3%/yr, since fever/
+/// respiratory illness is one contributor among several to ordinary
+/// mortality, not the whole of it.
+pub(crate) const SEASONAL_MORTALITY_BASE: f32 = 0.006;
+
+/// SETTLEMENT_LIFE_PLAN.md L8 (§3.7) — urban hazards, FIRST of its three
+/// named parts only: fire's toll on HOUSING and LIVES, layered onto the
+/// existing warehouse-stock fire event (`kind == "fire"` in `roll_events`,
+/// unconditional and UNCHANGED by this dose — the stock burn, house-wealth
+/// loss, depot damage and estate strike all ship exactly as before). Flood
+/// (riverine hubs, wet season) and water/sanitation (a new civic structure)
+/// are NOT built this pass, queued. Kept SEPARATE from `CALENDAR_DOSE`/
+/// `HOUSING_DOSE`/`VITAL_RATES_DOSE` per the standing "two doses moving
+/// together" rule. At `URBAN_HAZARD_DOSE <= 0.0`, `fire_settlement_toll_e`
+/// is a true no-op (returns `(0.0, 0.0)`).
+pub(crate) const URBAN_HAZARD_DOSE: f32 = 0.0;
+/// Scales the existing fire event's own `mag` (0.5-0.65ish, already the
+/// warehouse-stock burn fraction) into a housing-loss fraction, before the
+/// crowding/dry-season risk multiplier and the hard cap below are applied.
+pub(crate) const FIRE_HOUSING_LOSS_SCALE: f32 = 0.5;
+/// However severe the risk multiplier, a single fire event may never
+/// destroy more than this share of a hub's housing in one strike — "burns
+/// A FRACTION", never the whole city.
+pub(crate) const FIRE_HOUSING_LOSS_CAP: f32 = 0.35;
+/// Share of those displaced by a fire's housing loss who actually die —
+/// historically LOW even for a famous conflagration (the Great Fire of
+/// London, 1666: ~13,200 houses lost, a handful of recorded deaths). Fire
+/// destroys property far more efficiently than it kills.
+pub(crate) const FIRE_DEATH_RATE_OF_DISPLACED: f32 = 0.02;
+
+/// SETTLEMENT_LIFE_PLAN.md L8 (§3.7) — a fire's toll on housing and lives,
+/// riding on top of the EXISTING warehouse-stock fire event's own `mag`.
+/// `crowding` above 1.0 raises risk (a crowded city loses more to the same
+/// blaze); `timber_share` is a fixed proxy at 1.0 today — no per-hub
+/// building-material state exists yet, and the plan's own "a city that has
+/// burned may enact a stone-rebuilding law, lowering future risk" is
+/// EXPLICITLY QUEUED, not built this pass; `dry_season_mult` is the SAME
+/// local-summer risk curve `seasonal_mortality_mult_e`'s warm-climate branch
+/// already computes (fire risk peaks in a settlement's own dry/hot season
+/// regardless of whether its climate is generally hot or cold — reused
+/// rather than duplicated). Returns `(housing_frac_lost, death_frac)`, both
+/// exactly `(0.0, 0.0)` at `dose <= 0.0`.
+#[inline]
+pub(crate) fn fire_settlement_toll_e(
+    mag: f32,
+    crowding: f32,
+    timber_share: f32,
+    dry_season_mult: f32,
+    dose: f32,
+) -> (f32, f32) {
+    if dose <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let risk = crowding.max(0.3) * timber_share.max(0.0) * dry_season_mult.max(0.1);
+    let housing_frac = (mag * FIRE_HOUSING_LOSS_SCALE * risk * dose.clamp(0.0, 1.0))
+        .clamp(0.0, FIRE_HOUSING_LOSS_CAP);
+    let death_frac = housing_frac * FIRE_DEATH_RATE_OF_DISPLACED;
+    (housing_frac, death_frac)
+}
+
 /// MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
 /// change, named twice) · `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
 /// above names the exact prerequisite this is: `update_food_and_starvation`
@@ -4424,6 +4494,29 @@ pub(crate) fn vital_net_rate_e(
         * (1.0 + VITAL_DEATH_WELFARE_GAIN * (1.0 - w).max(0.0));
     let vital_net = cbr - cdr;
     old_net * (1.0 - dose) + vital_net * dose
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L7 (§3.6) — the settlement year's seasonal
+/// mortality curve. A hot/wet climate's fever toll peaks at ITS OWN
+/// hemisphere's summer; a cold climate's respiratory toll peaks at its own
+/// winter — there is no dedicated respiratory `CAUSE_*` slot (`DEATH_CAUSE_
+/// COUNT`'s own doc comment: append-only, no slot left), so both read onto
+/// `CAUSE_FEVER`, the closer of the two existing causes either way. Returns
+/// a MULTIPLIER on this month's seasonal-mortality slice — exactly 1.0 (a
+/// true no-op) at `dose <= 0.0`, the same shape `vital_net_rate_e` uses.
+#[inline]
+pub(crate) fn seasonal_mortality_mult_e(day_of_year: u32, north: bool, cold_climate: bool, dose: f32) -> f32 {
+    if dose <= 0.0 {
+        return 1.0;
+    }
+    let hemi_shift = if north { 0.0 } else { 0.5 };
+    // A cold climate peaks at the hub's own winter (day ~0/365, phase 0.0);
+    // a warm/wet one peaks at its own summer (~day 200, phase ~0.55) — the
+    // same late-summer phase `seasonal_mult`'s harvest peak already uses.
+    let peak_phase = if cold_climate { 0.0 } else { 0.55 };
+    let phase = (day_of_year as f32 / TICKS_PER_YEAR as f32 - peak_phase + hemi_shift)
+        * std::f32::consts::TAU;
+    (1.0 + dose.clamp(0.0, 1.0) * SEASONAL_MORTALITY_AMP * phase.cos()).max(0.1)
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L6 (§3.5) — housing & crowding. A hub's
@@ -10127,6 +10220,7 @@ impl CampaignSim {
                 self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
                 self.update_housing(); // SETTLEMENT_LIFE_PLAN.md L6: housing/crowding, consuming real goods
+                self.update_seasonal_mortality(); // SETTLEMENT_LIFE_PLAN.md L7: the settlement year's seasonal mortality curve
                 self.sample_hub_history();
                 self.sample_journal();
                 self.sample_world_chronicle();

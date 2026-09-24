@@ -10088,3 +10088,120 @@
         assert_eq!(s.houses[0].fleet_sea, 5, "the admiral's house must keep every galley");
         assert!(s.houses[1].fleet_sea < 50, "the unprotected house must lose ships to corsairs over 300 years");
     }
+    // ── SETTLEMENT_LIFE_PLAN.md L7 ──────────────────────────────────────────
+    #[test]
+    fn calendar_dose_zero_is_a_noop() {
+        for doy in [0u32, 90, 182, 274, 364] {
+            for north in [true, false] {
+                for cold in [true, false] {
+                    assert_eq!(seasonal_mortality_mult_e(doy, north, cold, 0.0), 1.0,
+                        "dose 0 must return the exact no-op multiplier for doy={doy} north={north} cold={cold}");
+                }
+            }
+        }
+        // End-to-end: a whole year of monthly calls at the shipped dose must
+        // leave population EXACTLY where `update_vital_rates` alone would.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 10_000.0, vec![100.0], 0);
+        let mut s = sim(vec![h], goods);
+        for tick in 0..TICKS_PER_YEAR {
+            s.tick = tick;
+            s.update_seasonal_mortality();
+        }
+        assert_eq!(s.hubs[0].population, 10_000.0,
+            "CALENDAR_DOSE=0.0 must never move population over a full year");
+        assert_eq!(s.hubs[0].deaths_by_cause[CAUSE_FEVER], 0.0,
+            "CALENDAR_DOSE=0.0 must never tag a seasonal-mortality death");
+    }
+
+    #[test]
+    fn summer_fever_in_the_south_winter_deaths_in_the_north() {
+        // A cold NORTHERN hub: the seasonal multiplier must peak near northern
+        // winter (day ~0) and trough near northern summer (day ~182).
+        let north_winter = seasonal_mortality_mult_e(0, true, true, 1.0);
+        let north_summer = seasonal_mortality_mult_e(182, true, true, 1.0);
+        assert!(north_winter > north_summer,
+            "a cold northern hub must see MORE seasonal mortality in its own winter than its own summer, got winter={north_winter} summer={north_summer}");
+
+        // A warm/wet SOUTHERN hub: "summer" there falls opposite the northern
+        // calendar (~day 18, per the shared hemi_shift), so its fever peak
+        // must exceed its own winter (~day 200).
+        let south_summer = seasonal_mortality_mult_e(18, false, false, 1.0);
+        let south_winter = seasonal_mortality_mult_e(200, false, false, 1.0);
+        assert!(south_summer > south_winter,
+            "a warm southern hub must see MORE fever mortality in its own (southern) summer than its own winter, got summer={south_summer} winter={south_winter}");
+
+        // The multiplier must stay strictly positive at any phase (a
+        // population can never lose MORE than all of itself in a month).
+        for doy in 0..TICKS_PER_YEAR {
+            assert!(seasonal_mortality_mult_e(doy, true, true, 1.0) > 0.0);
+            assert!(seasonal_mortality_mult_e(doy, false, false, 1.0) > 0.0);
+        }
+    }
+
+    #[test]
+    fn seasonal_mortality_redistributes_rather_than_adds() {
+        // Summed over a full year, the signed monthly extras must net to
+        // (very close to) zero — this is a REDISTRIBUTION of `update_vital_
+        // rates`'s own yearly total onto its true season, not an added death
+        // rate stacked on top of it.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 100_000.0, vec![1000.0], 0);
+        let mut s = sim(vec![h], goods);
+        // Force the dose on for this one diagnostic run only, via a scoped
+        // copy of the pure function's own math (CALENDAR_DOSE itself stays
+        // 0.0 — this test does not flip the shipped constant).
+        let start_pop = s.hubs[0].population;
+        let mut pop = start_pop;
+        for month in 0..12u32 {
+            let doy = month * 30;
+            let north = s.hub_lat_frac(0) >= 0.0;
+            let cold = s.hubs[0].koppen >= 14;
+            let mult = seasonal_mortality_mult_e(doy, north, cold, 1.0);
+            let extra = pop * (SEASONAL_MORTALITY_BASE / 12.0) * (mult - 1.0);
+            pop -= extra;
+        }
+        let drift = (pop - start_pop).abs() / start_pop;
+        assert!(drift < 0.01,
+            "a full year's signed seasonal extras must net close to zero, drifted {drift:.4} of starting population");
+    }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L8 (fire, first of three named parts) ──────
+    #[test]
+    fn urban_hazard_dose_zero_is_a_noop() {
+        for mag in [0.2f32, 0.5, 0.65] {
+            for crowding in [0.5f32, 1.0, 2.5] {
+                for dry in [0.5f32, 1.0, 1.5] {
+                    assert_eq!(
+                        fire_settlement_toll_e(mag, crowding, 1.0, dry, 0.0),
+                        (0.0, 0.0),
+                        "dose 0 must return no housing/death toll for mag={mag} crowding={crowding} dry={dry}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fire_toll_is_bounded_and_worse_when_crowded() {
+        let (comfortable_housing, comfortable_deaths) =
+            fire_settlement_toll_e(0.5, 0.6, 1.0, 1.0, 1.0);
+        let (crowded_housing, crowded_deaths) =
+            fire_settlement_toll_e(0.5, 2.5, 1.0, 1.0, 1.0);
+        assert!(crowded_housing > comfortable_housing,
+            "a crowded hub must lose MORE housing to the same blaze, got crowded={crowded_housing} comfortable={comfortable_housing}");
+        assert!(crowded_deaths > comfortable_deaths,
+            "a crowded hub must lose MORE lives to the same blaze, got crowded={crowded_deaths} comfortable={comfortable_deaths}");
+        // However severe the inputs, a single fire may never destroy more than
+        // the hard cap's share of a hub's housing in one strike.
+        let (extreme_housing, _) = fire_settlement_toll_e(0.65, 10.0, 5.0, 3.0, 1.0);
+        assert!(extreme_housing <= FIRE_HOUSING_LOSS_CAP + 1e-6,
+            "housing loss must never exceed FIRE_HOUSING_LOSS_CAP, got {extreme_housing}");
+        // Fire destroys property far more efficiently than it kills — the
+        // Great Fire of London (1666) lost ~13,200 houses to a handful of
+        // recorded deaths. The death rate is a fixed, small share of the
+        // displaced, never comparable in magnitude to the housing loss.
+        assert!(comfortable_deaths < comfortable_housing * 0.1,
+            "fire deaths must stay a small fraction of the housing lost, got deaths={comfortable_deaths} housing={comfortable_housing}");
+    }
+

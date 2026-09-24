@@ -9,6 +9,114 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-24d — `SETTLEMENT_LIFE_PLAN.md`: L8's fire toll shipped at dose 0
+
+Follow-up session to 2026-09-24c's L7. L8 (§3.7, "urban hazards: fire, flood,
+water") names three parts; this session ships only the first, fire's toll on
+housing and lives, and leaves flood (riverine hubs, wet season) and water/
+sanitation (a new civic structure) queued by name rather than declared out
+of scope (rule 36).
+
+**Reused the existing warehouse-fire mechanism rather than building a
+parallel one.** `roll_events` (production.rs) already rolls a global "fire"
+event a few times a century, burning a hub's stock, a slice of resident
+houses' wealth, one house depot, and sometimes a nearby estate — all of it
+unconditional and unchanged by this slice. `fire_settlement_toll_e` (mod.rs)
+adds a SECOND, dosed consequence riding the same event: housing loss and
+deaths, scaled by the event's own severity, the struck hub's crowding, a
+fixed `timber_share` proxy (no per-hub building-material state exists yet —
+the plan's own stone-rebuilding law is queued, not built), and a dry-season
+risk curve that REUSES `seasonal_mortality_mult_e`'s warm-climate branch
+(L7) rather than duplicating it — fire risk peaks at a settlement's own
+dry/hot season whatever its general climate. Housing loss is hard-capped
+(`FIRE_HOUSING_LOSS_CAP`) so a single fire burns a fraction, never the whole
+city; the death rate is a small, fixed share of those displaced
+(`FIRE_DEATH_RATE_OF_DISPLACED` — the Great Fire of London, 1666, lost
+~13,200 houses to a handful of recorded deaths, so fire destroys property
+far more efficiently than it kills). Deaths tag `CAUSE_FIRE`, reserved since
+L4 and at 0.0 until this slice.
+
+**Rebuilding demand needed no new code.** Burning housing below its target
+simply reopens the deficit L6's `update_housing` already closes — the two
+slices compose for free the moment `HOUSING_DOSE` is raised, exactly the
+"REBUILDING demand" the plan's own §3.7 text asks for, without a dedicated
+mechanism.
+
+**Fires/century is now printed**, satisfying the build-order table's own
+named L8 gate: `econ_measure_settlement_life` filters the world journal on
+the fire event's own text ("Fire ravages the warehouses of…"), the same
+lower-bound, journal-capped convention riots/revolts/plague strikes already
+use.
+
+Shipped `URBAN_HAZARD_DOSE = 0.0` — a true no-op: `fire_settlement_toll_e`
+returns exactly `(0.0, 0.0)`, and the pre-existing stock/wealth/depot/estate
+fire effects are unaffected at any dose (they are outside this slice's
+control flow entirely). Gated by `urban_hazard_dose_zero_is_a_noop` (every
+tried combination of severity/crowding/dry-season returns the no-op pair)
+and `fire_toll_is_bounded_and_worse_when_crowded` (a crowded hub loses more
+housing and more lives to the identical blaze than a comfortable one; the
+hard cap holds even under extreme inputs; the death rate stays a small
+fraction of the housing lost, matching the historical London 1666 ratio) —
+both new, `tick::tests` 304/304 (~42s). `cargo test --lib econ_ --
+--nocapture` 6/6 bit-identical including the multi-seed inheritance gate
+(559.71s). `npx tsc --noEmit` clean (no frontend change this slice). Raising
+the dose, flood, water/sanitation and the stone-rebuilding law each remain
+unstarted, separate work.
+
+---
+
+## 2026-09-24c — `SETTLEMENT_LIFE_PLAN.md`: L7's seasonal mortality shipped at dose 0
+
+Follow-up session to 2026-09-24b's L6. L7 (§3.6, "the settlement year") names
+four parts; this session ships only the first, seasonal mortality, and leaves
+the other three (pre-harvest hoarding + `LAW_GRAIN` calling dearth earlier, a
+harvest-labour dip in the manufacturing cap, a feast-day calendar) queued by
+name rather than declared out of scope (rule 36).
+
+`seasonal_mortality_mult_e` (mod.rs) reads a hub's own hemisphere
+(`hub_lat_frac`) and climate (`koppen >= 14` ⇒ cold) and returns a multiplier
+peaking at a warm/wet hub's OWN summer (fever) or a cold hub's OWN winter
+(respiratory) — both tag `CAUSE_FEVER`, the closer of the two existing causes,
+since `DEATH_CAUSE_COUNT`'s own doc comment records that append-only field as
+having no slot left for a dedicated respiratory cause. `update_seasonal_
+mortality` (monthly, `cities.rs`) gates the WHOLE pass on `CALENDAR_DOSE`, not
+just a downstream reader — applying L6's own lesson directly: unlike L4's
+age-pyramid bookkeeping (pure counters), this changes real `population`, a
+genuine economic-adjacent quantity, so it cannot be unconditional the way a
+label can. The monthly extra is SIGNED — both above and below the year's
+average — so the 12 monthly calls net close to zero over a full year: this
+REDISTRIBUTES `update_vital_rates`'s own yearly mortality total onto its true
+season, it does not add a new death rate on top of it. Only the POSITIVE
+(peak-season) excess is tagged into `deaths_by_cause[CAUSE_FEVER]`, since that
+running tally is descriptive only and need not itself sum to zero.
+`CALENDAR_DOSE` is kept SEPARATE from `VITAL_RATES_DOSE`/`WELFARE_BEHAVIOUR_
+DOSE`/`HOUSING_DOSE`, per the standing "two doses moving together cannot be
+told apart by one gate run" rule.
+
+**Grain temporal CV needed no new work.** L7's second named deliverable in
+the build-order table — "grain temporal CV PRINTED" — was already shipped:
+`economy_validation.rs`'s `temporal_cv` ("grain price CV within a city",
+0.30–0.50 band) has been printed, not asserted, since before this plan
+existed. Checked and left alone rather than duplicated; unmoved by this
+session's change, since seasonal mortality touches population, never price.
+
+Shipped `CALENDAR_DOSE = 0.0` — a true no-op: `seasonal_mortality_mult_e`
+returns exactly 1.0 and `update_seasonal_mortality` returns before touching a
+single hub. Gated by `calendar_dose_zero_is_a_noop` (the multiplier is 1.0 at
+every phase/climate/hemisphere combination tried, AND a full simulated year
+of monthly calls at the shipped dose leaves population and `deaths_by_cause`
+untouched), `summer_fever_in_the_south_winter_deaths_in_the_north` (the
+named gate — a cold northern hub peaks at its own winter, a warm southern hub
+peaks at its own summer, both at full dose), `seasonal_mortality_redistributes_
+rather_than_adds` (a full year's signed monthly extras net under 1% of
+starting population — proving the redistribution claim, not just asserting
+it) — all three new, `tick::tests` 302/302 (~42s). `cargo test --lib econ_
+-- --nocapture` 6/6 bit-identical including the multi-seed inheritance gate
+(516.10s). `npx tsc --noEmit` clean (no frontend change this slice). Raising
+the dose, and the three unbuilt L7 parts, remain unstarted, separate work.
+
+---
+
 ## 2026-09-24b — `SETTLEMENT_LIFE_PLAN.md`: L6 (housing & crowding) shipped at dose 0 — one real regression caught and fixed before shipping
 
 Follow-up session to 2026-09-24's L13-partial surfacing. `TickHub.housing`/

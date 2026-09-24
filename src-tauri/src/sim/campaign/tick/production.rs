@@ -2622,6 +2622,26 @@ impl CampaignSim {
                 // Every band scales equally — a blind multiply over the whole flat
                 // vector is exactly that, and sidesteps needing a per-good loop.
                 for v in self.hubs[hub].stock.iter_mut() { *v *= 1.0 - mag; }
+                // SETTLEMENT_LIFE_PLAN.md L8 (§3.7) — the same blaze also burns
+                // housing and costs lives, at `URBAN_HAZARD_DOSE` (a true no-op
+                // at 0.0; everything above and below this block is unchanged by
+                // this dose). `timber_share` is the fixed 1.0 proxy named in the
+                // constant's own doc comment (no stone-rebuilding law yet).
+                if URBAN_HAZARD_DOSE > 0.0 && !self.hubs[hub].is_estate {
+                    let doy = self.day_of_year();
+                    let north = self.hub_lat_frac(hub) >= 0.0;
+                    let dry_season_mult = seasonal_mortality_mult_e(doy, north, false, 1.0);
+                    let (housing_frac, death_frac) = fire_settlement_toll_e(
+                        mag, self.hubs[hub].crowding, 1.0, dry_season_mult, URBAN_HAZARD_DOSE,
+                    );
+                    if housing_frac > 0.0 {
+                        self.hubs[hub].housing *= 1.0 - housing_frac;
+                        let pop = self.hubs[hub].population.max(0.0);
+                        let deaths = pop * death_frac;
+                        self.hubs[hub].population = (pop - deaths).max(0.0);
+                        self.hubs[hub].deaths_by_cause[CAUSE_FIRE] += deaths;
+                    }
+                }
                 // The warehouses that burn belong to the city's merchant houses:
                 // every resident house loses a slice of its wealth (stored stock
                 // value), the heavier the richer it is — a stabilizing loss that
