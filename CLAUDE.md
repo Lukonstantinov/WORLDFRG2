@@ -1779,21 +1779,23 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   fixes) — nothing here changes that sequencing, this entry only records
   which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L5 shipped (L0-L3 the STOP MARKER, L4-L5 past it), L13 partly surfaced
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L6 shipped (L0-L3 the STOP MARKER, L4-L6 past it), L13 partly surfaced
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
 in a follow-up session, so the STOP MARKER was reached in full — the hidden
 famine is measured, the welfare ratio exists AND is visible, and the player can
 see how a city lives. Further sessions then shipped **L4** (vital rates + age
-bands) and **L5** (welfare into behaviour), each at its own dose of zero, per
-the plan's own explicit permission to continue past the marker one gated slice
-at a time. L6 onward remain queued (see below), with one exception: **the two
-L13 items that had real data already — the age pyramid and causes of death,
-both computed by L4 and sitting unused in `TickHub` — are now surfaced in the
-Life tab**, rather than waiting on L13's other four ingredients (housing,
-church, watch, notables), which genuinely have no mechanism behind them yet
-(L6/L9/L10/L12).
+bands), **L5** (welfare into behaviour) and **L6** (housing & crowding), each
+at its own dose of zero, per the plan's own explicit permission to continue
+past the marker one gated slice at a time. L7 onward remain queued (see
+below), with one exception: **the two L13 items that had real data already —
+the age pyramid and causes of death, both computed by L4 and sitting unused
+in `TickHub` — are now surfaced in the Life tab**, rather than waiting on
+L13's other five ingredients. Housing/crowding (L6) is now real DATA too
+(`TickHub.housing`/`crowding`) but not yet drawn in the tab — a UI gap, not
+a missing mechanism; church, watch and notables genuinely have no mechanism
+behind them yet (L9/L10/L12).
 
 - **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
   `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
@@ -1946,14 +1948,57 @@ church, watch, notables), which genuinely have no mechanism behind them yet
   causes-of-death bar (the 8 `CAUSE_*` categories, cumulative since founding,
   fire/flood still 0 pending L8) — and a new, honest footer naming what still
   isn't there: housing, church, watch and named notables (L6/L9/L10/L12).
-- **What did NOT ship, and why (rule 36 — queued, not waived)**: L6 onward
-  (housing, the settlement year, urban hazards, the church, the watch,
-  persistent pops, townspeople) are each their own dose walk per the plan's
-  own build order and are unstarted; the rest of Life tab v2 (§3.13) waits on
-  them the same way. Gates run across all sessions: `cargo check --lib --tests`
-  (clean), `cargo test --lib tick::tests` (286/286, ~16s), `cargo test --lib
-  econ_ -- --nocapture` (6/6 incl. the multi-seed inheritance gate),
-  `npx tsc --noEmit` (clean).
+- **L6 — housing & crowding** (§3.5). `TickHub.housing`/`crowding` — a fresh
+  or old-save hub seeds `housing = population * HOUSING_SEED_RATIO`
+  (`housing_needs_seeding`, the same "reads as zero ⇒ seed me" convention
+  `ages_needs_seeding` uses); `update_housing` (monthly, `cities.rs`) decays
+  it a small share a year and, when crowded, closes part of the deficit
+  through a pure, dosed helper (`housing_build_persons_e`, the N6/S3 `_e`
+  pattern) that CONSUMES a real construction good straight from the hub's
+  own market stock — `pick_build_supply_good`'s existing non-food category
+  (already prefers timber/stone/iron/brick, the same supply-pick
+  `construction_pass` uses for satellites), never conjured.
+  `crowding = population / housing`, stored so the dosed readers below
+  don't recompute it. **Unlike L4's age-pyramid bookkeeping, construction is
+  NOT unconditional** — consuming real stock is a genuine economic action
+  (it can move prices and, through them, wealth), so it is gated by
+  `HOUSING_DOSE` too, alongside its two consequence readers. A first cut
+  left construction unconditional on the L4 precedent and it moved
+  `econ_inheritance_rules_fragment_differently` (seed 7: partible read
+  richer than primogeniture) — caught by the gate, not by review, and fixed
+  before shipping rather than argued past (§2.4's own rule: a spot failure
+  on the aggregate gate is a revert, not a judgement call). Only seeding,
+  decay and the `crowding` read stay unconditional, since none of them
+  touch stock/prices/wealth. `HOUSING_DOSE` is kept apart from
+  `VITAL_RATES_DOSE`/`WELFARE_BEHAVIOUR_DOSE` per the "two doses moving
+  together" rule: `housing_crowding_net_adjust_e` subtracts an
+  excess-mortality term from the daily net growth rate (composed AFTER
+  `vital_net_rate_e`, never folded into it — a separate adjustment, not a
+  shared lever), and `housing_crowding_unrest_e` adds a term to
+  `update_unrest`'s target. All three — construction and both consequences
+  — are true no-ops at `HOUSING_DOSE = 0.0`, and only crowding ABOVE 1.0
+  ever costs anything. Shipped `HOUSING_BUILD_RATE` (5%/month of the
+  deficit) is deliberately slow — "builders cannot keep pace" is the plan's
+  own default story, not instant catch-up. **Not built this session,
+  queued**: the rent term ("a slice of household income goes to housing
+  owners — the resident houses and the church") explicitly waits on L9
+  (the church doesn't exist yet to be one of the two payees); the
+  growth-ceiling read ("the growth ceiling reads housing as one more
+  capacity term") is left unwired rather than composed into
+  `CAPACITY_LAND_WEIGHT`'s own dose walk, for the same one-lever-at-a-time
+  reason; a Life tab surfacing of housing/crowding (fire/flood destruction
+  wait on L8 regardless). Gated by
+  `housing_dose_zero_is_a_noop`, `crowding_above_one_costs_more_than_housed_
+  comfortably`, `housing_seeds_from_population_once`,
+  `housing_build_persons_e_spends_real_stock_it_has` (`tick::tests`).
+- **What did NOT ship, and why (rule 36 — queued, not waived)**: L7 onward
+  (the settlement year, urban hazards, the church, the watch, persistent
+  pops, townspeople) are each their own dose walk per the plan's own build
+  order and are unstarted; L6's own rent/growth-ceiling sub-effects and the
+  rest of Life tab v2 (§3.13) wait as named above. Gates run across all
+  sessions: `cargo check --lib --tests` (clean), `cargo test --lib
+  tick::tests` (299/299, ~43s), `cargo test --lib econ_ -- --nocapture`
+  (6/6 incl. the multi-seed inheritance gate), `npx tsc --noEmit` (clean).
 
 ---
 

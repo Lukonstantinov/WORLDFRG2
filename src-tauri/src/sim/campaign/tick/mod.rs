@@ -4328,6 +4328,21 @@ pub struct TickHub {
     /// L13's Life tab v2 is the first. `#[serde(default)]` — zeros on an old
     /// save, which is the honest answer ("unrecorded before this version").
     #[serde(default)] pub deaths_by_cause: [f32; DEATH_CAUSE_COUNT],
+    /// SETTLEMENT_LIFE_PLAN.md L6 (§3.5) — persons this hub can house, seeded
+    /// at `population * HOUSING_SEED_RATIO` the first time it is touched
+    /// (`housing_needs_seeding`), built up monthly by `update_housing`
+    /// (consuming real construction goods from the hub's own stock) and
+    /// decaying a small fraction a year. `#[serde(default)]` reads 0.0 on an
+    /// old save, which `housing_needs_seeding` reads as "seed me", not as a
+    /// literal homeless city.
+    #[serde(default)] pub housing: f32,
+    /// SETTLEMENT_LIFE_PLAN.md L6 — `population / housing`, recomputed every
+    /// time `update_housing` runs. A DERIVED, stored value (not folded back
+    /// into `housing` itself) purely so the Life tab and the dosed
+    /// consequences below can read it without recomputing the division.
+    /// Above 1.0 the city is overcrowded. `#[serde(default)]` reads 0.0 on an
+    /// old save until the next monthly pass.
+    #[serde(default)] pub crowding: f32,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
@@ -4410,6 +4425,94 @@ pub(crate) fn vital_net_rate_e(
     let vital_net = cbr - cdr;
     old_net * (1.0 - dose) + vital_net * dose
 }
+
+/// SETTLEMENT_LIFE_PLAN.md L6 (§3.5) — housing & crowding. A hub's
+/// `housing` (persons it can decently house) is seeded once at
+/// `population * HOUSING_SEED_RATIO`; `housing_needs_seeding` reads the
+/// same "reads as zero" convention `ages_needs_seeding` already uses so a
+/// fresh hub or an old save's first pass after this slice reseeds rather
+/// than reading as a literal homeless city.
+pub(crate) fn housing_needs_seeding(housing: f32) -> bool {
+    housing < EPS
+}
+/// How much housing a brand-new or reseeded hub starts with, relative to
+/// its population — a small surplus (real pre-modern towns were not
+/// usually AT capacity the day they were founded).
+pub(crate) const HOUSING_SEED_RATIO: f32 = 1.10;
+/// Housing lost to ordinary decay/abandonment, per YEAR — applied monthly
+/// as `HOUSING_DECAY_RATE / 12`. ~1%/yr, the plan's own figure.
+pub(crate) const HOUSING_DECAY_RATE: f32 = 0.01;
+/// What SHARE of a hub's housing deficit (population above current
+/// housing, at `HOUSING_SEED_RATIO`) the city + resident houses close in
+/// one month, when the construction good is affordable. Deliberately slow
+/// — "builders cannot keep pace" (the plan's own story line) is the
+/// default read, not instant catch-up.
+pub(crate) const HOUSING_BUILD_RATE: f32 = 0.05;
+/// Physical UNITS of the picked construction good consumed per PERSON of
+/// housing built. A small number: a real dwelling is mostly labour, and
+/// this hub has no separate labour ledger to draw down (rule: never
+/// invent a mechanism this slice doesn't need — `works_dev`/estates
+/// already tax a hub's manpower elsewhere).
+pub(crate) const HOUSING_BUILD_GOOD_PER_PERSON: f32 = 0.02;
+
+/// SETTLEMENT_LIFE_PLAN.md L6 — how many PERSONS of housing this month's
+/// construction adds, given the housing deficit, how much of the picked
+/// good sits in the hub's own stock, and the dose. Pure and independently
+/// testable (the N6/S3 `_e` pattern), because the caller (`update_housing`)
+/// is the one place this slice actually spends real stock — unlike the
+/// age-pyramid bookkeeping this file otherwise mirrors, that spend is a
+/// genuine economic action and is NOT safe to leave unconditional (see
+/// `update_housing`'s own doc comment for the measured regression this
+/// caught). `dose <= 0.0` returns exactly 0.0 — no persons built, no stock
+/// consumed — which is what makes the caller's zero-dose path a true no-op.
+#[inline]
+pub(crate) fn housing_build_persons_e(deficit_persons: f32, avail_stock: f32, dose: f32) -> (f32, f32) {
+    if dose <= 0.0 || deficit_persons <= 0.0 || avail_stock <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let want_persons = deficit_persons * HOUSING_BUILD_RATE * dose.clamp(0.0, 1.0);
+    let need_units = want_persons * HOUSING_BUILD_GOOD_PER_PERSON;
+    let used_units = need_units.min(avail_stock);
+    let built_persons = used_units / HOUSING_BUILD_GOOD_PER_PERSON;
+    (built_persons, used_units)
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L6 — the ONE lever for crowding's CONSEQUENCES
+/// (excess mortality, unrest). Housing itself (`update_housing`'s
+/// build/decay/seed bookkeeping) is UNCONDITIONAL, the same discipline L4's
+/// age-band bookkeeping uses — it never touches `population`/`unrest` on
+/// its own, only these two dosed readers do, and both are true no-ops at
+/// `0.0`. Kept separate from `VITAL_RATES_DOSE`/`WELFARE_BEHAVIOUR_DOSE`
+/// (CLAUDE.md's own "two doses moving together cannot be told apart"
+/// rule) so a future session can walk it alone.
+pub(crate) const HOUSING_DOSE: f32 = 0.0;
+
+/// Crowding's excess-mortality term, added to a hub's net growth rate
+/// AFTER `vital_net_rate_e` (a separate, independently-gated adjustment —
+/// never folded into that function, which is L4's own dosed lever). Only
+/// crowding ABOVE 1.0 costs anything; a well-housed city is unaffected.
+/// `dose <= 0.0` is an exact no-op (returns `net` unchanged).
+#[inline]
+pub(crate) fn housing_crowding_net_adjust_e(net: f32, crowding: f32, dose: f32) -> f32 {
+    if dose <= 0.0 { return net; }
+    let excess = (crowding - 1.0).max(0.0);
+    net - HOUSING_CROWDING_DEATH_GAIN * excess * dose.clamp(0.0, 1.0)
+}
+/// How much a hub's net growth rate falls per unit of crowding excess
+/// (`crowding - 1.0`) at full dose — e.g. a city at 1.5× its housing loses
+/// `0.5 * HOUSING_CROWDING_DEATH_GAIN` off its annual net rate.
+pub(crate) const HOUSING_CROWDING_DEATH_GAIN: f32 = 0.02;
+
+/// Crowding's unrest term, added to `update_unrest`'s target before the
+/// clamp. Pure and independently testable, same shape as the other `_e`
+/// helpers in this file. `dose <= 0.0` is an exact 0.0 (no-op).
+#[inline]
+pub(crate) fn housing_crowding_unrest_e(crowding: f32, dose: f32) -> f32 {
+    if dose <= 0.0 { return 0.0; }
+    let excess = (crowding - 1.0).clamp(0.0, 1.0);
+    HOUSING_CROWDING_UNREST_WEIGHT * excess * dose.clamp(0.0, 1.0)
+}
+pub(crate) const HOUSING_CROWDING_UNREST_WEIGHT: f32 = 0.18;
 
 /// Dosed from zero (SETTLEMENT_LIFE_PLAN.md L5, §3.4). Once L2 gave a real
 /// welfare ratio, three existing sentiment-only readers can switch to it:
@@ -10006,6 +10109,7 @@ impl CampaignSim {
                 self.warehouse_and_spoilage_pass(); // size city warehouses, spoil what rots (§4.2)
                 self.works_monthly_pass(); // each estate's 12-month output/quality/price ring (§4.6)
                 self.construction_pass(); // satellite build sites: haul supply, advance/decay
+                self.update_housing(); // SETTLEMENT_LIFE_PLAN.md L6: housing/crowding, consuming real goods
                 self.sample_hub_history();
                 self.sample_journal();
                 self.sample_world_chronicle();

@@ -9,6 +9,74 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-24b — `SETTLEMENT_LIFE_PLAN.md`: L6 (housing & crowding) shipped at dose 0 — one real regression caught and fixed before shipping
+
+Follow-up session to 2026-09-24's L13-partial surfacing. `TickHub.housing`/
+`crowding` — a fresh or old-save hub seeds `housing = population *
+HOUSING_SEED_RATIO` (the same "reads as zero ⇒ seed me" convention
+`ages_needs_seeding` uses), `update_housing` (monthly, `cities.rs`) decays it
+a small share a year and, when crowded, closes part of the deficit through a
+pure dosed helper (`housing_build_persons_e`) that CONSUMES a real
+construction good picked via the existing `pick_build_supply_good` (non-food
+category — already prefers timber/stone/iron/brick, the same supply-pick
+pattern `construction_pass` already uses for satellite builds) straight from
+the hub's own market stock — never conjured. `crowding = population /
+housing`, stored so the dosed readers don't recompute it.
+
+**A real regression, caught by the gate rather than review.** The first cut
+followed L4's own precedent and left housing build/decay entirely
+UNCONDITIONAL, on the reasoning that it mirrors the age-pyramid bookkeeping.
+That reasoning was wrong: L4's bookkeeping is pure internal counters, but
+construction CONSUMES REAL STOCK — a genuine economic action that can move
+prices and, through them, wealth — so it cannot be neutral at "dose zero"
+the way a counter can. `cargo test --lib econ_` caught it directly:
+`econ_inheritance_rules_fragment_differently` failed on seed 7 ("partible
+must leave the average house poorer than primogeniture (154885 vs 127856)"
+— the wrong direction), immediately after a clean 517.81s pass on the exact
+same commit before this slice's diff. Per §2.4's own rule — a spot failure
+on the aggregate gate is a revert, not a judgement call — this was fixed
+before shipping, not argued past: `housing_build_persons_e` (the N6/S3 `_e`
+pattern, pure and independently testable) now folds `HOUSING_DOSE` into the
+construction amount itself, so the only unconditional bookkeeping left is
+seeding, decay and the `crowding` read — none of which ever touch
+stock/prices/wealth.
+
+Two SEPARATE, independently-gated consequences share the same `HOUSING_DOSE`
+(kept apart from `VITAL_RATES_DOSE`/`WELFARE_BEHAVIOUR_DOSE` per the "two
+doses moving together cannot be told apart by one gate run" rule):
+`housing_crowding_net_adjust_e` subtracts an excess-mortality term from the
+daily net growth rate, composed AFTER `vital_net_rate_e` rather than folded
+into it; `housing_crowding_unrest_e` adds a term to `update_unrest`'s
+target. All three — construction and both consequences — are true no-ops at
+`HOUSING_DOSE = 0.0`, and only crowding ABOVE 1.0 ever costs anything.
+
+**Deliberately not wired this pass, and named rather than silently
+dropped**: the rent term ("a slice of household income goes to housing
+owners — the resident houses and the church") waits on L9, since the church
+doesn't exist yet as one of its two payees; the growth-ceiling read ("the
+growth ceiling reads housing as one more capacity term") is left unwired
+rather than composed into `CAPACITY_LAND_WEIGHT`'s own already-established
+dose walk, for the same one-lever-at-a-time reason; the Life tab does not
+yet draw housing/crowding (a UI gap, not a missing mechanism — L13's own
+row now reflects this precisely).
+
+**Gates**: `cargo check --lib --tests` clean; `cargo test --lib
+tick::tests` 299/299 (4 new: `housing_dose_zero_is_a_noop` — now also
+asserting a crowded hub with real stock on hand consumes NONE of it at the
+shipped dose, `crowding_above_one_costs_more_than_housed_comfortably`,
+`housing_seeds_from_population_once`,
+`housing_build_persons_e_spends_real_stock_it_has`); `cargo test --lib
+econ_ -- --nocapture` RE-VERIFIED CLEAN after the construction-gating fix
+(6/6, multi-seed inheritance gate included, ~527s); `npx tsc --noEmit`
+clean.
+
+L7 onward (the settlement year, urban hazards, the church, the watch,
+persistent pops, townspeople) remain queued exactly as before, plus L6's
+own two named sub-effects (rent, growth ceiling) and the Life tab housing
+chart.
+
+---
+
 ## 2026-09-24 — `SETTLEMENT_LIFE_PLAN.md`: L13 partially surfaced — the age pyramid + causes of death, ahead of the rest of Life tab v2
 
 Follow-up session. L13 as a whole ("pyramid, causes of death, housing, church,

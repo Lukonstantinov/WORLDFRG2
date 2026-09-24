@@ -1209,11 +1209,14 @@ export function HubPanel() {
           L3's trend table (population, Allen's welfare ratio, hunger/unrest)
           plus L13's age pyramid + causes-of-death, both real data from L4's
           `TickHub.ages`/`deaths_by_cause` now snapshotted into the annals.
-          Housing, church, watch and named notables (L6/L9/L10/L12) still
-          have no mechanism behind them and are named as queued rather than
-          rendered empty or faked — rule 36. Quiet-when-ordinary, same
-          discipline as the stability gauges: only the unusual reads as a
-          callout, the rest is a plain trend table. */}
+          Housing/crowding (L6) is now real backend data
+          (`TickHub.housing`/`crowding`) but not yet drawn here — a UI gap,
+          not a missing mechanism, queued for its own pass. Church, watch and
+          named notables (L9/L10/L12) genuinely have no mechanism behind them
+          yet and are named as queued rather than rendered empty or faked —
+          rule 36. Quiet-when-ordinary, same discipline as the stability
+          gauges: only the unusual reads as a callout, the rest is a plain
+          trend table. */}
       {tab === "life" && (() => {
         if (annals.length === 0) {
           return <div style={{ color: "#7a90a8", fontSize: 10 }}>No annals recorded yet — check back after the campaign has run a year.</div>;
@@ -1313,9 +1316,10 @@ export function HubPanel() {
               );
             })()}
             <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
-              Housing &amp; crowding, the church, the watch, and named notables
-              have no mechanism behind them yet — that is L6/L9/L10/L12 of the
-              plan, still queued. This is Life tab v2 over what L0-L4 made real.
+              Housing &amp; crowding is tracked now but not shown on this tab yet.
+              The church, the watch, and named notables have no mechanism
+              behind them at all — that is L9/L10/L12 of the plan, still
+              queued. This is Life tab v2 over what L0-L6 made real.
             </div>
           </>
         );

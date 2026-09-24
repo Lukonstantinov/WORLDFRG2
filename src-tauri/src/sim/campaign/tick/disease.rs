@@ -651,6 +651,11 @@ impl CampaignSim {
                     net, food_sec, self.hubs[h].welfare_ratio, self.hubs[h].starving,
                     VITAL_RATES_DOSE,
                 );
+                // SETTLEMENT_LIFE_PLAN.md L6 (§3.5) · crowding's excess
+                // mortality — a SEPARATE, independently-gated adjustment
+                // (never folded into `vital_net_rate_e`, which is L4's own
+                // lever). A true no-op at `HOUSING_DOSE = 0.0`.
+                let net = housing_crowding_net_adjust_e(net, self.hubs[h].crowding, HOUSING_DOSE);
                 new_pop += net * pop * (1.0 - pop / capacity);
             }
             // Famine empties a city faster than trade decline alone.

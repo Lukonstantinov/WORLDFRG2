@@ -34,7 +34,7 @@
             wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0,
             yard_progress: 0.0,
             food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
-            ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT],
+            ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0,
         }
     }
 
@@ -9957,5 +9957,90 @@
             let v = welfare_opportunity_e(0.5, wr, 1.0);
             assert!((0.0..=1.0).contains(&v), "welfare_opportunity_e must stay in 0..1, got {v} for welfare_ratio {wr}");
         }
+    }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L6 ──────────────────────────────────────────
+
+    /// L6 (§3.5) · `HOUSING_DOSE = 0.0` must be a TRUE no-op for the two
+    /// consequence helpers AND for construction — unlike L4's age-pyramid
+    /// bookkeeping, building housing spends real stock (a genuine economic
+    /// action), so it is dosed too; only seeding/decay/the `crowding` read
+    /// are unconditional (see `update_housing`'s own doc comment for the
+    /// measured regression that made this the shipped shape).
+    #[test]
+    fn housing_dose_zero_is_a_noop() {
+        assert_eq!(housing_crowding_net_adjust_e(0.002, 2.0, 0.0), 0.002);
+        assert_eq!(housing_crowding_unrest_e(3.0, 0.0), 0.0);
+        assert_eq!(housing_build_persons_e(500.0, 1000.0, 0.0), (0.0, 0.0),
+            "construction must build nothing and spend nothing at dose 0");
+        // End-to-end: a badly crowded hub with plenty of stock to build from
+        // must still consume NO stock at the shipped dose.
+        let goods = vec![good("timber", 2, 2, 1.0, 0.3, false)];
+        let mut h = hub(0, 0.0, 0.0, 2000.0, vec![10.0], 0);
+        h.housing = 500.0; // well under the 2000-person population: crowded
+        stock_add_ungraded(&mut h.stock, 0, 1000.0);
+        let mut s = sim(vec![h], goods);
+        let stock_before = stock_of(&s.hubs[0].stock, 0);
+        s.update_housing();
+        assert_eq!(stock_of(&s.hubs[0].stock, 0), stock_before,
+            "a crowded hub with real stock on hand must consume none of it at HOUSING_DOSE = 0.0");
+    }
+
+    /// L6 · a crowded hub (population above housing) must read a higher
+    /// excess-mortality drag and a higher unrest term than an uncrowded one,
+    /// at a real dose — this is what makes crowding a real consequence
+    /// rather than a stored number nothing reads.
+    #[test]
+    fn crowding_above_one_costs_more_than_housed_comfortably() {
+        let crowded = housing_crowding_net_adjust_e(0.0, 2.0, 1.0);
+        let comfortable = housing_crowding_net_adjust_e(0.0, 0.8, 1.0);
+        assert!(crowded < comfortable,
+            "a hub at 2x its housing must read a worse net rate than one under capacity, got {crowded} vs {comfortable}");
+        assert_eq!(comfortable, 0.0, "crowding below 1.0 must cost nothing, got {comfortable}");
+        let u = housing_crowding_unrest_e(2.0, 1.0);
+        assert!(u > 0.0, "an overcrowded hub must add a positive unrest term, got {u}");
+        assert_eq!(housing_crowding_unrest_e(0.8, 1.0), 0.0, "crowding below 1.0 must add zero unrest");
+    }
+
+    /// L6 · a fresh hub must seed `housing` at `population * HOUSING_SEED_
+    /// RATIO` (not zero), and an already-seeded hub must NOT be reseeded on
+    /// a later pass even if population has since grown past it.
+    #[test]
+    fn housing_seeds_from_population_once() {
+        let goods = vec![good("timber", 2, 2, 1.0, 0.3, false)];
+        let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.update_housing();
+        let seeded = s.hubs[0].housing;
+        assert!((seeded - 1000.0 * HOUSING_SEED_RATIO).abs() < 1.0,
+            "a fresh hub must seed housing near population*HOUSING_SEED_RATIO, got {seeded}");
+        s.hubs[0].population = 5000.0; // grown well past its housing
+        s.update_housing();
+        assert!(s.hubs[0].housing < 2000.0,
+            "an already-seeded hub must not be reseeded to the new, larger population, got {}", s.hubs[0].housing);
+    }
+
+    /// L6 · `housing_build_persons_e` at a real dose: a deficit with real
+    /// stock on hand must build real housing, consuming exactly what the
+    /// build-good-per-person conversion implies, and never more than the
+    /// stock actually available. A deficit with NO stock must build
+    /// nothing — no money or goods are ever conjured, whatever the dose.
+    #[test]
+    fn housing_build_persons_e_spends_real_stock_it_has() {
+        let (built, used) = housing_build_persons_e(500.0, 1000.0, 1.0);
+        assert!(built > 0.0 && used > 0.0,
+            "a real deficit with real stock on hand must build something at full dose, got built={built} used={used}");
+        assert!((used / built - HOUSING_BUILD_GOOD_PER_PERSON).abs() < 1e-6,
+            "the goods-per-person conversion must hold exactly, got {used} units for {built} persons");
+        let (built_empty, used_empty) = housing_build_persons_e(500.0, 0.0, 1.0);
+        assert_eq!((built_empty, used_empty), (0.0, 0.0),
+            "a hub with NO stock to build from must build nothing, whatever the deficit");
+        let (built_none, used_none) = housing_build_persons_e(0.0, 1000.0, 1.0);
+        assert_eq!((built_none, used_none), (0.0, 0.0),
+            "a hub already at target (zero deficit) must build nothing, whatever its stock");
+        // Never draws more than the stock actually on hand.
+        let (_, used_capped) = housing_build_persons_e(1e6, 5.0, 1.0);
+        assert!(used_capped <= 5.0 + 1e-6,
+            "construction must never spend more than the hub's real stock, got {used_capped} against 5.0 available");
     }
 

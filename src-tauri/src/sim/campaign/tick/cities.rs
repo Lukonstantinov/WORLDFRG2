@@ -1596,6 +1596,60 @@ impl CampaignSim {
         }
     }
 
+    /// SETTLEMENT_LIFE_PLAN.md L6 (§3.5) · monthly housing bookkeeping.
+    /// Seeding, decay and the `crowding` READ are pure number bookkeeping —
+    /// unconditional, the same discipline `update_vital_rates` uses for the
+    /// age pyramid, since neither touches a hub's real stock/prices/wealth.
+    /// The construction step is DIFFERENT IN KIND: it consumes a real good
+    /// out of the hub's own market stock, which is a genuine economic
+    /// action (it can move prices and, through them, wealth) — so unlike
+    /// the age-pyramid bookkeeping it is gated by `HOUSING_DOSE` too, not
+    /// just its two mortality/unrest readers. A `dose <= 0.0` first cut
+    /// left this unconditional and it moved
+    /// `econ_inheritance_rules_fragment_differently` (a real, measured
+    /// regression, not a judgement call — reverted per CLAUDE.md §2.4).
+    /// At `HOUSING_DOSE = 0.0`, `housing` only ever seeds and decays: it
+    /// never grows, so `crowding` only ever reads the SAME story an old
+    /// save already told (unchanging or rising population against
+    /// unchanging or shrinking housing) rather than a new one construction
+    /// could tell. A hub with nothing to build with, or with the dose at
+    /// zero, simply stays crowded — no money or goods are ever conjured.
+    pub(crate) fn update_housing(&mut self) {
+        let ng = self.goods.len();
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let pop = self.hubs[h].population.max(0.0);
+            if housing_needs_seeding(self.hubs[h].housing) {
+                self.hubs[h].housing = pop * HOUSING_SEED_RATIO;
+            }
+            // Ordinary decay/abandonment, monthly share of the annual rate.
+            self.hubs[h].housing *= 1.0 - HOUSING_DECAY_RATE / 12.0;
+            // Build toward the seed ratio if crowded and something to build
+            // with — via the pure, dosed `housing_build_persons_e`, which is
+            // the one part of this pass that spends real stock and so must
+            // not run at dose 0 (see this method's own doc comment).
+            if ng > 0 {
+                let target = pop * HOUSING_SEED_RATIO;
+                let deficit = (target - self.hubs[h].housing).max(0.0);
+                let g = self.pick_build_supply_good(h, 2) as usize;
+                if g < ng {
+                    let avail = stock_of(&self.hubs[h].stock, g).max(0.0);
+                    let (built, used) = housing_build_persons_e(deficit, avail, HOUSING_DOSE);
+                    if used > EPS {
+                        stock_take(&mut self.hubs[h].stock, g, used);
+                        self.hubs[h].housing += built;
+                    }
+                }
+            }
+            self.hubs[h].housing = self.hubs[h].housing.max(0.0);
+            self.hubs[h].crowding = if self.hubs[h].housing > EPS {
+                pop / self.hubs[h].housing
+            } else {
+                0.0
+            };
+        }
+    }
+
     /// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) · one annual record per live hub, over
     /// what L0-L2 made real (population, welfare, hunger, mood, unrest). Called
     /// yearly, AFTER `update_society`/`update_unrest` so this year's welfare
@@ -1676,6 +1730,9 @@ impl CampaignSim {
                     (mil.clamp(0.0, 1.0), con.clamp(0.0, 1.0))
                 } else { (0.0, 0.0) }
             };
+            // SETTLEMENT_LIFE_PLAN.md L6 (§3.5) · crowding stokes unrest — a
+            // true no-op at `HOUSING_DOSE = 0.0`.
+            let crowd_unrest = housing_crowding_unrest_e(self.hubs[h].crowding, HOUSING_DOSE);
             let target = (0.42 * (1.0 - mood)
                 + 0.30 * ineq
                 + 0.32 * lackb
@@ -1684,6 +1741,7 @@ impl CampaignSim {
                 + minority_unrest
                 + CULTURE_UNREST * cult_discontent
                 + POP_MILITANCY_WEIGHT * pop_mil
+                + crowd_unrest
                 - 0.30 * welfare
                 - 0.18 * prosp).clamp(0.0, 1.0);
             let u = {
@@ -2046,7 +2104,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT],
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0,
         });
         self.routes_dirty = true;
         self.hubs.len() - 1
