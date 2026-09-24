@@ -47,6 +47,140 @@ PLAN.md` S10 recorded for its own frontend-only work).
 
 ---
 
+## 2026-09-23c — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: Q19 (on-map lanes) + S12b + S12c(3/5) shipped
+
+Continuation of the same day's sessions (see 2026-09-23b below), this time
+under an explicit maintainer instruction to continue through the plan's
+remaining items and accept the blind-verification risk rather than stop.
+
+**Q19 — the on-map lane half of S11.** The focused house's existing
+seat→city web now carries real per-lane width (volume, normalized against
+the house's own busiest lane) and colour (the lane's dominant good's own
+`GOOD_DEFS` hue), stroked one medium at a time via the existing
+`mediumRuns` split (dashed open water / solid road — the same discipline
+already shipped for the merchant-route layer), with a small goods
+medallion + a `drawLabel` name at the lane's far end. Needed a new
+`LabelKey`, `"tradeLane"`, added to the typography registry and to
+Settings' "Cultural & trade" group. `MapCanvas` fetches
+`campaign_house_atlas` for the focused house into a new
+`OverlayManager.setHouseAtlas`. Backend untouched (`cargo check --lib
+--tests` clean, confirming no regression); frontend `tsc`/`vite build`
+clean. This is the highest-risk piece of canvas code this plan has shipped
+blind — flagged as the first thing to check once a browser session is
+available.
+
+**S12b — the Dossier timeline plate.** A horizontal life-timeline above
+the subtabs: head segments (from each head's own real `since_year`/
+`until_year`/`wealth_start`/`wealth_end`), milestone marks (founded/
+succession/monopoly/branch/dissolved only), feud brackets, a wealth curve
+as a filled area. Scrubbable by drag; does NOT rewrite the tabs below to a
+scrubbed year (no per-tab historical state exists for that anywhere in the
+sim — queue item Q20). Zero new backend query.
+
+**S12c — three of five per-tab graphs.** Accountant waterfall (real
+cascade from the year's own income/expense lines to NET), Standing radar
+(needed one new read, `campaign_tier1_gauge_medians`, which calls
+`campaign_house_stability` verbatim per tier-1 house so the two numbers
+can never drift), Feuds temperature line (a stepped line from each feud's
+own recorded flare log). Kin-as-a-tree and Lineage-as-an-SVG-diagram are
+named as NOT built rather than faked: Kin has no parent/child field
+anywhere in the sim (a real tree needs new persisted state, not a query —
+queue item Q21), and Lineage already renders as a real indented branching
+list, judged to already convey the structure closely enough that a
+from-scratch SVG tree wasn't worth the blind layout risk this pass (queue
+item Q22).
+
+**Verification, stated exactly as it was done**: `campaign_tier1_gauge_
+medians` is the one backend addition (a pure derived read reusing an
+already-gated function) — `cargo check --lib --tests` clean, no `econ_`/
+`tick::tests` run owed per the plan's own §4 note. Everything else this
+entry covers is frontend-only. `npx tsc --noEmit` clean, `npx vite build`
+clean (181 modules, unchanged) across all three pieces. None of it was
+opened in a real browser — the widened queue item Q17 now names Q19's
+on-map rendering specifically as the first thing to check.
+
+---
+
+## 2026-09-23b — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S11 (the two atlases, text form) shipped
+
+Continuation of the same follow-up session (see 2026-09-23 below, S12a).
+Picked S11 next per the plan's own §7 build order.
+
+The S8/S9 atlas queries (`campaign_house_atlas`, `campaign_guild_atlas`)
+were built in the first session and read by no UI. `HouseDossier` gains a
+"🗺 Atlas" tab: partner cities ranked by combined in/out volume with a
+two-tone bar, the goods portfolio (bought-at/sold-at cities resolved from
+the atlas's own partner names), and a 12-bar seasonal lane-ease chart —
+`season_slices` finally has a reader. `GuildsPanel` gains a per-row "🗺"
+toggle expanding an inline Craft Atlas strip: inputs/outputs by city,
+reach (hubs currently buying the good), the earned signature when one
+exists. This needed one small backend addition — `GuildBrief.idx` (index
+into `sim.guilds`, taken via `.enumerate()` before the quality sort so it
+stays a stable key) — since the browse query never carried anything
+`campaign_guild_atlas(guild_idx)` could use.
+
+**Deliberately NOT attempted**: the plan's fuller on-map lane design (lane
+thickness ∝ volume, colour = the dominant good's `GOOD_DEFS` hue,
+direction arrows, the `mediumRuns` dashed/solid medium split, a
+`drawGoodIcon` medallion at the lane midpoint, a far-end label through
+`drawLabel`, rivals' lanes ghosted behind the focused house's own). That
+is real new canvas rendering on `OverlayManager`'s `laneBetween`/
+`mediumRuns` machinery — a much larger and much harder to verify blind
+piece of work than a text tab reusing an already-gated query — recorded
+as new queue item Q19 rather than silently left out.
+
+**Verification, stated exactly as it was done**: both S8/S9 queries are
+pure derived reads (§4's own note — neither can move a tile/sim gate), so
+no `econ_`/`tick::tests` run was owed. `cargo check --lib --tests` clean,
+`npx tsc --noEmit` clean, `npx vite build` clean (181 modules, unchanged
+from S10/S12a's count). Same caveat as everything else this session
+shipped in the UI — not opened in a real browser; folded into the already
+-widened queue item Q17.
+
+---
+
+## 2026-09-23 — `HOUSES_GUILDS_AND_MARKET_PLAN.md`: S12a (the Houses bump chart) shipped
+
+Follow-up session on the same branch, picked up after 2026-09-22g (S10) below.
+User asked to continue into the plan's own elastic tail; per §7's build order
+this is S12a, taken next since it was smaller and lower-risk than S11's map
+rendering work.
+
+`campaign_house_bump_chart` (new `#[tauri::command]`, `read_houses.rs`)
+reconstructs each of the top ~12 houses' wealth RANK per year from its own
+`wealth_history` — checked FIRST, per the plan's own §9 risk-register warning
+that a chart's window is bounded by data that may not exist at the right
+granularity: `WEALTH_HISTORY_CAP` = 80 years, comfortably past the plan's
+50-year window. A house stops being sampled the year it goes `defunct`, so
+its line in the chart simply STOPS rather than crawling to zero — the
+"a line that stops is a house that died" narrative the plan asked for falls
+out of existing data, no new field needed.
+
+`HousesPanel.tsx` gained a top band: an SVG bump chart (click a line to open
+that house's dossier), each house's existing `distinct_color` identity
+colour, a thicker stroke for Tier 1. Beside it, four "quiet gauge" cells —
+but only TWO are real sparklines. `families` and `top-10% share` reuse the
+EXISTING `campaign_get_inequality` query's per-year `series` (#29's own
+reads — a new caller, not new state). `founded`/`fallen` have no per-year
+series anywhere in the sim (only running cumulative totals), so they ship as
+plain numbers rather than a fabricated history — the exact discipline this
+plan's own §9 note was written to enforce, applied to a case the note didn't
+originally anticipate. New queue item Q18 names the small state addition
+(`InequalityPoint.founded_this_year`/`died_this_year`) that would close this
+gap. A bottom "pulse" ticker reuses the existing world journal query
+(`campaign_get_journal(-1,-1)`, the same one `NewsFeedPanel` already reads)
+filtered to house-ish event kinds — a sixth caller of an existing mechanism,
+matching the discipline the plan's own S11 section names for map lanes.
+
+**Verification, stated exactly as it was done**: pure derived read touching
+no tile/sim state, so per the plan's own §4 note this needed no `econ_`/
+`tick::tests` run. `cargo check --lib --tests` clean, `npx tsc --noEmit`
+clean, `npx vite build` clean (181 modules, unchanged from S10's count).
+Same caveat as S10 — not opened in a real browser this session; folded into
+the widened queue item Q17.
+
+---
+
 ## 2026-09-23e — Two real bugs found and FIXED behind 2026-09-23d's dose walk
 
 Continuation of the same session's dose-walk trial: rather than accept
