@@ -3048,6 +3048,42 @@ pub(crate) const ENTITLEMENT_MARGIN: f32 = 0.15;
 /// it never feeds `population` on its own, only this dose does.
 pub(crate) const VITAL_RATES_DOSE: f32 = 0.0;
 
+/// MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
+/// change, named twice) · `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
+/// above names the exact prerequisite this is: `update_food_and_starvation`
+/// (disease.rs) reads `food_have = stock + production` — GRAIN LEFT IN
+/// STOCK, including grain nobody could afford to buy — so a household
+/// priced out of its own ration (whether by S7's dose, still 0.0, or any
+/// other future cause) reads as the city being BETTER fed, not worse. The
+/// SPENDING side already exists: `lack_basic` (mod.rs's day loop, computed
+/// earlier the same tick) is the smoothed fraction of BASIC-tier need that
+/// went unmet — food included, but also every other tier-0 good, so this is
+/// deliberately not a food-only signal; a household that cannot afford its
+/// grain is exactly the case this is meant to catch.
+///
+/// Shipped at `0.0` — a true no-op (`dose == 0.0` returns `bal` bit-for-bit,
+/// no arithmetic performed on it) — for the same reason `HOUSEHOLD_
+/// MONETIZATION_DOSE` sits at 0.0: `lack_basic` and the food-balance `bal`
+/// measure different baskets (all basic goods vs. food goods only), so
+/// blending them is a real behavioural change even before S7's own dose
+/// is ever raised, and it must be walked with the same care — `unrest_
+/// topples_councils` and the famine tests re-run per step, per §5's build
+/// rule — not shipped live the way M6's catalogue-only closure could be.
+pub(crate) const FOOD_AFFORDABILITY_DOSE: f32 = 0.0;
+
+/// The pure twin of the blend `update_food_and_starvation` applies to its
+/// own `bal` (food_have vs. food_need) — split out (the N6/S3 pattern) so a
+/// test can exercise a real dose without touching the shipped constant. At
+/// `dose = 0.0` this returns `bal` UNCHANGED; a household priced out of its
+/// ration (`lack_basic > 0`) only ever PULLS the balance down, never up, so
+/// this cannot manufacture a famine where the physical stock genuinely
+/// covers the need at full price.
+#[inline]
+pub(crate) fn food_afford_adjusted_bal(bal: f32, lack_basic: f32, dose: f32) -> f32 {
+    if dose == 0.0 { return bal; }
+    bal - lack_basic.clamp(0.0, 1.0) * dose.clamp(0.0, 1.0)
+}
+
 /// `price / base_value`, clamped, run through a monotone dampened response and
 /// blended in by `PROD_ELASTICITY` — at 0.0 this returns EXACTLY 1.0 for any
 /// input, which is what makes the dose provably inert rather than merely
@@ -7692,6 +7728,16 @@ pub struct CampaignSim {
     #[serde(default)] pub issues: Vec<Issue>,
     /// Running id counter for `issues`, monotonic, never reused.
     #[serde(default)] pub next_issue_id: u32,
+    /// M3 · every purse that has ever held a coin (§3.1). Sparse — created
+    /// lazily by `add_coin`. Nothing outside `coinage.rs` reads or writes this
+    /// yet; it is a parallel ledger computed ALONGSIDE the existing wealth/
+    /// treasury numbers, not yet reconciled with them (D10, M9's own job).
+    #[serde(default)] pub purses: Vec<Purse>,
+    /// M5 · DIAGNOSTIC counters for `barter_settlement_pass` — zero while
+    /// `BARTER_DOSE` stays at 0.0, exactly like `diag_why_no_carrier_bind`
+    /// and friends before their own doses were ever raised.
+    #[serde(default)] pub diag_barter_trades: u32,
+    #[serde(default)] pub diag_barter_volume: f32,
 }
 
 /// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
@@ -9361,6 +9407,10 @@ impl CampaignSim {
                 // into the coin catalogue — same timing as `snapshot_coins` above, for
                 // the same reason (fineness/trust/reform are all settled by now).
                 self.record_currencies(yr);
+                // M6 (MONEY_AND_COINAGE_PLAN.md §3.7) · catalogue-only mint
+                // closure — reads the coin_basket update_currency_baskets just
+                // ran above; writes only the catalogue's own Currency fields.
+                self.mark_mint_closures(yr);
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
@@ -9722,9 +9772,27 @@ impl CampaignSim {
                         eat -= household_priced_out(eat, self.hubs[h].household_wealth, price,
                             HOUSEHOLD_MONETIZATION_DOSE);
                         eat = eat.max(0.0);
+                        // BUG (found 2026-09-23d dose-walk trial, SCOREBOARD.md): `spend`
+                        // is what the ration WOULD cost; `household_wealth` is what the
+                        // household actually HAS. At a small dose `household_priced_out`
+                        // only shaves a little off `eat`, so `spend` stays close to the
+                        // full ration value even when `household_wealth` cannot cover it
+                        // — the old code credited `civic_pool` with the FULL `spend`
+                        // regardless, while `household_wealth` was merely clamped to 0,
+                        // so the shortfall was struck as money from nothing every single
+                        // day (rule 18). Measured: civic_pool reached 197,485 over 5
+                        // years on a population earning a wage of a few units a month,
+                        // which alone explains why raising this dose never widens
+                        // unrest — the fabricated prosperity signal (civic_pool feeds
+                        // BOTH sent_prosperity and commoner_wealth, cities.rs, both
+                        // NEGATIVE terms in update_unrest) swamps the real lack_basic/
+                        // starving distress the dose is supposed to create. `paid` is
+                        // capped at what the household purse actually holds — the same
+                        // clamp `stock_take` already uses for goods, applied to money.
                         let spend = eat * price;
-                        self.hubs[h].household_wealth = (self.hubs[h].household_wealth - spend).max(0.0);
-                        self.hubs[h].civic_pool += spend; // the money reaches somewhere real
+                        let paid = spend.min(self.hubs[h].household_wealth.max(0.0));
+                        self.hubs[h].household_wealth = (self.hubs[h].household_wealth - paid).max(0.0);
+                        self.hubs[h].civic_pool += paid; // the money reaches somewhere real
                     }
                     stock_take(&mut self.hubs[h].stock, g, eat);
                     let t = self.goods[g].need_tier.min(2) as usize;
@@ -9773,6 +9841,11 @@ impl CampaignSim {
             self.fulfill_contracts(&needs);
             // 4) Merchant dispatch (arbitrage → in-transit cargo).
             self.dispatch(&needs);
+            // M5 (MONEY_AND_COINAGE_PLAN.md §3.5) · barter as a real settlement,
+            // read straight off today's `recent_trades` — a wholly separate,
+            // additive pass, never woven into `dispatch` itself. Ships at
+            // `BARTER_DOSE = 0.0`, a true no-op (see `coinage.rs`'s own header).
+            self.barter_settlement_pass();
             t_trade += _s_trade.elapsed().as_secs_f32() * 1000.0;
 
             // 5) Arrivals. Decay each hub's by-sea/by-land supply tally, then add
@@ -10700,8 +10773,11 @@ mod certification;
 mod league;
 mod yards;
 mod coinage;
-pub use coinage::{Currency, Denom, Issue, UnitOfAccount,
-    DENOM_GOLD, DENOM_SILVER, DENOM_PETTY, ISSUE_FIRST, ISSUE_DEBASEMENT, ISSUE_REFORM};
+pub use coinage::{Currency, Denom, Issue, UnitOfAccount, Purse,
+    DENOM_GOLD, DENOM_SILVER, DENOM_PETTY, ISSUE_FIRST, ISSUE_DEBASEMENT, ISSUE_REFORM,
+    HOLDER_CITY_TREASURY, HOLDER_HOUSE, HOLDER_BANK, HOLDER_HOUSEHOLD, HOLDER_LOCAL_MERCHANT,
+    HOLDER_MINT};
+pub(crate) use coinage::{MINT_CLOSE_SHARE, MINT_CLOSE_YEARS};
 pub(crate) use league::{
     LEAGUE_MIN_MEMBERS, LEAGUE_MAX_FOUNDING_MEMBERS, LEAGUE_YEAR_FLOOR, LEAGUE_FLOW_MIN,
     LEAGUE_DRIFT_YEARS, LEAGUE_DUES_FRAC, LEAGUE_DUES_MIN_TREASURY, LEAGUE_BOYCOTT_MAX,

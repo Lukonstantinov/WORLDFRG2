@@ -1880,6 +1880,65 @@ export interface MintBrief {
   debt_holders: number;   // number of patrician bondholders
 }
 
+// ── MONEY_AND_COINAGE_PLAN.md M2 · the coin catalogue ─────────────────────────
+
+/** One dated striking of a `CatalogueDenom`. `cause`: 0 First · 1 Debasement ·
+ *  2 Reform (3 NewRuler / 4 WarIssue are queued, not yet produced). M1 ships
+ *  struck/circulating/hoarded/melted/lost at 0 — M3's parallel ledger is what
+ *  will populate them. */
+export interface CatalogueIssue {
+  id: number;
+  denom_tier: number;   // 0 Gold · 1 Silver · 2 Petty
+  denom_name: string;
+  year: number;
+  authority: string;
+  grams: number;
+  fineness: number;
+  struck: number;
+  circulating: number;
+  hoarded: number;
+  melted: number;
+  lost: number;
+  cause: number;
+  cognomen: string;
+}
+
+/** One denomination of a currency (its gold trade coin, silver everyday coin,
+ *  or petty billon), oldest-issue-first. */
+export interface CatalogueDenom {
+  tier: number;
+  name: string;
+  standard_grams: number;
+  issues: CatalogueIssue[];
+}
+
+/** One mint's whole currency card. */
+export interface CatalogueCurrency {
+  mint_hub: number;
+  mint_city: string;
+  name: string;
+  unit_of_account: string;   // e.g. "pound / shilling / penny", "" if unresolved
+  open: boolean;
+  closed_year: number;
+  denoms: CatalogueDenom[];
+  trust: number;
+  current_fineness: number;
+  strength: number;          // headline 0..100, same scale as MintBrief.strength
+}
+
+/** M4 · Σ purses by holder class, today's snapshot (no time series yet). */
+export interface CoinLedgerSummary {
+  total_struck: number;
+  in_city_treasuries: number;
+  in_households: number;
+  in_local_merchants: number;
+}
+
+export interface CoinCatalogue {
+  currencies: CatalogueCurrency[];
+  ledger: CoinLedgerSummary;
+}
+
 /** A3 · one yearly point in a coin's biography (Money panel sparklines). */
 export interface CoinSnapshot {
   year: number;
@@ -2137,6 +2196,8 @@ export interface EpidemicBrief {
 
 /** Phase 6 · one craft guild (Guilds & Crafts panel + map). */
 export interface GuildBrief {
+  /** Index into sim.guilds — the key for campaignGuildAtlas (S9). */
+  idx?: number;
   hub: number;
   x: number;
   y: number;
@@ -2212,6 +2273,26 @@ export interface GuildAtlas {
   /** Length 0 or 1 — only the CURRENT tradition-years sample; no history is
    *  persisted per good/hub, so this is never a real time series yet. */
   tradition_by_year: number[];
+}
+
+/** S12a · one house's thread through the Houses bump chart
+ *  (`campaign_house_bump_chart`). `ranks`/`wealth` are aligned 1:1 with
+ *  `BumpChart.years`; a rank of -1 means not ranked that year (not yet
+ *  founded, already dead, or outside the top field). */
+export interface BumpLine {
+  house: number;
+  name: string;
+  color: string;
+  tier: number;
+  defunct: boolean;
+  ranks: number[];
+  wealth: number[];
+}
+
+/** S12a · the top houses' wealth rank over the last N years. */
+export interface BumpChart {
+  years: number[];
+  lines: BumpLine[];
 }
 
 /** Phase 6 · a notable figure (Great Lives roster). */
@@ -2783,6 +2864,14 @@ export interface HouseStability {
   head_span_years: number;
   feuds_live: number;
   feuds_hot: number;
+}
+
+/** S12c · the world's tier-1 median for each stability gauge, for the
+ *  Standing tab's radar chart. `n` houses contributed; 0 means no tier-1
+ *  house exists yet, not an error. */
+export interface GaugeMedians {
+  medians: [string, number][];
+  n: number;
 }
 
 /** One flare in a feud's history. */

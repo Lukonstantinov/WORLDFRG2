@@ -655,7 +655,7 @@ pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, St
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let (gw, gh) = (sim.world_w as u32, (sim.world_w * 0.5) as u32);
-    let mut out: Vec<GuildBrief> = sim.guilds.iter().filter_map(|g| {
+    let mut out: Vec<GuildBrief> = sim.guilds.iter().enumerate().filter_map(|(gi, g)| {
         let (hub, good) = (g.hub as usize, g.good as usize);
         let h = sim.hubs.get(hub)?;
         let spec = sim.goods.get(good)?;
@@ -666,6 +666,7 @@ pub fn campaign_get_guilds(db: State<'_, WorldDb>) -> Result<Vec<GuildBrief>, St
         // Brand by the city (a place of renown, like Murano glass).
         let brand = if exceptional { format!("{} {}", h.name, spec.name) } else { String::new() };
         Some(GuildBrief {
+            idx: gi as u32,
             hub: g.hub, x: h.x, y: h.y, city: h.name.clone(),
             good: g.good, good_name: spec.name.clone(),
             quality, output: h.production.get(good).copied().unwrap_or(0.0),

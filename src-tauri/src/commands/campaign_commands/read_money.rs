@@ -247,6 +247,68 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
 }
 
 
+/// MONEY_AND_COINAGE_PLAN.md M2 · the coin CATALOGUE — every `Currency` M1's
+/// `record_currencies` has ever struck, with its denominations and their full
+/// issue timelines resolved server-side. A read of `sim.currencies`/`sim.
+/// issues`/`sim.units_of_account` (`coinage.rs`) alone; touches nothing else.
+#[tauri::command]
+pub fn campaign_get_coin_catalogue(db: State<'_, WorldDb>) -> Result<CoinCatalogue, String> {
+    use crate::sim::tick::coin_strength;
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(CoinCatalogue::default()) };
+    let mut currencies: Vec<CatalogueCurrency> = sim.currencies.iter().map(|c| {
+        let hub_idx = c.mint_hub as usize;
+        let (mint_city, trust, current_fineness, strength) = match sim.hubs.get(hub_idx) {
+            Some(h) => {
+                let fine = if h.mint_fineness <= 0.0 { 1.0 } else { h.mint_fineness };
+                (h.name.clone(), h.coin_trust, fine, coin_strength(fine, h.coin_trust))
+            }
+            None => (String::new(), 0.0, 1.0, 0.0),
+        };
+        let unit_of_account = sim.units_of_account.get(c.unit_of_account as usize)
+            .map(|u| u.names.join(" / "))
+            .unwrap_or_default();
+        let denoms = c.denoms.iter().map(|d| {
+            let mut issues: Vec<CatalogueIssue> = d.issues.iter().filter_map(|&id| {
+                sim.issues.iter().find(|iss| iss.id == id).map(|iss| CatalogueIssue {
+                    id: iss.id, denom_tier: d.tier, denom_name: d.name.clone(),
+                    year: iss.year, authority: iss.authority.clone(), grams: iss.grams,
+                    fineness: iss.fineness, struck: iss.struck, circulating: iss.circulating,
+                    hoarded: iss.hoarded, melted: iss.melted, lost: iss.lost,
+                    cause: iss.cause, cognomen: iss.cognomen.clone(),
+                })
+            }).collect();
+            issues.sort_by_key(|i| i.year);
+            CatalogueDenom { tier: d.tier, name: d.name.clone(), standard_grams: d.standard_grams, issues }
+        }).collect();
+        CatalogueCurrency {
+            mint_hub: c.mint_hub, mint_city, name: c.name.clone(), unit_of_account,
+            open: c.open, closed_year: c.closed_year, denoms,
+            trust, current_fineness, strength,
+        }
+    }).collect();
+    currencies.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
+
+    // M4 · the ledger summary — Σ purses by holder class, read straight off
+    // M3's `sim.purses`. `HOLDER_BANK`/`HOLDER_HOUSE` never appear yet (M3's
+    // mint-striking transaction only ever pays the three classes below), so
+    // this is the whole of what the parallel ledger holds today.
+    let mut ledger = CoinLedgerSummary::default();
+    for p in &sim.purses {
+        let sum: f32 = p.coins.iter().map(|(_, amt)| *amt).sum();
+        match p.holder_kind {
+            crate::sim::tick::HOLDER_CITY_TREASURY => ledger.in_city_treasuries += sum,
+            crate::sim::tick::HOLDER_HOUSEHOLD => ledger.in_households += sum,
+            crate::sim::tick::HOLDER_LOCAL_MERCHANT => ledger.in_local_merchants += sum,
+            _ => {}
+        }
+    }
+    ledger.total_struck = sim.issues.iter().map(|i| i.struck).sum();
+
+    Ok(CoinCatalogue { currencies, ledger })
+}
+
+
 /// A3 · one coin's yearly BIOGRAPHY — the fineness/trust/value/price-level series
 /// (oldest→newest) for the Money panel sparklines. `hub` is the mint's hub id.
 #[tauri::command]

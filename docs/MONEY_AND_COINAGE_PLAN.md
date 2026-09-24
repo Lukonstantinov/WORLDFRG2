@@ -1,14 +1,20 @@
 # Money and Coinage Plan — real money, mints, banks and barter
 
-> **Status: M0 (instrument) + M1 (coin catalogue data model) SHIPPED, gated,
-> bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. M2-M4 (the rest of the
-> plan's own §5 "Stop marker" — the catalogue window, the parallel ledger,
-> the market money band + dashboard) are real, still-safe, unbuilt work,
-> queued per rule 36. M5-M11 (barter, the monetary stages, paid consumption,
-> the wealth/purse switch-over, banks on real reserves, price-level feedback)
-> are each explicitly dosed-from-zero work per §5's own build rule and were
-> not attempted — rushing a dose walk without its own gate sweep is the exact
-> mistake §8.15 (CLAUDE.md) already recorded this project making five times.**
+> **Status: M0-M8 SHIPPED (M4/M5/M6/M7/M8 partial — see their own rows),
+> gated, bit-identical — see `docs/SCOREBOARD.md` 2026-09-23. The plan's own
+> "Stop marker" landing is complete, M5/M7's mechanisms are real code
+> shipped inert, M6's mint closure ships LIVE (catalogue-only, so it carries
+> no economic risk), and M8's household purse ships as a closed,
+> self-balancing parallel-ledger pass that needs no dose gate at all. M9-M11
+> (the wealth/purse switch-over, banks on real reserves, price-level
+> feedback) are each explicitly dosed-from-zero work per §5's own build
+> rule — rushing a dose walk without its own gate sweep is the exact mistake
+> §8.15 (CLAUDE.md) already recorded this project making five times, so
+> each is shipped MECHANISM-FIRST at an inert dose (or, where provably
+> risk-free like M6's closure and M8's closed loop, shipped live) and
+> walked up with its own gate run, never blind. The real behavioural half of
+> M8 (a household priced out of its ration) still waits on M7's own dose
+> being walked first, per the plan's own R6.**
 > Written from a brainstorm with the maintainer (2026-09-23). Supersedes
 > nothing — it extends `BANKS_MONEY_AND_CRAFT_PLAN.md` (whose findings §1
 > relies on) and `MONEY_MINES_AND_GOODS_PLAN.md` (whose slices 1-3 — notes
@@ -341,13 +347,13 @@ tick::tests` + `econ_`; every frontend slice runs `npx tsc --noEmit`.
 |---|---|---|---|
 | **M0** | ✅ SHIPPED 2026-09-23. **Instrument**: `econ_measure_money_creation` (`#[ignore]`d). Scoped down from a literal per-SITE breakdown (~150 call sites — queued) to per HOLDER CLASS: house wealth / hub treasury / bank reserves. | none (diagnostic) | ran; number on `SCOREBOARD.md` 2026-09-23 |
 | **M1** | ✅ SHIPPED 2026-09-23. **Coin data model** (`coinage.rs`): `Currency`/`Denom`/`Issue` recorded from the decisions `decide_coinage` already makes; units of account per culture (§3.4). Currency naming still rides the existing `coin_name` string (deduplicated) — full culture-rooted naming (§3.3's own ask) is real M2 UI-adjacent polish, not done here. | observe only — bit-identical | `sim_fingerprint` unchanged (verified: no folded field touched); `every_currency_name_is_unique_in_a_world` (`tick::tests`) |
-| **M2** | **Catalogue window** (browse, card art, denomination + issue pages, follow a coin) over M1. | UI only | `tsc`; a `dump_coin_sheet` render of the card art, looked at (§8.21's rule) |
-| **M3** | **Parallel ledger**: purses (§3.1), bullion → mint → coin (§3.2), every existing `+=` mirrored as a TRANSFER between purses, coin chests on `InTransit`. The ledger reports; nothing reads it. | observe only — bit-identical | conservation invariant holds every year; `sim_fingerprint` unchanged |
-| **M4** | **Market money band + dashboard** (§4.2, §4.3) reading the parallel ledger; prices in local money as DISPLAY (real price × price level × unit). | UI only | `tsc` |
-| **M5** | **Barter as a real settlement** (§3.5): goods-for-goods with the payment goods leaving the seller's stock on a return leg; commodity money; `BARTER_SPREAD`. | dosed from 0 | `econ_` per dose step; multi-seed `econ_inheritance_rules_fragment_differently`; new `barter_moves_stock_both_ways`, `barter_is_never_refused`, `money_beats_barter_when_available` |
-| **M6** | **Three stages**: ledger houses, weighed bullion, the extended mint charter; coin reaches a city only by purse/chest; mint closure on demand (§3.7). | the charter/closure logic live in the parallel ledger only | new `a_coin_never_reaches_a_city_nothing_trades_with`, `an_unused_mint_closes` |
-| **M7** | **Affordability fix**: `update_food_and_starvation` reads the spending shortfall, not raw stock (S7's prerequisite). | dosed from 0 | `unrest_topples_councils` and the famine tests still fire; `econ_expenditure_shares_resemble_a_household` |
-| **M8** | **Wages + paid consumption** (§3.9) in the ledger. | parallel, then dosed | household purses stay non-negative; no city starves with grain it could afford |
+| **M2** | ✅ SHIPPED 2026-09-23, **coin card art added 2026-09-24**. **Catalogue surface**: `campaign_get_coin_catalogue` (a pure read of `currencies`/`issues`/`units_of_account`) + a "📜 Catalogue" tab in `MoneyFinancePanel.tsx` — every currency, its denominations, and each denomination's dated issue timeline. Every issue and the currency card's own headline now render a real D7 coin CARD: `CoinIcon` (already used for a house's own mint mark elsewhere) supplies the obverse (the striking authority's arms — `iss.authority`, a house name or "the council of X") and a new `face="reverse"` mode supplies the reverse (a per-tier motif — sunburst/crescent/cross for gold/silver/petty, since a reverse has no person to portray), both metal-tinted from `Denom.tier` (no backend field needed) and worn/tarnished by the issue's own `fineness` via `CoinIcon`'s existing wear rule. **Still scoped down**: no rim legend text, no denomination/issue detail PAGES (weight chart, circulation map, hoards, follow-a-coin — §4.1's own further bullets), and no standalone floating window (§4.1's own layout) — a real coin card in a browse list, not the whole numismatic reference book. | UI only | `tsc` clean; `npx vite build` clean (no display in this environment to actually open the panel — stated per rule, not claimed as visually verified) |
+| **M3** | ✅ SHIPPED 2026-09-23. **Parallel ledger, mint side**: `Purse`s (§3.1) + the mint-striking transaction (§3.2) — every new `Issue` sizes a real STRUCK quantity from the mint's own throughput and splits it into seigniorage (city treasury purse) / brassage (household purse) / circulation (local-merchant purse). Additive — no existing `wealth`/`treasury` `+=` site is touched or mirrored; this is a genuinely separate ledger computed alongside them, per D10. **Scoped down**: real bullion CARGO (mined, shipped, sometimes lost at sea) is not wired — the struck quantity is sized from the mint's existing regional throughput/bullion-ratio proxy, not a real delivery; melting/loss/hoarding/wear (the sinks) are not implemented, so every issue's `circulating` still equals its `struck` exactly. | observe only — bit-identical (purses are read by nothing else) | `sim_fingerprint` unchanged; `the_coin_ledger_conserves_every_struck_coin` (tests.rs) — Σ purses == Σ struck == Σ circulating per issue, to the float ulp |
+| **M4** | ✅ SHIPPED 2026-09-23 (partial). **Money stock ledger** (§4.3's own bullet): `CoinLedgerSummary` — Σ purses by holder class, a snapshot of M3's ledger — served on `CoinCatalogue` and shown as a stat strip atop the Catalogue tab. **Not done**: the market money band in `CityMarketView` (§4.2 — coins-in-use table, prices in local money, the barter/coin split), the exchange-rate matrix and bullion-flow map (§4.3's other bullets), and a TIME SERIES for the ledger (today's snapshot only — no yearly sample is persisted). All real, unbuilt, queued. | UI only | `tsc` clean; `cargo check --lib` clean |
+| **M5** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0. **Barter as a real settlement** (§3.5): `barter_settlement_pass` — goods-for-goods, the payment good leaving the buyer's own stock for the seller's, priced by `BARTER_SPREAD`. **Deliberately NOT woven into `dispatch`** (too fragile to touch blind — see the function's own doc comment); a wholly separate additive pass over the day's `recent_trades` instead, gated by `BARTER_DOSE = 0.0`. Commodity money (§3.5's other half) and the real `InTransit` return leg (this cut moves stock same-day, no transit time) are not built — queued. | shipped INERT (dose 0.0 = true no-op); walking the dose is real future work, not attempted | `sim_fingerprint`/`econ_` bit-identical at dose 0; new `barter_dose_is_a_noop_at_zero`, `barter_moves_stock_both_ways`, `barter_is_never_refused` (all `tick::tests`, exercised via the pure-parameter twin `barter_settlement_pass_e` at dose 1.0) |
+| **M6** | ✅ MINT CLOSURE SHIPPED 2026-09-23 (partial), LIVE. `mark_mint_closures` (§3.7): reads the mint's own city's EXISTING `coin_basket` share (already computed by `update_currency_baskets`) and marks `Currency.open = false`/`closed_year` after `MINT_CLOSE_YEARS` (15) below `MINT_CLOSE_SHARE` (5%). Catalogue-only — does NOT touch `TickHub.has_mint`/`coin_name` (the real, live coinage mechanism), so it carries no economic-concentration risk and ships at its real dose rather than gated inert. **Not built**: the real economic effect of closure (the council actually stops striking / the city settles in a foreign coin), the three named STAGES (ledger houses, weighed bullion — §3.6's diffusion is still directly gated by the boundary the M6 test below locks down), and the extended mint charter. All queued. | closure LIVE (real dose, no risk); the stage/diffusion mechanism and the real striking-side effect are unbuilt | `an_unused_mint_closes`, `a_coin_never_reaches_a_city_nothing_trades_with` (both `tick::tests`) |
+| **M7** | ✅ MECHANISM SHIPPED 2026-09-23, dose left at 0.0 (same change as `SETTLEMENT_LIFE_PLAN.md` L1). **Affordability fix**: `food_afford_adjusted_bal` blends `lack_basic` (the day loop's own smoothed spending-shortfall signal) into `update_food_and_starvation`'s `bal`, so a household priced out of its ration reads as genuinely underfed even when raw stock (`food_have`) shows a surplus — the exact prerequisite `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment named after its S7 revert. Gated by `FOOD_AFFORDABILITY_DOSE = 0.0`, since `lack_basic` (all basic-tier goods) and `bal` (food goods only) are different baskets and blending them is a real behavioural change even before S7's own dose is ever raised — not provably risk-free the way M6's catalogue-only closure was. | shipped INERT (dose 0.0 = true no-op, bit-for-bit); walking it together with `HOUSEHOLD_MONETIZATION_DOSE` is the real next dose-walk session, not attempted here | `sim_fingerprint`/`econ_`/`unrest_topples_councils` bit-identical at dose 0; new `food_affordability_is_a_noop_at_zero_dose`, `a_household_priced_out_reads_as_underfed` (both `tick::tests`, via the pure twin `food_afford_adjusted_bal`) |
+| **M8** | ✅ PARALLEL LEDGER SHIPPED 2026-09-23 (scoped down). `household_ledger_pass` (§3.9): monthly, at every hub with an open mint currency, mirrors `household_income_pass`'s own wage formula as a coin deposit into the hub's household purse, then immediately debits the identical amount back out (via the new `take_coin`, M3's missing spend side) into the local-merchant purse — a household's wage spent on its ration in the same month, a closed loop by construction. A hub with no open currency is skipped, never invented money. **Scoped down from §3.9's real design**: this does NOT let a household save, run into debt, or be priced out of its ration when the wage can't cover it — the actual behavioural "paid consumption" R6 flags, which needs `FOOD_AFFORDABILITY_DOSE` (M7) walked FIRST per the plan's own R6 ("M7 before M8, no exceptions"). Because `purses` are read by nothing outside `coinage.rs` (same as M3), this is observe-only and needs no dose gate of its own. | observe only — bit-identical (purses read by nothing else) | `sim_fingerprint`/`econ_` bit-identical; new `household_ledger_pass_deposits_and_immediately_spends_the_wage` (`tick::tests`) — the household purse empties every pass, the merchant purse receives exactly the wage, no currency ⇒ no purse |
 | **M9** | **The switch-over**: house wealth / treasuries / bank reserves BECOME the ledger (coins + goods + claims), blended from the old numbers by a dose 0 → 1. | the big recalibration | `simulate_decades_reports_dynamics` (bounded, finite, turnover), full `econ_`, multi-seed inheritance gate, re-tuned at each step; SCOREBOARD row per step |
 | **M10** | **Banks on real reserves** (§3.10): requested loans, local rates, bills of exchange, branch specie settlement, money-changer spreads. | dosed from 0 | `econ_measure_finance` lifespan and failure rate; interest-rate trend against the historical band |
 | **M11** | **Price level into prices**: money scarcity and debasement move `live_price`; regional gold:silver ratios live. | last and riskiest, dosed from 0 | `econ_fidelity_scorecard` (grain CV, price/distance gradient) must not regress; may not ship |
@@ -385,6 +391,119 @@ with the simulation bit-identical. Everything from M5 changes the economy.
   break (§8.15).
 - **R6 · Households priced out of food** — the reverted S7 walk. M7 before M8,
   no exceptions.
+  **Tried again 2026-09-23 with M7's own fix live** (`HOUSEHOLD_MONETIZATION_
+  DOSE` and `FOOD_AFFORDABILITY_DOSE` both raised to 0.02, `cargo test --lib
+  tick::tests`) — REVERTED. `unrest_topples_councils` still failed, the
+  IDENTICAL failure mode the original S7 walk hit, meaning M7's affordability
+  fix is not by itself sufficient to close the gap at this dose (either the
+  dose pairing is wrong, or `lack_basic`'s own smoothing lags too far behind
+  the priced-out shortfall for `update_food_and_starvation` to catch it in
+  time — not disentangled). Two OTHER real gate failures surfaced at the same
+  trial and are recorded separately since they are not specific to this dose
+  pairing: `n1_bind_stays_healthy_on_a_realistically_dense_world` (a
+  wealth-concentration regression on the N1 staging gate — plausibly the
+  same "everything is chaotic-sensitive" effect §8.15 already documents for
+  this exact pair of constants, not confirmed) and, more concerning,
+  `the_coin_ledger_conserves_every_struck_coin` failed on a **pure f32
+  summation drift** (purses held 51.98718 against a stamped `circulating` of
+  51.990627 — 0.007% relative, past the test's 1e-3 absolute tolerance) with
+  NO logic bug found in `add_coin`/`take_coin`/`household_ledger_pass` (each
+  add/take pair in M8's own loop is bit-exact by construction — `count.min(
+  remaining)` never performs arithmetic when the purse was just topped up by
+  the exact amount being taken). This is very likely ordinary f32 rounding
+  error compounding over many more `household_ledger_pass` cycles than the
+  standard M7/M8 gate run exercises (the dose change ripples chaotically into
+  `trade_wealth`, which sizes M8's own wage, and so how many hubs run a
+  nonzero-wage cycle each month) — a latent numerical fragility in the
+  Purse ledger's f32 accumulators, not a conservation LOGIC bug, and real
+  regardless of whether this dose walk is ever resumed. Reverted both
+  constants to 0.0; `tick::tests` re-confirmed 283/283 clean immediately
+  after. Queued, not chased further this session: (a) a genuinely different
+  dose pairing or a fix to `lack_basic`'s lag before re-attempting the walk,
+  (b) tightening `the_coin_ledger_conserves_every_struck_coin`'s tolerance
+  or moving the Purse ledger's running totals to f64 if heavier exercise
+  (M9's eventual switch-over will run this ledger far harder than M8 ever
+  does today) makes the drift worse.
+
+  **Follow-up, same day: two real bugs found and FIXED, independent of the
+  dose walk itself.** Root-causing WHY `unrest_topples_councils` fails
+  (rather than accepting "not disentangled") found the actual mechanism,
+  and it was neither the dose pairing nor `lack_basic`'s lag:
+
+  1. **`household_income_pass`'s own S7 code (pre-existing, not new this
+     session) created money from nothing.** `civic_pool += spend` credited
+     the FULL ration cost unconditionally, while `household_wealth -= spend`
+     was merely clamped to 0 — so whenever a household couldn't afford the
+     full `spend`, the shortfall was struck as fresh civic money every
+     single day (rule 18). Measured directly (`diag_household_wage_civic_
+     pool_offset`, `tick::tests`, `#[ignore]`d): at dose 0.02, `civic_pool`
+     reached **197,485** over 5 years against a wage of a few units a month;
+     `sent_prosperity` saturated to **1.000** and `commoner_wealth` to
+     **950.897** (baseline, dose 0: 0.000 / 0.012 / 0.086). Both feed
+     NEGATIVE terms in `update_unrest`'s target (`cities.rs`), so the
+     fabricated prosperity signal swamped the real `lack_basic`/`starving`
+     distress — unrest fell from 0.803 (dose 0, no household mechanism at
+     all) to 0.353 (dose 0.02, buggy), which is exactly why zero revolts
+     fired. **Fixed**: `paid = spend.min(household_wealth)`, crediting
+     `civic_pool` only what the household purse actually held.
+  2. **`take_coin` (M8, this session's own code) drained a purse in plain
+     vector order with no regard for `issue_id`.** A household purse that
+     already held an older issue's coin (M3's mint brassage lands in the
+     same `HOLDER_HOUSEHOLD` purse) could have `household_ledger_pass`'s
+     same-month deposit-then-withdraw round trip drain the OLDER issue
+     instead of the one just deposited, while the fresh deposit sat
+     untouched — silently relabelling coin from one issue to another,
+     conserved in total but not per issue, exactly what `the_coin_ledger_
+     conserves_every_struck_coin` checks (measured: issue 6 short by ~0.003
+     of ~34). **Fixed**: `take_coin_issue`, targeting only the entry for
+     the issue just deposited; `household_ledger_pass` now uses it, and the
+     now-unused generic `take_coin` was deleted rather than left dead.
+
+  **With BOTH fixes, at `HOUSEHOLD_MONETIZATION_DOSE = 0.02` alone (`FOOD_
+  AFFORDABILITY_DOSE` left at 0.0)**: `unrest_topples_councils` now PASSES
+  — the fix alone (no M7 involvement) resolves the exact failure the
+  original S7 walk hit. `civic_pool`/`sent_prosperity`/`commoner_wealth`
+  read 0.000 / 0.116 / 0.118 (sane, bounded) and unrest reads 0.717 (close
+  to the honest dose-0 baseline of 0.803). But the FULL `tick::tests` suite
+  at this dose still shows **2 remaining failures**, so the dose is NOT yet
+  safe to ship: `simulate_decades_reports_dynamics` (a house reaching
+  -527.5, past the -500 limited-liability floor by a small margin) and
+  `the_coin_ledger_conserves_every_struck_coin` (a SMALLER residual drift —
+  issue 14, ~0.0027 of ~52 — that survives fix #2, on a debasement-created
+  issue; not yet root-caused, and NOT confirmed to be the same class of bug
+  as either fix above).
+
+  **Both fixes are shipped now, at the unchanged `HOUSEHOLD_MONETIZATION_
+  DOSE = 0.0`** — they are general correctness improvements to code that
+  runs regardless of dose (`household_ledger_pass` has no gate of its own),
+  verified bit-identical at the shipped dose: `cargo check` clean, full
+  `tick::tests` 283/283, full `econ_` 6/6 (212.18s). The dose itself stays
+  at 0.0 — actually raising it needs the two remaining failures above
+  root-caused first.
+
+  **Both were characterized further the same session — neither turned out
+  to be a third logic bug.** `simulate_decades_reports_dynamics`'s -527.5
+  is a running MINIMUM over the whole 50-year run (`tests.rs:2592`), never
+  a sustained state, and reproduced bit-identically at dose 0.02 with both
+  fixes applied — the same class of bounded consequence that already
+  justified widening this exact floor once (`CONSUMPTION_REBUILD_PLAN.md`
+  S1, -339.7 measured against a widened -500 floor with headroom); this
+  dose narrows trade margins the same way, one step further, at only ~5%
+  past the current floor — nowhere near the millions-scale runaway the
+  floor actually guards against. The coin-ledger drift: audited all 5
+  `add_coin` call sites in the codebase — the 3 inside `strike_issue`
+  always create a fresh entry for a never-before-used issue id (bit-exact
+  by construction) and the 2 inside `household_ledger_pass` are now
+  issue-targeted and exact (fix 2). No further mis-crediting path exists.
+  The magnitude is consistent with ordinary f32 rounding compounding over
+  many `+=` credits to a long-lived purse — real, expected float behaviour,
+  not a conservation error (`Purse.bullion`, the other candidate, is
+  confirmed dead code). Neither finding changes anything at the shipped
+  dose. **What's next**: actually walk this dose in a session that budgets
+  for widening the insolvency floor (matching the S1 precedent) AND either
+  moving the Purse ledger to f64 accumulators or loosening the coin-ledger
+  gate to a relative tolerance — bundled into that dose-walk commit, never
+  done speculatively ahead of it.
 
 ---
 

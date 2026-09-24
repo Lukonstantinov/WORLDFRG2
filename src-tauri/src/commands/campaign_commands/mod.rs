@@ -2562,6 +2562,74 @@ pub struct MintBrief {
     #[serde(default)] pub debt_holders: u32,
 }
 
+/// MONEY_AND_COINAGE_PLAN.md M2 · one dated striking in the coin catalogue —
+/// mirrors `sim::tick::coinage::Issue` field-for-field, plus `denom_name`/
+/// `denom_tier` resolved server-side so the catalogue window never has to
+/// re-join `denom` against the currency it belongs to.
+#[derive(Serialize, Clone)]
+pub struct CatalogueIssue {
+    pub id: u32,
+    pub denom_tier: u8,
+    pub denom_name: String,
+    pub year: u32,
+    pub authority: String,
+    pub grams: f32,
+    pub fineness: f32,
+    pub struck: f32,
+    pub circulating: f32,
+    pub hoarded: f32,
+    pub melted: f32,
+    pub lost: f32,
+    pub cause: u8,
+    pub cognomen: String,
+}
+
+/// M2 · one denomination card.
+#[derive(Serialize, Clone)]
+pub struct CatalogueDenom {
+    pub tier: u8,
+    pub name: String,
+    pub standard_grams: f32,
+    pub issues: Vec<CatalogueIssue>,
+}
+
+/// M2 · one currency card — the whole catalogue entry for a mint, with its
+/// denominations and their issue timelines resolved and ordered oldest-first.
+#[derive(Serialize, Clone)]
+pub struct CatalogueCurrency {
+    pub mint_hub: u32,
+    pub mint_city: String,
+    pub name: String,
+    pub unit_of_account: String,
+    pub open: bool,
+    pub closed_year: u32,
+    pub denoms: Vec<CatalogueDenom>,
+    /// Live headline read (today's fineness/trust/strength) so the catalogue
+    /// card doesn't need a second round-trip to `campaign_get_mints`.
+    pub trust: f32,
+    pub current_fineness: f32,
+    pub strength: f32,
+}
+
+/// MONEY_AND_COINAGE_PLAN.md M4 · §4.3's "money stock ledger" — struck vs
+/// held, split by holder class — read straight off M3's `purses`. A snapshot
+/// of TODAY's totals, not yet a time series (no yearly sample is persisted
+/// for this; queued alongside the rest of M4's dashboard).
+#[derive(Serialize, Clone, Default)]
+pub struct CoinLedgerSummary {
+    pub total_struck: f32,
+    pub in_city_treasuries: f32,
+    pub in_households: f32,
+    pub in_local_merchants: f32,
+}
+
+/// M2 · the whole served catalogue.
+#[derive(Serialize, Clone, Default)]
+pub struct CoinCatalogue {
+    pub currencies: Vec<CatalogueCurrency>,
+    pub ledger: CoinLedgerSummary,
+}
+
 /// v2.0 · one entry in the MONETARY CHRONICLE — the dated story of money (mints,
 /// debasements, reforms, bank foundings, runs, crashes) for the Shocks timeline.
 #[derive(Serialize, Clone)]
@@ -2784,6 +2852,8 @@ pub struct EpidemicBrief {
 /// Phase 6 · one craft guild (for the Guilds & Crafts panel + map).
 #[derive(Serialize, Clone)]
 pub struct GuildBrief {
+    /// Index into `sim.guilds` — the key for `campaign_guild_atlas` (S9).
+    #[serde(default)] pub idx: u32,
     pub hub: u32,
     pub x: f32,
     pub y: f32,

@@ -3299,6 +3299,7 @@ impl CampaignSim {
             // flows to the people — runs right after interest so it offsets it.
             self.apply_wealth_sinks();
             self.household_income_pass(); // S7, dosed from zero
+            self.household_ledger_pass(); // M8, parallel ledger — observe only
             self.pay_to_regain_markets();
             self.recompute_monopolies_and_power();
             // Phase 1.1 · reads political_power/monopoly/dominant_seat just refreshed

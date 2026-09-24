@@ -479,6 +479,14 @@ impl CampaignSim {
                 ENTITLEMENT_MARGIN,
                 ENTITLEMENT_DOSE,
             );
+            // M7 · a household priced out of its own ration still shows up
+            // here — dosed from zero (see `FOOD_AFFORDABILITY_DOSE`'s own doc
+            // comment), a true no-op at the shipped dose. Composed with L1's
+            // entitlement blend above, not a replacement of it — the two
+            // mechanisms are independent readings of the same failure
+            // (warehouse-locked grain vs. a price the household can't pay)
+            // and both are proven inert at dose 0 independently.
+            let bal = food_afford_adjusted_bal(bal, self.hubs[h].lack_basic, FOOD_AFFORDABILITY_DOSE);
             // Smooth.
             self.hubs[h].food_balance = 0.85 * self.hubs[h].food_balance + 0.15 * bal;
             let fb = self.hubs[h].food_balance;

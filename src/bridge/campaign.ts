@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CoarseRoute, BankBrief, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
+import type { CoarseRoute, BankBrief, BumpChart, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinCatalogue, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -246,6 +246,12 @@ export async function campaignGetMints(): Promise<MintBrief[]> {
   return invoke("campaign_get_mints");
 }
 
+/** MONEY_AND_COINAGE_PLAN.md M2 · the coin catalogue — every currency ever
+ *  struck, with its denominations' full issue timelines. */
+export async function campaignGetCoinCatalogue(): Promise<CoinCatalogue> {
+  return invoke("campaign_get_coin_catalogue");
+}
+
 /** v2.0 · the monetary chronicle (mints, debasements, reforms, runs, crashes), newest first. */
 export async function campaignMonetaryChronicle(): Promise<MonetaryEvent[]> {
   return invoke("campaign_monetary_chronicle");
@@ -382,6 +388,12 @@ export async function campaignHouseStability(idx: number): Promise<HouseStabilit
   return invoke("campaign_house_stability", { idx });
 }
 
+/** S12c · the world's tier-1 median for each stability gauge — what the
+ *  Standing tab's radar chart compares a house against. */
+export async function campaignTier1GaugeMedians(): Promise<import("@types").GaugeMedians> {
+  return invoke("campaign_tier1_gauge_medians");
+}
+
 /** Feuds, live first then settled. `house` < 0 = every feud in the world. */
 export async function campaignGetFeuds(house = -1): Promise<FeudRow[]> {
   return invoke("campaign_get_feuds", { house });
@@ -413,6 +425,12 @@ export async function campaignGetHouseLineage(idx: number): Promise<HouseLineage
  *  cities, its goods portfolio, its holdings, and its lanes' seasonal ease. */
 export async function campaignHouseAtlas(idx: number): Promise<HouseAtlas | null> {
   return invoke("campaign_house_atlas", { idx });
+}
+
+/** HOUSES_GUILDS_AND_MARKET_PLAN.md S12a · the top houses' wealth RANK over the
+ *  last ~50 years, for the Houses panel's bump chart. */
+export async function campaignHouseBumpChart(): Promise<BumpChart> {
+  return invoke("campaign_house_bump_chart", {});
 }
 
 // ── Province land state (FIX_PLAN B1) + the holder's control verbs ──────────

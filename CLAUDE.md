@@ -1634,15 +1634,150 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   to accept this risk explicitly rather than defer S10 to a session that
   can open a browser; visually exercising the four windows before trusting
   them is still owed.
+- **S12a — the Houses bump chart (shipped in a follow-up session, same
+  branch).** "Stop showing state, start showing change." A new
+  `campaign_house_bump_chart` query (`read_houses.rs`) reconstructs each of
+  the top ~12 houses' wealth RANK per year from its own `wealth_history`
+  (`WEALTH_HISTORY_CAP` = 80 years — checked first, per the plan's own §9
+  risk-register note, before building a 50-year-wide chart the data might
+  not have supported) and returns only the houses that were EVER in the top
+  field, never the whole roster. `HousesPanel` renders it as an SVG line
+  chart above the list — a house's own `distinct_color` (the one stable
+  app-wide identity colour), a thicker line for Tier 1, a dot at the last
+  ranked year, a line that simply STOPS the year a house dies rather than
+  crawling to zero (falls out of `wealth_history` no longer being sampled
+  once `defunct` — no special-casing needed) — with four quiet gauges beside
+  it. Only TWO of those four ship as real sparklines: `families`
+  (`InequalitySnapshot.series[].active`) and `top-10% share`
+  (`...top10_share`), both already-existing per-year series from
+  `campaign_get_inequality` (#29's own reads, reused rather than
+  duplicated). `founded`/`fallen` ship as plain totals — no per-year series
+  for either exists anywhere in the sim, and rather than fabricate a history
+  the data cannot support (the exact failure mode this plan's own §9 warns
+  against), they are shown honestly as cumulative counts; giving them a
+  real series is queue item Q18. A bottom "pulse" ticker reuses the
+  existing world journal query (`campaign_get_journal(-1,-1)`,
+  `NewsFeedPanel`'s own data source) filtered to house-ish event kinds — a
+  new CALLER of an existing mechanism, not new state. Pure derived read
+  (touches no tile/sim state), gated by `cargo check --lib --tests` +
+  `npx tsc --noEmit` + a clean `vite build` (181 modules, unchanged) alone,
+  per the plan's own §4 note that neither atlas query nor this chart can
+  move a tile/sim gate. Same no-display verification caveat as S10 — not
+  opened in a real browser this session (queue item Q17, widened to cover
+  this).
+- **S11 — the two atlases, TEXT/TABLE form (shipped in the same follow-up
+  session as S12a).** The S8/S9 atlas queries were built and unused by any
+  UI. `HouseDossier` gains a "🗺 Atlas" tab: partner cities ranked by
+  volume with an in/out two-tone bar, the goods portfolio (bought-at/
+  sold-at cities resolved from the atlas's own partner list), and a
+  seasonal lane-ease bar chart (`season_slices` finally has a reader).
+  `GuildsPanel` gains a per-row "🗺" toggle that expands an inline Craft
+  Atlas strip: inputs/outputs by city, reach (hubs currently buying the
+  good), the earned signature when one exists — needed one new field,
+  `GuildBrief.idx` (index into `sim.guilds`, enumerated before the
+  quality-sort so it stays stable), since the browse query never carried a
+  key `campaign_guild_atlas` could use. Both S8/S9 queries were already
+  gated as pure derived reads touching no tile/sim state (§4's own note),
+  so this needed no `econ_`/`tick::tests` run — `cargo check --lib --tests`
+  + `npx tsc --noEmit` + a clean `vite build` (181 modules, unchanged)
+  alone. The plan's own richer on-map version was queue item Q19 at
+  first — then shipped in a THIRD follow-up session (user instruction:
+  "do all the steps, ignore risks"). See the Q19 entry below.
+- **Q19 — the on-map lane half of S11 (shipped in a third follow-up
+  session).** The focused house's existing seat→city web
+  (`OverlayManager.renderHouseControlLayer`, built on `recomputeHouseNetwork`'s
+  real corridor-snapped paths) now carries real per-lane data once the
+  house's atlas has been fetched: line WIDTH ∝ real volume
+  (`partner.volume_in+volume_out`, normalized against the house's busiest
+  lane), line COLOUR = the lane's dominant good's own `GOOD_DEFS` hue
+  (cross-referencing the partner's traded goods against the house's own
+  goods-portfolio volumes for the best match), stroked one MEDIUM at a
+  time via the existing `mediumRuns` helper (the same dashed-open-water/
+  solid-road discipline already shipped for the merchant-route layer,
+  rule 35/§8.5) instead of one uniform dash style end to end. A small
+  `drawGoodIcon` medallion + a `drawLabel` name mark the dominant good at
+  the lane's far end — needed a new `LabelKey`, `"tradeLane"` (§8.11's
+  registry: human works, sans, upright, small), added to
+  `LABEL_STYLE_DEFAULTS`/`LABEL_THEMES` and to `SettingsPanel`'s
+  "Cultural & trade" group so it's themeable like every other place-name
+  class. `MapCanvas` fetches `campaign_house_atlas` whenever the focused
+  house changes and pushes it into a new `OverlayManager.setHouseAtlas(idx,
+  atlas)`, which guards against a stale fetch outliving a house switch via
+  its own `houseAtlasFor` check. Falls back to the original flat-red/
+  uniform-width style when no atlas has arrived yet or a destination has
+  no recorded trade (an office/bailo city). **Still not built**: distinct
+  outbound/inbound arrow styling (the existing single chevron+arrowhead is
+  unchanged), a per-good/per-partner toggle UI, rivals' lanes ghosted
+  behind the focused house's own, and any Craft Atlas map presence at
+  all. Backend untouched (`cargo check --lib --tests` clean, confirming no
+  regression, since this is a pure frontend change); `npx tsc --noEmit` +
+  `npx vite build` clean. This is the highest-risk piece of canvas code
+  this plan has shipped blind — check it FIRST in queue item Q17's
+  session.
+- **S12b — the Dossier timeline plate (shipped in the same follow-up
+  session as Q19).** A horizontal life-timeline (`TimelinePlate`) under
+  the House Dossier's header, above the subtabs: every head as a segment
+  (coloured by sex, labelled when wide enough, from `chron.line`'s own
+  `since_year`/`until_year`/`wealth_start`/`wealth_end`), milestones as
+  marks above (founded/succession/monopoly/branch/dissolved only —
+  chatter excluded, the chronicle's own "quiet unless it matters" rule
+  applied here too), feuds as brackets below (a new
+  `campaignGetFeuds(h.idx)` fetch alongside the tab's existing ones), and
+  a wealth curve as a filled area threading through, piecewise-linear
+  between each head's own recorded wealth_start/wealth_end. Scrubbable by
+  drag: sets a `scrubYear` that shows which head ruled then and their
+  interpolated wealth. **Does NOT rewrite the tabs below to that year** —
+  no per-tab historical state exists anywhere in the sim for Kin/Goals/
+  Crisis/etc. to read from, so a genuine cross-tab year-travel view is
+  queue item Q20, not attempted. Built entirely from data already fetched
+  elsewhere in the file — no new backend query, no sim change. Gate: `npx
+  tsc --noEmit` clean, `npx vite build` clean (181 modules, unchanged).
+- **S12c — three of five per-tab graphs (shipped in the same follow-up
+  session; two named as genuinely blocked, not faked).** The plan names
+  five: Accountant waterfall · Kin as a real tree · Lineage as a
+  branching diagram · Standing as a radar against the tier-1 median ·
+  Feuds as a temperature line with stage transitions.
+  **Accountant waterfall** (`WaterfallChart`, `LedgerView`) — a real
+  cascade from 0 through the year's top trade goods (top 4 by |amount|,
+  the rest bucketed) and every expense line already printed above it,
+  ending at the real NET in gold. **Standing radar** — needed one new
+  backend read, `campaign_tier1_gauge_medians` (`read_houses.rs`): calls
+  `campaign_house_stability` VERBATIM for every live tier-1 house and
+  takes the per-gauge median, so the house's own gauge and the world's
+  median can never drift apart (the two numbers share one computation by
+  construction). Quiet when no tier-1 house exists yet (`n === 0`) rather
+  than plotting a pentagon against zeros, which would misread as "this
+  house has no standing" when the truth is "nobody does yet".
+  **Feud temperature line** (`FeudTemperatureLine`) — a STEPPED line (a
+  feud's stage is a real jump, never a smooth climb) built from each
+  feud's own recorded flare log (`f.log`'s real year+stage pairs) plus
+  the feud's current stage as the line's live end-point; quiet below two
+  points. **Kin as a real tree is NOT built** — `KinBrief` carries a flat
+  `role` and no parent/child field anywhere in the sim, so a genuine
+  family tree needs real generational edges that do not exist; inventing
+  a plausible-looking hierarchy from role alone would be exactly the
+  fabrication §2.4 forbids (queue item Q21, waits on the sim actually
+  persisting kinship edges — new sim state, not a query). **Lineage as a
+  drawn SVG diagram is NOT built** — the tab already renders as a real
+  indented branching list with dashed connector lines (ancestors → this
+  house → offshoots), judged to already convey the same structure closely
+  enough that a from-scratch SVG tree's own layout/collision risk wasn't
+  worth taking blind this pass (queue item Q22). Gate:
+  `campaign_tier1_gauge_medians` is a `sim/campaign_commands/**` wiring
+  change (a pure derived read reusing an already-gated function) →
+  `cargo check --lib --tests` clean, no `econ_`/`tick::tests` run owed
+  per the plan's own §4 note; `npx tsc --noEmit` + `npx vite build` clean
+  (181 modules, unchanged).
 - **What did NOT ship, and why, per rule 36** (a waiting item, not a refusal):
   S1 (blocked — see above, waits on the room/deficit fix), S6 (reverted —
   see above, waits on the relay-fixture fix before its own dose walk can be
-  re-attempted), S11/S12 (the two atlases with real on-map lane labelling
-  using S8/S9's queries, and the Houses three-band redesign — bump chart,
-  sparkline strips, event ticker). Each waits on exactly what the plan's
-  own §7/§8 already say it waits on (S1/S6 additionally wait on their own
-  newly-found fixture/mechanism fixes) — nothing here changes that
-  sequencing, this entry only records which end of it landed.
+  re-attempted), Q20 (full cross-tab year-travel on the timeline plate),
+  Q21 (Kin as a real tree — needs new persisted sim state), Q22 (Lineage
+  as a drawn SVG diagram — a judgement call, not a blocker).
+  Each waits on exactly what the plan's own §7/§8 already say it waits on
+  (S1/S6 additionally wait on their own newly-found fixture/mechanism
+  fixes) — nothing here changes that sequencing, this entry only records
+  which end of it landed.
 
 ### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L5 shipped (L0-L3 the STOP MARKER, L4-L5 past it), L13 partly surfaced
 
@@ -1874,6 +2009,15 @@ commands/
                                   ATLAS (`campaign_house_atlas`, HOUSES_GUILDS_
                                   AND_MARKET_PLAN.md S8 — partner cities, goods
                                   portfolio, holdings, seasonal lane ease; pure
+                                  derived read, §5.6) + the BUMP CHART
+                                  (`campaign_house_bump_chart`, S12a — the top
+                                  houses' wealth rank per year, from each
+                                  house's own `wealth_history`; pure derived
+                                  read, §5.6) + TIER-1 GAUGE MEDIANS
+                                  (`campaign_tier1_gauge_medians`, S12c —
+                                  calls `campaign_house_stability` verbatim
+                                  per tier-1 house and medians each gauge,
+                                  for the Standing tab's radar chart; pure
                                   derived read, §5.6). Four
                                   of five gauges are pure derivations of state the sim
                                   already held; kin_power_shares/character_phrase
@@ -2422,12 +2566,29 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   quarrels as their OWN window (a feud belongs to two
                                   houses, not one; it was never a house's tab), wrapping
                                   `FeudsView` with no house focus. `GuildsPanel.tsx`
-                                  relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts").
+                                  relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts"),
+                                  and (S11, text form) each row carries a "🗺"
+                                  toggle expanding an inline Craft Atlas strip —
+                                  inputs/outputs by city, reach, signature —
+                                  reading `campaign_guild_atlas` (S9's own
+                                  query) keyed by the row's new `idx` field.
                                   Split helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`,
                                   used by both the browser and the dossier) live in
                                   `houseShared.ts` rather than being duplicated or
                                   cross-imported, which would make a HousesPanel ↔
-                                  HouseDossier import cycle.
+                                  HouseDossier import cycle. S12a added a TOP BAND
+                                  above the list — an SVG bump chart of the top
+                                  ~12 houses' wealth rank over ~50 years
+                                  (`campaign_house_bump_chart`, click a line to
+                                  open that house), two real sparkline gauges
+                                  (families/top-10% share, from the existing
+                                  `campaign_get_inequality`) and two plain-total
+                                  gauges (founded/fallen — no per-year series
+                                  exists for either, so shown honestly rather
+                                  than invented, Q18) — and a bottom PULSE
+                                  ticker reusing `campaign_get_journal(-1,-1)`
+                                  (`NewsFeedPanel`'s own world feed) filtered to
+                                  house-ish kinds.
   HouseDossier.tsx              ← The big per-house window — `HouseDetail` (moved here
                                   verbatim from HousesPanel.tsx in the S10 split) plus its
                                   ten subtabs, alongside this file's original two views
@@ -2465,6 +2626,11 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   risings" list; observation only, Phase 3.2-3.6)/
                                   🧭 Expeditions (this house's live ventures, click a
                                   row to highlight its destination province, Phase 1.3)/
+                                  🗺 Atlas (S11, text form — partner cities by
+                                  volume, the goods portfolio with bought-at/
+                                  sold-at cities, a seasonal lane-ease bar
+                                  chart; reads `campaign_house_atlas`, S8's
+                                  own query)/
                                   ⚖ Standing/⚔ Feuds/🏦 Bank/📒 Accountant.
                                   `HouseStandingView` (five stability gauges — solvency
                                   COUNTDOWN, liquidity runway, concentration exposure,
@@ -2474,7 +2640,20 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   world, which is what `FeudsAlliancesPanel.tsx` calls it
                                   with) are unchanged from before the split. Pips + a
                                   PHRASE, never a raw 0..1; a healthy gauge stays quiet so
-                                  the warning colour still means something
+                                  the warning colour still means something. S12c adds a
+                                  RADAR (`GaugeRadar`) to Standing — this house's five
+                                  gauges against the world's tier-1 MEDIAN
+                                  (`campaign_tier1_gauge_medians`) — and a stepped
+                                  TEMPERATURE LINE (`FeudTemperatureLine`) to each Feuds
+                                  card, from that feud's own recorded flare log. The
+                                  Accountant's `LedgerView` gains a WATERFALL
+                                  (`WaterfallChart`) cascading from 0 through the year's
+                                  top trade goods and every expense line to the real NET.
+                                  S12b adds a `TimelinePlate` above the subtabs — every
+                                  head a segment, milestones marked, feuds bracketed,
+                                  a wealth curve threading through, scrubbable by drag
+                                  (does not rewrite the tabs below to a scrubbed year —
+                                  no per-tab historical state exists for that, Q20).
   BankPanel/MoneyFinancePanel.tsx ← Bank T-accounts, currencies/mints/monetary chronicle
   SpeculationPanel.tsx          ← DLC 3: Speculation why-chain / Poleis (treasury/tariff/mint/coin)
   CoinCreditPanel.tsx           ← Currencies / Banks / Wars / Crashes / Schematics tabs
@@ -5764,19 +5943,25 @@ HOUSES_GUILDS_AND_MARKET_PLAN.md  ← ⭐ S2 (annona carrier class) + S3 (craft
                                     breach and a relay-fixture assumption the
                                     dose invalidates), recorded at
                                     `BLOCKADE_STAGING_DOSE`'s own doc comment.
-                                    S10 could only be verified by `tsc`/
-                                    `vite build` in this session — no display
-                                    to actually open the four windows in, said
-                                    plainly rather than claimed as tested.
-                                    S11/S12 (the map labelling for S8/S9's
-                                    atlases, the Houses three-band redesign)
-                                    QUEUED, per the plan's own §9 risk
-                                    register — THREE doses attempted this
-                                    session (S1 investigated/blocked, S3
-                                    walked/untestable, S6 walked/reverted), at
-                                    the plan's own stated ceiling; S8/S9/S10
-                                    shipped after since none is a dose. The
-                                    one-session build
+                                    S10/S11(text+map, incl. Q19)/S12a/S12b/
+                                    S12c(3 of 5) — everything this plan built
+                                    in follow-up sessions after the first —
+                                    could only be verified by `tsc`/`vite
+                                    build` — no display to actually open the
+                                    windows in, said plainly rather than
+                                    claimed as tested (queue item Q17, and
+                                    Q19's on-map lane rendering is named as
+                                    the single highest-risk piece to check
+                                    first). Q20 (full cross-tab year-travel on
+                                    the timeline plate), Q21 (Kin as a real
+                                    tree — needs new persisted sim state) and
+                                    Q22 (Lineage as a drawn SVG diagram) remain
+                                    QUEUED. The first session's own THREE-DOSE
+                                    ceiling (S1 investigated/blocked, S3
+                                    walked/untestable, S6 walked/reverted) is
+                                    unchanged — every slice shipped since is a
+                                    read-only query or pure frontend work, not
+                                    a dose. The one-session build
                                     plan for houses, guilds and the settlement
                                     market, after four decisions: the era is a
                                     Roman/medieval MIX (no `EraProfile` switch built

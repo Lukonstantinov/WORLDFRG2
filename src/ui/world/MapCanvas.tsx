@@ -12,7 +12,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -1502,6 +1502,24 @@ export function MapCanvas() {
     om.drawHouseControl(houses, meta?.grid_width ?? 0, selectedHouseIdx);
     requestRender();
   }, [houses, meta, selectedHouseIdx, requestRender]);
+
+  // S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the focused house's own trade
+  // atlas, so its map web draws with real per-lane volume/dominant-good
+  // instead of the plain flat-red style. Fetched only while a house is
+  // selected; `setHouseAtlas` itself guards against a stale fetch outliving
+  // a house switch (its own `houseAtlasFor` check).
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (selectedHouseIdx == null) { om.setHouseAtlas(null, null); requestRender(); return; }
+    let alive = true;
+    campaignHouseAtlas(selectedHouseIdx).then((atlas) => {
+      if (!alive) return;
+      om.setHouseAtlas(selectedHouseIdx, atlas);
+      requestRender();
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [selectedHouseIdx, requestRender]);
 
   // Draw latitude lines. Driven by the live `latConfig` slice (not `meta`) so
   // dragging the Latitude Frame sliders repaints ONLY this overlay — no tile

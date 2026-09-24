@@ -8,13 +8,14 @@ import { drawFigure, resolveKit, type Occasion } from "@ui/campaign/cultureDress
 import { clarifyGemLabel } from "@goods";
 import { goodIcon, TIER_META, tierOf, dull, familyRunAt } from "@ui/campaign/houseShared";
 import {
-  campaignGetFeuds, campaignHouseStability, campaignGetHouseHistory, campaignMerchantRoutes,
+  campaignGetFeuds, campaignHouseStability, campaignTier1GaugeMedians, campaignGetHouseHistory, campaignMerchantRoutes,
   campaignHouseLedger, campaignGetBanks, campaignGetExpeditions, campaignGetHouseKin,
-  campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage,
+  campaignGetHouseGoals, campaignGetHouseCrisis, campaignGetHouseLineage, campaignHouseAtlas,
 } from "@bridge";
 import type {
-  FeudRow, Gauge, HouseStability, HouseHistory, HouseBrief, MerchantRoute, HouseLedger,
+  FeudRow, Gauge, HouseStability, GaugeMedians, HouseHistory, HouseBrief, MerchantRoute, HouseLedger,
   BankBrief, ExpeditionView, KinBrief, GoalsBrief, CrisisBrief, HouseLineage, LineageNode, HeadBrief,
+  HouseAtlas, HouseTimelineEvent,
 } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
@@ -79,13 +80,70 @@ function GaugeCard({ g }: { g: Gauge }) {
 
 const fmt = (v: number) => (Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(1));
 
+/** S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · Standing as a radar against the
+ *  tier-1 median — the plan's own ask. A house's five gauges (0..1, already
+ *  computed) plotted on a pentagon alongside the world's tier-1 MEDIAN for
+ *  each (`campaign_tier1_gauge_medians`, S12c's own new read, reusing
+ *  `campaign_house_stability` verbatim so the two numbers can never drift).
+ *  Quiet when there is nothing to compare against yet (`medians.n === 0` —
+ *  no tier-1 house exists on a young world) rather than drawing a pentagon
+ *  against zeros, which would read as "this house has no standing" when the
+ *  truth is "nobody does yet". */
+function GaugeRadar({ gauges, medians }: { gauges: Gauge[]; medians: GaugeMedians | null }) {
+  if (!medians || medians.n === 0 || gauges.length < 3) return null;
+  const medianOf = (key: string) => medians.medians.find(([k]) => k === key)?.[1] ?? null;
+  if (!gauges.some((g) => medianOf(g.key) != null)) return null;
+  const N = gauges.length, W = 140, H = 140, cx = W / 2, cy = H / 2, R = 52;
+  const angle = (i: number) => -Math.PI / 2 + (i / N) * Math.PI * 2;
+  const ptAt = (i: number, frac: number): [number, number] => {
+    const a = angle(i), r = R * Math.max(0, Math.min(1, frac));
+    return [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+  };
+  const path = (fracs: number[]) => fracs.map((f, i) => ptAt(i, f)).map(([x, y], i) => `${i === 0 ? "M" : "L"}${x.toFixed(1)},${y.toFixed(1)}`).join(" ") + "Z";
+  const selfPath = path(gauges.map((g) => g.score));
+  const medPath = path(gauges.map((g) => medianOf(g.key) ?? 0));
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}
+      title={`Compared to the median of ${medians.n} tier-1 house${medians.n === 1 ? "" : "s"}`}>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        {/* Grid rings */}
+        {[0.25, 0.5, 0.75, 1].map((f, i) => (
+          <polygon key={i} points={gauges.map((_, gi) => ptAt(gi, f).join(",")).join(" ")}
+            fill="none" stroke="#1c2c40" strokeWidth={0.6} />
+        ))}
+        {/* Spokes */}
+        {gauges.map((_, i) => {
+          const [x, y] = ptAt(i, 1);
+          return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#1c2c40" strokeWidth={0.6} />;
+        })}
+        {/* Tier-1 median, quiet grey fill */}
+        <path d={medPath} fill="rgba(150,160,175,0.14)" stroke="#7a8aa0" strokeWidth={1} strokeDasharray="2,2" />
+        {/* This house, gold */}
+        <path d={selfPath} fill="rgba(201,162,39,0.22)" stroke="#c9a227" strokeWidth={1.3} />
+        {gauges.map((g, i) => {
+          const [x, y] = ptAt(i, 1.14);
+          return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={8}>{GAUGE_ICON[g.key] ?? "•"}</text>;
+        })}
+      </svg>
+      <div style={{ fontSize: 9, color: "#8fa6be" }}>
+        <div><span style={{ color: "#c9a227" }}>■</span> this house</div>
+        <div><span style={{ color: "#7a8aa0" }}>┅</span> tier-1 median ({medians.n})</div>
+      </div>
+    </div>
+  );
+}
+
 export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey?: number }) {
   const [st, setSt] = useState<HouseStability | null>(null);
+  const [medians, setMedians] = useState<GaugeMedians | null>(null);
   useEffect(() => {
     let alive = true;
     campaignHouseStability(idx)
       .then((s) => { if (alive) setSt(s); })
       .catch(() => { if (alive) setSt(null); });
+    campaignTier1GaugeMedians()
+      .then((m) => { if (alive) setMedians(m); })
+      .catch(() => { if (alive) setMedians(null); });
     return () => { alive = false; };
   }, [idx, refreshKey]);
 
@@ -95,6 +153,7 @@ export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey
       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
         {st.gauges.map((g) => <GaugeCard key={g.key} g={g} />)}
       </div>
+      <GaugeRadar gauges={st.gauges} medians={medians} />
 
       {/* The countdown. This is the single highest-value number in the panel: the sim
           has always known it, and the player could never see it. */}
@@ -178,6 +237,42 @@ function OutcomeChip({ f }: { f: FeudRow }) {
   );
 }
 
+const STAGE_NAMES = ["cold rivalry", "open feud", "trade war", "vendetta"];
+const stageIdxOf = (s: string) => { const i = STAGE_NAMES.indexOf(s); return i >= 0 ? i : 0; };
+
+/** S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · Feuds as a temperature line with
+ *  stage transitions — the plan's own ask. Built from `f.log` (real recorded
+ *  flares, each carrying its own year + stage), stepped rather than
+ *  interpolated since a feud's stage is a genuine jump, not a smooth climb.
+ *  Quiet (not rendered) below two points — a single flare has no LINE to
+ *  draw, just a dot, which says nothing a bar didn't already. */
+function FeudTemperatureLine({ f }: { f: FeudRow }) {
+  const pts = [...f.log].sort((a, b) => a.year - b.year).map((l) => ({ year: l.year, stage: stageIdxOf(l.stage) }));
+  const nowYear = f.running ? f.started_year + f.years : f.ended_year;
+  if (pts.length === 0 || pts[pts.length - 1].year !== nowYear) pts.push({ year: nowYear, stage: f.stage_idx });
+  if (pts.length < 2) return null;
+  const W = 200, H = 26, PAD = 2;
+  const minY = pts[0].year, maxY = Math.max(minY + 1, pts[pts.length - 1].year);
+  const xAt = (y: number) => PAD + ((y - minY) / (maxY - minY)) * (W - PAD * 2);
+  const yAt = (s: number) => H - PAD - (s / 3) * (H - PAD * 2);
+  let d = "";
+  pts.forEach((p, i) => {
+    d += `${i === 0 ? "M" : "L"}${xAt(p.year).toFixed(1)},${yAt(p.stage).toFixed(1)} `;
+    if (i < pts.length - 1) d += `L${xAt(pts[i + 1].year).toFixed(1)},${yAt(p.stage).toFixed(1)} `; // step, not slope
+  });
+  return (
+    <svg width={W} height={H} style={{ display: "block", marginTop: 3 }}>
+      <title>Stage over time — a real jump, not a smooth climb</title>
+      <path d={d.trim()} fill="none" stroke={STAGE_COLOR[Math.max(...pts.map((p) => p.stage))]} strokeWidth={1.2} />
+      {pts.map((p, i) => (
+        <circle key={i} cx={xAt(p.year)} cy={yAt(p.stage)} r={1.6} fill={STAGE_COLOR[p.stage]}>
+          <title>{`yr ${p.year}: ${STAGE_NAMES[p.stage]}`}</title>
+        </circle>
+      ))}
+    </svg>
+  );
+}
+
 function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
   const [open, setOpen] = useState(false);
   const stage = Math.min(3, Math.max(0, f.stage_idx));
@@ -224,6 +319,7 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
           {f.stage}
         </span>
       </div>
+      <FeudTemperatureLine f={f} />
 
       <div style={{ color: "#6a86a6", fontSize: 8, marginTop: 2 }}>
         {f.running ? `running ${f.years}y` : `ran ${f.years}y from ${f.started_year}`}
@@ -386,9 +482,30 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
   const [goals, setGoals] = useState<GoalsBrief | null>(null);
   const [crisis, setCrisis] = useState<CrisisBrief | null>(null);
   const [lineage, setLineage] = useState<HouseLineage | null>(null);
+  // S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the trade-flow atlas — partner
+  // cities, the goods portfolio, holdings, seasonal lane ease. Text/table
+  // only: the plan's own on-map lane labelling (thickness/colour/arrows) is
+  // deliberately NOT attempted here — that is real new canvas rendering code
+  // layered onto OverlayManager's laneBetween/mediumRuns machinery, a much
+  // larger and harder-to-verify-blind piece than this tab, so it stays
+  // queued (Q19) rather than attempted partially and left half-working.
+  const [atlas, setAtlas] = useState<HouseAtlas | null>(null);
+  // S12b · the timeline plate's own feud brackets (independent of the Feuds
+  // tab's own fetch, which only runs while that tab is selected).
+  const [timelineFeuds, setTimelineFeuds] = useState<FeudRow[]>([]);
+  // The scrub cursor — a year the reader is pointing at on the timeline.
+  // Scoping note (rule 36 discipline): the plan's own text says "scrub it
+  // and the tabs below re-read to that year." No per-tab historical state
+  // exists anywhere in the sim to make that literal — Kin/Goals/Crisis/etc.
+  // all read LIVE state only. What the timeline CAN honestly show at a
+  // scrubbed year — which head ruled then, their wealth then (linearly
+  // interpolated between that head's own recorded start/end), which
+  // feuds/milestones were live then — it does; a true year-travel view
+  // across every tab is queue item Q20, not attempted here.
+  const [scrubYear, setScrubYear] = useState<number | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions">("chronicle");
+  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions" | "atlas">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -415,6 +532,10 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       campaignGetHouseCrisis(h.idx).then((c) => { if (alive) setCrisis(c); }).catch(() => {});
       // Lineage: the chain this house descends from + what split off it directly.
       campaignGetHouseLineage(h.idx).then((l) => { if (alive) setLineage(l); }).catch(() => {});
+      // S11 · the trade-flow atlas (partners/goods/holdings/seasons).
+      campaignHouseAtlas(h.idx).then((a) => { if (alive) setAtlas(a); }).catch(() => {});
+      // S12b · feud brackets for the timeline plate.
+      campaignGetFeuds(h.idx).then((fs) => { if (alive) setTimelineFeuds(fs); }).catch(() => {});
     }
     // Find this family's bank (if any) so we can show its balance-sheet subtab.
     if (h.owns_bank) {
@@ -564,6 +685,13 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
         </div>
       </div>
 
+      {/* S12b · the life of the house as one horizontal timeline: every head a
+          segment, milestones as marks above, feuds as brackets below, the
+          wealth curve running through as a filled area. Scrubbable — see the
+          scoping note at `scrubYear`'s own declaration above. */}
+      <TimelinePlate line={chron?.line ?? []} events={chron?.events ?? []} feuds={timelineFeuds}
+        houseIdx={h.idx ?? -1} scrubYear={scrubYear} onScrub={setScrubYear} fmt={fmtW} />
+
       {/* Subtabs — Chronicle first (§2.3: the dossier has nothing to DECIDE, so the
           record is the primary artefact). Accountant gets its own roomy view so
           expenses aren't clipped. */}
@@ -573,6 +701,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
            ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
            ...((lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0)) || (chron?.line?.length ?? 0) > 0 ? ["lineage" as const] : []),
            ...(expeds.length > 0 ? ["expeditions" as const] : []),
+           ...(atlas && (atlas.partners.length > 0 || atlas.goods.length > 0) ? ["atlas" as const] : []),
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
@@ -585,6 +714,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
             : t === "crisis" ? `⚠ Crisis${crisis?.active ? ` r${crisis.active.round}/${crisis.active.round_cap}` : ""}`
             : t === "lineage" ? "🌳 Lineage"
             : t === "expeditions" ? `🧭 Expeditions (${expeds.length})`
+            : t === "atlas" ? "🗺 Atlas"
             : t === "standing" ? "⚖ Standing"
             : t === "feuds" ? `⚔ Feuds${h.rivals.length > 0 ? ` (${h.rivals.length})` : ""}`
             : t === "bank" ? "🏦 Bank"
@@ -604,6 +734,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
         <LineageTab lineage={lineage} current={h} onJump={jumpTo} line={chron?.line ?? []} />
       ) : view === "expeditions" ? (
         <ExpeditionsTab expeds={expeds} fmt={fmtW} />
+      ) : view === "atlas" ? (
+        <AtlasTab atlas={atlas} fmt={fmtW} />
       ) : view === "standing" ? (
         // The five stability gauges. Everything here was already in the sim — the
         // solvency countdown in particular has always decided whether this family
@@ -787,6 +919,223 @@ function ExpeditionsTab({ expeds, fmt }: { expeds: ExpeditionView[]; fmt: (v: nu
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** S11 (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the trade-flow atlas, text/table
+ *  form — partner cities ranked by volume, the goods portfolio with where
+ *  each is bought/sold, and a seasonal-ease bar. `campaign_house_atlas` is a
+ *  pure derived read (§5.6 of CLAUDE.md), so this tab can never move a
+ *  gate. The plan's own richer on-map version (lane thickness/colour/arrows,
+ *  a medallion at the midpoint, a label at the far end) is deliberately NOT
+ *  attempted here — see this tab's call site for why. */
+function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) => string }) {
+  if (!atlas || (atlas.partners.length === 0 && atlas.goods.length === 0)) {
+    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No live trade to chart yet.</div>;
+  }
+  const hubName = (id: number) => atlas.partners.find((p) => p.hub === id)?.name ?? `hub #${id}`;
+  const partners = [...atlas.partners].sort((a, b) => (b.volume_in + b.volume_out) - (a.volume_in + a.volume_out)).slice(0, 10);
+  const goods = [...atlas.goods].sort((a, b) => b.volume - a.volume).slice(0, 8);
+  const maxVol = Math.max(1, ...partners.map((p) => p.volume_in + p.volume_out));
+  const monthNames = ["J", "F", "M", "A", "M", "J", "J", "A", "S", "O", "N", "D"];
+  const maxEase = Math.max(0.01, ...atlas.seasons);
+  return (
+    <div>
+      {partners.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+            Partner cities — by volume
+          </div>
+          {partners.map((p) => (
+            <div key={p.hub} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0", fontSize: 10 }}>
+              <span style={{ flex: 1, minWidth: 0, color: "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {p.name}
+              </span>
+              <div style={{ width: 60, height: 5, background: "#0a1018", borderRadius: 3, overflow: "hidden", display: "flex" }}
+                title={`in ${fmt(p.volume_in)} · out ${fmt(p.volume_out)}`}>
+                <div style={{ width: `${Math.round((p.volume_in / maxVol) * 100)}%`, background: "#7fb0e0" }} />
+                <div style={{ width: `${Math.round((p.volume_out / maxVol) * 100)}%`, background: "#7fd0a0" }} />
+              </div>
+              <span style={{ color: "#7a90a8", fontSize: 9, width: 44, textAlign: "right" }}>
+                {fmt(p.volume_in + p.volume_out)}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      {goods.length > 0 && (
+        <div style={{ marginBottom: 8 }}>
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+            Goods portfolio
+          </div>
+          {goods.map((g) => (
+            <div key={g.good} style={{ fontSize: 10, marginBottom: 3 }}>
+              <div style={{ color: "#e8dcc0" }}>{goodIcon(g.name)} {g.name} <span style={{ color: "#9ab0c8" }}>· {fmt(g.volume)} · profit {fmt(g.profit)}</span></div>
+              {(g.bought_at.length > 0 || g.sold_at.length > 0) && (
+                <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                  {g.bought_at.length > 0 && <>bought at {g.bought_at.slice(0, 3).map(hubName).join(", ")} </>}
+                  {g.sold_at.length > 0 && <>· sold at {g.sold_at.slice(0, 3).map(hubName).join(", ")}</>}
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+      {atlas.seasons.some((v) => v > 0) && (
+        <div>
+          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}
+            title="Relative ease of this house's own lanes by month — taller is cheaper/easier">
+            Seasonal lane ease
+          </div>
+          <div style={{ display: "flex", alignItems: "flex-end", gap: 3, height: 34 }}>
+            {atlas.seasons.map((v, i) => (
+              <div key={i} title={`${monthNames[i]}: ${(v).toFixed(2)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
+                <div style={{ width: "100%", height: Math.max(2, Math.round((v / maxEase) * 28)), background: "#7fb0e0", borderRadius: 2 }} />
+                <span style={{ color: "#5a6a7e", fontSize: 7.5, marginTop: 2 }}>{monthNames[i]}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** S12b (HOUSES_GUILDS_AND_MARKET_PLAN.md) · the house's life as one
+ *  horizontal timeline: every head a segment (coloured by sex, labelled when
+ *  wide enough), milestones as marks above (founding/succession/monopoly/
+ *  branch/dissolution only — chatter is deliberately excluded, the same
+ *  "quiet unless it matters" discipline rule 20 already applies to the
+ *  chronicle itself), feuds as brackets below, and the head-to-head
+ *  wealth_start/wealth_end run as a filled area threading through. Built
+ *  entirely from data every other tab already fetches — `chron.line`
+ *  (Phase 0.4's own succession record), `chron.events`, and this house's
+ *  feuds — so it adds no new query.
+ *
+ *  Scrubbable: dragging sets `scrubYear`, and the plate answers what it
+ *  honestly can from that data alone (which head ruled, their wealth then,
+ *  linearly interpolated between their own recorded start/end). It does
+ *  NOT rewrite the tabs below to that year — no per-tab historical state
+ *  exists in the sim for Kin/Goals/Crisis/etc. to read from, so a genuine
+ *  year-travel view is queue item Q20, not attempted here. */
+const MILESTONE_KINDS = new Set(["founded", "succession", "monopoly", "branch", "dissolved"]);
+
+function TimelinePlate({
+  line, events, feuds, houseIdx, scrubYear, onScrub, fmt,
+}: {
+  line: HeadBrief[]; events: HouseTimelineEvent[]; feuds: FeudRow[]; houseIdx: number;
+  scrubYear: number | null; onScrub: (y: number | null) => void; fmt: (v: number) => string;
+}) {
+  const milestones = events.filter((e) => MILESTONE_KINDS.has(e.kind));
+  if (line.length === 0 && milestones.length === 0) return null;
+
+  const W = 680, H = 74, PAD = 6, BAND_TOP = 30, BAND_H = 12;
+  const years: number[] = [];
+  line.forEach((h) => { years.push(h.since_year); if (h.until_year > 0) years.push(h.until_year); });
+  milestones.forEach((e) => years.push(e.year));
+  feuds.forEach((f) => { years.push(f.started_year); years.push(f.started_year + f.years); });
+  if (years.length === 0) return null;
+  const minY = Math.min(...years);
+  const maxY = Math.max(minY + 1, ...years);
+  const xAt = (y: number) => PAD + ((y - minY) / (maxY - minY)) * (W - PAD * 2);
+  const yearAt = (px: number) => Math.round(minY + ((px - PAD) / (W - PAD * 2)) * (maxY - minY));
+
+  const segEnd = (h: HeadBrief) => h.until_year > 0 ? h.until_year : maxY;
+  const maxWealth = Math.max(1, ...line.flatMap((h) => [h.wealth_start, h.wealth_end]));
+  const wealthAt = (y: number) => {
+    const h = line.find((hh) => y >= hh.since_year && y <= segEnd(hh));
+    if (!h) return null;
+    const span = Math.max(1, segEnd(h) - h.since_year);
+    const t = (y - h.since_year) / span;
+    return h.wealth_start + (h.wealth_end - h.wealth_start) * t;
+  };
+  const wealthPath = (() => {
+    const pts = line.flatMap((h) => [
+      `${xAt(h.since_year).toFixed(1)},${(H - 4 - (h.wealth_start / maxWealth) * 16).toFixed(1)}`,
+      `${xAt(segEnd(h)).toFixed(1)},${(H - 4 - (h.wealth_end / maxWealth) * 16).toFixed(1)}`,
+    ]);
+    if (pts.length === 0) return "";
+    return `M${xAt(minY).toFixed(1)},${H - 4} L${pts.join(" L")} L${xAt(maxY).toFixed(1)},${H - 4} Z`;
+  })();
+
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const scrub = (clientX: number) => {
+    const el = svgRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    const px = ((clientX - rect.left) / rect.width) * W;
+    onScrub(Math.min(maxY, Math.max(minY, yearAt(px))));
+  };
+
+  const scrubHead = scrubYear != null ? line.find((h) => scrubYear >= h.since_year && scrubYear <= segEnd(h)) : null;
+  const scrubWealth = scrubYear != null ? wealthAt(scrubYear) : null;
+
+  return (
+    <div style={{ marginTop: 6, marginBottom: 2 }}>
+      <svg ref={svgRef} viewBox={`0 0 ${W} ${H}`} width="100%" height={H} preserveAspectRatio="none"
+        style={{ display: "block", cursor: "crosshair" }}
+        onMouseDown={(e) => { scrub(e.clientX); }}
+        onMouseMove={(e) => { if (e.buttons === 1) scrub(e.clientX); }}
+        onMouseLeave={() => {}}>
+        {/* Wealth curve, a filled area running through the whole life */}
+        {wealthPath && <path d={wealthPath} fill="#c9a22733" stroke="#c9a227" strokeWidth={1} />}
+        {/* Head segments */}
+        {line.map((h, i) => (
+          <rect key={i} x={xAt(h.since_year)} y={BAND_TOP} width={Math.max(1, xAt(segEnd(h)) - xAt(h.since_year))}
+            height={BAND_H} fill={h.female ? "#b06fa0" : "#4a7ab0"} opacity={h.until_year === 0 ? 0.9 : 0.65}
+            stroke="#0c141e" strokeWidth={0.5}>
+            <title>{`${h.name}${h.epithet ? ` "${h.epithet}"` : ""} — ${h.since_year}–${h.until_year > 0 ? h.until_year : "present"} (${h.accession})`}</title>
+          </rect>
+        ))}
+        {/* Segment name labels, only where a segment is wide enough */}
+        {line.map((h, i) => {
+          const w = xAt(segEnd(h)) - xAt(h.since_year);
+          if (w < 34) return null;
+          return (
+            <text key={i} x={xAt(h.since_year) + w / 2} y={BAND_TOP + BAND_H - 3} textAnchor="middle"
+              fontSize={7.5} fill="#f0e4c8" style={{ pointerEvents: "none" }}>{h.name}</text>
+          );
+        })}
+        {/* Milestone marks, above the band */}
+        {milestones.map((e, i) => (
+          <g key={i}>
+            <line x1={xAt(e.year)} x2={xAt(e.year)} y1={BAND_TOP - 8} y2={BAND_TOP} stroke="#e8c860" strokeWidth={1} />
+            <text x={xAt(e.year)} y={BAND_TOP - 10} textAnchor="middle" fontSize={7}>
+              <title>{`${e.text} (year ${e.year})`}</title>
+              {EVENT_ICON[e.kind] ?? "•"}
+            </text>
+          </g>
+        ))}
+        {/* Feud brackets, below the band */}
+        {feuds.map((f, i) => {
+          const x1 = xAt(f.started_year), x2 = xAt(f.started_year + f.years);
+          const y = BAND_TOP + BAND_H + 6 + (i % 2) * 5;
+          return (
+            <g key={i} opacity={0.8}>
+              <line x1={x1} x2={x2} y1={y} y2={y} stroke="#c06868" strokeWidth={1.2} />
+              <line x1={x1} x2={x1} y1={y - 2} y2={y + 2} stroke="#c06868" strokeWidth={1} />
+              <line x1={x2} x2={x2} y1={y - 2} y2={y + 2} stroke="#c06868" strokeWidth={1} />
+              <title>{`Feud vs ${f.a === houseIdx ? f.b_name : f.a_name} — ${f.cause}, ${f.outcome}`}</title>
+            </g>
+          );
+        })}
+        {/* Scrub cursor */}
+        {scrubYear != null && (
+          <line x1={xAt(scrubYear)} x2={xAt(scrubYear)} y1={2} y2={H - 2} stroke="#7fd0c0" strokeWidth={1} strokeDasharray="2,2" />
+        )}
+      </svg>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#4a5c72", padding: "0 2px" }}>
+        <span>{minY}</span>
+        {scrubYear != null ? (
+          <span style={{ color: "#7fd0c0" }} data-no-drag onClick={() => onScrub(null)} title="Clear the scrub cursor">
+            yr {scrubYear} — {scrubHead ? scrubHead.name : "no head on record"}{scrubWealth != null ? ` · wealth ≈ ${fmt(scrubWealth)}` : ""} ✕
+          </span>
+        ) : (
+          <span title="Drag along the timeline to inspect a year">drag to inspect a year</span>
+        )}
+        <span>{maxY}</span>
+      </div>
     </div>
   );
 }
@@ -1225,6 +1574,90 @@ function BankSheet({ b, fmt }: { b: BankBrief; fmt: (v: number) => string }) {
 /** The yearly ledger (Accountant view): Income then Expenditure stacked FULL-WIDTH
  *  (so nothing is clipped in the narrow panel) + NET + warehouse stock. Per-city
  *  tax/profit lines arrive sorted largest → lowest. */
+/** S12c (HOUSES_GUILDS_AND_MARKET_PLAN.md) · Accountant as a waterfall — the
+ *  plan's own ask. Every step is a real line the Ledger tab already lists
+ *  above (top trade goods by |amount|, the rest bucketed so a house with a
+ *  wide portfolio doesn't fill the chart with slivers, then every expense
+ *  line), cascading from 0 to the year's real net. Quiet when there's
+ *  nothing recorded yet (year 0 / an empty ledger). */
+function WaterfallChart({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
+  type Step = { label: string; amount: number };
+  const income: Step[] = [];
+  const sortedTrade = [...l.trade_profit].sort((a, b) => Math.abs(b.amount) - Math.abs(a.amount));
+  sortedTrade.slice(0, 4).forEach((c) => income.push({ label: c.label, amount: c.amount }));
+  if (sortedTrade.length > 4) {
+    const rest = sortedTrade.slice(4).reduce((s, c) => s + c.amount, 0);
+    if (Math.abs(rest) > 0.01) income.push({ label: `+${sortedTrade.length - 4} more`, amount: rest });
+  }
+  if (l.office_income) income.push({ label: "Office income", amount: l.office_income });
+  if (l.estate_income) income.push({ label: "Estate income", amount: l.estate_income });
+
+  const expense: Step[] = [];
+  const pushExp = (label: string, amt: number) => { if (amt > 0.01) expense.push({ label, amount: -amt }); };
+  pushExp("Import tax", l.import_tax.reduce((s, c) => s + c.amount, 0));
+  pushExp("Export tax", l.export_tax.reduce((s, c) => s + c.amount, 0));
+  pushExp("Estate tax", l.estate_tax);
+  pushExp("Upkeep", l.upkeep);
+  pushExp("Fleet", l.fleet_cost);
+  pushExp("Lost cargo", l.lost_cargo);
+  pushExp("Misfortune", l.events);
+  pushExp("Consumption", l.consumption);
+  pushExp("Inflation", l.inflation);
+  pushExp("War levy", l.war_levy);
+  pushExp("War damage", l.war_damage);
+
+  const steps = [...income, ...expense];
+  if (steps.length === 0) return null;
+  let cum = 0;
+  const bars = steps.map((s) => {
+    const start = cum; cum += s.amount;
+    return { ...s, start, end: cum };
+  });
+  const allVals = [0, ...bars.flatMap((b) => [b.start, b.end])];
+  const lo = Math.min(...allVals), hi = Math.max(...allVals);
+  const span = Math.max(1e-6, hi - lo);
+  const W = 260, H = 92, padL = 4, padR = 4, padT = 6, padB = 20;
+  const n = bars.length + 1; // +1 for the NET bar
+  const slotW = (W - padL - padR) / n;
+  const barW = Math.max(3, slotW * 0.72);
+  const yAt = (v: number) => padT + (1 - (v - lo) / span) * (H - padT - padB);
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
+        This year, step by step
+      </div>
+      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
+        <line x1={0} y1={yAt(0)} x2={W} y2={yAt(0)} stroke="#1c2c40" strokeWidth={0.6} />
+        {bars.map((b, i) => {
+          const x = padL + i * slotW + (slotW - barW) / 2;
+          const up = b.amount >= 0;
+          const y = yAt(Math.max(b.start, b.end));
+          const h = Math.max(0.6, Math.abs(yAt(b.start) - yAt(b.end)));
+          return (
+            <g key={i}>
+              <rect x={x} y={y} width={barW} height={h} fill={up ? "#7fcf8f" : "#e0a0a0"} opacity={0.9}>
+                <title>{`${b.label}: ${up ? "+" : "−"}${fmt(Math.abs(b.amount))}`}</title>
+              </rect>
+            </g>
+          );
+        })}
+        {/* NET — the final bar, from 0 to the year's real total, in gold */}
+        {(() => {
+          const x = padL + bars.length * slotW + (slotW - barW) / 2;
+          const y = yAt(Math.max(0, l.net));
+          const h = Math.max(0.6, Math.abs(yAt(0) - yAt(l.net)));
+          return (
+            <rect x={x} y={y} width={barW} height={h} fill="#c9a227">
+              <title>{`NET: ${l.net >= 0 ? "+" : "−"}${fmt(Math.abs(l.net))}`}</title>
+            </rect>
+          );
+        })()}
+      </svg>
+      <div style={{ color: "#4a5c72", fontSize: 7.5, textAlign: "right" }}>hover a bar for its line</div>
+    </div>
+  );
+}
+
 function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
   const head: React.CSSProperties = { color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 7, marginBottom: 2 };
   const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
@@ -1271,6 +1704,7 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
         <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>NET</span>
         <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 11 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
       </div>
+      <WaterfallChart l={l} fmt={fmt} />
       {((l.wealth_years?.length ?? 0) >= 2 || l.wealth_graph.length >= 2) && (
         <WealthGraph
           data={(l.wealth_years?.length ?? 0) >= 2 ? l.wealth_years : l.wealth_graph}
