@@ -9,6 +9,46 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-24 — `SETTLEMENT_LIFE_PLAN.md`: L13 partially surfaced — the age pyramid + causes of death, ahead of the rest of Life tab v2
+
+Follow-up session. L13 as a whole ("pyramid, causes of death, housing, church,
+watch, notables") cannot honestly ship yet — housing (L6), church (L9), the
+watch (L10), persistent pops (L11) and townspeople (L12) have no mechanism
+behind them. But two of L13's six ingredients already had real data sitting
+unread since L4: `TickHub.ages`/`deaths_by_cause`. This session surfaces
+those two only, rather than build the rest against data that does not exist.
+
+`CityYear` (the annals struct `record_city_annals` snapshots yearly, served by
+`campaign_city_life`) gained `ages: [f32; 3]` and `deaths_by_cause: [f32; 8]`,
+both `#[serde(default)]` so an annal recorded before L4 shipped reads as
+all-zero — the frontend treats that as "not yet recorded", never as "an empty
+population". This is pure bookkeeping, not a new mechanism: both fields
+already existed on `TickHub` and were computed every year by L4's
+`update_vital_rates`/`spend_levy_casualties` with nothing reading them; it
+changes what the annals RECORD, not what the sim COMPUTES, so it needed no
+dose gate and cannot move `sim_fingerprint`.
+
+The Life tab's L3-era footer ("age pyramid and causes of death wait on L4") is
+replaced with two real reads: a three-band population bar
+(children/adults/elders) and a stacked causes-of-death bar (the 8 `CAUSE_*`
+categories, cumulative since founding — fire/flood still read 0 pending L8),
+each falling back to an explicit "not yet recorded"/"no recorded deaths yet"
+rather than rendering empty. The footer now names what still isn't there —
+housing, church, watch, notables — instead of claiming L13 is done.
+
+**Gates**: `cargo check --lib --tests` clean; `cargo test --lib tick::tests`
+286/286 in 16.37s (no new tests needed — this is a struct widen + two field
+reads, covered by the existing L3 annals gate `city_annals_fill_yearly_and_
+stay_capped` continuing to pass); `cargo test --lib econ_ -- --nocapture`
+re-verified bit-identical, multi-seed inheritance gate included; `npx tsc
+--noEmit` clean.
+
+L6-L12 and the rest of L13 (housing/crowding, the settlement year, urban
+hazards, the church, the watch, persistent pops, townspeople) remain queued
+exactly as before — this session did not advance any of them.
+
+---
+
 ## 2026-09-23e — `SETTLEMENT_LIFE_PLAN.md`: L5 (welfare into behaviour) shipped at dose 0
 
 Follow-up session to 2026-09-23d. Once L2 gave a real welfare ratio, three

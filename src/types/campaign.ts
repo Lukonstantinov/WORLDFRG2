@@ -1408,7 +1408,10 @@ export interface MarketCity {
   y: number;
 }
 /** SETTLEMENT_LIFE_PLAN.md L3 · one year of a city's annals (campaign_city_life).
- *  Widens additively as later slices (L4+) land — never renumbered. */
+ *  Widens additively as later slices land — never renumbered. L13 folded in
+ *  `ages`/`deaths_by_cause` (from L4) for the Life tab's pyramid + mortality
+ *  reading; both are `#[serde(default)]` all-zero on an annal recorded before
+ *  L4 shipped, which the UI must read as "no data", not "empty population". */
 export interface CityYear {
   year: number;
   population: number;
@@ -1419,6 +1422,12 @@ export interface CityYear {
   grain_price: number;
   mood: number;
   unrest: number;
+  /** children/adults/elders shares (L4's age pyramid), this year end. */
+  ages: [number, number, number];
+  /** Cumulative deaths since founding, by cause — index order: famine, plague,
+   *  fever, war, fire, flood, old age, infancy (`CAUSE_*`/`DEATH_CAUSE_COUNT`
+   *  in `tick/mod.rs`; fire/flood stay 0 until L8). */
+  deaths_by_cause: [number, number, number, number, number, number, number, number];
 }
 export interface CityPriceIndex {
   name: string;

@@ -1,10 +1,15 @@
 # Settlement Life Plan — how people live, earn, eat, die and make trouble in a campaign city
 
-**Status: L0-L5 SHIPPED (all at dose 0 where dosed).** L0-L2 shipped
-2026-09-23, L3 (annals + the Life tab), L4 (vital rates + age bands) and L5
-(welfare into behaviour) in follow-up sessions — see CLAUDE.md §5.7 for the
-full account. L6-L13 remain queued per the build order below. Originally
-written from a read of the campaign tick
+**Status: L0-L5 SHIPPED (all at dose 0 where dosed); L13 PARTIALLY SHIPPED.**
+L0-L2 shipped 2026-09-23, L3 (annals + the Life tab), L4 (vital rates + age
+bands) and L5 (welfare into behaviour) in follow-up sessions — see CLAUDE.md
+§5.7 for the full account. A later session shipped the two L13 ingredients
+that already had real data behind them (the age pyramid and causes of death,
+both from L4) into the Life tab, rather than wait on L13's other four
+ingredients — housing, church, watch, notables — which have no mechanism
+behind them yet (L6/L9/L10/L12) and are unstarted. L6-L12 and the rest of L13
+remain queued per the build order below. Originally written from a read of
+the campaign tick
 (`sim/campaign/tick/`), not from memory; every claim in §1 names the code it
 was read from. Coordinates with — and shares one slice with —
 `MONEY_AND_COINAGE_PLAN.md` (see §2 D1).
@@ -392,7 +397,12 @@ bread price, labourer welfare ratio, crowding, riots/revolts, fires, notable eve
 6. **The townspeople** (after L12).
 
 L3 ships the tab over what exists after L0–L2 (population, welfare, lack_basic,
-unrest drivers); L13 fills in pyramid, causes, housing and notables.
+unrest drivers). A later session folded the pyramid and causes-of-death — both
+already computed by L4, just unread — into the same tab ahead of the rest of
+L13, since they needed no new mechanism, only surfacing (`CityYear` widened
+additively per rule 29's own tail-alignment discipline, `#[serde(default)]`
+so an old annal reads as "not recorded" rather than corrupt). Housing and
+notables still wait on L6/L12 — there is no data to fill them with.
 
 ---
 
@@ -419,7 +429,7 @@ Each slice also names the gate that is NOT its own target (§2.4).
 | **L10** | **Watch + crime** (§3.9). | `ORDER_DOSE` | theft ledger line balances; crime bounded; `unrest_topples_councils` still fires (a watch may delay a revolt, never abolish it). |
 | **L11** | **Persistent pops + mobility** (§3.10): shadow slice, then switch. | shadow (bit-identical), then `PERSISTENT_POPS_DOSE` | `pops_sum_to_population`; Society aggregate within tolerance of old shares at dose 0; full `econ_` + inheritance gate per dose step. |
 | **L12** | **Townspeople** (§3.11). | effects anchored ±10%, dosed | notable count bounded per tier; save size bounded; chronicle milestones survive pruning (rule 20). |
-| **L13** | **Life tab v2**: pyramid, causes of death, housing, church, watch, notables. | UI | `tsc`; `vite build`; looked at (owed if no display). |
+| **L13** | 🟡 **PARTIALLY SHIPPED** — Life tab v2: pyramid + causes of death (✅, see below), housing/church/watch/notables (❌, still queued — no mechanism exists; L6/L9/L10/L12). | UI + `CityYear` widened additively (`ages`/`deaths_by_cause`, `#[serde(default)]`) | `tsc` clean; full `tick::tests` (286/286) + `econ_` (6/6 incl. multi-seed inheritance gate) bit-identical — pure bookkeeping onto data L4 already computed, no dose needed. Housing/church/watch/notables still owed if no display to look at them in. |
 
 **Build rules.** One dose at a time, the others pinned at zero. Three doses per
 session at most. A dose that regresses an aggregate gate is REVERTED and the walk

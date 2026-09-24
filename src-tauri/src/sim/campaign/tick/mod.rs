@@ -6317,13 +6317,15 @@ pub struct Pop {
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L3 (§3.12) — one annual record of a city's life, over
-/// exactly what L0-L2 have made real: population, the welfare ratio, hunger and
-/// unrest. L4+ (age bands, deaths by cause, crowding, fires) will widen this
-/// struct additively when those slices land; nothing here is removed or
-/// renumbered when they do (the same discipline rule 29 states for a parallel
-/// series). Capped at `ANNALS_CAP` years, oldest dropped first — a rolling
-/// living memory, not a permanent archive (unlike a house's milestones, rule 20,
-/// a city's ordinary year is not individually significant).
+/// what L0-L2 made real: population, the welfare ratio, hunger and unrest. L4's
+/// age bands + causes of death (`ages`/`deaths_by_cause`) were folded in
+/// additively for L13's Life tab v2 pyramid/mortality reading. Crowding and
+/// fires (L6/L8) will widen this struct the same way when those slices land;
+/// nothing here is removed or renumbered when they do (the same discipline
+/// rule 29 states for a parallel series). Capped at `ANNALS_CAP` years, oldest
+/// dropped first — a rolling living memory, not a permanent archive (unlike a
+/// house's milestones, rule 20, a city's ordinary year is not individually
+/// significant).
 #[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct CityYear {
     pub year: u32,
@@ -6336,6 +6338,17 @@ pub struct CityYear {
     pub grain_price: f32,
     pub mood: f32,
     pub unrest: f32,
+    /// L13 · a snapshot of `TickHub.ages` this year end — children/adults/elders
+    /// shares, so the Life tab can draw a real age pyramid instead of the seeded
+    /// constant. `#[serde(default)]` so an annal recorded before L4 still loads
+    /// (reads as the all-zero pre-seed state, which the frontend must treat as
+    /// "no data" rather than "an empty population").
+    #[serde(default)] pub ages: [f32; 3],
+    /// L13 · a snapshot of `TickHub.deaths_by_cause` this year end — CUMULATIVE
+    /// since the hub was founded (the same all-time tally `TickHub` itself
+    /// carries, never reset per year), so the Life tab's causes-of-death
+    /// breakdown is a running lifetime record, not a single year's toll.
+    #[serde(default)] pub deaths_by_cause: [f32; DEATH_CAUSE_COUNT],
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L3 — a rolling cap on `TickHub.annals`, the same

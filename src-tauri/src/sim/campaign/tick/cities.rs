@@ -1612,6 +1612,8 @@ impl CampaignSim {
                 grain_price: self.hubs[h].price.first().copied().unwrap_or(0.0),
                 mood: self.hubs[h].mood,
                 unrest: self.hubs[h].society.unrest,
+                ages: self.hubs[h].ages,
+                deaths_by_cause: self.hubs[h].deaths_by_cause,
             };
             self.hubs[h].annals.push(entry);
             if self.hubs[h].annals.len() > ANNALS_CAP {

@@ -1205,12 +1205,15 @@ export function HubPanel() {
         );
       })()}
 
-      {/* ════════════ LIFE (SETTLEMENT_LIFE_PLAN.md L3) ════════════
-          Over what L0-L2 made real: population, Allen's welfare ratio, and
-          hunger/unrest — no age pyramid, causes of death, housing or church
-          yet (those are L4+, Life tab v2 per the plan). Quiet-when-ordinary,
-          same discipline as the stability gauges: only the unusual reads as
-          a callout, the rest is a plain trend table. */}
+      {/* ════════════ LIFE (SETTLEMENT_LIFE_PLAN.md L3 + L13) ════════════
+          L3's trend table (population, Allen's welfare ratio, hunger/unrest)
+          plus L13's age pyramid + causes-of-death, both real data from L4's
+          `TickHub.ages`/`deaths_by_cause` now snapshotted into the annals.
+          Housing, church, watch and named notables (L6/L9/L10/L12) still
+          have no mechanism behind them and are named as queued rather than
+          rendered empty or faked — rule 36. Quiet-when-ordinary, same
+          discipline as the stability gauges: only the unusual reads as a
+          callout, the rest is a plain trend table. */}
       {tab === "life" && (() => {
         if (annals.length === 0) {
           return <div style={{ color: "#7a90a8", fontSize: 10 }}>No annals recorded yet — check back after the campaign has run a year.</div>;
@@ -1261,10 +1264,58 @@ export function HubPanel() {
               <span title="1.0 = bare subsistence">— 1.0 ≈ bare subsistence —</span>
               <span>{rows[rows.length - 1].year}</span>
             </div>
+            {(() => {
+              const ages = latest.ages;
+              const hasAges = ages && (ages[0] + ages[1] + ages[2]) > 0.001;
+              const deaths = latest.deaths_by_cause;
+              const totalDeaths = deaths ? deaths.reduce((a, b) => a + b, 0) : 0;
+              const DEATH_LABELS = ["Famine", "Plague", "Fever", "War", "Fire", "Flood", "Old age", "Infancy"];
+              const DEATH_COLORS = ["#c05a4a", "#8a5ac0", "#c0904a", "#a03030", "#e0703a", "#3a80c0", "#6a86a6", "#7a5ac0"];
+              return (
+                <>
+                  <div style={{ ...sectionHdr, marginTop: 10 }}>Age pyramid</div>
+                  {!hasAges ? (
+                    <div style={{ color: "#7a90a8", fontSize: 9 }}>Not yet recorded — an annal from before this feature shipped.</div>
+                  ) : (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 4 }}>
+                      {(["Children", "Adults", "Elders"] as const).map((label, i) => (
+                        <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5 }}>
+                          <span style={{ width: 52, color: "#9ab0c8", flexShrink: 0 }}>{label}</span>
+                          <div style={{ flex: 1, background: "#16222e", borderRadius: 2, height: 10, overflow: "hidden" }}>
+                            <div style={{ width: `${Math.round(ages[i] * 100)}%`, height: "100%", background: "#4a8a6a" }} />
+                          </div>
+                          <span style={{ width: 30, color: "#cfe2f6", textAlign: "right", flexShrink: 0 }}>{Math.round(ages[i] * 100)}%</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  <div style={{ ...sectionHdr, marginTop: 8 }}>Causes of death (since founding)</div>
+                  {totalDeaths < 0.5 ? (
+                    <div style={{ color: "#7a90a8", fontSize: 9 }}>No recorded deaths yet.</div>
+                  ) : (
+                    <>
+                      <div style={{ display: "flex", height: 8, borderRadius: 2, overflow: "hidden", marginBottom: 4 }}>
+                        {deaths.map((d, i) => d > 0 ? (
+                          <div key={i} title={`${DEATH_LABELS[i]}: ${Math.round(d).toLocaleString()}`}
+                            style={{ width: `${(d / totalDeaths) * 100}%`, background: DEATH_COLORS[i] }} />
+                        ) : null)}
+                      </div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", fontSize: 9 }}>
+                        {deaths.map((d, i) => d > 0.5 ? (
+                          <span key={i} style={{ color: "#9ab0c8" }}>
+                            <span style={{ color: DEATH_COLORS[i] }}>●</span> {DEATH_LABELS[i]} {Math.round((d / totalDeaths) * 100)}%
+                          </span>
+                        ) : null)}
+                      </div>
+                    </>
+                  )}
+                </>
+              );
+            })()}
             <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
-              The people, by profession — and who died, and of what — are not yet
-              shown here: the age pyramid and causes of death wait on L4; this
-              is Life tab v1, over what L0-L2 already made real.
+              Housing &amp; crowding, the church, the watch, and named notables
+              have no mechanism behind them yet — that is L6/L9/L10/L12 of the
+              plan, still queued. This is Life tab v2 over what L0-L4 made real.
             </div>
           </>
         );

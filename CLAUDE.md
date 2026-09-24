@@ -1644,7 +1644,7 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   newly-found fixture/mechanism fixes) — nothing here changes that
   sequencing, this entry only records which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L5 shipped (L0-L3 the STOP MARKER, L4-L5 past it)
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L5 shipped (L0-L3 the STOP MARKER, L4-L5 past it), L13 partly surfaced
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
@@ -1653,7 +1653,12 @@ famine is measured, the welfare ratio exists AND is visible, and the player can
 see how a city lives. Further sessions then shipped **L4** (vital rates + age
 bands) and **L5** (welfare into behaviour), each at its own dose of zero, per
 the plan's own explicit permission to continue past the marker one gated slice
-at a time. L6 onward remain queued (see below).
+at a time. L6 onward remain queued (see below), with one exception: **the two
+L13 items that had real data already — the age pyramid and causes of death,
+both computed by L4 and sitting unused in `TickHub` — are now surfaced in the
+Life tab**, rather than waiting on L13's other four ingredients (housing,
+church, watch, notables), which genuinely have no mechanism behind them yet
+(L6/L9/L10/L12).
 
 - **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
   `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
@@ -1791,13 +1796,29 @@ at a time. L6 onward remain queued (see below).
   the downstream ranking logic assumes. **Raising the dose is unstarted,
   separate work** — needs `unrest_topples_councils` and the `EXODUS_*`
   migration gates re-verified per dose step.
+- **L13, partial — the age pyramid + causes of death, surfaced ahead of the
+  rest of Life tab v2.** `CityYear` (the annals struct `record_city_annals`
+  snapshots yearly) gained `ages: [f32; 3]` and `deaths_by_cause: [f32;
+  DEATH_CAUSE_COUNT]`, both `#[serde(default)]` so an annal recorded before L4
+  shipped loads as all-zero rather than failing — the frontend reads that as
+  "not yet recorded", never as "an empty population". This is bookkeeping, not
+  a new mechanism: both fields already existed on `TickHub` since L4 and were
+  computed every year with nothing reading them; nothing here changes what the
+  sim computes, only what the annals record of it, so it needed no dose gate
+  and cannot move `sim_fingerprint`. The Life tab's L3-era footer ("age pyramid
+  and causes of death wait on L4") is replaced with two real reads: a
+  three-band population bar (children/adults/elders) and a stacked
+  causes-of-death bar (the 8 `CAUSE_*` categories, cumulative since founding,
+  fire/flood still 0 pending L8) — and a new, honest footer naming what still
+  isn't there: housing, church, watch and named notables (L6/L9/L10/L12).
 - **What did NOT ship, and why (rule 36 — queued, not waived)**: L6 onward
   (housing, the settlement year, urban hazards, the church, the watch,
-  persistent pops, townspeople, Life tab v2) are each their own dose walk per
-  the plan's own build order and are unstarted. Gates run across all sessions:
-  `cargo check --lib --tests` (clean), `cargo test --lib tick::tests`
-  (286/286, ~26s), `cargo test --lib econ_ -- --nocapture` (6/6 incl. the
-  multi-seed inheritance gate), `npx tsc --noEmit` + `npx vite build` (clean).
+  persistent pops, townspeople) are each their own dose walk per the plan's
+  own build order and are unstarted; the rest of Life tab v2 (§3.13) waits on
+  them the same way. Gates run across all sessions: `cargo check --lib --tests`
+  (clean), `cargo test --lib tick::tests` (286/286, ~16s), `cargo test --lib
+  econ_ -- --nocapture` (6/6 incl. the multi-seed inheritance gate),
+  `npx tsc --noEmit` (clean).
 
 ---
 
