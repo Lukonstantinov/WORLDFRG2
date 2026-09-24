@@ -1,402 +1,109 @@
-import { useEffect, useRef, useState } from "react";
-import type { HubDetail, BuildingInfo } from "@types";
-import { building as drawBuilding, buildingPeakY, BUILDING_SPECS } from "@canvas/buildingArt";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, ReactNode } from "react";
+import type { CultureBrief, HubDetail, MerchantRoute, TradeFlows } from "@types";
+import { campaignGetCultures, campaignMerchantRoutes, campaignTradeFlows } from "@bridge";
+import { useCampaignStore } from "@state/campaignStore";
+import { useWorldStore } from "@state/worldStore";
+import { useGoodsStore } from "@state/goodsStore";
+import { GOOD_DEFS } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
+import { koppenCode, koppenName } from "@ui/world/climate";
+import { SERIF } from "@ui/campaign/chronicleTheme";
+import {
+  STYLES, WALL_LABEL, genCity, renderIso, presentIso, renderPlan, isoLandmarkAt, planLandmarkAt,
+  landmarkIcon, vesselIcon, toHex,
+  type CityCfg, type IsoRender, type PlanGeom, type StyleKey,
+} from "@canvas/cityArt";
+import {
+  TIER_NAMES, CIVIC_COLOR, HULL_NAMES, VESSEL_ICONS, SCENE_CARAVAN,
+  pickFamily, waterKind, popBucket, isWalled, deriveSlots, deriveDistricts, tierChecklist,
+  seaShare, sceneShips, type SlotRow,
+} from "@ui/campaign/settlementWindowData";
 
-// ── Isometric city view ─────────────────────────────────────────────────────
-// Every settlement generates a bird's-eye ISOMETRIC plan of itself, deterministic
-// from its name: land is partitioned into QUARTERS each owned by a faction (a
-// resident house / the civic commons / a diaspora fondaco) and washed in that
-// owner's heraldic colour; the city's real buildings are placed as marked
-// LANDMARKS; coastal cities get water + a harbour. Everything recolours live with
-// the campaign (owners come straight from `detail.buildings`).
+// ── The settlement window (design handoff: "WorldForge Settlement Window") ──
+// A culture- and climate-styled pixel-isometric scene of the city (with a
+// top-down Plan toggle), the development-tier ladder, and six cards: building
+// slots, population, goods by mode, the vessel registry, manufacture chains and
+// trade partners. The scene is `canvas/cityArt.ts`; every number here comes from
+// HubDetail / TradeFlows / MerchantRoute — see `settlementWindowData.ts` for
+// what is derived and what is deliberately hidden (faiths, a construction queue).
 //
-// The buildings are drawn here as procedural iso BLOCKS. Each block is emitted
-// through `drawTile`, the single sprite-slot: swapping in the Kenney CC0 iso
-// tiles later means only replacing that one function — the generator + layout are
-// unchanged.
+// Theme: this ships the CHRONICLE DARK variant only. The app has no light/dark
+// switch for campaign windows (every other one is Chronicle dark), so the
+// handoff's "Organic light" token set would have no way to be selected; it is
+// queued rather than carried as dead tokens.
 
-const CIVIC = "#7a8aa0";
-// Tile size is DYNAMIC: the plan is fit to a target width, so a small town gets
-// chunky tiles and a metropolis packs smaller ones — both fill the panel nicely.
-const REF_TW = 38;      // reference tile width the landmark heights are tuned to
-const TARGET_W = 320;   // target on-screen plan width (px) to fit the panel
-const TW_MIN = 16, TW_MAX = 48;
-/** Dynamic iso tile dims + height scale for a grid of `N` tiles across. */
-function tileDims(N: number) {
-  const tw = Math.max(TW_MIN, Math.min(TW_MAX, Math.round(TARGET_W / (N + 1))));
-  const th = Math.max(8, Math.round(tw / 2));
-  return { tw, th, hs: tw / REF_TW }; // hs scales building heights with tile size
-}
+/** Chronicle-dark tokens for this window, from the handoff's token table. */
+const K = {
+  bg: "#0d1521", head: "#111b2a", card: "#0f1826", bd: "#1e2e42", tx: "#cfe2f6", mu: "#9fb4cc", fa: "#6f88a6",
+  ac: "#d8b24a", acBg: "rgba(216,178,74,.14)", acBd: "rgba(216,178,74,.38)", pos: "#7fd0a0", neg: "#e8a07c",
+  bar: "#1a2536", sea: "#5aa8d8", river: "#6fc3b0", land: "#d8a656", chip: "rgba(9,14,20,.84)", lock: "#4a5c72",
+  scene: "#0a1018", hf: SERIF, bf: "system-ui,-apple-system,'Segoe UI',sans-serif",
+} as const;
+const SOCIETY = [
+  { key: "patrician", label: "Patricians", color: "#c8813a" },
+  { key: "burgher", label: "Burghers", color: "#5a8ac8" },
+  { key: "commoner", label: "Commoners", color: "#6aa05a" },
+  { key: "underclass", label: "Underclass", color: "#9a8a78" },
+] as const;
+const SCENE_W = 1180, SCENE_H = 420;
+const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 
-// ── PNG SPRITE PACK support ─────────────────────────────────────────────────
-// Drop an isometric building pack into `public/city-sprites/` as one PNG per
-// building type (see the map below). When a sprite is present it is blitted in
-// place of the procedural iso block; a missing sprite falls back to the drawn
-// building, so the view always renders. Owner colour keeps reading via the ground
-// wash + the heraldic flag, so fixed-palette sprites still show who controls what.
-const SPRITE_BASE = "/city-sprites/"; // public/city-sprites/<stem>.png (like /fish/)
-// PNG only. `public/city-sprites/*.svg` still holds the generated templates this
-// pack hook shipped with, and they would shadow the built-in building set that
-// replaced them — they are superseded, not the art.
-const SPRITE_EXTS = [".png"];
-// Uniform sprite CELL (shared with scripts/gen_city_sprites.mjs): a 128×220 canvas
-// whose footprint (width 100, base bottom-vertex at sprite y=185) maps onto exactly
-// ONE grid tile — so every building is the same footprint and tiles cleanly.
-const SP_VB_W = 128, SP_VB_H = 220, SP_FOOT_W = 100, SP_BASE_Y = 185;
-// Sprite-space Y of each building's flag anchor (its roof peak) — mirrors gen script.
-const SPRITE_PEAK: Record<string, number> = {
-  house: 114, guildhall: 86, workshop: 102, granary: 88, warehouse: 107, shipyard: 122,
-  fondaco: 96, cathedral: 20, temple: 96, citadel: 42, palace: 92, council_hall: 42, mint: 104, bank: 102, harbor: 74,
-};
-/** Building label → sprite file stem in public/city-sprites/<stem>.png.
- *  Edit these to match the filenames in your pack. */
+const fk = (n: number) => n >= 1e5 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(Math.round(n));
+const fc = (n: number) => Math.round(n).toLocaleString("en-US");
+
+// ── PNG SPRITE PACK support (public/city-sprites/<stem>.png) ────────────────
+// Preserved from the previous city plan: drop one transparent PNG per building
+// type into `public/city-sprites/` and it is blitted in place of the procedural
+// landmark; a missing sprite falls back to the drawn building. PNG only — the
+// `.svg` templates in that folder are superseded placeholders, not the art.
+const SPRITE_BASE = "/city-sprites/";
 const SPRITE_MAP: Record<string, string> = {
   Guildhall: "guildhall", Workshop: "workshop", Granary: "granary", Warehouse: "warehouse",
   Shipyard: "shipyard", Fondaco: "fondaco", Cathedral: "cathedral", Temple: "temple",
   Citadel: "citadel", Palace: "palace", "Council Hall": "council_hall", Mint: "mint",
-  Bank: "bank", Harbor: "harbor", house: "house",
+  Bank: "bank", Harbor: "harbor",
 };
 type SpriteState = HTMLImageElement | "loading" | "error";
 const spriteCache = new Map<string, SpriteState>();
-/** Return a ready sprite image, or null while it loads / if it's absent. Calls
- *  `onReady` once when a fresh image finishes loading so the canvas can redraw. */
 function loadSprite(stem: string, onReady: () => void): HTMLImageElement | null {
   const cur = spriteCache.get(stem);
   if (cur instanceof HTMLImageElement) return cur;
   if (cur === "loading" || cur === "error") return null;
   spriteCache.set(stem, "loading");
   const img = new Image();
-  let ext = 0;
   img.onload = () => { spriteCache.set(stem, img); onReady(); };
-  img.onerror = () => {
-    ext += 1;
-    if (ext < SPRITE_EXTS.length) { img.src = `${SPRITE_BASE}${stem}${SPRITE_EXTS[ext]}`; }
-    else { spriteCache.set(stem, "error"); }
-  };
-  img.src = `${SPRITE_BASE}${stem}${SPRITE_EXTS[0]}`;
+  img.onerror = () => { spriteCache.set(stem, "error"); };
+  img.src = `${SPRITE_BASE}${stem}.png`;
   return null;
 }
 
-/** Per-type landmark height → each building reads as a distinct silhouette
- *  (a guildhall towers, a granary squats, a shipyard hugs the shore). */
-function landmarkHeight(label: string): number {
-  const H: Record<string, number> = {
-    Cathedral: 42, Temple: 42, Citadel: 36, Palace: 36, Guildhall: 34,
-    "Council Hall": 30, Mint: 28, Fondaco: 27, Workshop: 22, Bank: 24,
-    Warehouse: 17, Granary: 15, Harbor: 13, Shipyard: 13,
-  };
-  return H[label] ?? 24;
-}
-
-function hstr(s: string): number {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 16777619) >>> 0; }
-  return h >>> 0;
-}
-function mkRng(seed: number) {
-  let s = (seed || 1) >>> 0;
-  return () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
-}
-function toRgb(hex: string): [number, number, number] {
-  const h = (hex || CIVIC).replace("#", "");
-  return [parseInt(h.slice(0, 2), 16) || 122, parseInt(h.slice(2, 4), 16) || 138, parseInt(h.slice(4, 6), 16) || 160];
-}
-function shade([r, g, b]: [number, number, number], f: number): string {
-  const c = (v: number) => Math.max(0, Math.min(255, Math.round(v * f)));
-  return `rgb(${c(r)},${c(g)},${c(b)})`;
-}
-function mix(a: [number, number, number], b: [number, number, number], t: number): [number, number, number] {
-  return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
-}
-
-interface Ward { ci: number; cj: number; owner: string; color: string; label: string }
-interface Cell { i: number; j: number; water: boolean; ward: number; building?: BuildingInfo; height: number }
-
-const QUARTER_LABELS = ["Patrician", "Merchant", "Artisan", "Harbour", "Temple", "Commons"];
-
-/** Build the deterministic plan: grid size from population, quarters from the
- *  city's factions, buildings dropped into their owner's quarter. */
-function generate(detail: HubDetail) {
-  const seed = hstr(detail.name || "city");
-  const rand = mkRng(seed);
-  const pop = Math.max(200, detail.population || 500);
-  // Grid scales with population (a hamlet ~6, a metropolis ~13 across).
-  const N = Math.max(6, Math.min(13, Math.round(6 + Math.log10(pop / 400) * 2.4)));
-  const coastal = !!detail.coastal;
-
-  // Factions present = the distinct owners of the city's buildings (+ civic floor).
-  const owners = new Map<string, string>(); // name -> colour
-  owners.set("Civic", CIVIC);
-  for (const b of detail.buildings || []) owners.set(b.owner, b.color);
-  const factions = [...owners.entries()];
-  // Fewer, chunkier quarters → each coloured district reads as a large area.
-  const K = Math.max(2, Math.min(4, factions.length));
-
-  // Ward seeds — one per faction, scattered; each carries a quarter label.
-  const wards: Ward[] = [];
-  for (let k = 0; k < K; k++) {
-    const [owner, color] = factions[k % factions.length];
-    wards.push({
-      ci: Math.floor(rand() * N), cj: Math.floor(rand() * N),
-      owner, color, label: QUARTER_LABELS[k % QUARTER_LABELS.length],
-    });
+// ── caches: culture kits (one fetch), rendered scenes (per hub/bucket/content) ──
+let kitCache: Map<string, number> | null = null;
+let kitInflight: Promise<Map<string, number>> | null = null;
+function loadKits(): Promise<Map<string, number>> {
+  if (kitCache) return Promise.resolve(kitCache);
+  if (!kitInflight) {
+    kitInflight = campaignGetCultures().then((cs: CultureBrief[]) => {
+      const m = new Map<string, number>();
+      for (const c of cs) if (typeof c.kit === "number" && c.kit >= 0) m.set(c.name, c.kit);
+      kitCache = m; return m;
+    }).catch(() => new Map<string, number>());
   }
-
-  // Water band on one coastal edge.
-  const waterEdge = coastal ? Math.floor(rand() * 4) : -1;
-  const isWater = (i: number, j: number) => {
-    if (waterEdge < 0) return false;
-    if (waterEdge === 0) return j >= N - 1;
-    if (waterEdge === 1) return i >= N - 1;
-    if (waterEdge === 2) return j <= 0;
-    return i <= 0;
-  };
-
-  // Assign every cell to its nearest ward (Voronoi → organic coloured quarters).
-  const cells: Cell[] = [];
-  for (let j = 0; j < N; j++) {
-    for (let i = 0; i < N; i++) {
-      let best = 0, bd = Infinity;
-      for (let k = 0; k < wards.length; k++) {
-        const d = (wards[k].ci - i) ** 2 + (wards[k].cj - j) ** 2;
-        if (d < bd) { bd = d; best = k; }
-      }
-      cells.push({ i, j, water: isWater(i, j), ward: best, height: 0 });
-    }
-  }
-  const at = (i: number, j: number) => cells[j * N + i];
-
-  // Place LANDMARK buildings — each into a land tile of its owner's quarter,
-  // preferring tiles near that ward's seed; harbour goes on the coast.
-  const land = cells.filter((c) => !c.water);
-  const used = new Set<number>();
-  const buildings = detail.buildings || [];
-  for (const b of buildings) {
-    const wantHarbour = b.label === "Shipyard" || b.label === "Fondaco";
-    // Score each free tile ONCE (lower = better): same-owner quarter preferred,
-    // harbour buildings pulled to the coast, with a stable per-tile jitter.
-    let pick: Cell | undefined; let bestScore = Infinity;
-    for (const c of land) {
-      if (used.has(c.j * N + c.i)) continue;
-      const jitter = ((hstr(b.label + c.i + "," + c.j) >>> 0) % 1000) / 1000 * 0.9;
-      const score = (wards[c.ward].owner === b.owner ? 0 : 5)
-        + (wantHarbour ? nearWater(c, isWater, N) : 0) + jitter;
-      if (score < bestScore) { bestScore = score; pick = c; }
-    }
-    if (pick) { used.add(pick.j * N + pick.i); pick.building = b; pick.height = landmarkHeight(b.label); }
-  }
-
-  // Fill the rest of the land with common houses — kept LOW (well below any
-  // landmark) so the marked buildings clearly dominate.
-  for (const c of land) {
-    if (c.building) continue;
-    if (rand() < 0.24) continue; // gaps → streets/yards
-    c.height = 4 + Math.floor(rand() * 5);
-  }
-
-  const walled = pop > 12000;
-  return { N, cells, wards, at, walled, waterEdge };
+  return kitInflight;
 }
-
-function nearWater(c: Cell, isWater: (i: number, j: number) => boolean, N: number): number {
-  for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
-    const ni = c.i + di, nj = c.j + dj;
-    if (ni < 0 || nj < 0 || ni >= N || nj >= N || isWater(ni, nj)) return -2;
-  }
-  return 0;
-}
-
-export function CityView({ detail }: { detail: HubDetail }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const [hover, setHover] = useState<BuildingInfo | null>(null);
-  const [spriteTick, setSpriteTick] = useState(0); // bumped when a pack sprite loads
-  const bumpRef = useRef(() => setSpriteTick((t) => t + 1));
-  const planRef = useRef<ReturnType<typeof generate> | null>(null);
-  const geomRef = useRef<{ ox: number; oy: number; tw: number; th: number } | null>(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !detail) return;
-    const plan = generate(detail);
-    planRef.current = plan;
-    const { N, cells, wards } = plan;
-    const { tw, th, hs } = tileDims(N); // ← dynamic with city size
-
-    const dpr = Math.min(2, window.devicePixelRatio || 1);
-    const cssW = (N + 1) * tw;
-    const cssH = (N + 1) * th + Math.round(46 * hs);
-    canvas.width = cssW * dpr; canvas.height = cssH * dpr;
-    canvas.style.width = cssW + "px"; canvas.style.height = cssH + "px";
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    const ox = cssW / 2;
-    const oy = Math.round(28 * hs) + 4;
-    geomRef.current = { ox, oy, tw, th };
-    const iso = (i: number, j: number): [number, number] => [ox + (i - j) * tw / 2, oy + (i + j) * th / 2];
-
-    const getImg = (stem: string) => loadSprite(stem, bumpRef.current);
-    // Painter's order: far tiles (small i+j) first.
-    const order = [...cells].sort((a, b) => (a.i + a.j) - (b.i + b.j));
-    for (const c of order) {
-      const [cx, cy] = iso(c.i, c.j);
-      const wardCol = toRgb(wards[c.ward].color);
-      if (c.water) { drawGround(ctx, cx, cy, tw, th, "#1c3a4a", "#173040"); continue; }
-      // Ground washed strongly toward the ward owner's colour → bold quarters.
-      const g = mix([58, 74, 60], wardCol, 0.44);
-      drawGround(ctx, cx, cy, tw, th, shade(g, 1.0), shade(g, 0.78));
-      if (c.height > 0) drawTile(ctx, cx, cy, c.height * hs, tw, th, wardCol, c.building, getImg);
-    }
-  }, [detail, spriteTick]);
-
-  const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const plan = planRef.current, geom = geomRef.current, canvas = canvasRef.current;
-    if (!plan || !geom || !canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    // Inverse iso (approximate to the tile under the cursor's base).
-    const a = (mx - geom.ox) / (geom.tw / 2), b = (my - geom.oy) / (geom.th / 2);
-    const i = Math.round((a + b) / 2), j = Math.round((b - a) / 2);
-    if (i < 0 || j < 0 || i >= plan.N || j >= plan.N) { setHover(null); return; }
-    setHover(plan.at(i, j).building ?? null);
-  };
-
-  // Quarter legend from the plan.
-  const wards = planRef.current?.wards ?? [];
-  const seen = new Set<string>();
-  const legend = wards.filter((w) => { if (seen.has(w.owner)) return false; seen.add(w.owner); return true; });
-
-  return (
-    <div>
-      <div style={{ overflowX: "auto", background: "#0a121c", border: "1px solid #24405e", borderRadius: 8, padding: "4px 0" }}>
-        <canvas ref={canvasRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)}
-          style={{ display: "block", margin: "0 auto", imageRendering: "auto" }} />
-      </div>
-      {hover && (
-        <div style={{ fontSize: 11, color: "#cfe0f4", marginTop: 4, background: "#0a121c",
-          border: "1px solid #24405e", borderRadius: 6, padding: "5px 8px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 13 }}>{hover.emoji}</span>
-            <span style={{ color: "#cdbb88", fontWeight: 700 }}>{hover.label}</span>
-            <span style={{ flex: 1 }} />
-            <span style={{ width: 9, height: 9, borderRadius: 2, background: hover.color, display: "inline-block" }} />
-            <span style={{ color: hover.color }}>{hover.owner}</span>
-          </div>
-          {BUILDING_INFO[hover.label] && (
-            <div style={{ color: "#9ab0c8", marginTop: 2, lineHeight: 1.4 }}>{BUILDING_INFO[hover.label]}</div>
-          )}
-          <div style={{ color: "#7fbf9a", marginTop: 2 }}>{hover.effect}</div>
-        </div>
-      )}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 9, color: "#9ab0c8", marginTop: 5 }}>
-        {legend.map((w) => (
-          <span key={w.owner} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            <span style={{ width: 8, height: 8, borderRadius: 2, background: w.color, display: "inline-block" }} />
-            {w.owner} <span style={{ color: "#6a86a6" }}>quarter</span>
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Drawing primitives (the sprite-slot) ────────────────────────────────────
-/** A single iso ground diamond. */
-function drawGround(ctx: CanvasRenderingContext2D, cx: number, cy: number, tw: number, th: number, top: string, edge: string) {
-  ctx.beginPath();
-  ctx.moveTo(cx, cy - th / 2);
-  ctx.lineTo(cx + tw / 2, cy);
-  ctx.lineTo(cx, cy + th / 2);
-  ctx.lineTo(cx - tw / 2, cy);
-  ctx.closePath();
-  ctx.fillStyle = top; ctx.fill();
-  ctx.strokeStyle = edge; ctx.lineWidth = 0.5; ctx.stroke();
-}
-
-type Pt = [number, number];
-function poly(ctx: CanvasRenderingContext2D, pts: Pt[], fill: string) {
-  ctx.beginPath();
-  ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0], pts[i][1]);
-  ctx.closePath();
-  ctx.fillStyle = fill; ctx.fill();
-}
-
-/** Draw ONE building: a PNG sprite from the pack if one is present, otherwise the
- *  procedural iso structure. Owner colour still reads via the ground wash + flag. */
-function drawTile(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
-  tw: number, th: number, wardCol: [number, number, number],
-  building: BuildingInfo | undefined, getImg: (stem: string) => HTMLImageElement | null) {
-  const stem = building ? SPRITE_MAP[building.label] : SPRITE_MAP.house;
-  const img = stem ? getImg(stem) : null;
-  if (img) { drawSprite(ctx, img, cx, cy, tw, th, building); return; }
-  drawProcedural(ctx, cx, cy, h, tw, th, wardCol, building);
-}
-
-/** Blit a pack sprite anchored on the tile's front, sized to the tile. A landmark
- *  keeps its heraldic flag + emoji chip so ownership and identity still read. */
-function drawSprite(ctx: CanvasRenderingContext2D, img: HTMLImageElement, cx: number, cy: number,
-  tw: number, th: number, building?: BuildingInfo) {
-  // Uniform blit: the sprite's footprint (width SP_FOOT_W, base at SP_BASE_Y) maps
-  // onto exactly one tile, so all buildings are the same size on the grid.
-  const s = tw / SP_FOOT_W;
-  const w = SP_VB_W * s, hgt = SP_VB_H * s;
-  const dx = cx - (SP_VB_W / 2) * s;
-  const dy = (cy + th / 2) - SP_BASE_Y * s;
-  ctx.drawImage(img, dx, dy, w, hgt);
-  if (building) {
-    const topY = dy + (SPRITE_PEAK[building.label] ?? 96) * s; // roof peak
-    const poleH = Math.max(8, tw * 0.34), pw = Math.max(5, tw * 0.22);
-    ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
-    ctx.beginPath(); ctx.moveTo(cx, topY); ctx.lineTo(cx, topY - poleH); ctx.stroke();
-    poly(ctx, [[cx, topY - poleH], [cx + pw, topY - poleH + 3], [cx, topY - poleH + 6]], building.color);
-    const chipR = Math.max(6.5, Math.min(10, tw * 0.24));
-    const fontPx = Math.max(9, Math.min(14, Math.round(tw * 0.34)));
-    const ey = topY - poleH - chipR - 1;
-    ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
-    ctx.fillStyle = "rgba(9,14,20,0.85)"; ctx.fill();
-    ctx.strokeStyle = building.color; ctx.lineWidth = 1.2; ctx.stroke();
-    ctx.font = `${fontPx}px system-ui, sans-serif`;
-    ctx.textAlign = "center"; ctx.textBaseline = "middle";
-    ctx.fillText(building.emoji || "🏛️", cx, ey + 0.5);
-  }
-}
-
-/** The procedural iso building (drawn when no pack sprite is present) — the
- *  design handoff's building set: form, roof shape and material read the TYPE,
- *  while ownership reads from the ground wash and the heraldic flag on top. */
-function drawProcedural(ctx: CanvasRenderingContext2D, cx: number, cy: number, h: number,
-  tw: number, th: number, wardCol: [number, number, number], building?: BuildingInfo) {
-  void h; void wardCol;
-  const isLandmark = !!building;
-  const stem = (building ? SPRITE_MAP[building.label] : SPRITE_MAP.house) ?? "house";
-  const spec = BUILDING_SPECS[stem] ?? BUILDING_SPECS.house;
-  // A great landmark stands a tier taller; common houses a tier shorter.
-  const tier = !isLandmark ? 0 : landmarkHeight(building!.label) >= 34 ? 2 : 1;
-  const s = tw * (isLandmark ? 1.02 : 0.7);
-  const by = cy + th / 2;
-  drawBuilding(ctx, cx, by, s, spec, tier);
-  if (!isLandmark) return;
-
-  const flagTopY = buildingPeakY(by, s, spec, tier);
-  // Owner flag: a short pole + a pennant in the owner's heraldic colour.
-  const poleH = Math.max(7, tw * 0.32);
-  const pw = Math.max(5, tw * 0.22);
-  ctx.strokeStyle = "#1b2833"; ctx.lineWidth = 1.1;
-  ctx.beginPath(); ctx.moveTo(cx, flagTopY); ctx.lineTo(cx, flagTopY - poleH); ctx.stroke();
-  poly(ctx, [[cx, flagTopY - poleH], [cx + pw, flagTopY - poleH + 3], [cx, flagTopY - poleH + 6]], building!.color);
-  // Small emoji chip above the flag for at-a-glance identification.
-  const chipR = Math.max(6.5, Math.min(10, tw * 0.24));
-  const fontPx = Math.max(9, Math.min(14, Math.round(tw * 0.34)));
-  const ey = flagTopY - poleH - chipR - 1;
-  ctx.beginPath(); ctx.arc(cx, ey, chipR, 0, Math.PI * 2);
-  ctx.fillStyle = "rgba(9,14,20,0.85)"; ctx.fill();
-  ctx.strokeStyle = building!.color; ctx.lineWidth = 1.2; ctx.stroke();
-  ctx.font = `${fontPx}px system-ui, sans-serif`;
-  ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(building!.emoji || "\u{1F3DB}\u{FE0F}", cx, ey + 0.5);
+/** The iso render is the expensive part (hundreds of shaded polygons); a campaign
+ *  tick refetches HubDetail every day, so the scene is cached on exactly what it
+ *  depends on and only regenerates when buildings, tier, population bucket (or
+ *  the other drawn inputs) change. Small LRU — one entry per recently opened city. */
+const sceneCache = new Map<string, IsoRender>();
+function cachedScene(key: string, make: () => IsoRender): IsoRender {
+  const hit = sceneCache.get(key);
+  if (hit) { sceneCache.delete(key); sceneCache.set(key, hit); return hit; }
+  const r = make();
+  sceneCache.set(key, r);
+  while (sceneCache.size > 8) { const k = sceneCache.keys().next().value; if (k === undefined) break; sceneCache.delete(k); }
+  return r;
 }
 
 /** One-line lore/role for each building type — shown on hover + in the ward grid. */
@@ -416,3 +123,561 @@ export const BUILDING_INFO: Record<string, string> = {
   Bank: "A counting-house extending credit across the trade network.",
   Harbor: "Docks and quays working the city's sea trade.",
 };
+
+// ── small presentational pieces ──────────────────────────────────────────────
+
+function Card({ title, meta, span, children }: { title: string; meta?: ReactNode; span?: number; children: ReactNode }) {
+  return (
+    <div style={{ background: K.card, border: `1px solid ${K.bd}`, borderRadius: 6, padding: "12px 14px 14px", minWidth: 0,
+      display: "flex", flexDirection: "column", gap: 10, ...(span ? { gridColumn: `span ${span}` } : {}) }}>
+      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+        <span style={{ font: `600 10px/1 ${K.bf}`, letterSpacing: .7, textTransform: "uppercase", color: K.fa }}>{title}</span>
+        <span style={{ flex: 1 }} />
+        {meta && <span style={{ font: `400 11px/1.2 ${K.bf}`, color: K.fa, textAlign: "right" }}>{meta}</span>}
+      </div>
+      {children}
+    </div>
+  );
+}
+function Bar({ frac, color, h = 6 }: { frac: number; color: string; h?: number }) {
+  return (
+    <div style={{ flex: 1, height: h, background: K.bar, borderRadius: 4, overflow: "hidden", minWidth: 0 }}>
+      <div style={{ width: `${Math.max(0, Math.min(100, frac * 100))}%`, height: "100%", background: color, borderRadius: 4 }} />
+    </div>
+  );
+}
+function Stack({ parts, h = 8 }: { parts: [number, string][]; h?: number }) {
+  return (
+    <div style={{ display: "flex", height: h, borderRadius: 4, overflow: "hidden", gap: 2, background: K.bar }}>
+      {parts.filter(([f]) => f > 0).map(([f, c], i) => <div key={i} style={{ flex: `${f} 0 0`, background: c }} />)}
+    </div>
+  );
+}
+function Spark({ vals, color, w = 180, h = 30 }: { vals: number[]; color: string; w?: number; h?: number }) {
+  if (vals.length < 2) return null;
+  const mn = Math.min(...vals), mx = Math.max(...vals);
+  const pts = vals.map((v, k) => `${(k / (vals.length - 1) * w).toFixed(1)},${(h - 2 - (v - mn) / (mx - mn || 1) * (h - 4)).toFixed(1)}`).join(" ");
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block", overflow: "visible", maxWidth: "100%" }}>
+      <polyline points={`0,${h} ${pts} ${w},${h}`} style={{ fill: color, opacity: .14, stroke: "none" }} />
+      <polyline points={pts} style={{ fill: "none", stroke: color, strokeWidth: 1.6, strokeLinejoin: "round" }} />
+    </svg>
+  );
+}
+function Pill({ children, strong }: { children: ReactNode; strong?: boolean }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: strong ? K.acBg : "transparent",
+      color: strong ? K.ac : K.mu, border: `1px solid ${strong ? K.acBd : K.bd}`, borderRadius: 4, padding: "2px 9px",
+      font: `600 10px/1.3 ${K.bf}`, letterSpacing: .4, whiteSpace: "nowrap" }}>{children}</span>
+  );
+}
+function Swatch({ color, size = 8, round }: { color: string; size?: number; round?: boolean }) {
+  return <span style={{ width: size, height: size, borderRadius: round ? "50%" : 2, background: color, flex: "none", display: "inline-block" }} />;
+}
+/** Blit a cached offscreen canvas at CSS size `size`, pixelated. */
+function Blit({ src, size, style }: { src: HTMLCanvasElement; size: number; style?: CSSProperties }) {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const el = ref.current; if (!el) return;
+    el.width = src.width; el.height = src.height;
+    const ctx = el.getContext("2d"); if (!ctx) return;
+    ctx.imageSmoothingEnabled = false; ctx.clearRect(0, 0, el.width, el.height); ctx.drawImage(src, 0, 0);
+  }, [src]);
+  return <canvas ref={ref} style={{ width: size, height: size, flex: "none", display: "block", imageRendering: "pixelated", ...style }} />;
+}
+const LOCK = (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round">
+    <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
+  </svg>
+);
+const chipStyle = (color: string = K.tx): CSSProperties => ({
+  background: K.chip, color, border: `1px solid ${K.bd}`, borderRadius: 4, padding: "3px 9px",
+  font: `600 10.5px/1.3 ${K.bf}`, backdropFilter: "blur(2px)",
+});
+
+// ── the window ────────────────────────────────────────────────────────────────
+
+export function CityView({ detail }: { detail: HubDetail }) {
+  const economy = useWorldStore((s) => s.economy);
+  const settlements = useWorldStore((s) => s.settlements);
+  const clock = useCampaignStore((s) => s.snapshot?.clock);
+  const hubBrief = useCampaignStore((s) => s.snapshot?.hubs.find((h) => h.id === detail.id));
+  const specs = useGoodsStore((s) => s.specs);
+  const [kits, setKits] = useState<Map<string, number> | null>(kitCache);
+  const [flows, setFlows] = useState<TradeFlows | null>(null);
+  const [routes, setRoutes] = useState<MerchantRoute[]>([]);
+  const [mode, setMode] = useState<"iso" | "plan">("iso");
+  const [spriteTick, setSpriteTick] = useState(0);
+  const [hover, setHover] = useState<SlotRow | null>(null);
+  const bumpRef = useRef(() => setSpriteTick((t) => t + 1));
+  const cvRef = useRef<HTMLCanvasElement | null>(null);
+  const isoRef = useRef<IsoRender | null>(null);
+  const planRef = useRef<PlanGeom | null>(null);
+  const year = clock?.year ?? 0;
+
+  useEffect(() => { let alive = true; loadKits().then((m) => { if (alive) setKits(m); }); return () => { alive = false; }; }, []);
+  // Flows refresh with the campaign day (they are a small per-hub payload); the
+  // world's merchant-route list is large, so it is re-read once per year only.
+  useEffect(() => {
+    let alive = true;
+    campaignTradeFlows(detail.id).then((f) => { if (alive) setFlows(f); }).catch(() => { if (alive) setFlows(null); });
+    return () => { alive = false; };
+  }, [detail.id, clock?.tick]);
+  useEffect(() => {
+    let alive = true;
+    campaignMerchantRoutes().then((r) => { if (alive) setRoutes(r); }).catch(() => { if (alive) setRoutes([]); });
+    return () => { alive = false; };
+  }, [detail.id, year]);
+
+  const econHub = economy?.hubs.find((h) => h.id === detail.id);
+  const settlement = settlements.find((s) => s.name === detail.name);
+  const kit = detail.culture ? kits?.get(detail.culture) : undefined;
+  const style: StyleKey = pickFamily(detail.koppen, kit, detail.coastal, econHub?.elevation);
+  const S = STYLES[style];
+  const riverTrade = (flows?.goods ?? []).some((g) => (g.river_volume ?? 0) > 0)
+    || (detail.vessels?.classes.find((c) => c.kind === "river")?.registered ?? 0) > 0;
+  const water = waterKind({ coastal: detail.coastal, seaAccess: econHub?.sea_access, river: settlement?.site === "river" || riverTrade, family: style });
+  const tier = detail.dev_tier ?? 0;
+  const walled = isWalled(detail.population, tier);
+  const bucket = popBucket(detail.population);
+
+  const slots = useMemo(() => deriveSlots(detail, econHub?.sea_access), [detail, econHub?.sea_access]);
+  const districts = useMemo(() => deriveDistricts(detail, slots), [detail, slots]);
+  const caravanN = detail.vessels?.classes.find((c) => c.kind === "caravan")?.registered ?? 0;
+  const cfg: CityCfg = useMemo(() => ({
+    name: detail.name || "city", style, water, walled, popBucket: bucket,
+    buildings: slots.map((s, i) => ({ kind: s.kind, status: s.status, color: s.color, ref: i })),
+    districts: districts.map((d) => ({ name: d.name, color: d.color })),
+    caravan: caravanN > 0 || (detail.in_by_land ?? 0) > 0 ? SCENE_CARAVAN[style] : null,
+    ships: sceneShips(detail.vessels, water, detail.in_by_sea ?? 0),
+  }), [detail.name, detail.vessels, detail.in_by_land, detail.in_by_sea, style, water, walled, bucket, slots, districts, caravanN]);
+  const sceneKey = useMemo(() => [detail.id, cfg.name, style, water, walled ? 1 : 0, bucket, tier, cfg.ships, cfg.caravan ?? "",
+    cfg.buildings.map((b) => `${b.kind}:${b.status}:${b.color}`).join(","), cfg.districts.map((d) => d.color).join(","), spriteTick].join("|"),
+  [detail.id, cfg, style, water, walled, bucket, tier, spriteTick]);
+
+  // Draw the scene (iso: cached low-res render blitted pixelated; plan: redrawn).
+  useEffect(() => {
+    const cv = cvRef.current; if (!cv) return;
+    const sprites = (kind: string) => { const stem = SPRITE_MAP[kind]; return stem ? loadSprite(stem, bumpRef.current) : null; };
+    const iso = cachedScene(sceneKey, () => renderIso(genCity(cfg), cfg, { W: SCENE_W, H: SCENE_H, sprites }));
+    isoRef.current = iso;
+    if (mode === "iso") { presentIso(cv, iso.canvas, SCENE_W, SCENE_H); planRef.current = null; }
+    else planRef.current = renderPlan(cv, iso.city, cfg, SCENE_W, SCENE_H);
+  }, [sceneKey, cfg, mode]);
+
+  const onMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    const cv = cvRef.current, iso = isoRef.current; if (!cv || !iso) return;
+    const rect = cv.getBoundingClientRect();
+    const fx = (e.clientX - rect.left) / rect.width, fy = (e.clientY - rect.top) / rect.height;
+    const hit = mode === "iso"
+      ? isoLandmarkAt(iso, fx * iso.geom.lw, fy * iso.geom.lh)
+      : planRef.current ? planLandmarkAt(iso.city, planRef.current, fx * SCENE_W, fy * SCENE_H) : null;
+    setHover(hit ? slots[hit.ref] ?? null : null);
+  };
+
+  const sub = [detail.government?.govt_type, detail.culture ? `of the ${detail.culture}` : ""].filter(Boolean).join(" ");
+  const kc = koppenCode(detail.koppen);
+  const cityColor = detail.government?.council && detail.government.council !== "—"
+    ? toHex(detail.government.council_color, CIVIC_COLOR)
+    : toHex(detail.culture_moods?.[0]?.color, CIVIC_COLOR);
+  const check = tierChecklist(detail, hubBrief?.hub_class ?? 0, tier);
+
+  return (
+    <div style={{ background: K.bg, color: K.tx, border: `1px solid ${K.bd}`, borderRadius: 8, overflow: "hidden", font: `400 12px/1.4 ${K.bf}` }}>
+      {/* ── header ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 18px", background: K.head, borderBottom: `1px solid ${K.bd}`, flexWrap: "wrap" }}>
+        <span style={{ width: 14, height: 14, borderRadius: "50%", background: cityColor, boxShadow: `0 0 0 2px ${K.bd}`, flex: "none" }} />
+        <span style={{ font: `700 20px/1.1 ${K.hf}`, color: K.ac }}>{detail.name}</span>
+        {tier > 0 && <Pill strong>{`${(TIER_NAMES[tier] ?? "").toUpperCase()} · TIER ${tier} OF 5`}</Pill>}
+        <span style={{ color: K.mu, fontSize: 12, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: "1 1 200px" }}>
+          {sub && <>{sub} · </>}<span style={{ color: K.fa }}>{S.label}{kc ? ` · ${kc} · ${koppenName(detail.koppen)}` : ""}</span>
+        </span>
+        <HeadStat label="Pop" value={fc(detail.population)} />
+        {typeof detail.treasury === "number" && <HeadStat label="Treasury" value={fc(detail.treasury)} color={K.ac} />}
+        {detail.coin_name && <HeadStat label="Coin" value={detail.coin_name} />}
+      </div>
+
+      {/* ── scene ── */}
+      <div style={{ position: "relative", background: K.scene, borderBottom: `1px solid ${K.bd}`, aspectRatio: `${SCENE_W} / ${SCENE_H}` }}>
+        <canvas ref={cvRef} onMouseMove={onMove} onMouseLeave={() => setHover(null)}
+          style={{ display: "block", width: "100%", height: "100%", imageRendering: mode === "iso" ? "pixelated" : "auto" }} />
+        <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 6, pointerEvents: "none" }}>
+          {clock && <span style={chipStyle()}>{clock.season ? `${clock.season} · ` : ""}{clock.year}</span>}
+          <span style={chipStyle(walled ? K.pos : K.mu)}>{walled ? WALL_LABEL[S.wall] : "Unwalled"}</span>
+          {kc && <span style={chipStyle()}>{kc} climate</span>}
+        </div>
+        <div data-no-drag style={{ position: "absolute", right: 12, top: 12, display: "flex", background: K.chip, border: `1px solid ${K.bd}`, borderRadius: 4, padding: 2, gap: 2 }}>
+          {(["iso", "plan"] as const).map((m) => (
+            <button key={m} onClick={() => setMode(m)} style={{ all: "unset", cursor: "pointer", padding: "4px 12px", borderRadius: 4,
+              font: `600 11px/1.2 ${K.bf}`, background: mode === m ? K.ac : "transparent", color: mode === m ? "#0b1420" : K.mu }}>
+              {m === "iso" ? "Isometric" : "Plan"}
+            </button>
+          ))}
+        </div>
+        {districts.length > 0 && (
+          <div style={{ position: "absolute", left: 12, bottom: 12, display: "flex", gap: 6, flexWrap: "wrap", maxWidth: "62%", pointerEvents: "none" }}>
+            {districts.map((d) => (
+              <span key={d.name} style={{ display: "flex", alignItems: "center", gap: 6, background: K.chip, border: `1px solid ${K.bd}`,
+                borderRadius: 4, padding: "3px 10px 3px 7px", font: `600 11px/1.3 ${K.bf}`, color: K.tx }}>
+                <Swatch color={d.color} size={9} />{d.name}
+                <span style={{ color: K.fa, fontWeight: 400 }}>{d.works} {d.works === 1 ? "work" : "works"}</span>
+              </span>
+            ))}
+          </div>
+        )}
+        {hover && (
+          <div style={{ position: "absolute", right: 12, bottom: 12, width: 300, background: K.chip, border: `1px solid ${K.bd}`,
+            borderRadius: 6, padding: "6px 9px", fontSize: 11, pointerEvents: "none" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{ color: K.ac, fontWeight: 700, fontFamily: K.hf, fontSize: 13 }}>{hover.kind}</span>
+              <span style={{ flex: 1 }} />
+              {hover.owner && <><Swatch color={hover.color} /><span style={{ color: K.mu }}>{hover.owner}</span></>}
+            </div>
+            {BUILDING_INFO[hover.kind] && <div style={{ color: K.mu, marginTop: 2, lineHeight: 1.4 }}>{BUILDING_INFO[hover.kind]}</div>}
+            <div style={{ color: K.pos, marginTop: 2 }}>{hover.note}</div>
+            {hover.derived && <div style={{ color: K.fa, marginTop: 2 }}>Drawn because of {hover.derived}.</div>}
+          </div>
+        )}
+      </div>
+
+      {/* ── tier ladder ── */}
+      <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "10px 18px", borderBottom: `1px solid ${K.bd}`, background: K.head, flexWrap: "wrap" }}>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          {[1, 2, 3, 4, 5].map((t) => <span key={t} title={TIER_NAMES[t]} style={{ width: 26, height: 6, borderRadius: 4, background: t <= tier ? K.ac : K.bar }} />)}
+        </div>
+        <span style={{ font: `600 11px ${K.bf}`, color: K.mu, whiteSpace: "nowrap" }}>
+          {check.next ? <>Toward <b style={{ color: K.tx }}>{check.next}</b>{check.need && <span style={{ color: K.fa, fontWeight: 400 }}> · {check.need}</span>}</>
+            : <b style={{ color: K.tx }}>{tier >= 5 ? "Apex tier held" : "Not yet ranked"}</b>}
+        </span>
+        <div style={{ display: "flex", gap: 12, flexWrap: "wrap", minWidth: 0 }}>
+          {check.checks.map((c) => (
+            <span key={c.label} title={c.title} style={{ font: `400 11px ${K.bf}`, whiteSpace: "nowrap",
+              color: c.state === "met" ? K.pos : K.fa, opacity: c.state === "unknown" ? .7 : 1 }}>
+              {c.state === "met" ? "✓" : c.state === "unknown" ? "?" : "○"} {c.label}
+            </span>
+          ))}
+        </div>
+      </div>
+
+      {/* ── cards ── */}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 12, padding: "14px 16px 18px" }}>
+        <SlotsCard slots={slots} style={style} />
+        <PeopleCard detail={detail} spark={hubBrief?.pop_spark ?? []} growth={hubBrief?.growth} />
+        <TradeCard detail={detail} flows={flows} />
+        <FleetCard detail={detail} style={style} />
+        <WorksCard detail={detail} flows={flows} specs={specs} />
+        <PartnersCard detail={detail} flows={flows} routes={routes} />
+      </div>
+    </div>
+  );
+}
+
+function HeadStat({ label, value, color }: { label: string; value: string; color?: string }) {
+  return (
+    <span style={{ color: K.fa, fontSize: 11, whiteSpace: "nowrap" }}>
+      {label} <b style={{ color: color ?? K.tx, font: `700 15px ${K.hf}` }}>{value}</b>
+    </span>
+  );
+}
+
+// ── cards ─────────────────────────────────────────────────────────────────────
+
+function SlotsCard({ slots, style }: { slots: SlotRow[]; style: StyleKey }) {
+  const standing = slots.filter((s) => s.status === "op").length;
+  let n = 0;
+  return (
+    <Card span={2} title={`Building slots · ${standing} standing`}
+      meta={<><span style={{ color: K.pos }}>■</span> operating · □ site · locked</>}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 6 }}>
+        {slots.map((s, i) => {
+          const act = s.status === "op" || s.status === "build";
+          if (act) n++;
+          return (
+            <div key={i} title={[BUILDING_INFO[s.kind], s.derived ? `Drawn because of ${s.derived}.` : ""].filter(Boolean).join(" ")}
+              style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 8px 5px 5px", borderRadius: 6, minWidth: 0,
+                border: `1px solid ${s.status === "build" ? K.acBd : K.bd}`, background: s.status === "build" ? K.acBg : "transparent",
+                opacity: s.status === "lock" ? .62 : 1 }}>
+              <Blit src={landmarkIcon(s.kind, style, s.status, s.color, 46)} size={46} style={{ opacity: s.status === "site" ? .4 : 1 }} />
+              <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+                <div style={{ font: `700 13px/1.15 ${K.hf}`, color: K.tx, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {act && <span style={{ font: `600 9px ui-monospace,Menlo,monospace`, color: K.fa, marginRight: 4 }}>{n}</span>}{s.kind}
+                </div>
+                <div style={{ font: `400 10.5px/1.2 ${K.bf}`, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                  {s.status === "op" ? <span style={{ color: K.pos }}>{s.note || "Operating"}</span>
+                    : s.status === "site" ? <span style={{ color: K.fa }}>{s.note}</span>
+                    : <span style={{ color: K.lock, display: "inline-flex", gap: 3, alignItems: "center" }}>{LOCK} {s.note}</span>}
+                </div>
+                {act && s.owner && (
+                  <div style={{ font: `400 10px/1.2 ${K.bf}`, color: K.fa, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", alignItems: "center", gap: 4 }}>
+                    <Swatch color={s.color} size={7} round />{s.owner}
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </Card>
+  );
+}
+
+function PeopleCard({ detail, spark, growth }: { detail: HubDetail; spark: number[]; growth?: number }) {
+  const soc = detail.society;
+  const moods = [...(detail.culture_moods ?? [])].sort((a, b) => b.share - a.share).slice(0, 6);
+  const sub = (t: string, m?: string) => (
+    <div style={{ display: "flex", gap: 6, alignItems: "baseline", marginTop: 2, font: `600 9.5px/1 ${K.bf}`, letterSpacing: .6, textTransform: "uppercase", color: K.fa }}>
+      {t}{m && <span style={{ font: `400 10px ${K.bf}`, letterSpacing: 0, textTransform: "none", marginLeft: "auto" }}>{m}</span>}
+    </div>
+  );
+  const up = (growth ?? 0) >= 0;
+  return (
+    <Card title="Population" meta={typeof growth === "number" ? `${up ? "+" : ""}${(growth * 100).toFixed(1)}% / mo` : undefined}>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: 12 }}>
+        <div style={{ font: `700 28px/1 ${K.hf}`, color: K.tx }}>{fc(detail.population)}</div>
+        <div style={{ flex: 1, minWidth: 0 }}><Spark vals={spark} color={up ? K.pos : K.neg} /></div>
+      </div>
+      {soc && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          <Stack h={9} parts={SOCIETY.map((s) => [soc[s.key], s.color] as [number, string])} />
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: 4 }}>
+            {SOCIETY.map((s) => (
+              <div key={s.key} style={{ font: `400 10px/1.25 ${K.bf}`, color: K.fa }}>
+                <Swatch color={s.color} size={7} /> {s.label}<br />
+                <b style={{ color: K.tx, fontSize: 12 }}>{fk(detail.population * soc[s.key])}</b>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {moods.length > 0 && (
+        <>
+          {sub("Peoples", "share · prized goods met")}
+          {moods.map((m) => {
+            const col = toHex(m.color);
+            return (
+              <div key={m.name} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{ width: 92, flex: "none", font: `600 11.5px ${K.bf}`, color: K.tx, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", display: "flex", gap: 5, alignItems: "center" }}>
+                  <Swatch color={col} round />{m.name}
+                </span>
+                <Bar frac={m.share} color={col} />
+                <span style={{ width: 34, textAlign: "right", font: `600 11px ${K.bf}`, color: K.tx }}>{Math.round(m.share * 100)}%</span>
+                <span style={{ width: 36, textAlign: "right", font: `400 10.5px ${K.bf}`, color: m.satisfaction > .6 ? K.pos : m.satisfaction > .4 ? K.mu : K.neg }}>{Math.round(m.satisfaction * 100)}%</span>
+              </div>
+            );
+          })}
+        </>
+      )}
+      {/* Faiths: the handoff proposes `HubDetail.faiths`; the sim models no
+          religion per city yet, so the row is hidden rather than invented. */}
+    </Card>
+  );
+}
+
+const TRADE_COLS = "190px minmax(0,1fr) 54px minmax(0,1fr) 110px 60px";
+function TradeCard({ detail, flows }: { detail: HubDetail; flows: TradeFlows | null }) {
+  const goods = [...(flows?.goods ?? [])].filter((g) => g.in_volume + g.out_volume > 0)
+    .sort((a, b) => (b.in_volume + b.out_volume) - (a.in_volume + a.out_volume)).slice(0, 10);
+  const mx = Math.max(1e-6, ...goods.map((g) => Math.max(g.in_volume, g.out_volume)));
+  const meta = (
+    <>bought <b style={{ color: K.pos }}>{fk(detail.bought ?? 0)}</b> · sold <b style={{ color: K.neg }}>{fk(detail.sold ?? 0)}</b>
+      {flows && <> · made here {fk(flows.produced_here)} · used {fk(flows.consumed_here)}</>}</>
+  );
+  return (
+    <Card span={2} title="Imports & exports by good" meta={meta}>
+      {!flows ? <div style={{ color: K.fa }}>Reading this city's trade…</div> : goods.length === 0 ? <div style={{ color: K.fa }}>No trade recorded in the last year.</div> : (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: TRADE_COLS, gap: 10, font: `600 9.5px ${K.bf}`, letterSpacing: .5, textTransform: "uppercase", color: K.fa, paddingBottom: 2, borderBottom: `1px solid ${K.bd}` }}>
+            <span>Good</span><span style={{ textAlign: "right" }}>Imports</span><span /><span>Exports</span><span>By sea · river · land</span><span style={{ textAlign: "right" }}>Net</span>
+          </div>
+          {goods.map((g) => {
+            const def = GOOD_BY_NAME.get(g.name);
+            const tot = Math.max(1e-6, g.last_volume);
+            const sea = Math.min(1, (g.sea_volume ?? 0) / tot), riv = Math.min(1 - sea, (g.river_volume ?? 0) / tot);
+            const transit = !g.produced && g.in_volume > 0 && g.out_volume > 0 && Math.min(g.in_volume, g.out_volume) / Math.max(g.in_volume, g.out_volume) > .5;
+            const net = g.out_volume - g.in_volume;
+            const tag = (t: string, c: string) => <span style={{ font: `600 9px ${K.bf}`, color: c, border: `1px solid ${K.bd}`, borderRadius: 4, padding: "0 5px", whiteSpace: "nowrap" }}>{t}</span>;
+            return (
+              <div key={g.good} style={{ display: "grid", gridTemplateColumns: TRADE_COLS, gap: 10, alignItems: "center" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+                  <GoodIcon name={g.name} size={24} />
+                  <span style={{ font: `600 12px ${K.bf}`, color: K.tx, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{def?.label ?? g.name}</span>
+                  {g.produced && tag("made", K.pos)}{transit && tag("transit", K.mu)}
+                </div>
+                <div style={{ display: "flex", justifyContent: "flex-end", height: 8 }}><div style={{ width: `${g.in_volume / mx * 100}%`, background: K.pos, borderRadius: "4px 0 0 4px", opacity: .9 }} /></div>
+                <div style={{ font: `400 10.5px/1.1 ${K.bf}`, color: K.fa, textAlign: "center", whiteSpace: "nowrap" }}>{g.in_volume ? fk(g.in_volume) : "–"} · {g.out_volume ? fk(g.out_volume) : "–"}</div>
+                <div style={{ display: "flex", height: 8 }}><div style={{ width: `${g.out_volume / mx * 100}%`, background: K.neg, borderRadius: "0 4px 4px 0", opacity: .9 }} /></div>
+                <Stack h={7} parts={[[sea, K.sea], [riv, K.river], [Math.max(0, 1 - sea - riv), K.land]]} />
+                <span style={{ textAlign: "right", font: `600 12px ${K.bf}`, color: net >= 0 ? K.neg : K.pos }}>{net >= 0 ? "+" : "−"}{fk(Math.abs(net))}</span>
+              </div>
+            );
+          })}
+          <div style={{ display: "flex", gap: 14, font: `400 10.5px ${K.bf}`, color: K.fa, flexWrap: "wrap" }}>
+            {([["bought in", K.pos], ["sent out", K.neg], ["sea", K.sea], ["river", K.river], ["caravan", K.land]] as [string, string][]).map(([l, c]) => (
+              <span key={l} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Swatch color={c} />{l}</span>
+            ))}
+            <span style={{ marginLeft: "auto" }}>last full year · grain-eq units</span>
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}
+
+function FleetCard({ detail, style }: { detail: HubDetail; style: StyleKey }) {
+  const v = detail.vessels;
+  const names = HULL_NAMES[style], icons = VESSEL_ICONS[style];
+  const bySea = seaShare(detail);
+  return (
+    <Card title="Fleet & caravan registry" meta={v ? `${v.houses} seated ${v.houses === 1 ? "house" : "houses"}` : undefined}>
+      {!v ? <div style={{ color: K.fa }}>No hulls are registered to houses seated here.</div> : (
+        <>
+          {v.classes.map((c) => {
+            const col = c.kind === "sea" ? K.sea : c.kind === "river" ? K.river : K.land;
+            return (
+              <div key={c.kind} style={{ display: "flex", alignItems: "center", gap: 10, opacity: c.registered ? 1 : .45 }}>
+                <Blit src={vesselIcon(icons[c.kind], style, 40)} size={40} style={{ borderRadius: 6 }} />
+                <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span style={{ font: `700 13px ${K.hf}`, color: K.tx }}>{names[c.kind]}</span><span style={{ flex: 1 }} />
+                    <b style={{ font: `700 16px ${K.hf}`, color: K.tx }}>{c.registered}</b><span style={{ font: `400 10px ${K.bf}`, color: K.fa }}>hulls</span>
+                  </div>
+                  <Stack h={7} parts={[[c.away, col], [c.idle, K.bar]]} />
+                  <div style={{ font: `400 10.5px ${K.bf}`, color: K.fa }}>
+                    {c.registered ? <><b style={{ color: K.tx }}>{c.away}</b> away carrying · <b style={{ color: K.tx }}>{c.idle}</b> idle in port</> : "none registered"}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 6, borderTop: `1px solid ${K.bd}`, paddingTop: 10 }}>
+            <IoBox label="Inbound" value={String(v.inbound_cargoes)} sub={v.inbound_cargoes > 0 ? `cargoes · first in ${Math.round(v.inbound_eta)} d` : "cargoes"} />
+            <IoBox label="Outbound" value={String(v.outbound_cargoes)} sub="cargoes in flight" />
+            {bySea !== null && <IoBox label="Supply by sea" value={`${Math.round(bySea * 100)}%`} sub={`${Math.round((1 - bySea) * 100)}% overland`} />}
+          </div>
+          {v.land_pooled && <div style={{ font: `400 10px/1.35 ${K.bf}`, color: K.fa }}>River and caravan slots are pooled by dispatch — the land total is exact, the split indicative.</div>}
+          <div style={{ font: `400 10px/1.35 ${K.bf}`, color: K.fa }}>Hull names are this city's building tradition, not sim types — a vessel is a counted slot, not an entity.</div>
+        </>
+      )}
+    </Card>
+  );
+}
+function IoBox({ label, value, sub }: { label: string; value: string; sub: string }) {
+  return (
+    <div>
+      <div style={{ font: `600 9.5px ${K.bf}`, letterSpacing: .5, textTransform: "uppercase", color: K.fa }}>{label}</div>
+      <div style={{ font: `700 18px/1.2 ${K.hf}`, color: K.tx }}>{value}</div>
+      <div style={{ font: `400 10px ${K.bf}`, color: K.fa }}>{sub}</div>
+    </div>
+  );
+}
+
+function WorksCard({ detail, flows, specs }: { detail: HubDetail; flows: TradeFlows | null; specs: { id: string; name: string; inputs?: { good: string; qty: number }[] }[] }) {
+  const works = (detail.estates_here ?? []).filter((e) => e.kind === 6);
+  if (works.length === 0) {
+    return <Card span={2} title="Manufactures · input chains"><div style={{ color: K.fa }}>No manufactory stands in this city.</div></Card>;
+  }
+  const specOf = (g: string) => specs.find((s) => s.id === g || s.name === g);
+  const madeHere = new Set((flows?.goods ?? []).filter((g) => g.produced).map((g) => g.name));
+  const ownEstate = new Set((detail.estates_here ?? []).filter((e) => e.kind !== 6).map((e) => e.good));
+  const goodIdx = new Map((flows?.goods ?? []).map((g) => [g.name, g.good]));
+  const topSupplier = (name: string): string | null => {
+    const gi = goodIdx.get(name); if (gi === undefined) return null;
+    const rs = (flows?.routes ?? []).filter((r) => r.good === gi && r.dir === 0).sort((a, b) => b.amount - a.amount);
+    return rs[0]?.partner_name ?? null;
+  };
+  return (
+    <Card span={2} title="Manufactures · input chains" meta={`${works.length} ${works.length === 1 ? "manufactory" : "manufactories"}`}>
+      {works.map((w, i) => {
+        const inputs = specOf(w.good)?.inputs ?? [];
+        const owner = w.owner_is_civic ? "Civic" : w.owner;
+        const ocol = w.owner_is_civic ? CIVIC_COLOR : (detail.houses ?? []).find((h) => h.name === w.owner)?.color ?? CIVIC_COLOR;
+        return (
+          <div key={w.hub} style={{ display: "grid", gridTemplateColumns: "minmax(0,1.25fr) 18px minmax(0,1fr) 150px", gap: 10, alignItems: "center", padding: "6px 0", borderBottom: i < works.length - 1 ? `1px solid ${K.bd}` : "none" }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", minWidth: 0 }}>
+              {inputs.length === 0 && <span style={{ color: K.fa, fontSize: 11 }}>No recipe inputs</span>}
+              {inputs.map((inp) => {
+                const src = ownEstate.has(inp.good) ? "own estate" : madeHere.has(inp.good) ? "local market" : topSupplier(inp.good);
+                const local = src === "own estate" || src === "local market";
+                return (
+                  <div key={inp.good} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 8px 3px 4px", border: `1px solid ${K.bd}`, borderRadius: 4 }}>
+                    <GoodIcon name={inp.good} size={22} />
+                    <span style={{ font: `400 11px/1.15 ${K.bf}`, color: K.tx, whiteSpace: "nowrap" }}>
+                      {GOOD_BY_NAME.get(inp.good)?.label ?? inp.good} <b>×{inp.qty}</b><br />
+                      <span style={{ fontSize: 9.5, color: local ? K.pos : K.ac }}>{src ? (local ? src : `imported · ${src}`) : "no supply recorded"}</span>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+            <span style={{ color: K.fa, fontSize: 15, textAlign: "center" }}>→</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <GoodIcon name={w.good} size={32} />
+              <div style={{ minWidth: 0 }}>
+                <div style={{ font: `700 13.5px/1.15 ${K.hf}`, color: K.tx, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{GOOD_BY_NAME.get(w.good)?.label ?? w.good}</div>
+                <div style={{ font: `400 11px ${K.bf}`, color: K.mu }}><b style={{ color: K.tx }}>{fc(w.output * 365)}</b> / yr{(w.damage ?? 0) > 0.05 && <span style={{ color: K.neg }}> · {Math.round((w.damage ?? 0) * 100)}% damaged</span>}</div>
+              </div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 3, alignItems: "flex-end" }}>
+              <div style={{ display: "flex", gap: 2 }}>{[1, 2, 3, 4, 5].map((k) => <span key={k} style={{ width: 10, height: 5, borderRadius: 4, background: k <= w.tier ? K.ac : K.bar }} />)}</div>
+              <span style={{ font: `400 10.5px ${K.bf}`, color: K.mu, display: "flex", gap: 4, alignItems: "center", whiteSpace: "nowrap", maxWidth: 150, overflow: "hidden", textOverflow: "ellipsis" }}>
+                <Swatch color={toHex(ocol)} size={7} round />{owner}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </Card>
+  );
+}
+
+function PartnersCard({ detail, flows, routes }: { detail: HubDetail; flows: TradeFlows | null; routes: MerchantRoute[] }) {
+  const partners = [...(flows?.partners ?? [])].sort((a, b) => b.pct - a.pct).slice(0, 6);
+  /** Mode + days from the matching merchant route; else the dominant mode of this
+   *  city's own recorded flows with that partner (no days then). */
+  const modeOf = (hub: number, name: string): { mode: "sea" | "river" | "road"; days?: number } => {
+    const rs = routes.filter((r) => (r.a_name === detail.name && r.b_name === name) || (r.b_name === detail.name && r.a_name === name));
+    if (rs.length) {
+      const r = rs.reduce((a, b) => (b.volume > a.volume ? b : a));
+      return { mode: r.sea ? "sea" : r.river ? "river" : "road", days: r.days };
+    }
+    const fl = (flows?.routes ?? []).filter((r) => r.partner === hub);
+    const tot = fl.reduce((s, r) => s + r.amount, 0), sea = fl.reduce((s, r) => s + (r.sea_amount ?? 0), 0), riv = fl.reduce((s, r) => s + (r.river_amount ?? 0), 0);
+    if (tot <= 0) return { mode: "road" };
+    return { mode: sea >= riv && sea > tot - sea - riv ? "sea" : riv > tot - sea - riv ? "river" : "road" };
+  };
+  return (
+    <Card title="Trade partners & routes" meta="share of our book">
+      {partners.length === 0 ? <div style={{ color: K.fa }}>{flows ? "No trade partners recorded yet." : "Reading this city's trade…"}</div> : (
+        <>
+          {partners.map((p) => {
+            const { mode, days } = modeOf(p.hub, p.name);
+            const ip = Math.round(p.in_pct ?? 0), op = Math.round(p.out_pct ?? 0);
+            const mcol = mode === "sea" ? K.sea : mode === "river" ? K.river : K.land;
+            return (
+              <div key={p.hub} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                  <span style={{ font: `700 13px ${K.hf}`, color: K.tx, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{p.name}</span>
+                  <span style={{ font: `600 9px ${K.bf}`, color: mcol, border: `1px solid ${K.bd}`, borderRadius: 4, padding: "0 6px", whiteSpace: "nowrap" }}>
+                    {mode}{typeof days === "number" ? ` · ${Math.round(days)} d` : ""}
+                  </span>
+                  <span style={{ flex: 1 }} />
+                  {p.goods.slice(0, 3).map((g) => <GoodIcon key={g} name={g} size={18} />)}
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ width: 40, font: `400 10.5px ${K.bf}`, color: K.pos, textAlign: "right" }}>{ip}%</span>
+                  <div style={{ flex: 1, display: "flex", justifyContent: "flex-end", height: 6 }}><div style={{ width: `${Math.min(100, ip * 2.2)}%`, background: K.pos, borderRadius: "4px 0 0 4px" }} /></div>
+                  <span style={{ width: 1, height: 10, background: K.bd }} />
+                  <div style={{ flex: 1, display: "flex", height: 6 }}><div style={{ width: `${Math.min(100, op * 2.2)}%`, background: K.neg, borderRadius: "0 4px 4px 0" }} /></div>
+                  <span style={{ width: 40, font: `400 10.5px ${K.bf}`, color: K.neg }}>{op}%</span>
+                </div>
+              </div>
+            );
+          })}
+          <div style={{ font: `400 10px ${K.bf}`, color: K.fa }}>
+            <span style={{ color: K.pos }}>left</span> share of our imports · <span style={{ color: K.neg }}>right</span> share of our exports
+          </div>
+        </>
+      )}
+    </Card>
+  );
+}

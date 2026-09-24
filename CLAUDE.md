@@ -2731,11 +2731,15 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   houses, not one; it was never a house's tab), wrapping
                                   `FeudsView` with no house focus. `GuildsPanel.tsx`
                                   relabelled "🔨 Crafts & Guilds" (was "🏛 Guilds & Crafts"),
-                                  and (S11, text form) each row carries a "🗺"
-                                  toggle expanding an inline Craft Atlas strip —
-                                  inputs/outputs by city, reach, signature —
-                                  reading `campaign_guild_atlas` (S9's own
-                                  query) keyed by the row's new `idx` field.
+                                  now a production DASHBOARD: four stat tiles,
+                                  a "what the workshops make" ranked bar per
+                                  craft (click filters), Guilds / By-craft tabs,
+                                  search, paging (60 rows — worlds reach 400
+                                  guilds), a grade word per quality. A guild card
+                                  expands into a CRAFT FLOW diagram — raws
+                                  arriving → workshop → where the good ships —
+                                  reading `campaign_guild_atlas` (S9, cargo on
+                                  the road NOW, sorted client-side) keyed by `idx`.
                                   Split helpers (`TIER_META`/`tierOf`/`dull`/`goodIcon`,
                                   used by both the browser and the dossier) live in
                                   `houseShared.ts` rather than being duplicated or
@@ -2852,7 +2856,35 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
   SatelliteConstructionPanel.tsx← Satellite (suburb) construction projects
   PlaguePanel.tsx               ← Historical epidemics
   PeoplesPanel.tsx              ← Cultures / peoples / pops
-  FiguresPanel/CultureFigures/CultureDonut.tsx ← Key figures/notables + culture charts
+  FiguresPanel/CultureFigures/CultureDonut.tsx ← Key figures/notables + culture charts.
+                                  FiguresPanel is a PORTRAIT GALLERY: each figure's bust
+                                  (`cultureDress.drawBust` in the home city's
+                                  `kitForCulture`, hair/beard/dyes varied per NAME so two
+                                  of one people differ), role ring, house arms, career
+                                  years and `FigureBrief.legacy` — the one real capped
+                                  effect `raise_notable_figures` applied (fleet, prestige,
+                                  unrest, craft quality), mirrored from its chronicle
+                                  text, never invented, plus `FigureBrief.influence` — what a
+                                  LIVING figure keeps doing every year (`living_figures_pass`,
+                                  `houses.rs`): an admiral shields their house's fleet from
+                                  piracy in `run_piracy`, a demagogue nudges unrest up (and
+                                  chronicles a one-time "rallied" event past
+                                  `DEMAGOGUE_RALLY_AT`), a master craftsman raises their
+                                  craft's quality/tradition, a banker/explorer adds to their
+                                  house's prestige — every effect capped (rule 18) and shown
+                                  as a "Now" line. A role donut on top. A click-to-expand
+                                  "life ▾" panel (read_people.rs::campaign_get_figures) adds
+                                  `bio` (birthplace · house or culture · for an Explorer with
+                                  a real linked `Expedition`, the actual destination and its
+                                  outcome — every clause gated on real data, omitted rather
+                                  than invented when absent), `merchant_goods` (straight off
+                                  the linked `House.spec`, "" if unaffiliated) and `thought`
+                                  (one deterministic quote from a per-role pool, picked by
+                                  `fnv1a32(name) % 4` so it never changes between reads —
+                                  flavour, not persisted state). Also exports `CityNotables`,
+                                  shown on HubPanel's Life tab. NOTE: `cultureFigure.ts` below
+                                  no longer exists — portraits everywhere now go through
+                                  `cultureDress.ts`
   LandmarksPanel.tsx            ← Notable landmarks
   AtlasPanel.tsx                ← Atlas 2.0 (eras / world frame)
   NewsFeedPanel.tsx             ← Campaign news feed

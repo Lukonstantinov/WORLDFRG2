@@ -2447,7 +2447,7 @@ impl CampaignSim {
             * TICKS_PER_YEAR as f32) as u32;
         self.figures.push(Figure {
             name, kind, hub: hub as u32, house: resident, good,
-            born_tick: tick, dies_tick: tick + span, dead: false,
+            born_tick: tick, dies_tick: tick + span, dead: false, rallied: false,
         });
     }
 
@@ -2530,6 +2530,50 @@ impl CampaignSim {
     }
 
 
+    /// A LIVING figure's yearly influence on their city or house — see the
+    /// `DEMAGOGUE_*`/`MASTER_*`/`PATRON_*` constants for the bounds. Admirals act
+    /// through `run_piracy` instead. Runs right after `raise_notable_figures`, so a
+    /// figure retired this year exerts nothing.
+    pub(crate) fn living_figures_pass(&mut self) {
+        let tick = self.tick;
+        for i in 0..self.figures.len() {
+            if self.figures[i].dead { continue; }
+            let (kind, hub, house, good) = (self.figures[i].kind, self.figures[i].hub as usize,
+                self.figures[i].house, self.figures[i].good);
+            if hub >= self.hubs.len() { continue; }
+            match kind {
+                1 => {
+                    let u = self.hubs[hub].society.unrest;
+                    if u < DEMAGOGUE_UNREST_CEIL {
+                        self.hubs[hub].society.unrest = (u + DEMAGOGUE_UNREST_STEP).min(DEMAGOGUE_UNREST_CEIL);
+                    }
+                    if !self.figures[i].rallied && self.hubs[hub].society.unrest >= DEMAGOGUE_RALLY_AT {
+                        self.figures[i].rallied = true;
+                        let text = format!("The crowds of {} rally behind the demagogue {}; the council fears the street.",
+                            self.hubs[hub].name, self.figures[i].name);
+                        self.journal.push(JournalEntry { tick, kind: "figure".into(), hub: hub as i32, good: -1, value: 0.0, text });
+                    }
+                }
+                2 if good >= 0 => {
+                    let g = good as usize;
+                    if let Some(q) = self.hubs[hub].quality.get_mut(g) {
+                        if *q < MASTER_QUALITY_CAP { *q = (*q + MASTER_QUALITY_STEP).min(MASTER_QUALITY_CAP); }
+                    }
+                    if let Some(t) = self.hubs[hub].tradition.get_mut(g) { *t += MASTER_TRADITION_STEP; }
+                }
+                3 | 4 if house >= 0 => {
+                    if let Some(h) = self.houses.get_mut(house as usize) {
+                        if !h.defunct && h.prestige < FEUD_PRESTIGE_CAP {
+                            h.prestige = (h.prestige + PATRON_PRESTIGE_STEP).min(FEUD_PRESTIGE_CAP);
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+
     /// Phase 5 (flavour) · CIVIC WONDERS: a prosperous city occasionally raises a
     /// monument (lighthouse → market hall → cathedral) for prestige & stability.
     pub(crate) fn run_civic_wonders(&mut self, yr: u32) {
@@ -2561,8 +2605,12 @@ impl CampaignSim {
     /// it one sea-fleet asset (floored at 0). Bounded; a chronicle beat.
     pub(crate) fn run_piracy(&mut self, yr: u32) {
         if hash01(self.seed, yr as u64 ^ 0x9A17, 0) >= PIRACY_YEARLY_CHANCE { return; }
+        // A house with a living admiral keeps corsairs off its galleys.
+        let shielded: Vec<i32> = self.figures.iter()
+            .filter(|f| !f.dead && f.kind == 0 && f.house >= 0).map(|f| f.house).collect();
         let cand: Vec<usize> = (0..self.houses.len())
-            .filter(|&i| !self.houses[i].defunct && self.houses[i].fleet_sea > 0).collect();
+            .filter(|&i| !self.houses[i].defunct && self.houses[i].fleet_sea > 0
+                && !shielded.contains(&(i as i32))).collect();
         if cand.is_empty() { return; }
         let hi = cand[((hash01(self.seed, yr as u64, 0x9A2) * cand.len() as f32) as usize) % cand.len()];
         self.houses[hi].fleet_sea = self.houses[hi].fleet_sea.saturating_sub(1);

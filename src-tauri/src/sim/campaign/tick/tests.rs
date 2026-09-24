@@ -10044,6 +10044,50 @@
             "construction must never spend more than the hub's real stock, got {used_capped} against 5.0 available");
     }
 
+
+    fn test_figure(kind: u8, house: i32, good: i32) -> Figure {
+        Figure { name: "Test Figure".into(), kind, hub: 0, house, good,
+            born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false }
+    }
+
+    /// A LIVING figure acts every year, and every action stops at its ceiling —
+    /// a demagogue at `DEMAGOGUE_UNREST_CEIL` (rallying the crowd exactly once),
+    /// a master at `MASTER_QUALITY_CAP`, a patron at `FEUD_PRESTIGE_CAP` (rule 18).
+    /// A dead figure does nothing at all.
+    #[test]
+    fn living_figures_act_every_year_within_their_bounds() {
+        let goods = vec![good("glass", 1, 2, 10.0, 0.4, false)];
+        let mut h = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        h.quality = vec![0.5];
+        h.tradition = vec![0.0];
+        let mut s = sim(vec![h], goods);
+        s.houses = vec![house_at(0, vec![], 0), house_at(0, vec![], 0)];
+        let mut dead = test_figure(3, 0, -1);
+        dead.dead = true;
+        s.figures = vec![test_figure(1, -1, -1), test_figure(2, -1, 0), test_figure(3, 1, -1), dead];
+        for _ in 0..200 { s.living_figures_pass(); }
+        let u = s.hubs[0].society.unrest;
+        assert!(u >= DEMAGOGUE_RALLY_AT && u <= DEMAGOGUE_UNREST_CEIL + 1e-6, "demagogue unrest must climb to its ceiling and stop, got {u}");
+        let rallies = s.journal.iter().filter(|j| j.text.contains("rally behind")).count();
+        assert_eq!(rallies, 1, "the crowd rallies once per demagogue, not every year");
+        assert!((s.hubs[0].quality[0] - MASTER_QUALITY_CAP).abs() < 1e-6, "a master lifts quality to the cap and no further, got {}", s.hubs[0].quality[0]);
+        assert!(s.hubs[0].tradition[0] > 0.0, "a master deepens the craft's tradition");
+        assert!((s.houses[1].prestige - FEUD_PRESTIGE_CAP).abs() < 1e-6, "a patron's prestige stops at the feud-prestige ceiling, got {}", s.houses[1].prestige);
+        assert_eq!(s.houses[0].prestige, 0.0, "a dead banker exerts nothing");
+    }
+
+    /// A house with a LIVING admiral is never the corsairs' target; an
+    /// unprotected rival with ships is.
+    #[test]
+    fn a_living_admiral_keeps_corsairs_off_the_house() {
+        let goods = vec![good("grain", 0, 0, 1.0, 1.0, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0)], goods);
+        s.houses = vec![house_at(0, vec![], 5), house_at(0, vec![], 50)];
+        s.figures = vec![test_figure(0, 0, -1)];
+        for yr in 0..300 { s.run_piracy(yr); }
+        assert_eq!(s.houses[0].fleet_sea, 5, "the admiral's house must keep every galley");
+        assert!(s.houses[1].fleet_sea < 50, "the unprotected house must lose ships to corsairs over 300 years");
+    }
     // ── SETTLEMENT_LIFE_PLAN.md L7 ──────────────────────────────────────────
     #[test]
     fn calendar_dose_zero_is_a_noop() {
@@ -10254,7 +10298,7 @@
         });
         s.figures.push(Figure {
             name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
-            born_tick: 0, dies_tick: 100_000, dead: false,
+            born_tick: 0, dies_tick: 100_000, dead: false, rallied: false,
         });
 
         // Untiered (tier 0) — the cap floors to 1: only the guildmaster (the

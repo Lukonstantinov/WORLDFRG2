@@ -2,6 +2,60 @@
 //! `use super::*` inherits the shared imports, structs and helpers kept in mod.rs.
 use super::*;
 
+/// Plain FNV-1a over a name, used only to pick a stable index into a flavour-text
+/// pool — the same "seed off the person's own name" discipline `deriveKit` (the
+/// frontend portrait variation) already uses, so a figure's quote/bio never
+/// changes between reads without being persisted anywhere.
+fn fnv1a32(s: &str) -> u32 {
+    let mut h: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
+}
+
+/// One deterministic first-person line per role, 4 variants each — a quote, never
+/// a claim about sim state. Picked by `fnv1a32(name) % 4`, so the same figure
+/// always gets the same line.
+const FIGURE_THOUGHTS: [[&str; 4]; 5] = [
+    // 0 Admiral
+    [
+        "\"The sea forgives nothing, and remembers everything.\"",
+        "\"Give me a hull that answers the helm and I'll give you the horizon.\"",
+        "\"A fleet in harbour earns no one's bread.\"",
+        "\"Corsairs learn a flag's reputation faster than any envoy teaches it.\"",
+    ],
+    // 1 Demagogue
+    [
+        "\"The council dines while the docks go hungry — let them hear it.\"",
+        "\"A crowd is not a mob until it is ignored.\"",
+        "\"Every charter was once somebody's grievance, spoken loudly enough.\"",
+        "\"I did not make the streets restless. The bread did.\"",
+    ],
+    // 2 Master Craftsman
+    [
+        "\"A guild that stops teaching is already dying.\"",
+        "\"The apprentice who never ruins a piece has never been taught properly.\"",
+        "\"My mark on a good is a debt I intend to keep paying.\"",
+        "\"Secrecy protects a workshop for a season. Skill protects it for a lifetime.\"",
+    ],
+    // 3 Great Banker
+    [
+        "\"A loan is a bet on tomorrow, dressed as a favour today.\"",
+        "\"Trust is the only coin that cannot be debased.\"",
+        "\"I have buried more fortunes in ledgers than any war has buried men.\"",
+        "\"The house that never defaults has simply never lent enough.\"",
+    ],
+    // 4 Explorer
+    [
+        "\"The map ends where my patience begins.\"",
+        "\"Every coastline is a rumour until you have sailed it yourself.\"",
+        "\"I have never once returned poorer in stories than I set out.\"",
+        "\"Home is a place you leave so you have something to come back to.\"",
+    ],
+];
+
 
 /// Per-culture census: population, town count, top cities, houses, mobility. Sorted
 /// by population (largest people first). Powers the Peoples panel.
@@ -515,19 +569,105 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let mut out: Vec<FigureBrief> = sim.figures.iter().map(|f| {
         let h = sim.hubs.get(f.hub as usize);
+        let city = h.map(|x| x.name.clone()).unwrap_or_default();
+        let good_name = if f.good >= 0 {
+            sim.goods.get(f.good as usize).map(|g| g.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        let house = if f.house >= 0 {
+            sim.houses.get(f.house as usize).map(|h| h.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        let culture = sim.hub_culture.get(f.hub as usize).cloned().unwrap_or_default();
+        // One sentence describing the figure's one real, capped effect — mirrors
+        // `raise_notable_figures`' own chronicle text, never inventing a new claim.
+        let legacy = match f.kind {
+            0 => if !house.is_empty() {
+                format!("Built House {}'s war fleet and won it renown at sea.", house)
+            } else { format!("Won renown at sea sailing out of {}.", city) },
+            1 => format!("Stirs the crowds of {} to unrest.", city),
+            2 => if !good_name.is_empty() {
+                format!("Raised {}'s {} craft to new heights.", city, good_name)
+            } else { format!("Raised the craftsmanship of {}.", city) },
+            3 => if !house.is_empty() {
+                format!("Gathered capital for House {} from across the sea.", house)
+            } else { format!("A great banker of {}, gathering capital from afar.", city) },
+            _ => if !house.is_empty() {
+                format!("Charted distant shores, raising House {}'s standing.", house)
+            } else { format!("Set out from {} to chart distant shores.", city) },
+        };
+        let influence = if f.dead { String::new() } else { match f.kind {
+            0 if !house.is_empty() => format!("While at sea, corsairs leave House {}'s galleys alone.", house),
+            1 => format!("Keeps the streets of {} restless every year.", city),
+            2 if !good_name.is_empty() => format!("Refines {}'s {} a little more each year.", city, good_name),
+            3 | 4 if !house.is_empty() => format!("Adds to House {}'s prestige each year.", house),
+            _ => String::new(),
+        } };
+
+        // Merchant goods — real, straight off `House.spec` (what the linked house
+        // actually specializes in). Empty for an unaffiliated figure: not every
+        // notable is a merchant, and nothing here invents a trade for one who isn't.
+        let merchant_goods = if f.house >= 0 {
+            sim.houses.get(f.house as usize).map(|h| {
+                h.spec.iter().filter_map(|&g| sim.goods.get(g).map(|gd| gd.name.clone()))
+                    .take(3).collect::<Vec<_>>().join(", ")
+            }).unwrap_or_default()
+        } else { String::new() };
+
+        // Family/birthplace/culture line, plus — for an Explorer whose house has a
+        // real linked expedition — the actual voyage. Every clause is gated on real
+        // data being present; a clause with nothing to say is simply omitted rather
+        // than invented (rule 36's "never fabricate" discipline applied to prose).
+        let family_line = if !house.is_empty() {
+            format!("Born in {} to the merchant House {}.", city, house)
+        } else if !culture.is_empty() {
+            format!("Born in {} to a family of the {} people.", city, culture)
+        } else {
+            format!("Born in {}.", city)
+        };
+        let culture_line = if !culture.is_empty() && !house.is_empty() {
+            format!(" Raised among the {}.", culture)
+        } else { String::new() };
+        let merchant_line = if !merchant_goods.is_empty() {
+            format!(" A trader by trade, dealing chiefly in {}.", merchant_goods)
+        } else { String::new() };
+        let travel_line = if f.kind == 4 {
+            let voyage = if f.house >= 0 {
+                sim.expeditions.iter().find(|e| e.house as i32 == f.house).and_then(|e| {
+                    sim.hubs.get(e.dest as usize).map(|d| {
+                        let verb = match e.status {
+                            3 => "returned from",
+                            4 => "was lost sailing for",
+                            2 => "is homeward bound from",
+                            1 => "reached",
+                            _ => "set out for",
+                        };
+                        format!(" They {} {}.", verb, d.name)
+                    })
+                })
+            } else { None };
+            voyage.unwrap_or_else(|| format!(" They range the coasts beyond {}, chasing rumours of new markets.", city))
+        } else { String::new() };
+        let bio = format!("{}{}{}{}", family_line, culture_line, merchant_line, travel_line);
+        let thought = FIGURE_THOUGHTS[(f.kind as usize).min(4)]
+            [(fnv1a32(&f.name) % 4) as usize].to_string();
+
         FigureBrief {
             name: f.name.clone(),
             role: FIGURE_KINDS.get(f.kind as usize).copied().unwrap_or("Figure").to_string(),
             hub: f.hub,
             x: h.map(|x| x.x).unwrap_or(0.0),
             y: h.map(|x| x.y).unwrap_or(0.0),
-            city: h.map(|x| x.name.clone()).unwrap_or_default(),
-            good_name: if f.good >= 0 {
-                sim.goods.get(f.good as usize).map(|g| g.name.clone()).unwrap_or_default()
-            } else { String::new() },
+            city,
+            good_name,
             born_year: f.born_tick / TICKS_PER_YEAR,
             died_year: if f.dead { f.dies_tick / TICKS_PER_YEAR } else { 0 },
             alive: !f.dead,
+            culture,
+            house,
+            legacy,
+            influence,
+            bio,
+            thought,
+            merchant_goods,
         }
     }).collect();
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));

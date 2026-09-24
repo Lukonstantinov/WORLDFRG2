@@ -2322,6 +2322,21 @@ export interface FigureBrief {
   born_year: number;
   died_year: number;
   alive: boolean;
+  /** The figure's home city's majority culture — "" if unknown (portrait kit). */
+  culture: string;
+  /** The linked house's name, or "" if unaffiliated. */
+  house: string;
+  /** One sentence naming the figure's one real, capped effect on the world. */
+  legacy: string;
+  /** What a living figure keeps doing every year — "" once dead. */
+  influence: string;
+  /** Birthplace/family/culture, and — for an Explorer with a real linked
+   *  expedition — where they actually sailed. */
+  bio: string;
+  /** A short deterministic first-person line, stable per figure. Flavour only. */
+  thought: string;
+  /** Comma-joined goods the figure's own house specializes in — "" if unaffiliated. */
+  merchant_goods: string;
 }
 
 /** Phase 6 · a landmark / place of note. */

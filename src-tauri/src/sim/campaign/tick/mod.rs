@@ -6971,6 +6971,19 @@ const FIGURE_LIVING_CAP: usize = 6;
 const FIGURE_CAP: usize = 60;
 /// Yearly probability the world raises a new notable figure.
 const FIGURE_YEARLY_CHANCE: f32 = 0.45;
+/// A LIVING figure's yearly influence (`living_figures_pass`). Each is small and
+/// bounded by an existing ceiling, so six living figures cannot run the economy:
+/// a demagogue's unrest push stops at `DEMAGOGUE_UNREST_CEIL`, a master's quality
+/// lift at the same 0.9 cap the rise effect uses, and a banker's/explorer's
+/// prestige at `FEUD_PRESTIGE_CAP` (rule 18). An admiral's house is spared by
+/// `run_piracy` while the admiral lives.
+const DEMAGOGUE_UNREST_STEP: f32 = 0.03;
+const DEMAGOGUE_UNREST_CEIL: f32 = 0.6;
+const DEMAGOGUE_RALLY_AT: f32 = 0.5;
+const MASTER_QUALITY_STEP: f32 = 0.01;
+const MASTER_QUALITY_CAP: f32 = 0.9;
+const MASTER_TRADITION_STEP: f32 = 0.5;
+const PATRON_PRESTIGE_STEP: f32 = 0.01;
 
 /// Short title prefix for a figure kind (chronicle text).
 fn role_title(kind: u8) -> &'static str {
@@ -7024,6 +7037,9 @@ pub struct Figure {
     /// Death already chronicled.
     #[serde(default)]
     pub dead: bool,
+    /// A demagogue's crowds have already rallied once (chronicled a single time).
+    #[serde(default)]
+    pub rallied: bool,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) — per-city NOTABLES, distinct from
@@ -9700,6 +9716,7 @@ impl CampaignSim {
                 self.roll_city_finances(yr);
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
+                self.living_figures_pass();
                 // Feuds · a council both houses trade in may impose a settlement on a
                 // long-running quarrel. Runs BEFORE marriages, so a feud the council
                 // settled this year is not also "sealed by marriage" in the same year.
