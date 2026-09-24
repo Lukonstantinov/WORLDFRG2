@@ -4,6 +4,7 @@ import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife } from "@bridge";
+import { CityNotables } from "@ui/campaign/FiguresPanel";
 import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
@@ -1217,6 +1218,9 @@ export function HubPanel() {
           rule 36. Quiet-when-ordinary, same discipline as the stability
           gauges: only the unusual reads as a callout, the rest is a plain
           trend table. */}
+      {tab === "life" && selectedHub !== null && campHubs.findIndex((h) => h.id === selectedHub) >= 0 && (
+        <CityNotables hubIdx={campHubs.findIndex((h) => h.id === selectedHub)} cityName={hub.name} />
+      )}
       {tab === "life" && (() => {
         if (annals.length === 0) {
           return <div style={{ color: "#7a90a8", fontSize: 10 }}>No annals recorded yet — check back after the campaign has run a year.</div>;
@@ -1317,8 +1321,8 @@ export function HubPanel() {
             })()}
             <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
               Housing &amp; crowding is tracked now but not shown on this tab yet.
-              The church, the watch, and named notables have no mechanism
-              behind them at all — that is L9/L10/L12 of the plan, still
+              The church, the watch, and ordinary townspeople notables have no
+              mechanism behind them yet — that is L9/L10/L12 of the plan, still
               queued. This is Life tab v2 over what L0-L6 made real.
             </div>
           </>

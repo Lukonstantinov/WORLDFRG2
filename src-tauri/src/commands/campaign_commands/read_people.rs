@@ -515,19 +515,45 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let mut out: Vec<FigureBrief> = sim.figures.iter().map(|f| {
         let h = sim.hubs.get(f.hub as usize);
+        let city = h.map(|x| x.name.clone()).unwrap_or_default();
+        let good_name = if f.good >= 0 {
+            sim.goods.get(f.good as usize).map(|g| g.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        let house = if f.house >= 0 {
+            sim.houses.get(f.house as usize).map(|h| h.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        let culture = sim.hub_culture.get(f.hub as usize).cloned().unwrap_or_default();
+        // One sentence describing the figure's one real, capped effect — mirrors
+        // `raise_notable_figures`' own chronicle text, never inventing a new claim.
+        let legacy = match f.kind {
+            0 => if !house.is_empty() {
+                format!("Built House {}'s war fleet and won it renown at sea.", house)
+            } else { format!("Won renown at sea sailing out of {}.", city) },
+            1 => format!("Stirs the crowds of {} to unrest.", city),
+            2 => if !good_name.is_empty() {
+                format!("Raised {}'s {} craft to new heights.", city, good_name)
+            } else { format!("Raised the craftsmanship of {}.", city) },
+            3 => if !house.is_empty() {
+                format!("Gathered capital for House {} from across the sea.", house)
+            } else { format!("A great banker of {}, gathering capital from afar.", city) },
+            _ => if !house.is_empty() {
+                format!("Charted distant shores, raising House {}'s standing.", house)
+            } else { format!("Set out from {} to chart distant shores.", city) },
+        };
         FigureBrief {
             name: f.name.clone(),
             role: FIGURE_KINDS.get(f.kind as usize).copied().unwrap_or("Figure").to_string(),
             hub: f.hub,
             x: h.map(|x| x.x).unwrap_or(0.0),
             y: h.map(|x| x.y).unwrap_or(0.0),
-            city: h.map(|x| x.name.clone()).unwrap_or_default(),
-            good_name: if f.good >= 0 {
-                sim.goods.get(f.good as usize).map(|g| g.name.clone()).unwrap_or_default()
-            } else { String::new() },
+            city,
+            good_name,
             born_year: f.born_tick / TICKS_PER_YEAR,
             died_year: if f.dead { f.dies_tick / TICKS_PER_YEAR } else { 0 },
             alive: !f.dead,
+            culture,
+            house,
+            legacy,
         }
     }).collect();
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));

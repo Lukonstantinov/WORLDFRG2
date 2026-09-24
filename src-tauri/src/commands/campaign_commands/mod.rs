@@ -2896,6 +2896,14 @@ pub struct FigureBrief {
     pub born_year: u32,
     pub died_year: u32,
     pub alive: bool,
+    /// The figure's home city's majority culture (for a portrait kit) — "" if unknown.
+    pub culture: String,
+    /// The linked house's name, or "" if unaffiliated.
+    pub house: String,
+    /// One sentence naming the figure's one real, capped effect on the world at the
+    /// moment they rose to prominence (mirrors the chronicle text `raise_notable_
+    /// figures` writes once — never fabricated beyond that).
+    pub legacy: String,
 }
 
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).

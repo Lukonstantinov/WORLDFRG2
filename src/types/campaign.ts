@@ -2307,6 +2307,12 @@ export interface FigureBrief {
   born_year: number;
   died_year: number;
   alive: boolean;
+  /** The figure's home city's majority culture — "" if unknown (portrait kit). */
+  culture: string;
+  /** The linked house's name, or "" if unaffiliated. */
+  house: string;
+  /** One sentence naming the figure's one real, capped effect on the world. */
+  legacy: string;
 }
 
 /** Phase 6 · a landmark / place of note. */
