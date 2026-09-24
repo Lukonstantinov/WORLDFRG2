@@ -2907,6 +2907,16 @@ pub struct FigureBrief {
     /// What a LIVING figure keeps doing every year (`living_figures_pass`,
     /// `run_piracy`'s admiral shield) — "" once they are dead.
     pub influence: String,
+    /// Birthplace/family/culture, and — for an Explorer with a real linked
+    /// expedition — where they actually sailed. Built entirely from fields the
+    /// figure/house/expedition already carry; never a fabricated location.
+    pub bio: String,
+    /// A short deterministic first-person line, seeded from the figure's own
+    /// name so it never changes between reads. Flavour only — no persisted state.
+    pub thought: String,
+    /// Comma-joined names of the goods the figure's own house specializes in
+    /// (`House.spec`) — "" if the figure is unaffiliated with a house.
+    pub merchant_goods: String,
 }
 
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).

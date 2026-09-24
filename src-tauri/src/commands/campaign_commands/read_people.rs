@@ -2,6 +2,60 @@
 //! `use super::*` inherits the shared imports, structs and helpers kept in mod.rs.
 use super::*;
 
+/// Plain FNV-1a over a name, used only to pick a stable index into a flavour-text
+/// pool — the same "seed off the person's own name" discipline `deriveKit` (the
+/// frontend portrait variation) already uses, so a figure's quote/bio never
+/// changes between reads without being persisted anywhere.
+fn fnv1a32(s: &str) -> u32 {
+    let mut h: u32 = 0x811c9dc5;
+    for b in s.as_bytes() {
+        h ^= *b as u32;
+        h = h.wrapping_mul(0x01000193);
+    }
+    h
+}
+
+/// One deterministic first-person line per role, 4 variants each — a quote, never
+/// a claim about sim state. Picked by `fnv1a32(name) % 4`, so the same figure
+/// always gets the same line.
+const FIGURE_THOUGHTS: [[&str; 4]; 5] = [
+    // 0 Admiral
+    [
+        "\"The sea forgives nothing, and remembers everything.\"",
+        "\"Give me a hull that answers the helm and I'll give you the horizon.\"",
+        "\"A fleet in harbour earns no one's bread.\"",
+        "\"Corsairs learn a flag's reputation faster than any envoy teaches it.\"",
+    ],
+    // 1 Demagogue
+    [
+        "\"The council dines while the docks go hungry — let them hear it.\"",
+        "\"A crowd is not a mob until it is ignored.\"",
+        "\"Every charter was once somebody's grievance, spoken loudly enough.\"",
+        "\"I did not make the streets restless. The bread did.\"",
+    ],
+    // 2 Master Craftsman
+    [
+        "\"A guild that stops teaching is already dying.\"",
+        "\"The apprentice who never ruins a piece has never been taught properly.\"",
+        "\"My mark on a good is a debt I intend to keep paying.\"",
+        "\"Secrecy protects a workshop for a season. Skill protects it for a lifetime.\"",
+    ],
+    // 3 Great Banker
+    [
+        "\"A loan is a bet on tomorrow, dressed as a favour today.\"",
+        "\"Trust is the only coin that cannot be debased.\"",
+        "\"I have buried more fortunes in ledgers than any war has buried men.\"",
+        "\"The house that never defaults has simply never lent enough.\"",
+    ],
+    // 4 Explorer
+    [
+        "\"The map ends where my patience begins.\"",
+        "\"Every coastline is a rumour until you have sailed it yourself.\"",
+        "\"I have never once returned poorer in stories than I set out.\"",
+        "\"Home is a place you leave so you have something to come back to.\"",
+    ],
+];
+
 
 /// Per-culture census: population, town count, top cities, houses, mobility. Sorted
 /// by population (largest people first). Powers the Peoples panel.
@@ -547,6 +601,55 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             3 | 4 if !house.is_empty() => format!("Adds to House {}'s prestige each year.", house),
             _ => String::new(),
         } };
+
+        // Merchant goods — real, straight off `House.spec` (what the linked house
+        // actually specializes in). Empty for an unaffiliated figure: not every
+        // notable is a merchant, and nothing here invents a trade for one who isn't.
+        let merchant_goods = if f.house >= 0 {
+            sim.houses.get(f.house as usize).map(|h| {
+                h.spec.iter().filter_map(|&g| sim.goods.get(g).map(|gd| gd.name.clone()))
+                    .take(3).collect::<Vec<_>>().join(", ")
+            }).unwrap_or_default()
+        } else { String::new() };
+
+        // Family/birthplace/culture line, plus — for an Explorer whose house has a
+        // real linked expedition — the actual voyage. Every clause is gated on real
+        // data being present; a clause with nothing to say is simply omitted rather
+        // than invented (rule 36's "never fabricate" discipline applied to prose).
+        let family_line = if !house.is_empty() {
+            format!("Born in {} to the merchant House {}.", city, house)
+        } else if !culture.is_empty() {
+            format!("Born in {} to a family of the {} people.", city, culture)
+        } else {
+            format!("Born in {}.", city)
+        };
+        let culture_line = if !culture.is_empty() && !house.is_empty() {
+            format!(" Raised among the {}.", culture)
+        } else { String::new() };
+        let merchant_line = if !merchant_goods.is_empty() {
+            format!(" A trader by trade, dealing chiefly in {}.", merchant_goods)
+        } else { String::new() };
+        let travel_line = if f.kind == 4 {
+            let voyage = if f.house >= 0 {
+                sim.expeditions.iter().find(|e| e.house as i32 == f.house).and_then(|e| {
+                    sim.hubs.get(e.dest as usize).map(|d| {
+                        let verb = match e.status {
+                            3 => "returned from",
+                            4 => "was lost sailing for",
+                            2 => "is homeward bound from",
+                            1 => "reached",
+                            _ => "set out for",
+                        };
+                        format!(" They {} {}.", verb, d.name)
+                    })
+                })
+            } else { None };
+            voyage.unwrap_or_else(|| format!(" They range the coasts beyond {}, chasing rumours of new markets.", city))
+        } else { String::new() };
+        let bio = format!("{}{}{}{}", family_line, culture_line, merchant_line, travel_line);
+        let thought = FIGURE_THOUGHTS[(f.kind as usize).min(4)]
+            [(fnv1a32(&f.name) % 4) as usize].to_string();
+
         FigureBrief {
             name: f.name.clone(),
             role: FIGURE_KINDS.get(f.kind as usize).copied().unwrap_or("Figure").to_string(),
@@ -562,6 +665,9 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             house,
             legacy,
             influence,
+            bio,
+            thought,
+            merchant_goods,
         }
     }).collect();
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));

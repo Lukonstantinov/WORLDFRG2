@@ -2315,6 +2315,13 @@ export interface FigureBrief {
   legacy: string;
   /** What a living figure keeps doing every year — "" once dead. */
   influence: string;
+  /** Birthplace/family/culture, and — for an Explorer with a real linked
+   *  expedition — where they actually sailed. */
+  bio: string;
+  /** A short deterministic first-person line, stable per figure. Flavour only. */
+  thought: string;
+  /** Comma-joined goods the figure's own house specializes in — "" if unaffiliated. */
+  merchant_goods: string;
 }
 
 /** Phase 6 · a landmark / place of note. */

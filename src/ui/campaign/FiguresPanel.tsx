@@ -171,11 +171,13 @@ function FigureCard({ f, year, selected, onClick }: {
 }) {
   const spec = roleOf(f.role);
   const span = (f.alive ? year : f.died_year) - f.born_year;
+  const [showLife, setShowLife] = useState(false);
+  const hasLife = !!(f.bio || f.thought);
   return (
+    <div style={{ flexShrink: 0, borderRadius: RADIUS.md, border: `1px solid ${selected ? spec.color : T.lineSoft}`, overflow: "hidden" }}>
     <div data-no-drag onClick={onClick}
       style={{
-        display: "flex", gap: SPACE.md, padding: "8px 9px", cursor: "pointer", flexShrink: 0,
-        borderRadius: RADIUS.md, border: `1px solid ${selected ? spec.color : T.lineSoft}`,
+        display: "flex", gap: SPACE.md, padding: "8px 9px", cursor: "pointer",
         borderLeft: `3px solid ${f.alive ? spec.color : T.inkFaint}`,
         background: f.alive
           ? `linear-gradient(90deg, ${hexA(spec.color, 0.10)}, ${T.card} 55%)`
@@ -233,7 +235,46 @@ function FigureCard({ f, year, selected, onClick }: {
           {f.alive ? "● living" : "† departed"}
         </div>
         <div style={{ fontSize: FZ.micro, color: T.inkDim }}>{Math.max(0, span)} yr{span === 1 ? "" : "s"}</div>
+        {hasLife && (
+          <button data-no-drag onClick={(e) => { e.stopPropagation(); setShowLife((v) => !v); }}
+            style={{
+              marginTop: 4, fontSize: FZ.micro, color: T.inkDim, background: "transparent",
+              border: `1px solid ${T.lineSoft}`, borderRadius: RADIUS.sm, padding: "1px 5px", cursor: "pointer",
+            }}>
+            {showLife ? "hide life ▴" : "life ▾"}
+          </button>
+        )}
       </div>
+    </div>
+    {showLife && hasLife && (
+      <div data-no-drag style={{
+        padding: "7px 10px 9px", borderTop: `1px solid ${T.lineSoft}`,
+        background: "rgba(0,0,0,0.15)",
+      }}>
+        {f.bio && (
+          <div style={{ fontSize: FZ.small, lineHeight: 1.45, color: T.inkMid }}>{f.bio}</div>
+        )}
+        {f.merchant_goods && (
+          <div style={{ marginTop: 5, display: "flex", flexWrap: "wrap", gap: 4, alignItems: "center" }}>
+            <span style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.4 }}>Trades in</span>
+            {f.merchant_goods.split(", ").map((g) => (
+              <span key={g} style={{
+                fontSize: FZ.micro, color: spec.color, background: hexA(spec.color, 0.12),
+                border: `1px solid ${hexA(spec.color, 0.35)}`, borderRadius: 999, padding: "0 6px", lineHeight: 1.6,
+              }}>{g}</span>
+            ))}
+          </div>
+        )}
+        {f.thought && (
+          <div style={{
+            marginTop: 6, fontSize: FZ.small, fontStyle: "italic", color: T.gold,
+            fontFamily: SERIF, lineHeight: 1.4,
+          }}>
+            {f.thought}
+          </div>
+        )}
+      </div>
+    )}
     </div>
   );
 }

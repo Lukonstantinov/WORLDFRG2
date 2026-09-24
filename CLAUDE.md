@@ -2808,10 +2808,27 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   years and `FigureBrief.legacy` — the one real capped
                                   effect `raise_notable_figures` applied (fleet, prestige,
                                   unrest, craft quality), mirrored from its chronicle
-                                  text, never invented. A role donut on top. Also exports
-                                  `CityNotables`, shown on HubPanel's Life tab. NOTE:
-                                  `cultureFigure.ts` below no longer exists — portraits
-                                  everywhere now go through `cultureDress.ts`
+                                  text, never invented, plus `FigureBrief.influence` — what a
+                                  LIVING figure keeps doing every year (`living_figures_pass`,
+                                  `houses.rs`): an admiral shields their house's fleet from
+                                  piracy in `run_piracy`, a demagogue nudges unrest up (and
+                                  chronicles a one-time "rallied" event past
+                                  `DEMAGOGUE_RALLY_AT`), a master craftsman raises their
+                                  craft's quality/tradition, a banker/explorer adds to their
+                                  house's prestige — every effect capped (rule 18) and shown
+                                  as a "Now" line. A role donut on top. A click-to-expand
+                                  "life ▾" panel (read_people.rs::campaign_get_figures) adds
+                                  `bio` (birthplace · house or culture · for an Explorer with
+                                  a real linked `Expedition`, the actual destination and its
+                                  outcome — every clause gated on real data, omitted rather
+                                  than invented when absent), `merchant_goods` (straight off
+                                  the linked `House.spec`, "" if unaffiliated) and `thought`
+                                  (one deterministic quote from a per-role pool, picked by
+                                  `fnv1a32(name) % 4` so it never changes between reads —
+                                  flavour, not persisted state). Also exports `CityNotables`,
+                                  shown on HubPanel's Life tab. NOTE: `cultureFigure.ts` below
+                                  no longer exists — portraits everywhere now go through
+                                  `cultureDress.ts`
   LandmarksPanel.tsx            ← Notable landmarks
   AtlasPanel.tsx                ← Atlas 2.0 (eras / world frame)
   NewsFeedPanel.tsx             ← Campaign news feed
