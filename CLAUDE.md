@@ -1779,7 +1779,7 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   fixes) — nothing here changes that sequencing, this entry only records
   which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L8 shipped (L0-L3 the STOP MARKER, L4-L8 past it, L7/L8 partial), L13 partly surfaced
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L8, L11(shadow), L12(partial) shipped, L13 mostly surfaced
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
@@ -1787,19 +1787,18 @@ in a follow-up session, so the STOP MARKER was reached in full — the hidden
 famine is measured, the welfare ratio exists AND is visible, and the player can
 see how a city lives. Further sessions then shipped **L4** (vital rates + age
 bands), **L5** (welfare into behaviour), **L6** (housing & crowding), **L7's
-first named part** (the settlement year's seasonal mortality) and now **L8's
-first named part** (fire's toll on housing and lives), each at its own dose
-of zero, per the plan's own explicit permission to continue past the marker
-one gated slice at a time. L7's other three named parts (lean-months
-hoarding, harvest labour, feast days), L8's other two named parts (flood,
-water/sanitation) and L9 onward remain queued (see below), with one
-exception: **the two L13 items that had real data already —
-the age pyramid and causes of death, both computed by L4 and sitting unused
-in `TickHub` — are now surfaced in the Life tab**, rather than waiting on
-L13's other five ingredients. Housing/crowding (L6) is now real DATA too
-(`TickHub.housing`/`crowding`) but not yet drawn in the tab — a UI gap, not
-a missing mechanism; church, watch and notables genuinely have no mechanism
-behind them yet (L9/L10/L12).
+first named part** (the settlement year's seasonal mortality), **L8's first
+named part** (fire's toll on housing and lives), and then, at the maintainer's
+explicit request to prioritise the Life tab and its remaining slices, **L13's
+housing/crowding chart**, **L11** (persistent pops, shadow phase) and **L12**
+(three of its six named notable roles), each at its own dose of zero (or, for
+L11's shadow, no dose at all — nothing reads it yet). L7's other three named
+parts (lean-months hoarding, harvest labour, feast days), L8's other two named
+parts (flood, water/sanitation), L9/L10 (church, watch), L12's other three
+roles (bishop, physician, watch captain — each waiting on L9/L10) and
+`PERSISTENT_POPS_DOSE` itself all remain queued (see below). Housing/crowding
+(L6) and the townspeople (L12) are now DRAWN in the Life tab, not just
+computed; church/watch genuinely have no mechanism behind them yet (L9/L10).
 
 - **L0 — the instrument** (`economy_validation.rs::econ_measure_settlement_life`,
   `#[ignore]`d, run on `realm_reference_world` + `dense_world` per §1 F10 — never
@@ -2053,15 +2052,72 @@ behind them yet (L9/L10/L12).
   structure raising `public_health`) are NOT built this pass, queued. Gated
   by `urban_hazard_dose_zero_is_a_noop`, `fire_toll_is_bounded_and_worse_
   when_crowded` (`tick::tests`, 304/304).
+- **L13 — housing/crowding now DRAWN in the Life tab.** `CityYear` gained
+  `crowding: f32` (`#[serde(default)]`, the same rule-29 tail-alignment
+  `ages`/`deaths_by_cause` already used), snapshotted yearly from
+  `TickHub.crowding` (real since L6). Pure bookkeeping — the value was
+  already computed, this only records it — so no dose gate, mirroring
+  L13-partial's own precedent exactly. The Life tab draws a bar chart plus a
+  plain-English reading ("comfortably housed" … "severely overcrowded").
+- **L11 — persistent pops, SHADOW PHASE (§3.10).** `TickHub.pops_shadow:
+  Vec<Pop>` runs in PARALLEL with the existing `derive_pops`, which still
+  drives every real reader. Births re-enter a pop's OWN profession — the
+  plan's "inversion" of L4's hub-wide children band; apprenticeship moves
+  labourers into craftsmen; ruin (scaled by the hub's own structural
+  `damage`) and famine (scaled by `starving`) move craftsmen/clerks/
+  merchants back into labourers; the shadow's TOTAL reconciles onto the real
+  population every year, since this pass tracks profession MIX, never net
+  headcount — that stays L4's job. Migration is NOT modelled — exodus/rural
+  pull carry no profession mix anywhere in the sim, a documented
+  simplification, not an oversight. `pops_shadow` is read by NOTHING in the
+  tick, proven directly (`persistent_pops_shadow_is_never_read_by_the_tick`
+  runs two identical sims, one calling the shadow pass every year and one
+  never calling it, and asserts `sim_fingerprint` is IDENTICAL) — so this is
+  unconditional bookkeeping exactly like L4's age pyramid, no dose needed
+  because nothing would read one. **The plan's own required instrument
+  before `PERSISTENT_POPS_DOSE` may switch any reader over is now built and
+  measured**: `econ_measure_persistent_pops_divergence` (`#[ignore]`d) finds
+  craftsmen and soldiers diverge most (~0.04-0.10 mean share on both
+  fixtures — apprenticeship/ruin/famine all move people through the
+  craftsmen slot) while clergy/capitalists diverge least (~0.004-0.008); the
+  transition rates themselves are named first approximations in their own
+  doc comments, not a calibrated model. Gated by `persistent_pops_shadow_
+  moves_people_between_professions`, `persistent_pops_shadow_is_never_read_
+  by_the_tick` (`tick::tests`).
+- **L12 — the townspeople, THREE of six named roles (§3.11).** `TickHub.
+  notables: Vec<Notable>`, capped by `hub.tier` (floored at 1), rebuilt
+  yearly right after the guild and Figure passes settle for the year — a
+  guildmaster lookup sees this year's founded/dissolved guilds, an agitator
+  lookup sees this year's Demagogue roster. Only the roles with a REAL
+  institution to anchor to today: **Guildmaster** (the hub's strongest live
+  `CraftGuild`); **Alderman** (the council house's own `kin[1]`, its second
+  kinsman — a naming read over existing data, no new roll); **Agitator**
+  (the EXISTING Demagogue `Figure` mechanic, LOCALISED — no new roll, no new
+  effect, since its unrest bump already fires inside `raise_notable_
+  figures`; this only anchors it to a city for display). The bishop (L9),
+  the physician (L8's still-unbuilt water/sanitation half) and the watch
+  captain (L10) are explicitly QUEUED, not fabricated — each needs an
+  institution that does not exist in the sim yet, and inventing one to fill
+  the slot would be exactly the fabrication rule 36/§2.4 forbid. A fresh
+  appointment is chronicled once (quiet when the roster simply stands, the
+  same discipline the Life tab uses everywhere else). The plan's own "±10%
+  institutional nudge" (guildmaster → guild strength, alderman → civic
+  mood) is real but `TOWNSPEOPLE_DOSE`-gated — 0.0 ships as a true no-op;
+  the agitator carries no nudge of its own, since that would double the
+  existing Demagogue effect. Served via a new `campaign_city_notables`
+  query, drawn in the Life tab's new "The townspeople" section. Gated by
+  `notable_count_is_bounded_by_tier`, `townspeople_dose_zero_is_a_noop`
+  (`tick::tests`).
 - **What did NOT ship, and why (rule 36 — queued, not waived)**: L7's other
-  three named parts, L8's other two named parts (above); L9 onward (the
-  church, the watch, persistent pops, townspeople) are each their own dose
-  walk per the plan's own build order and are unstarted; L6's own
-  rent/growth-ceiling sub-effects and the rest of Life tab v2 (§3.13) wait as
-  named above. Gates run across all sessions: `cargo check --lib --tests`
-  (clean), `cargo test --lib tick::tests` (304/304, ~42s), `cargo test --lib
-  econ_ -- --nocapture` (6/6 incl. the multi-seed inheritance gate), `npx tsc
-  --noEmit` (clean).
+  three named parts, L8's other two named parts (above); L9/L10 (the church,
+  the watch) are each their own dose walk per the plan's own build order and
+  are unstarted; L12's other three notable roles wait on them; raising
+  `PERSISTENT_POPS_DOSE` above zero is unstarted, separate work now that
+  L11's own divergence instrument gives it a real baseline; L6's own
+  rent/growth-ceiling sub-effects wait as named above. Gates run across all
+  sessions: `cargo check --lib --tests` (clean), `cargo test --lib
+  tick::tests` (308/308, ~42s), `cargo test --lib econ_ -- --nocapture`
+  (6/6 incl. the multi-seed inheritance gate), `npx tsc --noEmit` (clean).
 
 ---
 

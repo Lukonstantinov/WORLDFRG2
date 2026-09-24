@@ -633,7 +633,7 @@ impl CampaignSim {
             is_estate: true, parent, koppen, coastal, river, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(), pops_shadow: Vec::new(), notables: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0, tw_state: 0.0,
             estate_kind: kind, estate_tier: 1, mine_depth, mine_extent, is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -2449,6 +2449,84 @@ impl CampaignSim {
             name, kind, hub: hub as u32, house: resident, good,
             born_tick: tick, dies_tick: tick + span, dead: false,
         });
+    }
+
+    /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) · per-city notables. Called AFTER
+    /// `raise_notable_figures` (so an agitator lookup sees this year's
+    /// Demagogue roster) and after the guild passes (so a guildmaster
+    /// lookup sees this year's founded/dissolved guilds). Rebuilds each
+    /// live hub's `notables` from scratch every year — cheap (at most 3
+    /// candidates per hub) and correct by construction, rather than
+    /// incrementally patching a stale roster.
+    pub(crate) fn update_notables(&mut self, _yr: u32) {
+        let tick = self.tick;
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let cap = (self.hubs[h].tier as usize).max(1).min(NOTABLE_ROLES.len());
+            let mut desired: Vec<Notable> = Vec::new();
+
+            // Guildmaster — the hub's strongest live CraftGuild.
+            let best_guild = self.guilds.iter()
+                .filter(|g| g.hub as usize == h)
+                .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|g| g.good as i32);
+            if let Some(good) = best_guild {
+                let salt = (tick as u64) ^ (h as u64).wrapping_mul(0x9E3779B1) ^ 0xC4A5;
+                let hub_name = self.hubs[h].name.clone();
+                let name = self.head_name_for(h, &hub_name, salt);
+                desired.push(Notable { role: NOTABLE_GUILDMASTER, name, good });
+            }
+
+            // Alderman — the council house's own second kinsman.
+            let council = self.hubs[h].council_house;
+            if council >= 0 {
+                if let Some(house) = self.houses.get(council as usize) {
+                    if let Some(k) = house.kin.get(1).filter(|k| k.dies_tick == 0) {
+                        desired.push(Notable { role: NOTABLE_ALDERMAN, name: k.name.clone(), good: -1 });
+                    }
+                }
+            }
+
+            // Agitator — the existing Demagogue Figure, localised: no new
+            // roll, no new effect (its unrest bump already fired above).
+            if let Some(f) = self.figures.iter().find(|f| !f.dead && f.kind == 1 && f.hub as usize == h) {
+                desired.push(Notable { role: NOTABLE_AGITATOR, name: f.name.clone(), good: -1 });
+            }
+
+            desired.truncate(cap);
+
+            // Chronicle only a CHANGE (a fresh appointment) — quiet when the
+            // roster simply stands, the same discipline the Life tab uses.
+            for want in &desired {
+                let already = self.hubs[h].notables.iter().any(|n| n.role == want.role && n.name == want.name);
+                if !already {
+                    let city = self.hubs[h].name.clone();
+                    self.journal.push(JournalEntry {
+                        tick, kind: "notable".into(), hub: h as i32, good: want.good, value: 0.0,
+                        text: format!("{} becomes {} of {}.", want.name, NOTABLE_ROLES[want.role as usize], city),
+                    });
+                }
+            }
+
+            // The institutional nudge — ±10% cap, dosed. Guildmaster lifts
+            // the guild's own strength; alderman lifts civic mood. Agitator
+            // carries none (see above — it would double the existing effect).
+            if TOWNSPEOPLE_DOSE > 0.0 {
+                if desired.iter().any(|n| n.role == NOTABLE_GUILDMASTER) {
+                    if let Some(g) = self.guilds.iter_mut()
+                        .filter(|g| g.hub as usize == h)
+                        .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal))
+                    {
+                        g.strength = (g.strength + TOWNSPEOPLE_NUDGE_CAP * TOWNSPEOPLE_DOSE).min(1.0);
+                    }
+                }
+                if desired.iter().any(|n| n.role == NOTABLE_ALDERMAN) {
+                    self.hubs[h].mood = (self.hubs[h].mood + TOWNSPEOPLE_NUDGE_CAP * TOWNSPEOPLE_DOSE).min(1.0);
+                }
+            }
+
+            self.hubs[h].notables = desired;
+        }
     }
 
 

@@ -1975,6 +1975,54 @@ fn econ_measure_settlement_life() {
     }
 }
 
+/// SETTLEMENT_LIFE_PLAN.md L11 (§3.10) — the instrument the plan's own build
+/// order names before `PERSISTENT_POPS_DOSE` may switch any reader over to
+/// the shadow: how far does a PERSISTENT profession mix (births into a
+/// parent's profession, apprenticeship/ruin/famine mobility) diverge from
+/// the FRESHLY-DERIVED one (`derive_pops`, re-computed from `Society` shares
+/// every year) over a real run? `#[ignore]`d like the plan's other long-run
+/// diagnostics — a real gate needs this read first, not guessed.
+#[test]
+#[ignore]
+fn econ_measure_persistent_pops_divergence() {
+    for (label, mut s) in [
+        ("realm_reference (provinced)", realm_reference_world()),
+        ("dense_world", dense_world()),
+    ] {
+        let years = 60u32;
+        for _ in 0..years {
+            s.advance(TICKS_PER_YEAR);
+        }
+        // Per-profession absolute share divergence, population-weighted
+        // across every live hub — the same "how far apart" question for
+        // every one of the 9 `POP_PROFESSIONS`, not just one city's.
+        let mut abs_diff = [0.0f64; 9];
+        let mut weight = [0.0f64; 9];
+        let mut hubs_compared = 0u32;
+        for h in 0..s.hubs.len() {
+            if s.hubs[h].is_estate || s.hubs[h].abandoned { continue; }
+            if s.hubs[h].pops.is_empty() || s.hubs[h].pops_shadow.is_empty() { continue; }
+            hubs_compared += 1;
+            let derived_total: f32 = s.hubs[h].pops.iter().map(|p| p.size).sum::<f32>().max(1.0);
+            let shadow_total: f32 = s.hubs[h].pops_shadow.iter().map(|p| p.size).sum::<f32>().max(1.0);
+            for prof in 0u8..9 {
+                let d_share = s.hubs[h].pops.iter().find(|p| p.profession == prof).map(|p| p.size).unwrap_or(0.0) / derived_total;
+                let s_share = s.hubs[h].pops_shadow.iter().find(|p| p.profession == prof).map(|p| p.size).unwrap_or(0.0) / shadow_total;
+                abs_diff[prof as usize] += (d_share - s_share).abs() as f64 * s.hubs[h].population as f64;
+                weight[prof as usize] += s.hubs[h].population as f64;
+            }
+        }
+        println!();
+        println!("═══ persistent-pops divergence · {label} · {years}y · {hubs_compared} hubs ═══");
+        println!("  profession       mean |derived − shadow| share");
+        for (i, name) in POP_PROFESSIONS.iter().enumerate() {
+            let mean = if weight[i] > 1e-6 { abs_diff[i] / weight[i] } else { 0.0 };
+            println!("    {name:<12}  {:>7.4}", mean);
+        }
+        println!("═══════════════════════════════════════════════════════════════");
+    }
+}
+
 /// `PORT_COMPETITION_PLAN.md` Slice 2 — the diagnostic that gates whether
 /// `PORT_TOLL_COMPETITION_DOSE` is ever safe to raise above its shipped 0.0.
 /// The mechanism biases `route_outlet`'s entrepôt search: for hub `a`, the

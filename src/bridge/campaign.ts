@@ -199,6 +199,12 @@ export async function campaignCityLife(hub: number): Promise<import("@types").Ci
   return invoke("campaign_city_life", { hub });
 }
 
+/** SETTLEMENT_LIFE_PLAN.md L12 · one hub's current notables — the Life tab's
+ *  "the townspeople" section. */
+export async function campaignCityNotables(hub: number): Promise<import("@types").Notable[]> {
+  return invoke("campaign_city_notables", { hub });
+}
+
 /** The Markets window's city picker — every LIVE city, including ones founded
  *  during the campaign (which the frozen worldgen economy snapshot cannot list). */
 export async function campaignMarketCities(): Promise<import("@types").MarketCity[]> {

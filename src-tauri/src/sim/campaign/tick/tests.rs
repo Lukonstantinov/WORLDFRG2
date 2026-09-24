@@ -19,7 +19,7 @@
             export_earn: 0.0, import_spend: 0.0,
             mood: 0.6, sent_food: 0.7, sent_prosperity: 0.5, sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(),
             in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(), pops_shadow: Vec::new(), notables: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0, tw_state: 0.0,
             estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: 255, is_mining_settlement: false, last_upgrade_tick: 0, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
@@ -10159,5 +10159,148 @@
         // displaced, never comparable in magnitude to the housing loss.
         assert!(comfortable_deaths < comfortable_housing * 0.1,
             "fire deaths must stay a small fraction of the housing lost, got deaths={comfortable_deaths} housing={comfortable_housing}");
+    }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L11 (persistent pops, shadow phase) ────────
+    #[test]
+    fn persistent_pops_shadow_moves_people_between_professions() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![100.0], 0);
+        let mut society = Society::default();
+        society.patrician = 0.05;
+        society.burgher = 0.30;
+        society.commoner = 0.55;
+        society.underclass = 0.10;
+        society.commoner_wealth = 1.0;
+        h.society = society;
+        let mut s = sim(vec![h], goods);
+        s.derive_pops(0);
+        s.update_persistent_pops_shadow(0); // bootstrap from the fresh derive
+        assert!(!s.hubs[0].pops_shadow.is_empty(), "bootstrap must seed the shadow from `pops`");
+
+        let size_of = |s: &CampaignSim, prof: u8| -> f32 {
+            s.hubs[0].pops_shadow.iter().find(|p| p.profession == prof).map(|p| p.size).unwrap_or(0.0)
+        };
+        let craft_before = size_of(&s, 2);
+        let labour_before = size_of(&s, 1);
+        assert!(craft_before > 0.0 && labour_before > 0.0, "the fixture must seed both pools to make this test meaningful");
+
+        // A badly damaged, starving hub over several years — ruin + famine
+        // push should visibly shrink craftsmen and swell labourers.
+        s.hubs[0].damage = 0.8;
+        s.hubs[0].starving = 0.6;
+        for _ in 0..5 {
+            s.update_persistent_pops_shadow(0);
+        }
+        let craft_after = size_of(&s, 2);
+        let labour_after = size_of(&s, 1);
+        assert!(craft_after < craft_before,
+            "ruin+famine must shrink the craftsmen pool, before={craft_before} after={craft_after}");
+        assert!(labour_after > labour_before,
+            "ruin+famine must swell the labourer pool, before={labour_before} after={labour_after}");
+
+        // This pass tracks profession MIX, never net headcount — the total
+        // must always reconcile onto the real population.
+        let total: f32 = s.hubs[0].pops_shadow.iter().map(|p| p.size).sum();
+        assert!((total - s.hubs[0].population).abs() < 1.0,
+            "shadow total must reconcile onto real population, got {total} vs {}", s.hubs[0].population);
+    }
+
+    #[test]
+    fn persistent_pops_shadow_is_never_read_by_the_tick() {
+        // `pops_shadow` must not appear anywhere sim_fingerprint reads, or
+        // this slice would silently stop being unconditional bookkeeping.
+        // A direct proof: run identical sims, one where the shadow pass is
+        // called every year and one where it is skipped entirely, and
+        // confirm every OTHER field folded into the fingerprint matches.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h1 = hub(0, 0.0, 0.0, 10_000.0, vec![100.0], 0);
+        let mut society = Society::default();
+        society.commoner = 0.7;
+        society.underclass = 0.2;
+        society.burgher = 0.1;
+        society.commoner_wealth = 1.0;
+        h1.society = society.clone();
+        let h2 = h1.clone();
+        let mut s1 = sim(vec![h1], goods.clone());
+        let mut s2 = sim(vec![h2], goods);
+        for _ in 0..3 {
+            s1.derive_pops(0);
+            s1.update_persistent_pops_shadow(0); // called
+            s2.derive_pops(0); // s2: shadow pass never called
+        }
+        assert!(!s1.hubs[0].pops_shadow.is_empty());
+        assert!(s2.hubs[0].pops_shadow.is_empty());
+        assert_eq!(sim_fingerprint(&s1), sim_fingerprint(&s2),
+            "the shadow pass must be provably invisible to sim_fingerprint");
+    }
+
+    // ── SETTLEMENT_LIFE_PLAN.md L12 (townspeople / notables) ────────────────
+    #[test]
+    fn notable_count_is_bounded_by_tier() {
+        let goods = vec![good("cloth", 1, 1, 2.0, 0.5, false)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        h.council_house = 0;
+        let mut s = sim(vec![h], goods);
+        let mut house = house_at(0, vec![], 0);
+        house.kin = vec![
+            Kin { name: "Head".into(), role: 0, ..Default::default() },
+            Kin { name: "Alderman Kin".into(), role: 2, ..Default::default() },
+        ];
+        s.houses.push(house);
+        s.guilds.push(CraftGuild {
+            hub: 0, good: 0, strength: 0.5, hall: false, secrecy: 0.0,
+            idle_years: 0.0, signature: None,
+        });
+        s.figures.push(Figure {
+            name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
+            born_tick: 0, dies_tick: 100_000, dead: false,
+        });
+
+        // Untiered (tier 0) — the cap floors to 1: only the guildmaster (the
+        // first-pushed candidate) survives the truncation.
+        s.hubs[0].tier = 0;
+        s.update_notables(0);
+        assert_eq!(s.hubs[0].notables.len(), 1,
+            "an untiered hub must still cap at 1, got {:?}", s.hubs[0].notables);
+        assert_eq!(s.hubs[0].notables[0].role, NOTABLE_GUILDMASTER);
+
+        // Tier 3 — room for all three candidates this fixture offers.
+        s.hubs[0].tier = 3;
+        s.update_notables(0);
+        assert_eq!(s.hubs[0].notables.len(), 3,
+            "a tier-3 hub with three real candidates must show all three, got {:?}", s.hubs[0].notables);
+        let roles: Vec<u8> = s.hubs[0].notables.iter().map(|n| n.role).collect();
+        assert!(roles.contains(&NOTABLE_GUILDMASTER));
+        assert!(roles.contains(&NOTABLE_ALDERMAN));
+        assert!(roles.contains(&NOTABLE_AGITATOR));
+    }
+
+    #[test]
+    fn townspeople_dose_zero_is_a_noop() {
+        let goods = vec![good("cloth", 1, 1, 2.0, 0.5, false)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        h.council_house = 0;
+        h.tier = 3;
+        h.mood = 0.5;
+        let mut s = sim(vec![h], goods);
+        let mut house = house_at(0, vec![], 0);
+        house.kin = vec![
+            Kin { name: "Head".into(), role: 0, ..Default::default() },
+            Kin { name: "Alderman Kin".into(), role: 2, ..Default::default() },
+        ];
+        s.houses.push(house);
+        s.guilds.push(CraftGuild {
+            hub: 0, good: 0, strength: 0.5, hall: false, secrecy: 0.0,
+            idle_years: 0.0, signature: None,
+        });
+        let mood_before = s.hubs[0].mood;
+        let strength_before = s.guilds[0].strength;
+        s.update_notables(0);
+        assert!(!s.hubs[0].notables.is_empty(), "the fixture must actually seat notables to test the dose");
+        assert_eq!(s.hubs[0].mood, mood_before,
+            "TOWNSPEOPLE_DOSE=0.0 must never move mood");
+        assert_eq!(s.guilds[0].strength, strength_before,
+            "TOWNSPEOPLE_DOSE=0.0 must never move guild strength");
     }
 

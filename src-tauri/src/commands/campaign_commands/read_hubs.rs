@@ -67,6 +67,19 @@ pub fn campaign_city_life(hub: u32, db: State<'_, WorldDb>) -> Result<Vec<CityYe
     Ok(sim.hubs.get(hub as usize).map(|h| h.annals.clone()).unwrap_or_default())
 }
 
+/// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) — a pure read of `TickHub.notables`,
+/// same shape as `campaign_city_life` beside it. Empty on an estate, an
+/// abandoned hub, an unknown id, or a save from before this slice.
+#[tauri::command]
+pub fn campaign_city_notables(hub: u32, db: State<'_, WorldDb>) -> Result<Vec<crate::sim::campaign::tick::Notable>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => return Ok(vec![]),
+    };
+    Ok(sim.hubs.get(hub as usize).map(|h| h.notables.clone()).unwrap_or_default())
+}
+
 #[tauri::command]
 pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDetail>, String> {
     use std::collections::HashMap;

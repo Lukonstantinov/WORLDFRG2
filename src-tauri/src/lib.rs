@@ -184,6 +184,7 @@ pub fn run() {
             campaign_commands::campaign_culture_hubs,
             campaign_commands::campaign_get_hub,
             campaign_commands::campaign_city_life,
+            campaign_commands::campaign_city_notables,
             campaign_commands::campaign_market_cities,
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_satellite,

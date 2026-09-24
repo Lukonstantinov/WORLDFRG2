@@ -1392,6 +1392,9 @@ impl CampaignSim {
         }
         // DLC 4 · derive typed Pops from the freshly-updated shares (read-only foundation).
         for h in 0..self.hubs.len() { self.derive_pops(h); }
+        // SETTLEMENT_LIFE_PLAN.md L11 · the persistent-pops SHADOW, run after
+        // derive_pops so a first-time bootstrap seeds from this year's fresh read.
+        for h in 0..self.hubs.len() { self.update_persistent_pops_shadow(h); }
     }
 
 
@@ -1521,6 +1524,80 @@ impl CampaignSim {
             }
         }
         self.hubs[h].pops = pops;
+    }
+
+    /// SETTLEMENT_LIFE_PLAN.md L11 (§3.10) · the SHADOW pass — pops that
+    /// PERSIST and MOVE year to year, run in parallel with `derive_pops`'s
+    /// fresh-every-year `pops`. Bootstraps from `pops` the first time it's
+    /// empty (a new hub, or an old save's first pass after this slice), then
+    /// applies: births re-entering the SAME profession (the plan's
+    /// "inversion" of L4's hub-wide children band); apprenticeship
+    /// (labourers → craftsmen); ruin (craftsmen/merchants → labourers,
+    /// scaled by structural `damage`); famine push (craftsmen/clerks/
+    /// merchants → labourers, scaled by `starving`). Migration is NOT
+    /// modelled here — exodus/rural pull carry no profession mix anywhere in
+    /// the sim yet, a documented simplification per §3.10, not an
+    /// oversight. Reconciles the shadow's TOTAL onto the real population
+    /// each year (this pass tracks profession MIX, not net growth/death —
+    /// that stays L4's job), so a divergence the diagnostic measures is
+    /// genuinely about who does what, not how many people there are.
+    /// `pops_shadow` is read by NOTHING else in the tick, so this is
+    /// unconditional bookkeeping exactly like L4's age pyramid — no dose.
+    pub(crate) fn update_persistent_pops_shadow(&mut self, h: usize) {
+        let hub = &self.hubs[h];
+        if hub.is_estate || hub.population < 1.0 {
+            self.hubs[h].pops_shadow.clear();
+            return;
+        }
+        if self.hubs[h].pops_shadow.is_empty() {
+            self.hubs[h].pops_shadow = self.hubs[h].pops.clone();
+            return;
+        }
+        let pop_now = self.hubs[h].population.max(0.0);
+        let damage = self.hubs[h].damage.clamp(0.0, 1.0);
+        let starving = self.hubs[h].starving.clamp(0.0, 1.0);
+        let mut shadow = std::mem::take(&mut self.hubs[h].pops_shadow);
+
+        for p in &mut shadow {
+            p.size *= 1.0 + PERSISTENT_POPS_BIRTH_RATE;
+        }
+
+        let move_between = |shadow: &mut Vec<Pop>, from: u8, to: u8, rate: f32| {
+            if rate <= 0.0 { return; }
+            let Some(fi) = shadow.iter().position(|p| p.profession == from) else { return; };
+            let moved = shadow[fi].size * rate;
+            if moved <= 0.0 { return; }
+            shadow[fi].size -= moved;
+            if let Some(ti) = shadow.iter().position(|p| p.profession == to) {
+                shadow[ti].size += moved;
+            } else {
+                let template = shadow[fi].clone();
+                shadow.push(Pop { profession: to, size: moved, ..template });
+            }
+        };
+
+        // Apprenticeship: labourers (1) -> craftsmen (2).
+        move_between(&mut shadow, 1, 2, PERSISTENT_POPS_APPRENTICE_RATE);
+        // Ruin: craftsmen (2) / merchants (4) -> labourers (1), scaled by damage.
+        if damage > 0.0 {
+            move_between(&mut shadow, 2, 1, PERSISTENT_POPS_RUIN_RATE * damage);
+            move_between(&mut shadow, 4, 1, PERSISTENT_POPS_RUIN_RATE * damage);
+        }
+        // Famine push: craftsmen (2) / clerks (3) / merchants (4) -> labourers (1).
+        if starving > 0.0 {
+            let rate = PERSISTENT_POPS_FAMINE_PUSH_RATE * starving;
+            move_between(&mut shadow, 2, 1, rate);
+            move_between(&mut shadow, 3, 1, rate);
+            move_between(&mut shadow, 4, 1, rate);
+        }
+
+        let shadow_total: f32 = shadow.iter().map(|p| p.size).sum();
+        if shadow_total > EPS {
+            let scale = pop_now / shadow_total;
+            for p in &mut shadow { p.size *= scale; }
+        }
+        shadow.retain(|p| p.size >= 0.5);
+        self.hubs[h].pops_shadow = shadow;
     }
 
 
@@ -1699,6 +1776,7 @@ impl CampaignSim {
                 unrest: self.hubs[h].society.unrest,
                 ages: self.hubs[h].ages,
                 deaths_by_cause: self.hubs[h].deaths_by_cause,
+                crowding: self.hubs[h].crowding,
             };
             self.hubs[h].annals.push(entry);
             if self.hubs[h].annals.len() > ANNALS_CAP {
@@ -2123,7 +2201,7 @@ impl CampaignSim {
             is_estate: false, parent: -1, koppen: site.koppen, coastal: site.coastal, river: false, component,
             export_earn: 0.0, import_spend: 0.0, mood: 0.62, sent_food: 0.7, sent_prosperity: 0.5,
             sent_stability: 0.8, civic_pool: 0.0, history: Vec::new(), in_by_sea: 0.0, in_by_land: 0.0,
-            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(),
+            base_per_capita, lack_basic: 0.0, lack_comfort: 0.0, lack_luxury: 0.0, society: Society::default(), pops: Vec::new(), pops_shadow: Vec::new(), notables: Vec::new(),
             tw_house: 0.0, tw_local: 0.0, tw_guild: 0.0, tw_state: 0.0,
             estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: unknown_extent(), is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,

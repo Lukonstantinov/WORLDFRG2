@@ -577,7 +577,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 lack_comfort: 0.0,
                 lack_luxury: 0.0,
                 society: crate::sim::tick::Society::default(),
-                pops: Vec::new(),
+                pops: Vec::new(), pops_shadow: Vec::new(), notables: Vec::new(),
                 tw_house: 0.0,
                 tw_local: 0.0,
                 tw_guild: 0.0,
