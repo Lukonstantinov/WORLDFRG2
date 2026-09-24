@@ -18,6 +18,8 @@ import type {
   HouseAtlas, HouseTimelineEvent,
 } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
+import { HouseWindow } from "@ui/campaign/HouseWindow";
+import { WIDE_WINDOW } from "@ui/campaign/windowKit";
 
 /** ⚜️ House Dossier — HOUSES_GUILDS_AND_MARKET_PLAN.md S10's own window: one
  *  house, big, floating, the tabs. Split out of the former monolithic
@@ -505,7 +507,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
   const [scrubYear, setScrubYear] = useState<number | null>(null);
   // Chronicle-first (§2.3 of the design): the dossier has nothing for the player to
   // DECIDE, so the primary artefact is the family's record, not its balance sheet.
-  const [view, setView] = useState<"chronicle" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions" | "atlas">("chronicle");
+  const [view, setView] = useState<"chronicle" | "plate" | "summary" | "kin" | "goals" | "crisis" | "lineage" | "standing" | "feuds" | "bank" | "ledger" | "expeditions" | "atlas">("chronicle");
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.house);
   const tick = useCampaignStore((s) => s.snapshot?.clock.tick ?? 0);
   useEffect(() => {
@@ -590,7 +592,10 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
     return [...evs].sort((x, y) => y.year - x.year).slice(0, 3);
   }, [chron]);
   return (
-    <div data-draggable style={{ ...detailPanel, ...rootStyle }} onPointerDown={onPointerDown}>
+    <div data-draggable style={{ ...detailPanel, ...rootStyle, ...(view === "plate" ? { width: WIDE_WINDOW, right: 12 } : {}) }} onPointerDown={onPointerDown}>
+      {/* The overview plate carries its own header and seat band, so the figure
+          header and the timeline plate step aside while it is showing. */}
+      {view !== "plate" && <>
       <div style={{ display: "flex", gap: 8 }}>
         {/* The figure — house identity is added as three marks: a coloured frame (the
             house's colour, standing in for the garment accent), a coat-of-arms badge
@@ -691,12 +696,13 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
           scoping note at `scrubYear`'s own declaration above. */}
       <TimelinePlate line={chron?.line ?? []} events={chron?.events ?? []} feuds={timelineFeuds}
         houseIdx={h.idx ?? -1} scrubYear={scrubYear} onScrub={setScrubYear} fmt={fmtW} />
+      </>}
 
       {/* Subtabs — Chronicle first (§2.3: the dossier has nothing to DECIDE, so the
           record is the primary artefact). Accountant gets its own roomy view so
           expenses aren't clipped. */}
       <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap" }}>
-        {(["chronicle", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
+        {(["chronicle", "plate", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
            ...(goals && (goals.active.length > 0 || goals.history.length > 0) ? ["goals" as const] : []),
            ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
            ...((lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0)) || (chron?.line?.length ?? 0) > 0 ? ["lineage" as const] : []),
@@ -708,6 +714,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
             color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
             borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
           }}>{t === "chronicle" ? "📜 Chronicle"
+            : t === "plate" ? "🏛 Overview"
             : t === "summary" ? "Summary"
             : t === "kin" ? `👪 Kin (${kin.length})`
             : t === "goals" ? `🎯 Ambitions${goals && goals.active.length > 0 ? ` (${goals.active.length})` : ""}`
@@ -724,6 +731,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
 
       {view === "chronicle" ? (
         <ChronicleTab h={h} chron={chron} onExpand={() => onChronicle(h.name)} fmt={fmtW} />
+      ) : view === "plate" ? (
+        <HouseWindow h={h} chron={chron} ledger={ledger} onClose={onClose} onDragStart={onPointerDown} />
       ) : view === "kin" ? (
         <KinTab kin={kin} />
       ) : view === "goals" ? (

@@ -1,24 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { CSSProperties, ReactNode } from "react";
-import type { CultureBrief, HubDetail, MerchantRoute, TradeFlows } from "@types";
-import { campaignGetCultures, campaignMerchantRoutes, campaignTradeFlows } from "@bridge";
+import type { HubDetail, MerchantRoute, TradeFlows } from "@types";
+import { campaignMerchantRoutes, campaignTradeFlows } from "@bridge";
 import { useCampaignStore } from "@state/campaignStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { GOOD_DEFS } from "@goods";
 import { GoodIcon } from "@ui/goods/GoodIcon";
 import { koppenCode, koppenName } from "@ui/world/climate";
-import { SERIF } from "@ui/campaign/chronicleTheme";
 import {
   STYLES, WALL_LABEL, genCity, renderIso, presentIso, renderPlan, isoLandmarkAt, planLandmarkAt,
   landmarkIcon, vesselIcon, toHex,
-  type CityCfg, type IsoRender, type PlanGeom, type StyleKey,
+  type IsoRender, type PlanGeom, type StyleKey,
 } from "@canvas/cityArt";
 import {
-  TIER_NAMES, CIVIC_COLOR, HULL_NAMES, VESSEL_ICONS, SCENE_CARAVAN,
-  pickFamily, waterKind, popBucket, isWalled, deriveSlots, deriveDistricts, tierChecklist,
-  seaShare, sceneShips, type SlotRow,
+  TIER_NAMES, CIVIC_COLOR, HULL_NAMES, VESSEL_ICONS, tierChecklist, seaShare, type SlotRow,
 } from "@ui/campaign/settlementWindowData";
+import {
+  K, SCENE_W, SCENE_H, fk, fc, Card, Bar, Stack, Spark, Pill, Swatch, Blit, HeadStat, chipStyle,
+  useCultureKits, cachedScene, cityScene, cfgKey,
+} from "@ui/campaign/windowKit";
 
 // ── The settlement window (design handoff: "WorldForge Settlement Window") ──
 // A culture- and climate-styled pixel-isometric scene of the city (with a
@@ -33,24 +33,13 @@ import {
 // handoff's "Organic light" token set would have no way to be selected; it is
 // queued rather than carried as dead tokens.
 
-/** Chronicle-dark tokens for this window, from the handoff's token table. */
-const K = {
-  bg: "#0d1521", head: "#111b2a", card: "#0f1826", bd: "#1e2e42", tx: "#cfe2f6", mu: "#9fb4cc", fa: "#6f88a6",
-  ac: "#d8b24a", acBg: "rgba(216,178,74,.14)", acBd: "rgba(216,178,74,.38)", pos: "#7fd0a0", neg: "#e8a07c",
-  bar: "#1a2536", sea: "#5aa8d8", river: "#6fc3b0", land: "#d8a656", chip: "rgba(9,14,20,.84)", lock: "#4a5c72",
-  scene: "#0a1018", hf: SERIF, bf: "system-ui,-apple-system,'Segoe UI',sans-serif",
-} as const;
 const SOCIETY = [
   { key: "patrician", label: "Patricians", color: "#c8813a" },
   { key: "burgher", label: "Burghers", color: "#5a8ac8" },
   { key: "commoner", label: "Commoners", color: "#6aa05a" },
   { key: "underclass", label: "Underclass", color: "#9a8a78" },
 ] as const;
-const SCENE_W = 1180, SCENE_H = 420;
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
-
-const fk = (n: number) => n >= 1e5 ? Math.round(n / 1e3) + "k" : n >= 1e3 ? (n / 1e3).toFixed(1).replace(/\.0$/, "") + "k" : String(Math.round(n));
-const fc = (n: number) => Math.round(n).toLocaleString("en-US");
 
 // ── PNG SPRITE PACK support (public/city-sprites/<stem>.png) ────────────────
 // Preserved from the previous city plan: drop one transparent PNG per building
@@ -78,34 +67,6 @@ function loadSprite(stem: string, onReady: () => void): HTMLImageElement | null 
   return null;
 }
 
-// ── caches: culture kits (one fetch), rendered scenes (per hub/bucket/content) ──
-let kitCache: Map<string, number> | null = null;
-let kitInflight: Promise<Map<string, number>> | null = null;
-function loadKits(): Promise<Map<string, number>> {
-  if (kitCache) return Promise.resolve(kitCache);
-  if (!kitInflight) {
-    kitInflight = campaignGetCultures().then((cs: CultureBrief[]) => {
-      const m = new Map<string, number>();
-      for (const c of cs) if (typeof c.kit === "number" && c.kit >= 0) m.set(c.name, c.kit);
-      kitCache = m; return m;
-    }).catch(() => new Map<string, number>());
-  }
-  return kitInflight;
-}
-/** The iso render is the expensive part (hundreds of shaded polygons); a campaign
- *  tick refetches HubDetail every day, so the scene is cached on exactly what it
- *  depends on and only regenerates when buildings, tier, population bucket (or
- *  the other drawn inputs) change. Small LRU — one entry per recently opened city. */
-const sceneCache = new Map<string, IsoRender>();
-function cachedScene(key: string, make: () => IsoRender): IsoRender {
-  const hit = sceneCache.get(key);
-  if (hit) { sceneCache.delete(key); sceneCache.set(key, hit); return hit; }
-  const r = make();
-  sceneCache.set(key, r);
-  while (sceneCache.size > 8) { const k = sceneCache.keys().next().value; if (k === undefined) break; sceneCache.delete(k); }
-  return r;
-}
-
 /** One-line lore/role for each building type — shown on hover + in the ward grid. */
 export const BUILDING_INFO: Record<string, string> = {
   Guildhall: "Seat of the merchant guild; lowers freight on goods leaving the city.",
@@ -124,76 +85,11 @@ export const BUILDING_INFO: Record<string, string> = {
   Harbor: "Docks and quays working the city's sea trade.",
 };
 
-// ── small presentational pieces ──────────────────────────────────────────────
-
-function Card({ title, meta, span, children }: { title: string; meta?: ReactNode; span?: number; children: ReactNode }) {
-  return (
-    <div style={{ background: K.card, border: `1px solid ${K.bd}`, borderRadius: 6, padding: "12px 14px 14px", minWidth: 0,
-      display: "flex", flexDirection: "column", gap: 10, ...(span ? { gridColumn: `span ${span}` } : {}) }}>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-        <span style={{ font: `600 10px/1 ${K.bf}`, letterSpacing: .7, textTransform: "uppercase", color: K.fa }}>{title}</span>
-        <span style={{ flex: 1 }} />
-        {meta && <span style={{ font: `400 11px/1.2 ${K.bf}`, color: K.fa, textAlign: "right" }}>{meta}</span>}
-      </div>
-      {children}
-    </div>
-  );
-}
-function Bar({ frac, color, h = 6 }: { frac: number; color: string; h?: number }) {
-  return (
-    <div style={{ flex: 1, height: h, background: K.bar, borderRadius: 4, overflow: "hidden", minWidth: 0 }}>
-      <div style={{ width: `${Math.max(0, Math.min(100, frac * 100))}%`, height: "100%", background: color, borderRadius: 4 }} />
-    </div>
-  );
-}
-function Stack({ parts, h = 8 }: { parts: [number, string][]; h?: number }) {
-  return (
-    <div style={{ display: "flex", height: h, borderRadius: 4, overflow: "hidden", gap: 2, background: K.bar }}>
-      {parts.filter(([f]) => f > 0).map(([f, c], i) => <div key={i} style={{ flex: `${f} 0 0`, background: c }} />)}
-    </div>
-  );
-}
-function Spark({ vals, color, w = 180, h = 30 }: { vals: number[]; color: string; w?: number; h?: number }) {
-  if (vals.length < 2) return null;
-  const mn = Math.min(...vals), mx = Math.max(...vals);
-  const pts = vals.map((v, k) => `${(k / (vals.length - 1) * w).toFixed(1)},${(h - 2 - (v - mn) / (mx - mn || 1) * (h - 4)).toFixed(1)}`).join(" ");
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} style={{ display: "block", overflow: "visible", maxWidth: "100%" }}>
-      <polyline points={`0,${h} ${pts} ${w},${h}`} style={{ fill: color, opacity: .14, stroke: "none" }} />
-      <polyline points={pts} style={{ fill: "none", stroke: color, strokeWidth: 1.6, strokeLinejoin: "round" }} />
-    </svg>
-  );
-}
-function Pill({ children, strong }: { children: ReactNode; strong?: boolean }) {
-  return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 4, background: strong ? K.acBg : "transparent",
-      color: strong ? K.ac : K.mu, border: `1px solid ${strong ? K.acBd : K.bd}`, borderRadius: 4, padding: "2px 9px",
-      font: `600 10px/1.3 ${K.bf}`, letterSpacing: .4, whiteSpace: "nowrap" }}>{children}</span>
-  );
-}
-function Swatch({ color, size = 8, round }: { color: string; size?: number; round?: boolean }) {
-  return <span style={{ width: size, height: size, borderRadius: round ? "50%" : 2, background: color, flex: "none", display: "inline-block" }} />;
-}
-/** Blit a cached offscreen canvas at CSS size `size`, pixelated. */
-function Blit({ src, size, style }: { src: HTMLCanvasElement; size: number; style?: CSSProperties }) {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  useEffect(() => {
-    const el = ref.current; if (!el) return;
-    el.width = src.width; el.height = src.height;
-    const ctx = el.getContext("2d"); if (!ctx) return;
-    ctx.imageSmoothingEnabled = false; ctx.clearRect(0, 0, el.width, el.height); ctx.drawImage(src, 0, 0);
-  }, [src]);
-  return <canvas ref={ref} style={{ width: size, height: size, flex: "none", display: "block", imageRendering: "pixelated", ...style }} />;
-}
 const LOCK = (
   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.75" strokeLinecap="round" strokeLinejoin="round">
     <rect x="4" y="11" width="16" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" />
   </svg>
 );
-const chipStyle = (color: string = K.tx): CSSProperties => ({
-  background: K.chip, color, border: `1px solid ${K.bd}`, borderRadius: 4, padding: "3px 9px",
-  font: `600 10.5px/1.3 ${K.bf}`, backdropFilter: "blur(2px)",
-});
 
 // ── the window ────────────────────────────────────────────────────────────────
 
@@ -203,7 +99,7 @@ export function CityView({ detail }: { detail: HubDetail }) {
   const clock = useCampaignStore((s) => s.snapshot?.clock);
   const hubBrief = useCampaignStore((s) => s.snapshot?.hubs.find((h) => h.id === detail.id));
   const specs = useGoodsStore((s) => s.specs);
-  const [kits, setKits] = useState<Map<string, number> | null>(kitCache);
+  const kits = useCultureKits();
   const [flows, setFlows] = useState<TradeFlows | null>(null);
   const [routes, setRoutes] = useState<MerchantRoute[]>([]);
   const [mode, setMode] = useState<"iso" | "plan">("iso");
@@ -215,7 +111,6 @@ export function CityView({ detail }: { detail: HubDetail }) {
   const planRef = useRef<PlanGeom | null>(null);
   const year = clock?.year ?? 0;
 
-  useEffect(() => { let alive = true; loadKits().then((m) => { if (alive) setKits(m); }); return () => { alive = false; }; }, []);
   // Flows refresh with the campaign day (they are a small per-hub payload); the
   // world's merchant-route list is large, so it is re-read once per year only.
   useEffect(() => {
@@ -232,28 +127,14 @@ export function CityView({ detail }: { detail: HubDetail }) {
   const econHub = economy?.hubs.find((h) => h.id === detail.id);
   const settlement = settlements.find((s) => s.name === detail.name);
   const kit = detail.culture ? kits?.get(detail.culture) : undefined;
-  const style: StyleKey = pickFamily(detail.koppen, kit, detail.coastal, econHub?.elevation);
-  const S = STYLES[style];
   const riverTrade = (flows?.goods ?? []).some((g) => (g.river_volume ?? 0) > 0)
     || (detail.vessels?.classes.find((c) => c.kind === "river")?.registered ?? 0) > 0;
-  const water = waterKind({ coastal: detail.coastal, seaAccess: econHub?.sea_access, river: settlement?.site === "river" || riverTrade, family: style });
-  const tier = detail.dev_tier ?? 0;
-  const walled = isWalled(detail.population, tier);
-  const bucket = popBucket(detail.population);
-
-  const slots = useMemo(() => deriveSlots(detail, econHub?.sea_access), [detail, econHub?.sea_access]);
-  const districts = useMemo(() => deriveDistricts(detail, slots), [detail, slots]);
-  const caravanN = detail.vessels?.classes.find((c) => c.kind === "caravan")?.registered ?? 0;
-  const cfg: CityCfg = useMemo(() => ({
-    name: detail.name || "city", style, water, walled, popBucket: bucket,
-    buildings: slots.map((s, i) => ({ kind: s.kind, status: s.status, color: s.color, ref: i })),
-    districts: districts.map((d) => ({ name: d.name, color: d.color })),
-    caravan: caravanN > 0 || (detail.in_by_land ?? 0) > 0 ? SCENE_CARAVAN[style] : null,
-    ships: sceneShips(detail.vessels, water, detail.in_by_sea ?? 0),
-  }), [detail.name, detail.vessels, detail.in_by_land, detail.in_by_sea, style, water, walled, bucket, slots, districts, caravanN]);
-  const sceneKey = useMemo(() => [detail.id, cfg.name, style, water, walled ? 1 : 0, bucket, tier, cfg.ships, cfg.caravan ?? "",
-    cfg.buildings.map((b) => `${b.kind}:${b.status}:${b.color}`).join(","), cfg.districts.map((d) => d.color).join(","), spriteTick].join("|"),
-  [detail.id, cfg, style, water, walled, bucket, tier, spriteTick]);
+  const scene = useMemo(() => cityScene(detail, {
+    kit, seaAccess: econHub?.sea_access, elevation: econHub?.elevation, river: settlement?.site === "river" || riverTrade,
+  }), [detail, kit, econHub?.sea_access, econHub?.elevation, settlement?.site, riverTrade]);
+  const { style, walled, tier, slots, districts, cfg } = scene;
+  const S = STYLES[style];
+  const sceneKey = `${detail.id}|${tier}|${cfgKey(cfg)}|${spriteTick}`;
 
   // Draw the scene (iso: cached low-res render blitted pixelated; plan: redrawn).
   useEffect(() => {
@@ -369,14 +250,6 @@ export function CityView({ detail }: { detail: HubDetail }) {
         <PartnersCard detail={detail} flows={flows} routes={routes} />
       </div>
     </div>
-  );
-}
-
-function HeadStat({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (
-    <span style={{ color: K.fa, fontSize: 11, whiteSpace: "nowrap" }}>
-      {label} <b style={{ color: color ?? K.tx, font: `700 15px ${K.hf}` }}>{value}</b>
-    </span>
   );
 }
 

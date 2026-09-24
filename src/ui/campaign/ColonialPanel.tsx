@@ -4,6 +4,8 @@ import { useUIStore } from "@state/uiStore";
 import { campaignGetColonies, campaignColonyGates, campaignGetColony, campaignGetExpeditions, campaignGetCorridors } from "@bridge";
 import type { ColonySummary, ColonyGateStatus, ColonyDetail, ExpeditionView, TradeCorridor } from "@types";
 import { useFloatingWindow } from "@ui/world/useFloatingWindow";
+import { ColonyWindow } from "@ui/campaign/ColonyWindow";
+import { WIDE_WINDOW } from "@ui/campaign/windowKit";
 
 // Colours mirror OverlayManager.ts (settlementColony / houseOutpost) + the app theme.
 const COLONY_VIOLET = "#c08cff";
@@ -93,6 +95,19 @@ export function ColonialPanel() {
   const { rootStyle, onPointerDown } = useFloatingWindow(COLONIAL_TINT);
   if (!open) return null;
   const close = () => useUIStore.getState().setShowColonial(false);
+
+  // A settlement colony or house outpost opens as the full colonial city view
+  // (the 1180px design window); the roster is one click back.
+  const selRow = active && sel != null ? colonies.find((c) => c.id === sel) : undefined;
+  if (selRow && (selRow.colony_kind === 1 || selRow.colony_kind === 2)) {
+    return (
+      <div data-draggable style={{ ...panel, right: 12, ...rootStyle, width: WIDE_WINDOW, maxHeight: "90vh", overflowY: "auto", padding: 6 }}
+        onPointerDown={onPointerDown}>
+        <ColonyWindow summary={selRow} roster={colonies} gates={gates} onClose={close} onDragStart={onPointerDown}
+          onBack={() => { setSel(null); setSelectedHub(null); setColonyHighlight(null); }} />
+      </div>
+    );
+  }
 
   return (
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>

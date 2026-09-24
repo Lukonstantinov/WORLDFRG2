@@ -327,6 +327,8 @@ interface UIStore {
   /** Coin-usage map overlay: the mint hub id of the coin to highlight on the map
    *  (cities that settle in it), or null for off. Set from the Currencies panel. */
   coinOverlayHub: number | null;
+  /** The coin (by name) whose Coin & bank window is open, or null. */
+  coinWindow: string | null;
   /** Goods & Chains review window open (always shown before goods generation). */
   chainReviewOpen: boolean;
   /** Action run when the user confirms "Generate" in the chain-review window
@@ -447,6 +449,7 @@ interface UIStore {
   setShowWorkflow: (v: boolean) => void;
   setShowToolbar: (v: boolean) => void;
   setCoinOverlayHub: (v: number | null) => void;
+  setCoinWindow: (v: string | null) => void;
   openChainReview: (onConfirm?: () => void) => void;
   closeChainReview: () => void;
 }
@@ -600,6 +603,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showWorkflow: true,
   showToolbar: true,
   coinOverlayHub: null,
+  coinWindow: null,
   chainReviewOpen: false,
   chainReviewConfirm: null,
 
@@ -796,6 +800,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowWorkflow: (v) => set({ showWorkflow: v }),
   setShowToolbar: (v) => set({ showToolbar: v }),
   setCoinOverlayHub: (v) => set({ coinOverlayHub: v }),
+  setCoinWindow: (v) => set({ coinWindow: v }),
   openChainReview: (onConfirm) => set({ chainReviewOpen: true, chainReviewConfirm: onConfirm ?? null }),
   closeChainReview: () => set({ chainReviewOpen: false, chainReviewConfirm: null }),
 

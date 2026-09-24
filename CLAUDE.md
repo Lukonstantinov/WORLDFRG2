@@ -2851,7 +2851,25 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   that partner would hurt. The two-tone in/out bar
                                   replaces the single-colour volume bar, so a good's
                                   DIRECTION reads without expanding its row
-  ColonialPanel.tsx             ← Colonies / colony gates / lifelines
+  ColonialPanel.tsx             ← Colonies / colony gates / lifelines. Selecting a settlement
+                                  colony or house outpost opens `ColonyWindow.tsx` — the 1180px
+                                  colonial city view (design handoff Turn 5, 5a/5b): a growth
+                                  strip (one seeded city drawn at the four stages via
+                                  `cityArt.ts`), the stage ladder with the real `colony_pass` /
+                                  `maybe_graduate_outpost` gate, backers, food reserve, convoys
+                                  and the founder's roster
+  windowKit.tsx                 ← SHARED shell for the 1180px design-handoff windows (CityView,
+                                  ColonyWindow, CoinBankWindow, HouseWindow): the Chronicle-dark
+                                  `K` tokens, `fk`/`fc`, Card/Bar/Stack/Spark/MarkChart/… ,
+                                  `WindowFrame`, `IsoThumb`, `cityScene()` and the culture-kit
+                                  cache
+  CoinBankWindow.tsx            ← 5c · one coin's window (uiStore.coinWindow, opened from a Mint
+                                  card or the Bank panel): fineness/trust/value biography with
+                                  event marks, cities settling in it, its chronicle, the bank of
+                                  issue's balance sheet, stakes and loan book
+  HouseWindow.tsx               ← 5d/5e · the house/guild overview plate — the dossier's
+                                  "🏛 Overview" tab (widens the window): seat iso, head, the five
+                                  gauges, heads, accounts, fleet, estates, charters, reach
   ImmigrationPanel.tsx          ← Route-bound migration corridors
   SatelliteConstructionPanel.tsx← Satellite (suburb) construction projects
   PlaguePanel.tsx               ← Historical epidemics
