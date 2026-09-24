@@ -3063,6 +3063,61 @@ pub(crate) const SEASONAL_MORTALITY_AMP: f32 = 0.6;
 /// mortality, not the whole of it.
 pub(crate) const SEASONAL_MORTALITY_BASE: f32 = 0.006;
 
+/// SETTLEMENT_LIFE_PLAN.md L8 (§3.7) — urban hazards, FIRST of its three
+/// named parts only: fire's toll on HOUSING and LIVES, layered onto the
+/// existing warehouse-stock fire event (`kind == "fire"` in `roll_events`,
+/// unconditional and UNCHANGED by this dose — the stock burn, house-wealth
+/// loss, depot damage and estate strike all ship exactly as before). Flood
+/// (riverine hubs, wet season) and water/sanitation (a new civic structure)
+/// are NOT built this pass, queued. Kept SEPARATE from `CALENDAR_DOSE`/
+/// `HOUSING_DOSE`/`VITAL_RATES_DOSE` per the standing "two doses moving
+/// together" rule. At `URBAN_HAZARD_DOSE <= 0.0`, `fire_settlement_toll_e`
+/// is a true no-op (returns `(0.0, 0.0)`).
+pub(crate) const URBAN_HAZARD_DOSE: f32 = 0.0;
+/// Scales the existing fire event's own `mag` (0.5-0.65ish, already the
+/// warehouse-stock burn fraction) into a housing-loss fraction, before the
+/// crowding/dry-season risk multiplier and the hard cap below are applied.
+pub(crate) const FIRE_HOUSING_LOSS_SCALE: f32 = 0.5;
+/// However severe the risk multiplier, a single fire event may never
+/// destroy more than this share of a hub's housing in one strike — "burns
+/// A FRACTION", never the whole city.
+pub(crate) const FIRE_HOUSING_LOSS_CAP: f32 = 0.35;
+/// Share of those displaced by a fire's housing loss who actually die —
+/// historically LOW even for a famous conflagration (the Great Fire of
+/// London, 1666: ~13,200 houses lost, a handful of recorded deaths). Fire
+/// destroys property far more efficiently than it kills.
+pub(crate) const FIRE_DEATH_RATE_OF_DISPLACED: f32 = 0.02;
+
+/// SETTLEMENT_LIFE_PLAN.md L8 (§3.7) — a fire's toll on housing and lives,
+/// riding on top of the EXISTING warehouse-stock fire event's own `mag`.
+/// `crowding` above 1.0 raises risk (a crowded city loses more to the same
+/// blaze); `timber_share` is a fixed proxy at 1.0 today — no per-hub
+/// building-material state exists yet, and the plan's own "a city that has
+/// burned may enact a stone-rebuilding law, lowering future risk" is
+/// EXPLICITLY QUEUED, not built this pass; `dry_season_mult` is the SAME
+/// local-summer risk curve `seasonal_mortality_mult_e`'s warm-climate branch
+/// already computes (fire risk peaks in a settlement's own dry/hot season
+/// regardless of whether its climate is generally hot or cold — reused
+/// rather than duplicated). Returns `(housing_frac_lost, death_frac)`, both
+/// exactly `(0.0, 0.0)` at `dose <= 0.0`.
+#[inline]
+pub(crate) fn fire_settlement_toll_e(
+    mag: f32,
+    crowding: f32,
+    timber_share: f32,
+    dry_season_mult: f32,
+    dose: f32,
+) -> (f32, f32) {
+    if dose <= 0.0 {
+        return (0.0, 0.0);
+    }
+    let risk = crowding.max(0.3) * timber_share.max(0.0) * dry_season_mult.max(0.1);
+    let housing_frac = (mag * FIRE_HOUSING_LOSS_SCALE * risk * dose.clamp(0.0, 1.0))
+        .clamp(0.0, FIRE_HOUSING_LOSS_CAP);
+    let death_frac = housing_frac * FIRE_DEATH_RATE_OF_DISPLACED;
+    (housing_frac, death_frac)
+}
+
 /// MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
 /// change, named twice) · `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
 /// above names the exact prerequisite this is: `update_food_and_starvation`

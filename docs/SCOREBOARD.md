@@ -9,6 +9,62 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-24d — `SETTLEMENT_LIFE_PLAN.md`: L8's fire toll shipped at dose 0
+
+Follow-up session to 2026-09-24c's L7. L8 (§3.7, "urban hazards: fire, flood,
+water") names three parts; this session ships only the first, fire's toll on
+housing and lives, and leaves flood (riverine hubs, wet season) and water/
+sanitation (a new civic structure) queued by name rather than declared out
+of scope (rule 36).
+
+**Reused the existing warehouse-fire mechanism rather than building a
+parallel one.** `roll_events` (production.rs) already rolls a global "fire"
+event a few times a century, burning a hub's stock, a slice of resident
+houses' wealth, one house depot, and sometimes a nearby estate — all of it
+unconditional and unchanged by this slice. `fire_settlement_toll_e` (mod.rs)
+adds a SECOND, dosed consequence riding the same event: housing loss and
+deaths, scaled by the event's own severity, the struck hub's crowding, a
+fixed `timber_share` proxy (no per-hub building-material state exists yet —
+the plan's own stone-rebuilding law is queued, not built), and a dry-season
+risk curve that REUSES `seasonal_mortality_mult_e`'s warm-climate branch
+(L7) rather than duplicating it — fire risk peaks at a settlement's own
+dry/hot season whatever its general climate. Housing loss is hard-capped
+(`FIRE_HOUSING_LOSS_CAP`) so a single fire burns a fraction, never the whole
+city; the death rate is a small, fixed share of those displaced
+(`FIRE_DEATH_RATE_OF_DISPLACED` — the Great Fire of London, 1666, lost
+~13,200 houses to a handful of recorded deaths, so fire destroys property
+far more efficiently than it kills). Deaths tag `CAUSE_FIRE`, reserved since
+L4 and at 0.0 until this slice.
+
+**Rebuilding demand needed no new code.** Burning housing below its target
+simply reopens the deficit L6's `update_housing` already closes — the two
+slices compose for free the moment `HOUSING_DOSE` is raised, exactly the
+"REBUILDING demand" the plan's own §3.7 text asks for, without a dedicated
+mechanism.
+
+**Fires/century is now printed**, satisfying the build-order table's own
+named L8 gate: `econ_measure_settlement_life` filters the world journal on
+the fire event's own text ("Fire ravages the warehouses of…"), the same
+lower-bound, journal-capped convention riots/revolts/plague strikes already
+use.
+
+Shipped `URBAN_HAZARD_DOSE = 0.0` — a true no-op: `fire_settlement_toll_e`
+returns exactly `(0.0, 0.0)`, and the pre-existing stock/wealth/depot/estate
+fire effects are unaffected at any dose (they are outside this slice's
+control flow entirely). Gated by `urban_hazard_dose_zero_is_a_noop` (every
+tried combination of severity/crowding/dry-season returns the no-op pair)
+and `fire_toll_is_bounded_and_worse_when_crowded` (a crowded hub loses more
+housing and more lives to the identical blaze than a comfortable one; the
+hard cap holds even under extreme inputs; the death rate stays a small
+fraction of the housing lost, matching the historical London 1666 ratio) —
+both new, `tick::tests` 304/304 (~42s). `cargo test --lib econ_ --
+--nocapture` 6/6 bit-identical including the multi-seed inheritance gate
+(559.71s). `npx tsc --noEmit` clean (no frontend change this slice). Raising
+the dose, flood, water/sanitation and the stone-rebuilding law each remain
+unstarted, separate work.
+
+---
+
 ## 2026-09-24c — `SETTLEMENT_LIFE_PLAN.md`: L7's seasonal mortality shipped at dose 0
 
 Follow-up session to 2026-09-24b's L6. L7 (§3.6, "the settlement year") names

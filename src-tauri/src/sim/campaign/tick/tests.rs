@@ -10122,3 +10122,42 @@
             "a full year's signed seasonal extras must net close to zero, drifted {drift:.4} of starting population");
     }
 
+    // ── SETTLEMENT_LIFE_PLAN.md L8 (fire, first of three named parts) ──────
+    #[test]
+    fn urban_hazard_dose_zero_is_a_noop() {
+        for mag in [0.2f32, 0.5, 0.65] {
+            for crowding in [0.5f32, 1.0, 2.5] {
+                for dry in [0.5f32, 1.0, 1.5] {
+                    assert_eq!(
+                        fire_settlement_toll_e(mag, crowding, 1.0, dry, 0.0),
+                        (0.0, 0.0),
+                        "dose 0 must return no housing/death toll for mag={mag} crowding={crowding} dry={dry}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn fire_toll_is_bounded_and_worse_when_crowded() {
+        let (comfortable_housing, comfortable_deaths) =
+            fire_settlement_toll_e(0.5, 0.6, 1.0, 1.0, 1.0);
+        let (crowded_housing, crowded_deaths) =
+            fire_settlement_toll_e(0.5, 2.5, 1.0, 1.0, 1.0);
+        assert!(crowded_housing > comfortable_housing,
+            "a crowded hub must lose MORE housing to the same blaze, got crowded={crowded_housing} comfortable={comfortable_housing}");
+        assert!(crowded_deaths > comfortable_deaths,
+            "a crowded hub must lose MORE lives to the same blaze, got crowded={crowded_deaths} comfortable={comfortable_deaths}");
+        // However severe the inputs, a single fire may never destroy more than
+        // the hard cap's share of a hub's housing in one strike.
+        let (extreme_housing, _) = fire_settlement_toll_e(0.65, 10.0, 5.0, 3.0, 1.0);
+        assert!(extreme_housing <= FIRE_HOUSING_LOSS_CAP + 1e-6,
+            "housing loss must never exceed FIRE_HOUSING_LOSS_CAP, got {extreme_housing}");
+        // Fire destroys property far more efficiently than it kills — the
+        // Great Fire of London (1666) lost ~13,200 houses to a handful of
+        // recorded deaths. The death rate is a fixed, small share of the
+        // displaced, never comparable in magnitude to the housing loss.
+        assert!(comfortable_deaths < comfortable_housing * 0.1,
+            "fire deaths must stay a small fraction of the housing lost, got deaths={comfortable_deaths} housing={comfortable_housing}");
+    }
+

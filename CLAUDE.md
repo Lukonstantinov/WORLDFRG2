@@ -1779,19 +1779,21 @@ as the atlas queries + window split + Houses redesign) — not silently dropped.
   fixes) — nothing here changes that sequencing, this entry only records
   which end of it landed.
 
-### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L7 shipped (L0-L3 the STOP MARKER, L4-L7 past it, L7 partial), L13 partly surfaced
+### 5.7 `docs/SETTLEMENT_LIFE_PLAN.md` — L0-L8 shipped (L0-L3 the STOP MARKER, L4-L8 past it, L7/L8 partial), L13 partly surfaced
 
 The plan's own §4 build order calls L0-L3 "a coherent landing" and caps a session
 at three doses. L0-L2 shipped in one session; L3 (the annals + Life tab) shipped
 in a follow-up session, so the STOP MARKER was reached in full — the hidden
 famine is measured, the welfare ratio exists AND is visible, and the player can
 see how a city lives. Further sessions then shipped **L4** (vital rates + age
-bands), **L5** (welfare into behaviour), **L6** (housing & crowding) and now
-**L7's first named part** (the settlement year's seasonal mortality), each
-at its own dose of zero, per the plan's own explicit permission to continue
-past the marker one gated slice at a time. L7's other three named parts (lean-
-months hoarding, harvest labour, feast days) and L8 onward remain queued (see
-below), with one exception: **the two L13 items that had real data already —
+bands), **L5** (welfare into behaviour), **L6** (housing & crowding), **L7's
+first named part** (the settlement year's seasonal mortality) and now **L8's
+first named part** (fire's toll on housing and lives), each at its own dose
+of zero, per the plan's own explicit permission to continue past the marker
+one gated slice at a time. L7's other three named parts (lean-months
+hoarding, harvest labour, feast days), L8's other two named parts (flood,
+water/sanitation) and L9 onward remain queued (see below), with one
+exception: **the two L13 items that had real data already —
 the age pyramid and causes of death, both computed by L4 and sitting unused
 in `TickHub` — are now surfaced in the Life tab**, rather than waiting on
 L13's other five ingredients. Housing/crowding (L6) is now real DATA too
@@ -2021,14 +2023,45 @@ behind them yet (L9/L10/L12).
   NOT built, queued. Gated by `calendar_dose_zero_is_a_noop`, `summer_fever_
   in_the_south_winter_deaths_in_the_north`, `seasonal_mortality_redistributes_
   rather_than_adds` (`tick::tests`, 302/302).
+- **L8 — urban hazards (§3.7), FIRST of its three named parts only: fire's
+  toll on housing and lives.** Rides on top of the EXISTING warehouse-stock
+  fire event (`kind == "fire"` in `roll_events`, production.rs) rather than
+  inventing a parallel mechanism — the stock burn, house-wealth loss, depot
+  damage and estate strike all ship exactly as before, unconditional and
+  UNCHANGED by this dose. `fire_settlement_toll_e` (mod.rs) scales the
+  event's own severity (`mag`) by crowding (a crowded hub loses more to the
+  same blaze), a fixed `timber_share` proxy at 1.0 (no per-hub
+  building-material state exists yet — the plan's own "a burned city may
+  enact a stone-rebuilding law, lowering future risk" is explicitly QUEUED,
+  not built), and a dry-season risk curve that REUSES `seasonal_mortality_
+  mult_e`'s warm-climate branch (fire risk peaks at a settlement's own
+  dry/hot season regardless of whether its climate is generally hot or
+  cold — one curve, two readers, not duplicated). Housing loss is
+  hard-capped (`FIRE_HOUSING_LOSS_CAP`) — a fire burns A FRACTION, never the
+  whole city — and the resulting death rate is a small, fixed share of those
+  displaced (`FIRE_DEATH_RATE_OF_DISPLACED`: the Great Fire of London, 1666,
+  lost ~13,200 houses to a handful of recorded deaths — fire destroys
+  property far more efficiently than it kills). Deaths tag `CAUSE_FIRE`
+  (reserved since L4, at 0.0 until this slice writes it). **Rebuilding
+  demand needed no new code**: burning housing below its target simply
+  reopens the deficit L6's `update_housing` already closes, the moment
+  `HOUSING_DOSE` is raised — the two slices compose for free. Fires/century
+  is now PRINTED (`econ_measure_settlement_life`, journal-filtered on the
+  fire event's own text, the same lower-bound convention riots/revolts/
+  plague strikes already use) — satisfying the build-order table's own named
+  gate. Flood (riverine hubs, wet season) and water/sanitation (a new civic
+  structure raising `public_health`) are NOT built this pass, queued. Gated
+  by `urban_hazard_dose_zero_is_a_noop`, `fire_toll_is_bounded_and_worse_
+  when_crowded` (`tick::tests`, 304/304).
 - **What did NOT ship, and why (rule 36 — queued, not waived)**: L7's other
-  three named parts (above); L8 onward (urban hazards, the church, the
-  watch, persistent pops, townspeople) are each their own dose walk per the
-  plan's own build order and are unstarted; L6's own rent/growth-ceiling
-  sub-effects and the rest of Life tab v2 (§3.13) wait as named above. Gates
-  run across all sessions: `cargo check --lib --tests` (clean), `cargo test
-  --lib tick::tests` (302/302, ~42s), `cargo test --lib econ_ -- --nocapture`
-  (6/6 incl. the multi-seed inheritance gate), `npx tsc --noEmit` (clean).
+  three named parts, L8's other two named parts (above); L9 onward (the
+  church, the watch, persistent pops, townspeople) are each their own dose
+  walk per the plan's own build order and are unstarted; L6's own
+  rent/growth-ceiling sub-effects and the rest of Life tab v2 (§3.13) wait as
+  named above. Gates run across all sessions: `cargo check --lib --tests`
+  (clean), `cargo test --lib tick::tests` (304/304, ~42s), `cargo test --lib
+  econ_ -- --nocapture` (6/6 incl. the multi-seed inheritance gate), `npx tsc
+  --noEmit` (clean).
 
 ---
 
