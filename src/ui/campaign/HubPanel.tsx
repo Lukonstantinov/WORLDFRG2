@@ -439,7 +439,10 @@ export function HubPanel() {
   return (
     <div data-draggable style={{ ...panel, ...rootStyle, // The Trade tab renders CityMarketView's three-column quay (partner cities either
       // side of the market); 600px squeezed them to the point the city names elided.
-      width: tab === "trade" ? 780 : 360, transition: "width 160ms ease" }} onPointerDown={onPointerDown}>
+      // The City tab hosts the full settlement window (a 1180-wide scene + card
+      // grid, per the settlement design handoff), capped to the viewport.
+      width: tab === "trade" ? 780 : tab === "city" && detail && !detail.is_estate ? "min(1206px, calc(100vw - 24px))" : 360,
+      transition: "width 160ms ease" }} onPointerDown={onPointerDown}>
       {/* ── Title + stats header (always visible; drag handle) ── */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 4, cursor: "move" }} onPointerDown={onPointerDown}>
         <div>
@@ -484,13 +487,9 @@ export function HubPanel() {
       {/* ════════════ CITY / ESTATE SCHEMATIC ════════════ */}
       {tab === "city" && detail && (
         <>
-          {!detail.is_estate && (
-            <>
-              <div style={{ ...sectionHdr, marginBottom: 4 }}>City plan</div>
-              <CityView detail={detail} />
-            </>
-          )}
-          <SettlementScene detail={detail} />
+          {/* A city gets the settlement window (culture/climate iso scene, tier
+              ladder, six cards); an estate keeps its own schematic. */}
+          {detail.is_estate ? <SettlementScene detail={detail} /> : <CityView detail={detail} />}
           {detail.coin_basket && detail.coin_basket.length > 0 ? (
             <CurrencyBasket basket={detail.coin_basket} />
           ) : campActive ? (
