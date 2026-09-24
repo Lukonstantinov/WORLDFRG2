@@ -14,18 +14,60 @@ const METALS: Record<CoinMetal, Palette> = {
   bronze:   { hi: "#efc196", mid: "#c07f45", lo: "#824c22", edge: "#532f14", rimHi: "#f2c99e", rimLo: "#48280f", wear: "#2a1608" },
 };
 
+/** MONEY_AND_COINAGE_PLAN.md §4.1/D7 · which denomination tier a coin's
+ *  REVERSE motif names — 0 Gold · 1 Silver · 2 Petty (`Denom.tier`, the same
+ *  three values `coinage.rs` ships). The obverse carries the issuer's arms;
+ *  the reverse has no person to portray, so it carries the tier's own
+ *  emblem instead — a sunburst for a gold trade coin, a crescent for the
+ *  everyday silver, a plain cross for petty/billon change, each a real
+ *  numismatic convention rather than an invented mark. */
+export type DenomTier = 0 | 1 | 2;
+
+function ReverseMotif({ tier, color }: { tier: DenomTier; color: string }) {
+  if (tier === 0) {
+    // A sunburst — the trade coin's high-value emblem.
+    const rays = Array.from({ length: 8 }, (_, i) => {
+      const a = (i / 8) * Math.PI * 2;
+      const x1 = 50 + Math.cos(a) * 8, y1 = 50 + Math.sin(a) * 8;
+      const x2 = 50 + Math.cos(a) * 17, y2 = 50 + Math.sin(a) * 17;
+      return <line key={i} x1={x1} y1={y1} x2={x2} y2={y2} stroke={color} strokeWidth={2.6} strokeLinecap="round" />;
+    });
+    return <g opacity={0.85}>{rays}<circle cx={50} cy={50} r={6} fill={color} /></g>;
+  }
+  if (tier === 1) {
+    // A crescent — everyday silver.
+    return (
+      <g opacity={0.85}>
+        <path d="M 58 33 A 19 19 0 1 0 58 67 A 15 15 0 1 1 58 33 Z" fill={color} />
+      </g>
+    );
+  }
+  // A plain cross — petty/billon change, the humblest device.
+  return (
+    <g opacity={0.85}>
+      <rect x={46.5} y={30} width={7} height={40} rx={1.5} fill={color} />
+      <rect x={30} y={46.5} width={40} height={7} rx={1.5} fill={color} />
+    </g>
+  );
+}
+
 /** DLC 3.5 · a struck coin rendered as a realistic minted disc: a reeded (milled)
  *  edge, a raised rim lit from the top-left, a domed metallic field, a beaded
  *  inner ring and a specular gloss, with the issuer's coat of arms embossed at
  *  the centre. `metal` picks the bullion (gold/silver/electrum/bronze) from what
  *  the polis can reach; `value` (agio) then modulates the strike — a strong coin
- *  gleams, a debased one is worn/tarnished — so soundness reads at a glance. */
-export function CoinIcon({ issuer, size = 22, value, metal = "gold", title }: {
+ *  gleams, a debased one is worn/tarnished — so soundness reads at a glance.
+ *  `face: "reverse"` (§4.1/D7 — the catalogue's coin card) swaps the embossed
+ *  arms for the denomination's own tier motif (`reverseTier`), since a
+ *  reverse has no person to portray. */
+export function CoinIcon({ issuer, size = 22, value, metal = "gold", title, face = "obverse", reverseTier = 1 }: {
   issuer?: string;
   size?: number;
   value?: number;
   metal?: CoinMetal;
   title?: string;
+  face?: "obverse" | "reverse";
+  reverseTier?: DenomTier;
 }) {
   const uid = useId().replace(/:/g, "");
   const gid = (s: string) => `${s}${uid}`;
@@ -85,14 +127,20 @@ export function CoinIcon({ issuer, size = 22, value, metal = "gold", title }: {
         <g>{beads}</g>
         {/* Top specular gloss (brighter on a hard coin) */}
         <ellipse cx={40} cy={29} rx={21} ry={11} fill="#ffffff" opacity={gloss} />
+        {/* Reverse — the denomination's own tier motif, struck the same way the
+            obverse's arms are (no separate relief filter needed: it's already
+            inside the shaded disc). */}
+        {face === "reverse" && <ReverseMotif tier={reverseTier} color={M.edge} />}
       </svg>
-      {/* Central device — coat of arms, struck into the metal (drop-shadow = relief). */}
-      {issuer
+      {/* Central device — coat of arms, struck into the metal (drop-shadow = relief).
+          Only the OBVERSE carries a person's arms; the reverse's motif is drawn
+          inside the SVG above, since it has no separate coat-of-arms component. */}
+      {face === "obverse" && (issuer
         ? <span style={{ position: "relative", lineHeight: 0, filter: "drop-shadow(0 0.5px 0.4px rgba(0,0,0,0.55))" }}>
             <CoatOfArms name={issuer} size={armSize} />
           </span>
         : <span style={{ position: "relative", fontSize: armSize * 1.0, lineHeight: 1, color: M.edge,
-            textShadow: "0 0.5px 0 rgba(255,255,255,0.3)" }}>✦</span>}
+            textShadow: "0 0.5px 0 rgba(255,255,255,0.3)" }}>✦</span>)}
     </span>
   );
 }

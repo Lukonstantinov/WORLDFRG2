@@ -9,6 +9,44 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-24 — M2's coin catalogue gets real card art (D7, §4.1)
+
+User asked whether the catalogue's cards were done; they weren't — M2
+shipped as a plain data listing, its own comment saying so explicitly.
+Built the coin CARD itself rather than the whole §4.1 design: `CoinIcon`
+(`ui/heraldry/CoinIcon.tsx`, already rendering a house's own mint mark
+elsewhere in the app) gained a `face="reverse"` mode with a new
+`ReverseMotif` — a sunburst for gold, a crescent for silver, a plain cross
+for petty/billon, one SVG glyph per `Denom.tier`, drawn inside the SAME
+shaded/worn/tinted disc the obverse already uses so metal and wear read
+identically on both faces. No backend change needed: metal tint reads
+straight off `Denom.tier` (`METAL_FOR_TIER`, `MoneyFinancePanel.tsx`)
+since the tier already says what a coin is struck in.
+
+Every `IssueRow` in the Catalogue tab now shows a real obverse (`iss.
+authority`'s arms) beside a reverse (the tier motif), both worn by that
+issue's own `fineness` through `CoinIcon`'s existing wear rule (the same
+rule that already tarnishes a house's own coin at a low `coin_value`) —
+so a debased issue visibly looks worn next to a sound one, exactly what a
+numismatic catalogue is FOR. `CurrencyCatalogueCard`'s collapsed header
+also gained a headline obverse (the currency's highest-tier denom's latest
+issue), so a browsing eye sees the coin, not just a name.
+
+**Still scoped down from §4.1's full design**, named per rule 36: no rim
+legend text (curved SVG text-on-path, a real future refinement), no
+denomination/issue detail PAGES (weight chart, circulation map, hoards,
+follow-a-coin), no standalone floating window. What shipped is a real coin
+card in a browse list, replacing plain text rows — not the whole
+numismatic reference book.
+
+Gates: `npx tsc --noEmit` clean, `npx vite build` clean (181 modules) — no
+Rust touched, so no backend gate applies. No display in this environment
+to actually open the panel and look at it, stated plainly rather than
+claimed as visually verified (the same caveat `HOUSES_GUILDS_AND_MARKET_
+PLAN.md` S10 recorded for its own frontend-only work).
+
+---
+
 ## 2026-09-23e — Two real bugs found and FIXED behind 2026-09-23d's dose walk
 
 Continuation of the same session's dose-walk trial: rather than accept

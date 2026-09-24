@@ -13,7 +13,7 @@ import type {
   HouseBrief, SpecCenter, MonetaryEvent, ReservesPayload, ReserveHolder, CoinSnapshot,
   CoinCatalogue, CatalogueCurrency, CatalogueIssue,
 } from "@types";
-import { CoinIcon, type CoinMetal } from "@ui/heraldry/CoinIcon";
+import { CoinIcon, type CoinMetal, type DenomTier } from "@ui/heraldry/CoinIcon";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** v2.0 · 💰 Money & Finance — the ONE window for the whole monetary system,
@@ -483,13 +483,27 @@ const ISSUE_CAUSE_LABEL: Record<number, string> = { 0: "first struck", 1: "debas
 const ISSUE_CAUSE_COLOR: Record<number, string> = { 0: "#8aa8c8", 1: "#e0a020", 2: "#7fd0a0" };
 const DENOM_TIER_LABEL: Record<number, string> = { 0: "Gold", 1: "Silver", 2: "Petty" };
 
+/** Metal tint per denomination tier (§4.1/D7), read straight off `Denom.tier`
+ *  — no backend field needed, the tier already says what the coin is struck
+ *  in. Petty/billon coins have no `CoinMetal` of their own; "bronze" is the
+ *  closest of the four the icon already knows. */
+const METAL_FOR_TIER: Record<number, CoinMetal> = { 0: "gold", 1: "silver", 2: "bronze" };
+
 /** MONEY_AND_COINAGE_PLAN.md M2 · the coin CATALOGUE — a numismatic reference
  *  listing of every currency ever struck, its denominations and their dated
- *  issue timelines. A first, functional cut of the plan's own §4.1 —
- *  browse + denomination + issue detail collapsed into one card rather than
- *  the full Victorian-engraved obverse/reverse art treatment (D7) the plan's
- *  own design calls for; that illustration work is real, separate, unbuilt
- *  effort (`goodArt.ts`'s ledger treatment, not `CoinIcon`'s flat heraldry). */
+ *  issue timelines. §4.1/D7's own coin CARD is now real: each issue strikes
+ *  an obverse (`CoinIcon`, the issuing authority's arms — `iss.authority`,
+ *  a house name or "the council of X", embossed exactly the way a house's
+ *  own mint mark already renders elsewhere in this app) beside a reverse
+ *  (`CoinIcon face="reverse"`, the denomination's own tier motif — sunburst/
+ *  crescent/cross — since a reverse has no person to portray), metal-tinted
+ *  by `METAL_FOR_TIER` and worn/tarnished by the issue's own `fineness`
+ *  (the SAME wear rule `CoinIcon` already uses for a house's coin_value).
+ *  **Still scoped down** from the plan's full design: no rim legend text,
+ *  no denomination/issue detail PAGES (weight chart, circulation map,
+ *  hoards, follow-a-coin), and no standalone floating window (§4.1's own
+ *  layout) — a browse grid with real card art in place of the plain data
+ *  rows this tab shipped with, not the whole numismatic reference book. */
 function CatalogueTab({ catalogue }: { catalogue: CoinCatalogue }) {
   const l = catalogue.ledger;
   return (
@@ -501,8 +515,7 @@ function CatalogueTab({ catalogue }: { catalogue: CoinCatalogue }) {
         <>
           <div style={hint}>
             Every mint that has ever struck a coin, with its denominations and the dated timeline of issues
-            behind each — first striking, debasement, reform. A first cut of the numismatic catalogue
-            (M2): the full engraved card art is separate, unbuilt work.
+            behind each — first striking, debasement, reform, each shown as a real obverse/reverse coin card.
           </div>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "4px 4px 10px", borderBottom: "1px solid #131e2a", marginBottom: 6 }}
             title="M3's parallel ledger (§3.1/§3.2) — real Purses computed alongside the existing wealth/treasury numbers, not yet reconciled with them. No coin has ever been spent, melted, lost or hoarded in this ledger yet, so struck and held always agree exactly.">
@@ -522,9 +535,19 @@ function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
   const [open, setOpen] = useState(false);
   const strengthColor = c.strength >= 55 ? "#37a05a" : c.strength >= 40 ? "#c8a23a" : "#d08a3a";
   const totalIssues = c.denoms.reduce((n, d) => n + d.issues.length, 0);
+  // The card's own headline obverse: the currency's HIGHEST-tier denom's
+  // latest issue (gold over silver over petty — a trade coin is what a
+  // currency is known by), so a browsing eye sees the coin, not just its name.
+  const headline = c.denoms.slice().sort((a, b) => a.tier - b.tier)[0];
+  const headlineIssue = headline?.issues[headline.issues.length - 1];
   return (
     <div style={card} onClick={() => setOpen((v) => !v)}>
-      <div style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+        {headline && headlineIssue && (
+          <CoinIcon issuer={headlineIssue.authority} value={headlineIssue.fineness}
+            metal={METAL_FOR_TIER[headline.tier] ?? "silver"} size={30}
+            title={`${headlineIssue.authority} — ${headlineIssue.cognomen}`} />
+        )}
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{c.name}</span>
         {!c.open && <span style={{ color: "#8a6a6a", fontSize: 9 }}>closed {c.closed_year}</span>}
         <span style={{ flex: 1 }} />
@@ -541,11 +564,11 @@ function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
       {open && (
         <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
           {c.denoms.map((d) => (
-            <div key={d.tier} style={{ marginBottom: 8 }}>
-              <div style={{ color: "#cbb88a", fontSize: 10, fontWeight: 700, marginBottom: 3 }}>
+            <div key={d.tier} style={{ marginBottom: 10 }}>
+              <div style={{ color: "#cbb88a", fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
                 {DENOM_TIER_LABEL[d.tier] ?? "Denom"} — {d.name} <span style={{ color: "#5a7290", fontWeight: 400 }}>({d.standard_grams.toFixed(1)}g standard)</span>
               </div>
-              {d.issues.map((iss) => <IssueRow key={iss.id} iss={iss} />)}
+              {d.issues.map((iss) => <IssueRow key={iss.id} iss={iss} tier={d.tier} />)}
             </div>
           ))}
         </div>
@@ -554,11 +577,21 @@ function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
   );
 }
 
-function IssueRow({ iss }: { iss: CatalogueIssue }) {
+function IssueRow({ iss, tier }: { iss: CatalogueIssue; tier: number }) {
+  const metal = METAL_FOR_TIER[tier] ?? "silver";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 9.5, padding: "2px 0 2px 8px", borderLeft: "2px solid #1b2a3c" }}>
-      <span style={{ color: "#7a90a8", width: 40, flex: "0 0 auto" }}>{iss.year}</span>
-      <span style={{ color: ISSUE_CAUSE_COLOR[iss.cause] ?? "#9ab0c8", width: 68, flex: "0 0 auto" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 9.5, padding: "3px 0 3px 8px", borderLeft: "2px solid #1b2a3c" }}>
+      {/* The coin card (D7, §4.1) — obverse (the striking authority's own
+          arms) beside reverse (the denomination's tier motif), both tinted
+          by metal and worn by this issue's own fineness. */}
+      <span style={{ display: "flex", gap: 2, flex: "0 0 auto" }}>
+        <CoinIcon issuer={iss.authority} value={iss.fineness} metal={metal} size={24}
+          title={`Obverse — ${iss.authority}`} />
+        <CoinIcon face="reverse" reverseTier={tier as DenomTier} value={iss.fineness} metal={metal} size={24}
+          title={`Reverse — ${DENOM_TIER_LABEL[tier] ?? "denomination"}`} />
+      </span>
+      <span style={{ color: "#7a90a8", width: 36, flex: "0 0 auto" }}>{iss.year}</span>
+      <span style={{ color: ISSUE_CAUSE_COLOR[iss.cause] ?? "#9ab0c8", width: 62, flex: "0 0 auto" }}>
         {ISSUE_CAUSE_LABEL[iss.cause] ?? "issue"}
       </span>
       <span style={{ color: "#9ab0c8" }}>{iss.cognomen}</span>
