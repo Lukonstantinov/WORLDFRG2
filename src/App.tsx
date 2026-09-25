@@ -35,6 +35,7 @@ import { PlaguePanel } from "@ui/campaign/PlaguePanel";
 import { ImmigrationPanel } from "@ui/campaign/ImmigrationPanel";
 import { GuildsPanel } from "@ui/campaign/GuildsPanel";
 import { FiguresPanel } from "@ui/campaign/FiguresPanel";
+import { NotablesPanel } from "@ui/campaign/NotablesPanel";
 import { LandmarksPanel } from "@ui/campaign/LandmarksPanel";
 import { DynastiesPanel } from "@ui/campaign/DynastiesPanel";
 import { GoodsMarketPanel } from "@ui/goods/GoodsMarketPanel";
@@ -1104,6 +1105,7 @@ export default function App() {
           <ImmigrationPanel />
           <GuildsPanel />
           <FiguresPanel />
+          <NotablesPanel />
           <LandmarksPanel />
           <DynastiesPanel />
           <GoodsMarketPanel />

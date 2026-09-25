@@ -2038,7 +2038,7 @@ impl CampaignSim {
 /// low through early adulthood, rising after ~60, steep past ~75.
 /// `PERSON_CHILD_MORTALITY` covers the under-5 band on its own (the plan's own
 /// fragmentation engine, §3.8 path B, depends on it landing near real-world scale).
-fn person_mortality_hazard(age_years: u32) -> f32 {
+pub(crate) fn person_mortality_hazard(age_years: u32) -> f32 {
     match age_years {
         0..=4 => PERSON_CHILD_MORTALITY,
         5..=14 => 0.004,

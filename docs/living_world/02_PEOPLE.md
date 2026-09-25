@@ -1,6 +1,7 @@
 # 02 · People
 
-**Status:** NOT STARTED · **Depends on:** 01 · **Next:** 03
+**Status:** PARTIAL — slices 02.1-02.5, 02.8 shipped (see §Queue for 02.6/02.7/02.9's
+still-open items) · **Depends on:** 01 · **Next:** 03
 
 ## Goal
 
@@ -262,17 +263,17 @@ are recorded but applied only once those rows exist (they no-op before).
 
 ## Slices
 
-| Slice | Content | Gate |
-|---|---|---|
-| 02.1 | `Individual` + `people`/`hall_of_dead`; load-time migration of `Figure` (with its `life_log`); L12 `Notable` linked to stable `Individual` ids; the **weekly** `tick % 7` hook added to `advance()`; the salt registry; **inert** | `figures_migrate_to_individuals_losslessly`, `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero` |
-| 02.2 | Trait catalogue, modifier catalogue, `decide()` with the 75 % rule, reasons | `decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`, `decisions_are_deterministic` |
-| 02.3 | Life cycle: debut ≥ 16, aging, mortality (reuse `person_mortality_hazard`), death causes, fame, promotion/demotion, Hall of the Dead, ordinary forgotten | `notables_never_exceed_the_cap`, `dead_notables_keep_their_story`, `dead_ordinary_people_are_removed` |
-| 02.4 | Event engine: rate, tag evaluation, layered pool with fallback, effects, logging | `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence` |
-| 02.5 | ~40 starter templates + the geography lint | `life_event_templates_respect_geography` |
-| 02.6 | **Separate session:** ~150 more templates, reviewed by an agent against the lint and role list | the same lint |
-| 02.7 | Faces: feature layers in `cultureDress.ts`; acquired features | `tsc`, visual check |
-| 02.8 | Person window, roster, Hall of the Dead — commands `campaign_get_individual`, `campaign_get_notables`, `campaign_get_hall_of_dead` (lib.rs + bridge + types) | `tsc`, `vite build` |
-| 02.9 | End of row: `bench_campaign_tick_large` before/after, `tick::tests`, `econ_` | numbers in SCOREBOARD |
+| Slice | Content | Gate | Status |
+|---|---|---|---|
+| 02.1 | `Individual` + `people`/`hall_of_dead`; load-time migration of `Figure` (with its `life_log`); L12 `Notable` linked to stable `Individual` ids; the **weekly** `tick % 7` hook added to `advance()`; the salt registry; **inert** | `figures_migrate_to_individuals_losslessly`, `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero` | **DONE** |
+| 02.2 | Trait catalogue, modifier catalogue, `decide()` with the 75 % rule, reasons | `decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`, `decisions_are_deterministic` | **DONE** — `decide()` is pure/tested; not yet wired to a decision SITE, see Queue |
+| 02.3 | Life cycle: debut ≥ 16, aging, mortality (reuse `person_mortality_hazard`), death causes, fame, promotion/demotion, Hall of the Dead, ordinary forgotten | `notables_never_exceed_the_cap`, `dead_notables_keep_their_story`, `dead_ordinary_people_are_removed` | **DONE** |
+| 02.4 | Event engine: rate, tag evaluation, layered pool with fallback, effects, logging | `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence` | **DONE** — siege/festival turbulence and lake/mountain/forest tags queued (no producing signal in `tick/`) |
+| 02.5 | ~40 starter templates + the geography lint | `life_event_templates_respect_geography` | **DONE** |
+| 02.6 | **Separate session:** ~150 more templates, reviewed by an agent against the lint and role list | the same lint | NOT STARTED (by design) |
+| 02.7 | Faces: feature layers in `cultureDress.ts`; acquired features | `tsc`, visual check | NOT STARTED — needs a display to verify (see Queue) |
+| 02.8 | Person window, roster, Hall of the Dead — commands `campaign_get_individual`, `campaign_get_notables`, `campaign_get_hall_of_dead` (lib.rs + bridge + types) | `tsc`, `vite build` | **DONE**, as a plain list — not yet the FiguresPanel-as-gallery redesign |
+| 02.9 | End of row: `bench_campaign_tick_large` before/after, `tick::tests`, `econ_` | numbers in SCOREBOARD | **DONE** — see `docs/SCOREBOARD.md` 2026-09-25 |
 
 No row-02 mechanism moves money or population except what `living_figures_pass`
 already does, so `econ_` should be bit-identical.

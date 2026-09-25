@@ -1097,6 +1097,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         mine_deposits: vec![],
         deposit_potential_cache: Default::default(),
         units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
+        people: vec![], hall_of_dead: vec![], people_tombstones: vec![], next_individual_id: 0, people_migrated: false,
         life_log_synced_tick: 0,
     };
     seed_mine_deposits(&conn, &mut sim);

@@ -311,6 +311,8 @@ interface UIStore {
   showGuilds: boolean;
   /** Phase 6 · Notable Figures panel open. */
   showFigures: boolean;
+  /** 02_PEOPLE.md · Notables roster + Hall of the Dead panel open. */
+  showNotables: boolean;
   /** Phase 6 · Landmarks & Sacred Sites panel open. */
   showLandmarks: boolean;
   /** Phase 7 · Dynasties & Alliances panel open. */
@@ -448,6 +450,7 @@ interface UIStore {
   setShowImmigration: (v: boolean) => void;
   setShowGuilds: (v: boolean) => void;
   setShowFigures: (v: boolean) => void;
+  setShowNotables: (v: boolean) => void;
   setShowLandmarks: (v: boolean) => void;
   setShowDynasties: (v: boolean) => void;
   setShowGoodsWindow: (v: boolean) => void;
@@ -604,6 +607,7 @@ export const useUIStore = create<UIStore>((set) => ({
   showImmigration: false,
   showGuilds: false,
   showFigures: false,
+  showNotables: false,
   showLandmarks: false,
   showDynasties: false,
   showGoodsWindow: false,
@@ -798,6 +802,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowImmigration: (v) => set({ showImmigration: v }),
   setShowGuilds: (v) => set({ showGuilds: v }),
   setShowFigures: (v) => set({ showFigures: v }),
+  setShowNotables: (v) => set({ showNotables: v }),
   setShowLandmarks: (v) => set({ showLandmarks: v }),
   setShowDynasties: (v) => set({ showDynasties: v }),
   setShowGoodsWindow: (v) => set({ showGoodsWindow: v }),

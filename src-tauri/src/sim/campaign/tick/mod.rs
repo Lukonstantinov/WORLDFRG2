@@ -7181,6 +7181,12 @@ pub struct Notable {
     pub name: String,
     /// The guildmaster's own craft (good index), else −1.
     pub good: i32,
+    /// 02_PEOPLE.md — the stable `Individual` id this local role points at
+    /// (created once; the yearly rebuild carries it forward by name rather
+    /// than minting a fresh person every year). −1 on an old save until the
+    /// next `update_notables` links it.
+    #[serde(default = "neg_one_i32")]
+    pub individual_id: i32,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L12 — the shared dose gating BOTH institutional
@@ -8171,6 +8177,22 @@ pub struct CampaignSim {
     /// and friends before their own doses were ever raised.
     #[serde(default)] pub diag_barter_trades: u32,
     #[serde(default)] pub diag_barter_volume: f32,
+
+    // ── Living World row 02 (`docs/living_world/02_PEOPLE.md`) — the ONE
+    // Person system (`individuals.rs`/`life_events.rs`). Appended LAST →
+    // `#[serde(default)]` so every existing save loads with none, migrating
+    // `Figure` → `Individual` on first `advance()`.
+    /// Every living `Individual` — ordinary and famous.
+    #[serde(default)] pub people: Vec<Individual>,
+    /// Dead notables, kept forever with their full life (the Hall of the Dead).
+    #[serde(default)] pub hall_of_dead: Vec<Individual>,
+    /// A forgotten ordinary person's tombstone, while anything might still
+    /// reference their id (00_INDEX "Ids and tombstones"). Capped.
+    #[serde(default)] pub people_tombstones: Vec<Tombstone>,
+    /// Monotonic id counter for `Individual.id` — never reused.
+    #[serde(default)] pub next_individual_id: u32,
+    /// One-time migration flag: `Figure` → `Individual` has run.
+    #[serde(default)] pub people_migrated: bool,
 
     // ── living_world/01_FEEDS_AND_PRUNING.md ──────────────────────────────
     /// High-water mark: journal entries with `tick <= life_log_synced_tick`
@@ -9624,6 +9646,12 @@ impl CampaignSim {
             }
             self.fleets_migrated = true;
         }
+        // Living World row 02 (02_PEOPLE.md) · one-time: unify every still-
+        // referenced `Figure` into the new `Individual` roster.
+        if !self.people_migrated {
+            self.migrate_figures_to_individuals();
+            self.people_migrated = true;
+        }
         // Tech factor defaults to 0.0 on pre-existing saves (serde) → treat as 1.0.
         if self.tech_factor <= 0.0 {
             self.tech_factor = 1.0;
@@ -9760,6 +9788,13 @@ impl CampaignSim {
             let n = self.hubs.len();
             let doy = self.day_of_year();
 
+            // Living World row 02 (02_PEOPLE.md) · the new WEEKLY cadence hook
+            // (00_INDEX "Cadence hooks") — expires modifiers, fires due life
+            // events. `O(people)` with small constants.
+            if tick % 7 == 0 {
+                self.people_weekly_pass();
+            }
+
             // Phase G: keep the per-house ledgers aligned to the house list, and roll
             // the year over on the New Year — the just-finished year becomes the
             // Accountant's displayed `_prev`, and a fresh current year starts.
@@ -9875,6 +9910,11 @@ impl CampaignSim {
                 // Phase 4 (flavour) · raise/retire notable figures (Great Lives).
                 self.raise_notable_figures(yr);
                 self.living_figures_pass();
+                // Living World row 02 (02_PEOPLE.md) · aging, mortality, fame
+                // decay/promotion/demotion, Hall of the Dead — BEFORE
+                // `update_notables` so a seat a person just died out of is
+                // free to relink this same year.
+                self.people_yearly_pass(yr);
                 // Feuds · a council both houses trade in may impose a settlement on a
                 // long-running quarrel. Runs BEFORE marriages, so a feud the council
                 // settled this year is not also "sealed by marriage" in the same year.
@@ -11348,6 +11388,11 @@ pub use houses::{kin_power_shares, character_phrase};
 mod crisis;
 mod schism;
 mod foreign_hand;
+mod individuals;
+mod life_events;
+pub(crate) use individuals::*;
+pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
+pub(crate) use realms::person_mortality_hazard;
 mod production;
 mod realms;
 mod envoys;

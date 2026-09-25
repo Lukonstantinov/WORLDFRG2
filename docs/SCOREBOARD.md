@@ -9,6 +9,64 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-25 — `docs/living_world/02_PEOPLE.md`: the Individual system (Living World row 02, slices 02.1-02.5/02.8)
+
+Row 02 of the new `docs/living_world/00_INDEX.md` build queue — the ONE
+`Individual` record for every named human the campaign tracks. Started on a
+branch dedicated to it while a sibling branch/session works row 01
+concurrently, on explicit maintainer instruction (see 00_INDEX's own note on
+this). Full account in CLAUDE.md §5.8.
+
+Shipped: `Individual`/`Modifier`/`LifeEntry`/`Tombstone`
+(`sim/campaign/tick/individuals.rs`), load-time `Figure`→`Individual`
+migration, the L12 `Notable` roster linked to stable ids instead of minting a
+fresh person every year, ~42 traits/16 modifiers + `decide()` (the 75% rule,
+symmetric, deterministic), the yearly life cycle (aging/mortality/fame/
+promotion-demotion under the 40-notable cap/Hall of the Dead/tombstoned
+ordinary deaths), a new WEEKLY `tick % 7` cadence hook, the layered life-event
+engine (`life_events.rs`, hashed-Poisson yearly quota spread across the
+year's weeks, guaranteed in-city-generic fallback) with a ~40-template
+starter set gated by a geography lint, and three read commands
+(`campaign_get_individual`/`_notables`/`_hall_of_dead`) surfaced in a new
+`NotablesPanel.tsx`.
+
+Explicitly not attempted, recorded per 00_INDEX rule 36: 02.6 (~150 more
+templates — the design doc's own "separate session"); 02.7 (faces — a sex
+axis + feature layers on `cultureDress.ts`), held back because this
+environment has no display to visually verify new procedural art against
+(§8.21's own fill-light regression is exactly the failure mode blind canvas
+work risks); wiring `decide()` to any of the 12 named decision kinds (the
+function is built and gated, not yet called from a real decision site).
+
+| metric | before | after |
+|---|---|---|
+| `cargo check --lib --tests` | — | clean |
+| `cargo test --lib tick::tests` | 308 pass (§5.7's own baseline) | **322 pass, 0 fail, 5 ignored** (16.34s) — incl. `simulate_decades_reports_dynamics` |
+| `cargo test --lib econ_ -- --nocapture` | 6/6 (§5.7's own baseline) | **6/6**, incl. the multi-seed inheritance gate (212.77s) — bit-identical in shape to the pre-row-02 table (partible 32-37 alive by seed vs primogeniture 22-30, matching the recorded pattern) |
+| `bench_campaign_tick_large` ms/tick | *not captured before this row* — see caveat below | **31.158 ms/tick** (1200 hubs, 30 goods, 1095 ticks, fingerprint `0f300da7d1dfd51c`) |
+| `npx tsc --noEmit` | — | clean |
+| `npx vite build` | 181 modules (§5.6's own baseline) | 189 modules, clean |
+
+**Perf caveat, stated plainly**: `bench_campaign_tick_large` was not run
+BEFORE this row's changes landed (only after), so the table above is a
+single measurement, not a diff — §5.5's own last recorded figure for the
+same fixture's TRADE phase alone was ~37.5 ms/tick, and 31.158 ms/tick
+total here is consistent with the weekly people pass adding a small
+fraction of that, but this is inference from the existing record, not a
+direct before/after this session captured. A future session touching
+`individuals.rs`/`life_events.rs` again should capture a real before/after
+pair rather than repeat this gap.
+
+Twelve new tests, all passing: `figures_migrate_to_individuals_losslessly`,
+`local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero`,
+`decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`,
+`decisions_are_deterministic`, `notables_never_exceed_the_cap`,
+`dead_notables_keep_their_story`, `dead_ordinary_people_are_removed`,
+`a_due_event_always_finds_a_template`, `event_rate_follows_turbulence`,
+`life_event_templates_respect_geography`.
+
+---
+
 ## 2026-09-25b — `living_world/01_FEEDS_AND_PRUNING.md` shipped: measured chronicle growth
 
 Row 01 of the new Living World build queue (`docs/living_world/00_INDEX.md`).

@@ -70,6 +70,7 @@ export function CampaignTopBar() {
         { label: "⚭ Dynasties & Alliances", on: ui.showDynasties, set: ui.setShowDynasties },
         { label: "🔨 Crafts & Guilds", on: ui.showGuilds, set: ui.setShowGuilds },
         { label: "👤 Notable Figures", on: ui.showFigures, set: ui.setShowFigures },
+        { label: "👥 Notables & Hall of the Dead", on: ui.showNotables, set: ui.setShowNotables },
         { label: "🗿 Landmarks & Sites", on: ui.showLandmarks, set: ui.setShowLandmarks },
         { label: "☠ Plagues & Epidemics", on: ui.showPlagues, set: ui.setShowPlagues },
       ],

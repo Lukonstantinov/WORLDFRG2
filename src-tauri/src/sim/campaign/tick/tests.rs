@@ -150,6 +150,7 @@
             mine_deposits: vec![],
             deposit_potential_cache: Default::default(),
             units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
+            people: vec![], hall_of_dead: vec![], people_tombstones: vec![], next_individual_id: 0, people_migrated: true,
             life_log_synced_tick: 0,
         };
         s.rebuild_routes();
@@ -10351,6 +10352,223 @@
             "TOWNSPEOPLE_DOSE=0.0 must never move mood");
         assert_eq!(s.guilds[0].strength, strength_before,
             "TOWNSPEOPLE_DOSE=0.0 must never move guild strength");
+    }
+
+    // ── 02_PEOPLE.md (Living World row 02) ──────────────────────────────
+
+    #[test]
+    fn figures_migrate_to_individuals_losslessly() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], vec![good("cloth", 1, 1, 2.0, 0.5, false)]);
+        s.figures.push(Figure { name: "Alive Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
+            born_tick: 100, dies_tick: 999_999, dead: false, rallied: false, life_log: Vec::new() });
+        s.figures.push(Figure { name: "Dead Banker".into(), kind: 3, hub: 0, house: -1, good: -1,
+            born_tick: 50, dies_tick: 200, dead: true, rallied: false, life_log: Vec::new() });
+        s.migrate_figures_to_individuals();
+        assert!(s.people.iter().any(|p| p.name == "Alive Admiral" && p.roles.contains(&ROLE_ADMIRAL)),
+            "a living figure must migrate into `people`");
+        assert!(s.hall_of_dead.iter().any(|p| p.name == "Dead Banker" && p.roles.contains(&ROLE_BANKER)),
+            "a dead figure must migrate straight into the Hall of the Dead, not `people`");
+        // Idempotent — running it again (e.g. a fixture that never sets the
+        // migration flag) must not double-mint the same people.
+        s.migrate_figures_to_individuals();
+        assert_eq!(s.people.iter().filter(|p| p.name == "Alive Admiral").count(), 1);
+        assert_eq!(s.hall_of_dead.iter().filter(|p| p.name == "Dead Banker").count(), 1);
+    }
+
+    #[test]
+    fn local_roles_do_not_mint_new_people_yearly() {
+        let goods = vec![good("cloth", 1, 1, 2.0, 0.5, false)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        h.council_house = 0;
+        let mut s = sim(vec![h], goods);
+        let mut house = house_at(0, vec![], 0);
+        house.kin = vec![
+            Kin { name: "Head".into(), role: 0, ..Default::default() },
+            Kin { name: "Steady Alderman".into(), role: 2, ..Default::default() },
+        ];
+        s.houses.push(house);
+        for yr in 0..5 {
+            s.update_notables(yr);
+        }
+        let aldermen: Vec<_> = s.people.iter().filter(|p| p.roles.contains(&ROLE_ALDERMAN)).collect();
+        assert_eq!(aldermen.len(), 1,
+            "the SAME kinsman holding the seat for 5 years must link to exactly one Individual, not mint a fresh one each year");
+    }
+
+    #[test]
+    fn living_world_is_inert_at_zero() {
+        // No row-02 mechanism moves money or population (00_INDEX): calling
+        // its own passes directly — migration, the weekly hook, the yearly
+        // life cycle, and firing an event on a heavily-decorated person —
+        // must leave every hub/house economic field bit-identical. (A
+        // `Figure`'s PRE-EXISTING effects — e.g. a Master Craftsman lifting
+        // quality — are a different, older mechanism and are deliberately
+        // NOT exercised here, so this isolates row 02's own additions.)
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![10_000.0 * 0.02], 0);
+        h.treasury = 100.0;
+        h.price[0] = 1.0;
+        let mut s = sim(vec![h], goods);
+        s.houses.push(house_at(0, vec![], 1));
+
+        let snap = |s: &CampaignSim| (s.hubs[0].population, s.hubs[0].treasury, s.hubs[0].price.clone(), s.houses[0].wealth);
+        let before = snap(&s);
+
+        s.migrate_figures_to_individuals();
+        let id = s.spawn_individual(0, ROLE_SCHOLAR, "Fully Decorated".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        s.people[idx].famous = true;
+        s.people[idx].fame = 1.0;
+        s.people[idx].traits = vec![(TRAIT_BRAVE, 2), (TRAIT_GREEDY, -2)];
+        for _ in 0..30 {
+            s.fire_one_event(idx);
+        }
+        for yr in 0..5 {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.people_weekly_pass();
+            s.people_yearly_pass(yr);
+        }
+
+        let after = snap(&s);
+        assert_eq!(before, after, "no row-02 pass may move population, treasury, price or house wealth");
+    }
+
+    #[test]
+    fn decision_at_75_percent_is_certain() {
+        let out = decide(1, 0, 1, 0xD, &[0.80, 0.20], &[vec![], vec![]], &[], &[vec![], vec![]], &[], &[0.0, 0.0]);
+        assert!(out.certain);
+        assert_eq!(out.choice, 0);
+        // Symmetric: the option ABOVE 75% wins whichever position it's in.
+        let out2 = decide(1, 0, 1, 0xD, &[0.20, 0.80], &[vec![], vec![]], &[], &[vec![], vec![]], &[], &[0.0, 0.0]);
+        assert!(out2.certain);
+        assert_eq!(out2.choice, 1);
+    }
+
+    #[test]
+    fn modifiers_can_tip_either_way() {
+        let mods = vec![Modifier { kind: MOD_DRUNK, value: 0.0, expires_tick: 100, note: String::new() }];
+        let terms_favor_a = [vec![(MOD_DRUNK, 0.20)], vec![(MOD_DRUNK, -0.20)]];
+        let out_a = decide(1, 0, 1, 0xE, &[0.5, 0.5], &[vec![], vec![]], &[], &terms_favor_a, &mods, &[0.0, 0.0]);
+        assert!(out_a.probs[0] > out_a.probs[1], "a modifier favoring option 0 must tip toward it");
+        let terms_favor_b = [vec![(MOD_DRUNK, -0.20)], vec![(MOD_DRUNK, 0.20)]];
+        let out_b = decide(1, 0, 1, 0xE, &[0.5, 0.5], &[vec![], vec![]], &[], &terms_favor_b, &mods, &[0.0, 0.0]);
+        assert!(out_b.probs[1] > out_b.probs[0], "the SAME modifier, weighted the other way, must tip toward option 1 instead");
+    }
+
+    #[test]
+    fn decisions_are_deterministic() {
+        let out1 = decide(42, 1000, 7, 0x1, &[0.4, 0.4, 0.2], &[vec![], vec![], vec![]], &[(TRAIT_BRAVE, 1)],
+            &[vec![], vec![], vec![]], &[], &[0.0, 0.0, 0.0]);
+        let out2 = decide(42, 1000, 7, 0x1, &[0.4, 0.4, 0.2], &[vec![], vec![], vec![]], &[(TRAIT_BRAVE, 1)],
+            &[vec![], vec![], vec![]], &[], &[0.0, 0.0, 0.0]);
+        assert_eq!(out1.choice, out2.choice);
+        assert_eq!(out1.probs, out2.probs);
+    }
+
+    #[test]
+    fn notables_never_exceed_the_cap() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], vec![good("cloth", 1, 1, 2.0, 0.5, false)]);
+        for i in 0..(NOTABLE_CAP as u32 + 20) {
+            let id = s.spawn_individual(0, ROLE_SCHOLAR, format!("Person{i}"), -1);
+            let idx = s.people.iter().position(|p| p.id == id).unwrap();
+            s.people[idx].fame = 1.0; // guarantees promotion eligibility every check
+        }
+        for yr in 0..10 {
+            s.people_yearly_pass(yr);
+            let living_notables = s.people.iter().filter(|p| p.famous && p.is_alive()).count();
+            assert!(living_notables <= NOTABLE_CAP, "notable roster exceeded the cap at year {yr}: {living_notables}");
+        }
+    }
+
+    #[test]
+    fn dead_notables_keep_their_story() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], vec![good("cloth", 1, 1, 2.0, 0.5, false)]);
+        let id = s.spawn_individual(0, ROLE_SCHOLAR, "Famous Scholar".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        s.people[idx].famous = true;
+        s.people[idx].life_log.push(IndividualLifeEntry { tick: 5, template_id: 1, args: vec![0] });
+        s.remove_dead_individual(idx, 3);
+        assert!(s.people.iter().all(|p| p.id != id), "a dead person must leave `people`");
+        let dead = s.hall_of_dead.iter().find(|p| p.id == id).expect("a dead NOTABLE must be in the Hall of the Dead");
+        assert_eq!(dead.life_log.len(), 1, "the Hall of the Dead keeps the full life log");
+    }
+
+    #[test]
+    fn dead_ordinary_people_are_removed() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], vec![good("cloth", 1, 1, 2.0, 0.5, false)]);
+        let id = s.spawn_individual(0, ROLE_OFFICIAL, "Ordinary Clerk".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        assert!(!s.people[idx].famous);
+        s.remove_dead_individual(idx, 6);
+        assert!(s.people.iter().all(|p| p.id != id), "a dead ordinary person must leave `people`");
+        assert!(s.hall_of_dead.iter().all(|p| p.id != id), "an ordinary person never enters the Hall of the Dead");
+        assert!(s.people_tombstones.iter().any(|t| t.id == id), "a forgotten person still leaves a tombstone");
+    }
+
+    #[test]
+    fn a_due_event_always_finds_a_template() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], vec![good("cloth", 1, 1, 2.0, 0.5, false)]);
+        // A person with NO hub context at all (current_hub -1) — the emptiest
+        // possible tag set — must still fire the in-city generic layer.
+        let id = s.spawn_individual(0, ROLE_OFFICIAL, "Someone".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        s.people[idx].current_hub = -1;
+        s.people[idx].origin_hub = -1;
+        s.people[idx].formed_hub = -1;
+        let before = s.people[idx].life_log.len();
+        s.fire_one_event(idx);
+        assert_eq!(s.people[idx].life_log.len(), before + 1, "a due event must always find SOME template to fire");
+    }
+
+    #[test]
+    fn event_rate_follows_turbulence() {
+        let goods = vec![good("cloth", 1, 1, 2.0, 0.5, false)];
+        let mut peace = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        peace.war_with = -1;
+        let mut war = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        war.war_with = 1; // any non-negative hub id marks "at war"
+        let s_peace = sim(vec![peace], goods.clone());
+        let s_war = sim(vec![war], goods);
+        let p = Individual {
+            id: 0, name: "X".into(), female: false, culture: String::new(),
+            birth_tick: 0, debut_tick: 0, death_tick: 0, death_cause: 0,
+            origin_hub: 0, formed_hub: 0, current_hub: 0, house: -1, kin_ref: -1,
+            roles: vec![], famous: false, fame: 0.0, traits: vec![], modifiers: vec![],
+            ideology: [0.0; 4], face_seed: 0, features: 0, relations: vec![], backstory: vec![],
+            life_log: vec![], events_year: 0, events_this_year: 0,
+        };
+        let t_peace = s_peace.event_turbulence(&p);
+        let t_war = s_war.event_turbulence(&p);
+        assert!(t_war > t_peace * 2.5, "war must raise a person's event turbulence sharply (expected ~3x, got {t_peace} -> {t_war})");
+    }
+
+    #[test]
+    fn life_event_templates_respect_geography() {
+        // keyword → the tag(s) its `requires` must guarantee. Any template
+        // whose TEXT uses a keyword without requiring the matching tag is a
+        // geography error a player would notice (a "whale" event firing on
+        // a landlocked steppe city).
+        let lint: &[(&str, u32)] = &[
+            ("whale", TAG_COAST), ("ship", TAG_COAST), ("sail", TAG_COAST), ("reef", TAG_COAST),
+            ("mole", TAG_COAST), ("fishing boat", TAG_COAST),
+            ("ferry", TAG_RIVER), ("barge", TAG_RIVER), ("wharves", TAG_RIVER), ("river", TAG_RIVER),
+            ("camel", TAG_DESERT), ("dune", TAG_DESERT), ("waterless", TAG_DESERT),
+            ("wild horse", TAG_STEPPE), ("herders", TAG_STEPPE), ("grass", TAG_STEPPE),
+            ("frost", TAG_COLD), ("frostbite", TAG_COLD),
+            ("wet season", TAG_TROPICAL),
+            ("walls", TAG_AT_WAR), ("levy", TAG_AT_WAR), ("mutiny", TAG_AT_WAR),
+            ("granary", TAG_FAMINE), ("bread riot", TAG_FAMINE), ("hungry", TAG_FAMINE),
+        ];
+        for t in EVENT_TEMPLATES {
+            let text_lower = t.text.to_lowercase();
+            for &(kw, tag) in lint {
+                if text_lower.contains(kw) {
+                    assert!(t.requires & tag != 0,
+                        "template {} uses '{}' but its `requires` ({:#b}) does not guarantee tag {:#b}: {}",
+                        t.id, kw, t.requires, tag, t.text);
+                }
+            }
+        }
     }
 
     // ── living_world/01_FEEDS_AND_PRUNING.md ──────────────────────────────────

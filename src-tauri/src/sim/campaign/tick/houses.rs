@@ -2487,7 +2487,8 @@ impl CampaignSim {
                 let salt = (tick as u64) ^ (h as u64).wrapping_mul(0x9E3779B1) ^ 0xC4A5;
                 let hub_name = self.hubs[h].name.clone();
                 let name = self.head_name_for(h, &hub_name, salt);
-                desired.push(Notable { role: NOTABLE_GUILDMASTER, name, good });
+                let individual_id = self.individual_id_for_notable(h, NOTABLE_GUILDMASTER, &name, good);
+                desired.push(Notable { role: NOTABLE_GUILDMASTER, name, good, individual_id });
             }
 
             // Alderman — the council house's own second kinsman.
@@ -2495,7 +2496,9 @@ impl CampaignSim {
             if council >= 0 {
                 if let Some(house) = self.houses.get(council as usize) {
                     if let Some(k) = house.kin.get(1).filter(|k| k.dies_tick == 0) {
-                        desired.push(Notable { role: NOTABLE_ALDERMAN, name: k.name.clone(), good: -1 });
+                        let name = k.name.clone();
+                        let individual_id = self.individual_id_for_notable(h, NOTABLE_ALDERMAN, &name, -1);
+                        desired.push(Notable { role: NOTABLE_ALDERMAN, name, good: -1, individual_id });
                     }
                 }
             }
@@ -2503,7 +2506,9 @@ impl CampaignSim {
             // Agitator — the existing Demagogue Figure, localised: no new
             // roll, no new effect (its unrest bump already fired above).
             if let Some(f) = self.figures.iter().find(|f| !f.dead && f.kind == 1 && f.hub as usize == h) {
-                desired.push(Notable { role: NOTABLE_AGITATOR, name: f.name.clone(), good: -1 });
+                let name = f.name.clone();
+                let individual_id = self.individual_id_for_notable(h, NOTABLE_AGITATOR, &name, -1);
+                desired.push(Notable { role: NOTABLE_AGITATOR, name, good: -1, individual_id });
             }
 
             desired.truncate(cap);
