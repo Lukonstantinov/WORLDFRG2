@@ -157,10 +157,9 @@ missing Southeast Asian kit is flagged; real dependencies were added (07 → 05,
 08 → 03/05, 09 → 07, 10 → 09); a per-slice `living_world_is_inert_at_zero`
 fingerprint gate and `econ_` per dose step keep regressions traceable.
 
-**Open for the maintainer** (not decided by the review): resettlement of **large**
-razed cities — 5 years for small towns as decided, but slower and probabilistic
-for great cities (Carthage, Corinth)? And should barbarian wave frequency scale
-with how much steppe/frontier the world has, within the decided 2–4 per century?
+**Resolved by the maintainer:** razed cities keep the existing 10-year
+resettlement threshold, large or small; barbarian waves use a universal rate
+(2–4 a century), not scaled by steppe/frontier area.
 
 ## Decisions log (for quick reference — details in each doc)
 
@@ -183,6 +182,6 @@ with how much steppe/frontier the world has, within the decided 2–4 per centur
 | Leisure | Every culture/creole/mix has 3 preferred types; venues open to all; built by edict; financed by treasury/houses/banks/guilds/liturgy; 2–6 games a year, a major festival every 3–5 years; **no betting money**; unviable venues decline and are abandoned, never converted |
 | Slavery | Per-culture bondage attitude, changeable by edict; gladiators from captives only where it is allowed |
 | Feeds | News Feed window removed; chatter > 50 years pruned; milestones kept; person stories never pruned |
-| Barbarians | Arise from provinces (culture, discontent, opposition to a settlement, unfair trade, ethnogenesis); leaders are notables with goals; 2–4 waves a century; own window |
-| Razed cities | Resettled after ~5 years (today's code: `RESETTLE_COOLDOWN_YEARS` = 10 — row 09 changes it; see its note on large cities) |
+| Barbarians | Universal rate, 2–4 waves a century; arise from provinces (culture, discontent, opposition to a settlement, unfair trade, ethnogenesis); leaders are notables with goals; 2–4 waves a century; own window |
+| Razed cities | Resettled after the existing 10-year threshold (`RESETTLE_COOLDOWN_YEARS`), for all cities |
 | Ore | Scales with land area automatically (done) |

@@ -38,7 +38,7 @@ tiers feed realm cohesion here.
   get **their own window** with a short story of how they arose, a minimap of
   their location, and their main goals.
 - **2–4 major barbarian waves a century.**
-- A razed city can be **resettled after about 5 years**.
+- A razed city can be **resettled after 10 years** (the existing threshold, kept for all — decided).
 - **Provinces are deepened, not shrunk**, so they carry weight.
 - Realm benefits and armies come in the same row as barbarians.
 
@@ -143,19 +143,17 @@ Visigoths); a crown **pays** or **hires** it (the *foederati*); it is **defeated
 or it **breaks up** when its leader dies.
 
 **Rate:** 2–4 major waves per century (decided), measured by a 300-year
-diagnostic; smaller warbands more often. Suggested refinement, to confirm: scale
-the rate by how much steppe/frontier land the world has, so a world with little
-of it is quieter.
+diagnostic; smaller warbands more often. **Decided: a universal rate** — not
+scaled by how much steppe or frontier a world has.
 
 **Termination:** every horde and every mercenary company ends within a bounded
 time (settles, is paid off, is defeated, or disbands) — the rule-22 discipline.
 
 **Razing and resettlement:** a razed city is abandoned. The existing path
 (`resettle_pass`) today waits `RESETTLE_COOLDOWN_YEARS` = **10** and needs a
-patron city of ≥ 5k people within reach. The maintainer asked for **~5 years**:
-the cooldown becomes 5 for small towns; for **large** razed cities resettlement
-becomes **probabilistic and slower** (Carthage and Corinth, razed in 146 BC, stood
-empty about a century) — flagged for the maintainer to confirm.
+patron city of ≥ 5k people within reach. **Decided: keep the 10-year threshold
+for every razed city**, large or small — no change to `RESETTLE_COOLDOWN_YEARS`;
+razing simply feeds the existing path.
 
 ## Part E — Empires
 
