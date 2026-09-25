@@ -42,10 +42,20 @@ function is built and gated, not yet called from a real decision site).
 |---|---|---|
 | `cargo check --lib --tests` | — | clean |
 | `cargo test --lib tick::tests` | 308 pass (§5.7's own baseline) | **322 pass, 0 fail, 5 ignored** (16.34s) — incl. `simulate_decades_reports_dynamics` |
-| `cargo test --lib econ_ -- --nocapture` | 6/6 (§5.7's own baseline) | *(recorded once the run finishes — see the commit this row lands in)* |
-| `bench_campaign_tick_large` ms/tick | *(recorded once the run finishes)* | *(recorded once the run finishes)* |
+| `cargo test --lib econ_ -- --nocapture` | 6/6 (§5.7's own baseline) | **6/6**, incl. the multi-seed inheritance gate (212.77s) — bit-identical in shape to the pre-row-02 table (partible 32-37 alive by seed vs primogeniture 22-30, matching the recorded pattern) |
+| `bench_campaign_tick_large` ms/tick | *not captured before this row* — see caveat below | **31.158 ms/tick** (1200 hubs, 30 goods, 1095 ticks, fingerprint `0f300da7d1dfd51c`) |
 | `npx tsc --noEmit` | — | clean |
 | `npx vite build` | 181 modules (§5.6's own baseline) | 189 modules, clean |
+
+**Perf caveat, stated plainly**: `bench_campaign_tick_large` was not run
+BEFORE this row's changes landed (only after), so the table above is a
+single measurement, not a diff — §5.5's own last recorded figure for the
+same fixture's TRADE phase alone was ~37.5 ms/tick, and 31.158 ms/tick
+total here is consistent with the weekly people pass adding a small
+fraction of that, but this is inference from the existing record, not a
+direct before/after this session captured. A future session touching
+`individuals.rs`/`life_events.rs` again should capture a real before/after
+pair rather than repeat this gap.
 
 Twelve new tests, all passing: `figures_migrate_to_individuals_losslessly`,
 `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero`,
