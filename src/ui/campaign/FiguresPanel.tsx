@@ -172,7 +172,7 @@ function FigureCard({ f, year, selected, onClick }: {
   const spec = roleOf(f.role);
   const span = (f.alive ? year : f.died_year) - f.born_year;
   const [showLife, setShowLife] = useState(false);
-  const hasLife = !!(f.bio || f.thought);
+  const hasLife = !!(f.bio || f.thought || f.life_events?.length);
   return (
     <div style={{ flexShrink: 0, borderRadius: RADIUS.md, border: `1px solid ${selected ? spec.color : T.lineSoft}`, overflow: "hidden" }}>
     <div data-no-drag onClick={onClick}
@@ -263,6 +263,24 @@ function FigureCard({ f, year, selected, onClick }: {
                 border: `1px solid ${hexA(spec.color, 0.35)}`, borderRadius: 999, padding: "0 6px", lineHeight: 1.6,
               }}>{g}</span>
             ))}
+          </div>
+        )}
+        {f.life_events && f.life_events.length > 0 && (
+          <div style={{ marginTop: 6 }}>
+            <span style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.4 }}>Life</span>
+            <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 3 }}>
+              {f.life_events.map((ev, i) => {
+                const dash = ev.indexOf(" — ");
+                const year = dash >= 0 ? ev.slice(0, dash) : "";
+                const text = dash >= 0 ? ev.slice(dash + 3) : ev;
+                return (
+                  <div key={i} style={{ display: "flex", gap: 6, fontSize: FZ.small, lineHeight: 1.35 }}>
+                    <span style={{ color: spec.color, fontVariantNumeric: "tabular-nums", flex: "0 0 auto", minWidth: 30 }}>{year}</span>
+                    <span style={{ color: T.inkMid }}>{text}</span>
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
         {f.thought && (

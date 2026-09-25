@@ -2900,13 +2900,24 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   a real linked `Expedition`, the actual destination and its
                                   outcome — every clause gated on real data, omitted rather
                                   than invented when absent), `merchant_goods` (straight off
-                                  the linked `House.spec`, "" if unaffiliated) and `thought`
-                                  (one deterministic quote from a per-role pool, picked by
-                                  `fnv1a32(name) % 4` so it never changes between reads —
-                                  flavour, not persisted state). Also exports `CityNotables`,
-                                  shown on HubPanel's Life tab. NOTE: `cultureFigure.ts` below
-                                  no longer exists — portraits everywhere now go through
-                                  `cultureDress.ts`
+                                  the linked `House.spec`, "" if unaffiliated), `life_events`
+                                  (`life_events_for`, read_people.rs — a chronological, capped-
+                                  at-6 log built ENTIRELY from real `sim.journal` entries at the
+                                  figure's own city during their lifetime, filtered to
+                                  `role_journal_kinds(role)` — an admiral's log is piracy/war/
+                                  voyages, a demagogue's is riots/unrest/starvation — plus a
+                                  small COMMON set everyone notices (plague, war, crashes,
+                                  revolt); a long life is SPREAD across via a stride sample
+                                  rather than truncated to its opening years) and `thought`
+                                  (`reactive_thought`, read_people.rs — REACTS to the figure's
+                                  own city's present `war_with`/`starving`/`lack_basic`/
+                                  `society.unrest` when one is genuinely unusual, else falls
+                                  back to the deterministic per-role quote pool picked by
+                                  `fnv1a32(name) % 4` so an ordinary figure's line still never
+                                  changes between reads — flavour built from real fields, never
+                                  fabricated). Also exports `CityNotables`, shown on HubPanel's
+                                  Life tab. NOTE: `cultureFigure.ts` below no longer exists —
+                                  portraits everywhere now go through `cultureDress.ts`
   LandmarksPanel.tsx            ← Notable landmarks
   AtlasPanel.tsx                ← Atlas 2.0 (eras / world frame)
   NewsFeedPanel.tsx             ← Campaign news feed

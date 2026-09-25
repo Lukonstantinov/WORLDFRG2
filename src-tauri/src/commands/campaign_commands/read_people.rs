@@ -15,6 +15,68 @@ fn fnv1a32(s: &str) -> u32 {
     h
 }
 
+/// The journal `kind`s each role actually cares about, for the life log below —
+/// a demagogue's story is riots and hunger, an admiral's is war and piracy. A
+/// small COMMON set (plague, war declared, crashes) applies to every role, since
+/// those touch anyone living through them regardless of trade.
+fn role_journal_kinds(role: u8) -> &'static [&'static str] {
+    match role {
+        0 => &["piracy", "war", "voyage_loss", "colony", "founding"],
+        1 => &["riot", "revolt", "unrest", "starvation"],
+        2 => &["guild_founded", "guild_strike", "guild_dissolved", "signature", "structure"],
+        3 => &["crash", "panic", "run", "bank", "failed", "debt", "recap", "coinage"],
+        _ => &["expedition", "founding", "colony", "voyage_loss", "corridor"],
+    }
+}
+const COMMON_JOURNAL_KINDS: &[&str] =
+    &["plague_lockup", "plague_extinction", "war", "crash", "revolt"];
+
+/// A short, capped life log built ENTIRELY from `sim.journal` entries recorded at
+/// the figure's own city while they were alive — never invented. Chronological
+/// (oldest first, so it reads as a life), capped at 6 so a long-lived figure in a
+/// busy capital doesn't drown the card.
+fn life_events_for(sim: &crate::sim::tick::CampaignSim, f: &crate::sim::tick::Figure) -> Vec<String> {
+    use crate::sim::tick::TICKS_PER_YEAR;
+    let role_kinds = role_journal_kinds(f.kind);
+    let end_tick = if f.dead { f.dies_tick } else { sim.tick };
+    let mut events: Vec<(u32, String)> = sim.journal.iter()
+        .filter(|e| e.hub == f.hub as i32
+            && e.tick >= f.born_tick && e.tick <= end_tick
+            && (role_kinds.contains(&e.kind.as_str()) || COMMON_JOURNAL_KINDS.contains(&e.kind.as_str())))
+        .map(|e| (e.tick, format!("{} — {}", e.tick / TICKS_PER_YEAR, e.text)))
+        .collect();
+    events.dedup_by(|a, b| a.1 == b.1);
+    events.sort_by_key(|(t, _)| *t);
+    if events.len() > 6 {
+        // keep a SPREAD across the life (first, last, and a stride through the
+        // middle) rather than just the earliest 6 — a long life should not read
+        // as only its opening years.
+        let n = events.len();
+        let stride = (n as f32 / 6.0).ceil() as usize;
+        events = events.into_iter().step_by(stride.max(1)).collect();
+    }
+    events.into_iter().map(|(_, s)| s).collect()
+}
+
+/// The figure's thought REACTS to their own city's present state when it is
+/// notably good or bad — a real read of `lack_basic`/`starving`/`war_with`/
+/// `society.unrest`, never a claim beyond what those fields already say. Falls
+/// back to the personality quote pool when nothing is currently unusual.
+fn reactive_thought(sim: &crate::sim::tick::CampaignSim, f: &crate::sim::tick::Figure) -> Option<String> {
+    let h = sim.hubs.get(f.hub as usize)?;
+    if h.war_with >= 0 {
+        let foe = sim.hubs.get(h.war_with as usize).map(|x| x.name.as_str()).unwrap_or("a rival");
+        return Some(format!("\"War with {} — every ship out of this harbour now sails armed.\"", foe));
+    }
+    if h.starving > 0.3 || h.lack_basic > 0.5 {
+        return Some("\"The granaries are thin this year. I have seen what hunger does to a crowd.\"".to_string());
+    }
+    if h.society.unrest > 0.55 {
+        return Some(format!("\"{} is not itself lately — the streets have a temper.\"", h.name));
+    }
+    None
+}
+
 /// One deterministic first-person line per role, 4 variants each — a quote, never
 /// a claim about sim state. Picked by `fnv1a32(name) % 4`, so the same figure
 /// always gets the same line.
@@ -647,8 +709,10 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             voyage.unwrap_or_else(|| format!(" They range the coasts beyond {}, chasing rumours of new markets.", city))
         } else { String::new() };
         let bio = format!("{}{}{}{}", family_line, culture_line, merchant_line, travel_line);
-        let thought = FIGURE_THOUGHTS[(f.kind as usize).min(4)]
-            [(fnv1a32(&f.name) % 4) as usize].to_string();
+        let thought = if f.dead { None } else { reactive_thought(&sim, f) }
+            .unwrap_or_else(|| FIGURE_THOUGHTS[(f.kind as usize).min(4)]
+                [(fnv1a32(&f.name) % 4) as usize].to_string());
+        let life_events = life_events_for(&sim, f);
 
         FigureBrief {
             name: f.name.clone(),
@@ -668,6 +732,7 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             bio,
             thought,
             merchant_goods,
+            life_events,
         }
     }).collect();
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));
