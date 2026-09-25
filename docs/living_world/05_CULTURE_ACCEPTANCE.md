@@ -41,7 +41,9 @@ cultures between cities; `Fondaco` exists but is never founded (W5 at zero);
 
 ## Mechanics
 
-**Relation score** per (city, culture), −100…+100, drifting yearly:
+**Relation score** per (city, culture), −100…+100, drifting yearly — stored
+**sparsely**, only for cultures resident in or trading with the city (not 1,200 ×
+every culture):
 - up: shared trade volume, that culture's merchants resident, related culture
   family, the same language kit, its scholars and artisans living here,
   **admiration** of a more-developed culture (row 03);
@@ -79,9 +81,11 @@ toward the most welcoming reachable cities, carrying part of the city's craft
 in a city). Used by row 08 (gladiators from captives only where permitted) and
 row 09 (captives taken in war).
 
-**The fondaco switched on:** the existing `Fondaco` struct becomes the tier 2–3
-foreign quarter: founded by edict, it holds a foreign culture's merchants, can be
-closed by the host (a real chronicle event).
+**The fondaco switched on:** the existing `Fondaco` struct's `occupant` is a
+**house** (`mod.rs` ~6464). So: a fondaco is chartered by edict **for a house
+whose culture holds tier 2–3** in the host city; it is the quarter where that
+house's (and its culture's) merchants live and trade; the host can close it (a
+real chronicle event).
 
 ## UI
 
@@ -94,7 +98,7 @@ score and its trend, residents, and why ("trade +12, the war of 214 −20").
 |---|---|---|
 | 05.1 | Tiers + relation scores + stance, derived at campaign start; **read by nothing** | `default_tiers_follow_stance_and_relation` |
 | 05.2 | Drift from trade/war/feuds/events; tier-change proposals into row 04's agenda | `trade_raises_relations`, `war_lowers_them` |
-| 05.3 | Persecution, expulsion, massacre, diaspora with tradition transfer | `expulsion_moves_residents_and_tradition` |
+| 05.3 | Persecution, expulsion, massacre, diaspora with tradition transfer — **population movement behind `PERSECUTION_DOSE` = 0** (recorded, not applied, until 05.5) | `expulsion_moves_residents_and_tradition` (at a test dose) |
 | 05.4 | Bondage attitude; fondaco activation | `bondage_follows_culture_until_edict` |
 | 05.5 | Effects dosed from zero (taxes, office, migration, scholars) | `acceptance_effects_are_noops_at_zero` |
 | 05.6 | UI table; end of row `tick::tests` + `econ_` | SCOREBOARD row |

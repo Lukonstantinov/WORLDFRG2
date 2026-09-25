@@ -28,6 +28,7 @@ its detailed window (as Market already is).
 | Culture tiers: the table, with the most recent change | row 05 | Society |
 | People: resident notables, scholars, artisans, performers (portraits) | rows 02, 06–08 | Person windows |
 | Venues and masterworks | rows 07, 08 | Venue subpanel, Gallery |
+| War and realm: at war with whom, sieges, occupation, which realm and its rank, horde threat nearby | row 09 | War window, Realms, Barbarian Tribes |
 | Economy at a glance: top exports/imports, treasury | existing | Market, Flows |
 | Last 5 chronicle lines | row 01 | the city's history |
 

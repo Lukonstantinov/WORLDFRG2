@@ -14,7 +14,10 @@ decision recorded here was made by the maintainer; where a document says
 
 1. Read this index, then `CLAUDE.md`.
 2. Take the **first row below whose status is `NOT STARTED` and whose
-   dependencies are all `DONE`**. Do not skip ahead, do not start two rows.
+   dependencies are all `DONE`**. Do not skip ahead, do not start two rows, and
+   **do not start any row while an earlier row is `PARTIAL`** — finish or
+   explicitly re-scope it first (a PARTIAL row can silently satisfy a later row's
+   dependency list otherwise).
 3. Build that document's slices **in order** (`02.1`, `02.2`, …). Each slice
    lists its own narrow gate.
 4. Run the **full economy gates only at the end of the row** (see "Testing"
@@ -33,10 +36,10 @@ decision recorded here was made by the maintainer; where a document says
 | 04 | [`04_GOVERNMENT_AND_EDICTS.md`](04_GOVERNMENT_AND_EDICTS.md) | NOT STARTED | 02, 03 | Government forms, offices (cultural and custom), named seat holders, political points, edicts debated in weekly rounds, the Lustrum, bribery, coups, ostracism, the Government window |
 | 05 | [`05_CULTURE_ACCEPTANCE.md`](05_CULTURE_ACCEPTANCE.md) | NOT STARTED | 03, 04 | Five acceptance tiers per city per culture, city stance, persecution and diaspora, bondage attitude, the fondaco switched on |
 | 06 | [`06_IDEOLOGY_AND_SCHOLARS.md`](06_IDEOLOGY_AND_SCHOLARS.md) | NOT STARTED | 02, 04, 05 | Four ideology axes (−5…+5), trait-built named ideologies, city meters (nobles · commons · government), scholars, schools, universities, the spread of ideas |
-| 07 | [`07_ARTISANS_AND_MASTERWORKS.md`](07_ARTISANS_AND_MASTERWORKS.md) | NOT STARTED | 02, 03 | Artisan kinds, culturally capped guild quality, named masterworks, galleries, the masterwork market, theft and looting, invitations |
-| 08 | [`08_LEISURE_AND_GAMES.md`](08_LEISURE_AND_GAMES.md) | NOT STARTED | 02, 04 | Leisure families (every culture, creole and mix picks 3 preferred types), venues by tier, financing, games and festivals, performers, the venue subpanel |
-| 09 | [`09_REALMS_WAR_AND_BARBARIANS.md`](09_REALMS_WAR_AND_BARBARIANS.md) | NOT STARTED | 02–05 | Why a realm is worth having, armies, realm-vs-realm war, the conflict map (smoke, ruins, resettlement), deeper provinces, barbarians and their leaders, empires |
-| 10 | [`10_SETTLEMENT_OVERVIEW.md`](10_SETTLEMENT_OVERVIEW.md) | NOT STARTED | 03–08 | The settlement Overview as the first panel, linking out to the detailed windows |
+| 07 | [`07_ARTISANS_AND_MASTERWORKS.md`](07_ARTISANS_AND_MASTERWORKS.md) | NOT STARTED | 02, 03, 05 | Artisan kinds, culturally capped guild quality, named masterworks, galleries, the masterwork market, theft and looting, invitations |
+| 08 | [`08_LEISURE_AND_GAMES.md`](08_LEISURE_AND_GAMES.md) | NOT STARTED | 02, 03, 04, 05 | Leisure families (every culture, creole and mix picks 3 preferred types), venues by tier, financing, games and festivals, performers, the venue subpanel |
+| 09 | [`09_REALMS_WAR_AND_BARBARIANS.md`](09_REALMS_WAR_AND_BARBARIANS.md) | NOT STARTED | 02–05, 07 | Why a realm is worth having, armies, realm-vs-realm war, the conflict map (smoke, ruins, resettlement), deeper provinces, barbarians and their leaders, empires |
+| 10 | [`10_SETTLEMENT_OVERVIEW.md`](10_SETTLEMENT_OVERVIEW.md) | NOT STARTED | 03–09 | The settlement Overview as the first panel, linking out to the detailed windows |
 
 Already shipped as part of this conversation (not a row): **ore districts scale
 with land area + minor showings** (`8288b3a`, CLAUDE.md §8.16).
@@ -73,6 +76,43 @@ city. Prestige-like numbers carry a ceiling and a decay (CLAUDE.md rule 18).
 a salience bar reach anything world-wide; everything else goes to the city's own
 history. Person stories always record in full.
 
+**Forward hooks read neutral until their row exists.** Several rows read values
+a later row produces (stability reads legitimacy from 04; edict costs read
+ideology from 06; events write track points from 03). Until the producing row is
+built, the reader uses a documented NEUTRAL constant, and the gate that needs the
+real value lives in the producing row. Every doc names its forward hooks.
+
+**Naming — avoid existing symbols.** `Person` is already the realm genealogy
+struct (`mod.rs` ~8620) and `Notable` is already the L12 per-city local-role
+entry (`mod.rs` ~7080). The new record is **`Individual`**; the 40 famous people
+are **"notables"** in the UI but `Individual { famous: true }` in code. The L12
+`Notable` stays and links to an `Individual` id.
+
+**Ids and tombstones.** `Individual` ids are never reused. When an ordinary
+individual dies they are forgotten (decided) — except that anything still pointing
+at them (a masterwork's maker, a school lineage, a relation, a horde) keeps a
+**tombstone**: id, name, culture, years, one-word role. No story.
+
+**Cadence hooks.** `advance()` today has daily work, `tick % 30` (monthly) and the
+365-tick year — **no weekly step**. Row 02 adds one (`tick % 7`) in a documented
+place in the day loop; every weekly pass in later rows uses it.
+
+**Lazy seeding.** Every new per-hub or per-culture state seeds itself on first
+read (the existing `*_needs_seeding` convention), so old saves and hubs founded
+mid-campaign get it without a migration step.
+
+**Hash salts.** Each new roll uses its own named salt constant from one registry
+(`living_world_salts` in `mod.rs`), so dozens of new `hash01` calls cannot collide.
+
+**Storage.** Culture as an index, not a `String`; life-log entries as
+`(tick, template_id, args)` with text generated lazily at read time; sparse maps
+(e.g. culture relations only for cultures present or trading). Measure the
+serialized size in row 01 and after each row.
+
+**Every new command is wired four ways:** `#[tauri::command]` → registered in
+`lib.rs` → a `bridge/` wrapper → a `types/` mirror (CLAUDE.md rules 8–9). Each
+doc's UI slice lists its commands.
+
 **Queue, don't refuse (CLAUDE.md rule 36).** Anything a row does not build goes in
 that document's `Queue` section with what it waits for.
 
@@ -82,8 +122,11 @@ The maintainer was waiting over an hour for gates on minor changes. For Living
 World rows:
 
 - **Per slice:** `cargo check --lib --tests` + the slice's own named tests
-  (`cargo test --lib <name>`), + `npx tsc --noEmit` for frontend slices. Seconds to
-  a few minutes. Never the whole suite.
+  (`cargo test --lib <name>`) + **`living_world_is_inert_at_zero`** (a short
+  30-year run of a small fixture with the new layer's passes on vs off; the
+  `sim_fingerprint` must match while every dose is zero — seconds, and it is what
+  makes skipping `econ_` safe), + `npx tsc --noEmit` for frontend slices. Never the
+  whole suite.
 - **Once, at the end of the row (before the final push):**
   `cargo test --lib tick::tests` and `cargo test --lib econ_ -- --nocapture`
   (and `simulate_decades_reports_dynamics`, which `tick::tests` includes). If a
@@ -91,7 +134,33 @@ World rows:
 - Intermediate slices may be committed and pushed without `econ_` **only because
   every behavioural constant is still at zero** — a slice that raises a dose is by
   definition the last slice.
+- Inside that last slice, if several doses are walked, run `econ_` **once per dose
+  step** (not once for all of them), so a regression can be traced to one dose.
 - `CLAUDE.md` §2.9 carries this rule for the rest of the project.
+
+## Independent review (2026-09-25)
+
+A separate review agent read every row against the code and CLAUDE.md. Its
+findings were folded in: the new record is `Individual` (both `Person` and
+`Notable` already exist in the code); row 01 now replaces the journal's existing
+25-year / 12,000-entry trimming (`sample_journal`) instead of adding a second rule
+beside it, and flags milestones where entries are written; milestone overflow
+becomes per-decade summaries (keeps rule 20); famous people's life logs are never
+capped; tombstones keep references valid; a weekly hook, lazy seeding, a hash-salt
+registry and compact storage are shared rules above; row 03 absorbs the existing
+per-hub `dev_tier` and `hub.structures` and normalises the new factor to today's
+production level; every trait maps to a culture ideal; row 04 is dosed
+(`GOV_POWER_DOSE`) because capture feeds wars and realms, seeds ideology from
+culture traits until row 06, and obeys rules 22/23/27; the 75 % rule is symmetric
+per option; the 18 shipped language kits are mapped to leisure families and the
+missing Southeast Asian kit is flagged; real dependencies were added (07 → 05,
+08 → 03/05, 09 → 07, 10 → 09); a per-slice `living_world_is_inert_at_zero`
+fingerprint gate and `econ_` per dose step keep regressions traceable.
+
+**Open for the maintainer** (not decided by the review): resettlement of **large**
+razed cities — 5 years for small towns as decided, but slower and probabilistic
+for great cities (Carthage, Corinth)? And should barbarian wave frequency scale
+with how much steppe/frontier the world has, within the decided 2–4 per century?
 
 ## Decisions log (for quick reference — details in each doc)
 
@@ -115,5 +184,5 @@ World rows:
 | Slavery | Per-culture bondage attitude, changeable by edict; gladiators from captives only where it is allowed |
 | Feeds | News Feed window removed; chatter > 50 years pruned; milestones kept; person stories never pruned |
 | Barbarians | Arise from provinces (culture, discontent, opposition to a settlement, unfair trade, ethnogenesis); leaders are notables with goals; 2–4 waves a century; own window |
-| Razed cities | Resettled after ~5 years |
+| Razed cities | Resettled after ~5 years (today's code: `RESETTLE_COOLDOWN_YEARS` = 10 — row 09 changes it; see its note on large cities) |
 | Ore | Scales with land area automatically (done) |

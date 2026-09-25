@@ -21,13 +21,22 @@ person's life story is **never** pruned — the maintainer reads them as stories
 
 | Feed | Where | Current cap |
 |---|---|---|
-| World journal | `CampaignSim.journal: Vec<JournalEntry>` | `JOURNAL_CAP` = 20,000 entries |
+| World journal | `CampaignSim.journal: Vec<JournalEntry>` | **already pruned**: `sample_journal` (`mod.rs` ~11069) keeps a rolling **25-year** window of everything, keeps older entries only where `is_milestone_kind` (`mod.rs` ~11141 — drops only price/world/voyage_loss), then hard-caps at **12,000** (dropping the oldest, milestones included). `JOURNAL_CAP` = 20,000 is a separate cap |
 | House chronicle | `House.events: Vec<HouseEvent>` | `HOUSE_EVENTS_CAP` = 60 chatter, `HOUSE_MILESTONE_CAP` = 120 milestones (`is_house_milestone`) |
 | Province chronicle | `CampaignSim.prov_events: Vec<Vec<ProvEvent>>` | `PROV_EVENTS_CAP` = 40 per province |
 | Realm chronicle | `Realm.events: Vec<RealmEvent>` | uncapped |
 | Feud log | `Feud.log: Vec<FeudFlare>` | per feud |
 | City annals | `TickHub.annals: Vec<CityYear>` | `ANNALS_CAP` = 300 — **numeric yearly data, not a feed; keep as is** |
 | Figures' life events | `read_people.rs::life_events_for` — **built at read time from `sim.journal`** | — |
+
+Journal readers: `HubPanel` chronicle, `HousesPanel` pulse ticker, `FiguresPanel`
+(via `life_events_for`), **`AtlasPanel`** — all must still work.
+
+**This row REPLACES `sample_journal`'s rule, it does not add a second one beside
+it.** Kinds are too coarse to classify milestones (`"war"` covers both a
+declaration and every round; `"disaster"`/`"event"` cover many things), so a
+`JournalEntry.milestone: bool` (`#[serde(default)]`) is set **at the write site**
+of each entry, and pruning reads that flag.
 
 **The trap:** a figure's life story is not stored on the figure; it is re-derived
 from the world journal each time the panel opens. Pruning the journal to 50 years
@@ -41,16 +50,18 @@ would therefore silently erase the youth of every long-lived figure. This row mu
   kind, text }`.
 - Whenever a journal entry is written that `life_events_for` would pick up for a
   living figure (same role filter, `role_journal_kinds`), also push it to that
-  figure's `life_log` (cap 60 per figure, oldest *non-milestone* dropped first).
+  figure's `life_log` — **not pruned** (decided: person stories are never pruned).
+  It is naturally bounded (≤ 10 events a year × a life) and stored compactly as
+  `(tick, template_id, args)` from row 02 on.
 - Backfill on load: if `life_log` is empty and the journal holds entries,
   build it once with the existing `life_events_for` logic.
 - `read_people.rs` reads `life_log` first, falls back to the journal scan.
-- Row 02 replaces `Figure` with `Person` and carries `life_log` across.
+- Row 02 migrates `Figure` into `Individual` and carries `life_log` across.
 - **Gate:** `figure_life_survives_journal_pruning` — build a figure, write journal
   entries across 120 years, prune the journal, assert the figure's story is intact.
 
-### 01.2 · One milestone classifier per feed
-- `fn is_world_milestone(kind: &str) -> bool` for the journal — founding and death
+### 01.2 · Milestone flags at the write sites
+- `JournalEntry.milestone` set where each entry is written — founding and death
   of cities, wars declared/ended, sacks, realm proclaimed/fallen, bank collapse,
   plague outbreak, masterwork created, notable born/died.
 - Reuse `is_house_milestone` for houses (unchanged).
@@ -63,10 +74,16 @@ would therefore silently erase the youth of every long-lived figure. This row mu
 ### 01.3 · The pruning pass
 - `CHRONICLE_KEEP_YEARS: u32 = 50`.
 - `prune_chronicles(&mut self, yr)` yearly, after the year's other passes:
-  - journal: drop entries older than 50 years **unless** a world milestone
-    (milestones still bounded by `JOURNAL_CAP`, oldest first);
+  - journal: drop entries older than 50 years **unless** flagged milestone;
+    replaces `sample_journal`'s 25-year/12,000 rule;
+  - **milestone overflow** (a milestone cap is reached — the existing
+    `HOUSE_MILESTONE_CAP` = 120, a journal milestone cap): the oldest milestones
+    are **folded into one summary line per decade** ("In the 210s: 3 successions,
+    a charter, the plague") rather than silently dropped — this keeps CLAUDE.md
+    rule 20 (milestones are permanent) true in substance;
   - house events: drop non-milestones older than 50 years (caps unchanged);
-  - province and realm events and feud logs: same rule;
+  - province and realm events and feud logs: same rule; `Realm.events` gets a cap
+    (it is unbounded today);
   - never touch any `life_log`.
 - **Gates:** `pruning_keeps_milestones`, `pruning_drops_old_chatter`,
   `pruning_never_touches_person_stories`.

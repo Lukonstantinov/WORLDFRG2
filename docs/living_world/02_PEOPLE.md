@@ -44,24 +44,30 @@ artisans (07), performers (08), commanders and barbarian chiefs (09).
   `update_government`.
 - `Kin` roster on houses (character axes, skill, loyalty) and `Person` in realm
   genealogies (`Realm.family`, `person_mortality_hazard` in `realms.rs`).
-- Portraits: `src/ui/campaign/cultureDress.ts` (`DressKit`, `drawBust`) and
-  `cultureFigure.ts` (sex axis). `read_people.rs` builds `bio`, `life_events`
+- Portraits: `src/ui/campaign/cultureDress.ts` (`DressKit`, `drawBust`).
+  `cultureFigure.ts` **no longer exists**, and `cultureDress.ts` itself says it has
+  **no sex axis** — unique faces for women and men need one added (02.7). `read_people.rs` builds `bio`, `life_events`
   (from the journal — row 01 materialises this), `thought`.
 
-**Unification rule:** `Person` becomes the one record. `Figure` and `Notable`
-become views over `Person` (migrate on load). House `Kin` and realm `Person`
+**Unification rule:** `Individual` becomes the one record for public people.
+`Figure` migrates into `Individual` on load (it is a persisted person). The L12
+`Notable` is **not** a persisted person — it is rebuilt yearly from a guild, a
+council house's `kin[1]` and the Demagogue figure — so it is **not** migrated; it
+becomes a local role that points at an `Individual` id (created once, stable,
+linked via `kin_ref` / guild id / figure id), or the yearly rebuild would mint new
+people every year. House `Kin` and realm `Person`
 entries stay where they are, but a kinsman or royal who **enters public life**
-(takes a seat, becomes notable) gets a `Person` record linked back by id — no
+(takes a seat, becomes notable) gets an `Individual` record linked back by id — no
 duplicated state.
 
 ## Data
 
 ```rust
-pub struct Person {
+pub struct Individual {   // NOT `Person` — that name is the realm genealogy struct (mod.rs ~8620)
     pub id: u32,
     pub name: String,
     pub female: bool,
-    pub culture: String,
+    pub culture: u16,             // index into the culture table, not a String
     pub birth_tick: u32,          // generated; before debut
     pub debut_tick: u32,          // age ≥ 16 at debut
     pub death_tick: u32,          // 0 = alive
@@ -72,7 +78,7 @@ pub struct Person {
     pub house: i32,               // −1 none
     pub kin_ref: i32,             // index into House.kin if a kinsman
     pub roles: Vec<u8>,           // ROLE_* — a person can hold several over a life
-    pub notable: bool,
+    pub famous: bool,             // one of the 40 "notables" (UI word)
     pub fame: f32,                // bounded, decays
     pub traits: Vec<(u8, i8)>,    // (TRAIT_*, strength −2..+2), ≤ 8
     pub modifiers: Vec<Modifier>, // (MOD_*, value, expires_tick), ≤ 6
@@ -80,16 +86,21 @@ pub struct Person {
     pub face_seed: u32,
     pub features: u32,            // bitflags: ONE_EYED, SCARRED, LAME, BALD, GREY, TATTOOED…
     pub relations: Vec<(u8, u32)>,// (REL_MENTOR/RIVAL/FRIEND/PATRON/SPOUSE/STUDENT, person id), ≤ 8
-    pub backstory: String,        // generated once at debut from real facts
-    pub life_log: Vec<LifeEntry>, // notable: ≤ 80; ordinary: ≤ 12
+    pub backstory: Vec<(u16, Vec<u32>)>, // template ids + args; text generated at read time
+    pub life_log: Vec<LifeEntry>, // (tick, template_id, args); famous: never pruned; ordinary: ≤ 12
 }
 ```
 
-- Living people: `CampaignSim.people: Vec<Person>`.
-- Dead notables: `CampaignSim.hall_of_dead: Vec<Person>` (kept forever; their
+- Living people: `CampaignSim.people: Vec<Individual>`.
+- Dead notables: `CampaignSim.hall_of_dead: Vec<Individual>` (kept forever; their
   `modifiers` cleared, `life_log` kept).
 - Dead ordinary people: removed at death (optionally one line in the city
-  chronicle if they held a senior office — row 04 decides which offices).
+  chronicle if they held a senior office — row 04 decides which offices), except
+  a **tombstone** (id, name, culture, years, role) while anything still refers to
+  them (00_INDEX "Ids and tombstones"). Ids are never reused.
+- **Hall of the Dead size:** famous people are few (≤ 40 alive, turnover of a few
+  per decade), so the Hall grows by roughly 10–20 a century — kept in full,
+  measured in the row-01 save-size diagnostic.
 
 ## Roles
 
@@ -117,10 +128,13 @@ life. A new trait that contradicts an old one replaces it.
 ## Decisions — the 75 % rule
 
 ```
-p = base(kind) + Σ trait_weight(kind, trait) × strength + Σ modifier_values + context
-if p ≥ 0.75 → choose A
-else        → choose A if hash01(seed, tick, person, kind) < p, else B
+for each option o:  p(o) = base(kind, o) + Σ trait_weight(kind, o, trait) × strength
+                          + Σ modifier_values(o) + context(o);  then normalise to sum 1
+if max_o p(o) ≥ 0.75 → that option, always
+else                 → pick by hash01(seed, tick, individual, kind) over the p(o)
 ```
+Defined per option, so the rule is symmetric: with two options, A at ≥ 75 % is
+certain and so is B at ≥ 75 % (A ≤ 25 %) — which option is "first" never matters.
 
 - Clamped to `[0, 1]` before the test. The 75 % threshold is one constant,
   `DECISION_CERTAIN_AT`, per the maintainer; individual decision kinds may add
@@ -146,7 +160,8 @@ risk is ×3 and a survival gives a chance of the Benefactor trait.
 
 ## Life events
 
-**Rate.** Each person, each year, draws a count:
+**Rate.** Each person, each year, draws a count (ordinary individuals use a
+lower role base — they are many and mostly quiet; famous ones the full rate):
 `λ = role_base × turbulence`, where turbulence multiplies for war ×3, under
 siege ×4, plague ×2, famine ×1.5, festival ×1.5, travelling ×2, holding office
 ×1.5; the count is a hashed Poisson draw, **capped at 10**, and can be 0. Events
@@ -196,6 +211,11 @@ debate, the road into exile, clinging to a spar after a shipwreck (`coast` +
 travelling by sea), a boxer's defeat at the games (`festival`), a forgotten scroll
 in the library (row 03 building), bread riots (`famine`).
 
+## Forward hooks (neutral until the row exists)
+
+Event effects that write development-track points (row 03) or ideology (row 06)
+are recorded but applied only once those rows exist (they no-op before).
+
 ## Faces and life story
 
 - `cultureDress.ts` gains feature layers: beard styles, grey hair and baldness
@@ -212,9 +232,11 @@ in the library (row 03 building), bread riots (`famine`).
 
 - `fame` rises with deeds (events flag how much), decays slowly.
 - An ordinary person whose fame crosses `NOTABLE_FAME_THRESHOLD` becomes notable
-  **if a slot is free** (40 alive). If full, the least-famous living notable whose
+  **if a slot is free** (40 alive). Roles that are famous **by design** — a horde
+  leader (row 09), a talented master artisan (row 07) — may **force** a slot: the
+  least-famous living notable is demoted. If full, the least-famous living notable whose
   fame is below the newcomer's by a margin is demoted back to ordinary (keeps
-  their story — they stay a `Person`; if they later die ordinary but were once
+  their story — they stay an `Individual`; if they later die ordinary but were once
   notable, they still go to the Hall).
 - Existing figure mechanics (`raise_notable_figures`, `living_figures_pass`)
   continue as the "births" of certain notable roles.
@@ -242,14 +264,14 @@ in the library (row 03 building), bread riots (`famine`).
 
 | Slice | Content | Gate |
 |---|---|---|
-| 02.1 | `Person` + `people`/`hall_of_dead`; load-time migration of `Figure` (with its `life_log`) and `Notable`; readers switched; **inert** | `figures_migrate_to_people_losslessly`, `sim_fingerprint` unchanged |
+| 02.1 | `Individual` + `people`/`hall_of_dead`; load-time migration of `Figure` (with its `life_log`); L12 `Notable` linked to stable `Individual` ids; the **weekly** `tick % 7` hook added to `advance()`; the salt registry; **inert** | `figures_migrate_to_individuals_losslessly`, `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero` |
 | 02.2 | Trait catalogue, modifier catalogue, `decide()` with the 75 % rule, reasons | `decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`, `decisions_are_deterministic` |
 | 02.3 | Life cycle: debut ≥ 16, aging, mortality (reuse `person_mortality_hazard`), death causes, fame, promotion/demotion, Hall of the Dead, ordinary forgotten | `notables_never_exceed_the_cap`, `dead_notables_keep_their_story`, `dead_ordinary_people_are_removed` |
 | 02.4 | Event engine: rate, tag evaluation, layered pool with fallback, effects, logging | `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence` |
 | 02.5 | ~40 starter templates + the geography lint | `life_event_templates_respect_geography` |
 | 02.6 | **Separate session:** ~150 more templates, reviewed by an agent against the lint and role list | the same lint |
 | 02.7 | Faces: feature layers in `cultureDress.ts`; acquired features | `tsc`, visual check |
-| 02.8 | Person window, roster, Hall of the Dead | `tsc`, `vite build` |
+| 02.8 | Person window, roster, Hall of the Dead — commands `campaign_get_individual`, `campaign_get_notables`, `campaign_get_hall_of_dead` (lib.rs + bridge + types) | `tsc`, `vite build` |
 | 02.9 | End of row: `bench_campaign_tick_large` before/after, `tick::tests`, `econ_` | numbers in SCOREBOARD |
 
 No row-02 mechanism moves money or population except what `living_figures_pass`

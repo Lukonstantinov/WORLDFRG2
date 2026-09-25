@@ -136,7 +136,7 @@ traits and founders.
 | Slice | Content | Gate |
 |---|---|---|
 | 06.1 | Axes, trait vocabulary, named ideologies, meters seeded from culture traits; **read by nothing** | `ideology_positions_are_bounded` |
-| 06.2 | Personal ideology on `Person`, formation events | `study_pulls_toward_the_teacher` |
+| 06.2 | Personal ideology on `Individual`, formation events | `study_pulls_toward_the_teacher` |
 | 06.3 | Scholar lives: spawning, study travel, career, exile, legacy | `scholars_prefer_centres_but_appear_anywhere` |
 | 06.4 | Schools, lineages, custom ideologies, institutions | `a_school_names_a_custom_ideology` |
 | 06.5 | Meter drift, demands vs row 04 edicts, spread along trade | `met_demands_spread_the_ideology` |

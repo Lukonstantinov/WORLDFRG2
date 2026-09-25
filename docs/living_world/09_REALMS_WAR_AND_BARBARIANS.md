@@ -47,8 +47,10 @@ tiers feed realm cohesion here.
 - Realms (`tick/realms.rs`): three founding paths (house, city, culture bloc),
   dynastic and civic governments, genealogy, taxation with collection efficiency,
   tax farming, expansion/vassalage/secession/partition, ranks and titles. The
-  treasury is spent **only** on province works (`cities.rs` ~1094/1230) and
-  annexation (`realms.rs` ~850). **No member city gets any benefit.**
+  treasury is **spent** only on province works (`cities.rs` ~1094/1230) and
+  annexation (`realms.rs` ~850); it is also read for war affordability (`war.rs`
+  ~805) and moved by vassal integration and partition. **No member city gets any
+  benefit.**
 - War (`tick/war.rs`): city vs city; `maybe_declare_war` takes the **first
   eligible pair in index order**; `MAX_ACTIVE_WARS = 2` world-wide; strength =
   war chest + treasury + a small manpower levy; war goals incl. province, annex,
@@ -82,6 +84,10 @@ growth, famine, survival). Expected today: no difference.
   **mercenary company** (Carthage's Mercenary War).
 - Armies move along `prov_neighbors`; a province is **occupied** when an enemy
   army holds it uncontested; a city is **besieged** (walls from row 03 matter).
+- **One war per city today:** `hub.war_with` is a single `i32`. Realm wars need a
+  separate `RealmWar` record listing member cities, with a member's `war_with`
+  kept for the city-level fight only; the O(n²) seat scan in `maybe_declare_war`
+  must not grow with realm count (pair realms first, then cities).
 - **Realm wars**: declared by realms; all member cities pool into one war score;
   fought by sieges and occupation; peace cedes occupied provinces; a foreign
   **capital can be taken**. The global two-war cap is lifted for realm wars (a
@@ -105,8 +111,8 @@ burn.
 pub struct Horde {
     pub id: u32,
     pub name: String,            // from the culture's naming kit ("the Horde of Kaan")
-    pub culture: String,         // may be a NEW culture (subculture/creole via the existing mechanism)
-    pub leader: u32,             // Person (row 02), notable
+    pub culture: u16,            // culture index; may be a NEW culture (subculture/creole via the existing mechanism)
+    pub leader: u32,             // Individual (row 02), famous
     pub goal: u8,                // plunder · land to settle · revenge on <city/house> · a crown · tribute
     pub target: i32,             // hub or province
     pub home_province: u32,
@@ -136,12 +142,20 @@ tribute.
 Visigoths); a crown **pays** or **hires** it (the *foederati*); it is **defeated**;
 or it **breaks up** when its leader dies.
 
-**Rate:** 2–4 major waves per century, measured by a 300-year diagnostic; smaller
-warbands more often.
+**Rate:** 2–4 major waves per century (decided), measured by a 300-year
+diagnostic; smaller warbands more often. Suggested refinement, to confirm: scale
+the rate by how much steppe/frontier land the world has, so a world with little
+of it is quieter.
 
-**Razing and resettlement:** a razed city is abandoned; after **~5 years** a
-resettlement (the existing resettled-ruins path) may found a new town on the site,
-often of the conquerors' culture.
+**Termination:** every horde and every mercenary company ends within a bounded
+time (settles, is paid off, is defeated, or disbands) — the rule-22 discipline.
+
+**Razing and resettlement:** a razed city is abandoned. The existing path
+(`resettle_pass`) today waits `RESETTLE_COOLDOWN_YEARS` = **10** and needs a
+patron city of ≥ 5k people within reach. The maintainer asked for **~5 years**:
+the cooldown becomes 5 for small towns; for **large** razed cities resettlement
+becomes **probabilistic and slower** (Carthage and Corinth, razed in 146 BC, stood
+empty about a century) — flagged for the maintainer to confirm.
 
 ## Part E — Empires
 
@@ -163,6 +177,8 @@ often of the conquerors' culture.
   years; a charred **†** for a razed city ("Razed 412 by the Horde of Kaan");
   scorch marks fading on a sacked but surviving one. One query returns conflict
   sites, army positions and razed cities; nothing is computed for the view.
+- Commands: `campaign_get_conflict_map`, `campaign_get_hordes`,
+  `campaign_get_horde` (lib.rs + bridge + types). `Realm.events` gets a cap (row 01).
 - **Barbarian Tribes window**: each horde — leader portrait and traits, the story
   of its rise, a minimap of where it is and where it has been, its goals, its
   strength, its history.
@@ -177,7 +193,7 @@ often of the conquerors' culture.
 | 09.3 | Province deepening: control, fort, garrison, levy, loyalty, villages | `levies_come_from_rural_population` |
 | 09.4 | Armies: raising, upkeep, movement, occupation, mutiny → mercenaries | `unpaid_armies_mutiny` |
 | 09.5 | Realm wars: pooled score, sieges, cession, capital conquest, hashed pairing | `every_realm_war_terminates` |
-| 09.6 | Hordes: triggers, leaders, goals, raids, sacks, razing, endings; resettlement after ~5 years | `hordes_arise_from_each_trigger`, `razed_cities_can_be_resettled` |
+| 09.6 | Hordes: triggers, leaders (famous by design — may force a notable slot), goals, raids, sacks (calling row 07's `loot_masterworks`), razing, endings; the resettlement change | `hordes_arise_from_each_trigger`, `every_horde_ends`, `razed_cities_can_be_resettled` |
 | 09.7 | Empire rank; league → hegemony; republic → principate | `leagues_can_turn_hegemonic` |
 | 09.8 | Conflict map layer, Barbarian Tribes window, War window | `tsc`, `vite build` |
 | 09.9 | End of row: dose walks; `tick::tests`, `econ_`, the 300-year wave-rate diagnostic | SCOREBOARD row |

@@ -52,9 +52,27 @@ a risk. Houses and guilds buy influence. Governments rise and fall.
   (tariff/mint/treasury).
 - The house crisis engine (`crisis.rs`), realm succession, the Enthrone war goal.
 
-Row 04 **extends** these: `Official` → an office held by a `Person`; the
+Row 04 **extends** these: `Official` → an office held by an `Individual`; the
 bribery/control code becomes the influence engine for votes; `Law` becomes the
 edict record.
+
+**Migration maps:** old `govt_type` 0 Merchant Council → Council; 1 Principality
+→ Tyranny/principality; 2 Free Commune → Assembly (a large free commune may become
+a Senate by a reform edict). `hub.officials` stays readable through a shim —
+`development_tier` and house capture read it.
+
+**This row is NOT inert by construction:** capture (`council_house` /
+`captor_house`) feeds war declarations (`maybe_declare_war`), charters and realm
+formation (path A). So the NEW capture/coup rules (04.2, 04.5) sit behind
+`GOV_POWER_DOSE`; at 0.0 the old `update_government` capture logic runs unchanged
+and the new machinery only records what it *would* do.
+
+**Forward hook:** edict costs and votes read ideology (row 06). Until row 06 the
+government's position is **seeded from its culture's traits** (Insular/Xenophobic
+→ Openness −, Mercantile → Economy +, Clannish → Authority −…) and seat holders'
+positions from their traits, so costs genuinely differ from day one; the full
+meters arrive in row 06. The commons-meter terms (revolution, assembly votes) read
+a neutral constant until then.
 
 ## Forms, sizes and offices
 
@@ -65,7 +83,9 @@ edict record.
 | Senate (republic) | Majority, with vetoes | 9–16 |
 | Assembly (democracy) | The commons, led by magistrates | magistrates 3–10; the assembly itself is the commons' meter (row 06), not seats |
 
-Villages have 1–3 seats (an elder or a headman).
+Villages have 1–3 seats (an elder or a headman). **Custom offices count inside
+the same cap** (≤ 16 including them): creating one either uses a free slot or
+replaces the least important office — itself a debate.
 
 **Offices** (Roman-flavoured examples; every culture names them in its own kit):
 
@@ -94,7 +114,7 @@ seat for houses to capture.
 
 ## Seat holders
 
-Each seat holds a `Person` (ordinary unless notable), with:
+Each seat holds an `Individual` (ordinary unless notable), with:
 - **Path** — why they sit: kin of a house · military success · wealth · guild
   representative · scholar/orator · elected by the commons · bribed in · appointed
   by the ruler. It sets the life line and the typical suitability.
@@ -186,6 +206,12 @@ took nearly three years.
 
 - **Ostracism** (assemblies): once a year the assembly may vote to exile one
   person for 10 years.
+- **Rules that must hold:** a forced installation (coup, emergency ruler, tyrant
+  succession) filters candidates through `heir_is_female` for the culture's
+  `LineRule` (CLAUDE.md rule 23); a coup in a **realm capital** replaces the
+  city's government only, never the crown (rule 27); an emergency ruler's term has
+  a hard maximum and every coup/revolution resolves within a bounded number of
+  weeks (rule 22's discipline).
 - **Bribery exposure**: chance rises with bribe size, number involved, rival houses
   watching; exposure costs the house prestige and the government legitimacy, and
   may expel the member.
@@ -201,13 +227,13 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 
 | Slice | Content | Gate |
 |---|---|---|
-| 04.1 | Offices held by `Person`s; migrate `Official`; seat counts by size; cultural title sets; **inert** | `officials_migrate_to_seats`, `seat_count_scales_with_city` |
+| 04.1 | Offices held by `Individual`s; migrate `Official`; seat counts by size; cultural title sets; **inert** | `officials_migrate_to_seats`, `seat_count_scales_with_city` |
 | 04.2 | Paths, suitability, allegiance, blocs; houses' kin seats + clients via existing bribery | `bought_members_follow_their_patron` |
 | 04.3 | Political points, edict catalogue, costs by ideological distance, expiry | `mismatched_edicts_cost_more`, `edicts_expire` |
 | 04.4 | Weekly debate rounds, amendments, filibuster, votes, deadlock | `every_debate_terminates`, `deadlock_costs_legitimacy` |
 | 04.5 | Tyrant path, legitimacy, overthrow risk, changes of government, ostracism, exposure | `unpopular_tyrants_fall_more_often`, `ostracism_exiles_one_person` |
-| 04.6 | The Lustrum (feeds row 03's track bonus) | `lustrum_every_five_years` |
-| 04.7 | Government window | `tsc`, `vite build` |
+| 04.6 | The Lustrum (feeds row 03's track bonus). **Owner in every form:** the Censor (senate), the First Councillor (council), the ruler alone (tyranny), the magistrates proposing to the assembly (assembly); debated like a minor edict except under a tyrant. Before row 04, row 03 picks the bonus track by need | `lustrum_every_five_years` |
+| 04.7 | Government window — commands `campaign_get_government`, `campaign_get_edicts` (lib.rs + bridge + types) | `tsc`, `vite build` |
 | 04.8 | End of row: edict effects dosed from zero; `tick::tests`, `econ_` | SCOREBOARD row |
 
 `every_debate_terminates` is the analogue of `every_crisis_terminates`

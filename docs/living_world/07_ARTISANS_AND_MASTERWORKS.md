@@ -61,7 +61,7 @@ pub struct Masterwork {
     pub id: u32,
     pub title: String,          // generated: type + subject + place ("the Bronze Charioteer of Kedra")
     pub kind: u8,               // statue, fresco, mosaic, ode, epic, play, building, treatise, jewel…
-    pub maker: u32,             // Person id (a guild's work credits the guildmaster)
+    pub maker: u32,             // Individual id (tombstoned if an ordinary maker dies) (a guild's work credits the guildmaster)
     pub year: u32,
     pub patron: i32,            // house / realm / city (tagged)
     pub material: String,       // from the city's real goods where possible (marble, bronze, gold)
@@ -80,7 +80,8 @@ bounded and decays slowly unless the work is still there.
 ## Market, theft, looting
 
 - **Buying**: a house with an office, bailo or strong trade tie in the city; a
-  crown; a rich city. Price ∝ prestige × rarity. Appetite from the house head's
+  crown; a rich city. Masterwork prestige for its owner is **capped** per owner and
+  decays unless the work is kept (rule 18). Price ∝ prestige × rarity. Appetite from the house head's
   traits and vices (Lavish buys, Miserly doesn't, Greedy resells, Patron of the
   Arts commissions). The seller is the owning city or house. **This moves real
   wealth** → dosed from zero, with a ceiling on spend per house per year.
@@ -129,7 +130,7 @@ Serious and funny, geography-checked (row 02 lint):
 | 07.2 | `Masterwork` records: creation by guild (threshold) and by talent | `guilds_need_culture_for_masterpieces`, `talent_needs_no_threshold` |
 | 07.3 | Prestige and development bonus (bounded) | `masterwork_prestige_is_bounded` |
 | 07.4 | Market: houses buy into galleries; appetite from traits; spend ceiling (dose 0) | `purchases_are_noops_at_zero` |
-| 07.5 | Theft and looting (looting hook for row 09), provenance | `provenance_records_every_move` |
+| 07.5 | Theft, provenance, and the **looting function** `loot_masterworks(hub, to)` — called by row 09's sacks (built later); tested here directly | `provenance_records_every_move` |
 | 07.6 | Invitations: commissions and relocation (variant C) | `commissioned_artisans_return_home` |
 | 07.7 | Galleries UI; end of row: dose the market; `tick::tests` + `econ_` | SCOREBOARD row |
 

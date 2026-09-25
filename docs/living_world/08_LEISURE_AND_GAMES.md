@@ -73,8 +73,36 @@ heroes, and sometimes regret it.
 | **Southeast-Asian-like** | Water games (boat races) · Theatre (shadow puppetry, *wayang*; court dance) · Wrestling / martial arts (kickboxing contests) | boat races, puppet masters, dancers, fighters |
 | Seafaring / Polynesian-like | Water games · Athletics (surfing, swimming) · Fair and feast | canoe races, navigators' feasts |
 
+**The 18 shipped language kits → families** (`cultures.rs` ~59–232):
+
+| Kit | Family |
+|---|---|
+| Roman, Hellene | Greco-Roman-like |
+| Punic | Racing · Water games · Fair and feast (a seafaring Greco-Roman cousin) |
+| Persian | Persian-like |
+| Arab | Arabian-like |
+| Amazigh | Racing · Recital · Fair and feast (horsemen and poets) |
+| Indic | Indian-like |
+| Sinitic | Chinese-like |
+| Yamato | Japanese-like |
+| Norse | Norse/Germanic-like |
+| Celtic | Celtic-like |
+| Slavic | Slavic-like |
+| Turkic, Mongol | Steppe-like |
+| Nilotic | Egyptian-like |
+| Nahua | Mesoamerican-like |
+| Quechua | Fair and feast · Racing (relay runners) · River festival |
+| Mande | West African-like |
+
+**No shipped kit is Southeast Asian or Polynesian.** The maintainer asked for
+Southeast Asian leisure, so 08.1 either **adds a kit** (a `Kit` entry in
+`cultures.rs` with names, and dress in `cultureDress.ts`) or reaches those
+families only through traits (Seafaring + tropical + Artisan →
+Southeast-Asian-like). Adding a kit is the faithful option; it is a worldgen change
+and owes `goods_` and naming checks. Decide at the start of 08.1.
+
 **How a culture gets its three:**
-1. If its **language kit** belongs to a family above → that family's three.
+1. If its **language kit** maps to a family (table above) → that family's three.
 2. Otherwise from **traits**: Martial → Arena/Wrestling · Nomadic/Pastoral →
    Polo/Racing · Scholarly → Theatre/Board games · Artisan → Theatre/Pleasure
    district · Seafaring → Water games · Mercantile → Fair · Agrarian → Fair/River
@@ -125,6 +153,14 @@ leisure.
   to war** (the Olympic truce).
 - **No betting**: no wealth moves on outcomes.
 
+**Prestige ceiling:** venue and sponsorship prestige (for the city and for
+sponsor houses) is capped and decays (CLAUDE.md rule 18) — sponsorship buys
+control, and control feeds capture, charters and wealth.
+
+**Loans:** a venue loan defaulting could call `fail_bank` and ripple as a crash.
+Venue loans are capped as a share of the bank's reserves, and a venue default's
+contagion is dosed separately (`VENUE_DEFAULT_CONTAGION_DOSE` = 0 at first).
+
 ## Viability, regret and abandonment
 
 A venue whose popularity falls (the population changed, the city shrank) or whose
@@ -134,7 +170,8 @@ upkeep cannot be met enters **distress**:
    begged House Varro for aid and was refused"*);
 2. failing that, it **declines** (condition falls, games cancelled);
 3. finally it is **abandoned** — a ruin that stays on the map and in the history.
-   Never converted.
+   Never converted. Distress always resolves within a bounded number of years
+   (financed or abandoned) — no venue sits in distress forever.
 
 Disasters: collapse (the Fidenae amphitheatre, 27 AD, killed thousands), fire, and
 **fan-faction riots** at racing venues (the Nika riots of 532 nearly toppled an
@@ -142,7 +179,7 @@ emperor) — factions can align with ideologies (row 06).
 
 ## Performers
 
-Performers are `Person`s (row 02) — part of the **40 notables** when famous. Their
+Performers are `Individual`s (row 02) — part of the **40 notables** when famous. Their
 lives, traits and events follow row 02; gladiators come from war captives where
 bondage is permitted and can win their freedom and fame; a champion can become a
 politician.
@@ -172,7 +209,7 @@ milestones — construction, disasters, abandonment, great festivals — kept).
 | 08.5 | Distress, financing search, decline, abandonment, disasters, faction riots | `unviable_venues_are_abandoned_not_converted` |
 | 08.6 | Performers (row 02 roles), captives where bondage permits | `gladiators_only_where_bondage_is_permitted` |
 | 08.7 | International games and the truce | `games_truce_lowers_war_chance` |
-| 08.8 | Venue subpanel; end of row: dose costs; `tick::tests` + `econ_` | SCOREBOARD row |
+| 08.8 | Venue subpanel — commands `campaign_get_venues`, `campaign_get_venue` (lib.rs + bridge + types); end of row: dose costs one at a time with `econ_` after each | SCOREBOARD row |
 
 ## Queue
 - Q08.1 — Fan factions as political blocs in the Government window (waits on

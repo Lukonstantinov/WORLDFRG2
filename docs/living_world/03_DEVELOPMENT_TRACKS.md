@@ -33,13 +33,24 @@ buildings with real effects.
   `roll_events`' fire/event setbacks outweigh the growth, so it collapses to
   `TECH_FACTOR_FLOOR` (0.85) within ~6 years and stays there (documented at
   `mod.rs` ~976 and in `economy_validation.rs` ~2285). **The world has no
-  technological progress today.** It is read in `production.rs` (~873, ~992).
+  technological progress today** — in effect a constant ×0.85 on production. It is
+  read in `production.rs` (~873, ~992) **and** `mod.rs` (~9806).
 - `TickHub.tradition` (per-good craft practice), craft guilds, signatures,
   `LAW_*` laws, structures (`buildingArt.ts` draws 15 building types),
   `TickHub.annals` (`CityYear`, yearly) — the natural home for the factor's
   history.
-- `dev_tier`/`dev_momentum` on the sim (world-age development) — read and
-  reconcile before adding anything parallel.
+- **`dev_tier`/`dev_momentum` are ALREADY a per-hub development tier**, 0–5
+  (Outpost … Emporium), computed in `cities.rs` (~2449, `development_tier` ~2538)
+  and shown by `read_hubs.rs` (~707). The new factor must **absorb or feed** that
+  tier, never sit beside it with a second, disagreeing notion of "development".
+  Decide in 03.1: the tier becomes a *display banding* of the new factor.
+- World-age development is a different thing: `WORLD_AGE_DEV_CAP` / `trade_dev`
+  in `disease.rs` (~510–546), a growth-ceiling term — leave it alone.
+- **`hub.structures` already exists** (`mod.rs` ~3987) with five buildings —
+  `STRUCT_GRANARY` (+12 % food), `STRUCT_WAREHOUSE`, `STRUCT_SHIPYARD`,
+  `STRUCT_GUILDHALL`, `STRUCT_WORKSHOP` (`mod.rs` ~2570). Track buildings extend
+  this list; the Civil-1 granary **is** `STRUCT_GRANARY`, the Trade warehouse **is**
+  `STRUCT_WAREHOUSE`, the guildhall/workshop map onto Trade/Ideological rungs.
 
 ## The development factor
 
@@ -72,6 +83,10 @@ scholars +0.5 · diffusion from Kedra +0.3 · plague −0.4").
 **Replacing `tech_factor`:** production reads a city's factor instead of the
 global one through `DEV_PRODUCTION_DOSE`, blended from the old value — at 0.0 the
 old global value is used everywhere (bit-identical); dosed in the last slice.
+**Normalise:** the city factor fed to production is scaled so that the
+population-weighted **world mean at campaign start equals the old value** (0.85
+today). Otherwise switching the dose on would jump production everywhere at once
+instead of letting cities diverge from a common start.
 
 ## The four tracks
 
@@ -100,7 +115,8 @@ with the greatest *need* (see below). Need per track:
 The government's ideology (row 06), the ruler's character (row 02) and lobbying
 by houses and guilds bias the Lustrum's choice.
 
-**Stability** (one formula, used everywhere): from legitimacy (row 04), unrest,
+**Stability** (one formula, used everywhere): from legitimacy (row 04 — a neutral
+constant until row 04 exists), unrest,
 war, recent disasters, and deadlock. 0.2 (chaos) to 1.2 (golden age).
 
 ## Buildings
@@ -134,10 +150,20 @@ Effects (each behind its own dose constant, 0.0 until the last slice):
 - **Culture development** is **derived**, never stored: the population-weighted
   mean of its cities' factors. A diaspora's development is that of the cities it
   lives in.
-- **Ideal**: what a culture admires, from its traits — conquest (Martial,
-  Nomadic), wealth and trade reach (Mercantile, Seafaring), learning and art
-  (Scholarly, Artisan), stability and population (Agrarian), lineage and loyalty
-  (Clannish). A culture's **prestige** grows by its own ideal: the Mongols gain it
+- **Ideal**: what a culture admires, from its traits — all 14 map to one:
+
+  | Traits | Ideal (what earns prestige) |
+  |---|---|
+  | Martial, Nomadic | conquest, victories, sacks |
+  | Mercantile, Seafaring | wealth, trade reach |
+  | Scholarly, Artisan | learning, art, masterworks |
+  | Agrarian, Pastoral | stability, population, herds and harvests |
+  | Clannish | lineage, loyalty, long-lived houses |
+  | Devout | monuments and festivals kept (no religion system — decided; read as tradition kept) |
+  | Insular, Xenophobic | purity and self-reliance: few foreigners, few imports |
+  | Assimilative | numbers absorbed: cultures made citizens |
+  | Diaspora | reach of their communities: cities where they live |
+ A culture's **prestige** grows by its own ideal: the Mongols gain it
   by sacking great cities.
 - **Judgement:** culture A regards B as **barbarian** when B's development, or B's
   score on **A's** ideal, is far below A's → B's default acceptance tier in A's
@@ -145,6 +171,7 @@ Effects (each behind its own dose constant, 0.0 until the last slice):
   **Admiration** is the reverse: a less-developed culture's elites admire a far
   more developed one → its default tier rises and its ideas spread faster
   (Hellenisation / Rome's philhellenism).
+- Culture **prestige carries a ceiling and a decay** (CLAUDE.md rule 18).
 
 ## Slices
 
@@ -156,7 +183,7 @@ Effects (each behind its own dose constant, 0.0 until the last slice):
 | 03.4 | Buildings: availability, cost in real goods, construction, damage | `a_building_needs_its_level`, `construction_spends_real_stock` (at dose 0 construction is off) |
 | 03.5 | Culture development (derived), ideals, prestige, barbarian/admiration judgement (exposed for rows 05/09) | `culture_development_is_population_weighted` |
 | 03.6 | UI: factor with sparkline and breakdown, tracks and buildings in the settlement panel | `tsc`, `vite build` |
-| 03.7 | Dose walk: `DEV_PRODUCTION_DOSE` and the building effects, one at a time; end-of-row `tick::tests` + `econ_` + `real_world_price_distance_gradient` | SCOREBOARD row |
+| 03.7 | Dose walk: `DEV_PRODUCTION_DOSE` (normalised) and the building effects, **one at a time, `econ_` after each**; end-of-row `tick::tests` + `real_world_price_distance_gradient` + the 300-year `econ_measure_development_leaders` | SCOREBOARD row |
 
 **Risk:** the factor feeds production, and production feeds every economy test.
 The runaway loop (trade → development → trade) needs the soft ceiling and decay,
