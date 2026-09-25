@@ -3844,6 +3844,28 @@ setting field × per-mineral noise) → ore DISTRICT (10–60 km, `MIN_DISTRICT_
 district, so clustering was never a cell-size problem — it was `min_sep = w*0.025`
 ≈ 1000 km between single cells.
 
+**How MANY districts scales with LAND AREA** (`deposits::district_budget`). The count
+used to be `richness × count_num / count_den` flat — about six to nine districts of a
+metal for a whole planet whatever its size, where medieval Europe alone worked a dozen
+great silver districts. It is now that product × `land_area_km2 /
+DISTRICT_LAND_REF_KM2` (18 M km², stated in km² per rule 25), so an Earth-like land
+area carries ~8× the old count; the per-mineral RATIO is untouched and still gated by
+`deposit_counts_span_an_order_of_magnitude`. On top of the districts sit **minor
+showings** (`SHOWINGS_PER_DISTRICT` = 2 per district, `MIN_SHOWING_SEP_KM` = 110): a
+single WEAK/MODERATE, lower-grade working each, placed LAST on the same candidate
+ground so the district and alluvial placement is untouched — the village lead pit
+between the great camps. The Biological step's slider is now "Ore richness"
+(6 = ×1.0), not a count. Measured (`deposit_census_diagnostic`, 600×300, 138 M km² of
+land): 8,094 workings, silver 119 districts incl. showings (was 9), iron 629, tin 82,
+lapis 24. Two things this made necessary: the district spacing test runs through a
+`SpacingGrid` (exact same accept/reject as the all-pairs scan, gated by
+`spacing_grid_matches_all_pairs`), and the campaign's per-(province, good) deposit
+potential is built ONCE into `CampaignSim::deposit_potential_cache` — the direct walk
+did an O(provinces) nearest-seat lookup per working per call, which at 10× the
+workings would have dominated the yearly province goods pass. `goods_`'s printed
+"wrong side of the coast" finding for `CoastalMarine` goods grows with the counts
+(bay_salt 115 → 1,864 cells): the same pre-existing `deposits.rs` question, larger.
+
 **Per-working state** the u8 belt cannot carry, persisted to `metadata["deposits"]`
 exactly as the province list is: `grade` (→ the quality tier, so "tiers of gems"
 becomes possible), `extent` (weak…world-class), `depth` (surface / shallow / deep /

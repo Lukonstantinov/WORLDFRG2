@@ -148,6 +148,7 @@
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
+            deposit_potential_cache: Default::default(),
             units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
         };
         s.rebuild_routes();

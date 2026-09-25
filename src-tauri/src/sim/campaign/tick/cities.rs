@@ -737,6 +737,15 @@ impl CampaignSim {
         // share — ore output has nothing to do with how many farmers a
         // province feeds or how much of it is ploughed (F4).
         if self.goods.get(g).map(|tg| tg.distribution) == Some(DIST_DEPOSITS) {
+            let np = self.prov_seat.len();
+            let nd = self.mine_deposits.len();
+            let cache = self.deposit_potential_cache.get_or_init(|| {
+                (nd, np, self.build_deposit_potential_table())
+            });
+            if cache.0 == nd && cache.1 == np {
+                return cache.2.get(p * ng + g).copied().unwrap_or(0.0);
+            }
+            // The fixture changed its deposits after the first read — walk directly.
             let name = self.goods[g].name.as_str();
             let mut sum = 0.0f32;
             for d in &self.mine_deposits {
@@ -751,6 +760,24 @@ impl CampaignSim {
         if belt <= 0.0 { return 0.0; }
         let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(0.0);
         belt * cap * self.province_good_land_share(p, g)
+    }
+
+    /// One pass over every working: the per-(province, good) deposit potential
+    /// `province_good_potential_base` reads (see `deposit_potential_cache`).
+    /// Identical sums to the direct walk, accumulated in the same working order.
+    fn build_deposit_potential_table(&self) -> Vec<f32> {
+        let ng = self.goods.len();
+        let np = self.prov_seat.len();
+        let mut table = vec![0.0f32; np * ng];
+        if np == 0 { return table; }
+        for d in &self.mine_deposits {
+            let Some(g) = self.goods.iter().position(|tg| tg.name == d.good) else { continue };
+            let p = self.province_at(d.x, d.y);
+            if p < 0 { continue; }
+            let extent_mult = ore_extent_ceiling_mult(d.extent).min(8.0);
+            table[p as usize * ng + g] += extent_mult * crate::sim::deposits::depth_workability(d.depth);
+        }
+        table
     }
 
     /// The calibrated, depleted potential — what `exploitation = actual/potential`

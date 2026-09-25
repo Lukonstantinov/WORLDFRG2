@@ -50,7 +50,7 @@ export interface RiverParamsState {
 }
 
 export interface BioParamsState {
-  gemDeposits: number;   // number of highland gemstone deposits
+  gemDeposits: number;   // ore richness: 6 = ×1.0; district counts also scale with land area (deposits::district_budget)
   tradeReach: number;    // 0 = global, 1 = coastal+short, 2 = continental only
   /** Longest UNBROKEN open-water run a route may cross, as a fraction of map
    *  width (x KM_EQUATOR for km). Shipped at 0.12 = ~4,809 km, i.e. an ocean

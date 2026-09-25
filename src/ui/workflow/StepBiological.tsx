@@ -107,7 +107,8 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
 
       {/* Generation parameters */}
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090" }}>
-        <span>Gemstone deposits</span><span style={{ color: "#8aa0c0" }}>{bioParams.gemDeposits}</span>
+        <span title="Ore and gem districts scale with this world's land area automatically; this sets how rich the crust is (6 = Earth-like).">Ore richness</span>
+        <span style={{ color: "#8aa0c0" }}>×{(bioParams.gemDeposits / 6).toFixed(2)}</span>
       </div>
       <input type="range" min={0} max={16} value={bioParams.gemDeposits}
         onChange={(e) => setBioParams({ gemDeposits: Number(e.target.value) })}

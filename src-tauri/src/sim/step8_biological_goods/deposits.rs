@@ -867,6 +867,121 @@ const KM_EQUATOR: f32 = 40075.0;
 const WORKINGS_MIN: u32 = 2;
 const WORKINGS_MAX: u32 = 8;
 
+/// THE DISTRICT COUNT SCALES WITH LAND, NOT WITH NOTHING. A mineral's district
+/// count used to be `richness × count_num / count_den` flat — about six silver
+/// districts for a whole planet, whatever its size, where medieval Europe alone
+/// (~10 M km²) worked a dozen great silver districts and thousands of lesser
+/// pits. The count is now that same product scaled by the world's real LAND AREA
+/// against this reference, so an Earth-like world (~150 M km² of land) carries
+/// about eight times the old count and a small archipelago world carries fewer.
+/// Stated in km² (rule 25), never cells, so it means the same at every grid size.
+/// The per-mineral RATIO (`count_num/count_den`, historically authored, gated by
+/// `deposit_counts_span_an_order_of_magnitude`) is untouched — only the scale.
+pub const DISTRICT_LAND_REF_KM2: f64 = 18.0e6;
+/// The shipped "ore richness" slider value that means ×1.0 (the old default).
+pub const RICHNESS_DEFAULT: u32 = 6;
+/// MINOR SHOWINGS: the small, poor, scattered deposits between the great
+/// districts — the village lead pit, the stream that paid a little gold, the
+/// iron outcrop a smith worked for a generation. Each is a single working of
+/// WEAK (sometimes MODERATE) extent and lower grade. This many per district.
+pub const SHOWINGS_PER_DISTRICT: f32 = 2.0;
+/// Showings sit much closer together than districts do — they are what fills
+/// the "smaller regions" between the great camps.
+const MIN_SHOWING_SEP_KM: f32 = 110.0;
+
+/// The world's real land area in km², equirectangular: a cell's east-west size
+/// shrinks with cos(latitude). Only used to SCALE deposit counts, so the plain
+/// y→latitude mapping (not the user's latitude frame) is precise enough.
+pub fn land_area_km2(buf: &WorldBuffer) -> f64 {
+    let w = buf.width.max(1) as usize;
+    let h = buf.height.max(1) as usize;
+    let dx = KM_EQUATOR as f64 / w as f64;
+    let dy = (KM_EQUATOR as f64 * 0.5) / h as f64;
+    let mut total = 0.0f64;
+    for y in 0..h {
+        let lat = (0.5 - (y as f64 + 0.5) / h as f64) * std::f64::consts::PI;
+        let row_area = dx * lat.cos().max(0.0) * dy;
+        let row = &buf.terrain[y * w..(y + 1) * w];
+        let land = row.iter().filter(|&&t| t == 1).count();
+        total += land as f64 * row_area;
+    }
+    total
+}
+
+/// `(districts, showings)` for one mineral: the richness slider × the mineral's
+/// own historical ratio × the world's land area. Never zero districts — a
+/// mineral must never silently vanish (§8.16's first rule).
+pub fn district_budget(richness: u32, count_num: u32, count_den: u32, land_km2: f64) -> (u32, u32) {
+    let base = richness as f64 * count_num.max(1) as f64 / count_den.max(1) as f64;
+    let scale = (land_km2 / DISTRICT_LAND_REF_KM2).max(0.0);
+    let districts = ((base * scale).round() as u32).max(1);
+    let showings = (districts as f32 * SHOWINGS_PER_DISTRICT).round() as u32;
+    (districts, showings)
+}
+
+/// A minimum-spacing test that does not rescan every accepted point: accepted
+/// points are bucketed on a grid whose cells are at least `sep` wide, so only the
+/// 3×3 neighbourhood can hold a point closer than `sep`. X wraps (rule 6). The
+/// accept/reject answer is EXACTLY the old all-pairs test's, so placement is
+/// bit-identical — only the cost changed (it matters now that counts scale).
+struct SpacingGrid {
+    w: i32,
+    bw: i32,
+    bh: i32,
+    cell_x: f32,
+    cell_y: f32,
+    sep: f32,
+    buckets: Vec<Vec<(i32, i32)>>,
+}
+
+impl SpacingGrid {
+    fn new(w: u32, h: u32, sep: f32) -> Self {
+        let sep = sep.max(1.0);
+        let bw = ((w as f32 / sep).floor() as i32).max(1);
+        let bh = ((h as f32 / sep).floor() as i32).max(1);
+        SpacingGrid {
+            w: w as i32,
+            bw,
+            bh,
+            cell_x: w as f32 / bw as f32,
+            cell_y: h.max(1) as f32 / bh as f32,
+            sep,
+            buckets: vec![Vec::new(); (bw * bh) as usize],
+        }
+    }
+    fn bucket_of(&self, x: i32, y: i32) -> (i32, i32) {
+        let bx = ((x as f32 / self.cell_x) as i32).clamp(0, self.bw - 1);
+        let by = ((y as f32 / self.cell_y) as i32).clamp(0, self.bh - 1);
+        (bx, by)
+    }
+    fn far_enough(&self, x: i32, y: i32) -> bool {
+        let (bx, by) = self.bucket_of(x, y);
+        let mut seen: [i32; 3] = [i32::MIN; 3];
+        for (k, ox) in (-1..=1).enumerate() {
+            let nbx = (bx + ox).rem_euclid(self.bw);
+            if seen[..k].contains(&nbx) { continue; }
+            seen[k] = nbx;
+            for oy in -1..=1 {
+                let nby = by + oy;
+                if nby < 0 || nby >= self.bh { continue; }
+                for &(qx, qy) in &self.buckets[(nby * self.bw + nbx) as usize] {
+                    let mut dx = (x - qx).abs();
+                    if dx > self.w / 2 { dx = self.w - dx; }
+                    let dy = (y - qy) as f32;
+                    if ((dx as f32) * (dx as f32) + dy * dy).sqrt() < self.sep {
+                        return false;
+                    }
+                }
+            }
+        }
+        true
+    }
+    fn insert(&mut self, x: i32, y: i32) {
+        let (bx, by) = self.bucket_of(x, y);
+        self.buckets[(by * self.bw + bx) as usize].push((x, y));
+    }
+}
+
 pub(crate) fn hash01(mut x: u64) -> f32 {
     x ^= x >> 33;
     x = x.wrapping_mul(0xFF51AFD7ED558CCD);
@@ -892,6 +1007,9 @@ pub struct MineralPlan<'a> {
     pub parent: Option<&'a str>,
     /// Number of ORE DISTRICTS to try to place.
     pub districts: u32,
+    /// Number of MINOR SHOWINGS (single small workings between the districts)
+    /// to try to place. 0 = none (the pre-scaling behaviour).
+    pub showings: u32,
     /// Deterministic per-mineral salt.
     pub salt: u64,
     /// 0..1 — rarer minerals demand a stronger setting and grade poorer on average
@@ -1074,30 +1192,19 @@ pub fn place_mineral(
             .then_with(|| a.0.cmp(&b.0))
     });
 
-    let wrap_dx = |a: i32, b: i32| -> i32 {
-        let mut d = (a - b).abs();
-        if d > w as i32 / 2 {
-            d = w as i32 - d;
-        }
-        d
-    };
-
     // ── District centres, spaced. ──
     let mut centers: Vec<(i32, i32, f32)> = Vec::new();
+    let mut spacing = SpacingGrid::new(w, h, sep_cells);
     for (i, _) in &ranked {
         if centers.len() as u32 >= plan.districts {
             break;
         }
         let cx = (*i as i32) % w as i32;
         let cy = (*i as i32) / w as i32;
-        let far_enough = centers.iter().all(|&(qx, qy, _)| {
-            let dx = wrap_dx(cx, qx) as f32;
-            let dy = (cy - qy) as f32;
-            (dx * dx + dy * dy).sqrt() >= sep_cells
-        });
-        if !far_enough {
+        if !spacing.far_enough(cx, cy) {
             continue;
         }
+        spacing.insert(cx, cy);
         centers.push((cx, cy, cand[*i]));
     }
 
@@ -1193,6 +1300,44 @@ pub fn place_mineral(
                 write_belt(&mut belt, t, &dep);
                 out.push(dep);
             }
+        }
+    }
+
+    // ── Minor showings: small single workings between the great districts. ──
+    // Placed LAST so the district and alluvial placement above is untouched by
+    // them. Same candidate ground (the setting still decides), kept clear of every
+    // working already placed, each its own one-working "district".
+    if plan.showings > 0 && !ranked.is_empty() {
+        let show_sep = (MIN_SHOWING_SEP_KM / km_per_cell).max(2.0);
+        let mut sg = SpacingGrid::new(w, h, show_sep);
+        for d in &out {
+            sg.insert(d.x as i32, d.y as i32);
+        }
+        let base_district = centers.len() as u32;
+        let mut placed = 0u32;
+        for (i, _) in &ranked {
+            if placed >= plan.showings {
+                break;
+            }
+            if belt[*i] != 0 {
+                continue;
+            }
+            let x = (*i as i32) % w as i32;
+            let y = (*i as i32) / w as i32;
+            if !sg.far_enough(x, y) {
+                continue;
+            }
+            let ks = gs ^ 0x5409_0000_0000 ^ (placed as u64).wrapping_mul(0x9E3779B97F4A7C15);
+            let local = ctx.setting_score(buf, plan.model, *i);
+            let mut dep = make_working(
+                plan, base_district + placed, x as u32, y as u32, local * 0.7, cand[*i] * 0.6, ks,
+            );
+            dep.extent = if hash01(ks ^ 0x3E) < 0.8 { EXTENT_WEAK } else { EXTENT_MODERATE };
+            dep.grade = (dep.grade * 0.8).clamp(0.20, 1.0);
+            write_belt(&mut belt, *i, &dep);
+            out.push(dep);
+            sg.insert(x, y);
+            placed += 1;
         }
     }
 
@@ -1439,6 +1584,7 @@ mod tests {
             placer_frac,
             parent: default_parent_for(id),
             districts,
+            showings: 0,
             salt: id
                 .bytes()
                 .fold(0xcbf29ce484222325u64, |a, b| (a ^ b as u64).wrapping_mul(0x100000001b3)),
@@ -1497,6 +1643,68 @@ mod tests {
             mt > md * 1.8,
             "tin ({mt:.3}) and diamond ({md:.3}) landed on the same kind of ground"
         );
+    }
+
+    /// The district count must grow with LAND AREA — a planet with twice the
+    /// land carries twice the districts — and the per-mineral ratio must survive
+    /// the scaling (tin stays rarer than iron).
+    #[test]
+    fn district_count_scales_with_land_area() {
+        let (a, sa) = district_budget(RICHNESS_DEFAULT, 1, 1, 40.0e6);
+        let (b, sb) = district_budget(RICHNESS_DEFAULT, 1, 1, 80.0e6);
+        assert!(b >= a * 2 - 1 && b <= a * 2 + 1, "doubling land must ~double districts: {a} → {b}");
+        assert!(sb > sa && sa > a, "showings must scale too and outnumber districts: {a}/{sa} {b}/{sb}");
+        let (tin, _) = district_budget(RICHNESS_DEFAULT, 2, 3, 150.0e6);
+        let (iron, _) = district_budget(RICHNESS_DEFAULT, 5, 1, 150.0e6);
+        assert!(iron > tin * 5, "ratio must survive scaling: tin {tin} iron {iron}");
+        // An Earth-like land area must carry far more than the old flat six.
+        let (earth, _) = district_budget(RICHNESS_DEFAULT, 1, 1, 150.0e6);
+        assert!(earth >= 40, "an Earth-sized world should hold dozens of districts, got {earth}");
+        // Never zero — a mineral must not vanish on a tiny world.
+        assert_eq!(district_budget(RICHNESS_DEFAULT, 1, 4, 1.0e5).0, 1);
+    }
+
+    /// The spacing grid is an optimisation only: its accept/reject answer must be
+    /// exactly the old all-pairs test's, including across the wrap seam.
+    #[test]
+    fn spacing_grid_matches_all_pairs() {
+        let (w, h, sep) = (97u32, 41u32, 6.5f32);
+        let mut g = SpacingGrid::new(w, h, sep);
+        let mut pts: Vec<(i32, i32)> = Vec::new();
+        for k in 0..4000u64 {
+            let x = (hash01(k.wrapping_mul(0x9E37)) * w as f32) as i32 % w as i32;
+            let y = (hash01(k.wrapping_mul(0x85EB) ^ 7) * h as f32) as i32 % h as i32;
+            let brute = pts.iter().all(|&(qx, qy)| {
+                let mut dx = (x - qx).abs();
+                if dx > w as i32 / 2 { dx = w as i32 - dx; }
+                let dy = (y - qy) as f32;
+                ((dx * dx) as f32 + dy * dy).sqrt() >= sep
+            });
+            assert_eq!(g.far_enough(x, y), brute, "grid disagrees at ({x},{y})");
+            if brute { g.insert(x, y); pts.push((x, y)); }
+        }
+        assert!(pts.len() > 20);
+    }
+
+    /// Minor showings fill the ground BETWEEN districts: they add workings, each
+    /// small, none on a cell already worked, and they never touch the districts.
+    #[test]
+    fn showings_add_small_workings_between_districts() {
+        let buf = test_world(128, 64);
+        let ctx = GeoContext::build(&buf, &[]);
+        let base = place_mineral(&buf, &ctx, &[], &plan_for("copper", 5), &[], 7);
+        let mut plan = plan_for("copper", 5);
+        plan.showings = 10;
+        let with = place_mineral(&buf, &ctx, &[], &plan, &[], 7);
+        let extra = with.deposits.len() - base.deposits.len();
+        assert!(extra >= 3, "showings placed too few: {extra}");
+        // The district workings are unchanged, in order.
+        for (a, b) in base.deposits.iter().zip(with.deposits.iter()) {
+            assert_eq!((a.x, a.y, a.district, a.extent), (b.x, b.y, b.district, b.extent));
+        }
+        for d in &with.deposits[base.deposits.len()..] {
+            assert!(d.extent <= EXTENT_MODERATE, "a showing must be small");
+        }
     }
 
     /// Workings must CLUSTER into camps. The old placer forced ~1000 km between

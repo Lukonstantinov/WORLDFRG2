@@ -8033,6 +8033,17 @@ pub struct CampaignSim {
     /// save, a template/painted world, or a world generated before slice 1 — every
     /// reader treats that as "no depth data", never as "no deposit exists".
     #[serde(default)] pub mine_deposits: Vec<MineSite>,
+    /// Per-(province, good) sum of `extent × depth_workability` over this world's
+    /// real workings — what `province_good_potential_base` reads for a deposit
+    /// good. Both inputs (`mine_deposits`, the province seats) are fixed once a
+    /// campaign starts, so this is computed ONCE on first read instead of
+    /// re-walking every working (with an O(provinces) nearest-seat lookup each)
+    /// on every call — which became the dominant cost of the yearly province
+    /// goods pass once deposit counts scaled with land area. Keyed by the
+    /// deposit/province counts it was built from; a mismatch (a test fixture
+    /// that edits `mine_deposits` after a read) falls back to the direct walk.
+    /// Never serialized — rebuilt lazily after a load.
+    #[serde(skip)] pub deposit_potential_cache: std::sync::OnceLock<(usize, usize, Vec<f32>)>,
 
     // ── MONEY_AND_COINAGE_PLAN.md M1 — the coin CATALOGUE (see `coinage.rs`) ──
     // Purely observational: recorded from what `decide_coinage`/`apply_coinage`

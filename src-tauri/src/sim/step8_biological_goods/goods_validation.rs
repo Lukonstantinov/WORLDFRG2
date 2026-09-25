@@ -46,6 +46,15 @@ pub struct GoodCoverage {
 fn reference_world(w: u32, h: u32, seed: u64) -> (
     WorldBuffer, Vec<rivers::River>, Vec<settlements::Settlement>, Vec<u32>, Vec<goods_spec::GoodSpec>,
 ) {
+    let (buf, r, s, p, g, _ore) = reference_world_with_ore(w, h, seed, 18);
+    (buf, r, s, p, g)
+}
+
+/// As `reference_world`, plus the placed ore workings, at a chosen richness.
+fn reference_world_with_ore(w: u32, h: u32, seed: u64, richness: u32) -> (
+    WorldBuffer, Vec<rivers::River>, Vec<settlements::Settlement>, Vec<u32>, Vec<goods_spec::GoodSpec>,
+    Vec<crate::sim::deposits::Deposit>,
+) {
     let conn = Connection::open_in_memory().unwrap();
     schema::create_tables(&conn).unwrap();
     for (k, v) in [("grid_width", w.to_string()), ("grid_height", h.to_string())] {
@@ -117,9 +126,9 @@ fn reference_world(w: u32, h: u32, seed: u64) -> (
     // 6 — so a handful of ore/gem districts landing far from every settlement is
     // not just small-world sampling noise (§2.4: a floor should measure the real
     // failure mode, not an artefact of an unrealistically sparse test world).
-    let (_ore, _localities, _report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, 18, 0.5, &specs);
+    let (ore, _localities, _report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, richness, 0.5, &specs);
 
-    (buf, extracted_rivers, settled, province_id, specs)
+    (buf, extracted_rivers, settled, province_id, specs, ore)
 }
 
 /// Coverage for every good against a reference world. Exposed (not test-only) so
@@ -268,6 +277,34 @@ mod tests {
             area.values().filter(|&&a| (a as u32) <= land.island_max_cells).count());
         // The ONLY thing this fixture can honestly assert: the coverage guarantee.
         assert!(placed >= 4, "endemic goods stopped placing entirely ({placed} of 6 placed)");
+    }
+
+    /// DEPOSIT CENSUS: how many districts, workings and minor showings each
+    /// mineral actually places on a real world at the shipped richness (6), and
+    /// how much land that world has. Run to see the effect of land-area scaling:
+    /// `cargo test --release --lib deposit_census_diagnostic -- --ignored --nocapture`
+    #[test]
+    #[ignore]
+    fn deposit_census_diagnostic() {
+        let (w, h) = (
+            std::env::var("CENSUS_W").ok().and_then(|v| v.parse().ok()).unwrap_or(600u32),
+            std::env::var("CENSUS_H").ok().and_then(|v| v.parse().ok()).unwrap_or(300u32),
+        );
+        let (buf, _r, _s, _p, _specs, ore) = reference_world_with_ore(w, h, 0xC0FFEE_5EED, 6);
+        let land = crate::sim::deposits::land_area_km2(&buf);
+        println!("\nworld {w}x{h} · land {:.1} M km² · {} workings total", land / 1e6, ore.len());
+        let mut by: std::collections::BTreeMap<String, (std::collections::BTreeSet<u32>, usize, usize, usize)> = Default::default();
+        for d in &ore {
+            let e = by.entry(d.good.clone()).or_default();
+            e.0.insert(d.district);
+            e.1 += 1;
+            if d.extent >= crate::sim::deposits::EXTENT_GREAT { e.2 += 1; }
+            if d.extent == crate::sim::deposits::EXTENT_WEAK { e.3 += 1; }
+        }
+        println!("{:<16} {:>9} {:>9} {:>7} {:>6}", "mineral", "districts", "workings", "great+", "weak");
+        for (g, (ds, n, great, weak)) in &by {
+            println!("{:<16} {:>9} {:>9} {:>7} {:>6}", g, ds.len(), n, great, weak);
+        }
     }
 
     #[test]

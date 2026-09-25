@@ -1151,6 +1151,9 @@ pub fn compute_trade_goods(
         .iter()
         .any(|s| s.enabled && matches!(s.distribution, Distribution::Deposits));
     let geo: Option<GeoContext> = any_deposit.then(|| GeoContext::build(buf, rivers));
+    // The world's real land area — scales every mineral's district count
+    // (`deposits::district_budget`). Measured once, not per good.
+    let land_km2 = if any_deposit { deposits::land_area_km2(buf) } else { 0.0 };
 
     // Every working placed so far, so a DERIVED mineral (turquoise weathering out
     // of a copper body) can find its parent. Keyed by good id.
@@ -1207,13 +1210,16 @@ pub fn compute_trade_goods(
                     buf.goods[slot] = vec![0u8; n];
                     continue;
                 };
+                let (districts, showings) =
+                    deposits::district_budget(gem_deposits, num, den, land_km2);
                 let plan = MineralPlan {
                     id: &spec.id,
                     model,
                     working,
                     placer_frac,
                     parent: parent.as_deref(),
-                    districts: (gem_deposits * num / den).max(1),
+                    districts,
+                    showings,
                     salt,
                     rarity: spec.rarity,
                 };
@@ -1313,13 +1319,16 @@ pub fn compute_trade_goods(
                 .unwrap_or((1, 1));
             let working = spec.deposit.as_ref().and_then(|d| d.working)
                 .unwrap_or_else(|| deposits::default_working_for(&spec.id));
+            let (districts, showings) =
+                deposits::district_budget(gem_deposits, num, den, land_km2);
             let plan = MineralPlan {
                 id: &spec.id,
                 model,
                 working,
                 placer_frac,
                 parent: parent_id.as_deref(),
-                districts: (gem_deposits * num / den).max(1),
+                districts,
+                showings,
                 salt: id_salt(&spec.id),
                 rarity: spec.rarity,
             };
