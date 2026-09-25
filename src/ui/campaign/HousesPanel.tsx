@@ -354,8 +354,10 @@ function PlainStat({ label, value, color }: { label: string; value: string; colo
 /** S12a · the bottom pulse — a thin scroll of the last handful of house-ish
  *  world events, colour-coded by kind. Not the chronicle (that is the per-house
  *  Chronicle tab); a heartbeat so the window feels alive while time advances.
- *  Reuses the SAME `campaign_get_journal(-1,-1)` world feed `NewsFeedPanel`
- *  already reads — a sixth caller of an existing mechanism, not a new one. */
+ *  Reuses the SAME `campaign_get_journal(-1,-1)` world feed every other
+ *  chronicle reader already calls — another caller of an existing mechanism,
+ *  not a new one (the standalone News Feed window itself is gone, see
+ *  living_world/01_FEEDS_AND_PRUNING.md). */
 const PULSE_KINDS = new Set(["house", "succession", "monopoly", "office", "feud", "guild_founded", "guild_dissolved"]);
 const PULSE_ICON: Record<string, string> = {
   house: "🛡", succession: "🛡", monopoly: "👑", office: "🏛", feud: "⚔",

@@ -321,7 +321,7 @@ pub struct Modifier {
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
-pub struct LifeEntry {
+pub struct IndividualLifeEntry {
     pub tick: u32,
     pub template_id: u16,
     #[serde(default)]
@@ -379,7 +379,7 @@ pub struct Individual {
     pub features: u32,
     pub relations: Vec<(u8, u32)>,
     pub backstory: Vec<(u16, Vec<u32>)>,
-    pub life_log: Vec<LifeEntry>,
+    pub life_log: Vec<IndividualLifeEntry>,
     /// The calendar year `events_this_year` was last rolled for (life_events.rs).
     #[serde(default)]
     pub events_year: u32,
@@ -605,7 +605,7 @@ impl CampaignSim {
                 features: 0,
                 relations: Vec::new(),
                 backstory: Vec::new(),
-                life_log: vec![LifeEntry { tick: f.born_tick, template_id: 0, args: vec![] }],
+                life_log: vec![IndividualLifeEntry { tick: f.born_tick, template_id: 0, args: vec![] }],
                 events_year: 0,
                 events_this_year: 0,
             };

@@ -242,7 +242,7 @@ impl CampaignSim {
         // `u32::MAX` marks "no hub" (an abroad/unknown person) so rendering
         // never mistakes it for hub 0 — every world has a real hub 0.
         let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
-        let entry = LifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg] };
+        let entry = IndividualLifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg] };
         let famous = self.people[i].famous;
         self.people[i].life_log.push(entry.clone());
         if !famous && self.people[i].life_log.len() > ORDINARY_LIFE_LOG_CAP {
@@ -280,7 +280,7 @@ impl CampaignSim {
     /// TIME (00_INDEX "text generated lazily at read time") — never baked
     /// into the log itself, so re-reading an old entry always uses the
     /// CURRENT city name etc.
-    pub(crate) fn render_life_entry_for(&self, name: &str, e: &LifeEntry) -> String {
+    pub(crate) fn render_life_entry_for(&self, name: &str, e: &IndividualLifeEntry) -> String {
         let t = EVENT_TEMPLATES.iter().find(|t| t.id == e.template_id);
         let city = e.args.first()
             .and_then(|&h| self.hubs.get(h as usize))

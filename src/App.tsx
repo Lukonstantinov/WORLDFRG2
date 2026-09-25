@@ -31,7 +31,6 @@ import { PeoplesPanel } from "@ui/campaign/PeoplesPanel";
 import { ColonialPanel } from "@ui/campaign/ColonialPanel";
 import { BankPanel } from "@ui/campaign/BankPanel";
 import { CoinBankWindow } from "@ui/campaign/CoinBankWindow";
-import { NewsFeedPanel } from "@ui/campaign/NewsFeedPanel";
 import { PlaguePanel } from "@ui/campaign/PlaguePanel";
 import { ImmigrationPanel } from "@ui/campaign/ImmigrationPanel";
 import { GuildsPanel } from "@ui/campaign/GuildsPanel";
@@ -1102,7 +1101,6 @@ export default function App() {
           <ColonialPanel />
           <BankPanel />
           <CoinBankWindow />
-          <NewsFeedPanel />
           <PlaguePanel />
           <ImmigrationPanel />
           <GuildsPanel />

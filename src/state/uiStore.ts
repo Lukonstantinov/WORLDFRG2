@@ -296,8 +296,6 @@ interface UIStore {
   selectedBankIdx: number | null;
   /** Bank icons on the map (find banks at a glance). */
   showBankIcons: boolean;
-  /** The filterable World News feed (global campaign chronicle). */
-  showNews: boolean;
   /** Phase 6 · Plagues & Epidemics panel open. */
   showPlagues: boolean;
   /** DLC 3.5 §3.4 · the War Council panel — active wars, the concluded-war log
@@ -446,7 +444,6 @@ interface UIStore {
   setShowBank: (v: boolean) => void;
   setSelectedBankIdx: (i: number | null) => void;
   setShowBankIcons: (v: boolean) => void;
-  setShowNews: (v: boolean) => void;
   setShowPlagues: (v: boolean) => void;
   setShowWar: (v: boolean) => void;
   setShowStates: (v: boolean) => void;
@@ -604,7 +601,6 @@ export const useUIStore = create<UIStore>((set) => ({
   showBank: false,
   selectedBankIdx: null,
   showBankIcons: false,
-  showNews: false,
   showPlagues: false,
   showWar: false,
   showStates: false,
@@ -800,7 +796,6 @@ export const useUIStore = create<UIStore>((set) => ({
   setShowBank: (v) => set({ showBank: v }),
   setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),
   setShowBankIcons: (v) => set({ showBankIcons: v }),
-  setShowNews: (v) => set({ showNews: v }),
   setShowPlagues: (v) => set({ showPlagues: v }),
   setShowWar: (v) => set({ showWar: v }),
   setShowStates: (v) => set({ showStates: v }),

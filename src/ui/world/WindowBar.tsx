@@ -14,7 +14,6 @@ export function WindowBar() {
     { label: "⚖ Markets", on: s.showMarkets, set: s.setShowMarkets },
     { label: "📦 Goods", on: s.showGoodsWindow, set: s.setShowGoodsWindow },
     { label: "🏆 Cities", on: s.showCityRanking, set: s.setShowCityRanking },
-    { label: "🗞 News", on: s.showNews, set: s.setShowNews },
     { label: "🏬 Depots", on: s.showWarehouses, set: s.setShowWarehouses },
     { label: "📜 Futures", on: s.showFutures, set: s.setShowFutures },
     { label: "🔀 Trade", on: s.showTradeMatrix, set: s.setShowTradeMatrix },

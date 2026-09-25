@@ -93,7 +93,6 @@ export function CampaignTopBar() {
         { label: "🏆 City Ranking", on: ui.showCityRanking, set: ui.setShowCityRanking },
         { label: "🏛 Colonial Office", on: ui.showColonial, set: ui.setShowColonial },
         { label: "🌊 Hydrology · Rivers", on: ui.showHydrology, set: ui.setShowHydrology },
-        { label: "🗞 World News", on: ui.showNews, set: ui.setShowNews },
         { label: "⚔ War Council", on: ui.showWar, set: ui.setShowWar },
       ],
     },

@@ -15,36 +15,34 @@ fn fnv1a32(s: &str) -> u32 {
     h
 }
 
-/// The journal `kind`s each role actually cares about, for the life log below —
-/// a demagogue's story is riots and hunger, an admiral's is war and piracy. A
-/// small COMMON set (plague, war declared, crashes) applies to every role, since
-/// those touch anyone living through them regardless of trade.
-fn role_journal_kinds(role: u8) -> &'static [&'static str] {
-    match role {
-        0 => &["piracy", "war", "voyage_loss", "colony", "founding"],
-        1 => &["riot", "revolt", "unrest", "starvation"],
-        2 => &["guild_founded", "guild_strike", "guild_dissolved", "signature", "structure"],
-        3 => &["crash", "panic", "run", "bank", "failed", "debt", "recap", "coinage"],
-        _ => &["expedition", "founding", "colony", "voyage_loss", "corridor"],
-    }
-}
-const COMMON_JOURNAL_KINDS: &[&str] =
-    &["plague_lockup", "plague_extinction", "war", "crash", "revolt"];
+// `role_journal_kinds`/`COMMON_JOURNAL_KINDS` moved to `sim::tick` (01_FEEDS_
+// AND_PRUNING.md 01.1) so both this read-time formatter and the write-time
+// materialiser (`CampaignSim::sync_figure_life_logs`) share one definition.
+use crate::sim::tick::{role_journal_kinds, COMMON_JOURNAL_KINDS};
 
-/// A short, capped life log built ENTIRELY from `sim.journal` entries recorded at
-/// the figure's own city while they were alive — never invented. Chronological
-/// (oldest first, so it reads as a life), capped at 6 so a long-lived figure in a
-/// busy capital doesn't drown the card.
+/// A short, capped life log — read from the figure's own MATERIALISED
+/// `life_log` where one has been synced (01_FEEDS_AND_PRUNING.md 01.1, so a
+/// long-lived figure's story survives the journal's own 50-year chatter
+/// prune), falling back to a live `sim.journal` scan for a figure who hasn't
+/// been through a yearly sync yet (a campaign under a year old). Chronological
+/// (oldest first, so it reads as a life), capped at 6 so a long-lived figure in
+/// a busy capital doesn't drown the card.
 fn life_events_for(sim: &crate::sim::tick::CampaignSim, f: &crate::sim::tick::Figure) -> Vec<String> {
     use crate::sim::tick::TICKS_PER_YEAR;
-    let role_kinds = role_journal_kinds(f.kind);
-    let end_tick = if f.dead { f.dies_tick } else { sim.tick };
-    let mut events: Vec<(u32, String)> = sim.journal.iter()
-        .filter(|e| e.hub == f.hub as i32
-            && e.tick >= f.born_tick && e.tick <= end_tick
-            && (role_kinds.contains(&e.kind.as_str()) || COMMON_JOURNAL_KINDS.contains(&e.kind.as_str())))
-        .map(|e| (e.tick, format!("{} — {}", e.tick / TICKS_PER_YEAR, e.text)))
-        .collect();
+    let mut events: Vec<(u32, String)> = if !f.life_log.is_empty() {
+        f.life_log.iter()
+            .map(|e| (e.tick, format!("{} — {}", e.tick / TICKS_PER_YEAR, e.text)))
+            .collect()
+    } else {
+        let role_kinds = role_journal_kinds(f.kind);
+        let end_tick = if f.dead { f.dies_tick } else { sim.tick };
+        sim.journal.iter()
+            .filter(|e| e.hub == f.hub as i32
+                && e.tick >= f.born_tick && e.tick <= end_tick
+                && (role_kinds.contains(&e.kind.as_str()) || COMMON_JOURNAL_KINDS.contains(&e.kind.as_str())))
+            .map(|e| (e.tick, format!("{} — {}", e.tick / TICKS_PER_YEAR, e.text)))
+            .collect()
+    };
     events.dedup_by(|a, b| a.1 == b.1);
     events.sort_by_key(|(t, _)| *t);
     if events.len() > 6 {
