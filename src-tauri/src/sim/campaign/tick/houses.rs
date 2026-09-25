@@ -2460,6 +2460,7 @@ impl CampaignSim {
         self.figures.push(Figure {
             name, kind, hub: hub as u32, house: resident, good,
             born_tick: tick, dies_tick: tick + span, dead: false, rallied: false,
+            life_log: Vec::new(),
         });
     }
 

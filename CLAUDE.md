@@ -2964,7 +2964,8 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   portraits everywhere now go through `cultureDress.ts`
   LandmarksPanel.tsx            ← Notable landmarks
   AtlasPanel.tsx                ← Atlas 2.0 (eras / world frame)
-  NewsFeedPanel.tsx             ← Campaign news feed
+  (NewsFeedPanel.tsx removed — living_world/01_FEEDS_AND_PRUNING.md; every other
+   chronicle reader still calls the same `campaign_get_journal`)
   ChroniclePanel.tsx            ← World ledger — reading matter (left rail). Also the
                                   two ways to begin again on this world — ➕ New
                                   campaign (archives the running one into the library,

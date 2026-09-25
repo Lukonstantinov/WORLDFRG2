@@ -2111,6 +2111,22 @@ const HOUSE_MILESTONE_CAP: usize = 120;
 // aborts mid-year (the "campaign died/restarted after ~30 years" crash). Cap it to
 // the most-recent N entries — plenty for the year-grouped Chronicle UI.
 const JOURNAL_CAP: usize = 20_000;
+/// living_world/01_FEEDS_AND_PRUNING.md · chatter older than this many years is
+/// dropped from every world chronicle EXCEPT a figure's own `life_log` (never
+/// pruned — a notable's life is a story, not chatter). A MILESTONE entry (see
+/// `is_milestone_kind`/`is_realm_milestone`/`is_prov_milestone`) survives past
+/// the window; only the periodic/routine noise the window exists to bound does
+/// not.
+const CHRONICLE_KEEP_YEARS: u32 = 50;
+/// Ceiling on a realm's own event log (unbounded before this row — R1's own doc
+/// comment already promised milestones "never pruned" without any cap existing
+/// to make that a real guarantee once a long-lived empire's chatter piled up).
+const REALM_EVENTS_CAP: usize = 200;
+/// Once the world journal's milestone entries alone exceed this, the OLDEST are
+/// folded into one per-decade summary line rather than silently dropped — a
+/// milestone is permanent in SUBSTANCE (rule 20), which a bare eviction would
+/// violate even though it is bounded in COUNT.
+const JOURNAL_MILESTONE_CAP: usize = 4_000;
 // ── Futures contracts (Phase 3). A contract is a thin, two-sided stability layer
 //    ON TOP of the spot market: it covers only a slice of a city's need (so the
 //    price signal survives), at a struck price allowed to drift within a band, for
@@ -7051,7 +7067,45 @@ pub struct Figure {
     /// A demagogue's crowds have already rallied once (chronicled a single time).
     #[serde(default)]
     pub rallied: bool,
+    /// living_world/01_FEEDS_AND_PRUNING.md 01.1 · this figure's own story,
+    /// MATERIALISED out of the world journal as it happens (`sync_figure_life_logs`)
+    /// so it survives the journal's own 50-year chatter prune (`prune_chronicles`).
+    /// Never pruned itself (decided: a notable's life is never pruned) and naturally
+    /// bounded — at most a handful of role-matching entries a year, for one life.
+    #[serde(default)]
+    pub life_log: Vec<LifeEntry>,
 }
+
+/// One entry in a `Figure`'s materialised life story — a copy of a world-journal
+/// row the figure's own role cares about (`role_journal_kinds`), taken at write
+/// time so pruning the journal later cannot erase it. `#[serde(default)]` empty
+/// Vec everywhere until `01_FEEDS_AND_PRUNING.md` backfills it once from
+/// whatever the journal still holds.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct LifeEntry {
+    pub tick: u32,
+    pub kind: String,
+    pub text: String,
+}
+
+/// The journal `kind`s each `Figure` role actually cares about for its own life
+/// log — a demagogue's story is riots and hunger, an admiral's is war and piracy.
+/// Moved here (from the read-only query layer) so both the read-time formatter
+/// (`read_people.rs::life_events_for`) and the write-time materialiser
+/// (`sync_figure_life_logs`) share one definition instead of two that can drift.
+pub(crate) fn role_journal_kinds(role: u8) -> &'static [&'static str] {
+    match role {
+        0 => &["piracy", "war", "voyage_loss", "colony", "founding"],
+        1 => &["riot", "revolt", "unrest", "starvation"],
+        2 => &["guild_founded", "guild_strike", "guild_dissolved", "signature", "structure"],
+        3 => &["crash", "panic", "run", "bank", "failed", "debt", "recap", "coinage"],
+        _ => &["expedition", "founding", "colony", "voyage_loss", "corridor"],
+    }
+}
+/// A small COMMON set (plague, war declared, crashes, revolt) applies to every
+/// role, since those touch anyone living through them regardless of trade.
+pub(crate) const COMMON_JOURNAL_KINDS: &[&str] =
+    &["plague_lockup", "plague_extinction", "war", "crash", "revolt"];
 
 /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) — per-city NOTABLES, distinct from
 /// the world-wide `Figure`/`FIGURE_KINDS` roster above (a Figure is one of a
@@ -8073,6 +8127,15 @@ pub struct CampaignSim {
     /// and friends before their own doses were ever raised.
     #[serde(default)] pub diag_barter_trades: u32,
     #[serde(default)] pub diag_barter_volume: f32,
+
+    // ── living_world/01_FEEDS_AND_PRUNING.md ──────────────────────────────
+    /// High-water mark: journal entries with `tick <= life_log_synced_tick`
+    /// have already been folded into every matching figure's own `life_log`
+    /// (`sync_figure_life_logs`). Serde-defaults to 0 on an old save, which is
+    /// exactly right — the next sync then walks the WHOLE journal currently
+    /// held (up to its existing window) and backfills every figure's story in
+    /// one pass, rather than needing a separate migration step.
+    #[serde(default)] pub life_log_synced_tick: u32,
 }
 
 /// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
@@ -9779,6 +9842,10 @@ impl CampaignSim {
                 self.run_civic_wonders(yr);
                 self.run_piracy(yr);
                 self.run_diaspora(yr);
+                // living_world/01_FEEDS_AND_PRUNING.md · after every other yearly
+                // pass, so a figure's life log has already copied out anything
+                // about to be pruned as chatter.
+                self.prune_chronicles(yr);
                 for l in self.house_ledger.iter_mut() {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
@@ -11077,25 +11144,131 @@ impl CampaignSim {
             value: index,
             text: String::new(),
         });
-        // ROLLING 25-YEAR WINDOW: drop journal entries older than 25 years. The
-        // journal is append-only and the WHOLE thing is (de)serialized on every
-        // state fetch — past ~25 years that accumulation is the source of the lag.
-        // Older ticks are simply discarded (overwritten by newer history). A hard
-        // count cap stays as a safety net for event-dense ticks.
-        const JOURNAL_WINDOW_TICKS: u32 = 25 * TICKS_PER_YEAR; // 25 years
-        let cutoff = self.tick.saturating_sub(JOURNAL_WINDOW_TICKS);
-        if self.journal.first().map_or(false, |e| e.tick < cutoff) {
-            // Keep recent entries within the window AND, beyond it, the MILESTONE
-            // events that form a city/house's permanent record (founding, colonies,
-            // wars, crashes, banks, espionage, speculation calls). The bulk that the
-            // window exists to shed is the per-tick "price" samples + "voyage_loss"
-            // noise, so those are still dropped past 25 years. (Fixes city Chronicles
-            // losing their early history on long campaigns.)
-            self.journal.retain(|e| e.tick >= cutoff || is_milestone_kind(&e.kind));
-        }
+        // A hard count cap as a safety net for event-dense ticks between yearly
+        // `prune_chronicles` runs (living_world/01_FEEDS_AND_PRUNING.md) — the
+        // real windowed/milestone-aware pruning now runs there, yearly, so the
+        // year's own entries are all still visible when it runs.
         if self.journal.len() > 12_000 {
             let drop = self.journal.len() - 12_000;
             self.journal.drain(0..drop);
+        }
+    }
+
+    /// living_world/01_FEEDS_AND_PRUNING.md 01.1 · fold every journal entry
+    /// written since the last sync into each LIVING (or just-died-this-window)
+    /// figure's own `life_log` — BEFORE `prune_chronicles` can drop it as
+    /// chatter. Cheap: bounded by roughly a year's worth of journal growth ×
+    /// `FIGURE_CAP` (60) rather than a full journal rescan.
+    fn sync_figure_life_logs(&mut self) {
+        let from = self.life_log_synced_tick;
+        let to = self.tick;
+        if to <= from || self.figures.is_empty() {
+            self.life_log_synced_tick = to;
+            return;
+        }
+        let new_entries: Vec<(u32, i32, String, String)> = self.journal.iter()
+            .filter(|e| e.tick > from && e.tick <= to)
+            .map(|e| (e.tick, e.hub, e.kind.clone(), e.text.clone()))
+            .collect();
+        if !new_entries.is_empty() {
+            for fi in 0..self.figures.len() {
+                let (hub, born, kind, dead, dies) = {
+                    let f = &self.figures[fi];
+                    (f.hub, f.born_tick, f.kind, f.dead, f.dies_tick)
+                };
+                let end_tick = if dead { dies } else { to };
+                let role_kinds = role_journal_kinds(kind);
+                for (etick, ehub, ekind, etext) in &new_entries {
+                    if *ehub != hub as i32 { continue; }
+                    if *etick < born || *etick > end_tick { continue; }
+                    if !(role_kinds.contains(&ekind.as_str())
+                        || COMMON_JOURNAL_KINDS.contains(&ekind.as_str())) { continue; }
+                    self.figures[fi].life_log.push(LifeEntry {
+                        tick: *etick, kind: ekind.clone(), text: etext.clone(),
+                    });
+                }
+            }
+        }
+        self.life_log_synced_tick = to;
+    }
+
+    /// living_world/01_FEEDS_AND_PRUNING.md 01.3 · the yearly pruning pass —
+    /// keeps every world chronicle small by dropping chatter older than
+    /// `CHRONICLE_KEEP_YEARS` while keeping every milestone. Called once a year,
+    /// after every other yearly pass, so a figure's life log (`sync_figure_
+    /// life_logs`, called first) has already copied out anything the journal is
+    /// about to drop. Never touches a `Figure.life_log` — a notable's story is
+    /// never pruned (decided).
+    pub(crate) fn prune_chronicles(&mut self, _yr: u32) {
+        self.sync_figure_life_logs();
+
+        let tick = self.tick;
+        let keep_ticks = CHRONICLE_KEEP_YEARS * TICKS_PER_YEAR;
+        let cutoff = tick.saturating_sub(keep_ticks);
+
+        // ── World journal ──────────────────────────────────────────────────
+        self.journal.retain(|e| e.tick >= cutoff || is_milestone_kind(&e.kind, &e.text));
+        // Milestone overflow: fold the OLDEST surviving milestones into one
+        // per-decade summary line rather than silently dropping them — keeps
+        // rule 20 (milestones are permanent) true in substance, not just in
+        // name, once a very long campaign's permanent record itself grows large.
+        let milestone_count = self.journal.iter()
+            .filter(|e| is_milestone_kind(&e.kind, &e.text)).count();
+        if milestone_count > JOURNAL_MILESTONE_CAP {
+            let over = milestone_count - JOURNAL_MILESTONE_CAP;
+            // Walk oldest-first, folding `over` milestones (grouped by decade)
+            // into one summary row each, and dropping the originals.
+            let mut folded = 0usize;
+            let mut decade_counts: std::collections::BTreeMap<u32, usize> = std::collections::BTreeMap::new();
+            let mut kept: Vec<JournalEntry> = Vec::with_capacity(self.journal.len());
+            for e in self.journal.drain(..) {
+                if folded < over && is_milestone_kind(&e.kind, &e.text) {
+                    let decade = (e.tick / TICKS_PER_YEAR / 10) * 10;
+                    *decade_counts.entry(decade).or_insert(0) += 1;
+                    folded += 1;
+                    continue;
+                }
+                kept.push(e);
+            }
+            let mut summaries: Vec<JournalEntry> = decade_counts.into_iter()
+                .map(|(decade, n)| JournalEntry {
+                    tick: (decade + 5) * TICKS_PER_YEAR, // mid-decade, so it sorts in place
+                    kind: "summary".into(), hub: -1, good: -1, value: n as f32,
+                    text: format!("In the {}s: {} further milestone{} of the age.",
+                        decade, n, if n == 1 { "" } else { "s" }),
+                })
+                .collect();
+            kept.append(&mut summaries);
+            kept.sort_by_key(|e| e.tick);
+            self.journal = kept;
+        }
+
+        // ── Realm chronicles ────────────────────────────────────────────────
+        for r in self.realms.iter_mut() {
+            r.events.retain(|e| e.tick >= cutoff || is_realm_milestone(&e.kind));
+            if r.events.len() > REALM_EVENTS_CAP {
+                let mut over = r.events.len() - REALM_EVENTS_CAP;
+                r.events.retain(|e| {
+                    if over == 0 || is_realm_milestone(&e.kind) { return true; }
+                    over -= 1;
+                    false
+                });
+            }
+        }
+
+        // ── Province chronicles ─────────────────────────────────────────────
+        let yr_now = tick / TICKS_PER_YEAR;
+        let keep_years = CHRONICLE_KEEP_YEARS;
+        for v in self.prov_events.iter_mut() {
+            v.retain(|e| yr_now.saturating_sub(e.year) < keep_years || is_prov_milestone(&e.kind));
+        }
+
+        // House events (chatter cap already runs at the year-boundary in
+        // `advance` — this adds the AGE half of the same rule (§01.3): a
+        // chatter entry younger than the window survives regardless of count,
+        // an older one is dropped even under the count cap).
+        for h in self.houses.iter_mut() {
+            h.events.retain(|e| e.tick >= cutoff || is_house_milestone(&e.kind));
         }
     }
 
@@ -11134,12 +11307,70 @@ pub(crate) use league::{
     KONTOR_COST, KONTOR_EXPEL_CHANCE, KONTOR_EXPEL_CHANCE_AT_WAR, KONTOR_EXPEL_UNREST_MULT,
 };
 
-/// Milestone journal kinds form a city/house's PERMANENT record and survive the
-/// rolling 25-year prune. Only the high-volume periodic samples — per-tick "price"
-/// index, the monthly "world" summary, and "voyage_loss" shipwreck noise — are
-/// shed past the window (they're what the window exists to bound).
-fn is_milestone_kind(kind: &str) -> bool {
-    !matches!(kind, "price" | "world" | "voyage_loss")
+/// Is this WORLD JOURNAL entry's `kind` a MILESTONE — part of the world's
+/// permanent record — rather than routine chatter? A milestone survives
+/// `prune_chronicles`' 50-year window (`CHRONICLE_KEEP_YEARS`); everything else
+/// is dropped once it ages past it. Deliberately a WHITELIST (mirrors
+/// `is_house_milestone`'s own shape): an unrecognised future `kind` defaults to
+/// chatter — pruned, not silently kept forever — which is the safer default for
+/// a kind nobody has classified yet.
+///
+/// `kind` alone is coarser than a per-entry flag for a handful of kinds shared
+/// between a genuine milestone and routine noise (a `Figure`'s own rise/death vs.
+/// its yearly "the crowds rally" chatter, both kind `"figure"`); those are told
+/// apart by a short, named text pattern rather than by adding a stored field to
+/// every one of the ~170 journal call sites across this module for a
+/// distinction only a few of them need.
+pub(crate) fn is_milestone_kind(kind: &str, text: &str) -> bool {
+    match kind {
+        // A Figure's own birth/rise and death are the "notable born/died" case
+        // this row names explicitly; its OTHER "figure" entries (a demagogue's
+        // crowds rallying, mid-life colour) are chatter.
+        "figure" => text.ends_with("has died.") || text.contains("passes into memory"),
+        _ => matches!(kind,
+            // Cities & settlements
+            "founded" | "founding" | "extinction" | "colony" | "corridor"
+            // Wars, sieges, raids
+            | "war" | "toll_war" | "trade_war" | "blockade" | "trade_ban" | "piracy"
+            // Institutions & crime
+            | "bank" | "bankruptcy" | "default" | "wound_down" | "absorbed" | "recap"
+            | "reform" | "crash" | "bad_debt" | "espionage" | "master_poached"
+            | "guild_founded" | "guild_dissolved" | "guildhall" | "signature"
+            | "kontor_established" | "kontor_expelled" | "league_founded" | "league_dissolved"
+            | "boycott_voted" | "entrepot" | "charter" | "bailo"
+            // Realms, government, provinces
+            | "realm_founded" | "realm_fallen" | "realm_succession" | "realm_partitioned"
+            | "realm_seceded" | "realm_vassal" | "realm_integrated" | "crowned"
+            | "province_granted" | "city_tier" | "government" | "ethnogenesis"
+            | "annexed" | "vassalized" | "submitted" | "integrated" | "seceded"
+            | "capital_moved" | "partitioned"
+            // Houses & dynasties (also permanent by `is_house_milestone`, but the
+            // world journal records the same event once for the world-wide feed)
+            | "dissolved" | "deposed" | "crisis_opened" | "crisis_survived" | "schism"
+            | "monopoly" | "monopoly_lost" | "succession" | "marriage" | "dynasty"
+            | "golden_age" | "inheritance" | "branch" | "acquire" | "goal_achieved"
+            // Great Lives, disease, disaster of record
+            | "notable" | "plague_extinction" | "wonder" | "speculation" | "expedition"
+            | "sequestered" | "dominance"
+        ),
+    }
+}
+
+/// Is this `Realm.events` entry permanent (mirrors `is_house_milestone` for a
+/// dynasty rather than a merchant house)? A rank reassessment and a routine tax
+/// farm's expiry are the realm's own chatter — everything else here is a
+/// once-per-reign kind of event.
+pub(crate) fn is_realm_milestone(kind: &str) -> bool {
+    matches!(kind,
+        "founded" | "fallen" | "annexed" | "vassalized" | "submitted" | "integrated"
+        | "seceded" | "capital_moved" | "succession" | "partitioned" | "marriage"
+        | "tax_farmed")
+}
+
+/// Is this `ProvEvent` permanent? A province's only real milestones today are a
+/// change of holder and a revolt; a dearth is the routine chatter.
+pub(crate) fn is_prov_milestone(kind: &str) -> bool {
+    matches!(kind, "granted" | "revolt")
 }
 
 /// Compact human-readable population (12,400 / 1.2M) for chronicle text.

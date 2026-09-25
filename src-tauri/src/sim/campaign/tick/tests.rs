@@ -150,6 +150,7 @@
             mine_deposits: vec![],
             deposit_potential_cache: Default::default(),
             units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
+            life_log_synced_tick: 0,
         };
         s.rebuild_routes();
         s
@@ -10050,7 +10051,7 @@
 
     fn test_figure(kind: u8, house: i32, good: i32) -> Figure {
         Figure { name: "Test Figure".into(), kind, hub: 0, house, good,
-            born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false }
+            born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false, life_log: Vec::new() }
     }
 
     /// A LIVING figure acts every year, and every action stops at its ceiling —
@@ -10302,6 +10303,7 @@
         s.figures.push(Figure {
             name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: 100_000, dead: false, rallied: false,
+            life_log: Vec::new(),
         });
 
         // Untiered (tier 0) — the cap floors to 1: only the guildmaster (the
@@ -10349,5 +10351,157 @@
             "TOWNSPEOPLE_DOSE=0.0 must never move mood");
         assert_eq!(s.guilds[0].strength, strength_before,
             "TOWNSPEOPLE_DOSE=0.0 must never move guild strength");
+    }
+
+    // ── living_world/01_FEEDS_AND_PRUNING.md ──────────────────────────────────
+
+    /// 01.1 · a figure's own story is copied into `life_log` as the journal is
+    /// written (`sync_figure_life_logs`, called from `prune_chronicles`), so it
+    /// survives the same pass pruning the journal's own chatter past the
+    /// 50-year window.
+    #[test]
+    fn figure_life_survives_journal_pruning() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.figures.push(Figure {
+            name: "Old Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
+            born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false,
+            life_log: Vec::new(),
+        });
+        // Role-relevant CHATTER for an Admiral (`role_journal_kinds(0)` — never a
+        // milestone kind) scattered one per decade across 120 simulated years.
+        for decade in 1..=12u32 {
+            let t = decade * 10 * TICKS_PER_YEAR;
+            s.journal.push(JournalEntry {
+                tick: t, kind: "voyage_loss".into(), hub: 0, good: -1, value: 0.0,
+                text: format!("A ship is lost, year {}", decade * 10),
+            });
+        }
+        s.tick = 120 * TICKS_PER_YEAR;
+        s.prune_chronicles(120);
+        let in_journal = s.journal.iter().filter(|e| e.kind == "voyage_loss").count();
+        assert!(in_journal < 12,
+            "voyage_loss chatter older than the 50-year window must be pruned from the journal, kept {}", in_journal);
+        let in_life_log = s.figures[0].life_log.iter().filter(|e| e.kind == "voyage_loss").count();
+        assert_eq!(in_life_log, 12,
+            "a figure's life log must survive journal pruning IN FULL — a notable's story is never pruned, got {}", in_life_log);
+    }
+
+    /// 01.2 · a table test: every kind of PERMANENT event this row names
+    /// (founding/death of cities, wars, sacks, realm proclaimed/fallen, bank
+    /// collapse, plague outbreak, notable born/died) reads as a milestone;
+    /// routine periodic noise does not.
+    #[test]
+    fn milestone_kinds_cover_every_permanent_event() {
+        let milestones: &[(&str, &str)] = &[
+            ("founded", ""), ("founding", ""), ("war", "X declares war on Y"),
+            ("bank", ""), ("bankruptcy", ""), ("crash", ""), ("realm_founded", ""),
+            ("realm_fallen", ""), ("plague_extinction", ""), ("notable", ""),
+            ("guild_founded", ""), ("province_granted", ""), ("succession", ""),
+        ];
+        for (kind, text) in milestones {
+            assert!(is_milestone_kind(kind, text), "{kind:?} must be a milestone");
+        }
+        let chatter: &[(&str, &str)] = &[
+            ("price", ""), ("world", ""), ("voyage_loss", ""), ("riot", ""),
+            ("unrest", ""), ("starvation", ""), ("estate", ""), ("construction", ""),
+        ];
+        for (kind, text) in chatter {
+            assert!(!is_milestone_kind(kind, text), "{kind:?} must be chatter, not a permanent milestone");
+        }
+        // A Figure's own birth/rise and death ARE "notable born/died"; its OTHER
+        // "figure" entries (a demagogue's crowds rallying) are chatter — `kind`
+        // alone cannot tell these two apart, only the recorded text can.
+        assert!(is_milestone_kind("figure", "Old Admiral of Tyre has died."));
+        assert!(!is_milestone_kind("figure", "The crowds of Tyre rally behind the demagogue."));
+
+        assert!(is_realm_milestone("founded"));
+        assert!(is_realm_milestone("fallen"));
+        assert!(is_realm_milestone("succession"));
+        assert!(!is_realm_milestone("rank"), "a yearly rank reassessment is chatter, not a milestone");
+        assert!(!is_realm_milestone("birth"), "a routine genealogy birth is chatter, not a milestone");
+
+        assert!(is_prov_milestone("granted"));
+        assert!(is_prov_milestone("revolt"));
+        assert!(!is_prov_milestone("dearth"), "a dearth note is chatter, not a milestone");
+    }
+
+    /// 01.3 · milestones (journal, realm, province) survive `prune_chronicles`
+    /// however old they are.
+    #[test]
+    fn pruning_keeps_milestones() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.journal.push(JournalEntry {
+            tick: 0, kind: "war".into(), hub: 0, good: -1, value: 0.0,
+            text: "Old declares war on New".into(),
+        });
+        s.realms.push(Realm {
+            id: 0, name: "Old Realm".into(), title: "Kingdom".into(), capital_hub: 0,
+            origin_realm: -1, ruling_house: 0, rank: 2, autonomy: 0,
+            provinces: vec![], vassals: vec![], treasury: 0.0, debts: 0.0,
+            legitimacy: 0.5, cohesion: 0.5, founded_tick: 0, fallen_tick: 0,
+            events: vec![
+                RealmEvent { tick: 0, kind: "founded".into(), text: "The realm is founded".into() },
+                RealmEvent { tick: 0, kind: "rank".into(), text: "Reassessed".into() },
+            ],
+            ruler: -1, regent: -1, family: vec![],
+            tax_rates: [0.0, 0.0], tithe_last_year: 0.0, tax_farm: None,
+            founding_path: 0, government: 0,
+        });
+        s.push_prov_event(0, 0, "granted", "A house is granted the writ".into());
+        s.push_prov_event(0, 0, "dearth", "A poor harvest".into());
+
+        s.tick = 200 * TICKS_PER_YEAR;
+        s.prune_chronicles(200);
+
+        assert!(s.journal.iter().any(|e| e.kind == "war"), "a 200-year-old war declaration must survive");
+        assert!(s.realms[0].events.iter().any(|e| e.kind == "founded"), "a realm's founding must survive");
+        assert!(!s.realms[0].events.iter().any(|e| e.kind == "rank"), "an old rank reassessment must be pruned");
+        assert!(s.prov_events[0].iter().any(|e| e.kind == "granted"), "a province grant must survive");
+        assert!(!s.prov_events[0].iter().any(|e| e.kind == "dearth"), "an old dearth note must be pruned");
+    }
+
+    /// 01.3 · chatter younger than the window survives regardless; only chatter
+    /// OLDER than `CHRONICLE_KEEP_YEARS` is dropped.
+    #[test]
+    fn pruning_drops_old_chatter() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.journal.push(JournalEntry {
+            tick: 1 * TICKS_PER_YEAR, kind: "price".into(), hub: -1, good: -1, value: 1.0, text: String::new(),
+        });
+        s.journal.push(JournalEntry {
+            tick: 190 * TICKS_PER_YEAR, kind: "price".into(), hub: -1, good: -1, value: 1.0, text: String::new(),
+        });
+        s.tick = 200 * TICKS_PER_YEAR;
+        s.prune_chronicles(200);
+        let remaining: Vec<u32> = s.journal.iter().filter(|e| e.kind == "price").map(|e| e.tick).collect();
+        assert!(!remaining.contains(&(1 * TICKS_PER_YEAR)), "chatter older than 50 years must be dropped");
+        assert!(remaining.contains(&(190 * TICKS_PER_YEAR)), "chatter younger than 50 years must survive");
+    }
+
+    /// 01.3 · `prune_chronicles` must never touch a figure's `life_log`, however
+    /// far past the chronicle window its own entries sit.
+    #[test]
+    fn pruning_never_touches_person_stories() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        let mut f = Figure {
+            name: "Ancient Figure".into(), kind: 0, hub: 0, house: -1, good: -1,
+            born_tick: 0, dies_tick: 10 * TICKS_PER_YEAR, dead: true, rallied: false,
+            life_log: Vec::new(),
+        };
+        f.life_log.push(LifeEntry { tick: 0, kind: "voyage_loss".into(), text: "A ship is lost".into() });
+        s.figures.push(f);
+        let before = s.figures[0].life_log.len();
+        s.tick = 500 * TICKS_PER_YEAR;
+        s.prune_chronicles(500);
+        assert_eq!(s.figures[0].life_log.len(), before,
+            "a figure's life_log must be untouched by pruning, 500 years on");
     }
 

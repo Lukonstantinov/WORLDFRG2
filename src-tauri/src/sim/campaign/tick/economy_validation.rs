@@ -1324,6 +1324,31 @@ fn econ_diagnose_house_turnover() {
     assert!(dead.len() + alive > 0, "the run produced no houses at all");
 }
 
+/// living_world/01_FEEDS_AND_PRUNING.md 01.5 · save size + journal length over a
+/// 200-year run, WITH the new yearly `prune_chronicles` pass wired in (it always
+/// is now — there is no build-time switch to compare against an unpruned run).
+/// Printed so the numbers are on record (`docs/SCOREBOARD.md`) rather than
+/// argued from the code; not asserted, per §2.5's printed-metric rule.
+#[test]
+#[ignore]
+fn econ_measure_chronicle_pruning() {
+    let mut s = reference_world();
+    for yr in 0..200u32 {
+        s.advance(TICKS_PER_YEAR);
+        if yr % 25 == 24 {
+            let bytes = serde_json::to_string(&s).map(|j| j.len()).unwrap_or(0);
+            let milestones = s.journal.iter().filter(|e| is_milestone_kind(&e.kind, &e.text)).count();
+            println!(
+                "[chronicle] year {:>3} · journal {:>6} ({:>6} milestone) · realm events {:>5} · save {:>9} bytes ({:.1} MB)",
+                yr + 1, s.journal.len(), milestones,
+                s.realms.iter().map(|r| r.events.len()).sum::<usize>(),
+                bytes, bytes as f64 / 1_000_000.0,
+            );
+        }
+    }
+    assert!(s.tick > 0, "the run must actually advance");
+}
+
 /// `MONEY_AND_COINAGE_PLAN.md` M0 · the diagnosis in a number. F1 claims money is
 /// created from nothing on every sale — nobody's purse goes down when a house's
 /// wealth, a treasury or a bank's reserves go up. This measures the AGGREGATE

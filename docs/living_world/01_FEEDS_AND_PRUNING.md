@@ -1,6 +1,35 @@
 # 01 · Feeds and pruning
 
-**Status:** NOT STARTED · **Depends on:** — · **Next:** 02
+**Status:** DONE · **Depends on:** — · **Next:** 02
+
+## Implementation note (as built, 2026-09-25)
+
+Every slice below shipped, with ONE deliberate deviation from 01.2's literal
+text: rather than adding a `JournalEntry.milestone: bool` set at each of the
+~170 `self.journal.push(JournalEntry{..})` call sites across `tick/`, milestone
+status is a **classifier function** — `is_milestone_kind(kind, text)` (and its
+siblings `is_realm_milestone`/`is_prov_milestone`) — read at prune time. This
+was chosen because `kind` is already far finer-grained than the doc's own
+`"war"` example suggested (~130 distinct kinds observed, most one-to-one with a
+real discrete event); only a couple of kinds (`"figure"`, shared by a Great
+Life's birth/death AND its routine mid-life chatter) need the `text` to
+disambiguate, which the classifier does directly rather than needing a stored
+field. This avoids touching every write site (and the risk of missing one) at
+the cost of the flag being computed, not stored — functionally equivalent for
+every reader, since nothing outside `prune_chronicles` needs to know a specific
+entry's milestone status. `role_journal_kinds`/`COMMON_JOURNAL_KINDS` moved
+from `read_people.rs` into `sim::tick::mod.rs` so both the read-time formatter
+and the write-time life-log materialiser share one definition. Realm events
+(`Realm.events`, previously unbounded) and province events
+(`CampaignSim.prov_events`) now prune the same way; `League.events` was left
+alone (already bounded by its own `LEAGUE_EVENTS_CAP`, out of scope here).
+Gates: `figure_life_survives_journal_pruning`, `milestone_kinds_cover_every_
+permanent_event`, `pruning_keeps_milestones`, `pruning_drops_old_chatter`,
+`pruning_never_touches_person_stories` (all `tick::tests`), plus the
+`#[ignore]`d `econ_measure_chronicle_pruning` (01.5) printing save size/journal
+length over 200 years for `docs/SCOREBOARD.md`. End-of-row gates: `tick::tests`
+315/315, `econ_` 6/6 (bit-identical — pruning cannot move the economy),
+`npx tsc --noEmit` clean.
 
 ## Goal
 
