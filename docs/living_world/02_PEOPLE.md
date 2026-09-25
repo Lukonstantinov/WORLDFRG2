@@ -1,7 +1,7 @@
 # 02 · People
 
-**Status:** PARTIAL — slices 02.1-02.5, 02.8 shipped (see §Queue for 02.6/02.7/02.9's
-still-open items) · **Depends on:** 01 · **Next:** 03
+**Status:** PARTIAL — slices 02.1-02.6, 02.8-02.9 shipped (see §Queue for 02.7's
+still-open item, the only one left) · **Depends on:** 01 · **Next:** 03
 
 ## Goal
 
@@ -270,7 +270,7 @@ are recorded but applied only once those rows exist (they no-op before).
 | 02.3 | Life cycle: debut ≥ 16, aging, mortality (reuse `person_mortality_hazard`), death causes, fame, promotion/demotion, Hall of the Dead, ordinary forgotten | `notables_never_exceed_the_cap`, `dead_notables_keep_their_story`, `dead_ordinary_people_are_removed` | **DONE** |
 | 02.4 | Event engine: rate, tag evaluation, layered pool with fallback, effects, logging | `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence` | **DONE** — siege/festival turbulence and lake/mountain/forest tags queued (no producing signal in `tick/`) |
 | 02.5 | ~40 starter templates + the geography lint | `life_event_templates_respect_geography` | **DONE** |
-| 02.6 | **Separate session:** ~150 more templates, reviewed by an agent against the lint and role list | the same lint | NOT STARTED (by design) |
+| 02.6 | ~150 more templates (147 shipped, ids 100-305), covering more of the generic/geography/war/famine/large-city pool plus a second layer of role-specific events for commander/admiral/scholar/artisan/performer/senator | `life_event_templates_respect_geography` | **DONE** |
 | 02.7 | Faces: feature layers in `cultureDress.ts`; acquired features | `tsc`, visual check | NOT STARTED — needs a display to verify (see Queue) |
 | 02.8 | Person window, roster, Hall of the Dead — commands `campaign_get_individual`, `campaign_get_notables`, `campaign_get_hall_of_dead` (lib.rs + bridge + types) | `tsc`, `vite build` | **DONE**, as a plain list — not yet the FiguresPanel-as-gallery redesign |
 | 02.9 | End of row: `bench_campaign_tick_large` before/after, `tick::tests`, `econ_` | numbers in SCOREBOARD | **DONE** — see `docs/SCOREBOARD.md` 2026-09-25 |
