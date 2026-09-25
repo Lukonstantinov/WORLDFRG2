@@ -2322,6 +2322,9 @@ export interface FigureBrief {
   thought: string;
   /** Comma-joined goods the figure's own house specializes in — "" if unaffiliated. */
   merchant_goods: string;
+  /** A short chronological life log ("212 — ...") built from real journal entries
+   *  at the figure's own city, filtered to what their role cares about. */
+  life_events: string[];
 }
 
 /** Phase 6 · a landmark / place of note. */

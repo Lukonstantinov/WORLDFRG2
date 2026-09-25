@@ -2917,6 +2917,12 @@ pub struct FigureBrief {
     /// Comma-joined names of the goods the figure's own house specializes in
     /// (`House.spec`) — "" if the figure is unaffiliated with a house.
     pub merchant_goods: String,
+    /// A short, chronological life log built from real `sim.journal` entries at
+    /// the figure's own city during their lifetime, filtered to what their role
+    /// cares about (`role_journal_kinds`) plus a few world-shaking kinds everyone
+    /// notices (plague, war, crashes). Capped at 6, spread across the life. Empty
+    /// for a figure whose city has had no relevant journal activity.
+    pub life_events: Vec<String>,
 }
 
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).
