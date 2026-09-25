@@ -2149,6 +2149,53 @@ computed; church/watch genuinely have no mechanism behind them yet (L9/L10).
   tick::tests` (308/308, ~42s), `cargo test --lib econ_ -- --nocapture`
   (6/6 incl. the multi-seed inheritance gate), `npx tsc --noEmit` (clean).
 
+### 5.8 `docs/living_world/02_PEOPLE.md` — 02.1 shipped (the person record + the migration); 02.2–02.9 queued
+
+Row 02 of `docs/living_world/00_INDEX.md` ("Living World") is the one system for
+every named human the world tracks — ruler, senator, commander, scholar, artisan,
+horde leader. `Individual` (`sim/campaign/tick/mod.rs`) is the one record for a
+public person — NOT `Person` (the realm genealogy struct, `realms.rs`) and NOT
+`Notable` (the L12 per-city local role, §5.7, which now LINKS to one of these
+instead of being one). `CampaignSim.people`/`hall_of_dead` hold the living and
+the dead-and-famous; an ordinary dead person is still forgotten (unbuilt — that's
+02.3's life-cycle slice). `migrate_figures_to_individuals` (one-time,
+`individuals_migrated`, on first `advance()`) folds every existing `Figure` into
+one, losslessly (name + `life_log`), routing a dead figure straight to
+`hall_of_dead`; a figure raised afterward (`raise_notable_figures`) mints its own
+via `mint_individual` at birth. The weekly (`tick % 7`) cadence hook 00_INDEX
+calls for is added (`living_world_weekly_pass`) — 02.1 only expires modifiers,
+which nothing sets yet, so it is inert bookkeeping; 02.4's event engine hangs off
+the same hook. A named-salt registry (`living_world_salts`) holds every `hash01`
+call this row adds so far, per row's own "Hash salts" rule.
+
+**A real bug found and fixed in the same slice, not merely worked around**:
+`update_notables` (L12, §5.7) picked the Guildmaster's name from `head_name_for`
+salted partly on `self.tick` — the CURRENT tick, which changes every year the
+yearly rebuild runs — so the hashed name changed annually even though the same
+guild kept mastering the same craft, and the "already appointed" check (matched
+by name) always saw a stranger and chronicled a fresh appointment every year.
+Fixed by (a) a STABLE salt (hub-only, no `tick` term) and (b) linking every one
+of the three roles (Guildmaster/Alderman/Agitator) to a real `Individual.id`
+(`Notable.individual_id`, found-or-minted each rebuild by a natural key —
+`(role, hub)` for Guildmaster, `(house, kin_ref)` for Alderman, the underlying
+Demagogue `Figure`'s own `individual_id` for Agitator) rather than by name, so a
+stable local role now provably re-seats the SAME person. Gated by
+`local_roles_do_not_mint_new_people_yearly` (journal/`people` length unmoved
+across 5 more rebuilds with nothing else changed) and
+`figures_migrate_to_individuals_losslessly`.
+
+**Provably inert** (`living_world_is_inert_at_zero`, mirroring the L11
+shadow-pass precedent, §5.7): nothing in the tick reads `people`/`hall_of_dead`
+yet, so `sim_fingerprint` is unmoved by any amount of migration/notable-linking
+bookkeeping. Gates: `cargo check --lib --tests` clean; the three named tests
+above pass. Per `00_INDEX.md`'s own testing rule, `tick::tests`/`econ_` are NOT
+re-run for this slice (dose stays zero throughout) — they run once at the row's
+end (02.9).
+
+**Traits, the decision engine, life cycle, the event engine, templates, faces,
+and the Person/Hall-of-Dead UI (02.2–02.9) are queued**, exactly as the doc's own
+slice table orders them — none of it exists yet.
+
 ---
 
 ## 6. Rust Backend Map (`src-tauri/src/`)

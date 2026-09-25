@@ -109,6 +109,10 @@
             relay_last: vec![],
             trade_hist: vec![],
             figures: vec![],
+            people: vec![],
+            hall_of_dead: vec![],
+            next_individual_id: 0,
+            individuals_migrated: false,
             fairs: vec![],
             fairs_seeded: false,
             holy_sites: vec![],
@@ -10051,7 +10055,8 @@
 
     fn test_figure(kind: u8, house: i32, good: i32) -> Figure {
         Figure { name: "Test Figure".into(), kind, hub: 0, house, good,
-            born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false, life_log: Vec::new() }
+            born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false,
+            individual_id: -1, life_log: Vec::new() }
     }
 
     /// A LIVING figure acts every year, and every action stops at its ceiling —
@@ -10303,7 +10308,7 @@
         s.figures.push(Figure {
             name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: 100_000, dead: false, rallied: false,
-            life_log: Vec::new(),
+            individual_id: -1, life_log: Vec::new(),
         });
 
         // Untiered (tier 0) — the cap floors to 1: only the guildmaster (the
@@ -10353,6 +10358,143 @@
             "TOWNSPEOPLE_DOSE=0.0 must never move guild strength");
     }
 
+    // ── living_world/02_PEOPLE.md (02.1) ──────────────────────────────────────
+
+    /// 02.1 · every existing `Figure` folds into a stable `Individual` with
+    /// nothing dropped: a living figure's name + life log land in `people`;
+    /// a dead one's land in `hall_of_dead` with its death tick, not `people`.
+    /// Re-running the migration must be a no-op (already-linked figures skip).
+    #[test]
+    fn figures_migrate_to_individuals_losslessly() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.figures.push(Figure {
+            name: "Living Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
+            born_tick: 10, dies_tick: u32::MAX, dead: false, rallied: false,
+            individual_id: -1,
+            life_log: vec![LifeEntry { tick: 20, kind: "war".into(), text: "fought bravely".into() }],
+        });
+        s.figures.push(Figure {
+            name: "Dead Demagogue".into(), kind: 1, hub: 0, house: -1, good: -1,
+            born_tick: 5, dies_tick: 50, dead: true, rallied: false,
+            individual_id: -1, life_log: Vec::new(),
+        });
+
+        s.migrate_figures_to_individuals();
+
+        let iid0 = s.figures[0].individual_id;
+        let iid1 = s.figures[1].individual_id;
+        assert!(iid0 >= 0 && iid1 >= 0 && iid0 != iid1, "both figures must get a distinct real id");
+
+        let p0 = s.people.iter().find(|p| p.id as i32 == iid0)
+            .expect("a living figure's Individual must be in `people`");
+        assert_eq!(p0.name, "Living Admiral");
+        assert_eq!(p0.life_log.len(), 1);
+        assert_eq!(p0.life_log[0].text, "fought bravely");
+        assert_eq!(p0.death_tick, 0);
+        assert!(p0.famous);
+
+        let d1 = s.hall_of_dead.iter().find(|p| p.id as i32 == iid1)
+            .expect("a dead figure's Individual must be in the Hall of the Dead");
+        assert_eq!(d1.name, "Dead Demagogue");
+        assert_eq!(d1.death_tick, 50);
+        assert!(!s.people.iter().any(|p| p.id as i32 == iid1),
+            "a dead figure's person must not also sit in `people`");
+
+        let (people_before, dead_before) = (s.people.len(), s.hall_of_dead.len());
+        s.migrate_figures_to_individuals();
+        assert_eq!(s.people.len(), people_before, "re-running the migration must not duplicate anyone");
+        assert_eq!(s.hall_of_dead.len(), dead_before);
+    }
+
+    /// 02.1 · a per-city local role (`Notable`) is rebuilt from scratch every
+    /// year, so it must LINK to the same `Individual` rather than minting a
+    /// fresh one — the Guildmaster's name used to be hashed off `tick`, so a
+    /// name-based "already appointed" check always saw a stranger.
+    #[test]
+    fn local_roles_do_not_mint_new_people_yearly() {
+        let goods = vec![good("cloth", 1, 1, 2.0, 0.5, false)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        h.council_house = 0;
+        h.tier = 3;
+        let mut s = sim(vec![h], goods);
+        let mut house = house_at(0, vec![], 0);
+        house.kin = vec![
+            Kin { name: "Head".into(), role: 0, ..Default::default() },
+            Kin { name: "Alderman Kin".into(), role: 2, ..Default::default() },
+        ];
+        s.houses.push(house);
+        s.guilds.push(CraftGuild {
+            hub: 0, good: 0, strength: 0.5, hall: false, secrecy: 0.0,
+            idle_years: 0.0, signature: None,
+        });
+        s.figures.push(Figure {
+            name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
+            born_tick: 0, dies_tick: 100_000, dead: false, rallied: false,
+            individual_id: -1, life_log: Vec::new(),
+        });
+
+        s.update_notables(0);
+        assert_eq!(s.hubs[0].notables.len(), 3);
+        let ids_before: Vec<i32> = s.hubs[0].notables.iter().map(|n| n.individual_id).collect();
+        assert!(ids_before.iter().all(|&id| id >= 0), "every seated notable must link to a real Individual");
+        let people_before = s.people.len();
+        let journal_before = s.journal.len();
+
+        // Several more yearly rebuilds, nothing else about the world changed.
+        for _ in 0..5 { s.update_notables(0); }
+
+        let ids_after: Vec<i32> = s.hubs[0].notables.iter().map(|n| n.individual_id).collect();
+        assert_eq!(ids_before, ids_after, "the same local role must link to the SAME person year after year");
+        assert_eq!(s.people.len(), people_before, "a stable local role must never mint a fresh person");
+        assert_eq!(s.journal.len(), journal_before,
+            "nothing genuinely changed, so no further 'becomes X' chronicle line should appear");
+    }
+
+    /// 02.1 · the `Individual`/`people`/`hall_of_dead` bookkeeping this slice
+    /// adds must be provably invisible to `sim_fingerprint` — nothing in the
+    /// tick reads it yet (00_INDEX "Dose from zero" / the L11 shadow-pass
+    /// precedent this mirrors).
+    #[test]
+    fn living_world_is_inert_at_zero() {
+        let goods = vec![good("cloth", 1, 1, 2.0, 0.5, false)];
+        let mut h = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        h.council_house = 0;
+        h.tier = 3;
+        let mut s = sim(vec![h], goods);
+        let mut house = house_at(0, vec![], 0);
+        house.kin = vec![
+            Kin { name: "Head".into(), role: 0, ..Default::default() },
+            Kin { name: "Alderman Kin".into(), role: 2, ..Default::default() },
+        ];
+        s.houses.push(house);
+        s.guilds.push(CraftGuild {
+            hub: 0, good: 0, strength: 0.5, hall: false, secrecy: 0.0,
+            idle_years: 0.0, signature: None,
+        });
+        s.figures.push(Figure {
+            name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
+            born_tick: 0, dies_tick: 100_000, dead: false, rallied: false,
+            individual_id: -1, life_log: Vec::new(),
+        });
+
+        // Prime the roster (the first call is a genuine change: journal grows).
+        s.migrate_figures_to_individuals();
+        s.update_notables(0);
+        s.living_world_weekly_pass();
+
+        let fp_before = sim_fingerprint(&s);
+        for _ in 0..5 {
+            s.migrate_figures_to_individuals();
+            s.update_notables(0);
+            s.living_world_weekly_pass();
+        }
+        let fp_after = sim_fingerprint(&s);
+        assert_eq!(fp_before, fp_after,
+            "Individual/Notable-link bookkeeping must not move anything sim_fingerprint reads");
+    }
+
     // ── living_world/01_FEEDS_AND_PRUNING.md ──────────────────────────────────
 
     /// 01.1 · a figure's own story is copied into `life_log` as the journal is
@@ -10367,7 +10509,7 @@
         s.figures.push(Figure {
             name: "Old Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false,
-            life_log: Vec::new(),
+            individual_id: -1, life_log: Vec::new(),
         });
         // Role-relevant CHATTER for an Admiral (`role_journal_kinds(0)` — never a
         // milestone kind) scattered one per decade across 120 simulated years.
@@ -10494,7 +10636,7 @@
         let mut f = Figure {
             name: "Ancient Figure".into(), kind: 0, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: 10 * TICKS_PER_YEAR, dead: true, rallied: false,
-            life_log: Vec::new(),
+            individual_id: -1, life_log: Vec::new(),
         };
         f.life_log.push(LifeEntry { tick: 0, kind: "voyage_loss".into(), text: "A ship is lost".into() });
         s.figures.push(f);

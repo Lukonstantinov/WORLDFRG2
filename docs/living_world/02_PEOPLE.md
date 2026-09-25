@@ -1,6 +1,9 @@
 # 02 · People
 
-**Status:** NOT STARTED · **Depends on:** 01 · **Next:** 03
+**Status:** PARTIAL — 02.1 shipped (`Individual` + `people`/`hall_of_dead` +
+migration + weekly hook + the Guildmaster-renaming fix), 02.2–02.9 queued
+(see §Slices and CLAUDE.md §5.8) · **Depends on:** 01 · **Next:** 03 (once this
+row is DONE)
 
 ## Goal
 
@@ -264,7 +267,7 @@ are recorded but applied only once those rows exist (they no-op before).
 
 | Slice | Content | Gate |
 |---|---|---|
-| 02.1 | `Individual` + `people`/`hall_of_dead`; load-time migration of `Figure` (with its `life_log`); L12 `Notable` linked to stable `Individual` ids; the **weekly** `tick % 7` hook added to `advance()`; the salt registry; **inert** | `figures_migrate_to_individuals_losslessly`, `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero` |
+| 02.1 ✅ | `Individual` + `people`/`hall_of_dead`; load-time migration of `Figure` (with its `life_log`); L12 `Notable` linked to stable `Individual` ids; the **weekly** `tick % 7` hook added to `advance()`; the salt registry; **inert** | `figures_migrate_to_individuals_losslessly`, `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero` |
 | 02.2 | Trait catalogue, modifier catalogue, `decide()` with the 75 % rule, reasons | `decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`, `decisions_are_deterministic` |
 | 02.3 | Life cycle: debut ≥ 16, aging, mortality (reuse `person_mortality_hazard`), death causes, fame, promotion/demotion, Hall of the Dead, ordinary forgotten | `notables_never_exceed_the_cap`, `dead_notables_keep_their_story`, `dead_ordinary_people_are_removed` |
 | 02.4 | Event engine: rate, tag evaluation, layered pool with fallback, effects, logging | `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence` |

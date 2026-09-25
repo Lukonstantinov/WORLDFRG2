@@ -7067,6 +7067,11 @@ pub struct Figure {
     /// A demagogue's crowds have already rallied once (chronicled a single time).
     #[serde(default)]
     pub rallied: bool,
+    /// living_world/02_PEOPLE.md 02.1 · the `Individual` this figure was
+    /// migrated to / minted alongside — the one stable person behind this
+    /// chronicle actor. `#[serde(default = "neg_one_i32")]` on an old save;
+    /// `migrate_figures_to_individuals` backfills it once, on first advance.
+    #[serde(default = "neg_one_i32")] pub individual_id: i32,
     /// living_world/01_FEEDS_AND_PRUNING.md 01.1 · this figure's own story,
     /// MATERIALISED out of the world journal as it happens (`sync_figure_life_logs`)
     /// so it survives the journal's own 50-year chatter prune (`prune_chronicles`).
@@ -7137,6 +7142,137 @@ pub struct Notable {
     pub name: String,
     /// The guildmaster's own craft (good index), else −1.
     pub good: i32,
+    /// living_world/02_PEOPLE.md 02.1 · the STABLE `Individual` this local role
+    /// points at. A `Notable` is rebuilt from scratch every year (`update_notables`)
+    /// so it must never itself BE the person — it links to one instead, or the
+    /// yearly rebuild mints a fresh name every year (00_INDEX "local roles do not
+    /// mint new people"). `#[serde(default = "neg_one_i32")]` — an old save has no
+    /// linked person until the next yearly rebuild re-links it.
+    #[serde(default = "neg_one_i32")] pub individual_id: i32,
+}
+
+/// living_world/02_PEOPLE.md · ONE named-salt registry for every `hash01` call
+/// this row adds, across every slice 02.1-02.9, so dozens of new rolls cannot
+/// collide with each other or with the rest of the tick (00_INDEX "Hash salts").
+/// Each constant is the `c` argument of `hash01(seed, key, C)`.
+pub(crate) mod living_world_salts {
+    const BASE: u64 = 0x4C57_0000; // "LW" — arbitrary, just a visibly-grouped base
+    pub const NOTABLE_GUILDMASTER_NAME: u64 = BASE + 1;
+    pub const DECISION: u64 = BASE + 2;      // 02.2
+    pub const EVENT_COUNT: u64 = BASE + 3;   // 02.4
+    pub const EVENT_PICK: u64 = BASE + 4;    // 02.4
+    pub const DEBUT_AGE: u64 = BASE + 5;     // 02.3
+    pub const MORTALITY: u64 = BASE + 6;     // 02.3
+    pub const FACE_SEED: u64 = BASE + 7;     // 02.7
+}
+
+/// living_world/02_PEOPLE.md §Roles · every role an `Individual` may hold over
+/// a life (they may hold several). `FIGURE_KINDS`' five map onto a subset of
+/// these (`figure_kind_to_role`); the rest are read by rows 04-09 as they ship.
+pub const ROLE_NAMES: [&str; 17] = [
+    "Ruler", "Commander", "Admiral", "Diplomat", "Merchant Prince", "Banker",
+    "Guildmaster", "Philosopher", "Scholar", "Ideologue", "Physician", "Artisan",
+    "Performer", "Explorer", "Demagogue", "Official", "Horde Leader",
+];
+pub const ROLE_RULER: u8 = 0;
+pub const ROLE_COMMANDER: u8 = 1;
+pub const ROLE_ADMIRAL: u8 = 2;
+pub const ROLE_DIPLOMAT: u8 = 3;
+pub const ROLE_MERCHANT_PRINCE: u8 = 4;
+pub const ROLE_BANKER: u8 = 5;
+pub const ROLE_GUILDMASTER: u8 = 6;
+pub const ROLE_PHILOSOPHER: u8 = 7;
+pub const ROLE_SCHOLAR: u8 = 8;
+pub const ROLE_IDEOLOGUE: u8 = 9;
+pub const ROLE_PHYSICIAN: u8 = 10;
+pub const ROLE_ARTISAN: u8 = 11;
+pub const ROLE_PERFORMER: u8 = 12;
+pub const ROLE_EXPLORER: u8 = 13;
+pub const ROLE_DEMAGOGUE: u8 = 14;
+pub const ROLE_OFFICIAL: u8 = 15;
+pub const ROLE_HORDE_LEADER: u8 = 16;
+
+/// Maps the 5 existing `FIGURE_KINDS` onto a `ROLE_*` for the `Individual` a
+/// figure is migrated to / minted alongside (02.1).
+pub(crate) fn figure_kind_to_role(kind: u8) -> u8 {
+    match kind { 0 => ROLE_ADMIRAL, 1 => ROLE_DEMAGOGUE, 2 => ROLE_GUILDMASTER, 3 => ROLE_BANKER, _ => ROLE_EXPLORER }
+}
+
+/// `Individual.death_cause` — the L4 `CAUSE_*` ordering (mod.rs ~4481, famine ·
+/// plague · fever · war · fire · flood · old-age · infancy, 0..7) plus three
+/// causes only a named person, not a whole city, can suffer.
+pub const IND_CAUSE_DUEL: u8 = 8;
+pub const IND_CAUSE_EXECUTION: u8 = 9;
+pub const IND_CAUSE_ACCIDENT: u8 = 10;
+
+/// living_world/02_PEOPLE.md §Decisions — a small, temporary decision modifier
+/// (≈ ±5 %, expires). Built in 02.2/02.4; the type ships in 02.1 so `Individual`
+/// has somewhere to hold one.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Modifier {
+    /// MOD_* kind, for chronicle/UI text (table ships with the decision engine, 02.2).
+    pub kind: u8,
+    pub value: f32,
+    pub expires_tick: u32,
+}
+
+/// living_world/02_PEOPLE.md §Data · the ONE record for every named human the
+/// world tracks — ruler, senator, commander, scholar, artisan, gladiator, horde
+/// leader. NOT `Person` (the realm genealogy struct, `realms.rs`) and NOT
+/// `Notable` (the L12 per-city local role, which links to one of these instead
+/// of being one). See `CampaignSim::people`/`hall_of_dead` and the unification
+/// rule in the doc for how `Figure` relates to this.
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Individual {
+    pub id: u32,
+    pub name: String,
+    #[serde(default)] pub female: bool,
+    /// Index into the culture table — never a `String` (00_INDEX "Storage").
+    #[serde(default)] pub culture: u16,
+    #[serde(default)] pub birth_tick: u32,
+    /// Age ≥ 16 at debut (00_INDEX "Debut"); the backstory before this is
+    /// generated text only, not a simulated childhood.
+    #[serde(default)] pub debut_tick: u32,
+    /// 0 while alive.
+    #[serde(default)] pub death_tick: u32,
+    /// `IND_CAUSE_*`/the L4 `CAUSE_*` ordering; meaningless while `death_tick == 0`.
+    #[serde(default)] pub death_cause: u8,
+    /// Born here, −1 = abroad/unknown.
+    #[serde(default = "neg_one_i32")] pub origin_hub: i32,
+    /// Where they studied / made their name, −1 = unknown.
+    #[serde(default = "neg_one_i32")] pub formed_hub: i32,
+    #[serde(default = "neg_one_i32")] pub current_hub: i32,
+    /// Linked house, −1 = none.
+    #[serde(default = "neg_one_i32")] pub house: i32,
+    /// Index into `House.kin` if this person is a kinsman who entered public
+    /// life, else −1.
+    #[serde(default = "neg_one_i32")] pub kin_ref: i32,
+    /// `ROLE_*` — a person can hold several over a life.
+    #[serde(default)] pub roles: Vec<u8>,
+    /// One of the ≤ 40 "notables" (UI word) alive at once.
+    #[serde(default)] pub famous: bool,
+    /// Bounded, decays (rule 18) — promotion/decay logic ships in 02.3.
+    #[serde(default)] pub fame: f32,
+    /// (TRAIT_*, strength −2..+2), ≤ 8 — the catalogue ships in 02.2.
+    #[serde(default)] pub traits: Vec<(u8, i8)>,
+    /// ≤ 6 — the catalogue ships in 02.2.
+    #[serde(default)] pub modifiers: Vec<Modifier>,
+    /// Row 06 fills; zero (a true no-op) until then.
+    #[serde(default)] pub ideology: [f32; 4],
+    #[serde(default)] pub face_seed: u32,
+    /// Bitflags: ONE_EYED, SCARRED, LAME, BALD, GREY, TATTOOED… (02.7).
+    #[serde(default)] pub features: u32,
+    /// (REL_MENTOR/RIVAL/FRIEND/PATRON/SPOUSE/STUDENT, individual id), ≤ 8.
+    #[serde(default)] pub relations: Vec<(u8, u32)>,
+    /// Template ids + args; text generated at read time, not stored.
+    #[serde(default)] pub backstory: Vec<(u16, Vec<u32>)>,
+    /// (tick, template_id, args); famous: never pruned; ordinary: ≤ 12 (02.4).
+    #[serde(default)] pub life_log: Vec<LifeEntry>,
+    /// living_world/02_PEOPLE.md 02.1 · the `Figure` this Individual mirrors,
+    /// or −1 for a person who never was one (e.g. an Alderman/Guildmaster
+    /// minted straight from a Notable role). Lets both sides of the migration
+    /// find each other without a second identity scheme.
+    #[serde(default = "neg_one_i32")] pub figure_ref: i32,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L12 — the shared dose gating BOTH institutional
@@ -7762,6 +7898,22 @@ pub struct CampaignSim {
     /// `#[serde(default)]` so old `.campaign` saves load with none.
     #[serde(default)]
     pub figures: Vec<Figure>,
+    /// living_world/02_PEOPLE.md · every LIVING named human the world tracks.
+    /// `#[serde(default)]` so a pre-row-02 save loads empty; `migrate_figures_
+    /// to_individuals` (one-time, `individuals_migrated`) then fills it from
+    /// the existing `figures` roster on first advance.
+    #[serde(default)]
+    pub people: Vec<Individual>,
+    /// Dead NOTABLES only (00_INDEX "Ids and tombstones") — kept forever, in
+    /// full. A dead ORDINARY person is removed instead (02.3).
+    #[serde(default)]
+    pub hall_of_dead: Vec<Individual>,
+    /// Next `Individual.id` to hand out. Ids are never reused.
+    #[serde(default)]
+    pub next_individual_id: u32,
+    /// One-time flag: `migrate_figures_to_individuals` has run.
+    #[serde(default)]
+    pub individuals_migrated: bool,
     /// Phase 4 (flavour) · seasonal trade fairs (one per large trading component),
     /// seeded once. `#[serde(default)]` so old saves load with none.
     #[serde(default)]
@@ -9619,6 +9771,15 @@ impl CampaignSim {
             }
             self.society_migrated = true;
         }
+        // living_world/02_PEOPLE.md 02.1 · one-time: fold every existing `Figure`
+        // into a stable `Individual` record. Purely additive — `Figure`/`Notable`
+        // keep acting exactly as before; only `self.people`/`self.hall_of_dead`
+        // are populated, and nothing yet reads them, so this cannot move
+        // anything `sim_fingerprint` sees (`living_world_is_inert_at_zero`).
+        if !self.individuals_migrated {
+            self.migrate_figures_to_individuals();
+            self.individuals_migrated = true;
+        }
         // Rescue isolated "cosmetic" cities on older saves: a settlement whose trade
         // component is tiny (< 3 real hubs) can never trade (rebuild_routes marks it
         // unreachable). Fuse each into the nearest substantial market's component.
@@ -10405,6 +10566,15 @@ impl CampaignSim {
 
             // 8.5) Population sentiment (mood + drivers).
             self.update_sentiment();
+
+            // living_world/02_PEOPLE.md · the WEEKLY cadence hook (00_INDEX
+            // "Cadence hooks" — `advance()` had daily/monthly/yearly work and no
+            // weekly step before this row). 02.1 only expires modifiers, which
+            // nothing sets yet, so this is inert bookkeeping; 02.4's event engine
+            // hangs off the same hook.
+            if tick % 7 == 0 {
+                self.living_world_weekly_pass();
+            }
 
             // 9) History — the "main" record is taken once per MONTH: a per-hub
             //    snapshot (charts + growth movers), the world price-index point

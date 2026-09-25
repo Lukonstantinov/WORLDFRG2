@@ -2351,6 +2351,17 @@ impl CampaignSim {
             let (kind, good, hub, house) =
                 (self.figures[i].kind, self.figures[i].good, self.figures[i].hub, self.figures[i].house);
             let name = self.figures[i].name.clone();
+            // living_world/02_PEOPLE.md 02.1 · the linked Individual dies with
+            // the figure — a notable's death, so it moves to the Hall of the
+            // Dead rather than being forgotten (00_INDEX "Ids and tombstones").
+            let iid = self.figures[i].individual_id;
+            if iid >= 0 {
+                if let Some(pos) = self.people.iter().position(|p| p.id as i32 == iid) {
+                    let mut dead_p = self.people.remove(pos);
+                    dead_p.death_tick = tick;
+                    self.hall_of_dead.push(dead_p);
+                }
+            }
             let city = self.hubs.get(hub as usize).map(|h| h.name.clone()).unwrap_or_default();
             self.journal.push(JournalEntry {
                 tick, kind: "figure".into(), hub: hub as i32, good, value: 0.0,
@@ -2457,11 +2468,78 @@ impl CampaignSim {
         }
         let span = ((15.0 + hash01(self.seed, tick as u64 ^ 0xCA6, hub as u64) * 25.0)
             * TICKS_PER_YEAR as f32) as u32;
+        // living_world/02_PEOPLE.md 02.1 · mint the stable person behind this
+        // figure now, so `update_notables`' Agitator link (a Demagogue figure)
+        // has an `individual_id` to read from the moment it exists.
+        let iid = self.mint_individual(&name, hub as i32, resident, -1, figure_kind_to_role(kind));
         self.figures.push(Figure {
             name, kind, hub: hub as u32, house: resident, good,
             born_tick: tick, dies_tick: tick + span, dead: false, rallied: false,
+            individual_id: iid,
             life_log: Vec::new(),
         });
+    }
+
+    /// living_world/02_PEOPLE.md 02.1 · mint a fresh `Individual`, minimally —
+    /// full backstory/traits/face are 02.2-02.7. `id` is the next one issued;
+    /// ids are never reused.
+    pub(crate) fn mint_individual(&mut self, name: &str, hub: i32, house: i32, kin_ref: i32, role: u8) -> i32 {
+        let id = self.next_individual_id;
+        self.next_individual_id += 1;
+        let tick = self.tick;
+        self.people.push(Individual {
+            id, name: name.to_string(), female: false, culture: 0,
+            birth_tick: tick.saturating_sub(30 * TICKS_PER_YEAR), debut_tick: tick,
+            death_tick: 0, death_cause: 0,
+            origin_hub: hub, formed_hub: hub, current_hub: hub, house, kin_ref,
+            roles: vec![role], famous: false, fame: 0.0, traits: Vec::new(),
+            modifiers: Vec::new(), ideology: [0.0; 4],
+            face_seed: id ^ tick, features: 0, relations: Vec::new(),
+            backstory: Vec::new(), life_log: Vec::new(), figure_ref: -1,
+        });
+        id as i32
+    }
+
+    /// living_world/02_PEOPLE.md 02.1 · one-time: fold every existing `Figure`
+    /// into a stable `Individual` (`figure.individual_id`, `-1` on an old save
+    /// = not yet migrated). A dead figure's person goes straight to the Hall
+    /// of the Dead — a figure is always one of the ≤40 "great lives", never an
+    /// ordinary forgotten one. Skips any figure already carrying a link (a
+    /// figure raised after this slice already minted its own via
+    /// `mint_individual`), so re-running it is a no-op.
+    pub(crate) fn migrate_figures_to_individuals(&mut self) {
+        for i in 0..self.figures.len() {
+            if self.figures[i].individual_id >= 0 { continue; }
+            let f = self.figures[i].clone();
+            let id = self.next_individual_id;
+            self.next_individual_id += 1;
+            let death_tick = if f.dead { f.dies_tick } else { 0 };
+            let individual = Individual {
+                id, name: f.name.clone(), female: false, culture: 0,
+                birth_tick: f.born_tick, debut_tick: f.born_tick,
+                death_tick, death_cause: 0,
+                origin_hub: f.hub as i32, formed_hub: f.hub as i32, current_hub: f.hub as i32,
+                house: f.house, kin_ref: -1, roles: vec![figure_kind_to_role(f.kind)],
+                famous: true, fame: 0.0, traits: Vec::new(), modifiers: Vec::new(),
+                ideology: [0.0; 4], face_seed: id ^ f.born_tick, features: 0,
+                relations: Vec::new(), backstory: Vec::new(),
+                life_log: f.life_log.clone(), figure_ref: i as i32,
+            };
+            if f.dead { self.hall_of_dead.push(individual); } else { self.people.push(individual); }
+            self.figures[i].individual_id = id as i32;
+        }
+    }
+
+    /// living_world/02_PEOPLE.md · the weekly (`tick % 7`) hook. 02.1 only
+    /// expires modifiers on living people — nothing sets one yet (02.2 is the
+    /// decision engine that would), so this is inert bookkeeping; 02.4's event
+    /// engine hangs off the same hook. `O(people)` with small constants.
+    pub(crate) fn living_world_weekly_pass(&mut self) {
+        let tick = self.tick;
+        for p in self.people.iter_mut() {
+            if p.death_tick != 0 { continue; }
+            p.modifiers.retain(|m| m.expires_tick > tick);
+        }
     }
 
     /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) · per-city notables. Called AFTER
@@ -2478,32 +2556,72 @@ impl CampaignSim {
             let cap = (self.hubs[h].tier as usize).max(1).min(NOTABLE_ROLES.len());
             let mut desired: Vec<Notable> = Vec::new();
 
-            // Guildmaster — the hub's strongest live CraftGuild.
+            // Guildmaster — the hub's strongest live CraftGuild. living_world/
+            // 02_PEOPLE.md 02.1: the salt used to be `tick`-dependent, so the
+            // hashed name changed every year and every rebuild read as a
+            // FRESH appointment (00_INDEX "local roles do not mint new people
+            // yearly"). It is STABLE now (hub only — a guildmaster keeps their
+            // name even if the guild's craft changes), and links to the SAME
+            // `Individual` every year instead of a new one.
             let best_guild = self.guilds.iter()
                 .filter(|g| g.hub as usize == h)
                 .max_by(|a, b| a.strength.partial_cmp(&b.strength).unwrap_or(std::cmp::Ordering::Equal))
                 .map(|g| g.good as i32);
             if let Some(good) = best_guild {
-                let salt = (tick as u64) ^ (h as u64).wrapping_mul(0x9E3779B1) ^ 0xC4A5;
-                let hub_name = self.hubs[h].name.clone();
-                let name = self.head_name_for(h, &hub_name, salt);
-                desired.push(Notable { role: NOTABLE_GUILDMASTER, name, good });
+                let existing = self.people.iter()
+                    .find(|p| p.death_tick == 0 && p.current_hub == h as i32 && p.roles.contains(&ROLE_GUILDMASTER))
+                    .map(|p| (p.id as i32, p.name.clone()));
+                let (iid, name) = match existing {
+                    Some(pair) => pair,
+                    None => {
+                        let salt = (h as u64).wrapping_mul(0x9E3779B1) ^ living_world_salts::NOTABLE_GUILDMASTER_NAME;
+                        let hub_name = self.hubs[h].name.clone();
+                        let name = self.head_name_for(h, &hub_name, salt);
+                        let iid = self.mint_individual(&name, h as i32, -1, -1, ROLE_GUILDMASTER);
+                        (iid, name)
+                    }
+                };
+                desired.push(Notable { role: NOTABLE_GUILDMASTER, name, good, individual_id: iid });
             }
 
-            // Alderman — the council house's own second kinsman.
+            // Alderman — the council house's own second kinsman. Already
+            // stable (the kin's own name doesn't change year to year), so this
+            // only needed a link, not a naming fix.
             let council = self.hubs[h].council_house;
-            if council >= 0 {
-                if let Some(house) = self.houses.get(council as usize) {
-                    if let Some(k) = house.kin.get(1).filter(|k| k.dies_tick == 0) {
-                        desired.push(Notable { role: NOTABLE_ALDERMAN, name: k.name.clone(), good: -1 });
-                    }
-                }
+            let alderman_name: Option<String> = self.houses.get(council.max(0) as usize)
+                .filter(|_| council >= 0)
+                .and_then(|house| house.kin.get(1))
+                .filter(|k| k.dies_tick == 0)
+                .map(|k| k.name.clone());
+            if let Some(kname) = alderman_name {
+                let existing = self.people.iter()
+                    .find(|p| p.death_tick == 0 && p.house == council && p.kin_ref == 1)
+                    .map(|p| p.id as i32);
+                let iid = match existing {
+                    Some(id) => id,
+                    None => self.mint_individual(&kname, h as i32, council, 1, ROLE_OFFICIAL),
+                };
+                desired.push(Notable { role: NOTABLE_ALDERMAN, name: kname, good: -1, individual_id: iid });
             }
 
             // Agitator — the existing Demagogue Figure, localised: no new
-            // roll, no new effect (its unrest bump already fired above).
-            if let Some(f) = self.figures.iter().find(|f| !f.dead && f.kind == 1 && f.hub as usize == h) {
-                desired.push(Notable { role: NOTABLE_AGITATOR, name: f.name.clone(), good: -1 });
+            // roll, no new effect (its unrest bump already fired above). The
+            // figure normally already carries a stable `individual_id` (minted
+            // at `raise_notable_figures`/migrated at load); a figure that
+            // somehow reached here without one (an old save mid-migration, a
+            // hand-built fixture) gets one lazily rather than seating a
+            // notable with no linked person (00_INDEX "Lazy seeding").
+            if let Some(fi) = self.figures.iter().position(|f| !f.dead && f.kind == 1 && f.hub as usize == h) {
+                let fname = self.figures[fi].name.clone();
+                let fhouse = self.figures[fi].house;
+                let iid = if self.figures[fi].individual_id >= 0 {
+                    self.figures[fi].individual_id
+                } else {
+                    let iid = self.mint_individual(&fname, h as i32, fhouse, -1, ROLE_DEMAGOGUE);
+                    self.figures[fi].individual_id = iid;
+                    iid
+                };
+                desired.push(Notable { role: NOTABLE_AGITATOR, name: fname, good: -1, individual_id: iid });
             }
 
             desired.truncate(cap);
