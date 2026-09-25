@@ -1989,6 +1989,20 @@ const CAPTOR_TARIFF_FAVOUR: f32 = 0.6;   // ×base for the captor's goods
 /// Trade-influence boost a captor gets at the city it controls (added to `influence`).
 const CAPTOR_INFLUENCE_BOOST: f32 = 0.12;
 const LAWS_CAP: usize = 12;
+/// `living_world/04_GOVERNMENT_AND_EDICTS.md` slice 04.1 · seat-count-by-size and
+/// the coup/legitimacy machinery (04.2, 04.5) sit behind this dose. At `0.0`
+/// `seed_government` builds exactly the same 3-4 fixed roles it always has, so
+/// this row is a true no-op until raised — proven directly (not by a separate
+/// fingerprint test) because `seat_count_for` is only ever consulted when
+/// `GOV_POWER_DOSE > 0.0`. Row 04 depends on rows 02 (`Individual`) and 03
+/// (development tracks), neither built yet, so this slice ships the
+/// seat-count/cultural-title SCAFFOLDING only — a seat is still an `Official`
+/// with a generated name, not yet an `Individual` with a face and traits; see
+/// this doc's own Queue for what that upgrade needs.
+pub(crate) const GOV_POWER_DOSE: f32 = 0.0;
+/// Hard cap on seats in any one government (04 §"Forms, sizes and offices") —
+/// the largest senate, and the ceiling a custom office (row 04.6+) must share.
+pub(crate) const GOVT_SEAT_CAP: usize = 16;
 /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.9 (A4) · a fresh captor OCCASIONALLY
 /// bars foreign ownership outright to protect its new turf — the conquest/
 /// capitulation origin the amendment names. Reuses the already-rare `captor !=
@@ -7018,8 +7032,38 @@ fn role_title(kind: u8) -> &'static str {
 }
 
 /// The office a government key figure holds (for chronicle text + the Government panel).
+/// Role 4 is a generic extra seat (04.1's seat-count scaling, `seat_count_for`)
+/// beyond the original four named offices — cultural/per-office titling (the
+/// Roman/Hellene/… sets in `living_world/04_GOVERNMENT_AND_EDICTS.md`) waits on
+/// threading a culture-kit index into `TickHub` (queued, `hub.culture` is a
+/// plain generated name here, not a `cultures::Kit` index).
 pub fn office_title(role: u8) -> &'static str {
-    match role { 0 => "Head", 1 => "Treasurer", 2 => "Harbormaster", _ => "Magistrate" }
+    match role { 0 => "Head", 1 => "Treasurer", 2 => "Harbormaster", 3 => "Magistrate", _ => "Councillor" }
+}
+
+/// `living_world/04_GOVERNMENT_AND_EDICTS.md` §"Forms, sizes and offices" —
+/// seats scale with city population, capped at `GOVT_SEAT_CAP`. Villages get
+/// 1-3, a free commune/assembly 3-10, a council/oligarchy 5-9, a
+/// principality/tyranny 1 ruler + 2-4 advisers, a senate 9-16. Pure and
+/// deterministic (no rng — the actual roll for WHICH extra seats exist, and
+/// who sits in them, stays `seed_government`'s job); only consulted when
+/// `GOV_POWER_DOSE > 0.0` (see that constant's own doc comment), so this
+/// function existing changes nothing about the shipped economy by itself.
+pub(crate) fn seat_count_for(pop: f32, govt_type: u8) -> usize {
+    if pop < 2_000.0 {
+        // A village: an elder or a headman, at most a tiny council.
+        return if pop < 400.0 { 1 } else { 3 };
+    }
+    let n = match govt_type {
+        // Tyranny/principality: the ruler + 2-4 advisers, growing slowly with size.
+        1 => 1 + (2.0 + (pop / 40_000.0).min(2.0)) as usize,
+        // Council/oligarchy: 5-9 seats.
+        0 => 5 + (pop / 60_000.0).min(4.0) as usize,
+        // Free commune/assembly: magistrates 3-10 (the assembly itself is the
+        // commons' meter, row 06, never seats).
+        _ => 3 + (pop / 25_000.0).min(7.0) as usize,
+    };
+    n.min(GOVT_SEAT_CAP).max(1)
 }
 
 /// Human name of a regime type.
@@ -9215,14 +9259,32 @@ impl CampaignSim {
             else { 2 };
         self.hubs[h].govt_type = govt;
         let term = GOVT_TERM_YEARS[govt as usize] * TICKS_PER_YEAR;
-        let roles: &[u8] = if self.hubs[h].coastal { &[0, 1, 2, 3] } else { &[0, 1, 3] };
+        let fixed_roles: &[u8] = if self.hubs[h].coastal { &[0, 1, 2, 3] } else { &[0, 1, 3] };
+        // `living_world/04_GOVERNMENT_AND_EDICTS.md` 04.1 · at GOV_POWER_DOSE > 0
+        // the seat count scales with city size (`seat_count_for`); extra seats
+        // beyond the four named offices are role 4 ("Councillor"), which already
+        // carries the tally's default weight of 1.0 (`match role { 0 => 2.0, 1 =>
+        // 1.4, _ => 1.0 }`), so no capture-logic change was needed to add them.
+        // At dose 0 this is exactly the old fixed 3-4 role list — a true no-op.
+        let extra_seats = if GOV_POWER_DOSE > 0.0 {
+            seat_count_for(pop, govt).saturating_sub(fixed_roles.len())
+        } else {
+            0
+        };
         let city = self.hubs[h].name.clone();
-        let mut officials = Vec::with_capacity(roles.len());
-        for (i, &role) in roles.iter().enumerate() {
-            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add(role as u64 ^ 0x51);
+        let n_seats = fixed_roles.len() + extra_seats;
+        let mut officials = Vec::with_capacity(n_seats);
+        for i in 0..n_seats {
+            let role = fixed_roles.get(i).copied().unwrap_or(4);
+            // Extra (role-4) seats salt on their SEAT INDEX `i`, not `role` (every
+            // extra seat shares role 4, so role-based salting would give them all
+            // the same name); the original four named offices keep salting on
+            // `role` exactly as before, so a dose-0 world is bit-identical.
+            let salt_key = if i < fixed_roles.len() { role as u64 } else { i as u64 };
+            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add(salt_key ^ 0x51);
             let name = self.head_name_for(h, &city, salt);
             // Stagger initial terms so the whole council doesn't turn over at once.
-            let te = self.tick + term / 2 + (i as u32 * term) / roles.len().max(1) as u32;
+            let te = self.tick + term / 2 + (i as u32 * term) / n_seats.max(1) as u32;
             officials.push(Official { role, name, house: -1, control: 0.0, kin: false, term_end: te });
         }
         self.hubs[h].officials = officials;

@@ -1,6 +1,14 @@
 # 04 · Government and edicts
 
-**Status:** NOT STARTED · **Depends on:** 02, 03 · **Next:** 05
+**Status:** PARTIAL — slice 04.1 done, see §Queue · **Depends on:** 02, 03 · **Next:** 05
+
+**2026-09-25:** started ahead of rows 02/03 at the maintainer's explicit
+request. Slice 04.1 (seat-count-by-size + office-title scaffolding) shipped as
+pure, dosed-zero scaffolding — `GOV_POWER_DOSE = 0.0` — because a seat is still
+an `Official` with a generated name, not yet an `Individual` with a face,
+traits and an ideology position (row 02). Slices 04.2 onward (paths,
+suitability, allegiance, blocs, debate, the Lustrum, the Government window)
+need row 02's `Individual` and are QUEUED below, not built.
 
 ## Goal
 
@@ -227,7 +235,7 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 
 | Slice | Content | Gate |
 |---|---|---|
-| 04.1 | Offices held by `Individual`s; migrate `Official`; seat counts by size; cultural title sets; **inert** | `officials_migrate_to_seats`, `seat_count_scales_with_city` |
+| 04.1 | **DONE (2026-09-25, scaffolding only).** Seat counts by size (`seat_count_for`, `GOVT_SEAT_CAP`); extra seats beyond the 4 named offices seed as generic role-4 "Councillor" seats; gated behind `GOV_POWER_DOSE = 0.0` (a true no-op — `seed_government` still builds the old fixed 3-4 roles at dose 0). **NOT done**: offices held by `Individual`s (needs row 02) and per-culture title sets (needs a culture-kit index threaded into `TickHub`, which the campaign tick does not carry today — `hub.culture` is a plain generated name) — both QUEUED (Q04.3, Q04.4) | `officials_migrate_to_seats`, `seat_count_scales_with_city` |
 | 04.2 | Paths, suitability, allegiance, blocs; houses' kin seats + clients via existing bribery | `bought_members_follow_their_patron` |
 | 04.3 | Political points, edict catalogue, costs by ideological distance, expiry | `mismatched_edicts_cost_more`, `edicts_expire` |
 | 04.4 | Weekly debate rounds, amendments, filibuster, votes, deadlock | `every_debate_terminates`, `deadlock_costs_legitimacy` |
@@ -243,3 +251,16 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 - Q04.1 — Realm-level government and realm-wide edicts (row 09).
 - Q04.2 — Elections with campaigns (candidates spending, speeches) — waits on
   measured seat turnover.
+- Q04.3 — Seat holders as real `Individual`s (face, traits, suitability,
+  ideology position) — waits on row 02.
+- Q04.4 — Per-culture office title sets (Roman/Hellene/Norse/… from the
+  "Forms, sizes and offices" table) — waits on a culture-kit index being
+  threaded into `TickHub` (today `hub.culture` is a plain generated name with
+  no back-reference to `cultures::KITS`); until then `office_title` serves the
+  Roman-flavoured default set for every culture.
+- Q04.5 — Slices 04.2-04.8 (paths/suitability/allegiance/blocs, political
+  points + edict catalogue, weekly debate, tyrant/legitimacy/coups, the
+  Lustrum, the Government window, end-of-row dosing) — waits on rows 02 and 03
+  per this row's own stated dependency; do not build them against the
+  `Official`-only stand-in above, or the eventual `Individual` migration would
+  have to redo this row's own vote/bribery/suitability wiring.

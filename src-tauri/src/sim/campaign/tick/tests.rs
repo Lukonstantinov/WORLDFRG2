@@ -10505,3 +10505,47 @@
             "a figure's life_log must be untouched by pruning, 500 years on");
     }
 
+    // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────
+
+    /// 04.1 · `seat_count_for` is a pure function: villages get 1-3 seats, larger
+    /// governments scale up, and nothing ever exceeds `GOVT_SEAT_CAP`.
+    #[test]
+    fn seat_count_scales_with_city() {
+        assert_eq!(seat_count_for(100.0, 0), 1, "a tiny hamlet gets one elder");
+        assert_eq!(seat_count_for(1000.0, 0), 3, "a small village gets a small council");
+        let council_small = seat_count_for(5_000.0, 0);
+        let council_big = seat_count_for(500_000.0, 0);
+        assert!(council_big > council_small,
+            "a larger council/oligarchy seats more people than a smaller one");
+        assert!(council_big <= GOVT_SEAT_CAP, "no government exceeds the seat cap");
+        let tyranny_small = seat_count_for(5_000.0, 1);
+        let tyranny_big = seat_count_for(500_000.0, 1);
+        assert!(tyranny_small >= 1 && tyranny_small <= 5, "a tyranny is the ruler + a few advisers");
+        assert!(tyranny_big <= GOVT_SEAT_CAP);
+        let assembly_small = seat_count_for(10_000.0, 2);
+        let assembly_big = seat_count_for(500_000.0, 2);
+        assert!(assembly_big > assembly_small, "a bigger free commune seats more magistrates");
+        assert!(assembly_big <= GOVT_SEAT_CAP);
+    }
+
+    /// 04.1 · at `GOV_POWER_DOSE == 0.0` (the shipped default) `seed_government`
+    /// must build EXACTLY the old fixed 3-4 role list — the seat-count scaling
+    /// exists as pure scaffolding for row 04's later slices, not yet wired live.
+    /// This is 04's own inertness proof: no separate fingerprint harness is
+    /// needed because the seat count is asserted directly.
+    #[test]
+    fn officials_migrate_to_seats() {
+        assert_eq!(GOV_POWER_DOSE, 0.0, "row 04.1 ships with the new seat scaling OFF");
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let coastal_hub = { let mut h = hub(0, 0.0, 0.0, 200_000.0, vec![10.0], 0); h.coastal = true; h };
+        let inland_hub = { let mut h = hub(1, 4.0, 0.0, 200_000.0, vec![10.0], 0); h.coastal = false; h };
+        let mut s = sim(vec![coastal_hub, inland_hub], goods);
+        s.seed_government(0);
+        s.seed_government(1);
+        assert_eq!(s.hubs[0].officials.len(), 4, "a coastal city keeps its 4 named offices at dose 0");
+        assert_eq!(s.hubs[1].officials.len(), 3, "an inland city keeps its 3 named offices at dose 0");
+        for o in &s.hubs[0].officials {
+            assert!(o.role <= 3, "no generic role-4 seat is created while the dose is zero");
+        }
+    }
+
