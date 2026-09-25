@@ -41,8 +41,8 @@ cargo test --release --lib ocean_atmosphere_field_checksums -- --ignored --nocap
 ## 2. STANDING RULES (non-negotiable)
 
 ### 2.1 Always iterate & test the simulation
-After ANY change touching `sim/campaign/tick/` (economy, houses, banks, coinage, war,
-crashes, trade) you MUST run the living simulation and read the dynamics, not just
+Before the FINAL push of a batch touching `sim/campaign/tick/` (economy, houses, banks,
+coinage, war, crashes, trade — see §2.9 for what a batch is) you MUST run the living simulation and read the dynamics, not just
 type-check. The world is meant to be DYNAMIC — houses rise and go **defunct**,
 banks are chartered and **fail**, poleis mint coin, wars flare, crashes ripple.
 
@@ -125,8 +125,8 @@ history shows the same failure repeatedly.
 ### 2.5 Never regress economy fidelity
 The campaign economy is scored against published pre-modern price, wage,
 urbanisation and inequality series by `sim/campaign/tick/economy_validation.rs`
-(Allen · Federico · Persson · De Vries · Alfani · Van Zanden). After ANY change to
-`tick/` you MUST run:
+(Allen · Federico · Persson · De Vries · Alfani · Van Zanden). Before the FINAL push of
+any batch that changed `tick/` (§2.9) you MUST run:
 
 ```bash
 cargo test --lib econ_ -- --nocapture
@@ -169,7 +169,7 @@ only affect a slice of it. Pick rows by the paths in your diff, run the union, a
 |---|---|
 | `docs/**`, `README`, `CLAUDE.md` | nothing |
 | a `#[cfg(test)]` block / a diagnostic only | `cargo check --lib --tests`, then that test by name |
-| `sim/campaign/tick/**` | `cargo test --lib tick::tests` + `econ_` (§2.1, §2.5) |
+| `sim/campaign/tick/**` | per slice: `cargo check --lib --tests` + the slice's named tests; **once at the end of the batch**: `cargo test --lib tick::tests` + `econ_` (§2.1, §2.5, §2.9) |
 | `sim/step3_ocean_atmo/**`, `sim/step4_climate/**` | `earth_` (§2.3) + re-read §8.9 |
 | `sim/step2_terrain/**` | `elevation::tests`, `landform`, `terrain_metrics`; **not** `earth_` — `earth_validation.rs` scores a baked DEM and never calls a generator (§8.23b) |
 | `sim/step1_plates/**` | `plates`, `elevation::tests`, `coastline_departs_from_the_plate_boundary` |
@@ -193,6 +193,27 @@ Three rules:
   genuinely cannot tell which rows a change touches, that is a signal the change is
   too broad, not a reason to run everything. CI (rule 16) is the backstop that runs
   the full set; it exists so a local session does not have to.
+
+### 2.9 Economy gates run once per BATCH, not per change (decided 2026-09-25)
+
+The maintainer was waiting over an hour for gates on minor changes. A **batch** is one
+numbered row of `docs/living_world/00_INDEX.md` (or, outside that plan, one plan phase /
+one user request). Inside a batch:
+
+- **Each slice:** `cargo check --lib --tests` + that slice's own named tests
+  (`cargo test --lib <name>`) + `npx tsc --noEmit` if the frontend changed. Seconds to
+  minutes. Slices may be committed and pushed like this.
+- **Once, at the end of the batch, before its final push:** `cargo test --lib
+  tick::tests` (includes `simulate_decades_reports_dynamics`) and `cargo test --lib
+  econ_ -- --nocapture`. This is where any dose is judged.
+- The licence to skip `econ_` on intermediate slices holds **only while every
+  behavioural constant the batch adds is still at its zero dose** (a true no-op). A
+  slice that raises a dose is by definition the batch's last slice and owes the full
+  end-of-batch gates.
+- Say in each commit which gates ran, and in the batch's final commit that the
+  end-of-batch gates ran and what they printed.
+- `earth_` (§2.3) and the other routing-table rows are unchanged — they are fast
+  enough to run per change.
 
 ---
 
@@ -6141,6 +6162,16 @@ where "Generate from Plates" used to always repeat the stored seed), and the
 
 **START HERE — the current plan**
 ```
+living_world/00_INDEX.md          ← ⭐ THE BUILD QUEUE (2026-09-25). Ten numbered rows —
+                                    01 feeds & pruning · 02 people · 03 development
+                                    tracks · 04 government & edicts · 05 culture
+                                    acceptance · 06 ideology & scholars · 07 artisans &
+                                    masterworks · 08 leisure & games · 09 realms, war &
+                                    barbarians · 10 settlement overview. A session takes
+                                    the FIRST row that is NOT STARTED with its
+                                    dependencies DONE, builds its slices in order, runs
+                                    the economy gates once at the row's end (§2.9), and
+                                    marks the row in the index in the same commit
 FIX_PLAN.md                       ← ⭐ Measured Earth-fidelity baseline + the prioritised
                                     fix plan (climate · one-simulator · economy · society),
                                     with a regression gate per item. Read before planning work.
@@ -7900,7 +7931,7 @@ Three rules:
     `step3_ocean_atmo/preview.rs` — change one, change all three, or the fidelity gate
     and the settings preview stop testing/showing the real pipeline.
 12. **Run the gates your change actually touches — see §2.8. Never the whole suite
-    by default.** A full `cargo test --lib` is ~an hour and most changes cannot
+    by default; `econ_` runs once per batch, at its end (§2.9).** A full `cargo test --lib` is ~an hour and most changes cannot
     affect most of it; running everything is not caution, it is a way of learning
     nothing slowly. **After any verified change** → push to `main` (§2.2), and keep
     this file true (§2.7).
