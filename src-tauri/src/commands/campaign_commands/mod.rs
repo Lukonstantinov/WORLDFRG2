@@ -2950,6 +2950,33 @@ pub struct FigureBrief {
     pub life_events: Vec<String>,
 }
 
+/// 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record
+/// for every named human the campaign tracks, ordinary and famous alike.
+#[derive(Serialize, Clone)]
+pub struct IndividualBrief {
+    pub id: u32,
+    pub name: String,
+    pub female: bool,
+    pub culture: String,
+    pub roles: Vec<String>,
+    pub famous: bool,
+    pub fame: f32,
+    pub alive: bool,
+    pub debut_year: u32,
+    pub death_year: u32,
+    pub death_cause: String,
+    pub current_hub: i32,
+    pub city: String,
+    pub house: String,
+    /// `trait_name(t)` for each trait carried.
+    pub traits: Vec<String>,
+    pub face_seed: u32,
+    pub features: u32,
+    /// Life log entries rendered to text AT READ TIME (00_INDEX "text
+    /// generated lazily at read time"), most recent last.
+    pub life_log: Vec<String>,
+}
+
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).
 #[derive(Serialize, Clone)]
 pub struct LandmarkBrief {

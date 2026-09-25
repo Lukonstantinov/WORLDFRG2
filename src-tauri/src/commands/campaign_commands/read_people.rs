@@ -739,6 +739,71 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
     Ok(out)
 }
 
+/// 02_PEOPLE.md (Living World row 02) · render one `Individual` into a brief.
+fn individual_brief(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> IndividualBrief {
+    use crate::sim::tick::{TICKS_PER_YEAR, role_name, trait_name, death_cause_name};
+    let city = sim.hubs.get(p.current_hub.max(0) as usize)
+        .filter(|_| p.current_hub >= 0).map(|h| h.name.clone()).unwrap_or_default();
+    let house = if p.house >= 0 {
+        sim.houses.get(p.house as usize).map(|h| h.name.clone()).unwrap_or_default()
+    } else { String::new() };
+    let life_log = p.life_log.iter()
+        .map(|e| sim.render_life_entry_for(&p.name, e))
+        .collect();
+    IndividualBrief {
+        id: p.id,
+        name: p.name.clone(),
+        female: p.female,
+        culture: p.culture.clone(),
+        roles: p.roles.iter().map(|&r| role_name(r).to_string()).collect(),
+        famous: p.famous,
+        fame: p.fame,
+        alive: p.is_alive(),
+        debut_year: p.debut_tick / TICKS_PER_YEAR,
+        death_year: if p.is_alive() { 0 } else { p.death_tick / TICKS_PER_YEAR },
+        death_cause: if p.is_alive() { String::new() } else { death_cause_name(p.death_cause).to_string() },
+        current_hub: p.current_hub,
+        city,
+        house,
+        traits: p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect(),
+        face_seed: p.face_seed,
+        features: p.features,
+        life_log,
+    }
+}
+
+/// 02_PEOPLE.md · one living or dead `Individual` by id (searches `people`
+/// then `hall_of_dead`), for the Person window.
+#[tauri::command]
+pub fn campaign_get_individual(db: State<'_, WorldDb>, id: u32) -> Result<Option<IndividualBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(None) };
+    let p = sim.people.iter().find(|p| p.id == id).or_else(|| sim.hall_of_dead.iter().find(|p| p.id == id));
+    Ok(p.map(|p| individual_brief(&sim, p)))
+}
+
+/// 02_PEOPLE.md · the 40-cap notable roster, famous living people only, for
+/// the Notables roster panel.
+#[tauri::command]
+pub fn campaign_get_notables(db: State<'_, WorldDb>) -> Result<Vec<IndividualBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<IndividualBrief> = sim.people.iter().filter(|p| p.famous)
+        .map(|p| individual_brief(&sim, p)).collect();
+    out.sort_by(|a, b| b.fame.partial_cmp(&a.fame).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(out)
+}
+
+/// 02_PEOPLE.md · the Hall of the Dead — every dead notable, full life kept.
+#[tauri::command]
+pub fn campaign_get_hall_of_dead(db: State<'_, WorldDb>) -> Result<Vec<IndividualBrief>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
+    let mut out: Vec<IndividualBrief> = sim.hall_of_dead.iter().map(|p| individual_brief(&sim, p)).collect();
+    out.sort_by(|a, b| b.death_year.cmp(&a.death_year));
+    Ok(out)
+}
+
 
 /// Phase 7 · marriage alliances (from `sim.alliances`) + feuds (from `House.rivals`)
 /// between living houses, with their seat cities for the map.

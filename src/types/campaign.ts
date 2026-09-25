@@ -2384,6 +2384,30 @@ export interface FigureBrief {
   life_events: string[];
 }
 
+/** 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record
+ *  for every named human the campaign tracks, ordinary and famous alike. */
+export interface IndividualBrief {
+  id: number;
+  name: string;
+  female: boolean;
+  culture: string;
+  roles: string[];
+  famous: boolean;
+  fame: number;
+  alive: boolean;
+  debut_year: number;
+  death_year: number;
+  death_cause: string;
+  current_hub: number;
+  city: string;
+  house: string;
+  traits: string[];
+  face_seed: number;
+  features: number;
+  /** Life log entries rendered to text at read time, most recent last. */
+  life_log: string[];
+}
+
 /** Phase 6 · a landmark / place of note. */
 export interface LandmarkBrief {
   hub: number;
