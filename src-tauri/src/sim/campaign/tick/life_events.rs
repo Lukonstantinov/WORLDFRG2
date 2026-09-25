@@ -239,7 +239,10 @@ impl CampaignSim {
         }
         let t = candidates[pick];
         let hub = self.people[i].current_hub;
-        let entry = LifeEntry { tick: self.tick, template_id: t.id, args: vec![hub.max(0) as u32] };
+        // `u32::MAX` marks "no hub" (an abroad/unknown person) so rendering
+        // never mistakes it for hub 0 — every world has a real hub 0.
+        let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
+        let entry = LifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg] };
         let famous = self.people[i].famous;
         self.people[i].life_log.push(entry.clone());
         if !famous && self.people[i].life_log.len() > ORDINARY_LIFE_LOG_CAP {

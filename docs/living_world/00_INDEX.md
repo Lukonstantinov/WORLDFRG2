@@ -31,7 +31,7 @@ decision recorded here was made by the maintainer; where a document says
 | # | Document | Status | Depends on | What it delivers |
 |---|---|---|---|---|
 | 01 | [`01_FEEDS_AND_PRUNING.md`](01_FEEDS_AND_PRUNING.md) | NOT STARTED | — | News Feed window removed; chronicles keep milestones, drop chatter older than 50 years; notable persons' stories are never pruned |
-| 02 | [`02_PEOPLE.md`](02_PEOPLE.md) | NOT STARTED | 01 | ONE Person system: life from debut (≥16) to death, traits, modifiers, the 75 % decision rule, faces, world-linked life events, 40 notables + Hall of the Dead |
+| 02 | [`02_PEOPLE.md`](02_PEOPLE.md) | PARTIAL — slices 02.1-02.5, 02.8 done, see doc §Queue | 01 | ONE Person system: life from debut (≥16) to death, traits, modifiers, the 75 % decision rule, faces, world-linked life events, 40 notables + Hall of the Dead |
 | 03 | [`03_DEVELOPMENT_TRACKS.md`](03_DEVELOPMENT_TRACKS.md) | NOT STARTED | 02 | Per-city development factor (replaces the dead global `tech_factor`), four tracks (Military · Trade · Civil · Ideological), buildings, culture "ideals" and the barbarian judgement |
 | 04 | [`04_GOVERNMENT_AND_EDICTS.md`](04_GOVERNMENT_AND_EDICTS.md) | NOT STARTED | 02, 03 | Government forms, offices (cultural and custom), named seat holders, political points, edicts debated in weekly rounds, the Lustrum, bribery, coups, ostracism, the Government window |
 | 05 | [`05_CULTURE_ACCEPTANCE.md`](05_CULTURE_ACCEPTANCE.md) | NOT STARTED | 03, 04 | Five acceptance tiers per city per culture, city stance, persecution and diaspora, bondage attitude, the fondaco switched on |
@@ -43,6 +43,15 @@ decision recorded here was made by the maintainer; where a document says
 
 Already shipped as part of this conversation (not a row): **ore districts scale
 with land area + minor showings** (`8288b3a`, CLAUDE.md §8.16).
+
+**Row 02 was started on `claude/00-index-second-part-tkp497` on explicit
+maintainer instruction, while row 01 was NOT YET `DONE`** — a deliberate,
+named exception to rule 2's own "do not start a row before its dependency is
+DONE", made because a sibling branch/session was assigned row 01 concurrently.
+Nothing row 02 shipped so far reads row 01's own output (pruning/the journal
+window), so the two do not conflict; if row 01 lands with a different
+chronicle shape than row 02 assumed, re-check `individuals.rs`/`life_events.rs`
+before building further on top.
 
 ## Rules that apply to every row
 

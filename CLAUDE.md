@@ -2151,6 +2151,100 @@ computed; church/watch genuinely have no mechanism behind them yet (L9/L10).
 
 ---
 
+### 5.8 `docs/living_world/02_PEOPLE.md` — the Individual system (Living World row 02), slices 02.1-02.5/02.8 shipped
+
+The **second row** of `docs/living_world/00_INDEX.md`'s build queue (row 01,
+feeds & pruning, is a separate branch's own work and was NOT re-verified
+DONE before this row started — see that row's own status). ONE record —
+`Individual` (`sim/campaign/tick/individuals.rs`) — for every named human the
+campaign tracks: ruler, senator, commander, scholar, artisan, horde leader.
+NOT `Person` (the realm genealogy struct) and NOT `Notable` (the L12
+per-city local role, §5.7's own townspeople), which is unchanged in shape but
+now carries a stable `individual_id` linking it to one.
+
+- **Migration + linkage.** `migrate_figures_to_individuals` (one-time, gated
+  by `people_migrated`) folds every still-referenced `Figure` into
+  `CampaignSim.people`/`hall_of_dead` on first `advance()`, without touching
+  `figures` itself (other code still reads it). `update_notables` now calls
+  `individual_id_for_notable` for each seat it fills — it carries the SAME id
+  forward while the same name holds the seat (read off last year's roster
+  entry) and only mints a fresh `Individual` (`spawn_individual`) when the
+  seat genuinely changes hands, which is what makes the yearly rebuild not
+  mint a new person every year (`local_roles_do_not_mint_new_people_yearly`).
+- **Traits/modifiers/`decide()`** (`individuals.rs`) — ~42 traits in five
+  groups (personality/education/lifestyle/health/reputation, the health ones
+  doubling as a face-feature bitflag), 16 modifiers at a flat ±5%
+  (`MODIFIER_MAGNITUDE`), and `decide()`: the 75% rule, symmetric per option
+  (`DECISION_CERTAIN_AT`), deterministic via `hash01(seed, tick,
+  individual_id, kind)`, with the chosen option's top reasons logged. It is a
+  pure, tested function — **not yet wired to a decision SITE** (the 12 named
+  decision kinds in the design doc, e.g. "stay or flee a plague", have no
+  caller yet); that wiring is real, queued future work.
+- **Life cycle** (yearly, `people_yearly_pass`) — aging + mortality (reuses
+  `person_mortality_hazard`, `realms.rs`), fame decay, notable
+  promotion/demotion under the 40-alive cap (`NOTABLE_CAP`,
+  `NOTABLE_FAME_THRESHOLD`), and death handling
+  (`remove_dead_individual`, split out for direct testability): a famous
+  death moves to `hall_of_dead` (kept forever, modifiers cleared); an
+  ordinary death is forgotten but leaves a capped `Tombstone`
+  (`people_tombstones`, `TOMBSTONE_CAP`).
+- **Life events** (`life_events.rs`, the new **weekly** `tick % 7` cadence
+  hook) — a yearly quota per person (`role_event_base` × `event_turbulence`,
+  a hashed-Poisson draw capped at 10) spent gradually across that year's
+  weeks rather than landing on New Year's Day, and a layered template pool
+  (role+geography → geography → a guaranteed in-city generic layer, so a due
+  event always finds one — `a_due_event_always_finds_a_template`). ~40
+  starter templates (`EVENT_TEMPLATES`), gated by
+  `life_event_templates_respect_geography` — a keyword→tag lint that fails
+  if a template's TEXT implies a tag (whale/ship→coast, camel/dune→desert,
+  frost→cold, walls/levy→at-war, granary/hungry→famine…) it does not
+  `requires`. Text is rendered at READ TIME from `(template_id, args)`
+  (`render_life_entry_for`), never baked in at fire time. Only a FAMOUS
+  person's event reaches the world journal (the Chronicle-salience
+  discipline §5.7 already established); an ordinary person's own
+  `life_log` is capped at `ORDINARY_LIFE_LOG_CAP` (12).
+- **Scope cuts, recorded rather than faked (rule 36).** Culture is a
+  `String` on `Individual` (matching `hub_culture: Vec<String>`'s own
+  convention), not the design doc's "index into a culture table" — no such
+  table exists anywhere in `tick/`, and building one for this row alone
+  would be new infrastructure the row doesn't need. `context_tags`/
+  `event_turbulence` cover only geography/state signals `TickHub` actually
+  carries (`coastal`/`river`/`koppen` bands/`war_with`/`starving`/
+  `plague_immune_until`); siege and festival turbulence, and
+  lake/mountain/forest tags, are QUEUED behind a producing signal, not
+  invented. 02.6 (~150 more templates, reviewed by an agent against the same
+  lint) is explicitly a **separate session** per the design doc. 02.7 (faces
+  — feature layers + a sex axis on `cultureDress.ts`, keyed off
+  `Individual.face_seed`/`features`, both already served end to end via
+  `IndividualBrief`) was deliberately NOT attempted this session: it is real
+  procedural-art work this environment cannot visually verify (no display),
+  and shipping a canvas layer blind risks exactly the kind of regression
+  §8.21's own fill-light story warns about.
+- **Commands** (`campaign_commands/read_people.rs`) —
+  `campaign_get_individual(id)` / `campaign_get_notables` /
+  `campaign_get_hall_of_dead`, wired lib.rs → `bridge/campaign.ts` →
+  `types/campaign.ts` (`IndividualBrief`). A new floating window,
+  `ui/campaign/NotablesPanel.tsx` (Society menu → "👥 Notables & Hall of the
+  Dead"; `uiStore.showNotables`), lists the living roster and the Hall,
+  each row expanding into its rendered life log — plain-list, not yet the
+  portrait gallery `FiguresPanel.tsx` is meant to become (02.8's own
+  "FiguresPanel.tsx becomes the roster's front page" is still queued).
+- Gates (`tick::tests`): `figures_migrate_to_individuals_losslessly`,
+  `local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero`
+  (calls the row's own passes directly — migration, the weekly hook, the
+  yearly life cycle, firing 30 events on a fully-decorated person — and
+  asserts every hub/house economic field is bit-identical before/after;
+  a `Figure`'s own PRE-EXISTING effects, e.g. a Master Craftsman lifting
+  quality, are a different, older mechanism and are deliberately NOT
+  exercised by this gate, or it would be testing the wrong thing),
+  `decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`,
+  `decisions_are_deterministic`, `notables_never_exceed_the_cap`,
+  `dead_notables_keep_their_story`, `dead_ordinary_people_are_removed`,
+  `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence`.
+  See `docs/SCOREBOARD.md` 2026-09-25 for the full-suite numbers.
+
+---
+
 ## 6. Rust Backend Map (`src-tauri/src/`)
 
 ```
@@ -2402,7 +2496,12 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   super::*`); crisis.rs = Phase 3.2-3.6, the succession-
                                   crisis engine (competence/vice, named factions,
                                   quarterly rounds, resolution, civic intervention, the
-                                  permanent record — see §5); schism.rs = Phase 4.1,
+                                  permanent record — see §5); individuals.rs =
+                                  Living World row 02, the `Individual`/`Modifier`/
+                                  `LifeEntry`/`Tombstone` roster, migration,
+                                  `decide()`, the yearly life cycle (§5.8);
+                                  life_events.rs = row 02's weekly event engine +
+                                  the ~40-template starter set; schism.rs = Phase 4.1,
                                   Quarrel/Departure (a simplified `tension` proxy,
                                   monthly; Rupture deferred); foreign_hand.rs = Phase
                                   4.4, the two-channel rival-leverage loyalty decay —
@@ -2962,6 +3061,10 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   fabricated). Also exports `CityNotables`, shown on HubPanel's
                                   Life tab. NOTE: `cultureFigure.ts` below no longer exists —
                                   portraits everywhere now go through `cultureDress.ts`
+  NotablesPanel.tsx             ← 02_PEOPLE.md (Living World row 02) — the
+                                  40-cap notable roster + the Hall of the
+                                  Dead, plain-list (not yet a portrait
+                                  gallery — see §5.8)
   LandmarksPanel.tsx            ← Notable landmarks
   AtlasPanel.tsx                ← Atlas 2.0 (eras / world frame)
   NewsFeedPanel.tsx             ← Campaign news feed

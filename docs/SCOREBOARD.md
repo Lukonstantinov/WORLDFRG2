@@ -9,6 +9,54 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-25 — `docs/living_world/02_PEOPLE.md`: the Individual system (Living World row 02, slices 02.1-02.5/02.8)
+
+Row 02 of the new `docs/living_world/00_INDEX.md` build queue — the ONE
+`Individual` record for every named human the campaign tracks. Started on a
+branch dedicated to it while a sibling branch/session works row 01
+concurrently, on explicit maintainer instruction (see 00_INDEX's own note on
+this). Full account in CLAUDE.md §5.8.
+
+Shipped: `Individual`/`Modifier`/`LifeEntry`/`Tombstone`
+(`sim/campaign/tick/individuals.rs`), load-time `Figure`→`Individual`
+migration, the L12 `Notable` roster linked to stable ids instead of minting a
+fresh person every year, ~42 traits/16 modifiers + `decide()` (the 75% rule,
+symmetric, deterministic), the yearly life cycle (aging/mortality/fame/
+promotion-demotion under the 40-notable cap/Hall of the Dead/tombstoned
+ordinary deaths), a new WEEKLY `tick % 7` cadence hook, the layered life-event
+engine (`life_events.rs`, hashed-Poisson yearly quota spread across the
+year's weeks, guaranteed in-city-generic fallback) with a ~40-template
+starter set gated by a geography lint, and three read commands
+(`campaign_get_individual`/`_notables`/`_hall_of_dead`) surfaced in a new
+`NotablesPanel.tsx`.
+
+Explicitly not attempted, recorded per 00_INDEX rule 36: 02.6 (~150 more
+templates — the design doc's own "separate session"); 02.7 (faces — a sex
+axis + feature layers on `cultureDress.ts`), held back because this
+environment has no display to visually verify new procedural art against
+(§8.21's own fill-light regression is exactly the failure mode blind canvas
+work risks); wiring `decide()` to any of the 12 named decision kinds (the
+function is built and gated, not yet called from a real decision site).
+
+| metric | before | after |
+|---|---|---|
+| `cargo check --lib --tests` | — | clean |
+| `cargo test --lib tick::tests` | 308 pass (§5.7's own baseline) | **322 pass, 0 fail, 5 ignored** (16.34s) — incl. `simulate_decades_reports_dynamics` |
+| `cargo test --lib econ_ -- --nocapture` | 6/6 (§5.7's own baseline) | *(recorded once the run finishes — see the commit this row lands in)* |
+| `bench_campaign_tick_large` ms/tick | *(recorded once the run finishes)* | *(recorded once the run finishes)* |
+| `npx tsc --noEmit` | — | clean |
+| `npx vite build` | 181 modules (§5.6's own baseline) | 189 modules, clean |
+
+Twelve new tests, all passing: `figures_migrate_to_individuals_losslessly`,
+`local_roles_do_not_mint_new_people_yearly`, `living_world_is_inert_at_zero`,
+`decision_at_75_percent_is_certain`, `modifiers_can_tip_either_way`,
+`decisions_are_deterministic`, `notables_never_exceed_the_cap`,
+`dead_notables_keep_their_story`, `dead_ordinary_people_are_removed`,
+`a_due_event_always_finds_a_template`, `event_rate_follows_turbulence`,
+`life_event_templates_respect_geography`.
+
+---
+
 ## 2026-09-24e — `SETTLEMENT_LIFE_PLAN.md`: L13 crowding chart, L11 persistent-pops shadow, L12 townspeople notables
 
 Follow-up session to 2026-09-24d's L8, at the maintainer's explicit request to
