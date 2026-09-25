@@ -9,6 +9,50 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-25b — `living_world/01_FEEDS_AND_PRUNING.md` shipped: measured chronicle growth
+
+Row 01 of the new Living World build queue (`docs/living_world/00_INDEX.md`).
+News Feed window removed; a yearly `prune_chronicles` pass drops journal/realm/
+province CHATTER older than 50 years while keeping every milestone (classified
+by `is_milestone_kind`/`is_realm_milestone`/`is_prov_milestone`); a `Figure`'s
+own `life_log` is materialised as the journal is written so a notable's story
+survives the prune in full, never pruned itself.
+
+**`econ_measure_chronicle_pruning` (`#[ignore]`d, `reference_world`, release,
+200 years):**
+
+| year | journal (of which milestone) | realm events | save size |
+|---|---|---|---|
+| 25 | 12,016 (564) | 0 | 15.6 MB |
+| 50 | 12,045 (315) | 9 | 35.5 MB |
+| 75 | 12,022 (291) | 32 | 44.3 MB |
+| 100 | 12,050 (269) | 79 | 45.4 MB |
+| 125 | 12,030 (279) | 71 | 47.4 MB |
+| 150 | 12,001 (225) | 50 | 49.1 MB |
+| 175 | 12,034 (277) | 84 | 50.9 MB |
+| 200 | 12,042 (310) | 123 | 53.0 MB |
+
+**The journal never reaches the 50-year age cutoff in practice** — the
+pre-existing `sample_journal` hard count cap (12,000, a monthly safety net
+predating this row) fires first on a busy reference world, so the new
+age/milestone rule is a backstop that would bind on a QUIETER world (fewer
+hubs/houses) rather than this one; milestone share of the capped journal stays
+comfortably under `JOURNAL_MILESTONE_CAP` (4,000), so the per-decade summary
+folding never triggers at this scale either — both are headroom, not dead
+code. Realm events grow roughly linearly with realm formation (0 → 123 over
+200 years) and stay well under the new `REALM_EVENTS_CAP` (200) for the whole
+run — the cap that used to not exist at all. Save size growth (15.6 → 53.0 MB)
+is dominated by hub/house/province state, not the journal (which is flat by
+construction of the count cap), so this row does not move that number in
+either direction; it is recorded here as the baseline the NEXT row that adds
+per-person state (`02_PEOPLE.md`) should be measured against.
+
+Gates: `cargo check --lib --tests` clean, `tick::tests` 315/315 (incl.
+`simulate_decades_reports_dynamics`), `econ_` 6/6 bit-identical (pruning
+touches no economic state), `npx tsc --noEmit` clean.
+
+---
+
 ## 2026-09-24e — `SETTLEMENT_LIFE_PLAN.md`: L13 crowding chart, L11 persistent-pops shadow, L12 townspeople notables
 
 Follow-up session to 2026-09-24d's L8, at the maintainer's explicit request to
