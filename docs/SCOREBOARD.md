@@ -9,6 +9,94 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-24e — `SETTLEMENT_LIFE_PLAN.md`: L13 crowding chart, L11 persistent-pops shadow, L12 townspeople notables
+
+Follow-up session to 2026-09-24d's L8, at the maintainer's explicit request to
+prioritise L11/L12/L13. All three ship additively; none touches production,
+prices, or growth, so none needed the multi-seed inheritance gate to be
+RE-RUN specifically for it — verified anyway (below), per the plan's own
+"run the full suite even for a bookkeeping-only slice" discipline.
+
+**L13 — housing/crowding now drawn in the Life tab.** `CityYear` (the annals
+struct) gained `crowding: f32` (`#[serde(default)]`, the same tail-alignment
+discipline `ages`/`deaths_by_cause` already used), snapshotted yearly from
+`TickHub.crowding` (real since L6). The Life tab draws a bar chart + a plain-
+English reading ("comfortably housed" … "severely overcrowded") over the
+recent years, replacing the old "not shown yet" caveat. Pure bookkeeping —
+`crowding` was already computed, this only records it into the annals — so no
+dose gate: `tick::tests`/`econ_` are asserted unchanged by construction,
+mirroring L13-partial's own precedent for `ages`/`deaths_by_cause`.
+
+**L11 — persistent pops, SHADOW phase.** `TickHub.pops_shadow: Vec<Pop>` runs
+in PARALLEL with the existing `derive_pops` (which still drives every real
+reader): births re-enter a pop's OWN profession (the plan's "inversion" of
+L4's hub-wide children band), apprenticeship moves labourers into craftsmen,
+ruin (scaled by the hub's own structural `damage`) and famine (scaled by
+`starving`) move craftsmen/clerks/merchants back into labourers, and the
+shadow's TOTAL is reconciled onto the real population every year — this pass
+tracks profession MIX, never net headcount. `pops_shadow` is read by NOTHING
+in the tick (confirmed directly: `persistent_pops_shadow_is_never_read_by_
+the_tick` runs two sims, one calling the shadow pass every year and one
+never calling it, and asserts `sim_fingerprint` is identical), so this is
+unconditional bookkeeping exactly like L4's age pyramid — no dose exists yet,
+because nothing would read it.
+
+**The divergence instrument the plan calls for BEFORE any dose may switch a
+reader over is now built and run**: `econ_measure_persistent_pops_divergence`
+(`#[ignore]`d, `realm_reference_world` + `dense_world`, 60y) measures the
+population-weighted mean |derived − shadow| share PER PROFESSION:
+
+| profession | realm_reference | dense_world |
+|---|---|---|
+| Farmers | 0.060 | 0.049 |
+| Labourers | 0.047 | 0.063 |
+| **Craftsmen** | **0.087** | **0.099** |
+| Clerks | 0.020 | 0.017 |
+| Merchants | 0.022 | 0.019 |
+| Clergy | 0.006 | 0.004 |
+| Capitalists | 0.005 | 0.004 |
+| Aristocrats | 0.008 | 0.006 |
+| **Soldiers** | **0.043** | **0.041** |
+
+Craftsmen and soldiers diverge most — expected, since apprenticeship/ruin/
+famine all move people through the craftsmen slot, and this pass's own
+constants (`PERSISTENT_POPS_APPRENTICE_RATE`/`_RUIN_RATE`/`_FAMINE_PUSH_
+RATE`) are named in their own doc comments as coarse first approximations,
+not a calibrated model — walking them (and eventually `PERSISTENT_POPS_
+DOSE`) is real, separate, unstarted work now that this baseline exists to
+walk it against. Migration is NOT modelled in the shadow at all (exodus/
+rural pull carry no profession mix anywhere in the sim), a documented
+simplification rather than an oversight.
+
+**L12 — the townspeople, three of six named roles.** `TickHub.notables: Vec<
+Notable>`, capped by `hub.tier` (floored at 1), rebuilt yearly after the
+guild and Figure passes settle for the year. Only the roles with a REAL
+institution to anchor to today: Guildmaster (the hub's strongest live
+`CraftGuild`), Alderman (the council house's own `kin[1]` — a naming read
+over existing data, no new roll), and Agitator (the EXISTING Demagogue
+`Figure` mechanic, localised — no new roll, no new effect, since its unrest
+bump already fires in `raise_notable_figures`). The bishop (L9), the
+physician (L8's unbuilt water/sanitation half) and the watch captain (L10)
+are explicitly QUEUED, not fabricated — each needs an institution that does
+not exist in the sim yet. A fresh appointment is chronicled once (quiet
+when the roster simply stands); the plan's own "±10% institutional nudge"
+(guildmaster → guild strength, alderman → civic mood) is real but dosed —
+`TOWNSPEOPLE_DOSE = 0.0`, a true no-op, kept separate from every other dose.
+Served via a new `campaign_city_notables` query and drawn in the Life tab's
+new "The townspeople" section.
+
+Gated by `notable_count_is_bounded_by_tier` (an untiered hub floors to 1;
+a tier-3 hub with three real candidates shows all three) and `townspeople_
+dose_zero_is_a_noop` (guild strength and hub mood both provably unmoved at
+dose 0) — both new. Full session: `cargo check --lib --tests` clean,
+`npx tsc --noEmit` clean, `npx vite build` clean (181 modules), `cargo test
+--lib tick::tests` 308/308, `cargo test --lib econ_ -- --nocapture` 6/6
+(514.08s, multi-seed inheritance gate included) — both bit-identical in
+shape to their pre-batch numbers, confirming all three slices are exactly
+the inert bookkeeping/dosed-zero additions they were designed to be.
+
+---
+
 ## 2026-09-24d — `SETTLEMENT_LIFE_PLAN.md`: L8's fire toll shipped at dose 0
 
 Follow-up session to 2026-09-24c's L7. L8 (§3.7, "urban hazards: fire, flood,

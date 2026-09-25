@@ -3,9 +3,10 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife } from "@bridge";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables } from "@bridge";
 import { CityNotables } from "@ui/campaign/FiguresPanel";
-import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear } from "@types";
+import { NOTABLE_ROLE_NAMES } from "@types";
+import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear, Notable } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
 const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
@@ -295,6 +296,7 @@ export function HubPanel() {
   const [prov, setProv] = useState<ProvisioningBrief | null>(null);
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const [annals, setAnnals] = useState<CityYear[]>([]);
+  const [notables, setNotables] = useState<Notable[]>([]);
   const [expandedEstate, setExpandedEstate] = useState<number | null>(null);
   const [relayExpanded, setRelayExpanded] = useState(false);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
@@ -324,6 +326,7 @@ export function HubPanel() {
     if (tab !== "life" || selectedHub === null || !campActive) return;
     let alive = true;
     campaignCityLife(selectedHub).then((a) => { if (alive) setAnnals(a); }).catch(() => { if (alive) setAnnals([]); });
+    campaignCityNotables(selectedHub).then((n) => { if (alive) setNotables(n); }).catch(() => { if (alive) setNotables([]); });
     return () => { alive = false; };
   }, [tab, selectedHub, campActive, campTick]);
 
@@ -1207,11 +1210,8 @@ export function HubPanel() {
 
       {/* ════════════ LIFE (SETTLEMENT_LIFE_PLAN.md L3 + L13) ════════════
           L3's trend table (population, Allen's welfare ratio, hunger/unrest)
-          plus L13's age pyramid + causes-of-death, both real data from L4's
-          `TickHub.ages`/`deaths_by_cause` now snapshotted into the annals.
-          Housing/crowding (L6) is now real backend data
-          (`TickHub.housing`/`crowding`) but not yet drawn here — a UI gap,
-          not a missing mechanism, queued for its own pass. Church, watch and
+          plus L13's age pyramid + causes-of-death (L4) and crowding trend
+          (L6), all real data snapshotted into the annals. Church, watch and
           named notables (L9/L10/L12) genuinely have no mechanism behind them
           yet and are named as queued rather than rendered empty or faked —
           rule 36. Quiet-when-ordinary, same discipline as the stability
@@ -1318,11 +1318,59 @@ export function HubPanel() {
                 </>
               );
             })()}
+            {(() => {
+              const crowdRows = annals.slice(-12).filter((y) => y.crowding > 0.001);
+              if (crowdRows.length === 0) {
+                return (
+                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
+                    Housing not yet recorded — an annal from before this feature shipped.
+                  </div>
+                );
+              }
+              const latestCrowd = crowdRows[crowdRows.length - 1].crowding;
+              const crowdWord = latestCrowd < 0.9 ? "comfortably housed" : latestCrowd < 1.2 ? "adequately housed" : latestCrowd < 1.6 ? "crowded" : "severely overcrowded";
+              const maxCrowd = Math.max(1.2, ...crowdRows.map((y) => y.crowding));
+              return (
+                <>
+                  <div style={{ ...sectionHdr, marginTop: 10 }}>Housing (crowding = population ÷ housing)</div>
+                  <div style={{ fontSize: 10, color: latestCrowd > 1.2 ? "#e0a06a" : "#9ab0c8", marginBottom: 4 }}>
+                    {latestCrowd.toFixed(2)}× — {crowdWord}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 28, marginBottom: 2 }}>
+                    {crowdRows.map((y) => {
+                      const h = Math.max(2, Math.round((y.crowding / maxCrowd) * 26));
+                      return (
+                        <div key={y.year} title={`${y.year}: crowding ${y.crowding.toFixed(2)}×`}
+                          style={{ flex: 1, height: h, background: y.crowding > 1.2 ? "#c07a4a" : "#4a7a8a", borderRadius: "1px 1px 0 0", minWidth: 3 }} />
+                      );
+                    })}
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#6a86a6" }}>
+                    <span>{crowdRows[0].year}</span>
+                    <span title="crowding = 1.0 means housing exactly meets population">— 1.0 ≈ fully housed —</span>
+                    <span>{crowdRows[crowdRows.length - 1].year}</span>
+                  </div>
+                </>
+              );
+            })()}
+            {notables.length > 0 && (
+              <>
+                <div style={{ ...sectionHdr, marginTop: 10 }}>The townspeople</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 4 }}>
+                  {notables.map((n, i) => (
+                    <div key={i} style={{ fontSize: 10, color: "#cfe2f6" }}>
+                      <span style={{ color: "#9ab0c8" }}>{NOTABLE_ROLE_NAMES[n.role] ?? "Notable"}</span> — {n.name}
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
             <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
-              Housing &amp; crowding is tracked now but not shown on this tab yet.
-              The church, the watch, and ordinary townspeople notables have no
-              mechanism behind them yet — that is L9/L10/L12 of the plan, still
-              queued. This is Life tab v2 over what L0-L6 made real.
+              The church and the watch have no mechanism behind them at all —
+              that is L9/L10 of the plan, still queued. The bishop, the
+              physician, and the captain of the watch (L12's other three
+              named roles) wait on those. This is Life tab v2 over what
+              L0-L8/L12 made real.
             </div>
           </>
         );

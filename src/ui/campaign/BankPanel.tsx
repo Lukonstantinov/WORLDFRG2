@@ -84,6 +84,12 @@ export function BankPanel() {
                     {bank.owner} · seat {bank.seat} · founded yr {bank.founded_year}
                     {bank.coin_name ? ` · banks in ${bank.coin_name}` : ""}
                   </div>
+                  {bank.coin_name && (
+                    <div data-no-drag onClick={() => useUIStore.getState().setCoinWindow(bank.coin_name)}
+                      style={{ color: T.gold, fontSize: FZ.tiny, cursor: "pointer", marginTop: 2 }}>
+                      ⤢ Coin &amp; bank window
+                    </div>
+                  )}
                 </div>
                 <Tabs<"overview" | "charts" | "deals" | "info">
                   tabs={[["overview", "Overview"], ["charts", "Charts"], ["deals", `Deals (${bank.loans.length + bank.stakes.length})`], ["info", "How it works"]]}

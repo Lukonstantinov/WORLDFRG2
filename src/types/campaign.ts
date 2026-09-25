@@ -1428,7 +1428,22 @@ export interface CityYear {
    *  fever, war, fire, flood, old age, infancy (`CAUSE_*`/`DEATH_CAUSE_COUNT`
    *  in `tick/mod.rs`; fire/flood stay 0 until L8). */
   deaths_by_cause: [number, number, number, number, number, number, number, number];
+  /** L13 · `TickHub.crowding` (population / housing) this year end, from L6.
+   *  `#[serde(default)]` 0.0 on an annal recorded before L6 shipped — the UI
+   *  must read that as "not recorded", not "no housing at all". */
+  crowding: number;
 }
+/** SETTLEMENT_LIFE_PLAN.md L12 · a per-city notable (campaign_city_notables).
+ *  role index: 0 Guildmaster · 1 Alderman · 2 Agitator — the three of the
+ *  plan's six named roles built so far; bishop/physician/watch-captain wait
+ *  on L9/L10 and are not represented (no fabricated placeholder role). */
+export interface Notable {
+  role: number;
+  name: string;
+  /** The guildmaster's own craft (good index), else -1. */
+  good: number;
+}
+export const NOTABLE_ROLE_NAMES = ["Guildmaster", "Alderman", "Agitator"] as const;
 export interface CityPriceIndex {
   name: string;
   index: number; // need-weighted mean of price ÷ base_value, ×100 (100 = world standard)

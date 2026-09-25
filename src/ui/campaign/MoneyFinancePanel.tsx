@@ -355,6 +355,11 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
               border: `1px solid ${onMap ? "#3a80c0" : "#24364e"}`, background: onMap ? "#19324a" : "transparent",
               color: onMap ? "#cfe2f6" : "#7fa0c4" }}>📍 map</span>
         )}
+        {hasCoin && (
+          <span onClick={(e) => { e.stopPropagation(); useUIStore.getState().setCoinWindow(m.coin_name); }}
+            title="Open the coin & bank window — biography, cities, chronicle and the bank that banks in it"
+            style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4, border: "1px solid #24364e", color: "#d8b24a" }}>⤢ window</span>
+        )}
         <span style={{ color: "#5a7290", fontSize: 10, marginLeft: 4 }}>{open ? "▾" : "▸"}</span>
       </div>
 

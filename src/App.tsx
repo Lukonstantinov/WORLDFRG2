@@ -30,6 +30,7 @@ import { AtlasPanel } from "@ui/campaign/AtlasPanel";
 import { PeoplesPanel } from "@ui/campaign/PeoplesPanel";
 import { ColonialPanel } from "@ui/campaign/ColonialPanel";
 import { BankPanel } from "@ui/campaign/BankPanel";
+import { CoinBankWindow } from "@ui/campaign/CoinBankWindow";
 import { NewsFeedPanel } from "@ui/campaign/NewsFeedPanel";
 import { PlaguePanel } from "@ui/campaign/PlaguePanel";
 import { ImmigrationPanel } from "@ui/campaign/ImmigrationPanel";
@@ -1097,6 +1098,7 @@ export default function App() {
           <PeoplesPanel />
           <ColonialPanel />
           <BankPanel />
+          <CoinBankWindow />
           <NewsFeedPanel />
           <PlaguePanel />
           <ImmigrationPanel />

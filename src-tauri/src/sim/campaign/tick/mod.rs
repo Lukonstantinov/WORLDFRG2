@@ -3118,6 +3118,31 @@ pub(crate) fn fire_settlement_toll_e(
     (housing_frac, death_frac)
 }
 
+/// SETTLEMENT_LIFE_PLAN.md L11 (§3.10) — the SHADOW pass's own yearly
+/// transition rates. Coarse by design: this slice exists to MEASURE how far
+/// a persistent reading diverges from the freshly-derived one
+/// (`econ_measure_persistent_pops_divergence`), not to be the final
+/// historically-calibrated model — walking these is separate, unstarted
+/// work, same as every rate here that starts as a first approximation.
+/// Unconditional (no dose): `pops_shadow` is read by nothing in the tick, so
+/// nothing downstream can be moved by these numbers however they're set.
+pub(crate) const PERSISTENT_POPS_BIRTH_RATE: f32 = 0.02;
+/// Share of labourers apprenticing into craftsmen per year — the plan's
+/// "apprenticeship lifts labourers into craftsmen when the workshop labour
+/// cap binds"; a fixed flow here since no per-hub "the cap binds" signal is
+/// wired into this pass yet (a documented simplification, not an oversight).
+pub(crate) const PERSISTENT_POPS_APPRENTICE_RATE: f32 = 0.03;
+/// Share of craftsmen/merchants ruined into labourers PER POINT of the
+/// hub's own structural `damage` (0..1, the same field a fire/war/disaster
+/// already writes) — "ruin drops craftsmen and merchants into labourers
+/// after a crash, a fire or a guild dissolution."
+pub(crate) const PERSISTENT_POPS_RUIN_RATE: f32 = 0.25;
+/// Share of craftsmen/clerks/merchants pushed into labourers PER POINT of
+/// the hub's own `starving` — "famine pushes the poorest into the
+/// underclass/soldier pools" (simplified to labourers, the pool `derive_
+/// pops` already folds underclass into).
+pub(crate) const PERSISTENT_POPS_FAMINE_PUSH_RATE: f32 = 0.10;
+
 /// MONEY_AND_COINAGE_PLAN.md M7 / SETTLEMENT_LIFE_PLAN.md L1 (the same
 /// change, named twice) · `HOUSEHOLD_MONETIZATION_DOSE`'s own doc comment
 /// above names the exact prerequisite this is: `update_food_and_starvation`
@@ -3881,6 +3906,22 @@ pub struct TickHub {
     /// (read-only foundation; not yet wired into consumption). Empty on old saves
     /// until the next yearly derive.
     #[serde(default)] pub pops: Vec<Pop>,
+    /// SETTLEMENT_LIFE_PLAN.md L11 (§3.10) — the SHADOW copy: pops that
+    /// persist and move year to year (births into a parent's profession,
+    /// apprenticeship/ruin/famine mobility) instead of being re-derived from
+    /// `society` shares fresh every year the way `pops` still is. Runs in
+    /// PARALLEL — nothing in the tick reads this field, `sim_fingerprint`
+    /// never touches it (it has no `Pop`/`pops` term at all), so it is
+    /// unconditional bookkeeping exactly like L4's age pyramid, not a dosed
+    /// mechanism. `PERSISTENT_POPS_DOSE` (unstarted, separate work) is what
+    /// will eventually switch real readers over to this once
+    /// `econ_measure_persistent_pops_divergence` says the two are understood.
+    #[serde(default)] pub pops_shadow: Vec<Pop>,
+    /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) — per-city NOTABLES, capped by
+    /// `hub.tier`. Only the roles with a real institution TODAY are built
+    /// (guildmaster, alderman, agitator); the bishop/physician/watch-captain
+    /// wait on L9/L10 and are explicitly queued, not faked.
+    #[serde(default)] pub notables: Vec<Notable>,
     // ── Trade throughput touching this hub in the last while, split by who carried
     //    it (decaying tallies). Used to estimate the merchant population by class.
     #[serde(default)] pub tw_house: f32,
@@ -6581,6 +6622,11 @@ pub struct CityYear {
     /// carries, never reset per year), so the Life tab's causes-of-death
     /// breakdown is a running lifetime record, not a single year's toll.
     #[serde(default)] pub deaths_by_cause: [f32; DEATH_CAUSE_COUNT],
+    /// L13 · a snapshot of `TickHub.crowding` (population / housing) this year
+    /// end, so the Life tab can chart it over time. `#[serde(default)]` so an
+    /// annal recorded before L6 loads as 0.0 — read as "not recorded" by the
+    /// frontend, the same convention `ages`/`deaths_by_cause` already use.
+    #[serde(default)] pub crowding: f32,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L3 — a rolling cap on `TickHub.annals`, the same
@@ -6995,6 +7041,50 @@ pub struct Figure {
     #[serde(default)]
     pub rallied: bool,
 }
+
+/// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) — per-city NOTABLES, distinct from
+/// the world-wide `Figure`/`FIGURE_KINDS` roster above (a Figure is one of a
+/// handful of Great Lives alive anywhere in the world at once; a `Notable`
+/// is local to ONE city and anchored to an institution it leads). Only THREE
+/// of the plan's six named roles are built this pass — the ones with a real
+/// institution to anchor to today:
+///   0 Guildmaster — the hub's strongest live `CraftGuild`.
+///   1 Alderman    — the council house's own `kin[1]` (its second kinsman),
+///                    a naming read over existing data, no new roll.
+///   2 Agitator    — the EXISTING Demagogue `Figure` mechanic, localised (no
+///                    new roll, no new effect — its unrest bump already
+///                    happened at `raise_notable_figures`; this only
+///                    anchors it to a city for display).
+/// The bishop/abbot (L9), the physician (L8's water/sanitation half, not yet
+/// built), and the captain of the watch (L10) are explicitly QUEUED — they
+/// need an institution (a church, public health, a watch) that does not
+/// exist in the sim yet, and inventing one to fill the slot would be exactly
+/// the fabrication rule 36/§2.4 forbid.
+pub const NOTABLE_ROLES: [&str; 3] = ["Guildmaster", "Alderman", "Agitator"];
+pub(crate) const NOTABLE_GUILDMASTER: u8 = 0;
+pub(crate) const NOTABLE_ALDERMAN: u8 = 1;
+pub(crate) const NOTABLE_AGITATOR: u8 = 2;
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct Notable {
+    /// Index into `NOTABLE_ROLES`.
+    pub role: u8,
+    pub name: String,
+    /// The guildmaster's own craft (good index), else −1.
+    pub good: i32,
+}
+
+/// SETTLEMENT_LIFE_PLAN.md L12 — the shared dose gating BOTH institutional
+/// nudges below (guildmaster → guild strength, alderman → civic mood), kept
+/// separate from every other `_DOSE` per the standing "two doses moving
+/// together" rule. A true no-op at 0.0: the notable ROSTER itself (names,
+/// presence, the chronicle line on a fresh appointment) is unconditional —
+/// like `Figure`'s own chronicle-only roster, it is descriptive bookkeeping,
+/// not an economic action — only the ±10% institutional EFFECT is dosed.
+pub(crate) const TOWNSPEOPLE_DOSE: f32 = 0.0;
+/// The plan's own "within ±10%" cap on how much a notable's presence may
+/// move the institution it leads.
+pub(crate) const TOWNSPEOPLE_NUDGE_CAP: f32 = 0.10;
 
 /// A component needs at least this many settlements to host its own fair.
 const FAIR_MIN_COMPONENT_HUBS: u32 = 4;
@@ -9641,6 +9731,11 @@ impl CampaignSim {
                 // Phase 5 (flavour) · craft guilds master their craft, strike, build.
                 self.run_craft_guilds(yr);
                 self.maybe_found_craft_guild(yr);
+                // SETTLEMENT_LIFE_PLAN.md L12 · per-city notables — after the guild
+                // passes above (a fresh guildmaster lookup sees this year's guild)
+                // and after `raise_notable_figures` (an agitator lookup sees this
+                // year's Demagogue roster).
+                self.update_notables(yr);
                 // Standing laws (kinds 4-5) — a grain law after a real famine, a guild
                 // monopoly once a guild's hall stands. Reads this year's `starving`/
                 // guild state, so runs right after both are updated above.
