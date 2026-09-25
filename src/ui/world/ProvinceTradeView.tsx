@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { campaignProvinceTrade } from "@bridge";
 import { houseColor } from "@ui/heraldry/CoatOfArms";
 import { GOOD_DEFS } from "@goods";
@@ -114,7 +115,7 @@ export function ProvinceTradeView({ provinceId, reload }: { provinceId: number; 
     const def = GOOD_DEFS[g.good];
     return (
       <div key={g.good} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, padding: "1px 0" }}>
-        <span style={{ flex: "0 0 auto" }}>{def?.emoji ?? "•"}</span>
+        <span style={{ flex: "0 0 auto" }}><GoodIcon name={def?.name ?? ""} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /></span>
         <span style={{ flex: 1, minWidth: 0, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {def?.label ?? `good ${g.good}`}
         </span>

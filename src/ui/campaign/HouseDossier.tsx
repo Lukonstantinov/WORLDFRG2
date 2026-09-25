@@ -548,7 +548,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
     return () => { alive = false; };
   }, [h.name, h.idx, h.owns_bank, tick]);
   const fmtW = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
-  const goodsStr = (gs: [string, number][]) => gs.slice(0, 3).map(([g, v]) => `${goodIcon(g)}${fmtW(v)}`).join(" ") || "—";
+  const goodsStr = (gs: [string, number][]) => gs.length === 0 ? "—" : gs.slice(0, 3).map(([g, v]) => <span key={g}>{goodIcon(g)}{fmtW(v)} </span>);
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div style={{ fontSize: 9, marginTop: 3 }}>
       <span style={{ color: "#6a86a6", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</span>
@@ -792,7 +792,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
           )}
           {h.estates && h.estates.length > 0 && (
             <Row label="Estates">
-              {h.estates.map(([g, c]) => `${goodIcon(g)} ${g} (${c}${familyRunAt(kin, c) ? ` · 👪${familyRunAt(kin, c)}` : ""})`).join(" · ")}
+              {h.estates.map(([g, c], i) => <span key={i}>{i > 0 && " · "}{goodIcon(g)} {`${g} (${c}${familyRunAt(kin, c) ? ` · 👪${familyRunAt(kin, c)}` : ""})`}</span>)}
             </Row>
           )}
           <Row label="Fleet">🚢 {h.fleet_sea ?? 0} · 🛶 {h.fleet_river ?? 0} · 🐫 {h.fleet_caravan ?? 0}</Row>
@@ -1724,7 +1724,7 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
       {l.warehouse.length > 0 && (
         <div>
           <div style={head}>Warehouse · {l.warehouse_city}</div>
-          <div style={{ fontSize: 11, color: "#bcd0e4", lineHeight: 1.6 }}>{l.warehouse.map((w) => `${goodIcon(w.label)}${fmt(w.amount)}`).join("  ")}</div>
+          <div style={{ fontSize: 11, color: "#bcd0e4", lineHeight: 1.6 }}>{l.warehouse.map((w, i) => <span key={i}>{goodIcon(w.label)}{fmt(w.amount)}  </span>)}</div>
         </div>
       )}
     </div>

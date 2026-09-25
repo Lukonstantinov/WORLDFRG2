@@ -1840,10 +1840,10 @@ export function MapCanvas() {
     if (!om) return;
     if (!showGuildCities || !campaignSnapshot?.active) { om.setGuilds([]); requestRender(); return; }
     let alive = true;
-    const emoji: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
+    const color: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.color]));
     campaignGetGuilds().then((guilds) => {
       if (!alive) return;
-      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, emoji: emoji[g.good_name] ?? "🏭", label: g.exceptional ? g.brand : "" })));
+      om.setGuilds(guilds.map((g) => ({ x: g.x, y: g.y, good: g.good_name, color: color[g.good_name] ?? "#c0a040", label: g.exceptional ? g.brand : "" })));
       requestRender();
     }).catch(() => {});
     return () => { alive = false; };

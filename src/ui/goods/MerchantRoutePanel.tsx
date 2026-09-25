@@ -1,5 +1,6 @@
 import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
+import { GoodIcon } from "./GoodIcon";
 import type { MerchantRoute } from "@types";
 
 /** Details for a clicked merchant route (the merchant map layer): which family or
@@ -19,7 +20,7 @@ export function MerchantRoutePanel() {
   const close = useUIStore((s) => s.setSelectedMerchantRoute);
   const goodMeta = useGoodsStore((s) => s.meta);
   if (!route) return null;
-  const icon = (id: string) => goodMeta(id).icon;
+  const icon = (id: string) => <GoodIcon name={id} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} />;
   const label = (id: string) => goodMeta(id).name;
   const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
   const pct = (v: number) => `${(v * 100).toFixed(1)}%`;

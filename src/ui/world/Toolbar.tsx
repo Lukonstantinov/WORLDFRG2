@@ -5,6 +5,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { MAP_THEMES, applyMapTheme, themeReady, layerReady, LAYER_REQUIRES } from "./mapThemes";
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
  *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
@@ -243,8 +244,8 @@ export function Toolbar() {
     // Manufactured goods are made in cities, not grown in a belt — they have no map
     // overlay (the backend emits no region for them), so hide their toggle here.
     ? goodsSpecs.filter((g) => g.enabled && g.distribution !== "manufactured")
-        .map((g) => ({ id: g.id, icon: g.icon, name: g.name }))
-    : GOOD_DEFS.map((g) => ({ id: g.name, icon: g.emoji, name: g.label }));
+        .map((g) => ({ id: g.id, name: g.name }))
+    : GOOD_DEFS.map((g) => ({ id: g.name, name: g.label }));
   const setLayerOpacity = useUIStore((s) => s.setLayerOpacity);
   const overlayOpacity = useUIStore((s) => s.overlayOpacity);
   const setOverlayOpacity = useUIStore((s) => s.setOverlayOpacity);
@@ -838,7 +839,7 @@ export function Toolbar() {
                       title="Show seeding climates & heatmap"
                       style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80", cursor: "pointer", flex: 1 }}
                     >
-                      {g.icon} {g.name}
+                      <GoodIcon name={g.id} size={16} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 3 }} />{g.name}
                     </span>
                   </div>
                 );

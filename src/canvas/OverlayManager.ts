@@ -644,7 +644,7 @@ export class OverlayManager {
   private plagueEdges: { ax: number; ay: number; bx: number; by: number }[] = [];
   /** Phase 6 · guild cities to mark with their good's emoji (+ a brand label for
    *  exceptional crafts). */
-  private guildCities: { x: number; y: number; emoji: string; label: string }[] = [];
+  private guildCities: { x: number; y: number; good: string; color: string; label: string }[] = [];
   /** Phase 6 · living notable figures + landmarks, as emoji map markers. */
   private figureMarks: { x: number; y: number; emoji: string }[] = [];
   private landmarkMarks: { x: number; y: number; emoji: string }[] = [];
@@ -1330,7 +1330,7 @@ export class OverlayManager {
   }
 
   /** Phase 6 · guild-city overlay (pass [] to hide). */
-  setGuilds(cities: { x: number; y: number; emoji: string; label: string }[]) {
+  setGuilds(cities: { x: number; y: number; good: string; color: string; label: string }[]) {
     this.guildCities = cities;
   }
 
@@ -4570,7 +4570,7 @@ export class OverlayManager {
     ctx.textBaseline = "alphabetic";
   }
 
-  /** Phase 6 · guild cities: a gold disc + the good's emoji. */
+  /** Phase 6 · guild cities: a gold disc + the good's sprite. */
   private renderGuildCities(ctx: CanvasRenderingContext2D) {
     const inv = 1 / Math.sqrt(this.currentScale);
     const r = Math.max(2.2, 5 * inv);
@@ -4586,8 +4586,7 @@ export class OverlayManager {
       ctx.lineWidth = Math.max(0.6, 1.4 * inv);
       ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.stroke();
       ctx.globalAlpha = 1;
-      ctx.font = `${fs}px sans-serif`;
-      ctx.fillText(g.emoji || "🏛", cx, cy + fs * 0.05);
+      drawGoodIcon(ctx, g.good, cx, cy, r * 0.8, g.color);
       // Renowned crafts carry their place-brand beneath the marker.
       if (g.label) {
         ctx.font = `${Math.max(4, fs * 0.7)}px sans-serif`;

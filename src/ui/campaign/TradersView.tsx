@@ -35,6 +35,7 @@
  *  gains the columns it never had (brought in · sent out · total), the full
  *  standing badges, and a sea/river/overland split that was never shown at all. */
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import type { CSSProperties, ReactNode } from "react";
 import { campaignTradeFlows } from "@bridge";
 import type { TradeFlows, CityTrader, CityEstablished } from "@types";
@@ -503,7 +504,7 @@ function TraderDetail({ t }: { t: CityTrader }) {
           {goods.map((g, i) => (
             <DataRow key={g.name} cols={GOOD_COLS} zebra={i % 2 === 1}>
               <span style={{ color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                {GOOD_META.get(g.name)?.emoji ?? "•"} {GOOD_META.get(g.name)?.label ?? g.name}
+                <GoodIcon name={g.name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {GOOD_META.get(g.name)?.label ?? g.name}
               </span>
               <NumCell tone={g.in_amount > 0 ? "#5fd0ff" : T.inkFaint}>{g.in_amount > 0 ? fmt(g.in_amount) : "—"}</NumCell>
               <NumCell tone={g.out_amount > 0 ? "#ffce5f" : T.inkFaint}>{g.out_amount > 0 ? fmt(g.out_amount) : "—"}</NumCell>
@@ -515,7 +516,7 @@ function TraderDetail({ t }: { t: CityTrader }) {
         <Line k="goods">
           {t.goods.length === 0
             ? <span style={{ color: T.inkFaint }}>nothing recorded</span>
-            : t.goods.map((gn) => `${GOOD_META.get(gn)?.emoji ?? "•"} ${GOOD_META.get(gn)?.label ?? gn}`).join(" · ")}
+            : t.goods.map((gn, i) => <span key={gn}>{i > 0 && " · "}<GoodIcon name={gn} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {GOOD_META.get(gn)?.label ?? gn}</span>)}
         </Line>
       )}
       <div style={{ marginTop: SPACE.sm }}>

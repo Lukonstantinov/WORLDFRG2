@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "./GoodIcon";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { computeTradeMatrix, exportTradeData } from "@bridge";
@@ -24,7 +25,7 @@ export function TradeMatrixPanel() {
   const rivers = useWorldStore((s) => s.rivers);
   const economy = useWorldStore((s) => s.economy);
   const goodMeta = useGoodsStore((s) => s.meta);
-  const emojiFor = (id: string) => goodMeta(id).icon;
+  const emojiFor = (id: string) => <GoodIcon name={id} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />;
   const labelFor = (id: string) => goodMeta(id).name;
   const [matrix, setMatrix] = useState<TradeMatrix | null>(null);
   const [loading, setLoading] = useState(false);
@@ -187,7 +188,7 @@ export function TradeMatrixPanel() {
                   <td style={td}>{Math.round(h.wealth * 100)}%</td>
                   <td style={td}>{h.population.toLocaleString()}</td>
                   <td style={{ ...td, textAlign: "left" }}>
-                    {h.produces.slice(0, 5).map((p) => emojiFor(p.good_name)).join(" ")}
+                    {h.produces.slice(0, 5).map((p) => <span key={p.good_name}>{emojiFor(p.good_name)} </span>)}
                   </td>
                 </tr>
               ))}

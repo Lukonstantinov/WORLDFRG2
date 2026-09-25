@@ -33,6 +33,7 @@
  *  Selecting a good, a direction, a single route or a partner highlights it on the
  *  map exactly as before — that behaviour is unchanged and deliberately so. */
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { campaignTradeFlows } from "@bridge";
 import type { TradeFlows, TradeFlowGood, TradePartner, TradeRouteFlow } from "@types";
 import { GOOD_DEFS } from "@goods";
@@ -472,7 +473,7 @@ function PartnerGoodsBreakdown({ hub, flows }: { hub: number; flows: TradeFlows 
   const nameOf = (good: number) => {
     const g = flows.goods.find((x) => x.good === good);
     const meta = g ? GOOD_META.get(g.name) : undefined;
-    return { emoji: meta?.emoji ?? "•", label: meta?.label ?? g?.name ?? `good ${good}`, produced: g?.produced };
+    return { name: g?.name ?? "", label: meta?.label ?? g?.name ?? `good ${good}`, produced: g?.produced };
   };
   const max = Math.max(...rows.map((r) => r.amount), 1e-6);
   const col = (dir: number, tint: string, lbl: string) => {
@@ -485,7 +486,7 @@ function PartnerGoodsBreakdown({ hub, flows }: { hub: number; flows: TradeFlows 
           const n = nameOf(r.good);
           return (
             <div key={r.good} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0" }}>
-              <span style={{ width: 14, fontSize: FZ.tiny }}>{n.emoji}</span>
+              <span style={{ width: 14 }}><GoodIcon name={n.name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /></span>
               <span style={{
                 flex: 1, minWidth: 0, color: T.inkMid, fontSize: FZ.tiny,
                 overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
@@ -997,7 +998,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                 onClick={() => { setSelGood(sel ? null : g.good); setSelDir(null); setSelPartner(null); setSelRoute(null); }}
               >
                 <span style={{ width: 12, color: T.inkFaint }}>{sel ? "▾" : "▸"}</span>
-                <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
+                <span style={{ width: 16 }}><GoodIcon name={g.name} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /></span>
                 <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink, display: "flex", alignItems: "center", gap: 5 }}>
                   {meta?.label ?? g.name}
                   {/* PRODUCED HERE — the same "made here" reading the Market tab shows,
@@ -1593,7 +1594,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                     <span style={{ width: 36, textAlign: "right", color: T.inkMid }}>{p.pct.toFixed(0)}%</span>
                     <span style={{ width: 96, textAlign: "right", color: T.inkDim, fontSize: FZ.base,
                       overflow: "hidden", whiteSpace: "nowrap" }}>
-                      {p.goods.map((gn) => GOOD_META.get(gn)?.emoji ?? "").join("")}
+                      {p.goods.map((gn) => <GoodIcon key={gn} name={gn} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />)}
                     </span>
                   </div>
                   {sel && <PartnerGoodsBreakdown hub={p.hub} flows={flows} />}

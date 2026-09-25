@@ -7,7 +7,8 @@
 // is seen at eye level, and a bird's-eye skyline over ground-level figures reads
 // as two different worlds stacked.
 
-import { pixelize, drawIcon } from "./goodArt";
+import { pixelize } from "./pixelize";
+import { drawPixelIcon } from "./goodArt";
 import { flag } from "./buildingArt";
 import { drawFigure, resolveKit, type KitSpec } from "@ui/campaign/cultureDress";
 
@@ -173,7 +174,7 @@ function stall(ctx: Ctx, x: number, w: number, awnY: number, tableY: number, k: 
   ctx.fillStyle = "#5a4a30"; ctx.beginPath(); ctx.ellipse(x + w - 20, tableY + 34, 12, 8, 0, 0, T2); ctx.fill();
   // the wares on the board
   const g = goods.length, step = g > 1 ? (w - 52) / (g - 1) : 0;
-  goods.forEach((it, i) => drawIcon(ctx, x + 26 + i * step, tableY - 18, 36, it[1], it[0], { glow }));
+  goods.forEach((it, i) => drawPixelIcon(ctx, x + 26 + i * step, tableY - 18, 36, it[1], it[0], { glow }));
 }
 
 /** The price chip pinned over a stall: the good, and what it goes for here. */
@@ -184,7 +185,7 @@ function chip(ctx: Ctx, cx: number, y: number, id: string, color: string, label:
   ctx.fillStyle = "rgba(9,15,24,0.86)";
   roundRectPath(ctx, x, y, w, 24, 12); ctx.fill();
   ctx.strokeStyle = "rgba(216,178,74,0.34)"; ctx.lineWidth = 1; ctx.stroke();
-  drawIcon(ctx, x + 14, y + 12, 20, color, id, { glow });
+  drawPixelIcon(ctx, x + 14, y + 12, 20, color, id, { glow });
   ctx.fillStyle = "#cfe2f6"; ctx.textBaseline = "middle"; ctx.textAlign = "left";
   ctx.fillText(label, x + 27, y + 12.5);
   ctx.fillStyle = xw > 1.3 ? "#e08080" : xw < 0.77 ? "#7fd0a0" : "#c0d0e0";

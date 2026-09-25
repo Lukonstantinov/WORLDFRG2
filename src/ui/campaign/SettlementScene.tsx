@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useGoodsStore } from "@state/goodsStore";
 import type { HubDetail } from "@types";
+import { goodSprite } from "@canvas/goodArt";
 import { sceneFromDetail, renderSettlement, fmtPop } from "@ui/campaign/settlementArt";
 
 /** The City / Estate tab: an isometric building schematic (climate ground +
@@ -13,7 +14,7 @@ export function SettlementScene({ detail }: { detail: HubDetail }) {
 
   useEffect(() => {
     if (!ref.current) return;
-    const sc = sceneFromDetail(detail, (g) => goodMeta(g).icon || "📦");
+    const sc = sceneFromDetail(detail, (g) => goodSprite(g, goodMeta(g).color).cv.toDataURL());
     renderSettlement(ref.current, sc, 360);
   }, [detail, goodMeta]);
 

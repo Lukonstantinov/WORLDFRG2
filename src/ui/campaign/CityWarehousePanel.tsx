@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { useGoodsStore } from "@state/goodsStore";
 import { campaignCityWarehouse } from "@bridge";
 import type { CityWarehouseGood, CityWarehouseInfo } from "@types";
@@ -84,7 +85,7 @@ export function CityWarehousePanel({ hub, tick }: { hub: number; tick: number })
           spoiled this month −{fmt(info.spoiled_total_month)}
           {topSpoiled.length > 0 && (
             <span style={{ color: T.inkFaint }}>
-              {" "}({topSpoiled.map((g) => `${goodMeta(g.name).icon} ${g.name} −${fmt(g.spoiled_month)}`).join(" · ")})
+              {" "}({topSpoiled.map((g, i) => <span key={g.name}>{i > 0 && " · "}<GoodIcon name={g.name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {`${g.name} −${fmt(g.spoiled_month)}`}</span>)})
             </span>
           )}
         </div>
@@ -131,7 +132,7 @@ export function CityWarehousePanel({ hub, tick }: { hub: number; tick: number })
       {sel && (
         <div style={{ marginTop: 8, borderTop: `1px solid ${T.line}`, paddingTop: 6 }}>
           <div style={{ color: T.gold, fontWeight: 700, marginBottom: 2 }}>
-            {goodMeta(sel.name).icon} {sel.name}
+            <GoodIcon name={sel.name} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /> {sel.name}
           </div>
           <div style={{ fontSize: FZ.small, color: T.inkMid }}>
             {fmt(sel.amount)} units · cover {sel.cover_months.toFixed(1)} mo

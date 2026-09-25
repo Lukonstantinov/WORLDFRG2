@@ -4,6 +4,7 @@ import { useCampaignStore } from "@state/campaignStore";
 import { campaignGetGuilds, campaignGuildAtlas } from "@bridge";
 import type { GuildBrief, GuildAtlas, AtlasPartner } from "@types";
 import { GOOD_DEFS } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, Meter, EmptyNote, Stat, StatGrid, Tabs, FootNote } from "@ui/kit";
@@ -26,10 +27,9 @@ const PAGE = 60;
 
 const BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 const goodLabel = (n: string) => BY_NAME.get(n)?.label ?? prettify(n);
-const goodEmoji = (n: string) => BY_NAME.get(n)?.emoji ?? "🏭";
+const goodGlyph = (n: string, size = 16) => <GoodIcon name={n} size={size} style={{ display: "inline-block", verticalAlign: "middle" }} />;
 const goodColor = (n: string) => BY_NAME.get(n)?.color ?? T.gold;
 const labelAt = (i: number) => GOOD_DEFS[i]?.label ?? `good ${i}`;
-const emojiAt = (i: number) => GOOD_DEFS[i]?.emoji ?? "📦";
 
 /** The app's own grade vocabulary (`deposits::grade_label`) — a word reads faster than 94% vs 97%. */
 function grade(q: number): { word: string; color: string } {
@@ -171,7 +171,7 @@ export function GuildsPanel() {
                       background: on ? "rgba(255,255,255,0.07)" : "transparent",
                       opacity: craft && !on ? 0.45 : 1,
                     }}>
-                    <span style={{ fontSize: FZ.base, textAlign: "center" }}>{goodEmoji(c.good)}</span>
+                    <span style={{ textAlign: "center" }}>{goodGlyph(c.good)}</span>
                     <span style={{ fontSize: FZ.tiny, color: T.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                       {goodLabel(c.good)}
                     </span>
@@ -235,7 +235,7 @@ export function GuildsPanel() {
                 padding: "6px 8px", borderRadius: RADIUS.md, border: `1px solid ${T.lineSoft}`,
                 borderLeft: `3px solid ${goodColor(c.good)}`, background: T.card, cursor: "pointer", flexShrink: 0,
               }}>
-              <span style={{ fontSize: 18, textAlign: "center" }}>{goodEmoji(c.good)}</span>
+              <span style={{ textAlign: "center" }}>{goodGlyph(c.good, 24)}</span>
               <div style={{ minWidth: 0 }}>
                 <div style={{ color: T.parchment, fontSize: FZ.body, fontWeight: 600 }}>
                   {goodLabel(c.good)}
@@ -277,7 +277,7 @@ function GuildCard({ g, rank, maxOut, open, onFocus, onToggle, atlas, onPartner 
           position: "relative", width: 34, height: 34, borderRadius: RADIUS.md, display: "grid", placeItems: "center",
           fontSize: 18, background: `radial-gradient(circle at 40% 30%, ${col}55, ${col}14 70%)`, border: `1px solid ${col}66`,
         }}>
-          {goodEmoji(g.good_name)}
+          {goodGlyph(g.good_name, 24)}
           <span style={{
             position: "absolute", left: -4, top: -5, fontSize: FZ.micro, color: T.inkDim,
             background: T.panel, border: `1px solid ${T.line}`, borderRadius: 999, padding: "0 3px", lineHeight: 1.4,
@@ -362,7 +362,7 @@ function CraftFlow({ atlas, g, onPartner }: { atlas: GuildAtlas | null; g: Guild
             width: 46, height: 46, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 22,
             background: `radial-gradient(circle, ${col}44, ${T.card} 75%)`, border: `2px solid ${col}`,
             boxShadow: `0 0 12px ${col}44`,
-          }}>{goodEmoji(g.good_name)}</div>
+          }}>{goodGlyph(g.good_name, 24)}</div>
           <div style={{ color: T.gold, fontSize: FZ.tiny, fontWeight: 700 }}>{fmt(g.output)}/d</div>
           <div style={{ color: "#ffce5f", fontSize: FZ.tiny }}>{fmt(outSum)} ▶</div>
         </div>
@@ -398,7 +398,7 @@ function FlowSide({ title, empty, partners, scale, color, align, onPartner, show
             display: "flex", justifyContent: align === "right" ? "flex-end" : "flex-start", gap: 4,
             fontSize: FZ.tiny, color: T.inkMid, whiteSpace: "nowrap", overflow: "hidden",
           }}>
-            {showGoods && align === "right" && <span>{p.goods.slice(0, 3).map(emojiAt).join("")}</span>}
+            {showGoods && align === "right" && <span style={{ display: "inline-flex", gap: 1 }}>{p.goods.slice(0, 3).map((i) => <GoodIcon key={i} name={GOOD_DEFS[i]?.name ?? ""} size={14} />)}</span>}
             <span style={{ overflow: "hidden", textOverflow: "ellipsis" }} title={showGoods ? p.goods.map(labelAt).join(", ") : undefined}>{p.name}</span>
             <span style={{ color: T.inkFaint }}>{fmt(p.weight)}</span>
           </div>

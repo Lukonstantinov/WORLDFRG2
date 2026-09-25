@@ -8,6 +8,7 @@ import {
   campaignProvinceGoods, campaignProvincePotential, provinceGoodBeltMasks,
 } from "@bridge";
 import { GOOD_DEFS } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { koppenName } from "@ui/world/climate";
 import { ProvinceMiniMap, soilWord } from "@ui/world/ProvinceMiniMap";
 import type {
@@ -15,7 +16,7 @@ import type {
   ProvinceGoodExploit, ProvincePotential, ProvinceGoodMask,
 } from "@types";
 
-import { ELEV_WORD, goodEmoji, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
+import { ELEV_WORD, goodLabel, provinceHistory, stars } from "@ui/world/provinceStory";
 
 // ── Variant B "Split": a ranked/filterable list rail + a rich detail card. The
 //    per-province dossier lives in ProvinceInspector (opened by a map click); this
@@ -505,7 +506,7 @@ export function ProvincePanel() {
                           <div style={{ opacity: 0.5 }}>no notable produce</div>
                         ) : selected.goods.map((g) => (
                           <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>
-                            <span style={{ width: 130 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                            <span style={{ width: 130 }}><GoodIcon name={GOOD_DEFS[g.good]?.name ?? ""} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /> {goodLabel(g.good)}</span>
                             <span style={{ color: "#e3c14a", letterSpacing: 1 }}>{stars(g.quality)}</span>
                           </div>
                         ));
@@ -524,7 +525,7 @@ export function ProvincePanel() {
                             const q = g.is_deposit && g.workings > 0 ? g.mean_grade : g.belt;
                             return (
                               <div key={g.good} style={{ display: "flex", gap: 8, alignItems: "center", padding: "1px 0" }}>
-                                <span style={{ width: 130 }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                                <span style={{ width: 130 }}><GoodIcon name={GOOD_DEFS[g.good]?.name ?? ""} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /> {goodLabel(g.good)}</span>
                                 <span style={{ color: "#e3c14a", letterSpacing: 1, fontSize: 11 }}>{stars(q)}</span>
                                 <span style={{ flex: 1 }} />
                                 <span style={{ opacity: 0.6, fontSize: 11 }}>

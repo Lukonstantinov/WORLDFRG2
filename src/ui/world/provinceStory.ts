@@ -17,7 +17,6 @@ export function stars(q: number): string {
 }
 
 export function goodLabel(g: number): string { return GOOD_DEFS[g]?.label ?? `good ${g}`; }
-export function goodEmoji(g: number): string { return GOOD_DEFS[g]?.emoji ?? "•"; }
 
 /** Icon + phrase for what physically divides two provinces. */
 export function borderKind(kind: number): { icon: string; label: string } {

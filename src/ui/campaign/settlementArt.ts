@@ -65,7 +65,7 @@ function plant(band: number, g: G, x: number, b: number, s: number, alt: boolean
   if (band === 4) return tRock(g, x, b, s);
   return (alt ? tShrub : tDecid)(g, x, b, s);
 }
-function goodBadge(g: G, x: number, y: number, icon: string) { g.appendChild(el("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: 8.5, fill: "#fff7e6", stroke: "#b89a5a", "stroke-width": 1.2 })); txt(g, x, y + 3.7, 11, icon, null, 400, "middle", '"Segoe UI Emoji","Noto Color Emoji",system-ui'); }
+function goodBadge(g: G, x: number, y: number, icon: string) { g.appendChild(el("circle", { cx: x.toFixed(1), cy: y.toFixed(1), r: 8.5, fill: "#fff7e6", stroke: "#b89a5a", "stroke-width": 1.2 })); g.appendChild(el("image", { href: icon, x: (x - 6).toFixed(1), y: (y - 6).toFixed(1), width: 12, height: 12, style: "image-rendering:pixelated" })); }
 
 // ── scene model ──────────────────────────────────────────────────────────────
 export interface SceneBldg { t: string; name: string; owner: string; guild?: boolean; tier?: number; goodIcon?: string | null; }
@@ -93,7 +93,7 @@ const ESTATE_LABEL: Record<number, string> = { 1: "Farm", 2: "Mine", 3: "Plantat
 function cap(s: string) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
 export function fmtPop(p: number) { return p >= 1e6 ? (p / 1e6).toFixed(2) + "M" : p >= 1e3 ? Math.round(p / 1e3) + "k" : String(Math.round(p)); }
 
-/** Build a scene from a live HubDetail. `goodIcon` resolves a good name → emoji. */
+/** Build a scene from a live HubDetail. `goodIcon` resolves a good name → an image URL (its pixel sprite). */
 export function sceneFromDetail(d: HubDetail, goodIcon: (g: string) => string): Scene {
   const band = koppenBand(d.koppen);
   const blds: SceneBldg[] = [];

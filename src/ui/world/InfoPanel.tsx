@@ -5,12 +5,15 @@ import { useViewportStore } from "@state/viewportStore";
 import { getCellInfo, simSetPlateOceanic } from "@bridge";
 import type { CellInfo } from "@types";
 import { GOOD_DEFS } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { settlementStory } from "@app/settlementStory";
 
-const goodLabel = (name: string) => {
-  const d = GOOD_DEFS.find((g) => g.name === name);
-  return d ? `${d.emoji} ${d.label}` : name;
-};
+const goodLabel = (name: string) => (
+  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+    <GoodIcon name={name} size={16} />
+    {GOOD_DEFS.find((g) => g.name === name)?.label ?? name}
+  </span>
+);
 
 const KOPPEN_NAMES: Record<number, string> = {
   0: "None",
@@ -147,7 +150,7 @@ export function InfoPanel() {
   const latDir = lat >= 0 ? "N" : "S";
   const lonDir = lon >= 0 ? "E" : "W";
 
-  const row = (label: string, value: string) => (
+  const row = (label: React.ReactNode, value: string) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
       <span style={{ color: "#607090" }}>{label}</span>
       <span style={{ color: "#c0d0e0" }}>{value}</span>

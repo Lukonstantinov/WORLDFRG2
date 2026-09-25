@@ -1,1064 +1,717 @@
-// Trade-good ARTWORK. Every good draws from its OWN recipe — a shaded vector
-// illustration on a 100x100 art box — so no two goods share a picture.
-// Coordinates are 0..100; the renderer scales to the requested size.
+// Trade-good artwork — TRUE pixel art, the ONLY goods treatment in the app.
+// Ported from the design handoff's `wf-pixel-goods.js`; every sprite function and
+// every number is kept as written (the numbers ARE the design).
 //
-// Two finished treatments sit on top of the illustrations:
-//   drawIcon           pixel-art (hard dark edge + one-pixel bevel) — dense panels
-//   drawIconVictorian  a Victoria II ledger card (aged paper, bronze frame)
-//
-// This is a SEPARATE module from `goodIcons.ts`, which keeps the EU4-style map
-// medallion the world overlay draws at arbitrary zoom. Different surface,
-// different treatment; neither should be made to serve the other.
+// Every good is a hand-placed 24×24 sprite: integer-grid shapes (no anti-aliasing),
+// a five-step hue-shifted ramp per good (shadows lean violet, lights lean cream),
+// a small fixed material set (wood, leaf, steel, glass, burlap, clay, stone, paper,
+// gold), top-left light, and a selective outline — each edge pixel takes a darkened
+// copy of the colour it borders instead of one flat black line.
+// Rendered at an integer scale with smoothing off; dark goods get a 1-px light rim
+// so they still read on a dark panel. One entry per GOOD_DEFS name plus a crate
+// fallback, stencilled in the good's own tint, for user-added goods.
 
+const N = 24;
 const T2 = Math.PI * 2;
 
+type Rgb = [number, number, number];
+type Mask = (x: number, y: number) => boolean;
 type Pt = number[];
+type Ramp = string[];
 
-/** Recipe variation bag. Every field is optional; a family reads only its own. */
-export interface GoodParams {
-  n?: number; droop?: number; awn?: number; kr?: number; kw?: number; leaf?: number;
-  rows?: number; taper?: number; pos?: Pt[]; oblate?: number; segments?: number;
-  neck?: number; belly?: number; foot?: number; top?: number; bot?: number;
-  nk?: number; bel?: number; lip?: number; handles?: number; cork?: number; stem?: number;
-  hoops?: number; fill?: number;
-  kind?: string; pattern?: number; cut?: string; palm?: number;
-  depth?: number; y?: number; dorsal?: number; stripes?: number; spots?: number; dried?: number;
-  fur?: number; second?: number; petals?: number; clasp?: number; scoop?: number;
-  veins?: number; inclusion?: number; grains?: number; spill?: Pt[]; round?: boolean;
-}
+function hx(h: string): Rgb { h = (h || "#888888").replace("#", ""); if (h.length === 3) h = h.split("").map((c) => c + c).join(""); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16)) as Rgb; }
+function toHex(c: number[]): string { return "#" + c.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join(""); }
+function mix(a: string, b: string, t: number): string { const A = hx(a), B = hx(b); return toHex(A.map((v, i) => v + (B[i] - v) * t)); }
+function lumOf(h: string): number { const c = hx(h); return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255; }
 
-/** The shaded colour set a family draws with, derived from the good's tint. */
-interface Cols {
-  base: string; lt: string; hi: string; dk: string; stem: string; leaf: string;
+/** Five-step ramp: 0 deepest · 1 shadow · 2 base · 3 light · 4 highlight. */
+export function ramp(hex: string): Ramp {
+  return [mix(hex, "#140a1e", 0.74), mix(hex, "#1c1230", 0.44), toHex(hx(hex)), mix(hex, "#fff2cc", 0.36), mix(hex, "#fffcf0", 0.7)];
 }
+const WOOD  =["#2a170c","#4e2e16","#7a4a24","#a26a36","#c89058"];
+const LEAF  =["#15290f","#244a1a","#3c7228","#5f9a3a","#8cc25a"];
+const STEEL =["#1e242c","#46505c","#7a8694","#b4c0cc","#e8f0f6"];
+const BURLAP=["#3a2814","#664a2a","#94723e","#bc9a5c","#dcc088"];
+const GLASS =["#1c3a40","#3c7078","#72aab0","#b0e0e0","#f0ffff"];
+const GOLD  =["#4a3008","#8a5c10","#c8961e","#ecc44a","#fff0a8"];
+const PAPER =["#5a4a30","#a08c64","#d2c29a","#ece0c0","#fffaea"];
+const CLAY  =["#3e1e10","#6e3a20","#a05a34","#c47e50","#e2a878"];
+const STONE =["#2c2c30","#56565c","#86868c","#b4b4ba","#e0e0e4"];
+const WHITE =["#6a6a74","#a8a8b2","#d8d8de","#f0f0f2","#ffffff"];
+const RED   =["#3a0a0e","#701620","#b0282c","#d8503a","#f08a6a"];
+const FLAME =["#7a2a08","#c85a10","#f09a20","#ffd24a","#fff6c0"];
+const FOAM  =["#8a8070","#c8c0b0","#ece6da","#f8f4ec","#ffffff"];
+const BLUE  =["#101c3a","#1e3a78","#3462b8","#6a94dc","#b0ccf4"];
+const ENDG  =ramp("#d8b07a");
 
-function hx(h: string): [number, number, number] {
-  let s = (h || "#888888").replace("#", "");
-  if (s.length === 3) s = s.split("").map((c) => c + c).join("");
-  return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)];
+// ── masks: (x,y) → inside?  tested at pixel centres ─────────────────────────
+const R=(x:number,y:number,w:number,h:number):Mask=>(X,Y)=>X>=x&&X<x+w&&Y>=y&&Y<y+h;
+const C=(cx:number,cy:number,r:number):Mask=>(X,Y)=>{const dx=X+.5-cx,dy=Y+.5-cy;return dx*dx+dy*dy<=r*r;};
+const E=(cx:number,cy:number,rx:number,ry:number):Mask=>(X,Y)=>{const dx=(X+.5-cx)/rx,dy=(Y+.5-cy)/ry;return dx*dx+dy*dy<=1;};
+const RE=(cx:number,cy:number,rx:number,ry:number,a:number):Mask=>{const c=Math.cos(a),s=Math.sin(a);return (X,Y)=>{const x=X+.5-cx,y=Y+.5-cy,u=(x*c+y*s)/rx,v=(-x*s+y*c)/ry;return u*u+v*v<=1;};};
+const SE=(cx:number,cy:number,rx:number,ry:number,p:number):Mask=>(X,Y)=>Math.pow(Math.abs(X+.5-cx)/rx,p)+Math.pow(Math.abs(Y+.5-cy)/ry,p)<=1;
+const P=(pts:Pt[]):Mask=>(X,Y)=>{const x=X+.5,y=Y+.5;let ins=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const xi=pts[i][0],yi=pts[i][1],xj=pts[j][0],yj=pts[j][1];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))ins=!ins;}return ins;};
+const Ln=(x0:number,y0:number,x1:number,y1:number,w:number):Mask=>(X,Y)=>{const x=X+.5,y=Y+.5,dx=x1-x0,dy=y1-y0,l=dx*dx+dy*dy||1;let t=((x-x0)*dx+(y-y0)*dy)/l;t=t<0?0:t>1?1:t;const ex=x0+t*dx-x,ey=y0+t*dy-y;return ex*ex+ey*ey<=w*w/4;};
+const U=(...m:Mask[]):Mask=>(X,Y)=>m.some(f=>f(X,Y));
+const D=(a:Mask,b:Mask):Mask=>(X,Y)=>a(X,Y)&&!b(X,Y);
+const I=(a:Mask,b:Mask):Mask=>(X,Y)=>a(X,Y)&&b(X,Y);
+const above=(y:number):Mask=>(X,Y)=>Y<y, below=(y:number):Mask=>(X,Y)=>Y>=y;
+const tear=(cx:number,cy:number,r:number)=>U(C(cx,cy,r),P([[cx-r*0.78,cy-r*0.55],[cx,cy-r*2.3],[cx+r*0.78,cy-r*0.55]]));
+const oct=(x:number,y:number,w:number,h:number,k:number)=>P([[x+k,y],[x+w-k,y],[x+w,y+k],[x+w,y+h-k],[x+w-k,y+h],[x+k,y+h],[x,y+h-k],[x,y+k]]);
+/** A curved, tapering horn/tusk: quadratic Bézier A→B via Q, width w0→w1. */
+function taper(A:Pt,Q:Pt,B:Pt,w0:number,w1:number,t0=0,t1=1){
+  const L:Pt[]=[],Rt:Pt[]=[],n=18;
+  for(let i=0;i<=n;i++){const t=t0+(t1-t0)*i/n,u=1-t;
+    const x=u*u*A[0]+2*u*t*Q[0]+t*t*B[0], y=u*u*A[1]+2*u*t*Q[1]+t*t*B[1];
+    const dx=2*u*(Q[0]-A[0])+2*t*(B[0]-Q[0]), dy=2*u*(Q[1]-A[1])+2*t*(B[1]-Q[1]), l=Math.hypot(dx,dy)||1;
+    const w=(w0+(w1-w0)*t)/2, nx=-dy/l*w, ny=dx/l*w;
+    L.push([x+nx,y+ny]); Rt.push([x-nx,y-ny]);}
+  return P(L.concat(Rt.reverse()));
 }
-function rgb(c: number[]): string { return `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`; }
-export function shade(hex: string, f: number): string {
-  const c = hx(hex);
-  return rgb(f >= 1
-    ? [c[0] + (255 - c[0]) * (f - 1), c[1] + (255 - c[1]) * (f - 1), c[2] + (255 - c[2]) * (f - 1)]
-    : [c[0] * f, c[1] * f, c[2] * f]);
-}
-export function lum(hex: string): number {
-  const c = hx(hex);
-  return (0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]) / 255;
-}
-
-// ── primitives ───────────────────────────────────────────────────────────────
-type Ctx = CanvasRenderingContext2D;
-type Paint = string | CanvasGradient;
-
-function P(ctx: Ctx, pts: Pt[], fill?: Paint, close = true) {
-  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) {
-    const p = pts[i];
-    if (p.length === 4) ctx.quadraticCurveTo(p[0], p[1], p[2], p[3]); else ctx.lineTo(p[0], p[1]);
-  }
-  if (close) ctx.closePath();
-  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-}
-function E(ctx: Ctx, x: number, y: number, rx: number, ry: number, rot: number, fill: Paint) {
-  ctx.beginPath(); ctx.ellipse(x, y, rx, ry, rot || 0, 0, T2); ctx.fillStyle = fill; ctx.fill();
-}
-function L(ctx: Ctx, pts: Pt[], stroke: Paint, w: number, cap: CanvasLineCap = "round") {
-  ctx.beginPath(); ctx.moveTo(pts[0][0], pts[0][1]);
-  for (let i = 1; i < pts.length; i++) {
-    const p = pts[i];
-    if (p.length === 4) ctx.quadraticCurveTo(p[0], p[1], p[2], p[3]); else ctx.lineTo(p[0], p[1]);
-  }
-  ctx.strokeStyle = stroke; ctx.lineWidth = w; ctx.lineCap = cap; ctx.lineJoin = "round"; ctx.stroke();
-}
-function lg(ctx: Ctx, x0: number, y0: number, x1: number, y1: number, stops: [number, string][]) {
-  const g = ctx.createLinearGradient(x0, y0, x1, y1);
-  stops.forEach(([o, c]) => g.addColorStop(o, c));
-  return g;
-}
-function rg(ctx: Ctx, x: number, y: number, r0: number, r1: number, stops: [number, string][]) {
-  const g = ctx.createRadialGradient(x - r1 * 0.25, y - r1 * 0.3, r0, x, y, r1);
-  stops.forEach(([o, c]) => g.addColorStop(o, c));
-  return g;
-}
-/** A shaded volume fill for a good's base colour. */
-function vol(ctx: Ctx, x: number, y: number, r: number, C: { base: string; lt: string; dk: string }) {
-  return rg(ctx, x, y, r * 0.1, r * 1.15, [[0, C.lt], [0.45, C.base], [1, C.dk]]);
+function fish(cx:number,cy:number,L:number,H:number,a:number){
+  const c=Math.cos(a),s=Math.sin(a),ux=c,uy=s,vx=-s,vy=c;
+  const tb=[cx-ux*(L/2-1),cy-uy*(L/2-1)];
+  return U(RE(cx,cy,L/2,H/2,a),P([tb,[tb[0]-ux*3.6+vx*H*0.62,tb[1]-uy*3.6+vy*H*0.62],[tb[0]-ux*2.4,tb[1]-uy*2.4],[tb[0]-ux*3.6-vx*H*0.62,tb[1]-uy*3.6-vy*H*0.62]]));
 }
 
-// ── shape families. Each takes (ctx, C, p) with p carrying the variation. ────
-
-/** Cereal ear: stalk + kernel rows. Grain species vary by kernel shape, awns, droop. */
-function ear(ctx: Ctx, C: Cols, p: GoodParams) {
-  const n = p.n || 5, drp = p.droop || 0, aw = p.awn || 0, kr = p.kr || 7, kw = p.kw || 4.5;
-  const topY = 22 + drp * 10, tipX = 50 + drp * 16;
-  L(ctx, [[46, 92], [48, 70, 50, 46], [52, 32, tipX - drp * 4, topY]], C.stem, 4.5);
-  if (p.leaf) P(ctx, [[47, 72], [26, 62, 30, 80], [40, 86, 47, 80]], C.leaf || C.stem);
-  for (let i = 0; i < n; i++) {
-    const t = i / (n - 1 || 1), y = topY + 8 + t * (64 - topY), x = 50 + drp * (1 - t) * 14;
-    for (const d of [-1, 1]) {
-      const kx = x + d * kw, ky = y - 2;
-      E(ctx, kx, ky, kr * 0.42, kr * 0.62, d * 0.55, i % 2 ? C.base : C.lt);
-      E(ctx, kx - d * 1, ky - 1.5, kr * 0.2, kr * 0.3, d * 0.55, C.hi);
-      if (aw) L(ctx, [[kx, ky - kr * 0.5], [kx + d * (6 + aw * 10), ky - kr * 1.4 - aw * 18]], C.dk, 1.4);
+// ── painter ────────────────────────────────────────────────────────────────
+type Mode = "bevel" | "ball" | "cylV" | "cylH" | number;
+function painter(){
+  const b:(string|null)[]=new Array(N*N).fill(null);
+  const set=(x:number,y:number,c:string)=>{x=Math.floor(x);y=Math.floor(y);if(x>=0&&y>=0&&x<N&&y<N)b[y*N+x]=c;};
+  const scan=(m:Mask)=>{const pts:[number,number][]=[];let x0=N,y0=N,x1=-1,y1=-1;
+    for(let y=0;y<N;y++)for(let x=0;x<N;x++)if(m(x,y)){pts.push([x,y]);if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+    return {pts,x0,y0,x1,y1};};
+  function f(m:Mask,r:Ramp,mode:Mode="bevel"){
+    const {pts,x0,y0,x1,y1}=scan(m); if(!pts.length) return;
+    const cx=(x0+x1+1)/2, cy=(y0+y1+1)/2, rx=Math.max(1,(x1-x0+1)/2), ry=Math.max(1,(y1-y0+1)/2);
+    for(const [x,y] of pts){
+      const up=!m(x,y-1), lf=!m(x-1,y), dn=!m(x,y+1), rt=!m(x+1,y);
+      let i=2;
+      if(typeof mode==="number") i=mode;
+      else if(mode==="bevel") i=(up||lf)?3:(dn||rt)?1:2;
+      else if(mode==="ball"){const hx=cx-rx*0.36,hy=cy-ry*0.4,d=Math.hypot((x+.5-hx)/rx,(y+.5-hy)/ry);
+        i=d<0.3?4:d<0.72?3:d<1.12?2:1; if((dn||rt)&&i>1) i=1;}
+      else if(mode==="cylV"||mode==="cylH"){const t=mode==="cylV"?(x+.5-x0)/(x1-x0+1):(y+.5-y0)/(y1-y0+1);
+        i=t<0.12?2:t<0.24?4:t<0.42?3:t<0.74?2:1;}
+      set(x,y,r[i]);
     }
   }
-  E(ctx, 50 + drp * 14, topY, kr * 0.4, kr * 0.7, 0, C.lt);
-}
-
-/** A head/panicle of small round grains (millet, sorghum). */
-function panicle(ctx: Ctx, C: Cols, p: GoodParams) {
-  L(ctx, [[50, 92], [50, 60, 50, 40]], C.stem, 4.5);
-  P(ctx, [[50, 70], [28, 64, 34, 82], [46, 84, 50, 78]], C.leaf || C.stem);
-  const rows = p.rows || 7;
-  for (let r = 0; r < rows; r++) {
-    const t = r / (rows - 1), y = 20 + t * 36, w = (p.taper ? (1 - Math.abs(t - 0.35)) * 1.3 : 1) * (16 - t * 4);
-    const cnt = Math.max(2, Math.round(w / 4));
-    for (let i = 0; i < cnt; i++) {
-      const x = 50 - w / 2 + (cnt > 1 ? i * (w / (cnt - 1)) : 0);
-      E(ctx, x, y, 3.1, 3.1, 0, (i + r) % 2 ? C.base : C.lt);
-      E(ctx, x - 1, y - 1, 1.2, 1.2, 0, C.hi);
+  /** Brilliant/cushion facet shader for cut stones. */
+  function gem(m:Mask,r:Ramp,table:number,sq?:boolean){
+    const {pts,x0,y0,x1,y1}=scan(m); if(!pts.length) return;
+    const cx=(x0+x1+1)/2, cy=(y0+y1+1)/2;
+    for(const [x,y] of pts){
+      const dx=x+.5-cx, dy=y+.5-cy, rr=sq?Math.max(Math.abs(dx),Math.abs(dy)):Math.hypot(dx,dy);
+      let i;
+      if(rr<table) i=(dx+dy<-table*0.5)?4:3;
+      else{const k=Math.floor((Math.atan2(dy,dx)+Math.PI)/(Math.PI/4))%8; i=(k%2)?2:1; if(dx+dy<0) i+=1;}
+      if(!m(x+1,y)||!m(x,y+1)) i=Math.min(i,1);
+      else if((!m(x-1,y)||!m(x,y-1))&&i<3) i=3;
+      set(x,y,r[i]);
     }
   }
+  function line(x0:number,y0:number,x1:number,y1:number,c:string,m?:Mask){x0=Math.round(x0);y0=Math.round(y0);x1=Math.round(x1);y1=Math.round(y1);
+    if(![x0,y0,x1,y1].every(Number.isFinite)) return;
+    const dx=Math.abs(x1-x0),dy=-Math.abs(y1-y0),sx=x0<x1?1:-1,sy=y0<y1?1:-1;let e=dx+dy;
+    for(let guard=0;guard<200;guard++){if(!m||m(x0,y0))set(x0,y0,c);if(x0===x1&&y0===y1)break;const e2=2*e;if(e2>=dy){e+=dy;x0+=sx;}if(e2<=dx){e+=dx;y0+=sy;}}}
+  const px=(x:number,y:number,c:string)=>set(x,y,c);
+  const dots=(list:number[][],c:string)=>list.forEach(([x,y])=>set(x,y,c));
+  return {b,f,gem,line,px,dots};
+}
+type Painter = ReturnType<typeof painter>;
+
+// ── shared object builders ─────────────────────────────────────────────────
+function cube(g:Painter,x:number,y:number,s:number,h:number,r:Ramp){
+  g.f(P([[x,y],[x+s,y+s/2],[x+s,y+s/2+h],[x,y+h]]),r,2);
+  g.f(P([[x+s,y+s/2],[x+2*s,y],[x+2*s,y+h],[x+s,y+s/2+h]]),r,1);
+  g.f(P([[x,y],[x+s,y-s/2],[x+2*s,y],[x+s,y+s/2]]),r,3);
+  g.line(x+1,y,x+s,y-s/2+0.5,r[4]);
+}
+function ear(g:Painter,bx:number,by:number,tx:number,ty:number,n:number,r:Ramp,awn?:number){
+  const dx=tx-bx,dy=ty-by,L=Math.hypot(dx,dy),ux=dx/L,uy=dy/L,px=-uy,py=ux;
+  g.line(bx,by,tx-ux*2,ty-uy*2,r[1]);
+  for(let k=n-1;k>=0;k--){const s=L-1.2-k*2.1,cx=bx+ux*s,cy=by+uy*s;
+    for(const sd of [-1,1]){g.f(C(cx+px*1.25*sd,cy+py*1.25*sd,1.35),r,"bevel");
+      if(awn) g.line(cx+px*2.2*sd,cy+py*2.2*sd,cx+px*(2.2+awn*0.35)*sd+ux*awn,cy+py*(2.2+awn*0.35)*sd+uy*awn,r[3]);}}
+  g.f(C(tx-ux*0.6,ty-uy*0.6,1.3),r,"bevel");
+  if(awn) g.line(tx,ty,tx+ux*awn*0.8,ty+uy*awn*0.8,r[3]);
+}
+function logEnd(g:Painter,cx:number,cy:number,r:number){
+  g.f(C(cx,cy,r),WOOD,"bevel"); g.f(C(cx,cy,r-1.2),ENDG,2);
+  g.f(D(C(cx,cy,r-2.3),C(cx,cy,r-3.1)),ENDG,1); g.px(cx-0.5,cy-0.5,ENDG[1]); g.px(cx-1.5,cy-2.2,ENDG[4]);
+}
+function barrel(){return P([[7,4],[17,4],[19,8],[19.5,13],[19,17],[17,21],[7,21],[5,17],[4.5,13],[5,8]]);}
+function barrelBody(g:Painter,r:Ramp){
+  const m=barrel(); g.f(m,r,"cylV");
+  for(const x of [9,12,15]) g.line(x,6,x,20,r[1],m);
+  for(const y of [7,18]) g.line(4,y,20,y,STEEL[2],m);
+  for(const y of [8,19]) g.line(4,y,20,y,STEEL[1],m);
+}
+function goldBar(g:Painter,x:number,y:number,w:number,r:Ramp){
+  g.f(P([[x+0.5,y],[x+w-0.5,y],[x+w,y+4.5],[x,y+4.5]]),r,"bevel");
+  g.f(P([[x+1.8,y-2.2],[x+w-1.8,y-2.2],[x+w-0.5,y],[x+0.5,y]]),r,3);
+  g.line(x+2,y-2,x+w-2,y-2,r[4]); g.px(x+w/2-0.5,y+2,r[1]); g.px(x+w/2+0.5,y+2,r[1]);
+}
+function cutGem(g:Painter,cx:number,cy:number,rad:number,r:Ramp){g.gem(C(cx,cy,rad),r,rad*0.48); g.px(cx-rad*0.45,cy-rad*0.5,"#ffffff");}
+function crystal(g:Painter,bx:number,by:number,w:number,h:number,lean:number,r:Ramp){
+  const sh=(p:Pt)=>[p[0]+lean*(by-p[1]),p[1]], x0=bx-w/2, x1=bx+w/2, top=by-h-w*0.75;
+  g.f(P([[x0,by],[x0,by-h],[bx,top],[bx,by]].map(sh)),r,3);
+  g.f(P([[bx,by],[bx,top],[x1,by-h],[x1,by]].map(sh)),r,1);
+  const t=sh([bx,top]); g.line(t[0]-0.6,t[1]+1.5,t[0]-0.6,by-2,r[4]);
+}
+function bowlOf(g:Painter,cx:number,cy:number,w:number,pr:Ramp){
+  g.f(I(E(cx,cy+0.5,w*0.82,w*0.55),above(cy+1)),pr,"ball");
+  g.f(I(E(cx,cy,w,w*0.78),below(cy+0.5)),CLAY,"ball");
+  g.f(R(cx-w,cy,w*2,1.2),CLAY,3);
 }
 
-/** Rounded fruit / berry cluster. */
-function fruit(ctx: Ctx, C: Cols, p: GoodParams) {
-  const n = p.n || 1;
-  const pos: Pt[] = p.pos || (n === 1 ? [[50, 54, 26]]
-    : n === 3 ? [[36, 46, 17], [64, 46, 17], [50, 70, 18]]
-    : [[38, 44, 14], [62, 44, 14], [30, 66, 13], [50, 64, 15], [70, 66, 13]]);
-  pos.forEach(([x, y, r]) => {
-    E(ctx, x, y, r, r * (p.oblate || 1), 0, vol(ctx, x, y, r, C));
-    E(ctx, x - r * 0.32, y - r * 0.38, r * 0.28, r * 0.2, -0.6, "rgba(255,255,255,0.5)");
-    if (p.segments) {
-      for (let i = 0; i < 7; i++) {
-        const a = i / 7 * T2;
-        L(ctx, [[x, y], [x + Math.cos(a) * r * 0.86, y + Math.sin(a) * r * 0.86]], C.hi, 1.4);
-      }
-      E(ctx, x, y, r * 0.16, r * 0.16, 0, C.hi);
-    }
-  });
-  if (p.leaf) {
-    P(ctx, [[52, 30], [70, 10, 80, 26], [62, 36, 52, 30]], C.leaf || "#5f8a3e");
-    L(ctx, [[50, 34], [50, 22]], C.stem || "#5d4022", 4);
-  }
-}
-
-/** Vessel profile: amphora, jar, bottle, goblet, barrel — one shape, many waists. */
-function vessel(ctx: Ctx, C: Cols, p: GoodParams) {
-  const nk = p.neck ?? 10, bel = p.belly ?? 32, foot = p.foot ?? 12, top = p.top ?? 16, bot = p.bot ?? 86;
-  const body: Pt[] = [[50 - nk, top], [50 - bel, top + 18, 50 - bel * 0.9, bot - 22], [50 - foot, bot],
-    [50 + foot, bot], [50 + bel * 0.9, bot - 22, 50 + bel, top + 18], [50 + nk, top]];
-  P(ctx, body, lg(ctx, 50 - bel, 0, 50 + bel, 0, [[0, C.dk], [0.4, C.base], [0.72, C.lt], [1, C.dk]]));
-  if (p.lip) P(ctx, [[50 - nk - 5, top], [50 + nk + 5, top], [50 + nk + 3, top + 6], [50 - nk - 3, top + 6]], C.lt);
-  if (p.handles) for (const d of [-1, 1]) L(ctx, [[50 + d * nk, top + 5], [50 + d * (bel + 10), top + 14, 50 + d * bel * 0.8, top + 30]], C.dk, 5);
-  if (p.cork) P(ctx, [[50 - nk * 0.7, top], [50 + nk * 0.7, top], [50 + nk * 0.7, top - 9], [50 - nk * 0.7, top - 9]], "#8a6a42");
-  if (p.stem) {
-    P(ctx, [[46, bot - 2], [54, bot - 2], [54, bot + 6], [46, bot + 6]], C.dk);
-    P(ctx, [[36, bot + 6], [64, bot + 6], [66, bot + 11], [34, bot + 11]], C.base);
-  }
-  if (p.hoops) for (const y of [top + 16, (top + bot) / 2, bot - 14]) L(ctx, [[50 - bel * 0.96, y], [50 + bel * 0.96, y]], "rgba(40,28,16,0.55)", 3.5, "butt");
-  if (p.fill != null) {
-    const fy = top + 8 + (1 - p.fill) * (bot - top - 20);
-    P(ctx, [[50 - bel * 0.8, fy], [50 + bel * 0.8, fy], [50 + bel * 0.8, fy + 6], [50 - bel * 0.8, fy + 6]], C.hi);
-  }
-  L(ctx, [[50 - bel * 0.55, top + 22], [50 - bel * 0.75, (top + bot) / 2]], "rgba(255,255,255,0.35)", 4);
-}
-
-/** Cloth: bolt, folded stack, rolled carpet, hank of yarn. */
-function cloth(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "rug") {
-    E(ctx, 50, 32, 27, 13, 0, C.lt);
-    P(ctx, [[23, 32], [77, 32], [77, 70], [23, 70]], lg(ctx, 23, 0, 77, 0, [[0, C.dk], [0.45, C.base], [1, C.dk]]));
-    E(ctx, 50, 32, 27, 13, 0, C.lt); E(ctx, 50, 32, 13, 6, 0, C.dk);
-    for (let i = 0; i < 3; i++) {
-      const y = 42 + i * 10;
-      for (let k = 0; k < 5; k++) P(ctx, [[28 + k * 11, y], [33 + k * 11, y + 5], [28 + k * 11, y + 10], [23 + k * 11, y + 5]], k % 2 ? C.hi : C.lt);
-    }
-    for (let i = 0; i < 10; i++) L(ctx, [[25 + i * 5.6, 70], [25 + i * 5.6, 82]], C.lt, 2.4);
-  } else if (p.kind === "roll") {
-    E(ctx, 50, 36, 26, 12, 0, C.lt);
-    P(ctx, [[24, 36], [76, 36], [76, 74], [24, 74]], lg(ctx, 24, 0, 76, 0, [[0, C.dk], [0.45, C.base], [1, C.dk]]));
-    E(ctx, 50, 74, 26, 12, 0, C.base);
-    E(ctx, 50, 36, 26, 12, 0, C.lt); E(ctx, 50, 36, 13, 6, 0, C.dk);
-    for (let i = 0; i < 4; i++) L(ctx, [[30 + i * 13, 40], [30 + i * 13, 72]], "rgba(255,255,255,0.14)", 3);
-  } else if (p.kind === "stack") {
-    for (let i = 0; i < 3; i++) {
-      const y = 44 + i * 15;
-      P(ctx, [[22, y], [78, y], [74, y + 13], [26, y + 13]], i % 2 ? C.base : C.lt);
-      L(ctx, [[26, y + 13], [74, y + 13]], C.dk, 2);
-    }
-    P(ctx, [[26, 32], [74, 32], [78, 44], [22, 44]], C.lt);
-  } else if (p.kind === "hank") {
-    for (let i = 0; i < 3; i++) { const x = 38 + i * 12; E(ctx, x, 54, 9, 30, 0, i === 1 ? C.lt : C.base); }
-    P(ctx, [[30, 44], [70, 44], [70, 60], [30, 60]], C.dk);
-    L(ctx, [[34, 46], [66, 46]], "rgba(255,255,255,0.25)", 3);
-  } else { // bolt over a board
-    P(ctx, [[20, 58], [80, 42], [80, 72], [20, 88]], lg(ctx, 20, 0, 80, 0, [[0, C.dk], [0.5, C.base], [1, C.lt]]));
-    P(ctx, [[20, 58], [80, 42], [80, 50], [20, 66]], C.lt);
-    for (let i = 0; i < 5; i++) L(ctx, [[24 + i * 13, 60 + (5 - i) * 3], [24 + i * 13, 88 - i * 3]], "rgba(0,0,0,0.12)", 3);
-    if (p.pattern) for (let i = 0; i < 4; i++) L(ctx, [[22 + i * 15, 63 + (4 - i) * 3.6], [30 + i * 15, 61 + (4 - i) * 3.6]], C.hi, 2.5);
-  }
-}
-
-/** Metal: ingot stack, coin pile, wire coil, worked ware. */
-function metal(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "coins") {
-    for (let i = 0; i < 5; i++) {
-      const y = 74 - i * 7, x = 50 + (i % 2 ? 3 : -3);
-      E(ctx, x, y, 24, 9, 0, i === 4 ? C.lt : C.base); E(ctx, x, y - 2, 24, 9, 0, C.lt); E(ctx, x, y - 2, 15, 5.5, 0, C.dk);
-    }
-    E(ctx, 26, 40, 15, 15, 0, vol(ctx, 26, 40, 15, C)); E(ctx, 26, 40, 9, 9, 0, C.dk);
-  } else if (p.kind === "ware") {
-    P(ctx, [[50, 14], [57, 32], [74, 34], [60, 48], [64, 68], [50, 58], [36, 68], [40, 48], [26, 34], [43, 32]], vol(ctx, 50, 44, 32, C));
-    L(ctx, [[50, 20], [50, 52]], "rgba(255,255,255,0.35)", 3);
-  } else if (p.kind === "sheet") {                 // Tin: rolled sheet + snips
-    P(ctx, [[18, 52], [62, 36], [84, 44], [40, 62]], lg(ctx, 18, 0, 84, 0, [[0, C.lt], [0.5, C.base], [1, C.dk]]));
-    P(ctx, [[18, 52], [40, 62], [40, 72], [18, 62]], C.dk);
-    P(ctx, [[40, 62], [84, 44], [84, 54], [40, 72]], C.base);
-    for (let i = 0; i < 4; i++) L(ctx, [[26 + i * 13, 54 - i * 2], [30 + i * 13, 66 - i * 2]], "rgba(255,255,255,0.28)", 1.6);
-    E(ctx, 70, 72, 12, 5, -0.25, C.dk);
-  } else if (p.kind === "pigs") {                  // Lead: squat pigs + a spill
-    for (let i = 0; i < 2; i++) {
-      const y = 74 - i * 15;
-      P(ctx, [[24, y - 11], [70, y - 11], [76, y], [18, y]], lg(ctx, 18, 0, 76, 0, [[0, C.dk], [0.5, C.base], [1, C.lt]]));
-      P(ctx, [[24, y - 11], [70, y - 11], [64, y - 17], [30, y - 17]], C.lt);
-    }
-    P(ctx, [[30, 42], [62, 42], [58, 34], [34, 34]], C.base);
-    for (const [x, y, r] of [[36, 28, 4], [52, 26, 3.4]]) E(ctx, x, y, r, r * 0.7, 0, C.hi);
-  } else if (p.kind === "plate") {                 // Silver: chased plate + goblet
-    E(ctx, 44, 58, 30, 22, 0, rg(ctx, 44, 58, 4, 32, [[0, C.hi], [0.5, C.lt], [1, C.dk]]));
-    E(ctx, 44, 56, 20, 14, 0, C.base);
-    ctx.beginPath(); ctx.ellipse(44, 58, 26, 19, 0, 0, T2); ctx.strokeStyle = C.dk; ctx.lineWidth = 2; ctx.stroke();
-    P(ctx, [[66, 26], [86, 26], [83, 42], [69, 42]], C.lt);
-    P(ctx, [[74, 42], [78, 42], [78, 52], [74, 52]], C.dk);
-    P(ctx, [[68, 52], [84, 52], [86, 57], [66, 57]], C.base);
-    E(ctx, 34, 50, 9, 5, -0.5, "rgba(255,255,255,0.45)");
-  } else if (p.kind === "ore") {
-    P(ctx, [[24, 68], [34, 40], [54, 32], [72, 46], [76, 72], [50, 84]], lg(ctx, 24, 32, 76, 84, [[0, C.lt], [0.5, C.base], [1, C.dk]]));
-    P(ctx, [[34, 40], [54, 32], [52, 52], [36, 58]], C.lt);
-    for (const [a, b] of [[[42, 62], [58, 50]], [[48, 74], [66, 60]]]) L(ctx, [a, b], C.hi, 4);
-  } else {
-    const n = p.n || 3;
-    for (let i = 0; i < n; i++) {
-      const y = 76 - i * 16, w = 30 - i * 3;
-      P(ctx, [[50 - w, y - 12], [50 + w, y - 12], [50 + w + 5, y], [50 - w - 5, y]], lg(ctx, 50 - w, 0, 50 + w, 0, [[0, C.dk], [0.45, C.base], [1, C.lt]]));
-      P(ctx, [[50 - w, y - 12], [50 + w, y - 12], [50 + w * 0.8, y - 17], [50 - w * 0.8, y - 17]], C.lt);
-    }
-  }
-}
-
-/** A small cross-flare specular sparkle — the glint a cut gem actually throws
- *  under raking light, which a flat highlight ellipse can't fake. */
-function sparkle(ctx: Ctx, x: number, y: number, r: number, c: string) {
-  ctx.save(); ctx.globalCompositeOperation = "lighter";
-  ctx.strokeStyle = c; ctx.lineWidth = 1.5; ctx.lineCap = "round";
-  ctx.beginPath(); ctx.moveTo(x - r, y); ctx.lineTo(x + r, y); ctx.moveTo(x, y - r); ctx.lineTo(x, y + r); ctx.stroke();
-  ctx.globalAlpha = 0.55; ctx.lineWidth = 0.7;
-  ctx.beginPath(); ctx.moveTo(x - r * 0.68, y - r * 0.68); ctx.lineTo(x + r * 0.68, y + r * 0.68);
-  ctx.moveTo(x - r * 0.68, y + r * 0.68); ctx.lineTo(x + r * 0.68, y - r * 0.68); ctx.stroke();
-  ctx.restore();
-}
-
-/** Cut gemstone. `cut` changes the facet plan so every stone is its own picture. */
-function gemstone(ctx: Ctx, C: Cols, p: GoodParams) {
-  const cut = p.cut || "brilliant";
-  const F = (pts: Pt[], f: Paint) => P(ctx, pts, f);
-  if (cut === "brilliant") {
-    F([[50, 16], [80, 42], [50, 86], [20, 42]], C.base);
-    F([[50, 16], [80, 42], [50, 50]], C.lt); F([[50, 16], [20, 42], [50, 50]], C.hi);
-    F([[20, 42], [50, 86], [50, 50]], C.dk); F([[80, 42], [50, 86], [50, 50]], C.base);
-  } else if (cut === "emerald") {
-    F([[30, 20], [70, 20], [80, 34], [80, 72], [70, 86], [30, 86], [20, 72], [20, 34]], C.base);
-    F([[34, 26], [66, 26], [72, 36], [72, 70], [66, 80], [34, 80], [28, 70], [28, 36]], C.lt);
-    F([[34, 26], [66, 26], [62, 40], [38, 40]], C.hi);
-    F([[38, 66], [62, 66], [66, 80], [34, 80]], C.dk);
-  } else if (cut === "cushion") {
-    F([[50, 16], [76, 30], [84, 56], [62, 84], [38, 84], [16, 56], [24, 30]], C.base);
-    F([[50, 16], [76, 30], [50, 52], [24, 30]], C.hi);
-    F([[24, 30], [50, 52], [16, 56]], C.lt);
-    F([[50, 52], [62, 84], [38, 84]], C.dk);
-  } else if (cut === "pear") {
-    F([[50, 14], [74, 50], [62, 84], [38, 84], [26, 50]], C.base);
-    F([[50, 14], [74, 50], [50, 54], [26, 50]], C.hi);
-    F([[26, 50], [50, 54], [38, 84]], C.lt);
-    F([[50, 54], [74, 50], [62, 84], [38, 84]], C.dk);
-    F([[50, 14], [62, 42], [50, 46], [38, 42]], "rgba(255,255,255,0.5)");
-  } else if (cut === "marquise") {
-    F([[50, 12], [74, 50], [50, 88], [26, 50]], C.base);
-    F([[50, 12], [74, 50], [50, 50]], C.hi);
-    F([[50, 12], [26, 50], [50, 50]], C.lt);
-    F([[26, 50], [50, 88], [50, 50]], C.dk);
-    L(ctx, [[50, 12], [50, 88]], C.hi, 2);
-  } else if (cut === "trilliant") {
-    F([[50, 16], [84, 74], [16, 74]], C.base);
-    F([[50, 16], [67, 45], [33, 45]], C.hi);
-    F([[33, 45], [67, 45], [84, 74], [16, 74]], C.lt);
-    F([[50, 45], [84, 74], [16, 74]], C.dk);
-    L(ctx, [[33, 45], [67, 45]], C.hi, 2);
-  } else if (cut === "cabochon") {
-    E(ctx, 50, 54, 30, 26, 0, vol(ctx, 50, 54, 30, C));
-    E(ctx, 40, 42, 12, 7, -0.6, "rgba(255,255,255,0.55)");
-  } else { // rough / uncut
-    F([[26, 60], [36, 28], [58, 20], [76, 40], [72, 74], [44, 84]], lg(ctx, 26, 20, 76, 84, [[0, C.lt], [0.55, C.base], [1, C.dk]]));
-    F([[36, 28], [58, 20], [56, 46], [38, 50]], C.hi);
-  }
-  E(ctx, 38, 34, 7, 4, -0.6, "rgba(255,255,255,0.6)");
-  sparkle(ctx, 38, 34, 7, "#ffffff");
-  sparkle(ctx, 64, 60, 3.4, "rgba(255,255,255,0.75)");
-}
-
-/** Fish body — species vary by depth, fins, tail and markings. */
-function fish(ctx: Ctx, C: Cols, p: GoodParams) {
-  const d = p.depth || 20, y = p.y || 52;
-  P(ctx, [[24, y], [46, y - d, 72, y - d * 0.55], [84, y], [72, y + d * 0.55, 46, y + d], [24, y]],
-    lg(ctx, 0, y - d, 0, y + d, [[0, C.lt], [0.5, C.base], [1, C.dk]]));
-  P(ctx, [[26, y], [10, y - d * 0.9], [12, y], [10, y + d * 0.9]], C.dk);           // tail
-  if (p.dorsal) P(ctx, [[48, y - d * 0.85], [60, y - d * 1.7], [68, y - d * 0.7]], C.dk);
-  P(ctx, [[52, y + d * 0.5], [62, y + d * 1.15], [68, y + d * 0.35]], C.dk);        // pelvic
-  E(ctx, 76, y - d * 0.18, 3.2, 3.2, 0, "#14202a"); E(ctx, 77, y - d * 0.3, 1.2, 1.2, 0, "#fff");
-  if (p.stripes) for (let i = 0; i < 4; i++) L(ctx, [[40 + i * 10, y - d * 0.7], [40 + i * 10, y + d * 0.7]], "rgba(255,255,255,0.25)", 3);
-  if (p.spots) for (const [sx, sy] of [[52, y - 6], [62, y + 3], [44, y + 5]]) E(ctx, sx, sy, 3, 3, 0, "rgba(20,30,40,0.35)");
-  if (p.dried) { L(ctx, [[70, y - d * 0.6], [70, y - d * 1.9]], "#9a8a6a", 2.5); E(ctx, 70, y - d * 2, 3, 3, 0, "#c9b78e"); }
-}
-
-/** Cetacean. */
-function whale(ctx: Ctx, C: Cols) {
-  P(ctx, [[16, 58], [40, 26, 70, 40], [86, 52], [70, 66, 40, 74], [16, 58]], lg(ctx, 0, 26, 0, 74, [[0, C.lt], [0.55, C.base], [1, C.dk]]));
-  P(ctx, [[84, 50], [96, 34], [92, 56]], C.dk);
-  P(ctx, [[52, 42], [62, 26], [64, 44]], C.dk);
-  P(ctx, [[44, 66], [54, 80], [62, 64]], C.dk);
-  E(ctx, 30, 54, 2.6, 2.6, 0, "#14202a");
-  for (let i = 0; i < 5; i++) L(ctx, [[22 + i * 6, 64], [24 + i * 6, 72]], "rgba(255,255,255,0.2)", 2.5);
-  L(ctx, [[46, 34], [40, 18, 48, 10]], "rgba(200,225,240,0.7)", 4);
-}
-
-/** Land animal silhouettes. */
-function beast(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "horse") {
-    P(ctx, [[26, 54], [44, 40, 62, 48], [70, 52], [76, 44, 80, 30], [86, 26], [84, 38], [76, 52], [70, 64], [60, 68], [34, 66], [26, 54]],
-      lg(ctx, 0, 26, 0, 80, [[0, C.lt], [0.55, C.base], [1, C.dk]]));
-    for (const x of [34, 44, 60, 68]) P(ctx, [[x, 64], [x + 6, 64], [x + 5, 86], [x - 1, 86]], C.dk);
-    P(ctx, [[26, 54], [12, 66], [22, 66]], C.dk);
-    P(ctx, [[80, 28], [84, 18], [86, 28]], C.dk);
-    L(ctx, [[70, 34], [62, 46, 56, 56]], C.dk, 5);
-  } else if (p.kind === "sheep") {
-    E(ctx, 48, 54, 28, 20, 0, C.lt);
-    for (const [x, y, r] of [[28, 46, 11], [42, 38, 12], [60, 40, 12], [70, 52, 11], [34, 64, 10], [54, 68, 11]]) E(ctx, x, y, r, r, 0, r > 11 ? C.lt : C.base);
-    E(ctx, 76, 44, 11, 9, 0.4, C.dk); E(ctx, 80, 42, 2.2, 2.2, 0, "#14202a");
-    for (const x of [36, 50, 62]) P(ctx, [[x, 70], [x + 5, 70], [x + 4, 84], [x - 1, 84]], C.dk);
-  } else { // hide / pelt stretched
-    P(ctx, [[50, 14], [68, 22], [86, 20], [74, 44], [80, 72], [62, 88], [38, 88], [20, 72], [26, 44], [14, 20], [32, 22]],
-      rg(ctx, 50, 50, 6, 44, [[0, C.lt], [0.6, C.base], [1, C.dk]]));
-    if (p.spots) for (const [x, y, r] of [[42, 44, 7], [60, 54, 6], [48, 68, 5]]) E(ctx, x, y, r, r * 0.8, 0.3, C.dk);
-    if (p.fur) for (let i = 0; i < 12; i++) {
-      const a = i / 12 * T2;
-      L(ctx, [[50 + Math.cos(a) * 30, 50 + Math.sin(a) * 32], [50 + Math.cos(a) * 36, 50 + Math.sin(a) * 38]], C.dk, 2.5);
-    }
-  }
-}
-
-/** Leaves / pods / bark rolls / threads — the aromatics family. */
-function botanical(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "leaf") {
-    P(ctx, [[26, 78], [18, 34, 52, 20], [84, 30], [74, 68, 26, 78]], lg(ctx, 26, 20, 84, 78, [[0, C.lt], [0.6, C.base], [1, C.dk]]));
-    L(ctx, [[28, 76], [50, 50, 78, 34]], C.dk, 3);
-    for (let i = 1; i < 5; i++) L(ctx, [[30 + i * 10, 72 - i * 8], [36 + i * 10, 58 - i * 6]], C.dk, 2);
-    if (p.second) P(ctx, [[36, 84], [44, 60, 72, 58]], C.base, false);
-  } else if (p.kind === "bark") {
-    for (let i = 0; i < 3; i++) {
-      const x = 32 + i * 18;
-      P(ctx, [[x - 9, 18], [x + 9, 18], [x + 9, 84], [x - 9, 84]], lg(ctx, x - 9, 0, x + 9, 0, [[0, C.dk], [0.4, C.base], [1, C.lt]]));
-      E(ctx, x, 18, 9, 3.4, 0, C.lt); E(ctx, x, 18, 5, 1.9, 0, C.dk);
-    }
-  } else if (p.kind === "buds") {
-    for (const [x, y, a] of [[34, 60, -0.5], [52, 70, 0.2], [66, 52, 0.7], [46, 42, -0.2]]) {
-      L(ctx, [[x, y], [x + Math.cos(a) * 16, y - 16]], C.dk, 4.5);
-      E(ctx, x + Math.cos(a) * 18, y - 19, 6, 6.5, a, C.base);
-      for (let i = 0; i < 4; i++) {
-        const b = a + i * 1.4;
-        L(ctx, [[x + Math.cos(a) * 18, y - 23], [x + Math.cos(a) * 18 + Math.cos(b) * 7, y - 26 + Math.sin(b) * 5]], C.lt, 2);
-      }
-    }
-  } else if (p.kind === "corns") {
-    for (const [x, y, r] of [[38, 44, 10], [60, 40, 9], [50, 60, 11], [30, 64, 8], [68, 62, 9], [50, 80, 7]]) {
-      E(ctx, x, y, r, r, 0, vol(ctx, x, y, r, C));
-      E(ctx, x - r * 0.3, y - r * 0.35, r * 0.25, r * 0.18, -0.6, "rgba(255,255,255,0.35)");
-      L(ctx, [[x - r * 0.5, y + r * 0.3], [x + r * 0.4, y - r * 0.2]], C.dk, 1.6);
-    }
-  } else if (p.kind === "threads") {
-    for (let i = 0; i < 9; i++) {
-      const x = 26 + i * 6, s = (i % 2 ? 1 : -1);
-      L(ctx, [[x, 74], [x + s * 8, 54, x - s * 4, 28]], i % 3 ? C.base : C.lt, 3.2);
-    }
-    E(ctx, 50, 80, 26, 7, 0, C.dk);
-  } else if (p.kind === "flower") {
-    for (let i = 0; i < (p.petals || 6); i++) {
-      const a = i / (p.petals || 6) * T2;
-      E(ctx, 50 + Math.cos(a) * 19, 52 + Math.sin(a) * 19, 13, 8, a, i % 2 ? C.base : C.lt);
-    }
-    E(ctx, 50, 52, 10, 10, 0, C.hi);
-    L(ctx, [[50, 62], [50, 88]], C.stem || "#4e7a3a", 4);
-  } else if (p.kind === "cane") {
-    for (let i = 0; i < 4; i++) {
-      const x = 30 + i * 13, t = i % 2;
-      P(ctx, [[x - 5, 20 + t * 6], [x + 5, 20 + t * 6], [x + 5, 86], [x - 5, 86]], i % 2 ? C.base : C.lt);
-      for (let k = 0; k < 5; k++) L(ctx, [[x - 5, 30 + t * 4 + k * 12], [x + 5, 30 + t * 4 + k * 12]], C.dk, 2.4, "butt");
-    }
-    P(ctx, [[34, 20], [18, 6, 26, 24]], C.leaf || "#6f9a44", false);
-    L(ctx, [[24, 60], [76, 60]], "rgba(40,30,16,0.45)", 4);
-  } else if (p.kind === "distaff") {
-    L(ctx, [[52, 90], [50, 40]], "#7a5f3a", 5);
-    for (let i = 0; i < 7; i++) {
-      const s = (i - 3) * 3;
-      L(ctx, [[50 + s * 0.4, 44], [46 + s, 26, 50 + s * 1.5, 10]], i % 2 ? C.base : C.lt, 3.4);
-    }
-    E(ctx, 50, 44, 16, 7, 0, C.dk);
-    P(ctx, [[36, 60], [64, 60], [62, 74], [38, 74]], C.lt);
-    for (let i = 0; i < 4; i++) L(ctx, [[39 + i * 7, 60], [39 + i * 7, 74]], C.dk, 1.8);
-  } else { // sheaf of stalks
-    for (let i = 0; i < 5; i++) {
-      const x = 32 + i * 9;
-      L(ctx, [[x - 4, 86], [x, 50, x + (i - 2) * 2, 20]], C.base, 3.4);
-      E(ctx, x + (i - 2) * 2, 20, 3.5, 5, 0, C.lt);
-    }
-    L(ctx, [[30, 64], [70, 64]], C.dk, 5);
-  }
-}
-
-/** Tree / timber / worked wood. */
-function wood(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "logs") {
-    for (const [x, y, r] of [[36, 64, 17], [66, 64, 17], [51, 36, 17]]) {
-      E(ctx, x, y, r, r, 0, vol(ctx, x, y, r, C));
-      for (let i = 1; i < 4; i++) { ctx.beginPath(); ctx.arc(x - 1, y - 1, r * i / 4.2, 0, T2); ctx.strokeStyle = C.dk; ctx.lineWidth = 1.6; ctx.stroke(); }
-    }
-  } else if (p.kind === "tree" && !p.palm) {
-    P(ctx, [[44, 88], [46, 60], [54, 60], [56, 88]], C.dk);
-    for (const [x, y, r] of [[50, 34, 26], [30, 48, 17], [70, 48, 17]]) E(ctx, x, y, r, r * 0.85, 0, vol(ctx, x, y, r, { base: C.base, lt: C.lt, dk: C.dk }));
-  } else if (p.palm) {
-    L(ctx, [[48, 90], [54, 60, 50, 34]], "#6d5232", 6);
-    for (let i = 0; i < 6; i++) {
-      const a = -Math.PI / 2 + (i - 2.5) * 0.5;
-      L(ctx, [[50, 34], [50 + Math.cos(a) * 26, 34 + Math.sin(a) * 20, 50 + Math.cos(a) * 40, 34 + Math.sin(a) * 36]], i % 2 ? C.base : C.lt, 5);
-    }
-    for (const [x, y] of [[44, 42], [56, 44], [50, 48]]) E(ctx, x, y, 5, 6, 0, C.dk);
-  } else if (p.kind === "plank") {
-    P(ctx, [[16, 40], [84, 32], [84, 56], [16, 64]], lg(ctx, 16, 0, 84, 0, [[0, C.dk], [0.5, C.base], [1, C.lt]]));
-    P(ctx, [[16, 64], [84, 56], [84, 66], [16, 74]], C.dk);
-    for (let i = 0; i < 3; i++) L(ctx, [[22, 46 + i * 6], [78, 38 + i * 6]], "rgba(0,0,0,0.14)", 1.6);
-  } else { // chair / furniture
-    P(ctx, [[30, 34], [58, 30], [60, 60], [32, 64]], lg(ctx, 30, 0, 60, 0, [[0, C.dk], [0.6, C.base], [1, C.lt]]));
-    P(ctx, [[32, 62], [74, 58], [76, 70], [34, 74]], C.base);
-    for (const [x, y] of [[36, 74], [70, 70], [60, 62]]) P(ctx, [[x, y], [x + 5, y - 1], [x + 4, y + 16], [x - 1, y + 16]], C.dk);
-    for (let i = 0; i < 3; i++) L(ctx, [[36 + i * 8, 34], [38 + i * 8, 60]], C.dk, 2);
-  }
-}
-
-/** Paper, books, candles, writing. */
-function craft(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "scroll") {
-    P(ctx, [[24, 28], [76, 28], [76, 74], [24, 74]], lg(ctx, 0, 28, 0, 74, [[0, C.lt], [0.5, C.base], [1, C.dk]]));
-    for (let i = 0; i < 4; i++) L(ctx, [[34, 40 + i * 9], [66, 40 + i * 9]], "rgba(60,44,26,0.4)", 2);
-    E(ctx, 24, 51, 7, 25, 0, C.dk); E(ctx, 76, 51, 7, 25, 0, C.base);
-  } else if (p.kind === "book") {
-    P(ctx, [[22, 24], [74, 20], [78, 74], [26, 80]], C.dk);
-    P(ctx, [[28, 28], [72, 24], [75, 70], [31, 76]], C.lt);
-    for (let i = 0; i < 5; i++) L(ctx, [[34, 36 + i * 8], [68, 33 + i * 8]], "rgba(70,54,34,0.35)", 1.8);
-    P(ctx, [[22, 24], [26, 80], [20, 74], [16, 20]], C.base);
-    if (p.clasp) P(ctx, [[70, 42], [80, 40], [80, 52], [70, 54]], "#c9a24a");
-  } else if (p.kind === "candle") {
-    P(ctx, [[42, 32], [58, 32], [60, 84], [40, 84]], lg(ctx, 40, 0, 60, 0, [[0, C.dk], [0.45, C.lt], [1, C.dk]]));
-    L(ctx, [[50, 32], [50, 24]], "#3a2c1c", 2.5);
-    P(ctx, [[50, 8], [58, 22], [50, 28], [42, 22]], "#f0b24a");
-    P(ctx, [[50, 14], [54, 22], [50, 26], [46, 22]], "#fff0c0");
-    L(ctx, [[44, 42], [44, 78]], "rgba(255,255,255,0.35)", 3);
-    P(ctx, [[32, 84], [68, 84], [72, 92], [28, 92]], "#8c7a56");
-  } else if (p.kind === "satchel") {
-    P(ctx, [[26, 42], [74, 42], [78, 80], [22, 80]], lg(ctx, 22, 0, 78, 0, [[0, C.dk], [0.45, C.base], [1, C.lt]]));
-    P(ctx, [[24, 38], [76, 38], [78, 58], [22, 58]], C.lt);
-    L(ctx, [[24, 58], [76, 58]], C.dk, 2.5);
-    P(ctx, [[44, 54], [56, 54], [56, 66], [44, 66]], C.dk);
-    E(ctx, 50, 60, 3.2, 3.2, 0, "#c9a24a");
-    L(ctx, [[28, 42], [50, 18, 72, 42]], C.dk, 5);
-    for (let i = 0; i < 2; i++) L(ctx, [[32 + i * 36, 44], [32 + i * 36, 56]], C.dk, 3);
-  } else { // soap / bar
-    P(ctx, [[24, 40], [76, 34], [80, 64], [28, 72]], lg(ctx, 24, 0, 80, 0, [[0, C.lt], [0.5, C.base], [1, C.dk]]));
-    P(ctx, [[24, 40], [76, 34], [70, 44], [30, 50]], C.hi);
-    E(ctx, 52, 52, 10, 7, -0.1, "rgba(255,255,255,0.25)");
-    ctx.beginPath(); ctx.arc(52, 52, 9, 0, T2); ctx.strokeStyle = "rgba(255,255,255,0.35)"; ctx.lineWidth = 2; ctx.stroke();
-  }
-}
-
-/** Marine curios: pearl, shell, coral, ambergris. */
-function marine(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "pearl") {
-    P(ctx, [[16, 60], [50, 32, 84, 60], [74, 76], [26, 76]], C.dk);
-    P(ctx, [[20, 60], [50, 38, 80, 60], [70, 70], [30, 70]], C.base);
-    for (let i = 0; i < 7; i++) L(ctx, [[50, 68], [22 + i * 9.4, 44]], "rgba(255,255,255,0.3)", 2);
-    E(ctx, 50, 58, 12, 12, 0, rg(ctx, 50, 58, 2, 14, [[0, "#ffffff"], [0.6, "#e6eef4"], [1, "#b9c8d4"]]));
-    E(ctx, 46, 54, 4, 3, -0.6, "#ffffff");
-  } else if (p.kind === "conch") {
-    P(ctx, [[26, 74], [20, 30, 58, 22], [86, 42], [66, 80], [26, 74]], lg(ctx, 20, 22, 86, 80, [[0, C.lt], [0.55, C.base], [1, C.dk]]));
-    for (let i = 0; i < 5; i++) L(ctx, [[30 + i * 4, 72 - i * 3], [52 + i * 6, 30 + i * 6]], C.hi, 2.4);
-    E(ctx, 62, 58, 12, 9, 0.4, C.dk);
-  } else if (p.kind === "coral") {
-    const br = (x: number, y: number, a: number, len: number, d: number) => {
-      const ex = x + Math.cos(a) * len, ey = y + Math.sin(a) * len;
-      L(ctx, [[x, y], [ex, ey]], d === 2 ? C.dk : C.base, 3.4 + d * 1.6);
-      if (d > 0) { br(ex, ey, a - 0.62, len * 0.74, d - 1); br(ex, ey, a + 0.5, len * 0.74, d - 1); }
-    };
-    br(50, 88, -Math.PI / 2, 24, 2);
-    for (const [x, y] of [[36, 44], [64, 46], [50, 30]]) E(ctx, x, y, 4, 4, 0, C.lt);
-    E(ctx, 50, 90, 22, 6, 0, "rgba(30,44,54,0.5)");
-  } else { // ambergris / lump
-    P(ctx, [[22, 56], [30, 26, 66, 24], [82, 50], [70, 80], [34, 80]], rg(ctx, 46, 48, 6, 40, [[0, C.lt], [0.55, C.base], [1, C.dk]]));
-    for (const [x, y, r] of [[40, 46, 6], [60, 58, 5], [52, 34, 4]]) E(ctx, x, y, r, r * 0.7, 0.4, C.dk);
-    E(ctx, 38, 40, 8, 5, -0.5, "rgba(255,255,255,0.3)");
-  }
-}
-
-/** Mineral heaps, salt crystals, clay. */
-function mineral(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "crystals") {
-    P(ctx, [[24, 84], [36, 44], [48, 84]], C.lt);
-    P(ctx, [[40, 84], [56, 26], [72, 84]], C.base);
-    P(ctx, [[62, 84], [74, 50], [86, 84]], C.lt);
-    P(ctx, [[56, 26], [64, 52], [56, 58], [48, 52]], C.hi);
-    E(ctx, 50, 86, 34, 7, 0, C.dk);
-  } else if (p.kind === "heap") {
-    P(ctx, [[18, 82], [50, 36], [82, 82]], lg(ctx, 18, 36, 82, 82, [[0, C.lt], [0.6, C.base], [1, C.dk]]));
-    for (const [x, y, r] of [[38, 66, 5], [56, 58, 4], [48, 74, 5], [64, 74, 4]]) E(ctx, x, y, r, r * 0.8, 0, C.hi);
-    E(ctx, 50, 84, 34, 7, 0, C.dk);
-    if (p.scoop) { P(ctx, [[58, 44], [80, 32], [86, 44], [64, 56]], "#b9a887"); P(ctx, [[80, 34], [92, 26], [95, 31], [83, 39]], "#7a5f3a"); }
-  } else if (p.kind === "loaf") {
-    P(ctx, [[50, 16], [70, 80], [30, 80]], lg(ctx, 30, 0, 70, 0, [[0, C.lt], [0.45, C.hi], [1, C.dk]]));
-    P(ctx, [[50, 16], [60, 48], [40, 48]], "rgba(255,255,255,0.5)");
-    L(ctx, [[36, 64], [64, 64]], "rgba(120,100,70,0.35)", 3);
-    E(ctx, 50, 80, 20, 6, 0, C.dk);
-    P(ctx, [[24, 80], [76, 80], [80, 88], [20, 88]], "#8a7250");
-  } else if (p.kind === "pan") {
-    P(ctx, [[14, 44], [86, 44], [76, 80], [24, 80]], "#6f6350");
-    P(ctx, [[20, 48], [80, 48], [72, 76], [28, 76]], lg(ctx, 0, 48, 0, 76, [[0, C.hi], [0.6, C.lt], [1, C.base]]));
-    for (let i = 0; i < 5; i++) L(ctx, [[24 + i * 2, 52 + i * 5], [76 - i * 2, 52 + i * 5]], "rgba(150,140,120,0.45)", 2);
-    P(ctx, [[44, 20], [52, 20], [56, 50], [48, 50]], "#7a5f3a");
-    P(ctx, [[34, 18], [66, 18], [66, 24], [34, 24]], "#7a5f3a");
-  } else if (p.kind === "block") {
-    P(ctx, [[24, 40], [64, 28], [80, 40], [80, 72], [40, 84], [24, 72]], C.base);
-    P(ctx, [[24, 40], [64, 28], [80, 40], [40, 52]], C.lt);
-    P(ctx, [[40, 52], [80, 40], [80, 72], [40, 84]], C.dk);
-    if (p.veins) for (const [a, b] of [[[46, 58], [70, 50]], [[44, 72], [66, 64]]]) L(ctx, [a, b], C.hi, 2.4);
-  } else { // resin drop
-    P(ctx, [[50, 18], [76, 52, 66, 74], [50, 84], [34, 74, 24, 52]], rg(ctx, 46, 48, 4, 40, [[0, C.hi], [0.45, C.base], [1, C.dk]]));
-    E(ctx, 42, 44, 9, 13, -0.4, "rgba(255,255,255,0.4)");
-    if (p.inclusion) E(ctx, 56, 58, 5, 4, 0.4, "rgba(60,36,10,0.55)");
-  }
-}
-
-/** Fired-earth wares and glass. */
-function ware(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "glass") {
-    P(ctx, [[36, 26], [64, 26], [62, 40], [70, 64], [50, 80], [30, 64], [38, 40]],
-      lg(ctx, 30, 0, 70, 0, [[0, "rgba(255,255,255,0.5)"], [0.35, C.lt], [0.7, C.base], [1, C.dk]]));
-    E(ctx, 50, 26, 14, 5, 0, C.lt);
-    L(ctx, [[40, 34], [36, 60]], "rgba(255,255,255,0.7)", 4);
-  } else if (p.kind === "pot") {
-    P(ctx, [[34, 24], [66, 24], [62, 34], [78, 56], [62, 80], [38, 80], [22, 56], [38, 34]],
-      lg(ctx, 22, 0, 78, 0, [[0, C.dk], [0.4, C.base], [0.75, C.lt], [1, C.dk]]));
-    L(ctx, [[28, 50], [72, 50]], C.hi, 3.5);
-    for (let i = 0; i < 5; i++) E(ctx, 30 + i * 10, 60, 3, 3, 0, C.hi);
-    E(ctx, 50, 24, 16, 5, 0, C.lt);
-  } else if (p.kind === "vat") {
-    P(ctx, [[24, 38], [76, 38], [70, 84], [30, 84]], lg(ctx, 24, 0, 76, 0, [[0, "#5c4a34"], [0.5, "#7a6144"], [1, "#4a3b28"]]));
-    E(ctx, 50, 38, 26, 9, 0, C.base);
-    E(ctx, 50, 38, 22, 7, 0, C.dk);
-    for (const y of [52, 70]) L(ctx, [[26, y], [74, y]], "rgba(30,22,14,0.5)", 3.5, "butt");
-    L(ctx, [[62, 14], [58, 30, 64, 40]], "#8a7a5c", 4);
-    P(ctx, [[52, 18], [74, 14], [70, 32], [50, 34]], C.lt);
-    for (let i = 0; i < 4; i++) L(ctx, [[54 + i * 5, 18], [52 + i * 5, 33]], C.base, 2);
-  } else if (p.kind === "bell") {
-    P(ctx, [[38, 28], [62, 28], [74, 70], [26, 70]], lg(ctx, 26, 0, 74, 0, [[0, C.dk], [0.42, C.lt], [0.75, C.base], [1, C.dk]]));
-    E(ctx, 50, 70, 24, 8, 0, C.base);
-    E(ctx, 50, 70, 24, 8, 0, lg(ctx, 26, 0, 74, 0, [[0, C.dk], [0.5, C.lt], [1, C.dk]]));
-    L(ctx, [[50, 26], [50, 16]], C.dk, 5);
-    ctx.beginPath(); ctx.arc(50, 14, 7, Math.PI, 0); ctx.strokeStyle = C.base; ctx.lineWidth = 5; ctx.stroke();
-    E(ctx, 50, 80, 5, 7, 0, C.dk);
-    L(ctx, [[34, 44], [30, 64]], "rgba(255,255,255,0.3)", 4);
-  } else { // clay lump on a wheel
-    P(ctx, [[30, 44], [70, 44], [64, 72], [36, 72]], lg(ctx, 30, 0, 70, 0, [[0, C.dk], [0.5, C.base], [1, C.lt]]));
-    E(ctx, 50, 44, 20, 7, 0, C.lt); E(ctx, 50, 44, 11, 4, 0, C.dk);
-    E(ctx, 50, 76, 32, 8, 0, C.dk);
-  }
-}
-
-/** Statues, columns, carved goods, jewelry. */
-function carved(ctx: Ctx, C: Cols, p: GoodParams) {
-  if (p.kind === "column") {
-    P(ctx, [[30, 22], [70, 22], [70, 30], [30, 30]], C.lt);
-    P(ctx, [[36, 30], [64, 30], [64, 76], [36, 76]], lg(ctx, 36, 0, 64, 0, [[0, C.dk], [0.45, C.lt], [1, C.dk]]));
-    for (const x of [42, 50, 58]) L(ctx, [[x, 32], [x, 74]], C.dk, 2);
-    P(ctx, [[28, 76], [72, 76], [74, 86], [26, 86]], C.base);
-  } else if (p.kind === "statue") {
-    E(ctx, 50, 26, 10, 12, 0, C.lt);
-    P(ctx, [[40, 38], [60, 38], [64, 72], [36, 72]], lg(ctx, 36, 0, 64, 0, [[0, C.dk], [0.5, C.lt], [1, C.dk]]));
-    P(ctx, [[40, 40], [30, 58], [36, 60], [44, 46]], C.base);
-    P(ctx, [[60, 40], [72, 54], [66, 58], [56, 46]], C.base);
-    P(ctx, [[30, 72], [70, 72], [74, 86], [26, 86]], C.dk);
-  } else if (p.kind === "tusk") {
-    L(ctx, [[22, 74], [46, 58, 58, 32], [62, 18]], C.lt, 13);
-    L(ctx, [[24, 76], [48, 60, 60, 34]], C.dk, 4);
-    E(ctx, 22, 74, 7, 7, 0, C.base);
-  } else if (p.kind === "ring") {
-    ctx.beginPath(); ctx.arc(50, 58, 24, 0, T2); ctx.strokeStyle = C.base; ctx.lineWidth = 9; ctx.stroke();
-    ctx.beginPath(); ctx.arc(50, 58, 24, Math.PI * 1.1, Math.PI * 1.75); ctx.strokeStyle = C.lt; ctx.lineWidth = 9; ctx.stroke();
-    P(ctx, [[50, 10], [64, 26], [50, 40], [36, 26]], C.hi);
-    P(ctx, [[50, 10], [64, 26], [50, 26]], "rgba(255,255,255,0.55)");
-  } else if (p.kind === "figurine") {
-    E(ctx, 50, 24, 9, 10, 0, C.lt);
-    P(ctx, [[42, 34], [58, 34], [62, 66], [38, 66]], lg(ctx, 38, 0, 62, 0, [[0, C.dk], [0.45, C.lt], [1, C.base]]));
-    P(ctx, [[42, 36], [28, 52], [33, 56], [46, 42]], C.base);
-    P(ctx, [[58, 36], [70, 48], [66, 53], [54, 42]], C.base);
-    P(ctx, [[38, 66], [62, 66], [66, 78], [34, 78]], C.base);
-    P(ctx, [[30, 78], [70, 78], [74, 88], [26, 88]], C.dk);
-    L(ctx, [[46, 40], [46, 62]], "rgba(255,255,255,0.3)", 2.5);
-  } else { // disc / bi
-    E(ctx, 50, 54, 32, 32, 0, rg(ctx, 50, 54, 6, 34, [[0, C.lt], [0.6, C.base], [1, C.dk]]));
-    E(ctx, 50, 54, 11, 11, 0, "rgba(12,18,24,0.85)");
-    ctx.beginPath(); ctx.arc(50, 54, 22, 0, T2); ctx.strokeStyle = C.hi; ctx.lineWidth = 2; ctx.stroke();
-  }
-}
-
-/** Smoke/aroma column for censed goods. */
-function aroma(ctx: Ctx, C: Cols, p: GoodParams) {
-  P(ctx, [[30, 74], [70, 74], [64, 88], [36, 88]], C.dk);
-  P(ctx, [[34, 66], [66, 66], [70, 76], [30, 76]], C.base);
-  for (const dx of [-10, 10]) L(ctx, [[50 + dx, 64], [50 + dx - 12, 46, 50 + dx + 10, 30], [50 + dx - 6, 14]], C.lt, 4);
-  if (p.grains) for (const [x, y, r] of [[44, 60, 5], [56, 58, 4], [50, 62, 4]]) E(ctx, x, y, r, r * 0.8, 0, C.hi);
-}
-
-/** Sack of a commodity, with the goods spilling out. */
-function sack(ctx: Ctx, C: Cols, p: GoodParams) {
-  P(ctx, [[28, 44], [72, 44], [80, 80], [20, 80]], lg(ctx, 20, 0, 80, 0, [[0, C.dk], [0.45, C.base], [1, C.lt]]));
-  P(ctx, [[34, 30], [66, 30], [72, 46], [28, 46]], C.lt);
-  L(ctx, [[34, 38], [66, 38]], C.dk, 4);
-  for (const [x, y, r] of (p.spill || [[42, 26, 5], [54, 22, 5], [62, 28, 4]])) E(ctx, x, y, r, r * (p.round === false ? 0.6 : 1), 0.4, C.hi);
-  L(ctx, [[36, 52], [36, 76]], "rgba(255,255,255,0.2)", 4);
-}
-
-type Family = (ctx: Ctx, C: Cols, p: GoodParams) => void;
-const F: Record<string, Family> = {
-  ear, panicle, fruit, vessel, cloth, metal, gemstone, fish, whale, beast,
-  botanical, wood, craft, marine, mineral, ware, carved, aroma, sack,
+// ── the sprites ────────────────────────────────────────────────────────────
+const SPR: Record<string, (g: Painter, T: Ramp) => void> = {
+  // Staples
+  wheat(g,T){ for(const [tx,ty] of [[5,4],[12,2],[19,4]]) ear(g,12,21,tx,ty,5,T,2.4); g.f(R(10,16,5,2),BURLAP,"bevel"); },
+  rice(g,T){
+    g.f(I(E(12,13.5,9,5.5),above(14)),T,"ball");
+    g.dots([[7,11],[10,10],[13,9],[16,11],[9,12],[12,12],[15,12],[18,13],[11,11]],T[1]);
+    g.dots([[8,10],[12,9],[14,10],[6,12]],T[4]);
+    g.line(13,11,20,2,WOOD[3]); g.line(15,11,21,4,WOOD[2]);
+    g.f(I(E(12,13,10,8),below(13.5)),BLUE,"ball"); g.f(R(2,13,20,1.2),BLUE,3);
+    g.line(4,16,20,16,WHITE[3],I(E(12,13,10,8),below(13.5))); g.f(R(8,20,8,2),BLUE,"bevel");
+  },
+  barley(g,T){ ear(g,6,22,13,4,6,T,5.5); ear(g,11,22,20,7,5,T,5); g.f(R(6,18,6,2),BURLAP,"bevel"); },
+  millet(g,T){
+    g.f(Ln(8,17,2,11,1.8),LEAF,"bevel"); g.line(6,22,10,12,LEAF[2]);
+    const pts=[[10,12],[10.5,9],[12,6.5],[14.5,5],[17,6],[18.5,8.5],[19,11.5],[18.5,14.5],[17.5,17]];
+    pts.forEach(([x,y],i)=>{g.f(C(x,y,2.3-i*0.08),T,"ball"); if(i>1) g.f(C(x+1.6,y+1.2,1.4),T,"ball");});
+  },
+  dates(g,T){
+    g.line(3,4,12,6,WOOD[2]); g.line(12,6,19,5,WOOD[2]);
+    g.line(12,5,21,1,LEAF[1]); for(let t=0.2;t<1;t+=0.2){const x=12+9*t,y=5-4*t; g.line(x,y,x+1,y+2.5,LEAF[3]); g.line(x,y,x-0.5,y-2.2,LEAF[2]);}
+    for(const [x,y,a] of [[8,10,0.3],[11.5,11,0],[15,10.5,-0.2],[18.5,9,-0.4],[9.5,15.5,0.25],[13,16,0],[16.5,15,-0.3],[12,20,0.1]]){g.line(12,6,x,y-2,WOOD[1]); g.f(RE(x,y,1.8,2.9,a),T,"ball");}
+  },
+  honey(g,T){
+    g.f(Ln(13,9,21,1.5,1.8),WOOD,"bevel");
+    g.f(E(11,15,7.5,6.5),CLAY,"ball"); g.f(R(5,7,12,3),CLAY,"bevel");
+    g.f(E(11,7.5,4.5,1.3),T,2); g.f(P([[5,8],[8,8],[8,13],[7,14.5],[6,13.5],[5.5,11]]),T,"bevel");
+    g.px(6,15,T[2]); g.dots([[13,14],[14,15],[15,14]],CLAY[3]);
+  },
+  // Wine, oil & vine
+  wine(g,T){
+    g.line(12,6,13,2,WOOD[2]); g.f(P([[13,4],[19,1.5],[21.5,5],[17.5,7.5]]),LEAF,"bevel"); g.line(14,4,20,3,LEAF[1]);
+    for(const [x,y] of [[6,8.5],[10,8.5],[14,8.5],[18,8.5],[8,12],[12,12],[16,12],[10,15.5],[14,15.5],[12,19]]) g.f(C(x,y,2.2),T,"ball");
+  },
+  oliveoil(g,T){
+    for(const s of [-1,1]) g.f(D(E(12+s*5,8,2.6,3.4),E(12+s*5,8,1.2,2)),CLAY,"bevel");
+    g.f(U(E(13,12.5,6.5,7),P([[9,17],[17,17],[14,22],[12,22]])),CLAY,"ball");
+    g.f(R(11,3,4,5),CLAY,"cylV"); g.f(R(10,2,6,2),CLAY,"bevel"); g.f(E(13,2.6,2,0.8),T,2);
+    g.line(7,13,19,13,CLAY[1],E(13,12.5,6.5,7));
+    g.line(1,21,8,15,WOOD[2]); g.f(RE(4,15.5,3.2,1.1,-0.7),ramp("#8a9a6a"),"bevel"); g.f(RE(7,19.5,3,1,0.3),ramp("#8a9a6a"),"bevel");
+    g.f(C(4,19.5,1.9),T,"ball"); g.f(C(8,16,1.9),T,"ball");
+  },
+  citrus(g,T){
+    g.f(C(12,13.5,8),T,"ball"); g.dots([[9,12],[13,10],[16,14],[11,17],[15,18],[8,16]],T[3]);
+    g.px(12,5.5,WOOD[1]); g.f(RE(16,4.5,4,1.6,-0.45),LEAF,"bevel"); g.line(13,5,18,3,LEAF[1]);
+  },
+  beer(g,T){
+    g.f(I(D(E(16.5,13.5,4.2,5),E(16.5,13.5,2,3)),(X)=>X>=15),T,"bevel");
+    g.f(R(5,7,11,14),T,"cylV"); g.f(R(5,20,11,1),T,1);
+    g.dots([[8,13],[11,16],[9,18],[12,11],[7,16]],T[4]);
+    g.f(U(C(7,6,2.5),C(10.5,5,3),C(14,6,2.5),R(5,6,11,2)),FOAM,"ball");
+    g.f(P([[12.5,7],[15,7],[15,11],[14,12],[13,11]]),FOAM,"bevel");
+  },
+  mead(g,T){
+    g.f(taper([5,6],[5,19],[20,18],7.5,1.2),ramp("#d6b77a"),"bevel");
+    g.f(taper([5,6],[5,19],[20,18],7.5,1.2,0,0.1),GOLD,"bevel");
+    g.f(taper([5,6],[5,19],[20,18],7.5,1.2,0.5,0.56),GOLD,"bevel");
+    g.f(taper([5,6],[5,19],[20,18],7.5,1.2,0.92,1),GOLD,"bevel");
+    g.f(E(5,5.6,3.4,1.3),T,2); g.px(4,5,T[4]);
+  },
+  brandy(g,T){
+    g.f(R(10,3,4,7),GLASS,"cylV"); g.f(R(10,1,4,3),BURLAP,"bevel");
+    g.f(C(12,15.5,6.8),T,"ball"); g.f(R(8,14,8,4),PAPER,"bevel"); g.line(9,16,14,16,PAPER[1]);
+    g.dots([[8,11],[8,12],[7,13]],T[4]);
+  },
+  citrus_liqueur(g,T){
+    g.f(R(10,3,4,4),GLASS,"cylV"); g.f(R(10,1,4,2),GOLD,"bevel");
+    g.f(U(R(7,9,9,13),P([[7,9.5],[16,9.5],[14,6.5],[9,6.5]])),T,"cylV");
+    g.f(R(7,13,9,4),PAPER,"bevel"); g.line(8,15,14,15,PAPER[1]);
+    const Y=ramp("#f4d23a"); g.f(C(18.5,18.5,4.2),Y,3); g.f(D(C(18.5,18.5,4.2),C(18.5,18.5,3.2)),Y,1);
+    for(let k=0;k<6;k++){const a=k*T2/6; g.line(18.5,18.5,18.5+Math.cos(a)*2.6,18.5+Math.sin(a)*2.6,Y[4]);}
+  },
+  // Cash crops
+  sugar(g,T){
+    for(const [x0,y0,x1,y1] of [[6,22,9,4],[12,22,12,3],[18,22,15,5]]){g.f(Ln(x0,y0,x1,y1,2.8),T,"cylV");
+      for(let t=0.18;t<0.98;t+=0.21){const x=x0+(x1-x0)*t,y=y0+(y1-y0)*t; g.line(x-1.4,y,x+1.4,y,T[1]);}}
+    g.f(Ln(9,5,3,1.5,1.6),LEAF,"bevel"); g.f(Ln(12,4,18,1,1.6),LEAF,"bevel"); g.f(Ln(15,6,21,4,1.6),LEAF,"bevel"); g.f(Ln(12,9,5,10,1.4),LEAF,"bevel");
+  },
+  refined_sugar(g,T){
+    g.f(P([[12,1.5],[13.4,3],[18.5,20],[5.5,20],[10.6,3]]),T,"cylV");
+    g.f(P([[6.2,15],[17.8,15],[18.8,21],[5.2,21]]),BLUE,"bevel"); g.line(6,17,18,17,WHITE[3]); g.dots([[12,18],[11,18]],WHITE[3]);
+  },
+  tobacco(g,T){
+    for(const [cx,cy,a] of [[8,10,-0.38],[16,10,0.38],[12,9,0]]){g.f(RE(cx,cy,3.1,8.6,a),T,"bevel"); g.line(12,18,cx+8.6*Math.sin(a),cy-8.6*Math.cos(a),T[1]);}
+    g.line(11,20,10,22,T[1]); g.line(13,20,14,22,T[1]); g.f(R(10,17,5,3),RED,"bevel");
+  },
+  indigo(g,T){
+    cube(g,2,14,5,5,T); cube(g,12,14,5,5,T); cube(g,7,9,5,5,T);
+    g.dots([[3,22],[6,23],[18,22],[21,22],[10,22]],T[3]);
+  },
+  coffee(g,T){
+    for(const [x,y,a] of [[9.5,7.5,-0.5],[15.5,7,0.35],[6.5,14,0.6],[17.5,14,0.7],[12,18,-0.3]]){
+      g.f(RE(x,y,3,4,a),T,"ball"); const s=Math.sin(a),c=Math.cos(a); g.line(x+s*2.6,y-c*2.6,x-s*2.6,y+c*2.6,T[0]);}
+  },
+  tea(g,T){
+    g.line(6,21,10,5,T[1]);
+    g.f(RE(6,11,2.4,4.6,-1.0),T,"bevel"); g.f(RE(13,8.5,2.4,4.6,0.95),T,"bevel"); g.f(RE(6.5,17,2.2,4,-1.1),T,"bevel"); g.f(RE(10.5,3.5,1.4,2.6,0.2),T,3);
+    g.f(I(E(16.5,16,5.6,5.2),below(16)),WHITE,"ball"); g.f(E(16.5,16,5.2,1.3),ramp("#b0802a"),2); g.f(R(14,20.5,5,1),WHITE,1);
+    g.dots([[15,13],[16,12],[18,13],[17,11]],WHITE[2]);
+  },
+  cacao(g,T){
+    g.line(15,4,18,1,WOOD[2]);
+    g.f(RE(11,12,5.5,9.5,0.55),T,"ball");
+    const a=0.55,s=Math.sin(a),c=Math.cos(a);
+    for(const o of [-2.4,0,2.4]) g.line(11+c*o+s*7.5,12+s*o-c*7.5,11+c*o-s*7.5,12+s*o+c*7.5,T[1],RE(11,12,5.3,9.3,0.55));
+    const B=ramp("#c08a62"); g.f(RE(18,18.5,2,2.8,0.4),B,"ball"); g.f(RE(20.5,15,1.8,2.5,-0.3),B,"ball");
+  },
+  // Spices & aromatics
+  spices(g,T){
+    g.f(Ln(13,11,19,2.5,3),STONE,"bevel"); g.f(C(19,2.8,1.8),STONE,"ball");
+    g.f(I(E(12,13,7,3),above(13.5)),T,"ball");
+    g.f(I(E(12,13.5,9,7.5),below(13.5)),STONE,"ball"); g.f(R(3,13,18,1.6),STONE,3); g.f(R(8,20,8,2),STONE,"bevel");
+    g.dots([[6,12],[18,12],[15,11]],T[3]);
+  },
+  cloves(g,T){
+    for(const [hx,hy,tx,ty] of [[6,5,9,19],[12,4,12,20],[18,5,15,19],[4,18,19,15]]){
+      g.f(Ln(hx,hy,tx,ty,2),T,"bevel"); g.f(C(hx,hy,2.1),T,"ball"); g.dots([[hx-1.5,hy-1.5],[hx+1,hy-1.5]],T[3]);}
+  },
+  pepper(g,T){
+    const rows:[number,number[]][]=[[19,[4,8,12,16,20]],[15.5,[6,10,14,18]],[12,[8,12,16]],[8.5,[10,14]],[5,[12]]];
+    for(const [y,xs] of rows) for(const x of xs){g.f(C(x,y,2),T,"ball"); g.px(x,y+0.5,T[1]);}
+  },
+  cinnamon(g,T){
+    for(const [o] of [[0],[4],[8]]){const x0=3+o*0.2,y0=19-o,x1=19+o*0.2,y1=9-o;
+      g.f(Ln(x0,y0,x1,y1,3.6),T,"bevel"); g.f(C(x0,y0,1.8),T,1); g.px(x0,y0,T[3]);}
+    g.line(9,19,13,6,RED[2]); g.line(10,19,14,6,RED[1]);
+  },
+  frankincense(g,T){
+    g.f(E(12,19,9.5,3),WOOD,"bevel");
+    for(const [x,y,r] of [[10,10.5,2.6],[15,10,2.4],[7,15,3],[12,14.5,3.3],[17,15,2.8]]){g.f(U(C(x,y,r),C(x+r*0.4,y+r*0.5,r*0.7)),T,"ball"); g.px(x-r*0.4,y-r*0.5,T[4]);}
+  },
+  incense(g,T){
+    for(const [x0,x1,y1] of [[10,7,5],[12,12,4],[14,17,6]]){g.line(x0,14,x1,y1,WOOD[1]); g.px(x1,y1,FLAME[3]);
+      g.dots([[x1,y1-1.5],[x1+1,y1-2.5],[x1,y1-3.5],[x1-1,y1-4.5]].filter(p=>p[1]>=0),T[3]);}
+    g.f(U(I(E(12,17,6.5,5),below(15)),R(5,14,14,2)),CLAY,"ball"); g.f(E(12,14.6,5.8,1.1),BURLAP,3);
+  },
+  saffron(g,T){
+    const V=ramp("#8e5cc8");
+    g.line(12,22,12,13,LEAF[2]); g.line(10,22,6,12,LEAF[3]); g.line(14,22,18,12,LEAF[3]);
+    g.f(RE(8.5,9.5,2.6,5,-0.5),V,"ball"); g.f(RE(15.5,9.5,2.6,5,0.5),V,"ball"); g.f(RE(12,8.5,2.9,5.6,0),V,"ball");
+    for(const [x,y] of [[8,2],[12,1],[16,2]]){g.line(12,9,x,y,RED[2]); g.px(x,y,RED[3]);}
+    g.dots([[11,7],[13,7],[12,6]],T[3]); g.dots([[4,20],[5,21],[19,21],[20,20]],T[2]);
+  },
+  perfume(g,T){
+    g.f(R(11,5,2,5),GLASS,"cylV"); g.f(R(10,8,4,1),GOLD,3);
+    g.f(C(12,15,6.8),T,"ball"); g.line(9,11,9,14,T[4]);
+    g.f(tear(12,4.2,1.9),GOLD,"ball");
+  },
+  nutmeg(g,T){
+    g.f(E(10,11.5,6,7.5),T,"ball"); g.dots([[8,8],[9,9],[11,10],[12,11],[8,13],[9,14],[12,15],[7,11]],T[1]);
+    g.f(C(17,17,4.6),T,"bevel"); g.f(C(17,17,3.4),ramp("#d8b88a"),2);
+    g.dots([[16,16],[17,17],[18,16],[16,18],[18,18],[17,15]],T[1]);
+  },
+  mace(g,T){
+    const seed=E(12,12.5,6.8,8.8); g.f(seed,ramp("#5a321a"),"ball");
+    for(const [x,y] of [[6.5,17],[9.5,20.5],[14.5,20.5],[17.5,17]]) g.f(I(Ln(12,4,x,y,1.8),seed),T,"bevel");
+    g.f(I(Ln(5,10,19,10,1.5),seed),T,"bevel"); g.f(I(Ln(6,15,18,15,1.5),seed),T,"bevel");
+    g.f(C(12,4,1.8),T,"ball");
+  },
+  dragons_blood(g,T){ g.f(tear(9,15.5,4.6),T,"ball"); g.f(tear(17,18,3),T,"ball"); g.f(tear(17,9,2.3),T,"ball"); g.dots([[7,13],[16,16],[16,8]],T[4]); },
+  camphor(g,T){
+    cube(g,3,9,8,7,T); g.dots([[7,6],[12,5],[10,8]],WHITE[4]);
+    g.f(RE(18,18.5,2.3,4.4,0.9),LEAF,"bevel"); g.f(RE(20.5,14.5,1.8,3.4,-0.3),LEAF,"bevel"); g.line(14,21,20,17,LEAF[1]);
+  },
+  benzoin(g,T){
+    for(const [x,y,r] of [[12,8.5,3.8],[7.5,15,4.5],[16,16,4.2]]){g.f(U(C(x,y,r),C(x+r*0.5,y-r*0.3,r*0.6)),T,"ball");
+      g.line(x-r*0.4,y,x+r*0.3,y+r*0.35,WHITE[3]);}
+  },
+  sandalwood(g,T){
+    g.f(R(3,8,14,9),T,"cylH"); for(const y of [10,13,15]) g.line(4,y,15,y,T[1]);
+    g.f(E(17,12.5,3,4.6),T,1); g.f(E(17,12.5,2.3,3.7),T,4);
+    g.f(D(E(17,12.5,1.6,2.5),E(17,12.5,0.8,1.3)),T,2);
+    for(const [x,y] of [[5,20],[10,21],[15,20],[19,21]]) g.f(P([[x,y-1],[x+2,y],[x,y+1.2],[x-1.5,y]]),T,3);
+  },
+  // Textiles & animal
+  silk(g,T){
+    g.f(E(12,18.5,6.5,2),WOOD,"bevel");
+    g.f(R(7,5,10,14),T,"cylV"); for(let y=7;y<18;y+=2) g.line(7,y,16,y,T[1]);
+    g.f(E(12,5,6.5,2),WOOD,"bevel"); g.f(E(12,5,1.5,0.8),WOOD,0);
+    g.line(17,12,21,21,T[3]); g.f(RE(4.5,19,2.3,3.3,0.6),WHITE,"ball");
+  },
+  cotton(g,T){
+    for(const pts of [[[12,21],[3,15],[9,13]],[[12,21],[21,15],[15,13]],[[12,21],[10,15],[14,15]]]) g.f(P(pts),WOOD,"bevel");
+    g.line(12,21,12,23,WOOD[1]);
+    for(const [x,y,r] of [[12,6.5,3.8],[8,10,4.2],[16,10,4.2],[8.5,15,3.9],[15.5,15,3.9]]) g.f(C(x,y,r),T,"ball");
+  },
+  flax(g,T){
+    for(let i=-3;i<=3;i++) g.line(12+i*0.6,21,12+i*2.3,6,i%2?BURLAP[3]:BURLAP[2]);
+    g.f(R(9,14,7,2.4),T,"bevel");
+    const F=ramp("#6f8fe0");
+    for(let i=-3;i<=3;i++){const x=12+i*2.3; if(i%2) {g.f(C(x,5,1.7),F,"ball"); g.px(x,5,GOLD[3]);} else g.f(C(x,5.5,1.3),BURLAP,"ball");}
+  },
+  wool_fleece(g,T){
+    for(const [x,y,r] of [[7,9,3.6],[12,8,3.8],[17,9,3.5],[4.5,13.5,3.2],[9.5,13,3.8],[14.5,13,3.8],[19.5,13.5,3],[7,18,3.5],[12,18,3.8],[17,18,3.4]]){g.f(C(x,y,r),T,"ball"); g.px(x+0.8,y+0.8,T[1]);}
+  },
+  wool_llama(g,T){
+    g.f(Ln(14,2,20,13,1.4),WOOD,3); g.f(Ln(20,2,14,13,1.4),WOOD,3);
+    const m=C(11,13.5,8); g.f(m,T,"ball");
+    for(const [a,b,c,d] of [[4,10,17,19],[5,7,15,21],[6,17,17,6],[9,20,19,10],[3,13,11,5]]) g.line(a,b,c,d,T[1],m);
+    g.line(17,19,22,22,T[2]); g.dots([[20,1],[14,1]],WOOD[4]);
+  },
+  furs(g,T){
+    g.f(taper([13,19],[20,23],[21,14],3.4,2.2),T,"bevel"); g.f(C(21,14,1.6),WHITE,"ball");
+    g.f(P([[11,2],[13,3],[14,1.5],[15,5],[16,7],[20,8],[19,10.5],[16,11],[15,14],[20,16],[19,19],[15,18],[13,20],[9,20],[7,18],[3,19],[2,16],[7,14],[6,11],[3,10.5],[2,8],[6,7],[7,5],[8,1.5],[9,3]]),T,"bevel");
+    g.line(11,5,11,18,T[1]); g.dots([[9,4],[13,4]],T[0]); g.dots([[11,3],[11,2]],T[0]);
+  },
+  hides(g,T){
+    g.f(P([[4,4],[9,5],[12,3],[15,5],[20,4],[19,9],[21,13],[19,17],[20,21],[15,19],[12,21],[9,19],[4,21],[5,16],[3,12],[5,8]]),T,"bevel");
+    g.f(C(9,10,2.6),T,1); g.f(C(15,13,2.1),T,1); g.f(C(10.5,16,1.8),T,1);
+    g.dots([[4,4],[20,4],[4,21],[20,21],[12,3],[12,21]],BURLAP[3]);
+  },
+  horses(g,T){
+    g.f(P([[6,19],[3,17],[3,14],[7,9],[10,5],[12,1.5],[13,4],[15,2.5],[16,6],[19,10],[20.5,15],[20,21],[12,21],[11,17],[8,19]]),T,"bevel");
+    g.f(Ln(14,4,20,13,2.4),ramp("#3a2418"),"bevel"); g.f(Ln(11,4,9,7,1.6),ramp("#3a2418"),2);
+    g.px(9,9,"#140a08"); g.px(8,9,"#f4ece0"); g.px(4,15,T[0]); g.line(6,12,11,15,RED[2]);
+  },
+  ivory(g,T){
+    g.f(taper([17,21],[1,18],[5,3],6,0.9),T,"bevel");
+    g.f(E(17,20.5,3,1.4),T,1);
+    for(const t of [0.3,0.5,0.7]){const u=1-t,x=u*u*17+2*u*t*1+t*t*5,y=u*u*21+2*u*t*18+t*t*3; g.px(x+1,y,T[1]);}
+  },
+  cloth(g,T){
+    const bolt=(x:number,y:number,w:number,h:number)=>{g.f(R(x,y,w,h),T,"cylH"); for(let k=x+3;k<x+w;k+=4) g.line(k,y,k,y+h-1,T[1]);
+      g.f(E(x+w,y+h/2,2.2,h/2),T,3); g.f(D(E(x+w,y+h/2,1.4,h/2-1.2),E(x+w,y+h/2,0.6,1)),T,1);};
+    bolt(4,4,14,7); bolt(2,12,16,8);
+    g.f(P([[3,19],[15,19],[16,22.5],[5,22.5]]),T,"bevel");
+  },
+  linen(g,T){
+    for(const [x,y,w] of [[3,16,17],[4,11,16],[3,6,17]]){g.f(R(x,y,w,5),T,"bevel"); g.line(x+2,y+2,x+w-3,y+2,T[1]);}
+    g.f(R(11,6,2,15),BLUE,2); g.dots([[10,5],[13,5],[9,4],[14,4]],BLUE[3]);
+  },
+  cotton_cloth(g,T){
+    g.f(P([[8,3],[10,4],[14,4],[16,3],[21.5,6.5],[19.5,11.5],[17,10.5],[17,21],[7,21],[7,10.5],[4.5,11.5],[2.5,6.5]]),T,"bevel");
+    g.f(P([[10,4],[14,4],[12,7.5]]),T,1); g.line(12,8,12,16,T[1]); g.dots([[13,10],[13,13]],T[4]);
+    g.line(7,10,7,12,T[1]); g.line(17,10,17,12,T[1]);
+  },
+  silk_brocade(g,T){
+    const m=P([[5,4],[19,4],[19,18],[17,20.5],[15,18],[13,20.5],[11,18],[9,20.5],[7,18],[5,20.5]]); g.f(m,T,"bevel");
+    for(let y=6;y<18;y++) for(let x=6;x<19;x++) if(((x+y)%4===0||(x-y+40)%4===0)&&(x+y)%2===0&&m(x,y)) g.px(x,y,GOLD[3]);
+    g.f(Ln(3,3.5,21,3.5,2),WOOD,"bevel"); g.dots([[2,3],[21,3]],GOLD[3]);
+    g.dots([[5,21],[9,21],[13,21],[17,21]],GOLD[3]);
+  },
+  carpets(g,T){
+    g.f(R(3,5,18,14),T,"bevel"); g.f(R(5,7,14,10),T,2);
+    g.line(5,7,18,7,GOLD[2]); g.line(5,16,18,16,GOLD[2]); g.line(5,7,5,16,GOLD[2]); g.line(18,7,18,16,GOLD[2]);
+    g.f(P([[12,8.5],[15.5,12],[12,15.5],[8.5,12]]),GOLD,"bevel"); g.f(P([[12,10.5],[13.5,12],[12,13.5],[10.5,12]]),BLUE,2);
+    for(let y=6;y<19;y+=2){g.px(2,y,PAPER[3]); g.px(21,y,PAPER[3]);}
+    g.dots([[7,9],[16,9],[7,14],[16,14]],BLUE[3]);
+  },
+  leather_goods(g,T){
+    g.f(P([[8,2],[15,2],[15,14],[21,16],[21.5,20],[6,20],[6,15],[8,13]]),T,"bevel");
+    g.f(R(6,20,16,2),WOOD,0); g.f(R(8,2,7,2),T,3); g.dots([[13,6],[13,8],[13,10],[13,12]],T[4]); g.line(9,5,9,12,T[1]);
+  },
+  hemp(g,T){
+    g.f(D(C(12,12.5,8.5),C(12,12.5,5.8)),T,"ball"); g.f(D(C(12,12.5,5.2),C(12,12.5,2.6)),T,"ball");
+    for(let k=0;k<12;k++){const a=k*T2/12; g.px(12+Math.cos(a)*7.1,12.5+Math.sin(a)*7.1,T[1]); if(k%2) g.px(12+Math.cos(a)*3.9,12.5+Math.sin(a)*3.9,T[1]);}
+    g.f(Ln(17,19,22,22.5,2),T,"bevel");
+  },
+  // Forestry & craft
+  timber(g,T){
+    logEnd(g,7.5,16.5,4.6); logEnd(g,16.5,16.5,4.6); logEnd(g,12,9,4.6);
+    g.line(15,5,21,1,WOOD[1]); g.dots([[16,3],[17,5],[18,2],[19,4],[20,1],[21,3],[17,3],[19,2]],T[3]);
+  },
+  hardwoods(g,T){
+    g.f(P([[3,12],[15,5],[21,8.5],[9,15.5]]),T,3);
+    g.f(P([[9,15.5],[21,8.5],[21,13.5],[9,20.5]]),T,2);
+    for(const o of [1.5,3.2]) g.line(10,15.5+o,20,9.5+o,T[1]);
+    g.f(P([[3,12],[9,15.5],[9,20.5],[3,17]]),ramp(mix(T[2],"#d8b07a",0.35)),2);
+    g.dots([[5,15],[6,16],[6,15],[5,16]],ramp(mix(T[2],"#d8b07a",0.35))[1]);
+    g.line(4,12.2,14,6.5,T[4]);
+  },
+  paper(g,T){
+    g.f(R(5,6,14,12),T,"bevel"); for(const y of [8,10,12,14]) g.line(7,y,y===14?12:16,y,T[1]);
+    g.f(R(3,3,18,3),T,"cylH"); g.f(R(3,17,18,3),T,"cylH"); g.f(C(16,15,1.7),RED,"ball");
+    g.dots([[3,4],[20,4],[3,18],[20,18]],T[1]);
+  },
+  clay(g,T){
+    g.f(U(E(12,16,8.5,5.5),C(9,11.5,4),C(14.5,11,4.5)),T,"ball");
+    g.line(8,15,11,17,T[1]); g.line(13,14,16,16,T[1]); g.dots([[10,9],[15,8]],T[4]);
+    g.f(P([[15,17],[21,17],[21,20],[15,20]]),T,"bevel");
+  },
+  ceramics(g,T){
+    const body=U(E(12,14,6.5,6.5),R(10,5,4,4)); g.f(body,WHITE,"ball"); g.f(E(12,4.6,3.9,1.3),WHITE,"bevel"); g.f(R(9,20,6,2),WHITE,"bevel");
+    g.line(4,10,20,10,T[2],body); g.line(4,18,20,18,T[2],body); g.line(9,6,15,6,T[2],body);
+    g.px(12,14,T[1]); g.dots([[11,13],[13,13],[11,15],[13,15]],T[2]); g.dots([[9,15],[15,13]],T[3]);
+  },
+  glassware(g,T){
+    g.f(E(12,20,5.6,1.6),T,"bevel"); g.f(R(11,11,2,8),T,"cylV"); g.f(C(12,14.5,1.5),T,"ball");
+    g.f(P([[6,2],[18,2],[17,7],[14,11],[10,11],[7,7]]),T,"ball"); g.dots([[8,4],[8,5],[9,6]],T[4]); g.line(6,2,18,2,T[4]);
+  },
+  books(g,T){
+    const book=(x:number,y:number,w:number,h:number,r:Ramp)=>{g.f(R(x,y,w,h),r,"bevel"); g.f(R(x+2,y+1,w-2,h-2),PAPER,2); g.line(x+2,y+2,x+w-1,y+2,PAPER[1]); g.f(R(x,y,2,h),r,"bevel");};
+    book(3,16,18,5,T); book(5,11,15,5,RED); book(4,6,16,5,BLUE);
+    g.px(4,8,GOLD[3]); g.px(6,13,GOLD[3]); g.px(4,18,GOLD[3]); g.line(15,6,15,3,RED[2]);
+  },
+  furniture(g,T){
+    g.f(R(5,14,2,7),T,1); g.f(R(15,12,2,5),T,1);
+    g.f(D(R(6,2,11,10),U(R(8,4,2,7),R(11,4,2,7),R(14,4,1.5,7))),T,"bevel");
+    g.f(R(7,15,2,7),T,"bevel"); g.f(R(17,15,2,7),T,"bevel");
+    g.f(P([[5,12],[17,12],[19.5,15],[7,15]]),T,3); g.f(R(7,15,13,1.5),T,1);
+    g.f(P([[7,12.5],[16.5,12.5],[18,14.3],[8.5,14.3]]),RED,3);
+  },
+  candles(g,T){
+    g.f(E(12,21,9.5,1.8),GOLD,"bevel");
+    g.f(R(6,7,4,14),T,"cylV"); g.f(R(13,11,4,10),T,"cylV");
+    g.dots([[6,8],[6,9],[13,12],[16,12],[16,13]],T[4]);
+    g.px(8,6,WOOD[0]); g.px(15,10,WOOD[0]);
+    g.f(tear(8,4.6,1.4),FLAME,"ball"); g.f(tear(15,8.6,1.4),FLAME,"ball");
+  },
+  soap(g,T){
+    g.f(P([[3,12],[12,16],[12,20],[3,16]]),T,2); g.f(P([[12,16],[21,12],[21,16],[12,20]]),T,1);
+    g.f(P([[3,12],[12,8],[21,12],[12,16]]),T,3); g.f(D(P([[7,12],[12,10],[17,12],[12,14]]),P([[9,12],[12,11],[15,12],[12,13]])),T,2);
+    for(const [x,y,r] of [[17,6,2.6],[8,6,1.8],[13,3,1.3]]){g.f(D(C(x,y,r),C(x,y,r-0.9)),WHITE,3); g.px(x-r*0.5,y-r*0.5,WHITE[4]);}
+  },
+  statuary(g,T){
+    g.f(R(7,17,10,5),STONE,"bevel"); g.f(R(6,16,12,1.5),STONE,3);
+    g.f(U(I(E(12,16,6.2,3.4),above(16.5)),R(10.5,10,3,4),E(12,7.6,3.6,4.3),P([[8.4,8],[7.6,9.4],[8.6,9.6]])),T,"ball");
+    g.px(10,7,T[1]); g.line(9,4,15,4,T[1]);
+  },
+  ivory_carvings(g,T){
+    g.f(U(E(12,20,6,1.8),R(7,18,10,2)),T,"bevel");
+    g.f(P([[9,18],[15,18],[14,11],[10,11]]),T,"cylV"); g.f(R(8,9,8,2),T,"bevel");
+    g.f(C(12,6.8,3),T,"ball"); g.f(R(11,0.5,2,4),T,3); g.f(R(9.5,1.5,5,1.5),T,3);
+    g.line(10,14,14,14,T[1]);
+  },
+  pitch(g,T){
+    barrelBody(g,T); g.f(E(12,4.5,5,1.3),T,3);
+    g.f(P([[14.5,4],[17,4],[17,9],[16,10.5],[15,9]]),T,0); g.px(15,6,T[4]);
+  },
+  // Minerals & metals
+  salt(g,T){ cube(g,6,10,5.5,5.5,T); cube(g,2,15,4.5,4.5,T); cube(g,12,16,4.5,4,T); g.dots([[8,9],[4,14],[14,15]],"#ffffff"); },
+  bay_salt(g,T){
+    g.f(Ln(13,11,20,3,1.8),WOOD,"bevel"); g.f(E(20,3,1.8,1.2),WOOD,3);
+    g.f(P([[2,21],[5,16],[9,12],[12,10],[15,12],[19,16],[22,21]]),T,"ball");
+    g.dots([[9,14],[12,12],[15,15],[6,18],[17,19],[11,17]],"#ffffff"); g.dots([[8,17],[14,18],[18,17]],T[1]);
+  },
+  iron(g,T){
+    g.f(P([[4,21],[5,15],[9,11.5],[15,12],[19.5,15],[20,21]]),STONE,"bevel");
+    g.dots([[8,15],[9,15],[13,17],[14,17],[10,19],[16,15],[17,18]],"#9a4a2a");
+    g.f(Ln(7,20,17,5,1.8),WOOD,"bevel");
+    g.f(P([[10,5.5],[14,3],[18,3],[22,6.5],[18,5.2],[14,5.4]]),T,"bevel");
+  },
+  copper(g,T){
+    g.f(P([[3,6],[8,8],[16,8],[21,6],[19,12],[21,18],[16,16],[8,16],[3,18],[5,12]]),T,"bevel");
+    g.dots([[9,11],[13,10],[15,13],[11,14],[7,13]],T[1]); g.line(6,8,17,8.5,T[4]);
+  },
+  tin(g,T){
+    g.f(P([[4,11],[18,8],[21,17],[7,20]]),T,2); g.line(6,12,18,9.5,T[4]); g.line(7,19,20,16.5,T[1]);
+    g.f(Ln(5,9,18,6,5.5),T,"cylH"); g.f(E(5,9,2.5,2.8),T,3); g.f(D(E(5,9,1.5,1.7),E(5,9,0.7,0.8)),T,1);
+  },
+  lead(g,T){
+    g.f(P([[3,12],[21,12],[19,20],[5,20]]),T,"bevel"); g.f(P([[5,8],[19,8],[21,12],[3,12]]),T,3);
+    g.line(6,8.5,18,8.5,T[4]); g.line(10,14,14,18,T[1]); g.line(14,14,10,18,T[1]);
+  },
+  gold(g,T){ goldBar(g,1.5,16,10.5,T); goldBar(g,12,16,10.5,T); goldBar(g,6.8,10.5,10.5,T); g.px(9,8,"#ffffff"); },
+  silver(g,T){
+    g.f(U(R(3,11,11,9),E(8.5,20,5.5,1.8)),T,"cylV"); for(let y=13;y<20;y+=2.4) g.line(3,y,13,y,T[1]);
+    g.f(E(8.5,11,5.5,1.8),T,3); g.px(7,10.5,T[4]);
+    g.f(E(17.5,14.5,4,5.6),T,"ball"); g.f(D(E(17.5,14.5,3,4.4),E(17.5,14.5,2.3,3.6)),T,1); g.dots([[17,13],[18,14],[17,15]],T[4]);
+  },
+  gemstones(g,T){ cutGem(g,8,15.5,4.6,RED); cutGem(g,15.5,16.5,4.6,BLUE); cutGem(g,12,8.5,4.2,T); cutGem(g,19,9,3,ramp("#2cc86a")); },
+  jade(g,T){
+    g.f(D(C(12,11.5,8.5),C(12,11.5,3)),T,"ball"); g.f(D(C(12,11.5,6.2),C(12,11.5,5.4)),T,1);
+    g.dots([[12,5],[17,9],[17,14],[12,18],[7,14],[7,9]],T[3]);
+    g.line(12,20,12,22,RED[2]); g.dots([[11,22],[13,22]],RED[2]);
+  },
+  ruby(g,T){ cutGem(g,12,12,9.5,T); g.dots([[7,6],[6,7],[8,7],[7,8]],"#ffffff"); },
+  sapphire(g,T){ g.gem(SE(12,12,9,8,3.2),T,4.2,true); g.dots([[7,6],[6,7],[8,7],[7,8]],"#ffffff"); },
+  emerald(g,T){
+    g.f(oct(4,3,16,18,2.5),T,"bevel"); g.f(oct(6,5,12,14,2),T,1); g.f(oct(7,6,10,12,1.6),T,3); g.f(oct(8.5,7.5,7,9,1),T,2);
+    g.line(4.5,5,8,7.5,T[4]); g.line(19.5,19,16,16,T[0]); g.line(8,6,11,6,T[4]);
+  },
+  diamond(g,T){
+    g.f(P([[3,9],[21,9],[12,21.5]]),T,2); g.f(P([[6.5,5],[17.5,5],[21,9],[3,9]]),T,3);
+    for(const x of [7,12,17]) g.line(12,21,x,9,T[1]);
+    g.line(6.5,5,8,9,T[1]); g.line(17.5,5,16,9,T[1]); g.line(10,5,12,9,T[4]); g.line(14,5,12,9,T[1]); g.line(7,5,17,5,T[4]);
+    g.dots([[9,12],[15,13]],"#f0b8d8"); g.dots([[13,11],[10,15]],"#a8d8ff"); g.dots([[6,7],[5,6],[7,6],[6,5]],"#ffffff");
+  },
+  amethyst(g,T){
+    g.f(E(12,20.5,9.5,2.5),STONE,"bevel");
+    crystal(g,7,20,4.6,7,-0.35,T); crystal(g,17,20,4.6,6,0.35,T); crystal(g,12,20,6,9,0,T);
+  },
+  topaz(g,T){ g.gem(tear(12,15,5.8),T,3.2); g.dots([[9,11],[10,10]],"#ffffff"); },
+  garnet(g,T){ cutGem(g,8,15,4.4,T); cutGem(g,16,14.5,4.4,T); cutGem(g,12,7.5,3.8,T); },
+  carnelian(g,T){
+    g.f(E(12,12.5,8.5,7),T,"ball"); g.f(D(E(12,12.5,6.4,5),E(12,12.5,5.4,4.1)),T,3); g.f(D(E(12,12.5,3.6,2.8),E(12,12.5,2.6,2)),T,3);
+    g.dots([[8,8],[9,8]],T[4]);
+  },
+  turquoise(g,T){
+    g.f(R(11,2,2,3),STEEL,"bevel");
+    g.f(E(12,12.5,9,8),STEEL,"bevel"); g.f(E(12,12.5,7.5,6.5),T,"ball");
+    const m=E(12,12.5,7,6); g.line(6,10,9,12,WOOD[1],m); g.line(9,12,8,16,WOOD[1],m); g.line(13,8,15,11,WOOD[1],m); g.line(15,11,18,12,WOOD[1],m); g.line(12,13,14,17,WOOD[1],m);
+    for(let k=0;k<10;k++){const a=k*T2/10; g.px(12+Math.cos(a)*8.3,12.5+Math.sin(a)*7.4,STEEL[4]);}
+  },
+  marble(g,T){
+    cube(g,3,8,9,9,T);
+    g.line(5,13,8,16,STONE[2]); g.line(8,16,10,20,STONE[2]); g.line(8,6,12,8,STONE[2]); g.line(12,8,15,7,STONE[2]); g.line(15,12,17,16,STONE[1]); g.line(17,16,19,17,STONE[1]);
+  },
+  lapis_lazuli(g,T){
+    g.f(P([[4,12],[7,6],[13,4],[19,7],[21,13],[17,19],[9,20],[5,17]]),T,"bevel");
+    g.f(P([[7,6],[13,4],[19,7],[14,10],[8,10]]),T,3);
+    g.dots([[10,13],[15,12],[12,16],[17,15],[8,15],[11,7]],GOLD[3]); g.line(6,15,11,18,WHITE[2]);
+  },
+  alum(g,T){
+    g.f(P([[11,2],[11,12],[3.5,12]]),T,3); g.f(P([[11,2],[18.5,12],[11,12]]),T,2);
+    g.f(P([[3.5,12],[11,12],[11,21]]),T,2); g.f(P([[11,12],[18.5,12],[11,21]]),T,1);
+    g.line(11,3,11,20,T[4]);
+    g.f(P([[18,14],[21,17.5],[18,21],[15,17.5]]),T,"bevel");
+  },
+  mercury(g,T){
+    g.f(E(12,20.5,9,1.8),T,"bevel");
+    for(const [x,y,r] of [[10,14,5],[17,17,3],[15.5,8.5,2],[5.5,19,1.8],[20,11,1.3]]){g.f(C(x,y,r),T,"ball"); g.px(x-r*0.45,y-r*0.45,"#ffffff");}
+  },
+  bog_iron(g,T){
+    g.line(4,21,5,7,LEAF[2]); g.line(6,21,8,9,LEAF[3]); g.f(RE(5,7,1.2,2.4,0.05),ramp("#6a4020"),"bevel");
+    for(const [x,y,r] of [[11,16.5,4.3],[17.5,17,3.6],[14.5,11,3.4],[19,11.5,2.4]]){g.f(U(C(x,y,r),C(x-r*0.5,y+r*0.4,r*0.6)),T,"ball");}
+    g.dots([[10,15],[12,17],[17,16],[15,10],[19,11]],"#b0602a");
+  },
+  coal(g,T){
+    g.f(P([[6,13],[9,7],[14,6],[16.5,11],[11,14]]),T,"bevel");
+    g.f(P([[3,20.5],[4,15],[8,13],[11.5,16],[10.5,21]]),T,"bevel");
+    g.f(P([[9,21],[10,14.5],[15,11],[19.5,14],[20.5,21]]),T,"bevel");
+    g.dots([[9,8],[10,8],[5,15],[11,15],[15,12],[16,12]],T[4]);
+  },
+  metalware(g,T){
+    g.f(C(8.5,11,6.8),WOOD,"ball"); g.f(D(C(8.5,11,6.8),C(8.5,11,5.8)),STEEL,2); g.f(C(8.5,11,2),STEEL,"ball");
+    g.f(Ln(9,16,20,3,2.2),T,"bevel"); g.line(10,15,19,4,T[4]);
+    g.f(Ln(5.5,14,12,19.5,1.8),GOLD,"bevel"); g.f(Ln(7,18,4,21,1.8),WOOD,"bevel"); g.f(C(3.5,21.5,1.4),GOLD,"ball");
+  },
+  bronzeware(g,T){
+    g.f(D(C(12,3.2,2.2),C(12,3.2,1)),T,"bevel");
+    g.f(U(I(C(12,10,5.2),above(10)),P([[6.8,10],[17.2,10],[19,18],[5,18]]),E(12,18,7.6,1.8)),T,"cylV");
+    g.line(6,13,18,13,T[1],P([[6.8,10],[17.2,10],[19,18],[5,18]])); g.line(5,16,19,16,T[3],P([[6.8,10],[17.2,10],[19,18],[5,18]]));
+    g.f(C(12,20.5,1.8),T,1);
+  },
+  jewelry(g,T){
+    g.f(D(E(12,15,7.5,6.3),E(12,15,5,4.3)),T,"ball");
+    g.f(P([[9,9],[15,9],[14,11],[10,11]]),T,"bevel");
+    cutGem(g,12,6.5,3.4,RED);
+  },
+  // Marine
+  stockfish(g,T){
+    for(const x of [7.5,16.5]){const m=fish(x,13.5,15,5.2,Math.PI/2); g.f(m,T,"bevel"); for(let y=9;y<19;y+=2.5) g.line(x-1.5,y,x+1.5,y,T[1],m); g.px(x-1,19.5,T[0]);}
+    g.f(Ln(2,3,22,3,1.8),WOOD,"bevel"); g.dots([[7,4],[17,4]],BURLAP[3]);
+  },
+  herring(g,T){
+    const m=fish(13,12,18,8,0); g.f(m,T,"ball"); g.f(I(m,above(9.5)),T,1);
+    g.line(15,9,15,14,T[1],m); g.px(18,11,"#101418"); g.px(18,10,"#ffffff");
+    g.f(P([[10,15.5],[13,15.5],[11,18]]),T,1); g.f(P([[10,8.5],[14,8.5],[11,6]]),T,1);
+    g.dots([[8,12],[10,11],[12,13],[9,14],[11,12]],T[4]);
+  },
+  salted_herring(g,T){
+    barrelBody(g,WOOD); g.f(E(12,5,6.5,2),WHITE,3);
+    g.f(P([[8,6],[6.5,1.5],[9.3,3.3],[11,1],[10.8,6]]),T,"bevel"); g.f(P([[14,5.5],[13.5,1],[15.6,2.8],[18,1.5],[16.8,6]]),T,"bevel");
+    g.dots([[7,5],[12,5],[17,5]],"#ffffff");
+  },
+  pearls(g,T){
+    const S=ramp("#9a8aa6");
+    g.f(I(E(12,11,9.5,6.5),above(11.5)),S,"bevel"); g.f(I(E(12,11,7.8,4.8),above(11.5)),ramp("#e8e0f0"),2);
+    g.f(I(E(12,14.5,10,6.5),below(14)),S,"ball"); for(const x of [6,9,12,15,18]) g.line(12,14,x,20,S[1],I(E(12,14.5,10,6.5),below(14.8)));
+    g.f(R(2,13.5,20,1.2),ramp("#e8e0f0"),3);
+    g.f(C(12,12,3.4),T,"ball"); g.px(11,10.5,"#ffffff"); g.f(C(19.5,20,1.8),T,"ball");
+  },
+  whaling(g,T){
+    g.f(P([[11,17],[10.5,11],[7,9.5],[2,9.5],[3.5,6],[9,6.5],[12,9],[15,6.5],[20.5,6],[22,9.5],[17,9.5],[13.5,11],[13,17]]),T,"bevel");
+    g.px(12,9,T[0]); g.dots([[2,11],[22,11],[3,13],[21,13]],WHITE[3]);
+    g.f(U(R(1,17,22,5),C(5,17,2),C(12,16.5,2.4),C(19,17,2)),BLUE,"bevel");
+    g.dots([[3,16],[4,15],[10,15],[11,14],[14,15],[18,15],[20,15.5]],"#ffffff");
+  },
+  amber(g,T){
+    g.f(P([[5,11],[8,5],[15,4],[20,9],[19.5,17],[13,21],[6,18.5]]),T,"ball");
+    g.f(R(11,11,2,3),WOOD,0); g.dots([[10,11],[13,11],[10,13],[13,13],[11,10],[12,10]],WOOD[1]); g.px(12,15,WOOD[1]);
+    g.dots([[8,7],[9,7],[8,8]],T[4]);
+  },
+  dyes(g,T){ bowlOf(g,12,7.5,6,T); bowlOf(g,6,16,5.4,RED); bowlOf(g,18,16,5.4,ramp("#e8b830")); },
+  tyrian_purple(g,T){
+    g.f(P([[7.5,15],[2,21.5],[6.5,16.5]]),T,"bevel");
+    g.f(P([[14,9],[20.5,3.5],[18,10.5]]),T,"bevel");
+    g.f(E(11,13,6.4,5.2),T,"ball");
+    for(const [a,b,c,d] of [[8,8.5,6,5.5],[12,8,12,4.5],[15.5,10,18,8],[5,13,2,12],[16.5,15,19.5,16],[10,18,9,21],[13.5,17.5,15,20.5]]) g.line(a,b,c,d,T[3]);
+    g.f(tear(19,19.5,2.3),T,"ball");
+  },
+  coral(g,T){
+    for(const [a,b,c,d] of [[12,21,12,14],[12,14,7,8],[12,14,17,6.5],[7,8,5,3.5],[7,8,10,3],[17,6.5,15,2.5],[17,6.5,20,4],[12,17,18,13],[18,13,21,10],[12,16,5,14],[5,14,3,10]]) g.f(Ln(a,b,c,d,2.1),T,"bevel");
+    for(const [x,y] of [[5,3.5],[10,3],[15,2.5],[20,4],[21,10],[3,10]]) g.f(C(x,y,1.4),T,3);
+    g.f(E(12,21.5,5,1.4),STONE,"bevel");
+  },
+  ambergris(g,T){
+    g.f(U(E(12,14,9,6.5),C(8,10,4),C(15,9.5,3.8)),T,"ball");
+    g.line(6,13,10,15,T[1]); g.line(12,11,17,13,T[1]); g.line(9,17,15,18,T[1]); g.dots([[8,8],[14,8]],T[4]);
+  },
+  // Fallback for user-added goods: a lidded crate stencilled in the good's tint.
+  __crate(g,T){ cube(g,3,9,9,8,WOOD); g.f(P([[3,11],[12,15.5],[12,18],[3,13.5]]),T,2); g.f(P([[12,15.5],[21,11],[21,13.5],[12,18]]),T,1); },
 };
 
-// ── per-good recipes: family + its variation. No two goods repeat a set. ─────
-export const RECIPES: Record<string, [string, GoodParams]> = {
-  wheat: ["ear", { n: 5, kr: 8, kw: 5, awn: 0.5, leaf: 1 }],
-  rice: ["ear", { n: 6, kr: 6.5, kw: 4, droop: 0.6, leaf: 1 }],
-  barley: ["ear", { n: 6, kr: 7, kw: 4.5, awn: 1, leaf: 0 }],
-  millet: ["panicle", { rows: 8, taper: 1 }],
-  dates: ["wood", { kind: "tree", palm: 1 }],
-  honey: ["vessel", { nk: 9, bel: 28, top: 20, lip: 1, fill: 0.62, handles: 0 }],
+// ── build + cache + draw ───────────────────────────────────────────────────
+interface Sprite { cv: HTMLCanvasElement; lit: HTMLCanvasElement; lum: number; known: boolean }
+const CACHE = new Map<string, Sprite>();
 
-  wine: ["vessel", { nk: 6, bel: 22, top: 14, cork: 1, fill: 0.5, foot: 14 }],
-  oliveoil: ["vessel", { nk: 8, bel: 30, top: 18, handles: 1, lip: 1 }],
-  citrus: ["fruit", { n: 1, segments: 1, leaf: 1 }],
-  beer: ["vessel", { nk: 20, bel: 24, top: 26, hoops: 1, fill: 0.72, foot: 20 }],
-  mead: ["vessel", { nk: 14, bel: 26, top: 22, fill: 0.66, lip: 1, foot: 16 }],
-  brandy: ["vessel", { nk: 5, bel: 26, top: 12, cork: 1, fill: 0.4, foot: 16 }],
-  citrus_liqueur: ["vessel", { nk: 7, bel: 20, top: 16, stem: 1, fill: 0.55, bot: 76 }],
-
-  sugar: ["botanical", { kind: "cane" }],
-  refined_sugar: ["mineral", { kind: "loaf" }],
-  tobacco: ["botanical", { kind: "leaf", second: 1 }],
-  indigo: ["botanical", { kind: "flower", petals: 5 }],
-  coffee: ["sack", { spill: [[40, 24, 5], [52, 20, 5], [62, 26, 5]] }],
-  tea: ["botanical", { kind: "leaf" }],
-  cacao: ["fruit", { n: 3, oblate: 1.25 }],
-
-  spices: ["mineral", { kind: "heap", scoop: 1 }],
-  cloves: ["botanical", { kind: "buds" }],
-  pepper: ["botanical", { kind: "corns" }],
-  cinnamon: ["botanical", { kind: "bark" }],
-  frankincense: ["mineral", { kind: "resin" }],
-  incense: ["aroma", { grains: 1 }],
-  saffron: ["botanical", { kind: "threads" }],
-  perfume: ["vessel", { nk: 5, bel: 24, top: 16, cork: 1, bot: 74, foot: 18 }],
-
-  silk: ["cloth", { kind: "roll" }],
-  cotton: ["fruit", { n: 5 }],
-  flax: ["botanical", { kind: "distaff" }],
-  wool_fleece: ["beast", { kind: "sheep" }],
-  wool_llama: ["cloth", { kind: "hank" }],
-  furs: ["beast", { kind: "hide", fur: 1 }],
-  hides: ["beast", { kind: "hide" }],
-  horses: ["beast", { kind: "horse" }],
-  ivory: ["carved", { kind: "tusk" }],
-  cloth: ["cloth", { kind: "bolt" }],
-  linen: ["cloth", { kind: "stack" }],
-  cotton_cloth: ["cloth", { kind: "bolt", pattern: 0 }],
-  silk_brocade: ["cloth", { kind: "bolt", pattern: 1 }],
-  carpets: ["cloth", { kind: "rug" }],
-  leather_goods: ["craft", { kind: "satchel" }],
-
-  timber: ["wood", { kind: "logs" }],
-  hardwoods: ["wood", { kind: "tree" }],
-  paper: ["craft", { kind: "scroll" }],
-  clay: ["ware", { kind: "clay" }],
-  ceramics: ["ware", { kind: "pot" }],
-  glassware: ["ware", { kind: "glass" }],
-  books: ["craft", { kind: "book", clasp: 1 }],
-  furniture: ["wood", { kind: "chair" }],
-  candles: ["craft", { kind: "candle" }],
-  soap: ["craft", { kind: "soap" }],
-  statuary: ["carved", { kind: "statue" }],
-  ivory_carvings: ["carved", { kind: "figurine" }],
-
-  salt: ["mineral", { kind: "crystals" }],
-  bay_salt: ["mineral", { kind: "pan" }],
-  iron: ["metal", { kind: "ore" }],
-  copper: ["metal", { n: 3 }],
-  tin: ["metal", { kind: "sheet" }],
-  lead: ["metal", { kind: "pigs" }],
-  gold: ["metal", { kind: "coins" }],
-  silver: ["metal", { kind: "plate" }],
-  gemstones: ["gemstone", { cut: "rough" }],
-  ruby: ["gemstone", { cut: "cushion" }],
-  sapphire: ["gemstone", { cut: "brilliant" }],
-  emerald: ["gemstone", { cut: "emerald" }],
-  diamond: ["gemstone", { cut: "pear" }],
-  amethyst: ["gemstone", { cut: "trilliant" }],
-  topaz: ["gemstone", { cut: "marquise" }],
-  jade: ["carved", { kind: "disc" }],
-  marble: ["mineral", { kind: "block", veins: 1 }],
-  metalware: ["metal", { kind: "ware" }],
-  bronzeware: ["ware", { kind: "bell" }],
-  jewelry: ["carved", { kind: "ring" }],
-
-  stockfish: ["fish", { depth: 14, dried: 1 }],
-  herring: ["fish", { depth: 17, stripes: 1 }],
-  salted_herring: ["vessel", { nk: 22, bel: 26, top: 24, hoops: 1, foot: 22 }],
-  pearls: ["marine", { kind: "pearl" }],
-  whaling: ["whale", {}],
-  amber: ["mineral", { kind: "resin", inclusion: 1 }],
-  dyes: ["ware", { kind: "vat" }],
-  tyrian_purple: ["marine", { kind: "conch" }],
-  coral: ["marine", { kind: "coral" }],
-  ambergris: ["marine", { kind: "lump" }],
-};
-
-/** Draw one good's illustration into a 0..100 box at (0,0), scaled by `size`.
- *  A good with no recipe (a user-added custom) falls back to a mineral heap. */
-export function drawGood(ctx: Ctx, name: string, size: number, color: string) {
-  const rec = RECIPES[name] || ["mineral", { kind: "heap" }];
-  const C: Cols = {
-    base: color, lt: shade(color, 1.28), hi: shade(color, 1.55), dk: shade(color, 0.6),
-    stem: "#6d5a32", leaf: "#5f8a3e",
-  };
-  ctx.save();
-  ctx.scale(size / 100, size / 100);
-  ctx.lineJoin = "round"; ctx.lineCap = "round";
-  (F[rec[0]] || F.mineral)(ctx, C, rec[1] || {});
-  ctx.restore();
-}
-
-function mkCanvas(w: number, h: number): HTMLCanvasElement {
-  const c = document.createElement("canvas"); c.width = w; c.height = h; return c;
-}
-
-export interface PixelIconOpts { grid?: number; glow?: number }
-
-/** Standalone PIXEL ICON: the good's artwork on a coarse grid, stamped with a
- *  one-pixel dark edge and a bevel, plus a bright rim-glow for dark goods so
- *  black subjects still read on a dark panel. */
-export function drawIcon(
-  ctx: Ctx, cx: number, cy: number, size: number, color: string, name: string, opts: PixelIconOpts = {},
-) {
-  const G = Math.max(20, Math.round(opts.grid || 46));   // art grid — every icon the same
-  const pad = 3;
-  const W = G + pad * 2;
-
-  // 1. draw once, measure the subject, then redraw scaled so EVERY good fills
-  //    the same share of the grid — that's what makes the set read as even.
-  const probe = mkCanvas(W, W);
-  const pc = probe.getContext("2d")!;
-  pc.save(); pc.translate(pad, pad); drawGood(pc, name, G, color); pc.restore();
-  let x0 = W, y0 = W, x1 = 0, y1 = 0;
-  const d0 = pc.getImageData(0, 0, W, W).data;
-  for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
-    if (d0[(y * W + x) * 4 + 3] > 24) { if (x < x0) x0 = x; if (x > x1) x1 = x; if (y < y0) y0 = y; if (y > y1) y1 = y; }
+function finish(b:(string|null)[]){
+  const out=b.slice(), at=(x:number,y:number)=>x<0||y<0||x>=N||y>=N?null:b[y*N+x];
+  for(let y=0;y<N;y++)for(let x=0;x<N;x++){ if(b[y*N+x]) continue;
+    const n=at(x,y+1)||at(x+1,y)||at(x,y-1)||at(x-1,y);
+    if(n) out[y*N+x]=mix(n,"#0c0610",0.72);
   }
-  const bw = Math.max(1, x1 - x0 + 1), bh = Math.max(1, y1 - y0 + 1);
-  const target = G * 0.92;
-  const k = Math.min(target / bw, target / bh, 1.9);
+  return out;
+}
 
-  const art = mkCanvas(W, W);
-  const a = art.getContext("2d")!;
-  a.save();
-  a.translate(W / 2, W / 2);
-  a.scale(k, k);
-  a.translate(-(x0 + bw / 2), -(y0 + bh / 2));
-  a.translate(pad, pad); drawGood(a, name, G, color);
-  a.restore();
+/** The finished 24×24 sprite for one good, cached per (name, tint). Use `cv`
+ *  directly on a canvas, or `cv.toDataURL()` for a DOM `<img>`/CSS background. */
+export function goodSprite(name:string,color:string):Sprite{
+  const key=name+"|"+color;
+  let s=CACHE.get(key); if(s) return s;
+  const g=painter(); const T=ramp(color||"#9a8a70");
+  (SPR[name]||SPR.__crate)(g,T);
+  const px=finish(g.b);
+  const cv=document.createElement("canvas"); cv.width=cv.height=N;
+  const lit=document.createElement("canvas"); lit.width=lit.height=N;
+  const a=cv.getContext("2d")!, l=lit.getContext("2d")!;
+  const id=a.createImageData(N,N), il=l.createImageData(N,N);
+  px.forEach((c,i)=>{ if(!c) return; const v=hx(c); id.data.set([v[0],v[1],v[2],255],i*4); il.data.set([255,248,232,255],i*4); });
+  a.putImageData(id,0,0); l.putImageData(il,0,0);
+  s={cv,lit,lum:lumOf(color||"#9a8a70"),known:!!SPR[name]};
+  CACHE.set(key,s); return s;
+}
 
-  // 1b. NORMALISE: measure the ink bbox and refit it so every icon carries the
-  //     same visual weight in its cell (fit the long axis, floor the short one).
-  {
-    const d = a.getImageData(0, 0, W, W).data;
-    let nx0 = W, ny0 = W, nx1 = -1, ny1 = -1;
-    for (let y = 0; y < W; y++) for (let x = 0; x < W; x++) {
-      if (d[(y * W + x) * 4 + 3] > 12) { if (x < nx0) nx0 = x; if (x > nx1) nx1 = x; if (y < ny0) ny0 = y; if (y > ny1) ny1 = y; }
-    }
-    if (nx1 >= nx0 && ny1 >= ny0) {
-      const nbw = nx1 - nx0 + 1, nbh = ny1 - ny0 + 1, t2 = G * 0.82, floor = G * 0.44;
-      let k2 = t2 / Math.max(nbw, nbh);
-      if (Math.min(nbw, nbh) * k2 < floor) k2 = Math.min(k2 * 1.55, floor / Math.min(nbw, nbh));
-      k2 = Math.max(0.6, Math.min(2.6, k2));
-      const src = mkCanvas(W, W);
-      src.getContext("2d")!.drawImage(art, 0, 0);
-      a.clearRect(0, 0, W, W);
-      a.save();
-      a.translate(W / 2, W / 2);
-      a.scale(k2, k2);
-      a.translate(-(nx0 + nbw / 2), -(ny0 + nbh / 2));
-      a.drawImage(src, 0, 0);
-      a.restore();
-    }
+/** Draw a good's pixel sprite centred on (cx,cy) in a `size` square.
+ *  Integer-scaled with smoothing off whenever the device size allows ≥2×;
+ *  below that it draws the exact size with smoothing on. Prefer 24/48/72/96
+ *  device-px slots. */
+export function drawPixelIcon(ctx:CanvasRenderingContext2D,cx:number,cy:number,size:number,color:string,name:string,opts:{glow?:number}={}){
+  const s=goodSprite(name,color);
+  const dev=Math.abs(ctx.getTransform?ctx.getTransform().a:1)||1;
+  let k=size*dev/N, draw=size, smooth=true;
+  if(k>=2){ k=Math.floor(k); draw=k*N/dev; smooth=false; }
+  const x=Math.round((cx-draw/2)*dev)/dev, y=Math.round((cy-draw/2)*dev)/dev, p=draw/N;
+  ctx.save(); ctx.imageSmoothingEnabled=smooth;
+  const glow=opts.glow??1;
+  if(glow && s.lum<0.3){
+    ctx.globalAlpha=Math.min(0.85,0.5*glow);
+    for(const [ox,oy] of [[-1,0],[1,0],[0,-1],[0,1]]) ctx.drawImage(s.lit,x+ox*p,y+oy*p,draw,draw);
+    ctx.globalAlpha=1;
   }
-
-  // 2. its silhouette, used for the dark edge and the bevel
-  const sil = (fill: string) => {
-    const c = mkCanvas(W, W);
-    const x = c.getContext("2d")!; x.drawImage(art, 0, 0);
-    x.globalCompositeOperation = "source-in"; x.fillStyle = fill; x.fillRect(0, 0, W, W); return c;
-  };
-  const dark = sil("#0d0b08"), light = sil("#ffffff");
-
-  const out = mkCanvas(W, W);
-  const o = out.getContext("2d")!;
-  // dark edge: the silhouette stamped one grid-pixel out in eight directions
-  for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) o.drawImage(dark, dx, dy);
-  o.drawImage(dark, 0, 0);
-  o.drawImage(art, 0, 0);
-  // bevel: a ONE-pixel rim band, not a wash — the silhouette minus itself, offset
-  const band = (src: HTMLCanvasElement, dx: number, dy: number) => {
-    const c = mkCanvas(W, W);
-    const x = c.getContext("2d")!; x.drawImage(src, 0, 0);
-    x.globalCompositeOperation = "destination-out"; x.drawImage(art, dx, dy); return c;
-  };
-  o.globalCompositeOperation = "source-atop";
-  o.globalAlpha = 0.75; o.drawImage(band(light, 1, 1), 0, 0);    // shiny top-left rim
-  o.globalAlpha = 0.4; o.drawImage(band(dark, -1, -1), 0, 0);    // shaded bottom-right
-  o.globalAlpha = 1; o.globalCompositeOperation = "source-over";
-
-  const Lm = lum(color), glow = opts.glow ?? 1;
-  const px = size / W;
-  ctx.save();
-  // authored at grid resolution and upscaled — smoothing OFF is what makes the edge crisp
-  ctx.imageSmoothingEnabled = false;
-  const dx0 = cx - W * px / 2, dy0 = cy - W * px / 2;
-  // dark goods keep a white shine so they read on a dark panel
-  if (glow && Lm < 0.42) {
-    ctx.save(); ctx.globalAlpha = Math.min(0.7, (0.8 - Lm)) * glow;
-    for (const [ox, oy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) ctx.drawImage(light, dx0 + ox * px, dy0 + oy * px, W * px, W * px);
-    ctx.restore();
-  }
-  ctx.drawImage(out, dx0, dy0, W * px, W * px);
+  ctx.drawImage(s.cv,x,y,draw,draw);
   ctx.restore();
 }
 
-/** The SET'S PIXEL TREATMENT, applied to any draw function instead of a good's
- *  recipe: art rendered onto a coarse grid, stamped with a one-pixel dark edge,
- *  given a shiny top-left rim and a shaded bottom-right one, then upscaled with
- *  smoothing off. `draw(c)` authors into a 100-wide box whose height follows the
- *  requested aspect. `dx,dy` is the box's top-left in device space. */
-export function pixelize(
-  ctx: Ctx, dx: number, dy: number, dw: number, dh: number, cols: number, draw: (c: Ctx) => void,
-) {
-  const pad = 3, C = Math.max(8, Math.round(cols)), rows = Math.max(6, Math.round(C * dh / dw));
-  const W = C + pad * 2, H = rows + pad * 2;
-  const mk = () => mkCanvas(W, H);
-  const art = mk(), a = art.getContext("2d")!;
-  a.save(); a.translate(pad, pad); a.scale(C / 100, C / 100); a.lineJoin = "round"; a.lineCap = "round";
-  draw(a); a.restore();
-  const sil = (fill: string) => {
-    const c = mk(), x = c.getContext("2d")!; x.drawImage(art, 0, 0);
-    x.globalCompositeOperation = "source-in"; x.fillStyle = fill; x.fillRect(0, 0, W, H); return c;
-  };
-  const dark = sil("#0d0b08"), light = sil("#ffffff");
-  const out = mk(), o = out.getContext("2d")!;
-  for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [1, -1], [-1, 1], [1, 1]]) o.drawImage(dark, ox, oy);
-  o.drawImage(art, 0, 0);
-  const band = (src: HTMLCanvasElement, ox: number, oy: number) => {
-    const c = mk(), x = c.getContext("2d")!; x.drawImage(src, 0, 0);
-    x.globalCompositeOperation = "destination-out"; x.drawImage(art, ox, oy); return c;
-  };
-  o.globalCompositeOperation = "source-atop";
-  o.globalAlpha = 0.72; o.drawImage(band(light, 1, 1), 0, 0);
-  o.globalAlpha = 0.36; o.drawImage(band(dark, -1, -1), 0, 0);
-  o.globalAlpha = 1; o.globalCompositeOperation = "source-over";
-  const px = dw / C;
-  ctx.save(); ctx.imageSmoothingEnabled = false;
-  ctx.drawImage(out, dx - pad * px, dy - pad * px, W * px, H * px);
-  ctx.restore();
-}
-
-const RIMS: Record<string, { a: string; b: string; c: string; d: string }> = {
-  gold: { a: "#f6e6b0", b: "#d8b24a", c: "#8a6f2c", d: "#5d4a1c" },
-  steel: { a: "#f0f5fa", b: "#a9b8c6", c: "#63727f", d: "#3b4650" },
-  dark: { a: "#5d6c7c", b: "#33404e", c: "#1b232c", d: "#0e141a" },
-};
-
-/** Mutes a good's tint towards a warm sepia — the desaturated, aged-print
- *  palette a hand-painted ledger icon uses instead of a bright flat colour. */
-function vicMute(hex: string): string {
-  const c = hx(hex), g = (c[0] * 0.3 + c[1] * 0.59 + c[2] * 0.11);
-  const sepia = [112, 92, 64];
-  const mix = (v: number, s: number, t: number) => v * (1 - t) + s * t;
-  const r = [mix(mix(c[0], g, 0.42), sepia[0], 0.22), mix(mix(c[1], g, 0.42), sepia[1], 0.22), mix(mix(c[2], g, 0.42), sepia[2], 0.22)];
-  return "#" + r.map((v) => Math.max(0, Math.min(255, Math.round(v))).toString(16).padStart(2, "0")).join("");
-}
-
-/** Deterministic per-good noise, so the same good textures the same way twice. */
-function seeded(name: string): (n: number) => number {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 131 + name.charCodeAt(i)) >>> 0;
-  return () => { h = (h * 1103515245 + 12345) >>> 0; return ((h >>> 8) % 10000) / 10000; };
-}
-
-/** Draws the good, then lays a MATERIAL texture over just its own ink (masked
- *  with source-atop) — the difference between a flat icon and a painted one:
- *  grain speckle on organic goods, brushed streaks on metal, a woven check on
- *  cloth, a glass reflection streak on vessels and jars. */
-function drawGoodMaterial(ctx: Ctx, name: string, s: number, color: string, family: string) {
-  const pad = 4, W = Math.ceil(s) + pad * 2;
-  const off = mkCanvas(W, W);
-  const o = off.getContext("2d")!;
-  o.translate(pad, pad);
-  drawGood(o, name, s, color);
-  o.save(); o.globalCompositeOperation = "source-atop";
-  const rnd = seeded(name);
-  if (family === "ear" || family === "panicle" || family === "fruit" || family === "botanical" || family === "beast") {
-    for (let i = 0; i < 46; i++) {
-      const x = rnd(i) * W, y = rnd(i + 1) * W;
-      o.fillStyle = rnd(i + 2) > 0.52 ? "rgba(255,250,232,0.12)" : "rgba(36,24,10,0.11)";
-      o.beginPath(); o.arc(x, y, 0.7 + rnd(i + 3) * 1.3, 0, T2); o.fill();
-    }
-  } else if (family === "metal" || family === "mineral" || family === "carved") {
-    for (let i = 0; i < 11; i++) {
-      const y = rnd(i) * W;
-      o.strokeStyle = rnd(i + 1) > 0.5 ? "rgba(255,255,255,0.11)" : "rgba(0,0,0,0.13)";
-      o.lineWidth = 0.7; o.beginPath(); o.moveTo(0, y); o.lineTo(W, y + (rnd(i + 2) - 0.5) * 7); o.stroke();
-    }
-  } else if (family === "cloth") {
-    for (let x = 0; x < W; x += 3.4) for (let y = 0; y < W; y += 3.4) {
-      o.fillStyle = ((x + y) / 3.4) % 2 ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.07)";
-      o.fillRect(x, y, 1.6, 1.6);
-    }
-  } else if (family === "vessel" || family === "ware") {
-    const g = o.createLinearGradient(0, 0, W * 0.4, 0);
-    g.addColorStop(0, "rgba(255,255,255,0.24)"); g.addColorStop(0.5, "rgba(255,255,255,0.02)"); g.addColorStop(1, "rgba(255,255,255,0)");
-    o.fillStyle = g; o.fillRect(0, 0, W, W);
-  } else if (family === "wood" || family === "craft") {
-    for (let i = 0; i < 6; i++) {
-      const y = W * 0.15 + i * W * 0.13;
-      o.strokeStyle = "rgba(0,0,0,0.09)"; o.lineWidth = 0.6;
-      o.beginPath(); o.moveTo(0, y); o.bezierCurveTo(W * 0.3, y + 2, W * 0.7, y - 2, W, y); o.stroke();
-    }
-  }
-  o.restore();
-  ctx.drawImage(off, -pad, -pad);
-}
-
-/** A Victoria-II-style ledger icon: a hand-painted good inside a bevelled
- *  bronze frame on an aged paper card, muted and softly lit rather than the
- *  flat pixel-art treatment `drawIcon` uses. `size` is the drawn square. */
-export function drawIconVictorian(ctx: Ctx, cx: number, cy: number, size: number, color: string, name: string) {
-  const muted = vicMute(color);
-  ctx.save();
-  ctx.translate(cx - size / 2, cy - size / 2);
-  // paper card
-  const rr = (x: number, y: number, w: number, h: number, r: number) => {
-    ctx.beginPath(); ctx.moveTo(x + r, y);
-    ctx.arcTo(x + w, y, x + w, y + h, r); ctx.arcTo(x + w, y + h, x, y + h, r);
-    ctx.arcTo(x, y + h, x, y, r); ctx.arcTo(x, y, x + w, y, r); ctx.closePath();
-  };
-  const pg = lg(ctx, 0, 0, size, size, [[0, "#e2cf9e"], [0.55, "#cdb27c"], [1, "#a9885a"]]);
-  rr(0, 0, size, size, size * 0.07); ctx.fillStyle = pg; ctx.fill();
-  // subtle paper grain
-  ctx.save(); ctx.clip();
-  for (let i = 0; i < 26; i++) {
-    const gx = (i * 53) % size, gy = (i * 97) % size;
-    ctx.fillStyle = i % 2 ? "rgba(70,50,24,0.05)" : "rgba(255,244,214,0.06)"; ctx.fillRect(gx, gy, size * 0.09, size * 0.02);
-  }
-  ctx.restore();
-  // vignette
-  ctx.save(); rr(0, 0, size, size, size * 0.07); ctx.clip();
-  const vg = rg(ctx, size / 2, size / 2, size * 0.2, size * 0.72, [[0, "rgba(0,0,0,0)"], [1, "rgba(40,26,10,0.32)"]]);
-  ctx.fillStyle = vg; ctx.fillRect(0, 0, size, size);
-  ctx.restore();
-  // the good, muted, softly lit, no hard pixel edge
-  ctx.save();
-  ctx.translate(size * 0.11, size * 0.11);
-  ctx.shadowColor = "rgba(30,18,6,0.45)"; ctx.shadowBlur = size * 0.05; ctx.shadowOffsetY = size * 0.02;
-  const fam = (RECIPES[name] || ["mineral"])[0];
-  drawGoodMaterial(ctx, name, size * 0.78, muted, fam);
-  ctx.restore();
-  // bevelled bronze frame
-  const rim = RIMS.gold, bw = Math.max(2, size * 0.05);
-  ctx.lineJoin = "miter";
-  rr(bw * 0.4, bw * 0.4, size - bw * 0.8, size - bw * 0.8, size * 0.06);
-  ctx.strokeStyle = lg(ctx, 0, 0, size, size, [[0, rim.a], [0.5, rim.b], [1, rim.c]]);
-  ctx.lineWidth = bw; ctx.stroke();
-  rr(bw * 1.1, bw * 1.1, size - bw * 2.2, size - bw * 2.2, size * 0.045);
-  ctx.strokeStyle = "rgba(20,12,4,0.5)"; ctx.lineWidth = Math.max(1, bw * 0.28); ctx.stroke();
-  // corner rivets
-  const rv = Math.max(1.4, size * 0.022);
-  for (const [rx, ry] of [[bw * 0.9, bw * 0.9], [size - bw * 0.9, bw * 0.9], [bw * 0.9, size - bw * 0.9], [size - bw * 0.9, size - bw * 0.9]]) {
-    ctx.beginPath(); ctx.arc(rx, ry, rv, 0, T2); ctx.fillStyle = rim.b; ctx.fill();
-    ctx.beginPath(); ctx.arc(rx - rv * 0.3, ry - rv * 0.3, rv * 0.4, 0, T2); ctx.fillStyle = rim.a; ctx.fill();
-  }
-  ctx.restore();
-}
-
-export interface MedallionOpts { rim?: string; reeded?: boolean }
-
-/** An enamel medallion: cast shadow, bevelled metal rim, domed enamel field,
- *  the good's illustration, and a glass highlight. */
-export function drawMedallion(ctx: Ctx, cx: number, cy: number, R: number, color: string, name: string, opts: MedallionOpts = {}) {
-  const rim = RIMS[opts.rim || "gold"] || RIMS.gold;
-  ctx.save();
-  ctx.translate(cx, cy);
-  // cast shadow
-  E(ctx, R * 0.06, R * 0.12, R, R, 0, rg(ctx, 0, R * 0.12, R * 0.2, R * 1.05, [[0, "rgba(0,0,0,0.55)"], [1, "rgba(0,0,0,0)"]]));
-  // metal rim
-  E(ctx, 0, 0, R, R, 0, lg(ctx, -R, -R, R, R, [[0, rim.a], [0.32, rim.b], [0.62, rim.c], [1, rim.d]]));
-  ctx.beginPath(); ctx.arc(0, 0, R * 0.995, 0, T2); ctx.strokeStyle = "rgba(12,9,4,0.65)"; ctx.lineWidth = R * 0.05; ctx.stroke();
-  // rim bevel + reeded edge
-  ctx.beginPath(); ctx.arc(0, 0, R * 0.9, 0, T2); ctx.strokeStyle = "rgba(255,255,255,0.28)"; ctx.lineWidth = R * 0.035; ctx.stroke();
-  if (opts.reeded !== false) {
-    for (let i = 0; i < 48; i++) {
-      const a = i / 48 * T2;
-      L(ctx, [[Math.cos(a) * R * 0.99, Math.sin(a) * R * 0.99], [Math.cos(a) * R * 0.9, Math.sin(a) * R * 0.9]], "rgba(0,0,0,0.18)", R * 0.02);
-    }
-  }
-  // enamel field
-  const fr = R * 0.78;
-  E(ctx, 0, 0, fr, fr, 0, rg(ctx, 0, 0, fr * 0.1, fr, [[0, shade(color, 1.3)], [0.55, color], [1, shade(color, 0.52)]]));
-  ctx.beginPath(); ctx.arc(0, 0, fr, 0, T2); ctx.strokeStyle = "rgba(10,8,4,0.5)"; ctx.lineWidth = R * 0.035; ctx.stroke();
-  // subject
-  const s = fr * 1.5;
-  ctx.save(); ctx.translate(-s / 2, -s / 2 - R * 0.02);
-  ctx.shadowColor = "rgba(10,8,4,0.45)"; ctx.shadowBlur = R * 0.09; ctx.shadowOffsetY = R * 0.03;
-  drawGood(ctx, name, s, color);
-  ctx.restore();
-  // glass highlight over the top-left of the field
-  ctx.save();
-  ctx.beginPath(); ctx.arc(0, 0, fr, 0, T2); ctx.clip();
-  E(ctx, -fr * 0.3, -fr * 0.55, fr * 0.72, fr * 0.42, -0.5, "rgba(255,255,255,0.20)");
-  ctx.restore();
-  ctx.restore();
-}
+export const PIXEL_GOODS = Object.keys(SPR).filter(k=>k!=="__crate");
+export const SPRITE_GRID = N;

@@ -12,8 +12,7 @@ import { GOOD_DEFS, clarifyGemLabel } from "@goods";
 import { useWorldStore } from "@state/worldStore";
 import type { HouseBrief } from "@types";
 
-const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
-const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
+import { goodIcon } from "@ui/campaign/houseShared";
 
 const fmt = (v: number | undefined) => {
   const n = v ?? 0;

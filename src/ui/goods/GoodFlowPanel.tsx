@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { GoodIcon } from "./GoodIcon";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
@@ -43,7 +44,7 @@ export function GoodFlowPanel() {
 
   if (!selectedGood || !economy) return null;
 
-  const icon = goodMeta(selectedGood).icon;
+  const icon = <GoodIcon name={selectedGood} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} />;
   const label = goodMeta(selectedGood).name;
   const hubName = (id: number) => economy.hubs.find((h) => h.id === id)?.name ?? `Hub ${id}`;
   const hubById = (id: number) => economy.hubs.find((h) => h.id === id);
@@ -139,7 +140,7 @@ export function GoodFlowPanel() {
           {openRoads
             .map((id) => routes.find((r) => r.id === id))
             .filter((r): r is EconChain => !!r)
-            .map((r) => <RoadDetail key={r.id} chain={r} hubName={hubName} hubById={hubById} iconFor={(id) => goodMeta(id).icon} labelFor={(id) => goodMeta(id).name} />)}
+            .map((r) => <RoadDetail key={r.id} chain={r} hubName={hubName} hubById={hubById} iconFor={(id) => <GoodIcon name={id} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />} labelFor={(id) => goodMeta(id).name} />)}
 
           <div style={{ color: "#506680", fontSize: 9, marginTop: 4 }}>
             {MODE_ICON.join(" ")} = overland / sea / river · click roads to open several at once.
@@ -156,7 +157,7 @@ function RoadDetail({ chain, hubName, hubById, iconFor, labelFor }: {
   chain: EconChain;
   hubName: (id: number) => string;
   hubById: (id: number) => EconHub | undefined;
-  iconFor: (id: string) => string;
+  iconFor: (id: string) => React.ReactNode;
   labelFor: (id: string) => string;
 }) {
   const tollTotal = chain.stops.reduce((a, s) => a + (s.toll ?? 0), 0);

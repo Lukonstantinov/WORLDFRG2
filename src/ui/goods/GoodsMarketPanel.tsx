@@ -9,9 +9,7 @@ import { T, FZ } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "@ui/kit";
 import { GoodIcon } from "./GoodIcon";
 
-const GICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
 const GLABEL = new Map(GOOD_DEFS.map((g) => [g.name, g.label]));
-const icon = (n: string) => GICON.get(n) ?? "\u{1F4E6}";
 const label = (n: string) => GLABEL.get(n) ?? n;
 const fmt = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(v < 10 ? 1 : 0));
 

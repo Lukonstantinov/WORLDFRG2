@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import type { HubDetail, HubGoodDetail, ShipmentRow } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { MarketSquare } from "@ui/campaign/MarketSquare";
 
 /** ─────────────────────────────────────────────────────────────────────────────
@@ -261,7 +262,7 @@ function SupplyBar({ shares }: { shares?: [number, number, number, number, numbe
 function QuayColumn({ quays, side, openCity, setOpenCity, icon, label, focus, labelOf }: {
   quays: Quay[]; side: "in" | "out";
   openCity: string | null; setOpenCity: (c: string | null) => void;
-  icon: (id: string) => string; label: (id: string) => string;
+  icon: (id: string) => React.ReactNode; label: (id: string) => string;
   focus: string | null; labelOf: (id: string) => string;
 }) {
   const tint = side === "in" ? C.buy : C.sell;
@@ -335,7 +336,7 @@ function QuayColumn({ quays, side, openCity, setOpenCity, icon, label, focus, la
  *  it was struck. */
 function DealRow({ s, side, icon, label }: {
   s: ShipmentRow; side: "in" | "out";
-  icon: (id: string) => string; label: (id: string) => string;
+  icon: (id: string) => React.ReactNode; label: (id: string) => string;
 }) {
   const deal = s.deal_price && s.deal_price > 0 ? s.deal_price : null;
   const gap = deal !== null ? deal - s.price : null;
@@ -428,7 +429,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
   onFocusGood?: (good: string | null) => void;
 }) {
   const goodMeta = useGoodsStore((s) => s.meta);
-  const icon = (id: string) => goodMeta(id).icon;
+  const icon = (id: string) => <GoodIcon name={id} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} />;
   const label = (id: string) => goodMeta(id).name;
   // HOUSES_GUILDS_AND_MARKET_PLAN.md S4 — an earned craft signature ("Ypres
   // broadcloth") reads in place of the plain good name; quiet (the plain name)
@@ -773,7 +774,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
  *  price/volume history — absorbing what used to be three separate sections. */
 function BookDetail({ r, buys, sells, icon, label }: {
   r: BookRow; buys: ShipmentRow[]; sells: ShipmentRow[];
-  icon: (id: string) => string; label: (id: string) => string;
+  icon: (id: string) => React.ReactNode; label: (id: string) => string;
 }) {
   const byCity = (rows: ShipmentRow[]) => {
     const m = new Map<string, { units: number; value: number }>();

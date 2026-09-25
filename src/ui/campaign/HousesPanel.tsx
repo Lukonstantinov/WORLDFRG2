@@ -129,7 +129,7 @@ export function HousesPanel() {
             {h.top_goods && h.top_goods.length > 0 && (
               <span style={{ ...chip, color: "#a8dcb4", borderColor: "#1e3a2a" }}
                 title="Top goods this family is known for exporting (by profit)">
-                {h.top_goods.slice(0, 3).map((g) => `${goodIcon(g)} ${clarifyGemLabel(g, h.gem_variety)}`).join("  ")}
+                {h.top_goods.slice(0, 3).map((g, i) => <span key={g}>{i > 0 && "  "}{goodIcon(g)} {clarifyGemLabel(g, h.gem_variety)}</span>)}
               </span>
             )}
             {h.specialties.filter((g) => !h.top_goods?.includes(g)).slice(0, 3).map((g) => (

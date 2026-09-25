@@ -202,6 +202,8 @@ const GOOD_CATEGORY: Record<string, string> = {
   spices: "Spices & Aromatics", cloves: "Spices & Aromatics", pepper: "Spices & Aromatics",
   cinnamon: "Spices & Aromatics", frankincense: "Spices & Aromatics", incense: "Spices & Aromatics",
   saffron: "Spices & Aromatics", perfume: "Spices & Aromatics",
+  nutmeg: "Spices & Aromatics", mace: "Spices & Aromatics", dragons_blood: "Spices & Aromatics",
+  camphor: "Spices & Aromatics", benzoin: "Spices & Aromatics", sandalwood: "Spices & Aromatics",
   // Textiles & animal — fibres/hides/animals AND the cloth/leather woven from them
   silk: "Textiles & Animal", cotton: "Textiles & Animal", flax: "Textiles & Animal",
   wool_fleece: "Textiles & Animal", wool_llama: "Textiles & Animal", furs: "Textiles & Animal",
@@ -223,6 +225,9 @@ const GOOD_CATEGORY: Record<string, string> = {
   diamond: "Minerals & Metals", amethyst: "Minerals & Metals", topaz: "Minerals & Metals",
   marble: "Minerals & Metals", lead: "Minerals & Metals",
   metalware: "Minerals & Metals", bronzeware: "Minerals & Metals", jewelry: "Minerals & Metals",
+  mercury: "Minerals & Metals", alum: "Minerals & Metals", lapis_lazuli: "Minerals & Metals",
+  turquoise: "Minerals & Metals", bog_iron: "Minerals & Metals", coal: "Minerals & Metals",
+  garnet: "Minerals & Metals", carnelian: "Minerals & Metals",
   // Marine — sea catch/harvest AND the salted fish preserved for transport
   stockfish: "Marine", herring: "Marine", salted_herring: "Marine", pearls: "Marine",
   whaling: "Marine", amber: "Marine", dyes: "Marine", tyrian_purple: "Marine",

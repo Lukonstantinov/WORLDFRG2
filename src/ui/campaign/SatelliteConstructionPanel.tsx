@@ -4,6 +4,7 @@ import { useCampaignStore } from "@state/campaignStore";
 import { campaignGetSatellite } from "@bridge";
 import type { SatelliteBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { GOOD_DEFS } from "@goods";
 import { T, FZ, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, Meter } from "@ui/kit";
@@ -11,8 +12,7 @@ import { Panel, Meter } from "@ui/kit";
 const STAGE_NAMES = ["Survey", "Foundations", "Warehousing", "Walls", "Market"];
 const CAT_ICON = ["🌾", "🧂", "🧱"];
 const CAT_COLOR = ["#7fcf6b", "#5ec6e0", "#d9a441"];
-const GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
-const goodIcon = (name: string) => GOOD_EMOJI[name] ?? "📦";
+const goodIcon = (name: string) => <GoodIcon name={name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />;
 
 /** Satellite CONSTRUCTION window (Blend V1+V3): a 5-stage bar + monthly cost/runway on
  *  top, the 3 supply tabs (food / preservables / construction) each carrying the convoy

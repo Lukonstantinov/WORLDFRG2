@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useViewportStore } from "@state/viewportStore";
@@ -228,7 +229,7 @@ export function PeoplesPanel() {
                         return (
                           <span key={g} style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11,
                             color: T.inkMid, border: `1px solid ${T.lineSoft}`, background: T.card, borderRadius: 12, padding: "2px 8px" }}>
-                            <span>{d?.emoji ?? "•"}</span>{d?.label ?? g}
+                            <GoodIcon name={g} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />{d?.label ?? g}
                           </span>
                         );
                       })}

@@ -119,7 +119,7 @@ export function GoodDetailPanel() {
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <strong style={{ fontSize: 16, display: "inline-flex", alignItems: "center", gap: 8 }}>
-            <GoodIcon name={spec.id} color={spec.color} size={40} treatment="victorian" />
+            <GoodIcon name={spec.id} color={spec.color} size={48} />
             {spec.name}
           </strong>
           <button onClick={() => close(null)} style={{ ...tag, cursor: "pointer", marginRight: 0 }}>✕ Close</button>

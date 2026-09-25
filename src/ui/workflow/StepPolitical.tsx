@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { computePolitical } from "@bridge";
@@ -12,7 +13,7 @@ interface Props {
   invalidateTiles: () => void;
 }
 
-const emojiFor = (name: string) => GOOD_DEFS.find((g) => g.name === name)?.emoji ?? "";
+const emojiFor = (name: string) => <GoodIcon key={name} name={name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />;
 
 export function StepPolitical(_props: Props) {
   const simRunning = useUIStore((s) => s.simRunning);
@@ -74,7 +75,7 @@ export function StepPolitical(_props: Props) {
               <span>#{c.rank + 1}</span>
               <span style={{ color: "#8aa0c0" }}>power {c.power.toFixed(2)}</span>
               <span style={{ minWidth: 70, textAlign: "right" }}>
-                {c.monopolies.slice(0, 4).map((m) => emojiFor(m)).join("")}
+                {c.monopolies.slice(0, 4).map((m) => emojiFor(m))}
               </span>
             </div>
           ))}

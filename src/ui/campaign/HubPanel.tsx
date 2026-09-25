@@ -9,7 +9,7 @@ import { NOTABLE_ROLE_NAMES } from "@types";
 import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear, Notable } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
-const HP_GOOD_EMOJI: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.emoji]));
+import { GoodIcon } from "@ui/goods/GoodIcon";
 const HP_GOOD_COLOR: Record<string, string> = Object.fromEntries(GOOD_DEFS.map((g) => [g.name, g.color]));
 import { climatePhrase } from "@ui/world/climate";
 import { CoatOfArms, houseColor } from "@ui/heraldry/CoatOfArms";
@@ -198,7 +198,7 @@ function specializationTier(topShare: number): SpecTier {
  *  summed by good) and falls back to the frozen worldgen mix pre-campaign;
  *  never mixes the two so the ring never straddles a stale and a live number. */
 function TradeSignature({ mix, iconFor, labelFor }:
-  { mix: { good: string; value: number }[]; iconFor: (id: string) => string; labelFor: (id: string) => string }) {
+  { mix: { good: string; value: number }[]; iconFor: (id: string) => React.ReactNode; labelFor: (id: string) => string }) {
   const R = 30, r = 17, cx = 34, cy = 34;
   const total = Math.max(1e-6, mix.reduce((s, m) => s + Math.max(0, m.value), 0));
   const slices = mix
@@ -366,7 +366,7 @@ export function HubPanel() {
   if (!hub) return null;
   const inEconomy = !!econHub; // false ⇒ synthesized in-campaign hub (no worldgen rank)
 
-  const iconFor = (id: string) => goodMeta(id).icon;
+  const iconFor = (id: string) => <GoodIcon name={id} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />;
   const labelFor = (id: string) => goodMeta(id).name;
   const fmt = (v: number) => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0);
   const stars = Math.max(1, Math.min(5, hub.stars));
@@ -773,7 +773,7 @@ export function HubPanel() {
           {!campActive && hub.monopolies && hub.monopolies.length > 0 && (
             <div style={{ color: "#9ab0c8", fontSize: 10, margin: "4px 0 2px" }}>
               <span style={{ color: "#6a86a6" }}>Monopolies: </span>
-              {hub.monopolies.map((m) => `${iconFor(m)} ${labelFor(m)}`).join(", ")}
+              {hub.monopolies.map((m, i) => <span key={m}>{i > 0 && ", "}{iconFor(m)} {labelFor(m)}</span>)}
             </div>
           )}
 
@@ -1139,7 +1139,7 @@ export function HubPanel() {
                     <div style={{ fontSize: 10, color: "#7fb0e0", fontWeight: 600, marginBottom: 2 }}>Richest goods held here</div>
                     {detail.city_stores.top_goods.slice(0, 6).map((g, i) => (
                       <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#a8bcd4" }}>
-                        <span>{HP_GOOD_EMOJI[g.name] ?? "📦"} {g.name}</span>
+                        <span><GoodIcon name={g.name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {g.name}</span>
                         <span>{Math.round(g.amount).toLocaleString()}</span>
                       </div>
                     ))}
@@ -1156,7 +1156,7 @@ export function HubPanel() {
               return (
                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#a8bcd4" }}>
-                    <span>{HP_GOOD_EMOJI[g.good] ?? "📦"} {g.good}{g.food ? " 🍞" : ""}</span>
+                    <span><GoodIcon name={g.good} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {g.good}{g.food ? " 🍞" : ""}</span>
                     <span style={{ color: "#7a8aa0" }}>{g.secured.toFixed(0)} / {g.target.toFixed(0)}</span>
                   </div>
                   <div style={{ height: 8, borderRadius: 4, background: "#0e1a27", border: "1px solid #1c2c40", overflow: "hidden" }}>
@@ -1515,7 +1515,7 @@ export function HubPanel() {
                     </div>
                     <div style={{ color: "#7a90a8", fontSize: 9, paddingLeft: 13 }}>
                       from {o.origin || "—"}
-                      {o.goods.length > 0 && <> · {o.goods.slice(0, 5).map((g) => `${iconFor(g)} ${labelFor(g)}`).join(", ")}</>}
+                      {o.goods.length > 0 && <> · {o.goods.slice(0, 5).map((g, i) => <span key={g}>{i > 0 && ", "}{iconFor(g)} {labelFor(g)}</span>)}</>}
                     </div>
                   </div>
                 ))}
@@ -1901,8 +1901,8 @@ function CultureMoodRow({ m }: { m: CultureMood }) {
       <span style={{ fontSize: 13 }} title={`${Math.round(s * 100)}% of what they crave is supplied`}>{face}</span>
       <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: "#8aa0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {m.unmet.length > 0
-          ? <span style={{ color: fc }}>craves {m.unmet.map((g) => HP_GOOD_EMOJI[g] ?? g).join(" ")}</span>
-          : <span style={{ color: "#7fa090" }}>content {m.met.slice(0, 3).map((g) => HP_GOOD_EMOJI[g] ?? "").join(" ")}</span>}
+          ? <span style={{ color: fc }}>craves {m.unmet.map((g) => <GoodIcon key={g} name={g} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />)}</span>
+          : <span style={{ color: "#7fa090" }}>content {m.met.slice(0, 3).map((g) => <GoodIcon key={g} name={g} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />)}</span>}
       </span>
     </div>
   );

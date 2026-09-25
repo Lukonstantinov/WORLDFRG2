@@ -148,7 +148,7 @@ export function GoodsCodexPanel() {
       {/* Identity */}
       <div style={{ padding: "2px 12px 6px", display: "flex", alignItems: "center", gap: 10 }}>
         {codexGood
-          ? <GoodIcon name={codexGood} size={48} treatment="victorian" title={m?.name} />
+          ? <GoodIcon name={codexGood} size={48} title={m?.name} />
           : <span style={{ fontSize: 30, lineHeight: 1 }}>📦</span>}
         <div style={{ minWidth: 0 }}>
           <div style={{ color: "#eaf2fb", fontWeight: 700, fontSize: 15 }}>{m?.name ?? "—"}</div>

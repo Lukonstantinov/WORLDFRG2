@@ -28,6 +28,7 @@
  *  economy" finding `docs/CONSUMPTION_AND_GOODS_REVIEW.md` names, restated
  *  here rather than papered over with an inferred split. */
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { campaignTradeFlows } from "@bridge";
 import type { TradeFlows, TradeFlowGood, HubDetail, HubGoodDetail } from "@types";
 import { GOOD_DEFS } from "@goods";
@@ -142,7 +143,7 @@ export function InternalMarketView({ hubId, active, tick, detail }: {
                 onClick={() => setExpanded(sel ? null : g.good)}
               >
                 <span style={{ width: 12, color: T.inkFaint }}>{sel ? "▾" : "▸"}</span>
-                <span style={{ width: 16 }}>{meta?.emoji ?? "•"}</span>
+                <span style={{ width: 16 }}><GoodIcon name={g.name} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /></span>
                 <span style={{ flex: 1, minWidth: 70, color: sel ? T.gold : T.ink, display: "flex", alignItems: "center", gap: 5 }}>
                   {meta?.label ?? g.name}
                   {(hd?.charter_holder ?? "") !== "" && (

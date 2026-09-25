@@ -13,10 +13,11 @@ import {
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { ProvinceTradeView } from "@ui/world/ProvinceTradeView";
 import {
-  ELEV_WORD, borderKind, cellsToKm, goodEmoji, goodLabel, provinceFrontiers,
+  ELEV_WORD, borderKind, cellsToKm, goodLabel, provinceFrontiers,
   provinceHistory, stars,
 } from "@ui/world/provinceStory";
 import { GOOD_DEFS } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { T, FZ, SPACE, SERIF } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Section, Card, Badge, Meter as KitMeter, Tabs, Button, EmptyNote, FootNote } from "@ui/kit";
 import type {
@@ -359,7 +360,7 @@ export function ProvinceInspector() {
                     padding: "1px 5px", borderRadius: 10, border: `1px solid ${T.lineSoft}`,
                     background: shown ? T.raised : T.card, color: shown ? T.ink : T.inkFaint, opacity: shown ? 1 : 0.7 }}>
                   <span style={{ width: 8, height: 8, borderRadius: 2, background: col, opacity: shown ? 1 : 0.35, flexShrink: 0 }} />
-                  {goodEmoji(g.good)} {goodLabel(g.good)}
+                  <GoodIcon name={GOOD_DEFS[g.good]?.name ?? ""} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /> {goodLabel(g.good)}
                   <span style={{ color: T.gold, letterSpacing: 0.5, fontSize: 8 }}>{stars(g.quality)}</span>
                 </button>
               );
@@ -555,7 +556,7 @@ export function ProvinceInspector() {
                     return (
                       <div key={g.good} style={{ marginBottom: 4, opacity: g.actual > 1e-4 ? 1 : 0.94 }}>
                         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                          <span style={{ width: 132, color: T.ink }}>{goodEmoji(g.good)} {goodLabel(g.good)}</span>
+                          <span style={{ width: 132, color: T.ink }}><GoodIcon name={GOOD_DEFS[g.good]?.name ?? ""} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /> {goodLabel(g.good)}</span>
                           <span style={{ color: T.gold, letterSpacing: 1 }}
                             title={`${g.grade_word} — ${g.is_deposit ? "mean ore grade" : "land quality"} ${(q * 100).toFixed(0)}%`}>{stars(q)}</span>
                           {g.is_deposit && g.workings > 0 ? (
@@ -639,7 +640,7 @@ export function ProvinceInspector() {
                             padding: "2px 4px", borderRadius: 3,
                             background: open ? T.card : "transparent" }}>
                           <span style={{ width: 14, color: T.inkFaint, fontSize: 10 }}>{open ? "▾" : "▸"}</span>
-                          <span style={{ width: 128, color: T.ink }}>{goodEmojiByName(g.good)} {goodLabelByName(g.good)}</span>
+                          <span style={{ width: 128, color: T.ink }}><GoodIcon name={g.good} size={16} style={{ display: "inline-block", verticalAlign: "middle" }} /> {goodLabelByName(g.good)}</span>
                           <span style={{ color: T.inkDim, fontSize: 11 }}>{g.model}</span>
                           <span style={{ color: T.gold, letterSpacing: 1 }}
                             title={`grade ${(bestGrade * 100).toFixed(0)}%`}>{stars(bestGrade)}</span>
@@ -920,12 +921,9 @@ function extentWord(e: number): string {
   return ["weak", "moderate", "great", "world-class"][Math.max(0, Math.min(3, e))];
 }
 
-/** `goodEmoji`/`goodLabel` (provinceStory.ts) key `GOOD_DEFS` by POSITIONAL
+/** `goodLabel` (provinceStory.ts) keys `GOOD_DEFS` by POSITIONAL
  *  index (a world good column), but `ProvinceDepositDot.good` carries the
  *  spec ID string — a by-name lookup instead. */
-function goodEmojiByName(id: string): string {
-  return GOOD_DEFS.find((d) => d.name === id)?.emoji ?? "⛏️";
-}
 function goodLabelByName(id: string): string {
   return GOOD_DEFS.find((d) => d.name === id)?.label ?? id;
 }

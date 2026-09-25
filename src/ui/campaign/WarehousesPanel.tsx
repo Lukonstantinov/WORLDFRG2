@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useGoodsStore } from "@state/goodsStore";
@@ -112,7 +113,7 @@ export function WarehousesPanel() {
               {r.goods.length > 0 && (
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 2 }}>
                   {r.goods.slice(0, 6).map(([g, v]) => (
-                    <span key={g} style={{ fontSize: FZ.tiny, color: T.inkMid }}>{goodMeta(g).icon} {fmt(v)}</span>
+                    <span key={g} style={{ fontSize: FZ.tiny, color: T.inkMid }}><GoodIcon name={g} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {fmt(v)}</span>
                   ))}
                 </div>
               )}

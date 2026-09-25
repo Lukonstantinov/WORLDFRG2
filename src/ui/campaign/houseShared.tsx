@@ -2,11 +2,10 @@
 // browser (HousesPanel.tsx) and the House Dossier (HouseDossier.tsx) now that
 // the dossier is its own file. Split out rather than duplicated or cross-
 // imported (which would create a HousesPanel <-> HouseDossier import cycle).
-import { GOOD_DEFS } from "@goods";
+import { GoodIcon } from "@ui/goods/GoodIcon";
 import type { HouseBrief, KinBrief } from "@types";
 
-export const GOOD_ICON = new Map(GOOD_DEFS.map((g) => [g.name, g.emoji]));
-export const goodIcon = (name: string) => GOOD_ICON.get(name) ?? "\u{1F4E6}"; // 📦 fallback
+export const goodIcon = (name: string) => <GoodIcon name={name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />;
 
 /** House tiers (`HOUSE_PEOPLE_AND_TIERS.md` §1) — a rank BAND among live peers, not an
  *  absolute score. Tier 1 may be empty on a young world; that's meaningful, not a bug. */

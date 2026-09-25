@@ -2464,18 +2464,23 @@ canvas/
                                   mask hasn't arrived
   PaintOverlay.ts               ← Brush preview, paint stamps
   projection.ts                 ← lat/lon ↔ world-cell projection helpers
-  goodIcons.ts                  ← EU4-style medallion for MAP overlays (`drawGoodIcon`,
-                                  radius-based, world-space) — untouched by the art pass below
-  goodArt.ts                    ← the 85-recipe illustration set (art redesign): `drawIcon`
-                                  (pixel treatment) / `drawIconVictorian` (ledger card) /
-                                  `drawGood` / `pixelize` / `drawMedallion`, one shape family
-                                  per good, no two goods share a picture. Separate from
-                                  `goodIcons.ts` because the two serve different contexts
-                                  (panel/ledger icons vs. a map medallion at arbitrary zoom)
-  goodIconCache.ts               ← offscreen-canvas cache for `goodArt.ts`, keyed
-                                  `${name}:${size}:${treatment}:${color}:${scale}` — `drawIcon`
-                                  allocates several offscreen canvases per call, too costly
-                                  for a list of 85
+  goodArt.ts                    ← THE goods art — the ONLY goods treatment app-wide
+                                  (pixel art, design handoff 2026-09-25, ported verbatim
+                                  from `wf-pixel-goods.js`: the numbers ARE the design).
+                                  One hand-placed 24×24 sprite per GOOD_DEFS name (all
+                                  101) + a crate stencilled in the tint for custom goods.
+                                  `drawPixelIcon` (integer-scaled, smoothing off at ≥2×
+                                  device px; prefer 24/48/72/96 slots) · `goodSprite`
+                                  (cached per name+tint; `.cv.toDataURL()` for SVG/DOM)
+                                  · `PIXEL_GOODS` · `SPRITE_GRID`. The old Victorian card,
+                                  parchment chip and enamel medallion are deleted
+  goodIcons.ts                  ← map-space wrapper (`drawGoodIcon`, radius-based) over
+                                  `drawPixelIcon` — region centroids, trade-lane and
+                                  guild-city markers; carries the gemstones sublabel tint
+  goodIconCache.ts               ← per (good, size, tint, DPR) blit cache for `GoodIcon`
+  pixelize.ts                    ← the coarse-grid pixel treatment for PEOPLE/BUILDING
+                                  art (`cultureDress.ts`, `marketSquareArt.ts`) + `shade`;
+                                  goods no longer go through it
   buildingArt.ts                 ← the 15 `SPRITE_MAP` building types, procedural
                                   (`drawProcedural`), differentiated by architectural form
                                   rather than palette — the art redesign's building pass
@@ -2609,10 +2614,9 @@ ui/world/  — map & world
   useFloatingWindow.ts          ← Floating/dockable window hook
 
 ui/goods/  — goods
-  GoodIcon.tsx                   ← React wrapper over `canvas/goodArt.ts` (authored 2×,
-                                  displayed at half) — pixel treatment for inline list
-                                  icons, Victorian ledger treatment for hero/identity
-                                  icons ≥40px; never mixed within one screen
+  GoodIcon.tsx                   ← React wrapper over `canvas/goodArt.ts`'s pixel sprite,
+                                  backed at device resolution. Every panel that shows a
+                                  good goes through it — no `GOOD_DEFS.emoji` glyphs remain in the panels
   GoodsEditor.tsx               ← Goods builder (distribution/value/bulk/perish + recipes)
   GoodsChainReview.tsx          ← Pre-generation planted-vs-manufactured review + recipe DAG
   GoodsBrowserPanel/GoodDetailPanel/GoodFlowPanel.tsx ← browser/detail/flow views

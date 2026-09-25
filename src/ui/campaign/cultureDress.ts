@@ -21,7 +21,7 @@
 // gone with it; the head's own name/sex/character still read from the text
 // beside the portrait, not from the art.
 
-import { pixelize, shade } from "@canvas/goodArt";
+import { pixelize, shade } from "@canvas/pixelize";
 
 export type Occasion = "everyday" | "national" | "ceremonial";
 /** The three registers every people has, whatever its kit's provenance. */
