@@ -740,6 +740,8 @@ export class OverlayManager {
    *  switch (the same discipline `selectedHouseIdx` itself already needs). */
   private houseAtlas: HouseAtlas | null = null;
   private houseAtlasFor: number | null = null;
+  /** null = the whole web in red; a good index = only that good's lanes. */
+  private houseLaneGood: number | null = null;
   // Goods Atlas · one good's yearly trade flow, each lane routed via `laneBetween`
   // (coarse cost grid → worldgen trade-route graph → dashed direct fallback, rule
   // 35). `amount` drives arrow width; `goodFlowMax` normalises it. `openWater` is
@@ -1318,6 +1320,11 @@ export class OverlayManager {
   setHouseAtlas(houseIdx: number | null, atlas: HouseAtlas | null) {
     this.houseAtlasFor = houseIdx;
     this.houseAtlas = atlas;
+  }
+
+  /** Narrow the focused house's web to one good (null = every lane, red). */
+  setHouseLaneGood(good: number | null) {
+    this.houseLaneGood = good;
   }
 
   /** Phase 6 · plague overlay: struck cities + contagion routes (pass [],[] to hide). */
@@ -5627,23 +5634,23 @@ export class OverlayManager {
         : 1;
       const goodVolByIdx = new Map<number, number>();
       if (atlasLive) for (const g of atlasLive.goods) goodVolByIdx.set(g.good, g.volume);
-      const laneMeta = (destPt: [number, number]): { color: string; width: number; good: string | null } => {
-        if (!atlasLive) return { color: RED, width: Math.max(0.7, 1.6 * inv), good: null };
-        const p = atlasLive.partners.find((pp) => d2(pp.x, pp.y, destPt[0], destPt[1]) <= TOL);
-        if (!p) return { color: RED, width: Math.max(0.7, 1.6 * inv), good: null };
-        const norm = (p.volume_in + p.volume_out) / maxLaneVol;
-        let dominant: { name: string; vol: number } | null = null;
-        for (const gi of p.goods) {
-          const vol = goodVolByIdx.get(gi) ?? 0;
-          const gb = atlasLive.goods.find((g) => g.good === gi);
-          if (gb && (!dominant || vol > dominant.vol)) dominant = { name: gb.name, vol };
-        }
-        const def = dominant ? GOOD_BY_NAME.get(dominant.name) : null;
-        return {
-          color: def ? def.color : RED,
-          width: Math.max(0.7, (1.0 + norm * 3.5) * inv),
-          good: dominant?.name ?? null,
-        };
+      // Default: the WHOLE web in one red (the house's reach at a glance), width
+      // still carrying real volume. With a good picked in the "lanes by good"
+      // window, only the lanes that carry THAT good are drawn, in its colour and
+      // labelled — so a reader can see which routes are used for which good.
+      const pick = this.houseLaneGood;
+      const pickBook = atlasLive && pick != null ? atlasLive.goods.find((g) => g.good === pick) : undefined;
+      const laneMeta = (destPt: [number, number]): { color: string; width: number; good: string | null } | null => {
+        const p = atlasLive ? atlasLive.partners.find((pp) => d2(pp.x, pp.y, destPt[0], destPt[1]) <= TOL) : undefined;
+        const norm = p ? (p.volume_in + p.volume_out) / maxLaneVol : 0;
+        const width = p ? Math.max(0.7, (1.0 + norm * 3.5) * inv) : Math.max(0.7, 1.6 * inv);
+        if (pick == null) return { color: RED, width, good: null };
+        if (!p) return null;
+        const carries = p.goods.includes(pick)
+          || (pickBook != null && (pickBook.bought_at.includes(p.hub) || pickBook.sold_at.includes(p.hub)));
+        if (!carries) return null;
+        const def = pickBook ? GOOD_BY_NAME.get(pickBook.name) : null;
+        return { color: def ? def.color : RED, width, good: pickBook?.name ?? null };
       };
       const drawHouseLane = (pts: [number, number][], seaAt: boolean[], color: string, width: number, good: string | null) => {
         ctx.strokeStyle = color;
@@ -5726,6 +5733,7 @@ export class OverlayManager {
       this.houseNetwork.forEach((path, i) => {
         if (path.length < 2) return;
         const meta = laneMeta(path[path.length - 1]);
+        if (!meta) return;
         const seaAt = this.houseNetworkSea[i] ?? path.map(() => false);
         drawHouseLane(path, seaAt, meta.color, meta.width, meta.good);
       });

@@ -7,276 +7,239 @@ import { HouseDetail, HouseTimeline } from "@ui/campaign/HouseDossier";
 import { HouseCompareWindow } from "@ui/campaign/HouseCompare";
 import { goodIcon, TIER_META, tierOf, dull } from "@ui/campaign/houseShared";
 import { clarifyGemLabel } from "@goods";
-import { campaignGetHouseHistory, campaignHouseBumpChart, campaignGetInequality, campaignGetJournal } from "@bridge";
-import type { HouseHistory, CampaignDiagnostics, HouseBrief, BumpChart, BumpLine, InequalitySnapshot, JournalEntry } from "@types";
+import { campaignGetHouseHistory, campaignHouseBumpChart, campaignGetInequality, campaignGetJournal, campaignHouseAtlas } from "@bridge";
+import type { HouseHistory, CampaignDiagnostics, HouseBrief, BumpChart, BumpLine, InequalitySnapshot, JournalEntry, HouseAtlas, AtlasGoodBook } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
-/** ⚜️ Trading Families — HOUSES_GUILDS_AND_MARKET_PLAN.md S10's own BROWSE window:
- *  rank / filter only, per §5's own table. What used to live here besides the list —
- *  the big per-house dossier and the world Feuds board — are now their own windows
- *  (`HouseDossier.tsx`'s `HouseDetail`, and `FeudsAlliancesPanel.tsx`), because a
- *  feud belongs to two houses, not one, and a 1,455-line file that browsed AND
- *  detailed AND adjudicated the world's quarrels was the asymmetry the plan named.
+/** ⚜️ Merchant Houses / 🏛 Merchant Companies — the two BROWSE windows.
  *
- *  Merchant Companies (`House.is_guild`) — civic firms, not a different kind of
- *  thing from a private house — stop being a TAB (which is what made the "guild"
- *  naming collision with `CraftGuild` visible to users in the first place) and
- *  become a filter CHIP here instead. */
-export function HousesPanel() {
-  const open = useUIStore((s) => s.showHouses);
+ *  They used to be one window with a filter chip, a bump chart, a ticker and
+ *  every one of several thousand cards rendered at once, which read as a mess
+ *  (user report). Now: one window per kind (`companies` picks which), a search
+ *  box, a sort, tiers that page 40 cards at a time, and no chart. The dossier
+ *  itself is app-wide (`HouseDossierHost`), so the Government tab, a charter or
+ *  a feud can open a house without this window being open. */
+export function HousesPanel({ companies = false }: { companies?: boolean }) {
+  const open = useUIStore((s) => companies ? s.showCompanies : s.showHouses);
   const houses = useCampaignStore((s) => s.houses);
   const diag = useCampaignStore((s) => s.diagnostics);
   const [history, setHistory] = useState<HouseHistory | null>(null);
-  // The one remaining filter: private houses (the default) vs civic companies.
-  const [showCompanies, setShowCompanies] = useState(false);
-  const [selected, setSelected] = useState<HouseBrief | null>(null);
   const [compareOpen, setCompareOpen] = useState(false);
-  // Tier 3/4 collapse by default (§1 schematic) — that IS the "see who has the power
-  // at a glance" the tiers exist for; expand either to browse the long tail.
+  const [query, setQuery] = useState("");
+  const [sort, setSort] = useState<"wealth" | "standing" | "name">("wealth");
   const [collapsedTiers, setCollapsedTiers] = useState<Record<number, boolean>>({ 3: true, 4: true });
+  const [shown, setShown] = useState<Record<string, number>>({});
+  const [showFallen, setShowFallen] = useState(false);
   const toggleTier = (t: number) => setCollapsedTiers((c) => ({ ...c, [t]: !c[t] }));
-  const setSelectedHouse = useCampaignStore((s) => s.setSelectedHouse);
-  // S12a · the top band (bump chart + quiet gauges) and the bottom pulse ticker.
-  // Fetched only while the window is open, and re-fetched as the campaign year
-  // moves so the chart/ticker stay live without polling on every tick.
-  const [bump, setBump] = useState<BumpChart | null>(null);
-  const [ineq, setIneq] = useState<InequalitySnapshot | null>(null);
-  const [pulse, setPulse] = useState<JournalEntry[]>([]);
-  const year = diag?.year;
-  useEffect(() => {
-    if (!open) return;
-    campaignHouseBumpChart().then(setBump).catch(() => setBump(null));
-    campaignGetInequality().then(setIneq).catch(() => setIneq(null));
-    campaignGetJournal(-1, -1).then(setPulse).catch(() => setPulse([]));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, year]);
-  // Focus a house: open its detail AND tell the map to highlight only it.
-  const selectHouse = (h: HouseBrief | null) => {
-    setSelected(h);
-    setSelectedHouse(h?.idx ?? null);
-    // Auto-show the House Control map layer so the focused house's sphere is visible.
-    if (h) useUIStore.getState().setOverlayVisible("houseControl", true);
-  };
-  const close = () => useUIStore.getState().setShowHouses(false);
+  const PAGE = 40;
+  const more = (key: string) => setShown((m) => ({ ...m, [key]: (m[key] ?? PAGE) + PAGE }));
+  const selectHouse = (h: HouseBrief | null) => useUIStore.getState().setDossierHouse(h?.idx ?? null);
+  const close = () => companies ? useUIStore.getState().setShowCompanies(false) : useUIStore.getState().setShowHouses(false);
   const openTimeline = (name: string) => {
     campaignGetHouseHistory(name).then((h) => setHistory(h)).catch(() => setHistory(null));
   };
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.houses);
   if (!open) return null;
 
-  const active = houses.filter((h) => !h.defunct);
-  const gone = houses.filter((h) => h.defunct);
-  const inTab = active.filter((h) => showCompanies === !!h.is_guild);
-  const maxWealth = Math.max(1, ...inTab.map((h) => h.wealth));
-  const nHouses = active.filter((h) => !h.is_guild).length;
-  const nGuilds = active.filter((h) => h.is_guild).length;
-
-  const fmtWealth = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+  const q = query.trim().toLowerCase();
+  const matches = (h: HouseBrief) => !q
+    || h.name.toLowerCase().includes(q)
+    || (h.home_name ?? "").toLowerCase().includes(q)
+    || (h.head_name ?? "").toLowerCase().includes(q)
+    || h.specialties.some((g) => g.toLowerCase().includes(q));
+  const kind = houses.filter((h) => companies === !!h.is_guild);
+  const active = kind.filter((h) => !h.defunct && matches(h));
+  const gone = kind.filter((h) => h.defunct && matches(h));
+  const sorter = (a: HouseBrief, b: HouseBrief) =>
+    sort === "name" ? a.name.localeCompare(b.name)
+    : sort === "standing" ? (b.standing ?? 0) - (a.standing ?? 0)
+    : b.wealth - a.wealth;
+  active.sort(sorter);
+  const maxWealth = Math.max(1, ...active.map((h) => h.wealth));
+  const fmtWealth = (v: number) => (v >= 1e6 ? `${(v / 1e6).toFixed(1)}M` : v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
 
   const renderHouseCard = (h: HouseBrief, i: number) => {
     const accent = h.is_guild ? dull(h.color ?? "") : (h.color ?? "#888");
     const sea = h.fleet_sea ?? 0, river = h.fleet_river ?? 0, car = h.fleet_caravan ?? 0;
     const fleetTotal = sea + river + car;
+    const goods = (h.top_goods && h.top_goods.length ? h.top_goods : h.specialties).slice(0, 3);
     return (
-    <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)}
-      onMouseEnter={(e) => { e.currentTarget.style.background = "#152234"; e.currentTarget.style.borderColor = "#2a3f5a"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.background = "#101a26"; e.currentTarget.style.borderColor = "#1c2c3f"; }}
-      title="Open this family's detail">
-      {/* A left accent bar carries the house's own colour the instant the eye lands
-          on the card — identity before the reader even reaches the coat of arms. */}
-      <span style={{ position: "absolute", left: 0, top: 6, bottom: 6, width: 3, borderRadius: 2, background: accent }} />
-      <CoatOfArms name={h.name} size={32} guild={h.is_guild} />
-      <div style={{ flex: 1, minWidth: 0 }}>
-        {/* ── IDENTITY ROW: name is the loudest thing on the card ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          {!h.is_guild && h.tier ? (
-            <span title={`${TIER_META[tierOf(h)].name} · standing ${((h.standing ?? 0) * 100).toFixed(0)}%`}
-              style={{ fontSize: 11, color: "#c9a227", flex: "0 0 auto" }}>{TIER_META[tierOf(h)].glyph}</span>
-          ) : null}
-          <span style={{ color: "#f0e4c8", fontWeight: 700, fontSize: 13, lineHeight: 1.2,
-            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-            textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227", textUnderlineOffset: 2 }}>
-            {h.name}
-          </span>
-          {h.owns_bank && <span title="Owns a chartered bank" style={{ fontSize: 10.5, flex: "0 0 auto" }}>🏦</span>}
-          {h.coin_name && <CoinIcon issuer={h.name} value={h.coin_value} size={13} title={`Mints the ${h.coin_name}`} />}
-          {h.is_guild && <span title="A civic Merchant Guild — acts in its home city's interest"
-            style={{ fontSize: 8.5, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px", flex: "0 0 auto" }}>COMPANY</span>}
-          <span style={{ flex: 1 }} />
-          {h.dominant && <span title="Controls its seat city (>=50% of its trade)" style={{ fontSize: 10.5, flex: "0 0 auto" }}>⚖</span>}
-          {h.political_power > 0.5 && <span title="A leading political power" style={{ fontSize: 10.5, flex: "0 0 auto" }}>👑</span>}
-        </div>
-        {/* ── META ROW: who leads it, where, wealth — the second-loudest facts ── */}
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 2, fontSize: 10.5 }}>
-          <span style={{ color: "#8fa6be" }}>{h.head_name}</span>
-          <span style={{ color: "#465870" }}>gen.{h.generation} · led {h.head_age}y</span>
-          <span style={{ color: "#3e5068" }}>·</span>
-          <span style={{ color: "#7a90a8" }}>{h.home_name}</span>
-          <span style={{ flex: 1 }} />
-          <span style={{ color: "#e0c060", fontWeight: 700, fontVariantNumeric: "tabular-nums" }}>{fmtWealth(h.wealth)}</span>
-        </div>
-        {/* Wealth bar — a background-weight cue under the meta row, not the very
-            last, easiest-to-miss line of a six-line stack. */}
-        <div style={{ height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
-          <div style={{ width: `${(h.wealth / maxWealth) * 100}%`, height: "100%",
-            background: `linear-gradient(90deg, ${accent}99, #c9a227)` }} />
-        </div>
-        {/* ── FACTS: every "known for / carries / holds" line collapsed into one
-            wrapping row of chips, instead of five separate stacked sentences ── */}
-        {(h.top_goods?.length || h.specialties.length || h.monopolies.length || fleetTotal > 0
-          || h.offices?.length || h.rivals.length) ? (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
-            {h.top_goods && h.top_goods.length > 0 && (
-              <span style={{ ...chip, color: "#a8dcb4", borderColor: "#1e3a2a" }}
-                title="Top goods this family is known for exporting (by profit)">
-                {h.top_goods.slice(0, 3).map((g, i) => <span key={g}>{i > 0 && "  "}{goodIcon(g)} {clarifyGemLabel(g, h.gem_variety)}</span>)}
-              </span>
-            )}
-            {h.specialties.filter((g) => !h.top_goods?.includes(g)).slice(0, 3).map((g) => (
-              <span key={g} style={{ ...chip, color: "#d8c896" }} title={`Specialises in ${g}`}>
-                {goodIcon(g)} {clarifyGemLabel(g, h.gem_variety)}
-              </span>
-            ))}
-            {h.monopolies.map(([g, s]) => (
-              <span key={g} style={{ ...chip, color: "#f0c878", borderColor: "#3a2e14", background: "#180f06" }}
-                title={`Holds ${Math.round(s * 100)}% of the world's ${g} trade`}>
-                {goodIcon(g)} {Math.round(s * 100)}% {g}
-              </span>
-            ))}
-            {fleetTotal > 0 && (
-              <span style={chip} title="Transport capital — each vessel carries one shipment at a time">
-                {sea > 0 && `🚢${sea} `}{river > 0 && `🛶${river} `}{car > 0 && `🐫${car}`}
-              </span>
-            )}
-            {h.offices && h.offices.length > 0 && (
-              <span style={{ ...chip, color: "#c8a8e0", borderColor: "#2e2244" }}
-                title={`Offices abroad: ${h.offices.map(([nm]) => nm).join(", ")}`}>
-                🏢 {h.offices.length} office{h.offices.length > 1 ? "s" : ""}
-              </span>
-            )}
-            {h.rivals.length > 0 && (
-              <span style={{ ...chip, color: "#e0a89a", borderColor: "#3a2420" }}
-                title={`Feuding: ${h.rivals.join(", ")}`}>
-                ⚔ {h.rivals.length} rival{h.rivals.length > 1 ? "s" : ""}
-              </span>
-            )}
+      <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "#152234"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "#101a26"; }}
+        title="Open this family's dossier">
+        <span style={{ position: "absolute", left: 0, top: 6, bottom: 6, width: 3, borderRadius: 2, background: accent }} />
+        <CoatOfArms name={h.name} size={28} guild={h.is_guild} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ color: "#f0e4c8", fontWeight: 700, fontSize: 12.5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {h.name}
+            </span>
+            {h.owns_bank && <span title="Owns a chartered bank" style={{ fontSize: 10.5 }}>🏦</span>}
+            {h.coin_name && <CoinIcon issuer={h.name} value={h.coin_value} size={12} title={`Mints the ${h.coin_name}`} />}
+            {h.dominant && <span title="Controls its seat city" style={{ fontSize: 10.5 }}>⚖</span>}
+            <span style={{ flex: 1 }} />
+            <span style={{ color: "#e0c060", fontWeight: 700, fontSize: 11.5, fontVariantNumeric: "tabular-nums" }}>{fmtWealth(h.wealth)}</span>
           </div>
-        ) : null}
-        {/* Cities traded with — kept as its own quiet line (a list of place names
-            reads better unwrapped than squeezed into a chip). */}
-        {h.cities && h.cities.length > 0 && (
-          <div style={{ color: "#5e7692", fontSize: 9, marginTop: 4, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-            title={h.cities.join(", ")}>
-            🏙 {h.cities.slice(0, 6).join(", ")}{h.cities.length > 6 ? ` +${h.cities.length - 6}` : ""}
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 1, fontSize: 10, color: "#7a90a8",
+            overflow: "hidden", whiteSpace: "nowrap" }}>
+            <span>🏙 {h.home_name}</span>
+            <span style={{ color: "#465870" }}>· {h.head_name}</span>
+            <span style={{ flex: 1 }} />
+            {goods.map((g) => <span key={g} title={g}>{goodIcon(g)}</span>)}
+            {fleetTotal > 0 && <span title="fleet">{sea > 0 && `🚢${sea}`}{river > 0 && ` 🛶${river}`}{car > 0 && ` 🐫${car}`}</span>}
+            {(h.offices?.length ?? 0) > 0 && <span title={`${h.offices!.length} offices abroad`}>🏢{h.offices!.length}</span>}
+            {h.rivals.length > 0 && <span title={`Feuding: ${h.rivals.join(", ")}`} style={{ color: "#e0a89a" }}>⚔{h.rivals.length}</span>}
+          </div>
+          <div style={{ height: 2, background: "#0a1018", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
+            <div style={{ width: `${(h.wealth / maxWealth) * 100}%`, height: "100%", background: accent }} />
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const pageOf = (key: string, list: HouseBrief[]) => {
+    const n = shown[key] ?? PAGE;
+    return (
+      <>
+        {list.slice(0, n).map((h, i) => renderHouseCard(h, i))}
+        {list.length > n && (
+          <div data-no-drag onClick={() => more(key)}
+            style={{ textAlign: "center", color: "#7fb2d8", fontSize: 10.5, padding: "5px 0", cursor: "pointer" }}>
+            show {Math.min(PAGE, list.length - n)} more of {list.length - n} ▾
           </div>
         )}
-      </div>
-    </div>
+      </>
     );
   };
 
   return (
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
-      {selected && <HouseDetail h={selected} onClose={() => selectHouse(null)} onChronicle={openTimeline} onSelectHouse={selectHouse} />}
       {compareOpen && <HouseCompareWindow houses={houses} onClose={() => setCompareOpen(false)} />}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
-        <span>⚜️ Trading Families</span>
+        <span>{companies ? "🏛 Merchant Companies" : "⚜️ Merchant Houses"}
+          <span style={{ color: "#6a7e96", fontWeight: 400, fontSize: 11 }}> · {kind.filter((h) => !h.defunct).length} active</span>
+        </span>
         <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
       </div>
-      {/* S12a · "stop showing state, start showing change" — the world of houses
-          as one picture before the list of individuals. */}
-      <BumpBand bump={bump} ineq={ineq} onSelect={(idx) => {
-        const h = houses.find((x) => x.idx === idx);
-        if (h) selectHouse(h);
-      }} />
-      {/* The one remaining filter (private houses vs civic companies), plus quick
-          entry points to the two windows this list used to embed as tabs. */}
-      <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid #1e2e42", flexWrap: "wrap" }}>
-        <span style={{ color: "#e8dcc0", fontSize: 11.5, fontWeight: 700 }}>👑 Houses ({nHouses})</span>
-        <div data-no-drag onClick={() => setShowCompanies((v) => !v)}
-          title="Merchant Companies (House.is_guild) — civic firms, not a different kind of thing from a private house"
-          style={{
-            padding: "3px 9px", cursor: "pointer", fontSize: 10.5, borderRadius: 12,
-            color: showCompanies ? "#0c141e" : "#7fd0c0",
-            background: showCompanies ? "#7fd0c0" : "#0e2420",
-            border: "1px solid #2e5a52", fontWeight: showCompanies ? 700 : 400,
-          }}>
-          🏛 Companies ({nGuilds})
+      {companies && (
+        <div style={{ padding: "5px 10px", fontSize: 10, color: "#6f8aa6", borderBottom: "1px solid #1e2e42" }}>
+          Civic firms chartered by their city — they trade in the city&apos;s interest, draw a civic subsidy and never go bankrupt.
         </div>
-        <span style={{ flex: 1 }} />
-        <div data-no-drag onClick={() => useUIStore.getState().setShowFeuds(true)} title="Open the world Feuds & Alliances board"
-          style={{ padding: "3px 9px", cursor: "pointer", fontSize: 10.5, color: "#e0a89a",
-            border: "1px solid #3a2420", borderRadius: 5, background: "#160f0e" }}>
-          ⚔ Feuds
-        </div>
-        <div data-no-drag onClick={() => setCompareOpen(true)} title="Compare two houses side by side"
-          style={{ padding: "3px 9px", cursor: "pointer", fontSize: 10.5, color: "#cfe2f6",
-            border: "1px solid #2e4864", borderRadius: 5, background: "#101c28" }}>
+      )}
+      {/* Search · sort · links — one compact row */}
+      <div data-no-drag style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid #1e2e42" }}>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔎 name, city, head or good…"
+          style={{ flex: 1, minWidth: 0, background: "#0b131d", border: "1px solid #24384e", borderRadius: 5,
+            color: "#dfe8f2", fontSize: 11, padding: "4px 7px" }} />
+        <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}
+          style={{ background: "#0b131d", border: "1px solid #24384e", borderRadius: 5, color: "#cfe2f6", fontSize: 10.5, padding: "3px 4px" }}>
+          <option value="wealth">wealth</option>
+          <option value="standing">standing</option>
+          <option value="name">name</option>
+        </select>
+        {!companies && (
+          <div onClick={() => useUIStore.getState().setShowFeuds(true)} title="Open the world Feuds & Alliances board"
+            style={{ padding: "3px 8px", cursor: "pointer", fontSize: 10.5, color: "#e0a89a", border: "1px solid #3a2420", borderRadius: 5 }}>
+            ⚔ Feuds
+          </div>
+        )}
+        <div onClick={() => setCompareOpen(true)} title="Compare two houses side by side"
+          style={{ padding: "3px 8px", cursor: "pointer", fontSize: 10.5, color: "#cfe2f6", border: "1px solid #2e4864", borderRadius: 5 }}>
           ⚖ Compare
         </div>
       </div>
-      {diag && <TradeDiagnostics diag={diag} />}
+      {diag && !companies && <TradeDiagnostics diag={diag} />}
       <div style={{ overflowY: "auto", padding: "4px 8px 10px" }}>
         {houses.length === 0 && (
           <div style={empty}>Begin the campaign (Step 11) — trading families rise as goods start to move.</div>
         )}
-        {houses.length > 0 && inTab.length === 0 && (
-          <div style={empty}>{showCompanies ? "No civic companies yet (cities form one at 50,000 people)." : "No private houses yet."}</div>
+        {houses.length > 0 && active.length === 0 && (
+          <div style={empty}>{q ? "Nothing matches that search." : companies
+            ? "No civic companies yet (cities form one at 50,000 people)." : "No private houses yet."}</div>
         )}
-        {!showCompanies ? (
+        {!companies && !q ? (
           ([1, 2, 3, 4] as const).map((t) => {
-            const group = inTab.filter((h) => tierOf(h) === t);
+            const group = active.filter((h) => tierOf(h) === t);
             if (group.length === 0) return null;
             const meta = TIER_META[t];
             const collapsed = collapsedTiers[t];
             return (
               <div key={`tier-${t}`}>
-                {/* A filled bar, not a thin bottom-rule — the section that answers
-                    "who has the power at a glance" deserves more weight than the
-                    cards it groups, not less. */}
                 <div data-no-drag onClick={() => toggleTier(t)} title={meta.band}
                   style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
-                    margin: "10px 0 6px", padding: "5px 9px", borderRadius: 6,
+                    margin: "8px 0 5px", padding: "4px 9px", borderRadius: 6,
                     background: t === 1 ? "linear-gradient(90deg, #1c1608, #120e06)" : "#0e1622",
                     border: `1px solid ${t === 1 ? "#3a2e10" : "#1a2838"}` }}>
                   <span style={{ color: "#c9a227", fontSize: 12 }}>{meta.glyph}</span>
                   <span style={{ color: t === 1 ? "#e8d090" : "#9ab0c8", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>
                     {meta.name.toUpperCase()}
                   </span>
-                  <span style={{ color: "#4e6480", fontSize: 9.5, fontWeight: 400 }}>({group.length})</span>
+                  <span style={{ color: "#4e6480", fontSize: 9.5 }}>({group.length})</span>
                   <span style={{ flex: 1 }} />
-                  <span style={{ color: "#5a6a7e", fontSize: 9 }}>{meta.band}</span>
                   <span style={{ color: "#5a6a7e", fontSize: 9 }}>{collapsed ? "▸" : "▾"}</span>
                 </div>
-                {!collapsed && group.map((h, i) => renderHouseCard(h, i))}
+                {!collapsed && pageOf(`t${t}`, group)}
               </div>
             );
           })
         ) : (
-          inTab.map((h, i) => renderHouseCard(h, i))
+          pageOf("all", active)
         )}
         {gone.length > 0 && (
           <>
-            <div style={{ color: "#5a6a7e", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4,
-              margin: "12px 0 6px", padding: "0 2px", textTransform: "uppercase" }}>
-              🪦 Fallen houses ({gone.length})
+            <div data-no-drag onClick={() => setShowFallen((v) => !v)}
+              style={{ color: "#5a6a7e", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, cursor: "pointer",
+                margin: "12px 0 6px", padding: "0 2px", textTransform: "uppercase" }}>
+              🪦 Fallen ({gone.length}) {showFallen ? "▾" : "▸"}
             </div>
-            {gone.map((h, i) => (
-              <div key={"d" + i} style={{ ...card, padding: "6px 10px", opacity: 0.6, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
-                <CoatOfArms name={h.name} size={22} guild={h.is_guild} />
-                <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 6 }}>
-                  <span style={{ color: "#9aa6b4", fontSize: 11.5, textDecoration: "line-through" }}>{h.name}</span>
+            {showFallen && gone.slice(0, shown.fallen ?? PAGE).map((h, i) => (
+              <div key={"d" + i} style={{ ...card, padding: "5px 10px", opacity: 0.6, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
+                <CoatOfArms name={h.name} size={20} guild={h.is_guild} />
+                <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
+                  <span style={{ color: "#9aa6b4", fontSize: 11, textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
                   <span style={{ color: "#4a5c72", fontSize: 9.5 }}>once of {h.home_name}</span>
                 </div>
               </div>
             ))}
+            {showFallen && gone.length > (shown.fallen ?? PAGE) && (
+              <div data-no-drag onClick={() => more("fallen")}
+                style={{ textAlign: "center", color: "#7fb2d8", fontSize: 10.5, padding: "5px 0", cursor: "pointer" }}>
+                show more ▾
+              </div>
+            )}
           </>
         )}
       </div>
-      {/* S12a · "the pulse" — a thin always-on heartbeat, not the chronicle. */}
-      <PulseTicker entries={pulse} />
     </div>
+  );
+}
+
+/** The House Dossier, app-wide. Any view can open a house by setting
+ *  `uiStore.dossierHouse` (the Government tab's charters, the Houses and
+ *  Companies lists, a feud…), without the browse window having to be open. */
+export function HouseDossierHost() {
+  const idx = useUIStore((s) => s.dossierHouse);
+  const houses = useCampaignStore((s) => s.houses);
+  const setSelectedHouse = useCampaignStore((s) => s.setSelectedHouse);
+  const [history, setHistory] = useState<HouseHistory | null>(null);
+  useEffect(() => {
+    setSelectedHouse(idx);
+    // Show the House Control layer so the focused house's trade web is visible.
+    if (idx != null) useUIStore.getState().setOverlayVisible("houseControl", true);
+  }, [idx, setSelectedHouse]);
+  const h = idx == null ? null : houses.find((x) => x.idx === idx) ?? null;
+  const set = (x: HouseBrief | null) => useUIStore.getState().setDossierHouse(x?.idx ?? null);
+  return (
+    <>
+      {history && <HouseTimeline history={history} onClose={() => setHistory(null)} />}
+      {h && h.idx != null && <HouseLanesWindow houseIdx={h.idx} houseName={h.name} />}
+      {h && <HouseDetail h={h} onClose={() => set(null)}
+        onChronicle={(name) => campaignGetHouseHistory(name).then(setHistory).catch(() => setHistory(null))}
+        onSelectHouse={set} />}
+    </>
   );
 }
 
@@ -498,3 +461,89 @@ const gaugeCell: React.CSSProperties = {
   padding: "4px 6px", borderRadius: 5, background: "#101c28", border: "1px solid #16222e",
   minWidth: 0,
 };
+
+/** 🧭 Trade lanes by good — the focused house's web on the map is red and whole
+ *  by default; picking a good here narrows the map to ONLY the lanes that carry
+ *  it (in the good's own colour) and lists where it is bought and sold. */
+function HouseLanesWindow({ houseIdx, houseName }: { houseIdx: number; houseName: string }) {
+  const [atlas, setAtlas] = useState<HouseAtlas | null>(null);
+  const pick = useUIStore((s) => s.houseLaneGood);
+  const setPick = useUIStore((s) => s.setHouseLaneGood);
+  const [min, setMin] = useState(false);
+  const year = useCampaignStore((s) => s.diagnostics?.year);
+  useEffect(() => {
+    let alive = true;
+    campaignHouseAtlas(houseIdx).then((a) => { if (alive) setAtlas(a); }).catch(() => { if (alive) setAtlas(null); });
+    return () => { alive = false; };
+  }, [houseIdx, year]);
+  const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.houses);
+  const goods = [...(atlas?.goods ?? [])].sort((a, b) => b.volume - a.volume);
+  const hubName = (hub: number) => atlas?.partners.find((p) => p.hub === hub)?.name ?? `#${hub}`;
+  const lanesFor = (g: AtlasGoodBook) => (atlas?.partners ?? []).filter((p) =>
+    p.goods.includes(g.good) || g.bought_at.includes(p.hub) || g.sold_at.includes(p.hub));
+  const book = pick != null ? goods.find((g) => g.good === pick) : undefined;
+  const fmtV = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
+  return (
+    <div data-draggable onPointerDown={onPointerDown}
+      style={{ ...rootStyle, position: "fixed", right: 16, top: 90, width: 270, maxHeight: "60vh", zIndex: 60,
+        display: "flex", flexDirection: "column", border: "1px solid #3a2a22", borderRadius: 8,
+        boxShadow: "0 8px 24px rgba(0,0,0,0.5)", fontSize: 11, color: "#d8e2ee" }}>
+      <div style={{ ...header, cursor: "move", fontSize: 11.5 }}>
+        <span>🧭 Trade lanes by good</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setMin((v) => !v)}>{min ? "▸" : "▾"}</span>
+      </div>
+      {!min && (
+        <div data-no-drag style={{ overflowY: "auto", padding: "6px 8px" }}>
+          <div style={{ color: "#6f8aa6", fontSize: 10, marginBottom: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {houseName}
+          </div>
+          <div onClick={() => setPick(null)}
+            style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 6px", borderRadius: 5, cursor: "pointer",
+              background: pick == null ? "#3a1616" : "transparent", border: `1px solid ${pick == null ? "#eb4646" : "#2a1c1c"}` }}>
+            <span style={{ width: 16, height: 3, background: "rgba(235,70,70,0.95)", borderRadius: 2 }} />
+            <span style={{ flex: 1, fontWeight: 600 }}>All trade lanes</span>
+            <span style={{ color: "#8aa0c0" }}>{atlas?.partners.length ?? 0} cities</span>
+          </div>
+          {atlas == null && <div style={{ color: "#6a7e96", padding: 6 }}>Loading…</div>}
+          {atlas && goods.length === 0 && <div style={{ color: "#6a7e96", padding: 6 }}>No goods recorded for this house yet.</div>}
+          {goods.map((g) => {
+            const on = pick === g.good;
+            const n = lanesFor(g).length;
+            return (
+              <div key={g.good} onClick={() => setPick(on ? null : g.good)}
+                style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", marginTop: 3, borderRadius: 5, cursor: "pointer",
+                  background: on ? "#1c2636" : "transparent", border: `1px solid ${on ? "#c9a227" : "transparent"}` }}>
+                <span style={{ width: 16, textAlign: "center" }}>{goodIcon(g.name)}</span>
+                <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  color: on ? "#f0d890" : "#d8e2ee" }}>{g.name}</span>
+                <span style={{ color: "#8aa0c0", fontSize: 10 }}>{n} lane{n === 1 ? "" : "s"}</span>
+                <span style={{ width: 40, textAlign: "right", color: "#e0c060", fontSize: 10 }}>{fmtV(g.volume)}</span>
+              </div>
+            );
+          })}
+          {book && (
+            <div style={{ marginTop: 8, padding: "6px 7px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+              <div style={{ fontWeight: 700, color: "#f0d890", marginBottom: 3 }}>{goodIcon(book.name)} {book.name}</div>
+              <div style={{ color: "#8aa0c0", fontSize: 10 }}>
+                profit {fmtV(book.profit)} · moved {fmtV(book.volume)}
+              </div>
+              {book.bought_at.length > 0 && (
+                <div style={{ marginTop: 4, fontSize: 10 }}>
+                  <span style={{ color: "#5fd0ff" }}>◀ bought at </span>{book.bought_at.map(hubName).join(", ")}
+                </div>
+              )}
+              {book.sold_at.length > 0 && (
+                <div style={{ marginTop: 2, fontSize: 10 }}>
+                  <span style={{ color: "#ffce5f" }}>▶ sold at </span>{book.sold_at.map(hubName).join(", ")}
+                </div>
+              )}
+              <div style={{ marginTop: 4, color: "#6a7e96", fontSize: 9.5 }}>
+                Only this good&apos;s lanes are drawn on the map, in its colour.
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}

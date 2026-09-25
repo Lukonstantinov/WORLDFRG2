@@ -1400,7 +1400,8 @@ impl CampaignSim {
         if a >= n || b >= n || a == b { return None; }
         let remaining = self.hub_km(a, b);
         let mut best: Option<(usize, f32)> = None;
-        for &pn in self.neighbors.get(a)?.iter() {
+        let shortlist: &[u32] = self.neighbors.get(a).map(|v| v.as_slice()).unwrap_or(&[]);
+        for &pn in shortlist.iter() {
             let p = pn as usize;
             if p >= n || p == a || p == b { continue; }
             // The onward gap must actually shrink, or this is not progress.
@@ -1416,6 +1417,36 @@ impl CampaignSim {
                 best = Some((p, rest));
             }
         }
+        if let Some((p, _)) = best { return Some(p); }
+        // The shortlist is ranked by trade pull, not geography, so a remote town
+        // can have 32 "neighbours" none of which lies on the way. Before letting
+        // a cargo cross thousands of km in one go (the reported "gems sold 5,000
+        // km away with no stop"), scan EVERY real settlement under the same three
+        // rules. Only reached when the shortlist failed, so the hot path keeps its
+        // O(NEIGHBOR_K) bound (§8.9 rule 1's spirit).
+        let real = |p: usize| -> bool {
+            let h = &self.hubs[p];
+            p != a && p != b && !h.abandoned && !(h.is_estate && h.parent >= 0)
+        };
+        for p in 0..n {
+            if !real(p) { continue; }
+            let rest = self.hub_km(p, b);
+            if !(rest < remaining) { continue; }
+            if !self.lane_days(a, p).is_finite() { continue; }
+            let hop_sea = self.hubs[a].coastal && self.hubs[p].coastal;
+            if Self::leg_exceeds_range(self.hub_km(a, p), hop_sea, ship_cap_km, caravan_cap_km) { continue; }
+            if best.map_or(true, |(bp, br)| rest < br || (rest == br && p < bp)) {
+                best = Some((p, rest));
+            }
+        }
+        // NEGATIVE RESULT, kept so it is not retried blind: a third fallback —
+        // when no LEGAL hop exists anywhere, break the journey at whichever town
+        // best splits it even though that stage is itself still over-range —
+        // was built and measured. On `the_relay_carries_long_lanes_in_stages_…`
+        // it cut staged trade volume to 0.19× the uncapped run (gate: > 0.6×):
+        // an over-range "stop" does not make the leg legal, it only adds days
+        // and a transshipment to cargo that then sails the long stage anyway.
+        // Only a gap with no legal stop anywhere sails direct (next line).
         best.map(|(p, _)| p)
     }
 
@@ -2428,6 +2459,10 @@ impl CampaignSim {
                         origin_km: self.hub_km(a, leg_to as usize),
                     });
                     self.log_trade(a as u32, leg_to, g, amount, owner, leg_sea, leg_river, pa);
+                    if leg_via >= 0 && amount > 0.0 {
+                        let e = self.relay_cur.entry((a as u32, b as u32, g as u32)).or_insert((0.0, leg_to));
+                        e.0 += amount;
+                    }
                 }
             }
         }
@@ -3147,6 +3182,12 @@ impl CampaignSim {
         self.trade_last = last;
         self.trade_last_season = last_season;
         self.trade_cur.clear();
+        let mut relays: Vec<RelayAgg> = self.relay_cur.iter()
+            .map(|(&(origin, dest, good), &(amount, first_stop))| RelayAgg { origin, dest, good, amount, first_stop })
+            .collect();
+        relays.sort_by(|a, b| (a.origin, a.dest, a.good).cmp(&(b.origin, b.dest, b.good)));
+        self.relay_last = relays;
+        self.relay_cur.clear();
     }
 
 

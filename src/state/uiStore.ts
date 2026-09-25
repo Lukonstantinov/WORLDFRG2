@@ -214,6 +214,13 @@ interface UIStore {
    *  split out of HousesPanel's old "feuds" tab into its own window, since a
    *  feud belongs to two houses, not one. */
   showFeuds: boolean;
+  /** 🏛 Merchant Companies — civic firms, their own window (split from Houses). */
+  showCompanies: boolean;
+  /** House index whose dossier is open app-wide (null = none). */
+  dossierHouse: number | null;
+  /** The focused house's map web: null = every lane in red; a good index =
+   *  only the lanes that carry that good, in its colour. */
+  houseLaneGood: number | null;
   showCityRanking: boolean;
   /** v2.0 · the unified Money & Finance panel (mints · banks · bubbles · shocks · schematics). */
   showMoneyFinance: boolean;
@@ -397,6 +404,9 @@ interface UIStore {
   setGoodDetail: (id: string | null) => void;
   setShowHouses: (v: boolean) => void;
   setShowFeuds: (v: boolean) => void;
+  setShowCompanies: (v: boolean) => void;
+  setDossierHouse: (idx: number | null) => void;
+  setHouseLaneGood: (g: number | null) => void;
   setShowCityRanking: (v: boolean) => void;
   setShowItinerary: (v: boolean) => void;
   setShowAtlas: (v: boolean) => void;
@@ -555,6 +565,9 @@ export const useUIStore = create<UIStore>((set) => ({
   goodDetailId: null,
   showHouses: false,
   showFeuds: false,
+  showCompanies: false,
+  dossierHouse: null,
+  houseLaneGood: null,
   showCityRanking: false,
   showMoneyFinance: false,
   showItinerary: false,
@@ -736,6 +749,9 @@ export const useUIStore = create<UIStore>((set) => ({
   setGoodDetail: (id) => set({ goodDetailId: id }),
   setShowHouses: (v) => set({ showHouses: v }),
   setShowFeuds: (v) => set({ showFeuds: v }),
+  setShowCompanies: (v) => set({ showCompanies: v }),
+  setDossierHouse: (idx) => set({ dossierHouse: idx, houseLaneGood: null }),
+  setHouseLaneGood: (g) => set({ houseLaneGood: g }),
   setShowCityRanking: (v) => set({ showCityRanking: v }),
   setShowMoneyFinance: (v) => set({ showMoneyFinance: v }),
   setShowItinerary: (v) => set({ showItinerary: v }),

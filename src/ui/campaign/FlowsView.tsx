@@ -34,8 +34,9 @@
  *  map exactly as before — that behaviour is unchanged and deliberately so. */
 import { useEffect, useMemo, useState } from "react";
 import { GoodIcon } from "@ui/goods/GoodIcon";
-import { campaignTradeFlows } from "@bridge";
-import type { TradeFlows, TradeFlowGood, TradePartner, TradeRouteFlow } from "@types";
+import { campaignTradeFlows, computeCoarseRoute } from "@bridge";
+import { useWorldStore } from "@state/worldStore";
+import type { TradeFlows, TradeFlowGood, TradePartner, TradeRouteFlow, RouteLeg } from "@types";
 import { GOOD_DEFS } from "@goods";
 import { Section, Card, Badge, Meter, Chip, EmptyNote, FootNote, StatGrid, Stat,
          Donut, DonutKey, SplitBar, type Slice } from "@ui/kit";
@@ -573,15 +574,23 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
   // dir 1 at `bx` — the same convention the single-segment case already used,
   // just applied twice).
   const legSegs = (ax: number, ay: number, r: TradeRouteFlow, w: number): Seg[] => {
-    const bx = r.px + 0.5, by = r.py + 0.5;
-    if ((r.relay_hub ?? -1) >= 0 && r.relay_px != null && r.relay_py != null) {
-      const rx = r.relay_px + 0.5, ry = r.relay_py + 0.5;
-      const relay = { relayX: rx, relayY: ry };
-      if (r.dir === 1) {
-        return [{ ax, ay, bx: rx, by: ry, dir: 1, w, ...relay }, { ax: rx, ay: ry, bx, by, dir: 1, w, ...relay }];
+    // The full itinerary when the backend sent one: every leg from where the
+    // good starts to its final market, each resolved onto the road/sea network
+    // by MapCanvas, arrow pointing the way the cargo moves, a relay ring at
+    // each port where it is unloaded and re-embarked.
+    if (r.legs && r.legs.length > 0) {
+      let px = r.dir === 1 ? ax : (r.start_px ?? r.px) + 0.5;
+      let py = r.dir === 1 ? ay : (r.start_py ?? r.py) + 0.5;
+      const out: Seg[] = [];
+      for (const l of r.legs) {
+        const bx = l.px + 0.5, by = l.py + 0.5;
+        const relay = l.transship ? { relayX: bx, relayY: by } : {};
+        out.push({ ax: px, ay: py, bx, by, dir: 1, w, ...relay });
+        px = bx; py = by;
       }
-      return [{ ax: rx, ay: ry, bx, by, dir: 0, w, ...relay }, { ax, ay, bx: rx, by: ry, dir: 0, w, ...relay }];
+      return out;
     }
+    const bx = r.px + 0.5, by = r.py + 0.5;
     return [{ ax, ay, bx, by, dir: r.dir, w }];
   };
 
@@ -1013,6 +1022,14 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                         borderRadius: RADIUS.sm, padding: "0 4px", lineHeight: "14px", flex: "0 0 auto",
                       }}>⚒ made here</span>
                   )}
+                  {(g.charter_house ?? -1) >= 0 && (
+                    <span title={`chartered here to ${g.charter_holder} — it carried ${Math.round((g.charter_share ?? 0) * 100)}% of this good's trade here last year; the rest moved on other accounts`}
+                      style={{
+                        display: "inline-flex", alignItems: "center", gap: 2, fontSize: FZ.tiny,
+                        color: "#e6c15a", background: "rgba(201,162,39,0.14)", border: "1px solid rgba(201,162,39,0.45)",
+                        borderRadius: RADIUS.sm, padding: "0 4px", lineHeight: "14px", flex: "0 0 auto",
+                      }}>🔒 chartered · {Math.round((g.charter_share ?? 0) * 100)}% by holder</span>
+                  )}
                   {(() => {
                     const tb = goodTransitBadge(g);
                     if (!tb) return null;
@@ -1175,89 +1192,20 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
             }
             return <EmptyNote>No routed flows recorded.</EmptyNote>;
           })()}
-          {goodRoutes.slice(0, 8).map((r, i) => {
+          {goodRoutes.slice(0, 10).map((r, i) => {
             const isSel = !!selRoute && selRoute.good === r.good && selRoute.partner === r.partner && selRoute.dir === r.dir;
-            const col = r.dir === 0 ? DIR_IN : DIR_OUT;
             return (
-              <div
-                key={i}
-                data-no-drag
-                onClick={() => setSelRoute(isSel ? null : { good: r.good, partner: r.partner, dir: r.dir })}
-                style={{
-                  display: "flex", flexWrap: "wrap", alignItems: "center", gap: SPACE.sm, padding: "3px 4px",
-                  cursor: "pointer", borderRadius: RADIUS.sm,
-                  background: isSel ? T.card : "transparent",
-                  borderLeft: `2px solid ${isSel ? col : "transparent"}`,
-                }}
-              >
-                <span style={{ width: 34, color: col, fontSize: FZ.tiny }}>{r.dir === 0 ? "◀ in" : "out ▶"}</span>
-                <span style={{
-                  flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  color: isSel ? T.gold : T.ink, display: "flex", alignItems: "center", gap: 4,
-                }}>
-                  {r.dir === 0 ? `${r.partner_name} → here` : `here → ${r.partner_name}`}
-                  {(() => {
-                    const role = partnerRoleBadge(r.partner_role);
-                    if (!role) return null;
-                    return (
-                      <span
-                        title={`${r.partner_name} is, on its own trade in this good, a ${role.label}`}
-                        style={{ fontSize: FZ.tiny, flex: "0 0 auto", opacity: 0.85 }}
-                      >
-                        {role.icon}
-                      </span>
-                    );
-                  })()}
-                </span>
-                {(() => {
-                  const routeTr = transportOf(r.sea_amount ?? 0, r.river_amount ?? 0, r.amount);
-                  return (
-                    <span style={{ width: 20, textAlign: "center", fontSize: FZ.tiny }}
-                      title={routeTr ? `carried ${routeTr.label}` : "carried overland"}>
-                      {routeTr?.icon || "🐫"}
-                    </span>
-                  );
-                })()}
-                <span
-                  title={`voyage risk ${(((r.risk ?? 0) * 100).toFixed(1))}%`}
-                  style={{
-                    width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto",
-                    background: riskColor(r.risk ?? 0),
-                  }}
-                />
-                <span style={{ width: 50, textAlign: "right", color: T.inkMid }}>{fmt(r.amount)}</span>
-                <span style={{ width: 46, textAlign: "right", color: T.gold, fontSize: FZ.tiny }}
-                  title="reward — this route's value at the good's base price">
-                  {fmt(r.value ?? 0)}
-                </span>
-                <span style={{ width: 38, textAlign: "right", color: T.inkDim }}>{r.pct.toFixed(0)}%</span>
-                {/* THE MAIN ROUTE'S LEGS + WHERE IT ACTUALLY CAME FROM — the
-                    Ostia case, user request: "mark that legs if it's main
-                    route", "from where good arrived and what origin it was
-                    if the import city is transit hub or the original city
-                    where good is produced". A relay splits the route into two
-                    legs on the map (see `legSegs` above); an ORIGIN one hop
-                    upstream of a transit partner is named here since the map
-                    has no room to draw a third leg without real per-shipment
-                    provenance data the sim doesn't keep. */}
-                {(r.origin_hub ?? -1) >= 0 && (
-                  <span style={{ width: "100%", fontSize: FZ.tiny, color: T.inkDim, paddingLeft: 34 }}
-                    title="one hop upstream of the transit partner — not chased further">
-                    🔎 {r.partner_name} mostly gets this from <span style={{ color: T.ink }}>{r.origin_name}</span>
-                    {r.origin_is_producer ? " (which makes it)" : " (itself further upstream)"}
-                  </span>
-                )}
-              </div>
+              <RouteCard key={i} r={r} sel={isSel}
+                onClick={() => setSelRoute(isSel ? null : { good: r.good, partner: r.partner, dir: r.dir })} />
             );
           })}
           {goodRoutes.length > 0 && (
             <FootNote>
-              Click a route to isolate it on the map. The dot is voyage risk (green→red); the gold
-              figure is the route's value. 🔀 transit hub · ⚒ producer · 🏠 terminal consumer — what
-              the PARTNER itself does with this good. A route that breaks bulk through a relay port
-              shows a <span style={{ color: "#2fd1c9" }}>⚓ teal ring</span> on the map at the
-              transshipment city; 🔎 traces one hop past a transit partner toward where the good is
-              actually made.
+              Click a route to open its itinerary and draw every leg on the map. ⚓ marks a port where
+              the cargo is unloaded and re-embarked (a caravan or ship cannot make the whole run in one
+              stage); distances are straight-line per leg, days are routed travel time. The dot is voyage
+              risk; the gold figure is the route&apos;s value. 🔀 transit · ⚒ producer · 🏠 consumer is
+              what the far end itself does with this good.
             </FootNote>
           )}
         </Section>
@@ -1605,6 +1553,154 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
         )}
         <FootNote>Click a city to expand what it sends/buys and map every route to it.</FootNote>
       </Section>
+    </div>
+  );
+}
+
+
+// ── One route, as a card ─────────────────────────────────────────────────────
+// Collapsed: direction · where to (with the number of stops) · distance ·
+// days · mode · risk · volume · value · share. Expanded (selected): the whole
+// itinerary as a strip of legs, the ROUTED distance (resolved leg by leg on the
+// same coarse road/sea network the map draws), the charter status at the
+// destination market, and the one-hop look-through for a transit partner.
+const MODE_ICON: Record<RouteLeg["mode"], string> = { sea: "⛵", river: "🛶", land: "🐫" };
+
+function kmFmt(km: number): string {
+  if (!isFinite(km) || km <= 0) return "—";
+  return km >= 1000 ? `${(km / 1000).toFixed(km >= 10000 ? 0 : 1)}k km` : `${Math.round(km)} km`;
+}
+
+/** Routed km along the real network, one coarse route per leg, summed. */
+function useRoutedKm(r: TradeRouteFlow, enabled: boolean): number | null {
+  const rivers = useWorldStore((s) => s.rivers);
+  const gridW = useWorldStore((s) => s.meta?.grid_width ?? 0);
+  const [km, setKm] = useState<number | null>(null);
+  const legsKey = (r.legs ?? []).map((l) => l.hub).join(",");
+  useEffect(() => {
+    setKm(null);
+    if (!enabled || !r.legs || r.legs.length === 0 || gridW <= 0) return;
+    let alive = true;
+    const kmPerCell = 40075 / gridW;
+    const rv = rivers.map((x) => ({ points: x.points }));
+    let px = r.dir === 1 ? -1 : (r.start_px ?? r.px);
+    let py = r.dir === 1 ? -1 : (r.start_py ?? r.py);
+    (async () => {
+      let total = 0;
+      for (const l of r.legs!) {
+        if (px < 0) { px = r.start_px ?? 0; py = r.start_py ?? 0; }
+        try {
+          const cr = await computeCoarseRoute([px, py], [l.px, l.py], rv, 0, 1.0);
+          const pts = cr.points;
+          if (pts.length < 2) { total += l.km; }
+          else {
+            for (let k = 1; k < pts.length; k++) {
+              let dx = Math.abs(pts[k][0] - pts[k - 1][0]);
+              dx = Math.min(dx, gridW - dx);
+              const dy = pts[k][1] - pts[k - 1][1];
+              total += Math.hypot(dx, dy) * kmPerCell;
+            }
+          }
+        } catch { total += l.km; }
+        px = l.px; py = l.py;
+      }
+      if (alive) setKm(total);
+    })();
+    return () => { alive = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, legsKey, r.dir, r.start_px, r.start_py, gridW]);
+  return km;
+}
+
+function RouteCard({ r, sel, onClick }: { r: TradeRouteFlow; sel: boolean; onClick: () => void }) {
+  const col = r.dir === 0 ? DIR_IN : DIR_OUT;
+  const legs = r.legs ?? [];
+  const stops = legs.filter((l) => l.transship);
+  const routedKm = useRoutedKm(r, sel);
+  const role = partnerRoleBadge(r.partner_role);
+  const routeTr = transportOf(r.sea_amount ?? 0, r.river_amount ?? 0, r.amount);
+  const startName = r.dir === 1 ? "here" : r.partner_name;
+  return (
+    <div data-no-drag onClick={onClick}
+      style={{
+        cursor: "pointer", borderRadius: RADIUS.sm, margin: "3px 0",
+        padding: sel ? "6px 8px" : "4px 6px",
+        background: sel ? T.card : "transparent",
+        border: `1px solid ${sel ? col : "transparent"}`,
+      }}>
+      {/* Line 1 — where, how far, how much */}
+      <div style={{ display: "flex", alignItems: "center", gap: SPACE.sm }}>
+        <span style={{ width: 30, color: col, fontSize: FZ.tiny, fontWeight: 700 }}>{r.dir === 0 ? "◀ IN" : "OUT ▶"}</span>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+          color: sel ? T.gold : T.ink, fontWeight: 600 }}>
+          {r.dir === 0 ? `from ${r.partner_name}` : `to ${r.partner_name}`}
+          {role && <span title={`${r.partner_name} is a ${role.label} of this good`} style={{ marginLeft: 4, opacity: 0.85 }}>{role.icon}</span>}
+          {stops.length > 0 && (
+            <span style={{ marginLeft: 6, fontSize: FZ.micro, color: "#2fd1c9", fontWeight: 400 }}
+              title={stops.map((s) => s.name).join(" → ")}>
+              ⚓ {stops.length} stop{stops.length > 1 ? "s" : ""}
+            </span>
+          )}
+          {(r.charter_share ?? -1) >= 0 && (
+            <span style={{ marginLeft: 6, fontSize: FZ.micro, color: T.gold, fontWeight: 400 }}
+              title={`chartered at the destination to ${r.charter_holder}`}>🔒</span>
+          )}
+        </span>
+        <span style={{ width: 54, textAlign: "right", color: T.inkDim, fontSize: FZ.tiny }}
+          title="straight-line distance start → final market">{kmFmt(r.km ?? 0)}</span>
+        <span style={{ width: 34, textAlign: "right", color: T.inkDim, fontSize: FZ.tiny }}
+          title="routed travel days, all legs">{(r.days ?? 0) > 0 ? `${Math.round(r.days!)}d` : ""}</span>
+        <span style={{ width: 18, textAlign: "center", fontSize: FZ.tiny }}
+          title={routeTr ? `carried ${routeTr.label}` : "carried overland"}>{routeTr?.icon || "🐫"}</span>
+        <span title={`voyage risk ${(((r.risk ?? 0) * 100).toFixed(1))}%`}
+          style={{ width: 8, height: 8, borderRadius: "50%", flex: "0 0 auto", background: riskColor(r.risk ?? 0) }} />
+        <span style={{ width: 46, textAlign: "right", color: T.inkMid }}>{fmt(r.amount)}</span>
+        <span style={{ width: 42, textAlign: "right", color: T.gold, fontSize: FZ.tiny }}
+          title="value at the good's base price">{fmt(r.value ?? 0)}</span>
+        <span style={{ width: 32, textAlign: "right", color: T.inkDim, fontSize: FZ.tiny }}>{r.pct.toFixed(0)}%</span>
+      </div>
+
+      {/* Expanded — the itinerary */}
+      {sel && (
+        <div style={{ marginTop: 6, paddingLeft: 30 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, fontSize: FZ.tiny }}>
+            <span style={{ color: T.ink, fontWeight: 600 }}>{startName}</span>
+            {legs.map((l, k) => (
+              <span key={k} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                <span style={{ color: T.inkDim, whiteSpace: "nowrap" }}>
+                  ─{MODE_ICON[l.mode]} {kmFmt(l.km)}{l.days > 0 ? ` · ${Math.round(l.days)}d` : ""}─▶
+                </span>
+                <span style={{ color: l.transship ? "#2fd1c9" : T.gold, fontWeight: 600, whiteSpace: "nowrap" }}
+                  title={l.transship ? "cargo unloaded and re-embarked here" : "final market"}>
+                  {l.transship ? "⚓ " : "🏁 "}{k === legs.length - 1 && r.dir === 0 ? "here" : l.name}
+                </span>
+              </span>
+            ))}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: SPACE.md, marginTop: 4, fontSize: FZ.micro, color: T.inkDim }}>
+            <span>by route <b style={{ color: T.ink }}>{routedKm == null ? "…" : kmFmt(routedKm)}</b></span>
+            <span>straight {kmFmt(r.km ?? 0)}</span>
+            <span>{Math.round(r.days ?? 0)} days on the road</span>
+            <span>{stops.length === 0 ? "direct — no transshipment" : `unloaded ${stops.length}× on the way`}</span>
+            {r.relayed && <span title="the ledger records each leg; this route is shown end to end">relay recorded</span>}
+          </div>
+          {(r.charter_share ?? -1) >= 0 && (
+            <div style={{ marginTop: 3, fontSize: FZ.micro, color: T.inkMid }}>
+              🔒 Chartered at {r.dir === 1 ? r.partner_name : "this city"} to{" "}
+              <span style={{ color: T.gold }}>{r.charter_holder}</span> — the holder carried{" "}
+              <b style={{ color: (r.charter_share ?? 0) >= 0.5 ? T.goodInk : T.badInk }}>
+                {Math.round((r.charter_share ?? 0) * 100)}%
+              </b>{" "}of this route; the rest moved on other accounts.
+            </div>
+          )}
+          {(r.origin_hub ?? -1) >= 0 && (
+            <div style={{ marginTop: 3, fontSize: FZ.micro, color: T.inkDim }}>
+              🔎 {r.partner_name} mostly gets this from <span style={{ color: T.ink }}>{r.origin_name}</span>
+              {r.origin_is_producer ? " (which makes it)" : " (itself further upstream)"}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

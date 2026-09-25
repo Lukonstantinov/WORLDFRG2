@@ -1026,6 +1026,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         city_dominator: vec![],
         trade_last: vec![],
         trade_last_season: vec![],
+        relay_cur: Default::default(),
+        relay_last: vec![],
         trade_hist: vec![],
         figures: vec![],
         fairs: vec![],

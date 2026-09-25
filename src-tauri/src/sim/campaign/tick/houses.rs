@@ -2309,19 +2309,31 @@ impl CampaignSim {
     /// both name and arms. Checks against ALL houses (incl. defunct) so a fallen
     /// family's name isn't silently reused.
     pub(crate) fn unique_family_name_for(&self, hub: usize, salt: u64) -> String {
-        let taken = |name: &str, houses: &[House]| houses.iter().any(|h| h.name == name);
+        let taken: std::collections::HashSet<&str> = self.houses.iter().map(|h| h.name.as_str()).collect();
         for k in 0..32u64 {
             let cand = self.family_name_for(hub, salt ^ k.wrapping_mul(0x9E3779B1));
-            if !taken(&cand, &self.houses) { return cand; }
+            if !taken.contains(cand.as_str()) { return cand; }
+        }
+        // The curated bank is spent (a long campaign founds thousands of houses
+        // against ~35 names per people): COIN a surname in the same idiom rather
+        // than repeat one or tag it with a number.
+        for k in 0..256u64 {
+            let cand = format!("House {}", self.synth_family_name_for(hub, salt ^ k.wrapping_mul(0xC2B2AE35)));
+            if !taken.contains(cand.as_str()) { return cand; }
         }
         let city = self.hubs[hub].name.clone();
-        for k in 0..32u64 {
-            let base = self.family_name_for(hub, salt ^ k.wrapping_mul(0x85EBCA77));
-            let cand = format!("{} of {}", base, city);
-            if !taken(&cand, &self.houses) { return cand; }
+        for k in 0..4096u64 {
+            let cand = format!("House {} of {}", self.synth_family_name_for(hub, salt ^ k.wrapping_mul(0x85EBCA77)), city);
+            if !taken.contains(cand.as_str()) { return cand; }
         }
-        // Last resort (vanishingly rare): tick-tag guarantees uniqueness.
-        format!("{} of {} [{}]", self.family_name_for(hub, salt), city, self.tick)
+        // Unreachable in practice (4k coined names in one city all taken).
+        format!("House {} of {}", self.synth_family_name_for(hub, salt), city)
+    }
+
+    /// A coined surname in `hub`'s culture (see `cultures::synth_family_name`).
+    pub(crate) fn synth_family_name_for(&self, hub: usize, salt: u64) -> String {
+        let (x, y) = (self.hubs[hub].x.max(0.0) as u32, self.hubs[hub].y.max(0.0) as u32);
+        crate::sim::names::gen_synth_family_name(x, y, self.world_w as u32, self.world_h(), salt)
     }
 
 
@@ -4517,12 +4529,33 @@ impl CampaignSim {
     /// the same family visibly spreads across cities (instead of inventing an
     /// unrelated surname). Unique per city.
     pub(crate) fn branch_name_for(&self, parent_name: &str, dest: usize) -> String {
+        // Strip the house prefix, any line/specialty tag "(…)" and any "of City" so a
+        // branch of a branch doesn't pile up "of A of B", and a Company branch doesn't
+        // carry its founding specialty into a new city.
+        let is_house = parent_name.starts_with("House ");
         let surname = parent_name.strip_prefix("House ").unwrap_or(parent_name);
-        let base = surname.split(" of ").next().unwrap_or(surname).trim();
+        let base = surname.split(" (").next().unwrap_or(surname);
+        let base = base.split(" of ").next().unwrap_or(base).trim();
+        let prefix = if is_house { "House " } else { "" };
         let city = self.hubs[dest].name.clone();
-        let cand = format!("House {} of {}", base, city);
-        if !self.houses.iter().any(|h| h.name == cand) { return cand; }
-        format!("House {} of {} [{}]", base, city, self.tick)
+        let taken = |c: &str| self.houses.iter().any(|h| h.name == c);
+        let cand = format!("{}{} of {}", prefix, base, city);
+        if !taken(&cand) { return cand; }
+        // Same family already there: distinguish the line by a marriage alliance with
+        // a local family — "House Cassii-Valerii of Aquentia" — never a number.
+        for k in 0..64u64 {
+            let local = self.family_name_for(dest, self.tick as u64 ^ k.wrapping_mul(0x9E3779B1));
+            let local = local.strip_prefix("House ").unwrap_or(&local).to_string();
+            if local == base { continue; }
+            let cand = format!("{}{}-{} of {}", prefix, base, local, city);
+            if !taken(&cand) { return cand; }
+        }
+        for k in 0..256u64 {
+            let local = self.synth_family_name_for(dest, self.tick as u64 ^ k.wrapping_mul(0xC2B2AE35));
+            let cand = format!("{}{}-{} of {}", prefix, base, local, city);
+            if !taken(&cand) { return cand; }
+        }
+        self.unique_family_name_for(dest, self.tick as u64 ^ 0xB2A1)
     }
 
 

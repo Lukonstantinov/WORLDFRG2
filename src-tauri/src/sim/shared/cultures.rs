@@ -86,7 +86,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Elissa","Sophonisba","Arishat","Batbaal","Amatashtart","Himilce","Yzebel","Shiphrah"],
         family: &["Barcids","Magonids","Hannids","Gisconids","Melqartids","Bostarids","Tyrians","Sidonites","Eshmunids","Baalids","Gerids","Zakarbids","Hannonids","Adonids","Bodashtarids","Hannibaals","Carthalonids","Safotids","Hamilcarids","Hasdrubalids","Maharbalids","Himilcoids","Adherbalids","Saphonids","Abdmelqarts","Bomilcarids","Yadamilkids","Abibaalids","Ahirams","Mottonids","Gerastartids","Hannobaals","Bythiads","Iomilkids"],
         guild: &["Beth","Sokim","Miqdash","Mahanet","Tarsis","Kothon","Suffetim"],
-        epithet: &["Rabba","Adir","the Great Harbour"] },
+        epithet: &["Rabba","Adir","Hadasht"] },
     // 3 Persian
     Kit { name: "Persian", lang_family: "Iranian", env: Env::Arid,
         on: &["Pasar","Ekba","Susa","Persa","Zara","Bakh","Ragha","Hyrka","Nisa","Kuru","Asha","Dara","Anshan","Gaba","Tushpa","Mithra"],
@@ -96,7 +96,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Atossa","Roxana","Parysatis","Amestris","Artystone","Shirin","Purandokht","Stateira","Rodogune","Azarmidokht"],
         family: &["Karen","Suren","Mihranids","Spandiyads","Varaz","Kanarang","Zarmihr","Achaemenids","Sasanids","Arsacids","Mehran","Pahlavids","Ispahbudhan","Zik","Aspahbadh","Andigan","Qaren","Dahae","Bawandids","Karinids","Sukhrids","Farrukhzads","Gondofarrids","Espahbadan","Dadbundadh","Sohaeids","Burzin","Mahgushnasp","Wahriz","Shahrbaraz","Mardanshah","Bistam","Vinduyih","Rashnu"],
         guild: &["Karwan","Anjoman","Bazaar","Rasta","Sarai","Kalantar","Ostandar"],
-        epithet: &["Buzurg","the Great","Shahanshah"] },
+        epithet: &["Buzurg","Shahanshah","Nau"] },
     // 4 Norse
     Kit { name: "Norse", lang_family: "Germanic", env: Env::Cold,
         on: &["Haf","Bjor","Skag","Vester","Nor","Ulf","Thrond","Stav","Gud","Ravn","Iso","Frost","Vik","Hald","Birk","Auste"],
@@ -106,7 +106,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Astrid","Gudrun","Sigrid","Thyra","Hallgerd","Freydis","Ingrid","Ragnhild","Bergthora","Unn"],
         family: &["Bjornsson","Sigurdarson","Ragnarsson","Ulfsson","Haraldsson","Knutsson","Ivarsson","Thorvaldsson","Gunnarsson","Eriksson","Haakonsson","Sturlung","Magnusson","Steinarsson","Vagnsson","Skjoldung","Yngling","Hlathir","Olafsson","Sveinsson","Asgrimsson","Ketilsson","Bardsson","Hroaldsson","Geirsson","Halldorsson","Egilsson","Snorrasson","Vifilsson","Ozurarson","Floksson","Arnesson","Hroarsson","Gormsson"],
         guild: &["Felag","Kaupang","Lag","Gildi","Stafnbui","Bryggja","Varda"],
-        epithet: &["hinn Mikli","Storr","the Elder"] },
+        epithet: &["hinn Mikli","Storr","Forna"] },
     // 5 Celtic
     Kit { name: "Celtic", lang_family: "Celtic", env: Env::Temperate,
         on: &["Dun","Caer","Llan","Aber","Pen","Tre","Inver","Kil","Bally","Glen","Rath","Cair","Loch","Ard","Bran","Vin"],
@@ -116,7 +116,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Boudica","Cartimandua","Medb","Rhiannon","Brigit","Eithne","Gwenllian","Sadb","Findabair","Creiddylad"],
         family: &["Brigantes","Catuvellauni","Arverni","Aedui","Iceni","Dumnonii","Carnutes","Senones","Parisii","Veneti","Cornovii","Boii","Atrebates","Trinovantes","Ordovices","Silures","Durotriges","Coritani","Helvetii","Sequani","Lingones","Bituriges","Volcae","Pictones","Santones","Allobroges","Treveri","Nervii","Morini","Cadurci","Vocontii","Turones","Redones","Namnetes","Cenomani"],
         guild: &["Comann","Margad","Tuath","Nemeton","Cuallacht","Aonach","Ceard"],
-        epithet: &["Mor","Vellaunos","the Tall"] },
+        epithet: &["Mor","Vellaunos","Uchel"] },
     // 6 Arabic
     Kit { name: "Arab", lang_family: "Semitic", env: Env::Arid,
         on: &["Al-","Ban","Qas","Madin","Hisn","Ras","Bir","Wad","Suq","Dar","Jab","Sham","Naj","Khaf","Yath","Hadr"],
@@ -126,7 +126,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Fatima","Khadija","Aisha","Zaynab","Layla","Rabia","Sukayna","Hind","Asma","Ruqayya"],
         family: &["al-Kindi","al-Faruqi","al-Hashimi","al-Najjar","al-Saqr","al-Rashidi","al-Bakri","al-Tujari","al-Mansuri","al-Qaysi","al-Dimashqi","al-Sahili","al-Tanukhi","al-Ghassani","al-Lakhmi","al-Azdi","al-Qurashi","al-Tamimi","al-Farabi","al-Razi","al-Tabari","al-Maqdisi","al-Andalusi","al-Misri","al-Yamani","al-Hijazi","al-Baghdadi","al-Basri","al-Kufi","al-Wasiti","al-Halabi","al-Mawsili","al-Shaybani","al-Khazraji","al-Juhani"],
         guild: &["Suq","Funduq","Tujjar","Qaysariyya","Wakala","Hisba","Sinf"],
-        epithet: &["al-Kubra","al-Azim","the Radiant"] },
+        epithet: &["al-Kubra","al-Azim","al-Jadida"] },
     // 7 Sanskritic / Indic
     Kit { name: "Indic", lang_family: "Indo-Aryan", env: Env::Tropical,
         on: &["Pata","Vara","Indra","Maha","Kasi","Ujja","Taksha","Vidi","Champa","Sura","Naga","Kanya","Praya","Dvara","Amara","Bhima"],
@@ -136,7 +136,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Prabhavati","Sanghamitra","Kumaradevi","Rajyashri","Malati","Ratnavali","Yashodhara","Amrapali","Lilavati","Devika"],
         family: &["Maurya","Gupta","Chola","Pallava","Kushana","Satavahana","Vakataka","Chalukya","Pandya","Rashtrakuta","Pala","Sena","Vardhana","Kadamba","Maitraka","Pratihara","Chahamana","Hoysala","Nanda","Shunga","Kanva","Kakatiya","Yadava","Paramara","Solanki","Tomara","Chandela","Gahadavala","Sisodia","Kalachuri","Ganga","Kamboja","Licchavi","Shilahara","Chera"],
         guild: &["Shreni","Nigama","Sangha","Puga","Gana","Vanik","Mahajana"],
-        epithet: &["Maha","Uttama","the Golden"] },
+        epithet: &["Maha","Uttama","Nava"] },
     // 8 Sinitic
     Kit { name: "Sinitic", lang_family: "Sinitic", env: Env::Temperate,
         on: &["Chang","Luo","Xian","Jian","Lin","Hang","Guang","Nan","Bei","Tai","Hua","Jin","Wu","Qi","Lu","Yun"],
@@ -146,7 +146,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Wenji","Zhaojun","Qingzhao","Yuhuan","Xiulan","Meiyin","Ruilan","Lifen","Yanran","Shufen"],
         family: &["Wang","Li","Zhang","Chen","Liu","Yang","Huang","Zhou","Wu","Sun","Zheng","Xu","Lin","He","Gao","Luo","Song","Tang","Feng","Deng","Zhao","Qin","Han","Wei","Jin","Cao","Ma","Zhu","Hu","Guo","Lu","Cai","Ye","Pan","Du","Ding","Shen","Xie","Cheng","Fan"],
         guild: &["Hang","Hui","Shanghui","Gongsuo","Bang","Zihao","Piaohao"],
-        epithet: &["Da","Sheng","the Great"] },
+        epithet: &["Da","Sheng","Xin"] },
     // 9 Slavic
     Kit { name: "Slavic", lang_family: "Slavic", env: Env::Cold,
         on: &["Nov","Bel","Veli","Krak","Smol","Cherni","Pere","Plesk","Rus","Vlad","Yaro","Sviat","Tver","Polo","Mira","Drago"],
@@ -156,7 +156,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Olga","Ludmila","Rogneda","Predslava","Milena","Vasilisa","Dobrava","Bogdana","Radmila","Zlata"],
         family: &["Rurikids","Olgovichi","Monomakhi","Drevlyane","Krivichi","Vyatichi","Polyane","Radimichi","Dregovichi","Severyane","Volhynians","Berendei","Izyaslavichi","Vseslavichi","Rostislavichi","Glebovichi","Yuryevichi","Mstislavichi","Svyatoslavichi","Vladimirovichi","Vsevolodovichi","Davydovichi","Olegovichi","Igorevichi","Yaroslavichi","Bryachislavichi","Rogvolodichi","Vasilkovichi","Romanovichi","Andreevichi","Vyacheslavichi","Tverichi","Galichane","Tysyatskie"],
         guild: &["Bratstvo","Torg","Druzhina","Artel","Sotnya","Ryad","Gostiny"],
-        epithet: &["Velikiy","Slavny","the Bold"] },
+        epithet: &["Velikiy","Slavny","Novy"] },
     // 10 Nahuatl / Mesoamerican
     Kit { name: "Nahua", lang_family: "Nahuan", env: Env::Tropical,
         on: &["Teno","Tlate","Texco","Xochi","Tlaxca","Cholo","Teoti","Azca","Cuauh","Mixco","Tula","Mali","Coa","Itz","Tepe","Huey"],
@@ -166,7 +166,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Malinalli","Tecuichpoch","Xochitl","Papan","Ilancueitl","Atotoztli","Miyahuaxihuitl","Chimalma","Quiauhxochitl","Tiacapan"],
         family: &["Mexica","Tepaneca","Acolhua","Chichimeca","Tlaxcalteca","Totonac","Mixteca","Zapoteca","Huaxteca","Otomi","Tarasca","Mazahua","Culhua","Xochimilca","Chalca","Cuitlahuac","Mixquica","Cohuixca","Tlatelolca","Texcoca","Chimalpaneca","Matlatzinca","Coatlican","Amaquemeca","Tenanca","Iztapalapa","Coyohuaca","Azcapotzalca","Huexotzinca","Tultitlan","Tepeyacac","Coatlinchan","Acolman"],
         guild: &["Pochteca","Calpolli","Tianquiztli","Pochtlan","Oztomeca","Tealtianime"],
-        epithet: &["Huey","Tlatoani","the Revered"] },
+        epithet: &["Huey","Tlatoani","Yancuic"] },
     // 11 Turkic
     Kit { name: "Turkic", lang_family: "Turkic", env: Env::Arid,
         on: &["Bal","Qara","Sar","Otra","Tash","Bukh","Sam","Talas","Aksu","Kashg","Turk","Yenis","Bes","Ulan","Altan","Bey"],
@@ -176,7 +176,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Terken","Altunay","Gulcicek","Sevinc","Aybike","Kutlug","Ilbike","Yaruk"],
         family: &["Ashina","Oguz","Kipchak","Karluk","Pecheneg","Khazar","Uyghur","Bashkir","Kimek","Tatar","Bulgar","Seljuk","Qarluq","Toquz","Onoq","Turgesh","Qangli","Yagma","Qarakhanid","Avar","Cuman","Khalaj","Chigil","Yabaku","Basmyl","Sabir","Utigur","Kutrigur","Bayandur","Salur","Yiwa","Afshar","Begdili","Chepni"],
         guild: &["Orda","Kervan","Lonca","Esnaf","Ahi","Bazirgan","Tamga"],
-        epithet: &["Ulug","Khan","the Wolf"] },
+        epithet: &["Ulug","Yangi","Beg"] },
     // ── Minor peoples (smaller, rarer hearths) ─────────────────────────────
     // 12 Egyptian / Nilotic
     Kit { name: "Nilotic", lang_family: "Nilotic", env: Env::Arid,
@@ -187,7 +187,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Nefertari","Hatshepsut","Tiye","Meritamun","Ankhesen","Henuttawy","Nodjmet","Nebet","Iset","Merit"],
         family: &["Amunids","Ptahmoset","Setiu","Nubkha","Ramessids","Sematawy","Ahmoside","Khaemwaset","Panhesy","Userkaf","Meritamun","Djehutis","Bakenkhonsu","Nebseny","Paankh","Iryhor"],
         guild: &["Per-hedj","Shena","Wabet","Kap","Hut-ka","Sesh","Menat"],
-        epithet: &["the Golden","Neb-Maat","of the Two Lands"] },
+        epithet: &["Wer","Neb-Maat","Nefer"] },
     // 13 Amazigh / Berber
     Kit { name: "Amazigh", lang_family: "Berber", env: Env::Arid,
         on: &["Agad","Tam","Tin","Ida","Ait"," Imi","Tafr","Ghar","Ouar","Zag","Tazr","Amel","Ifr","Tigh","Assa","Wadn"],
@@ -197,7 +197,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Dihya","Tinhinan","Tala","Kella","Titrit","Tasekkurt","Yamina","Damya"],
         family: &["Zenata","Sanhaja","Masmuda","Nafusa","Kutama","Awraba","Miknasa","Houara","Luwata","Gomara","Barghawata","Iznagen","Ait-Atta","Iregwaten","Ihahan","Aitmzab"],
         guild: &["Amur","Taddart","Agadir","Jmaa","Souk","Taqbilt","Amghar"],
-        epithet: &["Amenokal","the Free","of the Veil"] },
+        epithet: &["Amenokal","Meqqer","Amaynu"] },
     // 14 Yamato / Japonic
     Kit { name: "Yamato", lang_family: "Japonic", env: Env::Maritime,
         on: &["Yama","Kawa","Naga","Higa","Aki","Toyo","Iso","Miya","Kama","Owa","Shina","Kuni","Sato","Hira","Fuji","Naru"],
@@ -207,7 +207,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Tomoe","Masako","Shizuka","Chiyo","Kaede","Sadako","Nene","Ginchiyo","Ichi","Yodo"],
         family: &["Fujiwara","Taira","Minamoto","Tachibana","Soga","Mononobe","Otomo","Abe","Hojo","Ashikaga","Hosokawa","Shimazu","Mori","Date","Uesugi","Takeda","Ii","Maeda"],
         guild: &["Za","Kumi","Toiya","Nakama","Kabu","Machishu","Kaisho"],
-        epithet: &["no Kami","the Elder","Daimyo"] },
+        epithet: &["no Kami","Shin","O"] },
     // 15 Mongol / steppe horde
     Kit { name: "Mongol", lang_family: "Mongolic", env: Env::Cold,
         on: &["Kara","Ordu","Erden","Tsag","Bur","Khal","Nai","Kere","Merk","Oira","Bar","Onon","Selen","Tuul","Khent","Altan"],
@@ -217,7 +217,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Borte","Sorghaghtani","Hoelun","Alaqai","Khutulun","Chabi","Toregene","Yesui","Yesugen","Oghul"],
         family: &["Borjigin","Kereyid","Naiman","Merkid","Tatar","Oirat","Khongirad","Jalair","Barlas","Manghud","Uriankhai","Besud","Tayichiud","Khori","Buryat","Dorbet"],
         guild: &["Ordu","Yam","Nokod","Kesig","Aimag","Khuraldai","Zud"],
-        epithet: &["Khan","the Great Khan","Bagatur"] },
+        epithet: &["Ikh","Shine","Bagatur"] },
     // 16 Andean / Quechua
     Kit { name: "Quechua", lang_family: "Quechuan", env: Env::Tropical,
         on: &["Qusqu","Willka","Machu","Ollan","Sacsa","Pisaq","Cham","Wari","Tiwa","Cara","Chimu","Nazca","Apu","Inti","Puma","Yana"],
@@ -227,7 +227,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Ocllo","Cusi","Chimpu","Rahua","Curi","Asarpay","Quilla","Sisa"],
         family: &["Inka","Chanka","Wanka","Chimu","Colla","Lupaca","Cañari","Chachapoya","Quilla","Ayarmaca","Wari","Tiwanaku","Moche","Nazca","Chincha","Yarovilca"],
         guild: &["Ayllu","Mita","Qhapaq","Kuraka","Chaski","Tampu","Qollqa"],
-        epithet: &["Sapa","the Sun-Born","Qhapaq"] },
+        epithet: &["Sapa","Hatun","Qhapaq"] },
     // 17 Mande / Sahel
     Kit { name: "Mande", lang_family: "Mande", env: Env::Tropical,
         on: &["Wag","Nia","Kang","Segu","Dje","Timbu","Kum","Bam","Tou","Sika","Kaya","Gao","Kong","Bou","Mopt","Djen"],
@@ -237,7 +237,7 @@ pub const KITS: &[Kit] = &[
         given_f: &["Sogolon","Kankou","Nana","Aminata","Fatoumata","Djeneba","Maimouna","Sira"],
         family: &["Keita","Traore","Konate","Diarra","Cisse","Kouyate","Dembele","Sissoko","Koroma","Kamara","Diakite","Sanogo","Doumbia","Fofana","Diallo","Sacko"],
         guild: &["Ton","Djeli","Marka","Wangara","Dyula","Kafu","Numu"],
-        epithet: &["Mansa","the Lion","Faama"] },
+        epithet: &["Mansa","Ba","Faama"] },
 ];
 
 /// Goods a people PRIZES (its cultural taste) — the luxuries/staples its markets seek.
@@ -691,8 +691,87 @@ fn cap_first(s: &str) -> String {
 pub fn place_name(kit: usize, ms: u64, x: u32, y: u32) -> String {
     let k = &KITS[kit.min(KITS.len() - 1)];
     let base = hash64((x as u64).wrapping_mul(73856093) ^ (y as u64).wrapping_mul(19349663));
-    let raw = format!("{}{}{}", pick(k.on, base), pick(k.mid, base >> 8), pick(k.end, base >> 16));
-    let raw: String = raw.split_whitespace().collect::<Vec<_>>().join(" ");
+    let on = pick(k.on, base).trim();
+    let mid = pick(k.mid, base >> 8);
+    let end = pick(k.end, base >> 16).trim();
+    // Name SHAPE varies by hash, so a map reads like a real one — a scatter of
+    // clipped, old names (Po, Nov, Lucca, Tyr) among the longer compounds, rather
+    // than every town a three-part construction.
+    // A prefix-shaped root ("Al-") only ever joins an ending — never stands
+    // bare or with a lone vowel.
+    let plain_root = on.chars().all(|c| c.is_alphabetic());
+    let shape = if plain_root { (base >> 40) % 100 } else { 26 + (base >> 40) % 74 };
+    let raw = if !plain_root {
+        // "Al-" takes a whole word after it: "Al-Madinah", never "Al-ah".
+        let word: String = pick(k.on, base >> 24).chars().filter(|c| c.is_alphabetic()).collect();
+        let word = if word.eq_ignore_ascii_case("al") || word.is_empty() { "Qas".to_string() } else { word };
+        format!("{}{}{}", on, cap_first(&word), end)
+    } else if shape < 14 && on.chars().count() >= 3 {
+        // bare root: "Nov", "Haf", "Dun", "Chang"
+        on.to_string()
+    } else if shape < 26 {
+        // root + one vowel: "Luca", "Pera", "Bira"
+        let v = mid.chars().find(|c| "aeiouy".contains(*c)).unwrap_or('a');
+        format!("{}{}", on, v)
+    } else if shape < 50 || on.chars().count() + mid.chars().count() + end.chars().count() > 11 {
+        // root + ending, no middle: "Novium", "Hafvik", "Pasargad"
+        format!("{}{}", on, end)
+    } else {
+        format!("{}{}{}", on, mid, end)
+    };
+    let raw: String = raw.split_whitespace().collect::<Vec<_>>().join("");
+    cap_first(&mutate(&tidy_seams(&raw), ms))
+}
+
+/// Smooth the seams of a stitched name: a doubled vowel collapses ("Ostiaa" →
+/// "Ostia"), and no letter runs three deep ("Throndssson" → "Throndsson").
+fn tidy_seams(raw: &str) -> String {
+    let mut out: Vec<char> = Vec::with_capacity(raw.len());
+    for c in raw.chars() {
+        let n = out.len();
+        let lc = c.to_ascii_lowercase();
+        // ("ii" stays: it is the Latin gens plural, Cassii / Valerii.)
+        if n >= 1 && out[n - 1].to_ascii_lowercase() == lc && "aeou".contains(lc) { continue; }
+        if n >= 2 && out[n - 1].to_ascii_lowercase() == lc && out[n - 2].to_ascii_lowercase() == lc { continue; }
+        out.push(c);
+    }
+    out.into_iter().collect()
+}
+
+/// A NEW surname in a kit's idiom, for when the curated family bank is exhausted
+/// (a long campaign founds thousands of houses against ~35 names per people).
+/// Built from the kit's own place roots plus the SUFFIX shape of a real family name
+/// in that kit ("Cassii" → "-ii", "Bjornsson" → "-sson", "al-Kindi" → "al-…i"),
+/// so a coined name still reads as the same people's. Deterministic in `salt`.
+pub fn synth_family_name(kit: usize, ms: u64, salt: u64) -> String {
+    let k = &KITS[kit.min(KITS.len() - 1)];
+    let hh = hash64(0x5E4D_F00D ^ salt.wrapping_mul(0x9E37_79B9_7F4A_7C15));
+    let clean = |s: &str| -> String { s.chars().filter(|c| c.is_alphabetic()).collect() };
+    let on = clean(pick(k.on, hh));
+    let mid = clean(pick(k.mid, hh >> 8));
+    let donor = pick(k.family, hh >> 16);
+    let raw = match k.name {
+        // One-syllable clan names: the root itself is the surname.
+        "Sinitic" => on.clone(),
+        // Place-shaped surnames (Yamamoto, Kawasaki): root + place ending.
+        "Yamato" => format!("{}{}", on, clean(pick(k.end, hh >> 24))),
+        _ if donor.starts_with("al-") => {
+            let stem = on.trim_start_matches("Al").trim_start_matches("al");
+            let stem = if stem.is_empty() { "Qas" } else { stem };
+            let body = format!("{}{}", stem, mid).to_lowercase();
+            let body = if body.ends_with('i') { body } else { format!("{}i", body) };
+            return format!("al-{}", cap_first(&mutate(&tidy_seams(&body), ms)));
+        }
+        _ => {
+            let chars: Vec<char> = donor.chars().collect();
+            let n = chars.len();
+            let tail: String = if n >= 7 { chars[n - 4..].iter().collect() }
+                else if n >= 5 { chars[n - 3..].iter().collect() }
+                else { String::new() };
+            format!("{}{}{}", on, mid, tail)
+        }
+    };
+    let raw = tidy_seams(&raw.to_lowercase());
     cap_first(&mutate(&raw, ms))
 }
 
@@ -897,4 +976,63 @@ pub fn place_epithet(kit: usize, ms: u64, x: u32, y: u32, tier: u8) -> String {
     let k = &KITS[kit.min(KITS.len() - 1)];
     let h2 = hash64((x as u64) ^ (y as u64).wrapping_mul(0xABCD));
     format!("{} {}", name, pick(k.epithet, h2))
+}
+
+#[cfg(test)]
+mod naming_tests {
+    use super::*;
+
+    /// Place epithets are the local tongue's own word ("Rabba", "Buzurg"),
+    /// never an English gloss ("the Great Harbour", "the Wolf") bolted onto a
+    /// Punic or Turkic city name — the user report this gate answers.
+    #[test]
+    fn place_epithets_are_never_english() {
+        for k in KITS {
+            for e in k.epithet {
+                let l = e.to_lowercase();
+                assert!(!l.starts_with("the ") && !l.starts_with("of "),
+                    "{} epithet {:?} is an English gloss", k.name, e);
+            }
+        }
+    }
+
+    /// A map needs clipped old names (Po, Nov, Lucca) among the compounds, and
+    /// the typical name must stay short enough to label.
+    #[test]
+    fn place_names_mix_short_and_long() {
+        for kit in 0..KITS.len() {
+            let mut lens: Vec<usize> = Vec::new();
+            let mut sample: Vec<String> = Vec::new();
+            for i in 0..600u32 {
+                let n = place_name(kit, 0, i * 37 % 3600, i * 17 % 1800);
+                assert!(!n.is_empty());
+                if i < 8 { sample.push(n.clone()); }
+                lens.push(n.chars().count());
+            }
+            lens.sort();
+            let short = lens.iter().filter(|&&l| l <= 5).count();
+            let median = lens[lens.len() / 2];
+            println!("{:>9}: median {median:>2}  short {short:>3}/600  e.g. {}", KITS[kit].name, sample.join(", "));
+            assert!(short >= 60, "{}: too few short names ({short}/600)", KITS[kit].name);
+            assert!(median <= 10, "{}: median name length {median} is too long", KITS[kit].name);
+        }
+    }
+
+    /// Coined surnames must have a real space to draw from, or the "no number
+    /// in a house name" guarantee is only a longer road to a duplicate.
+    #[test]
+    fn coined_surnames_have_room() {
+        for kit in 0..KITS.len() {
+            let mut set = std::collections::HashSet::new();
+            let mut sample = Vec::new();
+            for salt in 0..2000u64 {
+                let n = synth_family_name(kit, 0, salt);
+                assert!(!n.is_empty() && !n.chars().any(|c| c.is_ascii_digit()));
+                if salt < 6 { sample.push(n.clone()); }
+                set.insert(n);
+            }
+            println!("{:>9}: {:>4} distinct  e.g. {}", KITS[kit].name, set.len(), sample.join(", "));
+            assert!(set.len() >= 12, "{}: only {} distinct coined surnames", KITS[kit].name, set.len());
+        }
+    }
 }

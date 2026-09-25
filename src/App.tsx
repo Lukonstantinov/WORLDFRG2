@@ -15,7 +15,7 @@ import { WarehousesPanel } from "@ui/campaign/WarehousesPanel";
 import { CityRankingPanel } from "@ui/campaign/CityRankingPanel";
 import { GoodFlowPanel } from "@ui/goods/GoodFlowPanel";
 import { GoodsBrowserPanel } from "@ui/goods/GoodsBrowserPanel";
-import { HousesPanel } from "@ui/campaign/HousesPanel";
+import { HousesPanel, HouseDossierHost } from "@ui/campaign/HousesPanel";
 import { FeudsAlliancesPanel } from "@ui/campaign/FeudsAlliancesPanel";
 import { MoneyFinancePanel } from "@ui/campaign/MoneyFinancePanel";
 import { WarPanel } from "@ui/campaign/WarPanel";
@@ -1084,6 +1084,8 @@ export default function App() {
           <GoodFlowPanel />
           <GoodsBrowserPanel />
           <HousesPanel />
+          <HousesPanel companies />
+          <HouseDossierHost />
           <FeudsAlliancesPanel />
           <MoneyFinancePanel />
           <WarPanel />

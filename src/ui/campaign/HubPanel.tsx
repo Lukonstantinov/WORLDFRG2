@@ -647,6 +647,32 @@ export function HubPanel() {
               </>
             )}
 
+            <div style={sectionHdr}>🔒 Charters granted</div>
+            {(g.charters ?? []).length === 0 ? (
+              <div style={{ color: "#6a86a6", fontSize: 10 }}>This city has chartered no goods to any house or guild.</div>
+            ) : (g.charters ?? []).map((c) => (
+              <div key={c.house} data-no-drag onClick={() => useUIStore.getState().setDossierHouse(c.house)}
+                title="Open this house's dossier"
+                style={{ display: "flex", alignItems: "flex-start", gap: 7, margin: "4px 0", padding: "4px 6px", cursor: "pointer",
+                  background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+                <CoatOfArms name={c.name} size={24} guild={c.is_guild} />
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ color: c.color, fontWeight: 700, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {c.name} <span style={{ color: "#6a86a6", fontWeight: 400 }}>· {c.is_guild ? "company" : "house"} ▸</span>
+                  </div>
+                  {c.goods.map((cg) => (
+                    <div key={cg.good} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#9fb4cc" }}>
+                      <span style={{ flex: 1 }}>{cg.name}</span>
+                      <span title="share of this good's trade here the holder actually carried last year"
+                        style={{ color: cg.holder_share >= 0.5 ? "#7fd0a0" : "#e6a07a" }}>
+                        {cg.traded > 0 ? `carries ${Math.round(cg.holder_share * 100)}%` : "no trade yet"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+
             <div style={sectionHdr}>
               Fiscal policy{" "}
               {g.tariff_default && <span style={{ color: "#6a86a6", fontWeight: 400, fontSize: 9 }}>(default — no council yet)</span>}

@@ -864,6 +864,7 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
     let mut g_carriers: HashMap<u32, HashMap<u32, f32>> = HashMap::new(); // good→carrier→amt
     let mut route_sea: HashMap<(u32, u32, u8), f32> = HashMap::new();
     let mut route_river: HashMap<(u32, u32, u8), f32> = HashMap::new();
+    let mut route_carriers: HashMap<(u32, u32, u8), HashMap<u32, f32>> = HashMap::new();
     for f in sim.trade_last.iter().filter(|f| f.hub == hidx) {
         let partner = city_of(f.partner); // fold estates/manufactories into their settlement
         if partner == hidx { continue; }  // skip self-trade after folding (own estate)
@@ -881,6 +882,8 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         *route_river.entry((f.good, partner, f.dir)).or_insert(0.0) += f.river_amount;
         let cg = g_carriers.entry(f.good).or_default();
         for &(who, amt) in &f.carriers { *cg.entry(who).or_insert(0.0) += amt; }
+        let rc = route_carriers.entry((f.good, partner, f.dir)).or_default();
+        for &(who, amt) in &f.carriers { *rc.entry(who).or_insert(0.0) += amt; }
     }
 
     // ── Partner role, per (partner city, good) — read off the PARTNER's own
@@ -959,6 +962,9 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         // hub's current daily output rate; annualise it against the same
         // TICKS_PER_YEAR the yearly trade folds themselves use, so it is
         // comparable to `in_volume`/`out_volume`.
+        let charter_here: Option<(usize, String)> = sim.houses.iter().enumerate()
+            .find(|(_, x)| !x.defunct && x.hub as usize == hi && x.charters.contains(&(g as usize)))
+            .map(|(i, x)| (i, x.name.clone()));
         let own_production = sim.hubs.get(hi).and_then(|h| h.production.get(g as usize))
             .copied().unwrap_or(0.0).max(0.0) * crate::sim::tick::TICKS_PER_YEAR as f32;
         TradeFlowGood {
@@ -998,6 +1004,12 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             need_tier: sim.goods.get(g as usize).map(|x| x.need_tier).unwrap_or(0),
             base_value: sim.goods.get(g as usize).map(|x| x.base_value).unwrap_or(1.0),
             in_history, out_history, prod_history,
+            charter_house: charter_here.as_ref().map(|(i, _)| *i as i32).unwrap_or(-1),
+            charter_holder: charter_here.as_ref().map(|(_, n)| n.clone()).unwrap_or_default(),
+            charter_share: charter_here.as_ref().map(|(i, _)| {
+                let mine = g_carriers.get(&g).and_then(|m| m.get(&(*i as u32))).copied().unwrap_or(0.0);
+                (mine / (iv + ov).max(1e-6)).clamp(0.0, 1.0)
+            }).unwrap_or(0.0),
         }
     }).collect();
     goods.sort_by(|a, b| b.avg_volume.partial_cmp(&a.avg_volume).unwrap_or(std::cmp::Ordering::Equal));
@@ -1030,13 +1042,90 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             .unwrap_or(false);
         (best as i32, name, is_producer)
     };
+    // ── RELAYS, end to end. A relayed cargo is logged leg by leg, so this
+    // city's own ledger names only the FIRST stop of an export (or the LAST stop
+    // of an import). `relay_last` pairs each relayed shipment with its true
+    // origin and final market, and the chain in between is continued by the
+    // same staging rule the arrivals pass applies — so the route reads
+    // "here → A → B → Utixadada" instead of either a teleport or an orphan leg.
+    let predict_chain = |first: usize, dest: usize| -> Vec<usize> {
+        let mut chain = vec![first];
+        let mut at = first;
+        let mut hops = 0u8;
+        while at != dest && hops < crate::sim::tick::RELAY_MAX_HOPS {
+            let sea = sim.hubs[at].coastal && sim.hubs[dest].coastal;
+            if crate::sim::tick::CampaignSim::leg_exceeds_range(
+                sim.hub_km(at, dest), sea, sim.ship_leg_max_km, sim.caravan_leg_max_km) {
+                if let Some(p) = sim.staging_hop(at, dest, sim.ship_leg_max_km, sim.caravan_leg_max_km) {
+                    chain.push(p); at = p; hops += 1; continue;
+                }
+            }
+            break;
+        }
+        if at != dest { chain.push(dest); }
+        chain
+    };
+    // route key → (start hub, chain of hubs the cargo reaches, ending at the final market)
+    let mut itinerary: HashMap<(u32, u32, u8), (usize, Vec<usize>)> = HashMap::new();
+    let mut relayed_keys: std::collections::HashSet<(u32, u32, u8)> = std::collections::HashSet::new();
+    for r in sim.relay_last.iter() {
+        let (o, d, st) = (r.origin as usize, r.dest as usize, r.first_stop as usize);
+        if o >= n || d >= n || st >= n || r.amount <= 0.0 { continue; }
+        let is_export = city_of(r.origin) == hidx;
+        let is_import = city_of(r.dest) == hidx;
+        if !is_export && !is_import { continue; }
+        let chain = predict_chain(st, d);
+        let (old_key, new_key) = if is_export {
+            ((r.good, city_of(st as u32), 1u8), (r.good, city_of(r.dest), 1u8))
+        } else {
+            let last = if chain.len() >= 2 { chain[chain.len() - 2] } else { o };
+            ((r.good, city_of(last as u32), 0u8), (r.good, city_of(r.origin), 0u8))
+        };
+        if old_key == new_key { continue; }
+        let have = route_amt.get(&old_key).copied().unwrap_or(0.0);
+        let take = r.amount.min(have);
+        if take <= 0.0 { continue; }
+        let frac = take / have.max(1e-6);
+        // Move the sea/river/carrier split proportionally with the amount.
+        for m in [&mut route_sea, &mut route_river] {
+            let v = m.get(&old_key).copied().unwrap_or(0.0) * frac;
+            *m.entry(old_key).or_insert(0.0) -= v;
+            *m.entry(new_key).or_insert(0.0) += v;
+        }
+        if let Some(src) = route_carriers.get(&old_key).cloned() {
+            let dst = route_carriers.entry(new_key).or_default();
+            for (w, a) in &src { *dst.entry(*w).or_insert(0.0) += a * frac; }
+            if let Some(src_m) = route_carriers.get_mut(&old_key) {
+                for v in src_m.values_mut() { *v *= 1.0 - frac; }
+            }
+        }
+        *route_amt.entry(old_key).or_insert(0.0) -= take;
+        *route_amt.entry(new_key).or_insert(0.0) += take;
+        itinerary.insert(new_key, (o, chain));
+        relayed_keys.insert(new_key);
+    }
+    route_amt.retain(|_, v| *v > 1e-4);
+
+    // Who holds a charter on good g at hub h (the destination market).
+    let charter_at = |h: usize, g: u32| -> Option<(usize, String)> {
+        sim.houses.iter().enumerate()
+            .find(|(_, x)| !x.defunct && x.hub as usize == h && x.charters.contains(&(g as usize)))
+            .map(|(i, x)| (i, x.name.clone()))
+    };
+    let mode_of = |a: usize, b: usize| -> &'static str {
+        if sim.hubs[a].coastal && sim.hubs[b].coastal { "sea" }
+        else if sim.hubs[a].river && sim.hubs[b].river { "river" }
+        else { "land" }
+    };
+
     let mut good_total: HashMap<u32, f32> = HashMap::new();
     for (&(g, _, _), &amt) in &route_amt { *good_total.entry(g).or_insert(0.0) += amt; }
     let mut routes: Vec<TradeRouteFlow> = route_amt.iter().filter_map(|(&(g, partner, dir), &amount)| {
         let (pname, px, py) = pos(partner)?;
+        let key = (g, partner, dir);
         let tot = good_total.get(&g).copied().unwrap_or(0.0).max(1e-6);
-        let sea_amount = route_sea.get(&(g, partner, dir)).copied().unwrap_or(0.0);
-        let river_amount = route_river.get(&(g, partner, dir)).copied().unwrap_or(0.0);
+        let sea_amount = route_sea.get(&key).copied().unwrap_or(0.0).max(0.0);
+        let river_amount = route_river.get(&key).copied().unwrap_or(0.0).max(0.0);
         // Risk mode = whichever of sea/river/caravan actually carried the
         // majority of this route's amount — a route aggregates many
         // individual shipments over the reporting window, which can mix
@@ -1046,19 +1135,40 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
         let river = !sea && river_amount >= land_amount;
         let (from, to) = if dir == 1 { (hi, partner as usize) } else { (partner as usize, hi) };
         let base_value = sim.goods.get(g as usize).map(|x| x.base_value).unwrap_or(1.0);
-        // The REAL MAIN-ROUTE LEGS: `route_outlet` (production.rs #6d) records,
-        // per directed (from,to) pair, the coastal outlet its cheapest route
-        // actually composes through — the Ostia case. Direction-aware: an
-        // export (dir=1) checks here→partner, an import (dir=0) checks
-        // partner→here, so the relay named always matches the direction the
-        // good actually moves.
-        let relay = sim.route_outlet.get(from * n + to).copied().unwrap_or(-1);
-        let (relay_hub, relay_name, relay_px, relay_py) = if relay >= 0 {
-            match pos(relay as u32) {
-                Some((rn, rx, ry)) => (relay, rn, rx, ry),
-                None => (-1, String::new(), 0.0, 0.0),
+        // The itinerary: a real relay chain where one was recorded, else a
+        // single direct leg.
+        let (start, chain) = itinerary.get(&key).cloned().unwrap_or((from, vec![to]));
+        let mut legs: Vec<RouteLeg> = Vec::with_capacity(chain.len());
+        let mut prev = start;
+        for (i, &h) in chain.iter().enumerate() {
+            let (nm, lx, ly) = pos(h as u32).unwrap_or_default();
+            let d = sim.lane_days(prev, h);
+            legs.push(RouteLeg {
+                hub: city_of(h as u32), name: nm, px: lx, py: ly,
+                km: sim.hub_km(prev, h),
+                days: if d.is_finite() { d } else { 0.0 },
+                mode: mode_of(prev, h).to_string(),
+                transship: i + 1 < chain.len(),
+            });
+            prev = h;
+        }
+        let days: f32 = legs.iter().map(|l| l.days).sum();
+        let km = sim.hub_km(start, *chain.last().unwrap_or(&to));
+        let (start_px, start_py) = pos(city_of(start as u32)).map(|(_, x, y)| (x, y)).unwrap_or((0.0, 0.0));
+        // Legacy single-relay fields, read off the itinerary's first stop.
+        let (relay_hub, relay_name, relay_px, relay_py) = match legs.first() {
+            Some(l) if l.transship => (l.hub as i32, l.name.clone(), l.px, l.py),
+            _ => (-1, String::new(), 0.0, 0.0),
+        };
+        // Charter at the market this good is delivered to.
+        let market = if dir == 1 { partner as usize } else { hi };
+        let (charter_share, charter_holder) = match charter_at(market, g) {
+            Some((ci, cname)) => {
+                let mine = route_carriers.get(&key).and_then(|m| m.get(&(ci as u32))).copied().unwrap_or(0.0);
+                ((mine / amount.max(1e-6)).clamp(0.0, 1.0), cname)
             }
-        } else { (-1, String::new(), 0.0, 0.0) };
+            None => (-1.0, String::new()),
+        };
         let partner_role = partner_role_for(partner, g);
         let (origin_hub, origin_name, origin_is_producer) = if partner_role == "transit" {
             origin_for(partner, g)
@@ -1072,6 +1182,10 @@ pub fn campaign_trade_flows(id: u32, db: State<'_, WorldDb>) -> Result<Option<Tr
             partner_role,
             relay_hub, relay_name, relay_px, relay_py,
             origin_hub, origin_name, origin_is_producer,
+            legs, km, days,
+            start_hub: city_of(start as u32) as i32, start_px, start_py,
+            relayed: relayed_keys.contains(&key),
+            charter_share, charter_holder,
         })
     }).collect();
     routes.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));

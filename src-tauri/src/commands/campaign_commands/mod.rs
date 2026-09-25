@@ -569,6 +569,31 @@ pub struct Government {
     /// or `council` (the softer, dominant-but-not-captured case), whichever is set.
     #[serde(default)]
     pub leader: Option<CityLeader>,
+    /// Every charter (staple right) this city has granted: which house/guild holds
+    /// it, on which goods, and how much of that good's trade here the holder
+    /// ACTUALLY carries — a charter is a right, not a guarantee of the trade.
+    #[serde(default)]
+    pub charters: Vec<CharterRow>,
+}
+
+/// One holder of chartered goods at a city (Government tab).
+#[derive(Serialize, Clone, Debug)]
+pub struct CharterRow {
+    /// House index — clickable into the House Dossier.
+    pub house: u32,
+    pub name: String,
+    pub is_guild: bool,
+    pub color: String,
+    pub goods: Vec<CharterGood>,
+}
+#[derive(Serialize, Clone, Debug)]
+pub struct CharterGood {
+    pub good: u32,
+    pub name: String,
+    /// This good's total trade at the city last year (in + out).
+    pub traded: f32,
+    /// Share of `traded` carried on the holder's own account (0..1).
+    pub holder_share: f32,
 }
 
 /// CITY_PROVINCE_WAR_PLAN.md §3.1 · the city leader — the head of the house that
@@ -3046,6 +3071,14 @@ pub struct TradeFlowGood {
     pub out_history: Vec<f32>,
     #[serde(default)]
     pub prod_history: Vec<f32>,
+    /// The house/guild holding a CHARTER on this good at this city (-1 = none),
+    /// and the share of this good's trade here it actually carried last year.
+    #[serde(default)]
+    pub charter_house: i32,
+    #[serde(default)]
+    pub charter_holder: String,
+    #[serde(default)]
+    pub charter_share: f32,
 }
 /// ONE TRADER AT A CITY — the Traders tab's main row. Aggregates every shipment
 /// that touched this city, by who financed it.
@@ -3236,6 +3269,52 @@ pub struct TradeRouteFlow {
     /// "still further upstream than we trace".
     #[serde(default)]
     pub origin_is_producer: bool,
+    /// The full ITINERARY, in the direction the good moves, excluding the start:
+    /// every port where the cargo is unloaded and re-embarked, then the final
+    /// market. A direct lane has exactly one leg. Relays are the real ones the
+    /// tick recorded (`relay_last`) continued by the same staging rule the
+    /// arrivals pass uses.
+    #[serde(default)]
+    pub legs: Vec<RouteLeg>,
+    /// Straight-line distance start → final market, km.
+    #[serde(default)]
+    pub km: f32,
+    /// Sum of the legs' routed travel days (the lane matrix is route-based).
+    #[serde(default)]
+    pub days: f32,
+    /// Where the good STARTS on this route (this city for an export, the
+    /// true origin for an import), so the frontend can draw the whole chain.
+    #[serde(default)]
+    pub start_hub: i32,
+    #[serde(default)]
+    pub start_px: f32,
+    #[serde(default)]
+    pub start_py: f32,
+    /// True when this route's amount was re-attributed from a relay's first
+    /// (or last) stop to its real origin/destination.
+    #[serde(default)]
+    pub relayed: bool,
+    /// Carried by the house/guild holding a charter on this good at the
+    /// destination market (share 0..1 of `amount`) — -1 when no charter applies.
+    #[serde(default)]
+    pub charter_share: f32,
+    #[serde(default)]
+    pub charter_holder: String,
+}
+
+/// One leg of a route itinerary: the port reached at the end of it.
+#[derive(Serialize, Clone)]
+pub struct RouteLeg {
+    pub hub: u32,
+    pub name: String,
+    pub px: f32,
+    pub py: f32,
+    pub km: f32,
+    pub days: f32,
+    /// "sea" | "river" | "land"
+    pub mode: String,
+    /// True for every stop before the final market — cargo unloaded & re-embarked.
+    pub transship: bool,
 }
 /// A top partner city: its share of ALL this city's trade + the goods exchanged.
 #[derive(Serialize, Clone)]

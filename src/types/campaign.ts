@@ -642,6 +642,16 @@ export interface Government {
   /** CITY_PROVINCE_WAR_PLAN.md §3.1 · the office as a person — null when no house
    *  holds either office (the ordinary early-campaign case). */
   leader: CityLeader | null;
+  /** Every charter (staple right) this city has granted. */
+  charters?: CharterRow[];
+}
+/** A house/guild holding chartered goods at a city. `house` opens the dossier. */
+export interface CharterRow {
+  house: number;
+  name: string;
+  is_guild: boolean;
+  color: string;
+  goods: { good: number; name: string; traded: number; holder_share: number }[];
 }
 /** §3.1 · the head of whichever house runs this seat — reuses the existing
  *  house-person stack, no new entity. */
@@ -712,6 +722,11 @@ export interface TradeFlowGood {
   in_history?: number[];
   out_history?: number[];
   prod_history?: number[];
+  /** House/guild holding a charter on this good here (-1 = none). */
+  charter_house?: number;
+  charter_holder?: string;
+  /** Share of this good's trade here the holder actually carried (0..1). */
+  charter_share?: number;
 }
 /** WHO carried a good and what share of this city's trade in it they moved. */
 export interface TradeCarrier {
@@ -769,6 +784,33 @@ export interface TradeRouteFlow {
   origin_name?: string;
   /** Whether that one-hop-upstream supplier itself makes the good. */
   origin_is_producer?: boolean;
+  /** Full itinerary in the direction the good moves (excluding the start):
+   *  every unload/re-embark port, then the final market. */
+  legs?: RouteLeg[];
+  /** Straight-line start → final market, km. */
+  km?: number;
+  /** Sum of the legs' routed travel days. */
+  days?: number;
+  start_hub?: number;
+  start_px?: number;
+  start_py?: number;
+  /** Amount re-attributed from a relay stop to its true origin/destination. */
+  relayed?: boolean;
+  /** Share of `amount` carried by the destination market's charter holder;
+   *  -1 when no charter applies. */
+  charter_share?: number;
+  charter_holder?: string;
+}
+export interface RouteLeg {
+  hub: number;
+  name: string;
+  px: number;
+  py: number;
+  km: number;
+  days: number;
+  mode: "sea" | "river" | "land";
+  /** True for every stop before the final market — unloaded & re-embarked. */
+  transship: boolean;
 }
 /** A top partner city: share of all this city's trade + goods exchanged. */
 export interface TradePartner {

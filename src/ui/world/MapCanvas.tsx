@@ -1521,6 +1521,15 @@ export function MapCanvas() {
     return () => { alive = false; };
   }, [selectedHouseIdx, requestRender]);
 
+  // The house web's good filter (the dossier's "lanes by good" window).
+  const houseLaneGood = useUIStore((s) => s.houseLaneGood);
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setHouseLaneGood(houseLaneGood);
+    requestRender();
+  }, [houseLaneGood, requestRender]);
+
   // Draw latitude lines. Driven by the live `latConfig` slice (not `meta`) so
   // dragging the Latitude Frame sliders repaints ONLY this overlay — no tile
   // reloads, no sim IPC.

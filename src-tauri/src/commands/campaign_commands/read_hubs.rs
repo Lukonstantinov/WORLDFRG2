@@ -591,7 +591,26 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 character_phrase: crate::sim::tick::character_phrase(head.character),
                 vice: crate::sim::tick::vice_label(sim.head_vice(hi)).to_string(),
             }));
+        // Charters granted by this city, with the holder's real share of the
+        // chartered good's trade here (from last year's carrier ledger).
+        let charters: Vec<CharterRow> = sim.houses.iter().enumerate()
+            .filter(|(_, h)| !h.defunct && h.hub as usize == hi && !h.charters.is_empty())
+            .map(|(idx, h)| {
+                let goods = h.charters.iter().filter_map(|&g| {
+                    let name = sim.goods.get(g)?.name.clone();
+                    let (mut tot, mut mine) = (0.0f32, 0.0f32);
+                    for f in sim.trade_last.iter().filter(|f| f.hub as usize == hi && f.good as usize == g) {
+                        tot += f.amount;
+                        mine += f.carriers.iter().filter(|(w, _)| *w == idx as u32).map(|(_, a)| *a).sum::<f32>();
+                    }
+                    Some(CharterGood { good: g as u32, name, traded: tot,
+                        holder_share: if tot > 0.0 { (mine / tot).clamp(0.0, 1.0) } else { 0.0 } })
+                }).collect();
+                CharterRow { house: idx as u32, name: h.name.clone(), is_guild: h.is_guild,
+                    color: distinct_color(idx), goods }
+            }).collect();
         Some(Government {
+            charters,
             council, council_color, council_archetype, council_is_guild, council_power,
             tariff_export, tariff_import, tariff_default,
             mint_fineness: if hub.mint_fineness <= 0.0 { 1.0 } else { hub.mint_fineness },

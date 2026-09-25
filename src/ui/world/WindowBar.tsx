@@ -7,6 +7,7 @@ export function WindowBar() {
   const s = useUIStore();
   const chips: { label: string; on: boolean; set: (v: boolean) => void }[] = [
     { label: "⚜️ Houses", on: s.showHouses, set: s.setShowHouses },
+    { label: "🏛 Companies", on: s.showCompanies, set: s.setShowCompanies },
     { label: "💰 Money", on: s.showMoneyFinance, set: s.setShowMoneyFinance },
     { label: "🏦 Banks", on: s.showBank, set: s.setShowBank },
     { label: "🏛 Colonies", on: s.showColonial, set: s.setShowColonial },

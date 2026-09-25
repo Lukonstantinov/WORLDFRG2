@@ -65,6 +65,7 @@ export function CampaignTopBar() {
       key: "society", label: "⚜️ Society",
       items: [
         { label: "⚜️ Merchant Houses", on: ui.showHouses, set: ui.setShowHouses },
+        { label: "🏛 Merchant Companies", on: ui.showCompanies, set: ui.setShowCompanies },
         { label: "⚔ Feuds & Alliances", on: ui.showFeuds, set: ui.setShowFeuds },
         { label: "⚭ Dynasties & Alliances", on: ui.showDynasties, set: ui.setShowDynasties },
         { label: "🔨 Crafts & Guilds", on: ui.showGuilds, set: ui.setShowGuilds },

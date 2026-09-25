@@ -1122,7 +1122,16 @@ Three facts about the campaign that are easy to miss and shape any change here:
   (`staging_hop`, picking from the hub's own trade neighbours, required to be
   legal in its own mode and to strictly close the gap), and the arrivals pass
   re-checks the onward leg so the cargo walks stop by stop, bounded by
-  `RELAY_MAX_HOPS`. **It is a ROUTING rule, never a prohibition** — with no
+  `RELAY_MAX_HOPS`. The stop is looked for in the hub's `NEIGHBOR_K`
+  shortlist first and, only if none there qualifies, in EVERY real
+  settlement under the same three rules (a remote monotown's pull-ranked
+  shortlist can hold no town on the way — the reported "gems sold 5,000 km
+  away with no stop"). A third "split anywhere, even over-range" fallback was
+  measured and REVERTED (0.19× staged volume on the dense-world relay gate).
+  Every relay leg is now `log_trade`d — so a stop reads as the transit port
+  it is — and `relay_cur`/`relay_last` keep each relayed cargo's true
+  origin → final market, which `campaign_trade_flows` uses to show a route
+  end to end with its full itinerary (`TradeRouteFlow.legs`, km, days). **It is a ROUTING rule, never a prohibition** — with no
   stop available the cargo sails direct — and that distinction is the whole
   mechanism: at the identical dose, REFUSING an over-range leg collapsed
   `econ_inheritance_rules_fragment_differently`'s world to 3 live houses,
@@ -2716,6 +2725,20 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   from `detail.culture`/`.minorities`, wares ranked by
                                   value on hand, chip prices from `price/base_value`, no
                                   new IPC
+  HousesPanel.tsx (2026-09-25)   ← NOW TWO BROWSE WINDOWS from one component —
+                                  `<HousesPanel />` (⚜️ Merchant Houses) and
+                                  `<HousesPanel companies />` (🏛 Merchant Companies,
+                                  `uiStore.showCompanies`) — with search, sort and
+                                  40-card paging; the S12a bump chart and pulse ticker
+                                  are no longer rendered (user: "a mess, no chart").
+                                  The dossier is APP-WIDE: `HouseDossierHost` renders
+                                  `HouseDetail` for `uiStore.dossierHouse`, so any view
+                                  (Government tab charters, a feud…) can open a house,
+                                  plus a 🧭 "Trade lanes by good" window that narrows the
+                                  map web (`uiStore.houseLaneGood` →
+                                  `OverlayManager.setHouseLaneGood`): null = the whole
+                                  web in red, a good = only its lanes, in its colour.
+                                  The history below describes the older layout.
   HousesPanel/FeudsAlliancesPanel/DynastiesPanel/GuildsPanel.tsx ← Merchant houses,
                                   feuds, dynasties, crafts — FOUR windows now, not two
                                   (HOUSES_GUILDS_AND_MARKET_PLAN.md S10, §5.6). `HousesPanel.tsx`

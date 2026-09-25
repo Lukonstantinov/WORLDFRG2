@@ -4907,6 +4907,17 @@ pub struct TradeCur {
     pub carriers: std::collections::HashMap<u32, f32>,
 }
 
+/// One relayed through-route, end to end, for the last completed year.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct RelayAgg {
+    pub origin: u32,
+    pub dest: u32,
+    pub good: u32,
+    pub amount: f32,
+    /// Where the cargo first broke bulk (the leg `trade_last` records).
+    pub first_stop: u32,
+}
+
 /// One aggregated trade flow for the settlement "Flows" subtab: how much of `good`
 /// moved between `hub` and `partner` in a direction (`dir` 0 = inbound to `hub`,
 /// 1 = outbound from `hub`) over a year. Sparse — only pairs that actually traded.
@@ -7677,6 +7688,17 @@ pub struct CampaignSim {
     /// until the next New Year folds a real quarterly breakdown into it.
     #[serde(default)]
     pub trade_last_season: Vec<TradeFlowAgg>,
+    /// THIS year's RELAYED shipments, keyed (origin, final destination, good) →
+    /// (amount, first stop). A relayed cargo is logged leg by leg in `trade_cur`
+    /// (so each stop reads as the transit port it is), which on its own loses
+    /// where the cargo started and where it was really bound. This keeps that
+    /// end-to-end pairing so the Flows view can show "here → X → Y → Utixadada"
+    /// instead of either a teleport or an orphaned first leg. Observability only.
+    #[serde(skip)]
+    pub relay_cur: std::collections::HashMap<(u32, u32, u32), (f32, u32)>,
+    /// The last completed year's relayed shipments (see `relay_cur`).
+    #[serde(default)]
+    pub relay_last: Vec<RelayAgg>,
     /// Per-(hub, good) yearly trade-volume history (the trend graphs).
     #[serde(default)]
     pub trade_hist: Vec<TradeHist>,
@@ -10240,6 +10262,11 @@ impl CampaignSim {
                         // as genuinely far-travelled, not reset at each stop.
                         origin_km: origin_km + self.hub_km(to, next_to),
                     });
+                    // Log the onward leg too, so the stop's own Flows read it as the
+                    // transit port it is (in from the last stop, out to the next)
+                    // and the final market sees where its cargo actually landed
+                    // from — instead of the relay being invisible past its first leg.
+                    self.log_trade(to as u32, next_to as u32, g, amt, owner, sea2, river2, price);
                     continue;
                 }
                 if to < self.hubs.len() {

@@ -481,8 +481,40 @@ fn compute_economy_impl(
                     }
                 }
             }
+            // The backstop is a SUPPLY LINE, not teleportation: the good reaches the
+            // economy through a town within `BACKSTOP_MAX_KM` of where it actually
+            // is, or not at all. Uncapped, a gem whose only workings lay in empty
+            // country was credited to whichever city happened to be nearest —
+            // thousands of km away — which then read as the world's "finest
+            // source" of a stone its whole province has never seen. Beyond the
+            // cap the good is honestly absent at the start; a mining colony
+            // (`maybe_found_mining_colony`) or extraction estate can still open it.
+            const BACKSTOP_MAX_KM: f32 = 400.0;
+            let max_cells = (BACKSTOP_MAX_KM / km_per_cell).max(1.0) as i64;
             for (k, &g) in uncovered.iter().enumerate() {
-                let (v, wx, wy) = best[k];
+                let (mut v, mut wx, mut wy) = best[k];
+                // An ore/gem good's belt is a broad metallogenic province (§8.16);
+                // anchor the backstop on a REAL working instead, so the credited
+                // city is next to an actual mine, not merely under the belt.
+                if is_deposit_good[g] {
+                    let gid = specs.get(g).map(|s| s.id.as_str()).unwrap_or("");
+                    let mut pick: Option<(i64, &crate::sim::deposits::Deposit)> = None;
+                    for d in deposits_early.iter().filter(|d| d.good == gid) {
+                        let mut near = i64::MAX;
+                        for hh in 0..nn {
+                            let raw = (nodes[hh].x as i64 - d.x as i64).rem_euclid(grid_w as i64);
+                            let dx = raw.min(grid_w as i64 - raw);
+                            let dy = nodes[hh].y as i64 - d.y as i64;
+                            near = near.min(dx * dx + dy * dy);
+                        }
+                        if pick.map(|(pd, _)| near < pd).unwrap_or(true) { pick = Some((near, d)); }
+                    }
+                    match pick {
+                        Some((_, d)) => { v = (d.workable_intensity() * 255.0).max(v.min(255.0)); wx = d.x; wy = d.y; }
+                        None if !deposits_early.is_empty() => continue, // no working anywhere
+                        None => {}
+                    }
+                }
                 if v <= 0.0 { continue; } // genuinely absent on this world — do not invent it
                 // Nearest live hub to the homeland cell (X wraps, Y clamps) — for a
                 // Marine good, nearest COASTAL hub, same reasoning as the two claim
@@ -502,6 +534,7 @@ fn compute_economy_impl(
                     if d2 < nd { nd = d2; nh = Some(hh); }
                 }
                 let Some(nh) = nh else { continue };
+                if nd > max_cells * max_cells { continue; } // no town within reach
                 // Enough to clear the `> 0.05` emit gate below and read as a real, if
                 // scarce, source (belt value is 0..1 after the /255).
                 prod[nh][g] += (v / 255.0).max(0.12);

@@ -105,3 +105,10 @@ pub fn gen_name_epithet(x: u32, y: u32, w: u32, h: u32, tier: u8) -> String {
     let (kit, ms) = resolve_kit(x, y, w, h);
     cultures::place_epithet(kit, ms, x, y, tier)
 }
+
+/// A coined surname in the local culture's idiom — used once the curated family
+/// bank is exhausted, so a long campaign never needs a number to tell houses apart.
+pub fn gen_synth_family_name(x: u32, y: u32, w: u32, h: u32, salt: u64) -> String {
+    let (kit, ms) = resolve_kit(x, y, w, h);
+    cultures::synth_family_name(kit, ms, salt)
+}
