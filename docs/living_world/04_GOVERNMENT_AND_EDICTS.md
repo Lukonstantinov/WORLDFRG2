@@ -44,6 +44,20 @@ the one place a real coup/regime-change mutation WOULD live
 behind `GOV_POWER_DOSE` per 04.1's own promise, and does nothing at the
 shipped `0.0`.
 
+**Same session, continued — Q04.13 and the first slice of Q04.9.** The
+Lustrum now credits its chosen track with real points
+(`LUSTRUM_TRACK_BONUS × LUSTRUM_TRACK_BONUS_DOSE`, dose-walked 0.0→1.0), and
+a passed Welfare or Foreigners edict now enacts the matching ALREADY-LIVE
+standing `Law` (`LAW_GRAIN`/`LAW_FOREIGN_BAR`) behind `EDICT_EFFECT_DOSE`
+(also walked 0.0→1.0 in this session). Both walks verified safe by
+construction before raising (the Lustrum bonus reaches no live reader since
+row 03's own `TRACK_CONSTRUCTION_DOSE` is still 0.0; the two laws are
+idempotent and only widen an EXISTING trigger a government can now reach
+proactively rather than only after living through the event) and confirmed
+by re-running the full `tick::tests` (354/354) and `econ_` (6/6, multi-seed
+inheritance gate included) after each raise. See §Slices/§Queue below for
+exactly which of 04.5/04.9/04.14's remaining pieces are still open.
+
 - **04.3 (political points + edict catalogue).** `TickHub.gov_points`
   accrues weekly at `1/52` per year of `stability_at(h)` (still reading row
   03's own NEUTRAL_LEGITIMACY constant, not the new real `legitimacy` field
@@ -348,13 +362,13 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 |---|---|---|
 | 04.1 | **DONE (2026-09-25, scaffolding only).** Seat counts by size (`seat_count_for`, `GOVT_SEAT_CAP`); extra seats beyond the 4 named offices seed as generic role-4 "Councillor" seats; gated behind `GOV_POWER_DOSE = 0.0` (a true no-op — `seed_government` still builds the old fixed 3-4 roles at dose 0). **NOT done**: offices held by `Individual`s (needs row 02) and per-culture title sets (needs a culture-kit index threaded into `TickHub`, which the campaign tick does not carry today — `hub.culture` is a plain generated name) — both QUEUED (Q04.3, Q04.4) | `officials_migrate_to_seats`, `seat_count_scales_with_city` |
 | 04.2 | **DONE (2026-09-26).** Paths (`PATH_*`), a static `suitability` roll, an `individual_id` linking each seat to a real `Individual` (`ROLE_OFFICIAL`); `official_allegiance`/`government_blocs` as pure derived reads over the existing house/kin/control fields; the existing bribery loop now records a newly-captured seat's path (military vs bribed). Undosed — purely descriptive, moves no wealth/production | `bought_members_follow_their_patron`, `government_blocs_group_by_allegiance` |
-| 04.3 | **DONE (2026-09-26).** Weekly `gov_points` accrual, 8 edict families (`EDICT_FAM_*`), `edict_cost = base × (1 + \|tag − gov_position\|)` (the doc's own formula), family choice by open issue (war/famine) or hashed lean-affinity pick. `gov_position` seeded once per city from `culture_ideal`. Effects NOT wired (Q04.9) | `mismatched_edicts_cost_more` |
+| 04.3 | **DONE (2026-09-26).** Weekly `gov_points` accrual, 8 edict families (`EDICT_FAM_*`), `edict_cost = base × (1 + \|tag − gov_position\|)` (the doc's own formula), family choice by open issue (war/famine) or hashed lean-affinity pick. `gov_position` seeded once per city from `culture_ideal`. Effects for 2 of 8 families wired (Welfare/Foreigners → `LAW_GRAIN`/`LAW_FOREIGN_BAR`, `EDICT_EFFECT_DOSE` 0.0→1.0); 6 remain queued (Q04.9) | `mismatched_edicts_cost_more`, `edict_effects_are_a_noop_at_zero_dose`, `passed_edicts_enact_their_matching_law` |
 | 04.4 | **DONE (2026-09-26).** Weekly debate rounds — allegiance+suitability-noised lean, smoothed tally, resolves PASS/FAIL/DEADLOCK within the form's own `round_cap`. Amendments/filibuster/vote-exposure folded into one persuasion-noise term rather than three separate mechanics (documented scope cut, Q04.11) | `every_debate_terminates` |
 | — | Costs (full/0.4×/0.15× pass/fail/deadlock) + expiry (25/50-yr minor/major) + a small legitimacy swing, all shipped alongside 04.3-04.4 | `edicts_expire` |
 | 04.5 | **PARTIAL (2026-09-26).** Tyrant path (`maybe_tyrant_decide`, no vote) + opposition/legitimacy bookkeeping off the real `mood` field, built. **NOT built**: 5 of 6 "changes of government" kinds (only a coup STUB exists, behind `GOV_POWER_DOSE`, a no-op at 0.0) and ostracism — see §Queue Q04.5b | (covered by 04.3/04.4's own gates + the coup stub's own dose-zero convention) |
 | 04.6 | **DONE (2026-09-26).** `maybe_run_lustrum` fires every `LUSTRUM_YEARS`, picks the trailing track, records it to history/chronicle, and CREDITS it `LUSTRUM_TRACK_BONUS × LUSTRUM_TRACK_BONUS_DOSE` real points (Q04.13, dose-walked 0.0→1.0 in this session, `tick::tests`+`econ_` both green before/after) | `lustrum_every_five_years`, `lustrum_bonus_is_a_noop_at_zero_dose`, `lustrum_bonus_credits_exactly_the_trailing_track` |
 | 04.7 | **DONE (2026-09-26), plain first cut.** Government window — `campaign_get_government`, `campaign_get_edicts` (lib.rs + bridge + types), `ui/campaign/GovernmentPanel.tsx`. **NOT built** (Q04.14): portraits, a live round timeline, bloc-grouped layout | `tsc`, `vite build` (189 modules, clean) |
-| 04.8 | End of row: edict EFFECTS dosed from zero (still unwired — Q04.9), the coup mutation dosed from zero (Q04.5b), `tick::tests`, `econ_` | SCOREBOARD row |
+| 04.8 | End of row: 6 of 8 edict families' effects still unwired (Q04.9), the coup mutation dosed from zero (Q04.5b), `tick::tests`, `econ_` | SCOREBOARD row |
 
 `every_debate_terminates` is the analogue of `every_crisis_terminates`
 (CLAUDE.md rule 22): no edict may sit in debate forever.
@@ -387,12 +401,25 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
   of `crisis.rs`, imposed) and ostracism — waits on nothing structural, just
   session budget; each needs its own gate (`unpopular_tyrants_fall_more_
   often`, `ostracism_exiles_one_person` as originally named).
-- Q04.9 — Wire a passed edict's `family` to an actual economic/military
-  effect (tariff, grain dole, walls, mint reform, …) — the row's own 04.8
-  "edict effects dosed from zero". Waits on picking ONE family at a time and
-  dose-walking it against `econ_` per CLAUDE.md §2.4 ("never tune a constant
-  without a gate that isn't the target"), exactly the N1/N6/L-series
-  discipline the rest of this codebase already follows.
+- Q04.9 — **PARTIAL, 2026-09-26: 2 of 8 families wired.** A passed Welfare
+  edict now enacts `LAW_GRAIN` and a passed Foreigners edict `LAW_
+  FOREIGN_BAR` — both reusing an ALREADY-LIVE standing-law effect
+  (`decide_crisis_relief`'s dearth-trigger ease; `resolve_envoy`'s
+  ownership bar) rather than inventing a new one, behind one dose,
+  `EDICT_EFFECT_DOSE` (0.0→1.0, walked this session; `tick::tests`
+  354/354, `econ_` 6/6 incl. the multi-seed inheritance gate, both green
+  before and after). Gates: `edict_effects_are_a_noop_at_zero_dose`,
+  `passed_edicts_enact_their_matching_law`. **Still queued**: Economy
+  (tariff/free-harbour/mint-reform — `decide_polis_policy` is the natural
+  hook), Military (walls/levy/mercenaries — `raise_manpower_levy`/
+  `war_manpower` exist), Learning (fund a school/university — row 06/07
+  don't exist yet, so this genuinely waits on them), Citizenship (grant/
+  revoke an acceptance tier — waits on row 05), Constitution (create/
+  abolish an office — a real seat-count change, needs its own care around
+  `GOVT_SEAT_CAP`), Buildings (a track building — row 03's own
+  `track_building_allowed`, itself still `TRACK_CONSTRUCTION_DOSE = 0.0`).
+  Each remaining family: pick it, wire it to something that already
+  exists where possible, dose-walk it alone against `econ_`.
 - Q04.10 — A genuine fourth `govt_type` (Senate, distinct from Council) —
   waits on deciding what actually distinguishes it mechanically (the doc
   names vetoes and a widened round cap; today "Senate" is Council's own

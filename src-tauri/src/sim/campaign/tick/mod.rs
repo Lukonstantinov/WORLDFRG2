@@ -11651,6 +11651,7 @@ pub(crate) use government::{
     EDICT_FAM_ECONOMY, EDICT_FAM_MILITARY, EDICT_FAM_CONSTITUTION, EDICT_FAM_BUILDINGS,
     EDICT_FAMILY_COUNT, gov_position_for_ideal, edict_cost,
     LUSTRUM_TRACK_BONUS, LUSTRUM_TRACK_BONUS_DOSE, lustrum_bonus_e,
+    EDICT_EFFECT_DOSE,
 };
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};

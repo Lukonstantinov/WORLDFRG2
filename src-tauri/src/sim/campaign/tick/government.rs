@@ -85,6 +85,31 @@ pub(crate) const LUSTRUM_TRACK_BONUS_DOSE: f32 = 1.0;
 /// testable independent of whichever value is currently shipped.
 pub(crate) fn lustrum_bonus_e(dose: f32) -> f32 { LUSTRUM_TRACK_BONUS * dose }
 
+/// Q04.9's first slice: two edict families, once PASSED, may now enact the
+/// matching ALREADY-LIVE standing `Law` — reusing a real effect rather than
+/// inventing a new one. Welfare → `LAW_GRAIN` (eases `decide_crisis_relief`'s
+/// dearth triggers, today only ever earned by living through a famine —
+/// this is what lets a government act BEFORE one). Foreigners → `LAW_
+/// FOREIGN_BAR` (blocks a foreign house's envoy without existing presence,
+/// today only a rare "fresh capture" roll — this gives a genuinely
+/// PROTECTIONIST government its own path to it). Both idempotent (a second
+/// enactment while the law already stands is a no-op, the same guard
+/// `enact_standing_laws`/the capture payoff already use) and both a real
+/// behaviour change (a city that would never have crossed either law's own
+/// trigger can now get it), so both sit behind ONE dose,
+/// `EDICT_EFFECT_DOSE` — shipped `0.0` first
+/// (`edict_effects_are_a_noop_at_zero_dose`), walked to `1.0` in the same
+/// session once `tick::tests`/`econ_` confirmed it safe.
+pub(crate) const EDICT_EFFECT_DOSE: f32 = 1.0;
+
+fn edict_law_for_family(family: u8) -> Option<u8> {
+    match family {
+        EDICT_FAM_WELFARE => Some(LAW_GRAIN),
+        EDICT_FAM_FOREIGNERS => Some(LAW_FOREIGN_BAR),
+        _ => None,
+    }
+}
+
 /// Round cap by government form (04.4's own table). `govt_type` 0 = Council
 /// (also standing in for "Senate" — the code has no distinct fourth form
 /// yet, Q04.10), 1 = Principality (no debate at all — 04.5's tyrant path),
@@ -316,7 +341,7 @@ impl CampaignSim {
         }
     }
 
-    fn resolve_debate(&mut self, h: usize, deb: GovDebate) {
+    pub(crate) fn resolve_debate(&mut self, h: usize, deb: GovDebate) {
         let tick = self.tick;
         let passed = deb.tally >= DEBATE_DECISIVE;
         let failed = deb.tally <= -DEBATE_DECISIVE;
@@ -340,8 +365,21 @@ impl CampaignSim {
             self.hubs[h].legitimacy = (self.hubs[h].legitimacy - DEADLOCK_LEGITIMACY_HIT).clamp(0.0, 1.0);
         }
 
+        if passed { self.maybe_enact_edict_law(h, deb.family); }
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family: deb.family, outcome });
         self.chronicle_edict_outcome(h, deb.family, outcome);
+    }
+
+    /// Q04.9 · at `EDICT_EFFECT_DOSE > 0.0`, a PASSED Welfare/Foreigners
+    /// edict enacts the matching standing `Law` if this city doesn't already
+    /// carry it — idempotent, dose-gated, called from both the debate path
+    /// (on PASSED only) and the tyrant path (which always "passes").
+    pub(crate) fn maybe_enact_edict_law(&mut self, h: usize, family: u8) {
+        if EDICT_EFFECT_DOSE <= 0.0 { return; }
+        let Some(kind) = edict_law_for_family(family) else { return };
+        if self.hubs[h].laws.iter().any(|l| l.kind == kind) { return; }
+        let year = self.tick / TICKS_PER_YEAR;
+        self.push_law(h, kind, -1, -1, year);
     }
 
     /// A tyrant skips the vote entirely (04.5). Once points allow, the ruler
@@ -382,6 +420,7 @@ impl CampaignSim {
             // regime-change mutation would live here, gated on this exact
             // dose, per 04.1's own doc comment.
         }
+        self.maybe_enact_edict_law(h, family);
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family, outcome: GOV_OUTCOME_PASSED });
         self.chronicle_edict_outcome(h, family, GOV_OUTCOME_PASSED);
     }

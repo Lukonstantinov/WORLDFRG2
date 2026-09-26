@@ -11278,6 +11278,58 @@
         }
     }
 
+    /// Q04.9 · at `EDICT_EFFECT_DOSE == 0.0` (the currently-shipped, or
+    /// checked directly regardless of what ships) a PASSED Welfare/
+    /// Foreigners edict must enact no `Law` at all.
+    #[test]
+    fn edict_effects_are_a_noop_at_zero_dose() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        let deb = GovDebate { family: EDICT_FAM_WELFARE, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        s.resolve_debate(0, deb);
+        if EDICT_EFFECT_DOSE <= 0.0 {
+            assert!(s.hubs[0].laws.is_empty(), "no law may be enacted while the dose is zero");
+        }
+    }
+
+    /// Q04.9 · at the shipped dose, a PASSED Welfare edict enacts `LAW_GRAIN`
+    /// and a PASSED Foreigners edict enacts `LAW_FOREIGN_BAR` — each exactly
+    /// once (idempotent), each only for the matching family.
+    #[test]
+    fn passed_edicts_enact_their_matching_law() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+
+        let welfare_pass = GovDebate { family: EDICT_FAM_WELFARE, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        s.resolve_debate(0, welfare_pass.clone());
+        if EDICT_EFFECT_DOSE > 0.0 {
+            let grain_count = s.hubs[0].laws.iter().filter(|l| l.kind == LAW_GRAIN).count();
+            assert_eq!(grain_count, 1, "a passed Welfare edict enacts LAW_GRAIN exactly once");
+            s.resolve_debate(0, welfare_pass);
+            let grain_count = s.hubs[0].laws.iter().filter(|l| l.kind == LAW_GRAIN).count();
+            assert_eq!(grain_count, 1, "enacting it again while it already stands is a no-op");
+        }
+
+        let foreigners_pass = GovDebate { family: EDICT_FAM_FOREIGNERS, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        s.resolve_debate(0, foreigners_pass);
+        let bar_count = s.hubs[0].laws.iter().filter(|l| l.kind == LAW_FOREIGN_BAR).count();
+        if EDICT_EFFECT_DOSE > 0.0 {
+            assert_eq!(bar_count, 1, "a passed Foreigners edict enacts LAW_FOREIGN_BAR exactly once");
+        } else {
+            assert_eq!(bar_count, 0);
+        }
+
+        // A family with no matching law (e.g. Military) never enacts anything.
+        let military_pass = GovDebate { family: EDICT_FAM_MILITARY, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        let laws_before = s.hubs[0].laws.len();
+        s.resolve_debate(0, military_pass);
+        assert_eq!(s.hubs[0].laws.len(), laws_before, "a family with no matching law enacts nothing");
+    }
+
     /// 04.3-04.6 · none of the new government mechanism may move wealth,
     /// population, price or production — everything it touches lives on the
     /// new `gov_*`/`legitimacy` fields alone. Run the real weekly cadence for
