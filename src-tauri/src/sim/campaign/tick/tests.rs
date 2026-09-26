@@ -36,6 +36,7 @@
             food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
             ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0,
             dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4],
+            track_buildings: [0; 4], track_build_progress: [0.0; 4],
         }
     }
 
@@ -10884,6 +10885,68 @@
         with_tracks.update_tracks(1);
         assert_eq!(sim_fingerprint(&with_tracks), before,
             "update_tracks must not move sim_fingerprint — it is read by nothing this slice touches");
+    }
+
+    // ── living_world/03_DEVELOPMENT_TRACKS.md, slice 03.4 ──────────────────────
+
+    /// 03.4 · a building at rung N may never start before the track's own
+    /// ability level has reached N — dose-independent, checked both as a pure
+    /// boundary sweep and end-to-end at FULL construction dose (so a real
+    /// pass, not just the predicate, respects the gate).
+    #[test]
+    fn a_building_needs_its_level() {
+        for lvl in 0..=5u8 {
+            for next in 1..=6u8 {
+                let allowed = track_building_allowed(next, lvl);
+                assert_eq!(allowed, next <= lvl && next <= TRACK_LEVEL_MAX,
+                    "track_building_allowed(next={next}, level={lvl}) = {allowed}, wrong");
+            }
+        }
+        // End-to-end: Military is unlocked to level 1 only; give the hub a
+        // huge stock and treasury and run many years at FULL dose. Military
+        // may reach (at most) its own level-1 building; every other track,
+        // still at level 0, must never start one.
+        let goods = vec![good("timber", 2, 2, 1.0, 0.3, false)];
+        let mut h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        h.treasury = 1e6;
+        stock_add_ungraded(&mut h.stock, 0, 1e6);
+        h.track_level = [1, 0, 0, 0];
+        let mut s = sim(vec![h], goods);
+        for _ in 0..20 { s.update_track_buildings(1.0); }
+        assert_eq!(s.hubs[0].track_buildings[TRACK_MILITARY], 1,
+            "Military, unlocked to level 1, must reach its first building given ample time and resources");
+        for k in [TRACK_TRADE, TRACK_CIVIL, TRACK_IDEOLOGICAL] {
+            assert_eq!(s.hubs[0].track_buildings[k], 0,
+                "track {k} has no level unlocked and must never start a building, however long it runs");
+        }
+    }
+
+    /// 03.4 · at `TRACK_CONSTRUCTION_DOSE` (0.0, the shipped value) an
+    /// eligible, well-stocked hub must build NOTHING and spend NOTHING —
+    /// "construction is off". At a real, nonzero dose the identical hub must
+    /// both spend real stock/treasury and eventually complete a building.
+    #[test]
+    fn construction_spends_real_stock() {
+        assert_eq!(track_build_progress_e(0.0, 1000.0, 1000.0, 40.0, 30.0, 0.0), (0.0, 0.0, 0.0),
+            "construction must progress and spend nothing at dose 0");
+        let goods = vec![good("timber", 2, 2, 1.0, 0.3, false)];
+        let mut h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        h.treasury = 1e6;
+        stock_add_ungraded(&mut h.stock, 0, 1e6);
+        h.track_level = [5, 5, 5, 5];
+        let mut s = sim(vec![h], goods);
+        let stock_before = stock_of(&s.hubs[0].stock, 0);
+        let treasury_before = s.hubs[0].treasury;
+        // The real shipped dose: nothing happens, however many years pass.
+        for _ in 0..10 { s.update_track_buildings(TRACK_CONSTRUCTION_DOSE); }
+        assert_eq!(stock_of(&s.hubs[0].stock, 0), stock_before, "stock must be untouched at the shipped dose");
+        assert_eq!(s.hubs[0].treasury, treasury_before, "treasury must be untouched at the shipped dose");
+        assert_eq!(s.hubs[0].track_buildings, [0, 0, 0, 0], "nothing may be built at the shipped dose");
+        // A real, nonzero dose: real resources are spent and something gets built.
+        for _ in 0..10 { s.update_track_buildings(1.0); }
+        assert!(stock_of(&s.hubs[0].stock, 0) < stock_before, "a real dose must spend real stock");
+        assert!(s.hubs[0].treasury < treasury_before, "a real dose must spend real treasury");
+        assert!(s.hubs[0].track_buildings.iter().any(|&b| b > 0), "a real dose must eventually complete a building");
     }
 
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────

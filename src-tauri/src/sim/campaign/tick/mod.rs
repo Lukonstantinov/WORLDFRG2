@@ -4515,6 +4515,15 @@ pub struct TickHub {
     /// sack that drops points below the current level's own threshold costs
     /// the level too. `#[serde(default)]` reads `[0; 4]` on an old save.
     #[serde(default)] pub track_level: [u8; 4],
+    /// 03.4 — the highest level ACTUALLY BUILT per track (0 = none),
+    /// always `<= track_level` by construction (`track_building_allowed`).
+    /// `#[serde(default)]` reads `[0; 4]` on an old save.
+    #[serde(default)] pub track_buildings: [u8; 4],
+    /// 0..1 progress toward each track's NEXT building, spent gradually
+    /// (`TRACK_BUILD_RATE` of the remainder a year, when affordable) rather
+    /// than completing in one lump sum. `#[serde(default)]` reads `[0.0; 4]`
+    /// on an old save.
+    #[serde(default)] pub track_build_progress: [f32; 4],
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
@@ -11433,6 +11442,7 @@ mod tracks;
 pub(crate) use tracks::{
     TRACK_MILITARY, TRACK_TRADE, TRACK_CIVIL, TRACK_IDEOLOGICAL, TRACK_COUNT,
     TRACK_THRESHOLDS, TRACK_LEVEL_MAX, level_for_points,
+    TRACK_CONSTRUCTION_DOSE, track_building_allowed, track_build_progress_e, track_building_name,
 };
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};

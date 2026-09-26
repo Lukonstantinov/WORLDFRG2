@@ -93,7 +93,132 @@ const NOTABLE_ROLE_BONUS: f32 = 0.5;
 const TRACK_SACK_DAMAGE_FLOOR: f32 = 0.3;
 const TRACK_SACK_LOSS_FRAC: f32 = 0.25;
 
+// ── 03.4 · buildings ─────────────────────────────────────────────────────
+// A level makes a building POSSIBLE; building it costs real goods (via
+// `pick_build_supply_good`, the same L6 housing convention) and city
+// treasury, gradually (`TRACK_BUILD_RATE` of the remaining cost a year, when
+// affordable — the same shape `housing_build_persons_e` already uses).
+// `TickHub.track_buildings` is the highest level ACTUALLY BUILT per track
+// (0 = none), always `<= track_level` (the ability/points level) by
+// construction — `track_building_allowed` is the one place that invariant is
+// enforced, and it holds regardless of dose.
+//
+// **Construction is dosed, and ships at 0.0 — a true no-op** (this slice's
+// own gate name: "at dose 0 construction is off"). Effects of an actually
+// built building (army strength, warehouse capacity, population ceiling,
+// idea spread, …) are 03.7's job, each behind its own separate dose
+// constant — this slice only makes a building buildable and buildable-from,
+// never wires an effect.
+pub(crate) const TRACK_CONSTRUCTION_DOSE: f32 = 0.0;
+const TRACK_BUILD_RATE: f32 = 0.35;
+const TRACK_BUILD_GOOD_BASE: f32 = 40.0;
+const TRACK_BUILD_MONEY_BASE: f32 = 30.0;
+
+/// A building at `next_level` may be started only once the track's own
+/// ability level has reached at least that rung — dose-independent, always
+/// true even at full construction dose.
+pub(crate) fn track_building_allowed(next_level: u8, track_level: u8) -> bool {
+    next_level >= 1 && next_level <= TRACK_LEVEL_MAX && next_level <= track_level
+}
+
+/// One year's construction progress on one (hub, track)'s next building —
+/// pure, so the dose can be exercised directly in tests without touching the
+/// shipped-zero constant. `dose <= 0.0` returns `progress` unchanged and
+/// spends nothing, which is the whole "construction is off" claim.
+pub(crate) fn track_build_progress_e(
+    progress: f32, avail_good: f32, avail_money: f32,
+    cost_good_total: f32, cost_money_total: f32, dose: f32,
+) -> (f32, f32, f32) {
+    if dose <= 0.0 || progress >= 1.0 {
+        return (progress, 0.0, 0.0);
+    }
+    let remaining_frac = 1.0 - progress;
+    let want_frac = (TRACK_BUILD_RATE * dose.clamp(0.0, 1.0)).min(remaining_frac);
+    if want_frac <= 0.0 {
+        return (progress, 0.0, 0.0);
+    }
+    let need_good = cost_good_total * want_frac;
+    let need_money = cost_money_total * want_frac;
+    let good_afford = if need_good > EPS { (avail_good / need_good).min(1.0) } else { 1.0 };
+    let money_afford = if need_money > EPS { (avail_money / need_money).min(1.0) } else { 1.0 };
+    let afford = good_afford.min(money_afford).max(0.0);
+    let actual_frac = want_frac * afford;
+    let used_good = cost_good_total * actual_frac;
+    let used_money = cost_money_total * actual_frac;
+    ((progress + actual_frac).min(1.0), used_good, used_money)
+}
+
+/// The design doc's own building names, by track and level — used only for
+/// the chronicle line today; the settlement panel's own reading (03.6) will
+/// call this too rather than duplicate the table.
+pub(crate) fn track_building_name(track: usize, level: u8) -> &'static str {
+    match (track, level) {
+        (TRACK_MILITARY, 1) => "a palisade",
+        (TRACK_MILITARY, 2) => "stone walls",
+        (TRACK_MILITARY, 3) => "a barracks",
+        (TRACK_MILITARY, 4) => "an arsenal",
+        (TRACK_MILITARY, 5) => "a fortress",
+        (TRACK_TRADE, 1) => "a quay",
+        (TRACK_TRADE, 2) => "a harbour mole and warehouse district",
+        (TRACK_TRADE, 3) => "a mint and exchange",
+        (TRACK_TRADE, 4) => "a lighthouse and fondaco quarter",
+        (TRACK_TRADE, 5) => "a bourse",
+        (TRACK_CIVIL, 1) => "a well and granary",
+        (TRACK_CIVIL, 2) => "a forum and council hall",
+        (TRACK_CIVIL, 3) => "a public granary",
+        (TRACK_CIVIL, 4) => "an aqueduct, sewer and baths",
+        (TRACK_CIVIL, 5) => "roads and a courier service",
+        (TRACK_IDEOLOGICAL, 1) => "a shrine",
+        (TRACK_IDEOLOGICAL, 2) => "a school",
+        (TRACK_IDEOLOGICAL, 3) => "a library",
+        (TRACK_IDEOLOGICAL, 4) => "an academy and embassy",
+        (TRACK_IDEOLOGICAL, 5) => "a university",
+        _ => "a building",
+    }
+}
+
 impl CampaignSim {
+    /// One year of construction toward each (hub, track)'s next possible
+    /// building. `dose` is passed explicitly (never read from the constant
+    /// internally) so a test can exercise the mechanism at full dose while
+    /// the real yearly call always passes the shipped `TRACK_CONSTRUCTION_
+    /// DOSE` (0.0).
+    pub(crate) fn update_track_buildings(&mut self, dose: f32) {
+        if dose <= 0.0 { return; }
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            let g = self.pick_build_supply_good(h, 2) as usize;
+            if g >= ng { continue; }
+            for k in 0..TRACK_COUNT {
+                let next = self.hubs[h].track_buildings[k] + 1;
+                if !track_building_allowed(next, self.hubs[h].track_level[k]) { continue; }
+                let cost_good_total = TRACK_BUILD_GOOD_BASE * next as f32;
+                let cost_money_total = TRACK_BUILD_MONEY_BASE * next as f32;
+                let avail_good = stock_of(&self.hubs[h].stock, g).max(0.0);
+                let avail_money = self.hubs[h].treasury.max(0.0);
+                let progress = self.hubs[h].track_build_progress[k];
+                let (new_progress, used_good, used_money) = track_build_progress_e(
+                    progress, avail_good, avail_money, cost_good_total, cost_money_total, dose,
+                );
+                if used_good > EPS { stock_take(&mut self.hubs[h].stock, g, used_good); }
+                if used_money > EPS { self.hubs[h].treasury -= used_money; }
+                self.hubs[h].track_build_progress[k] = new_progress;
+                if new_progress >= 1.0 - 1e-6 {
+                    self.hubs[h].track_buildings[k] = next;
+                    self.hubs[h].track_build_progress[k] = 0.0;
+                    let hn = self.hubs[h].name.clone();
+                    let label = track_building_name(k, next);
+                    self.journal.push(JournalEntry {
+                        tick: self.tick, kind: "structure".into(), hub: h as i32, good: -1, value: 0.0,
+                        text: format!("{hn} raises {label}"),
+                    });
+                }
+            }
+        }
+    }
+
     /// One year of the four tracks for every settled (non-estate) hub.
     pub(crate) fn update_tracks(&mut self, _year: u32) {
         let n = self.hubs.len();

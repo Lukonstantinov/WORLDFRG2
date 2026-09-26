@@ -776,6 +776,9 @@ impl CampaignSim {
             // 03_DEVELOPMENT_TRACKS.md slice 03.3 · the four tracks, reusing
             // this year's fresh stability/welfare/trade readings.
             self.update_tracks(yr_now);
+            // 03_DEVELOPMENT_TRACKS.md slice 03.4 · construction toward each
+            // track's next possible building, at the shipped (zero) dose.
+            self.update_track_buildings(TRACK_CONSTRUCTION_DOSE);
             // SETTLEMENT_LIFE_PLAN.md L3 · one annual record per hub, now that
             // this year's welfare ratio (L2) and unrest are both fresh.
             self.record_city_annals(yr_now);
