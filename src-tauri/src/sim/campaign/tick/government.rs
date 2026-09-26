@@ -69,6 +69,21 @@ pub(crate) const GOV_EDICTS_CAP: usize = 12;
 pub(crate) const GOV_HISTORY_CAP: usize = 20;
 /// 04.6 — every five years, a direction edict (the Lustrum).
 pub(crate) const LUSTRUM_YEARS: u32 = 5;
+/// Q04.13 · points credited to the Lustrum's chosen track, at full dose.
+/// `TRACK_THRESHOLDS[0]` (level 1) is 8.0, so 2.0 is a quarter of a level —
+/// a real nudge every five years, not a level-up in itself (the doc's own
+/// "benefits to its backers" reads as an edge, not a guarantee).
+pub(crate) const LUSTRUM_TRACK_BONUS: f32 = 2.0;
+/// Raised 0.0 → 1.0 (full bonus) in the same session it shipped, after
+/// `tick::tests`/`econ_` both confirmed it safe (Q04.13's own dose walk —
+/// see this row's doc/SCOREBOARD entry for the before/after numbers).
+/// 0.0 remains a true no-op, still guarded by `lustrum_bonus_is_a_noop_at_
+/// zero_dose`'s own pure-function test.
+pub(crate) const LUSTRUM_TRACK_BONUS_DOSE: f32 = 1.0;
+
+/// Pure `_e` split (the N6/S1-series pattern) so the zero-dose claim is
+/// testable independent of whichever value is currently shipped.
+pub(crate) fn lustrum_bonus_e(dose: f32) -> f32 { LUSTRUM_TRACK_BONUS * dose }
 
 /// Round cap by government form (04.4's own table). `govt_type` 0 = Council
 /// (also standing in for "Senate" — the code has no distinct fourth form
@@ -397,14 +412,17 @@ impl CampaignSim {
     /// the doc's own words, read here as simply the track most worth
     /// investing in). Called yearly (`update_government`'s own cadence),
     /// never weekly — the Lustrum is explicitly its own 5-yearly allowance,
-    /// separate from the weekly edict points above. Purely descriptive this
-    /// session: it records which track WOULD be favoured
-    /// (`gov_lustrum_track`-style bookkeeping is folded into a chronicle line
-    /// + history entry rather than a new field, since nothing yet reads a
-    /// "current Lustrum pick" outside that record) — actually crediting the
-    /// track's points is Q04.13, left for when row 03's own dose is walked
-    /// (raising it here first would be tuning a live number from a row this
-    /// one merely depends on, not owns).
+    /// separate from the weekly edict points above.
+    ///
+    /// Q04.13 — now credits the chosen track with `LUSTRUM_TRACK_BONUS ×
+    /// LUSTRUM_TRACK_BONUS_DOSE` real points, BEFORE `update_tracks` recomputes
+    /// `track_level` from points later the same year (`update_government` runs
+    /// ahead of `update_food_and_starvation`'s own `update_tracks` call in the
+    /// yearly sequence, so a Lustrum-earned level shows the same year it
+    /// fires, never a year late). Shipped at dose 0.0 first and proven inert
+    /// (`lustrum_bonus_is_a_noop_at_zero_dose`), then raised to 1.0 in the
+    /// same session once `tick::tests`/`econ_` confirmed it safe — see
+    /// CLAUDE.md §2.4's own discipline: a dose is walked, not assumed.
     pub(crate) fn maybe_run_lustrum(&mut self, h: usize) {
         if self.hubs[h].is_estate || self.hubs[h].abandoned { return; }
         if self.hubs[h].officials.is_empty() { return; }
@@ -412,6 +430,7 @@ impl CampaignSim {
         self.hubs[h].gov_lustrum_tick = self.tick + LUSTRUM_YEARS * TICKS_PER_YEAR;
         let track = self.hubs[h].track_points.iter().enumerate()
             .min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
+        self.hubs[h].track_points[track] += lustrum_bonus_e(LUSTRUM_TRACK_BONUS_DOSE);
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick: self.tick, family: EDICT_FAM_BUILDINGS, outcome: GOV_OUTCOME_PASSED });
         if (1..=2).contains(&self.hubs[h].tier) {
             let city = self.hubs[h].name.clone();

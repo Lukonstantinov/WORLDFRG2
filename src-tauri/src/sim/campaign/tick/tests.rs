@@ -11246,6 +11246,38 @@
             "the next Lustrum is rescheduled exactly LUSTRUM_YEARS later");
     }
 
+    /// Q04.13 · the pure `_e` split proves the zero-dose claim independent of
+    /// whatever value is currently shipped.
+    #[test]
+    fn lustrum_bonus_is_a_noop_at_zero_dose() {
+        assert_eq!(lustrum_bonus_e(0.0), 0.0);
+        assert_eq!(lustrum_bonus_e(1.0), LUSTRUM_TRACK_BONUS);
+    }
+
+    /// Q04.13 · at the shipped `LUSTRUM_TRACK_BONUS_DOSE`, a firing Lustrum
+    /// must move `track_points` by EXACTLY `LUSTRUM_TRACK_BONUS *
+    /// LUSTRUM_TRACK_BONUS_DOSE` on the trailing track, and nothing else —
+    /// the two-state gate (§2.4's own "a dose is walked, not assumed"):
+    /// at 0.0 this is `lustrum_bonus_is_a_noop_at_zero_dose`'s claim; at the
+    /// shipped 1.0 it is this test's.
+    #[test]
+    fn lustrum_bonus_credits_exactly_the_trailing_track() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        s.hubs[0].track_points = [5.0, 1.0, 9.0, 3.0]; // Trade (idx 1) trails
+        let before = s.hubs[0].track_points;
+        s.tick = s.hubs[0].gov_lustrum_tick;
+        s.maybe_run_lustrum(0);
+        let expect_bonus = LUSTRUM_TRACK_BONUS * LUSTRUM_TRACK_BONUS_DOSE;
+        for k in 0..4 {
+            let want = before[k] + if k == TRACK_TRADE { expect_bonus } else { 0.0 };
+            assert!((s.hubs[0].track_points[k] - want).abs() < 1e-5,
+                "track {k}: got {}, want {want}", s.hubs[0].track_points[k]);
+        }
+    }
+
     /// 04.3-04.6 · none of the new government mechanism may move wealth,
     /// population, price or production — everything it touches lives on the
     /// new `gov_*`/`legitimacy` fields alone. Run the real weekly cadence for
