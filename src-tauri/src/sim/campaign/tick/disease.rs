@@ -770,6 +770,9 @@ impl CampaignSim {
             // Then the people may stir: unrest builds, riots flare, revolts topple
             // councils (reads the freshly-updated inequality / welfare above).
             self.update_unrest();
+            // 03_DEVELOPMENT_TRACKS.md slice 03.1 · the per-city development
+            // factor, before the annals record it — read by nothing else yet.
+            self.update_development(yr_now);
             // SETTLEMENT_LIFE_PLAN.md L3 · one annual record per hub, now that
             // this year's welfare ratio (L2) and unrest are both fresh.
             self.record_city_annals(yr_now);

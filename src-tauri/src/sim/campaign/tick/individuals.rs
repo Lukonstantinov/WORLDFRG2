@@ -43,6 +43,8 @@ pub(crate) mod living_world_salts {
     pub const EVENT_SPREAD: u64 = 0x9E3F;
     pub const EVENT_ARG: u64 = 0x9E40;
     pub const DECISION_ROLL: u64 = 0x9E41;
+    /// `03_DEVELOPMENT_TRACKS.md` 03.1 — the one-time seed roll for `TickHub.dev`.
+    pub const DEV_SEED: u64 = 0x9E42;
 }
 use living_world_salts as salts;
 

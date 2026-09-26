@@ -35,6 +35,7 @@
             yard_progress: 0.0,
             food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
             ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0,
+            dev: 0.0, dev_breakdown: [0.0; 5],
         }
     }
 
@@ -10721,6 +10722,66 @@
         s.prune_chronicles(500);
         assert_eq!(s.figures[0].life_log.len(), before,
             "a figure's life_log must be untouched by pruning, 500 years on");
+    }
+
+    // ── living_world/03_DEVELOPMENT_TRACKS.md, slice 03.1 ──────────────────────
+
+    /// 03.1 · a city trading heavily develops faster than an identical one that
+    /// trades little — the trade term (`ln(1 + volume/ref)`) is the dominant
+    /// source at this slice, so this is the most direct claim the design makes.
+    #[test]
+    fn dev_factor_rises_with_trade() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut quiet = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut busy = hub(1, 1.0, 0.0, 1000.0, vec![10.0], 0);
+        quiet.dev = 1.0; busy.dev = 1.0;
+        quiet.trade_last_year = 0.0;
+        busy.trade_last_year = 50_000.0;
+        let mut s = sim(vec![quiet, busy], goods);
+        s.update_development(1);
+        assert!(s.hubs[1].dev > s.hubs[0].dev,
+            "a heavily-trading city must develop faster than a quiet one, got quiet={} busy={}",
+            s.hubs[0].dev, s.hubs[1].dev);
+    }
+
+    /// 03.1 · diffusion may only ever pull a city's development UP toward a
+    /// richer partner, never down toward a poorer one — `(dev_b - dev_a).max(0)`
+    /// in `update_development`. Three hubs: a poor one linked only to a rich
+    /// partner must rise; a rich one linked only to a poor partner must not fall
+    /// from diffusion (it may still fall from its OWN decay, so this fixture
+    /// gives it no decay source to isolate the claim).
+    #[test]
+    fn diffusion_only_pulls_up() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut poor = hub(0, 0.0, 0.0, 1000.0, vec![0.0], 0);
+        let mut rich = hub(1, 1.0, 0.0, 1000.0, vec![0.0], 0);
+        poor.dev = 1.0; rich.dev = 3.0;
+        poor.starving = 0.0; rich.starving = 0.0;
+        let mut s = sim(vec![poor, rich], goods);
+        s.neighbors = vec![vec![1], vec![0]];
+        s.update_development(1);
+        assert!(s.hubs[0].dev > 1.0, "the poor hub must be pulled up toward its rich partner, got {}", s.hubs[0].dev);
+        assert!(s.hubs[1].dev >= 3.0 - 1e-4,
+            "the rich hub must never be pulled DOWN by diffusion from a poorer partner, got {}", s.hubs[1].dev);
+    }
+
+    /// 03.1 · `update_development` writes only `TickHub.dev`/`dev_breakdown` and
+    /// `CityYear.dev` (via `record_city_annals`), none of which `sim_fingerprint`
+    /// mixes — so a year that runs it must fingerprint identically to one that
+    /// doesn't. This is the slice's own "read by nothing" claim, proven rather
+    /// than asserted by doc comment.
+    #[test]
+    fn development_pass_does_not_move_the_fingerprint() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = || hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut with_dev = sim(vec![h()], goods.clone());
+        let mut without_dev = sim(vec![h()], goods);
+        let before = sim_fingerprint(&with_dev);
+        assert_eq!(before, sim_fingerprint(&without_dev));
+        with_dev.update_development(1);
+        assert_eq!(sim_fingerprint(&with_dev), before,
+            "update_development must not move sim_fingerprint — it is read by nothing this slice touches");
+        let _ = without_dev.hubs.len(); // kept unrun, for the comparison above
     }
 
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────

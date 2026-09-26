@@ -4484,6 +4484,24 @@ pub struct TickHub {
     /// Above 1.0 the city is overcrowded. `#[serde(default)]` reads 0.0 on an
     /// old save until the next monthly pass.
     #[serde(default)] pub crowding: f32,
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.1 — the per-city development
+    /// factor. Computed yearly by `update_development` from real trade/
+    /// partner-reach/welfare sources plus diffusion from trade partners, but
+    /// **READ BY NOTHING** in this slice (`DEV_PRODUCTION_DOSE` in a later
+    /// slice is what wires it into production) — pure bookkeeping, so
+    /// `sim_fingerprint` cannot move: it mixes only `stock`/`price`/
+    /// `population`/`treasury`/`export_earn`/`import_spend`, none of which
+    /// this field or its pass touch. `#[serde(default)]` reads 0.0 on an old
+    /// save, which `dev_needs_seeding` reads as "seed me" (the
+    /// `housing_needs_seeding` convention), never as a literal zero economy.
+    #[serde(default)] pub dev: f32,
+    /// The breakdown behind this year's `dev` change, in source order
+    /// `[trade, partner_reach, welfare, diffusion, decay]` — decay stored as a
+    /// NEGATIVE contribution so a reader can sum the array to get the year's
+    /// net growth. Recomputed (not accumulated) every `update_development`
+    /// call, so it always reads as "this year's story", never a running
+    /// total. `#[serde(default)]` reads `[0.0; 5]` on an old save.
+    #[serde(default)] pub dev_breakdown: [f32; 5],
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
@@ -6668,6 +6686,12 @@ pub struct CityYear {
     /// annal recorded before L6 loads as 0.0 — read as "not recorded" by the
     /// frontend, the same convention `ages`/`deaths_by_cause` already use.
     #[serde(default)] pub crowding: f32,
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.1 · a snapshot of `TickHub.dev` at
+    /// year end, for the settlement panel's future 50-year sparkline (03.6).
+    /// `#[serde(default)]` so an annal recorded before this slice loads as
+    /// 0.0 — "not recorded", the same convention every other tail field here
+    /// already uses.
+    #[serde(default)] pub dev: f32,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L3 — a rolling cap on `TickHub.annals`, the same
@@ -11390,6 +11414,7 @@ mod schism;
 mod foreign_hand;
 mod individuals;
 mod life_events;
+mod development;
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;
