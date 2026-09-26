@@ -27,6 +27,31 @@ export type Occasion = "everyday" | "national" | "ceremonial";
 /** The three registers every people has, whatever its kit's provenance. */
 export const REGISTERS: Occasion[] = ["everyday", "national", "ceremonial"];
 
+// ── 02_PEOPLE.md §Faces (slice 02.7) — the sex axis + acquired features ────
+// A dress plate draws a PEOPLE and has no notion of a sex; an `Individual`
+// (sim/campaign/tick/individuals.rs) does, and needs one for its portrait to
+// differ between a male and female holder of the same seat. `female` and
+// `features` are both OPTIONAL on `DressOpts` — every existing caller (the
+// Peoples panel, a house head, a figure) omits them and renders exactly as
+// before; only a caller that has a real `Individual` (`IndividualBrief`'s own
+// `female`/`features` fields) passes them.
+//
+// Bit values mirror `individuals.rs`'s `FEATURE_*` consts exactly (ONE_EYED
+// 1<<0 · SCARRED 1<<1 · LAME 1<<2 · BALD 1<<3 · GREY 1<<4 · TATTOOED 1<<5 ·
+// MAIMED_HAND 1<<6) so a stored `Individual.features` value can be passed
+// straight through with no translation.
+export const FEATURE_ONE_EYED = 1 << 0;
+export const FEATURE_SCARRED = 1 << 1;
+/** `LAME` has no bust/figure-scale visual (a limp is not visible on a static
+ *  portrait) — deliberately not drawn, not a gap: nothing here claims to. */
+export const FEATURE_LAME = 1 << 2;
+export const FEATURE_BALD = 1 << 3;
+export const FEATURE_GREY = 1 << 4;
+export const FEATURE_TATTOOED = 1 << 5;
+/** Drawn only on the full figure (`drawFigure`) — a bust crops above the
+ *  hands, so there is nothing for it to change there. */
+export const FEATURE_MAIMED_HAND = 1 << 6;
+
 export interface DressKit {
   id: number;
   name: string;
@@ -178,6 +203,18 @@ export function kitForCulture(name: string): DressKit {
   return BY_NAME.get((name || "").trim().toLowerCase()) ?? deriveKit(name || "unknown");
 }
 
+/** An `Individual`'s own portrait kit (02.7): the culture's dress (garment,
+ *  headwear, neckline) stays the people's own, but hair/beard/trim/cloth2 are
+ *  varied off `faceSeed` — the same "vary per person, keep the people's cut"
+ *  trick `FiguresPanel.tsx`'s `personalKit` already uses for a `Figure`, keyed
+ *  on the stable numeric seed an `Individual` actually carries (`face_seed`)
+ *  rather than their name, since two people can share a name. */
+export function individualKit(culture: string, faceSeed: number): DressKit {
+  const base = kitForCulture(culture);
+  const v = deriveKit("face" + faceSeed, { seed: faceSeed || 1 });
+  return { ...base, hair: v.hair, beard: v.beard, trim: v.trim, cloth2: v.cloth2 };
+}
+
 /** Accept a preset index, a kit object, or a name to derive from. */
 export function resolveKit(spec: KitSpec, opts?: DeriveOpts): DressKit {
   if (spec && typeof spec === "object") return spec;
@@ -215,12 +252,13 @@ interface Pal {
   cloth2: string; cloth2D: string; rich: boolean;
 }
 
-function pal(K: DressKit, occ: Occasion): Pal {
+function pal(K: DressKit, occ: Occasion, features = 0): Pal {
   const dull = occ === "everyday" ? 0.86 : 1;
   const robe = shade(K.robe, dull);
+  const hairBase = features & FEATURE_GREY ? mix(K.hair, "#cfc9bc", 0.7) : K.hair;
   return {
     skin: K.skin, skinD: shade(K.skin, 0.8), skinL: shade(K.skin, 1.12),
-    hair: K.hair, hairL: shade(K.hair, 1.35),
+    hair: hairBase, hairL: shade(hairBase, 1.35),
     robe, robeL: shade(K.robe, dull * 1.18), robeD: shade(K.robe, dull * 0.72),
     trim: occ === "everyday" ? shade(K.trim, 0.8) : K.trim,
     trimL: shade(K.trim, 1.3),
@@ -361,28 +399,49 @@ function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
 /** Whether the headwear design hides the hairline (skip the fringe if so). */
 const COVERED = new Set([2, 3, 4, 6, 7, 8, 9, 11, 13, 15, 16, 17]);
 
-/** Head, hair, face and headwear in the canonical frame. */
-function headBlock(c: Ctx, K: DressKit, p: Pal, occ: Occasion) {
+/** Head, hair, face and headwear in the canonical frame. `female`/`features`
+ *  are both optional (02.7): omitted, this renders bit-identically to before
+ *  that slice. */
+function headBlock(c: Ctx, K: DressKit, p: Pal, occ: Occasion, female?: boolean, features = 0) {
   const hat = K.hat ?? K.id, veiled = K.veil ?? (hat === 13);
+  const bald = !!(features & FEATURE_BALD);
   for (const s of [-1, 1]) E(c, HX + s * (HRX - 1), HY + 3, 3.4, 4.2, p.skinD);
-  if (!COVERED.has(hat)) {
+  if (!COVERED.has(hat) && !bald) {
     P(c, [[HX - HRX, HY - 6], [HX - HRX - 3, HY + 30], [HX + HRX + 3, HY + 30], [HX + HRX, HY - 6]], p.hair);
   }
   E(c, HX, HY, HRX, HRY, p.skin);
   P(c, [[HX + HRX - 7, HY - HRY + 4], [HX + HRX, HY - 2], [HX + HRX - 2, HY + HRY - 6], [HX + 6, HY + HRY - 1]], p.skinD);
   if (!COVERED.has(hat)) {
-    P(c, [[HX - HRX - 1, HY - 6], [HX - HRX + 2, HY - HRY - 3], [HX, HY - HRY - 4], [HX + HRX - 2, HY - HRY - 3], [HX + HRX + 1, HY - 6],
-      [HX + 7, HY - HRY + 7], [HX, HY - HRY + 8], [HX - 7, HY - HRY + 7]], p.hair);
-  } else {
+    if (bald) {
+      E(c, HX, HY - HRY + 9, HRX - 4, 4.4, p.skinL); // a bare crown catches the light instead
+    } else {
+      P(c, [[HX - HRX - 1, HY - 6], [HX - HRX + 2, HY - HRY - 3], [HX, HY - HRY - 4], [HX + HRX - 2, HY - HRY - 3], [HX + HRX + 1, HY - 6],
+        [HX + 7, HY - HRY + 7], [HX, HY - HRY + 8], [HX - 7, HY - HRY + 7]], p.hair);
+    }
+  } else if (!bald) {
     P(c, [[HX - HRX + 1, HY - 8], [HX + HRX - 1, HY - 8], [HX + 8, HY - HRY + 8], [HX - 8, HY - HRY + 8]], p.hair);
   }
   if (!veiled) {
     for (const s of [-1, 1]) L(c, [[HX + s * 3, HY - 5], [HX + s * 10, HY - 4]], shade(p.hair, 1.1), 1.8);
-    for (const s of [-1, 1]) E(c, HX + s * 6.5, HY + 1, 2, 2.4, "#2a211c");
-    for (const s of [-1, 1]) E(c, HX + s * 5.6, HY + 0.2, 0.8, 0.9, "#f2ece4");
+    const patchedSide = features & FEATURE_ONE_EYED ? -1 : 0; // always the same (left) eye — a face_seed-varied side needs no new bit, but every reader must agree which one, so it is fixed rather than re-derived per call
+    for (const s of [-1, 1]) {
+      if (s === patchedSide) {
+        E(c, HX + s * 6.5, HY + 0.6, 2.6, 3, "#1c1712");
+        L(c, [[HX + s * 12, HY - 3.5], [HX - s * 4, HY + 5]], "#1c1712", 1.3);
+      } else {
+        E(c, HX + s * 6.5, HY + 1, 2, 2.4, "#2a211c");
+        E(c, HX + s * 5.6, HY + 0.2, 0.8, 0.9, "#f2ece4");
+      }
+    }
     L(c, [[HX, HY + 3], [HX, HY + 8]], p.skinD, 1.6);
     L(c, [[HX - 4, HY + 13], [HX, HY + 14.6], [HX + 4, HY + 13]], shade(p.skin, 0.66), 1.8);
-    if (K.beard && occ !== "everyday") {
+    if (features & FEATURE_SCARRED) {
+      L(c, [[HX + 8, HY - 9], [HX + 3, HY + 12]], shade(p.skin, 0.5), 1.1);
+    }
+    if (features & FEATURE_TATTOOED) {
+      for (let i = 0; i < 3; i++) L(c, [[HX - HRX + 2, HY - 7 + i * 4], [HX - HRX + 6, HY - 5 + i * 4]], p.trim, 1);
+    }
+    if (K.beard && occ !== "everyday" && !female) {
       P(c, [[HX - HRX + 2, HY + 4], [HX - HRX + 3, HY + 20], [HX, HY + 27], [HX + HRX - 3, HY + 20], [HX + HRX - 2, HY + 4],
         [HX + 8, HY + 15], [HX - 8, HY + 15]], p.hair);
       L(c, [[HX - 5, HY + 9], [HX + 5, HY + 9]], shade(p.hair, 1.2), 1.4);
@@ -449,19 +508,19 @@ function collar(c: Ctx, id: number, p: Pal, occ: Occasion, sy: number, halfTop: 
 }
 
 // ── the bust: 100 × 100 author box ─────────────────────────────────────────
-function bustArt(c: Ctx, K: DressKit, occ: Occasion) {
-  const p = pal(K, occ);
+function bustArt(c: Ctx, K: DressKit, occ: Occasion, female?: boolean, features = 0) {
+  const p = pal(K, occ, features);
   const sy = 74, by = 100, halfTop = 26, halfBot = 46;
   R(c, HX - 8, HY + HRY - 6, 16, 14, p.skinD);
   P(c, [[HX - halfTop, sy], [HX + halfTop, sy], [HX + halfBot, by], [HX - halfBot, by]], p.robe);
   P(c, [[HX + 6, sy + 1], [HX + halfTop, sy], [HX + halfBot, by], [HX + 14, by]], p.robeD);
   collar(c, K.neck ?? K.id, p, occ, sy, halfTop, halfBot, by);
-  headBlock(c, K, p, occ);
+  headBlock(c, K, p, occ, female, features);
 }
 
 // ── the figure: 100 × 210 author box ───────────────────────────────────────
-function figureArt(c: Ctx, K: DressKit, occ: Occasion) {
-  const p = pal(K, occ);
+function figureArt(c: Ctx, K: DressKit, occ: Occasion, female?: boolean, features = 0) {
+  const p = pal(K, occ, features);
   const cx = 50, shY = 62, waist = 118, foot = 202;
   const kind = K.garment;
   const wide = kind === "robe" || kind === "kaftan" || kind === "thobe" || kind === "boubou" || kind === "kimono" || kind === "deel";
@@ -481,10 +540,18 @@ function figureArt(c: Ctx, K: DressKit, occ: Occasion) {
 
   // sleeves, drawn wider than the torso so the arm reads as an arm
   const aw = wide ? 16 : 10;
+  const maimedSide = features & FEATURE_MAIMED_HAND ? 1 : 0; // fixed to the same (right) hand for every reader
   for (const s of [-1, 1]) {
     P(c, [[cx + s * 22, shY - 2], [cx + s * (22 + aw), shY + 10], [cx + s * (20 + aw), waist + 16], [cx + s * 19, waist + 10]], s < 0 ? p.robe : p.robeD);
     if (wide) L(c, [[cx + s * (21 + aw), waist + 4], [cx + s * 20, waist + 14]], p.trim, 2.2);
-    E(c, cx + s * (19 + aw * 0.35), waist + 22, 6, 6, p.skin);
+    const hx = cx + s * (19 + aw * 0.35), hy = waist + 22;
+    if (s === maimedSide) {
+      E(c, hx, hy, 5.4, 5.4, "#d8cdb8");
+      L(c, [[hx - 4, hy - 3], [hx + 4, hy + 3]], "#a89a7c", 1.2);
+      L(c, [[hx - 4, hy + 3], [hx + 4, hy - 3]], "#a89a7c", 1.2);
+    } else {
+      E(c, hx, hy, 6, 6, p.skin);
+    }
   }
 
   // the garment itself
@@ -515,22 +582,29 @@ function figureArt(c: Ctx, K: DressKit, occ: Occasion) {
   c.save();
   const s = 17 / HRX;
   c.translate(50 - HX * s, 32 - HY * s); c.scale(s, s);
-  headBlock(c, K, p, occ);
+  headBlock(c, K, p, occ, female, features);
   c.restore();
 }
 
-export interface DressOpts extends DeriveOpts { occasion?: Occasion; cols?: number }
+export interface DressOpts extends DeriveOpts {
+  occasion?: Occasion; cols?: number;
+  /** 02.7 — an `Individual`'s sex; omitted for a plain people/culture plate. */
+  female?: boolean;
+  /** 02.7 — an `Individual.features` bitflag value (`FEATURE_*` above);
+   *  omitted or 0 renders bit-identically to before this slice. */
+  features?: number;
+}
 
 /** One people's portrait bust, pixel-treated. `size` is the drawn square.
  *  `kit` is a preset index, a derived/creole kit object, or a culture name. */
 export function drawBust(ctx: Ctx, x: number, y: number, size: number, kit: KitSpec, opts: DressOpts = {}) {
   const K = resolveKit(kit, opts);
-  pixelize(ctx, x, y, size, size, opts.cols || 40, (c) => bustArt(c, K, opts.occasion || "national"));
+  pixelize(ctx, x, y, size, size, opts.cols || 40, (c) => bustArt(c, K, opts.occasion || "national", opts.female, opts.features ?? 0));
 }
 
 /** One people's full costume plate, pixel-treated. `w` is the drawn width;
  *  the plate is `w × 2.1w`. */
 export function drawFigure(ctx: Ctx, x: number, y: number, w: number, kit: KitSpec, opts: DressOpts = {}) {
   const K = resolveKit(kit, opts);
-  pixelize(ctx, x, y, w, w * 2.1, opts.cols || 26, (c) => figureArt(c, K, opts.occasion || "national"));
+  pixelize(ctx, x, y, w, w * 2.1, opts.cols || 26, (c) => figureArt(c, K, opts.occasion || "national", opts.female, opts.features ?? 0));
 }

@@ -1,7 +1,8 @@
 # 02 · People
 
-**Status:** PARTIAL — slices 02.1-02.6, 02.8-02.9 shipped (see §Queue for 02.7's
-still-open item, the only one left) · **Depends on:** 01 · **Next:** 03
+**Status:** DONE — all slices 02.1-02.9 shipped (02.6's own further-templates
+queue item and 02.7's no-display caveat are recorded below, per rule 36, but
+do not block the row) · **Depends on:** 01 · **Next:** 03
 
 ## Goal
 
@@ -271,7 +272,7 @@ are recorded but applied only once those rows exist (they no-op before).
 | 02.4 | Event engine: rate, tag evaluation, layered pool with fallback, effects, logging | `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence` | **DONE** — siege/festival turbulence and lake/mountain/forest tags queued (no producing signal in `tick/`) |
 | 02.5 | ~40 starter templates + the geography lint | `life_event_templates_respect_geography` | **DONE** |
 | 02.6 | ~150 more templates (147 shipped, ids 100-305), covering more of the generic/geography/war/famine/large-city pool plus a second layer of role-specific events for commander/admiral/scholar/artisan/performer/senator | `life_event_templates_respect_geography` | **DONE** |
-| 02.7 | Faces: feature layers in `cultureDress.ts`; acquired features | `tsc`, visual check | NOT STARTED — needs a display to verify (see Queue) |
+| 02.7 | Faces: a sex axis (`female?`) + `FEATURE_*` bitflag layers (eyepatch, scar, bald crown, grey hair, temple tattoo, a bandaged hand on the full figure) in `cultureDress.ts`, both optional so every existing caller (Peoples panel, house heads, Figures) renders bit-identically; `individualKit(culture, faceSeed)` derives an `Individual`'s own hair/beard/trim/cloth2 off `face_seed`, keeping the culture's cut; wired into a real portrait on `NotablesPanel`'s detail view (`female`/`features`/`face_seed` straight off `IndividualBrief`) | `tsc`, `vite build` | **DONE** — verified by `tsc`/`vite build` only, **not opened in a real browser** (no display in this environment); see Queue |
 | 02.8 | Person window, roster, Hall of the Dead — commands `campaign_get_individual`, `campaign_get_notables`, `campaign_get_hall_of_dead` (lib.rs + bridge + types) | `tsc`, `vite build` | **DONE**, as a plain list — not yet the FiguresPanel-as-gallery redesign |
 | 02.9 | End of row: `bench_campaign_tick_large` before/after, `tick::tests`, `econ_` | numbers in SCOREBOARD | **DONE** — see `docs/SCOREBOARD.md` 2026-09-25 |
 
@@ -283,3 +284,13 @@ already does, so `econ_` should be bit-identical.
 - Q02.2 — Marriages between notables and house kin feeding house alliances (waits
   on row 04's alliance use).
 - Q02.3 — Portrait ageing animation across the life log (cosmetic, after 10).
+- Q02.4 — Open `NotablesPanel`'s new 02.7 portrait (and the FEATURE_* layers
+  generally) in a real browser to check it visually — this session could only
+  verify it by `tsc`/`vite build`, the same no-display caveat
+  `HOUSES_GUILDS_AND_MARKET_PLAN.md` S10/S12a already record. Check the
+  eyepatch/scar/bald-crown/tattoo placements first — they are hand-placed
+  coordinates in a 100×100 author box with nothing to check them against but
+  the eye.
+- Q02.5 — `FiguresPanel.tsx` becoming the roster's front page (a real portrait
+  gallery for `NotablesPanel`, not just its detail view) is still future work,
+  unblocked now that 02.7 gives it real per-individual faces to show.
