@@ -327,6 +327,12 @@ interface UIStore {
   /** The city the Markets window is showing. Seeded from `selectedHub` on open,
    *  then independent of it. */
   marketsHub: number | null;
+  /** living_world/04_GOVERNMENT_AND_EDICTS.md 04.7 · the floating Government
+   *  window (seats/blocs/debate/edicts/history for one city) — same
+   *  seed-then-independent pattern as Markets, so it isn't bound to the map
+   *  selection either. */
+  showGovernment: boolean;
+  governmentHub: number | null;
   /** Chrome visibility — lets the user hide the left workflow panel and the right
    *  toolbar to get a clean map with just the floating window bar. */
   showWorkflow: boolean;
@@ -456,6 +462,8 @@ interface UIStore {
   setShowGoodsWindow: (v: boolean) => void;
   setShowMarkets: (v: boolean) => void;
   setMarketsHub: (id: number | null) => void;
+  setShowGovernment: (v: boolean) => void;
+  setGovernmentHub: (id: number | null) => void;
   setShowWorkflow: (v: boolean) => void;
   setShowToolbar: (v: boolean) => void;
   setCoinOverlayHub: (v: number | null) => void;
@@ -613,6 +621,8 @@ export const useUIStore = create<UIStore>((set) => ({
   showGoodsWindow: false,
   showMarkets: false,
   marketsHub: null,
+  showGovernment: false,
+  governmentHub: null,
   showWorkflow: true,
   showToolbar: true,
   coinOverlayHub: null,
@@ -813,6 +823,11 @@ export const useUIStore = create<UIStore>((set) => ({
     marketsHub: v && s.marketsHub === null ? s.selectedHub : s.marketsHub,
   })),
   setMarketsHub: (id) => set({ marketsHub: id }),
+  setShowGovernment: (v) => set((s) => ({
+    showGovernment: v,
+    governmentHub: v && s.governmentHub === null ? s.selectedHub : s.governmentHub,
+  })),
+  setGovernmentHub: (id) => set({ governmentHub: id }),
   setShowWorkflow: (v) => set({ showWorkflow: v }),
   setShowToolbar: (v) => set({ showToolbar: v }),
   setCoinOverlayHub: (v) => set({ coinOverlayHub: v }),

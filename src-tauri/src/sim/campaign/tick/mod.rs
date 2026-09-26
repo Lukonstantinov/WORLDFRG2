@@ -4524,7 +4524,40 @@ pub struct TickHub {
     /// than completing in one lump sum. `#[serde(default)]` reads `[0.0; 4]`
     /// on an old save.
     #[serde(default)] pub track_build_progress: [f32; 4],
+    // ── 04_GOVERNMENT_AND_EDICTS.md, slices 04.3-04.6 ──────────────────────
+    /// This government's standing with its own people, 0..1. Seeded to
+    /// `NEUTRAL_LEGITIMACY` (0.75, matching `development.rs`'s own forward-hook
+    /// constant of the same value) by `seed_government`. Purely descriptive —
+    /// `stability_at` (row 03) still reads its own neutral constant, not this
+    /// field (Q04.9: wiring the two together is queued, since it would move
+    /// row 03's live track-point/dev math and needs its own dose walk).
+    #[serde(default = "default_legitimacy")] pub legitimacy: f32,
+    /// Political points, accrued weekly (`government_weekly_pass`) and spent
+    /// on a passed/failed/deadlocked edict. An abstract currency — spending it
+    /// moves no wealth, price or production number.
+    #[serde(default)] pub gov_points: f32,
+    /// This government's ideological lean, roughly conservative (−1) ..
+    /// libertarian (+1), seeded ONCE from the hub's culture's own most
+    /// characteristic real trait (`gov_position_for_culture`) — the forward
+    /// hook this row's own intro names ("seeded from its culture's traits"
+    /// until row 06 gives ideology a real meter).
+    #[serde(default)] pub gov_position: f32,
+    /// The edict currently being debated at this seat, if any. `None` outside
+    /// a debate (including under a tyranny, which never debates — 04.5).
+    #[serde(default)] pub gov_debate: Option<GovDebate>,
+    /// Edicts currently in force, oldest first, expired ones dropped at their
+    /// own `expires_tick` (`expire_edicts`). Capped at `GOV_EDICTS_CAP`.
+    #[serde(default)] pub gov_edicts: Vec<GovEdict>,
+    /// Recent debate outcomes (passed/failed/deadlocked) + coups, capped at
+    /// `GOV_HISTORY_CAP`, oldest first — the Government window's "recent
+    /// history" list (04.7).
+    #[serde(default)] pub gov_history: Vec<GovHistoryEntry>,
+    /// Tick of this city's next Lustrum (every `LUSTRUM_YEARS` years, 04.6).
+    /// Seeded by `seed_government` to a staggered first occurrence so every
+    /// city's Lustrum doesn't land on the same year.
+    #[serde(default)] pub gov_lustrum_tick: u32,
 }
+fn default_legitimacy() -> f32 { NEUTRAL_LEGITIMACY_SEED }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
 /// `TickHub.deaths_by_cause`. A plain index table rather than an enum: the
@@ -9289,6 +9322,9 @@ impl CampaignSim {
             if self.hubs[h].is_estate { continue; }
             // 1) Seed the regime + officials once.
             if self.hubs[h].officials.is_empty() { self.seed_government(h); }
+            // 1b) 04.6 · the five-yearly Lustrum (its own allowance, never the
+            // weekly edict points above).
+            self.maybe_run_lustrum(h);
             // 2) Regime change: reseat any figure whose term has ended.
             for oi in 0..self.hubs[h].officials.len() {
                 if tick >= self.hubs[h].officials[oi].term_end { self.reseat_official(h, oi); }
@@ -9466,6 +9502,17 @@ impl CampaignSim {
             });
         }
         self.hubs[h].officials = officials;
+        // 04.3-04.6 · seed the rest of the government block once, alongside
+        // the seats themselves — idempotent with the `officials.is_empty()`
+        // gate above, so a colony/estate-founded hub gets these too, not
+        // just a world-generation-time one.
+        let culture = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let ideal = self.culture_ideal(&culture);
+        self.hubs[h].legitimacy = NEUTRAL_LEGITIMACY_SEED;
+        self.hubs[h].gov_position = gov_position_for_ideal(ideal);
+        // Stagger the first Lustrum exactly like the seats' own staggered terms.
+        self.hubs[h].gov_lustrum_tick = self.tick
+            + (hash01(self.seed, h as u64 ^ 0x1057, 0x1) * (LUSTRUM_YEARS * TICKS_PER_YEAR) as f32) as u32;
     }
 
     /// 04.2 · resolve (or mint) the `Individual` a seat holder should carry —
@@ -9973,6 +10020,10 @@ impl CampaignSim {
             // events. `O(people)` with small constants.
             if tick % 7 == 0 {
                 self.people_weekly_pass();
+                // Living World row 04 (04_GOVERNMENT_AND_EDICTS.md) · the same
+                // weekly hook — political points accrue, one debate round
+                // (or a tyrant's own decision) runs, spent edicts expire.
+                self.government_weekly_pass();
             }
 
             // Phase G: keep the per-house ledgers aligned to the house list, and roll
@@ -11589,6 +11640,17 @@ pub(crate) use culture_ideals::{
 };
 mod dev_production;
 pub(crate) use dev_production::DEV_PRODUCTION_DOSE;
+mod government;
+pub use government::{
+    GovEdict, GovDebate, GovHistoryEntry, edict_family_name,
+    GOV_OUTCOME_PASSED, GOV_OUTCOME_FAILED, GOV_OUTCOME_DEADLOCKED, GOV_OUTCOME_COUP,
+};
+pub(crate) use government::{
+    NEUTRAL_LEGITIMACY_SEED, GOV_EDICTS_CAP, GOV_HISTORY_CAP, LUSTRUM_YEARS,
+    EDICT_FAM_CITIZENSHIP, EDICT_FAM_FOREIGNERS, EDICT_FAM_LEARNING, EDICT_FAM_WELFARE,
+    EDICT_FAM_ECONOMY, EDICT_FAM_MILITARY, EDICT_FAM_CONSTITUTION, EDICT_FAM_BUILDINGS,
+    EDICT_FAMILY_COUNT, gov_position_for_ideal, edict_cost,
+};
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;

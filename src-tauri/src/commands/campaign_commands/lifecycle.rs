@@ -1,6 +1,7 @@
 //! lifecycle commands — split from the former monolithic campaign_commands.rs.
 //! `use super::*` inherits the shared imports, structs and helpers kept in mod.rs.
 use super::*;
+use crate::sim::tick::NEUTRAL_LEGITIMACY_SEED;
 
 
 /// Freeze the world's geography and record the fingerprint campaigns reference.
@@ -670,7 +671,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 tier: 0,
                 standing: 0.0,
                 war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-                wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0, dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4], track_buildings: [0; 4], track_build_progress: [0.0; 4],
+                wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0, dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4], track_buildings: [0; 4], track_build_progress: [0.0; 4], legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0, gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0,
             }
         })
         .collect();

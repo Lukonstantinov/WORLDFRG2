@@ -3358,3 +3358,76 @@ export interface ProvinceRepairReport {
   settlements_attached: number;
   settlements_orphaned: number;
 }
+
+// ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.7 — the Government window ──
+
+/** One seat (mirrors `read_government::SeatBrief`). */
+export interface SeatBrief {
+  role: number;
+  office_title: string;
+  name: string;
+  individual_id: number;
+  /** "kin of a house" | "military success" | "wealth" | "guild representative" |
+   *  "scholar/orator" | "elected by the commons" | "bribed in" | "appointed". */
+  path: string;
+  suitability: number;
+  /** 0 house · 1 ruler (kin) · 2 commons/none. */
+  allegiance: number;
+  house: number;
+  house_name: string;
+  control: number;
+}
+
+/** Every seat sharing one allegiance target. */
+export interface BlocBrief {
+  /** -1 = the commons/no-patron bloc. */
+  house: number;
+  house_name: string;
+  seat_indices: number[];
+}
+
+/** The debate in progress, if any. */
+export interface DebateBrief {
+  family: string;
+  tag: number;
+  major: boolean;
+  cost: number;
+  round: number;
+  round_cap: number;
+  /** -1 (solid fail) .. +1 (solid pass). */
+  tally: number;
+}
+
+/** One edict in force. */
+export interface EdictBrief {
+  family: string;
+  tag: number;
+  major: boolean;
+  enacted_year: number;
+  expires_year: number;
+}
+
+/** One closed debate's outcome, or a coup. */
+export interface GovHistoryBrief {
+  year: number;
+  family: string;
+  /** "passed" | "failed" | "deadlocked" | "coup". */
+  outcome: string;
+}
+
+/** The whole Government window for one city (mirrors `read_government::GovernmentBrief`). */
+export interface GovernmentBrief {
+  hub: number;
+  city: string;
+  /** "Merchant Council (Doge)" | "Principality (Prince)" | "Free Commune (Mayor)". */
+  form: string;
+  legitimacy: number;
+  gov_points: number;
+  /** -1 conservative .. +1 libertarian. */
+  gov_position: number;
+  seats: SeatBrief[];
+  blocs: BlocBrief[];
+  debate: DebateBrief | null;
+  edicts: EdictBrief[];
+  history: GovHistoryBrief[];
+}

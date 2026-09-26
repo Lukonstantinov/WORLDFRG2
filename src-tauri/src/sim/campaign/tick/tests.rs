@@ -37,6 +37,8 @@
             ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0,
             dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4],
             track_buildings: [0; 4], track_build_progress: [0.0; 4],
+            legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0,
+            gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0,
         }
     }
 
@@ -11122,5 +11124,102 @@
         assert_eq!(kin_bloc.1.len(), 1);
         let commons_bloc = blocs.iter().find(|(k, _)| *k == -1).expect("every other seat is still commons");
         assert_eq!(commons_bloc.1.len(), s.hubs[0].officials.len() - 1);
+    }
+
+    // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slices 04.3-04.6 ─────────────
+
+    /// 04.3 · the doc's own cost formula, verbatim: base × (1 + ideological
+    /// distance) — a libertarian edict is cheap in a libertarian government
+    /// and dear in a conservative one, and the reverse.
+    #[test]
+    fn mismatched_edicts_cost_more() {
+        // A government whose OWN lean matches the edict's tag pays close to the
+        // base cost; one whose lean opposes it pays up to double.
+        let matched_cost = edict_cost(1.0, 1, 0.9);   // edict tag +1, government lean +0.9 → close
+        let opposed_cost = edict_cost(1.0, 1, -0.9);  // edict tag +1, government lean −0.9 → far
+        assert!(opposed_cost > matched_cost,
+            "an edict fighting the government's own lean must cost more than one matching it");
+        assert!((matched_cost - 1.0 * (1.0 + 0.1)).abs() < 1e-4, "cost = base × (1 + distance) exactly");
+    }
+
+    /// 04.4 · a debate must always terminate within its own `round_cap`,
+    /// whatever the tally does — the same discipline `every_crisis_terminates`
+    /// already holds war/succession crises to (CLAUDE.md rule 22).
+    #[test]
+    fn every_debate_terminates() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        let round_cap = 4u8;
+        s.hubs[0].gov_debate = Some(GovDebate { family: EDICT_FAM_ECONOMY, tag: 0, major: true, cost: 10.0, round: 0, tally: 0.0, round_cap });
+        let mut rounds_run = 0u8;
+        for _ in 0..(round_cap as u32 + 5) {
+            if s.hubs[0].gov_debate.is_none() { break; }
+            s.run_debate_round(0);
+            rounds_run += 1;
+        }
+        assert!(s.hubs[0].gov_debate.is_none(), "the debate must have resolved by now");
+        assert!(rounds_run <= round_cap, "never more rounds than the form's own cap ({rounds_run} > {round_cap})");
+        assert_eq!(s.hubs[0].gov_history.len(), 1, "a resolved debate always leaves exactly one history entry");
+    }
+
+    /// 04.3 · a passed edict is held only until `expires_tick` — CLAUDE.md's
+    /// own "edicts expire" rule.
+    #[test]
+    fn edicts_expire() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.tick = 5;
+        s.hubs[0].gov_edicts.push(GovEdict { family: EDICT_FAM_WELFARE, tag: -1, major: false, enacted_tick: 0, expires_tick: 10 });
+        s.expire_edicts(0);
+        assert_eq!(s.hubs[0].gov_edicts.len(), 1, "not yet expired");
+        s.tick = 11;
+        s.expire_edicts(0);
+        assert_eq!(s.hubs[0].gov_edicts.len(), 0, "past its own expiry, the edict is gone");
+    }
+
+    /// 04.6 · every `LUSTRUM_YEARS`, exactly one Lustrum fires per city and
+    /// reschedules the next one — never twice in the same call, never skipped.
+    #[test]
+    fn lustrum_every_five_years() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        let first_due = s.hubs[0].gov_lustrum_tick;
+        s.tick = first_due.saturating_sub(1);
+        let before = s.hubs[0].gov_history.len();
+        s.maybe_run_lustrum(0);
+        assert_eq!(s.hubs[0].gov_history.len(), before, "not due yet — no Lustrum fires early");
+        s.tick = first_due;
+        s.maybe_run_lustrum(0);
+        assert_eq!(s.hubs[0].gov_history.len(), before + 1, "exactly one Lustrum fires once due");
+        assert_eq!(s.hubs[0].gov_lustrum_tick, first_due + LUSTRUM_YEARS * TICKS_PER_YEAR,
+            "the next Lustrum is rescheduled exactly LUSTRUM_YEARS later");
+    }
+
+    /// 04.3-04.6 · none of the new government mechanism may move wealth,
+    /// population, price or production — everything it touches lives on the
+    /// new `gov_*`/`legitimacy` fields alone. Run the real weekly cadence for
+    /// a few years and compare the pre-existing economic snapshot before/after.
+    #[test]
+    fn government_mechanism_moves_no_wealth_or_production() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h = hub(0, 0.0, 0.0, 20_000.0, vec![20_000.0 * 0.02], 0);
+        h.treasury = 100.0;
+        h.price[0] = 1.0;
+        let mut s = sim(vec![h], goods);
+        s.houses.push(house_at(0, vec![], 1));
+        let snap = |s: &CampaignSim| (s.hubs[0].population, s.hubs[0].treasury, s.hubs[0].price.clone(), s.houses[0].wealth);
+        s.seed_government(0);
+        let before = snap(&s);
+        for wk in 1..=(3 * TICKS_PER_YEAR / 7) {
+            s.tick = wk * 7;
+            s.government_weekly_pass();
+        }
+        let after = snap(&s);
+        assert_eq!(before, after, "the edict/debate/Lustrum mechanism must move no economic field");
     }
 
