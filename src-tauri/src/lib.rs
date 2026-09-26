@@ -144,6 +144,7 @@ pub fn run() {
             campaign_commands::campaign_tier1_gauge_medians,
             campaign_commands::campaign_get_feuds,
             campaign_commands::campaign_get_government,
+            campaign_commands::campaign_get_culture_acceptance,
             campaign_commands::campaign_get_edicts,
             campaign_commands::campaign_get_house_kin,
             campaign_commands::campaign_get_house_goals,

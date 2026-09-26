@@ -3415,6 +3415,25 @@ export interface GovHistoryBrief {
   outcome: string;
 }
 
+/** One (city, culture) relation — living_world/05_CULTURE_ACCEPTANCE.md,
+ *  mirrors `read_culture::CultureAcceptanceBrief`. */
+export interface CultureAcceptanceBrief {
+  culture: string;
+  tier: number;
+  /** "Citizens" | "Enfranchised" | "Resident foreigners" | "Unwelcome" | "Hated". */
+  tier_name: string;
+  /** -100..100. */
+  score: number;
+  /** Last year's net drift — the UI's trend arrow. */
+  trend: number;
+  /** A short "why" phrase, e.g. "trade +12, the war of 214 -20". */
+  reason: string;
+  /** Approximate resident share, 0..1. */
+  residents_frac: number;
+  /** -1 while no tier-change proposal is open, else the target tier. */
+  proposed_tier: number;
+}
+
 /** The whole Government window for one city (mirrors `read_government::GovernmentBrief`). */
 export interface GovernmentBrief {
   hub: number;
