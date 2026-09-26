@@ -871,7 +871,7 @@ impl CampaignSim {
         // so manufactured goods fell further behind raw ones purely by neglect
         // of this one term — not because the recipe/labor numbers were wrong.
         // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE = 0.0.
-        let tech_by_hub = self.dev_blended_tech();
+        let tech_by_hub = self.dev_blended_tech(DEV_PRODUCTION_DOSE);
         for h in 0..self.hubs.len() {
             let tech = tech_by_hub[h];
             let pop = self.hubs[h].population.max(0.0);
@@ -992,7 +992,7 @@ impl CampaignSim {
         // work more (technology growth) must also PULL more raw material, or the
         // higher labor cap goes unused against an input stock that never grew.
         // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE = 0.0.
-        let tech_by_hub = self.dev_blended_tech();
+        let tech_by_hub = self.dev_blended_tech(DEV_PRODUCTION_DOSE);
         for h in 0..self.hubs.len() {
             if self.hubs[h].is_estate { continue; } // manufacturing happens in cities
             let cap = (self.hubs[h].population.max(0.0) / median).min(8.0) * tech_by_hub[h];

@@ -86,10 +86,10 @@ shipped `0.0`.
   fires exactly once every `LUSTRUM_YEARS` (5) and reschedules the next —
   gate `lustrum_every_five_years`. It records which development track
   WOULD be favoured (the currently-trailing one) as a chronicle/history
-  entry only; actually crediting the track's points is `Q04.13`, queued
-  until row 03's own `DEV_PRODUCTION_DOSE` walk lands (raising a track's
-  points from a row 04 mechanism before row 03 itself is live would be
-  tuning someone else's dose).
+  entry only; actually crediting the track's points is `Q04.13`, queued —
+  row 03 reached `DONE` on `main` in the same window as this session
+  (`DEV_PRODUCTION_DOSE` raised 0.0→0.2), so the blocker is now session
+  budget alone, not a wait on another row.
 - **04.7 (the Government window).** `campaign_get_government(hub)` (seats
   + blocs + the debate in progress + edicts + history) and
   `campaign_get_edicts(hub)`, wired lib.rs → `bridge/campaign.ts` →
@@ -341,7 +341,7 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 | 04.4 | **DONE (2026-09-26).** Weekly debate rounds — allegiance+suitability-noised lean, smoothed tally, resolves PASS/FAIL/DEADLOCK within the form's own `round_cap`. Amendments/filibuster/vote-exposure folded into one persuasion-noise term rather than three separate mechanics (documented scope cut, Q04.11) | `every_debate_terminates` |
 | — | Costs (full/0.4×/0.15× pass/fail/deadlock) + expiry (25/50-yr minor/major) + a small legitimacy swing, all shipped alongside 04.3-04.4 | `edicts_expire` |
 | 04.5 | **PARTIAL (2026-09-26).** Tyrant path (`maybe_tyrant_decide`, no vote) + opposition/legitimacy bookkeeping off the real `mood` field, built. **NOT built**: 5 of 6 "changes of government" kinds (only a coup STUB exists, behind `GOV_POWER_DOSE`, a no-op at 0.0) and ostracism — see §Queue Q04.5b | (covered by 04.3/04.4's own gates + the coup stub's own dose-zero convention) |
-| 04.6 | **DONE (2026-09-26), scoped down.** `maybe_run_lustrum` fires every `LUSTRUM_YEARS`, picks the trailing track, records it to history/chronicle. **Does NOT yet credit the track's own points** — queued as Q04.13 until row 03's dose is walked, so this row's own mechanism doesn't tune a number it doesn't own | `lustrum_every_five_years` |
+| 04.6 | **DONE (2026-09-26), scoped down.** `maybe_run_lustrum` fires every `LUSTRUM_YEARS`, picks the trailing track, records it to history/chronicle. **Does NOT yet credit the track's own points** — queued as Q04.13 (row 03 is `DONE` as of this same window, so the only blocker left is session budget) | `lustrum_every_five_years` |
 | 04.7 | **DONE (2026-09-26), plain first cut.** Government window — `campaign_get_government`, `campaign_get_edicts` (lib.rs + bridge + types), `ui/campaign/GovernmentPanel.tsx`. **NOT built** (Q04.14): portraits, a live round timeline, bloc-grouped layout | `tsc`, `vite build` (189 modules, clean) |
 | 04.8 | End of row: edict EFFECTS dosed from zero (still unwired — Q04.9), the coup mutation dosed from zero (Q04.5b), `tick::tests`, `econ_` | SCOREBOARD row |
 
@@ -364,13 +364,13 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
   no back-reference to `cultures::KITS`); until then `office_title` serves the
   Roman-flavoured default set for every culture.
 - Q04.5 — **DONE 2026-09-26** (04.3-04.7's mechanism, and 04.6's Lustrum
-  bookkeeping, were built ahead of row 03 reaching `DONE` — a deliberate,
-  named exception mirroring row 04's own original out-of-order start,
-  because everything built is EFFECT-INERT: no edict yet pays out anything,
-  so there is no live number to get wrong by building this before row 03's
-  own dose walk lands). What remains queued is 04.8's real dosing pass —
-  see Q04.9/Q04.13 below — which DOES need row 03 `DONE` first, per this
-  row's own stated dependency.
+  bookkeeping, were built in the same window row 03 itself reached `DONE`
+  on `main` — a deliberate, named exception mirroring row 04's own original
+  out-of-order start, because everything built is EFFECT-INERT: no edict
+  yet pays out anything, so there is no live number to get wrong regardless
+  of row 03's own state). What remains queued is 04.8's real dosing pass —
+  see Q04.9/Q04.13 below — both now unblocked by row 03's dependency, left
+  for session budget alone.
 - Q04.5b — The 5 of 6 "changes of government" kinds 04.5 didn't build
   (revolution, oligarchic closing, emergency ruler, succession-crisis reuse
   of `crisis.rs`, imposed) and ostracism — waits on nothing structural, just
@@ -395,9 +395,9 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
   pattern) for the tyrant's decisions, instead of the government's flat
   `gov_position` — waits on Q04.3's own "fold suitability into traits"
   follow-up.
-- Q04.13 — Actually credit the Lustrum's chosen track with points (row 03) —
-  waits on row 03's own `DEV_PRODUCTION_DOSE` walk landing first, so this
-  row isn't the one moving another row's undosed number.
+- Q04.13 — Actually credit the Lustrum's chosen track with points (row 03,
+  now `DONE`) — waits on session budget alone; needs its own `econ_` dose
+  walk once built, since crediting real points is a live behaviour change.
 - Q04.14 — The Government window's richer layout: seat portraits, a live
   round-by-round debate timeline, bloc-grouped seats — waits on session
   budget alone, no structural blocker.
