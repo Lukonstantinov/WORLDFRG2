@@ -197,7 +197,7 @@ impl CampaignSim {
     /// depot at that city (stock is lost, not spilled to the local pool — it is
     /// PLUNDERED, not liquidated). Returns the wealth-equivalent value stripped,
     /// for the Accountant ledger and the journal.
-    fn strip_holdings_at(&mut self, hi: usize, city: usize, max_estates: usize) -> f32 {
+    pub(crate) fn strip_holdings_at(&mut self, hi: usize, city: usize, max_estates: usize) -> f32 {
         let mut lost = 0.0f32;
         let estates: Vec<usize> = (0..self.hubs.len())
             .filter(|&ei| self.hubs[ei].is_estate && !self.hubs[ei].abandoned

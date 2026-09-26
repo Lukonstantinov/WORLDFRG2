@@ -74,6 +74,7 @@ export function CampaignTopBar() {
         { label: "👥 Notables & Hall of the Dead", on: ui.showNotables, set: ui.setShowNotables },
         { label: "🗿 Landmarks & Sites", on: ui.showLandmarks, set: ui.setShowLandmarks },
         { label: "☠ Plagues & Epidemics", on: ui.showPlagues, set: ui.setShowPlagues },
+        { label: "🏇 Barbarian Tribes", on: ui.showHordes, set: ui.setShowHordes },
       ],
     },
     {

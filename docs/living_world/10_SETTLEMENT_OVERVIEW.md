@@ -1,6 +1,35 @@
 # 10 · Settlement overview
 
-**Status:** NOT STARTED · **Depends on:** 03–08 · **Next:** —
+**Status:** PARTIAL (2026-09-26) — 10.1/10.2 shipped; 10.3/10.4 not built ·
+**Depends on:** 03–08 · **Next:** —
+
+**Shipped.** `ui/campaign/SettlementOverviewTab.tsx`, a new "Overview" tab
+(now the FIRST/default tab on selecting a city) in `HubPanel.tsx`, showing
+government (form/legitimacy/seats/debate in progress), ideology (dominant
+doctrine + scholar count), culture tiers, a venues/masterworks count, and
+the last 5 chronicle lines.
+
+**Scope cut, recorded rather than silently made (rule 36):** 10.1 calls for
+"one read query assembling the Overview (no new sim state)". This is built
+as a CLIENT-SIDE composition of rows 04/06/07/08's own already-shipped read
+commands instead — each of those `#[tauri::command]` functions takes its
+own `db: State<'_, WorldDb>` and locks the SAME `std::sync::Mutex`
+internally, so calling one FROM inside a new aggregator command would
+deadlock on that lock. Composing independent `invoke()` calls client-side
+avoids inventing a second, parallel read path for data these commands
+already serve correctly, and needed zero new Rust code. Development-track
+levels, identity (population/culture mix/portrait), war/realm/horde-threat
+and the economy-at-a-glance blocks the doc's own table also asks for are
+NOT in this cut — most of that data already has its OWN reader elsewhere
+in `HubPanel.tsx` (the existing "summary"/"development"/"city" tabs), and
+folding it into Overview too is real, low-risk follow-up work, not a
+blocker; row 09's war/horde-threat block waits on that row's own Parts B/C
+existing to have anything to show.
+
+Gate: `cargo check --lib --tests` (unchanged, no Rust touched), `npx tsc
+--noEmit` + `npx vite build` (191 modules) both clean. No `econ_` run
+owed — no sim state changed (CLAUDE.md §2.8's own routing-table row for a
+frontend-only change).
 
 ## Goal
 
@@ -48,3 +77,15 @@ No sim change → no `econ_` run needed (CLAUDE.md §2.8, frontend row).
 
 ## Queue
 - Q10.1 — Venue art and seasonal festivals animated on the portrait.
+- Q10.2 — City portrait reflecting buildings/venues (10.3) — needs
+  `buildingArt.ts`-style procedural art for a venue, not built this session.
+- Q10.3 — Tidy the remaining tabs into pure detail windows (10.4) — the
+  Overview now duplicates a little of what "summary"/"development" already
+  show; a full pass to make each tab strictly the DETAIL behind an Overview
+  block (never a second copy of the summary) is real follow-up work.
+- Q10.4 — Fold in development-track levels, city identity (portrait/
+  population/culture mix) and an economy-at-a-glance block — the data
+  already has its own reader elsewhere in `HubPanel.tsx`; only the Overview
+  composition itself is missing them.
+- Q10.5 — A war/realm/horde-threat block — waits on row 09's Parts B/C
+  (armies, realm wars) actually existing to have something to summarise.

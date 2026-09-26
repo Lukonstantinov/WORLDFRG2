@@ -19,6 +19,7 @@ import { CoinIcon } from "@ui/heraldry/CoinIcon";
 import { YearChronicle } from "@ui/campaign/YearChronicle";
 import type { HouseBrief } from "@types";
 import { SettlementScene } from "@ui/campaign/SettlementScene";
+import { SettlementOverviewTab } from "@ui/campaign/SettlementOverviewTab";
 import { CityView, BUILDING_INFO } from "@ui/campaign/CityView";
 import { FlowsView } from "@ui/campaign/FlowsView";
 import { TradersView } from "@ui/campaign/TradersView";
@@ -45,7 +46,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life" | "development";
+type Tab = "overview" | "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life" | "development";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -307,7 +308,7 @@ export function HubPanel() {
   const setFlowHighlight = useUIStore((s) => s.setFlowHighlight);
 
   // Reset to the Overview tab whenever a different hub is opened.
-  useEffect(() => { setTab("summary"); setTradeView("market"); setExpandedEstate(null); setRelayExpanded(false); }, [selectedHub]);
+  useEffect(() => { setTab("overview"); setTradeView("market"); setExpandedEstate(null); setRelayExpanded(false); }, [selectedHub]);
   // Clear any map flow-highlight when leaving the Flows view (or the panel).
   useEffect(() => {
     if (!(tab === "trade" && tradeView === "flows")) setFlowHighlight([]);
@@ -449,6 +450,7 @@ export function HubPanel() {
   const cargoMax = Math.max(1e-6, ...outCargo.map((g) => g.value), ...inCargo.map((g) => g.value));
 
   const TABS: { id: Tab; label: string }[] = [
+    ...(campActive && selectedHub != null ? [{ id: "overview" as Tab, label: "Overview" }] : []),
     { id: "summary", label: "Summary" },
     ...(detail ? [{ id: "city" as Tab, label: detail.is_estate ? "Estate" : "City" }] : []),
     ...(detail && !detail.is_estate ? [{ id: "govt" as Tab, label: "Government" }] : []),
@@ -789,6 +791,10 @@ export function HubPanel() {
       })()}
 
       {/* ════════════ OVERVIEW ════════════ */}
+      {tab === "overview" && selectedHub != null && (
+        <SettlementOverviewTab hub={selectedHub} />
+      )}
+
       {tab === "summary" && (
         <>
           {/* During a live campaign the stats come from the running simulation, not

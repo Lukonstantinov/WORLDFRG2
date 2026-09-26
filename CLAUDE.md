@@ -2393,6 +2393,103 @@ whole mechanism.
   (`Q05.5`); raising any of the five effect doses above zero, each needing its
   own `econ_`-per-dose-step walk per 00_INDEX's own testing rule (`Q05.6`).
 
+### 5.11 `docs/living_world/06_IDEOLOGY_AND_SCHOLARS.md` — axes, named ideologies, scholars, schools (Living World row 06)
+
+Four axes (Authority/Tradition/Openness/Economy, −5..+5), 16 named traits, 7
+canonical named ideologies plus scholar-founded custom ones, per-city meters
+(nobles/commons/government — the government one a real prestige-weighted
+read of seated officials' own `Individual.ideology`), and scholars with a
+real life-stage arc (spawn → study under a real teacher → teach/return/
+patron → politics/exile), all in `sim/campaign/tick/ideology.rs`. Row 02
+already reserved `ROLE_SCHOLAR`/`ROLE_PHILOSOPHER`/`ROLE_IDEOLOGUE` and
+`Individual.ideology: [f32;4]` for exactly this row. Institutions (tutor →
+school → library → academy → university) are NOT a new field — row 03's
+own `TRACK_IDEOLOGICAL` building names already are this ladder; a founded
+`School` is the scholar-level record on top of it. Meter drift includes a
+real "a demand MET by a live edict entrenches its ideology faster than an
+unmet one" mechanic. Two forward-looking hooks ship dosed at zero:
+`IDEOLOGY_GOV_HOOK_DOSE` (row 04's `gov_position` would track this row's
+live government meter instead of a one-time culture seed) and
+`IDEOLOGY_UNREST_DOSE` (an unmet demand would raise unrest). UI is a
+compact section in the Government panel, not the doc's own "Schools & Great
+Minds" world window (queued, `06_IDEOLOGY_AND_SCHOLARS.md` Q06.3).
+
+### 5.12 `docs/living_world/07_ARTISANS_AND_MASTERWORKS.md` — masterworks, guild culture ceilings, theft and looting (Living World row 07)
+
+`sim/campaign/tick/masterworks.rs`: a real `Masterwork` record (title/kind/
+maker/year/owner/material/location/condition/prestige/provenance), created
+by a guild whose quality clears a threshold at ideological level ≥ 3 (now
+capped by a SECOND, cultural ceiling — `cultural_quality_cap_e`, blended
+into `run_craft_guilds`, dosed at `CULTURAL_QUALITY_CAP_DOSE`) or by a
+notable `ROLE_ARTISAN`'s talent alone, no ceiling. `loot_masterworks(hub,
+to_hub)` is real and CALLED — row 09's hordes sack cities with it this same
+session, closing the design's own "row 09's sacks are the eventual caller"
+note in one sitting. Theft is a real yearly house event resisted by a
+city's own guild secrecy; invitations (commission/relocate/stay) use row
+02's `decide()` 75% rule. `MASTERWORK_DEV_BONUS_DOSE`/`MASTERWORK_MARKET_
+DOSE` (a bounded development bonus; real house purchases) ship at zero. UI
+is a compact "Gallery" section in the Government panel, not a dedicated
+City Gallery / House Dossier tab / world "Great Works" list (queued).
+
+### 5.13 `docs/living_world/08_LEISURE_AND_GAMES.md` — leisure families, venues, games, decline (Living World row 08)
+
+`sim/campaign/tick/venues.rs`: 14 universal leisure types, the doc's own
+18-shipped-kit → 3-preference table plus a trait-weighted fallback (every
+culture always resolves exactly three — no Southeast-Asian/Polynesian kit
+was added this session, a worldgen change out of scope here, so that
+family is reached only via the fallback, queued `08_LEISURE_AND_GAMES.md`
+Q08.3). `Venue` records carry a real population-weighted popularity, hold
+2-6 games a year plus festivals, and enter DISTRESS → DECLINE → ABANDONMENT
+(never converted) within a bounded run of years. Performers spawn as real
+`ROLE_PERFORMER` individuals; an Arena's fighters are captives only where
+row 05's `bondage_permitted` allows it. `VENUE_COST_DOSE`/`VENUE_SPONSOR_
+CONTROL_DOSE`/`GAMES_TRUCE_DOSE` (building/upkeep spend; a sponsor's
+control over the aedile; the Olympic-truce war-chance reduction) all ship
+at zero — a venue still founds, holds games and is abandoned regardless. UI
+is a compact "Venues" section in the Government panel, not the doc's own
+dedicated venue subpanel.
+
+### 5.14 `docs/living_world/09_REALMS_WAR_AND_BARBARIANS.md` — barbarians and hordes (Living World row 09, Part D only)
+
+**Partial by design, not by accident.** Of the row's five parts (A realm
+benefits, B armies, C deeper provinces, D barbarians, E empires), only Part
+D and one Part-A benefit shipped this session — armies and realm-vs-realm
+war are flagged by the row's own doc as the highest-risk items in the whole
+Living World plan (population and wealth moved at scale), and a rushed
+version would have been worse than an honest partial row.
+`sim/campaign/tick/hordes.rs`: a `Horde` (real famous `Individual` leader,
+already-reserved `ROLE_HORDE_LEADER`) rises from whichever province scores
+highest on the doc's own five triggers (warlike-and-over-capacity, high
+discontent, a foreign settlement, and — where the signal exists — trade
+imbalance/ethnogenesis), via ONE world-wide yearly roll calibrated toward
+the doc's own decided "2-4 major waves a century" (never scaled by a
+world's own steppe area). A horde raids (dosed wealth transfer), sacks
+(calls `strip_holdings_at` + row 07's real `loot_masterworks`), razes
+(`abandoned = true`, `died_cause` names it — the EXISTING `resettle_pass`
+threshold picks it up unchanged), and always ends — settled, paid
+tribute, defeated, or broken up on its leader's death — within
+`HORDE_MAX_YEARS` (rule 22's discipline). One Part-A benefit also shipped:
+`realm_openness_cohesion_bonus_e`, wired into `realms.rs`'s own `update_
+realm_cohesion`, dosed at `REALM_OPENNESS_COHESION_DOSE = 0.0`. A compact
+"🏇 Barbarian Tribes" panel lists every horde; the doc's own richer
+conflict-map layer (smoke plumes, army/horde tokens, occupation hatching)
+and the other six Part-A benefits, all of Parts B/C/E, are explicitly
+QUEUED (`09_REALMS_WAR_AND_BARBARIANS.md`'s own Queue names each and what
+it waits for) — not silently dropped.
+
+### 5.15 `docs/living_world/10_SETTLEMENT_OVERVIEW.md` — the settlement Overview tab (Living World row 10, partial)
+
+A new "Overview" tab in `HubPanel.tsx` (`ui/campaign/SettlementOverviewTab.tsx`),
+now the first/default tab on selecting a city: government, ideology,
+culture tiers, a venues/masterworks count, and the last 5 chronicle lines.
+Built as a CLIENT-SIDE composition of rows 04/06/07/08's own already-
+shipped read commands, deliberately NOT a new Rust aggregator — those
+commands each lock the same `std::sync::Mutex` internally, so calling one
+from inside a new command would deadlock. Development-track levels, city
+identity/portrait, a war/realm/horde-threat block and an economy-at-a-
+glance summary are queued (`10_SETTLEMENT_OVERVIEW.md`'s own Queue) rather
+than folded in this session.
+
 ---
 
 ## 6. Rust Backend Map (`src-tauri/src/`)
@@ -2655,7 +2752,14 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   `LifeEntry`/`Tombstone` roster, migration,
                                   `decide()`, the yearly life cycle (§5.8);
                                   life_events.rs = row 02's weekly event engine +
-                                  the ~40-template starter set; schism.rs = Phase 4.1,
+                                  the ~40-template starter set; culture_acceptance.rs =
+                                  Living World row 05 (§5.10); ideology.rs = row 06,
+                                  axes/named ideologies/scholars/schools (§5.11);
+                                  masterworks.rs = row 07, masterworks + guild
+                                  cultural caps + theft/looting (§5.12); venues.rs =
+                                  row 08, leisure families + venues + games (§5.13);
+                                  hordes.rs = row 09 Part D, barbarians/hordes (§5.14);
+                                  schism.rs = Phase 4.1,
                                   Quarrel/Departure (a simplified `tension` proxy,
                                   monthly; Rupture deferred); foreign_hand.rs = Phase
                                   4.4, the two-channel rival-leverage loyalty decay —

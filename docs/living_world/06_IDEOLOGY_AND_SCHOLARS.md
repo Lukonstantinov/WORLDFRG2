@@ -1,6 +1,44 @@
 # 06 · Ideology and scholars
 
-**Status:** NOT STARTED · **Depends on:** 02, 04, 05 · **Next:** 07
+**Status:** DONE (2026-09-26) — 06.1-06.7 all shipped · **Depends on:** 02, 04, 05 · **Next:** 07
+
+**Shipped, in one session.** `sim/campaign/tick/ideology.rs`: four axes
+(Authority/Tradition/Openness/Economy), 16 named traits, 7 canonical named
+ideologies (enough to give every one of this doc's own worked demand
+examples a real holder) plus custom-ideology minting when a scholar's
+position sits far from all of them; per-city meters (nobles/commons/
+government, the government one a genuine prestige-weighted read of seated
+`Official`s' own `Individual.ideology`); scholar life stages (spawn → study
+→ teach/return/patron → politics/exile) using `decide()`'s 75% rule;
+schools; meter drift including a real "a met demand entrenches its
+ideology faster than an unmet one" mechanic. Institutions (tutor → school →
+library → academy → university) are NOT a new field — `tracks.rs`'s own
+`TRACK_IDEOLOGICAL` building names (shrine/school/library/academy/
+university at levels 1-5) already are this ladder, built for this row in
+advance; a founded `School` is the scholar-level record, the building name
+is the city-level one.
+
+**Dosed at zero, real hooks:** `IDEOLOGY_GOV_HOOK_DOSE` (row 04's
+`gov_position` would track this row's live `ideology_gov` Economy axis
+instead of its one-time culture seed) and `IDEOLOGY_UNREST_DOSE` (an unmet
+demand would raise `update_unrest`'s target). Both proven true no-ops at
+0.0.
+
+**Testing caveat, stated plainly:** `tick::tests` fixtures carry no active
+worldgen culture map, so `cultures::kit_of_people`/the kit path in
+`culture_leisure_prefs`-style functions cannot be exercised through a bare
+culture-name string in a unit test — only through a registered `Creole`
+entry (whose `kit_a` resolves locally) or the trait-fallback path. Gates:
+`ideology_positions_are_bounded`, `study_pulls_toward_the_teacher`,
+`scholars_prefer_centres_but_appear_anywhere`,
+`a_school_names_a_custom_ideology`, `met_demands_spread_the_ideology`,
+`ideology_gov_hook_is_a_noop_at_zero`, `ideology_unrest_hook_is_a_noop_at_
+zero`, `ideology_mechanism_moves_no_wealth_or_production`. `tick::tests`
+(390/390) and `npx tsc --noEmit`/`npx vite build` (191 modules) both clean.
+
+**UI:** a compact "Ideology" section in the existing Government panel
+(meters + resident scholars/schools), not the doc's own full "Schools &
+Great Minds" world window — queued as Q06.3.
 
 ## Goal
 
@@ -147,4 +185,13 @@ traits and founders.
 - Q06.1 — Ideological leagues between like-minded cities (a realm formation path,
   row 09).
 - Q06.2 — Written works as objects that travel (a treatise read in another city),
-  waits on row 07's masterwork records.
+  waits on row 07's masterwork records (now real — see 07's own doc).
+- Q06.3 — The world "Schools & Great Minds" window (lineages as a tree,
+  scholar travel minimap, ideologies ranked by adherents) — the backend
+  queries (`campaign_get_ideologies`/`campaign_get_schools`) already serve
+  this; only the window itself waits on session budget.
+- Q06.4 — Raise `IDEOLOGY_GOV_HOOK_DOSE`/`IDEOLOGY_UNREST_DOSE` above zero,
+  each its own dose walk against `econ_` + the multi-seed inheritance gate.
+- Q06.5 — The doc's full scholar relationship graph (rival/patron/student
+  lists) — narrowed this session to the one edge (`teacher_id`) that
+  actually drives a mechanic.

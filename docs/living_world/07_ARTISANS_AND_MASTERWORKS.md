@@ -1,6 +1,37 @@
 # 07 · Artisans and masterworks
 
-**Status:** NOT STARTED · **Depends on:** 02, 03 · **Next:** 08
+**Status:** DONE (2026-09-26) — 07.1-07.7 all shipped · **Depends on:** 02, 03 · **Next:** 08
+
+**Shipped, in one session.** `sim/campaign/tick/masterworks.rs`: a real
+`Masterwork` record (title/kind/maker/year/owner/material/location/
+condition/prestige/provenance), created either by a guild whose (now
+CULTURALLY capped — `cultural_quality_cap_e`, blended into `run_craft_
+guilds`' own cap at `CULTURAL_QUALITY_CAP_DOSE`) quality clears
+`MASTERPIECE_QUALITY` at ideological level ≥ 3, or by a notable
+`ROLE_ARTISAN` individual's talent alone, no ceiling. `loot_masterworks(hub,
+to_hub)` is real and tested directly (row 09's sacks are the eventual
+caller — and DO call it, see row 09's own entry, closing that loop this
+same session). Theft (`maybe_steal_masterwork`) is a real yearly house
+event resisted by the target city's own guild secrecy. Invitations
+(`update_artisan_lives`) use `decide()`'s 75% rule for commission/relocate/
+stay, reusing the exact "return home in the same call" pattern the gate
+demands.
+
+**Dosed at zero:** `MASTERWORK_DEV_BONUS_DOSE` (a masterwork's bounded
+development-track bonus) and `MASTERWORK_MARKET_DOSE` (house purchases —
+07.4's real wealth-moving market is NOT built this session, only its dose
+constant and cap; see Queue). Both proven true no-ops.
+
+Gates: `cultural_cap_is_a_noop_at_zero`, `guilds_need_culture_for_
+masterpieces`, `talent_needs_no_threshold`, `masterwork_prestige_is_
+bounded`, `masterwork_purchases_are_noops_at_zero`, `masterwork_dev_bonus_
+is_a_noop_at_zero`, `provenance_records_every_move`, `commissioned_
+artisans_return_home`. `tick::tests` (390/390), `npx tsc --noEmit`/`npx
+vite build` (191 modules) both clean.
+
+**UI:** a compact "Gallery" section in the Government panel (city
+masterworks with maker/condition/provenance on hover) — not the doc's own
+dedicated City Gallery / House Dossier tab / world "Great Works" list.
 
 ## Goal
 
@@ -135,5 +166,18 @@ Serious and funny, geography-checked (row 02 lint):
 | 07.7 | Galleries UI; end of row: dose the market; `tick::tests` + `econ_` | SCOREBOARD row |
 
 ## Queue
-- Q07.1 — Masterworks as diplomatic gifts between cities (waits on row 09).
+- Q07.1 — Masterworks as diplomatic gifts between cities (waits on row 09's
+  full realm/diplomacy machinery — row 09 shipped hordes/barbarians only
+  this session, not realm-to-realm relations).
 - Q07.2 — Forgeries (a rare event), waits on 07.4 being live.
+- Q07.3 — Real house purchases (07.4's actual market — money moving between
+  a buyer house and a seller city/house, capped per house per year) — the
+  dose constant and cap exist, the transfer mechanism does not yet.
+- Q07.4 — Artisan life-event templates (the doc's own "a flavour" list) —
+  needs authoring in row 02's `EVENT_TEMPLATES`, a content pass not a
+  mechanism.
+- Q07.5 — Dedicated Galleries UI (City Gallery, House Dossier tab, world
+  "Great Works" list) — `campaign_get_city_gallery`/`campaign_get_house_
+  gallery` already serve the data; only the windows wait on session budget.
+- Q07.6 — Per-artisan "kind" (sculptor/painter/…) as a real trait rather than
+  a hashed pick at creation time, weighted by row 08's leisure families.

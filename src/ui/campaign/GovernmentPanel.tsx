@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetGovernment } from "@bridge";
-import type { GovernmentBrief } from "@types";
+import { campaignGetGovernment, campaignGetCityIdeology, campaignGetCityGallery, campaignGetVenues } from "@bridge";
+import type { GovernmentBrief, CityIdeologyBrief, MasterworkBrief, VenueBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { Panel, PanelHeader, PanelBody, Section, Card, Divider, StatGrid, Stat, Badge, Meter, ColHead, DataRow, EmptyNote, FootNote } from "@ui/kit";
 
@@ -27,6 +27,9 @@ export function GovernmentPanel() {
   const snapshot = useCampaignStore((s) => s.snapshot);
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.government);
   const [brief, setBrief] = useState<GovernmentBrief | null>(null);
+  const [ideology, setIdeology] = useState<CityIdeologyBrief | null>(null);
+  const [gallery, setGallery] = useState<MasterworkBrief[]>([]);
+  const [venues, setVenues] = useState<VenueBrief[]>([]);
   const tick = snapshot?.clock?.tick ?? 0;
   const year = Math.floor(tick / 365);
 
@@ -34,6 +37,9 @@ export function GovernmentPanel() {
     let alive = true;
     if (!open || hubId == null) { setBrief(null); return; }
     campaignGetGovernment(hubId).then((b) => { if (alive) setBrief(b); }).catch(() => { if (alive) setBrief(null); });
+    campaignGetCityIdeology(hubId).then((b) => { if (alive) setIdeology(b); }).catch(() => { if (alive) setIdeology(null); });
+    campaignGetCityGallery(hubId).then((g) => { if (alive) setGallery(g); }).catch(() => { if (alive) setGallery([]); });
+    campaignGetVenues(hubId).then((v) => { if (alive) setVenues(v); }).catch(() => { if (alive) setVenues([]); });
     return () => { alive = false; };
   }, [open, hubId, year]);
 
@@ -118,6 +124,72 @@ export function GovernmentPanel() {
                 </DataRow>
               ))}
             </Section>
+
+            {ideology && (
+              <>
+                <Divider />
+                <Section title="Ideology — living_world/06">
+                  {ideology.dominant_id >= 0 && (
+                    <FootNote>Prevailing doctrine: <b>{ideology.dominant_name}</b></FootNote>
+                  )}
+                  {["Authority", "Tradition", "Openness", "Economy"].map((axis, i) => (
+                    <div key={axis} style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                      <span style={{ fontSize: 11, opacity: 0.7, width: 66 }}>{axis}</span>
+                      <Meter value={ideology.government[i] + 5} max={10} color="#7bb0d8" />
+                      <span style={{ fontSize: 10, opacity: 0.6 }}>{ideology.government[i].toFixed(1)}</span>
+                    </div>
+                  ))}
+                  {ideology.scholars.length === 0 && ideology.schools.length === 0 && (
+                    <FootNote>No resident scholars.</FootNote>
+                  )}
+                  {ideology.scholars.map((s) => (
+                    <DataRow key={s.individual_id} cols="1fr 0.6fr" zebra>
+                      <span>{s.name}</span>
+                      <span style={{ fontSize: 11, opacity: 0.7, textAlign: "right" }}>
+                        {["", "studying", "teaching", "returned home", "under a patron", "in politics", "in exile"][s.stage] ?? ""}
+                      </span>
+                    </DataRow>
+                  ))}
+                  {ideology.schools.length > 0 && (
+                    <FootNote>{ideology.schools.length} school{ideology.schools.length === 1 ? "" : "s"} founded here.</FootNote>
+                  )}
+                </Section>
+              </>
+            )}
+
+            {venues.length > 0 && (
+              <>
+                <Divider />
+                <Section title="Venues — living_world/08">
+                  {venues.map((v) => (
+                    <DataRow key={v.id} cols="1fr 0.6fr 0.5fr" zebra>
+                      <span>{v.name} <FootNote>(tier {v.tier} {v.leisure_type_name}{v.international_host ? " · international" : ""})</FootNote></span>
+                      <span style={{ fontSize: 11, opacity: 0.7 }}>{v.games_held} games</span>
+                      <Badge tone={v.condition_name === "thriving" ? "good" : v.condition_name === "declining" ? "warn" : "bad"}>
+                        {v.condition_name}
+                      </Badge>
+                    </DataRow>
+                  ))}
+                </Section>
+              </>
+            )}
+
+            {gallery.length > 0 && (
+              <>
+                <Divider />
+                <Section title="Gallery — living_world/07">
+                  {gallery.map((m) => (
+                    <DataRow key={m.id} cols="1fr 0.5fr 0.5fr" zebra>
+                      <span title={m.provenance.map(([, t]) => t).join(" · ")}>{m.title}</span>
+                      <span style={{ fontSize: 11, opacity: 0.7 }}>{m.maker_name}</span>
+                      <Badge tone={m.condition_name === "intact" ? "good" : m.condition_name === "damaged" ? "warn" : "bad"}>
+                        {m.condition_name}
+                      </Badge>
+                    </DataRow>
+                  ))}
+                </Section>
+              </>
+            )}
           </>
         )}
       </PanelBody>

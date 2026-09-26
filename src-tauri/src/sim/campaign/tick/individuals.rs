@@ -45,6 +45,15 @@ pub(crate) mod living_world_salts {
     pub const DECISION_ROLL: u64 = 0x9E41;
     /// `03_DEVELOPMENT_TRACKS.md` 03.1 — the one-time seed roll for `TickHub.dev`.
     pub const DEV_SEED: u64 = 0x9E42;
+    /// `06_IDEOLOGY_AND_SCHOLARS.md` — row 06's own salts.
+    pub const SCHOLAR_SPAWN: u64 = 0x9E43;
+    pub const SCHOLAR_NAME: u64 = 0x9E44;
+    pub const SCHOLAR_CAREER: u64 = 0x9E45;
+    pub const SCHOLAR_STUDY_TARGET: u64 = 0x9E46;
+    pub const SCHOLAR_EXILE_TARGET: u64 = 0x9E47;
+    pub const IDEOLOGY_EVENT: u64 = 0x9E48;
+    pub const IDEOLOGY_EVENT_SIGN: u64 = 0x9E49;
+    pub const SCHOOL_CUSTOM_NAME: u64 = 0x9E4A;
 }
 use living_world_salts as salts;
 
@@ -377,6 +386,27 @@ pub struct Individual {
     pub modifiers: Vec<Modifier>,
     /// Row 06 fills; zero until then (forward hook).
     pub ideology: [f32; 4],
+    /// Row 06 · whether `ideology` has been seeded yet (the `[0.0;4]`
+    /// sentinel a fresh debut carries is a real, if unlikely, position too,
+    /// so seeding needs its own explicit flag rather than reading the zero
+    /// vector as "unseeded").
+    #[serde(default)]
+    pub ideology_seeded: bool,
+    /// Row 06 · a scholar's life stage (`STAGE_*`), meaningless (left at 0)
+    /// for anyone who never rolled `ROLE_SCHOLAR`/`ROLE_PHILOSOPHER`/
+    /// `ROLE_IDEOLOGUE`.
+    #[serde(default)]
+    pub scholar_stage: u8,
+    /// Row 06 · the `Individual.id` of the scholar this one studied under,
+    /// or −1. Drives "study pulls toward the teacher" and is the lineage
+    /// edge a school's own record walks.
+    #[serde(default = "neg_one_i32")]
+    pub teacher_id: i32,
+    /// Row 07 · a notable artisan's talent (0..1), rolled once at debut for
+    /// a `ROLE_ARTISAN` individual, 0.0 (meaningless) for anyone else — the
+    /// ceiling-ignoring "talent alone" mechanic the doc names.
+    #[serde(default)]
+    pub talent: f32,
     pub face_seed: u32,
     pub features: u32,
     pub relations: Vec<(u8, u32)>,
@@ -603,6 +633,10 @@ impl CampaignSim {
                 traits: Vec::new(),
                 modifiers: Vec::new(),
                 ideology: [0.0; 4],
+                ideology_seeded: false,
+                scholar_stage: 0,
+                teacher_id: -1,
+                talent: 0.0,
                 face_seed: hash01(self.seed, f.hub as u64 ^ (i as u64).wrapping_mul(7), salts::DEBUT_FACE).to_bits(),
                 features: 0,
                 relations: Vec::new(),
@@ -675,6 +709,10 @@ impl CampaignSim {
             traits,
             modifiers: Vec::new(),
             ideology: [0.0; 4],
+            ideology_seeded: false,
+            scholar_stage: 0,
+            teacher_id: -1,
+            talent: 0.0,
             face_seed: hash01(self.seed, salt, salts::DEBUT_FACE).to_bits(),
             features: 0,
             relations: Vec::new(),

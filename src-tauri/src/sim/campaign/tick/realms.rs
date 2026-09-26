@@ -725,6 +725,19 @@ impl CampaignSim {
 
             let legit = self.realms[ri].legitimacy.clamp(0.0, 1.0);
             target += REALM_LEGITIMACY_TO_COHESION * (legit - REALM_FOUNDING_LEGITIMACY);
+            // 09 Part A · "cohesion from openness" — a real, dosed read of
+            // the capital's own row-05 acceptance tiers (0.0 ships as a true
+            // no-op; see `hordes.rs`'s own doc comment on why the other six
+            // Part-A benefits are queued, not built, this session).
+            if REALM_OPENNESS_COHESION_DOSE > 0.0 {
+                if let Some(cap_hub) = self.hubs.get(capital) {
+                    if !cap_hub.culture_relations.is_empty() {
+                        let mean_tier = cap_hub.culture_relations.iter().map(|r| r.tier as f32).sum::<f32>()
+                            / cap_hub.culture_relations.len() as f32;
+                        target += realm_openness_cohesion_bonus_e(mean_tier, REALM_OPENNESS_COHESION_DOSE);
+                    }
+                }
+            }
             let target = target.clamp(0.05, 1.0);
 
             let cur = self.realms[ri].cohesion;

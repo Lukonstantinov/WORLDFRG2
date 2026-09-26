@@ -298,6 +298,9 @@ interface UIStore {
   showBankIcons: boolean;
   /** Phase 6 · Plagues & Epidemics panel open. */
   showPlagues: boolean;
+  /** living_world/09_REALMS_WAR_AND_BARBARIANS.md Part D/F · Barbarian
+   *  Tribes panel open. */
+  showHordes: boolean;
   /** DLC 3.5 §3.4 · the War Council panel — active wars, the concluded-war log
    *  and aggregate war statistics, all in one dedicated window. */
   showWar: boolean;
@@ -451,6 +454,7 @@ interface UIStore {
   setSelectedBankIdx: (i: number | null) => void;
   setShowBankIcons: (v: boolean) => void;
   setShowPlagues: (v: boolean) => void;
+  setShowHordes: (v: boolean) => void;
   setShowWar: (v: boolean) => void;
   setShowStates: (v: boolean) => void;
   setShowImmigration: (v: boolean) => void;
@@ -610,6 +614,7 @@ export const useUIStore = create<UIStore>((set) => ({
   selectedBankIdx: null,
   showBankIcons: false,
   showPlagues: false,
+  showHordes: false,
   showWar: false,
   showStates: false,
   showImmigration: false,
@@ -807,6 +812,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setSelectedBankIdx: (i) => set({ selectedBankIdx: i }),
   setShowBankIcons: (v) => set({ showBankIcons: v }),
   setShowPlagues: (v) => set({ showPlagues: v }),
+  setShowHordes: (v) => set({ showHordes: v }),
   setShowWar: (v) => set({ showWar: v }),
   setShowStates: (v) => set({ showStates: v }),
   setShowImmigration: (v) => set({ showImmigration: v }),

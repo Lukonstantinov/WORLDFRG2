@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CoarseRoute, BankBrief, BumpChart, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinCatalogue, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, IndividualBrief, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport, GovernmentBrief, EdictBrief, CultureAcceptanceBrief } from "@types";
+import type { CoarseRoute, BankBrief, BumpChart, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinCatalogue, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, IndividualBrief, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport, GovernmentBrief, EdictBrief, CultureAcceptanceBrief, CityIdeologyBrief, IdeologyBrief, SchoolBrief, MasterworkBrief, VenueBrief, HordeBrief } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -448,6 +448,49 @@ export async function campaignGetEdicts(hub: number): Promise<EdictBrief[]> {
  *  hub, or one the yearly pass hasn't reached yet. */
 export async function campaignGetCultureAcceptance(hub: number): Promise<CultureAcceptanceBrief[]> {
   return invoke("campaign_get_culture_acceptance", { hub });
+}
+
+// ── living_world/06_IDEOLOGY_AND_SCHOLARS.md — ideology + scholars ─────────
+
+/** One city's three ideology meters + resident scholars/schools. */
+export async function campaignGetCityIdeology(hub: number): Promise<CityIdeologyBrief> {
+  return invoke("campaign_get_city_ideology", { hub });
+}
+
+/** The world's named-ideology roster, ranked by adherents. */
+export async function campaignGetIdeologies(): Promise<IdeologyBrief[]> {
+  return invoke("campaign_get_ideologies", {});
+}
+
+/** The world's school roster. */
+export async function campaignGetSchools(): Promise<SchoolBrief[]> {
+  return invoke("campaign_get_schools", {});
+}
+
+// ── living_world/07_ARTISANS_AND_MASTERWORKS.md — galleries ────────────────
+
+/** A city's own gallery — masterworks it currently holds and owns. */
+export async function campaignGetCityGallery(hub: number): Promise<MasterworkBrief[]> {
+  return invoke("campaign_get_city_gallery", { hub });
+}
+
+/** One house's own gallery. */
+export async function campaignGetHouseGallery(idx: number): Promise<MasterworkBrief[]> {
+  return invoke("campaign_get_house_gallery", { idx });
+}
+
+// ── living_world/08_LEISURE_AND_GAMES.md — venues ───────────────────────────
+
+/** A city's own venues. */
+export async function campaignGetVenues(hub: number): Promise<VenueBrief[]> {
+  return invoke("campaign_get_venues", { hub });
+}
+
+// ── living_world/09_REALMS_WAR_AND_BARBARIANS.md Part D — hordes ───────────
+
+/** The world's horde roster. */
+export async function campaignGetHordes(): Promise<HordeBrief[]> {
+  return invoke("campaign_get_hordes", {});
 }
 
 /** This house's kin roster (Phase 2.1) — empty for a guild or a house whose roster
