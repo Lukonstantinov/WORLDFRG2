@@ -3605,15 +3605,28 @@
         s.advance(TICKS_PER_YEAR * 5);
 
         assert!(!s.issues.is_empty(), "at least one issue was struck over 5 years");
+        // Tolerance is RELATIVE, not a fixed 1e-3 absolute — 1,825 days of
+        // per-hub f32 accumulation (each `add_coin` call rounds) drifts a
+        // small, bounded fraction of a percent regardless of the exact
+        // summation order production feeds it in, and the exact order
+        // shifted when `dev_production.rs` (03.7) started blending a
+        // per-hub tech factor into daily output. Measured: 35.57376 held
+        // against 35.572525 circulating (0.0035% relative) — three orders
+        // of magnitude below what a real leak would look like, and the
+        // same shape of drift `dev_norm_scale`'s own lazy f32 division
+        // would introduce. A genuine accounting bug (a coin created or
+        // destroyed outside `add_coin`) would show as a gap that GROWS with
+        // circulation, not a fixed tiny relative slop.
         for iss in &s.issues {
             let held: f32 = s.purses.iter()
                 .flat_map(|p| p.coins.iter())
                 .filter(|(id, _)| *id == iss.id)
                 .map(|(_, amt)| *amt)
                 .sum();
-            assert!((held - iss.circulating).abs() < 1e-3,
+            let tol = iss.circulating.abs() * 1e-4 + 1e-3;
+            assert!((held - iss.circulating).abs() < tol,
                 "issue {} ({}): purses hold {held}, circulating says {}", iss.id, iss.cognomen, iss.circulating);
-            assert!((iss.struck - iss.circulating).abs() < 1e-3,
+            assert!((iss.struck - iss.circulating).abs() < tol,
                 "issue {} ({}): no sink exists yet, struck must equal circulating", iss.id, iss.cognomen);
         }
         // Every coin the ledger has ever struck sits in exactly one of the
@@ -7774,9 +7787,18 @@
              is falling back to direct hauls it should not need to",
             dosed.diag_why_leg_range_bind, settled_from);
         // The volume claim. Staging costs time, so some fall is expected and
-        // healthy; a collapse is the failure this guards.
+        // healthy; a collapse is the failure this guards. Floor widened from
+        // 0.6 to 0.5 once `dev_production.rs` (03.7) started blending each
+        // hub's own development into daily output: a more developed hub
+        // trades LESS with distant partners (it is more self-sufficient),
+        // which compounds with staging's own time cost on the SAME long
+        // lanes this fixture is built to exercise. Measured 0.57x at
+        // `DEV_PRODUCTION_DOSE = 0.2` — real, expected, and explicitly
+        // accepted (maintainer: "if trade collapses that's okay as it was
+        // in real life") — never a bare removal of the floor, which would
+        // stop this gate from ever catching a genuine collapse again.
         let ratio = dosed.diag_volume / loose.diag_volume.max(1e-6);
-        assert!(ratio > 0.6,
+        assert!(ratio > 0.5,
             "staged trade volume must not collapse: {:.0} against {:.0} loose ({:.2}x)",
             dosed.diag_volume, loose.diag_volume, ratio);
     }
@@ -11010,13 +11032,14 @@
 
     // ── living_world/03_DEVELOPMENT_TRACKS.md, slice 03.7 (dose step 1) ────────
 
-    /// 03.7 · at the shipped `DEV_PRODUCTION_DOSE = 0.0`, `dev_blended_tech`
-    /// must return the plain global `tech_factor` for EVERY hub, whatever
-    /// their own `dev` reads — a true no-op, and `dev_norm_scale` must stay
-    /// untouched (proving the calibration branch was never even entered).
+    /// 03.7 · at `dose = 0.0`, `dev_blended_tech` must return the plain
+    /// global `tech_factor` for EVERY hub, whatever their own `dev` reads —
+    /// a true no-op, and `dev_norm_scale` must stay untouched (proving the
+    /// calibration branch was never even entered). Tests the mechanism at
+    /// dose 0 directly, independent of whatever `DEV_PRODUCTION_DOSE` is
+    /// currently shipped at.
     #[test]
     fn dev_production_dose_zero_is_a_noop() {
-        assert_eq!(DEV_PRODUCTION_DOSE, 0.0, "this slice must ship with the dose unraised");
         let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
         let mut low = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
         let mut high = hub(1, 1.0, 0.0, 1000.0, vec![10.0], 0);
@@ -11025,9 +11048,32 @@
         let mut s = sim(vec![low, high], goods);
         s.tech_factor = 0.85;
         let before_scale = s.dev_norm_scale;
-        let by_hub = s.dev_blended_tech();
+        let by_hub = s.dev_blended_tech(0.0);
         assert_eq!(by_hub, vec![0.85, 0.85], "every hub must read the plain global tech_factor at dose 0");
         assert_eq!(s.dev_norm_scale, before_scale, "the calibration branch must never run at dose 0");
+    }
+
+    /// 03.7 · at a positive dose, a hub's OWN `dev` must pull its effective
+    /// tech away from the plain global `tech_factor`, toward its own
+    /// relative development — the mechanism actually blending, not just
+    /// being provably inert at zero.
+    #[test]
+    fn dev_production_dose_above_zero_blends_by_hub() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut low = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut high = hub(1, 1.0, 0.0, 1000.0, vec![10.0], 0);
+        low.dev = 0.5;
+        high.dev = 2.0;
+        let mut s = sim(vec![low, high], goods);
+        s.tech_factor = 0.85;
+        let by_hub = s.dev_blended_tech(1.0);
+        assert!(by_hub[0] < by_hub[1],
+            "the hub with lower dev must read a lower effective tech than the one with higher dev");
+        assert!(s.dev_norm_scale > 0.0, "the calibration branch must run once dose is positive");
+        // population-weighted mean of dev (0.5, 2.0 at equal-ish weight) normalises
+        // back onto tech_factor, so neither hub's blended value should be wildly
+        // outside a sane band around the old global value.
+        assert!(by_hub[0] > 0.0 && by_hub[1] > 0.0, "effective tech must stay positive");
     }
 
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────

@@ -10027,7 +10027,7 @@ impl CampaignSim {
             //    readers (estates, briefs, "strongest good").
             // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE
             // = 0.0 (every entry reads self.tech_factor, unchanged from before).
-            let tech_by_hub = self.dev_blended_tech();
+            let tech_by_hub = self.dev_blended_tech(DEV_PRODUCTION_DOSE);
             // Extracted (non-recipe) FOOD goods — for the subsistence-farming floor.
             let food_gs: Vec<usize> = (0..ng)
                 .filter(|&g| self.goods[g].food && self.goods[g].inputs.is_empty())
