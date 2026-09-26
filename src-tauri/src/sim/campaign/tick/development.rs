@@ -1,27 +1,36 @@
-//! development — `docs/living_world/03_DEVELOPMENT_TRACKS.md`, slice 03.1.
+//! development — `docs/living_world/03_DEVELOPMENT_TRACKS.md`, slices
+//! 03.1-03.2.
 //!
 //! A per-city development factor: grows from real trade volume, partner
-//! reach and welfare, decays from famine/starvation/isolation, and diffuses
-//! from trade partners (pulling only UP, never down — a rich neighbour
-//! never impoverishes a backwater's own knowledge). Computed yearly by
-//! `update_development`, called from `disease.rs`'s yearly block right
-//! before `record_city_annals` so this year's value is what the annal
-//! snapshots.
+//! reach and welfare (scaled by STABILITY, 03.2), decays from starvation/
+//! isolation (unscaled — a collapsing city loses ground regardless of how
+//! calm it otherwise is), and diffuses from trade partners (pulling only UP,
+//! never down — a rich neighbour never impoverishes a backwater's own
+//! knowledge; also unscaled by stability, per the design's own formula,
+//! since a shaken city can still absorb an idea from a calm neighbour).
+//! Computed yearly by `update_development`, called from `disease.rs`'s
+//! yearly block right before `record_city_annals` so this year's value is
+//! what the annal snapshots.
 //!
 //! **This slice is read by nothing.** `TickHub.dev`/`dev_breakdown` are
 //! written and nothing else in the tick consults them — `DEV_PRODUCTION_
 //! DOSE` (03.7) is what will eventually blend a city's own factor into its
-//! production in place of the global `tech_factor`. Until then this is pure
-//! bookkeeping, which is exactly why `sim_fingerprint` (folding only
-//! `stock`/`price`/`population`/`treasury`/`export_earn`/`import_spend`) is
-//! provably untouched by it — no dose flag is needed for a mechanism nothing
-//! reads yet.
+//! production in place of the global `tech_factor`, and the four tracks
+//! (03.3) are what will eventually consume `stability_of` for point gains
+//! and losses. Until then this is pure bookkeeping, which is exactly why
+//! `sim_fingerprint` (folding only `stock`/`price`/`population`/`treasury`/
+//! `export_earn`/`import_spend`) is provably untouched by it — no dose flag
+//! is needed for a mechanism nothing reads yet.
 //!
 //! **Forward hooks read neutral until their row exists** (00_INDEX rule):
 //! the "scholars/schools/universities" and "cultural acceptance" sources the
 //! design names both need data rows 05/06 don't yet supply, so their terms
 //! are simply absent from `DevBreakdown` rather than wired to an invented
 //! stand-in — the doc's own table marks them "0 contribution until then".
+//! `stability_of`'s own two inputs — legitimacy (04) and deadlock (04) —
+//! read the same way: `NEUTRAL_LEGITIMACY`/`NEUTRAL_DEADLOCK` stand in until
+//! row 04 gives a city (as opposed to a realm — `Realm.legitimacy` already
+//! exists and is a DIFFERENT, realm-scale quantity) its own real reading.
 use super::*;
 use super::individuals::living_world_salts as salts;
 
@@ -71,7 +80,53 @@ const DEV_DECAY_ISOLATION: f32 = 0.01;
 /// would make two great cities indistinguishable at the top).
 const DEV_SOFT_CEILING: f32 = 4.0;
 
+// ── 03.2 · stability, "one formula, used everywhere" ────────────────────
+/// Slice 03.2's own bounds: 0.2 (chaos) to 1.2 (golden age), per the design
+/// doc verbatim.
+pub(crate) const STABILITY_MIN: f32 = 0.2;
+pub(crate) const STABILITY_MAX: f32 = 1.2;
+const STABILITY_BASE: f32 = 1.0;
+/// A city with no realm reads a comfortable, self-governing default rather
+/// than either extreme — `stability_is_bounded`'s own fixture (no realm, no
+/// war, no damage, no unrest) should read as an ordinary, unremarkable town.
+const NEUTRAL_LEGITIMACY: f32 = 0.75;
+/// Row 04 has no deadlock mechanism yet (edicts/votes); a neutral reading is
+/// "no deadlock", i.e. zero cost — the forward-hook convention (00_INDEX).
+const NEUTRAL_DEADLOCK: f32 = 0.0;
+const STABILITY_LEGIT_WEIGHT: f32 = 0.3;
+const STABILITY_UNREST_WEIGHT: f32 = 0.5;
+const STABILITY_WAR_PENALTY: f32 = 0.15;
+const STABILITY_DAMAGE_WEIGHT: f32 = 0.3;
+const STABILITY_DEADLOCK_WEIGHT: f32 = 0.2;
+
+/// The one stability formula "used everywhere" (design doc's own words):
+/// legitimacy, unrest, war, recent structural damage and deadlock, blended
+/// from a base of 1.0 and clamped to `[STABILITY_MIN, STABILITY_MAX]`. A
+/// PURE function (never reads `self` directly) so 03.3's track-point math and
+/// 03.4's building-cost math can call it identically without duplicating the
+/// formula — the whole point of "one formula".
+pub(crate) fn stability_of(legitimacy: f32, unrest: f32, at_war: bool, damage: f32, deadlock: f32) -> f32 {
+    let mut s = STABILITY_BASE;
+    s += (legitimacy - NEUTRAL_LEGITIMACY) * STABILITY_LEGIT_WEIGHT;
+    s -= unrest.clamp(0.0, 1.0) * STABILITY_UNREST_WEIGHT;
+    if at_war { s -= STABILITY_WAR_PENALTY; }
+    s -= damage.clamp(0.0, 1.0) * STABILITY_DAMAGE_WEIGHT;
+    s -= deadlock.clamp(0.0, 1.0) * STABILITY_DEADLOCK_WEIGHT;
+    s.clamp(STABILITY_MIN, STABILITY_MAX)
+}
+
 impl CampaignSim {
+    /// `stability_of` fed this hub's real, currently-available inputs.
+    /// `legitimacy`/`deadlock` read their neutral constants (00_INDEX forward
+    /// hooks) until row 04 gives a CITY (as opposed to a realm) its own real
+    /// values for either.
+    pub(crate) fn stability_at(&self, h: usize) -> f32 {
+        let hub = &self.hubs[h];
+        let unrest = hub.society.unrest;
+        let at_war = hub.war_with >= 0;
+        stability_of(NEUTRAL_LEGITIMACY, unrest, at_war, hub.damage, NEUTRAL_DEADLOCK)
+    }
+
     /// One year of `TickHub.dev` for every settled (non-estate) hub. Reads
     /// `self.neighbors` (already built by `rebuild_neighbors`) for partner
     /// reach and diffusion, and each hub's own `trade_last_year`/
@@ -95,11 +150,15 @@ impl CampaignSim {
         for h in 0..n {
             if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
             let neighbours = self.neighbors.get(h).map(|v| v.as_slice()).unwrap_or(&[]);
-            let trade_term = (1.0 + self.hubs[h].trade_last_year.max(0.0) / DEV_TRADE_REF).ln() * DEV_TRADE_WEIGHT;
+            // 03.2 · the design's own formula scales the SOURCE terms by
+            // stability (`Σ source_i × modifier_i × stability`); diffusion and
+            // decay sit OUTSIDE that product and are never stability-scaled.
+            let stability = self.stability_at(h);
+            let trade_term = (1.0 + self.hubs[h].trade_last_year.max(0.0) / DEV_TRADE_REF).ln() * DEV_TRADE_WEIGHT * stability;
             let partner_frac = (neighbours.len() as f32 / NEIGHBOR_K as f32).min(1.0);
-            let partner_term = partner_frac * DEV_PARTNER_WEIGHT;
+            let partner_term = partner_frac * DEV_PARTNER_WEIGHT * stability;
             let wr = self.hubs[h].welfare_ratio;
-            let welfare_term = if wr > 0.0 { (wr / 2.0 - 1.0).clamp(-1.0, 1.0) * DEV_WELFARE_WEIGHT } else { 0.0 };
+            let welfare_term = if wr > 0.0 { (wr / 2.0 - 1.0).clamp(-1.0, 1.0) * DEV_WELFARE_WEIGHT * stability } else { 0.0 };
             // Diffusion — only ever pulls UP, toward the best-connected
             // partner's own dev, spread thin across however many partners
             // this hub has (an isolated hub's one link matters more).

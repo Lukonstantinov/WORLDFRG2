@@ -11415,6 +11415,7 @@ mod foreign_hand;
 mod individuals;
 mod life_events;
 mod development;
+pub(crate) use development::{stability_of, STABILITY_MIN, STABILITY_MAX};
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;

@@ -10784,6 +10784,41 @@
         let _ = without_dev.hubs.len(); // kept unrun, for the comparison above
     }
 
+    /// 03.2 · `stability_of` never leaves `[STABILITY_MIN, STABILITY_MAX]`
+    /// (0.2..1.2, the design doc's own bounds), across the full range of every
+    /// input including well past what a real city would ever show (unrest/
+    /// damage/deadlock > 1, legitimacy < 0) — the clamp must hold even when a
+    /// future row's own math feeds it something out of its normal band.
+    #[test]
+    fn stability_is_bounded() {
+        let legit_vals = [-1.0, 0.0, 0.5, 0.75, 1.0, 2.0];
+        let unrest_vals = [-1.0, 0.0, 0.3, 0.7, 1.0, 5.0];
+        let damage_vals = [0.0, 0.5, 1.0, 3.0];
+        let deadlock_vals = [0.0, 0.5, 1.0, 2.0];
+        for &legit in &legit_vals {
+            for &unrest in &unrest_vals {
+                for &war in &[false, true] {
+                    for &damage in &damage_vals {
+                        for &deadlock in &deadlock_vals {
+                            let s = stability_of(legit, unrest, war, damage, deadlock);
+                            assert!(s >= STABILITY_MIN - 1e-5 && s <= STABILITY_MAX + 1e-5,
+                                "stability_of({legit}, {unrest}, {war}, {damage}, {deadlock}) = {s}, out of [{STABILITY_MIN}, {STABILITY_MAX}]");
+                        }
+                    }
+                }
+            }
+        }
+        // A calm, unremarkable, at-peace, undamaged city with the neutral
+        // legitimacy/deadlock reading should sit near the base 1.0, not at
+        // either extreme — the golden-age/chaos bounds are for the tails.
+        let ordinary = stability_of(0.75, 0.0, false, 0.0, 0.0);
+        assert!((ordinary - 1.0).abs() < 1e-4, "an ordinary city should read stability ≈ 1.0, got {ordinary}");
+        // War, unrest and damage together must be strictly worse than any one alone.
+        let one = stability_of(0.75, 0.8, false, 0.0, 0.0);
+        let all = stability_of(0.75, 0.8, true, 0.8, 0.8);
+        assert!(all < one, "compounding troubles must lower stability further, got one={one} all={all}");
+    }
+
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────
 
     /// 04.1 · `seat_count_for` is a pure function: villages get 1-3 seats, larger

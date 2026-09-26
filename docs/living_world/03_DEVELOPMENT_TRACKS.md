@@ -178,7 +178,7 @@ Effects (each behind its own dose constant, 0.0 until the last slice):
 | Slice | Content | Gate | Status |
 |---|---|---|---|
 | 03.1 | `TickHub.dev`/`dev_breakdown`, sources (trade/partner reach/welfare)/decay (starvation/isolation)/diffusion (pulls only up, soft ceiling), `CityYear.dev`; **read by nothing** (`sim/campaign/tick/development.rs`) | `dev_factor_rises_with_trade`, `diffusion_only_pulls_up`, `development_pass_does_not_move_the_fingerprint` | **DONE** |
-| 03.2 | Stability formula | `stability_is_bounded` | NOT STARTED |
+| 03.2 | Stability formula: `stability_of` (pure — legitimacy/unrest/war/damage/deadlock, base 1.0, clamped 0.2..1.2); wired into 03.1's growth term (`Σ source × modifier × stability`, diffusion/decay left unscaled per the design's own formula shape) | `stability_is_bounded` | **DONE** |
 | 03.3 | Four tracks: points, thresholds, automatic levels, losses | `levels_rise_automatically`, `a_sack_costs_points` | NOT STARTED |
 | 03.4 | Buildings: availability, cost in real goods, construction, damage | `a_building_needs_its_level`, `construction_spends_real_stock` (at dose 0 construction is off) | NOT STARTED |
 | 03.5 | Culture development (derived), ideals, prestige, barbarian/admiration judgement (exposed for rows 05/09) | `culture_development_is_population_weighted` | NOT STARTED |
