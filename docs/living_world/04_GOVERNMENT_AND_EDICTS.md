@@ -127,6 +127,24 @@ exactly which of 04.5/04.9/04.14's remaining pieces are still open.
   doc's own richer "portraits grouped by bloc" layout. Verified by
   `npx tsc --noEmit` (clean) and `npx vite build` (clean, 189 modules).
 
+**Same session, continued — the Government tab inside the settlement window
+itself.** `HubPanel.tsx`'s existing "Government" tab (DLC 3 polis, driven by
+`HubDetail.government`) predates row 04 and never carried any of it —
+seats read only a plain name/status, with no path/suitability/allegiance,
+no debate, no edict catalogue. Its leader/council/regime/officials block is
+now REPLACED by a fetch of `campaignGetGovernment(hub)` (the same
+`GovernmentBrief` the floating window reads): the real form/legitimacy/
+points/lean header, the debate in progress if any, every seat with its
+real path/suitability/allegiance, edicts actually in force, and recent
+history. The tab's other sections — family influence, charters, fiscal
+policy (tariff/mint), laws & decrees, treasury & stores, speculation,
+culture acceptance — are UNCHANGED: they read a genuinely different,
+still-live mechanism (`decide_polis_policy`'s yearly tariff/mint decision,
+the charter/speculation engines) that row 04 does not supersede, so
+deleting them would have thrown away real working information for no
+reason. Frontend-only (no Rust touched): `npx tsc --noEmit` and `npx vite
+build` (189 modules) both clean.
+
 Gates run for 04.3-04.7: `mismatched_edicts_cost_more`,
 `every_debate_terminates`, `edicts_expire`, `lustrum_every_five_years`,
 `government_mechanism_moves_no_wealth_or_production`, plus the pre-existing

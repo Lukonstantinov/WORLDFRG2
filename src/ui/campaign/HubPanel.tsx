@@ -3,8 +3,8 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables, campaignCityDevelopment, campaignGetCultureAcceptance } from "@bridge";
-import type { CultureAcceptanceBrief } from "@types";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables, campaignCityDevelopment, campaignGetCultureAcceptance, campaignGetGovernment } from "@bridge";
+import type { CultureAcceptanceBrief, GovernmentBrief } from "@types";
 import type { CityDevelopment } from "@types";
 import { CityNotables } from "@ui/campaign/FiguresPanel";
 import { NOTABLE_ROLE_NAMES } from "@types";
@@ -343,6 +343,19 @@ export function HubPanel() {
     return () => { alive = false; };
   }, [tab, selectedHub, campActive, campTick]);
 
+  // living_world/04_GOVERNMENT_AND_EDICTS.md 04.7 · the reworked Government
+  // system's own read (seats with real path/suitability/allegiance, the
+  // debate in progress, edicts in force, recent history) — replaces this
+  // tab's old officials/council/regime display, which predates row 04 and
+  // never carried any of it.
+  const [govBrief, setGovBrief] = useState<GovernmentBrief | null>(null);
+  useEffect(() => {
+    if (tab !== "govt" || selectedHub === null || !campActive) { setGovBrief(null); return; }
+    let alive = true;
+    campaignGetGovernment(selectedHub).then((g) => { if (alive) setGovBrief(g); }).catch(() => { if (alive) setGovBrief(null); });
+    return () => { alive = false; };
+  }, [tab, selectedHub, campActive, campTick]);
+
   // 03_DEVELOPMENT_TRACKS.md slice 03.6 · the Development tab's own factor +
   // four-track snapshot, refreshed on open and as the campaign advances.
   useEffect(() => {
@@ -568,91 +581,103 @@ export function HubPanel() {
         );
         return (
           <div style={{ fontSize: 11, color: "#c7d6e8" }}>
-            {/* §3.1 · the office as a PERSON — reuses the house-person stack
-                (kin, character, vice), no new entity. */}
-            {g.leader && (
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8,
-                padding: "5px 7px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
-                <CoatOfArms name={g.leader.house} size={28} guild={g.leader.is_guild} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: "#f0e2c0", fontWeight: 700 }}>
-                    {g.leader.head_name}
-                    <span style={{ color: "#8aa0c0", fontWeight: 400 }}>
-                      {" "}· {g.leader.is_captor ? "ruling" : "leading"} {g.leader.house}
-                    </span>
+            {/* living_world/04_GOVERNMENT_AND_EDICTS.md 04.7 · the reworked
+                Government system, in place of the old leader/council/regime/
+                officials display it supersedes: real seats (path/
+                suitability/allegiance, each linked to a genuine `Individual`
+                — row 02), the debate in progress, edicts actually in force,
+                and recent history. */}
+            {!govBrief ? (
+              <div style={{ color: "#6a86a6", fontSize: 10, marginBottom: 6 }}>
+                This city's government has not been seated yet.
+              </div>
+            ) : (
+              <>
+                {govRow("Form", govBrief.form)}
+                <div style={{ display: "flex", gap: 14, margin: "4px 0 8px", flexWrap: "wrap" }}>
+                  <div style={{ flex: 1, minWidth: 80 }}>
+                    <div style={{ color: "#6a86a6", fontSize: 9 }}>Legitimacy</div>
+                    <div style={{ color: "#e8dcc0", fontWeight: 700 }}>{Math.round(govBrief.legitimacy * 100)}%</div>
                   </div>
-                  {(g.leader.character_phrase || g.leader.vice) && (
-                    <div style={{ color: "#9ab0c8", fontSize: 10 }}>
-                      {g.leader.character_phrase}
-                      {g.leader.vice && (
-                        <span style={{ color: "#e6a07a" }}> {g.leader.character_phrase ? "· " : ""}{g.leader.vice}</span>
-                      )}
+                  <div style={{ flex: 1, minWidth: 80 }}>
+                    <div style={{ color: "#6a86a6", fontSize: 9 }}>Points</div>
+                    <div style={{ color: "#e8dcc0", fontWeight: 700 }}>{govBrief.gov_points.toFixed(2)}</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 100 }}>
+                    <div style={{ color: "#6a86a6", fontSize: 9 }}>Lean (cons. ↔ lib.)</div>
+                    <div style={{ height: 6, background: "#1e2e42", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
+                      <div style={{ width: `${Math.round(((govBrief.gov_position + 1) / 2) * 100)}%`, height: "100%", background: "#8e7bd8" }} />
                     </div>
-                  )}
-                </div>
-                <span style={{ fontSize: 9, color: g.leader.is_captor ? "#ff8a6a" : "#7fd0a0",
-                  border: `1px solid ${g.leader.is_captor ? "#5a3020" : "#1d4a30"}`, borderRadius: 10, padding: "1px 7px" }}>
-                  {g.leader.is_captor ? "captured" : "dominant"}
-                </span>
-              </div>
-            )}
-
-            <div style={sectionHdr}>Council</div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-              {g.council !== "—"
-                ? <CoatOfArms name={g.council} size={32} guild={g.council_is_guild} />
-                : <span style={{ fontSize: 24 }}>🏛️</span>}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ color: "#e8dcc0", fontWeight: 600 }}>{g.council}</div>
-                <div style={{ color: "#8aa0c0", fontSize: 10 }}>
-                  {g.council_archetype || (g.council === "—" ? "no governing house" : "")}
-                  {g.council_is_guild ? " · civic guild" : ""}
-                </div>
-              </div>
-              {g.council !== "—" && (
-                <div style={{ textAlign: "right", minWidth: 60 }}>
-                  <div style={{ fontSize: 9, color: "#6a86a6" }}>power</div>
-                  <div style={{ height: 6, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
-                    <div style={{ width: `${Math.round(Math.min(1, g.council_power) * 100)}%`, height: "100%", background: "#c9a227" }} />
                   </div>
                 </div>
-              )}
-            </div>
 
-            <div style={sectionHdr}>Regime</div>
-            {govRow("Government", g.govt_type || "—")}
-            {govRow("Next turnover", g.next_election_years <= 0 ? "imminent" : `in ${g.next_election_years}y`)}
-            {g.captor && (
-              <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "3px 0", fontSize: 11 }}>
-                <span style={{ color: "#8aa0c0" }}>🔴 Captured by</span>
-                <span style={{ width: 9, height: 9, borderRadius: 2, background: g.captor_color, flex: "0 0 auto" }} />
-                <span style={{ color: g.captor_color, fontWeight: 700 }}>{g.captor}</span>
-              </div>
-            )}
-
-            <div style={sectionHdr}>Key figures</div>
-            {g.officials.length === 0
-              ? <div style={{ color: "#6a86a6", fontSize: 10 }}>No officials seated yet.</div>
-              : g.officials.map((o, i) => {
-                const m = officialMeta(o.status);
-                return (
-                  <div key={i} style={{ margin: "4px 0" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      <span title={o.status} style={{ fontSize: 12 }}>{m.icon}</span>
-                      <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{o.role}</span>
-                      <span style={{ color: "#8aa0c0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.name}</span>
-                      {o.allegiance
-                        ? <span style={{ color: o.allegiance_color, fontSize: 10 }}>{m.label} {o.allegiance}</span>
-                        : <span style={{ color: "#6fae6f", fontSize: 10 }}>independent</span>}
-                    </div>
-                    {o.allegiance && (
-                      <div style={{ height: 5, background: "#1e2e42", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
-                        <div style={{ width: `${Math.round(Math.min(1, o.control) * 100)}%`, height: "100%", background: m.bar }} />
+                {govBrief.debate && (
+                  <>
+                    <div style={sectionHdr}>Debate in progress</div>
+                    <div style={{ margin: "2px 0 6px", padding: "5px 7px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                        <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{govBrief.debate.major ? "Major" : "Minor"} — {govBrief.debate.family}</span>
+                        <span style={{ color: govBrief.debate.tag < 0 ? "#8e9dd8" : govBrief.debate.tag > 0 ? "#c9a227" : "#8aa0c0" }}>
+                          {govBrief.debate.tag < 0 ? "conservative" : govBrief.debate.tag > 0 ? "libertarian" : "neutral"}
+                        </span>
                       </div>
-                    )}
-                  </div>
-                );
-              })}
+                      <div style={{ color: "#6a86a6", fontSize: 9, marginTop: 2 }}>
+                        Round {govBrief.debate.round} of {govBrief.debate.round_cap} · cost {govBrief.debate.cost.toFixed(1)}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
+                        <span style={{ fontSize: 9, color: "#6a86a6" }}>fail</span>
+                        <div style={{ flex: 1, height: 5, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${Math.round(((govBrief.debate.tally + 1) / 2) * 100)}%`, height: "100%", background: "#5fd0ff" }} />
+                        </div>
+                        <span style={{ fontSize: 9, color: "#6a86a6" }}>pass</span>
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                <div style={sectionHdr}>Seats ({govBrief.seats.length})</div>
+                {govBrief.seats.length === 0
+                  ? <div style={{ color: "#6a86a6", fontSize: 10 }}>No officials seated yet.</div>
+                  : govBrief.seats.map((s, i) => (
+                    <div key={i} style={{ margin: "4px 0" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>
+                        <span style={{ color: "#8aa0c0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                        <span style={{ color: s.allegiance === 0 ? "#c9a227" : s.allegiance === 1 ? "#7fd0a0" : "#6a86a6", fontSize: 10 }}>
+                          {s.allegiance === 0 ? (s.house_name || "house") : s.allegiance === 1 ? "ruler's kin" : "commons"}
+                        </span>
+                      </div>
+                      <div style={{ color: "#6a86a6", fontSize: 9 }}>
+                        {s.path} · suitability {Math.round(s.suitability * 100)}%
+                      </div>
+                    </div>
+                  ))}
+
+                <div style={sectionHdr}>Edicts in force ({govBrief.edicts.length})</div>
+                {govBrief.edicts.length === 0
+                  ? <div style={{ color: "#6a86a6", fontSize: 10 }}>None currently in force.</div>
+                  : govBrief.edicts.map((e, i) => (
+                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
+                      <span>{e.family}{e.major ? " (major)" : ""}</span>
+                      <span style={{ color: "#6a86a6" }}>Y{e.enacted_year}–{e.expires_year}</span>
+                    </div>
+                  ))}
+
+                {govBrief.history.length > 0 && (
+                  <>
+                    <div style={sectionHdr}>Recent history</div>
+                    {govBrief.history.slice().reverse().slice(0, 8).map((h, i) => (
+                      <div key={i} style={{ fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
+                        <span style={{ color: "#6a86a6" }}>Y{h.year} </span>{h.family}{" "}
+                        <span style={{ color: h.outcome === "passed" ? "#7fd0a0" : h.outcome === "failed" ? "#ff8a6a" : "#e6c86a" }}>
+                          {h.outcome}
+                        </span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </>
+            )}
 
             {g.family_influence.length > 0 && (
               <>
@@ -2355,17 +2380,6 @@ function acceptanceTierLabel(tier: number): string {
     default: return "Hated";
   }
 }
-
-function officialMeta(status: string): { icon: string; label: string; bar: string } {
-  switch (status) {
-    case "kin": return { icon: "👪", label: "kin of", bar: "#c86ad0" };
-    case "controlled": return { icon: "🔴", label: "controlled by", bar: "#e0503a" };
-    case "leaning": return { icon: "🟡", label: "leans to", bar: "#e0b020" };
-    default: return { icon: "🟢", label: "", bar: "#4fc06a" };
-  }
-}
-
-
 
 const BASKET_PALETTE = ["#f0d77a", "#c9a227", "#6fae8a", "#5f97c0", "#52708e"];
 
