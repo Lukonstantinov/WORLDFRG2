@@ -4774,7 +4774,7 @@ pub(crate) fn welfare_opportunity_e(old_prosp: f32, welfare_ratio: f32, dose: f3
 /// bribery or intimidation; at `control ≥ OFFICIAL_CAPTURE` the figure serves `house`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Official {
-    /// 0 Head (Mayor/Doge/Lord) · 1 Treasurer · 2 Harbormaster · 3 Magistrate.
+    /// 0 Head (Mayor/Doge/Lord) · 1 Treasurer · 2 Harbormaster · 3 Magistrate · 4 Councillor.
     pub role: u8,
     pub name: String,
     /// The house the figure serves (−1 neutral). Set when a house captures it.
@@ -4785,6 +4785,90 @@ pub struct Official {
     pub kin: bool,
     /// Tick this figure's term ends (regime change re-seats it).
     pub term_end: u32,
+    /// 04.2 · why this figure sits — `PATH_*` below. Set once at installation
+    /// (`seed_government`/`reseat_official`) and updated only when a bribed
+    /// capture actually changes who holds the seat, never on ordinary control
+    /// drift. Purely descriptive — nothing reads it yet except the gate below
+    /// and the eventual debate/vote weighting (04.4/04.5).
+    #[serde(default = "default_official_path")]
+    pub path: u8,
+    /// 04.2 · static 0..1 political skill, rolled once at installation and
+    /// held for the seat's whole tenure. Descriptive only until 04.4/04.5 read
+    /// it for vote noise/bribability/overthrow risk.
+    #[serde(default = "default_official_suitability")]
+    pub suitability: f32,
+    /// 04.2 · the `Individual` (row 02) holding this seat, so a seat holder is
+    /// a real person with a face and traits rather than a bare generated name.
+    /// −1 on a save from before this field, or the rare tick before the next
+    /// `update_government` pass mints one.
+    #[serde(default = "default_official_individual")]
+    pub individual_id: i32,
+}
+fn default_official_path() -> u8 { PATH_APPOINTED }
+fn default_official_suitability() -> f32 { 0.6 }
+fn default_official_individual() -> i32 { -1 }
+
+/// 04.2 · `Official.path` — why a figure sits, set at installation. Also sets
+/// the typical suitability band and (eventually, row 06) the seat holder's
+/// starting ideology lean.
+pub const PATH_KIN: u8 = 0;
+pub const PATH_MILITARY: u8 = 1;
+pub const PATH_WEALTH: u8 = 2;
+pub const PATH_GUILD: u8 = 3;
+pub const PATH_SCHOLAR: u8 = 4;
+pub const PATH_ELECTED: u8 = 5;
+pub const PATH_BRIBED: u8 = 6;
+pub const PATH_APPOINTED: u8 = 7;
+
+pub fn official_path_name(p: u8) -> &'static str {
+    match p {
+        PATH_KIN => "kin of a house",
+        PATH_MILITARY => "military success",
+        PATH_WEALTH => "wealth",
+        PATH_GUILD => "guild representative",
+        PATH_SCHOLAR => "scholar/orator",
+        PATH_ELECTED => "elected by the commons",
+        PATH_BRIBED => "bribed in",
+        _ => "appointed",
+    }
+}
+
+/// 04.2 · `Official`'s derived allegiance — house / commons-or-none / ruler
+/// (kin, which auto-serves at control 1.0). A pure read of the existing
+/// `house`/`kin`/`control` fields, never a stored duplicate of them.
+pub const ALLEGIANCE_HOUSE: u8 = 0;
+pub const ALLEGIANCE_RULER: u8 = 1;
+pub const ALLEGIANCE_COMMONS: u8 = 2;
+
+pub fn official_allegiance(o: &Official) -> u8 {
+    if o.kin { ALLEGIANCE_RULER }
+    else if o.house >= 0 && o.control >= OFFICIAL_CAPTURE { ALLEGIANCE_HOUSE }
+    else { ALLEGIANCE_COMMONS }
+}
+
+/// 04.2 · a seat's static political skill, rolled once at installation —
+/// 0.25..0.95, so no seat is a guaranteed pushover or unbribable.
+fn official_suitability_roll(seed: u64, h: usize, salt: u64) -> f32 {
+    0.25 + 0.70 * hash01(seed, h as u64 ^ salt, 0x0F1CE)
+}
+
+/// 04.2 · group a city's seats into blocs by allegiance target — a pure
+/// derived read for the Government window (04.7); nothing is persisted here.
+/// Key: `house` id when the bloc is house-bound (ALLEGIANCE_HOUSE/RULER,
+/// which always carries a real `house`), else `-1` for the commons/none bloc.
+pub fn government_blocs(officials: &[Official]) -> Vec<(i32, Vec<usize>)> {
+    let mut blocs: Vec<(i32, Vec<usize>)> = Vec::new();
+    for (i, o) in officials.iter().enumerate() {
+        let key = match official_allegiance(o) {
+            ALLEGIANCE_HOUSE | ALLEGIANCE_RULER => o.house,
+            _ => -1,
+        };
+        match blocs.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, v)) => v.push(i),
+            None => blocs.push((key, vec![i])),
+        }
+    }
+    blocs
 }
 
 /// One enacted law/policy in a city's government log.
@@ -9256,14 +9340,24 @@ impl CampaignSim {
                 self.houses[pi].wealth -= budget;
                 // The money doesn't vanish — it lines the city's coffers (and its officials).
                 self.hubs[h].civic_pool += budget;
+                // 04.2 · a genuinely NEW patron (not the seat's existing one) sets
+                // the seat's path to how it was actually taken — muscle for a
+                // fleet/political house, plain coin otherwise. A seat already
+                // held by `pi` keeps whatever path it was captured under.
+                let new_capture = cur != pi as i32;
+                let capture_path = if arch == ARCH_FLEET || arch == ARCH_POLITICAL { PATH_MILITARY } else { PATH_BRIBED };
                 let o = &mut self.hubs[h].officials[oi];
                 if contest {
                     // Erode the rival's grip first; take the seat once it's loosened.
                     o.control = (o.control - gain * 0.6).max(0.0);
-                    if o.control <= 0.05 { o.house = pi as i32; o.control = 0.0; }
+                    if o.control <= 0.05 {
+                        o.house = pi as i32; o.control = 0.0;
+                        if new_capture { o.path = capture_path; }
+                    }
                 } else {
                     o.house = pi as i32;
                     o.control = (o.control + gain).min(1.0);
+                    if new_capture { o.path = capture_path; }
                 }
             }
             // 4) Capture: the house holding a majority of control-weighted seats.
@@ -9360,9 +9454,28 @@ impl CampaignSim {
             let name = self.head_name_for(h, &city, salt);
             // Stagger initial terms so the whole council doesn't turn over at once.
             let te = self.tick + term / 2 + (i as u32 * term) / n_seats.max(1) as u32;
-            officials.push(Official { role, name, house: -1, control: 0.0, kin: false, term_end: te });
+            // 04.2 · a fresh seat's path by government form: a tyranny/principality
+            // appoints, a free commune elects, an oligarchy/council seat starts as
+            // wealth (a rich family's own, before any bribery contest moves it).
+            let path = match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH };
+            let suitability = official_suitability_roll(self.seed, h, salt);
+            let iid = self.individual_id_for_official(h, &name);
+            officials.push(Official {
+                role, name, house: -1, control: 0.0, kin: false, term_end: te,
+                path, suitability, individual_id: iid,
+            });
         }
         self.hubs[h].officials = officials;
+    }
+
+    /// 04.2 · resolve (or mint) the `Individual` a seat holder should carry —
+    /// the seat-holder analogue of `individual_id_for_notable`, which the same
+    /// pattern (never mint twice for the same standing name) is copied from.
+    fn individual_id_for_official(&mut self, h: usize, name: &str) -> i32 {
+        if let Some(p) = self.people.iter().find(|p| p.current_hub == h as i32 && p.name == name && p.roles.contains(&ROLE_OFFICIAL)) {
+            return p.id as i32;
+        }
+        self.spawn_individual(h, ROLE_OFFICIAL, name.to_string(), -1) as i32
     }
 
     /// Turn a key figure over at the end of its term — a fresh neutral appointee, or
@@ -9387,10 +9500,24 @@ impl CampaignSim {
         let salt = (self.tick as u64).wrapping_add((h as u64) << 8).wrapping_add(oi as u64);
         let surname = if kin_house >= 0 { self.houses[kin_house as usize].name.clone() } else { city.clone() };
         let name = self.head_name_for(h, &surname, salt);
+        // 04.2 · a kin installation is always PATH_KIN; otherwise the fresh
+        // appointee's path follows the government's form, same as a founding
+        // seed. A reseat always mints a fresh figure, so suitability rerolls
+        // and a fresh `Individual` is minted (or reused, if this exact name
+        // already holds another seat in this city — rare, but the same
+        // never-mint-twice discipline `individual_id_for_notable` uses).
+        let path = if kin_house >= 0 { PATH_KIN } else {
+            match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH }
+        };
+        let suitability = official_suitability_roll(self.seed, h, salt);
+        let iid = self.individual_id_for_official(h, &name);
         {
             let o = &mut self.hubs[h].officials[oi];
             o.name = name;
             o.term_end = self.tick + term;
+            o.path = path;
+            o.suitability = suitability;
+            o.individual_id = iid;
             if kin_house >= 0 { o.house = kin_house; o.control = 1.0; o.kin = true; }
             else { o.house = -1; o.control = 0.0; o.kin = false; }
         }
@@ -11444,6 +11571,7 @@ mod crisis;
 mod schism;
 mod foreign_hand;
 mod individuals;
+pub(crate) use individuals::ROLE_OFFICIAL;
 mod life_events;
 mod development;
 pub(crate) use development::{stability_of, STABILITY_MIN, STABILITY_MAX};

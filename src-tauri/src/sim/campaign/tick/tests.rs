@@ -11074,3 +11074,53 @@
         }
     }
 
+    // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.2 ───────────────────
+
+    /// 04.2 · a house that courts an uncontested seat captures it (the existing
+    /// bribery mechanism, unchanged), and the new descriptive fields must agree
+    /// with that capture: `allegiance` reads HOUSE and `path` records how it was
+    /// actually taken (plain coin here — a non-fleet, non-political archetype).
+    #[test]
+    fn bought_members_follow_their_patron() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        let mut patron = house_at(0, vec![], 0);
+        patron.wealth = 500_000.0;
+        patron.archetype = 0; // plain bribery, not fleet/political intimidation
+        patron.influence.push((0, 0.5));
+        s.houses.push(patron);
+        s.update_government(0);
+        let bought = s.hubs[0].officials.iter().find(|o| o.house == 0 && !o.kin)
+            .expect("the uncontested patron captures at least one seat in year one");
+        assert!(bought.control >= OFFICIAL_CAPTURE, "capture actually clears the threshold");
+        assert_eq!(official_allegiance(bought), ALLEGIANCE_HOUSE,
+            "a bought seat's derived allegiance follows its patron house");
+        assert_eq!(bought.path, PATH_BRIBED, "plain coin from a non-fleet/political house records as bribed-in");
+        assert!(bought.individual_id >= 0, "every seat is held by a real Individual, not a bare name");
+        assert!(bought.suitability >= 0.25 && bought.suitability <= 0.95, "suitability stays in its rolled band");
+    }
+
+    /// 04.2 · `official_allegiance`/`government_blocs` are pure reads of the
+    /// existing house/kin/control fields — an unclaimed seat is COMMONS, a kin
+    /// seat is RULER, and blocs group seats by their allegiance target.
+    #[test]
+    fn government_blocs_group_by_allegiance() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        for o in &s.hubs[0].officials {
+            assert_eq!(official_allegiance(o), ALLEGIANCE_COMMONS, "a fresh, unclaimed seat has no patron");
+        }
+        s.hubs[0].officials[0].kin = true;
+        s.hubs[0].officials[0].house = 7;
+        s.hubs[0].officials[0].control = 1.0;
+        assert_eq!(official_allegiance(&s.hubs[0].officials[0]), ALLEGIANCE_RULER, "a kin seat auto-serves its family");
+        let blocs = government_blocs(&s.hubs[0].officials);
+        let kin_bloc = blocs.iter().find(|(k, _)| *k == 7).expect("the kin seat forms its own bloc");
+        assert_eq!(kin_bloc.1.len(), 1);
+        let commons_bloc = blocs.iter().find(|(k, _)| *k == -1).expect("every other seat is still commons");
+        assert_eq!(commons_bloc.1.len(), s.hubs[0].officials.len() - 1);
+    }
+

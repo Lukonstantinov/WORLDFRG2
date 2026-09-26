@@ -1,14 +1,32 @@
 # 04 · Government and edicts
 
-**Status:** PARTIAL — slice 04.1 done, see §Queue · **Depends on:** 02, 03 · **Next:** 05
+**Status:** PARTIAL — slices 04.1-04.2 done, see §Queue · **Depends on:** 02, 03 · **Next:** 05
 
 **2026-09-25:** started ahead of rows 02/03 at the maintainer's explicit
 request. Slice 04.1 (seat-count-by-size + office-title scaffolding) shipped as
 pure, dosed-zero scaffolding — `GOV_POWER_DOSE = 0.0` — because a seat is still
 an `Official` with a generated name, not yet an `Individual` with a face,
-traits and an ideology position (row 02). Slices 04.2 onward (paths,
-suitability, allegiance, blocs, debate, the Lustrum, the Government window)
-need row 02's `Individual` and are QUEUED below, not built.
+traits and an ideology position (row 02).
+
+**2026-09-26:** row 02 (`Individual`) has since landed on `main`, so slice
+04.2 (paths, suitability, allegiance, blocs) is now built. Every `Official`
+carries `path` (why it sits — kin/military/wealth/guild/scholar/elected/
+bribed/appointed), a static `suitability` roll, and an `individual_id`
+linking it to a real `Individual` (`ROLE_OFFICIAL`, minted or reused exactly
+like `individual_id_for_notable`). `official_allegiance`/`government_blocs`
+are pure derived reads over the existing `house`/`kin`/`control` fields — no
+new stored duplicate. `seed_government`/`reseat_official` set a fresh seat's
+path from its government form (appointed/elected/wealth, or kin when a
+family is installed); the existing bribery loop in `update_government` now
+also records the path a NEWLY captured seat was actually taken by (muscle
+for a fleet/political house, plain coin otherwise) — a purely descriptive
+addition, since nothing yet reads `path`/`suitability` to change a vote or a
+wealth number, so no dose gate was needed (the same "unconditional
+bookkeeping" precedent L4's age pyramid set). Gate:
+`bought_members_follow_their_patron`, `government_blocs_group_by_allegiance`.
+Slices 04.3 onward (political points/edicts, weekly debate, tyrant/
+legitimacy/coups, the Lustrum, the Government window) are QUEUED below, not
+built.
 
 ## Goal
 
@@ -236,7 +254,7 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 | Slice | Content | Gate |
 |---|---|---|
 | 04.1 | **DONE (2026-09-25, scaffolding only).** Seat counts by size (`seat_count_for`, `GOVT_SEAT_CAP`); extra seats beyond the 4 named offices seed as generic role-4 "Councillor" seats; gated behind `GOV_POWER_DOSE = 0.0` (a true no-op — `seed_government` still builds the old fixed 3-4 roles at dose 0). **NOT done**: offices held by `Individual`s (needs row 02) and per-culture title sets (needs a culture-kit index threaded into `TickHub`, which the campaign tick does not carry today — `hub.culture` is a plain generated name) — both QUEUED (Q04.3, Q04.4) | `officials_migrate_to_seats`, `seat_count_scales_with_city` |
-| 04.2 | Paths, suitability, allegiance, blocs; houses' kin seats + clients via existing bribery | `bought_members_follow_their_patron` |
+| 04.2 | **DONE (2026-09-26).** Paths (`PATH_*`), a static `suitability` roll, an `individual_id` linking each seat to a real `Individual` (`ROLE_OFFICIAL`); `official_allegiance`/`government_blocs` as pure derived reads over the existing house/kin/control fields; the existing bribery loop now records a newly-captured seat's path (military vs bribed). Undosed — purely descriptive, moves no wealth/production | `bought_members_follow_their_patron`, `government_blocs_group_by_allegiance` |
 | 04.3 | Political points, edict catalogue, costs by ideological distance, expiry | `mismatched_edicts_cost_more`, `edicts_expire` |
 | 04.4 | Weekly debate rounds, amendments, filibuster, votes, deadlock | `every_debate_terminates`, `deadlock_costs_legitimacy` |
 | 04.5 | Tyrant path, legitimacy, overthrow risk, changes of government, ostracism, exposure | `unpopular_tyrants_fall_more_often`, `ostracism_exiles_one_person` |
@@ -251,16 +269,21 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 - Q04.1 — Realm-level government and realm-wide edicts (row 09).
 - Q04.2 — Elections with campaigns (candidates spending, speeches) — waits on
   measured seat turnover.
-- Q04.3 — Seat holders as real `Individual`s (face, traits, suitability,
-  ideology position) — waits on row 02.
+- Q04.3 — **DONE 2026-09-26** (seat holders now carry a real `Individual` via
+  `individual_id` — face/traits/ideology-position reads follow from that link
+  once row 06 gives ideology a real meter; traits are already on `Individual`
+  from row 02 but nothing here reads them yet, since suitability is currently
+  its own static roll rather than trait-derived — a future slice may fold the
+  two together).
 - Q04.4 — Per-culture office title sets (Roman/Hellene/Norse/… from the
   "Forms, sizes and offices" table) — waits on a culture-kit index being
   threaded into `TickHub` (today `hub.culture` is a plain generated name with
   no back-reference to `cultures::KITS`); until then `office_title` serves the
   Roman-flavoured default set for every culture.
-- Q04.5 — Slices 04.2-04.8 (paths/suitability/allegiance/blocs, political
-  points + edict catalogue, weekly debate, tyrant/legitimacy/coups, the
-  Lustrum, the Government window, end-of-row dosing) — waits on rows 02 and 03
-  per this row's own stated dependency; do not build them against the
-  `Official`-only stand-in above, or the eventual `Individual` migration would
-  have to redo this row's own vote/bribery/suitability wiring.
+- Q04.5 — Slices 04.3-04.8 (political points + edict catalogue, weekly debate,
+  tyrant/legitimacy/coups, the Lustrum, the Government window, end-of-row
+  dosing) — waits on row 03 reaching `DONE` (currently PARTIAL — see
+  `03_DEVELOPMENT_TRACKS.md` §Queue for its own outstanding dose walk) per
+  this row's own stated dependency, so a debate/edict mechanism has a real
+  development-track bonus (the Lustrum, 04.6) to pay out rather than a
+  neutral placeholder.
