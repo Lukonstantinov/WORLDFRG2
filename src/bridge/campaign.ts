@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CoarseRoute, BankBrief, BumpChart, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinCatalogue, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, IndividualBrief, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport } from "@types";
+import type { CoarseRoute, BankBrief, BumpChart, CampaignDiagnostics, CampaignSnapshot, CityPriceIndex, CityRank, CitySchematic, CityWarehouseInfo, CoinCatalogue, CoinSnapshot, CoinUseCity, ColonyDetail, ColonyGateStatus, ColonySummary, CrashRecord, CrisisBrief, CultureBrief, CulturePresenceGrid, CurrencyBrief, DynastiesPayload, EpidemicBrief, EraFrame, ExpeditionsPayload, FeudRow, FigureBrief, FuturesLane, GoalsBrief, GoodAtlas, GoodMarketRow, GuildAtlas, GuildBrief, HouseAtlas, HouseBrief, HouseHistory, HouseLedger, HouseLineage, HouseStability, HubDetail, IndividualBrief, InequalitySnapshot, JournalEntry, KinBrief, LandmarkBrief, MerchantRoute, MigrationRouteBrief, MintBrief, MonetaryEvent, NotablePerson, PolisBrief, PopBrief, ProvinceLand, ProvisioningBrief, ReservesPayload, SatelliteBrief, SpecCenter, TradeBasin, TradeCorridor, TradeFlows, TradeTrunk, WarehouseInfo, WarsPayload, WorksCardInfo, WorldEconomy, CampaignFileInfo, WorldHumanLayerStatus, ProvinceRepairReport, GovernmentBrief, EdictBrief, CultureAcceptanceBrief } from "@types";
 
 /** DLC 3.5 · the live campaign's dynamic trade-flow trunks (last year's actual
  *  shipped volume, routed over the cost grid + bundled; width ∝ volume). */
@@ -197,6 +197,12 @@ export async function campaignCityPriceIndex(): Promise<import("@types").CityPri
 /** SETTLEMENT_LIFE_PLAN.md L3 · one hub's annual annals — the Life tab's data source. */
 export async function campaignCityLife(hub: number): Promise<import("@types").CityYear[]> {
   return invoke("campaign_city_life", { hub });
+}
+
+/** `03_DEVELOPMENT_TRACKS.md` slice 03.6 · one hub's development factor +
+ *  four tracks — the settlement panel's Development tab. */
+export async function campaignCityDevelopment(hub: number): Promise<import("@types").CityDevelopment> {
+  return invoke("campaign_city_development", { hub });
 }
 
 /** SETTLEMENT_LIFE_PLAN.md L12 · one hub's current notables — the Life tab's
@@ -418,6 +424,30 @@ export async function campaignTier1GaugeMedians(): Promise<import("@types").Gaug
 /** Feuds, live first then settled. `house` < 0 = every feud in the world. */
 export async function campaignGetFeuds(house = -1): Promise<FeudRow[]> {
   return invoke("campaign_get_feuds", { house });
+}
+
+// ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.7 — the Government window ──
+
+/** One city's seats, blocs, the debate in progress (if any) and recent
+ *  history. `null` on an estate or a hub whose government hasn't been
+ *  seeded yet (the yearly pass hasn't reached it in its first partial year). */
+export async function campaignGetGovernment(hub: number): Promise<GovernmentBrief | null> {
+  return invoke("campaign_get_government", { hub });
+}
+
+/** The edicts currently in force at one city — a thinner read than the full
+ *  Government window, for a panel that only wants the "in force" list. */
+export async function campaignGetEdicts(hub: number): Promise<EdictBrief[]> {
+  return invoke("campaign_get_edicts", { hub });
+}
+
+// ── living_world/05_CULTURE_ACCEPTANCE.md, slice 05.6 — the culture table ──
+
+/** One city's culture-acceptance table — every culture this hub carries a
+ *  sparse relation for. Empty (not an error) for an estate, an abandoned
+ *  hub, or one the yearly pass hasn't reached yet. */
+export async function campaignGetCultureAcceptance(hub: number): Promise<CultureAcceptanceBrief[]> {
+  return invoke("campaign_get_culture_acceptance", { hub });
 }
 
 /** This house's kin roster (Phase 2.1) — empty for a guild or a house whose roster

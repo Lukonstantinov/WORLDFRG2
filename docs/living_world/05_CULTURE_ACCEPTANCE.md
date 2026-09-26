@@ -106,3 +106,38 @@ score and its trend, residents, and why ("trade +12, the war of 214 −20").
 ## Queue
 - Q05.1 — Realm-wide tier policy (row 09).
 - Q05.2 — Intermarriage raising relation scores (waits on row 02 marriages, Q02.2).
+- Q05.3 — Tier-change proposals currently run their own self-contained "shadow
+  debate" (`CultureRelation.proposed_tier`/`debate_round`/`debate_tally`),
+  deliberately kept separate from row 04's single per-city `GovDebate` slot (a
+  city can only debate one ordinary edict at a time — routing every culture-tier
+  crossing through that scarce slot would starve either ordinary government
+  edicts or culture policy). Merging the two into ONE shared agenda list (so the
+  Government window shows both kinds of proposal together) is real future work,
+  waiting on a design decision about how the two compete for debate time, not on
+  any missing mechanism — both halves already exist and are gated.
+- Q05.4 — The five 05.5 effects (`acceptance_tax_mult_e`, `acceptance_settle_
+  mult_e`, `acceptance_office_allowed_e`, `acceptance_dev_share_e`,
+  `acceptance_scholar_mult_e`) are pure, tested and dosed from zero, but NONE is
+  wired into a real tax/migration/office/development pass — the same "built and
+  tested, called by nothing" shape row 03's `admires_more_developed`/
+  `is_barbarian_to` already carry in this tree. Wiring a real effect needs a
+  per-culture population/wealth attribution that `hub_minorities`'s plain
+  0..1 share does not yet give (the pass can say "this culture is 20% of this
+  city" but not "here is that 20%'s own treasury/office/migration weight" at
+  the resolution these effects need) — new per-culture accounting, not a small
+  diff, and its own `econ_` dose walk once raised above zero.
+- Q05.5 — The diaspora destination (`maybe_persecute`) is picked from the SAME
+  trade component only, an O(component) scan with no reach bound. At the
+  shipped `PERSECUTION_DOSE = 0.0` this never moves anyone so the cost is
+  paid for nothing measurable; once the dose is raised (Q05.6), a reach-bounded
+  search (mirroring the trade-route `MAX_OPEN_SEA_CROSSING_KM`/component-horizon
+  discipline, CLAUDE.md §8.5) should replace the unbounded component scan
+  before it runs on a real, large world.
+- Q05.6 — Raising any of `PERSECUTION_DOSE`/`ACCEPT_TAX_DOSE`/`ACCEPT_
+  SETTLE_DOSE`/`ACCEPT_SCHOLAR_DOSE`/`ACCEPT_OFFICE_DOSE`/`ACCEPT_DEV_DOSE`/
+  `FONDACO_CHARTER_DOSE` above zero is unstarted, separate work — each needs
+  its own `econ_`-per-dose-step walk (00_INDEX's own testing rule: "if several
+  doses are walked, run `econ_` once per dose step, not once for all of
+  them"), and `ACCEPT_SCHOLAR_DOSE`/`ACCEPT_COHESION_DOSE` cannot be
+  meaningfully raised at all until rows 06/07/09 exist to give them something
+  real to scale.

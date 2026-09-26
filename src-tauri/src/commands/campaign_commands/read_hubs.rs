@@ -67,6 +67,35 @@ pub fn campaign_city_life(hub: u32, db: State<'_, WorldDb>) -> Result<Vec<CityYe
     Ok(sim.hubs.get(hub as usize).map(|h| h.annals.clone()).unwrap_or_default())
 }
 
+/// `03_DEVELOPMENT_TRACKS.md` slice 03.6 — a pure snapshot of one
+/// settlement's development factor + four tracks, for the settlement panel's
+/// Development tab. `None`-equivalent (an all-zero `CityDevelopment`) on an
+/// estate, an abandoned hub, an unknown id, or a save from before this row.
+#[tauri::command]
+pub fn campaign_city_development(hub: u32, db: State<'_, WorldDb>) -> Result<CityDevelopment, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let sim = match get_sim(&db, &conn)? {
+        Some(s) => s,
+        None => return Ok(CityDevelopment {
+            dev: 0.0, dev_breakdown: [0.0; 5],
+            track_points: [0.0; 4], track_level: [0; 4],
+            track_buildings: [0; 4], track_build_progress: [0.0; 4],
+        }),
+    };
+    Ok(sim.hubs.get(hub as usize).map(|h| CityDevelopment {
+        dev: h.dev,
+        dev_breakdown: h.dev_breakdown,
+        track_points: h.track_points,
+        track_level: h.track_level,
+        track_buildings: h.track_buildings,
+        track_build_progress: h.track_build_progress,
+    }).unwrap_or(CityDevelopment {
+        dev: 0.0, dev_breakdown: [0.0; 5],
+        track_points: [0.0; 4], track_level: [0; 4],
+        track_buildings: [0; 4], track_build_progress: [0.0; 4],
+    }))
+}
+
 /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) — a pure read of `TickHub.notables`,
 /// same shape as `campaign_city_life` beside it. Empty on an estate, an
 /// abandoned hub, an unknown id, or a save from before this slice.

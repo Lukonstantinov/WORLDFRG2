@@ -32,6 +32,7 @@ export const PANEL_TINTS = {
   war: "rgba(26,15,13,0.97)",       // ⚔ War Council — iron-crimson
   feuds: "rgba(24,14,14,0.97)",     // ⚔ Feuds & Alliances — a shade off war's crimson
   notables: "rgba(22,18,14,0.97)",  // 02_PEOPLE.md Notables & Hall of the Dead — parchment-bronze
+  government: "rgba(18,16,24,0.97)", // 04_GOVERNMENT_AND_EDICTS.md Government window — senate-purple
 } as const;
 
 /** Interactive descendants that must NEVER start a window drag — a press on any of

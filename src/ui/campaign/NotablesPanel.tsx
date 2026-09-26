@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { campaignGetNotableIndividuals, campaignGetHallOfDead } from "@bridge";
@@ -6,12 +6,16 @@ import type { IndividualBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "@ui/kit";
+import { drawBust, individualKit } from "@ui/campaign/cultureDress";
 
 /** 02_PEOPLE.md (Living World row 02) · the 40-cap notable roster and the
- *  Hall of the Dead in one window — a plain list for now (a real portrait
- *  gallery on `cultureDress.ts`'s feature layers is 02.7/future work, see
- *  that file's own doc comment; this panel reads exactly what the backend
- *  serves and adds nothing invented). */
+ *  Hall of the Dead in one window — a plain list, PLUS (02.7) a real portrait
+ *  on the detail view: the culture's own dress plate, varied per person by
+ *  `face_seed` and carrying their real `female`/`features` (an eyepatch, grey
+ *  hair, a scar…) straight off the stored `Individual`. Not yet the full
+ *  gallery redesign (`FiguresPanel.tsx` becoming the roster's front page is
+ *  still future work) — this panel still reads exactly what the backend
+ *  serves and invents nothing beyond the one portrait. */
 export function NotablesPanel() {
   const open = useUIStore((s) => s.showNotables);
   const close = () => useUIStore.getState().setShowNotables(false);
@@ -32,6 +36,23 @@ export function NotablesPanel() {
 
   const rows = tab === "living" ? living : dead;
   const pickedRow = useMemo(() => rows.find((r) => r.id === picked) ?? null, [rows, picked]);
+
+  const portraitRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const el = portraitRef.current;
+    if (!el || !pickedRow) return;
+    const size = 72, dpr = 2;
+    el.width = size * dpr; el.height = size * dpr;
+    const ctx = el.getContext("2d");
+    if (!ctx) return;
+    ctx.clearRect(0, 0, el.width, el.height);
+    const kit = individualKit(pickedRow.culture || "unknown", pickedRow.face_seed);
+    drawBust(ctx, 0, 0, size * dpr, kit, {
+      occasion: pickedRow.famous ? "ceremonial" : "national",
+      female: pickedRow.female,
+      features: pickedRow.features,
+    });
+  }, [pickedRow]);
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.notables);
   if (!open) return null;
@@ -55,9 +76,14 @@ export function NotablesPanel() {
                 <div data-no-drag onClick={() => setPicked(null)} style={{ cursor: "pointer", color: T.inkDim, fontSize: FZ.tiny, marginBottom: 6 }}>
                   ← back to the list
                 </div>
-                <div style={{ fontFamily: SERIF, color: T.parchment, fontSize: FZ.title }}>{pickedRow.name}</div>
-                <div style={{ color: T.inkMid, fontSize: FZ.small, marginBottom: 6 }}>
-                  {pickedRow.roles.join(", ") || "—"} · {pickedRow.city || "—"} · {pickedRow.culture || "unknown culture"}
+                <div style={{ display: "flex", gap: SPACE.md, alignItems: "flex-start" }}>
+                  <canvas ref={portraitRef} style={{ width: 72, height: 72, borderRadius: RADIUS.sm, flexShrink: 0, background: T.card }} />
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontFamily: SERIF, color: T.parchment, fontSize: FZ.title }}>{pickedRow.name}</div>
+                    <div style={{ color: T.inkMid, fontSize: FZ.small, marginBottom: 6 }}>
+                      {pickedRow.roles.join(", ") || "—"} · {pickedRow.city || "—"} · {pickedRow.culture || "unknown culture"}
+                    </div>
+                  </div>
                 </div>
                 <div style={{ color: T.inkDim, fontSize: FZ.tiny, marginBottom: 8 }}>
                   {pickedRow.alive ? `Debuted ${pickedRow.debut_year}` : `${pickedRow.debut_year} – ${pickedRow.death_year} (${pickedRow.death_cause})`}

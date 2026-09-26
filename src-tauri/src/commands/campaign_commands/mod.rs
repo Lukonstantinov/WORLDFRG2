@@ -474,6 +474,22 @@ pub struct HubGoodDetail {
     #[serde(default)] pub charter_share: f32,
 }
 
+/// `03_DEVELOPMENT_TRACKS.md` slice 03.6 — one settlement's development
+/// reading: the overall factor + this year's breakdown (03.1), and the four
+/// tracks' points/level/built-level (03.3/03.4). A pure snapshot, nothing
+/// derived beyond what `TickHub` already stores.
+#[derive(Serialize, Clone)]
+pub struct CityDevelopment {
+    pub dev: f32,
+    /// `[trade, partner_reach, welfare, diffusion, decay]`, this year's values.
+    pub dev_breakdown: [f32; 5],
+    /// Indexed by `TRACK_*` (Military · Trade · Civil · Ideological).
+    pub track_points: [f32; 4],
+    pub track_level: [u8; 4],
+    pub track_buildings: [u8; 4],
+    pub track_build_progress: [f32; 4],
+}
+
 /// One live city in the Markets window's picker.
 #[derive(Serialize, Clone)]
 pub struct MarketCity {
@@ -3565,7 +3581,9 @@ mod read_money;
 mod read_trade;
 mod read_hubs;
 mod read_houses;
+mod read_government;
 mod province;
+mod read_culture;
 pub use lifecycle::*;
 pub use read_people::*;
 pub use read_colonies::*;
@@ -3573,4 +3591,6 @@ pub use read_money::*;
 pub use read_trade::*;
 pub use read_hubs::*;
 pub use read_houses::*;
+pub use read_government::*;
 pub use province::*;
+pub use read_culture::*;

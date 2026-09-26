@@ -1475,6 +1475,21 @@ export interface CityYear {
    *  must read that as "not recorded", not "no housing at all". */
   crowding: number;
 }
+/** `03_DEVELOPMENT_TRACKS.md` slice 03.6 · one settlement's development
+ *  reading (campaign_city_development). Track index order is fixed:
+ *  0 Military · 1 Trade · 2 Civil · 3 Ideological (`TRACK_*` in tick/tracks.rs). */
+export interface CityDevelopment {
+  dev: number;
+  /** This year's `[trade, partner_reach, welfare, diffusion, decay]`. */
+  dev_breakdown: [number, number, number, number, number];
+  track_points: [number, number, number, number];
+  /** 0-5, how far each track's ABILITY has risen. */
+  track_level: [number, number, number, number];
+  /** 0-5, the highest level actually BUILT — always <= track_level. */
+  track_buildings: [number, number, number, number];
+  /** 0..1 progress toward each track's next building. */
+  track_build_progress: [number, number, number, number];
+}
 /** SETTLEMENT_LIFE_PLAN.md L12 · a per-city notable (campaign_city_notables).
  *  role index: 0 Guildmaster · 1 Alderman · 2 Agitator — the three of the
  *  plan's six named roles built so far; bishop/physician/watch-captain wait
@@ -3346,4 +3361,96 @@ export interface ProvinceRepairReport {
   provinces_changed: number;
   settlements_attached: number;
   settlements_orphaned: number;
+}
+
+// ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.7 — the Government window ──
+
+/** One seat (mirrors `read_government::SeatBrief`). */
+export interface SeatBrief {
+  role: number;
+  office_title: string;
+  name: string;
+  individual_id: number;
+  /** "kin of a house" | "military success" | "wealth" | "guild representative" |
+   *  "scholar/orator" | "elected by the commons" | "bribed in" | "appointed". */
+  path: string;
+  suitability: number;
+  /** 0 house · 1 ruler (kin) · 2 commons/none. */
+  allegiance: number;
+  house: number;
+  house_name: string;
+  control: number;
+}
+
+/** Every seat sharing one allegiance target. */
+export interface BlocBrief {
+  /** -1 = the commons/no-patron bloc. */
+  house: number;
+  house_name: string;
+  seat_indices: number[];
+}
+
+/** The debate in progress, if any. */
+export interface DebateBrief {
+  family: string;
+  tag: number;
+  major: boolean;
+  cost: number;
+  round: number;
+  round_cap: number;
+  /** -1 (solid fail) .. +1 (solid pass). */
+  tally: number;
+}
+
+/** One edict in force. */
+export interface EdictBrief {
+  family: string;
+  tag: number;
+  major: boolean;
+  enacted_year: number;
+  expires_year: number;
+}
+
+/** One closed debate's outcome, or a coup. */
+export interface GovHistoryBrief {
+  year: number;
+  family: string;
+  /** "passed" | "failed" | "deadlocked" | "coup". */
+  outcome: string;
+}
+
+/** One (city, culture) relation — living_world/05_CULTURE_ACCEPTANCE.md,
+ *  mirrors `read_culture::CultureAcceptanceBrief`. */
+export interface CultureAcceptanceBrief {
+  culture: string;
+  tier: number;
+  /** "Citizens" | "Enfranchised" | "Resident foreigners" | "Unwelcome" | "Hated". */
+  tier_name: string;
+  /** -100..100. */
+  score: number;
+  /** Last year's net drift — the UI's trend arrow. */
+  trend: number;
+  /** A short "why" phrase, e.g. "trade +12, the war of 214 -20". */
+  reason: string;
+  /** Approximate resident share, 0..1. */
+  residents_frac: number;
+  /** -1 while no tier-change proposal is open, else the target tier. */
+  proposed_tier: number;
+}
+
+/** The whole Government window for one city (mirrors `read_government::GovernmentBrief`). */
+export interface GovernmentBrief {
+  hub: number;
+  city: string;
+  /** "Merchant Council (Doge)" | "Principality (Prince)" | "Free Commune (Mayor)". */
+  form: string;
+  legitimacy: number;
+  gov_points: number;
+  /** -1 conservative .. +1 libertarian. */
+  gov_position: number;
+  seats: SeatBrief[];
+  blocs: BlocBrief[];
+  debate: DebateBrief | null;
+  edicts: EdictBrief[];
+  history: GovHistoryBrief[];
 }

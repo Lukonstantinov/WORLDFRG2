@@ -1989,6 +1989,20 @@ const CAPTOR_TARIFF_FAVOUR: f32 = 0.6;   // ×base for the captor's goods
 /// Trade-influence boost a captor gets at the city it controls (added to `influence`).
 const CAPTOR_INFLUENCE_BOOST: f32 = 0.12;
 const LAWS_CAP: usize = 12;
+/// `living_world/04_GOVERNMENT_AND_EDICTS.md` slice 04.1 · seat-count-by-size and
+/// the coup/legitimacy machinery (04.2, 04.5) sit behind this dose. At `0.0`
+/// `seed_government` builds exactly the same 3-4 fixed roles it always has, so
+/// this row is a true no-op until raised — proven directly (not by a separate
+/// fingerprint test) because `seat_count_for` is only ever consulted when
+/// `GOV_POWER_DOSE > 0.0`. Row 04 depends on rows 02 (`Individual`) and 03
+/// (development tracks), neither built yet, so this slice ships the
+/// seat-count/cultural-title SCAFFOLDING only — a seat is still an `Official`
+/// with a generated name, not yet an `Individual` with a face and traits; see
+/// this doc's own Queue for what that upgrade needs.
+pub(crate) const GOV_POWER_DOSE: f32 = 0.0;
+/// Hard cap on seats in any one government (04 §"Forms, sizes and offices") —
+/// the largest senate, and the ceiling a custom office (row 04.6+) must share.
+pub(crate) const GOVT_SEAT_CAP: usize = 16;
 /// ESTATES_SHARES_AND_WAREHOUSE_PLAN.md 4.9 (A4) · a fresh captor OCCASIONALLY
 /// bars foreign ownership outright to protect its new turf — the conquest/
 /// capitulation origin the amendment names. Reuses the already-rare `captor !=
@@ -4470,7 +4484,91 @@ pub struct TickHub {
     /// Above 1.0 the city is overcrowded. `#[serde(default)]` reads 0.0 on an
     /// old save until the next monthly pass.
     #[serde(default)] pub crowding: f32,
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.1 — the per-city development
+    /// factor. Computed yearly by `update_development` from real trade/
+    /// partner-reach/welfare sources plus diffusion from trade partners, but
+    /// **READ BY NOTHING** in this slice (`DEV_PRODUCTION_DOSE` in a later
+    /// slice is what wires it into production) — pure bookkeeping, so
+    /// `sim_fingerprint` cannot move: it mixes only `stock`/`price`/
+    /// `population`/`treasury`/`export_earn`/`import_spend`, none of which
+    /// this field or its pass touch. `#[serde(default)]` reads 0.0 on an old
+    /// save, which `dev_needs_seeding` reads as "seed me" (the
+    /// `housing_needs_seeding` convention), never as a literal zero economy.
+    #[serde(default)] pub dev: f32,
+    /// The breakdown behind this year's `dev` change, in source order
+    /// `[trade, partner_reach, welfare, diffusion, decay]` — decay stored as a
+    /// NEGATIVE contribution so a reader can sum the array to get the year's
+    /// net growth. Recomputed (not accumulated) every `update_development`
+    /// call, so it always reads as "this year's story", never a running
+    /// total. `#[serde(default)]` reads `[0.0; 5]` on an old save.
+    #[serde(default)] pub dev_breakdown: [f32; 5],
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.3 — the four tracks' running point
+    /// totals, indexed by `TRACK_*` (Military · Trade · Civil · Ideological).
+    /// The array literal is `4` rather than `TRACK_COUNT` here only because
+    /// this struct is defined before `tracks` is declared as a module in this
+    /// same file (Rust resolves both fine either way; `4` is simply what a
+    /// reader can check against the doc without following the import).
+    /// `#[serde(default)]` reads `[0.0; 4]` on an old save.
+    #[serde(default)] pub track_points: [f32; 4],
+    /// The level (0-5) each track has reached, recomputed from `track_points`
+    /// every year by `update_tracks` — never incremented independently, so a
+    /// sack that drops points below the current level's own threshold costs
+    /// the level too. `#[serde(default)]` reads `[0; 4]` on an old save.
+    #[serde(default)] pub track_level: [u8; 4],
+    /// 03.4 — the highest level ACTUALLY BUILT per track (0 = none),
+    /// always `<= track_level` by construction (`track_building_allowed`).
+    /// `#[serde(default)]` reads `[0; 4]` on an old save.
+    #[serde(default)] pub track_buildings: [u8; 4],
+    /// 0..1 progress toward each track's NEXT building, spent gradually
+    /// (`TRACK_BUILD_RATE` of the remainder a year, when affordable) rather
+    /// than completing in one lump sum. `#[serde(default)]` reads `[0.0; 4]`
+    /// on an old save.
+    #[serde(default)] pub track_build_progress: [f32; 4],
+    // ── 04_GOVERNMENT_AND_EDICTS.md, slices 04.3-04.6 ──────────────────────
+    /// This government's standing with its own people, 0..1. Seeded to
+    /// `NEUTRAL_LEGITIMACY` (0.75, matching `development.rs`'s own forward-hook
+    /// constant of the same value) by `seed_government`. Purely descriptive —
+    /// `stability_at` (row 03) still reads its own neutral constant, not this
+    /// field (Q04.9: wiring the two together is queued, since it would move
+    /// row 03's live track-point/dev math and needs its own dose walk).
+    #[serde(default = "default_legitimacy")] pub legitimacy: f32,
+    /// Political points, accrued weekly (`government_weekly_pass`) and spent
+    /// on a passed/failed/deadlocked edict. An abstract currency — spending it
+    /// moves no wealth, price or production number.
+    #[serde(default)] pub gov_points: f32,
+    /// This government's ideological lean, roughly conservative (−1) ..
+    /// libertarian (+1), seeded ONCE from the hub's culture's own most
+    /// characteristic real trait (`gov_position_for_culture`) — the forward
+    /// hook this row's own intro names ("seeded from its culture's traits"
+    /// until row 06 gives ideology a real meter).
+    #[serde(default)] pub gov_position: f32,
+    /// The edict currently being debated at this seat, if any. `None` outside
+    /// a debate (including under a tyranny, which never debates — 04.5).
+    #[serde(default)] pub gov_debate: Option<GovDebate>,
+    /// Edicts currently in force, oldest first, expired ones dropped at their
+    /// own `expires_tick` (`expire_edicts`). Capped at `GOV_EDICTS_CAP`.
+    #[serde(default)] pub gov_edicts: Vec<GovEdict>,
+    /// Recent debate outcomes (passed/failed/deadlocked) + coups, capped at
+    /// `GOV_HISTORY_CAP`, oldest first — the Government window's "recent
+    /// history" list (04.7).
+    #[serde(default)] pub gov_history: Vec<GovHistoryEntry>,
+    /// Tick of this city's next Lustrum (every `LUSTRUM_YEARS` years, 04.6).
+    /// Seeded by `seed_government` to a staggered first occurrence so every
+    /// city's Lustrum doesn't land on the same year.
+    #[serde(default)] pub gov_lustrum_tick: u32,
+    /// Living World row 05 (05_CULTURE_ACCEPTANCE.md) · SPARSE per-culture
+    /// acceptance state — only cultures resident in or trading with this
+    /// city ever get an entry (00_INDEX's own "sparse, not a matrix" rule),
+    /// lazily seeded on first read (`ensure_culture_relations`). Old saves
+    /// load empty and re-seed themselves the first year the pass runs.
+    #[serde(default)] pub culture_relations: Vec<CultureRelation>,
+    /// This city's own bondage-attitude OVERRIDE, set by a chronicled
+    /// edict-like toggle (05.4): −1 unset (follow the resident culture's own
+    /// trait-derived default), 0 abolished here, 1 permitted here.
+    #[serde(default = "neg_one_i8")] pub bondage_override: i8,
 }
+fn neg_one_i8() -> i8 { -1 }
+fn default_legitimacy() -> f32 { NEUTRAL_LEGITIMACY_SEED }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
 /// `TickHub.deaths_by_cause`. A plain index table rather than an enum: the
@@ -4720,7 +4818,7 @@ pub(crate) fn welfare_opportunity_e(old_prosp: f32, welfare_ratio: f32, dose: f3
 /// bribery or intimidation; at `control ≥ OFFICIAL_CAPTURE` the figure serves `house`.
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Official {
-    /// 0 Head (Mayor/Doge/Lord) · 1 Treasurer · 2 Harbormaster · 3 Magistrate.
+    /// 0 Head (Mayor/Doge/Lord) · 1 Treasurer · 2 Harbormaster · 3 Magistrate · 4 Councillor.
     pub role: u8,
     pub name: String,
     /// The house the figure serves (−1 neutral). Set when a house captures it.
@@ -4731,6 +4829,90 @@ pub struct Official {
     pub kin: bool,
     /// Tick this figure's term ends (regime change re-seats it).
     pub term_end: u32,
+    /// 04.2 · why this figure sits — `PATH_*` below. Set once at installation
+    /// (`seed_government`/`reseat_official`) and updated only when a bribed
+    /// capture actually changes who holds the seat, never on ordinary control
+    /// drift. Purely descriptive — nothing reads it yet except the gate below
+    /// and the eventual debate/vote weighting (04.4/04.5).
+    #[serde(default = "default_official_path")]
+    pub path: u8,
+    /// 04.2 · static 0..1 political skill, rolled once at installation and
+    /// held for the seat's whole tenure. Descriptive only until 04.4/04.5 read
+    /// it for vote noise/bribability/overthrow risk.
+    #[serde(default = "default_official_suitability")]
+    pub suitability: f32,
+    /// 04.2 · the `Individual` (row 02) holding this seat, so a seat holder is
+    /// a real person with a face and traits rather than a bare generated name.
+    /// −1 on a save from before this field, or the rare tick before the next
+    /// `update_government` pass mints one.
+    #[serde(default = "default_official_individual")]
+    pub individual_id: i32,
+}
+fn default_official_path() -> u8 { PATH_APPOINTED }
+fn default_official_suitability() -> f32 { 0.6 }
+fn default_official_individual() -> i32 { -1 }
+
+/// 04.2 · `Official.path` — why a figure sits, set at installation. Also sets
+/// the typical suitability band and (eventually, row 06) the seat holder's
+/// starting ideology lean.
+pub const PATH_KIN: u8 = 0;
+pub const PATH_MILITARY: u8 = 1;
+pub const PATH_WEALTH: u8 = 2;
+pub const PATH_GUILD: u8 = 3;
+pub const PATH_SCHOLAR: u8 = 4;
+pub const PATH_ELECTED: u8 = 5;
+pub const PATH_BRIBED: u8 = 6;
+pub const PATH_APPOINTED: u8 = 7;
+
+pub fn official_path_name(p: u8) -> &'static str {
+    match p {
+        PATH_KIN => "kin of a house",
+        PATH_MILITARY => "military success",
+        PATH_WEALTH => "wealth",
+        PATH_GUILD => "guild representative",
+        PATH_SCHOLAR => "scholar/orator",
+        PATH_ELECTED => "elected by the commons",
+        PATH_BRIBED => "bribed in",
+        _ => "appointed",
+    }
+}
+
+/// 04.2 · `Official`'s derived allegiance — house / commons-or-none / ruler
+/// (kin, which auto-serves at control 1.0). A pure read of the existing
+/// `house`/`kin`/`control` fields, never a stored duplicate of them.
+pub const ALLEGIANCE_HOUSE: u8 = 0;
+pub const ALLEGIANCE_RULER: u8 = 1;
+pub const ALLEGIANCE_COMMONS: u8 = 2;
+
+pub fn official_allegiance(o: &Official) -> u8 {
+    if o.kin { ALLEGIANCE_RULER }
+    else if o.house >= 0 && o.control >= OFFICIAL_CAPTURE { ALLEGIANCE_HOUSE }
+    else { ALLEGIANCE_COMMONS }
+}
+
+/// 04.2 · a seat's static political skill, rolled once at installation —
+/// 0.25..0.95, so no seat is a guaranteed pushover or unbribable.
+fn official_suitability_roll(seed: u64, h: usize, salt: u64) -> f32 {
+    0.25 + 0.70 * hash01(seed, h as u64 ^ salt, 0x0F1CE)
+}
+
+/// 04.2 · group a city's seats into blocs by allegiance target — a pure
+/// derived read for the Government window (04.7); nothing is persisted here.
+/// Key: `house` id when the bloc is house-bound (ALLEGIANCE_HOUSE/RULER,
+/// which always carries a real `house`), else `-1` for the commons/none bloc.
+pub fn government_blocs(officials: &[Official]) -> Vec<(i32, Vec<usize>)> {
+    let mut blocs: Vec<(i32, Vec<usize>)> = Vec::new();
+    for (i, o) in officials.iter().enumerate() {
+        let key = match official_allegiance(o) {
+            ALLEGIANCE_HOUSE | ALLEGIANCE_RULER => o.house,
+            _ => -1,
+        };
+        match blocs.iter_mut().find(|(k, _)| *k == key) {
+            Some((_, v)) => v.push(i),
+            None => blocs.push((key, vec![i])),
+        }
+    }
+    blocs
 }
 
 /// One enacted law/policy in a city's government log.
@@ -6654,6 +6836,12 @@ pub struct CityYear {
     /// annal recorded before L6 loads as 0.0 — read as "not recorded" by the
     /// frontend, the same convention `ages`/`deaths_by_cause` already use.
     #[serde(default)] pub crowding: f32,
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.1 · a snapshot of `TickHub.dev` at
+    /// year end, for the settlement panel's future 50-year sparkline (03.6).
+    /// `#[serde(default)]` so an annal recorded before this slice loads as
+    /// 0.0 — "not recorded", the same convention every other tail field here
+    /// already uses.
+    #[serde(default)] pub dev: f32,
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L3 — a rolling cap on `TickHub.annals`, the same
@@ -7018,8 +7206,38 @@ fn role_title(kind: u8) -> &'static str {
 }
 
 /// The office a government key figure holds (for chronicle text + the Government panel).
+/// Role 4 is a generic extra seat (04.1's seat-count scaling, `seat_count_for`)
+/// beyond the original four named offices — cultural/per-office titling (the
+/// Roman/Hellene/… sets in `living_world/04_GOVERNMENT_AND_EDICTS.md`) waits on
+/// threading a culture-kit index into `TickHub` (queued, `hub.culture` is a
+/// plain generated name here, not a `cultures::Kit` index).
 pub fn office_title(role: u8) -> &'static str {
-    match role { 0 => "Head", 1 => "Treasurer", 2 => "Harbormaster", _ => "Magistrate" }
+    match role { 0 => "Head", 1 => "Treasurer", 2 => "Harbormaster", 3 => "Magistrate", _ => "Councillor" }
+}
+
+/// `living_world/04_GOVERNMENT_AND_EDICTS.md` §"Forms, sizes and offices" —
+/// seats scale with city population, capped at `GOVT_SEAT_CAP`. Villages get
+/// 1-3, a free commune/assembly 3-10, a council/oligarchy 5-9, a
+/// principality/tyranny 1 ruler + 2-4 advisers, a senate 9-16. Pure and
+/// deterministic (no rng — the actual roll for WHICH extra seats exist, and
+/// who sits in them, stays `seed_government`'s job); only consulted when
+/// `GOV_POWER_DOSE > 0.0` (see that constant's own doc comment), so this
+/// function existing changes nothing about the shipped economy by itself.
+pub(crate) fn seat_count_for(pop: f32, govt_type: u8) -> usize {
+    if pop < 2_000.0 {
+        // A village: an elder or a headman, at most a tiny council.
+        return if pop < 400.0 { 1 } else { 3 };
+    }
+    let n = match govt_type {
+        // Tyranny/principality: the ruler + 2-4 advisers, growing slowly with size.
+        1 => 1 + (2.0 + (pop / 40_000.0).min(2.0)) as usize,
+        // Council/oligarchy: 5-9 seats.
+        0 => 5 + (pop / 60_000.0).min(4.0) as usize,
+        // Free commune/assembly: magistrates 3-10 (the assembly itself is the
+        // commons' meter, row 06, never seats).
+        _ => 3 + (pop / 25_000.0).min(7.0) as usize,
+    };
+    n.min(GOVT_SEAT_CAP).max(1)
 }
 
 /// Human name of a regime type.
@@ -7501,6 +7719,13 @@ pub struct CampaignSim {
     /// `serde(default)` yields 0.0 on old saves → treated as 1.0 in `advance`.
     #[serde(default)]
     pub tech_factor: f32,
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.7 — `dev_blended_tech`'s one-time
+    /// normalisation: `tech_factor / population_weighted_mean(dev)`, calibrated
+    /// lazily the first time `DEV_PRODUCTION_DOSE > 0.0` needs it (never touched
+    /// at the shipped dose 0.0). `<= 0.0` reads as "not yet calibrated" — the
+    /// same convention every other lazy-seed field in this file uses.
+    #[serde(default)]
+    pub dev_norm_scale: f32,
     /// One-time migration flag: derive `base_per_capita` for pre-existing saves whose
     /// hubs were seeded with absolute (population-independent) production.
     #[serde(default)]
@@ -9108,6 +9333,9 @@ impl CampaignSim {
             if self.hubs[h].is_estate { continue; }
             // 1) Seed the regime + officials once.
             if self.hubs[h].officials.is_empty() { self.seed_government(h); }
+            // 1b) 04.6 · the five-yearly Lustrum (its own allowance, never the
+            // weekly edict points above).
+            self.maybe_run_lustrum(h);
             // 2) Regime change: reseat any figure whose term has ended.
             for oi in 0..self.hubs[h].officials.len() {
                 if tick >= self.hubs[h].officials[oi].term_end { self.reseat_official(h, oi); }
@@ -9159,14 +9387,24 @@ impl CampaignSim {
                 self.houses[pi].wealth -= budget;
                 // The money doesn't vanish — it lines the city's coffers (and its officials).
                 self.hubs[h].civic_pool += budget;
+                // 04.2 · a genuinely NEW patron (not the seat's existing one) sets
+                // the seat's path to how it was actually taken — muscle for a
+                // fleet/political house, plain coin otherwise. A seat already
+                // held by `pi` keeps whatever path it was captured under.
+                let new_capture = cur != pi as i32;
+                let capture_path = if arch == ARCH_FLEET || arch == ARCH_POLITICAL { PATH_MILITARY } else { PATH_BRIBED };
                 let o = &mut self.hubs[h].officials[oi];
                 if contest {
                     // Erode the rival's grip first; take the seat once it's loosened.
                     o.control = (o.control - gain * 0.6).max(0.0);
-                    if o.control <= 0.05 { o.house = pi as i32; o.control = 0.0; }
+                    if o.control <= 0.05 {
+                        o.house = pi as i32; o.control = 0.0;
+                        if new_capture { o.path = capture_path; }
+                    }
                 } else {
                     o.house = pi as i32;
                     o.control = (o.control + gain).min(1.0);
+                    if new_capture { o.path = capture_path; }
                 }
             }
             // 4) Capture: the house holding a majority of control-weighted seats.
@@ -9237,17 +9475,65 @@ impl CampaignSim {
             else { 2 };
         self.hubs[h].govt_type = govt;
         let term = GOVT_TERM_YEARS[govt as usize] * TICKS_PER_YEAR;
-        let roles: &[u8] = if self.hubs[h].coastal { &[0, 1, 2, 3] } else { &[0, 1, 3] };
+        let fixed_roles: &[u8] = if self.hubs[h].coastal { &[0, 1, 2, 3] } else { &[0, 1, 3] };
+        // `living_world/04_GOVERNMENT_AND_EDICTS.md` 04.1 · at GOV_POWER_DOSE > 0
+        // the seat count scales with city size (`seat_count_for`); extra seats
+        // beyond the four named offices are role 4 ("Councillor"), which already
+        // carries the tally's default weight of 1.0 (`match role { 0 => 2.0, 1 =>
+        // 1.4, _ => 1.0 }`), so no capture-logic change was needed to add them.
+        // At dose 0 this is exactly the old fixed 3-4 role list — a true no-op.
+        let extra_seats = if GOV_POWER_DOSE > 0.0 {
+            seat_count_for(pop, govt).saturating_sub(fixed_roles.len())
+        } else {
+            0
+        };
         let city = self.hubs[h].name.clone();
-        let mut officials = Vec::with_capacity(roles.len());
-        for (i, &role) in roles.iter().enumerate() {
-            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add(role as u64 ^ 0x51);
+        let n_seats = fixed_roles.len() + extra_seats;
+        let mut officials = Vec::with_capacity(n_seats);
+        for i in 0..n_seats {
+            let role = fixed_roles.get(i).copied().unwrap_or(4);
+            // Extra (role-4) seats salt on their SEAT INDEX `i`, not `role` (every
+            // extra seat shares role 4, so role-based salting would give them all
+            // the same name); the original four named offices keep salting on
+            // `role` exactly as before, so a dose-0 world is bit-identical.
+            let salt_key = if i < fixed_roles.len() { role as u64 } else { i as u64 };
+            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add(salt_key ^ 0x51);
             let name = self.head_name_for(h, &city, salt);
             // Stagger initial terms so the whole council doesn't turn over at once.
-            let te = self.tick + term / 2 + (i as u32 * term) / roles.len().max(1) as u32;
-            officials.push(Official { role, name, house: -1, control: 0.0, kin: false, term_end: te });
+            let te = self.tick + term / 2 + (i as u32 * term) / n_seats.max(1) as u32;
+            // 04.2 · a fresh seat's path by government form: a tyranny/principality
+            // appoints, a free commune elects, an oligarchy/council seat starts as
+            // wealth (a rich family's own, before any bribery contest moves it).
+            let path = match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH };
+            let suitability = official_suitability_roll(self.seed, h, salt);
+            let iid = self.individual_id_for_official(h, &name);
+            officials.push(Official {
+                role, name, house: -1, control: 0.0, kin: false, term_end: te,
+                path, suitability, individual_id: iid,
+            });
         }
         self.hubs[h].officials = officials;
+        // 04.3-04.6 · seed the rest of the government block once, alongside
+        // the seats themselves — idempotent with the `officials.is_empty()`
+        // gate above, so a colony/estate-founded hub gets these too, not
+        // just a world-generation-time one.
+        let culture = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let ideal = self.culture_ideal(&culture);
+        self.hubs[h].legitimacy = NEUTRAL_LEGITIMACY_SEED;
+        self.hubs[h].gov_position = gov_position_for_ideal(ideal);
+        // Stagger the first Lustrum exactly like the seats' own staggered terms.
+        self.hubs[h].gov_lustrum_tick = self.tick
+            + (hash01(self.seed, h as u64 ^ 0x1057, 0x1) * (LUSTRUM_YEARS * TICKS_PER_YEAR) as f32) as u32;
+    }
+
+    /// 04.2 · resolve (or mint) the `Individual` a seat holder should carry —
+    /// the seat-holder analogue of `individual_id_for_notable`, which the same
+    /// pattern (never mint twice for the same standing name) is copied from.
+    fn individual_id_for_official(&mut self, h: usize, name: &str) -> i32 {
+        if let Some(p) = self.people.iter().find(|p| p.current_hub == h as i32 && p.name == name && p.roles.contains(&ROLE_OFFICIAL)) {
+            return p.id as i32;
+        }
+        self.spawn_individual(h, ROLE_OFFICIAL, name.to_string(), -1) as i32
     }
 
     /// Turn a key figure over at the end of its term — a fresh neutral appointee, or
@@ -9272,10 +9558,24 @@ impl CampaignSim {
         let salt = (self.tick as u64).wrapping_add((h as u64) << 8).wrapping_add(oi as u64);
         let surname = if kin_house >= 0 { self.houses[kin_house as usize].name.clone() } else { city.clone() };
         let name = self.head_name_for(h, &surname, salt);
+        // 04.2 · a kin installation is always PATH_KIN; otherwise the fresh
+        // appointee's path follows the government's form, same as a founding
+        // seed. A reseat always mints a fresh figure, so suitability rerolls
+        // and a fresh `Individual` is minted (or reused, if this exact name
+        // already holds another seat in this city — rare, but the same
+        // never-mint-twice discipline `individual_id_for_notable` uses).
+        let path = if kin_house >= 0 { PATH_KIN } else {
+            match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH }
+        };
+        let suitability = official_suitability_roll(self.seed, h, salt);
+        let iid = self.individual_id_for_official(h, &name);
         {
             let o = &mut self.hubs[h].officials[oi];
             o.name = name;
             o.term_end = self.tick + term;
+            o.path = path;
+            o.suitability = suitability;
+            o.individual_id = iid;
             if kin_house >= 0 { o.house = kin_house; o.control = 1.0; o.kin = true; }
             else { o.house = -1; o.control = 0.0; o.kin = false; }
         }
@@ -9731,6 +10031,10 @@ impl CampaignSim {
             // events. `O(people)` with small constants.
             if tick % 7 == 0 {
                 self.people_weekly_pass();
+                // Living World row 04 (04_GOVERNMENT_AND_EDICTS.md) · the same
+                // weekly hook — political points accrue, one debate round
+                // (or a tyrant's own decision) runs, spent edicts expire.
+                self.government_weekly_pass();
             }
 
             // Phase G: keep the per-house ledgers aligned to the house list, and roll
@@ -9882,6 +10186,15 @@ impl CampaignSim {
                 self.run_civic_wonders(yr);
                 self.run_piracy(yr);
                 self.run_diaspora(yr);
+                // Living World row 05 (05_CULTURE_ACCEPTANCE.md) · tier/score
+                // drift, shadow-debate resolution, persecution — after
+                // `update_notables`/`update_government` above so this year's
+                // gov_position/officials are fresh, and after the war/feud
+                // passes so this year's war_with/feuds are settled.
+                self.culture_acceptance_yearly_pass(yr);
+                // 05.4 · culture-tier-gated fondaco chartering (dosed at
+                // zero — see `culture_acceptance.rs`'s own doc comment).
+                self.maybe_charter_culture_fondacos();
                 // living_world/01_FEEDS_AND_PRUNING.md · after every other yearly
                 // pass, so a figure's life log has already copied out anything
                 // about to be pruned as chatter.
@@ -9910,7 +10223,9 @@ impl CampaignSim {
             //    less (so tiny hubs can no longer flood the world with surplus).
             //    `production[g]` is kept as the realized output for downstream
             //    readers (estates, briefs, "strongest good").
-            let tech = self.tech_factor;
+            // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE
+            // = 0.0 (every entry reads self.tech_factor, unchanged from before).
+            let tech_by_hub = self.dev_blended_tech(DEV_PRODUCTION_DOSE);
             // Extracted (non-recipe) FOOD goods — for the subsistence-farming floor.
             let food_gs: Vec<usize> = (0..ng)
                 .filter(|&g| self.goods[g].food && self.goods[g].inputs.is_empty())
@@ -9931,7 +10246,7 @@ impl CampaignSim {
                     for &g in &food_gs { sup += self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0) * pop; }
                     let mut nd = 0.0f32;
                     for &g in &food_gs { nd += self.base_need(h, g); }
-                    *comp_food_supply.entry(comp).or_default() += sup * tech;
+                    *comp_food_supply.entry(comp).or_default() += sup * tech_by_hub[h];
                     *comp_food_need.entry(comp).or_default() += nd;
                 }
             }
@@ -9962,7 +10277,7 @@ impl CampaignSim {
                         self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value),
                         self.goods[g].base_value);
                     let mut realized = percap * pop * self.seasonal_mult(h, g, doy)
-                        * prod_mult[h][g] * tech * struct_bonus * eff * price_mult;
+                        * prod_mult[h][g] * tech_by_hub[h] * struct_bonus * eff * price_mult;
                     // S5 · a real ore body caps output regardless of population.
                     // `ORE_CEILING_DOSE == 0.0` short-circuits before touching
                     // `mine_geology_at` at all, so this is a true no-op at zero dose.
@@ -11327,7 +11642,51 @@ mod crisis;
 mod schism;
 mod foreign_hand;
 mod individuals;
+pub(crate) use individuals::ROLE_OFFICIAL;
 mod life_events;
+mod development;
+pub(crate) use development::{stability_of, STABILITY_MIN, STABILITY_MAX};
+mod tracks;
+pub(crate) use tracks::{
+    TRACK_MILITARY, TRACK_TRADE, TRACK_CIVIL, TRACK_IDEOLOGICAL, TRACK_COUNT,
+    TRACK_THRESHOLDS, TRACK_LEVEL_MAX, level_for_points,
+    TRACK_CONSTRUCTION_DOSE, track_building_allowed, track_build_progress_e, track_building_name,
+};
+mod culture_ideals;
+pub(crate) use culture_ideals::{
+    IDEAL_CONQUEST, IDEAL_WEALTH, IDEAL_LEARNING, IDEAL_STABILITY, IDEAL_LINEAGE,
+    IDEAL_TRADITION, IDEAL_PURITY, IDEAL_ASSIMILATION, IDEAL_REACH, IDEAL_NAMES,
+    ideal_for_trait, track_for_ideal,
+};
+mod dev_production;
+pub(crate) use dev_production::DEV_PRODUCTION_DOSE;
+mod culture_acceptance;
+pub use culture_acceptance::{
+    CultureRelation, acceptance_tier_name,
+    ACCEPT_TIER_CITIZENS, ACCEPT_TIER_ENFRANCHISED, ACCEPT_TIER_RESIDENT,
+    ACCEPT_TIER_UNWELCOME, ACCEPT_TIER_HATED,
+};
+pub(crate) use culture_acceptance::{
+    tier_for_score, bondage_attitude_for_traits,
+    acceptance_tax_mult_e, acceptance_settle_mult_e, acceptance_scholar_mult_e,
+    acceptance_office_allowed_e, acceptance_dev_share_e, acceptance_cohesion_term_e,
+    persecution_migration_frac_e,
+    PERSECUTION_DOSE, ACCEPT_TAX_DOSE, ACCEPT_SETTLE_DOSE, ACCEPT_SCHOLAR_DOSE,
+    ACCEPT_OFFICE_DOSE, ACCEPT_DEV_DOSE, ACCEPT_COHESION_DOSE, FONDACO_CHARTER_DOSE,
+};
+mod government;
+pub use government::{
+    GovEdict, GovDebate, GovHistoryEntry, edict_family_name,
+    GOV_OUTCOME_PASSED, GOV_OUTCOME_FAILED, GOV_OUTCOME_DEADLOCKED, GOV_OUTCOME_COUP,
+};
+pub(crate) use government::{
+    NEUTRAL_LEGITIMACY_SEED, GOV_EDICTS_CAP, GOV_HISTORY_CAP, LUSTRUM_YEARS,
+    EDICT_FAM_CITIZENSHIP, EDICT_FAM_FOREIGNERS, EDICT_FAM_LEARNING, EDICT_FAM_WELFARE,
+    EDICT_FAM_ECONOMY, EDICT_FAM_MILITARY, EDICT_FAM_CONSTITUTION, EDICT_FAM_BUILDINGS,
+    EDICT_FAMILY_COUNT, gov_position_for_ideal, edict_cost,
+    LUSTRUM_TRACK_BONUS, LUSTRUM_TRACK_BONUS_DOSE, lustrum_bonus_e,
+    EDICT_EFFECT_DOSE,
+};
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;
