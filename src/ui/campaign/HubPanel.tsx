@@ -3,10 +3,10 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables } from "@bridge";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables, campaignGetIndividual } from "@bridge";
 import { CityNotables } from "@ui/campaign/FiguresPanel";
 import { NOTABLE_ROLE_NAMES } from "@types";
-import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear, Notable } from "@types";
+import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear, Notable, IndividualBrief } from "@types";
 import { settlementStory } from "@app/settlementStory";
 import { GOOD_DEFS } from "@goods";
 import { GoodIcon } from "@ui/goods/GoodIcon";
@@ -297,6 +297,7 @@ export function HubPanel() {
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const [annals, setAnnals] = useState<CityYear[]>([]);
   const [notables, setNotables] = useState<Notable[]>([]);
+  const [notablePeople, setNotablePeople] = useState<Record<number, IndividualBrief>>({});
   const [expandedEstate, setExpandedEstate] = useState<number | null>(null);
   const [relayExpanded, setRelayExpanded] = useState(false);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
@@ -329,6 +330,26 @@ export function HubPanel() {
     campaignCityNotables(selectedHub).then((n) => { if (alive) setNotables(n); }).catch(() => { if (alive) setNotables([]); });
     return () => { alive = false; };
   }, [tab, selectedHub, campActive, campTick]);
+
+  // The townspeople's own traits/life story live on the `Individual` each
+  // notable role points at (`individual_id`) — the role roster itself
+  // carries only name/role/good. Fetched once the roster lands, so a
+  // guildmaster/alderman/agitator's card can show a personality and a real
+  // story rather than a bare name (was the "government has no traits" gap).
+  useEffect(() => {
+    if (notables.length === 0) { setNotablePeople({}); return; }
+    let alive = true;
+    Promise.all(notables
+      .filter((n) => n.individual_id >= 0)
+      .map((n) => campaignGetIndividual(n.individual_id).then((p) => [n.individual_id, p] as const).catch(() => [n.individual_id, null] as const)))
+      .then((pairs) => {
+        if (!alive) return;
+        const map: Record<number, IndividualBrief> = {};
+        for (const [id, p] of pairs) if (p) map[id] = p;
+        setNotablePeople(map);
+      });
+    return () => { alive = false; };
+  }, [notables]);
 
   // Pull live per-hub detail (sentiment/market/history) while a campaign runs,
   // refreshed every time the campaign tick changes.
@@ -1382,12 +1403,31 @@ export function HubPanel() {
             {notables.length > 0 && (
               <>
                 <div style={{ ...sectionHdr, marginTop: 10 }}>The townspeople</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 4 }}>
-                  {notables.map((n, i) => (
-                    <div key={i} style={{ fontSize: 10, color: "#cfe2f6" }}>
-                      <span style={{ color: "#9ab0c8" }}>{NOTABLE_ROLE_NAMES[n.role] ?? "Notable"}</span> — {n.name}
-                    </div>
-                  ))}
+                <div style={{ display: "flex", flexDirection: "column", gap: 5, marginBottom: 4 }}>
+                  {notables.map((n, i) => {
+                    const person = n.individual_id >= 0 ? notablePeople[n.individual_id] : undefined;
+                    const lastLine = person?.life_log[person.life_log.length - 1];
+                    return (
+                      <div key={i} style={{ fontSize: 10, color: "#cfe2f6" }}>
+                        <div>
+                          <span style={{ color: "#9ab0c8" }}>{NOTABLE_ROLE_NAMES[n.role] ?? "Notable"}</span> — {n.name}
+                        </div>
+                        {person && person.traits.length > 0 && (
+                          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 2 }}>
+                            {person.traits.map((t) => (
+                              <span key={t} style={{
+                                fontSize: 8.5, color: "#e8d9b0", border: "1px solid #4a4030",
+                                borderRadius: 8, padding: "1px 6px",
+                              }}>{t}</span>
+                            ))}
+                          </div>
+                        )}
+                        <div style={{ fontSize: 9, color: "#7a90a8", fontStyle: "italic", marginTop: 1 }}>
+                          {lastLine ?? (person ? "A quiet life, so far." : "")}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </>
             )}

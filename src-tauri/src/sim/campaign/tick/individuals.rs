@@ -197,6 +197,27 @@ const DEBUT_TRAIT_POOL: [u8; 18] = [
     TRAIT_LOYAL, TRAIT_FICKLE, TRAIT_TEMPERATE, TRAIT_IMPULSIVE, TRAIT_GENEROUS, TRAIT_GREEDY,
 ];
 
+/// Roll 1..`TRAIT_CAP_YOUNG` debut personality traits from a hashed seed —
+/// shared by `spawn_individual` and `migrate_figures_to_individuals`, so a
+/// figure carried over from the pre-Individual roster gets a personality
+/// exactly like anyone freshly minted, rather than the empty `Vec::new()`
+/// that shipped it with none (the bug `campaign_get_notables` surfaced: the
+/// people most likely to show as notable — already-famous migrated figures —
+/// were the ones with no traits at all).
+fn roll_debut_traits(seed: u64, salt: u64) -> Vec<(u8, i8)> {
+    let mut traits = Vec::new();
+    let n_traits = 1 + (hash01(seed, salt, salts::DEBUT_TRAIT) * TRAIT_CAP_YOUNG as f32) as usize;
+    for k in 0..n_traits.min(TRAIT_CAP_YOUNG) {
+        let ti = (hash01(seed, salt ^ k as u64, salts::DEBUT_TRAIT) * DEBUT_TRAIT_POOL.len() as f32) as usize;
+        let t = DEBUT_TRAIT_POOL[ti.min(DEBUT_TRAIT_POOL.len() - 1)];
+        let strength = if hash01(seed, salt ^ k as u64, salts::DEBUT_TRAIT_STRENGTH) < 0.5 { 1i8 } else { 2i8 };
+        if !traits.iter().any(|&(tt, _): &(u8, i8)| tt == t) {
+            traits.push((t, strength));
+        }
+    }
+    traits
+}
+
 pub fn trait_name(t: u8) -> &'static str {
     match t {
         TRAIT_KIND => "Kind", TRAIT_CRUEL => "Cruel", TRAIT_BRAVE => "Brave",
@@ -579,6 +600,14 @@ impl CampaignSim {
             let female = hash01(self.seed, f.hub as u64, salts::FIGURE_MIGRATION_FEMALE) < 0.5;
             let age = 25 + (hash01(self.seed, f.hub as u64 ^ i as u64, salts::FIGURE_MIGRATION_AGE) * 35.0) as u32;
             let culture = self.hub_culture.get(f.hub as usize).cloned().unwrap_or_default();
+            // A migrated Figure gets a real personality too — the debut-trait
+            // roll every freshly-minted Individual already gets, keyed off the
+            // same salt shape as `spawn_individual`'s. Before this a migrated
+            // figure (the ones most likely to already be `famous` and so the
+            // ones actually shown in the Notables panel) carried `traits:
+            // Vec::new()` forever — the panel's "no traits" bug.
+            let trait_salt = (f.hub as u64).wrapping_mul(0x9E3779B1) ^ (i as u64);
+            let traits = roll_debut_traits(self.seed, trait_salt);
             let id = self.next_individual_id;
             self.next_individual_id += 1;
             let indiv = Individual {
@@ -598,15 +627,21 @@ impl CampaignSim {
                 roles: vec![role],
                 famous: !f.dead,
                 fame: if f.dead { 0.0 } else { 0.5 },
-                traits: Vec::new(),
+                traits,
                 modifiers: Vec::new(),
                 ideology: [0.0; 4],
                 face_seed: hash01(self.seed, f.hub as u64 ^ (i as u64).wrapping_mul(7), salts::DEBUT_FACE).to_bits(),
                 features: 0,
                 relations: Vec::new(),
                 backstory: Vec::new(),
-                life_log: vec![IndividualLifeEntry { tick: f.born_tick, template_id: 0, args: vec![] }],
-                events_year: 0,
+                // No template with id 0 exists (`EVENT_TEMPLATES` starts at 1),
+                // so the old placeholder entry here always rendered as the
+                // `render_life_entry_for` fallback ("passes an ordinary day")
+                // for every migrated figure — a fabricated non-event. Leave it
+                // empty; a real one arrives from `fire_due_life_events` in the
+                // normal course of play, exactly like a freshly-minted person.
+                life_log: Vec::new(),
+                events_year: u32::MAX,
                 events_this_year: 0,
             };
             if f.dead {
@@ -641,16 +676,7 @@ impl CampaignSim {
         let female = hash01(self.seed, salt, salts::DEBUT_FEMALE) < 0.5;
         let age = DEBUT_MIN_AGE + (hash01(self.seed, salt, salts::DEBUT_AGE) * 45.0) as u32;
         let culture = self.hub_culture.get(h).cloned().unwrap_or_default();
-        let mut traits = Vec::new();
-        let n_traits = 1 + (hash01(self.seed, salt, salts::DEBUT_TRAIT) * TRAIT_CAP_YOUNG as f32) as usize;
-        for k in 0..n_traits.min(TRAIT_CAP_YOUNG) {
-            let ti = (hash01(self.seed, salt ^ k as u64, salts::DEBUT_TRAIT) * DEBUT_TRAIT_POOL.len() as f32) as usize;
-            let t = DEBUT_TRAIT_POOL[ti.min(DEBUT_TRAIT_POOL.len() - 1)];
-            let strength = if hash01(self.seed, salt ^ k as u64, salts::DEBUT_TRAIT_STRENGTH) < 0.5 { 1i8 } else { 2i8 };
-            if !traits.iter().any(|&(tt, _): &(u8, i8)| tt == t) {
-                traits.push((t, strength));
-            }
-        }
+        let traits = roll_debut_traits(self.seed, salt);
         let id = self.next_individual_id;
         self.next_individual_id += 1;
         let indiv = Individual {
@@ -678,7 +704,12 @@ impl CampaignSim {
             relations: Vec::new(),
             backstory: Vec::new(),
             life_log: Vec::new(),
-            events_year: 0,
+            // `u32::MAX` (never a real year) so `fire_due_life_events` rolls
+            // this person's very first quota on its next weekly check even
+            // if that happens to fall in year 0 — a literal `0` here read as
+            // "year 0's quota is already rolled (at zero)" and silently gave
+            // every year-0 debut a dead first year.
+            events_year: u32::MAX,
             events_this_year: 0,
         };
         self.people.push(indiv);

@@ -1484,6 +1484,10 @@ export interface Notable {
   name: string;
   /** The guildmaster's own craft (good index), else -1. */
   good: number;
+  /** The stable `Individual` id this local role points at (02_PEOPLE.md) —
+   *  fetch it via `campaignGetIndividual` for traits/life story. -1 on an
+   *  old save until the next yearly rebuild links it. */
+  individual_id: number;
 }
 export const NOTABLE_ROLE_NAMES = ["Guildmaster", "Alderman", "Agitator"] as const;
 export interface CityPriceIndex {
