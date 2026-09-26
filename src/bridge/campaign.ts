@@ -199,6 +199,12 @@ export async function campaignCityLife(hub: number): Promise<import("@types").Ci
   return invoke("campaign_city_life", { hub });
 }
 
+/** `03_DEVELOPMENT_TRACKS.md` slice 03.6 · one hub's development factor +
+ *  four tracks — the settlement panel's Development tab. */
+export async function campaignCityDevelopment(hub: number): Promise<import("@types").CityDevelopment> {
+  return invoke("campaign_city_development", { hub });
+}
+
 /** SETTLEMENT_LIFE_PLAN.md L12 · one hub's current notables — the Life tab's
  *  "the townspeople" section. */
 export async function campaignCityNotables(hub: number): Promise<import("@types").Notable[]> {

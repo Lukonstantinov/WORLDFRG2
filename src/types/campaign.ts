@@ -1475,6 +1475,21 @@ export interface CityYear {
    *  must read that as "not recorded", not "no housing at all". */
   crowding: number;
 }
+/** `03_DEVELOPMENT_TRACKS.md` slice 03.6 · one settlement's development
+ *  reading (campaign_city_development). Track index order is fixed:
+ *  0 Military · 1 Trade · 2 Civil · 3 Ideological (`TRACK_*` in tick/tracks.rs). */
+export interface CityDevelopment {
+  dev: number;
+  /** This year's `[trade, partner_reach, welfare, diffusion, decay]`. */
+  dev_breakdown: [number, number, number, number, number];
+  track_points: [number, number, number, number];
+  /** 0-5, how far each track's ABILITY has risen. */
+  track_level: [number, number, number, number];
+  /** 0-5, the highest level actually BUILT — always <= track_level. */
+  track_buildings: [number, number, number, number];
+  /** 0..1 progress toward each track's next building. */
+  track_build_progress: [number, number, number, number];
+}
 /** SETTLEMENT_LIFE_PLAN.md L12 · a per-city notable (campaign_city_notables).
  *  role index: 0 Guildmaster · 1 Alderman · 2 Agitator — the three of the
  *  plan's six named roles built so far; bishop/physician/watch-captain wait

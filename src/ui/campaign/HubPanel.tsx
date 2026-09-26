@@ -3,7 +3,8 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables } from "@bridge";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables, campaignCityDevelopment } from "@bridge";
+import type { CityDevelopment } from "@types";
 import { CityNotables } from "@ui/campaign/FiguresPanel";
 import { NOTABLE_ROLE_NAMES } from "@types";
 import type { EconHub, HubCurrency, HubDetail, FuturesLane, ColonyDetail, CoinShare, SocietyBrief, ProvisioningBrief, Settlement, CultureMood, BuildingInfo, SettlementPeoples, RelayExample, CityYear, Notable } from "@types";
@@ -43,7 +44,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life";
+type Tab = "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life" | "development";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -297,6 +298,7 @@ export function HubPanel() {
   const [lanes, setLanes] = useState<FuturesLane[]>([]);
   const [annals, setAnnals] = useState<CityYear[]>([]);
   const [notables, setNotables] = useState<Notable[]>([]);
+  const [dev, setDev] = useState<CityDevelopment | null>(null);
   const [expandedEstate, setExpandedEstate] = useState<number | null>(null);
   const [relayExpanded, setRelayExpanded] = useState(false);
   const setFuturesFocus = useUIStore((s) => s.setFuturesFocus);
@@ -327,6 +329,15 @@ export function HubPanel() {
     let alive = true;
     campaignCityLife(selectedHub).then((a) => { if (alive) setAnnals(a); }).catch(() => { if (alive) setAnnals([]); });
     campaignCityNotables(selectedHub).then((n) => { if (alive) setNotables(n); }).catch(() => { if (alive) setNotables([]); });
+    return () => { alive = false; };
+  }, [tab, selectedHub, campActive, campTick]);
+
+  // 03_DEVELOPMENT_TRACKS.md slice 03.6 · the Development tab's own factor +
+  // four-track snapshot, refreshed on open and as the campaign advances.
+  useEffect(() => {
+    if (tab !== "development" || selectedHub === null || !campActive) return;
+    let alive = true;
+    campaignCityDevelopment(selectedHub).then((d) => { if (alive) setDev(d); }).catch(() => { if (alive) setDev(null); });
     return () => { alive = false; };
   }, [tab, selectedHub, campActive, campTick]);
 
@@ -437,6 +448,7 @@ export function HubPanel() {
     ...(campActive && detail ? [{ id: "warehouse" as Tab, label: "Warehouse" }] : []),
     { id: "people", label: "People" },
     ...(campActive && detail && !detail.is_estate ? [{ id: "life" as Tab, label: "Life" }] : []),
+    ...(campActive && detail && !detail.is_estate ? [{ id: "development" as Tab, label: "Development" }] : []),
   ];
 
   return (
@@ -1397,6 +1409,46 @@ export function HubPanel() {
               physician, and the captain of the watch (L12's other three
               named roles) wait on those. This is Life tab v2 over what
               L0-L8/L12 made real.
+            </div>
+          </>
+        );
+      })()}
+
+      {/* ════════════ DEVELOPMENT (03_DEVELOPMENT_TRACKS.md 03.6) ════════════ */}
+      {tab === "development" && (() => {
+        if (!dev) {
+          return <div style={{ color: "#7a90a8", fontSize: 10 }}>No development data yet — check back after the campaign has run a year.</div>;
+        }
+        const TRACK_NAMES = ["⚔ Military", "⚖ Trade", "🏛 Civil", "📜 Ideological"] as const;
+        const BREAKDOWN_NAMES = ["Trade", "Partner reach", "Welfare", "Diffusion", "Decay"] as const;
+        return (
+          <>
+            <div style={{ fontSize: 11, color: "#c9d6e3", marginBottom: 4 }}>
+              Development factor: <b>{dev.dev.toFixed(2)}</b>
+            </div>
+            <div style={{ fontSize: 9, color: "#7a90a8", marginBottom: 10 }}>
+              This year: {BREAKDOWN_NAMES.map((n, i) => `${n} ${dev.dev_breakdown[i] >= 0 ? "+" : ""}${dev.dev_breakdown[i].toFixed(2)}`).join(" · ")}
+            </div>
+            {TRACK_NAMES.map((name, k) => (
+              <div key={name} style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 4 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#c9d6e3" }}>
+                  <span>{name}</span>
+                  <span>level {dev.track_level[k]} · {dev.track_points[k].toFixed(1)} pts</span>
+                </div>
+                <div style={{ fontSize: 9, color: "#7a90a8", marginTop: 2 }}>
+                  {dev.track_buildings[k] > 0
+                    ? `built to level ${dev.track_buildings[k]}`
+                    : "no building raised yet"}
+                  {dev.track_buildings[k] < dev.track_level[k] && (
+                    <> — next building {(dev.track_build_progress[k] * 100).toFixed(0)}% funded</>
+                  )}
+                </div>
+              </div>
+            ))}
+            <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
+              Building effects (army strength, warehouse capacity, population
+              ceiling, idea spread…) are not wired up yet — 03.7's dose walk.
+              This tab shows what the city has actually built, nothing more.
             </div>
           </>
         );
