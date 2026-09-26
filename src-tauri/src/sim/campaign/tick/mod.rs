@@ -4556,7 +4556,18 @@ pub struct TickHub {
     /// Seeded by `seed_government` to a staggered first occurrence so every
     /// city's Lustrum doesn't land on the same year.
     #[serde(default)] pub gov_lustrum_tick: u32,
+    /// Living World row 05 (05_CULTURE_ACCEPTANCE.md) · SPARSE per-culture
+    /// acceptance state — only cultures resident in or trading with this
+    /// city ever get an entry (00_INDEX's own "sparse, not a matrix" rule),
+    /// lazily seeded on first read (`ensure_culture_relations`). Old saves
+    /// load empty and re-seed themselves the first year the pass runs.
+    #[serde(default)] pub culture_relations: Vec<CultureRelation>,
+    /// This city's own bondage-attitude OVERRIDE, set by a chronicled
+    /// edict-like toggle (05.4): −1 unset (follow the resident culture's own
+    /// trait-derived default), 0 abolished here, 1 permitted here.
+    #[serde(default = "neg_one_i8")] pub bondage_override: i8,
 }
+fn neg_one_i8() -> i8 { -1 }
 fn default_legitimacy() -> f32 { NEUTRAL_LEGITIMACY_SEED }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
@@ -10175,6 +10186,15 @@ impl CampaignSim {
                 self.run_civic_wonders(yr);
                 self.run_piracy(yr);
                 self.run_diaspora(yr);
+                // Living World row 05 (05_CULTURE_ACCEPTANCE.md) · tier/score
+                // drift, shadow-debate resolution, persecution — after
+                // `update_notables`/`update_government` above so this year's
+                // gov_position/officials are fresh, and after the war/feud
+                // passes so this year's war_with/feuds are settled.
+                self.culture_acceptance_yearly_pass(yr);
+                // 05.4 · culture-tier-gated fondaco chartering (dosed at
+                // zero — see `culture_acceptance.rs`'s own doc comment).
+                self.maybe_charter_culture_fondacos();
                 // living_world/01_FEEDS_AND_PRUNING.md · after every other yearly
                 // pass, so a figure's life log has already copied out anything
                 // about to be pruned as chatter.
@@ -11640,6 +11660,20 @@ pub(crate) use culture_ideals::{
 };
 mod dev_production;
 pub(crate) use dev_production::DEV_PRODUCTION_DOSE;
+mod culture_acceptance;
+pub use culture_acceptance::{
+    CultureRelation, acceptance_tier_name,
+    ACCEPT_TIER_CITIZENS, ACCEPT_TIER_ENFRANCHISED, ACCEPT_TIER_RESIDENT,
+    ACCEPT_TIER_UNWELCOME, ACCEPT_TIER_HATED,
+};
+pub(crate) use culture_acceptance::{
+    tier_for_score, bondage_attitude_for_traits,
+    acceptance_tax_mult_e, acceptance_settle_mult_e, acceptance_scholar_mult_e,
+    acceptance_office_allowed_e, acceptance_dev_share_e, acceptance_cohesion_term_e,
+    persecution_migration_frac_e,
+    PERSECUTION_DOSE, ACCEPT_TAX_DOSE, ACCEPT_SETTLE_DOSE, ACCEPT_SCHOLAR_DOSE,
+    ACCEPT_OFFICE_DOSE, ACCEPT_DEV_DOSE, ACCEPT_COHESION_DOSE, FONDACO_CHARTER_DOSE,
+};
 mod government;
 pub use government::{
     GovEdict, GovDebate, GovHistoryEntry, edict_family_name,

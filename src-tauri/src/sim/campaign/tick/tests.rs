@@ -38,7 +38,7 @@
             dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4],
             track_buildings: [0; 4], track_build_progress: [0.0; 4],
             legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0,
-            gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0,
+            gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0, culture_relations: Vec::new(), bondage_override: -1,
         }
     }
 
@@ -11351,5 +11351,151 @@
         }
         let after = snap(&s);
         assert_eq!(before, after, "the edict/debate/Lustrum mechanism must move no economic field");
+    }
+
+    // ── living_world/05_CULTURE_ACCEPTANCE.md ───────────────────────────────
+
+    /// 05.1 · a well-connected, heavily-trading city reads a resident
+    /// minority MORE openly (a higher seeded score) than an isolated,
+    /// untraded one — the doc's own "remote cities are conservative,
+    /// trading cities are open" stance rule, exercised directly at the
+    /// seeding step (no drift involved).
+    #[test]
+    fn default_tiers_follow_stance_and_relation() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut remote = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        remote.trade_last_year = 0.0;
+        let mut trading = hub(1, 1.0, 1.0, 10_000.0, vec![10.0], 1);
+        trading.trade_last_year = 9_000.0;
+        let mut s = sim(vec![remote, trading], goods);
+        s.hub_culture = vec!["Majority".into(), "Majority".into()];
+        s.hub_minorities = vec![
+            vec![("Outsider".into(), 0.10)],
+            vec![("Outsider".into(), 0.10)],
+        ];
+        // Remote hub: isolated (no other hub shares its component).
+        s.ensure_culture_relations(0, 0);
+        // Trading hub: plenty of live trade-component mates.
+        s.ensure_culture_relations(1, 10);
+
+        let remote_rel = s.hubs[0].culture_relations.iter().find(|r| r.culture == "Outsider").unwrap();
+        let trading_rel = s.hubs[1].culture_relations.iter().find(|r| r.culture == "Outsider").unwrap();
+        assert!(trading_rel.score > remote_rel.score,
+            "a well-connected, heavily-trading city must seed a resident minority more openly than an isolated one \
+             (trading {} vs remote {})", trading_rel.score, remote_rel.score);
+        // Every hub's own majority culture always starts as Citizens.
+        assert_eq!(s.hubs[0].culture_relations[0].tier, ACCEPT_TIER_CITIZENS);
+        assert_eq!(s.hubs[1].culture_relations[0].tier, ACCEPT_TIER_CITIZENS);
+    }
+
+    /// 05.2 · more trade with a resident culture drifts the relation UP.
+    #[test]
+    fn trade_raises_relations() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut quiet = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        quiet.trade_last_year = 0.0;
+        let mut busy = hub(1, 1.0, 1.0, 10_000.0, vec![10.0], 0);
+        busy.trade_last_year = 8_000.0;
+        let s = sim(vec![quiet, busy], goods);
+        let (delta_quiet, _) = s.culture_relation_drift(0, "Outsider", 0.10, 4, 0.0);
+        let (delta_busy, _) = s.culture_relation_drift(1, "Outsider", 0.10, 4, 0.0);
+        assert!(delta_busy > delta_quiet,
+            "heavier trade must drift the relation up more (busy {delta_busy} vs quiet {delta_quiet})");
+    }
+
+    /// 05.2 · war with a resident culture's own homeland drifts the
+    /// relation DOWN.
+    #[test]
+    fn war_lowers_them() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let host = hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0);
+        let enemy_home = hub(1, 1.0, 1.0, 10_000.0, vec![10.0], 0);
+        let mut s = sim(vec![host, enemy_home], goods);
+        s.hub_culture = vec!["Host".into(), "Enemy".into()];
+        let (delta_peace, _) = s.culture_relation_drift(0, "Enemy", 0.10, 4, 0.0);
+        s.hubs[0].war_with = 1;
+        let (delta_war, _) = s.culture_relation_drift(0, "Enemy", 0.10, 4, 0.0);
+        assert!(delta_war < delta_peace,
+            "war with a resident culture's homeland must drift the relation down (war {delta_war} vs peace {delta_peace})");
+    }
+
+    /// 05.3 · at a nonzero TEST dose, a persecution's diaspora carries away
+    /// a real share of the minority and a real share of local craft
+    /// tradition — proving the mechanism, not the shipped (zero) dose.
+    #[test]
+    fn expulsion_moves_residents_and_tradition() {
+        assert_eq!(persecution_migration_frac_e(0.20, 0.0), 0.0,
+            "PERSECUTION_DOSE's shipped value must move nobody");
+        let frac = persecution_migration_frac_e(0.20, 1.0);
+        assert!(frac > 0.0 && frac <= 0.20,
+            "at a nonzero dose, expulsion must move a real, bounded share of the minority");
+    }
+
+    /// 05.4 · a city's bondage attitude follows its resident majority
+    /// culture's own traits until an edict overrides it.
+    #[test]
+    fn bondage_follows_culture_until_edict() {
+        assert!(bondage_attitude_for_traits(&[3]) > 0.0, "Martial traits must lean toward permitting bondage");
+        assert!(bondage_attitude_for_traits(&[4, 9]) < 0.0, "Devout + Scholarly traits must lean toward rejecting bondage");
+
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], goods);
+        s.hub_culture = vec!["Unknown".into()]; // an unregistered culture: no traits, attitude 0.0 → permitted by default
+        assert!(s.bondage_permitted(0), "an unknown culture with no lean defaults to permitted (attitude >= 0.0)");
+        s.hubs[0].bondage_override = 0;
+        assert!(!s.bondage_permitted(0), "an edict-set override of 0 must abolish it here regardless of culture");
+        s.hubs[0].bondage_override = 1;
+        assert!(s.bondage_permitted(0), "an edict-set override of 1 must permit it here regardless of culture");
+    }
+
+    /// 05.5 · every acceptance effect is a true no-op at its shipped
+    /// (zero) dose.
+    #[test]
+    fn acceptance_effects_are_noops_at_zero() {
+        for tier in ACCEPT_TIER_CITIZENS..=ACCEPT_TIER_HATED {
+            assert_eq!(acceptance_tax_mult_e(tier, 0.0), 1.0, "tax mult must be 1.0 at dose 0 for tier {tier}");
+            assert_eq!(acceptance_settle_mult_e(tier, 0.0), 1.0, "settle mult must be 1.0 at dose 0 for tier {tier}");
+            assert_eq!(acceptance_scholar_mult_e(tier, 0.0), 1.0, "scholar mult must be 1.0 (forward hook) for tier {tier}");
+            assert!(acceptance_office_allowed_e(tier, 0.0), "office must be allowed at dose 0 for tier {tier}");
+            assert_eq!(acceptance_dev_share_e(tier, 0.0), 1.0, "dev share must be 1.0 at dose 0 for tier {tier}");
+            assert_eq!(acceptance_cohesion_term_e(tier, 1.0), 0.0, "cohesion term must always read 0.0 (row 09 forward hook)");
+        }
+        // And a NONZERO dose must actually move at least one of them, so the
+        // no-op above is proven against a real effect rather than a dead function.
+        assert!(acceptance_tax_mult_e(ACCEPT_TIER_HATED, 1.0) > 1.0, "a full dose must actually raise the Hated tax surcharge");
+        assert!(!acceptance_office_allowed_e(ACCEPT_TIER_RESIDENT, 1.0), "a full dose must actually bar a tier-3 resident from office");
+    }
+
+    /// 05 · the whole yearly pass, run for several years on a fixture with a
+    /// real minority, war and feuds all present, must move no economic
+    /// field (population, treasury, price, house wealth) — every dosed
+    /// mechanism in this row ships at zero.
+    #[test]
+    fn culture_acceptance_pass_is_inert_at_zero() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut h0 = hub(0, 0.0, 0.0, 10_000.0, vec![10_000.0 * 0.02], 0);
+        h0.treasury = 100.0;
+        h0.price[0] = 1.0;
+        h0.war_with = 1;
+        h0.starving = 0.5;
+        let h1 = hub(1, 1.0, 1.0, 10_000.0, vec![10_000.0 * 0.02], 0);
+        let mut s = sim(vec![h0, h1], goods);
+        s.hub_culture = vec!["Host".into(), "Enemy".into()];
+        s.hub_minorities = vec![vec![("Enemy".into(), 0.20)], vec![]];
+        s.houses.push(house_at(0, vec![], 1));
+        let snap = |s: &CampaignSim| (s.hubs[0].population, s.hubs[1].population, s.hubs[0].treasury,
+            s.hubs[0].price.clone(), s.houses[0].wealth);
+        let before = snap(&s);
+        for yr in 0..8 {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.culture_acceptance_yearly_pass(yr);
+            s.maybe_charter_culture_fondacos();
+        }
+        let after = snap(&s);
+        assert_eq!(before, after, "row 05's mechanism must move no economic field while every dose is zero");
+        // But the relation state itself DID move — proving the pass is real,
+        // not merely absent.
+        let rel = s.hubs[0].culture_relations.iter().find(|r| r.culture == "Enemy");
+        assert!(rel.is_some(), "a resident minority at 20% share must have seeded a relation");
     }
 

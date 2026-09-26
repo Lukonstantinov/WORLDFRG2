@@ -3,7 +3,8 @@ import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables, campaignCityDevelopment } from "@bridge";
+import { campaignGetHub, campaignGetColony, campaignFuturesLanes, campaignGetProvisioning, campaignSettlementPeoples, campaignCityLife, campaignCityNotables, campaignCityDevelopment, campaignGetCultureAcceptance } from "@bridge";
+import type { CultureAcceptanceBrief } from "@types";
 import type { CityDevelopment } from "@types";
 import { CityNotables } from "@ui/campaign/FiguresPanel";
 import { NOTABLE_ROLE_NAMES } from "@types";
@@ -329,6 +330,16 @@ export function HubPanel() {
     let alive = true;
     campaignCityLife(selectedHub).then((a) => { if (alive) setAnnals(a); }).catch(() => { if (alive) setAnnals([]); });
     campaignCityNotables(selectedHub).then((n) => { if (alive) setNotables(n); }).catch(() => { if (alive) setNotables([]); });
+    return () => { alive = false; };
+  }, [tab, selectedHub, campActive, campTick]);
+
+  // living_world/05_CULTURE_ACCEPTANCE.md slice 05.6 · the Government tab's
+  // culture-acceptance table, refreshed on open and as the campaign advances.
+  const [cultureAcceptance, setCultureAcceptance] = useState<CultureAcceptanceBrief[]>([]);
+  useEffect(() => {
+    if (tab !== "govt" || selectedHub === null || !campActive) { setCultureAcceptance([]); return; }
+    let alive = true;
+    campaignGetCultureAcceptance(selectedHub).then((c) => { if (alive) setCultureAcceptance(c); }).catch(() => { if (alive) setCultureAcceptance([]); });
     return () => { alive = false; };
   }, [tab, selectedHub, campActive, campTick]);
 
@@ -737,6 +748,41 @@ export function HubPanel() {
               </>
             ) : (
               <div style={{ color: "#6fae6f", fontSize: 10 }}>Calm — no speculative pressure detected this year.</div>
+            )}
+
+            {/* living_world/05_CULTURE_ACCEPTANCE.md slice 05.6 · one row per
+                culture this city carries a sparse relation for. */}
+            {cultureAcceptance.length > 0 && (
+              <>
+                <div style={sectionHdr}>Culture acceptance</div>
+                {cultureAcceptance.map((c) => {
+                  const tierColorFor = c.tier <= 1 ? "#7fd0a0" : c.tier === 2 ? "#a8c97f" : c.tier === 3 ? "#e6c86a" : c.tier === 4 ? "#e6a07a" : "#ff6a4a";
+                  return (
+                    <div key={c.culture} style={{ margin: "4px 0", padding: "4px 6px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                        <span style={{ color: "#e8dcc0", fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.culture}</span>
+                        <span style={{ color: tierColorFor, fontWeight: 700, fontSize: 10 }}>{c.tier_name}</span>
+                        <span style={{ color: c.trend > 0 ? "#7fd0a0" : c.trend < 0 ? "#ff8a6a" : "#6a86a6", fontSize: 10, minWidth: 14, textAlign: "right" }}>
+                          {c.trend > 0.05 ? "▲" : c.trend < -0.05 ? "▼" : "·"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
+                        <div style={{ flex: 1, height: 5, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
+                          <div style={{ width: `${Math.round(((c.score + 100) / 200) * 100)}%`, height: "100%", background: tierColorFor }} />
+                        </div>
+                        <span style={{ color: "#8aa0c0", fontSize: 9, minWidth: 30, textAlign: "right" }}>{c.score.toFixed(0)}</span>
+                        <span style={{ color: "#6a86a6", fontSize: 9, minWidth: 34, textAlign: "right" }}>{Math.round(c.residents_frac * 100)}%</span>
+                      </div>
+                      {c.reason && <div style={{ color: "#7a8aa0", fontSize: 9, marginTop: 1 }}>{c.reason}</div>}
+                      {c.proposed_tier >= 0 && (
+                        <div style={{ color: "#c9a227", fontSize: 9, marginTop: 1 }}>
+                          ⚖ a proposal to move to {acceptanceTierLabel(c.proposed_tier)} is being debated
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </>
             )}
           </div>
         );
@@ -2295,6 +2341,21 @@ function CurBar({ label, frac, color, hint }: { label: string; frac: number; col
 const fmtN = (v: number) => (v >= 1000 ? `${(v / 1000).toFixed(1)}k` : v.toFixed(0));
 
 /** Icon / label / bar-colour for a key figure's allegiance status. */
+/** living_world/05_CULTURE_ACCEPTANCE.md · the five acceptance-tier names,
+ *  mirrored from `culture_acceptance::acceptance_tier_name` for the debate
+ *  "proposal to move to X" line (the brief already carries a `tier_name` for
+ *  the CURRENT tier; this covers the PROPOSED one, which the brief only
+ *  gives as a bare number). */
+function acceptanceTierLabel(tier: number): string {
+  switch (tier) {
+    case 1: return "Citizens";
+    case 2: return "Enfranchised";
+    case 3: return "Resident foreigners";
+    case 4: return "Unwelcome";
+    default: return "Hated";
+  }
+}
+
 function officialMeta(status: string): { icon: string; label: string; bar: string } {
   switch (status) {
     case "kin": return { icon: "👪", label: "kin of", bar: "#c86ad0" };

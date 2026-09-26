@@ -2243,6 +2243,156 @@ now carries a stable `individual_id` linking it to one.
   `a_due_event_always_finds_a_template`, `event_rate_follows_turbulence`.
   See `docs/SCOREBOARD.md` 2026-09-25 for the full-suite numbers.
 
+### 5.10 `docs/living_world/05_CULTURE_ACCEPTANCE.md` — five acceptance tiers, sparse relations, dosed effects (Living World row 05)
+
+**Note on §5.9:** rows 03 (`03_DEVELOPMENT_TRACKS.md`) and 04
+(`04_GOVERNMENT_AND_EDICTS.md`) shipped on `main` before this row but were
+never given their own CLAUDE.md map entries — a pre-existing documentation
+gap, not introduced here, and out of THIS row's own scope to backfill. A
+cross-reference at §5's own province-work text already cites "§5.9" for
+future Realm-layer content that was never written; this row's own entry is
+`§5.10` rather than claiming that number, so a future session documenting
+rows 03/04/Realms is not misdirected.
+
+Each city treats each culture it holds a relation with differently — from full
+Citizens to Hated, with no rights — and that treatment drifts with trade, war,
+feuds, famine and the row 03 admiration/barbarian-judgement hooks
+(`culture_ideals.rs::admires_more_developed`/`is_barbarian_to`, built in row 03,
+"called by nothing" until now — this is their first real caller).
+`sim/campaign/tick/culture_acceptance.rs` (new theme file, `pub(crate)` impl
+block, `use super::*`, declared in `mod.rs` beside `government`) carries the
+whole mechanism.
+
+- **Five tiers, sparse state.** `TickHub.culture_relations: Vec<CultureRelation>`
+  — ONE entry per culture actually resident (≥ `ACCEPT_MIN_MINORITY_SHARE` = 2%
+  minority share) or holding the majority, never a 1,200×every-culture matrix
+  (00_INDEX's own storage rule). `CultureRelation{culture, tier, score, trend,
+  reason, proposed_tier, debate_round, debate_tally}`, `score` −100..100, `tier`
+  derived by `tier_for_score` with a HYSTERESIS band at each boundary (same
+  discipline `assign_house_tiers`/`assign_city_tiers` already use) so a relation
+  sitting on a boundary doesn't relabel every year. Lazily seeded
+  (`ensure_culture_relations`, the `*_needs_seeding` convention) — an old save or
+  a hub the pass hasn't reached yet reads empty until the first year it runs.
+- **Stance** (`culture_stance_bias`): remoteness (few LIVE trade-component mates,
+  precomputed ONCE per pass into a `HashMap<component, count>` rather than
+  rescanned per relation — the O(hubs) cost this row's <100 ms/year budget
+  forbids paying per relation) and Insular(2)/Xenophobic(13) traits pull closed;
+  Mercantile(0)/Assimilative(7) traits and real `trade_last_year` pull open —
+  exactly the doc's own "remote cities are conservative, trading cities are
+  open" rule, gated by `default_tiers_follow_stance_and_relation`.
+- **Yearly drift** (`culture_relation_drift`, called from
+  `culture_acceptance_yearly_pass`): trade volume (the minority's own share ×
+  the hub's own `trade_last_year`, the cheapest real proxy available without a
+  per-culture trade ledger — a genuine simplification, named as such), resident
+  merchants (the same share term), shared language kit (`cultures::
+  kit_of_people` match), admiration/barbarian judgement (row 03's real hooks,
+  not stubs), dominant-foreigner resentment (share > 35%), war (this hub's
+  `war_with` target's own majority culture), feuds (a precomputed
+  `HashMap<(hub, culture), f32>` built ONCE per pass from the bounded
+  `self.feuds` list, never rescanned per relation), and famine/plague blamed on
+  outsiders (`hub.starving > 0.3` while the MAJORITY leans Insular/Xenophobic).
+  Gated by `trade_raises_relations`, `war_lowers_them`.
+- **Tier-change proposals do NOT share row 04's `GovDebate` slot.** A city
+  debates only ONE ordinary edict at a time (04.4's own single-slot design);
+  routing every culture-tier crossing through that one scarce slot would starve
+  either ordinary government edicts or culture policy. Each `CultureRelation`
+  instead carries its own small "shadow debate"
+  (`proposed_tier`/`debate_round`/`debate_tally`, resolved by
+  `run_acceptance_debate_round`) — the SAME math shape row 04's `run_debate_round`
+  uses (`gov_position`, `stability_at`, a hashed noise term) but on its own
+  per-relation state, so a culture question and an ordinary edict can be live at
+  once. A passed proposal is chronicled (`chronicle_acceptance`,
+  `JournalEntry{kind: "acceptance_changed"|"acceptance_restricted"}`) under
+  `government.rs`'s own `EDICT_FAM_CITIZENSHIP`/`EDICT_FAM_FOREIGNERS` families,
+  so a citizenship change reads as the same KIND of event whichever row
+  produced it. A real merge into one shared agenda list (so the Government
+  window shows both kinds of proposal together) is queued (`Q05.3`).
+- **Persecution & diaspora** (`maybe_persecute`, tier 5 only): a modest yearly
+  roll (12%, a small slice of which turns massacre) always chronicles
+  expulsion/massacre and always computes the diaspora DESTINATION (the
+  highest-scoring other hub for this culture in the same trade component) —
+  but at the shipped `PERSECUTION_DOSE = 0.0`, `persecution_migration_frac_e`
+  returns exactly `0.0` and no population or craft `tradition` actually moves.
+  Gated at a nonzero TEST dose by `expulsion_moves_residents_and_tradition`
+  (the doc's own "at a test dose" instruction).
+- **Bondage attitude** (`bondage_attitude_for_traits`, pure, from Martial(3)/
+  Nomadic(5) leaning permissive and Devout(4)/Scholarly(9) leaning against — a
+  documented simplification, not a full historical table) and
+  `bondage_permitted(h)`, which reads a new per-hub `bondage_override: i8`
+  (−1 unset/follow culture, 0 abolished, 1 permitted — a direct toggle rather
+  than routed through the full weekly debate, a deliberate scope cut recorded
+  as `Q05.4`). Gated by `bondage_follows_culture_until_edict`.
+- **Fondaco activation** (`maybe_charter_culture_fondacos`, dosed
+  `FONDACO_CHARTER_DOSE = 0.0`): a house whose home hub's majority culture
+  (houses carry no `culture` field of their own — read via `hub_culture[house.hub]`,
+  the same reading every other culture-aware house pass in this tree already
+  uses) holds tier 2–3 at a DIFFERENT city may be chartered a `Fondaco` there
+  (`CampaignSim.fondacos`, the same struct/list §5's own Fondaco entry names).
+  Kept deliberately SEPARATE from `yards.rs::maybe_found_fondaco`
+  (`YARDS_VESSELS_AND_DEPOTS_PLAN.md` W5's own zero-dose stub, a generic
+  vessel-capacity mechanism with no culture trigger) — both dosed at zero, so a
+  world with no fondaco founded is bit-identical regardless of which plan's
+  session ran last.
+- **Effects (05.5), each a pure `_e` function dosed from zero**:
+  `acceptance_tax_mult_e` (tier 3 small surcharge, 4 large, 5 largest),
+  `acceptance_settle_mult_e` (1–3 normal, 4 rare, 5 none),
+  `acceptance_office_allowed_e` (tiers 1–2 only, at full dose),
+  `acceptance_dev_share_e` (row 03 hook — tiers 1–3 share, 4–5 none). Two are
+  named FORWARD HOOKS rather than approximated: `acceptance_scholar_mult_e`
+  reads a constant `1.0` regardless of dose, because rows 06/07 (scholars,
+  artisans) do not exist yet to have an appearance chance to scale; `acceptance_
+  cohesion_term_e` reads a constant `0.0`, because row 09's `Realm` does not
+  exist yet to read it. None of the five is wired into a live tax/migration/
+  office/development pass — the SAME "built and tested, called by nothing"
+  precedent row 03's own `admires_more_developed`/`is_barbarian_to` already set
+  in this tree, recorded here rather than silently mirrored: wiring a real
+  effect needs a per-culture population/wealth attribution `hub_minorities`'s
+  plain share does not yet carry at the granularity these effects need, queued
+  as `Q05.4` (renumbered from the doc's own `Q05.1`/`Q05.2` forward). Gated by
+  `acceptance_effects_are_noops_at_zero`.
+- **Cadence & wiring.** `culture_acceptance_yearly_pass` runs at the existing
+  yearly hook (`tick % 365`) right after `run_diaspora`/before `prune_chronicles`
+  — after `update_notables`/`update_government` so this year's `gov_position`/
+  officials are fresh, and after the war/feud passes so `war_with`/`feuds` are
+  settled. `maybe_charter_culture_fondacos` runs immediately after it.
+  `O(hubs × resident cultures)` with two ONE-TIME-PER-PASS precomputed maps
+  (component mates, feud pressure) — no per-day scan, no per-relation rescan of
+  the world.
+- **UI**: `campaign_get_culture_acceptance(hub)` (new
+  `commands/campaign_commands/read_culture.rs`, registered in `lib.rs`,
+  `bridge/campaign.ts::campaignGetCultureAcceptance`,
+  `types/campaign.ts::CultureAcceptanceBrief`) — a plain per-culture list, tier/
+  score/trend/reason/residents-share/open-proposal. Surfaced as a "Culture
+  acceptance" section appended to `HubPanel.tsx`'s existing Government
+  ("govt") tab, rather than a new tab of its own — the govt tab is already the
+  city's civic-state home and a culture relation IS civic state, so a new tab
+  would only duplicate the fetch/width plumbing that tab already carries.
+  **Verification caveat, stated plainly**: this environment has no display, so
+  the UI was verified by `npx tsc --noEmit` (clean) and `npx vite build` (clean,
+  189 modules) only — never opened in a real window. Visually exercising it is
+  still owed, the same caveat every Living World UI slice in this tree carries.
+- **Gates** (`tick::tests`): `default_tiers_follow_stance_and_relation`,
+  `trade_raises_relations`, `war_lowers_them`,
+  `expulsion_moves_residents_and_tradition`, `bondage_follows_culture_until_edict`,
+  `acceptance_effects_are_noops_at_zero`, and
+  `culture_acceptance_pass_is_inert_at_zero` (the row's own `living_world_is_
+  inert_at_zero`-shaped fingerprint gate — runs the real yearly pass for 8 years
+  on a fixture carrying a real minority, an active war and starvation, and
+  asserts population/treasury/price/house-wealth are bit-identical before/after,
+  while also asserting a relation DID seed and drift — proving the mechanism is
+  real, not merely absent). See `docs/SCOREBOARD.md` for the end-of-row numbers.
+- **Queue** (rule 36 — see `05_CULTURE_ACCEPTANCE.md`'s own `## Queue` for the
+  full, numbered list): realm-wide tier policy (row 09, doc's own `Q05.1`);
+  intermarriage raising relation scores (waits on row 02 marriages, doc's own
+  `Q05.2`); merging tier-change proposals into row 04's own shared agenda list
+  (`Q05.3`); wiring the five dosed effects into a real tax/migration/office/
+  development pass, which needs a per-culture population/wealth attribution
+  this row does not yet have (`Q05.4`); a reach-bounded diaspora-destination
+  search rather than the current same-trade-component scan, once dosing
+  `PERSECUTION_DOSE` above zero makes the destination choice matter for real
+  (`Q05.5`); raising any of the five effect doses above zero, each needing its
+  own `econ_`-per-dose-step walk per 00_INDEX's own testing rule (`Q05.6`).
+
 ---
 
 ## 6. Rust Backend Map (`src-tauri/src/`)
@@ -2340,6 +2490,10 @@ commands/
                                   measured funnel (`econ_measure_realm_formation`)
                                   collapsed exactly at the writ gate (24 tier-1-2
                                   dynasties, only 3 hold one)
+  read_culture.rs                 living_world/05_CULTURE_ACCEPTANCE.md slice 05.6 ·
+                                  `campaign_get_culture_acceptance(hub)` — the sparse
+                                  per-culture tier/score/trend/reason table, a pure
+                                  derived read over `TickHub.culture_relations`
   goods_commands.rs             ← Goods spec CRUD, default_custom_goods, backfill
   goods_import.rs                 ← DEPOSITS_AND_MINING_PLAN slice 3: the INI-ish
                                   `.txt` goods importer (`import_goods_txt`) —
