@@ -82,14 +82,25 @@ shipped `0.0`.
   the doc's six "changes of government" kinds (revolution, oligarchic
   closing, emergency ruler, succession crisis, imposed, reform — only a
   coup stub exists) and ostracism — queued as Q04.5's own remainder below.
-- **04.6 (the Lustrum).** `maybe_run_lustrum`, called yearly per city,
-  fires exactly once every `LUSTRUM_YEARS` (5) and reschedules the next —
-  gate `lustrum_every_five_years`. It records which development track
-  WOULD be favoured (the currently-trailing one) as a chronicle/history
-  entry only; actually crediting the track's points is `Q04.13`, queued —
-  row 03 reached `DONE` on `main` in the same window as this session
-  (`DEV_PRODUCTION_DOSE` raised 0.0→0.2), so the blocker is now session
-  budget alone, not a wait on another row.
+- **04.6 (the Lustrum), Q04.13 done.** `maybe_run_lustrum`, called yearly
+  per city, fires exactly once every `LUSTRUM_YEARS` (5), reschedules the
+  next (gate `lustrum_every_five_years`), and now CREDITS the trailing
+  development track with `LUSTRUM_TRACK_BONUS` (2.0, a quarter of a level)
+  × `LUSTRUM_TRACK_BONUS_DOSE` real points — a genuine "benefits to its
+  backers" edge, not just a chronicle line. `update_government` runs
+  BEFORE `update_food_and_starvation`'s own `update_tracks` call in the
+  yearly sequence, so a Lustrum-earned level shows the same year, never a
+  year late. Shipped at dose 0.0 first (`lustrum_bonus_is_a_noop_at_zero_
+  dose`, a pure `_e`-split test independent of whichever dose is currently
+  compiled — the N6/S1 pattern), then walked to 1.0 in the same session
+  after `tick::tests` (352/352, incl. `simulate_decades_reports_dynamics`)
+  and the full `econ_` (multi-seed inheritance gate included) both stayed
+  green. **Why this dose carried essentially no risk, verified rather than
+  assumed:** `track_points`/`track_level` are read by nothing live yet —
+  `track_building_allowed` (03.4) is itself still dosed at
+  `TRACK_CONSTRUCTION_DOSE = 0.0` — so nudging `track_points` cannot reach
+  a wealth/production number by any path that exists today; the full gate
+  run confirms exactly that rather than trusting the read of the code.
 - **04.7 (the Government window).** `campaign_get_government(hub)` (seats
   + blocs + the debate in progress + edicts + history) and
   `campaign_get_edicts(hub)`, wired lib.rs → `bridge/campaign.ts` →
@@ -341,7 +352,7 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 | 04.4 | **DONE (2026-09-26).** Weekly debate rounds — allegiance+suitability-noised lean, smoothed tally, resolves PASS/FAIL/DEADLOCK within the form's own `round_cap`. Amendments/filibuster/vote-exposure folded into one persuasion-noise term rather than three separate mechanics (documented scope cut, Q04.11) | `every_debate_terminates` |
 | — | Costs (full/0.4×/0.15× pass/fail/deadlock) + expiry (25/50-yr minor/major) + a small legitimacy swing, all shipped alongside 04.3-04.4 | `edicts_expire` |
 | 04.5 | **PARTIAL (2026-09-26).** Tyrant path (`maybe_tyrant_decide`, no vote) + opposition/legitimacy bookkeeping off the real `mood` field, built. **NOT built**: 5 of 6 "changes of government" kinds (only a coup STUB exists, behind `GOV_POWER_DOSE`, a no-op at 0.0) and ostracism — see §Queue Q04.5b | (covered by 04.3/04.4's own gates + the coup stub's own dose-zero convention) |
-| 04.6 | **DONE (2026-09-26), scoped down.** `maybe_run_lustrum` fires every `LUSTRUM_YEARS`, picks the trailing track, records it to history/chronicle. **Does NOT yet credit the track's own points** — queued as Q04.13 (row 03 is `DONE` as of this same window, so the only blocker left is session budget) | `lustrum_every_five_years` |
+| 04.6 | **DONE (2026-09-26).** `maybe_run_lustrum` fires every `LUSTRUM_YEARS`, picks the trailing track, records it to history/chronicle, and CREDITS it `LUSTRUM_TRACK_BONUS × LUSTRUM_TRACK_BONUS_DOSE` real points (Q04.13, dose-walked 0.0→1.0 in this session, `tick::tests`+`econ_` both green before/after) | `lustrum_every_five_years`, `lustrum_bonus_is_a_noop_at_zero_dose`, `lustrum_bonus_credits_exactly_the_trailing_track` |
 | 04.7 | **DONE (2026-09-26), plain first cut.** Government window — `campaign_get_government`, `campaign_get_edicts` (lib.rs + bridge + types), `ui/campaign/GovernmentPanel.tsx`. **NOT built** (Q04.14): portraits, a live round timeline, bloc-grouped layout | `tsc`, `vite build` (189 modules, clean) |
 | 04.8 | End of row: edict EFFECTS dosed from zero (still unwired — Q04.9), the coup mutation dosed from zero (Q04.5b), `tick::tests`, `econ_` | SCOREBOARD row |
 
@@ -395,9 +406,11 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
   pattern) for the tyrant's decisions, instead of the government's flat
   `gov_position` — waits on Q04.3's own "fold suitability into traits"
   follow-up.
-- Q04.13 — Actually credit the Lustrum's chosen track with points (row 03,
-  now `DONE`) — waits on session budget alone; needs its own `econ_` dose
-  walk once built, since crediting real points is a live behaviour change.
+- Q04.13 — **DONE 2026-09-26.** `LUSTRUM_TRACK_BONUS_DOSE` walked 0.0→1.0,
+  `tick::tests`/`econ_` both green before and after. Verified low-risk by
+  construction, not just by the gate: `track_points`/`track_level` have no
+  live downstream reader today (`TRACK_CONSTRUCTION_DOSE` is itself still
+  0.0), so the walk could only ever move things this row itself tracks.
 - Q04.14 — The Government window's richer layout: seat portraits, a live
   round-by-round debate timeline, bloc-grouped seats — waits on session
   budget alone, no structural blocker.
