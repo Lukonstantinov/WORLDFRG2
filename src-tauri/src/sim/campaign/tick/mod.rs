@@ -4502,6 +4502,19 @@ pub struct TickHub {
     /// call, so it always reads as "this year's story", never a running
     /// total. `#[serde(default)]` reads `[0.0; 5]` on an old save.
     #[serde(default)] pub dev_breakdown: [f32; 5],
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.3 — the four tracks' running point
+    /// totals, indexed by `TRACK_*` (Military · Trade · Civil · Ideological).
+    /// The array literal is `4` rather than `TRACK_COUNT` here only because
+    /// this struct is defined before `tracks` is declared as a module in this
+    /// same file (Rust resolves both fine either way; `4` is simply what a
+    /// reader can check against the doc without following the import).
+    /// `#[serde(default)]` reads `[0.0; 4]` on an old save.
+    #[serde(default)] pub track_points: [f32; 4],
+    /// The level (0-5) each track has reached, recomputed from `track_points`
+    /// every year by `update_tracks` — never incremented independently, so a
+    /// sack that drops points below the current level's own threshold costs
+    /// the level too. `#[serde(default)]` reads `[0; 4]` on an old save.
+    #[serde(default)] pub track_level: [u8; 4],
 }
 
 /// SETTLEMENT_LIFE_PLAN.md L4 (§3.3) · death-cause indices into
@@ -11416,6 +11429,11 @@ mod individuals;
 mod life_events;
 mod development;
 pub(crate) use development::{stability_of, STABILITY_MIN, STABILITY_MAX};
+mod tracks;
+pub(crate) use tracks::{
+    TRACK_MILITARY, TRACK_TRADE, TRACK_CIVIL, TRACK_IDEOLOGICAL, TRACK_COUNT,
+    TRACK_THRESHOLDS, TRACK_LEVEL_MAX, level_for_points,
+};
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;

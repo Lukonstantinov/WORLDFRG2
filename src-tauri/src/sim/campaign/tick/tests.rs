@@ -35,7 +35,7 @@
             yard_progress: 0.0,
             food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(),
             ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0,
-            dev: 0.0, dev_breakdown: [0.0; 5],
+            dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4],
         }
     }
 
@@ -10817,6 +10817,73 @@
         let one = stability_of(0.75, 0.8, false, 0.0, 0.0);
         let all = stability_of(0.75, 0.8, true, 0.8, 0.8);
         assert!(all < one, "compounding troubles must lower stability further, got one={one} all={all}");
+    }
+
+    // ── living_world/03_DEVELOPMENT_TRACKS.md, slice 03.3 ──────────────────────
+
+    /// 03.3 · a city with real, sustained Trade sources (heavy trade volume, a
+    /// resident house, a bank, a strong guild) must rise past level 0 within a
+    /// modest number of years, entirely automatically — no player action, no
+    /// direct level assignment anywhere in the test.
+    #[test]
+    fn levels_rise_automatically() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h = hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0);
+        h.trade_last_year = 80_000.0;
+        h.main_bank = 0;
+        let mut s = sim(vec![h], goods);
+        s.houses.push(house_at(0, vec![], 0));
+        s.guilds.push(CraftGuild { hub: 0, good: 0, strength: 0.8, hall: true, secrecy: 0.0, signature: None, idle_years: 0.0 });
+        assert_eq!(s.hubs[0].track_level[TRACK_TRADE], 0, "must start at level 0");
+        for yr in 1..=15 {
+            s.update_tracks(yr);
+        }
+        assert!(s.hubs[0].track_level[TRACK_TRADE] > 0,
+            "sustained real trade sources must raise the Trade track's level automatically, points={}",
+            s.hubs[0].track_points[TRACK_TRADE]);
+        // The level must match what `level_for_points` says about the points
+        // actually accumulated — no drift between the two.
+        assert_eq!(s.hubs[0].track_level[TRACK_TRADE], level_for_points(s.hubs[0].track_points[TRACK_TRADE]));
+    }
+
+    /// 03.3 · a sack (a real `TickHub.damage` spike) must measurably COST
+    /// points on every track relative to an identical hub that was never
+    /// sacked — and, since level is recomputed from points every year, may
+    /// cost a level too ("at worst a level", the design doc's own phrasing).
+    #[test]
+    fn a_sack_costs_points() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut calm = hub(0, 0.0, 0.0, 5000.0, vec![10.0], 0);
+        let mut sacked = hub(1, 1.0, 0.0, 5000.0, vec![10.0], 0);
+        calm.trade_last_year = 40_000.0;
+        sacked.trade_last_year = 40_000.0;
+        sacked.damage = 0.6; // well past TRACK_SACK_DAMAGE_FLOOR
+        let mut s = sim(vec![calm, sacked], goods);
+        // Give both hubs a real head start so a sack has something to take.
+        s.hubs[0].track_points = [5.0; 4];
+        s.hubs[1].track_points = [5.0; 4];
+        s.update_tracks(1);
+        for k in 0..TRACK_COUNT {
+            assert!(s.hubs[1].track_points[k] < s.hubs[0].track_points[k],
+                "track {k}: a sacked hub must accrue fewer points than an identical calm one, sacked={} calm={}",
+                s.hubs[1].track_points[k], s.hubs[0].track_points[k]);
+        }
+    }
+
+    /// 03.3 · `update_tracks` writes only `TickHub.track_points`/`track_level`,
+    /// neither of which `sim_fingerprint` mixes — proven, not just argued, the
+    /// same way slice 03.1's own development pass was.
+    #[test]
+    fn tracks_pass_does_not_move_the_fingerprint() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = || hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut with_tracks = sim(vec![h()], goods.clone());
+        let without_tracks = sim(vec![h()], goods);
+        let before = sim_fingerprint(&with_tracks);
+        assert_eq!(before, sim_fingerprint(&without_tracks));
+        with_tracks.update_tracks(1);
+        assert_eq!(sim_fingerprint(&with_tracks), before,
+            "update_tracks must not move sim_fingerprint — it is read by nothing this slice touches");
     }
 
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────
