@@ -257,7 +257,13 @@ impl CampaignSim {
             .min(candidates.len() - 1);
         let ei = candidates[pick];
         let r = hash01(self.seed, self.tick as u64 ^ 0x0DA3, ei as u64);
-        let dmg = WAR_DAMAGE_MIN + r * (WAR_DAMAGE_MAX - WAR_DAMAGE_MIN);
+        // Q04.9 (Military family) · a passed "Raise Walls" edict at the
+        // CITY (never the estate) mitigates the damage its estates take —
+        // read right here, at the one site war damage is rolled, rather
+        // than a separate mechanism that could drift from it.
+        let has_walls = self.hubs[hub].gov_edicts.iter().any(|e| e.family == EDICT_FAM_MILITARY);
+        let walls_mult = if has_walls { walls_damage_mult_e(EDICT_MILITARY_DOSE) } else { 1.0 };
+        let dmg = (WAR_DAMAGE_MIN + r * (WAR_DAMAGE_MAX - WAR_DAMAGE_MIN)) * walls_mult;
         let before = self.hubs[ei].damage;
         self.hubs[ei].damage = (before + dmg).clamp(0.0, 1.0);
         let inflicted = self.hubs[ei].damage - before;

@@ -108,6 +108,14 @@ impl CampaignSim {
                 ARCH_SPECIALTY => (EXPORT_TAX_RATE * 1.1, IMPORT_TAX_RATE * 1.1),
                 _ => (EXPORT_TAX_RATE, IMPORT_TAX_RATE),
             };
+            // Q04.9 (Economy family) · a passed "Free Harbour" edict discounts
+            // BOTH tariffs while it stands. Applied right here, at the same
+            // site that computes the archetype stance fresh every year, so it
+            // can never be silently overwritten the way a separate standing
+            // law would be (CLAUDE.md §5.4's own warning about this axis).
+            let has_free_harbour = self.hubs[h].gov_edicts.iter().any(|e| e.family == EDICT_FAM_ECONOMY);
+            let fh_mult = if has_free_harbour { free_harbour_mult_e(EDICT_ECONOMY_DOSE) } else { 1.0 };
+            let (exp, imp) = (exp * fh_mult, imp * fh_mult);
             // Mint: a prosperous, banking-led council "cuts the coin fine" to lend
             // cheap (fineness eases down); others slowly restore full-bodied coin.
             let prosperous = self.hubs[h].trade_wealth > 0.5;

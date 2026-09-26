@@ -303,4 +303,54 @@ impl CampaignSim {
             }
         }
     }
+
+    /// Q04.9 (Buildings family, `04_GOVERNMENT_AND_EDICTS.md`) · a passed
+    /// edict funds ONE construction step directly, for whichever track is
+    /// most ready (the highest ability level that still has a building it
+    /// could start) — at full LOCAL dose regardless of the ambient
+    /// `TRACK_CONSTRUCTION_DOSE` (still 0.0, row 03's own yearly-pass dose,
+    /// untouched). A discrete, bounded, edict-funded action — not the
+    /// automatic yearly attempt `update_track_buildings` makes for every
+    /// city — so raising it is this row's own call, not a side effect of
+    /// raising someone else's dose. Returns whether it actually funded
+    /// anything (nothing to build, or nothing affordable, both read false).
+    pub(crate) fn fund_building_via_edict(&mut self, h: usize) -> bool {
+        let ng = self.goods.len();
+        if ng == 0 || self.hubs[h].is_estate || self.hubs[h].abandoned { return false; }
+        let mut best: Option<usize> = None;
+        for k in 0..TRACK_COUNT {
+            let next = self.hubs[h].track_buildings[k] + 1;
+            if track_building_allowed(next, self.hubs[h].track_level[k])
+                && best.map_or(true, |b| self.hubs[h].track_level[k] > self.hubs[h].track_level[b]) {
+                best = Some(k);
+            }
+        }
+        let Some(k) = best else { return false };
+        let g = self.pick_build_supply_good(h, 2) as usize;
+        if g >= ng { return false; }
+        let next = self.hubs[h].track_buildings[k] + 1;
+        let cost_good_total = TRACK_BUILD_GOOD_BASE * next as f32;
+        let cost_money_total = TRACK_BUILD_MONEY_BASE * next as f32;
+        let avail_good = stock_of(&self.hubs[h].stock, g).max(0.0);
+        let avail_money = self.hubs[h].treasury.max(0.0);
+        let progress = self.hubs[h].track_build_progress[k];
+        let (new_progress, used_good, used_money) = track_build_progress_e(
+            progress, avail_good, avail_money, cost_good_total, cost_money_total, 1.0,
+        );
+        if used_good <= EPS && used_money <= EPS { return false; }
+        stock_take(&mut self.hubs[h].stock, g, used_good);
+        self.hubs[h].treasury -= used_money;
+        self.hubs[h].track_build_progress[k] = new_progress;
+        if new_progress >= 1.0 - 1e-6 {
+            self.hubs[h].track_buildings[k] = next;
+            self.hubs[h].track_build_progress[k] = 0.0;
+            let hn = self.hubs[h].name.clone();
+            let label = track_building_name(k, next);
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "structure".into(), hub: h as i32, good: -1, value: 0.0,
+                text: format!("{hn} raises {label}"),
+            });
+        }
+        true
+    }
 }

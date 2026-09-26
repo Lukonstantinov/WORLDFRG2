@@ -11330,6 +11330,99 @@
         assert_eq!(s.hubs[0].laws.len(), laws_before, "a family with no matching law enacts nothing");
     }
 
+    /// Q04.9's second slice · the two pure `_e` splits prove the zero-dose
+    /// claim for Economy/Military independent of whichever value is
+    /// currently shipped, and give the exact multiplier at full dose.
+    #[test]
+    fn edict_material_effects_are_a_noop_at_zero_dose() {
+        assert_eq!(free_harbour_mult_e(0.0), 1.0);
+        assert_eq!(walls_damage_mult_e(0.0), 1.0);
+        assert!(free_harbour_mult_e(1.0) < 1.0, "full dose genuinely discounts tariff");
+        assert!(walls_damage_mult_e(1.0) < 1.0, "full dose genuinely mitigates damage");
+    }
+
+    /// Q04.9's second slice · a passed Economy ("Free Harbour") edict
+    /// discounts both tariffs — read straight off `decide_polis_policy`'s
+    /// own output, the real yearly call site.
+    #[test]
+    fn free_harbour_edict_discounts_tariffs() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        let before_choices = s.decide_polis_policy(0);
+        s.apply_polis_policy(&before_choices);
+        let before = (s.hubs[0].tariff_export, s.hubs[0].tariff_import);
+        let economy_pass = GovDebate { family: EDICT_FAM_ECONOMY, tag: 0, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        s.resolve_debate(0, economy_pass);
+        let after_choices = s.decide_polis_policy(0);
+        s.apply_polis_policy(&after_choices);
+        let after = (s.hubs[0].tariff_export, s.hubs[0].tariff_import);
+        if EDICT_ECONOMY_DOSE > 0.0 {
+            assert!(after.0 < before.0, "Free Harbour lowers the export tariff");
+            assert!(after.1 < before.1, "Free Harbour lowers the import tariff");
+        } else {
+            assert_eq!(after.0, before.0);
+        }
+    }
+
+    /// Q04.9's second slice · Constitution was MEASURED AND REVERTED
+    /// (`EDICT_CONSTITUTION_DOSE`'s own doc comment — a seat-count change
+    /// reaches `update_government`'s capture tally and from there
+    /// `house_for`'s carrier pick, which collapsed the dense-world relay
+    /// gate to 0.35× staged volume). `enact_constitution_edict` itself is
+    /// exercised DIRECTLY here (bypassing the dose) to prove the mechanism
+    /// still genuinely works — it is disabled, not broken — while
+    /// `resolve_debate`'s own dispatch must never reach it while the dose
+    /// stays at its permanent zero.
+    #[test]
+    fn constitution_edict_is_permanently_reverted_but_still_works_directly() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        let fixed_seats = s.hubs[0].officials.len();
+        assert_eq!(EDICT_CONSTITUTION_DOSE, 0.0, "Constitution stays permanently reverted");
+
+        let create = GovDebate { family: EDICT_FAM_CONSTITUTION, tag: 1, major: true, cost: 35.0, round: 1, tally: 0.9, round_cap: 1 };
+        s.resolve_debate(0, create);
+        assert_eq!(s.hubs[0].officials.len(), fixed_seats, "resolve_debate must never reach the reverted effect");
+
+        // The mechanism itself still works when called directly (it is
+        // disabled by dose, not by a latent bug).
+        s.enact_constitution_edict(0, 1);
+        assert_eq!(s.hubs[0].officials.len(), fixed_seats + 1, "creating a seat directly still works");
+        assert!(s.hubs[0].officials.last().unwrap().role == 4, "the new seat is a generic Councillor");
+        s.enact_constitution_edict(0, -1);
+        assert_eq!(s.hubs[0].officials.len(), fixed_seats, "abolishing it directly still works");
+        assert!(s.hubs[0].officials.iter().all(|o| o.role <= 3), "only the extra seat is ever removed, never a fixed office");
+    }
+
+    /// Q04.9's second slice · a passed Buildings edict funds real
+    /// construction progress on the most-ready track, independent of row
+    /// 03's own `TRACK_CONSTRUCTION_DOSE` (still 0.0, untouched).
+    #[test]
+    fn buildings_edict_funds_progress_at_shipped_dose() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true), good("timber", 0, 0, 1.0, 0.5, false)];
+        let mut hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0, 10.0], 0);
+        hub0.treasury = 1000.0;
+        stock_set_total(&mut hub0.stock, 1, 1000.0);
+        hub0.track_level[TRACK_MILITARY] = 1;
+        let mut s = sim(vec![hub0], goods);
+        s.seed_government(0);
+        assert_eq!(TRACK_CONSTRUCTION_DOSE, 0.0, "row 03's own ambient dose must stay untouched by this");
+        let before = s.hubs[0].track_build_progress[TRACK_MILITARY];
+        let buildings_pass = GovDebate { family: EDICT_FAM_BUILDINGS, tag: 0, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        s.resolve_debate(0, buildings_pass);
+        if EDICT_BUILDINGS_DOSE > 0.0 {
+            let progressed = s.hubs[0].track_build_progress[TRACK_MILITARY] > before
+                || s.hubs[0].track_buildings[TRACK_MILITARY] >= 1;
+            assert!(progressed, "a passed Buildings edict funds real construction progress");
+        } else {
+            assert_eq!(s.hubs[0].track_build_progress[TRACK_MILITARY], before);
+        }
+    }
+
     /// 04.3-04.6 · none of the new government mechanism may move wealth,
     /// population, price or production — everything it touches lives on the
     /// new `gov_*`/`legitimacy` fields alone. Run the real weekly cadence for

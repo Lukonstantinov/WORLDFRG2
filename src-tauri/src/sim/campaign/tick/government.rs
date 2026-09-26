@@ -110,6 +110,72 @@ fn edict_law_for_family(family: u8) -> Option<u8> {
     }
 }
 
+/// Q04.9's second slice: Economy, Military and Buildings, each a small,
+/// bounded, additive effect at the exact site an existing mechanism already
+/// computes its own number fresh (never a competing standing rule):
+/// - **Economy** ("Free Harbour") discounts both tariffs at the one place
+///   `decide_polis_policy` computes them fresh every year (`polis.rs`) — the
+///   axis CLAUDE.md §5.4 warns a SEPARATE standing law would silently lose
+///   to; editing the same site instead cannot be overwritten by it.
+/// - **Military** ("Raise Walls") mitigates war damage at the one place
+///   `war_damage_pass` rolls it (`war.rs`).
+/// - **Buildings** funds one construction step directly
+///   (`fund_building_via_edict`, `tracks.rs`) — independent of row 03's own
+///   `TRACK_CONSTRUCTION_DOSE` (still 0.0), since this is a discrete,
+///   edict-funded action, not the automatic yearly attempt.
+///
+/// **They were first shipped behind ONE shared dose
+/// (`EDICT_MATERIAL_EFFECT_DOSE`) and that was a process mistake, caught by
+/// the gate rather than by review**: at dose 1.0, `econ_inheritance_rules_
+/// fragment_differently` failed on seed 1337 (partible 98,829 vs
+/// primogeniture 96,030 — partible must read POORER, and did not). Per
+/// CLAUDE.md §2.4 ("never tune a constant without a gate that isn't the
+/// target" / "walk one at a time"), three genuinely separate economic
+/// effects sharing one dose meant a failure could not be attributed to any
+/// one of them. Split into three INDEPENDENT doses below and reverted to
+/// 0.0 immediately on discovering the failure, each to be walked up (and
+/// re-verified against this exact gate) ONE AT A TIME — see this row's own
+/// doc/SCOREBOARD entry for which, if any, is later found safe.
+///
+/// Citizenship is deliberately NOT here: `culture_acceptance.rs`'s own
+/// shadow-debate (05.2) already reads THIS row's `gov_position`/
+/// `stability_at` and chronicles under `EDICT_FAM_CITIZENSHIP`/
+/// `EDICT_FAM_FOREIGNERS` — row 05 built the citizenship effect already, by
+/// consuming row 04's own machinery; adding a second, independent path to
+/// move the same `tier` field would race it. Learning remains queued: rows
+/// 06/07 (scholars, schools) do not exist, and there is nothing honest to
+/// wire it to yet (rule 36 — a queue entry, not a fabrication).
+pub(crate) const EDICT_ECONOMY_DOSE: f32 = 0.0;
+pub(crate) const EDICT_MILITARY_DOSE: f32 = 0.0;
+pub(crate) const EDICT_BUILDINGS_DOSE: f32 = 0.0;
+const FREE_HARBOUR_TARIFF_MULT: f32 = 0.5;
+const WALLS_DAMAGE_MULT: f32 = 0.5;
+
+/// **Constitution — MEASURED AND REVERTED (2026-09-26), per CLAUDE.md §2.4**
+/// ("a spot failure on the aggregate gate is a revert, not a judgement
+/// call"). `enact_constitution_edict` (create/abolish an extra role-4 seat)
+/// is real, tested, working code — and shipping it live collapsed
+/// `the_relay_carries_long_lanes_in_stages_on_a_realistically_dense_world`'s
+/// staged trade volume to 0.35× (526,547 against a 1,505,687 loose floor).
+/// Bisected directly (disabling only this one family's call restored the
+/// gate): a seat-count
+/// change feeds `update_government`'s own capture tally (§ step 4, weighted
+/// by role — a role-4 seat already carries weight 1.0 in that tally), which
+/// decides `captor_house`, which `house_for`'s indexed carrier pick reads
+/// via `seat_at`/`office_at` (§5.5) — so a Constitution edict does not stay
+/// inside "government", it reaches into WHO CARRIES CARGO on the very
+/// mechanism `dense_world`'s staging/relay gates are tuned against. Kept as
+/// real, callable code behind its own permanently-zero dose (never folded
+/// into the Economy/Military/Buildings doses, so raising those again can
+/// never silently re-enable this) rather than deleted, so a future session that
+/// wants to revisit it does not have to re-derive this finding from
+/// scratch — it would need to at minimum exempt Constitution-created seats
+/// from the capture tally, or accept a smaller effect than "a real seat".
+pub(crate) const EDICT_CONSTITUTION_DOSE: f32 = 0.0;
+
+pub(crate) fn free_harbour_mult_e(dose: f32) -> f32 { 1.0 - (1.0 - FREE_HARBOUR_TARIFF_MULT) * dose.clamp(0.0, 1.0) }
+pub(crate) fn walls_damage_mult_e(dose: f32) -> f32 { 1.0 - (1.0 - WALLS_DAMAGE_MULT) * dose.clamp(0.0, 1.0) }
+
 /// Round cap by government form (04.4's own table). `govt_type` 0 = Council
 /// (also standing in for "Senate" — the code has no distinct fourth form
 /// yet, Q04.10), 1 = Principality (no debate at all — 04.5's tyrant path),
@@ -365,7 +431,10 @@ impl CampaignSim {
             self.hubs[h].legitimacy = (self.hubs[h].legitimacy - DEADLOCK_LEGITIMACY_HIT).clamp(0.0, 1.0);
         }
 
-        if passed { self.maybe_enact_edict_law(h, deb.family); }
+        if passed {
+            self.maybe_enact_edict_law(h, deb.family);
+            self.maybe_enact_material_edict(h, deb.family, deb.tag);
+        }
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family: deb.family, outcome });
         self.chronicle_edict_outcome(h, deb.family, outcome);
     }
@@ -380,6 +449,50 @@ impl CampaignSim {
         if self.hubs[h].laws.iter().any(|l| l.kind == kind) { return; }
         let year = self.tick / TICKS_PER_YEAR;
         self.push_law(h, kind, -1, -1, year);
+    }
+
+    /// Q04.9's second slice — Constitution (create/abolish an extra seat)
+    /// and Buildings (fund one construction step). Economy/Military are
+    /// read directly at their own sites (`polis.rs`/`war.rs`) rather than
+    /// here, since neither needs a call at the moment an edict passes —
+    /// both just check "is this edict currently in force" where they
+    /// already compute their own number.
+    pub(crate) fn maybe_enact_material_edict(&mut self, h: usize, family: u8, tag: i8) {
+        if EDICT_BUILDINGS_DOSE > 0.0 && family == EDICT_FAM_BUILDINGS {
+            self.fund_building_via_edict(h);
+        }
+        // Constitution: measured and REVERTED — see EDICT_CONSTITUTION_DOSE's
+        // own doc comment. Kept as real, callable code behind its own
+        // permanently-zero dose rather than deleted, so a future session
+        // does not have to re-derive the same finding from scratch.
+        if EDICT_CONSTITUTION_DOSE > 0.0 && family == EDICT_FAM_CONSTITUTION {
+            self.enact_constitution_edict(h, tag);
+        }
+    }
+
+    /// A libertarian (`tag >= 0`) Constitution edict creates a new extra
+    /// (role-4, "Councillor") seat if the city has room under
+    /// `GOVT_SEAT_CAP`; a conservative one abolishes the MOST RECENTLY
+    /// created extra seat, never a fixed named office (role 0-3) — the
+    /// doc's own "create or abolish an office" read literally, bounded by
+    /// the same cap 04.1 already gives every government.
+    pub(crate) fn enact_constitution_edict(&mut self, h: usize, tag: i8) {
+        if tag >= 0 {
+            if self.hubs[h].officials.len() >= GOVT_SEAT_CAP { return; }
+            let city = self.hubs[h].name.clone();
+            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add((self.tick as u64) ^ 0xC015E);
+            let name = self.head_name_for(h, &city, salt);
+            let govt = (self.hubs[h].govt_type as usize).min(2);
+            let term_end = self.tick + GOVT_TERM_YEARS[govt] * TICKS_PER_YEAR;
+            let suitability = official_suitability_roll(self.seed, h, salt);
+            let iid = self.individual_id_for_official(h, &name);
+            self.hubs[h].officials.push(Official {
+                role: 4, name, house: -1, control: 0.0, kin: false, term_end,
+                path: PATH_APPOINTED, suitability, individual_id: iid,
+            });
+        } else if let Some(pos) = self.hubs[h].officials.iter().rposition(|o| o.role == 4) {
+            self.hubs[h].officials.remove(pos);
+        }
     }
 
     /// A tyrant skips the vote entirely (04.5). Once points allow, the ruler
@@ -421,6 +534,7 @@ impl CampaignSim {
             // dose, per 04.1's own doc comment.
         }
         self.maybe_enact_edict_law(h, family);
+        self.maybe_enact_material_edict(h, family, tag);
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family, outcome: GOV_OUTCOME_PASSED });
         self.chronicle_edict_outcome(h, family, GOV_OUTCOME_PASSED);
     }
