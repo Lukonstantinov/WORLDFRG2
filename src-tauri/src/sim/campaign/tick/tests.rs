@@ -10949,6 +10949,65 @@
         assert!(s.hubs[0].track_buildings.iter().any(|&b| b > 0), "a real dose must eventually complete a building");
     }
 
+    // ── living_world/03_DEVELOPMENT_TRACKS.md, slice 03.5 ──────────────────────
+
+    /// 03.5 · `culture_development` is the POPULATION-weighted mean of its
+    /// cities' `dev`, not a plain average — a huge low-dev city must pull the
+    /// culture's reading down further than a tiny one at the same dev would.
+    #[test]
+    fn culture_development_is_population_weighted() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut big = hub(0, 0.0, 0.0, 9000.0, vec![10.0], 0);
+        let mut small = hub(1, 1.0, 0.0, 1000.0, vec![10.0], 0);
+        big.dev = 1.0;
+        small.dev = 2.0;
+        let mut s = sim(vec![big, small], goods);
+        s.hub_culture = vec!["Roman".into(), "Roman".into()];
+        let expected = (9000.0 * 1.0 + 1000.0 * 2.0) / 10000.0; // 1.1
+        let got = s.culture_development("Roman");
+        assert!((got - expected).abs() < 1e-4, "expected the population-weighted mean {expected}, got {got}");
+        // A plain (unweighted) average would read 1.5 — must NOT match that.
+        assert!((got - 1.5).abs() > 0.1, "must not read as a plain unweighted average");
+        // A culture holding no city reads 0.0, not a panic or a stale value.
+        assert_eq!(s.culture_development("Nobody"), 0.0);
+    }
+
+    /// 03.5 · every one of the 14 real culture traits maps to exactly one of
+    /// the design doc's nine ideals — no trait is silently unmapped.
+    #[test]
+    fn every_trait_maps_to_an_ideal() {
+        for t in 0..14usize {
+            assert!(ideal_for_trait(t).is_some(), "trait index {t} has no ideal mapping");
+        }
+        // Conquest/wealth/learning/stability all have a real track counterpart;
+        // the other five (lineage/tradition/purity/assimilation/reach) do not yet.
+        assert!(track_for_ideal(IDEAL_CONQUEST).is_some());
+        assert!(track_for_ideal(IDEAL_WEALTH).is_some());
+        assert!(track_for_ideal(IDEAL_LEARNING).is_some());
+        assert!(track_for_ideal(IDEAL_STABILITY).is_some());
+        for ideal in [IDEAL_LINEAGE, IDEAL_TRADITION, IDEAL_PURITY, IDEAL_ASSIMILATION, IDEAL_REACH] {
+            assert!(track_for_ideal(ideal).is_none(), "ideal {ideal} has no track yet and must read as absent");
+        }
+    }
+
+    /// 03.5 · a much more developed culture judges a far less developed one
+    /// barbarian; the less-developed culture admires the more-developed one
+    /// back — the design doc's own two-sided judgement.
+    #[test]
+    fn barbarian_judgement_and_admiration_are_dev_gap_driven() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut advanced = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut plain = hub(1, 1.0, 0.0, 1000.0, vec![10.0], 0);
+        advanced.dev = 3.0;
+        plain.dev = 1.0;
+        let mut s = sim(vec![advanced, plain], goods);
+        s.hub_culture = vec!["Advanced".into(), "Plain".into()];
+        assert!(s.is_barbarian_to("Advanced", "Plain"), "a far more developed culture must judge the other barbarian");
+        assert!(!s.is_barbarian_to("Plain", "Advanced"), "a less developed culture judging a more developed one barbarian makes no sense");
+        assert!(s.admires_more_developed("Plain", "Advanced"), "the less developed culture must admire the more developed one");
+        assert!(!s.admires_more_developed("Advanced", "Plain"), "the more developed culture has no reason to admire the less developed one");
+    }
+
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────
 
     /// 04.1 · `seat_count_for` is a pure function: villages get 1-3 seats, larger

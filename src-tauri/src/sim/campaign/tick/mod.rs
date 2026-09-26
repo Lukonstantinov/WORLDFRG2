@@ -11444,6 +11444,12 @@ pub(crate) use tracks::{
     TRACK_THRESHOLDS, TRACK_LEVEL_MAX, level_for_points,
     TRACK_CONSTRUCTION_DOSE, track_building_allowed, track_build_progress_e, track_building_name,
 };
+mod culture_ideals;
+pub(crate) use culture_ideals::{
+    IDEAL_CONQUEST, IDEAL_WEALTH, IDEAL_LEARNING, IDEAL_STABILITY, IDEAL_LINEAGE,
+    IDEAL_TRADITION, IDEAL_PURITY, IDEAL_ASSIMILATION, IDEAL_REACH, IDEAL_NAMES,
+    ideal_for_trait, track_for_ideal,
+};
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;
