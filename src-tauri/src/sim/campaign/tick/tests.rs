@@ -63,7 +63,7 @@
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
             culture_rules: vec![],
-            fleets_migrated: true, tech_factor: 1.0, percap_migrated: true, society_migrated: false,
+            fleets_migrated: true, tech_factor: 1.0, dev_norm_scale: 0.0, percap_migrated: true, society_migrated: false,
             components_rescued: true,
             house_ledger: Vec::new(), house_ledger_prev: Vec::new(), house_barred: Vec::new(),
             colonizable: vec![], satellite_sites: vec![], hinterland: vec![], migration_routes: vec![], creoles: vec![], lingua: vec![], culture_history: vec![], council_bought_month: vec![], hub_patron: vec![], dev_tier: vec![], dev_momentum: vec![], base_days: vec![], base_n: 0, base_days_season: vec![], season_slices: 0, colony_supply: vec![],
@@ -11006,6 +11006,28 @@
         assert!(!s.is_barbarian_to("Plain", "Advanced"), "a less developed culture judging a more developed one barbarian makes no sense");
         assert!(s.admires_more_developed("Plain", "Advanced"), "the less developed culture must admire the more developed one");
         assert!(!s.admires_more_developed("Advanced", "Plain"), "the more developed culture has no reason to admire the less developed one");
+    }
+
+    // ── living_world/03_DEVELOPMENT_TRACKS.md, slice 03.7 (dose step 1) ────────
+
+    /// 03.7 · at the shipped `DEV_PRODUCTION_DOSE = 0.0`, `dev_blended_tech`
+    /// must return the plain global `tech_factor` for EVERY hub, whatever
+    /// their own `dev` reads — a true no-op, and `dev_norm_scale` must stay
+    /// untouched (proving the calibration branch was never even entered).
+    #[test]
+    fn dev_production_dose_zero_is_a_noop() {
+        assert_eq!(DEV_PRODUCTION_DOSE, 0.0, "this slice must ship with the dose unraised");
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut low = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
+        let mut high = hub(1, 1.0, 0.0, 1000.0, vec![10.0], 0);
+        low.dev = 0.3;
+        high.dev = 5.0; // wildly different — would obviously show if blended in
+        let mut s = sim(vec![low, high], goods);
+        s.tech_factor = 0.85;
+        let before_scale = s.dev_norm_scale;
+        let by_hub = s.dev_blended_tech();
+        assert_eq!(by_hub, vec![0.85, 0.85], "every hub must read the plain global tech_factor at dose 0");
+        assert_eq!(s.dev_norm_scale, before_scale, "the calibration branch must never run at dose 0");
     }
 
     // ── living_world/04_GOVERNMENT_AND_EDICTS.md, slice 04.1 ───────────────────

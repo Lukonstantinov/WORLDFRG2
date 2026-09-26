@@ -955,6 +955,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         culture_rules: Vec::new(),
         fleets_migrated: true, // new campaigns already seed fleets
         tech_factor: 1.0,
+        dev_norm_scale: 0.0,
         percap_migrated: true, // hubs seeded with base_per_capita directly
         society_migrated: false, // strata seeded on first advance (seed_society)
         components_rescued: true, // start-time component build already fused tiny clusters

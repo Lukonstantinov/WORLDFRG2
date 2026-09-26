@@ -7591,6 +7591,13 @@ pub struct CampaignSim {
     /// `serde(default)` yields 0.0 on old saves → treated as 1.0 in `advance`.
     #[serde(default)]
     pub tech_factor: f32,
+    /// `03_DEVELOPMENT_TRACKS.md` slice 03.7 — `dev_blended_tech`'s one-time
+    /// normalisation: `tech_factor / population_weighted_mean(dev)`, calibrated
+    /// lazily the first time `DEV_PRODUCTION_DOSE > 0.0` needs it (never touched
+    /// at the shipped dose 0.0). `<= 0.0` reads as "not yet calibrated" — the
+    /// same convention every other lazy-seed field in this file uses.
+    #[serde(default)]
+    pub dev_norm_scale: f32,
     /// One-time migration flag: derive `base_per_capita` for pre-existing saves whose
     /// hubs were seeded with absolute (population-independent) production.
     #[serde(default)]
@@ -10018,7 +10025,9 @@ impl CampaignSim {
             //    less (so tiny hubs can no longer flood the world with surplus).
             //    `production[g]` is kept as the realized output for downstream
             //    readers (estates, briefs, "strongest good").
-            let tech = self.tech_factor;
+            // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE
+            // = 0.0 (every entry reads self.tech_factor, unchanged from before).
+            let tech_by_hub = self.dev_blended_tech();
             // Extracted (non-recipe) FOOD goods — for the subsistence-farming floor.
             let food_gs: Vec<usize> = (0..ng)
                 .filter(|&g| self.goods[g].food && self.goods[g].inputs.is_empty())
@@ -10039,7 +10048,7 @@ impl CampaignSim {
                     for &g in &food_gs { sup += self.hubs[h].base_per_capita.get(g).copied().unwrap_or(0.0) * pop; }
                     let mut nd = 0.0f32;
                     for &g in &food_gs { nd += self.base_need(h, g); }
-                    *comp_food_supply.entry(comp).or_default() += sup * tech;
+                    *comp_food_supply.entry(comp).or_default() += sup * tech_by_hub[h];
                     *comp_food_need.entry(comp).or_default() += nd;
                 }
             }
@@ -10070,7 +10079,7 @@ impl CampaignSim {
                         self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value),
                         self.goods[g].base_value);
                     let mut realized = percap * pop * self.seasonal_mult(h, g, doy)
-                        * prod_mult[h][g] * tech * struct_bonus * eff * price_mult;
+                        * prod_mult[h][g] * tech_by_hub[h] * struct_bonus * eff * price_mult;
                     // S5 · a real ore body caps output regardless of population.
                     // `ORE_CEILING_DOSE == 0.0` short-circuits before touching
                     // `mine_geology_at` at all, so this is a true no-op at zero dose.
@@ -11450,6 +11459,8 @@ pub(crate) use culture_ideals::{
     IDEAL_TRADITION, IDEAL_PURITY, IDEAL_ASSIMILATION, IDEAL_REACH, IDEAL_NAMES,
     ideal_for_trait, track_for_ideal,
 };
+mod dev_production;
+pub(crate) use dev_production::DEV_PRODUCTION_DOSE;
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
 pub(crate) use realms::person_mortality_hazard;

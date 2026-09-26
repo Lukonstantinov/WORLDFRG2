@@ -870,8 +870,10 @@ impl CampaignSim {
         // campaign while every farm and mine around it compounded at ~1.5%/yr,
         // so manufactured goods fell further behind raw ones purely by neglect
         // of this one term — not because the recipe/labor numbers were wrong.
-        let tech = self.tech_factor;
+        // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE = 0.0.
+        let tech_by_hub = self.dev_blended_tech();
         for h in 0..self.hubs.len() {
+            let tech = tech_by_hub[h];
             let pop = self.hubs[h].population.max(0.0);
             let craftsmen = self.hubs[h].pops.iter()
                 .find(|p| p.profession == POP_CRAFTSMAN)
@@ -989,10 +991,11 @@ impl CampaignSim {
         // Matches `manufacture_pass`'s own `* tech`, below — a manufactory that can
         // work more (technology growth) must also PULL more raw material, or the
         // higher labor cap goes unused against an input stock that never grew.
-        let tech = self.tech_factor;
+        // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE = 0.0.
+        let tech_by_hub = self.dev_blended_tech();
         for h in 0..self.hubs.len() {
             if self.hubs[h].is_estate { continue; } // manufacturing happens in cities
-            let cap = (self.hubs[h].population.max(0.0) / median).min(8.0) * tech;
+            let cap = (self.hubs[h].population.max(0.0) / median).min(8.0) * tech_by_hub[h];
             if cap <= 0.0 { continue; }
             for &g in &recipe_goods {
                 let labor = { let l = self.goods[g].labor; if l <= 0.0 { 1.0 } else { l } };

@@ -1,6 +1,8 @@
 # 03 · Development tracks
 
-**Status:** PARTIAL — slice 03.1 shipped, see §Queue · **Depends on:** 02 · **Next:** 04
+**Status:** PARTIAL — slices 03.1-03.6 done, 03.7's mechanism built and shipped
+inert, its own dose walk not yet attempted (maintainer asked for a faster,
+lower-risk session — see that slice's own entry) · **Depends on:** 02 · **Next:** 04
 
 ## Goal
 
@@ -183,7 +185,7 @@ Effects (each behind its own dose constant, 0.0 until the last slice):
 | 03.4 | Buildings (`tracks.rs`): `TickHub.track_buildings`/`track_build_progress` per track; `track_building_allowed` gates a rung on the track's own `track_level`; construction spends real goods (`pick_build_supply_good`, the L6 housing convention) and city treasury, gradually, via `TRACK_CONSTRUCTION_DOSE` (shipped 0.0 — a true no-op); the 20 named buildings from the design's own table served by `track_building_name`. Damage/destruction in a sack is deferred to row 09 (no sack-vs-building mechanism exists yet; 03.3's own points/level sack cost is the current stand-in) | `a_building_needs_its_level`, `construction_spends_real_stock` (at dose 0 construction is off) | **DONE** — building damage in a sack deferred to row 09, see doc text |
 | 03.5 | Culture development (`culture_ideals.rs`): `culture_development` — population-weighted mean `dev` across a culture's cities, derived, never stored; `culture_ideal` — from the culture's own most-characteristic real trait (`culture_trait_ids`) via the design's own trait→ideal table (all 14 traits mapped, `every_trait_maps_to_an_ideal`); `culture_ideal_score` — the matching track's summed points (conquest→Military, wealth→Trade, learning→Ideological, stability→Civil; lineage/tradition/purity/assimilation/reach read 0.0, no track counterpart yet); `is_barbarian_to`/`admires_more_developed` — the design's own two-sided judgement, built and tested but called by NOTHING (row 05 applies it to acceptance tiers, row 09 turns it into a casus belli) | `culture_development_is_population_weighted` | **DONE** |
 | 03.6 | UI: a new "Development" tab in `HubPanel.tsx` — the factor + this year's breakdown, and each track's level/points/built-level/build-progress. Backend: `campaign_city_development` (a pure snapshot of `TickHub.dev`/`dev_breakdown`/`track_*`), wired lib.rs → bridge → types per rule 8-9. No sparkline yet (`CityYear.dev`, 03.1, has no reader here — queued Q03.4) | `tsc`, `vite build` | **DONE** — verified by `tsc`/`vite build` only, not opened in a real browser (no display in this environment), same caveat as 02.7 |
-| 03.7 | Dose walk: `DEV_PRODUCTION_DOSE` (normalised) and the building effects, **one at a time, `econ_` after each**; end-of-row `tick::tests` + `real_world_price_distance_gradient` + the 300-year `econ_measure_development_leaders` | SCOREBOARD row | NOT STARTED |
+| 03.7 | Dose walk: `DEV_PRODUCTION_DOSE` (normalised) and the building effects, **one at a time, `econ_` after each**; end-of-row `tick::tests` + `real_world_price_distance_gradient` + a 100-year `econ_measure_development_leaders` | SCOREBOARD row | **PARTIAL** — the mechanism is built (`dev_production.rs`: `dev_blended_tech` blends each hub's own `dev` into the three real production call sites — `mod.rs`'s daily extraction pass and `production.rs`'s `manufacture_pass`/`add_manufacturing_demand` — in place of the flat global `tech_factor`, lazily normalised via `dev_norm_scale` so a raised dose starts continuous with the pre-dose value) and shipped at `DEV_PRODUCTION_DOSE = 0.0`, a true no-op (`dev_production_dose_zero_is_a_noop`); `econ_measure_development_leaders` (100 years, not the plan's original 300 — shortened at the maintainer's explicit request for a faster session) is built as an `#[ignore]`d diagnostic and NOT yet run. **The dose walk itself, the building-effect doses, `econ_`, and `real_world_price_distance_gradient` are all deliberately NOT attempted this session** — the maintainer asked to move faster and could not wait for the multi-run `econ_` cycle (each full run + the multi-seed inheritance gate takes many minutes) this doc's own risk register says the walk needs. Queued, not skipped — see the Queue below. |
 
 **Risk:** the factor feeds production, and production feeds every economy test.
 The runaway loop (trade → development → trade) needs the soft ceiling and decay,
@@ -203,3 +205,18 @@ leading city **changes** over the centuries.
   same style `HubPanel.tsx`'s Life tab already uses for welfare ratio.
 - Q03.5 — Opening the new Development tab in a real browser to check it
   visually (no display in this environment) — same caveat as 02.7/Q02.4.
+- Q03.6 — The actual `DEV_PRODUCTION_DOSE` walk: raise it from 0.0 in small
+  steps, running `econ_` (and the multi-seed
+  `econ_inheritance_rules_fragment_differently`) after each step per CLAUDE.md
+  §2.9, watching for the runaway loop this doc's own risk register names
+  (trade → development → trade) and confirming `econ_measure_development_
+  leaders` shows the leading city changing over the run rather than the same
+  city holding the top spot the whole time. Needs a session with room for
+  several multi-minute `econ_` cycles — deliberately not attempted in a
+  session the maintainer asked to keep short.
+- Q03.7 — The building EFFECT doses (army strength, warehouse capacity,
+  freight cost, population ceiling, unrest dampening, scholar/artisan
+  appearance chance, idea spread, guild quality ceiling, prestige) — each
+  its own dose constant, each walked separately against `econ_`, per the
+  design doc's own effects table. None are wired to anything yet; a built
+  building today changes nothing but what the Development tab shows.

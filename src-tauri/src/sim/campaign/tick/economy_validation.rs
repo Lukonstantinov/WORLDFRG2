@@ -3430,3 +3430,46 @@ fn econ_measure_finance() {
         }
     }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// 03_DEVELOPMENT_TRACKS.md slice 03.7 — does the leading city CHANGE over time,
+// or does whichever city starts richest simply stay on top forever? The design
+// doc's own named risk register asks for exactly this before any dose is raised.
+// 100 YEARS (not the plan's original 300) — the maintainer asked for a shorter,
+// faster-to-run diagnostic; `dev`'s own soft ceiling and diffusion dynamics
+// settle within a few decades on a small world, so 100 years is enough to see
+// whether leadership churns without paying for 3x the run time.
+//
+// Run: cargo test --lib econ_measure_development_leaders -- --ignored --nocapture
+// ═══════════════════════════════════════════════════════════════════════════════
+
+#[test]
+#[ignore]
+fn econ_measure_development_leaders() {
+    const DEV_LEADER_YEARS: u32 = 100;
+    const SAMPLE_EVERY: u32 = 10;
+    let mut s = reference_world();
+    let mut leaders: Vec<(u32, String, f32)> = Vec::new();
+    for yr in 1..=DEV_LEADER_YEARS {
+        s.advance(365);
+        if yr % SAMPLE_EVERY != 0 { continue; }
+        if let Some((h, hub)) = s.hubs.iter().enumerate()
+            .filter(|(_, h)| !h.is_estate && !h.abandoned)
+            .max_by(|(_, a), (_, b)| a.dev.partial_cmp(&b.dev).unwrap_or(std::cmp::Ordering::Equal))
+        {
+            leaders.push((yr, hub.name.clone(), hub.dev));
+            let _ = h;
+        }
+    }
+    println!("development leader every {SAMPLE_EVERY} years over {DEV_LEADER_YEARS}:");
+    for (yr, name, dev) in &leaders {
+        println!("  year {yr:>4}: {name:<16} dev={dev:.3}");
+    }
+    let distinct_leaders: std::collections::HashSet<&str> =
+        leaders.iter().map(|(_, n, _)| n.as_str()).collect();
+    println!("distinct leaders over the run: {}", distinct_leaders.len());
+    if distinct_leaders.len() <= 1 {
+        println!("  → the SAME city led for the entire run — a finding worth investigating");
+        println!("    before DEV_PRODUCTION_DOSE is ever raised, not asserted here.");
+    }
+}
