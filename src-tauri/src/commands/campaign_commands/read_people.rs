@@ -710,18 +710,34 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
         let thought = if f.dead { None } else { reactive_thought(&sim, f) }
             .unwrap_or_else(|| FIGURE_THOUGHTS[(f.kind as usize).min(4)]
                 [(fnv1a32(&f.name) % 4) as usize].to_string());
-        let life_events = life_events_for(&sim, f);
 
         // The migrated `Individual` this figure became (`migrate_figures_to_
         // individuals` matches on exactly this triple to avoid double-minting,
         // so the same lookup here is guaranteed to find it once migration has
-        // run) — read its traits rather than duplicating a second trait roll.
+        // run) — read its traits, and MERGE its own weekly life_log (the ~40-
+        // template row-02 event engine — geography/role-flavoured, "watches
+        // whales breach", "takes in a stray dog") into this card's life story
+        // alongside the journal-scanned events (which repeat whenever the same
+        // journal line, e.g. a fleet lost to storm, fires for many figures) —
+        // the Notables panel already showed this richer log for the same
+        // person and FiguresPanel had never linked to it.
         let role = role_for_figure_kind(f.kind);
-        let traits: Vec<String> = if f.dead {
+        let matched = if f.dead {
             sim.hall_of_dead.iter().find(|p| p.name == f.name && p.roles.contains(&role))
         } else {
             sim.people.iter().find(|p| p.name == f.name && p.roles.contains(&role) && p.current_hub == f.hub as i32)
-        }.map(|p| p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect()).unwrap_or_default();
+        };
+        let traits: Vec<String> = matched
+            .map(|p| p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect())
+            .unwrap_or_default();
+        let mut life_events = life_events_for(&sim, f);
+        if let Some(p) = matched {
+            for e in &p.life_log {
+                life_events.push(format!("{} — {}", e.tick / TICKS_PER_YEAR, sim.render_life_entry_for(&p.name, e)));
+            }
+        }
+        life_events.sort_by_key(|s| s.split(" — ").next().and_then(|y| y.parse::<u32>().ok()).unwrap_or(0));
+        life_events.dedup();
 
         FigureBrief {
             name: f.name.clone(),
