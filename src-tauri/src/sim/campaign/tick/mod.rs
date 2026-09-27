@@ -4556,6 +4556,29 @@ pub struct TickHub {
     /// Seeded by `seed_government` to a staggered first occurrence so every
     /// city's Lustrum doesn't land on the same year.
     #[serde(default)] pub gov_lustrum_tick: u32,
+    /// Q04.5b · while `>= 0`, this city is under an EMERGENCY RULER (04.5's
+    /// "war or plague; the body grants one person power for a term") and will
+    /// revert to this prior `govt_type` once `gov_emergency_until` passes,
+    /// unless the emergency turns permanent ("they may keep it") —
+    /// `maybe_end_emergency_rule`. `-1` = not currently under one.
+    #[serde(default = "neg_one_i8")] pub gov_emergency_prev_type: i8,
+    #[serde(default)] pub gov_emergency_until: u32,
+    /// Q04.5b · no new LARGE regime-change kind (coup/revolution/oligarchic
+    /// closing/emergency rule/succession crisis/reform) may fire in this city
+    /// before this tick — bounds churn so a shaky government cannot flip form
+    /// every single year. Ostracism is independent and not bound by this.
+    #[serde(default)] pub gov_change_cooldown: u32,
+    /// Q04.5b · true once this Council has closed itself to new families
+    /// (`maybe_oligarchic_closing`, Venice's own *Serrata* — a one-way door,
+    /// so the mechanism never re-fires on the same city).
+    #[serde(default)] pub gov_closed: bool,
+    /// Q04.5b · the Assembly's own ostracism record: `(individual_id,
+    /// until_tick)`, capped at `OSTRACISM_CAP` — kept as a permanent-feeling
+    /// record for the Government window rather than to bar a name from a
+    /// future seat (seats are always freshly minted, never drawn from a named
+    /// candidate pool, so there is nothing here yet for the ban to exclude
+    /// from — a documented scope cut, not an oversight).
+    #[serde(default)] pub ostracized: Vec<(i32, u32)>,
     /// Living World row 05 (05_CULTURE_ACCEPTANCE.md) · SPARSE per-culture
     /// acceptance state — only cultures resident in or trading with this
     /// city ever get an entry (00_INDEX's own "sparse, not a matrix" rule),
@@ -9515,6 +9538,10 @@ impl CampaignSim {
                     self.hubs[h].treasury -= buy * price;
                 }
             }
+            // 7) Q04.5b · regime change — coup / revolution / oligarchic
+            // closing / emergency rule / succession crisis / reform /
+            // ostracism, all behind `GOV_POWER_DOSE` (0.0, a true no-op).
+            self.government_change_pass(h, GOV_POWER_DOSE);
         }
     }
 
@@ -11760,7 +11787,7 @@ pub(crate) use culture_acceptance::{
 };
 mod government;
 pub use government::{
-    GovEdict, GovDebate, GovHistoryEntry, edict_family_name,
+    GovEdict, GovDebate, GovHistoryEntry, edict_family_name, regime_kind_name,
     GOV_OUTCOME_PASSED, GOV_OUTCOME_FAILED, GOV_OUTCOME_DEADLOCKED, GOV_OUTCOME_COUP,
 };
 pub(crate) use government::{
@@ -11770,6 +11797,14 @@ pub(crate) use government::{
     EDICT_FAMILY_COUNT, gov_position_for_ideal, edict_cost,
     LUSTRUM_TRACK_BONUS, LUSTRUM_TRACK_BONUS_DOSE, lustrum_bonus_e,
     EDICT_EFFECT_DOSE,
+    // Q04.9's remainder — 6 more edict-family effect doses.
+    EDICT_ECONOMY_DOSE, EDICT_MILITARY_DOSE, EDICT_LEARNING_DOSE,
+    EDICT_CITIZENSHIP_DOSE, EDICT_CONSTITUTION_DOSE, EDICT_BUILDINGS_DOSE,
+    LEARNING_TRACK_BONUS, BUILDINGS_TRACK_BONUS,
+    // Q04.5b — the remaining "changes of government" kinds + ostracism.
+    REGIME_COUP, REGIME_REVOLUTION, REGIME_OLIGARCHIC_CLOSING, REGIME_EMERGENCY_RULER,
+    REGIME_SUCCESSION_CRISIS, REGIME_REFORM, REGIME_OSTRACISM, OSTRACISM_YEARS,
+    EMERGENCY_RULER_YEARS,
 };
 mod ideology;
 pub use ideology::{NamedIdeology, School, ideo_trait_name};

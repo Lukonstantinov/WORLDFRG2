@@ -119,8 +119,10 @@ export function GovernmentPanel() {
               {brief.history.slice().reverse().map((h, i) => (
                 <DataRow key={i} cols="0.5fr 1fr 0.7fr" zebra>
                   <span style={{ fontSize: 11, opacity: 0.7 }}>{h.year}</span>
-                  <span>{h.family}</span>
-                  <Badge tone={h.outcome === "passed" ? "good" : h.outcome === "failed" ? "bad" : "warn"}>{h.outcome}</Badge>
+                  <span>{h.regime_kind ? `a change of government — ${h.regime_kind}` : h.family}</span>
+                  <Badge tone={h.outcome === "passed" ? "good" : h.outcome === "failed" ? "bad" : "warn"}>
+                    {h.regime_kind || h.outcome}
+                  </Badge>
                 </DataRow>
               ))}
             </Section>

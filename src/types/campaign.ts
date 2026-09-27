@@ -3415,12 +3415,16 @@ export interface EdictBrief {
   expires_year: number;
 }
 
-/** One closed debate's outcome, or a coup. */
+/** One closed debate's outcome, or a change of government. */
 export interface GovHistoryBrief {
   year: number;
   family: string;
   /** "passed" | "failed" | "deadlocked" | "coup". */
   outcome: string;
+  /** Q04.5b · "coup" | "revolution" | "oligarchic closing" | "emergency
+   *  rule" | "succession crisis" | "reform" | "ostracism" | "" (an ordinary
+   *  edict/Lustrum entry). */
+  regime_kind: string;
 }
 
 /** One (city, culture) relation — living_world/05_CULTURE_ACCEPTANCE.md,

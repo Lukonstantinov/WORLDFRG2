@@ -38,7 +38,7 @@
             dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4],
             track_buildings: [0; 4], track_build_progress: [0.0; 4],
             legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0,
-            gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0, culture_relations: Vec::new(), bondage_override: -1,
+            gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0, gov_emergency_prev_type: -1, gov_emergency_until: 0, gov_change_cooldown: 0, gov_closed: false, ostracized: Vec::new(), culture_relations: Vec::new(), bondage_override: -1,
             ideology_nobles: [0.0; 4], ideology_commons: [0.0; 4], ideology_gov: [0.0; 4], ideology_seeded: false, ideology_dominant: -1,
         }
     }
@@ -11354,6 +11354,220 @@
         }
         let after = snap(&s);
         assert_eq!(before, after, "the edict/debate/Lustrum mechanism must move no economic field");
+    }
+
+    // ── Q04.9's remainder — 6 more edict-family effects ─────────────────────
+
+    /// Q04.9 · every one of the six remaining edict-family effects must be a
+    /// true no-op at dose 0.0 — the shipped state for all six.
+    #[test]
+    fn edict_family_effects_are_noops_at_zero_dose() {
+        assert_eq!(EDICT_ECONOMY_DOSE, 0.0);
+        assert_eq!(EDICT_MILITARY_DOSE, 0.0);
+        assert_eq!(EDICT_LEARNING_DOSE, 0.0);
+        assert_eq!(EDICT_CITIZENSHIP_DOSE, 0.0);
+        assert_eq!(EDICT_CONSTITUTION_DOSE, 0.0);
+        assert_eq!(EDICT_BUILDINGS_DOSE, 0.0);
+
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        h.pops.push(Pop { profession: POP_SOLDIER, size: 1000.0, ..Default::default() });
+        h.mint_fineness = 0.9;
+        let mut s = sim(vec![h], goods);
+        s.seed_government(0);
+        s.hub_culture = vec!["Majority".into()];
+        s.hubs[0].culture_relations.push(CultureRelation {
+            culture: "Minority".into(), tier: 2, score: 20.0, trend: 0.0,
+            reason: String::new(), proposed_tier: -1, debate_round: 0, debate_tally: 0.0,
+        });
+        let before_mint = s.hubs[0].mint_fineness;
+        let before_wm = s.hubs[0].war_manpower;
+        let before_track = s.hubs[0].track_points;
+        let before_score = s.hubs[0].culture_relations[0].score;
+        let before_seats = s.hubs[0].officials.len();
+        s.apply_economy_edict(0, 0.0);
+        s.apply_military_edict(0, 0.0);
+        s.apply_learning_edict(0, 0.0);
+        s.apply_buildings_edict(0, 0.0);
+        s.apply_citizenship_edict(0, 0.0);
+        s.apply_constitution_edict(0, 0.0);
+        assert_eq!(s.hubs[0].mint_fineness, before_mint);
+        assert_eq!(s.hubs[0].war_manpower, before_wm);
+        assert_eq!(s.hubs[0].track_points, before_track);
+        assert_eq!(s.hubs[0].culture_relations[0].score, before_score);
+        assert_eq!(s.hubs[0].officials.len(), before_seats);
+    }
+
+    /// Q04.9 · at a nonzero TEST dose, each of the six mechanisms does
+    /// exactly what its own doc comment claims — real, bounded, and (for
+    /// Economy/Military) never past an existing ceiling.
+    #[test]
+    fn edict_family_effects_do_something_at_a_test_dose() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        h.pops.push(Pop { profession: POP_SOLDIER, size: 1000.0, ..Default::default() });
+        h.mint_fineness = 0.9;
+        let mut s = sim(vec![h], goods);
+        s.seed_government(0);
+        s.hub_culture = vec!["Majority".into()];
+        s.hubs[0].culture_relations.push(CultureRelation {
+            culture: "Minority".into(), tier: 2, score: 20.0, trend: 0.0,
+            reason: String::new(), proposed_tier: -1, debate_round: 0, debate_tally: 0.0,
+        });
+
+        let before_mint = s.hubs[0].mint_fineness;
+        s.apply_economy_edict(0, 1.0);
+        assert_ne!(s.hubs[0].mint_fineness, before_mint, "a mint reform moves fineness");
+        assert!(s.hubs[0].mint_fineness >= 0.5 && s.hubs[0].mint_fineness <= 1.0, "fineness stays in its bounded band");
+
+        let ceiling = 1000.0 * LEVY_MAX_FRAC_OF_SOLDIERS;
+        s.apply_military_edict(0, 1.0);
+        assert!(s.hubs[0].war_manpower > 0.0, "a Military edict raises real war manpower");
+        assert!(s.hubs[0].war_manpower <= ceiling + 1e-4, "never past the ordinary levy's own ceiling");
+        // Repeated passes never exceed the ceiling either.
+        for _ in 0..20 { s.apply_military_edict(0, 1.0); }
+        assert!(s.hubs[0].war_manpower <= ceiling + 1e-4, "the ceiling holds under repeated edicts");
+
+        let before_ideo = s.hubs[0].track_points[TRACK_IDEOLOGICAL];
+        s.apply_learning_edict(0, 1.0);
+        assert!((s.hubs[0].track_points[TRACK_IDEOLOGICAL] - (before_ideo + LEARNING_TRACK_BONUS)).abs() < 1e-5);
+
+        let before_score = s.hubs[0].culture_relations[0].score;
+        s.apply_citizenship_edict(0, 1.0);
+        assert!(s.hubs[0].culture_relations[0].score > before_score, "citizenship nudges the minority's standing up");
+
+        let before_seats = s.hubs[0].officials.len();
+        s.apply_constitution_edict(0, 1.0);
+        // Direction is hashed (create or abolish); either way the seat count
+        // stays within bounds and changed by exactly one seat when it fires
+        // at all (a no-op is possible only on an "abolish" roll with no
+        // role-4 seat to remove yet).
+        let after_seats = s.hubs[0].officials.len();
+        assert!(after_seats <= GOVT_SEAT_CAP);
+        assert!(after_seats == before_seats || after_seats == before_seats + 1 || after_seats == before_seats - 1);
+
+        let before_trade = s.hubs[0].track_points[TRACK_TRADE];
+        s.hubs[0].track_points = [5.0, 1.0, 9.0, 3.0]; // Trade (idx 1) trails
+        let before2 = s.hubs[0].track_points;
+        s.apply_buildings_edict(0, 1.0);
+        let want = before2[TRACK_TRADE] + BUILDINGS_TRACK_BONUS;
+        assert!((s.hubs[0].track_points[TRACK_TRADE] - want).abs() < 1e-5, "Buildings credits the trailing track");
+        let _ = before_trade;
+    }
+
+    // ── Q04.5b — 5 more "changes of government" kinds + ostracism ──────────
+
+    /// Q04.5b · every regime-change mechanism must be a true no-op when
+    /// called with `dose = 0.0`, whatever the trigger conditions look like —
+    /// `government_change_pass`'s own top-level gate.
+    #[test]
+    fn government_change_kinds_are_noops_at_zero_dose() {
+        assert_eq!(GOV_POWER_DOSE, 0.0, "row 04 ships the whole regime-change bundle OFF");
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h = hub(0, 0.0, 0.0, 200_000.0, vec![10.0], 0);
+        h.govt_type = 1; // Tyranny — makes every large-kind trigger path reachable
+        h.legitimacy = 0.0; // as unpopular as possible
+        h.war_with = 1;
+        let hub1 = hub(1, 1.0, 0.0, 10_000.0, vec![10.0], 0);
+        let mut s = sim(vec![h, hub1], goods);
+        s.seed_government(0);
+        let mut rich = house_at(0, vec![], 40);
+        rich.wealth = 5_000_000.0;
+        s.houses.push(rich);
+        let snap = |s: &CampaignSim| (
+            s.hubs[0].govt_type, s.hubs[0].officials.len(), s.hubs[0].captor_house,
+            s.hubs[0].legitimacy, s.hubs[0].gov_change_cooldown,
+        );
+        let before = snap(&s);
+        for _ in 0..50 {
+            s.tick += TICKS_PER_YEAR;
+            s.government_change_pass(0, 0.0);
+        }
+        assert_eq!(before, snap(&s), "at dose 0.0 fifty years of the yearly check changes nothing");
+    }
+
+    /// Q04.5b · "a house or commander with wealth/fleet/army vs a
+    /// low-legitimacy government" — at a nonzero test dose and a
+    /// sufficiently rich, fleet-heavy house against a legitimacy floor, a
+    /// coup eventually installs that house's own kin as the new ruler.
+    #[test]
+    fn a_wealthy_house_can_topple_a_weak_tyrant() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 200_000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        // `seed_government` sets both `govt_type` (from population) and
+        // `legitimacy` (to NEUTRAL_LEGITIMACY_SEED) itself, so both must be
+        // overridden AFTER seeding, not on the input `TickHub`.
+        s.seed_government(0);
+        s.hubs[0].govt_type = 1;
+        s.hubs[0].legitimacy = 0.0;
+        let mut rich = house_at(0, vec![], 60);
+        rich.wealth = 5_000_000.0;
+        s.houses.push(rich);
+        let mut fired = false;
+        for yr in 0..80 {
+            s.tick = yr * TICKS_PER_YEAR;
+            if s.maybe_coup(0, 1.0) { fired = true; break; }
+        }
+        assert!(fired, "a rich, fleet-heavy house facing zero legitimacy must eventually seize the throne");
+        assert_eq!(s.hubs[0].captor_house, 0, "the toppling house becomes the new captor");
+        assert!(s.hubs[0].legitimacy > 0.0, "a fresh coup resets legitimacy off the floor");
+        let head = s.hubs[0].officials.iter().find(|o| o.role == 0).unwrap();
+        assert!(head.kin && head.house == 0, "the new ruler is installed as the house's own kin");
+    }
+
+    /// Q04.5b · a tyrant whose linked `Individual` has died (removed from
+    /// `self.people`, the `remove_dead_individual` convention) either passes
+    /// to an accepted heir (when the seat's house still has a kin roster) or
+    /// spirals toward instability — never silently continues as if nothing
+    /// happened.
+    #[test]
+    fn a_tyrant_dying_without_an_heir_destabilises_the_city() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut h = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
+        h.govt_type = 1;
+        h.legitimacy = 0.5;
+        let mut s = sim(vec![h], goods);
+        s.seed_government(0);
+        // Kill the ruler: remove their linked Individual from `people`.
+        let iid = s.hubs[0].officials.iter().find(|o| o.role == 0).unwrap().individual_id;
+        s.people.retain(|p| p.id != iid as u32);
+        // No house holds this seat and no `captor_house` — no accepted heir.
+        s.hubs[0].captor_house = -1;
+        let before_leg = s.hubs[0].legitimacy;
+        assert!(s.maybe_succession_crisis(0, 1.0), "a dead ruler with no heir must fire the crisis");
+        assert!(s.hubs[0].legitimacy < before_leg, "no accepted heir costs real legitimacy");
+        assert_eq!(s.hubs[0].gov_history.last().unwrap().regime_kind, REGIME_SUCCESSION_CRISIS);
+    }
+
+    /// Q04.5b · "once a year the assembly may vote to exile one person for
+    /// 10 years" — at a nonzero test dose, one seat is vacated, a fresh
+    /// official replaces it, and the exiled individual is recorded with a
+    /// 10-year expiry.
+    #[test]
+    fn ostracism_exiles_one_person() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let h = hub(0, 0.0, 0.0, 50_000.0, vec![10.0], 0);
+        let mut s = sim(vec![h], goods);
+        s.seed_government(0); // seeds seats from population — govt_type is set AFTER, below
+        s.hubs[0].govt_type = 2; // Assembly
+        assert!(s.hubs[0].officials.len() >= 2, "an assembly needs at least one non-Head seat to ostracize");
+        let target = s.hubs[0].officials.iter().enumerate()
+            .filter(|(_, o)| o.role != 0)
+            .min_by(|a, b| a.1.suitability.partial_cmp(&b.1.suitability).unwrap())
+            .map(|(_, o)| o.individual_id).unwrap();
+        // `OSTRACISM_CHANCE` is a real probability even at the full test
+        // dose, so retry across several years until the roll lands.
+        let mut fired = false;
+        for yr in 0..200 {
+            s.tick = yr * TICKS_PER_YEAR;
+            if s.maybe_ostracism(0, 1.0) { fired = true; break; }
+        }
+        assert!(fired, "ostracism must eventually fire at a nonzero test dose");
+        assert_eq!(s.hubs[0].ostracized.len(), 1);
+        assert_eq!(s.hubs[0].ostracized[0].0, target);
+        assert_eq!(s.hubs[0].ostracized[0].1, s.tick + OSTRACISM_YEARS * TICKS_PER_YEAR);
+        assert_eq!(s.hubs[0].gov_history.last().unwrap().regime_kind, REGIME_OSTRACISM);
     }
 
     // ── living_world/05_CULTURE_ACCEPTANCE.md ───────────────────────────────

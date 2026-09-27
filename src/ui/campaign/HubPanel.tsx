@@ -733,10 +733,13 @@ export function HubPanel() {
                     <div style={sectionHdr}>Recent history</div>
                     {govBrief.history.slice().reverse().slice(0, 8).map((h, i) => (
                       <div key={i} style={{ fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
-                        <span style={{ color: "#6a86a6" }}>Y{h.year} </span>{h.family}{" "}
-                        <span style={{ color: h.outcome === "passed" ? "#7fd0a0" : h.outcome === "failed" ? "#ff8a6a" : "#e6c86a" }}>
-                          {h.outcome}
-                        </span>
+                        <span style={{ color: "#6a86a6" }}>Y{h.year} </span>
+                        {h.regime_kind ? `a change of government — ${h.regime_kind}` : h.family}{" "}
+                        {!h.regime_kind && (
+                          <span style={{ color: h.outcome === "passed" ? "#7fd0a0" : h.outcome === "failed" ? "#ff8a6a" : "#e6c86a" }}>
+                            {h.outcome}
+                          </span>
+                        )}
                       </div>
                     ))}
                   </>

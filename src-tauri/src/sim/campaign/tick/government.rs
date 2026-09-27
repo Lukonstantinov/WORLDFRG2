@@ -110,6 +110,115 @@ fn edict_law_for_family(family: u8) -> Option<u8> {
     }
 }
 
+// ── Q04.9's remainder — one dose per family, each shipped at `0.0` (a true
+// no-op), each a small, BOUNDED, one-time nudge applied at the moment an
+// edict of that family PASSES (the same call site Welfare/Foreigners already
+// use). None of the six moves population, price or a house's wealth —
+// Economy nudges a hub's own `mint_fineness` (already 0..1-clamped and
+// itself eased back toward `decide_polis_policy`'s own target every year, so
+// a repeated edict cannot accumulate an unbounded swing); Military tops up
+// `war_manpower` no further than the SAME soldier-pool ceiling `raise_
+// manpower_levy` (war.rs) already enforces; Learning/Buildings credit
+// `track_points` exactly like the already-dosed-to-1.0 Lustrum bonus (Q04.13)
+// does; Citizenship nudges one existing `CultureRelation.score` (row 05,
+// -100..100 by construction); Constitution adds or removes one generic
+// role-4 seat, bounded by the existing `GOVT_SEAT_CAP`. Raising any of these
+// needs its own `econ_` walk per 00_INDEX's own per-dose-step testing rule —
+// left queued (Q04.9) for session budget, not attempted this pass.
+pub(crate) const EDICT_ECONOMY_DOSE: f32 = 0.0;
+pub(crate) const EDICT_MILITARY_DOSE: f32 = 0.0;
+pub(crate) const EDICT_LEARNING_DOSE: f32 = 0.0;
+pub(crate) const EDICT_CITIZENSHIP_DOSE: f32 = 0.0;
+pub(crate) const EDICT_CONSTITUTION_DOSE: f32 = 0.0;
+pub(crate) const EDICT_BUILDINGS_DOSE: f32 = 0.0;
+
+/// A "mint reform" nudges fineness by this much (0..1 scale) — bounded, and
+/// eased back toward `decide_polis_policy`'s own `mint_target` every year
+/// regardless, so it can never accumulate across repeated edicts.
+const ECONOMY_MINT_BUMP: f32 = 0.05;
+/// "Raise walls / a levy / hire mercenaries" folded into one readiness bump —
+/// a fraction of the SAME soldier-pool ceiling `war.rs::raise_manpower_levy`
+/// already caps `war_manpower` at, so this can never exceed what an ordinary
+/// wartime levy could reach on its own.
+const MILITARY_MANPOWER_BUMP_FRAC: f32 = 0.20;
+/// "Fund a school / found a university" — the same magnitude Q04.13's own
+/// Lustrum bonus credits, since both are "a government decision nudges one
+/// development track" and neither has ever needed a bigger one.
+pub(crate) const LEARNING_TRACK_BONUS: f32 = 2.0;
+pub(crate) const BUILDINGS_TRACK_BONUS: f32 = 2.0;
+/// "Grant a tier" to the city's most-established resident minority — well
+/// under one hysteresis band (`ACCEPT_T*` in `culture_acceptance.rs` sit
+/// ~15-30 apart), so a single edict nudges, never instantly promotes.
+const CITIZENSHIP_SCORE_BUMP: f32 = 6.0;
+
+fn neg_one_i8_regime_kind() -> i8 { -1 }
+
+/// Q04.5b · human name for a `GovHistoryEntry.regime_kind` — `""` for an
+/// ordinary edict/Lustrum entry (`regime_kind < 0`).
+pub fn regime_kind_name(k: i8) -> &'static str {
+    match k {
+        REGIME_COUP => "coup",
+        REGIME_REVOLUTION => "revolution",
+        REGIME_OLIGARCHIC_CLOSING => "oligarchic closing",
+        REGIME_EMERGENCY_RULER => "emergency rule",
+        REGIME_SUCCESSION_CRISIS => "succession crisis",
+        REGIME_REFORM => "reform",
+        REGIME_OSTRACISM => "ostracism",
+        _ => "",
+    }
+}
+
+/// Q04.5b · the doc's own six-kind "changes of government" table, minus
+/// "Imposed" (already exists — a war's Enthrone goal / realm formation, row
+/// 09) — all behind `GOV_POWER_DOSE` (0.0, unchanged from 04.1's own
+/// promise), plus ostracism.
+pub const REGIME_COUP: i8 = 0;
+pub const REGIME_REVOLUTION: i8 = 1;
+pub const REGIME_OLIGARCHIC_CLOSING: i8 = 2;
+pub const REGIME_EMERGENCY_RULER: i8 = 3;
+pub const REGIME_SUCCESSION_CRISIS: i8 = 4;
+pub const REGIME_REFORM: i8 = 5;
+pub const REGIME_OSTRACISM: i8 = 6;
+
+/// No two LARGE regime changes (everything but ostracism) may fire in the
+/// same city within this many years — bounds churn (CLAUDE.md rule 22's
+/// discipline extended from one mechanism's own round cap to a floor on how
+/// often the whole government can flip form).
+const GOV_CHANGE_COOLDOWN_YEARS: u32 = 15;
+
+const COUP_LEGITIMACY_CEILING: f32 = 0.35;
+const COUP_WEALTH_REF: f32 = 200_000.0;
+const COUP_FLEET_WEIGHT: f32 = 0.03;
+const COUP_STRENGTH_FLOOR: f32 = 0.5;
+const COUP_CHANCE_SCALE: f32 = 0.30;
+const COUP_CHANCE_CAP: f32 = 0.20;
+const COUP_LEGITIMACY_RESET: f32 = 0.55;
+
+pub(crate) const EMERGENCY_RULER_YEARS: u32 = 5;
+const EMERGENCY_RULER_CHANCE: f32 = 0.25;
+const EMERGENCY_KEEP_CHANCE: f32 = 0.20;
+
+const REVOLUTION_UNREST_FLOOR: f32 = 0.55;
+const REVOLUTION_CHANCE_SCALE: f32 = 0.40;
+const REVOLUTION_CHANCE_CAP: f32 = 0.25;
+const REVOLUTION_LEGITIMACY_RESET: f32 = 0.55;
+
+const CLOSING_WEALTH_FLOOR: f32 = 50_000.0;
+const CLOSING_MIN_RICH_HOUSES: usize = 3;
+const CLOSING_LEGITIMACY_FLOOR: f32 = 0.55;
+const CLOSING_BASE_CHANCE: f32 = 0.15;
+const CLOSING_LEGITIMACY_HIT: f32 = 0.05;
+
+const REFORM_IDEO_LEVEL_FLOOR: u8 = 3;
+const REFORM_BASE_CHANCE: f32 = 0.12;
+const REFORM_LEGITIMACY_RESET: f32 = 0.65;
+
+/// Q04.5b · "once a year the assembly may vote to exile one person for 10
+/// years."
+pub(crate) const OSTRACISM_YEARS: u32 = 10;
+const OSTRACISM_CHANCE: f32 = 0.10;
+const OSTRACISM_CAP: usize = 8;
+
 /// Round cap by government form (04.4's own table). `govt_type` 0 = Council
 /// (also standing in for "Senate" — the code has no distinct fourth form
 /// yet, Q04.10), 1 = Principality (no debate at all — 04.5's tyrant path),
@@ -212,6 +321,14 @@ pub struct GovHistoryEntry {
     pub tick: u32,
     pub family: u8,
     pub outcome: u8,
+    /// Q04.5b · which `REGIME_*` kind this entry records, when `outcome ==
+    /// GOV_OUTCOME_COUP` (reused as "a change of government", per the doc's
+    /// own six-kind table) — `-1` for an ordinary edict/Lustrum entry. Every
+    /// construction site sets this explicitly; the serde default only ever
+    /// fires for an entry recorded before this field existed, which is
+    /// correctly read as "not a regime change".
+    #[serde(default = "neg_one_i8_regime_kind")]
+    pub regime_kind: i8,
 }
 
 /// A culture's ideology lean from its own most-characteristic real trait
@@ -365,21 +482,126 @@ impl CampaignSim {
             self.hubs[h].legitimacy = (self.hubs[h].legitimacy - DEADLOCK_LEGITIMACY_HIT).clamp(0.0, 1.0);
         }
 
-        if passed { self.maybe_enact_edict_law(h, deb.family); }
-        push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family: deb.family, outcome });
+        if passed { self.apply_edict_effect(h, deb.family); }
+        push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family: deb.family, outcome, regime_kind: -1 });
         self.chronicle_edict_outcome(h, deb.family, outcome);
     }
 
-    /// Q04.9 · at `EDICT_EFFECT_DOSE > 0.0`, a PASSED Welfare/Foreigners
-    /// edict enacts the matching standing `Law` if this city doesn't already
-    /// carry it — idempotent, dose-gated, called from both the debate path
-    /// (on PASSED only) and the tyrant path (which always "passes").
-    pub(crate) fn maybe_enact_edict_law(&mut self, h: usize, family: u8) {
-        if EDICT_EFFECT_DOSE <= 0.0 { return; }
-        let Some(kind) = edict_law_for_family(family) else { return };
-        if self.hubs[h].laws.iter().any(|l| l.kind == kind) { return; }
-        let year = self.tick / TICKS_PER_YEAR;
-        self.push_law(h, kind, -1, -1, year);
+    /// Q04.9 · a PASSED edict's real effect, called from both the debate
+    /// path (on PASSED only) and the tyrant path (which always "passes").
+    /// Welfare/Foreigners enact the matching standing `Law` (idempotent,
+    /// gated on `EDICT_EFFECT_DOSE`); the other six families each carry
+    /// their own dose (see the six `EDICT_*_DOSE` constants' own doc
+    /// comment) and are dispatched here too.
+    pub(crate) fn apply_edict_effect(&mut self, h: usize, family: u8) {
+        if EDICT_EFFECT_DOSE > 0.0 {
+            if let Some(kind) = edict_law_for_family(family) {
+                if !self.hubs[h].laws.iter().any(|l| l.kind == kind) {
+                    let year = self.tick / TICKS_PER_YEAR;
+                    self.push_law(h, kind, -1, -1, year);
+                }
+            }
+        }
+        match family {
+            EDICT_FAM_ECONOMY => self.apply_economy_edict(h, EDICT_ECONOMY_DOSE),
+            EDICT_FAM_MILITARY => self.apply_military_edict(h, EDICT_MILITARY_DOSE),
+            EDICT_FAM_LEARNING => self.apply_learning_edict(h, EDICT_LEARNING_DOSE),
+            EDICT_FAM_CITIZENSHIP => self.apply_citizenship_edict(h, EDICT_CITIZENSHIP_DOSE),
+            EDICT_FAM_CONSTITUTION => self.apply_constitution_edict(h, EDICT_CONSTITUTION_DOSE),
+            EDICT_FAM_BUILDINGS => self.apply_buildings_edict(h, EDICT_BUILDINGS_DOSE),
+            _ => {}
+        }
+    }
+
+    /// "A mint reform" (Economy) — a one-time, bounded nudge to
+    /// `mint_fineness`, in either direction (a stable per-edict hash, since
+    /// the family's own ideology tag is neutral and cannot say which way).
+    /// Reformed toward honest coin or debased toward cheap credit are both
+    /// real historical "mint reforms"; `decide_polis_policy` eases the field
+    /// back toward its own yearly target regardless, so this can never
+    /// accumulate across repeated edicts. `dose` is passed explicitly (never
+    /// read from `EDICT_ECONOMY_DOSE` internally) so a test can exercise the
+    /// real mechanism while the shipped call site always passes the
+    /// dose-zero constant (the `track_build_progress_e`/`update_track_
+    /// buildings(dose)` pattern).
+    pub(crate) fn apply_economy_edict(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        if self.hubs[h].mint_fineness <= 0.0 { self.hubs[h].mint_fineness = 1.0; }
+        let dir = if hash01(self.seed, self.tick as u64, h as u64 ^ 0xEC0E) < 0.5 { 1.0 } else { -1.0 };
+        self.hubs[h].mint_fineness = (self.hubs[h].mint_fineness + dir * ECONOMY_MINT_BUMP * dose).clamp(0.5, 1.0);
+    }
+
+    /// "Raise walls / a levy / hire mercenaries" (Military) — tops up
+    /// `war_manpower` no further than the same soldier-pool ceiling an
+    /// ordinary wartime levy (`war.rs::raise_manpower_levy`) already caps it
+    /// at, so a Military edict can never out-arm what the city could raise
+    /// on its own in a real war.
+    pub(crate) fn apply_military_edict(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        let soldiers = self.hubs[h].pops.iter().find(|p| p.profession == POP_SOLDIER).map(|p| p.size).unwrap_or(0.0);
+        let ceiling = soldiers * LEVY_MAX_FRAC_OF_SOLDIERS;
+        if ceiling <= EPS { return; }
+        let bump = ceiling * MILITARY_MANPOWER_BUMP_FRAC * dose;
+        self.hubs[h].war_manpower = (self.hubs[h].war_manpower + bump).min(ceiling);
+    }
+
+    /// "Fund a school / found a university" (Learning) — credits the
+    /// Ideological track exactly like Q04.13's own Lustrum bonus.
+    pub(crate) fn apply_learning_edict(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        self.hubs[h].track_points[TRACK_IDEOLOGICAL] += LEARNING_TRACK_BONUS * dose;
+    }
+
+    /// "Build a track building" (Buildings) — credits whichever track
+    /// currently trails the others, the same choice Q04.6's own Lustrum
+    /// makes for its 5-yearly bonus.
+    pub(crate) fn apply_buildings_edict(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        let track = self.hubs[h].track_points.iter().enumerate()
+            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
+        self.hubs[h].track_points[track] += BUILDINGS_TRACK_BONUS * dose;
+    }
+
+    /// "Grant a tier" (Citizenship, row 05) — nudges the most-established
+    /// resident minority's own acceptance score upward. A city with no
+    /// recorded minority relation yet (`culture_relations` not seeded, or no
+    /// minority present) has nothing to grant to — a true no-op regardless
+    /// of dose, not a fabricated target.
+    pub(crate) fn apply_citizenship_edict(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        let majority = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let Some(rel) = self.hubs[h].culture_relations.iter_mut()
+            .filter(|r| r.culture != majority)
+            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+        else { return };
+        rel.score = (rel.score + CITIZENSHIP_SCORE_BUMP * dose).clamp(-100.0, 100.0);
+        rel.tier = tier_for_score(rel.score, rel.tier);
+    }
+
+    /// "Create or abolish an office" (Constitution) — a stable per-edict hash
+    /// (the family's own tag is neutral) picks the direction; CREATE adds one
+    /// generic role-4 seat, bounded by `GOVT_SEAT_CAP`; ABOLISH removes the
+    /// most recently created one, if any — never one of the four named
+    /// offices.
+    pub(crate) fn apply_constitution_edict(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        let create = hash01(self.seed, self.tick as u64, h as u64 ^ 0xC057) < 0.5;
+        if create {
+            if self.hubs[h].officials.len() >= GOVT_SEAT_CAP { return; }
+            let city = self.hubs[h].name.clone();
+            let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add((self.tick as u64) ^ 0x4F);
+            let name = self.head_name_for(h, &city, salt);
+            let suitability = official_suitability_roll(self.seed, h, salt);
+            let iid = self.individual_id_for_official(h, &name);
+            let govt = (self.hubs[h].govt_type as usize).min(2);
+            let te = self.tick + GOVT_TERM_YEARS[govt] * TICKS_PER_YEAR;
+            self.hubs[h].officials.push(Official {
+                role: 4, name, house: -1, control: 0.0, kin: false, term_end: te,
+                path: PATH_APPOINTED, suitability, individual_id: iid,
+            });
+        } else if let Some(pos) = self.hubs[h].officials.iter().rposition(|o| o.role == 4) {
+            self.hubs[h].officials.remove(pos);
+        }
     }
 
     /// A tyrant skips the vote entirely (04.5). Once points allow, the ruler
@@ -420,8 +642,8 @@ impl CampaignSim {
             // regime-change mutation would live here, gated on this exact
             // dose, per 04.1's own doc comment.
         }
-        self.maybe_enact_edict_law(h, family);
-        push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family, outcome: GOV_OUTCOME_PASSED });
+        self.apply_edict_effect(h, family);
+        push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family, outcome: GOV_OUTCOME_PASSED, regime_kind: -1 });
         self.chronicle_edict_outcome(h, family, GOV_OUTCOME_PASSED);
     }
 
@@ -470,7 +692,7 @@ impl CampaignSim {
         let track = self.hubs[h].track_points.iter().enumerate()
             .min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
         self.hubs[h].track_points[track] += lustrum_bonus_e(LUSTRUM_TRACK_BONUS_DOSE);
-        push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick: self.tick, family: EDICT_FAM_BUILDINGS, outcome: GOV_OUTCOME_PASSED });
+        push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick: self.tick, family: EDICT_FAM_BUILDINGS, outcome: GOV_OUTCOME_PASSED, regime_kind: -1 });
         if (1..=2).contains(&self.hubs[h].tier) {
             let city = self.hubs[h].name.clone();
             let track_name = track_name_for(track);
@@ -479,6 +701,277 @@ impl CampaignSim {
                 text: format!("{}'s Lustrum favours the {} track", city, track_name),
             });
         }
+    }
+}
+
+// ── Q04.5b — 5 of the doc's 6 "changes of government" kinds (Imposed
+// already exists — a war's Enthrone goal / realm formation) + ostracism.
+// All behind `GOV_POWER_DOSE`, shipped `0.0` exactly as 04.1's own doc
+// comment promised for "the NEW capture/coup rules" — every mechanism below
+// is real, tested at a nonzero TEST dose, and a true no-op at the shipped
+// dose (`government_change_kinds_are_noops_at_zero_dose`). Never walked up
+// this session (CLAUDE.md §2.4 — a dose is walked only once its own gate has
+// judged it, and six regime-change kinds moving population/political state
+// at once is exactly the "three doses in one session is the ceiling" risk
+// this codebase's own plans keep naming; left queued, Q04.5b).
+impl CampaignSim {
+    /// The yearly regime-change check, called once per settled hub from
+    /// `update_government`'s own per-hub loop, right after its existing
+    /// capture/bribery bookkeeping. `dose` is passed explicitly (never read
+    /// from `GOV_POWER_DOSE` internally) so a test can exercise the real
+    /// mechanism while the shipped call site always passes the dose-zero
+    /// constant. A realm capital's CROWN never changes hands here (rule 27)
+    /// — every mutation below touches only `hubs[h].govt_type`/`officials`,
+    /// never `Realm`/`prov_realm`, so a coup in a realm capital replaces the
+    /// CITY's government only, by construction rather than by a special
+    /// case. At most one LARGE regime change fires per city per year (tried
+    /// in the doc's own rough Polybius order, first match wins); ostracism
+    /// is small, independent, and may fire in the same year as one of them.
+    pub(crate) fn government_change_pass(&mut self, h: usize, dose: f32) {
+        if dose <= 0.0 { return; }
+        if self.hubs[h].is_estate || self.hubs[h].abandoned { return; }
+        if self.hubs[h].officials.is_empty() { return; }
+        self.maybe_end_emergency_rule(h, dose);
+        if self.tick >= self.hubs[h].gov_change_cooldown {
+            let fired = self.maybe_succession_crisis(h, dose)
+                || self.maybe_coup(h, dose)
+                || self.maybe_emergency_ruler(h, dose)
+                || self.maybe_revolution(h, dose)
+                || self.maybe_oligarchic_closing(h, dose)
+                || self.maybe_reform(h, dose);
+            if fired {
+                self.hubs[h].gov_change_cooldown = self.tick + GOV_CHANGE_COOLDOWN_YEARS * TICKS_PER_YEAR;
+            }
+        }
+        self.maybe_ostracism(h, dose);
+    }
+
+    fn chronicle_regime_change(&mut self, h: usize, kind: i8, text: String) {
+        push_gov_history(&mut self.hubs[h], GovHistoryEntry {
+            tick: self.tick, family: 0, outcome: GOV_OUTCOME_COUP, regime_kind: kind,
+        });
+        // Chronicle salience (00_INDEX's own rule) — only a tier 1-2 city's
+        // regime change reaches the WORLD journal; every city's own
+        // `gov_history` still records it in full via `push_gov_history` above.
+        if !(1..=2).contains(&self.hubs[h].tier) { return; }
+        self.journal.push(JournalEntry { tick: self.tick, kind: "government".into(), hub: h as i32, good: -1, value: 0.0, text });
+    }
+
+    /// "A tyrant dies without an accepted heir" (reuse `crisis.rs` in
+    /// spirit — the same `heir_is_female`/culture-`LineRule` filter a forced
+    /// house-head installation already applies, CLAUDE.md rule 23, since the
+    /// successor here is drawn from a real house's own kin roster). A dead
+    /// ruler is read directly off `self.people` (an `Individual` no longer
+    /// present there is dead — `remove_dead_individual`'s own convention),
+    /// so no new death hook is needed.
+    pub(crate) fn maybe_succession_crisis(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type != 1 { return false; }
+        let Some(head_idx) = self.hubs[h].officials.iter().position(|o| o.role == 0) else { return false };
+        let iid = self.hubs[h].officials[head_idx].individual_id;
+        if iid < 0 || self.people.iter().any(|p| p.id == iid as u32) { return false; } // still alive, or never linked
+        let house = if self.hubs[h].officials[head_idx].kin { self.hubs[h].officials[head_idx].house }
+            else { self.hubs[h].captor_house };
+        let has_heir = house >= 0 && (house as usize) < self.houses.len()
+            && !self.houses[house as usize].defunct && !self.houses[house as usize].kin.is_empty();
+        let tick = self.tick;
+        let cn = self.hubs[h].name.clone();
+        if has_heir {
+            let hi = house as usize;
+            let (line_rule, _inh) = self.rules_for_hub(h);
+            let female = crate::sim::inheritance::heir_is_female(line_rule, (h as u64) << 8 ^ tick as u64 ^ 0x5CC5, self.seed);
+            let hname = self.houses[hi].name.clone();
+            let name = self.head_name_sexed_for(h, &hname, tick as u64 ^ 0x5CC5, female);
+            let suitability = official_suitability_roll(self.seed, h, tick as u64 ^ 0x5CC5);
+            let iid2 = self.individual_id_for_official(h, &name);
+            let term = GOVT_TERM_YEARS[1] * TICKS_PER_YEAR;
+            {
+                let o = &mut self.hubs[h].officials[head_idx];
+                o.name = name; o.term_end = tick + term; o.path = PATH_KIN;
+                o.suitability = suitability; o.individual_id = iid2;
+                o.house = hi as i32; o.control = 1.0; o.kin = true;
+            }
+            self.hubs[h].legitimacy = (self.hubs[h].legitimacy + 0.10 * dose).clamp(0.0, 1.0);
+            self.chronicle_regime_change(h, REGIME_SUCCESSION_CRISIS, format!("{cn}'s ruler dies; the succession passes to an heir"));
+        } else {
+            self.hubs[h].legitimacy = (self.hubs[h].legitimacy - 0.35 * dose).clamp(0.0, 1.0);
+            if self.hubs[h].legitimacy < 0.15 {
+                self.hubs[h].govt_type = 0;
+                self.hubs[h].captor_house = -1;
+            }
+            self.chronicle_regime_change(h, REGIME_SUCCESSION_CRISIS, format!("{cn}'s ruler dies with no accepted heir — a succession crisis"));
+        }
+        true
+    }
+
+    /// "A house or commander with wealth/fleet/army vs a low-legitimacy
+    /// government" — a Tyranny only; a council/assembly's own equivalent is
+    /// the EXISTING control-weighted capture mechanism (`update_government`),
+    /// dose-independent since 04.1.
+    pub(crate) fn maybe_coup(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type != 1 { return false; }
+        if self.hubs[h].legitimacy > COUP_LEGITIMACY_CEILING { return false; }
+        let cur_house = self.hubs[h].officials.iter().find(|o| o.role == 0).map(|o| o.house).unwrap_or(-1);
+        let mut best = (-1i32, 0.0f32);
+        for (hi, hh) in self.houses.iter().enumerate() {
+            if hh.defunct || hh.is_guild || hi as i32 == cur_house || hh.hub as usize != h { continue; }
+            let strength = (hh.wealth.max(0.0) / COUP_WEALTH_REF)
+                + (hh.fleet_sea + hh.fleet_river + hh.fleet_caravan) as f32 * COUP_FLEET_WEIGHT;
+            if strength > best.1 { best = (hi as i32, strength); }
+        }
+        if best.0 < 0 || best.1 < COUP_STRENGTH_FLOOR { return false; }
+        let chance = (best.1 * (1.0 - self.hubs[h].legitimacy) * COUP_CHANCE_SCALE * dose).min(COUP_CHANCE_CAP);
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0xC0DE) >= chance { return false; }
+        let hi = best.0 as usize;
+        let tick = self.tick;
+        let (line_rule, _inh) = self.rules_for_hub(h);
+        let female = crate::sim::inheritance::heir_is_female(line_rule, (h as u64) ^ (tick as u64) << 3 ^ 0xC0DE, self.seed);
+        let hname = self.houses[hi].name.clone();
+        let name = self.head_name_sexed_for(h, &hname, tick as u64 ^ 0xC0DE, female);
+        let suitability = official_suitability_roll(self.seed, h, tick as u64 ^ 0xC0DE);
+        let iid = self.individual_id_for_official(h, &name);
+        let term = GOVT_TERM_YEARS[1] * TICKS_PER_YEAR;
+        if let Some(o) = self.hubs[h].officials.iter_mut().find(|o| o.role == 0) {
+            o.name = name; o.term_end = tick + term; o.path = PATH_MILITARY;
+            o.suitability = suitability; o.individual_id = iid;
+            o.house = hi as i32; o.control = 1.0; o.kin = true;
+        }
+        self.hubs[h].captor_house = hi as i32;
+        self.hubs[h].legitimacy = COUP_LEGITIMACY_RESET;
+        let (hn2, cn) = (self.houses[hi].name.clone(), self.hubs[h].name.clone());
+        self.chronicle_regime_change(h, REGIME_COUP, format!("{hn2} seizes the throne of {cn} in a palace coup"));
+        true
+    }
+
+    /// "War or plague; the body grants one person power for a term; they may
+    /// keep it." Applies to a council/assembly (a Tyranny is already a
+    /// single ruler). `maybe_end_emergency_rule` (called first, every year)
+    /// reverts — or, rarely, makes permanent — an expired emergency.
+    fn maybe_emergency_ruler(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type == 1 { return false; }
+        if self.hubs[h].gov_emergency_prev_type >= 0 { return false; } // already in one
+        let crisis = self.hubs[h].war_with >= 0 || self.hubs[h].starving > 0.5;
+        if !crisis { return false; }
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0xE43E) >= EMERGENCY_RULER_CHANCE * dose { return false; }
+        self.hubs[h].gov_emergency_prev_type = self.hubs[h].govt_type as i8;
+        self.hubs[h].govt_type = 1;
+        self.hubs[h].gov_emergency_until = self.tick + EMERGENCY_RULER_YEARS * TICKS_PER_YEAR;
+        if let Some(head) = self.hubs[h].officials.iter_mut().find(|o| o.role == 0) { head.path = PATH_MILITARY; }
+        self.hubs[h].legitimacy = (self.hubs[h].legitimacy + 0.05 * dose).clamp(0.0, 1.0);
+        let cn = self.hubs[h].name.clone();
+        self.chronicle_regime_change(h, REGIME_EMERGENCY_RULER, format!("{cn} grants one ruler emergency power"));
+        true
+    }
+
+    /// Every year, before anything else: end an emergency whose term has
+    /// passed — revert to the prior form, or (rarely) let it stand ("they
+    /// may keep it", the historical route from an emergency dictatorship to
+    /// a standing one).
+    fn maybe_end_emergency_rule(&mut self, h: usize, dose: f32) {
+        if self.hubs[h].gov_emergency_prev_type < 0 { return; }
+        if self.tick < self.hubs[h].gov_emergency_until { return; }
+        let keep = dose > 0.0 && hash01(self.seed, self.tick as u64, h as u64 ^ 0x5EED) < EMERGENCY_KEEP_CHANCE * dose;
+        let cn = self.hubs[h].name.clone();
+        if keep {
+            self.chronicle_regime_change(h, REGIME_EMERGENCY_RULER, format!("{cn}'s emergency ruler never steps down"));
+        } else {
+            self.hubs[h].govt_type = self.hubs[h].gov_emergency_prev_type as u8;
+            self.chronicle_regime_change(h, REGIME_EMERGENCY_RULER, format!("{cn}'s emergency ruler steps down"));
+        }
+        self.hubs[h].gov_emergency_prev_type = -1;
+        self.hubs[h].gov_emergency_until = 0;
+    }
+
+    /// "Commons' meter far from the government + unrest + a demagogue" — the
+    /// commons-meter forward hook (row 06) reads `1 - mood` until then, per
+    /// this row's own intro.
+    fn maybe_revolution(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type == 2 { return false; } // already an assembly
+        let unrest = self.hubs[h].society.unrest;
+        if unrest < REVOLUTION_UNREST_FLOOR { return false; }
+        let gap = (1.0 - self.hubs[h].mood).clamp(0.0, 1.0);
+        let demagogue = self.figures.iter().any(|f| !f.dead && f.hub as usize == h && f.kind == 1);
+        if !demagogue { return false; }
+        let chance = (unrest * gap * REVOLUTION_CHANCE_SCALE * dose).min(REVOLUTION_CHANCE_CAP);
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0x2E10) >= chance { return false; }
+        self.hubs[h].govt_type = 2;
+        self.hubs[h].captor_house = -1;
+        let n = self.hubs[h].officials.len();
+        for oi in 0..n { self.reseat_official(h, oi); }
+        self.hubs[h].legitimacy = REVOLUTION_LEGITIMACY_RESET;
+        let cn = self.hubs[h].name.clone();
+        self.chronicle_regime_change(h, REGIME_REVOLUTION, format!("the commons of {cn} rise and found an assembly"));
+        true
+    }
+
+    /// "A long-ruling council with rising rich houses" — Venice's own
+    /// *Serrata*, 1297: entry closes to new families, permanently.
+    fn maybe_oligarchic_closing(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type != 0 || self.hubs[h].gov_closed { return false; }
+        if self.hubs[h].legitimacy < CLOSING_LEGITIMACY_FLOOR { return false; }
+        let mut richest: Vec<(usize, f32)> = self.houses.iter().enumerate()
+            .filter(|(_, hh)| !hh.defunct && !hh.is_guild && hh.hub as usize == h && hh.wealth > CLOSING_WEALTH_FLOOR)
+            .map(|(i, hh)| (i, hh.wealth)).collect();
+        if richest.len() < CLOSING_MIN_RICH_HOUSES { return false; }
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0x5E44) >= CLOSING_BASE_CHANCE * dose { return false; }
+        richest.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        let mut ri = 0usize;
+        for oi in 0..self.hubs[h].officials.len() {
+            if self.hubs[h].officials[oi].kin { continue; }
+            if ri >= richest.len() { break; }
+            let hi = richest[ri].0; ri += 1;
+            let o = &mut self.hubs[h].officials[oi];
+            o.house = hi as i32; o.control = 1.0; o.kin = true; o.path = PATH_WEALTH;
+        }
+        self.hubs[h].gov_closed = true;
+        self.hubs[h].legitimacy = (self.hubs[h].legitimacy - CLOSING_LEGITIMACY_HIT * dose).clamp(0.0, 1.0);
+        let cn = self.hubs[h].name.clone();
+        self.chronicle_regime_change(h, REGIME_OLIGARCHIC_CLOSING, format!("{cn}'s council closes itself to new families"));
+        true
+    }
+
+    /// "A body votes to change the constitution, pushed by scholars" —
+    /// Solon, Cleisthenes: a Tyranny reforms into a Council once the
+    /// Ideological track has matured and a resident scholar pushes for it.
+    fn maybe_reform(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type != 1 { return false; }
+        if self.hubs[h].track_level[TRACK_IDEOLOGICAL] < REFORM_IDEO_LEVEL_FLOOR { return false; }
+        let scholar = self.people.iter().any(|p| p.current_hub as usize == h
+            && (p.roles.contains(&ROLE_SCHOLAR) || p.roles.contains(&ROLE_PHILOSOPHER) || p.roles.contains(&ROLE_IDEOLOGUE)));
+        if !scholar { return false; }
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0x501070) >= REFORM_BASE_CHANCE * dose { return false; }
+        self.hubs[h].govt_type = 0;
+        self.hubs[h].captor_house = -1;
+        let n = self.hubs[h].officials.len();
+        for oi in 0..n { self.reseat_official(h, oi); }
+        self.hubs[h].legitimacy = REFORM_LEGITIMACY_RESET;
+        let cn = self.hubs[h].name.clone();
+        self.chronicle_regime_change(h, REGIME_REFORM, format!("{cn} reforms its constitution into a council"));
+        true
+    }
+
+    /// "Once a year the assembly may vote to exile one person for 10 years."
+    /// Exiles the seated official with the LOWEST suitability (never the
+    /// Head) — the seat most likely to have stirred the trouble the
+    /// assembly wants gone — and immediately reseats it fresh.
+    pub(crate) fn maybe_ostracism(&mut self, h: usize, dose: f32) -> bool {
+        if dose <= 0.0 || self.hubs[h].govt_type != 2 || self.hubs[h].officials.len() < 2 { return false; }
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0x0577) >= OSTRACISM_CHANCE * dose { return false; }
+        let Some((oi, iid)) = self.hubs[h].officials.iter().enumerate()
+            .filter(|(_, o)| o.role != 0)
+            .min_by(|a, b| a.1.suitability.partial_cmp(&b.1.suitability).unwrap())
+            .map(|(oi, o)| (oi, o.individual_id))
+        else { return false };
+        let until = self.tick + OSTRACISM_YEARS * TICKS_PER_YEAR;
+        self.hubs[h].ostracized.push((iid, until));
+        if self.hubs[h].ostracized.len() > OSTRACISM_CAP {
+            let d = self.hubs[h].ostracized.len() - OSTRACISM_CAP;
+            self.hubs[h].ostracized.drain(0..d);
+        }
+        let name = self.hubs[h].officials[oi].name.clone();
+        self.reseat_official(h, oi);
+        let cn = self.hubs[h].name.clone();
+        self.chronicle_regime_change(h, REGIME_OSTRACISM, format!("{name} is ostracized from {cn} for a decade"));
+        true
     }
 }
 

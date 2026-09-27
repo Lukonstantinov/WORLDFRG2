@@ -11,7 +11,7 @@ use crate::sim::tick::{
     Official, TickHub, TICKS_PER_YEAR,
     official_allegiance, official_path_name, government_blocs, edict_family_name,
     GOV_OUTCOME_PASSED, GOV_OUTCOME_FAILED, GOV_OUTCOME_DEADLOCKED, GOV_OUTCOME_COUP,
-    govt_type_name, office_title,
+    govt_type_name, office_title, regime_kind_name,
 };
 
 /// One seat, browser-ready — a plain house name resolved rather than a bare
@@ -65,13 +65,17 @@ pub struct EdictBrief {
     pub expires_year: u32,
 }
 
-/// One closed debate's outcome, or a coup — "recent history".
+/// One closed debate's outcome, or a change of government — "recent history".
 #[derive(Serialize, Clone, Default)]
 pub struct GovHistoryBrief {
     pub year: u32,
     pub family: String,
     /// "passed" | "failed" | "deadlocked" | "coup".
     pub outcome: String,
+    /// Q04.5b · "coup" | "revolution" | "oligarchic closing" | "emergency
+    /// rule" | "succession crisis" | "reform" | "ostracism" | "" (an
+    /// ordinary edict/Lustrum entry, `outcome != "coup"`).
+    pub regime_kind: String,
 }
 
 /// The whole Government window for one city.
@@ -155,6 +159,7 @@ pub fn campaign_get_government(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
         year: e.tick / TICKS_PER_YEAR,
         family: edict_family_name(e.family).to_string(),
         outcome: outcome_name(e.outcome).to_string(),
+        regime_kind: regime_kind_name(e.regime_kind).to_string(),
     }).collect();
 
     Ok(Some(GovernmentBrief {
