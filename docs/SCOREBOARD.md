@@ -9,6 +9,67 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-27 — `docs/living_world/04_GOVERNMENT_AND_EDICTS.md`: closing out row 04 (Q04.9 remainder + Q04.5b), row 10 Q10.4
+
+Row 04 of `docs/living_world/00_INDEX.md` moves PARTIAL → DONE. Two closing
+pieces, both shipped at their dose constants' `0.0` (a true no-op — no
+number below moved because of this session's own changes):
+
+- **Q04.9's remaining 6 of 8 edict families** now dispatch through
+  `apply_edict_effect` (renamed from `maybe_enact_edict_law`): Economy →
+  a bounded `mint_fineness` nudge; Military → a `war_manpower` top-up
+  capped at the existing levy ceiling; Learning/Buildings → `track_points`;
+  Citizenship → a `CultureRelation.score` nudge; Constitution → create/
+  abolish one role-4 seat under `GOVT_SEAT_CAP`. Each behind its own dose
+  constant, each `0.0`.
+- **Q04.5b's remaining 5 "changes of government" kinds + ostracism**
+  (revolution, oligarchic closing, emergency ruler, succession crisis,
+  reform, ostracism) now live in `government_change_pass`, called yearly,
+  behind `GOV_POWER_DOSE = 0.0`.
+
+Two tests failed on first write and are worth recording as a process note
+rather than a finding about the economy: `seed_government` unconditionally
+resets BOTH `govt_type` (from population) and `legitimacy` (to
+`NEUTRAL_LEGITIMACY_SEED`) whenever it runs, so a fixture that set either
+field on the input `TickHub` *before* calling `sim()`/`seed_government` had
+it silently overwritten. Fixed by moving both overrides to *after*
+`seed_government` in the two affected tests
+(`a_wealthy_house_can_topple_a_weak_tyrant`, `ostracism_exiles_one_person`).
+
+**Gates run:** `cargo check --lib --tests` (clean); 20 named row-04 tests
+(20/20, incl. the 6 new: `edict_family_effects_are_noops_at_zero_dose`,
+`edict_family_effects_do_something_at_a_test_dose`,
+`government_change_kinds_are_noops_at_zero_dose`,
+`a_wealthy_house_can_topple_a_weak_tyrant`,
+`a_tyrant_dying_without_an_heir_destabilises_the_city`,
+`ostracism_exiles_one_person`); full `cargo test --lib tick::tests`
+(**396 passed, 0 failed, 5 ignored**, 25.6s — `simulate_decades_reports_
+dynamics` included, unchanged); full `cargo test --lib econ_ -- --nocapture`
+(**6 passed, 0 failed, 20 ignored**, 337.4s):
+
+| Metric | Value | Band | Source |
+|---|---|---|---|
+| top-10% wealth share (reference world) | 0.607 | 0.60–0.90 | Alfani |
+| top-10% wealth share (large world) | 0.673 | 0.60–0.90 | Alfani |
+| inheritance gate — houses ever founded, partible vs primogeniture (3 seeds) | 30/21, 33/27, 27/22 | partible > primogeniture, every seed | §8.15 |
+| inheritance gate — mean wealth/house, partible vs primogeniture (3 seeds) | 74,083/102,541, 71,734/79,159, 93,353/107,453 | partible < primogeniture, every seed | §8.15 |
+
+All figures are bit-identical in shape to the pre-session baseline (every
+new dose shipped at `0.0`), confirmed rather than assumed.
+
+Row 10 (`10_SETTLEMENT_OVERVIEW.md`) also advanced this session — Q10.4's
+identity/development/economy-at-a-glance blocks folded into the Overview
+tab, and 10.3's city portrait now reuses the EXISTING, already-shipped
+`cityScene`/`IsoThumb` isometric renderer (the same one `CityView.tsx`/
+`ColonyWindow.tsx`/`HouseWindow.tsx` already draw with) rather than new
+procedural art — a frontend-only change with no sim state touched, so no
+`econ_`/`tick::tests` run is owed for it (CLAUDE.md §2.8's own routing-table
+row for a frontend change); verified by `npx tsc --noEmit` and `npx vite
+build`, both clean. See `docs/living_world/00_INDEX.md` and
+`10_SETTLEMENT_OVERVIEW.md` for exactly what remains queued on both rows.
+
+---
+
 ## 2026-09-25 — `docs/living_world/02_PEOPLE.md`: the Individual system (Living World row 02, slices 02.1-02.5/02.8)
 
 Row 02 of the new `docs/living_world/00_INDEX.md` build queue — the ONE
