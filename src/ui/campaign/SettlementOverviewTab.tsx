@@ -2,14 +2,17 @@ import { useEffect, useMemo, useState } from "react";
 import {
   campaignGetGovernment, campaignGetCityIdeology, campaignGetCityGallery, campaignGetVenues,
   campaignGetCultureAcceptance, campaignGetJournal, campaignGetHub, campaignCityDevelopment,
+  campaignGetIndividual,
 } from "@bridge";
 import type {
   GovernmentBrief, CityIdeologyBrief, MasterworkBrief, VenueBrief, CultureAcceptanceBrief, JournalEntry,
-  HubDetail, CityDevelopment,
+  HubDetail, CityDevelopment, IndividualBrief,
 } from "@types";
 import { Section, StatGrid, Stat, DataRow, Badge, FootNote, EmptyNote } from "@ui/kit";
 import { useWorldStore } from "@state/worldStore";
 import { useCultureKits, cityScene, IsoThumb } from "@ui/campaign/windowKit";
+import { GovFormBadge } from "@ui/campaign/govFormBadge";
+import { PersonChip } from "@ui/campaign/personShared";
 
 const TRACK_NAMES = ["⚔ Military", "⚖ Trade", "🏛 Civil", "📜 Ideological"] as const;
 
@@ -67,6 +70,8 @@ export function SettlementOverviewTab({ hub }: { hub: number }) {
   const [venues, setVenues] = useState<VenueBrief[]>([]);
   const [tiers, setTiers] = useState<CultureAcceptanceBrief[]>([]);
   const [journal, setJournal] = useState<JournalEntry[]>([]);
+  const [scholarPeople, setScholarPeople] = useState<Record<number, IndividualBrief>>({});
+  const [expandedScholar, setExpandedScholar] = useState<number | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -80,6 +85,24 @@ export function SettlementOverviewTab({ hub }: { hub: number }) {
     campaignGetJournal(hub, -1).then((v) => { if (alive) setJournal(v.slice(-5).reverse()); }).catch(() => { if (alive) setJournal([]); });
     return () => { alive = false; };
   }, [hub]);
+
+  // Up to 3 of this city's scholars/philosophers/ideologues get a real bust
+  // portrait (the same `PersonChip` the Government tab's seats use), so the
+  // Ideology section shows real people instead of a bare count.
+  useEffect(() => {
+    const shown = (ideology?.scholars ?? []).slice(0, 3);
+    if (shown.length === 0) { setScholarPeople({}); return; }
+    let alive = true;
+    Promise.all(shown.map((sc) => campaignGetIndividual(sc.individual_id)
+      .then((p) => [sc.individual_id, p] as const).catch(() => [sc.individual_id, null] as const)))
+      .then((pairs) => {
+        if (!alive) return;
+        const map: Record<number, IndividualBrief> = {};
+        for (const [id, p] of pairs) if (p) map[id] = p;
+        setScholarPeople(map);
+      });
+    return () => { alive = false; };
+  }, [ideology]);
 
   const econHub = economy?.hubs.find((h) => h.id === hub);
   const settlement = settlements.find((s) => s.name === detail?.name);
@@ -128,7 +151,7 @@ export function SettlementOverviewTab({ hub }: { hub: number }) {
       {gov && (
         <Section title="Government">
           <StatGrid cols={3}>
-            <Stat label="Form" value={gov.form} />
+            <Stat label="Form" value={<GovFormBadge form={gov.form} />} />
             <Stat label="Legitimacy" value={`${Math.round(gov.legitimacy * 100)}%`} />
             <Stat label="Seats" value={String(gov.seats.length)} />
           </StatGrid>
@@ -140,8 +163,21 @@ export function SettlementOverviewTab({ hub }: { hub: number }) {
         <Section title="Ideology">
           <FootNote>
             {ideology.dominant_id >= 0 ? `Prevailing: ${ideology.dominant_name}` : "No dominant doctrine yet"}
-            {" · "}{ideology.scholars.length} scholar{ideology.scholars.length === 1 ? "" : "s"}
+            {ideology.scholars.length > 0 && <>{" · "}{ideology.scholars.length} scholar{ideology.scholars.length === 1 ? "" : "s"}</>}
           </FootNote>
+          {ideology.scholars.slice(0, 3).map((sc) => {
+            const person = scholarPeople[sc.individual_id];
+            if (!person) return null;
+            return (
+              <PersonChip
+                key={sc.individual_id}
+                person={person}
+                onClick={() => setExpandedScholar((v) => (v === sc.individual_id ? null : sc.individual_id))}
+                expanded={expandedScholar === sc.individual_id}
+                sub={`stage ${sc.stage} · fame ${sc.fame.toFixed(2)}`}
+              />
+            );
+          })}
         </Section>
       )}
 

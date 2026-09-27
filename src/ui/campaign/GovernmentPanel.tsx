@@ -5,6 +5,7 @@ import { campaignGetGovernment, campaignGetCityIdeology, campaignGetCityGallery,
 import type { GovernmentBrief, CityIdeologyBrief, MasterworkBrief, VenueBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { Panel, PanelHeader, PanelBody, Section, Card, Divider, StatGrid, Stat, Badge, Meter, ColHead, DataRow, EmptyNote, FootNote } from "@ui/kit";
+import { GovFormBadge } from "@ui/campaign/govFormBadge";
 
 const ALLEGIANCE_LABEL = ["house", "ruler", "commons"];
 const ALLEGIANCE_TONE: ("gold" | "accent" | "neutral")[] = ["gold", "accent", "neutral"];
@@ -56,7 +57,7 @@ export function GovernmentPanel() {
           <>
             <Section>
               <StatGrid cols={3}>
-                <Stat label="Form" value={brief.form} />
+                <Stat label="Form" value={<GovFormBadge form={brief.form} />} />
                 <Stat label="Legitimacy" value={`${Math.round(brief.legitimacy * 100)}%`} />
                 <Stat label="Points" value={brief.gov_points.toFixed(2)} hint="years of accrual" />
               </StatGrid>

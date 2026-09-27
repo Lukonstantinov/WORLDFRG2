@@ -28,6 +28,8 @@ import { InternalMarketView } from "@ui/campaign/InternalMarketView";
 import { CultureDonut } from "@ui/campaign/CultureDonut";
 import { CityWarehousePanel } from "@ui/campaign/CityWarehousePanel";
 import { WorksCard } from "@ui/campaign/WorksCard";
+import { GovFormBadge } from "@ui/campaign/govFormBadge";
+import { PersonChip } from "@ui/campaign/personShared";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** Icons/colours for the settlement chronicle's event kinds (year-grouped view). */
@@ -46,7 +48,7 @@ const HUB_EVENT_COLOR: Record<string, string> = {
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
 };
 
-type Tab = "overview" | "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life" | "development";
+type Tab = "overview" | "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life";
 
 const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
 const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
@@ -387,6 +389,9 @@ export function HubPanel() {
   // notable people with traits" gap — the Life tab's townspeople were fixed
   // already; this is the Government tab's own seats).
   const [seatPeople, setSeatPeople] = useState<Record<number, IndividualBrief>>({});
+  // Which seat holders' inline life story is expanded (keyed by their
+  // `individual_id`, so it survives the seats array re-fetching each tick).
+  const [expandedSeats, setExpandedSeats] = useState<Record<number, boolean>>({});
   useEffect(() => {
     const seats = govBrief?.seats ?? [];
     if (seats.length === 0) { setSeatPeople({}); return; }
@@ -403,10 +408,13 @@ export function HubPanel() {
     return () => { alive = false; };
   }, [govBrief]);
 
-  // 03_DEVELOPMENT_TRACKS.md slice 03.6 · the Development tab's own factor +
-  // four-track snapshot, refreshed on open and as the campaign advances.
+  // 03_DEVELOPMENT_TRACKS.md slice 03.6 · the development factor + four-track
+  // snapshot — was its own "Development" tab, folded into Government (the
+  // tab merge this session) since a city's growth tracks are as much a part
+  // of its civic state as its seats/edicts are, and the two tabs were
+  // splitting one "how is this city governed and growing" question in half.
   useEffect(() => {
-    if (tab !== "development" || selectedHub === null || !campActive) return;
+    if (tab !== "govt" || selectedHub === null || !campActive) return;
     let alive = true;
     campaignCityDevelopment(selectedHub).then((d) => { if (alive) setDev(d); }).catch(() => { if (alive) setDev(null); });
     return () => { alive = false; };
@@ -520,7 +528,6 @@ export function HubPanel() {
     ...(campActive && detail ? [{ id: "warehouse" as Tab, label: "Warehouse" }] : []),
     { id: "people", label: "People" },
     ...(campActive && detail && !detail.is_estate ? [{ id: "life" as Tab, label: "Life" }] : []),
-    ...(campActive && detail && !detail.is_estate ? [{ id: "development" as Tab, label: "Development" }] : []),
   ];
 
   return (
@@ -641,7 +648,10 @@ export function HubPanel() {
               </div>
             ) : (
               <>
-                {govRow("Form", govBrief.form)}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0" }}>
+                  <span style={{ color: "#8aa0c0", fontSize: 11 }}>Form</span>
+                  <GovFormBadge form={govBrief.form} />
+                </div>
                 <div style={{ display: "flex", gap: 14, margin: "4px 0 8px", flexWrap: "wrap" }}>
                   <div style={{ flex: 1, minWidth: 80 }}>
                     <div style={{ color: "#6a86a6", fontSize: 9 }}>Legitimacy</div>
@@ -689,31 +699,54 @@ export function HubPanel() {
                   : govBrief.seats.map((s, i) => {
                     const person = s.individual_id >= 0 ? seatPeople[s.individual_id] : undefined;
                     const lastLine = person?.life_log[person.life_log.length - 1];
+                    const isExpanded = !!expandedSeats[s.individual_id];
+                    const toggle = () => setExpandedSeats((m) => ({ ...m, [s.individual_id]: !m[s.individual_id] }));
+                    const allegiance = (
+                      <span style={{ color: s.allegiance === 0 ? "#c9a227" : s.allegiance === 1 ? "#7fd0a0" : "#6a86a6", fontSize: 10 }}>
+                        {s.allegiance === 0 ? (s.house_name || "house") : s.allegiance === 1 ? "ruler's kin" : "commons"}
+                      </span>
+                    );
                     return (
                     <div key={i} style={{ margin: "4px 0" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                        <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>
-                        <span style={{ color: "#8aa0c0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
-                        <span style={{ color: s.allegiance === 0 ? "#c9a227" : s.allegiance === 1 ? "#7fd0a0" : "#6a86a6", fontSize: 10 }}>
-                          {s.allegiance === 0 ? (s.house_name || "house") : s.allegiance === 1 ? "ruler's kin" : "commons"}
-                        </span>
-                      </div>
-                      <div style={{ color: "#6a86a6", fontSize: 9 }}>
-                        {s.path} · suitability {Math.round(s.suitability * 100)}%
-                      </div>
-                      {person && person.traits.length > 0 && (
-                        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 2 }}>
-                          {person.traits.map((t) => (
-                            <span key={t} style={{
-                              fontSize: 8.5, color: "#e8d9b0", border: "1px solid #4a4030",
-                              borderRadius: 8, padding: "1px 6px",
-                            }}>{t}</span>
-                          ))}
+                      {person ? (
+                        // A figurine bust + click-to-expand life story (Scholar/
+                        // Philosopher/Ideologue seats — including one filled
+                        // via PATH_SCHOLAR — read in the shared scholarly blue).
+                        <PersonChip
+                          person={person}
+                          pathOverride={s.path}
+                          onClick={toggle}
+                          expanded={isExpanded}
+                          label={<>
+                            <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>{" "}
+                            <span style={{ fontWeight: 400 }}>{s.name}</span>
+                          </>}
+                        />
+                      ) : (
+                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>
+                          <span style={{ color: "#8aa0c0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
+                          {allegiance}
                         </div>
                       )}
-                      <div style={{ color: "#7a90a8", fontSize: 9, fontStyle: "italic", marginTop: 1 }}>
-                        {lastLine ?? (person ? "A quiet life, so far." : "")}
-                      </div>
+                      {person && (
+                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 1 }}>
+                          <span style={{ color: "#6a86a6", fontSize: 9 }}>
+                            {s.path} · suitability {Math.round(s.suitability * 100)}%
+                          </span>
+                          {allegiance}
+                        </div>
+                      )}
+                      {!person && (
+                        <div style={{ color: "#6a86a6", fontSize: 9 }}>
+                          {s.path} · suitability {Math.round(s.suitability * 100)}%
+                        </div>
+                      )}
+                      {person && !isExpanded && (
+                        <div style={{ color: "#7a90a8", fontSize: 9, fontStyle: "italic", marginTop: 1 }}>
+                          {lastLine ?? "A quiet life, so far."}
+                        </div>
+                      )}
                     </div>
                     );
                   })}
@@ -746,6 +779,52 @@ export function HubPanel() {
                 )}
               </>
             )}
+
+            {/* Development tracks (03_DEVELOPMENT_TRACKS.md 03.6) — folded into
+                Government (the tab merge, this session): a city's growth
+                tracks are civic state exactly like its seats/edicts are, and
+                splitting the two into separate tabs only duplicated the
+                "how is this city run" question. */}
+            <div style={sectionHdr}>Development</div>
+            {!dev ? (
+              <div style={{ color: "#6a86a6", fontSize: 10, marginBottom: 6 }}>
+                No development data yet — check back after the campaign has run a year.
+              </div>
+            ) : (() => {
+              const TRACK_NAMES = ["⚔ Military", "⚖ Trade", "🏛 Civil", "📜 Ideological"] as const;
+              const BREAKDOWN_NAMES = ["Trade", "Partner reach", "Welfare", "Diffusion", "Decay"] as const;
+              return (
+                <>
+                  <div style={{ fontSize: 11, color: "#c9d6e3", marginBottom: 4 }}>
+                    Development factor: <b>{dev.dev.toFixed(2)}</b>
+                  </div>
+                  <div style={{ fontSize: 9, color: "#7a90a8", marginBottom: 10 }}>
+                    This year: {BREAKDOWN_NAMES.map((n, i) => `${n} ${dev.dev_breakdown[i] >= 0 ? "+" : ""}${dev.dev_breakdown[i].toFixed(2)}`).join(" · ")}
+                  </div>
+                  {TRACK_NAMES.map((name, k) => (
+                    <div key={name} style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 4 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#c9d6e3" }}>
+                        <span>{name}</span>
+                        <span>level {dev.track_level[k]} · {dev.track_points[k].toFixed(1)} pts</span>
+                      </div>
+                      <div style={{ fontSize: 9, color: "#7a90a8", marginTop: 2 }}>
+                        {dev.track_buildings[k] > 0
+                          ? `built to level ${dev.track_buildings[k]}`
+                          : "no building raised yet"}
+                        {dev.track_buildings[k] < dev.track_level[k] && (
+                          <> — next building {(dev.track_build_progress[k] * 100).toFixed(0)}% funded</>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 2, marginBottom: 6 }}>
+                    Building effects (army strength, warehouse capacity, population
+                    ceiling, idea spread…) are not wired up yet — 03.7's dose walk.
+                    This shows what the city has actually built, nothing more.
+                  </div>
+                </>
+              );
+            })()}
 
             {g.family_influence.length > 0 && (
               <>
@@ -1571,46 +1650,6 @@ export function HubPanel() {
               physician, and the captain of the watch (L12's other three
               named roles) wait on those. This is Life tab v2 over what
               L0-L8/L12 made real.
-            </div>
-          </>
-        );
-      })()}
-
-      {/* ════════════ DEVELOPMENT (03_DEVELOPMENT_TRACKS.md 03.6) ════════════ */}
-      {tab === "development" && (() => {
-        if (!dev) {
-          return <div style={{ color: "#7a90a8", fontSize: 10 }}>No development data yet — check back after the campaign has run a year.</div>;
-        }
-        const TRACK_NAMES = ["⚔ Military", "⚖ Trade", "🏛 Civil", "📜 Ideological"] as const;
-        const BREAKDOWN_NAMES = ["Trade", "Partner reach", "Welfare", "Diffusion", "Decay"] as const;
-        return (
-          <>
-            <div style={{ fontSize: 11, color: "#c9d6e3", marginBottom: 4 }}>
-              Development factor: <b>{dev.dev.toFixed(2)}</b>
-            </div>
-            <div style={{ fontSize: 9, color: "#7a90a8", marginBottom: 10 }}>
-              This year: {BREAKDOWN_NAMES.map((n, i) => `${n} ${dev.dev_breakdown[i] >= 0 ? "+" : ""}${dev.dev_breakdown[i].toFixed(2)}`).join(" · ")}
-            </div>
-            {TRACK_NAMES.map((name, k) => (
-              <div key={name} style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 4 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#c9d6e3" }}>
-                  <span>{name}</span>
-                  <span>level {dev.track_level[k]} · {dev.track_points[k].toFixed(1)} pts</span>
-                </div>
-                <div style={{ fontSize: 9, color: "#7a90a8", marginTop: 2 }}>
-                  {dev.track_buildings[k] > 0
-                    ? `built to level ${dev.track_buildings[k]}`
-                    : "no building raised yet"}
-                  {dev.track_buildings[k] < dev.track_level[k] && (
-                    <> — next building {(dev.track_build_progress[k] * 100).toFixed(0)}% funded</>
-                  )}
-                </div>
-              </div>
-            ))}
-            <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
-              Building effects (army strength, warehouse capacity, population
-              ceiling, idea spread…) are not wired up yet — 03.7's dose walk.
-              This tab shows what the city has actually built, nothing more.
             </div>
           </>
         );
