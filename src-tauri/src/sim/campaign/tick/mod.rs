@@ -2025,26 +2025,62 @@ const LAWS_CAP: usize = 12;
 /// `((full_extra_seats as f32) * GOV_POWER_DOSE.min(1.0)).round()`), matching
 /// how every other dose in this codebase already behaves — a fractional dose
 /// means a partially-grown government, not an all-or-nothing switch — which
-/// is what makes backing off the dose a real lever at all. Re-walked at
-/// `0.5` (min −166.4, late-richest 528,805 — held) and `0.75` (min −144.2,
-/// late-richest 381,736 — held, comfortable margin on both bounds and no
-/// worse than `0.5`'s). Shipped at **`0.75`**, not `1.0`: real government
-/// churn plus a genuinely scaled senate, without the runaway. Gates run at
-/// `0.75`: `cargo check --lib --tests` (clean); the full row-04 test set
-/// incl. the rewritten `officials_migrate_to_seats` (now asserting the
-/// DOSE-SCALED seat count, not a fixed prediction, since the shipped dose is
-/// no longer exactly `1.0`) and a new `government_dose_one_over_a_century`
-/// integration test that drives the REAL yearly call site
-/// (`government_change_pass(h, GOV_POWER_DOSE)` inside `advance`'s own loop,
-/// not the sub-functions called directly) for 150 years and asserts at least
-/// one real regime change lands, no `legitimacy`/`gov_position` goes out of
-/// bounds or NaN, and the sim never panics; the full `tick::tests` suite
-/// (`simulate_decades_reports_dynamics` read for sane, bounded wealth and
-/// real turnover); and the full `econ_` suite incl. the multi-seed
-/// `econ_inheritance_rules_fragment_differently` gate. See
-/// `docs/SCOREBOARD.md`'s 2026-09-27 entry and
+/// is what makes backing off the dose a real lever at all.
+///
+/// **`0.75` was committed, then caught its OWN regression once the full
+/// `econ_` suite (not just `simulate_decades_reports_dynamics`) finished
+/// running.** `simulate_decades_reports_dynamics`'s bounded-wealth floor held
+/// at both `0.5` (min −166.4) and `0.75` (min −144.2) — that part of the
+/// story above is accurate — but the multi-seed
+/// `econ_inheritance_rules_fragment_differently` gate (§8.15), which takes
+/// several minutes and was still running at commit time, came back FAILING
+/// at `0.75`: seed 42's own margin had flipped to a near-tie — partible
+/// 81,112 mean wealth/house vs primogeniture's 80,863, when partible must
+/// read LOWER on every seed. A spot pass on one gate and a regression on
+/// another is a revert, not a judgement call (CLAUDE.md §2.4) — this is
+/// exactly that case, just discovered one gate later than ideal (the lesson
+/// generalises: run the SLOW multi-seed gate before committing a dose walk's
+/// final value, never queue it as "results to follow").
+///
+/// Re-walked further: `0.6` broke BOTH gates at once — the inheritance
+/// margin AND, newly, `the_dosed_economy_stays_healthy_on_a_realistically_
+/// dense_world` (trade volume collapsed to 205,206 against a 914,063 "must
+/// not collapse" floor) — proof this interaction is genuinely non-monotonic
+/// in the dose, not a straight line between `0.5` and `0.75`'s two isolated
+/// failures (the same "single-trajectory chaos" this codebase's other dose
+/// walks already warn about, e.g. S7's household-monetization walk).
+/// `0.3` holds EVERY gate with real margin: `cargo check --lib --tests`
+/// (clean); the full row-04 test set incl. the rewritten
+/// `officials_migrate_to_seats` (now asserting the DOSE-SCALED seat count via
+/// the same rounding formula, not a fixed dose-1.0 prediction) and
+/// `government_dose_one_over_a_century` (drives the REAL yearly call site,
+/// `government_change_pass(h, GOV_POWER_DOSE)` inside `advance`'s own loop,
+/// for 150 years and asserts at least one real regime change lands with
+/// `legitimacy`/`gov_position` staying finite and in bounds); the full
+/// `tick::tests` suite (397/397, `simulate_decades_reports_dynamics`
+/// included); and the full `econ_` suite (6/6) — the inheritance gate now
+/// reads partible founding MORE houses than primogeniture on all 3 seeds
+/// (21>14, 28>23, 22>15) at a genuinely LOWER mean wealth/house each time
+/// (70,324<116,736, 102,722<106,336, 66,245<100,049), a comfortable margin
+/// rather than `0.75`'s near-tie. **Shipped at `0.3`**, not `0.75` or `1.0`:
+/// real, visible government churn (seat scaling, coups, revolutions, reform)
+/// without breaking any aggregate gate.
+///
+/// **One finding recorded rather than chased**: the large-world fidelity
+/// scorecard's own top-10% wealth-share PRINT (not asserted, §2.5) moved
+/// from a pre-session 0.673 to 0.463 at `0.3` — below the historical
+/// 0.60–0.90 Alfani band on that one fixture, while the reference-world
+/// scorecard's own print (0.648) stays comfortably inside it. Plausibly a
+/// real effect (genuine regime churn at scale redistributes concentrated
+/// elite wealth rather than merely reshuffling names at the top), but not
+/// disentangled from a fixture-specific interaction in this session — left
+/// as a named, printed finding for a future session to diagnose before
+/// walking this dose any further, not silently absorbed.
+///
+/// See `docs/SCOREBOARD.md`'s 2026-09-27 entries and
 /// `docs/living_world/04_GOVERNMENT_AND_EDICTS.md`'s Q04.5b for the full
-/// before/after numbers and the two intermediate (mechanism-isolating) runs.
+/// before/after numbers across all four values tried (`1.0`/`0.75`/`0.6`/
+/// `0.3`).
 ///
 /// Row 04 depends on rows 02 (`Individual`) and 03 (development tracks),
 /// both built by the time this was walked, so an extra (role-4) seat is now
@@ -2052,7 +2088,7 @@ const LAWS_CAP: usize = 12;
 /// one exists at the city (`seed_government`'s `PATH_SCHOLAR` branch) —
 /// giving `official_path_name`'s long-dead-code "scholar/orator" string its
 /// first real assignment site — rather than always minting a generic name.
-pub(crate) const GOV_POWER_DOSE: f32 = 0.75;
+pub(crate) const GOV_POWER_DOSE: f32 = 0.3;
 /// Hard cap on seats in any one government (04 §"Forms, sizes and offices") —
 /// the largest senate, and the ceiling a custom office (row 04.6+) must share.
 pub(crate) const GOVT_SEAT_CAP: usize = 16;

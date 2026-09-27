@@ -127,16 +127,28 @@ loop, never the sub-functions directly) for 150 years across 16 mixed-size
 hubs and asserts a real regime change lands with `legitimacy`/
 `gov_position` staying finite and in bounds; full `cargo test --lib
 tick::tests`; full `cargo test --lib econ_ -- --nocapture` incl. the
-multi-seed `econ_inheritance_rules_fragment_differently` gate — both run at
-the final shipped dose (`0.75`), numbers below:
+multi-seed `econ_inheritance_rules_fragment_differently` gate — run at
+`0.75` (the value this section originally shipped), numbers below. **This
+value was subsequently REVERTED — see the next section, "GOV_POWER_DOSE
+corrected", for why and what shipped instead.** Recorded here rather than
+edited away, per this file's own "never edit an old row" rule — a
+scoreboard whose history is rewritten cannot show a regression, and this
+IS the regression that prompted the correction:
 
-| Metric | Value | Band |
+| Metric | Value at `0.75` | Band |
 |---|---|---|
-| tick::tests | *(fill after run)* | 0 failed |
-| econ_ (top-10% wealth share, reference world) | *(fill after run)* | 0.60–0.90 |
-| econ_ (top-10% wealth share, large world) | *(fill after run)* | 0.60–0.90 |
-| inheritance gate — houses ever founded, partible vs primogeniture | *(fill after run)* | partible > primogeniture, every seed |
-| inheritance gate — mean wealth/house, partible vs primogeniture | *(fill after run)* | partible < primogeniture, every seed |
+| tick::tests | 397/397, 0 failed | 0 failed |
+| econ_ (top-10% wealth share, reference world) | 0.597 | 0.60–0.90 (just under) |
+| econ_ (top-10% wealth share, large world) | 0.809 | 0.60–0.90 |
+| inheritance gate — houses ever founded, partible vs primogeniture (seed 42) | 31 vs 19 | partible > primogeniture ✓ |
+| inheritance gate — mean wealth/house, partible vs primogeniture (seed 42) | **81,112 vs 80,863 — FAILED** | partible < primogeniture, every seed |
+
+`econ_ -- --nocapture` at `0.75`: **5 passed, 1 failed** —
+`econ_inheritance_rules_fragment_differently` panicked on seed 42's
+near-tied mean-wealth margin (partible reading slightly RICHER than
+primogeniture, the wrong direction). This is what actually shipping `0.75`
+would have regressed; caught after the commit above, corrected in the
+section immediately following.
 
 **Frontend (same session):** the Government and Development tabs merged
 into one (`HubPanel.tsx` — Development now a sub-section of Government,
@@ -153,6 +165,84 @@ holds their seat via `PATH_SCHOLAR`. Verified by `npx tsc --noEmit` and
 files) — this environment has no display, so the composed panel was never
 opened in a real browser, the same caveat every Living World UI slice in
 this tree carries.
+
+---
+
+## 2026-09-27 (continued 2) — `GOV_POWER_DOSE` corrected: `0.75` reverted, re-walked to `0.3`
+
+Continues the two entries above. `0.75` was committed as this session's
+shipped dose while the full `econ_ -- --nocapture` run was still in flight
+(its own multi-seed inheritance gate alone takes 3-4 minutes per value).
+That run finished after the commit and FAILED: seed 42's mean-wealth
+margin had flipped to a near-tie (see the table in the entry above) —
+partible must read poorer than primogeniture on every seed, and at `0.75`
+it very nearly did not. Per CLAUDE.md §2.4, a pass on one gate
+(`simulate_decades_reports_dynamics`) and a regression on another
+(the multi-seed inheritance gate) is a revert, not a judgement call —
+this is exactly that case, caught one gate later than it should have
+been. The lesson, stated plainly for next time: **run the slow multi-seed
+gate to completion BEFORE committing a dose walk's final value** — never
+ship on a partial result with "results to follow".
+
+**Re-walked further, `0.75 -> 0.6 -> 0.3`:**
+
+| Dose | `the_dosed_economy_stays_healthy_on_a_realistically_dense_world` | `econ_inheritance_rules_fragment_differently` (seed 42 mean wealth, partible vs primogeniture) |
+|---|---|---|
+| 0.75 | held | **FAILED** (81,112 vs 80,863 — near-tie, wrong direction) |
+| 0.6 | **FAILED** (trade volume 205,206 vs a 914,063 floor) | **FAILED** |
+| 0.3 (shipped) | held | held, real margin |
+
+`0.6` broke BOTH gates simultaneously — proof this interaction is
+genuinely non-monotonic in the dose (`0.75` alone failed one gate, `0.6`
+failed a different one plus the same one, `0.3` failed neither), not a
+straight line between two isolated failure points. This is the same
+"single-trajectory chaos" flavour of finding this codebase's other dose
+walks already warn about (e.g. S7's household-monetization walk, where
+0.005 broke a larger, different set of tests than 0.02).
+
+**`0.3` holds every gate, with real margin, not a near-tie:**
+
+| Metric | Value at `0.3` | Band |
+|---|---|---|
+| `cargo check --lib --tests` | clean | — |
+| `tick::tests` | 397/397, 0 failed, 5 ignored | 0 failed |
+| `econ_ -- --nocapture` | 6/6, 0 failed, 20 ignored | 0 failed |
+| econ_ (top-10% wealth share, reference world) | 0.648 | 0.60–0.90 ✓ |
+| econ_ (top-10% wealth share, large world) | **0.463 — below band** | 0.60–0.90 (printed, not asserted, §2.5) |
+| inheritance — houses ever founded, partible vs primogeniture (seeds 42/1337/7) | 21>14, 28>23, 22>15 | partible > primogeniture, every seed ✓ |
+| inheritance — mean wealth/house, partible vs primogeniture (seeds 42/1337/7) | 70,324<116,736 · 102,722<106,336 · 66,245<100,049 | partible < primogeniture, every seed ✓ |
+
+**Shipped at `GOV_POWER_DOSE = 0.3`.** Real, visible government churn —
+seats genuinely scale with city size, and coups/revolutions/oligarchic
+closings/emergency rule/succession crises/reform/ostracism all actually
+fire over a campaign — without breaking any aggregate gate.
+
+**One finding recorded rather than chased**, per this session's own
+"negative results are deliverables" discipline: the large-world fidelity
+scorecard's own top-10% wealth-share PRINT (not asserted) moved from a
+pre-session 0.673 down to 0.463 at the shipped `0.3` — below the
+historical 0.60–0.90 Alfani band, on that one fixture only (the
+reference-world print, 0.648, stays comfortably inside the band). This
+could be a real effect — genuine regime churn at scale plausibly
+redistributes concentrated elite wealth rather than merely reshuffling
+which house sits at the top — or a fixture-specific interaction; it was
+not disentangled this session. Named here as an open item for whoever
+next touches `GOV_POWER_DOSE` or the large-world fixture, not silently
+absorbed into "the gate still passes so it's fine" (it does still pass,
+since this metric is printed rather than asserted for exactly this
+reason — a finding, not a build failure).
+
+Gates run for this correction: `cargo check --lib --tests` (clean, only
+pre-existing warnings) at each of `0.6` and `0.3`; the two most
+discriminating named tests
+(`the_dosed_economy_stays_healthy_on_a_realistically_dense_world`,
+`econ_inheritance_rules_fragment_differently`) run together at each
+candidate dose before committing to a full-suite run; full `cargo test
+--lib tick::tests` and full `cargo test --lib econ_ -- --nocapture` both
+run to completion (not partially, this time) at the final `0.3` before
+shipping. `docs/living_world/04_GOVERNMENT_AND_EDICTS.md`'s Q04.5b entry
+and `GOV_POWER_DOSE`'s own doc comment in `tick/mod.rs` carry the same
+corrected walk.
 
 ---
 
