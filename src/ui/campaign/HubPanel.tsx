@@ -377,6 +377,31 @@ export function HubPanel() {
     return () => { alive = false; };
   }, [tab, selectedHub, campActive, campTick]);
 
+  // A seat is held by a real `Individual` (`SeatBrief.individual_id`, always
+  // >= 0 — `individual_id_for_official` mints one the first time a seat is
+  // filled) but the seat roster itself carries only name/path/suitability.
+  // Fetched once the seats land, same pattern as `notablePeople` above, so a
+  // Head/Treasurer/Magistrate's card can show their traits and latest life
+  // event instead of a bare name (the other half of the "government has no
+  // notable people with traits" gap — the Life tab's townspeople were fixed
+  // already; this is the Government tab's own seats).
+  const [seatPeople, setSeatPeople] = useState<Record<number, IndividualBrief>>({});
+  useEffect(() => {
+    const seats = govBrief?.seats ?? [];
+    if (seats.length === 0) { setSeatPeople({}); return; }
+    let alive = true;
+    Promise.all(seats
+      .filter((s) => s.individual_id >= 0)
+      .map((s) => campaignGetIndividual(s.individual_id).then((p) => [s.individual_id, p] as const).catch(() => [s.individual_id, null] as const)))
+      .then((pairs) => {
+        if (!alive) return;
+        const map: Record<number, IndividualBrief> = {};
+        for (const [id, p] of pairs) if (p) map[id] = p;
+        setSeatPeople(map);
+      });
+    return () => { alive = false; };
+  }, [govBrief]);
+
   // 03_DEVELOPMENT_TRACKS.md slice 03.6 · the Development tab's own factor +
   // four-track snapshot, refreshed on open and as the campaign advances.
   useEffect(() => {
@@ -659,7 +684,10 @@ export function HubPanel() {
                 <div style={sectionHdr}>Seats ({govBrief.seats.length})</div>
                 {govBrief.seats.length === 0
                   ? <div style={{ color: "#6a86a6", fontSize: 10 }}>No officials seated yet.</div>
-                  : govBrief.seats.map((s, i) => (
+                  : govBrief.seats.map((s, i) => {
+                    const person = s.individual_id >= 0 ? seatPeople[s.individual_id] : undefined;
+                    const lastLine = person?.life_log[person.life_log.length - 1];
+                    return (
                     <div key={i} style={{ margin: "4px 0" }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>
@@ -671,8 +699,22 @@ export function HubPanel() {
                       <div style={{ color: "#6a86a6", fontSize: 9 }}>
                         {s.path} · suitability {Math.round(s.suitability * 100)}%
                       </div>
+                      {person && person.traits.length > 0 && (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 2 }}>
+                          {person.traits.map((t) => (
+                            <span key={t} style={{
+                              fontSize: 8.5, color: "#e8d9b0", border: "1px solid #4a4030",
+                              borderRadius: 8, padding: "1px 6px",
+                            }}>{t}</span>
+                          ))}
+                        </div>
+                      )}
+                      <div style={{ color: "#7a90a8", fontSize: 9, fontStyle: "italic", marginTop: 1 }}>
+                        {lastLine ?? (person ? "A quiet life, so far." : "")}
+                      </div>
                     </div>
-                  ))}
+                    );
+                  })}
 
                 <div style={sectionHdr}>Edicts in force ({govBrief.edicts.length})</div>
                 {govBrief.edicts.length === 0

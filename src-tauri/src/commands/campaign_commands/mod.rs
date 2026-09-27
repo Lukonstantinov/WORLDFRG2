@@ -2964,6 +2964,13 @@ pub struct FigureBrief {
     /// notices (plague, war, crashes). Capped at 6, spread across the life. Empty
     /// for a figure whose city has had no relevant journal activity.
     pub life_events: Vec<String>,
+    /// A figure's personality, read off the `Individual` `migrate_figures_to_
+    /// individuals` mints for it (matched by name+role+hub, the same predicate
+    /// migration itself uses to avoid double-minting) — "" (empty) only for a
+    /// figure created before that migration has run this session, which
+    /// resolves itself on the next `advance()`. Before this a Great Lives card
+    /// showed no personality at all: `Figure` itself carries no traits field.
+    pub traits: Vec<String>,
 }
 
 /// 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record

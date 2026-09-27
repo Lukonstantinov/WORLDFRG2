@@ -202,6 +202,16 @@ function FigureCard({ f, year, selected, onClick }: {
           <span style={{ fontSize: FZ.tiny, color: T.inkMid }}>of {f.city}</span>
           {f.culture && <span style={{ fontSize: FZ.tiny, color: T.inkFaint }}>· {f.culture}</span>}
         </div>
+        {f.traits && f.traits.length > 0 && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 3 }}>
+            {f.traits.map((t) => (
+              <span key={t} style={{
+                fontSize: FZ.micro, color: T.inkMid, border: `1px solid ${T.lineSoft}`,
+                borderRadius: 999, padding: "0 6px", lineHeight: 1.6,
+              }}>{t}</span>
+            ))}
+          </div>
+        )}
         {f.house && (
           <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 4, fontSize: FZ.tiny, color: T.inkMid }}>
             <CoatOfArms name={f.house} size={14} />

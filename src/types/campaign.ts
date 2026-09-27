@@ -2401,6 +2401,10 @@ export interface FigureBrief {
   /** A short chronological life log ("212 — ...") built from real journal entries
    *  at the figure's own city, filtered to what their role cares about. */
   life_events: string[];
+  /** The figure's personality, read off the `Individual` they were migrated
+   *  into — empty only for a figure created before that migration has run
+   *  this session. */
+  traits: string[];
 }
 
 /** 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record

@@ -624,7 +624,7 @@ pub fn campaign_get_epidemics(db: State<'_, WorldDb>) -> Result<Vec<EpidemicBrie
 /// Phase 6 · the Notable Figures panel: the campaign's great lives, living first.
 #[tauri::command]
 pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, String> {
-    use crate::sim::tick::{TICKS_PER_YEAR, FIGURE_KINDS};
+    use crate::sim::tick::{TICKS_PER_YEAR, FIGURE_KINDS, role_for_figure_kind, trait_name};
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(vec![]) };
     let mut out: Vec<FigureBrief> = sim.figures.iter().map(|f| {
@@ -712,6 +712,17 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
                 [(fnv1a32(&f.name) % 4) as usize].to_string());
         let life_events = life_events_for(&sim, f);
 
+        // The migrated `Individual` this figure became (`migrate_figures_to_
+        // individuals` matches on exactly this triple to avoid double-minting,
+        // so the same lookup here is guaranteed to find it once migration has
+        // run) — read its traits rather than duplicating a second trait roll.
+        let role = role_for_figure_kind(f.kind);
+        let traits: Vec<String> = if f.dead {
+            sim.hall_of_dead.iter().find(|p| p.name == f.name && p.roles.contains(&role))
+        } else {
+            sim.people.iter().find(|p| p.name == f.name && p.roles.contains(&role) && p.current_hub == f.hub as i32)
+        }.map(|p| p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect()).unwrap_or_default();
+
         FigureBrief {
             name: f.name.clone(),
             role: FIGURE_KINDS.get(f.kind as usize).copied().unwrap_or("Figure").to_string(),
@@ -731,6 +742,7 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             thought,
             merchant_goods,
             life_events,
+            traits,
         }
     }).collect();
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));
