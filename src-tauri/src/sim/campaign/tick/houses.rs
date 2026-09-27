@@ -649,7 +649,7 @@ impl CampaignSim {
             main_bank: -1, indep_cooldown_until: 0, plague_immune_until: 0, public_health: 0.0, supply_ships: 0, supply_source: -1, supply_delivered: 0.0, transit_year: 0.0, hub_class: 0, class_momentum: 0, transit_toll_mult: 1.0, build_stage: 0, build_progress: 0.0, build_supply: [0.0; 3], build_supply_good: [0; 3], build_idle_months: 0, build_convoys: 0, build_start_tick: 0, govt_type: 0, officials: Vec::new(), civic_goods: Vec::new(), food_export_lock: 0, export_ban_until: Vec::new(), laws: Vec::new(), captor_house: -1,
             abandoned: false, decline_years: 0.0, founded_tick: self.tick, died_tick: 0, trade_last_year: 0.0, died_cause: String::new(),
             tier: 0, standing: 0.0, war_cooldown_until: 0, captor_since: 0, realm: -1, realm_role: 0, league: -1,
-            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0, dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4], track_buildings: [0; 4], track_build_progress: [0.0; 4], legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0, gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0, culture_relations: Vec::new(), bondage_override: -1,
+            wh_capacity: 0.0, wh_spoiled_month: Vec::new(), wh_last_month: Vec::new(), supply_accum: Vec::new(), demand_accum: Vec::new(), stock_origin: Vec::new(), works_accum: Vec::new(), household_wealth: 0.0, shares: Vec::new(), monthly: Vec::new(), brand_chronicled: false, bad_years: 0, disaster_repair_mult: 0.0, yard_progress: 0.0, food_eaten: 0.0, food_need_today: 0.0, welfare_ratio: 0.0, annals: Vec::new(), ages: [0.0; 3], male_adult_frac: 0.0, deaths_by_cause: [0.0; DEATH_CAUSE_COUNT], housing: 0.0, crowding: 0.0, dev: 0.0, dev_breakdown: [0.0; 5], track_points: [0.0; 4], track_level: [0; 4], track_buildings: [0; 4], track_build_progress: [0.0; 4], legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0, gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0, culture_relations: Vec::new(), bondage_override: -1, ideology_nobles: [0.0; 4], ideology_commons: [0.0; 4], ideology_gov: [0.0; 4], ideology_seeded: false, ideology_dominant: -1,
         });
         // Defer the O(n²) route/neighbour rebuild to the next tick (batched).
         self.routes_dirty = true;
@@ -2768,11 +2768,15 @@ impl CampaignSim {
             // (`LAW_GUILD_MONOPOLY`) raises the ceiling a guild secure from outside
             // competition can reach.
             if self.hubs[hub].quality.len() == ng {
-                let cap = if self.hubs[hub].laws.iter().any(|l| l.kind == LAW_GUILD_MONOPOLY && l.good == good as i32) {
+                let flat_cap = if self.hubs[hub].laws.iter().any(|l| l.kind == LAW_GUILD_MONOPOLY && l.good == good as i32) {
                     GUILD_MONOPOLY_QUALITY_CAP
                 } else {
                     GUILD_QUALITY_CAP
                 };
+                // Living World row 07 (07_ARTISANS_AND_MASTERWORKS.md) 07.1 ·
+                // the city's own culture is a SECOND ceiling — a true no-op
+                // at the shipped `CULTURAL_QUALITY_CAP_DOSE = 0.0`.
+                let cap = cultural_quality_cap_e(flat_cap, self.hubs[hub].track_level[TRACK_IDEOLOGICAL], CULTURAL_QUALITY_CAP_DOSE);
                 let q = self.hubs[hub].quality[good];
                 self.hubs[hub].quality[good] = (q + GUILD_QUALITY_STEP).min(cap);
             }

@@ -4566,6 +4566,28 @@ pub struct TickHub {
     /// edict-like toggle (05.4): −1 unset (follow the resident culture's own
     /// trait-derived default), 0 abolished here, 1 permitted here.
     #[serde(default = "neg_one_i8")] pub bondage_override: i8,
+
+    // ── Living World row 06 (`06_IDEOLOGY_AND_SCHOLARS.md`) ────────────────
+    /// This city's elite (house/noble) ideology position, one per axis
+    /// (`AX_*`). Seeded once from the city's own culture ideal
+    /// (`seed_hub_ideology`), drifted yearly thereafter.
+    #[serde(default)] pub ideology_nobles: [f32; 4],
+    /// The commons' own position — same axes, same seeding, drifts
+    /// independently (the gap between the two is TENSION, read by nothing
+    /// yet — row 04's revolution path is the eventual reader, per this row's
+    /// own forward-hook convention).
+    #[serde(default)] pub ideology_commons: [f32; 4],
+    /// The sitting government's own position — the real read `gov_position`
+    /// (row 04's single-axis proxy) blends toward at `IDEOLOGY_GOV_HOOK_DOSE`.
+    #[serde(default)] pub ideology_gov: [f32; 4],
+    /// Whether the three meters above have been seeded yet (the
+    /// `*_needs_seeding` convention — an old save or a hub not yet reached
+    /// reads all-zero until this flips true).
+    #[serde(default)] pub ideology_seeded: bool,
+    /// The `NamedIdeology.id` currently closest to this city's commons
+    /// meter, or −1 if none is close enough to call a real hold
+    /// (`IDEOLOGY_HOLD_MAX_DIST`). Recomputed yearly, read-only elsewhere.
+    #[serde(default = "neg_one_i32")] pub ideology_dominant: i32,
 }
 fn neg_one_i8() -> i8 { -1 }
 fn default_legitimacy() -> f32 { NEUTRAL_LEGITIMACY_SEED }
@@ -8383,6 +8405,38 @@ pub struct CampaignSim {
     /// held (up to its existing window) and backfills every figure's story in
     /// one pass, rather than needing a separate migration step.
     #[serde(default)] pub life_log_synced_tick: u32,
+
+    // ── Living World row 06 (`docs/living_world/06_IDEOLOGY_AND_SCHOLARS.md`)
+    // ──────────────────────────────────────────────────────────────────────
+    /// Every named ideology — the canonical seed set plus any custom ones a
+    /// school has crystallised. Capped at `IDEOLOGY_CAP`, least-adherent
+    /// dropped first (never a canonical one, which carries no founder).
+    #[serde(default)] pub ideologies: Vec<NamedIdeology>,
+    /// Every school ever founded (a scholar teaching students under a
+    /// doctrine). Capped at `SCHOOL_CAP`.
+    #[serde(default)] pub schools: Vec<School>,
+    /// Monotonic id counters — never reused, mirroring `next_individual_id`.
+    #[serde(default)] pub next_ideology_id: u32,
+    #[serde(default)] pub next_school_id: u32,
+
+    // ── Living World row 07 (`docs/living_world/07_ARTISANS_AND_MASTERWORKS.md`)
+    // ──────────────────────────────────────────────────────────────────────
+    /// Every masterwork ever made — never deleted (a "lost/forgotten" work
+    /// simply stops counting toward its city's cap; destruction is recorded
+    /// as a `condition`, not a removal).
+    #[serde(default)] pub masterworks: Vec<Masterwork>,
+    #[serde(default)] pub next_masterwork_id: u32,
+
+    // ── Living World row 08 (`docs/living_world/08_LEISURE_AND_GAMES.md`)
+    // ──────────────────────────────────────────────────────────────────────
+    #[serde(default)] pub venues: Vec<Venue>,
+    #[serde(default)] pub next_venue_id: u32,
+
+    // ── Living World row 09 (`docs/living_world/09_REALMS_WAR_AND_BARBARIANS.md`)
+    // Part D only this session — see `hordes.rs`'s own doc comment.
+    // ──────────────────────────────────────────────────────────────────────
+    #[serde(default)] pub hordes: Vec<Horde>,
+    #[serde(default)] pub next_horde_id: u32,
 }
 
 /// DEPOSITS_AND_MINING_PLAN.md slice 4 · one real geological working as seeded
@@ -10195,6 +10249,36 @@ impl CampaignSim {
                 // 05.4 · culture-tier-gated fondaco chartering (dosed at
                 // zero — see `culture_acceptance.rs`'s own doc comment).
                 self.maybe_charter_culture_fondacos();
+                // Living World row 06 (06_IDEOLOGY_AND_SCHOLARS.md) · after
+                // government/culture-acceptance above so this year's
+                // officials/gov_position/culture_relations are fresh.
+                // Spawn scholars before advancing lives (a scholar spawned
+                // this year is idle until next year, same as every other
+                // spawn-then-tick convention in this file), before the
+                // meter drift so a school just founded this year already
+                // shows in `ideology_dominant`.
+                self.maybe_spawn_scholars(yr);
+                self.update_scholar_lives(yr);
+                self.people_ideology_yearly_pass(yr);
+                self.ideology_meter_drift_pass(yr);
+                // Living World row 07 (07_ARTISANS_AND_MASTERWORKS.md) · after
+                // `run_craft_guilds`/`maybe_found_craft_guild` above so this
+                // year's guild quality/strength are fresh.
+                self.maybe_spawn_artisan(yr);
+                self.update_artisan_lives(yr);
+                self.maybe_create_masterworks(yr);
+                self.maybe_steal_masterwork(yr);
+                // Living World row 08 (08_LEISURE_AND_GAMES.md) · after
+                // culture acceptance/tracks above so this year's tiers and
+                // acceptance-derived popularity are fresh.
+                self.maybe_found_venue(yr);
+                self.run_venues(yr);
+                self.maybe_spawn_performer(yr);
+                // Living World row 09 (09_REALMS_WAR_AND_BARBARIANS.md) Part D
+                // · after the province land pass (`disease.rs`) so this
+                // year's prov_rural/prov_unrest are fresh.
+                self.maybe_raise_horde(yr);
+                self.update_hordes(yr);
                 // living_world/01_FEEDS_AND_PRUNING.md · after every other yearly
                 // pass, so a figure's life log has already copied out anything
                 // about to be pruned as chatter.
@@ -11686,6 +11770,42 @@ pub(crate) use government::{
     EDICT_FAMILY_COUNT, gov_position_for_ideal, edict_cost,
     LUSTRUM_TRACK_BONUS, LUSTRUM_TRACK_BONUS_DOSE, lustrum_bonus_e,
     EDICT_EFFECT_DOSE,
+};
+mod ideology;
+pub use ideology::{NamedIdeology, School, ideo_trait_name};
+pub(crate) use ideology::{
+    AX_AUTHORITY, AX_TRADITION, AX_OPENNESS, AX_ECONOMY, IDEOLOGY_AXES,
+    IDEOLOGY_CAP, SCHOOL_CAP,
+    STAGE_NONE, STAGE_STUDY, STAGE_TEACH, STAGE_RETURNED, STAGE_PATRON, STAGE_POLITICS, STAGE_EXILE,
+    IDEOLOGY_GOV_HOOK_DOSE, IDEOLOGY_UNREST_DOSE,
+    ideology_gov_position_e, ideology_unrest_term_e, clamp_ideology,
+};
+mod masterworks;
+pub use masterworks::Masterwork;
+pub(crate) use masterworks::{
+    OWNER_CITY, OWNER_HOUSE, OWNER_REALM, COND_INTACT, COND_DAMAGED, COND_LOOTED, COND_DESTROYED,
+    MASTERWORK_CAP_PER_CITY, CULTURAL_QUALITY_CAP_DOSE, MASTERWORK_DEV_BONUS_DOSE, MASTERWORK_MARKET_DOSE,
+    cultural_quality_cap_e, masterwork_dev_bonus_e,
+};
+mod venues;
+pub use venues::{Venue, leisure_type_name};
+pub(crate) use venues::{
+    LEISURE_ARENA, LEISURE_RACING, LEISURE_THEATRE, LEISURE_ATHLETICS, LEISURE_WRESTLING,
+    LEISURE_BALL_GAME, LEISURE_POLO, LEISURE_WATER_GAMES, LEISURE_PLEASURE_DISTRICT,
+    LEISURE_BOARD_GAMES, LEISURE_FAIR_FEAST, LEISURE_RECITAL_EPIC, LEISURE_RIVER_FESTIVAL,
+    LEISURE_BATHS, LEISURE_TYPE_COUNT,
+    COND_THRIVING, COND_DECLINING, COND_ABANDONED,
+    FUND_TREASURY, FUND_HOUSE, FUND_BANK, FUND_GUILD, FUND_LITURGY,
+    VENUE_CAP_PER_CITY, VENUE_COST_DOSE, VENUE_SPONSOR_CONTROL_DOSE, GAMES_TRUCE_DOSE,
+    venue_sponsor_control_e, leisure_prefs_for_kit, leisure_prefs_for_traits,
+};
+mod hordes;
+pub use hordes::Horde;
+pub(crate) use hordes::{
+    HORDE_GOAL_PLUNDER, HORDE_GOAL_LAND, HORDE_GOAL_REVENGE, HORDE_GOAL_CROWN, HORDE_GOAL_TRIBUTE,
+    HORDE_STAGE_RAIDING, HORDE_STAGE_MARCHING, HORDE_STAGE_SETTLED, HORDE_STAGE_PAID,
+    HORDE_STAGE_DEFEATED, HORDE_STAGE_BROKEN_UP, HORDE_CAP,
+    HORDE_RAID_DOSE, REALM_OPENNESS_COHESION_DOSE, horde_raid_amount_e, realm_openness_cohesion_bonus_e,
 };
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};

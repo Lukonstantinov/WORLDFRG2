@@ -3442,6 +3442,104 @@ export interface CultureAcceptanceBrief {
   proposed_tier: number;
 }
 
+/** living_world/06_IDEOLOGY_AND_SCHOLARS.md — one resident scholar. */
+export interface ScholarBrief {
+  individual_id: number;
+  name: string;
+  /** 0 none · 1 study · 2 teach · 3 returned home · 4 patron · 5 politics · 6 exile. */
+  stage: number;
+  fame: number;
+  /** [Authority, Tradition, Openness, Economy], each -5..5. */
+  ideology: [number, number, number, number];
+}
+
+/** One city's three ideology meters + resident scholars/schools
+ *  (mirrors `read_ideology::CityIdeologyBrief`). */
+export interface CityIdeologyBrief {
+  nobles: [number, number, number, number];
+  commons: [number, number, number, number];
+  government: [number, number, number, number];
+  /** -1 if no named ideology currently holds sway here. */
+  dominant_id: number;
+  dominant_name: string;
+  scholars: ScholarBrief[];
+  schools: number[];
+}
+
+/** One named ideology, canonical or scholar-founded (mirrors
+ *  `read_ideology::IdeologyBrief`). */
+export interface IdeologyBrief {
+  id: number;
+  name: string;
+  traits: string[];
+  position: [number, number, number, number];
+  /** -1 for a canonical ideology (no single founder). */
+  founder: number;
+  home_hub: number;
+  /** Rough world-wide share of cities whose commons lean this way, 0..1. */
+  adherents: number;
+  canonical: boolean;
+}
+
+/** One founded school (mirrors `read_ideology::SchoolBrief`). */
+export interface SchoolBrief {
+  id: number;
+  hub: number;
+  founder_name: string;
+  doctrine_name: string;
+  founded_year: number;
+  students: number;
+}
+
+/** living_world/07_ARTISANS_AND_MASTERWORKS.md — one masterwork (mirrors
+ *  `read_masterworks::MasterworkBrief`). */
+export interface MasterworkBrief {
+  id: number;
+  title: string;
+  kind_name: string;
+  maker_name: string;
+  year: number;
+  material: string;
+  /** "intact" | "damaged" | "looted" | "destroyed". */
+  condition_name: string;
+  prestige: number;
+  /** [tick, what happened], oldest first. */
+  provenance: [number, string][];
+}
+
+/** living_world/08_LEISURE_AND_GAMES.md — one venue (mirrors
+ *  `read_venues::VenueBrief`). */
+export interface VenueBrief {
+  id: number;
+  name: string;
+  leisure_type_name: string;
+  tier: number;
+  /** "thriving" | "declining" | "abandoned". */
+  condition_name: string;
+  games_held: number;
+  prestige: number;
+  international_host: boolean;
+  /** -1 if not house-sponsored. */
+  sponsor_house: number;
+}
+
+/** living_world/09_REALMS_WAR_AND_BARBARIANS.md Part D — one horde (mirrors
+ *  `read_hordes::HordeBrief`). */
+export interface HordeBrief {
+  id: number;
+  name: string;
+  culture: string;
+  leader_name: string;
+  goal_name: string;
+  province: number;
+  strength: number;
+  origin_story: string;
+  /** "active" | "settled" | "paid off" | "defeated" | "broken up". */
+  stage_name: string;
+  cities_sacked: number;
+  cities_razed: number;
+}
+
 /** The whole Government window for one city (mirrors `read_government::GovernmentBrief`). */
 export interface GovernmentBrief {
   hub: number;

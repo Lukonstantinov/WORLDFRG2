@@ -1,6 +1,61 @@
 # 09 · Realms, war and barbarians
 
-**Status:** NOT STARTED · **Depends on:** 02–05 · **Next:** 10
+**Status:** PARTIAL (2026-09-26) — Part D (barbarians/hordes) shipped in
+full, plus ONE Part-A realm benefit; Parts B/C/E (armies, realm wars,
+further province deepening, empire rank) explicitly NOT attempted this
+session · **Depends on:** 02–05 · **Next:** 10
+
+**Why Part D first:** it composes almost entirely out of mechanism that
+already existed (`strip_holdings_at`, row 07's real `loot_masterworks`,
+`abandoned`/`died_cause` razing, the existing `resettle_pass` threshold, the
+`Individual` famous-notable path) and delivers the session's most-requested
+"barbarians rise and raze cities" behaviour. Building a shallow, rushed
+army/siege/realm-war system in the time remaining would have been worse
+than an honest partial row — see `hordes.rs`'s own doc comment for the full
+reasoning.
+
+**Shipped.** `sim/campaign/tick/hordes.rs`: a `Horde` record (leader/goal/
+target/province/strength/origin story/stage), raised by a single
+world-wide yearly roll (calibrated toward the doc's own decided "2-4 major
+waves a century", not scaled by how much steppe a world has) from
+whichever province scores highest on the doc's own five triggers (warlike-
+and-over-capacity; high discontent; a foreign settlement in its land — the
+"trade doesn't benefit them"/ethnogenesis triggers are read as REAL scoring
+inputs where the signal exists and fall through honestly where it doesn't,
+see the module's own trigger table). The leader is a real, forced-famous
+`Individual` (`ROLE_HORDE_LEADER`, already reserved by row 02). A horde
+raids (real treasury transfer, dosed), sacks (calls `strip_holdings_at` +
+row 07's `loot_masterworks` for real), razes (`abandoned = true`,
+`died_cause` names the horde — the EXISTING resettlement path picks it up
+unchanged, per this doc's own "keep the 10-year threshold" decision), and
+ends — settled, paid tribute, defeated by a real city's own defensive
+strength, or broken up on its leader's death — always within
+`HORDE_MAX_YEARS` (rule 22's discipline, mirroring `every_crisis_
+terminates`).
+
+Also shipped: ONE of Part A's seven realm benefits — "cohesion from
+openness" (`realm_openness_cohesion_bonus_e`, wired into `realms.rs`'s own
+`update_realm_cohesion`), a realm's cohesion target genuinely reads its
+capital's own row-05 acceptance tiers now, dosed at `REALM_OPENNESS_
+COHESION_DOSE = 0.0`.
+
+**Dosed at zero:** `HORDE_RAID_DOSE` (raid/sack wealth transfer amounts —
+razing itself is NOT dosed, a city either falls or it doesn't) and
+`REALM_OPENNESS_COHESION_DOSE`. Both proven true no-ops.
+
+Gates: `hordes_arise_from_each_trigger`, `every_horde_ends`, `razed_cities_
+can_be_resettled`, `realm_benefits_are_noops_at_zero`, `horde_raid_is_a_
+noop_at_zero`. `tick::tests` (390/390), `npx tsc --noEmit`/`npx vite build`
+(191 modules) both clean. `econ_measure_realm_benefit` (09.1's own
+measurement-only slice) was NOT built this session — queued.
+
+**NOT built this session (Parts B/C/E), each recorded as a queue item
+below, not a refusal:** armies (raising/upkeep/movement/occupation/
+mutiny), realm-vs-realm war (pooled score, sieges, capital conquest),
+province deepening beyond what already existed (control/fortification/
+garrison/loyalty/villages), empire rank/hegemony/principate, the full
+conflict-map layer (smoke plumes, army tokens, occupation hatching) and
+the War-window extension for realm wars.
 
 ## Goal
 
@@ -203,3 +258,39 @@ effect ships at zero and is dosed only in 09.9 against the full economy gates.
 - Q09.1 — Naval warfare as its own mechanic (fleets as armies at sea).
 - Q09.2 — Personal union and inherited claims between dynasties.
 - Q09.3 — Faith-driven movements (no religion system yet — decided).
+- Q09.4 — `econ_measure_realm_benefit` (09.1's own measurement slice) — waits
+  on session budget alone, no structural blocker.
+- Q09.5 — Armies (Part B): `Army { owner, province, strength, morale,
+  upkeep, commander }`, raised from rural population + soldier class,
+  paid monthly, mutiny → mercenary companies. The single biggest remaining
+  gap — everything else in Parts B/C/E waits on this existing first.
+- Q09.6 — Realm wars (Part B cont'd): a separate `RealmWar` record pooling
+  member cities' scores, sieges, cession, capital conquest, hashed pairing,
+  a per-realm cap replacing the global two-war cap for realm wars only.
+  Explicitly flagged by the doc itself as high-risk (population/wealth
+  moved at scale) — needs its own multi-seed dose walk, not a shared one
+  with hordes.
+- Q09.7 — Province deepening beyond what already existed (Part C):
+  control, occupation, fortification, garrison, a real levy, loyalty
+  (separate from culture), barbarian pressure, villages as burnable
+  settlement density. Hordes currently read `prov_rural`/`prov_cap`/
+  `prov_unrest` directly rather than a dedicated pressure/loyalty field —
+  a documented simplification, not an oversight.
+- Q09.8 — Empire rank, league→hegemony, republic→principate (Part E).
+- Q09.9 — The full conflict-map layer (Part F): pulsing war/revolt/raid
+  markers, hatched occupation, army/horde tokens with a target arrow,
+  smoke plumes over a recently sacked city, scorch marks. `campaign_get_
+  hordes` exists; `campaign_get_conflict_map` does not yet.
+- Q09.10 — The Barbarian Tribes window's own minimap (where a horde is,
+  where it has been) and richer history — the shipped panel is a plain
+  list (leader/goal/strength/stage/tally), not yet the doc's own "minimap
+  of where it is and where it has been."
+- Q09.11 — The other six Part-A realm benefits (internal free trade, crown
+  roads, the annona, realm coin, protection, the knowledge floor) — each
+  touches a different, already load-bearing system (freight, the money
+  plan's own M6 queue item, development diffusion) and deserves its own
+  session and its own dose walk, not a rushed shared one.
+- Q09.12 — 300-year horde-rate diagnostic confirming the calibrated
+  `HORDE_WORLDWIDE_YEARLY_CHANCE` actually lands in the doc's own decided
+  2-4-waves-a-century band on a real generated world (only unit-tested this
+  session, on synthetic single-province fixtures).

@@ -1,6 +1,46 @@
 # 08 · Leisure and games
 
-**Status:** NOT STARTED · **Depends on:** 02, 04 · **Next:** 09
+**Status:** DONE (2026-09-26) — 08.1-08.8 all shipped · **Depends on:** 02, 04 · **Next:** 09
+
+**Shipped, in one session.** `sim/campaign/tick/venues.rs`: 14 universal
+leisure types, the doc's own 18-shipped-kit → 3-preference table
+(`KIT_LEISURE`) plus a trait-weighted fallback for any other culture (every
+culture always resolves exactly three); `Venue` records with tier, real
+population-weighted popularity, a games calendar (2-6/yr, scaled by
+popularity) + festivals, and DISTRESS → DECLINE → ABANDONMENT (never
+converted) within a bounded number of years. Performers spawn as real
+`ROLE_PERFORMER` individuals; an Arena venue's fighters are captives only
+where `bondage_permitted` (row 05) allows it, free professionals
+everywhere else — no separate captive/gladiator record invented.
+
+**Scope decided, not silently made:** no Southeast-Asian/Polynesian kit was
+added this session (a worldgen change with its own `goods_`/naming checks);
+that family is reached only via the trait fallback for now — queued as
+Q08.3, matching this doc's own original "decide at the start of 08.1" ask.
+
+**Dosed at zero:** `VENUE_COST_DOSE` (building/upkeep spend, loans),
+`VENUE_SPONSOR_CONTROL_DOSE` (a sponsor's control over the aedile),
+`GAMES_TRUCE_DOSE` (the Olympic-truce war-chance reduction). All three
+proven true no-ops — a venue still founds, holds games, and is abandoned at
+zero dose; only the money/control/war-chance SIDE EFFECTS wait.
+
+**Testing caveat** (same as row 06's own): a bare culture-name string in a
+`tick::tests` fixture never resolves through a real kit (no active worldgen
+map), so `every_culture_has_three_leisure_preferences` tests the KIT table
+directly via `leisure_prefs_for_kit`, and `popularity_follows_the_
+population`/`unviable_venues_are_abandoned_not_converted` read whichever
+type a fake name's deterministic TRAIT-fallback resolves to, rather than
+assuming a specific one.
+
+Gates: `every_culture_has_three_leisure_preferences`, `creoles_merge_their_
+parents_preferences`, `popularity_follows_the_population`, `venue_costs_
+are_noops_at_zero`, `sponsors_gain_control_over_the_aedile`, `unviable_
+venues_are_abandoned_not_converted`, `gladiators_only_where_bondage_is_
+permitted`, `games_truce_lowers_war_chance`. `tick::tests` (390/390), `npx
+tsc --noEmit`/`npx vite build` (191 modules) both clean.
+
+**UI:** a compact "Venues" section in the Government panel — not the doc's
+own dedicated venue subpanel (money/attendance/games-held/history/stars).
 
 ## Goal
 
@@ -213,5 +253,17 @@ milestones — construction, disasters, abandonment, great festivals — kept).
 
 ## Queue
 - Q08.1 — Fan factions as political blocs in the Government window (waits on
-  row 06 meters being live).
-- Q08.2 — Venue art on the city portrait (row 10).
+  row 06 meters being live — row 06 shipped this session, but the meters
+  are still descriptive-only, see that row's own Q06.4).
+- Q08.2 — Venue art on the city portrait (row 10 — row 10 shipped only its
+  overview aggregation this session, not portrait art; see that row's Queue).
+- Q08.3 — A real Southeast-Asian/Polynesian culture kit (worldgen change,
+  its own `goods_`/naming checks) — the trait fallback covers it honestly
+  in the meantime.
+- Q08.4 — Fan-faction riots + ideology alignment (row 06) — waits on row 06's
+  meters being a live input, not merely descriptive.
+- Q08.5 — The dedicated venue subpanel (money/attendance/games-held detail/
+  history/stars) — `campaign_get_venues` already serves counts/condition;
+  the richer per-game log is not persisted per-game yet.
+- Q08.6 — Dose `VENUE_COST_DOSE`/`VENUE_SPONSOR_CONTROL_DOSE`/`GAMES_TRUCE_
+  DOSE` above zero, each its own walk against `econ_`.
