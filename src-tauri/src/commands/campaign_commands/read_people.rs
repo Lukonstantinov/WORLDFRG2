@@ -60,8 +60,8 @@ fn life_events_for(sim: &crate::sim::tick::CampaignSim, f: &crate::sim::tick::Fi
 /// notably good or bad — a real read of `lack_basic`/`starving`/`war_with`/
 /// `society.unrest`, never a claim beyond what those fields already say. Falls
 /// back to the personality quote pool when nothing is currently unusual.
-fn reactive_thought(sim: &crate::sim::tick::CampaignSim, f: &crate::sim::tick::Figure) -> Option<String> {
-    let h = sim.hubs.get(f.hub as usize)?;
+fn reactive_thought(sim: &crate::sim::tick::CampaignSim, hub: u32) -> Option<String> {
+    let h = sim.hubs.get(hub as usize)?;
     if h.war_with >= 0 {
         let foe = sim.hubs.get(h.war_with as usize).map(|x| x.name.as_str()).unwrap_or("a rival");
         return Some(format!("\"War with {} — every ship out of this harbour now sails armed.\"", foe));
@@ -707,7 +707,7 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             voyage.unwrap_or_else(|| format!(" They range the coasts beyond {}, chasing rumours of new markets.", city))
         } else { String::new() };
         let bio = format!("{}{}{}{}", family_line, culture_line, merchant_line, travel_line);
-        let thought = if f.dead { None } else { reactive_thought(&sim, f) }
+        let thought = if f.dead { None } else { reactive_thought(&sim, f.hub) }
             .unwrap_or_else(|| FIGURE_THOUGHTS[(f.kind as usize).min(4)]
                 [(fnv1a32(&f.name) % 4) as usize].to_string());
 
@@ -761,6 +761,90 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             traits,
         }
     }).collect();
+
+    // "Notable Figures" and "Notables" were two separate rosters over the
+    // same underlying record: every `Figure` above is already an
+    // `Individual` (migrated), but a townspeople role (Guildmaster/Alderman/
+    // Agitator, L12) or a row 06-09 notable (Scholar/Ideologue/Horde Leader/…)
+    // that never went through the old `raise_notable_figures` path had no
+    // card here at all — only in the separate Notables window. Fold every
+    // OTHER famous Individual in as its own card so this is the one roster,
+    // each still showing its real role + a role colour (frontend ROLE_SPECS)
+    // and its own life story (`render_life_entry_for`, never the journal
+    // scan — these never had a `Figure.life_log`/journal-role mapping).
+    use crate::sim::tick::role_name;
+    let figure_identities: std::collections::HashSet<(String, u8)> = sim.figures.iter()
+        .map(|f| (f.name.clone(), role_for_figure_kind(f.kind))).collect();
+    let role_display = |r: u8| -> String {
+        use crate::sim::tick::{ROLE_ADMIRAL, ROLE_DEMAGOGUE, ROLE_ARTISAN, ROLE_BANKER, ROLE_EXPLORER};
+        match r {
+            ROLE_ADMIRAL => "Admiral", ROLE_DEMAGOGUE => "Demagogue",
+            ROLE_ARTISAN => "Master Craftsman", ROLE_BANKER => "Great Banker",
+            ROLE_EXPLORER => "Explorer", _ => role_name(r),
+        }.to_string()
+    };
+    let synth = |p: &crate::sim::tick::Individual| -> FigureBrief {
+        let role = *p.roles.first().unwrap_or(&0);
+        let h = sim.hubs.get(p.current_hub.max(0) as usize).filter(|_| p.current_hub >= 0);
+        let city = h.map(|x| x.name.clone()).unwrap_or_default();
+        let culture = p.culture.clone();
+        let house = if p.house >= 0 {
+            sim.houses.get(p.house as usize).map(|hh| hh.name.clone()).unwrap_or_default()
+        } else { String::new() };
+        let merchant_goods = if p.house >= 0 {
+            sim.houses.get(p.house as usize).map(|hh| {
+                hh.spec.iter().filter_map(|&g| sim.goods.get(g).map(|gd| gd.name.clone()))
+                    .take(3).collect::<Vec<_>>().join(", ")
+            }).unwrap_or_default()
+        } else { String::new() };
+        let family_line = if !house.is_empty() {
+            format!("Born in {} to the merchant House {}.", city, house)
+        } else if !culture.is_empty() {
+            format!("Born in {} to a family of the {} people.", city, culture)
+        } else { format!("Born in {}.", city) };
+        let merchant_line = if !merchant_goods.is_empty() {
+            format!(" A trader by trade, dealing chiefly in {}.", merchant_goods)
+        } else { String::new() };
+        let alive = p.is_alive();
+        // No capped one-time effect is attached to a role outside the old
+        // Figure kinds (rule 36 — never invent one); this line names what
+        // they are known for rather than claiming an effect on the world.
+        let legacy = format!("Known in {} as a {}.", if city.is_empty() { "their homeland" } else { &city }, role_display(role).to_lowercase());
+        let thought = if alive { reactive_thought(&sim, p.current_hub.max(0) as u32) } else { None }.unwrap_or_default();
+        let life_events: Vec<String> = p.life_log.iter()
+            .map(|e| format!("{} — {}", e.tick / crate::sim::tick::TICKS_PER_YEAR, sim.render_life_entry_for(&p.name, e)))
+            .collect();
+        FigureBrief {
+            name: p.name.clone(),
+            role: role_display(role),
+            hub: p.current_hub.max(0) as u32,
+            x: h.map(|x| x.x).unwrap_or(0.0),
+            y: h.map(|x| x.y).unwrap_or(0.0),
+            city,
+            good_name: String::new(),
+            born_year: p.debut_tick / crate::sim::tick::TICKS_PER_YEAR,
+            died_year: if alive { 0 } else { p.death_tick / crate::sim::tick::TICKS_PER_YEAR },
+            alive,
+            culture,
+            house,
+            legacy,
+            influence: String::new(),
+            bio: format!("{}{}", family_line, merchant_line),
+            thought,
+            merchant_goods,
+            life_events,
+            traits: p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect(),
+        }
+    };
+    for p in sim.people.iter().filter(|p| p.famous) {
+        if p.roles.iter().any(|r| figure_identities.contains(&(p.name.clone(), *r))) { continue; }
+        out.push(synth(p));
+    }
+    for p in sim.hall_of_dead.iter().filter(|p| p.famous) {
+        if p.roles.iter().any(|r| figure_identities.contains(&(p.name.clone(), *r))) { continue; }
+        out.push(synth(p));
+    }
+
     out.sort_by(|a, b| b.alive.cmp(&a.alive).then(b.born_year.cmp(&a.born_year)));
     Ok(out)
 }
