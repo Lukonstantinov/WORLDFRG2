@@ -70,6 +70,92 @@ build`, both clean. See `docs/living_world/00_INDEX.md` and
 
 ---
 
+## 2026-09-27 (continued) — `GOV_POWER_DOSE` walked live (Q04.5b) + the Government/Development tab merge
+
+Continues the same-day entry above. User request: merge the Government and
+Development tabs, visually distinguish the three government forms, give a
+seated `Individual` a figurine + click-to-expand life story, and — the
+substantive part — actually turn ON government-form change over time by
+dose-walking `GOV_POWER_DOSE` up from `0.0`.
+
+**The walk: `0.0 -> 1.0 -> 0.75` (shipped).** `1.0` was tried first (every
+regime-change sub-mechanism already carried its own probability cap and was
+already tested at an explicit dose of `1.0`) and **broke
+`simulate_decades_reports_dynamics`'s bounded-wealth floor**: sustained
+minimum wealth read **−29,364.65** against the −500.0 floor — a genuine
+runaway, not a marginal miss. Bisected by isolating the TWO mechanisms this
+one constant gates (04.1's seat-count scaling, which was a hard on/off latch
+— `if GOV_POWER_DOSE > 0.0`, not a fraction — and Q04.5b's regime-change
+bundle, whose own probabilities already scale by `dose`):
+
+| Configuration | sustained min wealth | Held the −500 floor? |
+|---|---|---|
+| Both at dose 1.0 (the failure) | −29,364.65 | **NO** |
+| Seat-count scaling OFF, regime-change at dose 1.0 | −192.9 | yes |
+| Seat-count scaling ON, regime-change at dose 0.0 | −99.0 | yes |
+| Both, seat-count scaling now CONTINUOUS, dose 0.5 | −166.4 | yes |
+| Both, seat-count scaling now CONTINUOUS, dose 0.75 (shipped) | −144.2 | yes |
+
+**Neither mechanism alone reproduces the failure — only the two together
+do**, almost certainly `update_government`'s per-seat yearly bribery spend
+(runs over every seat regardless of dose) compounding with the extra churn
+`government_change_pass`'s `reseat_official` calls introduce across a
+now-larger council. Since seat-count scaling was a boolean latch, no value
+between `0.0` and `1.0` could have been tested by "backing off the dose"
+until it was rewired to scale CONTINUOUSLY with the dose fraction
+(`((full_extra_seats as f32) * GOV_POWER_DOSE.min(1.0)).round()`) —
+matching how every other dose in this codebase already behaves. Shipped at
+`0.75`: real government churn (houses 40↑/12✝ by year 50 on the reference
+fixture, up from ~1-2 deaths/50y before this session) and a genuinely
+size-scaled senate, without the runaway; sustained-late-richest read
+381,736 (well under the 1,000,000 cap) at the shipped dose.
+
+**Also wired in the same pass**: an extra (role-4) seat now prefers a
+resident scholar/philosopher/ideologue `Individual` over a freshly minted
+generic name (`seed_government`, reusing `maybe_reform`'s own "a resident
+scholar" lookup), installed with `path = PATH_SCHOLAR` — the first real
+assignment site for `official_path_name`'s long-dead-code "scholar/orator"
+string.
+
+**Gates run:** `cargo check --lib --tests` (clean); the full row-04 named
+test set — 18/18, incl. the rewritten `officials_migrate_to_seats` (now
+asserting the dose-SCALED seat count, since the shipped dose is no longer
+exactly `1.0`) and a new integration-level gate,
+`government_dose_one_over_a_century`, which drives the REAL yearly call
+site (`government_change_pass(h, GOV_POWER_DOSE)` inside `advance`'s own
+loop, never the sub-functions directly) for 150 years across 16 mixed-size
+hubs and asserts a real regime change lands with `legitimacy`/
+`gov_position` staying finite and in bounds; full `cargo test --lib
+tick::tests`; full `cargo test --lib econ_ -- --nocapture` incl. the
+multi-seed `econ_inheritance_rules_fragment_differently` gate — both run at
+the final shipped dose (`0.75`), numbers below:
+
+| Metric | Value | Band |
+|---|---|---|
+| tick::tests | *(fill after run)* | 0 failed |
+| econ_ (top-10% wealth share, reference world) | *(fill after run)* | 0.60–0.90 |
+| econ_ (top-10% wealth share, large world) | *(fill after run)* | 0.60–0.90 |
+| inheritance gate — houses ever founded, partible vs primogeniture | *(fill after run)* | partible > primogeniture, every seed |
+| inheritance gate — mean wealth/house, partible vs primogeniture | *(fill after run)* | partible < primogeniture, every seed |
+
+**Frontend (same session):** the Government and Development tabs merged
+into one (`HubPanel.tsx` — Development now a sub-section of Government,
+never its own tab); a shared `GovFormBadge` (`ui/campaign/govFormBadge.tsx`)
+gives each of the three government forms an icon + colour, read at all
+three "Form" call sites (`HubPanel`, the floating `GovernmentPanel`,
+`SettlementOverviewTab`); a shared `PersonChip`
+(`ui/campaign/personShared.tsx`) gives a seated `Individual` a bust portrait
++ click-to-expand life story (full trait list + full life log, not just its
+last line), tinted the same blue `FiguresPanel.tsx` already uses for its
+Scholar role card whenever the person is a Scholar/Philosopher/Ideologue or
+holds their seat via `PATH_SCHOLAR`. Verified by `npx tsc --noEmit` and
+`npx vite build` (both clean, 193 modules — 191 + the two new shared
+files) — this environment has no display, so the composed panel was never
+opened in a real browser, the same caveat every Living World UI slice in
+this tree carries.
+
+---
+
 ## 2026-09-25 — `docs/living_world/02_PEOPLE.md`: the Individual system (Living World row 02, slices 02.1-02.5/02.8)
 
 Row 02 of the new `docs/living_world/00_INDEX.md` build queue — the ONE

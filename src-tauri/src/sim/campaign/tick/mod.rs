@@ -1991,15 +1991,68 @@ const CAPTOR_INFLUENCE_BOOST: f32 = 0.12;
 const LAWS_CAP: usize = 12;
 /// `living_world/04_GOVERNMENT_AND_EDICTS.md` slice 04.1 · seat-count-by-size and
 /// the coup/legitimacy machinery (04.2, 04.5) sit behind this dose. At `0.0`
-/// `seed_government` builds exactly the same 3-4 fixed roles it always has, so
-/// this row is a true no-op until raised — proven directly (not by a separate
-/// fingerprint test) because `seat_count_for` is only ever consulted when
-/// `GOV_POWER_DOSE > 0.0`. Row 04 depends on rows 02 (`Individual`) and 03
-/// (development tracks), neither built yet, so this slice ships the
-/// seat-count/cultural-title SCAFFOLDING only — a seat is still an `Official`
-/// with a generated name, not yet an `Individual` with a face and traits; see
-/// this doc's own Queue for what that upgrade needs.
-pub(crate) const GOV_POWER_DOSE: f32 = 0.0;
+/// `seed_government` built exactly the same 3-4 fixed roles it always had, and
+/// `government_change_pass` (Q04.5b's coup/revolution/oligarchic-closing/
+/// emergency-ruler/succession-crisis/reform + ostracism bundle) was a true
+/// no-op — proven directly (not by a separate fingerprint test) because
+/// `seat_count_for` is only ever consulted, and every regime-change kind only
+/// ever fires, when `GOV_POWER_DOSE > 0.0`.
+///
+/// **Walked `0.0 -> 1.0 -> 0.75` (2026-09-27).** `1.0` was tried first,
+/// following the precedent of `EDICT_EFFECT_DOSE`/`LUSTRUM_TRACK_BONUS_DOSE`
+/// (both raised straight to full dose once their own gates judged them) —
+/// every regime-change kind already carried its own internal probability cap
+/// (e.g. `COUP_CHANCE_CAP` = 0.20) and was already exercised at an explicit
+/// test dose of `1.0`. **It broke `simulate_decades_reports_dynamics`'s
+/// bounded-wealth floor**: sustained minimum wealth read −29,364.65 against
+/// the −500.0 floor — not a marginal miss, a genuine runaway. Bisecting the
+/// TWO mechanisms this one constant gates (seat-count scaling was, at the
+/// time, a hard on/off switch — `if GOV_POWER_DOSE > 0.0`, not a fraction —
+/// while regime-change's own probabilities already scale by `dose` directly)
+/// found neither one ALONE reproduces the failure: seat-scaling alone (regime
+/// change passed an explicit `0.0`) held at min −99.0; regime-change alone
+/// (seat-scaling forced off) held at min −192.9. Only the two TOGETHER blow
+/// up — a genuine interaction (almost certainly the per-seat yearly bribery
+/// spend in `update_government`'s step 3, which runs over EVERY seat
+/// regardless of dose, compounding with the churn `government_change_pass`'s
+/// `reseat_official` calls introduce across a now-larger council), not a bug
+/// in either mechanism read alone.
+///
+/// Since seat-count scaling was a boolean latch, no fraction of `1.0` could
+/// have been tested by "backing off the dose" alone — `0.5` and `1.0` would
+/// have seeded IDENTICAL seat counts. Seat scaling was rewired to scale
+/// CONTINUOUSLY with the dose fraction instead (`seed_government`:
+/// `((full_extra_seats as f32) * GOV_POWER_DOSE.min(1.0)).round()`), matching
+/// how every other dose in this codebase already behaves — a fractional dose
+/// means a partially-grown government, not an all-or-nothing switch — which
+/// is what makes backing off the dose a real lever at all. Re-walked at
+/// `0.5` (min −166.4, late-richest 528,805 — held) and `0.75` (min −144.2,
+/// late-richest 381,736 — held, comfortable margin on both bounds and no
+/// worse than `0.5`'s). Shipped at **`0.75`**, not `1.0`: real government
+/// churn plus a genuinely scaled senate, without the runaway. Gates run at
+/// `0.75`: `cargo check --lib --tests` (clean); the full row-04 test set
+/// incl. the rewritten `officials_migrate_to_seats` (now asserting the
+/// DOSE-SCALED seat count, not a fixed prediction, since the shipped dose is
+/// no longer exactly `1.0`) and a new `government_dose_one_over_a_century`
+/// integration test that drives the REAL yearly call site
+/// (`government_change_pass(h, GOV_POWER_DOSE)` inside `advance`'s own loop,
+/// not the sub-functions called directly) for 150 years and asserts at least
+/// one real regime change lands, no `legitimacy`/`gov_position` goes out of
+/// bounds or NaN, and the sim never panics; the full `tick::tests` suite
+/// (`simulate_decades_reports_dynamics` read for sane, bounded wealth and
+/// real turnover); and the full `econ_` suite incl. the multi-seed
+/// `econ_inheritance_rules_fragment_differently` gate. See
+/// `docs/SCOREBOARD.md`'s 2026-09-27 entry and
+/// `docs/living_world/04_GOVERNMENT_AND_EDICTS.md`'s Q04.5b for the full
+/// before/after numbers and the two intermediate (mechanism-isolating) runs.
+///
+/// Row 04 depends on rows 02 (`Individual`) and 03 (development tracks),
+/// both built by the time this was walked, so an extra (role-4) seat is now
+/// also wired to a resident scholar/philosopher/ideologue `Individual` when
+/// one exists at the city (`seed_government`'s `PATH_SCHOLAR` branch) —
+/// giving `official_path_name`'s long-dead-code "scholar/orator" string its
+/// first real assignment site — rather than always minting a generic name.
+pub(crate) const GOV_POWER_DOSE: f32 = 0.75;
 /// Hard cap on seats in any one government (04 §"Forms, sizes and offices") —
 /// the largest senate, and the ceiling a custom office (row 04.6+) must share.
 pub(crate) const GOVT_SEAT_CAP: usize = 16;
@@ -9564,13 +9617,22 @@ impl CampaignSim {
         // 1.4, _ => 1.0 }`), so no capture-logic change was needed to add them.
         // At dose 0 this is exactly the old fixed 3-4 role list — a true no-op.
         let extra_seats = if GOV_POWER_DOSE > 0.0 {
-            seat_count_for(pop, govt).saturating_sub(fixed_roles.len())
+            let full = seat_count_for(pop, govt).saturating_sub(fixed_roles.len());
+            ((full as f32) * GOV_POWER_DOSE.min(1.0)).round() as usize
         } else {
             0
         };
         let city = self.hubs[h].name.clone();
         let n_seats = fixed_roles.len() + extra_seats;
         let mut officials = Vec::with_capacity(n_seats);
+        // An extra (role-4) seat can be filled by a resident scholar/
+        // philosopher/ideologue `Individual` instead of a freshly minted
+        // generic name — the same "a resident scholar" lookup `maybe_reform`
+        // already uses to gate a Tyranny's reform into a council, reused here
+        // so that mechanism's namesake can actually HOLD the office their
+        // reforms describe them agitating for. `seated_scholars` stops two
+        // extra seats in the same city both grabbing the same person.
+        let mut seated_scholars: Vec<i32> = Vec::new();
         for i in 0..n_seats {
             let role = fixed_roles.get(i).copied().unwrap_or(4);
             // Extra (role-4) seats salt on their SEAT INDEX `i`, not `role` (every
@@ -9579,15 +9641,29 @@ impl CampaignSim {
             // `role` exactly as before, so a dose-0 world is bit-identical.
             let salt_key = if i < fixed_roles.len() { role as u64 } else { i as u64 };
             let salt = (h as u64).wrapping_mul(0x9E37).wrapping_add(salt_key ^ 0x51);
-            let name = self.head_name_for(h, &city, salt);
+            let scholar = if role == 4 {
+                self.people.iter().find(|p| p.current_hub as usize == h
+                    && !seated_scholars.contains(&(p.id as i32))
+                    && (p.roles.contains(&ROLE_SCHOLAR) || p.roles.contains(&ROLE_PHILOSOPHER) || p.roles.contains(&ROLE_IDEOLOGUE)))
+                    .map(|p| (p.id as i32, p.name.clone()))
+            } else {
+                None
+            };
             // Stagger initial terms so the whole council doesn't turn over at once.
             let te = self.tick + term / 2 + (i as u32 * term) / n_seats.max(1) as u32;
-            // 04.2 · a fresh seat's path by government form: a tyranny/principality
-            // appoints, a free commune elects, an oligarchy/council seat starts as
-            // wealth (a rich family's own, before any bribery contest moves it).
-            let path = match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH };
             let suitability = official_suitability_roll(self.seed, h, salt);
-            let iid = self.individual_id_for_official(h, &name);
+            let (name, path, iid) = if let Some((iid, name)) = scholar {
+                seated_scholars.push(iid);
+                (name, PATH_SCHOLAR, iid)
+            } else {
+                let name = self.head_name_for(h, &city, salt);
+                // 04.2 · a fresh seat's path by government form: a tyranny/principality
+                // appoints, a free commune elects, an oligarchy/council seat starts as
+                // wealth (a rich family's own, before any bribery contest moves it).
+                let path = match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH };
+                let iid = self.individual_id_for_official(h, &name);
+                (name, path, iid)
+            };
             officials.push(Official {
                 role, name, house: -1, control: 0.0, kin: false, term_end: te,
                 path, suitability, individual_id: iid,

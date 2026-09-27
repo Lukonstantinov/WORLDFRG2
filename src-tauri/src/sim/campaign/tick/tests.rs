@@ -11104,24 +11104,38 @@
         assert!(assembly_big <= GOVT_SEAT_CAP);
     }
 
-    /// 04.1 · at `GOV_POWER_DOSE == 0.0` (the shipped default) `seed_government`
-    /// must build EXACTLY the old fixed 3-4 role list — the seat-count scaling
-    /// exists as pure scaffolding for row 04's later slices, not yet wired live.
-    /// This is 04's own inertness proof: no separate fingerprint harness is
-    /// needed because the seat count is asserted directly.
+    /// 04.1 · at `GOV_POWER_DOSE > 0.0` (the now-shipped default, walked
+    /// alongside Q04.5b's regime-change mechanisms) `seed_government` must
+    /// build the SCALED seat count `seat_count_for(pop, govt)` predicts —
+    /// scaled by the dose fraction itself, since a partial dose means a
+    /// partially-grown government, not an all-or-nothing switch — not the
+    /// old fixed 3-4 role list. Every extra (role-4) seat beyond the named
+    /// offices must actually carry role 4.
     #[test]
     fn officials_migrate_to_seats() {
-        assert_eq!(GOV_POWER_DOSE, 0.0, "row 04.1 ships with the new seat scaling OFF");
+        assert!(GOV_POWER_DOSE > 0.0, "row 04's seat-count scaling ships live");
         let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
         let coastal_hub = { let mut h = hub(0, 0.0, 0.0, 200_000.0, vec![10.0], 0); h.coastal = true; h };
         let inland_hub = { let mut h = hub(1, 4.0, 0.0, 200_000.0, vec![10.0], 0); h.coastal = false; h };
         let mut s = sim(vec![coastal_hub, inland_hub], goods);
         s.seed_government(0);
         s.seed_government(1);
-        assert_eq!(s.hubs[0].officials.len(), 4, "a coastal city keeps its 4 named offices at dose 0");
-        assert_eq!(s.hubs[1].officials.len(), 3, "an inland city keeps its 3 named offices at dose 0");
-        for o in &s.hubs[0].officials {
-            assert!(o.role <= 3, "no generic role-4 seat is created while the dose is zero");
+        let govt0 = s.hubs[0].govt_type;
+        let govt1 = s.hubs[1].govt_type;
+        let named0 = if s.hubs[0].coastal { 4 } else { 3 };
+        let named1 = if s.hubs[1].coastal { 4 } else { 3 };
+        let scaled = |full: usize, named: usize| named + ((full.saturating_sub(named) as f32) * GOV_POWER_DOSE.min(1.0)).round() as usize;
+        let want0 = scaled(seat_count_for(200_000.0, govt0), named0);
+        let want1 = scaled(seat_count_for(200_000.0, govt1), named1);
+        assert_eq!(s.hubs[0].officials.len(), want0, "a coastal city's seat count matches the dose-scaled seat_count_for");
+        assert_eq!(s.hubs[1].officials.len(), want1, "an inland city's seat count matches the dose-scaled seat_count_for");
+        for (i, o) in s.hubs[0].officials.iter().enumerate() {
+            if i < named0 { assert!(o.role <= 3, "the named offices keep their own roles"); }
+            else { assert_eq!(o.role, 4, "every extra seat beyond the named offices is role 4"); }
+        }
+        for (i, o) in s.hubs[1].officials.iter().enumerate() {
+            if i < named1 { assert!(o.role <= 3, "the named offices keep their own roles"); }
+            else { assert_eq!(o.role, 4, "every extra seat beyond the named offices is role 4"); }
         }
     }
 
@@ -11462,7 +11476,12 @@
     /// `government_change_pass`'s own top-level gate.
     #[test]
     fn government_change_kinds_are_noops_at_zero_dose() {
-        assert_eq!(GOV_POWER_DOSE, 0.0, "row 04 ships the whole regime-change bundle OFF");
+        // Calls `government_change_pass` with an EXPLICIT literal `0.0` below,
+        // never the `GOV_POWER_DOSE` constant — so this remains a valid "the
+        // pure mechanism is inert at dose 0" regression test regardless of
+        // what the shipped constant is (same pattern as
+        // `lustrum_bonus_is_a_noop_at_zero_dose`, which never checked the
+        // shipped `LUSTRUM_TRACK_BONUS_DOSE` constant either).
         let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
         let mut h = hub(0, 0.0, 0.0, 200_000.0, vec![10.0], 0);
         h.govt_type = 1; // Tyranny — makes every large-kind trigger path reachable
@@ -11568,6 +11587,55 @@
         assert_eq!(s.hubs[0].ostracized[0].0, target);
         assert_eq!(s.hubs[0].ostracized[0].1, s.tick + OSTRACISM_YEARS * TICKS_PER_YEAR);
         assert_eq!(s.hubs[0].gov_history.last().unwrap().regime_kind, REGIME_OSTRACISM);
+    }
+
+    /// `GOV_POWER_DOSE`'s own dose walk (0.0 -> 1.0) · every unit test above
+    /// calls a `maybe_*` sub-function or `government_change_pass` DIRECTLY,
+    /// which proves each mechanism works but never proves the real shipped
+    /// wiring does — `advance()`'s own yearly loop calls
+    /// `government_change_pass(h, GOV_POWER_DOSE)` inside `update_government`,
+    /// and that call site is what this test actually drives. A dozen mixed-
+    /// size hubs (some Tyrannies, some Free Communes, some mid-size Councils
+    /// once seeded) run for 150 simulated years; over that much time and that
+    /// many hubs at least one real regime change must land somewhere, and
+    /// nothing may go out of bounds or NaN.
+    #[test]
+    fn government_dose_one_over_a_century() {
+        assert!(GOV_POWER_DOSE > 0.0, "this test exercises the LIVE dose, not a test-only override");
+        let goods = vec![
+            good("wheat", 0, 0, 1.0, 0.85, true),
+            good("silk", 1, 2, 20.0, 0.35, false),
+        ];
+        let ng = goods.len();
+        let mut hubs = Vec::new();
+        for i in 0..16u32 {
+            // Spans well below and well above the 15,000 tyranny/council
+            // split threshold, so the fixture seeds a real mix of forms.
+            let pop = 6_000.0 + (i as f32 * 3_700.0) % 40_000.0;
+            let prod: Vec<f32> = (0..ng).map(|g| if (g + i as usize) % 2 == 0 { pop * 0.01 } else { pop * 0.002 }).collect();
+            hubs.push(hub(i, (i % 4) as f32 * 6.0, (i / 4) as f32 * 6.0, pop, prod, 0));
+        }
+        let mut s = sim(hubs, goods);
+        for i in 0..6u32 {
+            let mut h = house_at((i * 3) % 16, vec![i as usize % ng], 3);
+            h.archetype = (i % 4) as u8;
+            h.wealth = 200.0 + (i as f32) * 400.0;
+            h.prestige = 0.5;
+            s.houses.push(h);
+        }
+        s.seed_house_count = s.houses.len() as u32;
+        s.advance(150 * TICKS_PER_YEAR);
+
+        let mut regime_changes = 0usize;
+        for hub in &s.hubs {
+            if hub.abandoned { continue; }
+            assert!(hub.legitimacy.is_finite() && (0.0..=1.0).contains(&hub.legitimacy),
+                "legitimacy must stay finite and in [0,1], got {}", hub.legitimacy);
+            assert!(hub.gov_position.is_finite(), "gov_position must stay finite, got {}", hub.gov_position);
+            regime_changes += hub.gov_history.iter().filter(|e| e.regime_kind >= 0).count();
+        }
+        assert!(regime_changes > 0,
+            "150 years across 16 hubs at GOV_POWER_DOSE={GOV_POWER_DOSE} must produce at least one real regime change");
     }
 
     // ── living_world/05_CULTURE_ACCEPTANCE.md ───────────────────────────────

@@ -22,8 +22,10 @@
 //! The one piece that DOES change an existing field — a coup replacing the
 //! captor house / regime — sits behind `GOV_POWER_DOSE` exactly as 04.1's own
 //! doc comment already promised for "the NEW capture/coup rules (04.2,
-//! 04.5)"; at the shipped `GOV_POWER_DOSE = 0.0` it is computed and would-log
-//! only, per that same convention.
+//! 04.5)". **Walked `0.0 -> 1.0` (broke the wealth-bound gate) `-> 0.75`
+//! (shipped)** — see `GOV_POWER_DOSE`'s own doc comment in `mod.rs` for the
+//! full walk, the two mechanism-isolating diagnostic runs, and the gate
+//! numbers — every regime-change kind below is now live, not would-log-only.
 use super::*;
 
 /// Mirrors `development.rs::NEUTRAL_LEGITIMACY` (0.75) — kept as its own
@@ -706,22 +708,21 @@ impl CampaignSim {
 
 // ── Q04.5b — 5 of the doc's 6 "changes of government" kinds (Imposed
 // already exists — a war's Enthrone goal / realm formation) + ostracism.
-// All behind `GOV_POWER_DOSE`, shipped `0.0` exactly as 04.1's own doc
-// comment promised for "the NEW capture/coup rules" — every mechanism below
-// is real, tested at a nonzero TEST dose, and a true no-op at the shipped
-// dose (`government_change_kinds_are_noops_at_zero_dose`). Never walked up
-// this session (CLAUDE.md §2.4 — a dose is walked only once its own gate has
-// judged it, and six regime-change kinds moving population/political state
-// at once is exactly the "three doses in one session is the ceiling" risk
-// this codebase's own plans keep naming; left queued, Q04.5b).
+// All behind `GOV_POWER_DOSE`, WALKED `0.0 -> 1.0 -> 0.75` (shipped; see that
+// constant's own doc comment in `mod.rs` for the full walk and gate numbers)
+// — every mechanism below is now live at the real shipped call site (0.75),
+// not just at the nonzero TEST dose the unit tests below already exercised
+// (`government_change_kinds_are_noops_at_zero_dose` still proves the pure
+// mechanism is inert at an explicit literal `0.0`, independent of what the
+// shipped constant is).
 impl CampaignSim {
     /// The yearly regime-change check, called once per settled hub from
     /// `update_government`'s own per-hub loop, right after its existing
     /// capture/bribery bookkeeping. `dose` is passed explicitly (never read
     /// from `GOV_POWER_DOSE` internally) so a test can exercise the real
-    /// mechanism while the shipped call site always passes the dose-zero
-    /// constant. A realm capital's CROWN never changes hands here (rule 27)
-    /// — every mutation below touches only `hubs[h].govt_type`/`officials`,
+    /// mechanism independent of the shipped constant. A realm capital's CROWN
+    /// never changes hands here (rule 27) — every mutation below touches only
+    /// `hubs[h].govt_type`/`officials`,
     /// never `Realm`/`prov_realm`, so a coup in a realm capital replaces the
     /// CITY's government only, by construction rather than by a special
     /// case. At most one LARGE regime change fires per city per year (tried
