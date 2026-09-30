@@ -2344,6 +2344,7 @@ impl CampaignSim {
     /// economy dynamics stay bounded.
     pub(crate) fn raise_notable_figures(&mut self, yr: u32) {
         let tick = self.tick;
+        self.link_figures_to_people(yr);
         // 1) Retire the departed — chronicle each death once.
         for i in 0..self.figures.len() {
             if self.figures[i].dead || self.figures[i].dies_tick > tick { continue; }
@@ -2457,11 +2458,57 @@ impl CampaignSim {
         }
         let span = ((15.0 + hash01(self.seed, tick as u64 ^ 0xCA6, hub as u64) * 25.0)
             * TICKS_PER_YEAR as f32) as u32;
+        // 2026-09-30b · the figure IS a person: mint (or find) the Individual
+        // who carries their traits, decisions, road and death. Born famous —
+        // a figure is notable by definition — and the yearly pass keeps the
+        // roster within its cap.
+        let role = role_for_figure_kind(kind);
+        let iid = if FIGURES_BECOME_PEOPLE { self.spawn_individual(hub, role, name.clone(), good) } else { u32::MAX };
+        if let Some(pi) = self.people.iter().position(|p| p.id == iid) {
+            self.people[pi].house = resident;
+            self.people[pi].fame = self.people[pi].fame.max(FIGURE_DEBUT_FAME);
+        }
         self.figures.push(Figure {
             name, kind, hub: hub as u32, house: resident, good,
             born_tick: tick, dies_tick: tick + span, dead: false, rallied: false,
-            life_log: Vec::new(),
+            life_log: Vec::new(), individual_id: if iid == u32::MAX { -1 } else { iid as i32 },
         });
+    }
+
+    /// 2026-09-30b · Figure and Individual are ONE life. An old save's figures
+    /// are linked to the person the one-time migration made of them (by name
+    /// and role — never by city, since people travel now); a figure whose
+    /// person has died ends with them, and a figure whose career ends takes
+    /// its person with it, so the chronicle's "has died" is never a lie.
+    pub(crate) fn link_figures_to_people(&mut self, yr: u32) {
+        let tick = self.tick;
+        for i in 0..self.figures.len() {
+            if self.figures[i].individual_id < 0 {
+                let role = role_for_figure_kind(self.figures[i].kind);
+                let name = self.figures[i].name.clone();
+                let found = self.people.iter().chain(self.hall_of_dead.iter())
+                    .find(|p| p.name == name && p.roles.contains(&role)).map(|p| p.id as i32);
+                if let Some(id) = found { self.figures[i].individual_id = id; }
+            }
+            let iid = self.figures[i].individual_id;
+            if iid < 0 || self.figures[i].dead { continue; }
+            let alive = self.people.iter().any(|p| p.id as i32 == iid && p.is_alive());
+            if !alive {
+                // The person has gone: the figure's career ends this year.
+                self.figures[i].dies_tick = self.figures[i].dies_tick.min(tick);
+            } else if self.figures[i].dies_tick <= tick {
+                // The career has run its course: so has the life.
+                if let Some(pi) = self.people.iter().position(|p| p.id as i32 == iid) {
+                    let hub = self.people[pi].current_hub;
+                    let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
+                    self.people[pi].death_tick = tick;
+                    self.people[pi].death_cause = ICAUSE_OLD_AGE;
+                    let e = IndividualLifeEntry { tick, template_id: MS_DEATH, args: vec![hub_arg, ICAUSE_OLD_AGE as u32], ..Default::default() };
+                    self.people[pi].life_log.push(e);
+                    self.remove_dead_individual(pi, yr);
+                }
+            }
+        }
     }
 
     /// SETTLEMENT_LIFE_PLAN.md L12 (§3.11) · per-city notables. Called AFTER

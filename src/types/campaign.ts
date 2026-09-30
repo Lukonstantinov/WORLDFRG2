@@ -2455,6 +2455,19 @@ export interface IndividualBrief {
   trait_strength?: number[];
   /** Every city lived in or visited, in order. */
   places?: PlaceBrief[];
+  /** 2026-09-30b · the Character window's extra reads. */
+  birth_year?: number;
+  home_hub?: number;
+  home_city?: string;
+  house_idx?: number;
+  /** How they came by each trait (index-aligned with `traits`). */
+  trait_origins?: string[];
+  modifiers?: ModifierBrief[];
+  links?: PersonLink[];
+  world_w?: number;
+  world_h?: number;
+  talent?: number;
+  scholar_stage?: string;
 }
 
 /** One stop on a person's road (`read_people::PlaceBrief`). */
@@ -2467,7 +2480,50 @@ export interface PlaceBrief {
   how: string;
   /** A there-and-back journey rather than a new home. */
   visit: boolean;
+  /** 2026-09-30b · map position (world cells). */
+  x?: number;
+  y?: number;
+  /** Where the leg set out from (−1 at the start of the road). */
+  from_hub?: number;
+  from_city?: string;
+  from_x?: number;
+  from_y?: number;
+  /** Why they went, in words. */
+  reason?: string;
+  /** Straight-line length of the leg, km. */
+  km?: number;
+  /** The chance they had given staying for good (−1 = no decision). */
+  stay_odds?: number;
 }
+
+/** 2026-09-30b · one option of a decision a person faced. */
+export interface DecisionOptionBrief {
+  label: string;
+  outcome: string;
+  /** decide()'s probability, 0..1; −1 when not recorded. */
+  odds: number;
+  chosen: boolean;
+  grants: string;
+  fame: number;
+  modifier: string;
+  ideology: [number, number, number, number];
+}
+
+/** 2026-09-30b · a decision in full. */
+export interface DecisionBrief {
+  /** "dilemma" | "journey" | "study" | "career". */
+  kind: string;
+  prompt: string;
+  options: DecisionOptionBrief[];
+  pick: number;
+  /** The 75% rule — the option taken was near-certain. */
+  certain: boolean;
+  why: string[];
+  against: string[];
+}
+
+export interface ModifierBrief { name: string; note: string; years_left: number; }
+export interface PersonLink { id: number; name: string; kind: string; alive: boolean; }
 
 /** One structured life-log entry (`read_people::LifeEntryBrief`). */
 export interface LifeEntryBrief {
@@ -2484,6 +2540,15 @@ export interface LifeEntryBrief {
   why: string[];
   /** A trait this entry granted ("Brave"), "" if none. */
   gained: string;
+  hub?: number;
+  city?: string;
+  /** What pulled the other way. */
+  against?: string[];
+  /** "gained" | "deepened" | "overturned" | "weakened" | "confirmed" | "no room" | "". */
+  change?: string;
+  /** The trait overturned/weakened. */
+  lost?: string;
+  decision?: DecisionBrief | null;
 }
 
 /** Phase 6 · a landmark / place of note. */
@@ -3619,6 +3684,17 @@ export interface HordeBrief {
 }
 
 /** The whole Government window for one city (mirrors `read_government::GovernmentBrief`). */
+/** One open culture-tier proposal, listed on the council's agenda. */
+export interface CultureMotionBrief {
+  culture: string;
+  from_tier: string;
+  to_tier: string;
+  warmer: boolean;
+  round: number;
+  tally: number;
+  reason: string;
+}
+
 export interface GovernmentBrief {
   hub: number;
   city: string;
@@ -3641,4 +3717,6 @@ export interface GovernmentBrief {
   debate: DebateBrief | null;
   edicts: EdictBrief[];
   history: GovHistoryBrief[];
+  /** 2026-09-30b · one civic agenda: open culture-tier questions (row 05). */
+  culture_motions?: CultureMotionBrief[];
 }

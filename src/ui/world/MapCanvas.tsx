@@ -180,6 +180,7 @@ export function MapCanvas() {
   const selectedFuturesLane = useUIStore((s) => s.selectedFuturesLane);
   const futuresFocus = useUIStore((s) => s.futuresFocus);
   const flowHighlight = useUIStore((s) => s.flowHighlight);
+  const personRoad = useUIStore((s) => s.personRoad);
   const futuresLanesRef = useRef<FuturesLane[]>([]);
   const selectedChain = useUIStore((s) => s.selectedChain);
   const selectedHub = useUIStore((s) => s.selectedHub);
@@ -1539,6 +1540,14 @@ export function MapCanvas() {
     om.drawLatLines(meta.grid_width, meta.grid_height, latConfig.equatorOffset, latConfig.latScale, latConfig.lineRatio);
     requestRender();
   }, [worldKey, latConfig, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 2026-09-30b · a person's road (Character window ▸ "Show on the map").
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    om.setPersonRoad(personRoad);
+    requestRender();
+  }, [personRoad, requestRender]);
 
   // Center the camera when a focus target is requested (e.g. clicking a city).
   useEffect(() => {

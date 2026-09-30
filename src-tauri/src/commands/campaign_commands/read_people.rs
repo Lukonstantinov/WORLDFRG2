@@ -722,11 +722,15 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
         // the Notables panel already showed this richer log for the same
         // person and FiguresPanel had never linked to it.
         let role = role_for_figure_kind(f.kind);
-        let matched = if f.dead {
+        // 2026-09-30b · by the stored link first (a figure IS its person now);
+        // the old name+role match only for a save not yet linked.
+        let matched = if f.individual_id >= 0 {
+            sim.people.iter().chain(sim.hall_of_dead.iter()).find(|p| p.id as i32 == f.individual_id)
+        } else { None }.or_else(|| if f.dead {
             sim.hall_of_dead.iter().find(|p| p.name == f.name && p.roles.contains(&role))
         } else {
-            sim.people.iter().find(|p| p.name == f.name && p.roles.contains(&role) && p.current_hub == f.hub as i32)
-        };
+            sim.people.iter().find(|p| p.name == f.name && p.roles.contains(&role))
+        });
         let traits: Vec<String> = matched
             .map(|p| p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect())
             .unwrap_or_default();
@@ -871,11 +875,14 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
 
 /// 02_PEOPLE.md (Living World row 02) · render one `Individual` into a brief.
 /// 2026-09-30 · one person's life log, structured for the Life Story view.
+/// 2026-09-30b · every entry that records a DECISION carries it in full
+/// (`DecisionBrief`): the situation, each option with its odds and what it
+/// meant, the reasons on both sides, and what it did to their character.
 pub(crate) fn life_entries(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> Vec<LifeEntryBrief> {
     use crate::sim::tick::{TICKS_PER_YEAR, is_key_life_entry, choice_label, choice_gain, trait_name, EVENT_TEMPLATES, MS_DEBUT, MS_TRAIT_FLIP};
     p.life_log.iter().map(|e| {
         let is_choice = choice_label(e).is_some();
-        let kind = if is_choice { "choice" } else if e.template_id >= MS_DEBUT { "milestone" } else { "event" };
+        let kind = if is_choice || !e.odds.is_empty() { "choice" } else if e.template_id >= MS_DEBUT { "milestone" } else { "event" };
         let gained = if is_choice {
             choice_gain(e).map(|t| trait_name(t).to_string()).unwrap_or_default()
         } else if e.template_id == MS_TRAIT_FLIP {
@@ -884,24 +891,138 @@ pub(crate) fn life_entries(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::
             EVENT_TEMPLATES.iter().find(|t| t.id == e.template_id).and_then(|t| t.trait_gain)
                 .map(|t| trait_name(t).to_string()).unwrap_or_default()
         };
+        let (change, lost) = entry_trait_change(e);
+        // A dilemma whose trait was refused for lack of room granted nothing.
+        let gained = if change == "no room" { String::new() } else { gained };
+        let hub = e.args.first().copied().filter(|&h| h != u32::MAX && (h as usize) < sim.hubs.len()).map(|h| h as i32).unwrap_or(-1);
         LifeEntryBrief {
             year: e.tick / TICKS_PER_YEAR,
             age: e.tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
             text: sim.render_life_entry_for(&p.name, e),
             kind: kind.to_string(),
             key: is_key_life_entry(e),
-            choice: choice_label(e).unwrap_or("").to_string(),
+            choice: choice_label(e).map(|s| s.to_string()).or_else(|| {
+                decision_of(sim, p, e).and_then(|d| d.options.get(d.pick).map(|o| o.label.clone()))
+            }).unwrap_or_default(),
             why: sim.render_choice_reasons(e),
             gained,
+            hub,
+            city: if hub >= 0 { sim.hubs[hub as usize].name.clone() } else { String::new() },
+            against: sim.render_choice_against(e),
+            change: change.to_string(),
+            lost,
+            decision: decision_of(sim, p, e),
         }
     }).collect()
 }
 
+/// A dilemma entry's stored trait outcome (`args[2..=4]`, `TC_*`).
+fn entry_trait_change(e: &crate::sim::tick::IndividualLifeEntry) -> (&'static str, String) {
+    use crate::sim::tick::{choice_label, trait_name, TC_GAINED, TC_DEEPENED, TC_REPLACED, TC_NO_ROOM, TC_WEAKENED, TC_CONFIRMED, MS_TRAIT_FLIP};
+    if e.template_id == MS_TRAIT_FLIP {
+        return ("overturned", e.args.get(2).map(|&t| trait_name(t as u8).to_string()).unwrap_or_default());
+    }
+    if choice_label(e).is_none() || e.args.len() < 5 { return ("", String::new()); }
+    let lost = trait_name(e.args[4] as u8).to_string();
+    match e.args[2] {
+        TC_GAINED => ("gained", String::new()),
+        TC_DEEPENED => ("deepened", String::new()),
+        TC_REPLACED => ("overturned", lost),
+        TC_NO_ROOM => ("no room", String::new()),
+        TC_WEAKENED => ("weakened", lost),
+        TC_CONFIRMED => ("confirmed", String::new()),
+        _ => ("", String::new()),
+    }
+}
+
+/// The decision an entry records, in full — `None` for an ordinary happening
+/// or milestone. A dilemma entry older than the stored odds still gets its
+/// options (odds −1), since both are read off the template.
+fn decision_of(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual, e: &crate::sim::tick::IndividualLifeEntry) -> Option<DecisionBrief> {
+    use crate::sim::tick::{CHOICE_TEMPLATES, DK_JOURNEY, DK_STUDY, DK_CAREER, DK_COMMISSION, MS_MOVE, MS_VISIT, MS_STUDY, MS_TEACH,
+        MS_RETURN, MS_PATRON, MS_CAREER, trait_name, modifier_name, move_reason, DECISION_CERTAIN_AT};
+    let city = |k: usize| e.args.get(k).and_then(|&h| sim.hubs.get(h as usize)).map(|h| h.name.clone())
+        .unwrap_or_else(|| "a distant place".into());
+    let home = sim.hubs.get(p.origin_hub.max(0) as usize).filter(|_| p.origin_hub >= 0)
+        .map(|h| h.name.clone()).unwrap_or_else(|| "home".into());
+    let odds = |k: usize| e.odds.get(k).map(|&v| v as f32 / 1000.0).unwrap_or(-1.0);
+    let name = &p.name;
+    let finish = |kind: &str, prompt: String, opts: Vec<(String, String)>, pick: usize| -> DecisionBrief {
+        let options: Vec<DecisionOptionBrief> = opts.into_iter().enumerate().map(|(k, (label, outcome))| DecisionOptionBrief {
+            label, outcome, odds: odds(k), chosen: k == pick, ..Default::default()
+        }).collect();
+        DecisionBrief {
+            kind: kind.into(), prompt, pick,
+            certain: options.get(pick).map(|o| o.odds >= DECISION_CERTAIN_AT).unwrap_or(false),
+            options, why: sim.render_choice_reasons(e), against: sim.render_choice_against(e),
+        }
+    };
+    if let Some(t) = CHOICE_TEMPLATES.iter().find(|t| t.id == e.template_id) {
+        let pick = e.args.get(1).copied().unwrap_or(0).min(1) as usize;
+        let c = city(0);
+        let fill = |s: &str| s.replace("{name}", name).replace("{city}", &c);
+        let mut d = finish("dilemma", fill(t.prompt),
+            t.options.iter().map(|o| (o.label.to_string(), fill(o.outcome))).collect(), pick);
+        for (k, o) in t.options.iter().enumerate() {
+            let ob = &mut d.options[k];
+            ob.grants = o.gain.map(|g| trait_name(g).to_string()).unwrap_or_default();
+            ob.fame = o.fame;
+            ob.modifier = o.modifier.map(|m| modifier_name(m).to_string()).unwrap_or_default();
+            ob.ideology = o.ideo;
+        }
+        return Some(d);
+    }
+    if e.odds.is_empty() { return None; }
+    let pick = e.pick as usize;
+    Some(match (e.dk, e.template_id) {
+        (DK_JOURNEY, MS_MOVE) | (DK_JOURNEY, MS_VISIT) => {
+            let (to, from) = (city(0), city(1));
+            let why_go = move_reason(e.args.get(2).copied().unwrap_or(0));
+            finish("journey",
+                format!("Having travelled from {from} to {to} {why_go}, {name} had to decide whether to stay."),
+                vec![(format!("settle in {to}"), format!("{name} makes a new life in {to}.")),
+                     (format!("go back to {from}"), format!("{name} returns to {from}."))], pick)
+        }
+        (DK_STUDY, MS_STUDY) | (DK_STUDY, MS_TEACH) => {
+            let (dest, here) = if e.template_id == MS_STUDY { (city(0), city(2)) } else { (city(1), city(0)) };
+            finish("study",
+                format!("{dest} had a greater school of learning than {here}. Would {name} leave home to study there?"),
+                vec![(format!("go to study in {dest}"), format!("{name} goes to sit at the feet of the masters of {dest}.")),
+                     (format!("stay and teach in {here}"), format!("{name} stays and opens a lecture hall in {here}."))], pick)
+        }
+        (DK_CAREER, MS_RETURN) | (DK_CAREER, MS_PATRON) | (DK_CAREER, MS_CAREER) => {
+            let here = if e.template_id == MS_RETURN { city(1) } else { city(0) };
+            finish("career",
+                format!("Every few years a scholar weighs their road. In {here}, {name} did too."),
+                vec![(format!("keep teaching in {here}"), format!("{name} stays with the lecture hall.")),
+                     (format!("go home to {home}"), format!("{name} goes home to {home}.")),
+                     ("seek a patron".to_string(), format!("{name} enters a rich household as its scholar."))], pick)
+        }
+        (DK_COMMISSION, _) => {
+            let (here, dest) = if e.template_id == MS_CAREER { (city(0), city(2)) } else { (city(1), city(0)) };
+            finish("commission",
+                format!("{dest}, a greater centre of the arts, called for {name}'s work."),
+                vec![(format!("keep working in {here}"), format!("{name} stays with the home workshop.")),
+                     (format!("take a commission in {dest}"), format!("{name} goes, makes a work for {dest}, and comes home.")),
+                     (format!("move to {dest} for good"), format!("{name} moves the workshop to {dest}."))], pick)
+        }
+        _ => return None,
+    })
+}
+
 /// 2026-09-30 · a person's road, read off their milestones.
+/// 2026-09-30b · each stop carries its map position, where they set out
+/// from, why, how far, and — where a decision was made — the odds they gave
+/// staying for good.
 pub(crate) fn places_of(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> Vec<PlaceBrief> {
-    use crate::sim::tick::{TICKS_PER_YEAR, MS_DEBUT, MS_STUDY, MS_EXILE, MS_RETURN, MS_MOVE, MS_VISIT};
+    use crate::sim::tick::{TICKS_PER_YEAR, MS_DEBUT, MS_STUDY, MS_EXILE, MS_RETURN, MS_MOVE, MS_VISIT, move_reason};
     let mut out: Vec<PlaceBrief> = Vec::new();
     let city = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_else(|| "a distant place".into());
+    let pos = |h: i32| sim.hubs.get(h.max(0) as usize).filter(|_| h >= 0).map(|x| (x.x, x.y)).unwrap_or((0.0, 0.0));
+    let person_name = |pid: u32| sim.people.iter().chain(sim.hall_of_dead.iter()).find(|q| q.id == pid).map(|q| q.name.clone());
+    // Where they are living at each point of the road — a visit sets out
+    // from here and comes back to it.
+    let mut home_now: i32 = -1;
     for e in &p.life_log {
         let how = match e.template_id {
             MS_DEBUT => "debut", MS_STUDY => "study", MS_EXILE => "exile",
@@ -909,17 +1030,50 @@ pub(crate) fn places_of(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tic
             _ => continue,
         };
         let Some(&h) = e.args.first() else { continue };
-        if h == u32::MAX { continue; }
+        if h == u32::MAX || h as usize >= sim.hubs.len() { continue; }
+        // The stored origin of the leg where the milestone carries one,
+        // else wherever they were living.
+        let stored_from = match e.template_id {
+            MS_MOVE | MS_VISIT | MS_EXILE => e.args.get(1).copied(),
+            MS_STUDY => e.args.get(2).copied(),
+            MS_RETURN => e.args.get(1).copied(),
+            _ => None,
+        }.filter(|&f| f != u32::MAX && (f as usize) < sim.hubs.len()).map(|f| f as i32);
+        let from = if e.template_id == MS_DEBUT { -1 } else { stored_from.unwrap_or(home_now) };
+        let reason = match e.template_id {
+            MS_MOVE | MS_VISIT => match e.args.get(3).copied().filter(|&v| v > 0).and_then(|v| sim.venues.iter().find(|x| x.id + 1 == v)) {
+                Some(v) => format!("on tour, to play the {}", v.name),
+                None => move_reason(e.args.get(2).copied().unwrap_or(0)).to_string(),
+            },
+            MS_STUDY => match e.args.get(1).copied().filter(|&t| t != u32::MAX).and_then(person_name) {
+                Some(t) => format!("to study under {t}"),
+                None => "to study".to_string(),
+            },
+            MS_EXILE => "driven into exile".to_string(),
+            MS_RETURN => "coming home".to_string(),
+            _ => "entering public life".to_string(),
+        };
+        let (x, y) = pos(h as i32);
+        let (fx, fy) = pos(from);
+        let km = if from >= 0 && from != h as i32 { sim.hub_km(from as usize, h as usize) } else { 0.0 };
+        let stay_odds = if (e.template_id == MS_MOVE || e.template_id == MS_VISIT) && !e.odds.is_empty() {
+            e.odds[0] as f32 / 1000.0
+        } else { -1.0 };
         out.push(PlaceBrief {
             year: e.tick / TICKS_PER_YEAR,
             age: e.tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
             hub: h as i32, city: city(h), how: how.into(), visit: e.template_id == MS_VISIT,
+            x, y, from_hub: from, from_city: if from >= 0 { city(from as u32) } else { String::new() },
+            from_x: fx, from_y: fy, reason, km, stay_odds,
         });
+        if e.template_id != MS_VISIT { home_now = h as i32; }
     }
     // A life begun before milestones existed: start the road at the origin.
     if out.is_empty() && p.origin_hub >= 0 {
+        let (x, y) = pos(p.origin_hub);
         out.push(PlaceBrief { year: p.debut_tick / TICKS_PER_YEAR, age: p.debut_tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
-            hub: p.origin_hub, city: city(p.origin_hub as u32), how: "debut".into(), visit: false });
+            hub: p.origin_hub, city: city(p.origin_hub as u32), how: "debut".into(), visit: false,
+            x, y, from_hub: -1, stay_odds: -1.0, reason: "entering public life".into(), ..Default::default() });
     }
     out
 }
@@ -966,7 +1120,73 @@ fn individual_brief(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::I
         ideology_name: person_ideology_name(sim, p),
         trait_strength: p.traits.iter().map(|&(_, st)| st).collect(),
         places: places_of(sim, p),
+        birth_year: p.birth_tick / TICKS_PER_YEAR,
+        home_hub: p.origin_hub,
+        home_city: sim.hubs.get(p.origin_hub.max(0) as usize).filter(|_| p.origin_hub >= 0).map(|h| h.name.clone()).unwrap_or_default(),
+        house_idx: p.house,
+        trait_origins: trait_origins(p),
+        modifiers: p.modifiers.iter().map(|m| ModifierBrief {
+            name: crate::sim::tick::modifier_name(m.kind).to_string(),
+            note: m.note.clone(),
+            years_left: m.expires_tick.saturating_sub(sim.tick) as f32 / TICKS_PER_YEAR as f32,
+        }).collect(),
+        links: person_links(sim, p),
+        world_w: sim.world_w,
+        world_h: sim.world_h,
+        talent: p.talent,
+        scholar_stage: scholar_stage_name(p),
     }
+}
+
+/// How a person came by each trait they carry (index-aligned with
+/// `p.traits`): the LAST entry that granted, deepened or overturned into it,
+/// or "a born nature" when none did.
+fn trait_origins(p: &crate::sim::tick::Individual) -> Vec<String> {
+    use crate::sim::tick::{TICKS_PER_YEAR, choice_label, choice_gain, EVENT_TEMPLATES, MS_TRAIT_FLIP, TC_NO_ROOM};
+    p.traits.iter().map(|&(t, _)| {
+        let src = p.life_log.iter().rev().find_map(|e| {
+            let year = e.tick / TICKS_PER_YEAR;
+            let age = e.tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR;
+            if let Some(label) = choice_label(e) {
+                if choice_gain(e) == Some(t) && e.args.get(2).copied() != Some(TC_NO_ROOM) {
+                    return Some(format!("year {year}, age {age} · chose “{label}”"));
+                }
+            } else if e.template_id == MS_TRAIT_FLIP && e.args.get(1).copied() == Some(t as u32) {
+                return Some(format!("year {year}, age {age} · a change of heart"));
+            } else if EVENT_TEMPLATES.iter().any(|x| x.id == e.template_id && x.trait_gain == Some(t)) {
+                return Some(format!("year {year}, age {age} · what life did to them"));
+            }
+            None
+        });
+        src.unwrap_or_else(|| "a born nature".to_string())
+    }).collect()
+}
+
+/// Teacher, students, house — the people and bodies a life is tied to.
+fn person_links(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> Vec<PersonLink> {
+    let mut out = Vec::new();
+    let all = || sim.people.iter().chain(sim.hall_of_dead.iter());
+    if p.teacher_id >= 0 {
+        if let Some(t) = all().find(|q| q.id as i32 == p.teacher_id) {
+            out.push(PersonLink { id: t.id as i32, name: t.name.clone(), kind: "teacher".into(), alive: t.is_alive() });
+        }
+    }
+    for q in all().filter(|q| q.teacher_id == p.id as i32).take(12) {
+        out.push(PersonLink { id: q.id as i32, name: q.name.clone(), kind: "student".into(), alive: q.is_alive() });
+    }
+    if p.house >= 0 {
+        if let Some(h) = sim.houses.get(p.house as usize) {
+            out.push(PersonLink { id: p.house, name: h.name.clone(), kind: "house".into(), alive: !h.defunct });
+        }
+    }
+    out
+}
+
+fn scholar_stage_name(p: &crate::sim::tick::Individual) -> String {
+    use crate::sim::tick::{ROLE_SCHOLAR, ROLE_PHILOSOPHER, ROLE_IDEOLOGUE};
+    if !p.roles.iter().any(|&r| matches!(r, ROLE_SCHOLAR | ROLE_PHILOSOPHER | ROLE_IDEOLOGUE)) { return String::new(); }
+    match p.scholar_stage { 1 => "a student", 2 => "teaching", 3 => "home again", 4 => "in a patron's household",
+        5 => "in politics", 6 => "in exile", _ => "" }.to_string()
 }
 
 /// 02_PEOPLE.md · one living or dead `Individual` by id (searches `people`

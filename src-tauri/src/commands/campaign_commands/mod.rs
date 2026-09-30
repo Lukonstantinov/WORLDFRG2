@@ -3001,6 +3001,56 @@ pub struct PlaceBrief {
     pub how: String,
     /// A there-and-back journey rather than a new home.
     pub visit: bool,
+    /// 2026-09-30b · where the city is, in world cells (for the travel map).
+    #[serde(default)] pub x: f32,
+    #[serde(default)] pub y: f32,
+    /// Where they set out from (−1 / "" at the start of the road).
+    #[serde(default)] pub from_hub: i32,
+    #[serde(default)] pub from_city: String,
+    #[serde(default)] pub from_x: f32,
+    #[serde(default)] pub from_y: f32,
+    /// Why they went, in words ("on tour", "to study under Aurelia").
+    #[serde(default)] pub reason: String,
+    /// Straight-line distance of this leg, km (0 at the start).
+    #[serde(default)] pub km: f32,
+    /// The chance they had given staying for good, 0..1 (−1 = no decision).
+    #[serde(default)] pub stay_odds: f32,
+}
+
+/// 2026-09-30b · one option of a decision a person faced.
+#[derive(Serialize, Clone, Default)]
+pub struct DecisionOptionBrief {
+    pub label: String,
+    /// What taking it meant, in a sentence.
+    pub outcome: String,
+    /// The probability `decide()` gave it, 0..1 (−1 = not recorded — an
+    /// entry older than the odds).
+    pub odds: f32,
+    pub chosen: bool,
+    /// A trait this option grants, "" if none.
+    pub grants: String,
+    pub fame: f32,
+    /// A passing state it leaves ("Newly Wealthy"), "" if none.
+    pub modifier: String,
+    /// Its nudge to the person's ideology (Authority · Tradition · Openness · Economy).
+    pub ideology: [f32; 4],
+}
+
+/// 2026-09-30b · a decision in full: the situation, every option with its
+/// odds and consequences, and the reasons on both sides.
+#[derive(Serialize, Clone, Default)]
+pub struct DecisionBrief {
+    /// "dilemma" | "journey" | "study" | "career".
+    pub kind: String,
+    pub prompt: String,
+    pub options: Vec<DecisionOptionBrief>,
+    pub pick: usize,
+    /// The 75% rule: the taken option was near-certain (≥ 75%).
+    pub certain: bool,
+    /// What pulled toward the option taken.
+    pub why: Vec<String>,
+    /// What pulled the other way.
+    pub against: Vec<String>,
 }
 
 /// 2026-09-30 · one structured life-log entry — the Life Story view groups
@@ -3019,6 +3069,36 @@ pub struct LifeEntryBrief {
     pub why: Vec<String>,
     /// A trait the entry granted, "" if none.
     pub gained: String,
+    /// 2026-09-30b · where it happened.
+    #[serde(default)] pub hub: i32,
+    #[serde(default)] pub city: String,
+    /// What pulled the other way, for a decision.
+    #[serde(default)] pub against: Vec<String>,
+    /// What the entry did to their character: "gained" | "deepened" |
+    /// "overturned" | "weakened" | "confirmed" | "no room" | "".
+    #[serde(default)] pub change: String,
+    /// The trait overturned or weakened, "" if none.
+    #[serde(default)] pub lost: String,
+    /// The decision in full, if this entry records one.
+    #[serde(default)] pub decision: Option<DecisionBrief>,
+}
+
+/// 2026-09-30b · a passing state on a person, with how long it has left.
+#[derive(Serialize, Clone, Default)]
+pub struct ModifierBrief {
+    pub name: String,
+    pub note: String,
+    pub years_left: f32,
+}
+
+/// 2026-09-30b · someone this person is tied to (teacher, student, patron house…).
+#[derive(Serialize, Clone, Default)]
+pub struct PersonLink {
+    pub id: i32,
+    pub name: String,
+    /// "teacher" | "student" | "house" | "relation".
+    pub kind: String,
+    pub alive: bool,
 }
 
 /// 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record
@@ -3055,6 +3135,21 @@ pub struct IndividualBrief {
     #[serde(default)] pub trait_strength: Vec<i8>,
     /// Their road — every city lived in or visited, in order.
     #[serde(default)] pub places: Vec<PlaceBrief>,
+    /// 2026-09-30b · the Character window's extra reads.
+    #[serde(default)] pub birth_year: u32,
+    #[serde(default)] pub home_hub: i32,
+    #[serde(default)] pub home_city: String,
+    #[serde(default)] pub house_idx: i32,
+    /// For each trait (index-aligned with `traits`): how they came by it —
+    /// "a born nature" or "year 812 · chose to give".
+    #[serde(default)] pub trait_origins: Vec<String>,
+    #[serde(default)] pub modifiers: Vec<ModifierBrief>,
+    #[serde(default)] pub links: Vec<PersonLink>,
+    /// The world's size in cells (to scale the travel map).
+    #[serde(default)] pub world_w: f32,
+    #[serde(default)] pub world_h: f32,
+    #[serde(default)] pub talent: f32,
+    #[serde(default)] pub scholar_stage: String,
 }
 
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).

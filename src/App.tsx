@@ -16,6 +16,7 @@ import { CityRankingPanel } from "@ui/campaign/CityRankingPanel";
 import { GoodFlowPanel } from "@ui/goods/GoodFlowPanel";
 import { GoodsBrowserPanel } from "@ui/goods/GoodsBrowserPanel";
 import { HousesPanel, HouseDossierHost } from "@ui/campaign/HousesPanel";
+import { PersonWindowHost } from "@ui/campaign/PersonWindow";
 import { FeudsAlliancesPanel } from "@ui/campaign/FeudsAlliancesPanel";
 import { GovernmentPanel } from "@ui/campaign/GovernmentPanel";
 import { BarbarianTribesPanel } from "@ui/campaign/BarbarianTribesPanel";
@@ -1088,6 +1089,7 @@ export default function App() {
           <HousesPanel />
           <HousesPanel companies />
           <HouseDossierHost />
+          <PersonWindowHost />
           <FeudsAlliancesPanel />
           <GovernmentPanel />
           <BarbarianTribesPanel />

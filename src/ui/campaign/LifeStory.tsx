@@ -149,8 +149,12 @@ function LifeLine({ e, color }: { e: LifeEntryBrief; color: string }) {
         <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginLeft: 48, marginTop: 2 }}>
           {isChoice && (
             <span style={{ fontSize: FZ.micro, color }}>
-              chose to <b>{e.choice}</b>
-              {e.why.length > 0 && <span style={{ color: T.inkDim }}> — because {e.why.join(", ")}</span>}
+              chose <b>“{e.choice}”</b>
+              {(() => { const d = e.decision; const o = d?.options[d.pick]; return o && o.odds >= 0
+                ? <span style={{ color: T.inkDim }}> ({Math.round(o.odds * 100)}%{d!.options.length > 1 ? ` vs ${d!.options.filter((x) => !x.chosen).map((x) => `${x.label} ${Math.round(x.odds * 100)}%`).join(", ")}` : ""})</span>
+                : null; })()}
+              {e.why.length > 0 && <span style={{ color: T.inkDim }}> — moved by {e.why.join(", ")}</span>}
+              {(e.against ?? []).length > 0 && <span style={{ color: T.inkFaint }}>, despite {(e.against ?? []).join(", ")}</span>}
             </span>
           )}
           {e.gained && <span style={{ fontSize: FZ.micro, color: T.inkDim }}>→</span>}

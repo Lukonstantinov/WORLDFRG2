@@ -56,6 +56,17 @@ use super::*;
 // Tiers
 // ---------------------------------------------------------------------
 
+/// A modest yearly chance a HATED culture is persecuted — not a certainty
+/// every year, consistent with "massacres are rare" from the doc's own
+/// decisions.
+const PERSECUTE_CHANCE: f32 = 0.12;
+/// 2026-09-30b · how strongly a city's government ideology (row 06's
+/// Openness axis) moves its culture relations and its readiness to
+/// persecute. Live: every acceptance EFFECT is still dosed at zero (05.5),
+/// so a tier moved by belief changes the chronicle and the debates, never a
+/// tax, a settlement or a price.
+pub const IDEOLOGY_ACCEPTANCE_DOSE: f32 = 1.0;
+
 pub const ACCEPT_TIER_CITIZENS: u8 = 1;
 pub const ACCEPT_TIER_ENFRANCHISED: u8 = 2;
 pub const ACCEPT_TIER_RESIDENT: u8 = 3;
@@ -416,6 +427,17 @@ impl CampaignSim {
             // Feuds — houses of this culture feuding in this city.
             if feud_pressure > 0.0 { terms.push(("feuds", -feud_pressure)); }
 
+            // 2026-09-30b · what the city BELIEVES — row 06's government
+            // meter on the Openness axis. A council leaning "open gates" warms
+            // every foreign relation year on year; one leaning "blood and
+            // soil" chills them. The two rows used to run side by side
+            // without ever touching.
+            if hub.ideology_seeded {
+                let open = hub.ideology_gov[super::ideology::AX_OPENNESS] * IDEOLOGY_ACCEPTANCE_DOSE;
+                if open > 0.5 { terms.push(("open gates", open * 1.6)); }
+                if open < -0.5 { terms.push(("blood and soil", open * 1.6)); }
+            }
+
             // Famine/plague blamed on outsiders — only when the CITY's own
             // majority leans closed (Insular/Xenophobic); an open city does
             // not scapegoat.
@@ -495,11 +517,14 @@ impl CampaignSim {
             .unwrap_or(share);
         if share <= 0.0 { return; }
         let roll = hash01(self.seed, self.tick as u64, (h as u64) ^ SALT_ACCEPT_PERSECUTE ^ fnv_mix(0, &culture));
-        // A modest yearly chance while Hated — not a certainty every year,
-        // consistent with "massacres are rare" from the doc's own decisions.
-        const PERSECUTE_CHANCE: f32 = 0.12;
-        if roll >= PERSECUTE_CHANCE { return; }
-        let massacre = roll < PERSECUTE_CHANCE * 0.08; // a small slice of persecution years turn violent
+        // A modest yearly chance while Hated (`PERSECUTE_CHANCE`).
+        // 2026-09-30b · a "blood and soil" government persecutes more
+        // readily, an "open gates" one less (row 06's Openness axis).
+        let open = if self.hubs[h].ideology_seeded { self.hubs[h].ideology_gov[super::ideology::AX_OPENNESS] * IDEOLOGY_ACCEPTANCE_DOSE } else { 0.0 };
+        let belief_mult = if open < -2.0 { (1.0 + (-open - 2.0) * 0.5).min(2.5) } else if open > 2.0 { 0.5 } else { 1.0 };
+        let persecute_chance = PERSECUTE_CHANCE * belief_mult;
+        if roll >= persecute_chance { return; }
+        let massacre = roll < persecute_chance * 0.08; // a small slice of persecution years turn violent
         let kind = if massacre { "the {culture} of {city} are massacred" } else { "the {culture} of {city} are expelled" };
         let text = kind.replace("{culture}", &culture).replace("{city}", &self.hubs[h].name);
         self.chronicle_acceptance(h, EDICT_FAM_FOREIGNERS, &text);

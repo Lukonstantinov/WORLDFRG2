@@ -37,6 +37,134 @@ use super::individuals::living_world_salts as salts;
 pub const REASON_MODIFIER_BASE: u16 = 1000;
 /// "the circumstances" — a choice's own situational context term.
 pub const REASON_CONTEXT: u16 = 2000;
+/// A reason code with this bit set pulled toward an option NOT taken — what
+/// held the person back ("despite being loyal").
+pub const REASON_AGAINST: u16 = 0x4000;
+
+// ── Decision kinds (`IndividualLifeEntry.dk`) ──────────────────────────────
+/// A life dilemma from `CHOICE_TEMPLATES` (the chosen option is `args[1]`).
+pub const DK_CHOICE: u8 = 0;
+/// At a journey's end: settle there for good, or come home.
+pub const DK_JOURNEY: u8 = 1;
+/// A young scholar: go away to study, or stay and teach at home.
+pub const DK_STUDY: u8 = 2;
+/// A working scholar: keep teaching, go home, or seek a patron.
+pub const DK_CAREER: u8 = 3;
+/// An artisan called by a greater city: stay, take a commission, or move.
+pub const DK_COMMISSION: u8 = 4;
+
+// ── Situational reasons (`REASON_CONTEXT + CTX_*`) ────────────────────────
+pub const CTX_RIVAL_SCHOOL: u16 = 1;
+pub const CTX_FAR_FROM_HOME: u16 = 2;
+pub const CTX_AT_HOME: u16 = 3;
+pub const CTX_PATRON_NEARBY: u16 = 4;
+pub const CTX_NO_PATRON: u16 = 5;
+pub const CTX_GREATER_CENTRE: u16 = 6;
+pub const CTX_NO_GREATER_CENTRE: u16 = 7;
+pub const CTX_GREAT_CITY: u16 = 8;
+
+/// Words for a situational reason code.
+pub fn context_reason_name(k: u16) -> &'static str {
+    match k {
+        CTX_RIVAL_SCHOOL => "a rival school in the city",
+        CTX_FAR_FROM_HOME => "being far from home",
+        CTX_AT_HOME => "being at home already",
+        CTX_PATRON_NEARBY => "a rich house looking for a scholar",
+        CTX_NO_PATRON => "no patron to be had",
+        CTX_GREATER_CENTRE => "a greater centre of learning nearby",
+        CTX_NO_GREATER_CENTRE => "nowhere better to study",
+        CTX_GREAT_CITY => "the pull of a great city",
+        _ => "the circumstances",
+    }
+}
+
+/// Trait-outcome codes stored on a choice entry (`args[2]`, with the traits
+/// in `args[3]`/`args[4]`).
+pub const TC_NONE: u32 = 0;
+pub const TC_GAINED: u32 = 1;
+pub const TC_DEEPENED: u32 = 2;
+pub const TC_REPLACED: u32 = 3;
+/// The choice would have added a trait, but the character was already full.
+pub const TC_NO_ROOM: u32 = 4;
+/// A deeply-held opposite was only weakened, not yet overturned.
+pub const TC_WEAKENED: u32 = 5;
+/// The trait was already deeply held — the choice confirmed it.
+pub const TC_CONFIRMED: u32 = 6;
+
+/// What granting trait `g` would do to `traits`, WITHOUT doing it — the same
+/// rules `apply_trait_gain` applies, plus the soft cap `fire_choice_event`
+/// enforces. Returns (code, trait, lost/weakened trait).
+pub fn plan_trait_change(traits: &[(u8, i8)], g: u8) -> (u32, u8, u8) {
+    let has = traits.iter().any(|&(t, _)| t == g)
+        || opposite_trait(g).map(|o| traits.iter().any(|&(t, _)| t == o)).unwrap_or(false);
+    let reputation = (TRAIT_HERO..=TRAIT_KIN_SLAYER).contains(&g);
+    if !(has || reputation || traits.len() < CHOICE_NEW_TRAIT_SOFT_CAP) {
+        return (TC_NO_ROOM, g, 0);
+    }
+    let mut tmp = traits.to_vec();
+    let opp = opposite_trait(g).unwrap_or(u8::MAX);
+    let opp_deep = traits.iter().any(|&(t, st)| t == opp && st >= 2);
+    match apply_trait_gain(&mut tmp, g) {
+        TraitChange::Gained(t) => (TC_GAINED, t, 0),
+        TraitChange::Deepened(t) => (TC_DEEPENED, t, 0),
+        TraitChange::Replaced(n, l) => (TC_REPLACED, n, l),
+        TraitChange::None if opp_deep => (TC_WEAKENED, g, opp),
+        TraitChange::None if traits.iter().any(|&(t, _)| t == g) => (TC_CONFIRMED, g, 0),
+        TraitChange::None => (TC_NO_ROOM, g, 0),
+    }
+}
+
+/// The reason codes behind a `decide()` outcome: up to three present traits
+/// or modifiers that pulled toward the option taken, then (flagged
+/// `REASON_AGAINST`) up to two that pulled toward an option not taken, plus
+/// any situational `context` codes (`REASON_CONTEXT + CTX_*`, positive = for
+/// the pick). Pure.
+pub fn decision_reasons(
+    pick: usize,
+    trait_terms: &[Vec<(u8, f32)>],
+    traits: &[(u8, i8)],
+    mod_terms: &[Vec<(u8, f32)>],
+    mods: &[Modifier],
+    context: &[(u16, bool)],
+) -> Vec<u16> {
+    let mut pro: Vec<(u16, f32)> = Vec::new();
+    let mut con: Vec<(u16, f32)> = Vec::new();
+    for (o, terms) in trait_terms.iter().enumerate() {
+        for &(tk, w) in terms {
+            if let Some(&(_, st)) = traits.iter().find(|&&(t, _)| t == tk) {
+                let c = w * st as f32;
+                if c.abs() < 0.001 { continue; }
+                // A positive pull toward the pick (or away from a rival
+                // option) is FOR; a pull toward a rival option is AGAINST.
+                if (o == pick) == (c > 0.0) { pro.push((tk as u16, c.abs())); } else { con.push((tk as u16, c.abs())); }
+            }
+        }
+    }
+    for (o, terms) in mod_terms.iter().enumerate() {
+        for &(mk, w) in terms {
+            if w.abs() < 0.001 || !mods.iter().any(|m| m.kind == mk) { continue; }
+            let code = REASON_MODIFIER_BASE + mk as u16;
+            if (o == pick) == (w > 0.0) { pro.push((code, w.abs())); } else { con.push((code, w.abs())); }
+        }
+    }
+    let by = |a: &(u16, f32), b: &(u16, f32)| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal);
+    pro.sort_by(by);
+    con.sort_by(by);
+    pro.dedup_by_key(|x| x.0);
+    con.dedup_by_key(|x| x.0);
+    let mut out: Vec<u16> = pro.iter().take(3).map(|x| x.0).collect();
+    for &(k, for_pick) in context {
+        let code = REASON_CONTEXT + k;
+        if for_pick { out.push(code); } else { out.push(code | REASON_AGAINST); }
+    }
+    out.extend(con.iter().take(2).map(|x| x.0 | REASON_AGAINST));
+    out
+}
+
+/// `decide()`'s probabilities as per-mille odds.
+pub fn odds_milli(probs: &[f32]) -> Vec<u16> {
+    probs.iter().map(|p| (p.clamp(0.0, 1.0) * 1000.0).round() as u16).collect()
+}
 
 /// Share of fired life events that are dilemmas rather than happenings.
 pub const CHOICE_EVENT_SHARE: f32 = 0.35;
@@ -64,6 +192,9 @@ pub const MS_TRAIT_FLIP: u16 = 913;
 pub const MS_MOVE: u16 = 914;
 /// A journey there and back: args `[to, from, reason]`.
 pub const MS_VISIT: u16 = 915;
+/// A scholar's career review: args `[hub, changed]` — `changed` 1 when it
+/// set them on a new road (a KEY moment), 0 when they kept to the old one.
+pub const MS_CAREER: u16 = 916;
 
 pub const MOVE_RELOCATE: u32 = 0;
 pub const MOVE_COMMISSION: u32 = 1;
@@ -73,7 +204,7 @@ pub const MOVE_TRADE: u32 = 4;
 pub const MOVE_EXPLORE: u32 = 5;
 pub const MOVE_PILGRIMAGE: u32 = 6;
 
-fn move_reason(r: u32) -> &'static str {
+pub fn move_reason(r: u32) -> &'static str {
     match r {
         MOVE_COMMISSION => "to carry out a commission",
         MOVE_TOUR => "on tour",
@@ -98,6 +229,10 @@ fn travel_propensity(role: u8) -> (f32, f32, u32) {
         _ => (0.03, 0.20, MOVE_PILGRIMAGE),
     }
 }
+/// 2026-09-30b · renown a performer earns playing a venue on tour, scaled by
+/// the venue's own prestige (0..1). Before this no performer ever reached the
+/// notable roster (measured, 100 years).
+const PERFORMANCE_FAME: f32 = 0.04;
 /// A person living away from their home city goes back each year with this chance.
 const HOMECOMING_CHANCE: f32 = 0.08;
 
@@ -358,6 +493,7 @@ pub fn apply_trait_gain(traits: &mut Vec<(u8, i8)>, t: u8) -> TraitChange {
 /// Is a stored life entry a KEY moment of the life (a choice, a milestone, or
 /// a happening that changed the person — fame or a trait)?
 pub fn is_key_life_entry(e: &IndividualLifeEntry) -> bool {
+    if e.template_id == MS_CAREER { return e.args.get(1).copied().unwrap_or(0) == 1; }
     if e.template_id >= MS_DEBUT { return true; }
     EVENT_TEMPLATES.iter().find(|t| t.id == e.template_id)
         .map(|t| t.fame_delta >= 0.02 || t.trait_gain.is_some() || t.feature_gain.is_some())
@@ -416,7 +552,29 @@ impl CampaignSim {
     /// `people`). `args[0]` is always a hub or `u32::MAX`.
     pub(crate) fn log_milestone(&mut self, id: u32, ms: u16, args: Vec<u32>) {
         if let Some(i) = self.person_index(id) {
-            let e = IndividualLifeEntry { tick: self.tick, template_id: ms, args, why: Vec::new() };
+            let e = IndividualLifeEntry { tick: self.tick, template_id: ms, args, why: Vec::new(), ..Default::default() };
+            self.push_life_entry(i, e);
+        }
+    }
+
+    /// 2026-09-30b · ONE MOVEMENT SYSTEM. Every change of city — a journey's
+    /// end, a homecoming, a scholar going to study or into exile, an artisan's
+    /// commission — goes through here, so the rules of arriving live in one
+    /// place (coming home ends homesickness) and nothing can move a person
+    /// without the caller also logging the milestone the road is read from.
+    pub(crate) fn relocate_person(&mut self, i: usize, dest: i32) {
+        self.people[i].current_hub = dest;
+        if dest >= 0 && dest == self.people[i].origin_hub {
+            self.people[i].modifiers.retain(|m| m.kind != MOD_HOMESICK);
+        }
+    }
+
+    /// Log a milestone that is also the outcome of a DECISION: the odds each
+    /// option carried, the one taken, and the reasons for and against.
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn log_decision_milestone(&mut self, id: u32, ms: u16, args: Vec<u32>, odds: Vec<u16>, pick: u8, dk: u8, why: Vec<u16>) {
+        if let Some(i) = self.person_index(id) {
+            let e = IndividualLifeEntry { tick: self.tick, template_id: ms, args, why, odds, pick, dk };
             self.push_life_entry(i, e);
         }
     }
@@ -436,7 +594,7 @@ impl CampaignSim {
         if let TraitChange::Replaced(new, lost) = change {
             let hub = self.people[i].current_hub;
             let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
-            let e = IndividualLifeEntry { tick: self.tick, template_id: MS_TRAIT_FLIP, args: vec![hub_arg, new as u32, lost as u32], why: Vec::new() };
+            let e = IndividualLifeEntry { tick: self.tick, template_id: MS_TRAIT_FLIP, args: vec![hub_arg, new as u32, lost as u32], why: Vec::new(), ..Default::default() };
             self.push_life_entry(i, e);
         }
         change
@@ -469,43 +627,27 @@ impl CampaignSim {
         );
         let choice = outcome.choice.min(1);
         let o = &t.options[choice];
-        // Reasons as codes (trait ids / modifier kinds), resolved from the
-        // chosen option's own terms so the UI can name them in words.
-        let mut why: Vec<(u16, f32)> = Vec::new();
-        for &(tk, w) in o.traits {
-            if let Some(&(_, st)) = self.people[i].traits.iter().find(|&&(tt, _)| tt == tk) {
-                why.push((tk as u16, w * st as f32));
-            }
-        }
-        for &(mk, w) in o.mods {
-            if self.people[i].modifiers.iter().any(|m| m.kind == mk) {
-                why.push((REASON_MODIFIER_BASE + mk as u16, w));
-            }
-        }
-        why.sort_by(|a, b| b.1.abs().partial_cmp(&a.1.abs()).unwrap_or(std::cmp::Ordering::Equal));
-        why.truncate(3);
+        // Reasons for AND against, as codes the UI names in words.
+        let why = decision_reasons(choice, &trait_terms, &self.people[i].traits, &mod_terms, &self.people[i].modifiers, &[]);
+        // What the choice will do to their character — planned on a copy, so
+        // the entry can say "gained", "deepened", "overturned" or "no room".
+        let (tc, ta, tb) = o.gain.map(|g| plan_trait_change(&self.people[i].traits, g)).unwrap_or((TC_NONE, 0, 0));
         let hub = self.people[i].current_hub;
         let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
         let entry = IndividualLifeEntry {
-            tick: self.tick, template_id: t.id, args: vec![hub_arg, choice as u32],
-            why: why.into_iter().map(|(c, _)| c).collect(),
+            tick: self.tick, template_id: t.id,
+            args: vec![hub_arg, choice as u32, tc, ta as u32, tb as u32],
+            why, odds: odds_milli(&outcome.probs), pick: choice as u8, dk: DK_CHOICE,
         };
         let famous = self.people[i].famous;
         self.push_life_entry(i, entry.clone());
         if o.fame != 0.0 {
             self.people[i].fame = (self.people[i].fame + o.fame).clamp(0.0, 1.0);
         }
+        // The soft cap is applied by `plan_trait_change` (measured: every
+        // character drifted to ~6 traits without it).
         if let Some(g) = o.gain {
-            // A choice may always DEEPEN or FLIP a trait; it adds a NEW one
-            // only while the person carries fewer than
-            // `CHOICE_NEW_TRAIT_SOFT_CAP` (reputation traits excepted) —
-            // measured, every character drifted to ~6 traits without it.
-            let has = self.people[i].traits.iter().any(|&(t, _)| t == g)
-                || opposite_trait(g).map(|o| self.people[i].traits.iter().any(|&(t, _)| t == o)).unwrap_or(false);
-            let reputation = (TRAIT_HERO..=TRAIT_KIN_SLAYER).contains(&g);
-            if has || reputation || self.people[i].traits.len() < CHOICE_NEW_TRAIT_SOFT_CAP {
-                self.gain_trait_logged(i, g);
-            }
+            if tc != TC_NO_ROOM { self.gain_trait_logged(i, g); }
         }
         if let Some(mk) = o.modifier {
             let p = &mut self.people[i];
@@ -576,6 +718,12 @@ impl CampaignSim {
     pub(crate) fn people_travel_pass(&mut self, yr: u32) {
         let seated: std::collections::HashSet<i32> = self.hubs.iter()
             .flat_map(|h| h.officials.iter().map(|o| o.individual_id)).collect();
+        // 2026-09-30b · where the stages are: live venues by city (row 08), so
+        // a performer's tour goes to real arenas, theatres and odea.
+        let mut stages: std::collections::HashMap<usize, Vec<usize>> = std::collections::HashMap::new();
+        for (vi, v) in self.venues.iter().enumerate() {
+            if v.hub >= 0 && v.condition != super::venues::COND_ABANDONED { stages.entry(v.hub as usize).or_default().push(vi); }
+        }
         for i in 0..self.people.len() {
             let p = &self.people[i];
             if !p.is_alive() || seated.contains(&(p.id as i32)) { continue; }
@@ -594,8 +742,7 @@ impl CampaignSim {
             if home >= 0 && home != here && (home as usize) < self.hubs.len() && !self.hubs[home as usize].abandoned {
                 let chance = HOMECOMING_CHANCE * if homesick { 2.0 } else { 1.0 };
                 if hash01(self.seed, key, salts::TRAVEL_ROLL ^ 0x40) < chance {
-                    self.people[i].current_hub = home;
-                    self.people[i].modifiers.retain(|m| m.kind != MOD_HOMESICK);
+                    self.relocate_person(i, home);
                     self.log_milestone(id, MS_RETURN, vec![home as u32]);
                     continue;
                 }
@@ -609,26 +756,47 @@ impl CampaignSim {
                 .filter(|&b| b < self.hubs.len() && b != hu && !self.hubs[b].is_estate && !self.hubs[b].abandoned)
                 .collect();
             if cands.is_empty() { continue; }
-            let w: Vec<f32> = cands.iter().map(|&b| 1.0 + match self.hubs[b].tier { 1 => 3.0, 2 => 2.0, 3 => 1.0, _ => 0.0 }).collect();
+            let performer = role == ROLE_PERFORMER;
+            let w: Vec<f32> = cands.iter().map(|&b| {
+                let standing = 1.0 + match self.hubs[b].tier { 1 => 3.0, 2 => 2.0, 3 => 1.0, _ => 0.0 };
+                // A performer goes where there is a stage to play.
+                let stage = if performer { stages.get(&b).map(|v| v.len().min(3) as f32 * 2.5).unwrap_or(0.0) } else { 0.0 };
+                standing + stage
+            }).collect();
             let total: f32 = w.iter().sum();
             let mut r = hash01(self.seed, key, salts::TRAVEL_ROLL ^ 0x41) * total;
             let mut dest = cands[0];
             for (k, &b) in cands.iter().enumerate() { if r < w[k] { dest = b; break; } r -= w[k]; }
             let (_, stay_base, _) = travel_propensity(role);
+            let trait_terms = [vec![(TRAIT_CURIOUS, 0.08), (TRAIT_AMBITIOUS, 0.08), (TRAIT_FICKLE, 0.08)],
+                               vec![(TRAIT_LOYAL, 0.08), (TRAIT_CONTENT, 0.08), (TRAIT_CLOSED, 0.08)]];
+            let mod_terms = [vec![(MOD_NEWLY_WEALTHY, 0.05)], vec![(MOD_HOMESICK, 0.1), (MOD_GRIEVING, 0.05)]];
             let outcome = decide(
                 self.seed, self.tick, id, salts::TRAVEL_ROLL ^ 0x42,
                 &[stay_base, 1.0 - stay_base],
-                &[vec![(TRAIT_CURIOUS, 0.08), (TRAIT_AMBITIOUS, 0.08), (TRAIT_FICKLE, 0.08)],
-                  vec![(TRAIT_LOYAL, 0.08), (TRAIT_CONTENT, 0.08), (TRAIT_CLOSED, 0.08)]],
-                &self.people[i].traits,
-                &[vec![(MOD_NEWLY_WEALTHY, 0.05)], vec![(MOD_HOMESICK, 0.1), (MOD_GRIEVING, 0.05)]],
+                &trait_terms, &self.people[i].traits, &mod_terms,
                 &self.people[i].modifiers, &[0.0, 0.0],
             );
-            if outcome.choice == 0 {
-                self.people[i].current_hub = dest as i32;
-                self.log_milestone(id, MS_MOVE, vec![dest as u32, hu as u32, reason]);
+            let pick = outcome.choice.min(1);
+            let why = decision_reasons(pick, &trait_terms, &self.people[i].traits, &mod_terms, &self.people[i].modifiers, &[]);
+            let odds = odds_milli(&outcome.probs);
+            // The stage they played, if any: the most prestigious live venue
+            // at the destination. Playing it is renown (people-only — the
+            // venue's own books are row 08's, dosed at zero).
+            let venue = if performer {
+                stages.get(&dest).and_then(|vs| vs.iter().copied().max_by(|&a, &b| self.venues[a].prestige.partial_cmp(&self.venues[b].prestige).unwrap_or(std::cmp::Ordering::Equal)))
+            } else { None };
+            let mut args = vec![dest as u32, hu as u32, reason];
+            if let Some(vi) = venue {
+                args.push(self.venues[vi].id + 1);
+                let gain = PERFORMANCE_FAME * (1.0 + self.venues[vi].prestige);
+                self.people[i].fame = (self.people[i].fame + gain).min(1.0);
+            }
+            if pick == 0 {
+                self.relocate_person(i, dest as i32);
+                self.log_decision_milestone(id, MS_MOVE, args, odds, 0, DK_JOURNEY, why);
             } else {
-                self.log_milestone(id, MS_VISIT, vec![dest as u32, hu as u32, reason]);
+                self.log_decision_milestone(id, MS_VISIT, args, odds, 1, DK_JOURNEY, why);
                 if self.people[i].famous {
                     self.people[i].fame = (self.people[i].fame + 0.01).min(1.0);
                 }
@@ -652,16 +820,33 @@ impl CampaignSim {
                 e.args.get(1).map(|&r| role_name(r as u8).to_lowercase()).map(|r| format!("a{} {r}", if r.starts_with(['a','e','i','o','u']) { "n" } else { "" })).unwrap_or_else(|| "a citizen".into())),
             MS_OFFICE => format!("{name} takes a seat in the government of {}.", city(0)),
             MS_STUDY => format!("{name} goes to {} to study under {}.", city(0), person(1)),
+            MS_TEACH if e.dk == DK_STUDY && e.args.len() > 1 => format!("{name} decides against going away to study in {} and opens a lecture hall in {}.", city(1), city(0)),
             MS_TEACH => format!("{name} opens a lecture hall in {} and begins to teach.", city(0)),
+            MS_CAREER if e.dk == DK_COMMISSION => format!("{name} is called to {} but keeps working in {}.", city(2), city(0)),
+            MS_CAREER => match (e.args.get(1).copied().unwrap_or(0), e.pick) {
+                (1, _) => format!("{name} takes up teaching again in {}.", city(0)),
+                (_, 1) => format!("{name} stays on at home in {}.", city(0)),
+                (_, 2) => format!("{name} stays in a patron's household in {}.", city(0)),
+                _ => format!("{name} weighs leaving {} and resolves to keep teaching there.", city(0)),
+            },
             MS_SCHOOL => format!("{name} founds a school in {}, teaching {}.", city(0), ideology(1)),
             MS_DOCTRINE => format!("{name} sets down a new doctrine — {}.", ideology(1)),
             MS_EXILE => format!("{name} is driven out of {} and finds refuge in {}.", city(1), city(0)),
+            MS_RETURN if e.dk == DK_CAREER && e.args.len() > 1 => format!("{name} gives up the lecture hall in {} and comes home to {}.", city(1), city(0)),
             MS_RETURN => format!("{name} comes home to {}.", city(0)),
             MS_PATRON => format!("{name} enters the household of a patron in {}.", city(0)),
             MS_MASTERWORK => format!("{name} completes a masterwork in {}.", city(0)),
             MS_RENOWN => format!("{name}'s name is now known far beyond {}.", city(0)),
             MS_DEATH => format!("{name} dies of {} in {}.", e.args.get(1).map(|&c| death_cause_name(c as u8)).unwrap_or("old age"), city(0)),
             MS_POLITICS => format!("{name} turns from the lecture hall to politics in {}.", city(0)),
+            MS_MOVE | MS_VISIT if e.args.get(3).is_some_and(|&v| v > 0) => {
+                let venue = self.venues.iter().find(|v| v.id + 1 == e.args[3]).map(|v| v.name.clone()).unwrap_or_else(|| "a stage now gone".into());
+                if e.template_id == MS_MOVE {
+                    format!("{name} leaves {} on tour, plays the {venue} in {} — and stays.", city(1), city(0))
+                } else {
+                    format!("{name} goes on tour from {} to play the {venue} in {}.", city(1), city(0))
+                }
+            }
             MS_MOVE => format!("{name} leaves {} {} and settles in {}.", city(1), move_reason(e.args.get(2).copied().unwrap_or(0)), city(0)),
             MS_VISIT => format!("{name} travels from {} to {} {}.", city(1), city(0), move_reason(e.args.get(2).copied().unwrap_or(0))),
             MS_TRAIT_FLIP => format!("{name} is no longer {} — life has made them {}.",
@@ -680,14 +865,22 @@ impl CampaignSim {
         Some(format!("{} {}", fill(t.prompt), fill(t.options[choice].outcome)))
     }
 
-    /// Words for a choice entry's stored reasons.
+    /// Words for an entry's stored reasons FOR the option taken.
     pub(crate) fn render_choice_reasons(&self, e: &IndividualLifeEntry) -> Vec<String> {
-        e.why.iter().map(|&c| {
-            if c >= REASON_CONTEXT { "the circumstances".to_string() }
-            else if c >= REASON_MODIFIER_BASE { modifier_name((c - REASON_MODIFIER_BASE) as u8).to_string() }
-            else { trait_name(c as u8).to_lowercase() }
-        }).collect()
+        e.why.iter().filter(|&&c| c & REASON_AGAINST == 0).map(|&c| reason_code_name(c)).collect()
     }
+
+    /// Words for what pulled the other way ("despite …").
+    pub(crate) fn render_choice_against(&self, e: &IndividualLifeEntry) -> Vec<String> {
+        e.why.iter().filter(|&&c| c & REASON_AGAINST != 0).map(|&c| reason_code_name(c & !REASON_AGAINST)).collect()
+    }
+}
+
+/// Words for one reason code (without the `REASON_AGAINST` bit).
+pub fn reason_code_name(c: u16) -> String {
+    if c >= REASON_CONTEXT { context_reason_name(c - REASON_CONTEXT).to_string() }
+    else if c >= REASON_MODIFIER_BASE { modifier_name((c - REASON_MODIFIER_BASE) as u8).to_lowercase() }
+    else { format!("being {}", trait_name(c as u8).to_lowercase()) }
 }
 
 /// The chosen option's short label, if `e` is a choice entry.

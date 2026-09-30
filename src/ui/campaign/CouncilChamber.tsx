@@ -5,6 +5,7 @@ import { T, FZ, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { CoatOfArms, houseColor } from "@ui/heraldry/CoatOfArms";
 import { Bust } from "@ui/campaign/personShared";
 import { LifeStory } from "@ui/campaign/LifeStory";
+import { OpenLifeButton } from "@ui/campaign/PersonWindow";
 import { TraitChip, IdeologyBars, officeIcon, pathMeta, TRAIT_META, traitColor } from "@ui/campaign/traitIcons";
 import { GovFormBadge } from "@ui/campaign/govFormBadge";
 
@@ -168,6 +169,26 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
           </div>
         </div>
       )}
+      {/* ── One civic agenda: the culture questions also before the council ── */}
+      {(brief.culture_motions ?? []).length > 0 && (
+        <div style={{ margin: "0 0 8px", padding: "5px 8px", borderRadius: RADIUS.md, background: T.card, border: `1px dashed ${T.line}` }}>
+          <div style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+            {deb ? "Also on the agenda" : "On the agenda"} · the city's peoples
+          </div>
+          {(brief.culture_motions ?? []).map((m, k) => (
+            <div key={k} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: FZ.tiny, padding: "2px 0" }}>
+              <span>{m.warmer ? "🤝" : "🚫"}</span>
+              <span style={{ color: T.ink, flex: 1 }}>
+                the <b>{m.culture}</b>: {m.from_tier} → <b style={{ color: m.warmer ? "#7fd0a0" : "#e08a6a" }}>{m.to_tier}</b>
+                {m.reason && <span style={{ color: T.inkFaint }}> · {m.reason}</span>}
+              </span>
+              <div style={{ position: "relative", width: 60, height: 5, borderRadius: 3, background: "linear-gradient(90deg,#5a2a24,#1e2e42 50%,#244a34)" }}>
+                <span style={{ position: "absolute", top: -2, left: `calc(${((m.tally + 1) / 2) * 100}% - 3px)`, width: 6, height: 9, borderRadius: 2, background: "#5fd0ff" }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* ── The seats, as people ──────────────────────────────────────── */}
       <div style={{ display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 1fr", gap: 5 }}>
@@ -184,6 +205,7 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
           <div style={{ marginTop: 6, padding: "7px 9px", borderRadius: RADIUS.md, background: "rgba(0,0,0,0.2)", border: `1px solid ${seatRing(s)}66` }}>
             <div style={{ fontFamily: SERIF, color: T.parchment, fontSize: FZ.base, marginBottom: 4 }}>
               {officeIcon(s.role, brief.form_kind)} {s.office_title} {p.name} — a life
+              <span style={{ marginLeft: 8 }}><OpenLifeButton id={p.id} label="📖 Decisions, travels & full life" /></span>
             </div>
             <LifeStory life={p.life} places={p.places} color={seatRing(s)} fallback={p.life_log.slice().reverse()} />
           </div>

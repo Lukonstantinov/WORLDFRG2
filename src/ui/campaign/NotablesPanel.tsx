@@ -9,6 +9,7 @@ import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "@ui/kit";
 import { drawBust, individualKit } from "@ui/campaign/cultureDress";
 import { TraitChip } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
+import { OpenLifeButton } from "@ui/campaign/PersonWindow";
 
 /** 02_PEOPLE.md (Living World row 02) · the 40-cap notable roster and the
  *  Hall of the Dead in one window — a plain list, PLUS (02.7) a real portrait
@@ -87,6 +88,7 @@ export function NotablesPanel() {
                     </div>
                   </div>
                 </div>
+                <div style={{ marginBottom: 6 }}><OpenLifeButton id={pickedRow.id} label="📖 Open the full life — decisions & travels" /></div>
                 <div style={{ color: T.inkDim, fontSize: FZ.tiny, marginBottom: 8 }}>
                   {pickedRow.alive ? `Debuted ${pickedRow.debut_year}` : `${pickedRow.debut_year} – ${pickedRow.death_year} (${pickedRow.death_cause})`}
                 </div>

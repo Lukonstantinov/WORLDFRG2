@@ -498,26 +498,44 @@ impl CampaignSim {
             match self.people[i].scholar_stage {
                 STAGE_STUDY => {
                     if age_years < 16 { continue; }
-                    let roll = hash01(self.seed, self.people[i].id as u64, salts::SCHOLAR_STUDY_TARGET);
                     // Travel to the best-learning-tier reachable neighbour
                     // (a real centre), else stay and become the local teacher.
+                    // 2026-09-30b · going is a DECISION against the scholar's
+                    // own character (curious and ambitious go, content,
+                    // closed and loyal stay home), recorded with its odds.
                     let neighbours = self.neighbors.get(hu).cloned().unwrap_or_default();
                     let best = neighbours.iter()
                         .map(|&b| b as usize)
                         .filter(|&b| b < self.hubs.len() && !self.hubs[b].is_estate && !self.hubs[b].abandoned)
                         .max_by_key(|&b| self.hubs[b].track_level[TRACK_IDEOLOGICAL]);
-                    if roll < SCHOLAR_STUDY_TRAVEL_CHANCE {
-                        if let Some(dest) = best.filter(|&b| self.hubs[b].track_level[TRACK_IDEOLOGICAL] > self.hubs[hu].track_level[TRACK_IDEOLOGICAL]) {
+                    if let Some(dest) = best.filter(|&b| self.hubs[b].track_level[TRACK_IDEOLOGICAL] > self.hubs[hu].track_level[TRACK_IDEOLOGICAL]) {
+                        let trait_terms = [
+                            vec![(TRAIT_CURIOUS, 0.10), (TRAIT_AMBITIOUS, 0.08), (TRAIT_SCHOLARLY, 0.05)],
+                            vec![(TRAIT_CONTENT, 0.08), (TRAIT_CLOSED, 0.10), (TRAIT_LOYAL, 0.05)],
+                        ];
+                        let mod_terms = [Vec::new(), vec![(MOD_HOMESICK, 0.10), (MOD_GRIEVING, 0.05)]];
+                        let outcome = decide(
+                            self.seed, self.tick, self.people[i].id, salts::SCHOLAR_STUDY_TARGET,
+                            &[SCHOLAR_STUDY_TRAVEL_CHANCE, 1.0 - SCHOLAR_STUDY_TRAVEL_CHANCE],
+                            &trait_terms, &self.people[i].traits, &mod_terms, &self.people[i].modifiers, &[0.0, 0.0],
+                        );
+                        let pick = outcome.choice.min(1);
+                        let why = decision_reasons(pick, &trait_terms, &self.people[i].traits, &mod_terms,
+                            &self.people[i].modifiers, &[(CTX_GREATER_CENTRE, pick == 0)]);
+                        let odds = odds_milli(&outcome.probs);
+                        let pid = self.people[i].id;
+                        if pick == 0 {
                             let teacher = self.people.iter()
                                 .filter(|p| p.is_alive() && p.current_hub == dest as i32
                                     && p.roles.iter().any(|&r| matches!(r, ROLE_SCHOLAR | ROLE_PHILOSOPHER | ROLE_IDEOLOGUE))
                                     && p.scholar_stage == STAGE_TEACH)
                                 .max_by(|a, b| a.fame.partial_cmp(&b.fame).unwrap_or(std::cmp::Ordering::Equal))
                                 .map(|p| p.id as i32);
-                            self.people[i].current_hub = dest as i32;
+                            self.relocate_person(i, dest as i32);
                             self.people[i].teacher_id = teacher.unwrap_or(-1);
-                            let pid = self.people[i].id;
-                            self.log_milestone(pid, MS_STUDY, vec![dest as u32, teacher.map(|t| t as u32).unwrap_or(u32::MAX)]);
+                            self.log_decision_milestone(pid, MS_STUDY,
+                                vec![dest as u32, teacher.map(|t| t as u32).unwrap_or(u32::MAX), hu as u32],
+                                odds, 0, DK_STUDY, why);
                             // A student enrolls in the teacher's own school, if they founded one.
                             if let Some(t) = teacher {
                                 if let Some(sc) = self.schools.iter_mut().find(|sc| sc.founder as i32 == t) {
@@ -527,6 +545,12 @@ impl CampaignSim {
                                     tp.fame = (tp.fame + SCHOLAR_STUDENT_FAME).min(1.0);
                                 }
                             }
+                        } else {
+                            // Stayed: the decision rides on the teaching milestone below.
+                            self.people[i].scholar_stage = STAGE_TEACH;
+                            self.people[i].fame = (self.people[i].fame + SCHOLAR_TEACH_FAME).min(1.0);
+                            self.log_decision_milestone(pid, MS_TEACH, vec![hu as u32, dest as u32], odds, 1, DK_STUDY, why);
+                            continue;
                         }
                     }
                     self.people[i].scholar_stage = STAGE_TEACH;
@@ -548,14 +572,28 @@ impl CampaignSim {
                         if !is_home { 0.15 } else { -0.15 },
                         if has_house_wealth { 0.15 } else { -0.1 },
                     ];
+                    // 2026-09-30b · the scholar's own character weighs in too.
+                    let trait_terms = [
+                        vec![(TRAIT_CONTENT, 0.08), (TRAIT_SCHOLARLY, 0.05), (TRAIT_HUMBLE, 0.04)],
+                        vec![(TRAIT_LOYAL, 0.08)],
+                        vec![(TRAIT_AMBITIOUS, 0.10), (TRAIT_GREEDY, 0.05), (TRAIT_PROUD, 0.04)],
+                    ];
+                    let mod_terms = [Vec::new(), vec![(MOD_HOMESICK, 0.15), (MOD_GRIEVING, 0.05)], Vec::new()];
                     let outcome = decide(
                         self.seed, self.tick, self.people[i].id, salts::SCHOLAR_CAREER,
-                        &base, &[Vec::new(), Vec::new(), Vec::new()], &self.people[i].traits,
-                        &[Vec::new(), Vec::new(), Vec::new()], &self.people[i].modifiers, &ctx,
+                        &base, &trait_terms, &self.people[i].traits,
+                        &mod_terms, &self.people[i].modifiers, &ctx,
                     );
+                    let pick = outcome.choice.min(2);
+                    let mut context: Vec<(u16, bool)> = Vec::new();
+                    if rival_present { context.push((CTX_RIVAL_SCHOOL, pick != 0)); }
+                    if !is_home { context.push((CTX_FAR_FROM_HOME, pick == 1)); } else { context.push((CTX_AT_HOME, pick != 1)); }
+                    if has_house_wealth { context.push((CTX_PATRON_NEARBY, pick == 2)); } else { context.push((CTX_NO_PATRON, pick != 2)); }
+                    let why = decision_reasons(pick, &trait_terms, &self.people[i].traits, &mod_terms, &self.people[i].modifiers, &context);
+                    let odds = odds_milli(&outcome.probs);
                     let prev_stage = self.people[i].scholar_stage;
-                    self.people[i].scholar_stage = match outcome.choice {
-                        1 => { self.people[i].current_hub = home; STAGE_RETURNED }
+                    self.people[i].scholar_stage = match pick {
+                        1 => { self.relocate_person(i, home); STAGE_RETURNED }
                         2 => STAGE_PATRON,
                         _ => STAGE_TEACH,
                     };
@@ -563,10 +601,13 @@ impl CampaignSim {
                     let here_arg = if here >= 0 { here as u32 } else { u32::MAX };
                     if stage != prev_stage {
                         match stage {
-                            STAGE_RETURNED => self.log_milestone(pid, MS_RETURN, vec![here_arg]),
-                            STAGE_PATRON => self.log_milestone(pid, MS_PATRON, vec![here_arg]),
-                            _ => {}
+                            STAGE_RETURNED => self.log_decision_milestone(pid, MS_RETURN, vec![here_arg, hu as u32], odds, 1, DK_CAREER, why),
+                            STAGE_PATRON => self.log_decision_milestone(pid, MS_PATRON, vec![here_arg], odds, 2, DK_CAREER, why),
+                            _ => self.log_decision_milestone(pid, MS_CAREER, vec![here_arg, 1], odds, 0, DK_CAREER, why),
                         }
+                    } else {
+                        // The same road again — still a decision, but not a key moment.
+                        self.log_decision_milestone(pid, MS_CAREER, vec![here_arg, 0], odds, pick as u8, DK_CAREER, why);
                     }
                     // Every stage review a working scholar's reputation grows —
                     // more in a real centre of learning. Offsets the yearly
@@ -627,7 +668,7 @@ impl CampaignSim {
                     ta.cmp(&tb)
                 });
             if let Some(dest) = dest {
-                self.people[i].current_hub = dest as i32;
+                self.relocate_person(i, dest as i32);
                 self.people[i].scholar_stage = STAGE_EXILE;
                 self.people[i].teacher_id = -1;
                 // An exiled thinker is a cause célèbre.

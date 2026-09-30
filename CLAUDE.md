@@ -2554,6 +2554,67 @@ never rise on this fixture (0 in 100 y — unmeasured why); one doctrine still w
 most of a culture-less world;
 performers never reach the roster; tier-less towns' heads rarely do.
 
+### 5.16b The Character window, and the audit's combinations (2026-09-30b)
+
+**Every decision is recorded in full.** `IndividualLifeEntry` gained `odds`
+(`decide()`'s probability per option, per mille), `pick` and `dk` (`DK_CHOICE` a
+life dilemma · `DK_JOURNEY` settle-or-go-home at a journey's end · `DK_STUDY` go
+away to study or stay · `DK_CAREER` a scholar's road · `DK_COMMISSION` an
+artisan called by a greater city) — all serde-default, so an old log still loads
+and simply shows "odds not recorded". `why` now holds reasons on BOTH sides:
+`decision_reasons` (`life_choices.rs`, pure) keeps the top traits/modifiers that
+pulled toward the option taken and flags with `REASON_AGAINST` the ones that
+pulled the other way, plus situational `REASON_CONTEXT + CTX_*` codes (a rival
+school, far from home, a patron nearby…). A dilemma's `args[2..=4]` store what it
+actually did to the character (`TC_GAINED/DEEPENED/REPLACED/NO_ROOM/WEAKENED/
+CONFIRMED`, planned by the pure `plan_trait_change`, which is also where the
+trait soft cap now lives). Read side: `LifeEntryBrief.decision: DecisionBrief`
+(the situation, every option with odds, trait/fame/modifier/ideology
+consequences, reasons for and against), `PlaceBrief` gained coordinates, origin,
+reason, km and stay odds, `IndividualBrief` gained trait origins, live modifiers,
+teacher/students/house links and world size. Shown by `PersonWindow.tsx` (§7).
+Gates: `decisions_are_recorded_in_full` (odds form a distribution, the stored
+trait outcome is what actually happened), `decision_reasons_split_for_and_against`.
+
+**The combinations the audit recommended, and what became of each:**
+- **Scholar career as recorded decisions** (built): the study trip is now a
+  `decide()` against the scholar's traits instead of a coin flip, the career
+  review gains trait terms, and both are logged with odds even when the scholar
+  stays (`MS_CAREER`, a KEY moment only when the road actually changed).
+- **One movement system** (built): every change of city goes through
+  `relocate_person` — scholars, artisans, travellers, homecomings — and every
+  caller logs the milestone the road is read from. The artisan's call
+  (stay / commission / move) gained trait terms and is recorded.
+- **Performers tour real venues** (built): a performer's destinations weight
+  cities with live venues, the visit records the venue it played (`MS_VISIT`
+  `args[3]`, read as "to play the Great Arena"), and playing earns renown
+  (`PERFORMANCE_FAME` × prestige) — people-only, touching no venue books.
+- **One civic agenda** (Q05.3, built on the read side): `GovernmentBrief.
+  culture_motions` lists every open culture-tier question beside the council's
+  motion in the chamber. The two still debate on separate tracks in the sim (a
+  single slot would starve one or the other — §5.10).
+- **Beliefs drive culture acceptance** (built, live at `IDEOLOGY_ACCEPTANCE_DOSE`
+  1.0): the government meter's Openness axis is a drift term ("open gates" /
+  "blood and soil") and scales the persecution chance. Economically inert, since
+  every acceptance effect is still dosed at zero.
+- **Figure → Individual** (partly built): a figure carries `individual_id`, links
+  lazily by name and role (never city — people travel now), and a linked
+  figure's career and its person's life end together (`link_figures_to_people`).
+  **Minting a person for every NEW figure is a measured negative result**
+  (`FIGURES_BECOME_PEOPLE = false`): it shifted every later individual id, and so
+  the rolls that seat officials, and the dense-world trade-volume ratio fell to
+  0.20 against its 0.25 floor.
+- **Guildmaster/alderman take council seats** (built, **measured negative result**,
+  `GUILD_SEAT_CHANCE = 0.0`): bisected, it alone inverted the inheritance gate on
+  seed 42. `try_seat_guildmaster` stays built and tested at a live chance.
+- **The rows 05/07/08 prestige dose walk**: not started; it moves wealth and needs
+  its own multi-seed walk (queued).
+
+The lesson both negative results share: the government layer is now wired into
+the economy (seats → votes → edicts), so anything that changes WHO SITS moves the
+chaotic 60-year inheritance contrast. A people-layer change must be bisected
+against that gate before it ships, not argued past it.
+
 ---
 
 ## 6. Rust Backend Map (`src-tauri/src/`)
@@ -3389,6 +3450,19 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   Government tab and GovernmentPanel
   LifeStory.tsx                 ← A structured life story + the travel road (§5.16) —
                                   FiguresPanel, personShared, NotablesPanel, the chamber
+  PersonWindow.tsx              ← THE CHARACTER WINDOW (§5.16b), app-wide via
+                                  `uiStore.personWindow` (`PersonWindowHost` in App):
+                                  Life (a biography written only from the record +
+                                  the timeline) · Decisions (every decision in full —
+                                  situation, each option's odds and consequences,
+                                  reasons for and against, what it did to them) ·
+                                  Travels (a map over the world thumbnail, the
+                                  itinerary, "Show on the world map" →
+                                  `uiStore.personRoad` → `OverlayManager.
+                                  renderPersonRoad`) · Character (trait origins, the
+                                  arc of their nature, beliefs pole by pole, live
+                                  modifiers, teacher/students/house). `OpenLifeButton`
+                                  is the one entry point every person view carries
   traitIcons.tsx                ← ONE icon vocabulary: traits, offices, seat paths,
                                   ideology axes (`TraitChip`, `IdeologyBars`)
   NotablesPanel.tsx             ← 02_PEOPLE.md (Living World row 02) — the

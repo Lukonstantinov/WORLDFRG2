@@ -74,6 +74,15 @@ export interface BioParamsState {
  *  Chronicle is only reachable once the world is finalized (frozen). */
 export type AppMode = "forge" | "chronicle";
 
+/** A person's road for the map overlay (`OverlayManager.setPersonRoad`). */
+export interface PersonRoad {
+  name: string;
+  /** In order: a move (solid) or a there-and-back journey (dashed). */
+  legs: { ax: number; ay: number; bx: number; by: number; visit: boolean }[];
+  /** Every distinct city on the road, numbered in order of first arrival. */
+  stops: { x: number; y: number; city: string; n: number; home: boolean; last: boolean }[];
+}
+
 interface UIStore {
   /** Which subproduct is on screen (Forge vs Chronicle). */
   appMode: AppMode;
@@ -218,6 +227,12 @@ interface UIStore {
   showCompanies: boolean;
   /** House index whose dossier is open app-wide (null = none). */
   dossierHouse: number | null;
+  /** 2026-09-30b · the Character window: an `Individual.id`, or null. */
+  personWindow: number | null;
+  setPersonWindow: (id: number | null) => void;
+  /** A person's road drawn on the world map (null = none). */
+  personRoad: PersonRoad | null;
+  setPersonRoad: (r: PersonRoad | null) => void;
   /** The focused house's map web: null = every lane in red; a good index =
    *  only the lanes that carry that good, in its colour. */
   houseLaneGood: number | null;
@@ -579,6 +594,10 @@ export const useUIStore = create<UIStore>((set) => ({
   showFeuds: false,
   showCompanies: false,
   dossierHouse: null,
+  personWindow: null,
+  setPersonWindow: (id) => set({ personWindow: id }),
+  personRoad: null,
+  setPersonRoad: (r) => set({ personRoad: r }),
   houseLaneGood: null,
   showCityRanking: false,
   showMoneyFinance: false,

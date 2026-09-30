@@ -9,6 +9,35 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-30b — The Character window + the audit's combinations (CLAUDE.md §5.16b)
+
+End-of-batch gates: `tick::tests` **411/411**, `econ_` **6/6** (573 s).
+
+| metric | before (2026-09-30) | after | band |
+|---|---|---|---|
+| food / luxury share of consumption spend | 59.5% / 8.9% | 59.5% / 8.9% | — |
+| house wealth Gini (reference · large) | 0.774 / 0.727 | **0.684 / 0.632** | 0.60–0.85 |
+| top-10% wealth share (reference · large) | 0.600 / 0.623 | **0.416 / 0.427** | 0.60–0.90 — **OUT of band** |
+| goods with any positive price/distance gradient | 0 / 0 of 6 | 2 / 1 of 6 | — |
+| inheritance gate, partible vs primogeniture mean wealth | holds 3/3 | holds 3/3 (79,898 vs 93,655 · 78,091 vs 110,951 · 70,217 vs 86,780) | asserted |
+
+**FINDING, not yet explained:** top-10% share fell out of its band. Every live change in
+this batch is in the people layer (recorded decisions, scholar study/career decisions,
+artisan commission decisions with trait terms, performer venue tours, one movement path,
+figure↔person linking, belief-driven culture acceptance); none touches a price or a
+wealth flow directly, so the path is the one this batch already caught twice — who is
+where and who sits → votes → edicts → the economy. Bisecting which change moves the
+wealth distribution is QUEUED (one `econ_fidelity_scorecard` run per change toggled).
+
+**Two measured negative results** (both shipped dosed OFF, both bisected):
+- `FIGURES_BECOME_PEOPLE` (a person minted for every new figure): dense-world trade
+  volume ratio 0.20 against the 0.25 floor of `the_dosed_economy_stays_healthy_on_a_
+  realistically_dense_world`; with it off, 0.25+ and passing.
+- `GUILD_SEAT_CHANCE` 0.20 (guildmaster/alderman take council seats): inverted
+  `econ_inheritance_rules_fragment_differently` on seed 42 (partible 75,110 >
+  primogeniture 71,046). Toggling the belief→acceptance dose alone left the failure
+  intact; toggling the seat alone cleared it.
+
 ## 2026-09-30 — Living World audit: the rows were built and idle — measured, then brought to life (CLAUDE.md §5.16)
 
 Instrument: `econ_measure_living_world_census` (new, `#[ignore]`d) on

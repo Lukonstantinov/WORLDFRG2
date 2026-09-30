@@ -127,6 +127,25 @@ pub struct GovernmentBrief {
     pub debate: Option<DebateBrief>,
     pub edicts: Vec<EdictBrief>,
     pub history: Vec<GovHistoryBrief>,
+    /// 2026-09-30b · ONE CIVIC AGENDA (Q05.3): every culture-tier question
+    /// the council has open, listed beside its ordinary motion. The two
+    /// still debate on their own tracks in the sim (§5.10 — a single slot
+    /// would starve one or the other); what changed is that the council
+    /// window shows everything before the chamber in one place.
+    #[serde(default)] pub culture_motions: Vec<CultureMotionBrief>,
+}
+
+/// One open culture-tier proposal (row 05's shadow debate), for the agenda.
+#[derive(Serialize, Clone)]
+pub struct CultureMotionBrief {
+    pub culture: String,
+    pub from_tier: String,
+    pub to_tier: String,
+    /// true = toward full citizenship, false = toward exclusion.
+    pub warmer: bool,
+    pub round: u8,
+    pub tally: f32,
+    pub reason: String,
 }
 
 fn outcome_name(o: u8) -> &'static str {
@@ -230,6 +249,15 @@ pub fn campaign_get_government(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
         form_kind: govt_kind_key(hb.govt_type).to_string(), head_title, dominant_ideology, demands,
         legitimacy: hb.legitimacy, gov_points: hb.gov_points, gov_position: hb.gov_position,
         seats, blocs, debate, edicts, history,
+        culture_motions: hb.culture_relations.iter().filter(|r| r.proposed_tier >= 1).map(|r| CultureMotionBrief {
+            culture: r.culture.clone(),
+            from_tier: crate::sim::tick::acceptance_tier_name(r.tier).to_string(),
+            to_tier: crate::sim::tick::acceptance_tier_name(r.proposed_tier as u8).to_string(),
+            warmer: (r.proposed_tier as u8) < r.tier,
+            round: r.debate_round,
+            tally: r.debate_tally,
+            reason: r.reason.clone(),
+        }).collect(),
     }))
 }
 

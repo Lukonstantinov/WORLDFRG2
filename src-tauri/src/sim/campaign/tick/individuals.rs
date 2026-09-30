@@ -358,7 +358,7 @@ pub struct Modifier {
     pub note: String,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
 pub struct IndividualLifeEntry {
     pub tick: u32,
     pub template_id: u16,
@@ -369,6 +369,17 @@ pub struct IndividualLifeEntry {
     /// `REASON_CONTEXT`. Empty for an ordinary happening or a milestone.
     #[serde(default)]
     pub why: Vec<u16>,
+    /// 2026-09-30b · a DECISION's odds — the normalised probability `decide()`
+    /// gave each option, per mille. Empty = this entry records no decision.
+    #[serde(default)]
+    pub odds: Vec<u16>,
+    /// The option taken (index into `odds`).
+    #[serde(default)]
+    pub pick: u8,
+    /// What kind of decision (`life_choices::DK_*`): a life dilemma, a
+    /// journey's end, going away to study, a scholar's career.
+    #[serde(default)]
+    pub dk: u8,
 }
 
 /// A tombstone — kept while anything still points at a forgotten ordinary
@@ -653,6 +664,7 @@ impl CampaignSim {
             let traits = roll_debut_traits(self.seed, trait_salt);
             let id = self.next_individual_id;
             self.next_individual_id += 1;
+            self.figures[i].individual_id = id as i32;
             let indiv = Individual {
                 id,
                 name: f.name.clone(),
@@ -766,7 +778,7 @@ impl CampaignSim {
         self.people.push(indiv);
         // 2026-09-30 · the first KEY line of every life (`life_choices.rs`).
         let idx = self.people.len() - 1;
-        let e = IndividualLifeEntry { tick: self.tick, template_id: MS_DEBUT, args: vec![h as u32, role as u32], why: Vec::new() };
+        let e = IndividualLifeEntry { tick: self.tick, template_id: MS_DEBUT, args: vec![h as u32, role as u32], why: Vec::new(), ..Default::default() };
         self.push_life_entry(idx, e);
         id
     }
@@ -817,7 +829,7 @@ impl CampaignSim {
                 self.people[i].death_cause = cause;
                 let hub = self.people[i].current_hub;
                 let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
-                let e = IndividualLifeEntry { tick, template_id: MS_DEATH, args: vec![hub_arg, cause as u32], why: Vec::new() };
+                let e = IndividualLifeEntry { tick, template_id: MS_DEATH, args: vec![hub_arg, cause as u32], why: Vec::new(), ..Default::default() };
                 self.people[i].life_log.push(e);
                 newly_dead.push(i);
                 continue;

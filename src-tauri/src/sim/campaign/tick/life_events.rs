@@ -562,7 +562,7 @@ impl CampaignSim {
         // `u32::MAX` marks "no hub" (an abroad/unknown person) so rendering
         // never mistakes it for hub 0 — every world has a real hub 0.
         let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
-        let entry = IndividualLifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg], why: Vec::new() };
+        let entry = IndividualLifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg], why: Vec::new(), ..Default::default() };
         let famous = self.people[i].famous;
         let (fame_delta, trait_gain) = (t.fame_delta, t.trait_gain);
         let feature_gain = t.feature_gain;

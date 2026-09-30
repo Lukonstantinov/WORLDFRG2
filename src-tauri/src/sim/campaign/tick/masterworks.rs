@@ -303,28 +303,42 @@ impl CampaignSim {
             let gap = self.hubs[dest].track_level[TRACK_IDEOLOGICAL] as i32 - self.hubs[hu].track_level[TRACK_IDEOLOGICAL] as i32;
             if gap < 1 { continue; }
             let base = [0.7, 0.2, 0.1];
+            // 2026-09-30b · the artisan's own character weighs the call:
+            // content and loyal stay, curious take the commission, ambitious
+            // and proud go for good. Recorded as a decision (odds + reasons).
+            let trait_terms = [
+                vec![(TRAIT_CONTENT, 0.08), (TRAIT_LOYAL, 0.08)],
+                vec![(TRAIT_CURIOUS, 0.08)],
+                vec![(TRAIT_AMBITIOUS, 0.08), (TRAIT_PROUD, 0.04)],
+            ];
+            let mod_terms = [vec![(MOD_HOMESICK, 0.1)], Vec::new(), vec![(MOD_NEWLY_WEALTHY, 0.05)]];
             let outcome = decide(
                 self.seed, self.tick, self.people[i].id, 0xA040,
-                &base, &[Vec::new(), Vec::new(), Vec::new()], &self.people[i].traits,
-                &[Vec::new(), Vec::new(), Vec::new()], &self.people[i].modifiers,
+                &base, &trait_terms, &self.people[i].traits,
+                &mod_terms, &self.people[i].modifiers,
                 &[0.0, gap as f32 * 0.05, gap as f32 * 0.1],
             );
-            match outcome.choice {
+            let pick = outcome.choice.min(2);
+            let why = decision_reasons(pick, &trait_terms, &self.people[i].traits, &mod_terms, &self.people[i].modifiers,
+                &[(CTX_GREATER_CENTRE, pick != 0)]);
+            let odds = odds_milli(&outcome.probs);
+            let pid = self.people[i].id;
+            match pick {
                 1 => {
                     // Commission: travel, make the work, return home now.
-                    self.people[i].current_hub = dest as i32;
-                    let maker = self.people[i].id as i32;
-                    self.mint_masterwork(dest, maker, OWNER_CITY, dest as i32);
-                    self.people[i].current_hub = home;
-                    self.log_milestone(maker as u32, MS_VISIT, vec![dest as u32, hu as u32, MOVE_COMMISSION]);
+                    self.relocate_person(i, dest as i32);
+                    self.mint_masterwork(dest, pid as i32, OWNER_CITY, dest as i32);
+                    self.relocate_person(i, home);
+                    self.log_decision_milestone(pid, MS_VISIT, vec![dest as u32, hu as u32, MOVE_COMMISSION], odds, 1, DK_COMMISSION, why);
                 }
                 2 => {
                     // Relocation — a strong enough pull to move for good.
-                    self.people[i].current_hub = dest as i32;
-                    let pid = self.people[i].id;
-                    self.log_milestone(pid, MS_MOVE, vec![dest as u32, hu as u32, MOVE_COMMISSION]);
+                    self.relocate_person(i, dest as i32);
+                    self.log_decision_milestone(pid, MS_MOVE, vec![dest as u32, hu as u32, MOVE_COMMISSION], odds, 2, DK_COMMISSION, why);
                 }
-                _ => {}
+                _ => {
+                    self.log_decision_milestone(pid, MS_CAREER, vec![hu as u32, 0, dest as u32], odds, 0, DK_COMMISSION, why);
+                }
             }
         }
     }

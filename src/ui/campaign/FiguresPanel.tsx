@@ -10,6 +10,7 @@ import { drawBust, deriveKit, kitForCulture, type DressKit, type Occasion } from
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { TraitChip } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
+import { OpenLifeButton } from "@ui/campaign/PersonWindow";
 
 /** Notable Figures — the campaign's great lives as a gallery of portraits.
  *  Each card carries the person's likeness (their city's dress, varied per
@@ -300,6 +301,7 @@ function FigureCard({ f, year, selected, onClick }: {
         {((f.life && f.life.length > 0) || (f.life_events && f.life_events.length > 0)) && (
           <div style={{ marginTop: 6 }}>
             <span style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.4 }}>Life story</span>
+            <span style={{ marginLeft: 8 }}><OpenLifeButton id={f.individual_id} /></span>
             <div style={{ marginTop: 3 }}>
               <LifeStory life={f.life} places={f.places} color={spec.color} fallback={f.life_events} />
             </div>

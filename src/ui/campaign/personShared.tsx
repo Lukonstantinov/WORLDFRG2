@@ -4,6 +4,7 @@ import type { IndividualBrief } from "@types";
 import { drawBust, individualKit } from "@ui/campaign/cultureDress";
 import { TraitChip, IdeologyBars } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
+import { OpenLifeButton } from "@ui/campaign/PersonWindow";
 
 /** Shared "who holds this office / this role" chip — a bust portrait (the
  *  same `cultureDress` renderer `NotablesPanel.tsx` already draws with),
@@ -74,6 +75,7 @@ function PersonExpanded({ person }: { person: IndividualBrief }) {
             <span>{person.ideology_name ? `leans to ${person.ideology_name}` : "no settled doctrine"}</span>
           </div>
         )}
+        <div style={{ marginBottom: 4 }}><OpenLifeButton id={person.id} /></div>
         <LifeStory life={person.life} places={person.places} fallback={person.life_log.slice().reverse()} />
       </div>
     </div>

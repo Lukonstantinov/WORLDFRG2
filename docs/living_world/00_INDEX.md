@@ -81,6 +81,15 @@ and structured life story UI. Rows keep their DONE/PARTIAL status — this chang
 what they produce, not what they contain. **Combinations the audit recommends** are
 listed in `docs/SCOREBOARD.md` 2026-09-30.
 
+**2026-09-30b follow-up** (CLAUDE.md §5.16b): every decision a person makes is now
+recorded with its odds and reasons for and against, and shown in the new Character
+window (life · decisions · travels on a map · character). Of the audit's
+combinations, scholar decisions, one movement path, performers touring venues, the
+one civic agenda (Q05.3, read side) and belief-driven culture acceptance shipped
+live; minting a person for every new figure and guildmaster/alderman seats are
+measured negative results (dosed off, bisected against the dense-world and
+inheritance gates); the rows 05/07/08 prestige dose walk is queued.
+
 ## Rules that apply to every row
 
 **Observation only.** The player watches; every choice in these documents is the

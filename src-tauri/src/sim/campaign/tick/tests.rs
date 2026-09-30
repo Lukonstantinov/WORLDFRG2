@@ -10079,7 +10079,7 @@
 
 
     fn test_figure(kind: u8, house: i32, good: i32) -> Figure {
-        Figure { name: "Test Figure".into(), kind, hub: 0, house, good,
+        Figure { individual_id: -1, name: "Test Figure".into(), kind, hub: 0, house, good,
             born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false, life_log: Vec::new() }
     }
 
@@ -10329,7 +10329,7 @@
             hub: 0, good: 0, strength: 0.5, hall: false, secrecy: 0.0,
             idle_years: 0.0, signature: None,
         });
-        s.figures.push(Figure {
+        s.figures.push(Figure { individual_id: -1,
             name: "Rabble Rouser".into(), kind: 1, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: 100_000, dead: false, rallied: false,
             life_log: Vec::new(),
@@ -10387,9 +10387,9 @@
     #[test]
     fn figures_migrate_to_individuals_losslessly() {
         let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], vec![good("cloth", 1, 1, 2.0, 0.5, false)]);
-        s.figures.push(Figure { name: "Alive Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
+        s.figures.push(Figure { individual_id: -1, name: "Alive Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
             born_tick: 100, dies_tick: 999_999, dead: false, rallied: false, life_log: Vec::new() });
-        s.figures.push(Figure { name: "Dead Banker".into(), kind: 3, hub: 0, house: -1, good: -1,
+        s.figures.push(Figure { individual_id: -1, name: "Dead Banker".into(), kind: 3, hub: 0, house: -1, good: -1,
             born_tick: 50, dies_tick: 200, dead: true, rallied: false, life_log: Vec::new() });
         s.migrate_figures_to_individuals();
         assert!(s.people.iter().any(|p| p.name == "Alive Admiral" && p.roles.contains(&ROLE_ADMIRAL)),
@@ -10514,7 +10514,7 @@
         let id = s.spawn_individual(0, ROLE_SCHOLAR, "Famous Scholar".into(), -1);
         let idx = s.people.iter().position(|p| p.id == id).unwrap();
         s.people[idx].famous = true;
-        s.people[idx].life_log.push(IndividualLifeEntry { tick: 5, template_id: 1, args: vec![0], why: vec![] });
+        s.people[idx].life_log.push(IndividualLifeEntry { tick: 5, template_id: 1, args: vec![0], why: vec![], ..Default::default() });
         s.remove_dead_individual(idx, 3);
         assert!(s.people.iter().all(|p| p.id != id), "a dead person must leave `people`");
         let dead = s.hall_of_dead.iter().find(|p| p.id == id).expect("a dead NOTABLE must be in the Hall of the Dead");
@@ -10612,7 +10612,7 @@
         let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
         let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
         let mut s = sim(vec![h], goods);
-        s.figures.push(Figure {
+        s.figures.push(Figure { individual_id: -1,
             name: "Old Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: u32::MAX, dead: false, rallied: false,
             life_log: Vec::new(),
@@ -10739,7 +10739,7 @@
         let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
         let h = hub(0, 0.0, 0.0, 1000.0, vec![10.0], 0);
         let mut s = sim(vec![h], goods);
-        let mut f = Figure {
+        let mut f = Figure { individual_id: -1,
             name: "Ancient Figure".into(), kind: 0, hub: 0, house: -1, good: -1,
             born_tick: 0, dies_tick: 10 * TICKS_PER_YEAR, dead: true, rallied: false,
             life_log: Vec::new(),
@@ -12474,6 +12474,158 @@
         assert!(text.contains("Tested Soul") && !text.contains("{"), "rendered: {text}");
     }
 
+    /// 2026-09-30b · every decision is recorded IN FULL — the odds each option
+    /// carried, the one taken, the reasons on both sides, and what it did to
+    /// the character — so the Character window can show a decision rather
+    /// than only its outcome.
+    #[test]
+    fn decisions_are_recorded_in_full() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let h = hub(0, 0.0, 0.0, 10_000.0, vec![200.0], 0);
+        let mut s = sim(vec![h], goods);
+        let id = s.spawn_individual(0, ROLE_SCHOLAR, "Weigher".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        s.people[idx].famous = true;
+        for k in 0..80u32 {
+            s.tick = k * 30;
+            let before = s.people[idx].traits.clone();
+            assert!(s.fire_choice_event(idx));
+            let e = s.people[idx].life_log.iter().rev().find(|e| e.template_id >= 2000).unwrap().clone();
+            assert_eq!(e.odds.len(), 2, "a dilemma stores both options' odds");
+            let sum: u32 = e.odds.iter().map(|&v| v as u32).sum();
+            assert!((995..=1005).contains(&sum), "odds are a distribution, got {sum}");
+            assert_eq!(e.pick as u32, e.args[1], "the pick and the chosen option agree");
+            assert_eq!(e.dk, DK_CHOICE);
+            assert_eq!(e.args.len(), 5, "hub, choice, trait outcome, trait, lost");
+            // The stored trait outcome is what actually happened.
+            let after = &s.people[idx].traits;
+            let t = e.args[3] as u8;
+            match e.args[2] {
+                TC_GAINED => assert!(!before.iter().any(|&(x, _)| x == t) && after.iter().any(|&(x, _)| x == t)),
+                TC_DEEPENED => assert!(after.iter().any(|&(x, st)| x == t && st == 2)),
+                TC_REPLACED => assert!(after.iter().any(|&(x, _)| x == t) && !after.iter().any(|&(x, _)| x == e.args[4] as u8)),
+                TC_NO_ROOM => assert_eq!(&before, after, "no room means no change"),
+                _ => {}
+            }
+        }
+        // Journeys record the stay-or-go decision too.
+        let hubs: Vec<TickHub> = (0..4).map(|i| hub(i, i as f32 * 3.0, 0.0, 20_000.0, vec![400.0], 0)).collect();
+        let mut w = sim(hubs, vec![good("wheat", 0, 0, 1.0, 0.85, true)]);
+        w.rebuild_routes();
+        for k in 0..12 { w.spawn_individual(k % 4, ROLE_PERFORMER, format!("Player {k}"), -1); }
+        for yr in 0..30 { w.tick = yr * TICKS_PER_YEAR; w.people_travel_pass(yr); }
+        let mut n = 0;
+        for p in &w.people {
+            for e in p.life_log.iter().filter(|e| e.template_id == MS_MOVE || e.template_id == MS_VISIT) {
+                n += 1;
+                assert_eq!(e.dk, DK_JOURNEY);
+                assert_eq!(e.odds.len(), 2);
+                assert_eq!(e.pick, if e.template_id == MS_MOVE { 0 } else { 1 });
+            }
+        }
+        assert!(n > 5, "the fixture must actually travel, got {n}");
+    }
+
+    /// Reasons are split FOR and AGAINST the option taken.
+    #[test]
+    fn decision_reasons_split_for_and_against() {
+        let terms = [vec![(TRAIT_CURIOUS, 0.1)], vec![(TRAIT_LOYAL, 0.1)]];
+        let traits = vec![(TRAIT_CURIOUS, 1i8), (TRAIT_LOYAL, 2i8)];
+        let why = decision_reasons(0, &terms, &traits, &[Vec::new(), Vec::new()], &[], &[(CTX_FAR_FROM_HOME, true)]);
+        assert!(why.contains(&(TRAIT_CURIOUS as u16)), "curiosity pulled toward the pick");
+        assert!(why.contains(&(TRAIT_LOYAL as u16 | REASON_AGAINST)), "loyalty pulled the other way");
+        assert!(why.contains(&(REASON_CONTEXT + CTX_FAR_FROM_HOME)));
+        // Planning never mutates.
+        let t = vec![(TRAIT_BRAVE, 2i8)];
+        assert_eq!(plan_trait_change(&t, TRAIT_CRAVEN), (TC_WEAKENED, TRAIT_CRAVEN, TRAIT_BRAVE));
+        assert_eq!(plan_trait_change(&t, TRAIT_BRAVE).0, TC_CONFIRMED);
+        assert_eq!(t, vec![(TRAIT_BRAVE, 2i8)]);
+    }
+
+    /// 2026-09-30b · a city's beliefs move how it treats its foreigners:
+    /// "open gates" warms a resident culture, "blood and soil" chills it.
+    #[test]
+    fn belief_moves_culture_acceptance() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![10.0], 0)], goods);
+        s.hub_culture = vec!["Host".into()];
+        s.hubs[0].ideology_seeded = true;
+        let (neutral, _) = s.culture_relation_drift(0, "Outsider", 0.10, 4, 0.0);
+        s.hubs[0].ideology_gov[super::ideology::AX_OPENNESS] = 4.0;
+        let (open, why_open) = s.culture_relation_drift(0, "Outsider", 0.10, 4, 0.0);
+        s.hubs[0].ideology_gov[super::ideology::AX_OPENNESS] = -4.0;
+        let (closed, why_closed) = s.culture_relation_drift(0, "Outsider", 0.10, 4, 0.0);
+        assert!(open > neutral && neutral > closed, "open {open} > neutral {neutral} > closed {closed}");
+        assert!(why_open.contains("open gates") && why_closed.contains("blood and soil"), "{why_open} / {why_closed}");
+    }
+
+    /// 2026-09-30b · a figure IS a person: raising one mints its Individual,
+    /// and the two lives end together whichever ends first.
+    #[test]
+    fn a_figure_is_one_person() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 50_000.0, vec![10.0], 0)], goods);
+        s.people_migrated = true;
+        // A figure whose person already exists (the migration case).
+        let iid = s.spawn_individual(0, role_for_figure_kind(0), "Linked Admiral".into(), -1);
+        s.figures.push(Figure { individual_id: -1, name: "Linked Admiral".into(), kind: 0, hub: 0, house: -1, good: -1,
+            born_tick: 0, dies_tick: 5 * TICKS_PER_YEAR, dead: false, rallied: false, life_log: Vec::new() });
+        s.tick = TICKS_PER_YEAR;
+        s.link_figures_to_people(1);
+        assert_eq!(s.figures[0].individual_id, iid as i32, "linked by name and role, not by city");
+        // Moving city does not break the link.
+        if let Some(p) = s.people.iter_mut().find(|p| p.id == iid) { p.current_hub = -1; }
+        // The career ends → the person dies with it.
+        s.tick = 5 * TICKS_PER_YEAR;
+        s.raise_notable_figures(5);
+        assert!(s.figures[0].dead, "the figure's career is over");
+        assert!(!s.people.iter().any(|p| p.id == iid && p.is_alive()), "and so is the life");
+    }
+
+    /// 2026-09-30b · the city's guildmaster can take a council seat (the
+    /// "guild representative" path), carrying their own identity in.
+    #[test]
+    fn a_guildmaster_can_take_a_council_seat() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.5, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 30_000.0, vec![10.0], 0)], goods);
+        s.seed_government(0);
+        let gid = s.spawn_individual(0, ROLE_GUILDMASTER, "Master Weaver".into(), -1);
+        s.hubs[0].notables.push(Notable { role: NOTABLE_GUILDMASTER, name: "Master Weaver".into(), good: 0, individual_id: gid as i32 });
+        let mut seated = false;
+        for k in 0..200u32 {
+            s.tick = k * 97;
+            let oi = (k as usize) % s.hubs[0].officials.len().max(1);
+            if s.hubs[0].officials.is_empty() { break; }
+            if s.try_seat_guildmaster(0, oi, 5 * TICKS_PER_YEAR, 0.5, 0.2) { assert_eq!(s.hubs[0].officials[oi].individual_id, gid as i32); }
+            if s.hubs[0].officials.iter().any(|o| o.individual_id == gid as i32 && o.path == PATH_GUILD) { seated = true; break; }
+        }
+        assert!(seated, "over 200 reseatings the guildmaster must take a seat once");
+        let n = s.hubs[0].officials.iter().filter(|o| o.individual_id == gid as i32).count();
+        assert_eq!(n, 1, "never two seats for one person");
+    }
+
+    /// 2026-09-30b · performers tour to real stages and are known for it.
+    #[test]
+    fn performers_tour_real_venues() {
+        let hubs: Vec<TickHub> = (0..4).map(|i| hub(i, i as f32 * 3.0, 0.0, 20_000.0, vec![400.0], 0)).collect();
+        let mut s = sim(hubs, vec![good("wheat", 0, 0, 1.0, 0.85, true)]);
+        s.rebuild_routes();
+        s.venues.push(Venue {
+            id: 7, hub: 2, leisure_type: LEISURE_ARENA, tier: 2, name: "Great Arena".into(),
+            condition: COND_THRIVING, funder_kind: FUND_HOUSE, sponsor_house: -1, built_tick: 0,
+            games_held: 0, last_game_tick: 0, distress_years: 0, prestige: 0.5, international_host: false,
+        });
+        for k in 0..10 { s.spawn_individual(k % 2, ROLE_PERFORMER, format!("Player {k}"), -1); }
+        for yr in 0..30 { s.tick = yr * TICKS_PER_YEAR; s.people_travel_pass(yr); }
+        let played: Vec<&IndividualLifeEntry> = s.people.iter().flat_map(|p| p.life_log.iter())
+            .filter(|e| (e.template_id == MS_VISIT || e.template_id == MS_MOVE) && e.args.get(3) == Some(&8)).collect();
+        assert!(!played.is_empty(), "someone must play the Great Arena in 30 years");
+        assert!(played.iter().all(|e| e.args[0] == 2), "the venue is where it stands");
+        let p = s.people.iter().find(|p| p.life_log.iter().any(|e| e.args.get(3) == Some(&8))).unwrap();
+        let text = s.render_life_entry_for(&p.name, p.life_log.iter().find(|e| e.args.get(3) == Some(&8)).unwrap());
+        assert!(text.contains("Great Arena"), "{text}");
+    }
+
     /// An ordinary person's log keeps its KEY entries when chatter overflows.
     #[test]
     fn key_life_entries_survive_pruning() {
@@ -12482,7 +12634,7 @@
         let id = s.spawn_individual(0, ROLE_OFFICIAL, "Keeper".into(), -1);
         let idx = s.people.iter().position(|p| p.id == id).unwrap();
         for k in 0..40u32 {
-            s.push_life_entry(idx, IndividualLifeEntry { tick: k, template_id: 1, args: vec![0], why: vec![] });
+            s.push_life_entry(idx, IndividualLifeEntry { tick: k, template_id: 1, args: vec![0], why: vec![], ..Default::default() });
         }
         assert!(s.people[idx].life_log.iter().any(|e| e.template_id == MS_DEBUT), "the debut survives 40 lines of chatter");
         assert!(s.people[idx].life_log.len() <= ORDINARY_LIFE_LOG_CAP + ORDINARY_KEY_LOG_CAP);

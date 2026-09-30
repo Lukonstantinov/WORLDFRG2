@@ -5001,6 +5001,17 @@ pub const PATH_MILITARY: u8 = 1;
 pub const PATH_WEALTH: u8 = 2;
 pub const PATH_GUILD: u8 = 3;
 pub const PATH_SCHOLAR: u8 = 4;
+/// 2026-09-30b · chance an open council seat goes to the city's guildmaster
+/// (the L12 townsperson), and — when above zero — that a council house's
+/// installed kinsman is its real alderman rather than a fresh name.
+/// **MEASURED NEGATIVE RESULT at 0.20**: bisected against the belief→
+/// acceptance dose, this alone inverted `econ_inheritance_rules_fragment_
+/// differently` on seed 42 (partible mean wealth 75,110 > primogeniture
+/// 71,046) — who sits drives edicts, edicts reach the economy, and the gate's
+/// 60-year wealth contrast is chaotically sensitive to that. Built and tested
+/// (`try_seat_guildmaster`, `a_guildmaster_can_take_a_council_seat`); walk it
+/// with the multi-seed gate per step.
+pub const GUILD_SEAT_CHANCE: f32 = 0.0;
 pub const PATH_ELECTED: u8 = 5;
 pub const PATH_BRIBED: u8 = 6;
 pub const PATH_APPOINTED: u8 = 7;
@@ -7325,6 +7336,20 @@ pub const FIGURE_KINDS: [&str; 5] =
 const FIGURE_LIVING_CAP: usize = 6;
 /// Total roster cap (living + dead kept for the record) — bounds save size.
 const FIGURE_CAP: usize = 60;
+/// 2026-09-30b · the fame a figure's person debuts with — above the notable
+/// threshold, since a figure is notable by definition.
+pub(crate) const FIGURE_DEBUT_FAME: f32 = 0.70;
+/// 2026-09-30b · MEASURED NEGATIVE RESULT — minting a real `Individual` for
+/// every figure raised mid-campaign (so each figure IS a person with a life,
+/// decisions and a road) collapsed `the_dosed_economy_stays_healthy_on_a_
+/// realistically_dense_world`'s trade-volume ratio to 0.20 (floor 0.25):
+/// the extra people shift every later individual id, which keys the rolls
+/// that seat officials, and seats drive edicts. Bisected: guild seats and
+/// the belief→acceptance dose were each bit-identical on that gate; only
+/// this moved it. Off until the people layer's rolls are decoupled from id
+/// order. Figures that migrated into people are still linked by id and
+/// still end together with their person (`link_figures_to_people`).
+pub(crate) const FIGURES_BECOME_PEOPLE: bool = false;
 /// Yearly probability the world raises a new notable figure.
 const FIGURE_YEARLY_CHANCE: f32 = 0.45;
 /// A LIVING figure's yearly influence (`living_figures_pass`). Each is small and
@@ -7433,6 +7458,12 @@ pub struct Figure {
     /// bounded — at most a handful of role-matching entries a year, for one life.
     #[serde(default)]
     pub life_log: Vec<LifeEntry>,
+    /// 2026-09-30b · THE PERSON this figure is — the `Individual` that holds
+    /// their identity, traits, decisions, road and death. The figure itself
+    /// is now only the EFFECT record (its capped legacy and living
+    /// influence); −1 on an old save until `link_figures_to_people` finds it.
+    #[serde(default = "neg_one_i32")]
+    pub individual_id: i32,
 }
 
 /// One entry in a `Figure`'s materialised life story — a copy of a world-journal
@@ -9827,7 +9858,22 @@ impl CampaignSim {
                 return;
             }
         }
-        let iid = self.individual_id_for_official(h, &name);
+        // 2026-09-30b · the city's own townspeople (L12) take their seats. An
+        // open seat may go to the GUILDMASTER — the "guild representative"
+        // path, which before this was only ever a label at a city's founding —
+        // and when the council house installs one of its own, the kinsman IS
+        // the city's alderman (its `kin[1]`), not a stranger with its surname.
+        if kin_house < 0 && self.try_seat_guildmaster(h, oi, term, suitability, GUILD_SEAT_CHANCE) { return; }
+        let alderman = if kin_house >= 0 && GUILD_SEAT_CHANCE > 0.0 && kin_house == self.hubs[h].council_house {
+            self.unseated_townsperson(h, NOTABLE_ALDERMAN)
+        } else { None };
+        let (name, iid) = match alderman {
+            Some((aid, aname)) => {
+                self.log_milestone(aid as u32, MS_OFFICE, vec![h as u32]);
+                (aname, aid)
+            }
+            None => { let iid = self.individual_id_for_official(h, &name); (name, iid) }
+        };
         {
             let o = &mut self.hubs[h].officials[oi];
             o.name = name;
@@ -9845,6 +9891,29 @@ impl CampaignSim {
                 text: format!("A {} kinsman is installed as {} of {}", hn, office_title(role), cn),
             });
         }
+    }
+
+    /// 2026-09-30b · a city's L12 townsperson of `role` (guildmaster,
+    /// alderman) who has a person record and holds no seat here yet.
+    fn unseated_townsperson(&self, h: usize, role: u8) -> Option<(i32, String)> {
+        let seated: Vec<i32> = self.hubs[h].officials.iter().map(|o| o.individual_id).collect();
+        self.hubs[h].notables.iter()
+            .find(|n| n.role == role && n.individual_id >= 0 && !seated.contains(&n.individual_id))
+            .map(|n| (n.individual_id, n.name.clone()))
+    }
+
+    /// 2026-09-30b · the "guild representative" path: an open seat goes to
+    /// the city's guildmaster with probability `chance`. Returns whether the
+    /// seat was filled. Shipped at `GUILD_SEAT_CHANCE = 0.0` (see there).
+    pub(crate) fn try_seat_guildmaster(&mut self, h: usize, oi: usize, term: u32, suitability: f32, chance: f32) -> bool {
+        if chance <= 0.0 || hash01(self.seed, self.tick as u64 ^ 0x6D51, (h as u64) ^ oi as u64) >= chance { return false; }
+        let Some((gid, gname)) = self.unseated_townsperson(h, NOTABLE_GUILDMASTER) else { return false };
+        let o = &mut self.hubs[h].officials[oi];
+        o.name = gname; o.term_end = self.tick + term; o.path = PATH_GUILD;
+        o.suitability = suitability; o.individual_id = gid;
+        o.house = -1; o.control = 0.0; o.kin = false;
+        self.log_milestone(gid as u32, MS_OFFICE, vec![h as u32]);
+        true
     }
 
     /// Append a law to a city's government log (bounded).

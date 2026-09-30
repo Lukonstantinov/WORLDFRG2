@@ -2117,6 +2117,13 @@ export class OverlayManager {
   /** Transient highlight of one settlement's trade flows (Trade ▸ Flows subtab):
    *  glowing arrows between the city and its partners. dir 0 = inbound (arrow → city),
    *  1 = outbound (arrow → partner). Drawn whenever set; cleared with []. */
+  /** 2026-09-30b · a person's road (the Character window's "show on map"):
+   *  moves drawn solid, there-and-back journeys dashed, every city numbered in
+   *  the order they first reached it. Legs go through `laneBetween`, so they
+   *  follow the real roads and sea lanes wherever one is known. */
+  personRoad: { name: string; legs: { ax: number; ay: number; bx: number; by: number; visit: boolean }[];
+    stops: { x: number; y: number; city: string; n: number; home: boolean; last: boolean }[] } | null = null;
+  setPersonRoad(r: OverlayManager["personRoad"]) { this.personRoad = r && r.stops.length > 0 ? r : null; }
   flowHighlight: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[] = [];
   setFlowHighlight(segs: { ax: number; ay: number; bx: number; by: number; dir: number; w: number; relayX?: number; relayY?: number }[], gridW: number) {
     this.flowHighlight = segs;
@@ -3296,6 +3303,9 @@ export class OverlayManager {
     // Trade ▸ Flows highlight (always on top when set by the settlement panel).
     if (this.flowHighlight.length > 0) {
       this.renderFlowHighlight(ctx);
+    }
+    if (this.personRoad) {
+      this.renderPersonRoad(ctx);
     }
 
     // Directional trade corridors: one net-direction arrow per hub→hub corridor
@@ -4604,6 +4614,72 @@ export class OverlayManager {
     ctx.globalAlpha = 1;
     ctx.textAlign = "left";
     ctx.textBaseline = "alphabetic";
+  }
+
+  private renderPersonRoad(ctx: CanvasRenderingContext2D) {
+    const road = this.personRoad;
+    if (!road) return;
+    const inv = 1 / Math.sqrt(this.currentScale);
+    const W = this.worldW;
+    const MOVE = "#e8b86a", VISIT = "#b8a0e8";
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+    const strokeRun = (run: [number, number][]) => {
+      ctx.beginPath();
+      ctx.moveTo(run[0][0], run[0][1]);
+      for (let i = 1; i < run.length; i++) ctx.lineTo(run[i][0], run[i][1]);
+      ctx.stroke();
+    };
+    road.legs.forEach((leg) => {
+      const lane = this.laneBetween([leg.ax, leg.ay], [leg.bx, leg.by]);
+      if (lane.pts.length < 2) return;
+      const runs = this.mediumRuns(lane.pts, lane.sea, W);
+      const w = Math.max(1.3, (leg.visit ? 1.6 : 2.4) * inv);
+      ctx.strokeStyle = leg.visit ? VISIT : MOVE;
+      for (const run of runs) {
+        ctx.setLineDash(leg.visit ? [Math.max(2, 4 * inv), Math.max(2, 4 * inv)] : run.sea ? [Math.max(3, 7 * inv), Math.max(2, 4 * inv)] : []);
+        ctx.globalAlpha = 0.25; ctx.lineWidth = w * 3; strokeRun(run.pts);
+        ctx.globalAlpha = 0.95; ctx.lineWidth = w; strokeRun(run.pts);
+      }
+      ctx.setLineDash([]);
+      // An arrowhead where the leg arrives (a journey's return is implied).
+      const pts = lane.pts;
+      const [tx, ty] = pts[pts.length - 1], [fx, fy] = pts[pts.length - 2];
+      if (!(W > 0 && Math.abs(tx - fx) > W / 2)) {
+        const ang = Math.atan2(ty - fy, tx - fx), ah = Math.max(3, 7 * inv);
+        const back = Math.max(2, 5 * inv);
+        const cx = tx - back * Math.cos(ang), cy = ty - back * Math.sin(ang);
+        ctx.globalAlpha = 1; ctx.fillStyle = leg.visit ? VISIT : MOVE;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx - ah * Math.cos(ang - 0.45), cy - ah * Math.sin(ang - 0.45));
+        ctx.lineTo(cx - ah * Math.cos(ang + 0.45), cy - ah * Math.sin(ang + 0.45));
+        ctx.closePath(); ctx.fill();
+      }
+    });
+    // Numbered stops; home gets a ring, where they are now a filled marker.
+    const r = Math.max(3.5, 7 * inv);
+    const fs = Math.max(4, 9 * inv);
+    for (const st of road.stops) {
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = st.last ? MOVE : "#1a1410";
+      ctx.strokeStyle = st.home ? "#fff4d6" : MOVE;
+      ctx.lineWidth = Math.max(0.8, (st.home ? 2 : 1.2) * inv);
+      ctx.beginPath(); ctx.arc(st.x + 0.5, st.y + 0.5, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = st.last ? "#1a1410" : "#fff4d6";
+      ctx.font = `700 ${fs}px sans-serif`;
+      ctx.textAlign = "center"; ctx.textBaseline = "middle";
+      ctx.fillText(String(st.n), st.x + 0.5, st.y + 0.5 + fs * 0.05);
+      ctx.font = `600 ${fs}px Georgia, serif`;
+      ctx.textAlign = "left";
+      ctx.lineWidth = Math.max(1.5, 3 * inv);
+      ctx.strokeStyle = "rgba(10,8,6,0.85)";
+      ctx.strokeText(st.city, st.x + 0.5 + r + 2 * inv, st.y + 0.5);
+      ctx.fillStyle = "#fff4d6";
+      ctx.fillText(st.city, st.x + 0.5 + r + 2 * inv, st.y + 0.5);
+    }
+    ctx.restore();
   }
 
   private renderFlowHighlight(ctx: CanvasRenderingContext2D) {
