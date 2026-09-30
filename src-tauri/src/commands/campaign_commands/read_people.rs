@@ -759,6 +759,15 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             merchant_goods,
             life_events,
             traits,
+            life: matched.map(|p| life_entries(&sim, p)).unwrap_or_default(),
+            individual_id: matched.map(|p| p.id as i32).unwrap_or(-1),
+            female: matched.map(|p| p.female).unwrap_or(false),
+            face_seed: matched.map(|p| p.face_seed).unwrap_or(0),
+            features: matched.map(|p| p.features).unwrap_or(0),
+            ideology_name: matched.map(|p| person_ideology_name(&sim, p)).unwrap_or_default(),
+            fame: matched.map(|p| p.fame).unwrap_or(0.0),
+            roles: matched.map(|p| p.roles.iter().map(|&r| crate::sim::tick::role_name(r).to_string()).collect()).unwrap_or_default(),
+            places: matched.map(|p| places_of(&sim, p)).unwrap_or_default(),
         }
     }).collect();
 
@@ -784,7 +793,9 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
         }.to_string()
     };
     let synth = |p: &crate::sim::tick::Individual| -> FigureBrief {
-        let role = *p.roles.first().unwrap_or(&0);
+        // The most recent role is the one they are known for now (a scholar
+        // who founded a school is remembered as a Philosopher).
+        let role = *p.roles.last().unwrap_or(&0);
         let h = sim.hubs.get(p.current_hub.max(0) as usize).filter(|_| p.current_hub >= 0);
         let city = h.map(|x| x.name.clone()).unwrap_or_default();
         let culture = p.culture.clone();
@@ -834,6 +845,15 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
             merchant_goods,
             life_events,
             traits: p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect(),
+            life: life_entries(&sim, p),
+            individual_id: p.id as i32,
+            female: p.female,
+            face_seed: p.face_seed,
+            features: p.features,
+            ideology_name: person_ideology_name(&sim, p),
+            fame: p.fame,
+            roles: p.roles.iter().map(|&r| role_name(r).to_string()).collect(),
+            places: places_of(&sim, p),
         }
     };
     for p in sim.people.iter().filter(|p| p.famous) {
@@ -850,6 +870,67 @@ pub fn campaign_get_figures(db: State<'_, WorldDb>) -> Result<Vec<FigureBrief>, 
 }
 
 /// 02_PEOPLE.md (Living World row 02) · render one `Individual` into a brief.
+/// 2026-09-30 · one person's life log, structured for the Life Story view.
+pub(crate) fn life_entries(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> Vec<LifeEntryBrief> {
+    use crate::sim::tick::{TICKS_PER_YEAR, is_key_life_entry, choice_label, choice_gain, trait_name, EVENT_TEMPLATES, MS_DEBUT, MS_TRAIT_FLIP};
+    p.life_log.iter().map(|e| {
+        let is_choice = choice_label(e).is_some();
+        let kind = if is_choice { "choice" } else if e.template_id >= MS_DEBUT { "milestone" } else { "event" };
+        let gained = if is_choice {
+            choice_gain(e).map(|t| trait_name(t).to_string()).unwrap_or_default()
+        } else if e.template_id == MS_TRAIT_FLIP {
+            e.args.get(1).map(|&t| trait_name(t as u8).to_string()).unwrap_or_default()
+        } else {
+            EVENT_TEMPLATES.iter().find(|t| t.id == e.template_id).and_then(|t| t.trait_gain)
+                .map(|t| trait_name(t).to_string()).unwrap_or_default()
+        };
+        LifeEntryBrief {
+            year: e.tick / TICKS_PER_YEAR,
+            age: e.tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
+            text: sim.render_life_entry_for(&p.name, e),
+            kind: kind.to_string(),
+            key: is_key_life_entry(e),
+            choice: choice_label(e).unwrap_or("").to_string(),
+            why: sim.render_choice_reasons(e),
+            gained,
+        }
+    }).collect()
+}
+
+/// 2026-09-30 · a person's road, read off their milestones.
+pub(crate) fn places_of(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> Vec<PlaceBrief> {
+    use crate::sim::tick::{TICKS_PER_YEAR, MS_DEBUT, MS_STUDY, MS_EXILE, MS_RETURN, MS_MOVE, MS_VISIT};
+    let mut out: Vec<PlaceBrief> = Vec::new();
+    let city = |h: u32| sim.hubs.get(h as usize).map(|x| x.name.clone()).unwrap_or_else(|| "a distant place".into());
+    for e in &p.life_log {
+        let how = match e.template_id {
+            MS_DEBUT => "debut", MS_STUDY => "study", MS_EXILE => "exile",
+            MS_RETURN => "return", MS_MOVE => "settled", MS_VISIT => "visit",
+            _ => continue,
+        };
+        let Some(&h) = e.args.first() else { continue };
+        if h == u32::MAX { continue; }
+        out.push(PlaceBrief {
+            year: e.tick / TICKS_PER_YEAR,
+            age: e.tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
+            hub: h as i32, city: city(h), how: how.into(), visit: e.template_id == MS_VISIT,
+        });
+    }
+    // A life begun before milestones existed: start the road at the origin.
+    if out.is_empty() && p.origin_hub >= 0 {
+        out.push(PlaceBrief { year: p.debut_tick / TICKS_PER_YEAR, age: p.debut_tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
+            hub: p.origin_hub, city: city(p.origin_hub as u32), how: "debut".into(), visit: false });
+    }
+    out
+}
+
+/// The named doctrine a person leans toward, "" if none.
+pub(crate) fn person_ideology_name(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> String {
+    if !p.ideology_seeded { return String::new(); }
+    let id = crate::sim::tick::dominant_ideology_for(&sim.ideologies, p.ideology);
+    sim.ideologies.iter().find(|i| i.id as i32 == id).map(|i| i.name.clone()).unwrap_or_default()
+}
+
 fn individual_brief(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::Individual) -> IndividualBrief {
     use crate::sim::tick::{TICKS_PER_YEAR, role_name, trait_name, death_cause_name};
     let city = sim.hubs.get(p.current_hub.max(0) as usize)
@@ -879,6 +960,12 @@ fn individual_brief(sim: &crate::sim::tick::CampaignSim, p: &crate::sim::tick::I
         face_seed: p.face_seed,
         features: p.features,
         life_log,
+        life: life_entries(sim, p),
+        age: (if p.is_alive() { sim.tick } else { p.death_tick }).saturating_sub(p.birth_tick) / TICKS_PER_YEAR,
+        ideology: p.ideology,
+        ideology_name: person_ideology_name(sim, p),
+        trait_strength: p.traits.iter().map(|&(_, st)| st).collect(),
+        places: places_of(sim, p),
     }
 }
 

@@ -4700,6 +4700,13 @@ pub struct TickHub {
     /// meter, or −1 if none is close enough to call a real hold
     /// (`IDEOLOGY_HOLD_MAX_DIST`). Recomputed yearly, read-only elsewhere.
     #[serde(default = "neg_one_i32")] pub ideology_dominant: i32,
+    /// 2026-09-30 · share (0..1) of the prevailing ideology's demands no live
+    /// edict meets — read by `update_unrest` (`IDEOLOGY_UNREST_DOSE`).
+    #[serde(default)] pub ideology_unmet: f32,
+    /// 2026-09-30 · distance between the commons' and the government's
+    /// ideology meters, 0..1 — the revolution trigger's "commons far from the
+    /// government" term, replacing the old `1 - mood` stand-in.
+    #[serde(default)] pub ideology_gap: f32,
 }
 fn neg_one_i8() -> i8 { -1 }
 fn default_legitimacy() -> f32 { NEUTRAL_LEGITIMACY_SEED }
@@ -8501,6 +8508,8 @@ pub struct CampaignSim {
     #[serde(default)] pub people: Vec<Individual>,
     /// Dead notables, kept forever with their full life (the Hall of the Dead).
     #[serde(default)] pub hall_of_dead: Vec<Individual>,
+    /// 2026-09-30 · `migrate_government_forms` has run (see it).
+    #[serde(default)] pub gov_forms_migrated: bool,
     /// A forgotten ordinary person's tombstone, while anything might still
     /// reference their id (00_INDEX "Ids and tombstones"). Capped.
     #[serde(default)] pub people_tombstones: Vec<Tombstone>,
@@ -9495,6 +9504,7 @@ impl CampaignSim {
         let n = self.hubs.len();
         let ng = self.goods.len();
         let tick = self.tick;
+        self.migrate_government_forms();
         for h in 0..n {
             if self.hubs[h].is_estate { continue; }
             // 1) Seed the regime + officials once.
@@ -9634,15 +9644,48 @@ impl CampaignSim {
         }
     }
 
+    /// 2026-09-30 · ONE-TIME: a save seeded under the old size-only rule has
+    /// every town under 15,000 people as a Free Commune. Re-draw the form of
+    /// each such commune that never had a change of government since (its
+    /// history holds no regime change), with the same roll `seed_government`
+    /// now uses, and reseat its officials if the form changed — the same
+    /// reseat a reform already performs. Idempotent via `gov_forms_migrated`;
+    /// on a fresh campaign no hub is seeded yet when this first runs, so it
+    /// is a no-op there.
+    pub(crate) fn migrate_government_forms(&mut self) {
+        if self.gov_forms_migrated { return; }
+        self.gov_forms_migrated = true;
+        // At `GOV_FORM_DRAW_DOSE = 0.0` every hub keeps the legacy rule, so
+        // there is nothing to re-draw — a true no-op.
+        if GOV_FORM_DRAW_DOSE <= 0.0 { return; }
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].officials.is_empty() { continue; }
+            if self.hubs[h].govt_type != 2 { continue; }
+            if self.hubs[h].gov_history.iter().any(|e| e.regime_kind >= 0) { continue; }
+            let r = hash01(self.seed, h as u64 ^ 0x60F7, 0x1234);
+            let culture = self.hub_culture.get(h).cloned().unwrap_or_default();
+            if hash01(self.seed, h as u64 ^ 0x60F8, 0x1235) >= GOV_FORM_DRAW_DOSE { continue; }
+            let govt = govt_type_for(self.hubs[h].population, self.culture_ideal(&culture), r);
+            if govt == 2 { continue; }
+            self.hubs[h].govt_type = govt;
+            let n = self.hubs[h].officials.len();
+            for oi in 0..n { self.reseat_official(h, oi); }
+        }
+    }
+
     /// Seed a city's regime type + its key figures (once).
     fn seed_government(&mut self, h: usize) {
         let pop = self.hubs[h].population;
         let r = hash01(self.seed, h as u64 ^ 0x60F7, 0x1234);
-        // Big rich cities run as merchant oligarchies; mid split principality/oligarchy;
-        // small towns are free communes.
-        let govt = if pop >= 60_000.0 { 0u8 }
-            else if pop >= 15_000.0 { if r < 0.5 { 0 } else { 1 } }
-            else { 2 };
+        // 2026-09-30 · the form is a weighted draw by size AND the culture's
+        // own ideal (`govt_type_for`) — the old size-only rule made every
+        // town under 15,000 people a Free Commune, i.e. almost every city.
+        let seed_culture = self.hub_culture.get(h).cloned().unwrap_or_default();
+        let govt = if hash01(self.seed, h as u64 ^ 0x60F8, 0x1235) < GOV_FORM_DRAW_DOSE {
+            govt_type_for(pop, self.culture_ideal(&seed_culture), r)
+        } else {
+            legacy_govt_type(pop, r)
+        };
         self.hubs[h].govt_type = govt;
         let term = GOVT_TERM_YEARS[govt as usize] * TICKS_PER_YEAR;
         let fixed_roles: &[u8] = if self.hubs[h].coastal { &[0, 1, 2, 3] } else { &[0, 1, 3] };
@@ -9726,7 +9769,9 @@ impl CampaignSim {
         if let Some(p) = self.people.iter().find(|p| p.current_hub == h as i32 && p.name == name && p.roles.contains(&ROLE_OFFICIAL)) {
             return p.id as i32;
         }
-        self.spawn_individual(h, ROLE_OFFICIAL, name.to_string(), -1) as i32
+        let id = self.spawn_individual(h, ROLE_OFFICIAL, name.to_string(), -1);
+        self.log_milestone(id, MS_OFFICE, vec![h as u32]);
+        id as i32
     }
 
     /// Turn a key figure over at the end of its term — a fresh neutral appointee, or
@@ -9761,6 +9806,27 @@ impl CampaignSim {
             match govt { 1 => PATH_APPOINTED, 2 => PATH_ELECTED, _ => PATH_WEALTH }
         };
         let suitability = official_suitability_roll(self.seed, h, salt);
+        // 2026-09-30 · an open (non-kin) seat may go to a RENOWNED resident
+        // thinker — row 04's "scholar/orator" path was only ever filled at a
+        // city's founding, so no scholar ever entered politics mid-campaign
+        // (STAGE_POLITICS measured at zero over 100 years).
+        if kin_house < 0 && hash01(self.seed, self.tick as u64 ^ 0x5C40, (h as u64) ^ oi as u64) < SCHOLAR_SEAT_CHANCE {
+            let seated: Vec<i32> = self.hubs[h].officials.iter().map(|o| o.individual_id).collect();
+            if let Some((sid, sname)) = self.people.iter()
+                .filter(|p| p.is_alive() && p.current_hub == h as i32 && p.fame >= SCHOLAR_SEAT_FAME
+                    && !seated.contains(&(p.id as i32))
+                    && p.roles.iter().any(|&r| matches!(r, ROLE_SCHOLAR | ROLE_PHILOSOPHER | ROLE_IDEOLOGUE)))
+                .max_by(|a, b| a.fame.partial_cmp(&b.fame).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|p| (p.id, p.name.clone()))
+            {
+                let o = &mut self.hubs[h].officials[oi];
+                o.name = sname; o.term_end = self.tick + term; o.path = PATH_SCHOLAR;
+                o.suitability = suitability; o.individual_id = sid as i32;
+                o.house = -1; o.control = 0.0; o.kin = false;
+                self.log_milestone(sid, MS_OFFICE, vec![h as u32]);
+                return;
+            }
+        }
         let iid = self.individual_id_for_official(h, &name);
         {
             let o = &mut self.hubs[h].officials[oi];
@@ -10350,6 +10416,8 @@ impl CampaignSim {
                 // `update_notables` so a seat a person just died out of is
                 // free to relink this same year.
                 self.people_yearly_pass(yr);
+                // 2026-09-30 · people travel and relocate (life_choices.rs).
+                self.people_travel_pass(yr);
                 // Feuds · a council both houses trade in may impose a settlement on a
                 // long-running quarrel. Runs BEFORE marriages, so a feud the council
                 // settled this year is not also "sealed by marriage" in the same year.
@@ -11867,6 +11935,7 @@ mod foreign_hand;
 mod individuals;
 pub(crate) use individuals::ROLE_OFFICIAL;
 mod life_events;
+mod life_choices;
 mod development;
 pub(crate) use development::{stability_of, STABILITY_MIN, STABILITY_MAX};
 mod tracks;
@@ -11901,8 +11970,11 @@ mod government;
 pub use government::{
     GovEdict, GovDebate, GovHistoryEntry, edict_family_name, regime_kind_name,
     GOV_OUTCOME_PASSED, GOV_OUTCOME_FAILED, GOV_OUTCOME_DEADLOCKED, GOV_OUTCOME_COUP,
+    govt_form_for, office_title_for, govt_kind_key, directed_edict_phrase,
 };
 pub(crate) use government::{
+    govt_type_for, legacy_govt_type, GOV_FORM_DRAW_DOSE, ideology_support, edict_tag_for, family_default_dir,
+    IDEOLOGY_AGENDA_DOSE, IDEOLOGY_VOTE_DOSE, IDEOLOGY_REVOLUTION_DOSE,
     NEUTRAL_LEGITIMACY_SEED, GOV_EDICTS_CAP, GOV_HISTORY_CAP, LUSTRUM_YEARS,
     EDICT_FAM_CITIZENSHIP, EDICT_FAM_FOREIGNERS, EDICT_FAM_LEARNING, EDICT_FAM_WELFARE,
     EDICT_FAM_ECONOMY, EDICT_FAM_MILITARY, EDICT_FAM_CONSTITUTION, EDICT_FAM_BUILDINGS,
@@ -11925,7 +11997,8 @@ pub(crate) use ideology::{
     IDEOLOGY_CAP, SCHOOL_CAP,
     STAGE_NONE, STAGE_STUDY, STAGE_TEACH, STAGE_RETURNED, STAGE_PATRON, STAGE_POLITICS, STAGE_EXILE,
     IDEOLOGY_GOV_HOOK_DOSE, IDEOLOGY_UNREST_DOSE,
-    ideology_gov_position_e, ideology_unrest_term_e, clamp_ideology,
+    ideology_gov_position_e, ideology_unrest_term_e, clamp_ideology, dominant_ideology_for,
+    SCHOLAR_SEAT_CHANCE, SCHOLAR_SEAT_FAME,
 };
 mod masterworks;
 pub use masterworks::Masterwork;
@@ -11956,6 +12029,7 @@ pub(crate) use hordes::{
 };
 pub(crate) use individuals::*;
 pub(crate) use life_events::{EventTemplate, EVENT_TEMPLATES};
+pub(crate) use life_choices::*;
 pub(crate) use realms::person_mortality_hazard;
 mod production;
 mod realms;

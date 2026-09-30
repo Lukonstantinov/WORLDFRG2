@@ -154,6 +154,7 @@ pub(crate) const BUILDINGS_TRACK_BONUS: f32 = 2.0;
 const CITIZENSHIP_SCORE_BUMP: f32 = 6.0;
 
 fn neg_one_i8_regime_kind() -> i8 { -1 }
+fn one_i8() -> i8 { 1 }
 
 /// Q04.5b · human name for a `GovHistoryEntry.regime_kind` — `""` for an
 /// ordinary edict/Lustrum entry (`regime_kind < 0`).
@@ -261,6 +262,65 @@ fn edict_family_tag(family: u8) -> i8 {
     }
 }
 
+/// The direction every edict of a family meant before `GovEdict.dir`
+/// existed — what the family's own `apply_*` effect enacts.
+pub(crate) fn family_default_dir(family: u8) -> i8 {
+    match family {
+        EDICT_FAM_FOREIGNERS => -1, // the foreign-ownership bar is a restriction
+        _ => 1,
+    }
+}
+
+/// An edict's conservative↔libertarian lean for a chosen direction. The
+/// default direction keeps the family's own tag exactly (so every
+/// non-ideology proposal costs and votes as before); the reverse flips it,
+/// and a directionless family (economy, constitution) leans the way it goes.
+pub(crate) fn edict_tag_for(family: u8, dir: i8) -> i8 {
+    let t = edict_family_tag(family);
+    if dir == family_default_dir(family) { t }
+    else if t != 0 { -t }
+    else if family == EDICT_FAM_BUILDINGS { 0 }
+    else { dir.signum() }
+}
+
+/// Which ideology axis a family's measure is argued on, and which sign of
+/// that axis supports the family's OPEN/+1 direction. (Authority −5 = the
+/// strong hand … +5 = voice of the many; Tradition −5 piety … +5 inquiry;
+/// Openness −5 blood and soil … +5 the stranger is a guest; Economy −5 just
+/// price … +5 free harbour.) Buildings is argued on nothing.
+fn family_axis(family: u8) -> Option<(usize, f32)> {
+    use super::ideology::{AX_AUTHORITY, AX_TRADITION, AX_OPENNESS, AX_ECONOMY};
+    match family {
+        EDICT_FAM_CITIZENSHIP | EDICT_FAM_FOREIGNERS => Some((AX_OPENNESS, 1.0)),
+        EDICT_FAM_LEARNING => Some((AX_TRADITION, 1.0)),
+        EDICT_FAM_WELFARE => Some((AX_ECONOMY, -1.0)),
+        EDICT_FAM_ECONOMY => Some((AX_ECONOMY, 1.0)),
+        EDICT_FAM_MILITARY => Some((AX_AUTHORITY, -1.0)),
+        EDICT_FAM_CONSTITUTION => Some((AX_AUTHORITY, 1.0)),
+        _ => None,
+    }
+}
+
+/// −1..+1: how strongly a holder of ideology `pos` supports an edict of
+/// `family` going direction `dir`. Pure.
+pub(crate) fn ideology_support(pos: [f32; 4], family: u8, dir: i8) -> f32 {
+    match family_axis(family) {
+        Some((ax, sign)) => (pos[ax] / 5.0 * sign * dir as f32).clamp(-1.0, 1.0),
+        None => 0.0,
+    }
+}
+
+/// How often a city's agenda is set by its prevailing ideology's unmet
+/// demands rather than the plain lean-affinity pick (0 = never, the pre-fix
+/// behaviour). Walked live 2026-09-30 — see `docs/SCOREBOARD.md`.
+pub(crate) const IDEOLOGY_AGENDA_DOSE: f32 = 0.5;
+/// How much of a seat holder's vote comes from their OWN ideology rather
+/// than the government's single lean (0 = the pre-fix behaviour).
+pub(crate) const IDEOLOGY_VOTE_DOSE: f32 = 0.5;
+/// How much of the revolution trigger's "commons far from the government"
+/// term reads the real ideology gap rather than `1 - mood`.
+pub(crate) const IDEOLOGY_REVOLUTION_DOSE: f32 = 0.5;
+
 /// 04.3's own cost formula, verbatim: `base × (1 + distance between the
 /// edict's ideology position and the government's position)` — a libertarian
 /// edict is cheap in a libertarian government and dear in a conservative one,
@@ -291,6 +351,15 @@ pub fn edict_family_name(family: u8) -> &'static str {
 pub struct GovEdict {
     pub family: u8,
     pub tag: i8,
+    /// 2026-09-30 · which WAY the measure goes on its family's own axis —
+    /// +1 open/expand/enact, −1 restrict/close/repeal (`family_default_dir`
+    /// is what every edict before this field meant, and what an old save's
+    /// edicts load as). An ideology demand `(family, sign)` is met by a live
+    /// edict of that family and `dir == sign`; before this, demands were
+    /// matched against the family's FIXED lean tag and 10 of the 14
+    /// canonical demands could never be satisfied at all.
+    #[serde(default = "one_i8")]
+    pub dir: i8,
     pub major: bool,
     pub enacted_tick: u32,
     pub expires_tick: u32,
@@ -302,6 +371,13 @@ pub struct GovEdict {
 pub struct GovDebate {
     pub family: u8,
     pub tag: i8,
+    /// See `GovEdict.dir`.
+    #[serde(default = "one_i8")]
+    pub dir: i8,
+    /// Proposed because the city's prevailing ideology demands it (shown in
+    /// the council window; `chronicle_edict_outcome` names the doctrine).
+    #[serde(default)]
+    pub agenda: bool,
     pub major: bool,
     pub cost: f32,
     pub round: u8,
@@ -399,8 +475,8 @@ impl CampaignSim {
     fn maybe_propose_edict(&mut self, h: usize) {
         let hub = &self.hubs[h];
         if hub.gov_points < EDICT_COST_MINOR { return; }
-        let family = self.pick_edict_family(h);
-        let tag = edict_family_tag(family);
+        let (family, dir, agenda) = self.pick_edict_family(h);
+        let tag = edict_tag_for(family, dir);
         let dist = (tag as f32 - self.hubs[h].gov_position).abs();
         let major = self.hubs[h].gov_points >= EDICT_COST_MAJOR * (1.0 + dist) * MAJOR_EDICT_READY_FRAC
             && hash01(self.seed, self.tick as u64, h as u64 ^ 0xE01C) < MAJOR_EDICT_CHANCE;
@@ -408,13 +484,45 @@ impl CampaignSim {
         let cost = edict_cost(base, tag, self.hubs[h].gov_position);
         if self.hubs[h].gov_points < cost { return; }
         let round_cap = round_cap_for(self.hubs[h].govt_type, major);
-        self.hubs[h].gov_debate = Some(GovDebate { family, tag, major, cost, round: 0, tally: 0.0, round_cap });
+        self.hubs[h].gov_debate = Some(GovDebate { family, tag, dir, agenda, major, cost, round: 0, tally: 0.0, round_cap });
     }
 
-    fn pick_edict_family(&self, h: usize) -> u8 {
+    /// The named ideology whose demands set this city's agenda: under one
+    /// ruler, the doctrine nearest the GOVERNMENT's own meter (the ruler and
+    /// the advisers they chose); under a council or assembly, the doctrine
+    /// prevailing among the COMMONS (`ideology_dominant`) — public pressure.
+    pub(crate) fn agenda_ideology(&self, h: usize) -> Option<&super::ideology::NamedIdeology> {
         let hub = &self.hubs[h];
-        if hub.war_with >= 0 { return EDICT_FAM_MILITARY; }
-        if hub.starving > 0.3 { return EDICT_FAM_WELFARE; }
+        if hub.govt_type == 1 && hub.ideology_seeded {
+            let pos = hub.ideology_gov;
+            self.ideologies.iter()
+                .map(|i| (i, (0..4).map(|k| (i.position[k] - pos[k]).powi(2)).sum::<f32>()))
+                .filter(|(i, d)| !i.demands.is_empty() && *d < 9.0)
+                .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal))
+                .map(|(i, _)| i)
+        } else {
+            self.ideologies.iter().find(|i| i.id as i32 == hub.ideology_dominant)
+        }
+    }
+
+    /// `(family, dir, from the ideology agenda)`.
+    fn pick_edict_family(&self, h: usize) -> (u8, i8, bool) {
+        let hub = &self.hubs[h];
+        if hub.war_with >= 0 { return (EDICT_FAM_MILITARY, 1, false); }
+        if hub.starving > 0.3 { return (EDICT_FAM_WELFARE, 1, false); }
+        // The prevailing ideology presses its UNMET demands onto the agenda.
+        if hash01(self.seed, self.tick as u64, h as u64 ^ 0xA6E0) < IDEOLOGY_AGENDA_DOSE {
+            if let Some(ideo) = self.agenda_ideology(h) {
+                let unmet: Vec<(u8, i8)> = ideo.demands.iter().copied()
+                    .filter(|&(fam, sign)| !hub.gov_edicts.iter().any(|e| e.family == fam && e.dir == sign))
+                    .collect();
+                if !unmet.is_empty() {
+                    let k = (hash01(self.seed, self.tick as u64, h as u64 ^ 0xA6E1) * unmet.len() as f32) as usize;
+                    let (fam, sign) = unmet[k.min(unmet.len() - 1)];
+                    return (fam, sign, true);
+                }
+            }
+        }
         // Otherwise a plain weighted pick favouring a family closer to this
         // government's own lean (cheaper to pass), via rejection against a
         // hashed roll rather than a full weighted-sample table.
@@ -423,10 +531,32 @@ impl CampaignSim {
                 .min(EDICT_FAMILY_COUNT as u8 - 1);
             let dist = (edict_family_tag(f) as f32 - hub.gov_position).abs();
             if hash01(self.seed, self.tick as u64 ^ attempt, h as u64 ^ 0x0FA3) < 1.0 - dist * 0.4 {
-                return f;
+                return (f, family_default_dir(f), false);
             }
         }
-        EDICT_FAM_ECONOMY
+        (EDICT_FAM_ECONOMY, 1, false)
+    }
+
+    /// −1..+1 — how seat `o` leans on an edict of `family`/`tag`/`dir`
+    /// before this round's noise: the government's single lean (a house
+    /// seat mirrors its patron's tilt at half strength), blended with the
+    /// seat holder's OWN ideology by `IDEOLOGY_VOTE_DOSE` — so a council of
+    /// free-harbour merchants votes down a foreign bar their prince wanted.
+    pub(crate) fn official_edict_lean(&self, h: usize, o: &Official, family: u8, tag: i8, dir: i8) -> f32 {
+        let gov_lean = self.hubs[h].gov_position;
+        let base = if official_allegiance(o) == ALLEGIANCE_HOUSE { gov_lean * 0.5 } else { gov_lean };
+        let align = 1.0 - (tag as f32 - base).abs() * 0.5;
+        let lean = (align - 0.5) * 2.0;
+        let person = if o.individual_id >= 0 {
+            self.people.iter().find(|p| p.id as i32 == o.individual_id && p.ideology_seeded)
+        } else { None };
+        match person {
+            Some(p) if IDEOLOGY_VOTE_DOSE > 0.0 => {
+                let own = ideology_support(p.ideology, family, dir);
+                lean * (1.0 - IDEOLOGY_VOTE_DOSE) + own * IDEOLOGY_VOTE_DOSE
+            }
+            _ => lean,
+        }
     }
 
     /// One weekly round: each seated official leans toward the edict by how
@@ -439,15 +569,13 @@ impl CampaignSim {
     pub(crate) fn run_debate_round(&mut self, h: usize) {
         let Some(mut deb) = self.hubs[h].gov_debate.take() else { return };
         deb.round += 1;
-        let gov_lean = self.hubs[h].gov_position;
         let mut lean_sum = 0.0f32;
         let mut n = 0.0f32;
         for (oi, o) in self.hubs[h].officials.iter().enumerate() {
-            let base = if official_allegiance(o) == ALLEGIANCE_HOUSE { gov_lean * 0.5 } else { gov_lean };
-            let align = 1.0 - (deb.tag as f32 - base).abs() * 0.5;
+            let lean = self.official_edict_lean(h, o, deb.family, deb.tag, deb.dir);
             let noise = (hash01(self.seed, self.tick as u64 ^ (oi as u64), h as u64 ^ deb.round as u64) * 2.0 - 1.0)
                 * (1.0 - o.suitability);
-            lean_sum += (align - 0.5) * 2.0 + noise;
+            lean_sum += lean + noise;
             n += 1.0;
         }
         let round_lean = if n > EPS { (lean_sum / n).clamp(-1.0, 1.0) } else { 0.0 };
@@ -472,7 +600,10 @@ impl CampaignSim {
 
         if passed {
             let years = if deb.major { EDICT_MAJOR_DURATION_YEARS } else { EDICT_MINOR_DURATION_YEARS };
-            let edict = GovEdict { family: deb.family, tag: deb.tag, major: deb.major, enacted_tick: tick, expires_tick: tick + years * TICKS_PER_YEAR };
+            // A reversal cancels the opposite-direction edict of its family
+            // still in force (opening the gates ends the standing bar).
+            self.hubs[h].gov_edicts.retain(|e| !(e.family == deb.family && e.dir != deb.dir));
+            let edict = GovEdict { family: deb.family, tag: deb.tag, dir: deb.dir, major: deb.major, enacted_tick: tick, expires_tick: tick + years * TICKS_PER_YEAR };
             self.hubs[h].gov_edicts.push(edict);
             if self.hubs[h].gov_edicts.len() > GOV_EDICTS_CAP {
                 let drop = self.hubs[h].gov_edicts.len() - GOV_EDICTS_CAP;
@@ -484,9 +615,66 @@ impl CampaignSim {
             self.hubs[h].legitimacy = (self.hubs[h].legitimacy - DEADLOCK_LEGITIMACY_HIT).clamp(0.0, 1.0);
         }
 
-        if passed { self.apply_edict_effect(h, deb.family); }
+        if passed { self.apply_edict_effect_dir(h, deb.family, deb.dir); }
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family: deb.family, outcome, regime_kind: -1 });
         self.chronicle_edict_outcome(h, deb.family, outcome);
+        if deb.agenda { self.chronicle_agenda_outcome(h, deb.family, deb.dir, outcome); }
+    }
+
+    /// A directed edict's effect: the family's own measure when `dir` is its
+    /// default (exactly `apply_edict_effect`, unchanged), else the reversal —
+    /// opening the gates repeals the foreign-ownership bar, austerity repeals
+    /// the grain law (both behind `EDICT_EFFECT_DOSE`, like their enactment),
+    /// abolishing an office, demobilising a levy, narrowing citizenship (each
+    /// behind its own family dose, exactly as the forward measure).
+    pub(crate) fn apply_edict_effect_dir(&mut self, h: usize, family: u8, dir: i8) {
+        if dir == family_default_dir(family) {
+            self.apply_edict_effect(h, family);
+            return;
+        }
+        if EDICT_EFFECT_DOSE > 0.0 {
+            if let Some(kind) = edict_law_for_family(family) {
+                self.hubs[h].laws.retain(|l| l.kind != kind);
+            }
+        }
+        match family {
+            EDICT_FAM_CONSTITUTION if EDICT_CONSTITUTION_DOSE > 0.0 => {
+                if let Some(pos) = self.hubs[h].officials.iter().rposition(|o| o.role == 4) {
+                    self.hubs[h].officials.remove(pos);
+                }
+            }
+            EDICT_FAM_MILITARY if EDICT_MILITARY_DOSE > 0.0 => {
+                self.hubs[h].war_manpower *= 1.0 - 0.5 * EDICT_MILITARY_DOSE;
+            }
+            EDICT_FAM_CITIZENSHIP if EDICT_CITIZENSHIP_DOSE > 0.0 => {
+                let majority = self.hub_culture.get(h).cloned().unwrap_or_default();
+                if let Some(rel) = self.hubs[h].culture_relations.iter_mut()
+                    .filter(|r| r.culture != majority)
+                    .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+                {
+                    rel.score = (rel.score - CITIZENSHIP_SCORE_BUMP * EDICT_CITIZENSHIP_DOSE).clamp(-100.0, 100.0);
+                    rel.tier = tier_for_score(rel.score, rel.tier);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// "The partisans of X carry the day" — only for an ideology-driven
+    /// proposal, and only where the ordinary edict line would itself reach
+    /// the world journal (same tier-1-2 salience rule), so the prevailing
+    /// doctrine is NAMED as the cause.
+    fn chronicle_agenda_outcome(&mut self, h: usize, family: u8, dir: i8, outcome: u8) {
+        if self.hubs[h].tier == 0 || self.hubs[h].tier > 2 { return; }
+        let Some(ideo) = self.agenda_ideology(h).map(|i| i.name.clone()) else { return };
+        let what = directed_edict_phrase(family, dir);
+        let city = self.hubs[h].name.clone();
+        let text = match outcome {
+            GOV_OUTCOME_PASSED => format!("the partisans of {ideo} carry {city}: {what}"),
+            GOV_OUTCOME_FAILED => format!("{city} rejects the {ideo} demand to {what}"),
+            _ => return,
+        };
+        self.journal.push(JournalEntry { tick: self.tick, kind: "ideology".into(), hub: h as i32, good: -1, value: 0.0, text });
     }
 
     /// Q04.9 · a PASSED edict's real effect, called from both the debate
@@ -614,8 +802,8 @@ impl CampaignSim {
     /// a documented scope cut, Q04.12). No vote tally, no debate rounds.
     fn maybe_tyrant_decide(&mut self, h: usize) {
         if self.hubs[h].gov_points < EDICT_COST_MINOR { return; }
-        let family = self.pick_edict_family(h);
-        let tag = edict_family_tag(family);
+        let (family, dir, agenda) = self.pick_edict_family(h);
+        let tag = edict_tag_for(family, dir);
         let dist = (tag as f32 - self.hubs[h].gov_position).abs();
         let major = self.hubs[h].gov_points >= EDICT_COST_MAJOR * (1.0 + dist) * MAJOR_EDICT_READY_FRAC
             && hash01(self.seed, self.tick as u64, h as u64 ^ 0x7A24) < MAJOR_EDICT_CHANCE;
@@ -625,7 +813,8 @@ impl CampaignSim {
         let tick = self.tick;
         self.hubs[h].gov_points -= cost;
         let years = if major { EDICT_MAJOR_DURATION_YEARS } else { EDICT_MINOR_DURATION_YEARS };
-        self.hubs[h].gov_edicts.push(GovEdict { family, tag, major, enacted_tick: tick, expires_tick: tick + years * TICKS_PER_YEAR });
+        self.hubs[h].gov_edicts.retain(|e| !(e.family == family && e.dir != dir));
+        self.hubs[h].gov_edicts.push(GovEdict { family, tag, dir, major, enacted_tick: tick, expires_tick: tick + years * TICKS_PER_YEAR });
         if self.hubs[h].gov_edicts.len() > GOV_EDICTS_CAP {
             let drop = self.hubs[h].gov_edicts.len() - GOV_EDICTS_CAP;
             self.hubs[h].gov_edicts.drain(0..drop);
@@ -644,7 +833,8 @@ impl CampaignSim {
             // regime-change mutation would live here, gated on this exact
             // dose, per 04.1's own doc comment.
         }
-        self.apply_edict_effect(h, family);
+        self.apply_edict_effect_dir(h, family, dir);
+        if agenda { self.chronicle_agenda_outcome(h, family, dir, GOV_OUTCOME_PASSED); }
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick, family, outcome: GOV_OUTCOME_PASSED, regime_kind: -1 });
         self.chronicle_edict_outcome(h, family, GOV_OUTCOME_PASSED);
     }
@@ -889,7 +1079,12 @@ impl CampaignSim {
         if dose <= 0.0 || self.hubs[h].govt_type == 2 { return false; } // already an assembly
         let unrest = self.hubs[h].society.unrest;
         if unrest < REVOLUTION_UNREST_FLOOR { return false; }
-        let gap = (1.0 - self.hubs[h].mood).clamp(0.0, 1.0);
+        // Row 06's commons meter, finally read: the gap between what the
+        // commons believe and what the government believes, blended with the
+        // old `1 - mood` stand-in by `IDEOLOGY_REVOLUTION_DOSE`.
+        let mood_gap = (1.0 - self.hubs[h].mood).clamp(0.0, 1.0);
+        let gap = mood_gap * (1.0 - IDEOLOGY_REVOLUTION_DOSE)
+            + (self.hubs[h].ideology_gap * 2.0).clamp(0.0, 1.0) * IDEOLOGY_REVOLUTION_DOSE;
         let demagogue = self.figures.iter().any(|f| !f.dead && f.hub as usize == h && f.kind == 1);
         if !demagogue { return false; }
         let chance = (unrest * gap * REVOLUTION_CHANCE_SCALE * dose).min(REVOLUTION_CHANCE_CAP);
@@ -982,5 +1177,169 @@ fn track_name_for(track: usize) -> &'static str {
         TRACK_TRADE => "trade",
         TRACK_CIVIL => "civil",
         _ => "ideological",
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// Government FORMS by culture and size (2026-09-30 audit fix).
+//
+// `seed_government` used to decide a city's form by population ALONE — every
+// town under 15,000 people was seeded a "Free Commune" and never revisited,
+// so on a real world (where most towns are small) the Government tab read
+// "Free Commune" almost everywhere, whatever the people. The form is now a
+// weighted draw by size AND the culture's own ideal (a lineage/conquest
+// people is ruled by a lord, a mercantile one by a council, a learned or
+// assimilative one leans to an assembly), and its NAME and office titles come
+// from the culture's own language kit (Q04.4 — the kit is now reachable via
+// `cultures::kit_of_people`, which is what that queue item waited on).
+// ─────────────────────────────────────────────────────────────────────────
+
+/// The seeding rule every campaign used before this audit: big cities are
+/// councils, mid-size ones split council/principality, towns under 15,000 are
+/// assemblies. Still the SHIPPED rule — see `GOV_FORM_DRAW_DOSE`.
+pub(crate) fn legacy_govt_type(pop: f32, r: f32) -> u8 {
+    if pop >= 60_000.0 { 0 } else if pop >= 15_000.0 { if r < 0.5 { 0 } else { 1 } } else { 2 }
+}
+
+/// Share of cities seeded by the culture×size draw (`govt_type_for`) rather
+/// than `legacy_govt_type`. **Shipped 0.0 — a measured negative result, not a
+/// placeholder.** At 1.0 the draw broke two aggregate gates: the multi-seed
+/// `econ_inheritance_rules_fragment_differently` (seed 3: partible mean wealth
+/// 70,637 > primogeniture 52,773) and the dense-world relay-volume ratio
+/// (0.37 / 0.36 / 0.49 / 0.55 across four roll salts, against 0.89 on the
+/// legacy rule — the UNCAPPED counterfactual's volume inflates 1.2M → 1.4-3.2M
+/// while the shipped capped run barely moves). The channel is indirect: form →
+/// seat count and term → kin capture → charters / regime changes / wars. With
+/// the legacy rule restored both gates pass, so the rest of the 2026-09-30
+/// audit ships live and this waits for its own dose walk (queued, 04 doc).
+/// The visible half of the "Free Commune everywhere" report is fixed without
+/// it: forms are NAMED in each culture's own words and by size
+/// (`govt_form_for`).
+pub(crate) const GOV_FORM_DRAW_DOSE: f32 = 0.0;
+
+/// Weighted form draw — `[council, principality, assembly]` weights by size,
+/// shifted by the culture's ideal, picked by the hashed roll `r`. Pure.
+pub(crate) fn govt_type_for(pop: f32, ideal: Option<usize>, r: f32) -> u8 {
+    let mut w: [f32; 3] = if pop >= 60_000.0 { [0.70, 0.22, 0.08] }
+        else if pop >= 15_000.0 { [0.45, 0.42, 0.13] }
+        else if pop >= 5_000.0 { [0.35, 0.40, 0.25] }
+        else { [0.38, 0.34, 0.28] };
+    match ideal {
+        Some(IDEAL_WEALTH) | Some(IDEAL_REACH) => w[0] += 0.30,
+        Some(IDEAL_CONQUEST) | Some(IDEAL_LINEAGE) => w[1] += 0.35,
+        Some(IDEAL_STABILITY) | Some(IDEAL_TRADITION) | Some(IDEAL_PURITY) => w[1] += 0.20,
+        Some(IDEAL_LEARNING) | Some(IDEAL_ASSIMILATION) => w[2] += 0.25,
+        _ => {}
+    }
+    let total: f32 = w.iter().sum();
+    let mut acc = 0.0;
+    for (k, &wk) in w.iter().enumerate() {
+        acc += wk / total;
+        if r < acc { return k as u8; }
+    }
+    0
+}
+
+/// One culture's names for the three forms and their offices.
+/// `forms[t] = (form name, head title)`; `offices = [treasury, harbour, justice, seat]`.
+pub struct CultureGovTitles {
+    pub forms: [(&'static str, &'static str); 3],
+    pub offices: [&'static str; 4],
+}
+
+/// Per language kit, index-aligned to `cultures::KITS` (Roman · Hellene ·
+/// Punic · Persian · Norse · Celtic · Arab · Indic · Sinitic · Slavic · Nahua
+/// · Turkic · Nilotic · Amazigh · Yamato · Mongol · Quechua · Mande) — the
+/// doc's own "cultural title sets" list, extended to every shipped kit.
+pub(crate) const KIT_GOV_TITLES: [CultureGovTitles; 18] = [
+    CultureGovTitles { forms: [("Senate", "Consul"), ("Principate", "Princeps"), ("Comitia", "Tribune")], offices: ["Quaestor", "Praefect of the Fleet", "Praetor", "Senator"] },
+    CultureGovTitles { forms: [("Boule", "Prytanis"), ("Tyranny", "Tyrant"), ("Ekklesia", "Archon")], offices: ["Tamias", "Nauarch", "Archon", "Bouleutes"] },
+    CultureGovTitles { forms: [("Council of Elders", "Suffete"), ("Kingship", "Melek"), ("Popular Assembly", "Suffete")], offices: ["Keeper of the Treasury", "Master of Ships", "Judge", "Elder"] },
+    CultureGovTitles { forms: [("Council of Nobles", "Vazir"), ("Satrapy", "Satrap"), ("Anjoman", "Dehqan")], offices: ["Ganzabara", "Navarch", "Databara", "Azata"] },
+    CultureGovTitles { forms: [("Thing", "Lawspeaker"), ("Jarldom", "Jarl"), ("Althing", "Lawspeaker")], offices: ["Steward", "Styrsman", "Lawman", "Hersir"] },
+    CultureGovTitles { forms: [("Council of Chiefs", "Tánaiste"), ("Chiefdom", "Rí"), ("Óenach", "Brehon")], offices: ["Steward", "Shipmaster", "Brehon", "Flaith"] },
+    CultureGovTitles { forms: [("Shura", "Sheikh"), ("Emirate", "Emir"), ("Jamaa", "Qadi")], offices: ["Khazin", "Amir al-Bahr", "Qadi", "Sheikh"] },
+    CultureGovTitles { forms: [("Sabha", "Adhyaksha"), ("Rajya", "Raja"), ("Gana-sangha", "Ganapati")], offices: ["Kosadhyaksha", "Navadhyaksha", "Dharmadhikari", "Amatya"] },
+    CultureGovTitles { forms: [("Grand Council", "Chancellor"), ("Marquisate", "Marquis"), ("Village Compact", "Headman")], offices: ["Revenue Minister", "Maritime Commissioner", "Censor", "Grand Secretary"] },
+    CultureGovTitles { forms: [("Boyar Council", "Posadnik"), ("Knyazhestvo", "Knyaz"), ("Veche", "Posadnik")], offices: ["Tysyatsky", "Shipmaster", "Voivode", "Boyar"] },
+    CultureGovTitles { forms: [("Tlatocan", "Cihuacoatl"), ("Altepetl", "Tlatoani"), ("Calpolli", "Calpollec")], offices: ["Petlacalcatl", "Canoe-master", "Tecuhtli", "Pilli"] },
+    CultureGovTitles { forms: [("Divan", "Beg"), ("Khanate", "Khan"), ("Kurultai", "Aksakal")], offices: ["Tarkhan", "Kapudan", "Kadi", "Beg"] },
+    CultureGovTitles { forms: [("Council of Elders", "Elder"), ("Kingdom", "Reth"), ("Age-set Assembly", "Spokesman")], offices: ["Keeper of Herds", "Boatmaster", "Judge", "Elder"] },
+    CultureGovTitles { forms: [("Council of Notables", "Amghar"), ("Chiefdom", "Agellid"), ("Tajmaat", "Amin")], offices: ["Treasurer", "Raïs", "Qadi", "Elder"] },
+    CultureGovTitles { forms: [("Council of Elders", "Tairō"), ("Domain", "Daimyō"), ("Village Council", "Nanushi")], offices: ["Kanjō-bugyō", "Funa-bugyō", "Machi-bugyō", "Karō"] },
+    CultureGovTitles { forms: [("Council of Noyans", "Noyan"), ("Khanate", "Khan"), ("Kurultai", "Aksakal")], offices: ["Darughachi", "Chief Boatman", "Jarguchi", "Noyan"] },
+    CultureGovTitles { forms: [("Council of Elders", "Apu"), ("Curacazgo", "Kuraka"), ("Ayllu", "Kamayuq")], offices: ["Quipucamayoc", "Boatmaster", "Tokoyrikoq", "Apu"] },
+    CultureGovTitles { forms: [("Council of Elders", "Dugu-tigi"), ("Kingdom", "Mansa"), ("Gbara", "Belen-tigi")], offices: ["Farba", "Ji-tigi", "Judge", "Horon"] },
+];
+
+/// The generic set for a culture with no known kit — SIZE-aware, so a hamlet
+/// is not a "Principality" and a village council is not a "Senate".
+fn generic_form(govt_type: u8, pop: f32) -> (&'static str, &'static str) {
+    let small = pop < 5_000.0;
+    let great = pop >= 60_000.0;
+    match (govt_type, small, great) {
+        (0, true, _) => ("Council of Elders", "Elder"),
+        (0, _, true) => ("Signoria", "Doge"),
+        (0, _, _) => ("Merchant Council", "Doge"),
+        (1, true, _) => ("Lordship", "Lord"),
+        (1, _, _) => ("Principality", "Prince"),
+        (_, true, _) => ("Village Assembly", "Headman"),
+        (_, _, true) => ("Popular Assembly", "Archon"),
+        _ => ("Free Commune", "Mayor"),
+    }
+}
+
+/// `(form name, head title)` for a city — from its culture's kit where known,
+/// else the size-aware generic set. A village of a known kit still reads as
+/// its kit's own words (a Norse hamlet's assembly is a Thing, not a commune).
+pub fn govt_form_for(govt_type: u8, pop: f32, kit: Option<usize>) -> (String, String) {
+    match kit.and_then(|k| KIT_GOV_TITLES.get(k)) {
+        Some(t) => {
+            let (f, h) = t.forms[(govt_type as usize).min(2)];
+            (f.to_string(), h.to_string())
+        }
+        None => {
+            let (f, h) = generic_form(govt_type, pop);
+            (f.to_string(), h.to_string())
+        }
+    }
+}
+
+/// An office title in the city's own tongue — role 0 is the form's own head.
+pub fn office_title_for(role: u8, govt_type: u8, pop: f32, kit: Option<usize>) -> String {
+    if role == 0 {
+        return govt_form_for(govt_type, pop, kit).1;
+    }
+    match kit.and_then(|k| KIT_GOV_TITLES.get(k)) {
+        Some(t) => t.offices[((role as usize).saturating_sub(1)).min(3)].to_string(),
+        None => office_title(role).to_string(),
+    }
+}
+
+/// Stable 0 council · 1 one ruler · 2 assembly — the frontend's badge key,
+/// so the icon never depends on matching a culture's form NAME.
+pub fn govt_kind_key(govt_type: u8) -> &'static str {
+    match govt_type { 0 => "council", 1 => "ruler", _ => "assembly" }
+}
+
+/// "open the gates to foreigners" / "bar foreigners from property" … — the
+/// directed edict as a verb phrase, for chronicle lines and the UI.
+pub fn directed_edict_phrase(family: u8, dir: i8) -> &'static str {
+    match (family, dir > 0) {
+        (EDICT_FAM_CITIZENSHIP, true) => "widen the citizenship",
+        (EDICT_FAM_CITIZENSHIP, false) => "narrow the citizenship",
+        (EDICT_FAM_FOREIGNERS, true) => "open the gates to foreigners",
+        (EDICT_FAM_FOREIGNERS, false) => "bar foreigners from property",
+        (EDICT_FAM_LEARNING, true) => "endow schools and learning",
+        (EDICT_FAM_LEARNING, false) => "curb the schools",
+        (EDICT_FAM_WELFARE, true) => "open the granaries to the poor",
+        (EDICT_FAM_WELFARE, false) => "cut the grain dole",
+        (EDICT_FAM_ECONOMY, true) => "free the markets",
+        (EDICT_FAM_ECONOMY, false) => "fix the just price",
+        (EDICT_FAM_MILITARY, true) => "raise the levy",
+        (EDICT_FAM_MILITARY, false) => "stand down the levy",
+        (EDICT_FAM_CONSTITUTION, true) => "widen the council",
+        (EDICT_FAM_CONSTITUTION, false) => "close the council",
+        _ => "raise new public works",
     }
 }

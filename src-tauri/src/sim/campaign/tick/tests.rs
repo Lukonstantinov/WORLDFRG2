@@ -39,7 +39,7 @@
             track_buildings: [0; 4], track_build_progress: [0.0; 4],
             legitimacy: NEUTRAL_LEGITIMACY_SEED, gov_points: 0.0, gov_position: 0.0,
             gov_debate: None, gov_edicts: Vec::new(), gov_history: Vec::new(), gov_lustrum_tick: 0, gov_emergency_prev_type: -1, gov_emergency_until: 0, gov_change_cooldown: 0, gov_closed: false, ostracized: Vec::new(), culture_relations: Vec::new(), bondage_override: -1,
-            ideology_nobles: [0.0; 4], ideology_commons: [0.0; 4], ideology_gov: [0.0; 4], ideology_seeded: false, ideology_dominant: -1,
+            ideology_nobles: [0.0; 4], ideology_commons: [0.0; 4], ideology_gov: [0.0; 4], ideology_seeded: false, ideology_dominant: -1, ideology_unmet: 0.0, ideology_gap: 0.0,
         }
     }
 
@@ -155,7 +155,7 @@
             mine_deposits: vec![],
             deposit_potential_cache: Default::default(),
             units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
-            people: vec![], hall_of_dead: vec![], people_tombstones: vec![], next_individual_id: 0, people_migrated: true,
+            people: vec![], hall_of_dead: vec![], people_tombstones: vec![], next_individual_id: 0, people_migrated: true, gov_forms_migrated: false,
             life_log_synced_tick: 0,
             ideologies: vec![], schools: vec![], next_ideology_id: 0, next_school_id: 0, masterworks: vec![], next_masterwork_id: 0, venues: vec![], next_venue_id: 0, hordes: vec![], next_horde_id: 0,
         };
@@ -10514,11 +10514,12 @@
         let id = s.spawn_individual(0, ROLE_SCHOLAR, "Famous Scholar".into(), -1);
         let idx = s.people.iter().position(|p| p.id == id).unwrap();
         s.people[idx].famous = true;
-        s.people[idx].life_log.push(IndividualLifeEntry { tick: 5, template_id: 1, args: vec![0] });
+        s.people[idx].life_log.push(IndividualLifeEntry { tick: 5, template_id: 1, args: vec![0], why: vec![] });
         s.remove_dead_individual(idx, 3);
         assert!(s.people.iter().all(|p| p.id != id), "a dead person must leave `people`");
         let dead = s.hall_of_dead.iter().find(|p| p.id == id).expect("a dead NOTABLE must be in the Hall of the Dead");
-        assert_eq!(dead.life_log.len(), 1, "the Hall of the Dead keeps the full life log");
+        assert!(dead.life_log.iter().any(|e| e.template_id == 1) && dead.life_log.iter().any(|e| e.template_id == MS_DEBUT),
+            "the Hall of the Dead keeps the full life log (the debut milestone and the event)");
     }
 
     #[test]
@@ -11215,7 +11216,7 @@
         let mut s = sim(vec![hub0], goods);
         s.seed_government(0);
         let round_cap = 4u8;
-        s.hubs[0].gov_debate = Some(GovDebate { family: EDICT_FAM_ECONOMY, tag: 0, major: true, cost: 10.0, round: 0, tally: 0.0, round_cap });
+        s.hubs[0].gov_debate = Some(GovDebate { family: EDICT_FAM_ECONOMY, tag: 0, dir: 1, agenda: false, major: true, cost: 10.0, round: 0, tally: 0.0, round_cap });
         let mut rounds_run = 0u8;
         for _ in 0..(round_cap as u32 + 5) {
             if s.hubs[0].gov_debate.is_none() { break; }
@@ -11235,7 +11236,7 @@
         let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
         let mut s = sim(vec![hub0], goods);
         s.tick = 5;
-        s.hubs[0].gov_edicts.push(GovEdict { family: EDICT_FAM_WELFARE, tag: -1, major: false, enacted_tick: 0, expires_tick: 10 });
+        s.hubs[0].gov_edicts.push(GovEdict { family: EDICT_FAM_WELFARE, tag: -1, dir: 1, major: false, enacted_tick: 0, expires_tick: 10 });
         s.expire_edicts(0);
         assert_eq!(s.hubs[0].gov_edicts.len(), 1, "not yet expired");
         s.tick = 11;
@@ -11304,7 +11305,7 @@
         let hub0 = hub(0, 0.0, 0.0, 20_000.0, vec![10.0], 0);
         let mut s = sim(vec![hub0], goods);
         s.seed_government(0);
-        let deb = GovDebate { family: EDICT_FAM_WELFARE, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        let deb = GovDebate { family: EDICT_FAM_WELFARE, tag: -1, dir: 1, agenda: false, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
         s.resolve_debate(0, deb);
         if EDICT_EFFECT_DOSE <= 0.0 {
             assert!(s.hubs[0].laws.is_empty(), "no law may be enacted while the dose is zero");
@@ -11321,7 +11322,7 @@
         let mut s = sim(vec![hub0], goods);
         s.seed_government(0);
 
-        let welfare_pass = GovDebate { family: EDICT_FAM_WELFARE, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        let welfare_pass = GovDebate { family: EDICT_FAM_WELFARE, tag: -1, dir: 1, agenda: false, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
         s.resolve_debate(0, welfare_pass.clone());
         if EDICT_EFFECT_DOSE > 0.0 {
             let grain_count = s.hubs[0].laws.iter().filter(|l| l.kind == LAW_GRAIN).count();
@@ -11331,7 +11332,7 @@
             assert_eq!(grain_count, 1, "enacting it again while it already stands is a no-op");
         }
 
-        let foreigners_pass = GovDebate { family: EDICT_FAM_FOREIGNERS, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        let foreigners_pass = GovDebate { family: EDICT_FAM_FOREIGNERS, tag: -1, dir: -1, agenda: false, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
         s.resolve_debate(0, foreigners_pass);
         let bar_count = s.hubs[0].laws.iter().filter(|l| l.kind == LAW_FOREIGN_BAR).count();
         if EDICT_EFFECT_DOSE > 0.0 {
@@ -11341,7 +11342,7 @@
         }
 
         // A family with no matching law (e.g. Military) never enacts anything.
-        let military_pass = GovDebate { family: EDICT_FAM_MILITARY, tag: -1, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
+        let military_pass = GovDebate { family: EDICT_FAM_MILITARY, tag: -1, dir: 1, agenda: false, major: false, cost: 1.0, round: 1, tally: 0.9, round_cap: 1 };
         let laws_before = s.hubs[0].laws.len();
         s.resolve_debate(0, military_pass);
         assert_eq!(s.hubs[0].laws.len(), laws_before, "a family with no matching law enacts nothing");
@@ -11926,7 +11927,7 @@
         }
         // Hub 1 has a live edict matching one of the dominant ideology's demands.
         let (fam, tag) = dom.demands[0];
-        s.hubs[1].gov_edicts.push(GovEdict { family: fam, tag, major: false, enacted_tick: 0, expires_tick: 999_999_999 });
+        s.hubs[1].gov_edicts.push(GovEdict { family: fam, tag, dir: tag, major: false, enacted_tick: 0, expires_tick: 999_999_999 });
         for yr in 0..10 {
             s.tick = yr * TICKS_PER_YEAR;
             s.ideology_meter_drift_pass(yr);
@@ -11942,7 +11943,9 @@
     /// `ideology_gov` meter reads.
     #[test]
     fn ideology_gov_hook_is_a_noop_at_zero() {
-        assert_eq!(IDEOLOGY_GOV_HOOK_DOSE, 0.0, "the shipped dose must be exactly zero");
+        // 2026-09-30 · dosed LIVE (the audit's "ideologies do nothing");
+        // the pure function's zero-dose no-op is still asserted.
+        assert!(IDEOLOGY_GOV_HOOK_DOSE > 0.0 && IDEOLOGY_GOV_HOOK_DOSE <= 1.0);
         assert_eq!(ideology_gov_position_e(0.3, 5.0, 0.0), 0.3);
         assert_eq!(ideology_gov_position_e(0.3, -5.0, 0.0), 0.3);
         assert!((ideology_gov_position_e(0.3, 5.0, 1.0) - 1.0).abs() < 1e-6,
@@ -11952,7 +11955,7 @@
     /// The demand/unrest hook is also a proven no-op at its shipped dose.
     #[test]
     fn ideology_unrest_hook_is_a_noop_at_zero() {
-        assert_eq!(IDEOLOGY_UNREST_DOSE, 0.0);
+        assert!(IDEOLOGY_UNREST_DOSE > 0.0 && IDEOLOGY_UNREST_DOSE <= 1.0);
         assert_eq!(ideology_unrest_term_e(1.0, 0.0), 0.0);
         assert!(ideology_unrest_term_e(1.0, 1.0) > 0.0);
     }
@@ -12425,4 +12428,190 @@
         assert_eq!(HORDE_RAID_DOSE, 0.0);
         assert_eq!(horde_raid_amount_e(1000.0, 0.0), 0.0);
         assert!(horde_raid_amount_e(1000.0, 1.0) > 0.0);
+    }
+
+    // ── 2026-09-30 audit: character progression, forms, ideology ──────────
+
+    /// A trait gain gains, deepens, or FLIPS its opposite — the mechanism a
+    /// person's character changes by. A deeply-held opposite only weakens.
+    #[test]
+    fn choices_change_character() {
+        let mut t = vec![(TRAIT_CRAVEN, 1i8)];
+        assert_eq!(apply_trait_gain(&mut t, TRAIT_BRAVE), TraitChange::Replaced(TRAIT_BRAVE, TRAIT_CRAVEN));
+        assert_eq!(t, vec![(TRAIT_BRAVE, 1)]);
+        assert_eq!(apply_trait_gain(&mut t, TRAIT_BRAVE), TraitChange::Deepened(TRAIT_BRAVE));
+        assert_eq!(t, vec![(TRAIT_BRAVE, 2)]);
+        let mut deep = vec![(TRAIT_GREEDY, 2i8)];
+        assert_eq!(apply_trait_gain(&mut deep, TRAIT_GENEROUS), TraitChange::None);
+        assert_eq!(deep, vec![(TRAIT_GREEDY, 1)], "a deep vice only weakens at first");
+        assert_eq!(apply_trait_gain(&mut deep, TRAIT_GENEROUS), TraitChange::Replaced(TRAIT_GENEROUS, TRAIT_GREEDY));
+    }
+
+    /// Choice events fire, are logged as KEY entries with their reasons, and
+    /// render; over many events the character actually moves.
+    #[test]
+    fn life_choices_are_logged_and_shape_the_person() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let h = hub(0, 0.0, 0.0, 10_000.0, vec![200.0], 0);
+        let mut s = sim(vec![h], goods);
+        let id = s.spawn_individual(0, ROLE_SCHOLAR, "Tested Soul".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        s.people[idx].famous = true;
+        let before = s.people[idx].traits.clone();
+        let mut choices = 0;
+        for k in 0..120u32 {
+            s.tick = k * 30;
+            if s.fire_choice_event(idx) { choices += 1; }
+        }
+        assert_eq!(choices, 120, "the generic layer means a choice always matches");
+        let log = &s.people[idx].life_log;
+        assert!(log.iter().any(|e| e.template_id >= 2000), "choices are logged");
+        assert!(log.iter().filter(|e| e.template_id >= 2000).all(|e| is_key_life_entry(e)));
+        assert!(log.iter().any(|e| e.template_id >= 2000 && !e.why.is_empty()), "some choice records its reasons");
+        assert_ne!(s.people[idx].traits, before, "120 decisions must leave a mark on the character");
+        let e = log.iter().find(|e| e.template_id >= 2000).unwrap().clone();
+        let text = s.render_life_entry_for("Tested Soul", &e);
+        assert!(text.contains("Tested Soul") && !text.contains("{"), "rendered: {text}");
+    }
+
+    /// An ordinary person's log keeps its KEY entries when chatter overflows.
+    #[test]
+    fn key_life_entries_survive_pruning() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 5_000.0, vec![100.0], 0)], goods);
+        let id = s.spawn_individual(0, ROLE_OFFICIAL, "Keeper".into(), -1);
+        let idx = s.people.iter().position(|p| p.id == id).unwrap();
+        for k in 0..40u32 {
+            s.push_life_entry(idx, IndividualLifeEntry { tick: k, template_id: 1, args: vec![0], why: vec![] });
+        }
+        assert!(s.people[idx].life_log.iter().any(|e| e.template_id == MS_DEBUT), "the debut survives 40 lines of chatter");
+        assert!(s.people[idx].life_log.len() <= ORDINARY_LIFE_LOG_CAP + ORDINARY_KEY_LOG_CAP);
+    }
+
+    /// Choice texts obey the same geography lint as happenings.
+    #[test]
+    fn life_choice_templates_respect_geography() {
+        let lint: &[(&str, u32)] = &[
+            ("whale", TAG_COAST), ("ship", TAG_COAST), ("sail", TAG_COAST), ("harbour", TAG_COAST),
+            ("river", TAG_RIVER), ("camel", TAG_DESERT), ("frost", TAG_COLD),
+            ("walls", TAG_AT_WAR), ("levy", TAG_AT_WAR), ("granary", TAG_FAMINE), ("hungry", TAG_FAMINE),
+        ];
+        let mut ids = std::collections::HashSet::new();
+        for t in CHOICE_TEMPLATES {
+            assert!(ids.insert(t.id) && t.id >= 2000, "choice ids unique and ≥2000: {}", t.id);
+            let text = format!("{} {} {}", t.prompt, t.options[0].outcome, t.options[1].outcome).to_lowercase();
+            for &(kw, tag) in lint {
+                if text.contains(kw) {
+                    assert!(t.requires & tag != 0, "choice {} uses '{}' without requiring its tag", t.id, kw);
+                }
+            }
+        }
+    }
+
+    /// Small towns are no longer all communes, and culture moves the form.
+    #[test]
+    fn government_forms_follow_size_and_culture() {
+        let rolls: Vec<f32> = (0..200).map(|k| (k as f32 + 0.5) / 200.0).collect();
+        let count = |pop: f32, ideal: Option<usize>, t: u8| rolls.iter().filter(|&&r| govt_type_for(pop, ideal, r) == t).count();
+        assert!(count(3_000.0, None, 2) < 80, "a village is not a commune by default");
+        assert!(count(3_000.0, None, 0) > 40 && count(3_000.0, None, 1) > 40);
+        assert!(count(3_000.0, Some(IDEAL_CONQUEST), 1) > count(3_000.0, Some(IDEAL_WEALTH), 1));
+        assert!(count(90_000.0, Some(IDEAL_WEALTH), 0) > 150);
+        let (f, h) = govt_form_for(1, 40_000.0, Some(4));
+        assert_eq!((f.as_str(), h.as_str()), ("Jarldom", "Jarl"));
+        assert_eq!(govt_form_for(2, 2_000.0, None).0, "Village Assembly");
+        // Shipped at zero (a measured negative result) — the legacy rule seeds.
+        assert_eq!(GOV_FORM_DRAW_DOSE, 0.0);
+        assert_eq!(legacy_govt_type(3_000.0, 0.9), 2);
+    }
+
+    /// Every canonical demand can now be MET (direction, not the fixed tag),
+    /// and a city leaning toward a doctrine holds it.
+    #[test]
+    fn ideology_demands_can_be_met_and_held() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 5_000.0, vec![100.0], 0)], vec![good("wheat", 0, 0, 1.0, 0.85, true)]);
+        s.ensure_ideologies_seeded();
+        for i in &s.ideologies {
+            for &(fam, sign) in &i.demands {
+                assert!(ideology_support(i.position, fam, sign) >= 0.0,
+                    "{} demands {} {} yet its own position opposes it", i.name, fam, sign);
+            }
+        }
+        let fh = s.ideologies.iter().find(|i| i.name == "Free Harbour").unwrap().clone();
+        let lean: [f32; 4] = [fh.position[0] * 0.4, fh.position[1] * 0.4, fh.position[2] * 0.4, fh.position[3] * 0.4];
+        assert_eq!(dominant_ideology_for(&s.ideologies, lean), fh.id as i32);
+        assert_eq!(dominant_ideology_for(&s.ideologies, [0.0; 4]), -1, "a neutral city holds nothing");
+        assert_eq!(edict_tag_for(EDICT_FAM_FOREIGNERS, -1), -1, "the default bar keeps its tag");
+        assert_eq!(edict_tag_for(EDICT_FAM_FOREIGNERS, 1), 1, "opening the gates is libertarian");
+    }
+
+    /// A seat holder's own ideology moves their vote: a free-harbour
+    /// councillor opposes a foreign bar their conservative government wants.
+    #[test]
+    fn officials_vote_their_own_ideology() {
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 30_000.0, vec![100.0], 0)], vec![good("wheat", 0, 0, 1.0, 0.85, true)]);
+        s.hubs[0].gov_position = -0.8;
+        let open = s.spawn_individual(0, ROLE_OFFICIAL, "Open".into(), -1);
+        let closed = s.spawn_individual(0, ROLE_OFFICIAL, "Closed".into(), -1);
+        for (id, pos) in [(open, [0.0, 0.0, 5.0, 3.0]), (closed, [0.0, 0.0, -5.0, 0.0])] {
+            let p = s.people.iter_mut().find(|p| p.id == id).unwrap();
+            p.ideology = pos; p.ideology_seeded = true;
+        }
+        let seat = |iid: u32| Official { role: 4, name: String::new(), house: -1, control: 0.0, kin: false, term_end: 0,
+            path: PATH_ELECTED, suitability: 1.0, individual_id: iid as i32 };
+        let bar_tag = edict_tag_for(EDICT_FAM_FOREIGNERS, -1);
+        let l_open = s.official_edict_lean(0, &seat(open), EDICT_FAM_FOREIGNERS, bar_tag, -1);
+        let l_closed = s.official_edict_lean(0, &seat(closed), EDICT_FAM_FOREIGNERS, bar_tag, -1);
+        assert!(l_closed > l_open + 0.5, "closed {l_closed} vs open {l_open}");
+    }
+
+    /// People travel: over 30 years a performer/merchant roster produces
+    /// real moves or visits, each logged as a KEY milestone with a place.
+    #[test]
+    fn notables_travel_and_keep_a_road() {
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.85, true)];
+        let hubs: Vec<TickHub> = (0..4).map(|i| hub(i, i as f32 * 3.0, 0.0, 20_000.0, vec![400.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.rebuild_routes();
+        let mut ids = Vec::new();
+        for k in 0..12 {
+            let role = if k % 2 == 0 { ROLE_PERFORMER } else { ROLE_MERCHANT_PRINCE };
+            ids.push(s.spawn_individual(k % 4, role, format!("Wanderer {k}"), -1));
+        }
+        for yr in 0..30 {
+            s.tick = yr * TICKS_PER_YEAR;
+            s.people_travel_pass(yr);
+        }
+        let journeys: usize = s.people.iter().map(|p| p.life_log.iter().filter(|e| e.template_id == MS_MOVE || e.template_id == MS_VISIT || e.template_id == MS_RETURN).count()).sum();
+        assert!(journeys > 10, "a travelling roster must actually travel, got {journeys}");
+        for p in &s.people {
+            for e in p.life_log.iter().filter(|e| e.template_id == MS_MOVE || e.template_id == MS_VISIT) {
+                assert!(is_key_life_entry(e));
+                assert!((e.args[0] as usize) < s.hubs.len() && e.args[0] != e.args[1], "a journey goes somewhere else");
+                let text = s.render_life_entry_for(&p.name, e);
+                assert!(!text.contains("distant place"), "{text}");
+            }
+        }
+    }
+
+    #[test]
+    #[ignore]
+    /// 2026-09-30 · the instrument behind `GOV_FORM_DRAW_DOSE`'s negative result:
+    /// dense-world trade volume, forms, captures and charters, caps on vs off.
+    fn diag_forms_vs_relay_volume() {
+        for dosed_caps in [false, true] {
+            let mut w = dense_world();
+            if dosed_caps { w.ship_leg_max_km = 3500.0; w.caravan_leg_max_km = 800.0; }
+            for _ in 0..8 { w.advance(365); }
+            let live: Vec<usize> = (0..w.hubs.len()).filter(|&h| !w.hubs[h].is_estate && !w.hubs[h].abandoned).collect();
+            let mut forms = [0; 3];
+            for &h in &live { forms[(w.hubs[h].govt_type as usize).min(2)] += 1; }
+            let captured = live.iter().filter(|&&h| w.hubs[h].captor_house >= 0 || w.hubs[h].council_house >= 0).count();
+            let charters: usize = live.iter().map(|&h| w.hubs[h].laws.iter().filter(|l| l.kind == 0).count()).sum();
+            let bars: usize = live.iter().map(|&h| w.hubs[h].laws.iter().filter(|l| l.kind == 6).count()).sum();
+            let pop: f32 = live.iter().map(|&h| w.hubs[h].population).sum();
+            let wars = live.iter().filter(|&&h| w.hubs[h].war_with >= 0).count();
+            eprintln!("caps={dosed_caps} vol={:.0} live={} forms={forms:?} captured={captured} charters={charters} bars={bars} pop={pop:.0} at_war={wars} regime_changes={}",
+                w.diag_volume, live.len(), live.iter().map(|&h| w.hubs[h].gov_history.iter().filter(|e| e.regime_kind >= 0).count()).sum::<usize>());
+        }
     }

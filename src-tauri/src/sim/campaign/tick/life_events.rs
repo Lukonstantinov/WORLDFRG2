@@ -523,6 +523,13 @@ impl CampaignSim {
     /// since the in-city generic layer matches unconditionally
     /// (`a_due_event_always_finds_a_template`).
     pub(crate) fn fire_one_event(&mut self, i: usize) {
+        // 2026-09-30 · a share of due events are DILEMMAS the person decides
+        // (`life_choices.rs`) — the character-progression half of a life.
+        if hash01(self.seed, self.tick as u64, (self.people[i].id as u64) ^ salts::CHOICE_ROLL) < CHOICE_EVENT_SHARE
+            && self.fire_choice_event(i)
+        {
+            return;
+        }
         let tags = self.individual_context_tags(&self.people[i]);
         let mut candidates: Vec<&EventTemplate> = EVENT_TEMPLATES.iter().filter(|t| template_matches(t, tags)).collect();
         if candidates.is_empty() {
@@ -555,26 +562,18 @@ impl CampaignSim {
         // `u32::MAX` marks "no hub" (an abroad/unknown person) so rendering
         // never mistakes it for hub 0 — every world has a real hub 0.
         let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
-        let entry = IndividualLifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg] };
+        let entry = IndividualLifeEntry { tick: self.tick, template_id: t.id, args: vec![hub_arg], why: Vec::new() };
         let famous = self.people[i].famous;
-        self.people[i].life_log.push(entry.clone());
-        if !famous && self.people[i].life_log.len() > ORDINARY_LIFE_LOG_CAP {
-            let drop = self.people[i].life_log.len() - ORDINARY_LIFE_LOG_CAP;
-            self.people[i].life_log.drain(0..drop);
+        let (fame_delta, trait_gain) = (t.fame_delta, t.trait_gain);
+        let feature_gain = t.feature_gain;
+        self.push_life_entry(i, entry.clone());
+        if fame_delta != 0.0 {
+            self.people[i].fame = (self.people[i].fame + fame_delta).clamp(0.0, 1.0);
         }
-        if t.fame_delta != 0.0 {
-            self.people[i].fame = (self.people[i].fame + t.fame_delta).clamp(0.0, 1.0);
+        if let Some(tg) = trait_gain {
+            self.gain_trait_logged(i, tg);
         }
-        if let Some(tg) = t.trait_gain {
-            if !self.people[i].traits.iter().any(|&(tt, _)| tt == tg) && self.people[i].traits.len() < TRAIT_CAP_MAX {
-                self.people[i].traits.push((tg, 1));
-                let feat = feature_for_trait(tg);
-                if feat != 0 {
-                    self.people[i].features |= feat;
-                }
-            }
-        }
-        if let Some(f) = t.feature_gain {
+        if let Some(f) = feature_gain {
             self.people[i].features |= f;
         }
         // Only a FAMOUS person's ordinary event reaches the world journal —
@@ -594,6 +593,9 @@ impl CampaignSim {
     /// into the log itself, so re-reading an old entry always uses the
     /// CURRENT city name etc.
     pub(crate) fn render_life_entry_for(&self, name: &str, e: &IndividualLifeEntry) -> String {
+        if let Some(text) = self.render_choice(name, e).or_else(|| self.render_milestone(name, e)) {
+            return text;
+        }
         let t = EVENT_TEMPLATES.iter().find(|t| t.id == e.template_id);
         let city = e.args.first()
             .and_then(|&h| self.hubs.get(h as usize))

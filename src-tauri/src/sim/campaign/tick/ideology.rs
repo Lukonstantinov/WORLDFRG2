@@ -152,6 +152,57 @@ pub struct NamedIdeology {
 
 pub(crate) const IDEOLOGY_CAP: usize = 40;
 pub(crate) const IDEOLOGY_HOLD_MAX_DIST: f32 = 3.0;
+/// A city holds a named ideology once its commons lean at least this far
+/// (in axis units, of ±5) along that ideology's own direction.
+pub(crate) const IDEOLOGY_HOLD_MIN_LEAN: f32 = 1.0;
+
+/// `-1` or the id of the ideology `commons` leans furthest toward (see the
+/// call site). Pure — ties break on the lower id (iteration order).
+pub(crate) fn dominant_ideology_for(ideologies: &[NamedIdeology], commons: [f32; 4]) -> i32 {
+    let mut best = (-1i32, IDEOLOGY_HOLD_MIN_LEAN);
+    for i in ideologies {
+        let norm = (0..4).map(|k| i.position[k] * i.position[k]).sum::<f32>().sqrt();
+        if norm < 1e-3 { continue; }
+        let proj = (0..4).map(|k| commons[k] * i.position[k]).sum::<f32>() / norm;
+        if proj > best.1 { best = (i.id as i32, proj); }
+    }
+    best.0
+}
+
+/// A person's own leaning from their CHARACTER — the row-04 doc's "seat
+/// holders' positions from their traits". Axes: Authority (− strong hand ·
+/// + voice of the many), Tradition (− piety · + inquiry), Openness (− blood
+/// and soil · + the stranger is a guest), Economy (− just price · + free
+/// harbour). Scaled by trait strength (1 or 2).
+pub(crate) fn trait_ideology_push(traits: &[(u8, i8)]) -> [f32; 4] {
+    let mut v = [0.0f32; 4];
+    for &(t, st) in traits {
+        let d: [f32; 4] = match t {
+            TRAIT_KIND => [0.5, 0.0, 0.5, -0.5],
+            TRAIT_CRUEL => [-1.0, 0.0, -0.5, 0.0],
+            TRAIT_BRAVE => [-0.3, -0.3, 0.0, 0.0],
+            TRAIT_PROUD => [-0.8, -0.3, -0.3, 0.0],
+            TRAIT_HUMBLE => [0.8, 0.0, 0.3, 0.0],
+            TRAIT_AMBITIOUS => [-0.5, 0.3, 0.0, 0.5],
+            TRAIT_CONTENT => [0.0, -0.5, 0.0, -0.3],
+            TRAIT_CURIOUS => [0.2, 1.0, 0.8, 0.2],
+            TRAIT_CLOSED => [0.0, -0.8, -1.0, 0.0],
+            TRAIT_LOYAL => [-0.4, -0.6, 0.0, 0.0],
+            TRAIT_FICKLE => [0.3, 0.3, 0.0, 0.0],
+            TRAIT_GENEROUS => [0.4, 0.0, 0.2, -0.8],
+            TRAIT_GREEDY => [-0.2, 0.0, 0.0, 1.0],
+            TRAIT_SCHOLARLY => [0.3, 1.2, 0.4, 0.0],
+            TRAIT_ORATOR => [0.8, 0.2, 0.0, 0.0],
+            TRAIT_STRATEGIST => [-0.6, 0.0, 0.0, 0.0],
+            TRAIT_SEAFARER => [0.0, 0.2, 0.6, 0.6],
+            TRAIT_ASCETIC => [0.0, -0.8, -0.2, -0.6],
+            TRAIT_BENEFACTOR => [0.5, 0.0, 0.2, -0.5],
+            _ => [0.0; 4],
+        };
+        for k in 0..4 { v[k] += d[k] * st as f32; }
+    }
+    v
+}
 
 /// The seven canonical ideologies — enough of the doc's 16-trait vocabulary
 /// to give every one of the doc's own worked demand examples ("Voice of the
@@ -176,7 +227,7 @@ fn canonical_ideologies() -> Vec<NamedIdeology> {
         mk(1, "Free Harbour", &[7, 5], &[(EDICT_FAM_ECONOMY, 1), (EDICT_FAM_FOREIGNERS, 1)]),
         mk(2, "Blood and Soil", &[6, 2], &[(EDICT_FAM_FOREIGNERS, -1), (EDICT_FAM_CITIZENSHIP, -1)]),
         mk(3, "Rule of the Best Families", &[0, 10], &[(EDICT_FAM_CONSTITUTION, -1), (EDICT_FAM_ECONOMY, -1)]),
-        mk(4, "Ancestral Piety", &[3, 12], &[(EDICT_FAM_MILITARY, -1), (EDICT_FAM_LEARNING, -1)]),
+        mk(4, "Ancestral Piety", &[3, 12], &[(EDICT_FAM_MILITARY, 1), (EDICT_FAM_LEARNING, -1)]),
         mk(5, "Inquiry and Reason", &[4, 13, 15], &[(EDICT_FAM_LEARNING, 1), (EDICT_FAM_CITIZENSHIP, 1)]),
         mk(6, "Just Price", &[8, 14], &[(EDICT_FAM_ECONOMY, -1), (EDICT_FAM_WELFARE, 1)]),
     ]
@@ -216,16 +267,29 @@ const SCHOLAR_LEARNING_TIER_BONUS: f32 = 0.01;
 const SCHOLAR_STUDY_TRAVEL_CHANCE: f32 = 0.5;
 /// Years spent at each stage before the next roll (a life takes time).
 const SCHOLAR_STAGE_YEARS: u32 = 6;
+/// Fame a scholar earns at each stage review while working (before the
+/// centre-of-learning bonus), and per student who travels to study under them.
+const SCHOLAR_TEACH_FAME: f32 = 0.12;
+const SCHOLAR_STUDENT_FAME: f32 = 0.04;
+/// Reseating an open government seat may pick a renowned resident thinker.
+pub(crate) const SCHOLAR_SEAT_CHANCE: f32 = 0.25;
+pub(crate) const SCHOLAR_SEAT_FAME: f32 = 0.30;
 /// Fame a teaching scholar needs before they may found a school.
-const SCHOOL_FOUNDING_FAME: f32 = 0.35;
+const SCHOOL_FOUNDING_FAME: f32 = 0.45;
+/// A city supports at most `1 + its Ideological track level` schools, and a
+/// scholar founds at most one — measured, 200 schools (the cap) on 70 cities
+/// by year 80 once scholars could earn fame at all.
+const SCHOOLS_PER_CITY_BASE: usize = 1;
 /// Two positions within this distance share a school rather than minting a
 /// second, near-identical custom doctrine.
-const CUSTOM_IDEOLOGY_MERGE_DIST: f32 = 1.5;
+const CUSTOM_IDEOLOGY_MERGE_DIST: f32 = 3.0;
 
 /// Dosed hooks — both true no-ops at 0.0 (`ideology_gov_hook_is_a_noop_at_
 /// zero`, `ideology_unrest_hook_is_a_noop_at_zero`).
-pub(crate) const IDEOLOGY_GOV_HOOK_DOSE: f32 = 0.0;
-pub(crate) const IDEOLOGY_UNREST_DOSE: f32 = 0.0;
+pub(crate) const IDEOLOGY_GOV_HOOK_DOSE: f32 = 0.3;
+pub(crate) const IDEOLOGY_UNREST_DOSE: f32 = 0.5;
+/// Yearly pull of a city's meters back toward its culture's own position.
+pub(crate) const IDEOLOGY_CULTURE_ANCHOR: f32 = 0.04;
 
 /// Pure, testable twin of the government-position blend (N6/S1 `_e` split).
 pub(crate) fn ideology_gov_position_e(old_scalar: f32, gov_economy_axis: f32, dose: f32) -> f32 {
@@ -339,7 +403,20 @@ impl CampaignSim {
                 } else {
                     self.hubs[hu].ideology_commons
                 };
-                self.people[i].ideology = base;
+                // Home meter + the person's own character + a personal spread
+                // (±1.5 per axis, hashed on id). Before this every person was
+                // seeded to EXACTLY their city's meter, so a scholar could
+                // only ever teach the city back its own position and nothing
+                // diverged (no dominant doctrine, no school, no exile, all
+                // measured at zero over 100 years).
+                let push = trait_ideology_push(&self.people[i].traits);
+                let pid = self.people[i].id as u64;
+                let mut pos = base;
+                for k in 0..4 {
+                    let spread = (hash01(self.seed, pid, salts::IDEOLOGY_EVENT ^ (0x5EED0 + k as u64)) * 2.0 - 1.0) * 1.5;
+                    pos[k] += push[k] + spread;
+                }
+                self.people[i].ideology = clamp_ideology(pos);
                 self.people[i].ideology_seeded = true;
                 continue;
             }
@@ -427,7 +504,7 @@ impl CampaignSim {
                     let neighbours = self.neighbors.get(hu).cloned().unwrap_or_default();
                     let best = neighbours.iter()
                         .map(|&b| b as usize)
-                        .filter(|&b| b < self.hubs.len())
+                        .filter(|&b| b < self.hubs.len() && !self.hubs[b].is_estate && !self.hubs[b].abandoned)
                         .max_by_key(|&b| self.hubs[b].track_level[TRACK_IDEOLOGICAL]);
                     if roll < SCHOLAR_STUDY_TRAVEL_CHANCE {
                         if let Some(dest) = best.filter(|&b| self.hubs[b].track_level[TRACK_IDEOLOGICAL] > self.hubs[hu].track_level[TRACK_IDEOLOGICAL]) {
@@ -439,9 +516,23 @@ impl CampaignSim {
                                 .map(|p| p.id as i32);
                             self.people[i].current_hub = dest as i32;
                             self.people[i].teacher_id = teacher.unwrap_or(-1);
+                            let pid = self.people[i].id;
+                            self.log_milestone(pid, MS_STUDY, vec![dest as u32, teacher.map(|t| t as u32).unwrap_or(u32::MAX)]);
+                            // A student enrolls in the teacher's own school, if they founded one.
+                            if let Some(t) = teacher {
+                                if let Some(sc) = self.schools.iter_mut().find(|sc| sc.founder as i32 == t) {
+                                    sc.students += 1;
+                                }
+                                if let Some(tp) = self.people.iter_mut().find(|p| p.id as i32 == t) {
+                                    tp.fame = (tp.fame + SCHOLAR_STUDENT_FAME).min(1.0);
+                                }
+                            }
                         }
                     }
                     self.people[i].scholar_stage = STAGE_TEACH;
+                    self.people[i].fame = (self.people[i].fame + SCHOLAR_TEACH_FAME).min(1.0);
+                    let (pid, here) = (self.people[i].id, self.people[i].current_hub.max(0) as u32);
+                    self.log_milestone(pid, MS_TEACH, vec![here]);
                 }
                 STAGE_TEACH | STAGE_RETURNED | STAGE_PATRON => {
                     // Career: stay & teach / return home / seek a patron —
@@ -462,11 +553,34 @@ impl CampaignSim {
                         &base, &[Vec::new(), Vec::new(), Vec::new()], &self.people[i].traits,
                         &[Vec::new(), Vec::new(), Vec::new()], &self.people[i].modifiers, &ctx,
                     );
+                    let prev_stage = self.people[i].scholar_stage;
                     self.people[i].scholar_stage = match outcome.choice {
                         1 => { self.people[i].current_hub = home; STAGE_RETURNED }
                         2 => STAGE_PATRON,
                         _ => STAGE_TEACH,
                     };
+                    let (pid, stage, here) = (self.people[i].id, self.people[i].scholar_stage, self.people[i].current_hub);
+                    let here_arg = if here >= 0 { here as u32 } else { u32::MAX };
+                    if stage != prev_stage {
+                        match stage {
+                            STAGE_RETURNED => self.log_milestone(pid, MS_RETURN, vec![here_arg]),
+                            STAGE_PATRON => self.log_milestone(pid, MS_PATRON, vec![here_arg]),
+                            _ => {}
+                        }
+                    }
+                    // Every stage review a working scholar's reputation grows —
+                    // more in a real centre of learning. Offsets the yearly
+                    // fame decay (0.03 × `SCHOLAR_STAGE_YEARS`) for an active
+                    // teacher, so a long career can reach a school and a name.
+                    let centre = self.hubs.get(here.max(0) as usize).map(|hb| hb.track_level[TRACK_IDEOLOGICAL] as f32).unwrap_or(0.0);
+                    self.people[i].fame = (self.people[i].fame + SCHOLAR_TEACH_FAME * (1.0 + centre * 0.25)).min(1.0);
+                    // Seated in a government? The scholar has entered politics.
+                    let seated = self.hubs.get(here.max(0) as usize)
+                        .map(|hb| here >= 0 && hb.officials.iter().any(|o| o.individual_id == pid as i32)).unwrap_or(false);
+                    if seated {
+                        self.people[i].scholar_stage = STAGE_POLITICS;
+                        self.log_milestone(pid, MS_POLITICS, vec![here_arg]);
+                    }
                     // A teaching scholar with enough fame may found a school.
                     if self.people[i].scholar_stage == STAGE_TEACH && self.people[i].fame >= SCHOOL_FOUNDING_FAME {
                         self.maybe_found_school(i);
@@ -496,11 +610,17 @@ impl CampaignSim {
             let hu = h as usize;
             let gap = ideology_dist(self.people[i].ideology, self.hubs[hu].ideology_gov);
             if gap < 4.0 { continue; }
+            // At most one exile a decade — a refugee's new city is judged
+            // only after they have lived there a while.
+            let tick = self.tick;
+            if self.people[i].life_log.iter().any(|e| e.template_id == MS_EXILE && tick.saturating_sub(e.tick) < 10 * TICKS_PER_YEAR) {
+                continue;
+            }
             let culture = self.people[i].culture.clone();
             let neighbours = self.neighbors.get(hu).cloned().unwrap_or_default();
             let dest = neighbours.iter()
                 .map(|&b| b as usize)
-                .filter(|&b| b < self.hubs.len())
+                .filter(|&b| b < self.hubs.len() && !self.hubs[b].is_estate && !self.hubs[b].abandoned)
                 .max_by(|&a, &b| {
                     let ta = self.culture_relation_tier(a, &culture);
                     let tb = self.culture_relation_tier(b, &culture);
@@ -510,6 +630,10 @@ impl CampaignSim {
                 self.people[i].current_hub = dest as i32;
                 self.people[i].scholar_stage = STAGE_EXILE;
                 self.people[i].teacher_id = -1;
+                // An exiled thinker is a cause célèbre.
+                self.people[i].fame = (self.people[i].fame + 0.08).min(1.0);
+                let pid = self.people[i].id;
+                self.log_milestone(pid, MS_EXILE, vec![dest as u32, hu as u32]);
             }
         }
     }
@@ -528,8 +652,13 @@ impl CampaignSim {
     pub(crate) fn maybe_found_school(&mut self, person_idx: usize) {
         if self.schools.len() >= SCHOOL_CAP { return; }
         let h = self.people[person_idx].current_hub;
-        if h < 0 { return; }
+        if h < 0 || h as usize >= self.hubs.len() { return; }
+        let hb = &self.hubs[h as usize];
+        if hb.is_estate || hb.abandoned { return; }
         let founder_id = self.people[person_idx].id;
+        if self.schools.iter().any(|sc| sc.founder == founder_id) { return; }
+        let here = self.schools.iter().filter(|sc| sc.hub == h).count();
+        if here >= SCHOOLS_PER_CITY_BASE + hb.track_level[TRACK_IDEOLOGICAL] as usize { return; }
         let doctrine = self.doctrine_for(person_idx);
         let id = self.next_school_id;
         self.next_school_id += 1;
@@ -537,6 +666,12 @@ impl CampaignSim {
             id, hub: h, founder: founder_id, doctrine,
             founded_tick: self.tick, students: 1,
         });
+        // Founding a school makes a PHILOSOPHER — a public figure, not only
+        // a teacher (row 02 reserved the role; nothing ever assigned it).
+        let p = &mut self.people[person_idx];
+        if !p.roles.contains(&ROLE_PHILOSOPHER) { p.roles.push(ROLE_PHILOSOPHER); }
+        p.fame = (p.fame + 0.15).min(1.0);
+        self.log_milestone(founder_id, MS_SCHOOL, vec![h as u32, doctrine]);
     }
 
     /// The nearest existing named ideology to a scholar's own position, or —
@@ -571,10 +706,33 @@ impl CampaignSim {
         let name = format!("the {} {}", city_name, if traits.iter().any(|&t| t == 4) { "Inquiry" } else { "Doctrine" });
         let id = self.next_ideology_id;
         self.next_ideology_id += 1;
+        // A custom doctrine carries real DEMANDS (the canonical ones do; a
+        // demand-less doctrine could hold a city and ask nothing of it): the
+        // two families its position argues hardest for, in the direction it
+        // leans (`ideology_support`).
+        let mut scored_dem: Vec<((u8, i8), f32)> = Vec::new();
+        for fam in 0..EDICT_FAMILY_COUNT as u8 {
+            for dir in [1i8, -1] {
+                scored_dem.push(((fam, dir), super::government::ideology_support(position, fam, dir)));
+            }
+        }
+        scored_dem.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut demands: Vec<(u8, i8)> = Vec::new();
+        for ((fam, dir), sc) in scored_dem {
+            if sc < 0.2 || demands.len() >= 2 { break; }
+            if demands.iter().any(|&(f, _)| f == fam) { continue; }
+            demands.push((fam, dir));
+        }
+        let founder = self.people[person_idx].id;
         self.ideologies.push(NamedIdeology {
-            id, name, traits, position, founder: self.people[person_idx].id as i32,
-            home_hub, founded_tick: self.tick, demands: Vec::new(), adherents: 0.0,
+            id, name, traits, position, founder: founder as i32,
+            home_hub, founded_tick: self.tick, demands, adherents: 0.0,
         });
+        // Setting down a new doctrine makes an IDEOLOGUE.
+        let p = &mut self.people[person_idx];
+        if !p.roles.contains(&ROLE_IDEOLOGUE) { p.roles.push(ROLE_IDEOLOGUE); }
+        p.fame = (p.fame + 0.2).min(1.0);
+        self.log_milestone(founder, MS_DOCTRINE, vec![home_hub.max(0) as u32, id]);
         if self.ideologies.len() > IDEOLOGY_CAP {
             // Drop the least-adherent CUSTOM ideology (never a canonical
             // one — canonicals carry `founder == -1` and are permanent).
@@ -627,6 +785,16 @@ impl CampaignSim {
 
             let mut commons = self.hubs[h].ideology_commons;
             let mut nobles = self.hubs[h].ideology_nobles;
+            // 2026-09-30 · tradition reasserts itself: the commons and nobles
+            // drift back toward their CULTURE's own position every year. Without
+            // this nothing opposed a scholar-born doctrine and one spread to
+            // 61 of 72 cities in `econ_measure_living_world_census`.
+            let culture = self.hub_culture.get(h).cloned().unwrap_or_default();
+            let anchor = Self::ideology_pos_for_ideal(self.culture_ideal(&culture));
+            for k in 0..4 {
+                commons[k] += (anchor[k] - commons[k]) * IDEOLOGY_CULTURE_ANCHOR;
+                nobles[k] += (anchor[k] - nobles[k]) * IDEOLOGY_CULTURE_ANCHOR;
+            }
             for k in 0..4 {
                 if let Some(rp) = resident_pull {
                     commons[k] += (rp[k] - commons[k]) * 0.03;
@@ -653,8 +821,8 @@ impl CampaignSim {
             // exactly the "what this city already leans toward" question.
             if let Some(dom) = self.ideology_by_id(self.hubs[h].ideology_dominant).cloned() {
                 if !dom.demands.is_empty() {
-                    let met = dom.demands.iter().filter(|&&(fam, tag)| {
-                        self.hubs[h].gov_edicts.iter().any(|e| e.family == fam && e.tag == tag)
+                    let met = dom.demands.iter().filter(|&&(fam, sign)| {
+                        self.hubs[h].gov_edicts.iter().any(|e| e.family == fam && e.dir == sign)
                     }).count();
                     let frac_met = met as f32 / dom.demands.len() as f32;
                     let pull = frac_met * 0.08;
@@ -687,14 +855,15 @@ impl CampaignSim {
 
             self.apply_ideology_gov_hook(h);
 
-            // Which named ideology (if any) is closest to this city's commons.
-            let dominant = self.ideologies.iter()
-                .min_by(|a, b| ideology_dist(a.position, self.hubs[h].ideology_commons)
-                    .partial_cmp(&ideology_dist(b.position, self.hubs[h].ideology_commons))
-                    .unwrap_or(std::cmp::Ordering::Equal))
-                .filter(|i| ideology_dist(i.position, self.hubs[h].ideology_commons) < IDEOLOGY_HOLD_MAX_DIST)
-                .map(|i| i.id as i32)
-                .unwrap_or(-1);
+            // Which named ideology this city's commons LEAN toward — the
+            // doctrine with the largest projection of the commons position
+            // onto its own direction, if that lean is at least
+            // `IDEOLOGY_HOLD_MIN_LEAN`. The old nearest-within-3.0 test could
+            // never fire: a canonical doctrine sits 3.5-5.4 from the origin
+            // (its traits' pushes add up), while a city's meter starts at its
+            // culture's ideal (magnitude ~1-3), so measured over 100 years NO
+            // city ever held ANY ideology (`econ_measure_living_world_census`).
+            let dominant = dominant_ideology_for(&self.ideologies, self.hubs[h].ideology_commons);
             self.hubs[h].ideology_dominant = dominant;
         }
 
@@ -706,18 +875,22 @@ impl CampaignSim {
             ideo.adherents = holders as f32 / total;
         }
 
-        // Demands vs edicts (a real read, effect dosed at zero — see module doc).
-        if IDEOLOGY_UNREST_DOSE > 0.0 {
-            for &h in &settled {
-                let Some(dom) = self.ideology_by_id(self.hubs[h].ideology_dominant) else { continue };
-                let unmet = dom.demands.iter().filter(|&&(fam, tag)| {
-                    !self.hubs[h].gov_edicts.iter().any(|e| e.family == fam && (e.tag as i8) == tag)
-                }).count();
-                let frac = unmet as f32 / dom.demands.len().max(1) as f32;
-                let _term = ideology_unrest_term_e(frac, IDEOLOGY_UNREST_DOSE);
-                // Wiring `_term` into `update_unrest`'s target is the rest of
-                // this dose walk — not reached while the dose is 0.0.
-            }
+        // Demands vs edicts — the unmet share is stored per city and read by
+        // `update_unrest` (`ideology_unrest_term_e`, `IDEOLOGY_UNREST_DOSE`),
+        // and the commons-vs-government gap is stored for `maybe_revolution`.
+        for &h in &settled {
+            let unmet = match self.ideology_by_id(self.hubs[h].ideology_dominant) {
+                Some(dom) if !dom.demands.is_empty() => {
+                    let n = dom.demands.iter().filter(|&&(fam, sign)| {
+                        !self.hubs[h].gov_edicts.iter().any(|e| e.family == fam && e.dir == sign)
+                    }).count();
+                    n as f32 / dom.demands.len() as f32
+                }
+                _ => 0.0,
+            };
+            self.hubs[h].ideology_unmet = unmet;
+            self.hubs[h].ideology_gap = (ideology_dist(self.hubs[h].ideology_commons, self.hubs[h].ideology_gov)
+                / (2.0 * IDEOLOGY_CLAMP)).clamp(0.0, 1.0);
         }
     }
 }

@@ -54,6 +54,12 @@ pub(crate) mod living_world_salts {
     pub const IDEOLOGY_EVENT: u64 = 0x9E48;
     pub const IDEOLOGY_EVENT_SIGN: u64 = 0x9E49;
     pub const SCHOOL_CUSTOM_NAME: u64 = 0x9E4A;
+    /// 2026-09-30 · choice life events + renown (`life_choices.rs`).
+    pub const CHOICE_ROLL: u64 = 0x9F01;
+    pub const CHOICE_PICK: u64 = 0x9F02;
+    pub const CHOICE_DECIDE: u64 = 0x9F03;
+    pub const IDEOLOGY_SPREAD: u64 = 0x9F04;
+    pub const TRAVEL_ROLL: u64 = 0x9F05;
 }
 use living_world_salts as salts;
 
@@ -358,6 +364,11 @@ pub struct IndividualLifeEntry {
     pub template_id: u16,
     #[serde(default)]
     pub args: Vec<u32>,
+    /// 2026-09-30 · the dominant reasons behind a CHOICE (`life_choices.rs`),
+    /// as codes: a trait id, or `REASON_MODIFIER_BASE + modifier kind`, or
+    /// `REASON_CONTEXT`. Empty for an ordinary happening or a milestone.
+    #[serde(default)]
+    pub why: Vec<u16>,
 }
 
 /// A tombstone — kept while anything still points at a forgotten ordinary
@@ -753,6 +764,10 @@ impl CampaignSim {
             events_this_year: 0,
         };
         self.people.push(indiv);
+        // 2026-09-30 · the first KEY line of every life (`life_choices.rs`).
+        let idx = self.people.len() - 1;
+        let e = IndividualLifeEntry { tick: self.tick, template_id: MS_DEBUT, args: vec![h as u32, role as u32], why: Vec::new() };
+        self.push_life_entry(idx, e);
         id
     }
 
@@ -773,7 +788,9 @@ impl CampaignSim {
     /// called once a year, after the figure/notable passes above so a
     /// notable-linked individual's fame this year is already current.
     pub(crate) fn people_yearly_pass(&mut self, yr: u32) {
+        self.people_renown_pass();
         let tick = self.tick;
+        let mut promoted: Vec<u32> = Vec::new();
         let mut newly_dead: Vec<usize> = Vec::new();
         for i in 0..self.people.len() {
             // Fame decays slowly toward 0 every year (00_INDEX "`fame` rises
@@ -798,6 +815,10 @@ impl CampaignSim {
                 };
                 self.people[i].death_tick = tick;
                 self.people[i].death_cause = cause;
+                let hub = self.people[i].current_hub;
+                let hub_arg = if hub >= 0 { hub as u32 } else { u32::MAX };
+                let e = IndividualLifeEntry { tick, template_id: MS_DEATH, args: vec![hub_arg, cause as u32], why: Vec::new() };
+                self.people[i].life_log.push(e);
                 newly_dead.push(i);
                 continue;
             }
@@ -808,6 +829,7 @@ impl CampaignSim {
                 let living_notables = self.people.iter().filter(|p| p.famous && p.is_alive()).count();
                 if living_notables < NOTABLE_CAP {
                     self.people[i].famous = true;
+                    promoted.push(self.people[i].id);
                 } else {
                     let newcomer_fame = self.people[i].fame;
                     if let Some((lo_idx, lo_fame)) = self.people.iter().enumerate()
@@ -819,6 +841,7 @@ impl CampaignSim {
                         if newcomer_fame > lo_fame + NOTABLE_DEMOTE_MARGIN && margin_roll < 0.5 {
                             self.people[lo_idx].famous = false;
                             self.people[i].famous = true;
+                            promoted.push(self.people[i].id);
                         }
                     }
                 }
@@ -826,6 +849,10 @@ impl CampaignSim {
         }
         // Remove the dead — famous go to the Hall (kept forever, modifiers
         // cleared); ordinary are forgotten but leave a tombstone.
+        for id in promoted {
+            let hub = self.people.iter().find(|p| p.id == id).map(|p| p.current_hub).unwrap_or(-1);
+            self.log_milestone(id, MS_RENOWN, vec![if hub >= 0 { hub as u32 } else { u32::MAX }]);
+        }
         for &i in newly_dead.iter().rev() {
             self.remove_dead_individual(i, yr);
         }

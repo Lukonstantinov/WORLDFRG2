@@ -2405,6 +2405,19 @@ export interface FigureBrief {
    *  into — empty only for a figure created before that migration has run
    *  this session. */
   traits: string[];
+  /** 2026-09-30 · the linked person's structured life (choices, milestones). */
+  life?: LifeEntryBrief[];
+  individual_id?: number;
+  female?: boolean;
+  face_seed?: number;
+  features?: number;
+  /** The named doctrine the person leans toward, "" if none. */
+  ideology_name?: string;
+  fame?: number;
+  /** Every role the person has held, in the order earned. */
+  roles?: string[];
+  /** Every city lived in or visited, in order. */
+  places?: PlaceBrief[];
 }
 
 /** 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record
@@ -2429,6 +2442,48 @@ export interface IndividualBrief {
   features: number;
   /** Life log entries rendered to text at read time, most recent last. */
   life_log: string[];
+  /** 2026-09-30 · the same log, STRUCTURED (index-aligned with `life_log`):
+   *  choices, milestones and happenings, with key flags and reasons. */
+  life?: LifeEntryBrief[];
+  /** Age now (or at death). */
+  age?: number;
+  /** Personal ideology (Authority · Tradition · Openness · Economy, −5..+5). */
+  ideology?: [number, number, number, number];
+  /** The named doctrine this person leans toward, "" if none. */
+  ideology_name?: string;
+  /** Trait strengths, index-aligned with `traits` (1 or 2 — "deeply"). */
+  trait_strength?: number[];
+  /** Every city lived in or visited, in order. */
+  places?: PlaceBrief[];
+}
+
+/** One stop on a person's road (`read_people::PlaceBrief`). */
+export interface PlaceBrief {
+  year: number;
+  age: number;
+  hub: number;
+  city: string;
+  /** "debut" | "study" | "exile" | "return" | "settled" | "visit". */
+  how: string;
+  /** A there-and-back journey rather than a new home. */
+  visit: boolean;
+}
+
+/** One structured life-log entry (`read_people::LifeEntryBrief`). */
+export interface LifeEntryBrief {
+  year: number;
+  age: number;
+  text: string;
+  /** "choice" | "milestone" | "event". */
+  kind: string;
+  /** A key moment of the life (never pruned ahead of chatter). */
+  key: boolean;
+  /** For a choice: what they chose ("gives", "flees to the country"). */
+  choice: string;
+  /** For a choice: the dominant reasons, in words ("brave", "drunk"). */
+  why: string[];
+  /** A trait this entry granted ("Brave"), "" if none. */
+  gained: string;
 }
 
 /** Phase 6 · a landmark / place of note. */
@@ -3384,6 +3439,18 @@ export interface SeatBrief {
   house: number;
   house_name: string;
   control: number;
+  /** 2026-09-30 · the council window's seat card, from the seat holder's
+   *  own `Individual` (empty when no person is linked). */
+  traits?: string[];
+  ideology?: [number, number, number, number];
+  ideology_seeded?: boolean;
+  age?: number;
+  female?: boolean;
+  famous?: boolean;
+  fame?: number;
+  roles?: string[];
+  /** −1 against … +1 for the debate in progress, as this seat leans. */
+  vote_lean?: number;
 }
 
 /** Every seat sharing one allegiance target. */
@@ -3404,12 +3471,19 @@ export interface DebateBrief {
   round_cap: number;
   /** -1 (solid fail) .. +1 (solid pass). */
   tally: number;
+  /** +1 open/enact · −1 restrict/repeal. */
+  dir?: number;
+  /** The measure in words ("open the gates to foreigners"). */
+  what?: string;
+  /** Proposed by the prevailing ideology's agenda. */
+  agenda?: boolean;
 }
 
 /** One edict in force. */
 export interface EdictBrief {
   family: string;
   tag: number;
+  what?: string;
   major: boolean;
   enacted_year: number;
   expires_year: number;
@@ -3548,8 +3622,16 @@ export interface HordeBrief {
 export interface GovernmentBrief {
   hub: number;
   city: string;
-  /** "Merchant Council (Doge)" | "Principality (Prince)" | "Free Commune (Mayor)". */
+  /** The culture's own name for its form ("Signoria", "Jarldom", "Althing"…). */
   form: string;
+  /** "council" | "ruler" | "assembly" — the stable badge key. */
+  form_kind?: string;
+  /** The head's title in this culture ("Doge", "Jarl", "Khan"…). */
+  head_title?: string;
+  /** The prevailing named ideology, "" if none. */
+  dominant_ideology?: string;
+  /** Its demands, each [measure in words, met by a live edict]. */
+  demands?: [string, boolean][];
   legitimacy: number;
   gov_points: number;
   /** -1 conservative .. +1 libertarian. */

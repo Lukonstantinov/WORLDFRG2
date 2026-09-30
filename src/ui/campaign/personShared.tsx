@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type { IndividualBrief } from "@types";
 import { drawBust, individualKit } from "@ui/campaign/cultureDress";
+import { TraitChip, IdeologyBars } from "@ui/campaign/traitIcons";
+import { LifeStory } from "@ui/campaign/LifeStory";
 
 /** Shared "who holds this office / this role" chip — a bust portrait (the
  *  same `cultureDress` renderer `NotablesPanel.tsx` already draws with),
@@ -29,7 +31,7 @@ export function isScholarly(person: IndividualBrief | null | undefined, pathOver
   return person.roles.some((r) => SCHOLARLY_ROLES.includes(r));
 }
 
-function Bust({ person, size = 32 }: { person: IndividualBrief; size?: number }) {
+export function Bust({ person, size = 32 }: { person: IndividualBrief; size?: number }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {
     const el = ref.current;
@@ -58,23 +60,21 @@ function PersonExpanded({ person }: { person: IndividualBrief }) {
       <div style={{ minWidth: 0, flex: 1 }}>
         <div style={{ color: "#7a8aa0", fontSize: 9, marginBottom: 3 }}>
           {person.alive ? `Debuted ${person.debut_year}` : `${person.debut_year} – ${person.death_year} (${person.death_cause})`}
+          {person.age ? ` · age ${person.age}` : ""}
+          {person.roles.length > 1 ? ` · ${person.roles.join(" → ")}` : ""}
         </div>
         {person.traits.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 4 }}>
-            {person.traits.map((t) => (
-              <span key={t} style={{ fontSize: 8.5, color: "#e8d9b0", border: "1px solid #4a4030", borderRadius: 8, padding: "1px 6px" }}>{t}</span>
-            ))}
+            {person.traits.map((t, i) => <TraitChip key={t} name={t} strength={person.trait_strength?.[i] ?? 1} />)}
           </div>
         )}
-        {person.life_log.length === 0 ? (
-          <div style={{ color: "#6a86a6", fontSize: 9, fontStyle: "italic" }}>A quiet life, so far.</div>
-        ) : (
-          person.life_log.slice().reverse().map((line, i) => (
-            <div key={i} style={{ color: "#9fb4cc", fontSize: 9.5, padding: "2px 0", borderTop: i > 0 ? "1px solid #1e2e42" : "none" }}>
-              {line}
-            </div>
-          ))
+        {person.ideology && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4, fontSize: 9, color: "#9a8ae0" }}>
+            <IdeologyBars v={person.ideology} />
+            <span>{person.ideology_name ? `leans to ${person.ideology_name}` : "no settled doctrine"}</span>
+          </div>
         )}
+        <LifeStory life={person.life} places={person.places} fallback={person.life_log.slice().reverse()} />
       </div>
     </div>
   );

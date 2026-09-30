@@ -280,6 +280,15 @@ No row-02 mechanism moves money or population except what `living_figures_pass`
 already does, so `econ_` should be bit-identical.
 
 ## Queue
+
+- **2026-09-30 audit (CLAUDE.md §5.16).** `decide()` is now wired to a real
+  site: 35% of life events are dilemmas (`life_choices.rs`, 26 templates) whose
+  outcome gains/deepens/flips traits, moves fame, leaves a modifier and nudges
+  ideology. Career milestones are key entries never pruned ahead of chatter. Yearly
+  renown by role × city tier fills the roster (measured 0 notables in 100 years
+  before). People travel (`people_travel_pass`) and their road is served
+  (`PlaceBrief`). Still queued: most of the design doc's 12 named decision kinds
+  beyond the dilemma set; marriages/relations edges.
 - Q02.1 — The 20–60 notable-cap setting (waits on a campaign settings panel).
 - Q02.2 — Marriages between notables and house kin feeding house alliances (waits
   on row 04's alliance use).

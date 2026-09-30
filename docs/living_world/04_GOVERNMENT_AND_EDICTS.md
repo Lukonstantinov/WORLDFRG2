@@ -462,6 +462,19 @@ force with expiry · recent history (passed, failed, deadlocked, coups).
 (CLAUDE.md rule 22): no edict may sit in debate forever.
 
 ## Queue
+
+- **2026-09-30 audit (CLAUDE.md §5.16).** Q04.4 CLOSED — per-kit form names and
+  office titles (`KIT_GOV_TITLES`, `govt_form_for`, `office_title_for`). The form
+  itself as a size × culture-ideal draw (`govt_type_for`) is built but QUEUED at
+  `GOV_FORM_DRAW_DOSE = 0.0`: at 1.0 it broke the inheritance gate and the
+  dense-world relay ratio (numbers at the constant and in SCOREBOARD 2026-09-30);
+  the legacy rule (every town under 15k an assembly) still seeds.
+  `GovEdict`/`GovDebate` gained `dir` (+1 enact/open · −1 restrict/repeal); a
+  reversal repeals its family's standing law. Seat holders now vote their own
+  ideology (`official_edict_lean`), which closes the scholar/ideology half of
+  Q04.3's note. Q04.14 partly closed: seat portraits, bloc colours and a vote lean
+  per seat now render (`CouncilChamber.tsx`); an animated round timeline is still
+  queued.
 - Q04.1 — Realm-level government and realm-wide edicts (row 09).
 - Q04.2 — Elections with campaigns (candidates spending, speeches) — waits on
   measured seat turnover.

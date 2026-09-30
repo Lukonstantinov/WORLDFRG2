@@ -8,6 +8,8 @@ import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote, Donut } from "@ui/kit";
 import { drawBust, deriveKit, kitForCulture, type DressKit, type Occasion } from "@ui/campaign/cultureDress";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
+import { TraitChip } from "@ui/campaign/traitIcons";
+import { LifeStory } from "@ui/campaign/LifeStory";
 
 /** Notable Figures — the campaign's great lives as a gallery of portraits.
  *  Each card carries the person's likeness (their city's dress, varied per
@@ -187,7 +189,7 @@ function FigureCard({ f, year, selected, onClick }: {
   const spec = roleOf(f.role);
   const span = (f.alive ? year : f.died_year) - f.born_year;
   const [showLife, setShowLife] = useState(false);
-  const hasLife = !!(f.bio || f.thought || f.life_events?.length);
+  const hasLife = !!(f.bio || f.thought || f.life_events?.length || f.life?.length);
   return (
     <div style={{ flexShrink: 0, borderRadius: RADIUS.md, border: `1px solid ${selected ? spec.color : T.lineSoft}`, overflow: "hidden" }}>
     <div data-no-drag onClick={onClick}
@@ -219,12 +221,17 @@ function FigureCard({ f, year, selected, onClick }: {
         </div>
         {f.traits && f.traits.length > 0 && (
           <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 3 }}>
-            {f.traits.map((t) => (
-              <span key={t} style={{
-                fontSize: FZ.micro, color: T.inkMid, border: `1px solid ${T.lineSoft}`,
-                borderRadius: 999, padding: "0 6px", lineHeight: 1.6,
-              }}>{t}</span>
-            ))}
+            {f.traits.map((t) => <TraitChip key={t} name={t} />)}
+          </div>
+        )}
+        {((f.roles && f.roles.length > 1) || f.ideology_name) && (
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 5, marginTop: 3, fontSize: FZ.tiny, color: T.inkMid }}>
+            {f.roles && f.roles.length > 1 && (
+              <span title="career — every role held, in order">🪜 {f.roles.join(" → ")}</span>
+            )}
+            {f.ideology_name && (
+              <span title="the doctrine this person leans toward" style={{ color: "#9a8ae0" }}>📜 {f.ideology_name}</span>
+            )}
           </div>
         )}
         {f.house && (
@@ -290,21 +297,11 @@ function FigureCard({ f, year, selected, onClick }: {
             ))}
           </div>
         )}
-        {f.life_events && f.life_events.length > 0 && (
+        {((f.life && f.life.length > 0) || (f.life_events && f.life_events.length > 0)) && (
           <div style={{ marginTop: 6 }}>
-            <span style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.4 }}>Life</span>
-            <div style={{ marginTop: 3, display: "flex", flexDirection: "column", gap: 3 }}>
-              {f.life_events.map((ev, i) => {
-                const dash = ev.indexOf(" — ");
-                const year = dash >= 0 ? ev.slice(0, dash) : "";
-                const text = dash >= 0 ? ev.slice(dash + 3) : ev;
-                return (
-                  <div key={i} style={{ display: "flex", gap: 6, fontSize: FZ.small, lineHeight: 1.35 }}>
-                    <span style={{ color: spec.color, fontVariantNumeric: "tabular-nums", flex: "0 0 auto", minWidth: 30 }}>{year}</span>
-                    <span style={{ color: T.inkMid }}>{text}</span>
-                  </div>
-                );
-              })}
+            <span style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.4 }}>Life story</span>
+            <div style={{ marginTop: 3 }}>
+              <LifeStory life={f.life} places={f.places} color={spec.color} fallback={f.life_events} />
             </div>
           </div>
         )}

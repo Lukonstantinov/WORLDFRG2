@@ -182,6 +182,17 @@ traits and founders.
 | 06.7 | UI; end of row `tick::tests` + `econ_` + the learning-centres diagnostic | SCOREBOARD row |
 
 ## Queue
+
+- **2026-09-30 audit (CLAUDE.md §5.16).** Both hooks walked LIVE
+  (`IDEOLOGY_GOV_HOOK_DOSE` 0.3, `IDEOLOGY_UNREST_DOSE` 0.5) plus three new ones
+  (`IDEOLOGY_AGENDA_DOSE`, `IDEOLOGY_VOTE_DOSE`, `IDEOLOGY_REVOLUTION_DOSE`, all
+  0.5). Measured before: no city ever held an ideology (hold radius 3.0 < every
+  canonical doctrine's distance), 0 schools, Philosopher/Ideologue never assigned,
+  10 of 14 demands unmeetable. Now: projection-based holding, personal ideology
+  from traits + spread, a cultural anchor, schools per city capped by the learning
+  track, founders become Philosophers/Ideologues with real demands, renowned
+  thinkers take seats (STAGE_POLITICS). Q06.3 (rival/patron edges) and Q06.5 (the
+  world "Schools & Great Minds" window) remain queued.
 - Q06.1 — Ideological leagues between like-minded cities (a realm formation path,
   row 09).
 - Q06.2 — Written works as objects that travel (a treatise read in another city),

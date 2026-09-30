@@ -521,7 +521,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
     let government = if hub.is_estate {
         None
     } else {
-        use crate::sim::tick::{archetype_label, office_title, govt_type_name, govt_head_title,
+        use crate::sim::tick::{archetype_label, govt_form_for, office_title_for,
             EXPORT_TAX_RATE, IMPORT_TAX_RATE, OFFICIAL_CAPTURE};
         let ci = hub.council_house;
         let (council, council_color, council_archetype, council_is_guild, council_power) =
@@ -547,12 +547,12 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
                 .map(|h| (h.name.clone(), distinct_color(hi as usize)))
                 .unwrap_or_default() } else { (String::new(), String::new()) }
         };
+        let gov_kit = sim.hub_culture.get(hi).and_then(|c| crate::sim::cultures::kit_of_people(c));
         let officials: Vec<OfficialRow> = hub.officials.iter().map(|o| {
             let (an, ac) = hname(o.house);
             let status = if o.kin { "kin" } else if o.house < 0 { "neutral" }
                 else if o.control >= OFFICIAL_CAPTURE { "controlled" } else { "leaning" };
-            let role = if o.role == 0 { govt_head_title(hub.govt_type).to_string() }
-                else { office_title(o.role).to_string() };
+            let role = office_title_for(o.role, hub.govt_type, hub.population, gov_kit);
             OfficialRow { role, name: o.name.clone(), allegiance: an, allegiance_color: ac,
                 control: o.control, status: status.to_string() }
         }).collect();
@@ -645,7 +645,7 @@ pub fn campaign_get_hub(id: u32, db: State<'_, WorldDb>) -> Result<Option<HubDet
             mint_fineness: if hub.mint_fineness <= 0.0 { 1.0 } else { hub.mint_fineness },
             treasury: hub.treasury, civic_pool: hub.civic_pool,
             spec_risk, spec_tier, spec_stars, spec_pattern, spec_drivers, spec_watch,
-            govt_type: govt_type_name(hub.govt_type).to_string(),
+            govt_type: govt_form_for(hub.govt_type, hub.population, gov_kit).0,
             next_election_years, captor, captor_color,
             officials, family_influence, laws, civic_goods, leader,
         })

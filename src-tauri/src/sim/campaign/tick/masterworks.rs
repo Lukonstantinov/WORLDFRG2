@@ -134,6 +134,12 @@ impl CampaignSim {
             location_hub: hub as i32, condition: COND_INTACT, prestige: 0.3,
             provenance: vec![(self.tick, format!("made in {city}"))],
         });
+        if maker >= 0 {
+            self.log_milestone(maker as u32, MS_MASTERWORK, vec![hub as u32, id]);
+            if let Some(p) = self.people.iter_mut().find(|p| p.id as i32 == maker) {
+                p.fame = (p.fame + 0.12).min(1.0);
+            }
+        }
         // The least prestigious work drifts into "lost/forgotten" rather
         // than being deleted from provenance — i.e. it simply stops being
         // counted toward this city's cap, never removed from the vec.
@@ -290,7 +296,8 @@ impl CampaignSim {
             if home < 0 || home as usize >= self.hubs.len() { continue; }
             let hu = home as usize;
             let neighbours = self.neighbors.get(hu).cloned().unwrap_or_default();
-            let best = neighbours.iter().map(|&b| b as usize).filter(|&b| b < self.hubs.len())
+            let best = neighbours.iter().map(|&b| b as usize)
+                .filter(|&b| b < self.hubs.len() && !self.hubs[b].is_estate && !self.hubs[b].abandoned)
                 .max_by_key(|&b| self.hubs[b].track_level[TRACK_IDEOLOGICAL]);
             let Some(dest) = best else { continue };
             let gap = self.hubs[dest].track_level[TRACK_IDEOLOGICAL] as i32 - self.hubs[hu].track_level[TRACK_IDEOLOGICAL] as i32;
@@ -309,10 +316,13 @@ impl CampaignSim {
                     let maker = self.people[i].id as i32;
                     self.mint_masterwork(dest, maker, OWNER_CITY, dest as i32);
                     self.people[i].current_hub = home;
+                    self.log_milestone(maker as u32, MS_VISIT, vec![dest as u32, hu as u32, MOVE_COMMISSION]);
                 }
                 2 => {
                     // Relocation — a strong enough pull to move for good.
                     self.people[i].current_hub = dest as i32;
+                    let pid = self.people[i].id;
+                    self.log_milestone(pid, MS_MOVE, vec![dest as u32, hu as u32, MOVE_COMMISSION]);
                 }
                 _ => {}
             }

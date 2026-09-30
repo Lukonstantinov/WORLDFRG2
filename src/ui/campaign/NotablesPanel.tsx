@@ -7,6 +7,8 @@ import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "@ui/kit";
 import { drawBust, individualKit } from "@ui/campaign/cultureDress";
+import { TraitChip } from "@ui/campaign/traitIcons";
+import { LifeStory } from "@ui/campaign/LifeStory";
 
 /** 02_PEOPLE.md (Living World row 02) · the 40-cap notable roster and the
  *  Hall of the Dead in one window — a plain list, PLUS (02.7) a real portrait
@@ -90,16 +92,11 @@ export function NotablesPanel() {
                 </div>
                 {pickedRow.traits.length > 0 && (
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 8 }}>
-                    {pickedRow.traits.map((t) => <Chip key={t}>{t}</Chip>)}
+                    {pickedRow.traits.map((t, i) => <TraitChip key={t} name={t} strength={pickedRow.trait_strength?.[i] ?? 1} />)}
                   </div>
                 )}
                 <div style={{ borderTop: `1px solid ${T.lineSoft}`, paddingTop: 6 }}>
-                  {pickedRow.life_log.length === 0 && <div style={{ color: T.inkDim, fontSize: FZ.tiny }}>A quiet life, so far.</div>}
-                  {pickedRow.life_log.slice().reverse().map((line, i) => (
-                    <div key={i} style={{ color: T.inkMid, fontSize: FZ.small, padding: "3px 0", borderBottom: i < pickedRow.life_log.length - 1 ? `1px solid ${T.lineSoft}` : "none" }}>
-                      {line}
-                    </div>
-                  ))}
+                  <LifeStory life={pickedRow.life} places={pickedRow.places} fallback={pickedRow.life_log.slice().reverse()} />
                 </div>
               </div>
             ) : (

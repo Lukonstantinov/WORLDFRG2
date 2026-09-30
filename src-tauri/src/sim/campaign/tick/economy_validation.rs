@@ -3473,3 +3473,73 @@ fn econ_measure_development_leaders() {
         println!("    before DEV_PRODUCTION_DOSE is ever raised, not asserted here.");
     }
 }
+
+/// `docs/living_world/00_INDEX.md` audit instrument — does each row's
+/// mechanism actually PRODUCE anything on a real campaign, or does it sit
+/// idle? Prints a census every 20 years on `realm_reference_world` (the
+/// provinced fixture with contiguous cultures): people and notables by role,
+/// scholars by stage, schools, named ideologies and which dominate cities,
+/// government forms, edicts passed/failed and regime changes, masterworks,
+/// venues, hordes, and culture-acceptance tiers. Printed, never asserted —
+/// a zero here is a FINDING about the mechanism, not a build failure.
+#[test]
+#[ignore]
+fn econ_measure_living_world_census() {
+    use crate::sim::campaign::tick::individuals::*;
+    let mut s = realm_reference_world();
+    for yr in (20..=100).step_by(20) {
+        s.advance(20 * TICKS_PER_YEAR);
+        let live: Vec<usize> = (0..s.hubs.len()).filter(|&h| !s.hubs[h].is_estate && !s.hubs[h].abandoned).collect();
+        println!("\n=== year {yr} · {} live cities ===", live.len());
+        let alive = s.people.iter().filter(|p| p.is_alive()).count();
+        let famous = s.people.iter().filter(|p| p.is_alive() && p.famous).count();
+        println!("people alive {alive} · notables {famous} · hall of dead {} · tombstones {}",
+            s.hall_of_dead.len(), s.people_tombstones.len());
+        let mut by_role = vec![(0usize, 0usize); ROLE_COUNT];
+        for p in s.people.iter().filter(|p| p.is_alive()) {
+            for &r in &p.roles { if (r as usize) < ROLE_COUNT { by_role[r as usize].0 += 1; if p.famous { by_role[r as usize].1 += 1; } } }
+        }
+        let roles: Vec<String> = by_role.iter().enumerate().filter(|(_, c)| c.0 > 0)
+            .map(|(r, c)| format!("{} {}/{}★", role_name(r as u8), c.0, c.1)).collect();
+        println!("roles (alive/famous): {}", roles.join(" · "));
+        let mean_traits = if alive > 0 { s.people.iter().filter(|p| p.is_alive()).map(|p| p.traits.len()).sum::<usize>() as f32 / alive as f32 } else { 0.0 };
+        let mean_log = if alive > 0 { s.people.iter().filter(|p| p.is_alive()).map(|p| p.life_log.len()).sum::<usize>() as f32 / alive as f32 } else { 0.0 };
+        let max_fame = s.people.iter().filter(|p| p.is_alive()).map(|p| p.fame).fold(0.0f32, f32::max);
+        println!("mean traits {mean_traits:.2} · mean life-log {mean_log:.1} · max fame {max_fame:.2}");
+        let all = || s.people.iter().chain(s.hall_of_dead.iter());
+        let moves: usize = all().map(|p| p.life_log.iter().filter(|e| e.template_id == MS_MOVE || e.template_id == MS_EXILE || e.template_id == MS_STUDY || e.template_id == MS_RETURN).count()).sum();
+        let visits: usize = all().map(|p| p.life_log.iter().filter(|e| e.template_id == MS_VISIT).count()).sum();
+        let away = s.people.iter().filter(|p| p.is_alive() && p.current_hub != p.origin_hub).count();
+        let choices: usize = all().map(|p| p.life_log.iter().filter(|e| e.template_id >= 2000).count()).sum();
+        let flips: usize = all().map(|p| p.life_log.iter().filter(|e| e.template_id == MS_TRAIT_FLIP).count()).sum();
+        println!("travel: moves {moves} · visits {visits} · living away from home {away} · choices {choices} · trait flips {flips}");
+        let mut stages = [0usize; 8];
+        for p in s.people.iter().filter(|p| p.is_alive() && p.roles.iter().any(|&r| matches!(r, ROLE_SCHOLAR | ROLE_PHILOSOPHER | ROLE_IDEOLOGUE))) {
+            stages[(p.scholar_stage as usize).min(7)] += 1;
+        }
+        println!("scholars by stage {:?} · schools {} · ideologies {} (custom {})", stages, s.schools.len(),
+            s.ideologies.len(), s.ideologies.iter().filter(|i| i.founder >= 0).count());
+        let mut dom: std::collections::BTreeMap<String, usize> = Default::default();
+        for &h in &live {
+            let n = s.ideologies.iter().find(|i| i.id as i32 == s.hubs[h].ideology_dominant).map(|i| i.name.clone()).unwrap_or("(none)".into());
+            *dom.entry(n).or_default() += 1;
+        }
+        println!("dominant ideology by city: {:?}", dom);
+        let mut forms = [0usize; 3];
+        for &h in &live { forms[(s.hubs[h].govt_type as usize).min(2)] += 1; }
+        println!("forms council/principality/commune {:?}", forms);
+        let (mut passed, mut failed, mut dead, mut regime) = (0, 0, 0, 0);
+        for &h in &live {
+            for e in &s.hubs[h].gov_history {
+                if e.regime_kind >= 0 { regime += 1; } else { match e.outcome { 0 => passed += 1, 1 => failed += 1, _ => dead += 1 } }
+            }
+        }
+        let edicts_now: usize = live.iter().map(|&h| s.hubs[h].gov_edicts.len()).sum();
+        println!("edicts (history window) passed {passed} failed {failed} deadlocked {dead} · regime changes {regime} · in force {edicts_now}");
+        println!("masterworks {} · venues {} · hordes {} (active {})", s.masterworks.len(), s.venues.len(), s.hordes.len(),
+            s.hordes.iter().filter(|h| h.stage <= 1).count());
+        let mut tiers = [0usize; 6];
+        for &h in &live { for r in &s.hubs[h].culture_relations { tiers[(r.tier as usize).min(5)] += 1; } }
+        println!("culture relation tiers [_,1..5] {:?}", tiers);
+    }
+}

@@ -2490,6 +2490,70 @@ identity/portrait, a war/realm/horde-threat block and an economy-at-a-
 glance summary are queued (`10_SETTLEMENT_OVERVIEW.md`'s own Queue) rather
 than folded in this session.
 
+### 5.16 The 2026-09-30 Living World audit — what was dead, and what now lives
+
+A measured audit of rows 02-10 (`econ_measure_living_world_census`, `#[ignore]`d,
+prints a census every 20 years on `realm_reference_world`) found the layer mostly
+built and mostly idle. Baseline over 100 years: **0 notables ever** (max fame 0.10 vs
+the 0.65 threshold), **no city ever held an ideology** (the 3.0 "hold" radius was
+smaller than any canonical doctrine's distance from a city), **0 schools**, **0 edicts
+ever failed**, and **~68% of cities "Free Commune"** (every town under 15k was seeded
+one, forever). Fixed:
+
+- **Government forms** (`government.rs::govt_form_for`, `office_title_for`,
+  `KIT_GOV_TITLES`): a form is NAMED in its culture's own kit and by size (a Norse
+  assembly is an *Althing*, a Slavic one a *Veche*, a steppe ruler a *Khan*, a
+  culture-less hamlet a "Village Assembly") — closes Q04.4, and is what fixes the
+  VISIBLE "Free Commune everywhere". The mechanical redistribution
+  (`govt_type_for`, a size × culture-ideal draw) is built but ships at
+  **`GOV_FORM_DRAW_DOSE = 0.0` — a measured negative result**: at 1.0 it broke the
+  multi-seed inheritance gate (seed 3) and the dense-world relay-volume ratio
+  (0.37-0.55 vs 0.89), via form → seats/terms → capture → charters/regime
+  changes/wars. `legacy_govt_type` still seeds; `migrate_government_forms` is a
+  no-op at zero. Its dose walk is queued (04 doc); instrument
+  `diag_forms_vs_relay_volume`.
+- **Ideology does things** (`government.rs`/`ideology.rs`): an edict now has a
+  DIRECTION (`GovEdict.dir`, +1 open/enact · −1 restrict/repeal — before, demands
+  matched a FIXED per-family tag, so 10 of 14 canonical demands were unmeetable);
+  the prevailing doctrine sets the agenda (`IDEOLOGY_AGENDA_DOSE` 0.5), seat holders
+  vote their OWN ideology (`official_edict_lean`, `IDEOLOGY_VOTE_DOSE` 0.5), unmet
+  demands feed unrest (`TickHub.ideology_unmet`, `IDEOLOGY_UNREST_DOSE` 0.5), the
+  government meter drives `gov_position` (`IDEOLOGY_GOV_HOOK_DOSE` 0.3), revolution
+  reads the commons-vs-government gap (`TickHub.ideology_gap`,
+  `IDEOLOGY_REVOLUTION_DOSE` 0.5). A city holds the doctrine it LEANS toward
+  (`dominant_ideology_for`, projection ≥ 1); people are seeded from their home meter
+  + their traits (`trait_ideology_push`) + a personal spread; cities drift back toward
+  their culture (`IDEOLOGY_CULTURE_ANCHOR`), without which one doctrine took 61/72.
+- **Character progression** (`life_choices.rs`, new): 35% of life events are DILEMMAS
+  resolved by `decide()` against the person's traits/modifiers; the choice gains,
+  deepens or FLIPS a trait (`apply_trait_gain`, opposites in `opposite_trait`), moves
+  fame, leaves a modifier and nudges ideology; its reasons are stored
+  (`IndividualLifeEntry.why`). Career MILESTONES (`MS_*`, template ids 900-999) are KEY
+  entries never pruned ahead of chatter (`push_life_entry`, rule 20 applied to a
+  person). Yearly RENOWN (`people_renown_pass`) by role/office × city tier is what
+  finally fills the notable roster.
+- **Scholars** earn fame teaching and from students; founding a school makes a
+  PHILOSOPHER, setting down a doctrine an IDEOLOGUE (with real demands); exile is a
+  cause célèbre (once a decade); a renowned thinker may take an open seat
+  (`SCHOLAR_SEAT_CHANCE`) and enter politics. Schools capped per city by learning track.
+- **Travel** (`people_travel_pass`): only scholars and (untraced) artisans ever moved;
+  now merchants, performers, diplomats, explorers, demagogues tour, visit and relocate
+  (relocation is a `decide()` against their character), and go home. Every move/visit
+  is a milestone; `places_of` serves the road (`PlaceBrief`).
+- **UI**: `LifeStory.tsx` (key-moments filter, stages of life, choices with reasons,
+  trait changes, the road), `CouncilChamber.tsx` (seats on a semicircle ringed by
+  allegiance, office/path/trait icons, personal ideology bars, live vote lean, the
+  motion with round pips, doctrine demands met/unmet), `traitIcons.tsx` (one icon
+  vocabulary for traits/offices/paths/axes).
+
+After (100 y, shipped config): 40 notables (29 philosophers, 33 scholars, 17
+ideologues, 4 artisans, 3 officials — overlapping roles), 103 schools, 13 doctrines
+holding cities (largest 41/72), 262 relocations, 410 journeys, 13k decisions, 512
+character flips. Gates: `tick::tests` 405/405, `econ_` 6/6. **Still open**: hordes
+never rise on this fixture (0 in 100 y — unmeasured why); one doctrine still wins
+most of a culture-less world;
+performers never reach the roster; tier-less towns' heads rarely do.
+
 ---
 
 ## 6. Rust Backend Map (`src-tauri/src/`)
@@ -2752,7 +2816,9 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   `LifeEntry`/`Tombstone` roster, migration,
                                   `decide()`, the yearly life cycle (§5.8);
                                   life_events.rs = row 02's weekly event engine +
-                                  the ~40-template starter set; culture_acceptance.rs =
+                                  the ~40-template starter set; life_choices.rs =
+                                  the 2026-09-30 audit's choice events, milestones,
+                                  renown and travel (§5.16); culture_acceptance.rs =
                                   Living World row 05 (§5.10); ideology.rs = row 06,
                                   axes/named ideologies/scholars/schools (§5.11);
                                   masterworks.rs = row 07, masterworks + guild
@@ -3319,6 +3385,12 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   fabricated). Also exports `CityNotables`, shown on HubPanel's
                                   Life tab. NOTE: `cultureFigure.ts` below no longer exists —
                                   portraits everywhere now go through `cultureDress.ts`
+  CouncilChamber.tsx            ← The council chamber (§5.16) — shared by HubPanel's
+                                  Government tab and GovernmentPanel
+  LifeStory.tsx                 ← A structured life story + the travel road (§5.16) —
+                                  FiguresPanel, personShared, NotablesPanel, the chamber
+  traitIcons.tsx                ← ONE icon vocabulary: traits, offices, seat paths,
+                                  ideology axes (`TraitChip`, `IdeologyBars`)
   NotablesPanel.tsx             ← 02_PEOPLE.md (Living World row 02) — the
                                   40-cap notable roster + the Hall of the
                                   Dead, plain-list (not yet a portrait

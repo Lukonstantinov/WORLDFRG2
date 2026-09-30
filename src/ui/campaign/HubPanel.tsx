@@ -28,8 +28,7 @@ import { InternalMarketView } from "@ui/campaign/InternalMarketView";
 import { CultureDonut } from "@ui/campaign/CultureDonut";
 import { CityWarehousePanel } from "@ui/campaign/CityWarehousePanel";
 import { WorksCard } from "@ui/campaign/WorksCard";
-import { GovFormBadge } from "@ui/campaign/govFormBadge";
-import { PersonChip } from "@ui/campaign/personShared";
+import { CouncilChamber } from "@ui/campaign/CouncilChamber";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 
 /** Icons/colours for the settlement chronicle's event kinds (year-grouped view). */
@@ -388,25 +387,7 @@ export function HubPanel() {
   // event instead of a bare name (the other half of the "government has no
   // notable people with traits" gap — the Life tab's townspeople were fixed
   // already; this is the Government tab's own seats).
-  const [seatPeople, setSeatPeople] = useState<Record<number, IndividualBrief>>({});
-  // Which seat holders' inline life story is expanded (keyed by their
-  // `individual_id`, so it survives the seats array re-fetching each tick).
-  const [expandedSeats, setExpandedSeats] = useState<Record<number, boolean>>({});
-  useEffect(() => {
-    const seats = govBrief?.seats ?? [];
-    if (seats.length === 0) { setSeatPeople({}); return; }
-    let alive = true;
-    Promise.all(seats
-      .filter((s) => s.individual_id >= 0)
-      .map((s) => campaignGetIndividual(s.individual_id).then((p) => [s.individual_id, p] as const).catch(() => [s.individual_id, null] as const)))
-      .then((pairs) => {
-        if (!alive) return;
-        const map: Record<number, IndividualBrief> = {};
-        for (const [id, p] of pairs) if (p) map[id] = p;
-        setSeatPeople(map);
-      });
-    return () => { alive = false; };
-  }, [govBrief]);
+  // Seat holders' people are fetched by `CouncilChamber` itself.
 
   // 03_DEVELOPMENT_TRACKS.md slice 03.6 · the development factor + four-track
   // snapshot — was its own "Development" tab, folded into Government (the
@@ -647,137 +628,7 @@ export function HubPanel() {
                 This city's government has not been seated yet.
               </div>
             ) : (
-              <>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "2px 0" }}>
-                  <span style={{ color: "#8aa0c0", fontSize: 11 }}>Form</span>
-                  <GovFormBadge form={govBrief.form} />
-                </div>
-                <div style={{ display: "flex", gap: 14, margin: "4px 0 8px", flexWrap: "wrap" }}>
-                  <div style={{ flex: 1, minWidth: 80 }}>
-                    <div style={{ color: "#6a86a6", fontSize: 9 }}>Legitimacy</div>
-                    <div style={{ color: "#e8dcc0", fontWeight: 700 }}>{Math.round(govBrief.legitimacy * 100)}%</div>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 80 }}>
-                    <div style={{ color: "#6a86a6", fontSize: 9 }}>Points</div>
-                    <div style={{ color: "#e8dcc0", fontWeight: 700 }}>{govBrief.gov_points.toFixed(2)}</div>
-                  </div>
-                  <div style={{ flex: 1, minWidth: 100 }}>
-                    <div style={{ color: "#6a86a6", fontSize: 9 }}>Lean (cons. ↔ lib.)</div>
-                    <div style={{ height: 6, background: "#1e2e42", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
-                      <div style={{ width: `${Math.round(((govBrief.gov_position + 1) / 2) * 100)}%`, height: "100%", background: "#8e7bd8" }} />
-                    </div>
-                  </div>
-                </div>
-
-                {govBrief.debate && (
-                  <>
-                    <div style={sectionHdr}>Debate in progress</div>
-                    <div style={{ margin: "2px 0 6px", padding: "5px 7px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
-                        <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{govBrief.debate.major ? "Major" : "Minor"} — {govBrief.debate.family}</span>
-                        <span style={{ color: govBrief.debate.tag < 0 ? "#8e9dd8" : govBrief.debate.tag > 0 ? "#c9a227" : "#8aa0c0" }}>
-                          {govBrief.debate.tag < 0 ? "conservative" : govBrief.debate.tag > 0 ? "libertarian" : "neutral"}
-                        </span>
-                      </div>
-                      <div style={{ color: "#6a86a6", fontSize: 9, marginTop: 2 }}>
-                        Round {govBrief.debate.round} of {govBrief.debate.round_cap} · cost {govBrief.debate.cost.toFixed(1)}
-                      </div>
-                      <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 3 }}>
-                        <span style={{ fontSize: 9, color: "#6a86a6" }}>fail</span>
-                        <div style={{ flex: 1, height: 5, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
-                          <div style={{ width: `${Math.round(((govBrief.debate.tally + 1) / 2) * 100)}%`, height: "100%", background: "#5fd0ff" }} />
-                        </div>
-                        <span style={{ fontSize: 9, color: "#6a86a6" }}>pass</span>
-                      </div>
-                    </div>
-                  </>
-                )}
-
-                <div style={sectionHdr}>Seats ({govBrief.seats.length})</div>
-                {govBrief.seats.length === 0
-                  ? <div style={{ color: "#6a86a6", fontSize: 10 }}>No officials seated yet.</div>
-                  : govBrief.seats.map((s, i) => {
-                    const person = s.individual_id >= 0 ? seatPeople[s.individual_id] : undefined;
-                    const lastLine = person?.life_log[person.life_log.length - 1];
-                    const isExpanded = !!expandedSeats[s.individual_id];
-                    const toggle = () => setExpandedSeats((m) => ({ ...m, [s.individual_id]: !m[s.individual_id] }));
-                    const allegiance = (
-                      <span style={{ color: s.allegiance === 0 ? "#c9a227" : s.allegiance === 1 ? "#7fd0a0" : "#6a86a6", fontSize: 10 }}>
-                        {s.allegiance === 0 ? (s.house_name || "house") : s.allegiance === 1 ? "ruler's kin" : "commons"}
-                      </span>
-                    );
-                    return (
-                    <div key={i} style={{ margin: "4px 0" }}>
-                      {person ? (
-                        // A figurine bust + click-to-expand life story (Scholar/
-                        // Philosopher/Ideologue seats — including one filled
-                        // via PATH_SCHOLAR — read in the shared scholarly blue).
-                        <PersonChip
-                          person={person}
-                          pathOverride={s.path}
-                          onClick={toggle}
-                          expanded={isExpanded}
-                          label={<>
-                            <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>{" "}
-                            <span style={{ fontWeight: 400 }}>{s.name}</span>
-                          </>}
-                        />
-                      ) : (
-                        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                          <span style={{ color: "#e8dcc0", fontWeight: 600 }}>{s.office_title}</span>
-                          <span style={{ color: "#8aa0c0", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
-                          {allegiance}
-                        </div>
-                      )}
-                      {person && (
-                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 1 }}>
-                          <span style={{ color: "#6a86a6", fontSize: 9 }}>
-                            {s.path} · suitability {Math.round(s.suitability * 100)}%
-                          </span>
-                          {allegiance}
-                        </div>
-                      )}
-                      {!person && (
-                        <div style={{ color: "#6a86a6", fontSize: 9 }}>
-                          {s.path} · suitability {Math.round(s.suitability * 100)}%
-                        </div>
-                      )}
-                      {person && !isExpanded && (
-                        <div style={{ color: "#7a90a8", fontSize: 9, fontStyle: "italic", marginTop: 1 }}>
-                          {lastLine ?? "A quiet life, so far."}
-                        </div>
-                      )}
-                    </div>
-                    );
-                  })}
-
-                <div style={sectionHdr}>Edicts in force ({govBrief.edicts.length})</div>
-                {govBrief.edicts.length === 0
-                  ? <div style={{ color: "#6a86a6", fontSize: 10 }}>None currently in force.</div>
-                  : govBrief.edicts.map((e, i) => (
-                    <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
-                      <span>{e.family}{e.major ? " (major)" : ""}</span>
-                      <span style={{ color: "#6a86a6" }}>Y{e.enacted_year}–{e.expires_year}</span>
-                    </div>
-                  ))}
-
-                {govBrief.history.length > 0 && (
-                  <>
-                    <div style={sectionHdr}>Recent history</div>
-                    {govBrief.history.slice().reverse().slice(0, 8).map((h, i) => (
-                      <div key={i} style={{ fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
-                        <span style={{ color: "#6a86a6" }}>Y{h.year} </span>
-                        {h.regime_kind ? `a change of government — ${h.regime_kind}` : h.family}{" "}
-                        {!h.regime_kind && (
-                          <span style={{ color: h.outcome === "passed" ? "#7fd0a0" : h.outcome === "failed" ? "#ff8a6a" : "#e6c86a" }}>
-                            {h.outcome}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                  </>
-                )}
-              </>
+              <CouncilChamber brief={govBrief} compact />
             )}
 
             {/* Development tracks (03_DEVELOPMENT_TRACKS.md 03.6) — folded into

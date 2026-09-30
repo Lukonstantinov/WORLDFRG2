@@ -2971,6 +2971,54 @@ pub struct FigureBrief {
     /// resolves itself on the next `advance()`. Before this a Great Lives card
     /// showed no personality at all: `Figure` itself carries no traits field.
     pub traits: Vec<String>,
+    /// 2026-09-30 · the linked `Individual`'s STRUCTURED life (choices,
+    /// milestones, happenings with key flags) — empty for a figure with no
+    /// linked person yet.
+    #[serde(default)] pub life: Vec<LifeEntryBrief>,
+    /// The linked `Individual.id`, or −1.
+    #[serde(default)] pub individual_id: i32,
+    #[serde(default)] pub female: bool,
+    #[serde(default)] pub face_seed: u32,
+    #[serde(default)] pub features: u32,
+    /// The named doctrine the person leans toward, "" if none.
+    #[serde(default)] pub ideology_name: String,
+    #[serde(default)] pub fame: f32,
+    /// Every role the person has held, in the order earned.
+    #[serde(default)] pub roles: Vec<String>,
+    /// Their road — every city lived in or visited, in order.
+    #[serde(default)] pub places: Vec<PlaceBrief>,
+}
+
+/// 2026-09-30 · one stop on a person's road — where they were born into
+/// public life, studied, fled to, settled or visited, in order.
+#[derive(Serialize, Clone, Default)]
+pub struct PlaceBrief {
+    pub year: u32,
+    pub age: u32,
+    pub hub: i32,
+    pub city: String,
+    /// "debut" | "study" | "exile" | "return" | "settled" | "visit".
+    pub how: String,
+    /// A there-and-back journey rather than a new home.
+    pub visit: bool,
+}
+
+/// 2026-09-30 · one structured life-log entry — the Life Story view groups
+/// these by age and can filter to the KEY moments.
+#[derive(Serialize, Clone, Default)]
+pub struct LifeEntryBrief {
+    pub year: u32,
+    pub age: u32,
+    pub text: String,
+    /// "choice" | "milestone" | "event".
+    pub kind: String,
+    pub key: bool,
+    /// For a choice: the chosen response ("gives", "flees to the country").
+    pub choice: String,
+    /// For a choice: its dominant reasons, in words.
+    pub why: Vec<String>,
+    /// A trait the entry granted, "" if none.
+    pub gained: String,
 }
 
 /// 02_PEOPLE.md (Living World row 02) · one `Individual` — the unified record
@@ -2998,6 +3046,15 @@ pub struct IndividualBrief {
     /// Life log entries rendered to text AT READ TIME (00_INDEX "text
     /// generated lazily at read time"), most recent last.
     pub life_log: Vec<String>,
+    /// The same log, structured (index-aligned with `life_log`).
+    #[serde(default)] pub life: Vec<LifeEntryBrief>,
+    #[serde(default)] pub age: u32,
+    #[serde(default)] pub ideology: [f32; 4],
+    #[serde(default)] pub ideology_name: String,
+    /// Strength (1 or 2) of each trait, index-aligned with `traits`.
+    #[serde(default)] pub trait_strength: Vec<i8>,
+    /// Their road — every city lived in or visited, in order.
+    #[serde(default)] pub places: Vec<PlaceBrief>,
 }
 
 /// Phase 6 · one landmark / place of note (wonders, holy cities, fair towns, guildhalls).

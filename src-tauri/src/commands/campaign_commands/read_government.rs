@@ -11,7 +11,8 @@ use crate::sim::tick::{
     Official, TickHub, TICKS_PER_YEAR,
     official_allegiance, official_path_name, government_blocs, edict_family_name,
     GOV_OUTCOME_PASSED, GOV_OUTCOME_FAILED, GOV_OUTCOME_DEADLOCKED, GOV_OUTCOME_COUP,
-    govt_type_name, office_title, regime_kind_name,
+    regime_kind_name, govt_form_for, office_title_for, govt_kind_key,
+    trait_name, role_name, directed_edict_phrase,
 };
 
 /// One seat, browser-ready — a plain house name resolved rather than a bare
@@ -30,6 +31,21 @@ pub struct SeatBrief {
     pub house: i32,
     pub house_name: String,
     pub control: f32,
+    /// 2026-09-30 · the council window's seat card — the seat holder's own
+    /// character, read off their `Individual` (empty when a seat carries no
+    /// linked person, e.g. an old save's plain name).
+    #[serde(default)] pub traits: Vec<String>,
+    /// The four ideology axes (Authority · Tradition · Openness · Economy, −5..+5).
+    #[serde(default)] pub ideology: [f32; 4],
+    #[serde(default)] pub ideology_seeded: bool,
+    #[serde(default)] pub age: u32,
+    #[serde(default)] pub female: bool,
+    #[serde(default)] pub famous: bool,
+    #[serde(default)] pub fame: f32,
+    #[serde(default)] pub roles: Vec<String>,
+    /// −1 against … +1 for the debate in progress, as this seat would lean
+    /// this round (`CampaignSim::official_edict_lean`); 0 with no debate.
+    #[serde(default)] pub vote_lean: f32,
 }
 
 /// A bloc — every seat sharing one allegiance target, grouped for the window's
@@ -53,6 +69,12 @@ pub struct DebateBrief {
     pub round: u8,
     pub round_cap: u8,
     pub tally: f32,
+    /// +1 open/enact · −1 restrict/repeal (`GovEdict.dir`).
+    #[serde(default)] pub dir: i8,
+    /// "open the gates to foreigners" — the measure in words.
+    #[serde(default)] pub what: String,
+    /// Proposed by the prevailing ideology's agenda.
+    #[serde(default)] pub agenda: bool,
 }
 
 /// One edict in force.
@@ -60,6 +82,7 @@ pub struct DebateBrief {
 pub struct EdictBrief {
     pub family: String,
     pub tag: i8,
+    #[serde(default)] pub what: String,
     pub major: bool,
     pub enacted_year: u32,
     pub expires_year: u32,
@@ -85,6 +108,16 @@ pub struct GovernmentBrief {
     pub city: String,
     /// "Merchant Council (Doge)" | "Principality (Prince)" | "Free Commune (Mayor)".
     pub form: String,
+    /// "council" | "ruler" | "assembly" — the stable badge key, independent
+    /// of the culture's own NAME for its form.
+    #[serde(default)] pub form_kind: String,
+    /// The head's title in this culture ("Doge", "Jarl", "Khan"…).
+    #[serde(default)] pub head_title: String,
+    /// The prevailing named ideology in this city, "" if none holds.
+    #[serde(default)] pub dominant_ideology: String,
+    /// The dominant ideology's demands as edict family names, each with
+    /// whether a live edict meets it right now.
+    #[serde(default)] pub demands: Vec<(String, bool)>,
     pub legitimacy: f32,
     pub gov_points: f32,
     /// −1 conservative .. +1 libertarian.
@@ -106,10 +139,19 @@ fn outcome_name(o: u8) -> &'static str {
     }
 }
 
-fn seat_brief(o: &Official, house_name: &dyn Fn(i32) -> String) -> SeatBrief {
+fn seat_brief(
+    sim: &crate::sim::tick::CampaignSim, h: usize, o: &Official,
+    house_name: &dyn Fn(i32) -> String, govt_type: u8, pop: f32, kit: Option<usize>,
+) -> SeatBrief {
+    let person = if o.individual_id >= 0 {
+        sim.people.iter().find(|p| p.id as i32 == o.individual_id)
+    } else { None };
+    let vote_lean = sim.hubs[h].gov_debate.as_ref()
+        .map(|d| sim.official_edict_lean(h, o, d.family, d.tag, d.dir))
+        .unwrap_or(0.0);
     SeatBrief {
         role: o.role,
-        office_title: office_title(o.role).to_string(),
+        office_title: office_title_for(o.role, govt_type, pop, kit),
         name: o.name.clone(),
         individual_id: o.individual_id,
         path: official_path_name(o.path).to_string(),
@@ -118,6 +160,15 @@ fn seat_brief(o: &Official, house_name: &dyn Fn(i32) -> String) -> SeatBrief {
         house: o.house,
         house_name: house_name(o.house),
         control: o.control,
+        traits: person.map(|p| p.traits.iter().map(|&(t, _)| trait_name(t).to_string()).collect()).unwrap_or_default(),
+        ideology: person.map(|p| p.ideology).unwrap_or([0.0; 4]),
+        ideology_seeded: person.map(|p| p.ideology_seeded).unwrap_or(false),
+        age: person.map(|p| sim.tick.saturating_sub(p.birth_tick) / TICKS_PER_YEAR).unwrap_or(0),
+        female: person.map(|p| p.female).unwrap_or(false),
+        famous: person.map(|p| p.famous).unwrap_or(false),
+        fame: person.map(|p| p.fame).unwrap_or(0.0),
+        roles: person.map(|p| p.roles.iter().map(|&r| role_name(r).to_string()).collect()).unwrap_or_default(),
+        vote_lean,
     }
 }
 
@@ -137,7 +188,17 @@ pub fn campaign_get_government(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
         if hi < 0 { return String::new(); }
         sim.houses.get(hi as usize).map(|hh| hh.name.clone()).unwrap_or_default()
     };
-    let seats: Vec<SeatBrief> = hb.officials.iter().map(|o| seat_brief(o, &house_name)).collect();
+    let culture = sim.hub_culture.get(h).cloned().unwrap_or_default();
+    let kit = crate::sim::cultures::kit_of_people(&culture);
+    let (form, head_title) = govt_form_for(hb.govt_type, hb.population, kit);
+    let seats: Vec<SeatBrief> = hb.officials.iter()
+        .map(|o| seat_brief(&sim, h, o, &house_name, hb.govt_type, hb.population, kit)).collect();
+    let dom = sim.ideologies.iter().find(|i| i.id as i32 == hb.ideology_dominant);
+    let dominant_ideology = dom.map(|i| i.name.clone()).unwrap_or_default();
+    let demands: Vec<(String, bool)> = dom.map(|i| i.demands.iter().map(|&(fam, sign)| {
+        let met = hb.gov_edicts.iter().any(|e| e.family == fam && e.dir == sign);
+        (directed_edict_phrase(fam, sign).to_string(), met)
+    }).collect()).unwrap_or_default();
     let blocs: Vec<BlocBrief> = government_blocs(&hb.officials).into_iter()
         .map(|(house, idxs)| BlocBrief {
             house,
@@ -148,9 +209,11 @@ pub fn campaign_get_government(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
     let debate = hb.gov_debate.as_ref().map(|d| DebateBrief {
         family: edict_family_name(d.family).to_string(),
         tag: d.tag, major: d.major, cost: d.cost, round: d.round, round_cap: d.round_cap, tally: d.tally,
+        dir: d.dir, what: directed_edict_phrase(d.family, d.dir).to_string(), agenda: d.agenda,
     });
     let edicts: Vec<EdictBrief> = hb.gov_edicts.iter().map(|e| EdictBrief {
         family: edict_family_name(e.family).to_string(),
+        what: directed_edict_phrase(e.family, e.dir).to_string(),
         tag: e.tag, major: e.major,
         enacted_year: e.enacted_tick / TICKS_PER_YEAR,
         expires_year: e.expires_tick / TICKS_PER_YEAR,
@@ -163,7 +226,8 @@ pub fn campaign_get_government(hub: u32, db: State<'_, WorldDb>) -> Result<Optio
     }).collect();
 
     Ok(Some(GovernmentBrief {
-        hub, city: hb.name.clone(), form: govt_type_name(hb.govt_type).to_string(),
+        hub, city: hb.name.clone(), form,
+        form_kind: govt_kind_key(hb.govt_type).to_string(), head_title, dominant_ideology, demands,
         legitimacy: hb.legitimacy, gov_points: hb.gov_points, gov_position: hb.gov_position,
         seats, blocs, debate, edicts, history,
     }))
@@ -179,6 +243,7 @@ pub fn campaign_get_edicts(hub: u32, db: State<'_, WorldDb>) -> Result<Vec<Edict
     let Some(hb) = sim.hubs.get(hub as usize) else { return Ok(vec![]) };
     Ok(hb.gov_edicts.iter().map(|e| EdictBrief {
         family: edict_family_name(e.family).to_string(),
+        what: directed_edict_phrase(e.family, e.dir).to_string(),
         tag: e.tag, major: e.major,
         enacted_year: e.enacted_tick / TICKS_PER_YEAR,
         expires_year: e.expires_tick / TICKS_PER_YEAR,

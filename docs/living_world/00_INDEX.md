@@ -63,6 +63,24 @@ still needs. Row 02 (the `Individual` system) has SINCE landed on `main`
 (above) — 04.2 onward can now draw on it; 04.1's own scaffolding was not
 revisited to use it and still stands as shipped.
 
+## 2026-09-30 audit — what the rows actually DO (measured)
+
+`econ_measure_living_world_census` (`#[ignore]`d, `economy_validation.rs`) runs
+`realm_reference_world` 100 years and prints each row's output every 20 years.
+Before this audit the layer was built but idle: **0 notables in 100 years**, **no
+city ever held an ideology**, **0 schools**, **0 edicts ever failed**, **~68% of cities
+"Free Commune"**, no life event ever a decision, and only scholars/artisans ever
+changed city. Fixed in one batch (CLAUDE.md §5.16): government forms named in each
+culture's own words (closes Q04.4 — the mechanical culture×size form draw is built
+but dosed at 0.0, a measured negative result); edicts with a DIRECTION so ideology demands can
+be met; ideology now sets the agenda, votes, unrest, `gov_position` and revolution
+(row 04/06 hooks walked live — see `docs/SCOREBOARD.md` 2026-09-30); choice life
+events + trait flips + career milestones + renown (row 02); scholars → philosophers
+→ ideologues as notables (row 06); travel with a served road; the council chamber
+and structured life story UI. Rows keep their DONE/PARTIAL status — this changed
+what they produce, not what they contain. **Combinations the audit recommends** are
+listed in `docs/SCOREBOARD.md` 2026-09-30.
+
 ## Rules that apply to every row
 
 **Observation only.** The player watches; every choice in these documents is the

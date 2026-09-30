@@ -9,6 +9,59 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-09-30 — Living World audit: the rows were built and idle — measured, then brought to life (CLAUDE.md §5.16)
+
+Instrument: `econ_measure_living_world_census` (new, `#[ignore]`d) on
+`realm_reference_world`, 100 years.
+
+| metric (year 100) | before | after |
+|---|---|---|
+| living notables (cap 40) | **0** (max fame 0.10) | 40 |
+| cities holding a named ideology | **0 / 72** | 68 / 72 (13 doctrines) |
+| schools | 0 | 103 |
+| Philosophers / Ideologues ever assigned | 0 / 0 | 48 / 25 alive |
+| edicts FAILED (history window) | 0 | occasional (1-21) |
+| life-event decisions | 0 | 13,237 (512 trait flips) |
+| relocations / journeys (non-scholar) | untraced | 262 / 410 |
+| forms council/ruler/assembly | 4 / 20-26 / 42-48 | unchanged mechanically (`GOV_FORM_DRAW_DOSE` 0.0), named per culture |
+
+Live doses shipped: `IDEOLOGY_AGENDA_DOSE` 0.5, `IDEOLOGY_VOTE_DOSE` 0.5,
+`IDEOLOGY_UNREST_DOSE` 0 → 0.5, `IDEOLOGY_GOV_HOOK_DOSE` 0 → 0.3,
+`IDEOLOGY_REVOLUTION_DOSE` 0.5, `IDEOLOGY_CULTURE_ANCHOR` 0.04.
+
+**Negative result:** `GOV_FORM_DRAW_DOSE` 1.0 (the culture × size form draw) broke
+`econ_inheritance_rules_fragment_differently` (seed 3: partible 70,637 > primogeniture
+52,773 mean wealth) and `the_relay_carries_long_lanes_in_stages…` (ratio 0.37, 0.36,
+0.49, 0.55 across four roll salts vs 0.89 legacy — the uncapped run's volume inflates
+1.23M → 1.4-3.2M). Reverting ONLY that restores both. Shipped at 0.0.
+
+Gates (end of batch): `tick::tests` **405/405**, `econ_` **6/6** — food 59.5% / luxury
+8.9%; Gini 0.774 / 0.727; top-10% 0.600 / 0.623 (scorecard / large world); basket
+gradient −0.049 / −0.084 (unchanged sign — F2 still open); inheritance partible <
+primogeniture mean wealth on all 3 seeds. `npx tsc --noEmit` + `vite build` clean;
+the council chamber and life story were rendered in Chromium with mocked data.
+
+**Combinations the audit recommends** (queued, none built):
+1. Collapse `Figure` into `Individual` — three person records (`Figure`, `Individual`,
+   L12 `Notable`) describe overlapping people; `campaign_get_figures` already
+   synthesizes one from the other.
+2. One civic agenda — row 04's `GovDebate`, row 05's per-relation shadow debate and
+   the new ideology agenda all propose civic measures; a single queue (Q05.3).
+3. Openness axis → culture acceptance — row 06's Openness meter and row 05's
+   tier drift model the same attitude twice; let the meter drive the drift and
+   Blood-and-Soil dominance drive persecution.
+4. One movement system — scholar moves, artisan commissions and the new travel
+   pass are three mechanisms for "a person goes somewhere"; unify behind
+   `people_travel_pass`.
+5. Scholar career choices as dilemma templates — they already use `decide()`;
+   logging them as choices would give them reasons in the life story.
+6. Performers × venues — performers could tour real venues (row 08) instead of
+   generic neighbours; games would then have names on the bill.
+7. L12 guildmaster/alderman → council seats (row 04's "guild representative" path)
+   rather than a parallel local-role list.
+8. The remaining zero doses of rows 05/07/08 (acceptance effects, masterwork dev
+   bonus/market, venue cost/control, games truce) are one "city prestige" dose walk.
+
 ## 2026-09-27 — `docs/living_world/04_GOVERNMENT_AND_EDICTS.md`: closing out row 04 (Q04.9 remainder + Q04.5b), row 10 Q10.4
 
 Row 04 of `docs/living_world/00_INDEX.md` moves PARTIAL → DONE. Two closing
