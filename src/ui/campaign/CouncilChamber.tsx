@@ -8,6 +8,7 @@ import { LifeStory } from "@ui/campaign/LifeStory";
 import { OpenLifeButton } from "@ui/campaign/PersonWindow";
 import { TraitChip, IdeologyBars, officeIcon, pathMeta, TRAIT_META, traitColor } from "@ui/campaign/traitIcons";
 import { GovFormBadge } from "@ui/campaign/govFormBadge";
+import { CouncilRoom, ROOM_LABEL, type RoomKind } from "@ui/campaign/CouncilRoom";
 
 /** The council chamber (2026-09-30 redesign of the Government window/tab).
  *  Instead of a table of names, the government reads as a ROOM: the seats sit
@@ -42,6 +43,11 @@ function leanColor(v: number): string {
 export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; compact?: boolean }) {
   const [people, setPeople] = useState<Record<number, IndividualBrief>>({});
   const [openSeat, setOpenSeat] = useState<number | null>(null);
+  const [room, setRoom] = useState<RoomKind>(() => {
+    try { const v = localStorage.getItem("wf.councilRoom"); if (v === "chamber" || v === "table" || v === "hemicycle") return v; } catch { /* storage unavailable */ }
+    return "chamber";
+  });
+  useEffect(() => { try { localStorage.setItem("wf.councilRoom", room); } catch { /* storage unavailable */ } }, [room]);
   const idsKey = brief.seats.map((s) => s.individual_id).join(",");
   useEffect(() => {
     let alive = true;
@@ -70,9 +76,6 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
 
   const head = brief.seats.find((s) => s.role === 0) ?? brief.seats[0];
   const others = brief.seats.filter((s) => s !== head);
-  const W = compact ? 360 : 460, H = compact ? 150 : 180;
-  const cx = W / 2, cy = H - 34, R = H - 62;
-  const token = compact ? 34 : 40;
 
   return (
     <div data-no-drag style={{ fontSize: FZ.body, color: T.ink }}>
@@ -112,33 +115,22 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
         <div style={{ fontSize: FZ.micro, color: T.inkDim, margin: "2px 0 8px" }}>No doctrine holds the streets yet.</div>
       )}
 
-      {/* ── The chamber ───────────────────────────────────────────────── */}
-      <div style={{ position: "relative", width: W, maxWidth: "100%", height: H, margin: "0 auto 6px" }}>
-        <svg width={W} height={H} style={{ position: "absolute", inset: 0 }} aria-hidden>
-          <defs>
-            <radialGradient id="floor" cx="50%" cy="100%" r="80%">
-              <stop offset="0%" stopColor="#2a2418" />
-              <stop offset="100%" stopColor={T.card} />
-            </radialGradient>
-          </defs>
-          <path d={`M ${cx - R - 26} ${cy} A ${R + 26} ${R + 26} 0 0 1 ${cx + R + 26} ${cy} Z`} fill="url(#floor)" stroke={T.lineGold} />
-          <path d={`M ${cx - R} ${cy} A ${R} ${R} 0 0 1 ${cx + R} ${cy}`} fill="none" stroke="#5a4a28" strokeDasharray="2 4" />
-          <rect x={cx - 46} y={cy + 2} width={92} height={10} rx={3} fill="#3a3020" stroke="#6a5a30" />
-        </svg>
-        {others.map((s, i) => {
-          const n = others.length;
-          const a = Math.PI * (n === 1 ? 0.5 : 0.1 + 0.8 * (i / (n - 1)));
-          const x = cx - Math.cos(a) * R, y = cy - Math.sin(a) * R;
-          return <SeatToken key={i} s={s} p={people[s.individual_id]} x={x} y={y} size={token}
-            debate={!!deb} formKind={brief.form_kind} on={openSeat === i + 1} onClick={() => setOpenSeat(openSeat === i + 1 ? null : i + 1)} />;
-        })}
-        {head && <SeatToken s={head} p={people[head.individual_id]} x={cx} y={cy - 12} size={token + 10}
-          debate={!!deb} formKind={brief.form_kind} head on={openSeat === 0} onClick={() => setOpenSeat(openSeat === 0 ? null : 0)} />}
+      {/* ── The room: chamber · table · hemicycle ─────────────────────── */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 4, alignItems: "center" }}>
+        {(Object.keys(ROOM_LABEL) as RoomKind[]).map((k) => (
+          <span key={k} onClick={() => setRoom(k)} style={{
+            cursor: "pointer", fontSize: FZ.micro, padding: "1px 8px", borderRadius: 999,
+            color: room === k ? T.panel : T.inkDim, background: room === k ? T.gold : "transparent", border: `1px solid ${room === k ? T.gold : T.line}`,
+          }}>{ROOM_LABEL[k]}</span>
+        ))}
         {deb && votes && (
-          <div style={{ position: "absolute", left: 6, bottom: 2, fontSize: FZ.micro, color: T.inkMid }}>
+          <span style={{ marginLeft: "auto", fontSize: FZ.micro, color: T.inkMid }}>
             <span style={{ color: "#5fc08a" }}>● {votes.yes} aye</span> · <span style={{ color: "#e0735a" }}>● {votes.no} nay</span> · <span>● {votes.undecided} wavering</span>
-          </div>
+          </span>
         )}
+      </div>
+      <div style={{ marginBottom: 6 }}>
+        <CouncilRoom brief={brief} people={people} kind={room} openSeat={openSeat} onSeat={setOpenSeat} />
       </div>
 
       {/* ── The motion on the floor ───────────────────────────────────── */}
@@ -166,6 +158,32 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
             {Array.from({ length: deb.round_cap }, (_, k) => (
               <span key={k} style={{ width: 9, height: 9, borderRadius: 2, background: k < deb.round ? "#5fd0ff" : "transparent", border: `1px solid ${k < deb.round ? "#5fd0ff" : T.line}` }} />
             ))}
+          </div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5, marginTop: 6 }}>
+            {([["aye", "#5fc08a", (v: number) => v > 0.15], ["wavering", "#9fb4cc", (v: number) => Math.abs(v) <= 0.15], ["nay", "#e0735a", (v: number) => v < -0.15]] as const).map(([word, col, test]) => {
+              const hit = brief.seats.map((s, i) => ({ s, i })).filter((e) => test(e.s.vote_lean ?? 0));
+              return (
+                <div key={word} style={{ borderRadius: RADIUS.md, border: `1px solid ${T.lineSoft}`, background: "rgba(0,0,0,.18)", padding: "4px 6px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginBottom: 3 }}>
+                    <span style={{ width: 7, height: 7, borderRadius: "50%", background: col }} />
+                    <span style={{ fontFamily: SERIF, fontSize: FZ.base, color: T.parchment }}>{hit.length}</span>
+                    <span style={{ fontSize: FZ.micro, color: T.inkDim, textTransform: "uppercase", letterSpacing: 0.5 }}>{word}</span>
+                  </div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 3, minHeight: 22 }}>
+                    {hit.map(({ s, i }) => {
+                      const p = people[s.individual_id];
+                      return (
+                        <div key={i} title={`${s.office_title} ${s.name}`} onClick={() => setOpenSeat(i === brief.seats.indexOf(head) ? 0 : others.indexOf(s) + 1)}
+                          style={{ width: 26, height: 26, borderRadius: "50%", overflow: "hidden", cursor: "pointer", boxShadow: `0 0 0 2px ${seatRing(s)}`, background: T.card }}>
+                          {p ? <Bust person={p} size={26} /> : null}
+                        </div>
+                      );
+                    })}
+                    {hit.length === 0 && <span style={{ fontSize: FZ.micro, color: T.inkFaint }}>no one</span>}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -259,32 +277,6 @@ function Gauge({ label, value, color, text }: { label: string; value: number; co
       </svg>
       <span style={{ fontSize: FZ.micro, color: T.inkDim }}>{label}</span>
     </span>
-  );
-}
-
-function SeatToken({ s, p, x, y, size, debate, formKind, head, on, onClick }: {
-  s: SeatBrief; p?: IndividualBrief; x: number; y: number; size: number; debate: boolean; formKind?: string; head?: boolean; on: boolean; onClick: () => void;
-}) {
-  const ring = seatRing(s);
-  const lean = s.vote_lean ?? 0;
-  return (
-    <div onClick={onClick} title={`${s.office_title} ${s.name}${s.house_name ? ` (${s.house_name})` : ""}`}
-      style={{ position: "absolute", left: x - size / 2, top: y - size / 2, width: size, height: size, cursor: "pointer" }}>
-      <div style={{
-        width: size, height: size, borderRadius: "50%", overflow: "hidden", background: T.card,
-        boxShadow: `0 0 0 ${on ? 3 : 2}px ${ring}${on ? "" : "cc"}, 0 2px 6px rgba(0,0,0,0.6)`,
-      }}>
-        {p ? <Bust person={p} size={size} /> : <div style={{ display: "grid", placeItems: "center", height: "100%", fontSize: size * 0.4 }}>{officeIcon(s.role, formKind)}</div>}
-      </div>
-      <span style={{
-        position: "absolute", right: -4, top: -4, width: 15, height: 15, borderRadius: "50%", display: "grid", placeItems: "center",
-        fontSize: 8, background: T.panel, border: `1px solid ${ring}`,
-      }}>{officeIcon(s.role, formKind)}</span>
-      {debate && (
-        <span style={{ position: "absolute", left: "50%", bottom: -5, transform: "translateX(-50%)", width: 9, height: 9, borderRadius: "50%", background: leanColor(lean), border: `1px solid ${T.panel}` }} />
-      )}
-      {head && <span style={{ position: "absolute", left: "50%", top: -14, transform: "translateX(-50%)", fontSize: 10 }}>👑</span>}
-    </div>
   );
 }
 

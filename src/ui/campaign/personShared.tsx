@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { ReactNode } from "react";
 import type { IndividualBrief } from "@types";
-import { drawBust, individualKit } from "@ui/campaign/cultureDress";
+import { drawBust, individualPerson, kitForCulture } from "@ui/campaign/cultureDress";
 import { TraitChip, IdeologyBars } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
 import { OpenLifeButton } from "@ui/campaign/PersonWindow";
@@ -42,11 +42,10 @@ export function Bust({ person, size = 32 }: { person: IndividualBrief; size?: nu
     const ctx = el.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, el.width, el.height);
-    const kit = individualKit(person.culture || "unknown", person.face_seed);
-    drawBust(ctx, 0, 0, size * dpr, kit, {
+    drawBust(ctx, 0, 0, size * dpr, kitForCulture(person.culture || "unknown"), {
       occasion: person.famous ? "ceremonial" : "national",
-      female: person.female,
-      features: person.features,
+      person: individualPerson(person),
+      cols: size >= 90 ? 52 : 44,
     });
   }, [person, size]);
   return <canvas ref={ref} style={{ width: size, height: size, borderRadius: 6, flexShrink: 0, background: "#0d1622" }} />;
@@ -115,3 +114,41 @@ export function PersonChip({
     </div>
   );
 }
+
+// ── the new people vocabulary (design handoff "Council & People") ─────────
+
+/** One colour per role, so a role reads the same on a ladder, a ring and a chip. */
+export const ROLE_COLOR: Record<string, string> = {
+  Doge: "#d8b24a", Jarl: "#d8b24a", Khan: "#d8b24a", Burgomaster: "#d8b24a", Treasurer: "#e0a83a", "Harbour Master": "#5fa8e8",
+  "Master of the Horse": "#b0503a", Justiciar: "#9fb4cc", Councillor: "#8a9a4a", Alderman: "#8a9a4a", Admiral: "#5fa8e8",
+  Demagogue: "#e0735a", "Master Craftsman": "#d8b24a", "Great Banker": "#5cc08a", Explorer: "#b48ae0", Diplomat: "#4ac0c0",
+  "Merchant Prince": "#e0a83a", Guildmaster: "#c98a3a", Philosopher: "#8a7ad8", Scholar: "#6a8fd8", Ideologue: "#c85a7a",
+  Physician: "#4ac09a", Artisan: "#d8a24a", Official: "#7a8ca0", "Horde Leader": "#b0503a", Factor: "#9a8a6a",
+  Apprentice: "#7a7a6a", Journeyman: "#a08a5a", Student: "#6a8fd8", Captain: "#5fa8e8", Soldier: "#b07a5a", Merchant: "#c8a060",
+  Envoy: "#4ac0c0", Exile: "#7a6a8a", Priest: "#b8a0d0", Performer: "#d890b0",
+};
+export const roleColor = (r: string | undefined): string => (r && ROLE_COLOR[r]) || "#9fb4cc";
+
+/** The compact career ladder: each rung a role, rising — the latest in full ink.
+ *  `roles` is the sim's own role list, oldest first (years are not served yet). */
+export function CareerLadder({ roles, max = 4 }: { roles: string[]; max?: number }) {
+  const shown = roles.slice(-max);
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", gap: 3, minWidth: 0, flexWrap: "wrap" }}>
+      {roles.length > shown.length && <span style={{ fontSize: 10, color: T_FAINT }}>+{roles.length - shown.length}</span>}
+      {shown.map((r, i) => {
+        const last = i === shown.length - 1, c = roleColor(r);
+        return (
+          <span key={i} style={{ display: "inline-flex", alignItems: "flex-end", gap: 3 }}>
+            {i > 0 && <span style={{ fontSize: 10, color: T_FAINT, paddingBottom: 1 }}>›</span>}
+            <span style={{ display: "inline-flex", alignItems: "flex-end", gap: 4, fontSize: 10, lineHeight: 1.5, whiteSpace: "nowrap", color: last ? "#cfe2f6" : "#9fb4cc", fontWeight: last ? 600 : 400 }}>
+              <span style={{ width: 4, height: 5 + i * 3, borderRadius: 1, background: c, opacity: last ? 1 : 0.65, marginBottom: 2 }} />
+              {r}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+const T_FAINT = "#46586e";

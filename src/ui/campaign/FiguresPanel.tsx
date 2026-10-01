@@ -6,7 +6,7 @@ import type { FigureBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote, Donut } from "@ui/kit";
-import { drawBust, deriveKit, kitForCulture, type DressKit, type Occasion } from "@ui/campaign/cultureDress";
+import { drawBust, deriveKit, kitForCulture, makePerson, type DressKit, type Occasion } from "@ui/campaign/cultureDress";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { TraitChip } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
@@ -385,7 +385,8 @@ function FigurePortrait({ f, spec, size = 54 }: { f: FigureBrief; spec: RoleSpec
     const ctx = el.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, el.width, el.height);
-    drawBust(ctx, 0, 0, size * S, personalKit(f.culture || f.city, f.name), { occasion: spec.occasion });
+    const kit = personalKit(f.culture || f.city, f.name);
+    drawBust(ctx, 0, 0, size * S, kit, { occasion: spec.occasion, person: makePerson({ seed: f.name, kit, name: f.name, age: 30 + (f.name.length * 7) % 35 }) });
   }, [f.culture, f.city, f.name, spec.occasion, size]);
 
   return (

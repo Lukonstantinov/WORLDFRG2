@@ -157,7 +157,7 @@ export function deriveKit(name: string, opts: DeriveOpts = {}): DressKit {
   };
 }
 
-const mix = (a: string, b: string, t: number): string => {
+export const mix = (a: string, b: string, t: number): string => {
   const p = (h: string) => {
     let s = h.replace("#", "");
     if (s.length === 3) s = s.split("").map((c) => c + c).join("");
@@ -268,9 +268,10 @@ function pal(K: DressKit, occ: Occasion, features = 0): Pal {
 }
 
 // ── headwear: one distinct silhouette per people ───────────────────────────
-function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
+function headwear(c: Ctx, id: number, p: Pal, occ: Occasion, g = false) {
   const top = HY - HRY, cx = HX;
   switch (id) {
+    case 99: break; // bareheaded
     case 0: // Roman — laurel wreath over a short cap of hair
       for (let i = 0; i < 5; i++) {
         const t = i / 4, a = -Math.PI * (0.14 + t * 0.34);
@@ -284,7 +285,7 @@ function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
     case 1: // Hellene — fillet band with trailing ends
       L(c, [[cx - HRX - 1, top + 8], [cx, top + 2], [cx + HRX + 1, top + 8]], p.trim, 3.4);
       L(c, [[cx + HRX - 1, top + 8], [cx + HRX + 4, top + 20]], p.trim, 2.2);
-      for (const s of [-1, 1]) E(c, cx + s * 13, top + 4, 5, 4, p.hairL);
+      if (!g) for (const s of [-1, 1]) E(c, cx + s * 13, top + 4, 5, 4, p.hairL);
       break;
     case 2: // Punic — tall conical cap with brim and tassel
       P(c, [[cx - 13, top + 4], [cx + 13, top + 4], [cx + 4, top - 22], [cx - 4, top - 22]], p.cloth2);
@@ -302,7 +303,7 @@ function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
       P(c, [[cx - 16, top + 8], [cx + 16, top + 8], [cx + 12, top - 10], [cx - 12, top - 10]], p.robeD);
       R(c, cx - 18, top + 5, 36, 7, shade(p.trim, 1.1));
       for (let i = -3; i <= 3; i++) E(c, cx + i * 5.2, top + 8.5, 3.2, 3.6, i % 2 ? p.trim : shade(p.trim, 1.22));
-      for (const s of [-1, 1]) {
+      if (!g) for (const s of [-1, 1]) {
         L(c, [[cx + s * (HRX - 1), HY + 6], [cx + s * (HRX + 3), HY + 26]], p.hair, 5);
         for (let i = 0; i < 3; i++) E(c, cx + s * (HRX + 1 + i * 0.6), HY + 12 + i * 6, 2.6, 2.2, p.hairL);
       }
@@ -352,7 +353,7 @@ function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
     case 12: // Nilotic — shaved crown, beaded band, long ear ring
       R(c, cx - HRX, top + 7, HRX * 2, 5, p.cloth2);
       for (let i = -3; i <= 3; i++) E(c, cx + i * 5.2, top + 9.5, 2.4, 2.4, i % 2 ? p.trim : shade(p.trim, 1.3));
-      L(c, [[cx - 3, top + 4], [cx, top - 1], [cx + 3, top + 4]], p.trim, 2.2);
+      if (!g) L(c, [[cx - 3, top + 4], [cx, top - 1], [cx + 3, top + 4]], p.trim, 2.2);
       for (const s of [-1, 1]) { c.beginPath(); c.arc(cx + s * (HRX - 1), HY + 12, 5, 0, T2); c.strokeStyle = p.trim; c.lineWidth = 1.8; c.stroke(); }
       break;
     case 13: // Amazigh — indigo tagelmust, wrapped over the face
@@ -369,7 +370,7 @@ function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
       E(c, 0, -17, 7, 3, "#262b33");
       c.restore();
       L(c, [[cx - 12, top + 6], [cx + 12, top + 6]], p.trim, 2);
-      L(c, [[cx + 2, top - 12], [cx + 12, top - 18]], p.hair, 4);
+      if (!g) L(c, [[cx + 2, top - 12], [cx + 12, top - 18]], p.hair, 4);
       break;
     case 15: // Mongol — fur-brimmed conical hat with earflaps
       P(c, [[cx - 13, top - 2], [cx + 13, top - 2], [cx, top - 24]], p.robe);
@@ -387,6 +388,25 @@ function headwear(c: Ctx, id: number, p: Pal, occ: Occasion) {
         L(c, [[cx + s * 15, HY + 14], [cx + s * 15, HY + 22]], p.cloth2, 1.8);
       }
       break;
+    case 101: // palla — a mantle drawn up over the hair
+      P(c, [[cx - HRX - 4, HY + 6], [cx - HRX - 3, top + 2], [cx - 8, top - 5], [cx + 8, top - 5], [cx + HRX + 3, top + 2], [cx + HRX + 4, HY + 6], [cx + HRX + 7, HY + 34], [cx + HRX, HY + 34], [cx + HRX - 1, HY], [cx + 10, top + 5], [cx - 10, top + 5], [cx - HRX + 1, HY], [cx - HRX, HY + 34], [cx - HRX - 7, HY + 34]], p.cloth2);
+      L(c, [[cx - HRX - 1, top + 6], [cx, top - 1], [cx + HRX + 1, top + 6]], shade(p.cloth2, 1.25), 1.6); break;
+    case 102: // shawl wrapped close round the face
+      P(c, [[cx - HRX - 4, HY + 4], [cx - HRX - 3, top - 1], [cx, top - 6], [cx + HRX + 3, top - 1], [cx + HRX + 4, HY + 4], [cx + HRX + 6, HY + 34], [cx - HRX - 6, HY + 34], [cx - HRX - 4, HY + 4], [cx - HRX + 2, HY + 14], [cx - 8, HY + HRY + 1], [cx + 8, HY + HRY + 1], [cx + HRX - 2, HY + 14], [cx + HRX - 1, HY - 4], [cx, top + 3], [cx - HRX + 1, HY - 4]], p.robeL);
+      L(c, [[cx - HRX + 1, HY - 4], [cx, top + 3], [cx + HRX - 1, HY - 4]], p.trim, 1.6); break;
+    case 103: // dupatta — falls from the back of the head, parting shows
+      P(c, [[cx - HRX - 2, top + 8], [cx - 6, top - 3], [cx + 6, top - 3], [cx + HRX + 2, top + 8], [cx + HRX + 6, HY + 34], [cx + HRX + 1, HY + 34], [cx + HRX - 2, top + 12], [cx - HRX + 2, top + 12], [cx - HRX - 1, HY + 34], [cx - HRX - 6, HY + 34]], p.cloth2);
+      L(c, [[cx - HRX - 1, top + 9], [cx, top - 1], [cx + HRX + 1, top + 9]], p.trim, 1.8); E(c, cx, HY - 7, 1.4, 1.4, p.trim); break;
+    case 104: // gele — tall knotted headwrap
+      P(c, [[cx - HRX - 2, top + 9], [cx + HRX + 2, top + 9], [cx + HRX + 7, top - 10], [cx + 6, top - 18], [cx - 6, top - 16], [cx - HRX - 6, top - 6]], p.cloth2);
+      for (let i = 0; i < 3; i++) L(c, [[cx - HRX + i * 4, top + 6 - i * 2], [cx + HRX - 2 - i * 3, top - 4 - i * 4]], shade(p.cloth2, 0.78), 1.6);
+      P(c, [[cx + 8, top - 16], [cx + 18, top - 24], [cx + 14, top - 12]], p.trim); P(c, [[cx - 4, top - 15], [cx - 12, top - 24], [cx - 10, top - 12]], shade(p.trim, 1.15)); break;
+    case 105: // bun with hairpins
+      E(c, cx, top - 4, 9, 6.5, p.hair); E(c, cx - 2, top - 6, 4, 2, p.hairL); L(c, [[cx - 14, top - 10], [cx + 4, top - 2]], p.trim, 1.6); L(c, [[cx + 14, top - 12], [cx - 2, top - 2]], p.trim, 1.6); E(c, cx - 14, top - 10, 1.8, 1.8, p.cloth2); break;
+    case 106: // band over braids
+      L(c, [[cx - HRX - 1, top + 9], [cx, top + 4], [cx + HRX + 1, top + 9]], p.trim, 3); for (let i = -2; i <= 2; i++) E(c, cx + i * 7, top + 6 - Math.abs(i) * 0.4, 1.6, 1.6, p.trimL); break;
+    case 107: // braid ties
+      for (const s of [-1, 1]) { R(c, cx + s * (HRX + 1) - 2.5, HY + 18, 5, 3, p.trim); R(c, cx + s * (HRX + 1.6) - 2.5, HY + 28, 5, 3, p.cloth2); } break;
     default: // 17 Mande — embroidered kufi
       P(c, [[cx - 15, top + 8], [cx + 15, top + 8], [cx + 13, top - 6], [cx - 13, top - 6]], p.cloth2);
       E(c, cx, top - 6, 13, 4, shade(p.cloth2, 1.18));
@@ -593,12 +613,19 @@ export interface DressOpts extends DeriveOpts {
   /** 02.7 — an `Individual.features` bitflag value (`FEATURE_*` above);
    *  omitted or 0 renders bit-identically to before this slice. */
   features?: number;
+  /** A per-person face genome from `makePerson` — when present the head is
+   *  drawn from it (eyes, nose, brows, hair, beard, age) instead of the
+   *  people's single shared face. Omitted ⇒ bit-identical to before. */
+  person?: Person;
+  /** With `person`: draw the head bare in the everyday register. */
+  bare?: boolean;
 }
 
 /** One people's portrait bust, pixel-treated. `size` is the drawn square.
  *  `kit` is a preset index, a derived/creole kit object, or a culture name. */
 export function drawBust(ctx: Ctx, x: number, y: number, size: number, kit: KitSpec, opts: DressOpts = {}) {
   const K = resolveKit(kit, opts);
+  if (opts.person) { const Pn = opts.person; pixelize(ctx, x, y, size, size, opts.cols || 44, (c) => bustArtGene(c, Pn, opts.occasion || "national", opts.bare ?? Pn.G.bare)); return; }
   pixelize(ctx, x, y, size, size, opts.cols || 40, (c) => bustArt(c, K, opts.occasion || "national", opts.female, opts.features ?? 0));
 }
 
@@ -606,5 +633,309 @@ export function drawBust(ctx: Ctx, x: number, y: number, size: number, kit: KitS
  *  the plate is `w × 2.1w`. */
 export function drawFigure(ctx: Ctx, x: number, y: number, w: number, kit: KitSpec, opts: DressOpts = {}) {
   const K = resolveKit(kit, opts);
+  if (opts.person) { const Pn = opts.person; pixelize(ctx, x, y, w, w * 2.1, opts.cols || 26, (c) => figureArtGene(c, Pn, opts.occasion || "national", opts.bare ?? Pn.G.bare)); return; }
   pixelize(ctx, x, y, w, w * 2.1, opts.cols || 26, (c) => figureArt(c, K, opts.occasion || "national", opts.female, opts.features ?? 0));
+}
+
+// ═══ Per-person face genome (design handoff "Council & People", wf-faces.js) ═══
+// Two people of one culture no longer share a face: eye shape + colour, nose,
+// brows, face/jaw, lips, hair style, beard style, age lines and greying are
+// drawn per person from a seeded genome whose weights come from the culture's
+// PHENOTYPE GROUP. Skin follows the HOMELAND's latitude, not the culture.
+
+function rng(seed: number) {
+  let s = (seed >>> 0) || 1;
+  return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+}
+type Wt = [string, number][];
+const Wpick = (r: () => number, arr: Wt): string => {
+  let t = 0; for (const a of arr) t += a[1];
+  let x = r() * t; for (const a of arr) { x -= a[1]; if (x <= 0) return a[0]; }
+  return arr[arr.length - 1][0];
+};
+
+const FACE_SKINS = ["#f4d6b8", "#ecc7a2", "#e3b78c", "#d8ac78", "#cc9a68", "#bb8858", "#a6744a", "#8c5c3a", "#6f472c", "#5a3922"];
+const HAIR_TONES: Record<string, string> = { flax: "#d8c08a", blond: "#c09a52", red: "#a8431e", auburn: "#7e3a22", chestnut: "#6a4228", brown: "#4a3220", dkbrown: "#2e2018", black: "#16110d", blue: "#0f1014" };
+export const IRIS: Record<string, string> = { dk: "#24160c", br: "#4e2e16", hz: "#7a5a2a", gr: "#4f7044", bl: "#4a6c9c", gy: "#6c7c88", am: "#8a6420" };
+
+/** Kit index → phenotype group. */
+export const PHENO_GROUP: Record<number, string> = { 0: "med", 1: "med", 2: "med", 3: "wasia", 4: "north", 5: "north", 6: "wasia", 7: "sasia", 8: "easia", 9: "north", 10: "amer", 11: "steppe", 12: "afr", 13: "wasia", 14: "easia", 15: "steppe", 16: "amer", 17: "afr" };
+interface Pheno { eye: Wt; iris: Wt; nose: Wt; brow: Wt; face: Wt; lips: Wt; hair: Wt; hsM: Wt; hsF: Wt; beard: Wt; fhat: string; grey: number }
+const PH: Record<string, Pheno> = {
+  north: { eye: [["round", 3], ["deep", 3], ["almond", 1.5], ["hooded", 1]], iris: [["bl", 4], ["gy", 3], ["gr", 2], ["hz", 1.5], ["br", 1]], nose: [["straight", 3], ["button", 2], ["long", 2], ["aquiline", 1]], brow: [["thin", 2], ["straight", 3], ["thick", 1], ["angled", 1]], face: [["long", 2], ["square", 3], ["oval", 2], ["broad", 1]], lips: [["thin", 4], ["mid", 3]], hair: [["flax", 3], ["blond", 3], ["red", 1.5], ["chestnut", 2], ["brown", 2]], hsM: [["crop", 3], ["long", 3], ["braids", 2], ["receding", 1.5]], hsF: [["braids", 4], ["long", 3], ["bun", 1]], beard: [["full", 4], ["long", 2], ["forked", 1.5], ["braided", 1.5], ["moustache", 1], ["none", 0.6]], fhat: "band", grey: 1.1 },
+  med: { eye: [["almond", 4], ["round", 2], ["large", 2], ["hooded", 1]], iris: [["br", 4], ["dk", 3], ["hz", 2], ["gr", 1]], nose: [["aquiline", 3], ["straight", 3], ["long", 2], ["broad", 0.6]], brow: [["thick", 3], ["arched", 2], ["straight", 2]], face: [["oval", 4], ["square", 2], ["heart", 1.5], ["long", 1]], lips: [["mid", 4], ["full", 2], ["thin", 1]], hair: [["dkbrown", 4], ["black", 3], ["brown", 2], ["chestnut", 1]], hsM: [["crop", 4], ["curly", 3], ["receding", 2]], hsF: [["bun", 3], ["curly", 2], ["long", 2]], beard: [["none", 4], ["stubble", 2], ["full", 2], ["goatee", 1]], fhat: "palla", grey: 1 },
+  wasia: { eye: [["almond", 4], ["deep", 2], ["large", 2], ["hooded", 1]], iris: [["dk", 4], ["br", 4], ["hz", 1.5], ["gr", 1]], nose: [["aquiline", 4], ["long", 3], ["straight", 2]], brow: [["thick", 4], ["joined", 2], ["arched", 2]], face: [["long", 3], ["oval", 3], ["heart", 1]], lips: [["mid", 3], ["full", 2], ["thin", 1]], hair: [["black", 5], ["dkbrown", 3]], hsM: [["crop", 3], ["curly", 2], ["receding", 1]], hsF: [["long", 4], ["braids", 1]], beard: [["full", 5], ["long", 2], ["goatee", 1], ["moustache", 1]], fhat: "shawl", grey: 0.9 },
+  sasia: { eye: [["large", 4], ["almond", 4], ["round", 1]], iris: [["dk", 5], ["br", 3], ["hz", 1], ["am", 0.5]], nose: [["straight", 3], ["broad", 2], ["aquiline", 2], ["button", 1]], brow: [["arched", 4], ["thick", 2], ["joined", 1]], face: [["oval", 4], ["round", 2], ["heart", 2]], lips: [["full", 4], ["mid", 3]], hair: [["black", 6], ["dkbrown", 2]], hsM: [["crop", 3], ["topknot", 2], ["long", 1]], hsF: [["long", 3], ["bun", 3], ["braids", 2]], beard: [["moustache", 4], ["full", 2], ["none", 2], ["mutton", 1]], fhat: "dupatta", grey: 0.9 },
+  easia: { eye: [["mono", 6], ["almond", 2], ["hooded", 1.5]], iris: [["dk", 6], ["br", 2]], nose: [["flat", 4], ["button", 3], ["straight", 1.5]], brow: [["straight", 4], ["thin", 3], ["angled", 1]], face: [["round", 3], ["broad", 3], ["oval", 2], ["square", 1]], lips: [["mid", 3], ["thin", 3], ["full", 1]], hair: [["black", 6], ["blue", 3]], hsM: [["topknot", 4], ["crop", 2], ["long", 1]], hsF: [["bun", 5], ["long", 2]], beard: [["none", 5], ["moustache", 2], ["goatee", 2]], fhat: "pins", grey: 0.8 },
+  steppe: { eye: [["mono", 4], ["almond", 3], ["hooded", 2], ["deep", 0.6]], iris: [["dk", 4], ["br", 3], ["hz", 1], ["gr", 0.5]], nose: [["flat", 2], ["straight", 2], ["aquiline", 2], ["broad", 1]], brow: [["thick", 3], ["straight", 2], ["angled", 2]], face: [["broad", 4], ["round", 2], ["square", 2]], lips: [["thin", 3], ["mid", 3]], hair: [["black", 5], ["dkbrown", 2], ["brown", 1]], hsM: [["braids", 3], ["topknot", 2], ["shaved", 2], ["crop", 1]], hsF: [["braids", 5], ["long", 1]], beard: [["moustache", 4], ["goatee", 2], ["none", 2], ["full", 1]], fhat: "braids", grey: 0.9 },
+  afr: { eye: [["large", 4], ["round", 3], ["almond", 2]], iris: [["dk", 6], ["br", 2]], nose: [["broad", 5], ["button", 2], ["straight", 1]], brow: [["thin", 2], ["arched", 2], ["straight", 2]], face: [["long", 3], ["oval", 3], ["round", 1], ["heart", 1]], lips: [["full", 6], ["mid", 2]], hair: [["black", 6], ["blue", 2]], hsM: [["coils", 4], ["shaved", 3], ["topknot", 1]], hsF: [["coils", 3], ["braids", 3]], beard: [["none", 4], ["goatee", 2], ["full", 1.5], ["stubble", 1]], fhat: "gele", grey: 0.8 },
+  amer: { eye: [["almond", 4], ["hooded", 3], ["mono", 1]], iris: [["dk", 6], ["br", 2]], nose: [["aquiline", 4], ["broad", 3], ["straight", 1]], brow: [["straight", 3], ["thick", 2], ["thin", 1]], face: [["broad", 4], ["square", 2], ["round", 2]], lips: [["mid", 4], ["full", 2]], hair: [["black", 6], ["blue", 2]], hsM: [["long", 3], ["topknot", 2], ["crop", 2]], hsF: [["braids", 5], ["long", 2]], beard: [["none", 6], ["stubble", 1]], fhat: "braids", grey: 0.7 },
+};
+const FACE_DIMS: Record<string, [number, number]> = { oval: [19, 22], round: [20.5, 20.6], long: [17.6, 23.6], square: [19.8, 21.6], heart: [19.6, 21.6], broad: [21.4, 21] };
+const COVERED_G = new Set([2, 3, 4, 6, 7, 8, 9, 11, 13, 15, 16, 17, 101, 102, 104]);
+const FEM_HAT: Record<string, number> = { palla: 101, shawl: 102, dupatta: 103, gele: 104, pins: 105, band: 106, braids: 107 };
+
+export interface Gene {
+  female: boolean; age: number; features: number; skin: string;
+  eye: string; iris: string; eyeSet: number; nose: string; brow: string; face: string; lips: string;
+  hs: string; beard: string; hairC: string; bald: boolean; hat: number; bare: boolean; earring: boolean;
+}
+export interface Person { K: DressKit; G: Gene; seed: number; kit: number; culture: string }
+export interface PersonSpec {
+  seed?: number | string; name?: string; kit?: KitSpec; female?: boolean; age?: number;
+  /** Homeland latitude, 0 equator → 1 polar. Drives skin. */
+  lat?: number; features?: number; hat?: number; bare?: boolean;
+}
+
+const colorDist = (a: string, b: string) => {
+  const p = (h: string) => { const t = h.replace("#", ""); return [0, 2, 4].map((i) => parseInt(t.slice(i, i + 2), 16)); };
+  const A = p(a), B = p(b); return Math.abs(A[0] - B[0]) + Math.abs(A[1] - B[1]) + Math.abs(A[2] - B[2]);
+};
+
+/** One person: their culture's dress kit with personal dyes, and a face genome. */
+export function makePerson(spec: PersonSpec = {}): Person {
+  const base = resolveKit(spec.kit ?? 0);
+  const seed = spec.seed != null ? (typeof spec.seed === "number" ? spec.seed : strSeed(spec.seed)) : strSeed(spec.name || "p");
+  const r = rng(seed ^ 0x51ed), grp = PH[PHENO_GROUP[base.id] ?? "med"] || PH.med, female = !!spec.female;
+  const age = spec.age ?? Math.round(28 + r() * 36);
+  let skinI = spec.lat != null ? (1 - spec.lat) * (FACE_SKINS.length - 1)
+    : FACE_SKINS.reduce((b, sk, i) => (colorDist(sk, base.skin) < colorDist(FACE_SKINS[b], base.skin) ? i : b), 0);
+  skinI = Math.max(0, Math.min(FACE_SKINS.length - 1, Math.round(skinI + (r() - 0.5) * 1.4)));
+  const tier = r() > 0.7 ? DYES.costly : DYES.fine;
+  const K: DressKit = { ...base, trim: r() < 0.5 ? base.trim : tier[Math.floor(r() * tier.length)], cloth2: r() < 0.45 ? base.cloth2 : DYES.fine[Math.floor(r() * DYES.fine.length)] };
+  let hairC = HAIR_TONES[Wpick(r, grp.hair)] || base.hair;
+  if (r() < 0.35) hairC = base.hair;
+  const greyT = Math.max(0, Math.min(1, (age - 44) / 28)) * (grp.grey || 1) * (0.6 + r() * 0.6);
+  const features = spec.features || 0;
+  const G: Gene = {
+    female, age, features, skin: FACE_SKINS[skinI],
+    eye: Wpick(r, grp.eye), iris: IRIS[Wpick(r, grp.iris)], eyeSet: 6 + r() * 1.6,
+    nose: Wpick(r, grp.nose), brow: Wpick(r, grp.brow), face: Wpick(r, grp.face), lips: Wpick(r, grp.lips),
+    hs: Wpick(r, female ? grp.hsF : grp.hsM),
+    beard: female ? "none" : (base.beard || r() < 0.3 ? Wpick(r, grp.beard) : (r() < 0.7 ? "none" : "stubble")),
+    hairC: features & FEATURE_GREY ? mix(hairC, "#d2ccc0", 0.75) : mix(hairC, "#cfc9bc", Math.min(0.85, greyT)),
+    bald: !!(features & FEATURE_BALD) || (!female && age > 50 && r() < 0.18),
+    hat: spec.hat != null ? spec.hat : (female ? (r() < 0.78 ? FEM_HAT[grp.fhat] : (base.hat ?? base.id)) : (base.hat ?? base.id)),
+    bare: spec.bare != null ? spec.bare : r() < 0.42,
+    earring: female ? r() < 0.7 : r() < 0.15,
+  };
+  if (G.bald && G.hs !== "shaved") G.hs = "receding";
+  return { K, G, seed, kit: base.id, culture: base.name };
+}
+
+/** Human-readable genome, for the person sheet. */
+export function describePerson(Pn: Person): string {
+  const G = Pn.G;
+  const eyeW: Record<string, string> = { round: "round", deep: "deep-set", large: "large", almond: "almond", hooded: "hooded", mono: "narrow, single-lidded" };
+  const irisW = Object.entries(IRIS).find(([, v]) => v === G.iris)?.[0] || "";
+  const IW: Record<string, string> = { dk: "dark", br: "brown", hz: "hazel", gr: "green", bl: "blue", gy: "grey", am: "amber" };
+  return `${eyeW[G.eye]} ${IW[irisW] || ""} eyes · ${G.nose} nose · ${G.face} face`;
+}
+
+function palG(K: DressKit, G: Gene, occ: Occasion): Pal {
+  const dull = occ === "everyday" ? 0.86 : 1, robe = shade(K.robe, dull);
+  return {
+    skin: G.skin, skinD: shade(G.skin, 0.8), skinL: shade(G.skin, 1.12), hair: G.hairC, hairL: shade(G.hairC, 1.35),
+    robe, robeL: shade(K.robe, dull * 1.18), robeD: shade(K.robe, dull * 0.72),
+    trim: occ === "everyday" ? shade(K.trim, 0.8) : K.trim, trimL: shade(K.trim, 1.3),
+    cloth2: shade(K.cloth2, dull), cloth2D: shade(K.cloth2, dull * 0.72), rich: occ === "ceremonial",
+  };
+}
+
+function eyeG(c: Ctx, x: number, y: number, s: number, G: Gene, p: Pal) {
+  const sc = "#ece3d4", lid = shade(G.hairC, 0.55), ir = G.iris, pu = "#120c08", sh = G.eye;
+  if (sh === "deep") E(c, x, y - 1.3, 4.4, 3.1, p.skinD);
+  if (sh === "round" || sh === "deep") { E(c, x, y, 2.9, 2.2, sc); E(c, x + 0.2, y + 0.1, 1.8, 1.9, ir); E(c, x + 0.2, y, 0.8, 0.9, pu); L(c, [[x - 3, y - 1.4], [x, y - 2.5], [x + 3, y - 1.4]], lid, 1.2); }
+  else if (sh === "large") { E(c, x, y, 3.4, 2.7, sc); E(c, x, y + 0.1, 2.2, 2.3, ir); E(c, x, y, 1, 1.1, pu); E(c, x - 0.8, y - 0.8, 0.6, 0.6, "#fbf6ee"); L(c, [[x - 3.6, y - 1.4], [x, y - 3], [x + 3.6, y - 1.4]], lid, 1.5); }
+  else if (sh === "almond" || sh === "hooded") {
+    P(c, [[x - 3.8, y + 0.2], [x - 1.2, y - 1.8], [x + 1.4, y - 1.8], [x + 3.8, y - 0.3], [x + 1.4, y + 1.5], [x - 1.4, y + 1.4]], sc);
+    E(c, x, y, 1.7, 1.7, ir); E(c, x, y, 0.8, 0.8, pu);
+    if (sh === "hooded") P(c, [[x - 4, y - 0.3], [x, y - 3], [x + 4, y - 0.9], [x + 3.8, y - 0.1], [x, y - 1.1], [x - 3.8, y + 0.2]], p.skinD);
+    L(c, [[x - 3.8, y + 0.1], [x - 1, y - 1.9], [x + 1.6, y - 1.8], [x + 3.9, y - 0.4]], lid, 1.3);
+  } else if (sh === "mono") {
+    const ix = x - s * 3.5, ox = x + s * 3.5;
+    P(c, [[ix, y + 0.5], [x, y - 1.1], [ox, y - 1], [x, y + 1.1]], sc); E(c, x, y, 1.4, 1.05, ir);
+    L(c, [[ix, y + 0.2], [x, y - 1.3], [ox, y - 1.4]], lid, 1.8);
+  }
+  if (G.female) L(c, [[x + s * 3.4, y - 1.2], [x + s * 4.8, y - 2.4]], lid, 1.1);
+}
+function browsG(c: Ctx, G: Gene) {
+  const col = shade(G.hairC, 0.82), y = HY - (G.eye === "deep" ? 4.2 : 5.2);
+  const w = ({ thin: 1.1, straight: 2.1, thick: 2.9, arched: 1.8, joined: 2.7, angled: 2 } as Record<string, number>)[G.brow] || 1.8;
+  const e = G.eyeSet;
+  for (const s of [-1, 1]) {
+    const a = HX + s * (e - 3.6), b = HX + s * (e + 4);
+    if (G.brow === "arched") L(c, [[a, y + 0.5], [HX + s * (e + 0.4), y - 1.7], [b, y + 1]], col, w);
+    else if (G.brow === "angled") L(c, [[a, y + 0.8], [b, y - 1.4]], col, w);
+    else L(c, [[a, y], [b, y + (G.brow === "thin" ? 0.6 : 0.2)]], col, w);
+  }
+  if (G.brow === "joined") L(c, [[HX - 2.6, y + 0.4], [HX + 2.6, y + 0.4]], col, 1.3);
+}
+function noseG(c: Ctx, G: Gene, p: Pal) {
+  const d = shade(G.skin, 0.7), n = shade(G.skin, 0.52), hi = p.skinL;
+  switch (G.nose) {
+    case "aquiline": P(c, [[HX + 0.6, HY + 1], [HX + 3, HY + 5.6], [HX + 1.8, HY + 9.6], [HX, HY + 9], [HX + 1, HY + 5]], d); E(c, HX - 1.8, HY + 9.4, 0.9, 0.7, n); E(c, HX + 2.4, HY + 9.4, 0.9, 0.7, n); break;
+    case "button": E(c, HX + 0.8, HY + 7.8, 2.6, 1.8, d); E(c, HX, HY + 7, 1.2, 1, hi); E(c, HX - 1.6, HY + 8.8, 0.7, 0.6, n); E(c, HX + 1.8, HY + 8.8, 0.7, 0.6, n); break;
+    case "broad": L(c, [[HX + 0.3, HY + 2], [HX + 0.8, HY + 6]], d, 1.4); E(c, HX + 0.6, HY + 8.4, 4.4, 2.2, d); E(c, HX - 2.6, HY + 8.8, 1.2, 0.9, n); E(c, HX + 3.2, HY + 8.8, 1.2, 0.9, n); E(c, HX, HY + 7.4, 1.3, 0.9, hi); break;
+    case "long": L(c, [[HX + 0.4, HY + 1], [HX + 1.4, HY + 10.4]], d, 1.7); E(c, HX + 0.9, HY + 10.4, 2.4, 1.2, d); E(c, HX - 1.4, HY + 11, 0.7, 0.6, n); E(c, HX + 2.6, HY + 11, 0.7, 0.6, n); break;
+    case "flat": E(c, HX + 0.6, HY + 7.4, 3.4, 1.7, d); E(c, HX - 1.8, HY + 8, 0.9, 0.7, n); E(c, HX + 2.6, HY + 8, 0.9, 0.7, n); break;
+    default: L(c, [[HX + 0.2, HY + 2], [HX + 1.2, HY + 8]], d, 1.6); E(c, HX - 1.5, HY + 8.6, 0.8, 0.6, n); E(c, HX + 2.2, HY + 8.6, 0.8, 0.6, n);
+  }
+}
+function mouthG(c: Ctx, G: Gene, full: boolean) {
+  const y = HY + 13.6 + (G.face === "long" ? 1 : 0), lip = mix(G.skin, "#9a3838", G.female ? 0.4 : 0.2), ln = shade(G.skin, 0.55);
+  if (G.lips === "full") { P(c, [[HX - 4.6, y], [HX - 1.6, y - 1.4], [HX, y - 0.8], [HX + 1.6, y - 1.4], [HX + 4.6, y]], lip); E(c, HX, y + 1.6, 3.8, 1.9, lip); L(c, [[HX - 4.4, y], [HX + 4.4, y]], ln, 1.1); }
+  else if (G.lips === "mid") { E(c, HX, y + 1.3, 3, 1.2, lip); L(c, [[HX - 4, y - 0.2], [HX, y + 0.5], [HX + 4, y - 0.2]], ln, 1.3); }
+  else L(c, [[HX - 4, y - 0.2], [HX, y + 0.6], [HX + 4, y - 0.2]], ln, 1.3);
+  if (G.age > 60 && !full) L(c, [[HX - 5, y + 1], [HX - 6, y + 3]], shade(G.skin, 0.72), 0.8);
+}
+function beardG(c: Ctx, G: Gene, p: Pal, rx: number): (() => void) | null {
+  const h = p.hair, hl = shade(p.hair, 1.2), b = G.beard;
+  const must = () => P(c, [[HX - 6, HY + 13.8], [HX - 2.2, HY + 11], [HX, HY + 11.6], [HX + 2.2, HY + 11], [HX + 6, HY + 13.8], [HX + 4, HY + 13], [HX, HY + 12.4], [HX - 4, HY + 13]], h);
+  const fullP = (lo: number) => P(c, [[HX - rx + 2, HY + 3], [HX - rx + 3, HY + 19], [HX - 4, HY + lo - 2], [HX, HY + lo], [HX + 4, HY + lo - 2], [HX + rx - 3, HY + 19], [HX + rx - 2, HY + 3], [HX + 8, HY + 14], [HX + 4, HY + 16], [HX - 4, HY + 16], [HX - 8, HY + 14]], h);
+  if (b === "stubble") { c.globalAlpha = 0.38; fullP(23); c.globalAlpha = 1; }
+  else if (b === "full") { fullP(27); L(c, [[HX - 5, HY + 21], [HX + 5, HY + 21]], hl, 1); }
+  else if (b === "long") { fullP(36); L(c, [[HX - 2, HY + 24], [HX - 1, HY + 33]], hl, 1); L(c, [[HX + 3, HY + 22], [HX + 3, HY + 31]], hl, 1); }
+  else if (b === "forked") { P(c, [[HX - rx + 2, HY + 3], [HX - rx + 3, HY + 19], [HX - 7, HY + 34], [HX - 3, HY + 36], [HX, HY + 28], [HX + 3, HY + 36], [HX + 7, HY + 34], [HX + rx - 3, HY + 19], [HX + rx - 2, HY + 3], [HX + 8, HY + 14], [HX - 8, HY + 14]], h); }
+  else if (b === "braided") { fullP(26); R(c, HX - 2.2, HY + 24, 4.4, 12, h); for (let i = 0; i < 3; i++) R(c, HX - 2.4, HY + 26 + i * 3.6, 4.8, 1.2, p.trim); }
+  else if (b === "goatee") { P(c, [[HX - 4, HY + 16.4], [HX + 4, HY + 16.4], [HX + 3, HY + 22], [HX, HY + 24.5], [HX - 3, HY + 22]], h); }
+  else if (b === "mutton") { for (const s of [-1, 1]) P(c, [[HX + s * (rx - 1), HY - 2], [HX + s * (rx - 1), HY + 14], [HX + s * 8, HY + 16], [HX + s * (rx - 5), HY + 4]], h); }
+  return ["moustache", "goatee", "full", "long", "forked", "braided", "mutton"].includes(b) ? must : null;
+}
+function hairBackG(c: Ctx, G: Gene, p: Pal, rx: number, covered: boolean) {
+  if (G.bald || ["shaved", "coils", "crop", "receding"].includes(G.hs)) return;
+  if (G.hs === "long" || (G.female && (G.hs === "curly" || G.hs === "braids") && !covered)) {
+    const lo = G.female ? 36 : 28;
+    P(c, [[HX - rx - 1, HY - 8], [HX - rx - 5, HY + lo], [HX - rx + 4, HY + lo + 2], [HX + rx - 4, HY + lo + 2], [HX + rx + 5, HY + lo], [HX + rx + 1, HY - 8]], shade(p.hair, 0.88));
+  }
+}
+function hairCapG(c: Ctx, G: Gene, p: Pal, rx: number, ry: number) {
+  const top = HY - ry, h = p.hair;
+  const crop = () => P(c, [[HX - rx - 1, HY - 6], [HX - rx + 2, top - 3], [HX, top - 4], [HX + rx - 2, top - 3], [HX + rx + 1, HY - 6], [HX + 7, top + 7], [HX, top + 8], [HX - 7, top + 7]], h);
+  if (G.bald) { E(c, HX, top + 9, rx - 4, 4.4, p.skinL); for (const s of [-1, 1]) P(c, [[HX + s * (rx + 1), HY - 2], [HX + s * (rx - 1), top + 8], [HX + s * (rx - 5), top + 10], [HX + s * (rx - 3), HY - 2]], h); return; }
+  switch (G.hs) {
+    case "receding": for (const s of [-1, 1]) P(c, [[HX + s * (rx + 1), HY - 4], [HX + s * (rx - 1), top + 1], [HX + s * (rx - 6), top - 2], [HX + s * (rx - 6), top + 6], [HX + s * (rx - 2), HY - 6]], h); E(c, HX, top + 1, rx - 6, 3, h); E(c, HX, top + 5, 6, 2.6, p.skinL); break;
+    case "curly": crop(); for (let i = 0; i <= 8; i++) { const a = Math.PI * (1.05 + i * 0.1125); E(c, HX + Math.cos(a) * (rx + 0.5), HY - 3 + Math.sin(a) * (ry + 1), 4.2, 4, i % 2 ? h : p.hairL); } break;
+    case "coils": P(c, [[HX - rx - 1.4, HY - 5], [HX - rx + 1, top - 4], [HX, top - 6], [HX + rx - 1, top - 4], [HX + rx + 1.4, HY - 5], [HX + 7, top + 6], [HX - 7, top + 6]], h); for (let i = -3; i <= 3; i++) for (let j = 0; j < 2; j++) E(c, HX + i * 4.6 + j * 2.2, top - 2 + j * 4, 1, 1, p.hairL); break;
+    case "shaved": E(c, HX, top + 6, rx - 1.5, 7.5, mix(G.skin, h, 0.32)); break;
+    case "topknot": crop(); E(c, HX, top - 5, 5.4, 4.8, h); E(c, HX - 1.4, top - 6.4, 2, 1.4, p.hairL); R(c, HX - 3, top - 1.6, 6, 1.8, p.trim); break;
+    case "bun": crop(); E(c, HX + rx - 4, top + 2, 6, 5.4, h); E(c, HX + rx - 5.4, top + 0.6, 2.2, 1.4, p.hairL); break;
+    case "braids": crop(); L(c, [[HX, top - 3], [HX, top + 7]], p.skinD, 0.9); break;
+    case "long": crop(); if (G.female) L(c, [[HX - 1, top - 3], [HX - 1, top + 7]], p.skinD, 0.9); break;
+    default: crop();
+  }
+}
+function braidsG(c: Ctx, p: Pal, rx: number) {
+  for (const s of [-1, 1]) { L(c, [[HX + s * (rx - 1), HY + 4], [HX + s * (rx + 3), HY + 30]], p.hair, 5); for (let i = 0; i < 4; i++) E(c, HX + s * (rx + 0.6 + i * 0.9), HY + 9 + i * 5.6, 2.6, 2.1, p.hairL); }
+}
+function ageLinesG(c: Ctx, G: Gene, p: Pal, rx: number) {
+  const ln = shade(G.skin, 0.7), a = G.age;
+  if (a >= 38) for (const s of [-1, 1]) L(c, [[HX + s * 3.6, HY + 8.4], [HX + s * 6.2, HY + 14]], ln, 0.9);
+  if (a >= 48) { L(c, [[HX - 6, HY - 11], [HX + 6, HY - 11.6]], ln, 0.8); if (a >= 56) L(c, [[HX - 4, HY - 13.6], [HX + 4.6, HY - 13.8]], ln, 0.8); }
+  if (a >= 54) for (const s of [-1, 1]) { const x = HX + s * G.eyeSet; L(c, [[x - 1.8, HY + 3.4], [x + 1.8, HY + 3.4]], ln, 0.8); L(c, [[x + s * 4.4, HY + 0.2], [x + s * 6, HY + 1.4]], ln, 0.8); }
+  if (a >= 64) for (const s of [-1, 1]) P(c, [[HX + s * (rx - 3), HY + 10], [HX + s * (rx - 2), HY + 17], [HX + s * (rx - 6), HY + 20]], p.skinD);
+}
+
+function headBlockG(c: Ctx, K: DressKit, G: Gene, p: Pal, occ: Occasion, bare: boolean) {
+  let hat = G.hat; if (bare && occ === "everyday" && hat < 99 && !G.female) hat = 99;
+  const [rx, ry] = FACE_DIMS[G.face] || FACE_DIMS.oval, veiled = hat === 13, covered = COVERED_G.has(hat);
+  hairBackG(c, G, p, rx, covered);
+  for (const s of [-1, 1]) E(c, HX + s * (rx - 1), HY + 3, 3.4, 4.2, p.skinD);
+  E(c, HX, HY, rx, ry, G.skin);
+  if (G.face === "square") P(c, [[HX - rx + 0.4, HY + 2], [HX + rx - 0.4, HY + 2], [HX + rx - 1.6, HY + ry - 4], [HX + 6, HY + ry + 0.4], [HX - 6, HY + ry + 0.4], [HX - rx + 1.6, HY + ry - 4]], G.skin);
+  if (G.face === "heart") P(c, [[HX - 9, HY + 12], [HX + 9, HY + 12], [HX, HY + ry + 2.4]], G.skin);
+  if (G.face === "broad") for (const s of [-1, 1]) E(c, HX + s * (rx - 4), HY + 3, 5.4, 6.4, G.skin);
+  P(c, [[HX + rx - 7, HY - ry + 4], [HX + rx, HY - 2], [HX + rx - 2, HY + ry - 6], [HX + 6, HY + ry - 1]], p.skinD);
+  if (G.face === "broad" || G.face === "round") E(c, HX - rx + 6, HY + 5, 2.6, 1.6, p.skinL);
+  if (!covered) hairCapG(c, G, p, rx, ry);
+  else if (!G.bald && hat !== 105) P(c, [[HX - rx + 1, HY - 8], [HX + rx - 1, HY - 8], [HX + 8, HY - ry + 8], [HX - 8, HY - ry + 8]], p.hair);
+  if (!veiled) {
+    browsG(c, G);
+    const one = G.features & FEATURE_ONE_EYED ? -1 : 0;
+    for (const s of [-1, 1]) {
+      const x = HX + s * G.eyeSet;
+      if (s === one) { E(c, x, HY + 0.6, 2.8, 3, "#1c1712"); L(c, [[HX + s * 12, HY - 3.5], [HX - s * 4, HY + 5]], "#1c1712", 1.3); }
+      else eyeG(c, x, HY + 1, s, G, p);
+    }
+    noseG(c, G, p);
+    const must = beardG(c, G, p, rx);
+    mouthG(c, G, !!must && G.beard !== "goatee");
+    if (must) must();
+    ageLinesG(c, G, p, rx);
+    if (G.features & FEATURE_SCARRED) L(c, [[HX + 8, HY - 9], [HX + 3, HY + 12]], shade(G.skin, 0.5), 1.1);
+    if (G.features & FEATURE_TATTOOED) for (let i = 0; i < 3; i++) L(c, [[HX - rx + 2, HY - 7 + i * 4], [HX - rx + 6, HY - 5 + i * 4]], p.trim, 1);
+  }
+  if (G.hs === "braids" && !G.bald && hat !== 102 && hat !== 101) braidsG(c, p, rx);
+  if (G.earring && hat !== 102 && hat !== 101 && hat !== 6 && hat !== 13) for (const s of [-1, 1]) E(c, HX + s * (rx - 0.5), HY + 9, 1.6, 1.6, p.trim);
+  headwear(c, hat, p, occ, true);
+  void K;
+}
+
+function bustArtGene(c: Ctx, Pn: Person, occ: Occasion, bare: boolean) {
+  const { K, G } = Pn, p = palG(K, G, occ);
+  const sy = 74, by = 100, halfTop = G.female ? 23 : 26, halfBot = G.female ? 42 : 46;
+  R(c, HX - 8, HY + HRY - 6, 16, 14, p.skinD);
+  P(c, [[HX - halfTop, sy], [HX + halfTop, sy], [HX + halfBot, by], [HX - halfBot, by]], p.robe);
+  P(c, [[HX + 6, sy + 1], [HX + halfTop, sy], [HX + halfBot, by], [HX + 14, by]], p.robeD);
+  collar(c, K.neck ?? K.id, p, occ, sy, halfTop, halfBot, by);
+  if (G.female && occ !== "everyday") { c.beginPath(); c.arc(HX, sy - 4, 9, 0.3, Math.PI - 0.3); c.strokeStyle = p.trimL; c.lineWidth = 1.6; c.stroke(); }
+  headBlockG(c, K, G, p, occ, bare);
+}
+
+function figureArtGene(c: Ctx, Pn: Person, occ: Occasion, bare: boolean) {
+  const { K, G } = Pn, p = palG(K, G, occ), f = G.features;
+  const cx = 50, shY = 62, waist = 118, foot = 202, kind = K.garment;
+  const wide = ["robe", "kaftan", "thobe", "boubou", "kimono", "deel"].includes(kind), legs = ["tunic", "poncho", "wrap"].includes(kind);
+  const half = kind === "boubou" ? 38 : kind === "thobe" ? 27 : kind === "poncho" ? 36 : kind === "wrap" ? 26 : 34;
+  const hem = kind === "tunic" ? 134 : kind === "poncho" ? 146 : kind === "wrap" ? 156 : 186;
+  if (occ === "ceremonial") P(c, [[cx - 27, shY], [cx + 27, shY], [cx + 41, 190], [cx - 41, 190]], p.cloth2D);
+  const legTop = legs ? hem - 6 : 170;
+  for (const s of [-1, 1]) { R(c, cx + (s < 0 ? -16 : 3), legTop, 13, foot - 10 - legTop, legs ? p.cloth2 : p.skinD); R(c, cx + (s < 0 ? -19 : 3), foot - 11, 16, 11, "#33251a"); R(c, cx + (s < 0 ? -19 : 3), foot - 11, 16, 2.5, "#4a3823"); }
+  const aw = wide ? 16 : 10, maimed = f & FEATURE_MAIMED_HAND ? 1 : 0;
+  for (const s of [-1, 1]) {
+    P(c, [[cx + s * 22, shY - 2], [cx + s * (22 + aw), shY + 10], [cx + s * (20 + aw), waist + 16], [cx + s * 19, waist + 10]], s < 0 ? p.robe : p.robeD);
+    if (wide) L(c, [[cx + s * (21 + aw), waist + 4], [cx + s * 20, waist + 14]], p.trim, 2.2);
+    const hx2 = cx + s * (19 + aw * 0.35), hy = waist + 22;
+    if (s === maimed) { E(c, hx2, hy, 5.4, 5.4, "#d8cdb8"); L(c, [[hx2 - 4, hy - 3], [hx2 + 4, hy + 3]], "#a89a7c", 1.2); } else E(c, hx2, hy, 6, 6, G.skin);
+  }
+  P(c, [[cx - 24, shY], [cx + 24, shY], [cx + half, hem], [cx - half, hem]], p.robe);
+  P(c, [[cx + 5, shY], [cx + 24, shY], [cx + half, hem], [cx + half * 0.32, hem]], p.robeD);
+  for (const x of [-13, 0, 13]) L(c, [[cx + x, waist], [cx + x * 1.45, hem - 3]], p.robeD, 1.5);
+  P(c, [[cx - half, hem - 5], [cx + half, hem - 5], [cx + half, hem], [cx - half, hem]], p.trim);
+  if (kind === "toga") P(c, [[cx - 23, shY - 1], [cx + 7, waist + 18], [cx + 20, waist + 15], [cx - 9, shY - 2]], p.robeL);
+  if (kind === "himation") P(c, [[cx + 23, shY - 1], [cx - 7, waist + 20], [cx - 20, waist + 17], [cx + 9, shY - 2]], p.robeL);
+  if (kind === "sari") { P(c, [[cx - 22, shY - 1], [cx + 12, hem - 22], [cx + 25, hem - 19], [cx - 9, shY - 2]], p.cloth2); L(c, [[cx - 14, shY + 8], [cx + 23, hem - 22]], p.trim, 2.4); }
+  if (kind === "kaftan" || kind === "deel") { R(c, cx - 4.5, shY, 9, hem - shY, p.cloth2); L(c, [[cx, shY], [cx, hem]], p.trim, 1.6); }
+  if (kind === "crossrobe" || kind === "kimono") { P(c, [[cx - 17, shY - 2], [cx + 4, shY + 10], [cx + 6, hem], [cx - 20, hem]], p.robeL); L(c, [[cx + 17, shY - 2], [cx - 4, shY + 11]], p.trim, 2.6); }
+  if (kind === "poncho") for (let i = 0; i < 5; i++) R(c, cx - 36 + i * 0.9, shY + 10 + i * 13, 72 - i * 1.8, 5, i % 2 ? p.trim : p.cloth2);
+  if (kind === "boubou") for (let i = 0; i < 3; i++) { c.beginPath(); c.arc(cx, shY, 13 + i * 8, 0.25, Math.PI - 0.25); c.strokeStyle = i % 2 ? p.trim : p.cloth2; c.lineWidth = 2.8; c.stroke(); }
+  if (kind === "wrap") { P(c, [[cx - 25, shY - 2], [cx + 9, shY + 8], [cx + 11, hem], [cx - 25, hem]], p.robeL); E(c, cx + 18, shY + 5, 5, 5, p.trim); }
+  if (kind !== "boubou" && kind !== "wrap") P(c, [[cx - 25, waist - 5], [cx + 25, waist - 5], [cx + 26, waist + 8], [cx - 26, waist + 8]], p.cloth2);
+  if (kind === "kimono" || kind === "deel") E(c, cx + 15, waist + 2, 4.4, 4.4, p.trim);
+  if (kind === "thobe" || kind === "robe") L(c, [[cx, shY + 8], [cx, waist - 6]], p.trim, 2);
+  R(c, cx - 8, 46, 16, 20, p.skinD);
+  c.save(); const s = 17 / HRX; c.translate(50 - HX * s, 32 - HY * s); c.scale(s, s); headBlockG(c, K, G, p, occ, bare); c.restore();
+}
+
+// ── bridging the sim's `IndividualBrief` to a genome ──────────────────────
+const PERSON_CACHE = new Map<string, Person>();
+/** The structural subset of `IndividualBrief` a likeness needs. */
+export interface LikenessSource {
+  id?: number; name?: string; culture?: string; face_seed: number; female: boolean;
+  age?: number; features: number; world_h?: number; places?: { y?: number }[];
+}
+/** A person's cached likeness. Skin follows the HOMELAND's latitude (their first
+ *  recorded place, as a fraction of world height away from the equator); absent
+ *  that, the culture's own skin tone stands in. */
+export function individualPerson(p: LikenessSource): Person {
+  const y0 = p.places?.[0]?.y;
+  const lat = y0 != null && p.world_h ? Math.min(1, Math.abs(y0 / p.world_h - 0.5) * 2) : undefined;
+  const key = `${p.id ?? ""}|${p.face_seed}|${p.culture}|${p.female ? 1 : 0}|${Math.floor((p.age ?? 40) / 4)}|${p.features}|${lat != null ? lat.toFixed(1) : "-"}`;
+  let Pn = PERSON_CACHE.get(key);
+  if (!Pn) {
+    Pn = makePerson({ seed: p.face_seed || strSeed(`${p.name}${p.id}`), kit: kitForCulture(p.culture || "unknown"), female: p.female, age: p.age, lat, features: p.features });
+    if (PERSON_CACHE.size > 600) PERSON_CACHE.clear();
+    PERSON_CACHE.set(key, Pn);
+  }
+  return Pn;
 }

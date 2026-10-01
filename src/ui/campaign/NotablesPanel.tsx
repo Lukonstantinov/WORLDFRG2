@@ -6,7 +6,7 @@ import type { IndividualBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Chip, EmptyNote } from "@ui/kit";
-import { drawBust, individualKit } from "@ui/campaign/cultureDress";
+import { drawBust, individualPerson, kitForCulture } from "@ui/campaign/cultureDress";
 import { TraitChip } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
 import { OpenLifeButton } from "@ui/campaign/PersonWindow";
@@ -49,11 +49,9 @@ export function NotablesPanel() {
     const ctx = el.getContext("2d");
     if (!ctx) return;
     ctx.clearRect(0, 0, el.width, el.height);
-    const kit = individualKit(pickedRow.culture || "unknown", pickedRow.face_seed);
-    drawBust(ctx, 0, 0, size * dpr, kit, {
+    drawBust(ctx, 0, 0, size * dpr, kitForCulture(pickedRow.culture || "unknown"), {
       occasion: pickedRow.famous ? "ceremonial" : "national",
-      female: pickedRow.female,
-      features: pickedRow.features,
+      person: individualPerson(pickedRow),
     });
   }, [pickedRow]);
 
