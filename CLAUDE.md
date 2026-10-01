@@ -3463,6 +3463,22 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   arc of their nature, beliefs pole by pole, live
                                   modifiers, teacher/students/house). `OpenLifeButton`
                                   is the one entry point every person view carries
+  CouncilRoom.tsx               ← The council's ROOM, three ways (design handoff 7a-7c):
+                                  pixel chamber · table from above · hemicycle by bloc,
+                                  each authored on a fixed stage and scaled to the panel
+                                  (overlay text hides below 0.6 scale). Pixel scenes in
+                                  `canvas/councilArt.ts`; `CouncilChamber` hosts it with a
+                                  room switcher (localStorage `wf.councilRoom`)
+  PixelBust.tsx                 ← `PixelBust`/`PixelFigure`: canvas wrappers over a `Person`
+  (cultureDress.ts, 2026-10)    ← now also a per-person FACE GENOME: `makePerson` (eyes, nose,
+                                  brows, jaw, lips, hair, beard, age, skin by homeland
+                                  latitude; weights per `PHENO_GROUP`), women's headwear
+                                  101-107, `individualPerson(IndividualBrief)` (cached).
+                                  Opt-in via `DressOpts.person`; omitted ⇒ bit-identical.
+                                  `NotablesPanel` is now the roster (filters, away strip,
+                                  cards with career ladder); `WorksCard` Production tab is a
+                                  Sankey + tier ladder. NOT built: the design's sources/
+                                  buyers/upgrades/master (not served by the sim), light theme
   traitIcons.tsx                ← ONE icon vocabulary: traits, offices, seat paths,
                                   ideology axes (`TraitChip`, `IdeologyBars`)
   NotablesPanel.tsx             ← 02_PEOPLE.md (Living World row 02) — the

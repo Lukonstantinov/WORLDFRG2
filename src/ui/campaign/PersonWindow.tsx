@@ -7,7 +7,9 @@ import type { IndividualBrief, LifeEntryBrief, DecisionBrief, PlaceBrief } from 
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Tabs, Chip, EmptyNote } from "@ui/kit";
-import { Bust } from "@ui/campaign/personShared";
+import { Bust, CareerLadder } from "@ui/campaign/personShared";
+import { PixelFigure } from "@ui/campaign/PixelBust";
+import { individualPerson, describePerson } from "@ui/campaign/cultureDress";
 import { TraitChip, TRAIT_META, traitColor, IDEOLOGY_AXES } from "@ui/campaign/traitIcons";
 import { LifeStory } from "@ui/campaign/LifeStory";
 
@@ -117,6 +119,11 @@ function Header({ p }: { p: IndividualBrief }) {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
           {p.traits.map((t, i) => <TraitChip key={t} name={t} strength={p.trait_strength?.[i] ?? 1} />)}
         </div>
+        {p.roles.length > 1 && <div style={{ marginTop: 8 }}><CareerLadder roles={p.roles} max={5} /></div>}
+        <div style={{ fontSize: FZ.micro, color: T.inkFaint, marginTop: 6 }}>{describePerson(individualPerson(p))}</div>
+      </div>
+      <div style={{ flex: "none", display: "flex", justifyContent: "center", alignItems: "flex-end", padding: "8px 14px 6px", borderRadius: RADIUS.md, background: "linear-gradient(#111b2a,#0a1018)", border: `1px solid ${T.line}`, filter: p.alive ? undefined : "grayscale(.85) brightness(.9)" }}>
+        <PixelFigure person={individualPerson(p)} w={66} occasion={p.alive && p.famous ? "ceremonial" : "national"} />
       </div>
     </div>
   );

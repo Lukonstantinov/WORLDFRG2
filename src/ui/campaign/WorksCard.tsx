@@ -44,6 +44,69 @@ function Sparkline({ values, color }: { values: number[]; color: string }) {
   );
 }
 
+
+interface FlowIn { name: string; icon: string; color: string; ton: number }
+
+/** Production as a flow (design handoff 7f): each raw input a band whose
+ *  thickness is monthly tonnage, funnelled into the works and out as the
+ *  finished good (thinner by the waste). Drawn from the recipe × output the
+ *  card already carries; sources and buyers by city are not served yet. */
+function FlowSankey({ inputs, out, outName, outColor }: { inputs: FlowIn[]; out: number; outName: string; outColor: string }) {
+  const W = 340, H = 30 + Math.max(inputs.length, 1) * 30;
+  const tot = inputs.reduce((s, f) => s + f.ton, 0);
+  const K = (H - 24) / Math.max(tot, out, 1e-6);
+  const gap = 8, hs = inputs.map((f) => Math.max(5, f.ton * K));
+  const stack = hs.reduce((a, b) => a + b, 0) + gap * (inputs.length - 1);
+  let y = (H - stack) / 2;
+  const x0 = 96, x1 = 190, x2 = 232, wkH = Math.max(8, tot * K), wkY = (H - wkH) / 2, oH = Math.max(5, out * K), oY = (H - oH) / 2;
+  const band = (ax: number, ay: number, ah: number, bx: number, by: number, bh: number, c: string, op: number) => {
+    const m = (ax + bx) / 2;
+    return <path d={`M${ax},${ay} C${m},${ay} ${m},${by} ${bx},${by} L${bx},${by + bh} C${m},${by + bh} ${m},${ay + ah} ${ax},${ay + ah} Z`} fill={c} fillOpacity={op} />;
+  };
+  let wf = 0;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block" }}>
+      {inputs.map((f, i) => {
+        const h = hs[i], yy = y, th = (f.ton / Math.max(tot, 1e-6)) * wkH, el = (
+          <g key={i}>
+            {band(x0, yy, h, x1, wkY + wf, th, f.color, 0.45)}
+            <rect x={x0 - 4} y={yy} width={4} height={h} rx={1} fill={f.color} />
+            <text x={x0 - 8} y={yy + h / 2 + 3} textAnchor="end" fontSize={9} fill={T.inkMid}>{f.icon} {f.name}</text>
+            <text x={x0 + 4} y={yy + h / 2 + 3} fontSize={8} fill={T.inkDim}>{fmt(f.ton)}</text>
+          </g>
+        );
+        y += h + gap; wf += th; return el;
+      })}
+      <rect x={x1} y={wkY - 5} width={x2 - x1} height={wkH + 10} rx={4} fill={T.raised} stroke={T.gold} strokeWidth={1.2} />
+      <text x={(x1 + x2) / 2} y={H / 2 + 3} textAnchor="middle" fontSize={9} fill={T.parchment}>⚒ works</text>
+      {band(x2, wkY + (wkH - oH) / 2, oH, x2 + 50, oY, oH, T.gold, 0.5)}
+      <rect x={x2 + 50} y={oY} width={5} height={oH} rx={1} fill={outColor} />
+      <text x={x2 + 60} y={H / 2 - 2} fontSize={10} fontWeight={700} fill={T.gold}>{outName}</text>
+      <text x={x2 + 60} y={H / 2 + 10} fontSize={9} fill={T.gold}>{fmt(out)}/mo</text>
+    </svg>
+  );
+}
+
+/** Tier pips I–V: the works' rung of the ladder. The requirements for the next
+ *  rung are not served by the sim yet, so none are claimed here. */
+function TierLadder({ tier }: { tier: number }) {
+  return (
+    <div style={{ display: "flex", gap: 5, alignItems: "center", marginTop: 6 }} title={`tier ${tier} of 5`}>
+      <span style={{ fontSize: 8, color: T.inkFaint, textTransform: "uppercase", marginRight: 2 }}>Tier</span>
+      {["I", "II", "III", "IV", "V"].map((r, k) => {
+        const done = k + 1 <= tier, cur = k + 1 === tier;
+        return (
+          <span key={r} style={{
+            width: 20, height: 20, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 9, fontWeight: 700,
+            background: done ? T.gold : "transparent", color: done ? T.panel : T.inkFaint,
+            border: `1px ${k + 1 === tier + 1 ? "dashed" : "solid"} ${done ? T.gold : T.line}`, boxShadow: cur ? `0 0 0 2px ${T.gold}44` : "none",
+          }}>{r}</span>
+        );
+      })}
+    </div>
+  );
+}
+
 const rowStat: React.CSSProperties = {
   background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: RADIUS.sm,
   padding: "5px 7px", flex: 1, minWidth: 0,
@@ -105,7 +168,6 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
   const marginPct = inCost > 1e-6 ? Math.round(((out * outPrice - inCost) / inCost) * 100) : null;
   const totalInTon = inFlows.reduce((s, f) => s + f.ton, 0);
   const lossPct = totalInTon > out ? Math.round(((totalInTon - out) / totalInTon) * 100) : 0;
-  const maxTon = Math.max(out, ...inFlows.map((f) => f.ton), 1e-6);
   const outMeta = goodMeta(card.good_name);
 
   return (
@@ -154,6 +216,8 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
             </span>
           </div>
 
+          <TierLadder tier={card.tier} />
+
           {/* Age / workforce — fields the sim already tracked (founding tick,
               the works' own population) but never surfaced anywhere before. */}
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
@@ -193,23 +257,7 @@ export function WorksCard({ hub, tick }: { hub: number; tick: number }) {
           {inFlows.length > 0 && (
             <div style={{ padding: "6px 4px", background: T.card, borderRadius: RADIUS.sm, border: `1px solid ${T.line}` }}
               title="Production flow — raw inputs worked into the finished good; bar length is monthly tonnage">
-              {inFlows.map((f, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: 2 }}>
-                  <span style={{ width: 74, fontSize: FZ.small, color: T.inkMid, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{f.icon} {f.name}</span>
-                  <div style={{ flex: 1, height: 8, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
-                    <div style={{ width: `${Math.max(4, (f.ton / maxTon) * 100)}%`, height: "100%", background: f.color, opacity: 0.85 }} />
-                  </div>
-                  <span style={{ width: 40, textAlign: "right", fontSize: FZ.small, color: T.inkDim }}>{fmt(f.ton)}</span>
-                </div>
-              ))}
-              <div style={{ textAlign: "center", fontSize: FZ.small, color: T.inkFaint, margin: "1px 0" }}>⚒ works into ▼</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ width: 74, fontSize: FZ.small, color: T.gold, fontWeight: 700, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{outMeta.icon} {outMeta.name}</span>
-                <div style={{ flex: 1, height: 8, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
-                  <div style={{ width: `${Math.max(4, (out / maxTon) * 100)}%`, height: "100%", background: T.gold }} />
-                </div>
-                <span style={{ width: 40, textAlign: "right", fontSize: FZ.small, color: T.gold }}>{fmt(out)}/mo</span>
-              </div>
+              <FlowSankey inputs={inFlows} out={out} outName={outMeta.name} outColor={outMeta.color} />
               <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3, fontSize: FZ.small }}>
                 {marginPct !== null && (
                   <span style={{ color: marginPct >= 0 ? T.goodInk : T.badInk }} title="output value vs input cost">
