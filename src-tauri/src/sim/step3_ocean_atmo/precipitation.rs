@@ -1465,7 +1465,7 @@ mod tests {
         let row_at = |target: f32| -> u32 {
             (0..h).min_by(|&a, &b| {
                 (buf.latitude(a) - target).abs()
-                    .partial_cmp(&(buf.latitude(b) - target).abs()).unwrap()
+                    .total_cmp(&(buf.latitude(b) - target).abs())
             }).unwrap()
         };
         let eq_row = row_at(3.0);
@@ -1525,7 +1525,7 @@ mod tests {
 
         let row_at = |target: f32| -> u32 {
             (0..h).min_by(|&a, &b| {
-                (buf.latitude(a) - target).abs().partial_cmp(&(buf.latitude(b) - target).abs()).unwrap()
+                (buf.latitude(a) - target).abs().total_cmp(&(buf.latitude(b) - target).abs())
             }).unwrap()
         };
         let x = w / 2;
@@ -1578,7 +1578,7 @@ mod tests {
 
         // Sample the westerly belt (~45°N).
         let row = (0..h).min_by(|&a, &b| {
-            (buf.latitude(a) - 45.0).abs().partial_cmp(&(buf.latitude(b) - 45.0).abs()).unwrap()
+            (buf.latitude(a) - 45.0).abs().total_cmp(&(buf.latitude(b) - 45.0).abs())
         }).unwrap();
         let windward = buf.precipitation[buf.idx(10, row)]; // just west of the crest
         let lee = buf.precipitation[buf.idx(16, row)];       // just east of the crest

@@ -434,7 +434,7 @@ pub fn apply_landform_shaping(
     if any_terrace {
         for (p, b) in buckets.iter_mut().enumerate() {
             if b.is_empty() { continue; }
-            b.sort_by(|a, c| a.partial_cmp(c).unwrap());
+            b.sort_by(|a, c| a.total_cmp(c));
             level[p] = b[(b.len() as f32 * 0.60) as usize % b.len()];
         }
     }
@@ -516,8 +516,8 @@ mod tests {
             amps.push(f.amp[i]);
             rugs.push(f.rugged[i]);
         }
-        amps.sort_by(|a, b| a.partial_cmp(b).unwrap());
-        rugs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        amps.sort_by(|a, b| a.total_cmp(b));
+        rugs.sort_by(|a, b| a.total_cmp(b));
         let p = |v: &Vec<f32>, q: f32| v[((v.len() - 1) as f32 * q) as usize];
 
         let amp_spread = p(&amps, 0.90) - p(&amps, 0.10);

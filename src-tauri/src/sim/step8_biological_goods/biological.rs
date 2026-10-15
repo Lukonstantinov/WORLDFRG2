@@ -2413,7 +2413,7 @@ mod tests {
         // Richest 10% of cells in each mineral's province field.
         let topk = |f: &[f32]| -> HashSet<usize> {
             let mut idx: Vec<usize> = (0..f.len()).collect();
-            idx.sort_by(|&i, &j| f[j].partial_cmp(&f[i]).unwrap());
+            idx.sort_by(|&i, &j| f[j].total_cmp(&f[i]));
             idx.into_iter().take(f.len() / 10).collect()
         };
         let (ta, tb) = (topk(&a), topk(&b));
