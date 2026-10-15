@@ -1,6 +1,6 @@
 [package]
 name = "worldforge2"
-version = "0.1.0"
+version = "0.1.0-beta.1"
 edition = "2021"
 description = "WorldForge 2 - Fantasy World Map Editor"
 

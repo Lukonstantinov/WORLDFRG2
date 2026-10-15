@@ -342,3 +342,72 @@ async fn real_world_craft_spread() {
     println!("    that the biggest city wins, it is that EVERY established maker reaches");
     println!("    the same ceiling, so no city is distinctive at anything.");
 }
+
+/// Peak working set of THIS process in MB (cumulative, never decreases). No extra
+/// crates: Linux reads `VmHWM`, Windows asks PowerShell about our own PID.
+fn peak_rss_mb() -> f64 {
+    #[cfg(target_os = "linux")]
+    {
+        let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
+        return s.lines().find(|l| l.starts_with("VmHWM:"))
+            .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
+            .map_or(f64::NAN, |kb| kb / 1024.0);
+    }
+    #[cfg(windows)]
+    {
+        let cmd = format!("(Get-Process -Id {}).PeakWorkingSet64", std::process::id());
+        let out = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &cmd]).output();
+        return out.ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok())
+            .map_or(f64::NAN, |b| b / 1_048_576.0);
+    }
+    #[allow(unreachable_code)]
+    f64::NAN
+}
+
+/// IMPROVEMENT_PLAN Phase 2 — peak memory and seconds per simulated year on a
+/// FULL-SIZE world (3600×1800), well past the old year-30 OOM, through the real
+/// commands. Target machine: an 8 GB RAM laptop; budget: 3 GB peak working set
+/// (`MEM_BUDGET_MB`) — leaves room for the OS and the WebView. Override the length
+/// with `WF2_MEASURE_YEARS` (default 60). Run in release:
+/// `cargo test --release --lib measure_full_size_campaign -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn measure_full_size_campaign() {
+    const MEM_BUDGET_MB: f64 = 3072.0;
+    let years: u32 = std::env::var("WF2_MEASURE_YEARS").ok().and_then(|v| v.parse().ok()).unwrap_or(60);
+    let app = tauri::test::mock_app();
+    app.manage(WorldDb::in_memory().expect("in-memory WorldDb"));
+    let state = app.state::<WorldDb>();
+    let t0 = std::time::Instant::now();
+
+    world_commands::new_world("measure".into(), 3600, 1800, state.clone()).expect("new_world");
+    let seed = 20261015u64;
+    let run = sim_commands::sim_run_all(seed, 10, "plates".into(), 0.5, 0.5, 0.5, 0.5, state.clone())
+        .expect("sim_run_all");
+    let econ = compute_economy(
+        serde_json::to_string(&run.settlements).unwrap(), serde_json::to_string(&run.rivers).unwrap(),
+        0, 0.15, false, 6, 0.5, 0.0, -1, 1, state.clone(),
+    ).expect("compute_economy");
+    let gen_s = t0.elapsed().as_secs_f64();
+    let gen_mb = peak_rss_mb();
+    println!("[measure] worldgen 3600x1800: {} settlements, {} hubs, {gen_s:.0} s, peak {gen_mb:.0} MB",
+        run.settlements.len(), econ.hubs.len());
+
+    finalize_world(state.clone()).expect("finalize_world");
+    campaign_start_sim(seed, state.clone()).expect("campaign_start_sim");
+    let mut worst_s = 0.0f64;
+    let camp0 = std::time::Instant::now();
+    for y in 1..=years {
+        let ty = std::time::Instant::now();
+        campaign_advance(365, state.clone()).await.expect("campaign_advance");
+        let s = ty.elapsed().as_secs_f64();
+        worst_s = worst_s.max(s);
+        if y % 10 == 0 || y == 1 {
+            println!("[measure] year {y:>3}: {s:6.1} s/yr, peak {:6.0} MB", peak_rss_mb());
+        }
+    }
+    let peak = peak_rss_mb();
+    println!("[measure] {years} years: mean {:.1} s/yr, worst {worst_s:.1} s/yr, PEAK {peak:.0} MB (budget {MEM_BUDGET_MB:.0})",
+        camp0.elapsed().as_secs_f64() / years as f64);
+    assert!(peak.is_nan() || peak <= MEM_BUDGET_MB, "peak {peak:.0} MB is over the {MEM_BUDGET_MB:.0} MB budget");
+}

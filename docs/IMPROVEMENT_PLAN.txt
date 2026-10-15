@@ -100,7 +100,7 @@ Phase 1 - Save safety  (I-4)
 - [ ] Optional, after testers: slice 3 (.wf2 bundle) and slice 5 (drag-and-drop).
 
 Phase 2 - Measure  (I-5, I-6)
-- [ ] Before measuring, write down the target machine (for example 8 GB RAM laptop) and a peak-memory limit.
+- [x] Target: 8 GB RAM Windows laptop; budget 3 GB peak working set (MEM_BUDGET_MB in real_world_diagnostics.rs; change there if the owner picks another).
 - [ ] Profile one campaign on a 3600x1800 world, well past year 30 (aim for year 60), recording peak memory (working set) and seconds per simulated year. WF2_PROFILE=1 already gives the per-phase time.
 - [ ] Record the numbers as a new row in docs/SCOREBOARD.md.
 - [ ] If memory is over the limit, find the growing structure (same method as the journal fix). If over budget because of the tile/WorldBuffer design itself, put claim 4 back on trial.
@@ -114,13 +114,13 @@ Phase 3 - Decide the product  (I-7)
 Phase 4 - Legal basics  (I-8)
 - [x] Closed commercial licence chosen; LICENSE added (EULA.md still to draft).
 - [x] docs/THIRD_PARTY_LICENSES.md via `node scripts/license_report.mjs`: 0 npm flags, 5 MPL-2.0 crates via Tauri (OK unmodified).
-- [ ] Check the licence of the Koppen-Geiger dataset and the commodity-history text, and replace anything that cannot be sold.
-- [ ] Draft a short EULA. Have it, and the AI-code question, reviewed once.
+- [x] docs/DATA_RIGHTS.md: Koppen + elevation fixtures are test-only (never shipped); commodity text is original; fish plates are AI-generated (check tool terms); no bundled fonts.
+- [~] EULA.md drafted (marked DRAFT). STILL OPEN: one professional review of it + the AI-code question (docs/DATA_RIGHTS.md lists the open points).
 
 Phase 5 - Ship v0.1 to testers  (I-1, I-2)
-- [ ] Add a CI job that runs tauri build on Windows and uploads the installer as an artifact.
-- [ ] Bump to 0.1.0-beta, tag v0.1.0-beta, attach the installer to a GitHub release (private or public).
-- [ ] Add an "Install" section to the README that does not need Node or Rust.
+- [x] .github/workflows/release.yml: tauri build on windows-latest, NSIS installer uploaded as artifact (run by hand or on a v* tag). Built locally: WorldForge 2_0.1.0-beta.1_x64-setup.exe, 9 MB.
+- [~] Version is 0.1.0-beta.1 (MSI dropped: WiX rejects "-beta"). STILL OPEN (owner): push tag v0.1.0-beta.1 → draft release with the installer; check it, then publish.
+- [x] README "Install (testers)" section: download, SmartScreen note, backups.
 - [ ] Recruit 5-10 outside worldbuilders. Ask each to: install, make a world, export a map, save, reopen, start a campaign, run 10 years.
 - [ ] Collect what broke, what they used, what they ignored, and whether they would pay (and how much).
 - [ ] Put up a one-page waitlist or pre-order page with a stated price, and count sign-ups.

@@ -112,7 +112,22 @@ See [`CLAUDE.md`](./CLAUDE.md) for the full architecture reference and exact for
 
 ---
 
-## Getting Started
+## Install (testers — no Node or Rust needed)
+
+1. Download `WorldForge 2_<version>_x64-setup.exe` from the release link you were sent
+   (or the **Releases** page / the latest **Release installer** run under **Actions**).
+2. Run it. The installer is not code-signed yet, so Windows SmartScreen may warn —
+   choose **More info → Run anyway**. Windows 10/11, 64-bit; WebView2 is installed
+   automatically if missing.
+3. Start **WorldForge 2** from the Start menu. Keep backups of your `.worldforge` and
+   `.campaign` files — this is a beta.
+
+Builds are produced by `.github/workflows/release.yml` (run it by hand, or push a
+`v*` tag to attach the installer to a draft release).
+
+---
+
+## Getting Started (developers)
 
 ### Prerequisites
 - [Node.js](https://nodejs.org) (18+)
