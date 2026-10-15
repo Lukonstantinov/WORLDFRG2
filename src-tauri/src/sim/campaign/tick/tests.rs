@@ -5215,7 +5215,18 @@
                     "head {i} did not age in office ({} → {})", p.age_at_accession, p.age_at_death
                 );
                 let years = (p.until - p.since) / TICKS_PER_YEAR;
-                assert!(years >= 3, "head {i} held the house for {years} years — not a generation");
+                // A head removed by a crisis DEPOSITION can serve far less than a
+                // generation — a coup is not a natural death, and the record faithfully
+                // stores the short reign. A deposition is the only path that closes a
+                // record early (natural succession floors tenure at MIN_TENURE_YEARS),
+                // and it stamps the SUCCESSOR's accession with one of these three
+                // phrases. Hold the ≥3-year floor only where the next head did NOT seize.
+                let deposed = line.get(i + 1).is_some_and(|nx| matches!(
+                    nx.accession.as_str(),
+                    "seized the seat" | "the succession held" | "a compromise candidate"));
+                if !deposed {
+                    assert!(years >= 3, "head {i} held the house for {years} years — not a generation");
+                }
                 prev_until = p.until;
             }
         }
@@ -11574,7 +11585,7 @@
         assert!(s.hubs[0].officials.len() >= 2, "an assembly needs at least one non-Head seat to ostracize");
         let target = s.hubs[0].officials.iter().enumerate()
             .filter(|(_, o)| o.role != 0)
-            .min_by(|a, b| a.1.suitability.partial_cmp(&b.1.suitability).unwrap())
+            .min_by(|a, b| a.1.suitability.total_cmp(&b.1.suitability))
             .map(|(_, o)| o.individual_id).unwrap();
         // `OSTRACISM_CHANCE` is a real probability even at the full test
         // dose, so retry across several years until the roll lands.
