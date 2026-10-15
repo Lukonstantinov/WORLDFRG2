@@ -33,18 +33,15 @@ pub fn save_world_as(
     // The backup copies every table; one PLAYTHROUGH doesn't belong in a world file,
     // but the world's own human layer does.
     crate::commands::campaign_commands::clear_campaign_run(&dest)?;
+    crate::commands::campaign_commands::stamp_save_format(&dest)?;
     Ok(())
 }
 
-/// What `open_world` hands the frontend: the world meta, the campaign (if the
-/// file carried one — legacy single-file saves do, in-memory-migrated), and
-/// persisted wizard progress.
+/// What `open_world` hands the frontend: the world meta, the campaign name (if the
+/// file carried one), and persisted wizard progress.
 #[derive(serde::Serialize)]
 pub struct OpenWorldResult {
     pub meta: crate::commands::world_commands::WorldMeta,
-    /// True when the file was a pre-split save (its settlements/economy lived
-    /// in world metadata) — the frontend offers to split it into two files.
-    pub legacy: bool,
     pub campaign_name: Option<String>,
     /// JSON-encoded step-completion maps (empty when never persisted).
     pub world_progress: Option<String>,
@@ -62,34 +59,29 @@ pub fn open_world(
     // Copy file DB into the managed in-memory DB
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
 
-    // Attach the source DB and copy all data
+    // Attach the source DB and check its format BEFORE touching the loaded world,
+    // so a rejected file leaves the current world intact.
     let src_path = path.replace('\'', "''");
-    conn.execute_batch(&format!(
-        "ATTACH DATABASE '{}' AS src;
-         DELETE FROM tiles; DELETE FROM metadata; DELETE FROM objects;
+    conn.execute_batch(&format!("ATTACH DATABASE '{}' AS src;", src_path))
+        .map_err(|e| e.to_string())?;
+    let version: i64 = conn.query_row("PRAGMA src.user_version", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    if let Err(e) = crate::commands::campaign_commands::check_save_format(version, "world file") {
+        let _ = conn.execute_batch("DETACH DATABASE src;");
+        return Err(e);
+    }
+    conn.execute_batch(
+        "DELETE FROM tiles; DELETE FROM metadata; DELETE FROM objects;
          DELETE FROM sim_state; DELETE FROM undo_journal; DELETE FROM campaign;
          INSERT INTO metadata SELECT * FROM src.metadata;
          INSERT INTO tiles SELECT * FROM src.tiles;
          INSERT OR IGNORE INTO objects SELECT * FROM src.objects;
-         INSERT OR IGNORE INTO sim_state SELECT * FROM src.sim_state;",
-        src_path
-    )).map_err(|e| e.to_string())?;
-    // Older files have no campaign table; copy it only when present.
-    let has_campaign: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM src.sqlite_master WHERE type = 'table' AND name = 'campaign'",
-        [], |r| r.get(0),
+         INSERT OR IGNORE INTO sim_state SELECT * FROM src.sim_state;
+         INSERT INTO campaign SELECT * FROM src.campaign;
+         DETACH DATABASE src;",
     ).map_err(|e| e.to_string())?;
-    if has_campaign > 0 {
-        conn.execute_batch("INSERT INTO campaign SELECT * FROM src.campaign;")
-            .map_err(|e| e.to_string())?;
-    }
-    conn.execute_batch("DETACH DATABASE src;").map_err(|e| e.to_string())?;
     // A different world/campaign is now loaded — drop any resident campaign sim.
     db.invalidate_campaign();
-
-    // Pre-split saves keep settlements/economy in metadata → move them into the
-    // campaign table so the app always runs on the split model in memory.
-    let legacy = crate::commands::campaign_commands::migrate_legacy_campaign_keys(&conn)?;
 
     // Activate this world's organic culture map (if any) so names resolve correctly.
     crate::sim::cultures::ensure_active(&conn);
@@ -122,7 +114,6 @@ pub fn open_world(
             obliquity,
             frozen: crate::commands::campaign_commands::is_frozen(&conn),
         },
-        legacy,
         campaign_name: metadata::campaign_get(&conn, "name").ok().flatten(),
         world_progress: metadata::get_meta(&conn, "world_progress").ok().flatten(),
         campaign_progress: metadata::campaign_get(&conn, "campaign_progress").ok().flatten(),

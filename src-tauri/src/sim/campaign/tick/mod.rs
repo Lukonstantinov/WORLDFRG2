@@ -5108,6 +5108,13 @@ pub(crate) const LAW_ENTREPOT: u8 = 7;
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
 fn neg_one_i32() -> i32 { -1 }
+/// JSON has no infinity: serde_json writes a non-finite f32 as `null` and then refuses
+/// to read `null` back as f32 — so every save whose route matrix held an unreachable
+/// pair (`f32::INFINITY`) could not be reopened. Reads `null` back as infinity.
+fn vec_f32_null_is_inf<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<f32>, D::Error> {
+    let v: Vec<Option<f32>> = serde::Deserialize::deserialize(d)?;
+    Ok(v.into_iter().map(|x| x.unwrap_or(f32::INFINITY)).collect())
+}
 /// Serde defaults for `CampaignSim`'s voyage-range caps — an old save, and
 /// every ordinary campaign, runs at the shipped constants.
 pub(crate) fn ship_leg_max_km_default() -> f32 { SHIP_LEG_MAX_KM }
@@ -8085,7 +8092,7 @@ pub struct CampaignSim {
     /// rivers, coast-hugging, sea crossings — the trade-route generation rules), so campaign
     /// routes follow real lanes and never a straight line. Serialized (survives save/load);
     /// hubs added later (colonies, index ≥ `base_n`) fall back to Euclidean via `rebuild_routes`.
-    #[serde(default)] pub base_days: Vec<f32>,
+    #[serde(default, deserialize_with = "vec_f32_null_is_inf")] pub base_days: Vec<f32>,
     #[serde(default)] pub base_n: usize,
     /// N5 (`SEASONS_ELASTICITY_AND_LEAGUES_PLAN.md` §1.2) · per-lane seasonal
     /// travel-time multiplier, quantised to a `u8` — flat

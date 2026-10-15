@@ -96,7 +96,7 @@ pub fn save_campaign_as(path: String, db: State<'_, WorldDb>) -> Result<(), Stri
             .map_err(|e| e.to_string())?;
         }
     }
-    Ok(())
+    stamp_save_format(&dest)
 }
 
 
@@ -146,6 +146,9 @@ pub fn open_campaign(path: String, db: State<'_, WorldDb>) -> Result<CampaignInf
         rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
     )
     .map_err(|e| e.to_string())?;
+    let version: i64 = src.query_row("PRAGMA user_version", [], |r| r.get(0))
+        .map_err(|e| e.to_string())?;
+    check_save_format(version, "campaign")?;
 
     let mut rows: Vec<(String, String)> = Vec::new();
     {

@@ -406,5 +406,7 @@ panel.
 (`WorldRef::same_world` — fingerprint + grid, now shared with `open_campaign`'s own
 check). `App.tsx` offers to load it with the dialog plugin's `ask`. The mismatch
 warning on opening a `.campaign` now names the world it was saved against
-(`CampaignInfo.world_name`). Gate: `commands::old_save_tests` — the old-build fixture
-pair finds its sibling; a lone world file offers none. Slices 3 and 5 remain queued.
+(`CampaignInfo.world_name`). Gate: `commands::save_roundtrip_tests` — a freshly saved
+pair finds its sibling and resumes. Old-format files are no longer supported at all
+(owner decision, same day): files carry `SAVE_FORMAT` in SQLite `user_version` and
+unstamped files are refused, so the pre-fix recovery path is moot. Slices 3 and 5 remain queued.

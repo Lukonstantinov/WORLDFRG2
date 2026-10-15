@@ -21,8 +21,6 @@ export interface WorldMeta {
 /** What open_world returns: the world plus any campaign data the file carried. */
 export interface OpenWorldResult {
   meta: WorldMeta;
-  /** Pre-split single-file save — offer to split it into world + campaign. */
-  legacy: boolean;
   campaign_name: string | null;
   /** JSON-encoded step-completion maps persisted by set_progress. */
   world_progress: string | null;

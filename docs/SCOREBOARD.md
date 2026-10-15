@@ -9,6 +9,26 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-10-15 — First full-size campaign measurement (IMPROVEMENT_PLAN Phase 2): memory and speed both grow with campaign age
+
+`real_world_diagnostics::measure_full_size_campaign`, release build, owner's Windows
+machine, 3600×1800 world from plates (seed 20261015), real commands end to end.
+Target: 8 GB RAM laptop, 3 GB peak working set; owner's goal: **at least 200 years**.
+
+| Point | s / simulated year | Peak working set |
+|---|---|---|
+| Worldgen (827 settlements → 827 hubs) | 94 s total | 1,656 MB |
+| Campaign year 1 | 34.1 | 2,136 MB |
+| Campaign year 10 | 72.0 | 2,618 MB |
+
+Stopped by the owner at ~year 12: enough to show the shape. **Both numbers grow with
+campaign AGE, not just world size** — +~53 MB/year of peak memory (budget crossed
+around year 20-25 by extrapolation, so 200 years is impossible as built) and s/yr
+doubling in 9 years (200 years would take many hours). Also: real-world year-1 cost is
+3-4× the synthetic `bench_campaign_tick_large`'s 8-10 s/yr, so that bench no longer
+represents a real campaign. Next: find the structures that grow per year (same method
+as the journal OOM fix).
+
 ## 2026-09-30b — The Character window + the audit's combinations (CLAUDE.md §5.16b)
 
 End-of-batch gates: `tick::tests` **411/411**, `econ_` **6/6** (573 s).

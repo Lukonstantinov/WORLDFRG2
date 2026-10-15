@@ -283,8 +283,11 @@ sets `frozen=1` + records `finalized_fp`). Everything human lives in the
 `campaign` table (settlements, economy, `campaign_progress`, `world_ref`) and
 saves to a separate **`.campaign`** file (`save_campaign_as`/`open_campaign`,
 fingerprint-checked). `save_world_as` strips campaign rows. Paint/template/sim
-phases 1-6 + run-alls call `ensure_unfrozen`. Legacy single-file saves migrate
-in-memory on open (`legacy=true` → the app offers to split). `import_world_layers`
+phases 1-6 + run-alls call `ensure_unfrozen`. **Only current-format saves load**
+(owner decision 2026-10-15): both file kinds carry `SAVE_FORMAT` in their SQLite
+`user_version`; `open_world`/`open_campaign` refuse anything else with a clear message
+BEFORE touching the open world (gate: `commands::save_roundtrip_tests`). Bump
+`SAVE_FORMAT` when the format changes incompatibly — there is no migration path. `import_world_layers`
 copies layer groups (terrain/climate/hydrology/soil/hazards/goods) from another
 world of the same grid size via `TileData::merge_columns`.
 
@@ -3634,7 +3637,7 @@ Three rules:
    `visibility[type]`.
 5. **Rendering is server-side** — Rust renders RGBA, frontend only displays.
 6. **Cylindrical wrapping** — X wraps, Y clamps; all BFS/paint/sim respect it.
-7. **New tile fields append LAST** — v2 self-describing blobs; trailing reads pad zeros (old saves load).
+7. **New tile fields append LAST** — v2 self-describing blobs; trailing reads pad zeros. (Files from before `SAVE_FORMAT` are refused outright — §3.4 — but appending keeps saves within one format readable across builds.)
 8. **Every `#[tauri::command]` is registered in `lib.rs`** and gets a wrapper in `bridge/` (via the @bridge barrel).
 9. **New TS types mirror Rust serde structs** in `types/` (world/campaign/goods).
 10. **Earth params must stay a no-op** — the EBM anomaly and `Circulation` return zero /

@@ -411,3 +411,72 @@ async fn measure_full_size_campaign() {
         camp0.elapsed().as_secs_f64() / years as f64);
     assert!(peak.is_nan() || peak <= MEM_BUDGET_MB, "peak {peak:.0} MB is over the {MEM_BUDGET_MB:.0} MB budget");
 }
+
+/// Phase 2 follow-up: WHAT grows with campaign age. Every 5 years prints the serialized
+/// size of every top-level `CampaignSim` field, of every per-hub / per-house sub-field
+/// summed across all hubs / houses, and the in-memory SQLite size — the biggest growers
+/// first. Serialized bytes are a proxy for heap, good enough to rank. Quarter-size world
+/// to keep it fast; `WF2_MEASURE_YEARS` (default 30), `WF2_MEASURE_W` (default 1800).
+/// `cargo test --release --lib diag_what_grows -- --ignored --nocapture`
+#[tokio::test]
+#[ignore]
+async fn diag_what_grows() {
+    use std::collections::BTreeMap;
+    let years: u32 = std::env::var("WF2_MEASURE_YEARS").ok().and_then(|v| v.parse().ok()).unwrap_or(30);
+    let w: u32 = std::env::var("WF2_MEASURE_W").ok().and_then(|v| v.parse().ok()).unwrap_or(1800);
+    let app = tauri::test::mock_app();
+    app.manage(WorldDb::in_memory().expect("in-memory WorldDb"));
+    let state = app.state::<WorldDb>();
+    world_commands::new_world("grow".into(), w, w / 2, state.clone()).expect("new_world");
+    let seed = 20261015u64;
+    let run = sim_commands::sim_run_all(seed, 10, "plates".into(), 0.5, 0.5, 0.5, 0.5, state.clone()).unwrap();
+    compute_economy(serde_json::to_string(&run.settlements).unwrap(), serde_json::to_string(&run.rivers).unwrap(),
+        0, 0.15, false, 6, 0.5, 0.0, -1, 1, state.clone()).unwrap();
+    finalize_world(state.clone()).unwrap();
+    campaign_start_sim(seed, state.clone()).unwrap();
+
+    let snapshot = |state: &tauri::State<'_, WorldDb>| -> BTreeMap<String, usize> {
+        let conn = state.conn.lock().unwrap();
+        let sim = get_sim(state, &conn).unwrap().unwrap();
+        let mut m = BTreeMap::new();
+        let v = serde_json::to_value(&*sim).unwrap();
+        for (k, fv) in v.as_object().unwrap() {
+            m.insert(format!("sim.{k}"), fv.to_string().len());
+            if let Some(arr) = fv.as_array() {
+                if k == "hubs" || k == "houses" {
+                    for item in arr {
+                        if let Some(o) = item.as_object() {
+                            for (sk, sv) in o {
+                                *m.entry(format!("{k}[].{sk}")).or_default() += sv.to_string().len();
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        let db: i64 = conn.query_row("SELECT page_count * page_size FROM pragma_page_count, pragma_page_size", [], |r| r.get(0)).unwrap_or(0);
+        m.insert("sqlite.in_memory_db".into(), db as usize);
+        m.insert("count.hubs".into(), sim.hubs.len());
+        m.insert("count.houses".into(), sim.houses.len());
+        m
+    };
+
+    let mut base = snapshot(&state);
+    println!("[grow] start: {} hubs, peak {:.0} MB", base["count.hubs"], peak_rss_mb());
+    for y in 1..=years {
+        let t = std::time::Instant::now();
+        campaign_advance(365, state.clone()).await.unwrap();
+        if y % 5 != 0 { continue; }
+        let s = t.elapsed().as_secs_f64();
+        let now = snapshot(&state);
+        let mut growth: Vec<(&String, i64, usize)> = now.iter()
+            .map(|(k, &v)| (k, v as i64 - *base.get(k).unwrap_or(&0) as i64, v)).collect();
+        growth.sort_by_key(|g| -g.1);
+        println!("[grow] year {y}: {s:.1} s/yr, peak {:.0} MB, hubs {} houses {}  — top growers over the last 5 years:",
+            peak_rss_mb(), now["count.hubs"], now["count.houses"]);
+        for (k, d, v) in growth.iter().take(14) {
+            println!("[grow]   {:>+9.2} MB  now {:>8.2} MB  {k}", *d as f64 / 1e6, *v as f64 / 1e6);
+        }
+        base = now;
+    }
+}

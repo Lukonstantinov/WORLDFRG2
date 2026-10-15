@@ -199,9 +199,34 @@ impl WorldRef {
     }
 }
 
+/// Save-file format, stored in each `.worldforge` / `.campaign` file's SQLite
+/// `user_version` header. Owner decision 2026-10-15: only saves written from this
+/// version on are supported — an unstamped (older) file is refused with a clear
+/// message instead of being migrated. Bump this, and reject the old number, when the
+/// format next changes incompatibly.
+pub const SAVE_FORMAT: i64 = 1;
+
+pub fn stamp_save_format(dest: &Connection) -> Result<(), String> {
+    dest.pragma_update(None, "user_version", SAVE_FORMAT).map_err(|e| e.to_string())
+}
+
+pub fn check_save_format(version: i64, what: &str) -> Result<(), String> {
+    match version {
+        v if v == SAVE_FORMAT => Ok(()),
+        v if v < SAVE_FORMAT => Err(format!(
+            "This {what} was saved by an older version of WorldForge 2 and is no longer \
+             supported. Only files saved by this version can be opened.")),
+        _ => Err(format!("This {what} was saved by a newer version of WorldForge 2. \
+             Update the app to open it.")),
+    }
+}
+
 /// The `world_ref` a `.campaign` file records, read without loading the file.
+/// `None` for an unsupported (older-format) file.
 pub fn read_file_world_ref(path: &std::path::Path) -> Option<WorldRef> {
     let src = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let version: i64 = src.query_row("PRAGMA user_version", [], |r| r.get(0)).ok()?;
+    check_save_format(version, "campaign").ok()?;
     let v: String = src
         .query_row("SELECT value FROM campaign WHERE key = 'world_ref'", [], |r| r.get(0))
         .ok()?;
@@ -1057,60 +1082,29 @@ fn ensure_campaign_loaded(cache: &mut crate::db::CampaignCache, conn: &Connectio
     Ok(())
 }
 
-/// Batch 1 · campaign blob codec: `"Z1:" + base64(zstd(json))` — ~5-10× smaller
-/// DB rows and `.campaign` files. JSON stays the wire format underneath
-/// (self-describing, so the append-`serde(default)` save-compat strategy is
-/// untouched); legacy plain-JSON rows load via the prefix check.
-fn compress_blob(json: &str) -> Result<String, String> {
+/// The campaign save blob: `"Z1:" + base64(zstd(json))`. The JSON is STREAMED into
+/// zstd: on a long full-size campaign the uncompressed text is hundreds of MB, and
+/// building it as one String on every autosave was the campaign memory peak
+/// (SCOREBOARD 2026-10-15).
+fn encode_campaign_blob(sim: &CampaignSim) -> Result<String, String> {
     use base64::Engine as _;
-    let z = zstd::encode_all(json.as_bytes(), 3).map_err(|e| e.to_string())?;
+    use std::io::Write as _;
+    let enc = zstd::Encoder::new(Vec::new(), 3).map_err(|e| e.to_string())?;
+    let mut w = std::io::BufWriter::with_capacity(1 << 16, enc);
+    serde_json::to_writer(&mut w, sim).map_err(|e| e.to_string())?;
+    w.flush().map_err(|e| e.to_string())?;
+    let z = w.into_inner().map_err(|e| e.to_string())?.finish().map_err(|e| e.to_string())?;
     Ok(format!("Z1:{}", base64::engine::general_purpose::STANDARD.encode(z)))
 }
 
-/// Returns the JSON inside `raw` — decompressing a `Z1:` blob, passing a legacy
-/// plain-JSON row through untouched.
-fn decompress_blob(raw: &str) -> Result<std::borrow::Cow<'_, str>, String> {
-    use base64::Engine as _;
-    if let Some(b64) = raw.strip_prefix("Z1:") {
-        let z = base64::engine::general_purpose::STANDARD.decode(b64)
-            .map_err(|e| format!("campaign_sim base64: {e}"))?;
-        let bytes = zstd::decode_all(&z[..]).map_err(|e| format!("campaign_sim zstd: {e}"))?;
-        Ok(std::borrow::Cow::Owned(
-            String::from_utf8(bytes).map_err(|e| format!("campaign_sim utf8: {e}"))?))
-    } else {
-        Ok(std::borrow::Cow::Borrowed(raw))
-    }
-}
-
-fn encode_campaign_blob(sim: &CampaignSim) -> Result<String, String> {
-    let json = serde_json::to_string(sim).map_err(|e| e.to_string())?;
-    compress_blob(&json)
-}
-
 fn decode_campaign_blob(raw: &str) -> Result<CampaignSim, String> {
-    let json = decompress_blob(raw)?;
-    serde_json::from_str(&json).map_err(|e| format!("campaign_sim parse: {e}"))
-}
-
-#[cfg(test)]
-mod blob_tests {
-    use super::{compress_blob, decompress_blob};
-
-    /// Batch 1 · the save-blob codec round-trips and shrinks; legacy plain-JSON
-    /// rows pass through untouched.
-    #[test]
-    fn campaign_blob_codec_roundtrip_and_legacy() {
-        // A repetitive JSON-ish payload (like real sim state) compresses well.
-        let json = format!("{{\"hubs\":[{}]}}",
-            (0..500).map(|i| format!("{{\"id\":{i},\"stock\":[0.0,1.5,2.25]}}"))
-                .collect::<Vec<_>>().join(","));
-        let blob = compress_blob(&json).expect("compress");
-        assert!(blob.starts_with("Z1:"));
-        assert!(blob.len() < json.len() / 3, "blob {} vs json {}", blob.len(), json.len());
-        assert_eq!(decompress_blob(&blob).expect("decompress").as_ref(), json);
-        // Legacy row (no prefix) passes through untouched.
-        assert_eq!(decompress_blob(&json).expect("legacy").as_ref(), json);
-    }
+    use base64::Engine as _;
+    let b64 = raw.strip_prefix("Z1:").ok_or("campaign_sim: unsupported (pre-Z1) save format")?;
+    let z = base64::engine::general_purpose::STANDARD.decode(b64)
+        .map_err(|e| format!("campaign_sim base64: {e}"))?;
+    let dec = zstd::Decoder::new(&z[..]).map_err(|e| format!("campaign_sim zstd: {e}"))?;
+    serde_json::from_reader(std::io::BufReader::with_capacity(1 << 16, dec))
+        .map_err(|e| format!("campaign_sim parse: {e}"))
 }
 
 /// A HANDLE to the resident sim (loading it from the DB once if needed) — an Arc
@@ -3746,24 +3740,6 @@ pub struct CityPriceIndex {
     pub index: f32,
 }
 
-/// Migrate pre-split keys living in `metadata` into the campaign table (runs on
-/// every world open; a no-op for already-split worlds). Returns true when
-/// anything was migrated (i.e. the file was a legacy single-file save).
-pub fn migrate_legacy_campaign_keys(conn: &Connection) -> Result<bool, String> {
-    let mut migrated = false;
-    for key in ["settlements", "economy"] {
-        if let Some(v) = metadata::get_meta(conn, key).map_err(|e| e.to_string())? {
-            // Don't clobber campaign data that's already present.
-            if metadata::campaign_get(conn, key).map_err(|e| e.to_string())?.is_none() && !v.is_empty() {
-                metadata::campaign_set(conn, key, &v).map_err(|e| e.to_string())?;
-                migrated = true;
-            }
-            conn.execute("DELETE FROM metadata WHERE key = ?1", rusqlite::params![key])
-                .map_err(|e| e.to_string())?;
-        }
-    }
-    Ok(migrated)
-}
 
 // ── Command submodules (split out; re-exported so external paths are unchanged) ──
 mod lifecycle;

@@ -59,7 +59,7 @@ import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useUIStore } from "@state/uiStore";
 import { useViewportStore } from "@state/viewportStore";
 import { useGoodsStore } from "@state/goodsStore";
-import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, writeExportImage, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, finalizeWorld, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
+import { newWorld, saveWorldAs, openWorld, exportHeightmap, exportLayers, writeExportImage, persistOverlays, getOverlays, saveCampaignAs, openCampaign, newCampaign, getAppearance, getToponyms, getProvinceLayer, worldHumanLayerStatus } from "@bridge";
 import { useSettingsStore } from "@state/settingsStore";
 import { getApp } from "@canvas/PixiApp";
 import { exportMapSnapshot, exportMapSnapshotRaw } from "@canvas/mapExport";
@@ -834,18 +834,6 @@ export default function App() {
           yes = confirm(msg);
         }
         if (yes) await loadCampaignFrom(res.sibling_campaign);
-      }
-
-      // Pre-split single-file save: offer to split it into a frozen world file
-      // + a campaign file (the in-memory migration already happened on open).
-      if (res.legacy && confirm(
-        "This is a legacy single-file save. Split it into a frozen .worldforge world " +
-        "file and a .campaign file?\n\nThe original file is left untouched."
-      )) {
-        await finalizeWorld();
-        setMeta({ ...res.meta, frozen: true });
-        await handleSaveAs();
-        await handleSaveCampaign();
       }
     } catch (err) {
       console.error("Failed to open world:", err);
