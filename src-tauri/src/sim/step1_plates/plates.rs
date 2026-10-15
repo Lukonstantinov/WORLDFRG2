@@ -597,7 +597,7 @@ pub fn generate_plates_and_landmass_from_seeds(
     // structure every existing gate assumes is never disturbed.
     let mut order: Vec<usize> = (0..count).collect();
     order.sort_by(|&a, &b| {
-        raw[b].size_weight.partial_cmp(&raw[a].size_weight).unwrap()
+        raw[b].size_weight.total_cmp(&raw[a].size_weight)
             .then(a.cmp(&b))
     });
     let mut placed: Vec<usize> = Vec::with_capacity(count);
@@ -1198,7 +1198,7 @@ fn rasterize_landmass_and_volcanism(
 
     let target_land: usize = orig_terrain.iter().filter(|&&t| t == 1).count();
     let mut sorted_score = score.clone();
-    sorted_score.sort_by(|a, b| b.partial_cmp(a).unwrap()); // descending
+    sorted_score.sort_by(|a, b| b.total_cmp(a)); // descending
     let threshold = if target_land == 0 {
         f32::INFINITY
     } else if target_land >= sorted_score.len() {

@@ -2011,7 +2011,7 @@ pub fn campaign_province_detail(id: u32, db: State<'_, WorldDb>) -> Result<Optio
     };
     let main_good = |prod: &[f32]| -> Option<usize> {
         prod.iter().enumerate().filter(|(_, &v)| v > 0.0)
-            .max_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i)
+            .max_by(|a, b| a.1.total_cmp(b.1)).map(|(i, _)| i)
     };
     let stars = |q: f32| -> String {
         let n = (q * 5.0).round().clamp(0.0, 5.0) as usize;

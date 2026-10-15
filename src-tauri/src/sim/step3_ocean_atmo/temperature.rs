@@ -363,7 +363,7 @@ mod tests {
 
         let row = (0..h)
             .min_by(|&a, &b| {
-                (buf.latitude(a) - 45.0).abs().partial_cmp(&(buf.latitude(b) - 45.0).abs()).unwrap()
+                (buf.latitude(a) - 45.0).abs().total_cmp(&(buf.latitude(b) - 45.0).abs())
             })
             .unwrap();
         let coast = buf.seasonal_amp[buf.idx(w / 4, row)] as f32 / SEASON_AMP_SCALE;

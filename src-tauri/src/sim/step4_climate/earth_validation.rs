@@ -415,7 +415,7 @@ fn earth_diagnose_koppen_zone_census() {
         let gp = 100.0 * gw / total;
         (if rp > 0.0 { gp / rp } else { 0.0 }, c, gp, rp)
     }).collect();
-    rows.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+    rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     println!("\n─── Köppen zone census (area-weighted %, worst-served first) ───");
     println!("  {:30} {:>7} {:>7} {:>7}", "zone", "gen%", "ref%", "gen/ref");
     for (ratio, c, gp, rp) in &rows {

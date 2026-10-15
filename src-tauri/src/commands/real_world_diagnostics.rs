@@ -307,9 +307,9 @@ async fn real_world_craft_spread() {
         // leader/biggest comparison below is reporting an arbitrary tie-break.
         let at_top = makers.iter().filter(|m| m.1 >= hi - 0.005).count();
         let best_q = makers.iter().cloned()
-            .max_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+            .max_by(|a, b| a.1.total_cmp(&b.1)).unwrap();
         let biggest = makers.iter().cloned()
-            .max_by(|a, b| a.2.partial_cmp(&b.2).unwrap_or(std::cmp::Ordering::Equal)).unwrap();
+            .max_by(|a, b| a.2.total_cmp(&b.2)).unwrap();
         let same = best_q.0 == biggest.0;
         if makers.len() >= 2 {
             goods_measured += 1;

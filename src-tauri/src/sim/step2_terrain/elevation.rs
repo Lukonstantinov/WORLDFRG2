@@ -148,7 +148,7 @@ fn priority_flood_flow(elevation: &[f32], terrain: &[u8], w: u32, h: u32) -> (Ve
     // rather than silently erode nothing.
     if heap.is_empty() {
         if let Some(lowest) = (0..n).filter(|&i| terrain[i] == 1)
-            .min_by(|&a, &b| elevation[a].partial_cmp(&elevation[b]).unwrap())
+            .min_by(|&a, &b| elevation[a].total_cmp(&elevation[b]))
         {
             visited[lowest] = true;
             flow_to[lowest] = lowest;
@@ -742,7 +742,7 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         }
         let target_cap = 0.35 + height * 0.60;
         let mut sorted: Vec<f32> = (0..n).filter(|&i| terrain[i] == 1).map(|i| elevation[i]).collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.total_cmp(b));
         if !sorted.is_empty() {
             let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
             let cap_scale = target_cap / p998;
@@ -1373,7 +1373,7 @@ pub fn generate_elevation_from_terrain(
             .filter(|&i| terrain[i] == 1)
             .map(|i| elevation[i])
             .collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.total_cmp(b));
         if !sorted.is_empty() {
             let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
             let cap_scale = target_cap / p998;
@@ -1529,7 +1529,7 @@ pub fn generate_elevation_ridged(
         }
         let target_cap = 0.35 + height * 0.60;
         let mut sorted: Vec<f32> = (0..n).filter(|&i| terrain[i] == 1).map(|i| elevation[i]).collect();
-        sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted.sort_by(|a, b| a.total_cmp(b));
         if !sorted.is_empty() {
             let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
             let cap_scale = target_cap / p998;
@@ -1974,7 +1974,7 @@ fn normalize_and_redistribute(
     }
     let target_cap = 0.35 + height * 0.60;
     let mut sorted: Vec<f32> = (0..n).filter(|&i| terrain[i] == 1).map(|i| elevation[i]).collect();
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    sorted.sort_by(|a, b| a.total_cmp(b));
     if !sorted.is_empty() {
         let p998 = sorted[(sorted.len() as f32 * 0.998) as usize].max(0.01);
         let cap_scale = target_cap / p998;
@@ -2629,7 +2629,7 @@ fn redistribute_elevation(elevation: &mut [f32], terrain: &[u8], n: usize, targe
         .filter(|&i| terrain[i] == 1 && elevation[i] > 0.0)
         .collect();
     if land_indices.is_empty() { return; }
-    land_indices.sort_by(|&a, &b| elevation[a].partial_cmp(&elevation[b]).unwrap());
+    land_indices.sort_by(|&a, &b| elevation[a].total_cmp(&elevation[b]));
 
     let total_land = land_indices.len();
     let total_pct: f32 = target_pcts.iter().sum();
@@ -3065,7 +3065,7 @@ pub fn generate_elevation_glaciated(
     // summits toward the coast, carving a valley and breaching the final stretch
     // into the sea (a real fjord mouth), bounded to a handful of trails so this
     // stays a local, selection-sized cost rather than a full-grid search.
-    cirque_seeds.sort_by(|&a, &b| (ice[b] * elevation[b]).partial_cmp(&(ice[a] * elevation[a])).unwrap());
+    cirque_seeds.sort_by(|&a, &b| (ice[b] * elevation[b]).total_cmp(&(ice[a] * elevation[a])));
     let trough_count = cirque_seeds.len().min(6);
     for &start in cirque_seeds.iter().take(trough_count) {
         let mut x = (start % w as usize) as f32;
@@ -3402,7 +3402,7 @@ mod tests {
         // absolute altitudes the hypsometric redistribution happens to pick.
         let mut land: Vec<f32> = (0..n).filter(|&i| buf.terrain[i] == 1).map(|i| buf.elevation[i]).collect();
         assert!(!land.is_empty());
-        land.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        land.sort_by(|a, b| a.total_cmp(b));
         let thresh = land[(land.len() as f32 * 0.90) as usize];
 
         let high: Vec<bool> = (0..n).map(|i| buf.terrain[i] == 1 && buf.elevation[i] >= thresh).collect();
@@ -3458,7 +3458,7 @@ mod tests {
         let spread = |buf: &WorldBuffer| -> f64 {
             let n = (w * h) as usize;
             let mut land: Vec<f32> = (0..n).filter(|&i| buf.terrain[i] == 1).map(|i| buf.elevation[i]).collect();
-            land.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            land.sort_by(|a, b| a.total_cmp(b));
             let thresh = land[(land.len() as f32 * 0.90) as usize];
             let ds: Vec<f64> = (0..n)
                 .filter(|&i| buf.terrain[i] == 1 && buf.elevation[i] >= thresh)
@@ -3498,7 +3498,7 @@ mod tests {
         let mean: Vec<f64> = (0..=max_d)
             .map(|d| if cnt[d] > 0 { sum[d] / cnt[d] as f64 } else { 0.0 })
             .collect();
-        let crest = (0..=max_d).max_by(|&a, &b| mean[a].partial_cmp(&mean[b]).unwrap()).unwrap();
+        let crest = (0..=max_d).max_by(|&a, &b| mean[a].total_cmp(&mean[b])).unwrap();
         assert!(crest > 2, "the crest must sit inland of the shoreline, got {crest}");
 
         // Compare how fast the profile decays either side of the crest, over the
@@ -4816,7 +4816,7 @@ mod flat_diagnostic {
                 }
                 climb_per_river.push(climb);
             }
-            climb_per_river.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            climb_per_river.sort_by(|a, b| a.total_cmp(b));
             let cp = |q: f32| climb_per_river[((climb_per_river.len() as f32 * q) as usize).min(climb_per_river.len().saturating_sub(1))];
             println!(
                 "{name:<7} ascending steps: {} in FILLED depressions ({:.0}%), {} on OPEN ground ({:.0}%)                    per-river total climb: p50={:.0}m p90={:.0}m max={:.0}m   rivers climbing >100m: {}",
@@ -4841,7 +4841,7 @@ mod flat_diagnostic {
                     }
                 }
             }
-            diffs.sort_by(|a, b| a.partial_cmp(b).unwrap());
+            diffs.sort_by(|a, b| a.total_cmp(b));
             let pct = |p: f32| diffs[((diffs.len() as f32 * p) as usize).min(diffs.len() - 1)];
 
             println!(

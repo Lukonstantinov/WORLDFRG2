@@ -413,7 +413,7 @@ impl CampaignSim {
                     .filter(|&p| self.prov_holder[p] == lose as i32
                         && self.prov_holder_house.get(p).copied().unwrap_or(-1) < 0)
                     .max_by(|&x, &y| self.prov_rural.get(x).copied().unwrap_or(0.0)
-                        .partial_cmp(&self.prov_rural.get(y).copied().unwrap_or(0.0)).unwrap());
+                        .total_cmp(&self.prov_rural.get(y).copied().unwrap_or(0.0)));
                 match prize {
                     Some(p) => {
                         self.prov_holder[p] = win as i32;

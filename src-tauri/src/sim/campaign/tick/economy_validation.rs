@@ -211,7 +211,7 @@ fn ols_slope(xs: &[f32], ys: &[f32]) -> f32 {
 fn gini(values: &[f32]) -> f32 {
     let mut v: Vec<f32> = values.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
     if v.len() < 2 { return 0.0; }
-    v.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    v.sort_by(|a, b| a.total_cmp(b));
     let n = v.len() as f32;
     let total: f32 = v.iter().sum();
     if total < 1e-9 { return 0.0; }
@@ -223,7 +223,7 @@ fn gini(values: &[f32]) -> f32 {
 fn top_share(values: &[f32], frac: f32) -> f32 {
     let mut v: Vec<f32> = values.iter().copied().filter(|x| x.is_finite() && *x >= 0.0).collect();
     if v.is_empty() { return 0.0; }
-    v.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    v.sort_by(|a, b| b.total_cmp(a));
     let total: f32 = v.iter().sum();
     if total < 1e-9 { return 0.0; }
     let k = ((v.len() as f32 * frac).ceil() as usize).clamp(1, v.len());
@@ -500,7 +500,7 @@ fn measure(s: &mut CampaignSim) -> EconScorecard {
     // silently empties itself: this reference world's longest route is ~11 days,
     // so a ">30 days" band contained no pairs at all and reported a flat 0.000
     // that looked like a model finding and was really a broken instrument.
-    pairs.sort_by(|x, y| x.0.partial_cmp(&y.0).unwrap());
+    pairs.sort_by(|x, y| x.0.total_cmp(&y.0));
     if pairs.len() >= 4 {
         let q = pairs.len() / 4;
         card.gap_near = mean(&pairs[..q].iter().map(|p| p.1).collect::<Vec<_>>());
@@ -582,7 +582,7 @@ fn measure(s: &mut CampaignSim) -> EconScorecard {
 
     // ── Rank-size: the shape of the urban hierarchy ─────────────────────────
     let mut pops: Vec<f32> = live.iter().map(|&i| s.hubs[i].population).collect();
-    pops.sort_by(|a, b| b.partial_cmp(a).unwrap());
+    pops.sort_by(|a, b| b.total_cmp(a));
     let ln_pop: Vec<f32> = pops.iter().filter(|p| **p > 1.0).map(|p| p.ln()).collect();
     let ln_rank: Vec<f32> = (1..=ln_pop.len()).map(|r| (r as f32).ln()).collect();
     card.zipf_slope = ols_slope(&ln_pop, &ln_rank);
@@ -1240,7 +1240,7 @@ fn econ_diagnose_house_turnover() {
     };
     let median_age = |v: &mut Vec<&&DeadHouse>| -> f32 {
         if v.is_empty() { return 0.0; }
-        v.sort_by(|a, b| a.age_years.partial_cmp(&b.age_years).unwrap());
+        v.sort_by(|a, b| a.age_years.total_cmp(&b.age_years));
         v[v.len() / 2].age_years
     };
 
@@ -1690,7 +1690,7 @@ fn realm_reference_world() -> CampaignSim {
         .map(|p| {
             (0..NHUB as usize)
                 .filter(|&h| s.hub_province[h] == p as i32)
-                .max_by(|&a, &b| s.hubs[a].population.partial_cmp(&s.hubs[b].population).unwrap())
+                .max_by(|&a, &b| s.hubs[a].population.total_cmp(&s.hubs[b].population))
                 .map(|h| h as i32)
                 .unwrap_or(-1)
         })
@@ -1947,7 +1947,7 @@ fn econ_measure_settlement_life() {
                 (sp, ep, cagr)
             })
             .collect();
-        by_size.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+        by_size.sort_by(|a, b| a.0.total_cmp(&b.0));
         let third = (by_size.len() / 3).max(1);
         let band_cagr = |band: &[(f32, f32, f32)]| -> f32 {
             if band.is_empty() { 0.0 } else { band.iter().map(|x| x.2).sum::<f32>() / band.len() as f32 }
@@ -1967,7 +1967,7 @@ fn econ_measure_settlement_life() {
 
         let mean_lack = mean(&lack_samples);
         let mut sorted_lack = lack_samples.clone();
-        sorted_lack.sort_by(|a, b| a.partial_cmp(b).unwrap());
+        sorted_lack.sort_by(|a, b| a.total_cmp(b));
         let pct = |p: f32| -> f32 {
             if sorted_lack.is_empty() { return 0.0; }
             sorted_lack[((sorted_lack.len() as f32 * p) as usize).min(sorted_lack.len() - 1)]

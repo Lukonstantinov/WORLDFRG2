@@ -2346,7 +2346,7 @@ mod tests {
         assert!(rivers.len() >= 4, "fixture produced too few rivers ({}) to compare", rivers.len());
 
         let mut by_q: Vec<&River> = rivers.iter().filter(|r| r.discharge_m3s > 0.0).collect();
-        by_q.sort_by(|a, b| a.discharge_m3s.partial_cmp(&b.discharge_m3s).unwrap());
+        by_q.sort_by(|a, b| a.discharge_m3s.total_cmp(&b.discharge_m3s));
         let small = by_q.first().unwrap();
         let big = by_q.last().unwrap();
         println!("smallest: Q={:.1} m³/s w={:.2}   largest: Q={:.1} m³/s w={:.2}",

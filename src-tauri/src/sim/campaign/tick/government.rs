@@ -650,7 +650,7 @@ impl CampaignSim {
                 let majority = self.hub_culture.get(h).cloned().unwrap_or_default();
                 if let Some(rel) = self.hubs[h].culture_relations.iter_mut()
                     .filter(|r| r.culture != majority)
-                    .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+                    .max_by(|a, b| a.score.total_cmp(&b.score))
                 {
                     rel.score = (rel.score - CITIZENSHIP_SCORE_BUMP * EDICT_CITIZENSHIP_DOSE).clamp(-100.0, 100.0);
                     rel.tier = tier_for_score(rel.score, rel.tier);
@@ -748,7 +748,7 @@ impl CampaignSim {
     pub(crate) fn apply_buildings_edict(&mut self, h: usize, dose: f32) {
         if dose <= 0.0 { return; }
         let track = self.hubs[h].track_points.iter().enumerate()
-            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
+            .min_by(|a, b| a.1.total_cmp(b.1)).map(|(i, _)| i).unwrap_or(0);
         self.hubs[h].track_points[track] += BUILDINGS_TRACK_BONUS * dose;
     }
 
@@ -762,7 +762,7 @@ impl CampaignSim {
         let majority = self.hub_culture.get(h).cloned().unwrap_or_default();
         let Some(rel) = self.hubs[h].culture_relations.iter_mut()
             .filter(|r| r.culture != majority)
-            .max_by(|a, b| a.score.partial_cmp(&b.score).unwrap())
+            .max_by(|a, b| a.score.total_cmp(&b.score))
         else { return };
         rel.score = (rel.score + CITIZENSHIP_SCORE_BUMP * dose).clamp(-100.0, 100.0);
         rel.tier = tier_for_score(rel.score, rel.tier);
@@ -882,7 +882,7 @@ impl CampaignSim {
         if self.tick < self.hubs[h].gov_lustrum_tick { return; }
         self.hubs[h].gov_lustrum_tick = self.tick + LUSTRUM_YEARS * TICKS_PER_YEAR;
         let track = self.hubs[h].track_points.iter().enumerate()
-            .min_by(|a, b| a.1.partial_cmp(b.1).unwrap()).map(|(i, _)| i).unwrap_or(0);
+            .min_by(|a, b| a.1.total_cmp(b.1)).map(|(i, _)| i).unwrap_or(0);
         self.hubs[h].track_points[track] += lustrum_bonus_e(LUSTRUM_TRACK_BONUS_DOSE);
         push_gov_history(&mut self.hubs[h], GovHistoryEntry { tick: self.tick, family: EDICT_FAM_BUILDINGS, outcome: GOV_OUTCOME_PASSED, regime_kind: -1 });
         if (1..=2).contains(&self.hubs[h].tier) {
@@ -1109,7 +1109,7 @@ impl CampaignSim {
             .map(|(i, hh)| (i, hh.wealth)).collect();
         if richest.len() < CLOSING_MIN_RICH_HOUSES { return false; }
         if hash01(self.seed, self.tick as u64, h as u64 ^ 0x5E44) >= CLOSING_BASE_CHANCE * dose { return false; }
-        richest.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        richest.sort_by(|a, b| b.1.total_cmp(&a.1));
         let mut ri = 0usize;
         for oi in 0..self.hubs[h].officials.len() {
             if self.hubs[h].officials[oi].kin { continue; }
@@ -1154,7 +1154,7 @@ impl CampaignSim {
         if hash01(self.seed, self.tick as u64, h as u64 ^ 0x0577) >= OSTRACISM_CHANCE * dose { return false; }
         let Some((oi, iid)) = self.hubs[h].officials.iter().enumerate()
             .filter(|(_, o)| o.role != 0)
-            .min_by(|a, b| a.1.suitability.partial_cmp(&b.1.suitability).unwrap())
+            .min_by(|a, b| a.1.suitability.total_cmp(&b.1.suitability))
             .map(|(oi, o)| (oi, o.individual_id))
         else { return false };
         let until = self.tick + OSTRACISM_YEARS * TICKS_PER_YEAR;

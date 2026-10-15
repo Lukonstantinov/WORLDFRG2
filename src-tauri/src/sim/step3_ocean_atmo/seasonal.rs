@@ -298,7 +298,7 @@ mod tests {
         }
         // A subtropical coastal row (just inside the land, warm interior to its north).
         let row = (0..h).min_by(|&a, &b| {
-            (buf.latitude(a) - 14.0).abs().partial_cmp(&(buf.latitude(b) - 14.0).abs()).unwrap()
+            (buf.latitude(a) - 14.0).abs().total_cmp(&(buf.latitude(b) - 14.0).abs())
         }).unwrap();
         let x = w / 2;
 

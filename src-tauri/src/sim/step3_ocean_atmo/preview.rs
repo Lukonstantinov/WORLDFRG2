@@ -569,7 +569,7 @@ mod tests {
         let steep = zonal_profile(PreviewParams { obliquity: 60.0, ..PreviewParams::earth() });
         let mid = |z: &ZonalProfile| {
             let s = z.samples.iter().min_by(|a, b| {
-                (a.lat - 50.0).abs().partial_cmp(&(b.lat - 50.0).abs()).unwrap()
+                (a.lat - 50.0).abs().total_cmp(&(b.lat - 50.0).abs())
             }).unwrap();
             s.summer_continental - s.winter_continental
         };

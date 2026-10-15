@@ -1478,7 +1478,7 @@ impl CampaignSim {
             let next = (0..self.hubs.len())
                 .filter(|&h| h != capital && self.hubs[h].realm == ri as i32
                     && !self.hubs[h].is_estate && !self.hubs[h].abandoned)
-                .max_by(|&a, &b| self.hubs[a].population.partial_cmp(&self.hubs[b].population).unwrap());
+                .max_by(|&a, &b| self.hubs[a].population.total_cmp(&self.hubs[b].population));
             match next {
                 Some(nc) => self.move_realm_capital(ri, nc),
                 None => {
@@ -1700,7 +1700,7 @@ impl CampaignSim {
             let heir_provs = shares[k].clone();
             let new_capital = heir_provs.iter()
                 .filter_map(|&p| self.province_seat_hub(p as usize))
-                .max_by(|&a, &b| self.hubs[a].population.partial_cmp(&self.hubs[b].population).unwrap());
+                .max_by(|&a, &b| self.hubs[a].population.total_cmp(&self.hubs[b].population));
             let Some(new_capital) = new_capital else {
                 // No city anywhere in this heir's share — nothing to found a
                 // realm ON. Their share stays part of the ORIGINAL realm rather
