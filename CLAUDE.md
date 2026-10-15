@@ -11,6 +11,30 @@ on top of it (merchant houses, banks, coinage, wars, plagues, colonies).
 
 ---
 
+## 0. ACTIVE PRIORITY — Release-first plan (read before ANY work)
+
+**As of 2026-10-15 the project is in a FEATURE FREEZE.** A `/court` trial of four
+claims (12 juror agents each; verdicts in `docs/court/2026-10-15/`) found the engine
+sound but the ORDER OF WORK wrong: nothing ships, no outsider has used it, and saved
+files and peak memory are unproven. Full issue list and phased plan:
+**`docs/IMPROVEMENT_PLAN.txt`** (PDF copy alongside it).
+
+At the start of every session: read that file and tell the owner which phase is
+current and which items are still open, before starting other work.
+
+- **Frozen:** new Living World rows, people-layer features, new goods/institutions/panels.
+- **Allowed:** bug fixes, performance, save safety, measurement, legal, release/packaging.
+- **Order:** P1 save safety (old-save fixture test, sibling-file pairing) → P2 measure
+  peak memory on a long 3600×1800 campaign → P3 decide one app vs two + one-line pitch →
+  P4 LICENSE/EULA/dependency+data licence audit → P5 installer to 5-10 outside testers
+  + priced waitlist → P6 let testers decide the campaign's depth.
+- If the owner asks for a frozen feature, remind them of the freeze and of the next
+  open item, then do what they decide.
+- When an item lands: tick it in `docs/IMPROVEMENT_PLAN.txt`, then run
+  `python scripts/plan_to_pdf.py`. When Phase 5 is done, rewrite this section.
+
+---
+
 ## 1. Quick Start — Dev Commands
 
 ```bash

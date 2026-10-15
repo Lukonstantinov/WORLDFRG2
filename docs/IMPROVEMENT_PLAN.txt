@@ -1,0 +1,154 @@
+WorldForge 2 - Open Issues and Release-First Improvement Plan
+=============================================================
+
+Written: 2026-10-15
+Status: ACTIVE. This is the current top priority for all work in this repo.
+Source: a /court trial of four claims (12 independent juror agents per claim, prosecution, defense, judge), each finding then checked against the repository.
+Verdicts: docs/court/2026-10-15/
+PDF copy: docs/IMPROVEMENT_PLAN.pdf (regenerate with: python scripts/plan_to_pdf.py)
+
+
+1. The verdicts
+---------------
+
+Score = jurors who voted FOR the claim, out of 12, scaled to 10.
+
+- Claim 1 - "Worth continuing in its current direction": GUILTY 11-1. Score 1/10.
+- Claim 2 - "Ready (or close) to sell": GUILTY 12-0. Score 0/10.
+- Claim 3 - "Generator + deep campaign in one app is the right scope": GUILTY 9-3. Score 2.5/10.
+- Claim 4 - "Tauri + Rust tiles + SQLite is the right foundation": NOT GUILTY 9-3. Score 7.5/10.
+
+Bottom line, the same in all four rulings: the engine is sound, the ORDER OF
+WORK is wrong. Nobody argued for a rewrite or a new stack. The project keeps
+adding simulation layers while nothing has shipped, no outsider has used it,
+and the parts a buyer would touch first (install, saved files, memory on
+their machine) are unproven.
+
+Redesign question: the court found no case for redesigning the program. The
+only "new idea" it supports is a reframing of the PRODUCT, not the code:
+sell it as a science-grounded worldbuilding map tool, with the living
+campaign as a second mode, and let testers decide how deep the campaign goes.
+
+
+2. Open issues
+--------------
+
+I-1  No evidence anyone wants it  [severity: critical]
+- No users, testers, buyers, price, sales page or waitlist anywhere.
+- All 12 jurors on claim 2 rested their vote on this.
+
+I-2  Nothing can be installed or bought  [critical]
+- No LICENSE file, no release tags, version still 0.1.0 in package.json and Cargo.toml.
+- README only documents dev mode (npm run tauri dev, run.bat).
+- CI (.github/workflows/ci.yml) type-checks, tests and runs vite build, but never produces a Tauri installer.
+
+I-3  Features are being added before anything ships  [critical]
+- Sept-Oct 2026 went into Living World rows 02-10 (face genomes, councils, leisure and games, masterworks) and a UI redesign.
+- Each new layer adds code for one person to maintain and new economy side effects (see I-9).
+
+I-4  Saved worlds and campaigns  [high]
+- FIXED for new saves: slice 1 of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md (section 8) stopped save_world_as and new_campaign from deleting the world's human layer. Gate: campaign_key_split_tests.
+- STILL OPEN: .worldforge files written BEFORE that fix cannot start a campaign without their matching .campaign file (the recovery card in ChroniclePanel explains this).
+- STILL OPEN: slices 3-5 (.wf2 bundle, sibling-file pairing, drag-and-drop) are not built.
+- STILL OPEN: no test opens a saved file from an OLDER build and begins a campaign. SCOREBOARD.md itself says "a compatibility claim with no old-save fixture behind it is a hope".
+
+I-5  Peak memory has never been measured  [high]
+- SCOREBOARD.md: "Time is benchmarked; memory is not, and memory is the likelier failure on a customer's machine."
+- The year-30 out-of-memory crash (unbounded history journal) is recorded as fixed, but no long full-size campaign has been measured since.
+- All 9 jurors who acquitted the architecture said they would flip if memory turns out bad.
+
+I-6  Campaign speed at real scale  [medium]
+- CLAUDE.md section 5.5: at ~1,200 hubs the trade phase is still ~8,300-10,200 ms per simulated year after the house_for cache (down from 18-26 s).
+- A decade-long campaign on a big world is minutes of waiting. Fine for testers, worth fixing before a paid release.
+
+I-7  Product identity is undecided  [high]
+- Still open: one app, or a world generator plus a campaign player?
+- There is no one-sentence pitch. The Designer juror: "a stranger could not say in five seconds whether this is a map generator or a merchant-and-dynasty sim".
+
+I-8  Legal basics for a paid product  [high before any sale]
+- No commercial licence or end-user agreement (EULA).
+- No audit of dependency licences (Tauri, React, PixiJS, rusqlite and the rest of the npm/cargo tree).
+- No check of data rights: the Koppen-Geiger reference map used by the climate harness, the commodity-history text in the Goods Codex, any bundled fonts or images.
+- Most commits (728 of 988) were written by an AI agent. Check how your jurisdiction treats copyright in AI-assisted code before selling.
+- This list is not legal advice. Get a short professional review before the first sale.
+
+I-9  Quality debt  [medium]
+- The frontend (~33k lines per SCOREBOARD, ~60k TS/TSX in total) has zero tests.
+- Rust <-> TypeScript types are mirrored by hand (types/campaign.ts), so a renamed field fails silently.
+- The top-10% wealth share has fallen out of its band, cause "not yet explained" (SCOREBOARD 2026-09-30b). The bisect is queued.
+- Tests have been red on main at times (inheritance gate, unrest_topples_councils). Check their current state in CI.
+- There are 116 git branches. Prune the merged ones.
+
+I-10  Local test environment  [low]
+- cargo test binaries fail to launch on the owner's Windows machine (STATUS_ENTRYPOINT_NOT_FOUND). Use cargo check locally and rely on CI for tests.
+
+
+3. The plan
+-----------
+
+Work the phases in order. Each item has a "done when" so progress is
+checkable. Tick items here ([x]) as they land, and regenerate the PDF.
+
+Phase 0 - Feature freeze  (now)
+- [x] Freeze written into CLAUDE.md section 0: no new Living World / people-layer / campaign features until v0.1 has shipped to testers. Bug fixes, performance, save safety and release work are allowed.
+- [ ] Decide with the owner what happens to unfinished Living World rows: park them on a branch or leave them as-is. Do not extend them.
+
+Phase 1 - Save safety  (I-4)
+- [ ] Commit an old-save fixture: a small .worldforge (+ .campaign) written by an older build, under src-tauri/tests or test fixtures.
+- [ ] Regression test: open the fixture, then begin a campaign, and assert the campaign has hubs and runs one tick. Done when it is green in CI.
+- [ ] Slice 4 - sibling-file pairing: opening X.worldforge offers X.campaign next to it automatically.
+- [ ] Optional, after testers: slice 3 (.wf2 bundle) and slice 5 (drag-and-drop).
+
+Phase 2 - Measure  (I-5, I-6)
+- [ ] Before measuring, write down the target machine (for example 8 GB RAM laptop) and a peak-memory limit.
+- [ ] Profile one campaign on a 3600x1800 world, well past year 30 (aim for year 60), recording peak memory (working set) and seconds per simulated year. WF2_PROFILE=1 already gives the per-phase time.
+- [ ] Record the numbers as a new row in docs/SCOREBOARD.md.
+- [ ] If memory is over the limit, find the growing structure (same method as the journal fix). If over budget because of the tile/WorldBuffer design itself, put claim 4 back on trial.
+- [ ] Next target for speed: shipment logic in dispatch() (CLAUDE.md section 5.5 names it as the largest remaining cost).
+
+Phase 3 - Decide the product  (I-7)
+- [ ] One app or two. The court's lean: ONE app, map tool first, campaign as a mode. Record the decision at the top of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md.
+- [ ] Write the one-sentence pitch and put it as the first line of README.md.
+- [ ] Name the first buyer (for example: fantasy authors, TTRPG game masters, worldbuilding hobbyists).
+
+Phase 4 - Legal basics  (I-8)
+- [ ] Choose a licence model (closed commercial, or source-available) and add LICENSE.
+- [ ] Generate a dependency licence report (cargo-about or cargo-license for Rust, license-checker for npm) and save it in docs/.
+- [ ] Check the licence of the Koppen-Geiger dataset and the commodity-history text, and replace anything that cannot be sold.
+- [ ] Draft a short EULA. Have it, and the AI-code question, reviewed once.
+
+Phase 5 - Ship v0.1 to testers  (I-1, I-2)
+- [ ] Add a CI job that runs tauri build on Windows and uploads the installer as an artifact.
+- [ ] Bump to 0.1.0-beta, tag v0.1.0-beta, attach the installer to a GitHub release (private or public).
+- [ ] Add an "Install" section to the README that does not need Node or Rust.
+- [ ] Recruit 5-10 outside worldbuilders. Ask each to: install, make a world, export a map, save, reopen, start a campaign, run 10 years.
+- [ ] Collect what broke, what they used, what they ignored, and whether they would pay (and how much).
+- [ ] Put up a one-page waitlist or pre-order page with a stated price, and count sign-ups.
+
+Phase 6 - Let the testers steer
+- [ ] Only now decide whether the campaign / people layers grow, stay, or get cut, based on what testers actually used.
+- [ ] Re-run /court on claims 1-3 with the tester evidence in the case file.
+
+Housekeeping (any time, small)
+- [ ] Fix or explain the red tests on main, bisect the top-10% wealth share drift.
+- [ ] Prune merged branches (116 now).
+- [ ] Add a generated Rust -> TS type check (ts-rs or specta) for the campaign types, or at least one smoke test per panel.
+
+
+4. What NOT to do
+-----------------
+
+- Do not rewrite the stack. Claim 4 was acquitted: every recorded failure was in application code, not in Tauri, Rust, tiles or SQLite.
+- Do not split into two codebases before testers have used it.
+- Do not start new Living World rows, new goods, new institutions or new panels until Phase 5 is done.
+- Do not treat "the tests pass" as "it is ready". The tests measure the code, not demand.
+
+
+5. How to use and update this file
+----------------------------------
+
+- Every new Claude Code session: read CLAUDE.md section 0 first, then this file. Tell the owner which phase is current and which items are open before starting other work.
+- If the owner asks for a new feature while Phase 0-5 items are open, remind them of the freeze and of the next open item, then do what they decide.
+- When an item lands: tick it here, add evidence (commit, test name, number), and regenerate the PDF:
+    python scripts/plan_to_pdf.py
+- When all of Phase 5 is ticked, the freeze is over. Update CLAUDE.md section 0.
