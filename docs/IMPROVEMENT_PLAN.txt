@@ -49,8 +49,8 @@ I-3  Features are being added before anything ships  [critical]
 I-4  Saved worlds and campaigns  [high]
 - FIXED for new saves: slice 1 of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md (section 8) stopped save_world_as and new_campaign from deleting the world's human layer. Gate: campaign_key_split_tests.
 - STILL OPEN: .worldforge files written BEFORE that fix cannot start a campaign without their matching .campaign file (the recovery card in ChroniclePanel explains this).
-- STILL OPEN: slices 3-5 (.wf2 bundle, sibling-file pairing, drag-and-drop) are not built.
-- STILL OPEN: no test opens a saved file from an OLDER build and begins a campaign. SCOREBOARD.md itself says "a compatibility claim with no old-save fixture behind it is a hope".
+- Slice 4 (sibling-file pairing) BUILT 2026-10-15. STILL OPEN: slices 3 and 5 (.wf2 bundle, drag-and-drop).
+- FIXED 2026-10-15: old-save fixture + regression test (commands::old_save_tests).
 
 I-5  Peak memory has never been measured  [high]
 - SCOREBOARD.md: "Time is benchmarked; memory is not, and memory is the likelier failure on a customer's machine."
@@ -94,9 +94,9 @@ Phase 0 - Feature freeze  (now)
 - [x] Living World rows: owner decided 2026-10-15 — LEAVE AS-IS, frozen on main, not extended.
 
 Phase 1 - Save safety  (I-4)
-- [ ] Commit an old-save fixture: a small .worldforge (+ .campaign) written by an older build, under src-tauri/tests or test fixtures.
-- [ ] Regression test: open the fixture, then begin a campaign, and assert the campaign has hubs and runs one tick. Done when it is green in CI.
-- [ ] Slice 4 - sibling-file pairing: opening X.worldforge offers X.campaign next to it automatically.
+- [x] Old-save fixture: src-tauri/test_fixtures/old_world.{worldforge,campaign}, written by commit 231f75b (the build before the save fix), 256x128, campaign at day 30.
+- [x] Regression test: commands::old_save_tests (opens the old world, confirms it alone cannot start, opens its .campaign, resumes at tick 30, runs a tick). Green locally; CI runs it with the full suite.
+- [x] Slice 4: open_world returns sibling_campaign; App offers to load it. Mismatch warning now names the world. Gate: old_save_tests (both cases).
 - [ ] Optional, after testers: slice 3 (.wf2 bundle) and slice 5 (drag-and-drop).
 
 Phase 2 - Measure  (I-5, I-6)

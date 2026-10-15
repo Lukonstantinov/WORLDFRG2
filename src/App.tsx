@@ -822,6 +822,20 @@ export default function App() {
       setShowDialog(false);
       setStatus("World loaded: " + res.meta.name);
 
+      // A campaign saved beside this world, against this world: offer it.
+      if (res.sibling_campaign) {
+        const file = res.sibling_campaign.split(/[\\/]/).pop();
+        const msg = `${file} was saved with this world. Load that campaign too?`;
+        let yes: boolean;
+        try {
+          const { ask } = await import("@tauri-apps/plugin-dialog");
+          yes = await ask(msg, { title: "Campaign found" });
+        } catch {
+          yes = confirm(msg);
+        }
+        if (yes) await loadCampaignFrom(res.sibling_campaign);
+      }
+
       // Pre-split single-file save: offer to split it into a frozen world file
       // + a campaign file (the in-memory migration already happened on open).
       if (res.legacy && confirm(
@@ -868,7 +882,8 @@ export default function App() {
     const info = await openCampaign(path);
     if (!info.world_match) {
       alert(
-        "This campaign was saved against a different (or since-modified) world. " +
+        "This campaign was saved against a different (or since-modified) world" +
+        (info.world_name ? ` — "${info.world_name}"` : "") + ". " +
         "Its settlements and economy may not line up with the current map."
       );
     }

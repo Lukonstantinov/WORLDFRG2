@@ -163,11 +163,7 @@ pub fn open_campaign(path: String, db: State<'_, WorldDb>) -> Result<CampaignInf
         .find(|(k, _)| k == "world_ref")
         .and_then(|(_, v)| serde_json::from_str(v).ok());
     let world_match = match (&file_ref, current_world_ref(&conn).ok()) {
-        (Some(fr), Some(cur)) => {
-            fr.fingerprint == cur.fingerprint
-                && fr.grid_width == cur.grid_width
-                && fr.grid_height == cur.grid_height
-        }
+        (Some(fr), Some(cur)) => fr.same_world(&cur),
         _ => false,
     };
 
@@ -207,7 +203,8 @@ pub fn open_campaign(path: String, db: State<'_, WorldDb>) -> Result<CampaignInf
         .iter()
         .find(|(k, _)| k == "campaign_progress")
         .map(|(_, v)| v.clone());
-    Ok(CampaignInfo { name, world_match, campaign_progress })
+    let world_name = file_ref.map(|r| r.world_name);
+    Ok(CampaignInfo { name, world_match, campaign_progress, world_name })
 }
 
 

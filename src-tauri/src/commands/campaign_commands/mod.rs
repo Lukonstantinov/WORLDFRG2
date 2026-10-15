@@ -186,6 +186,39 @@ pub struct CampaignInfo {
     pub world_match: bool,
     /// JSON step-completion map for the campaign wizard (steps 7-10).
     pub campaign_progress: Option<String>,
+    /// The world the file says it was saved against, so a mismatch warning can name it.
+    pub world_name: Option<String>,
+}
+
+impl WorldRef {
+    /// Same frozen world: fingerprint and grid. The name may differ (a renamed copy).
+    pub fn same_world(&self, other: &WorldRef) -> bool {
+        self.fingerprint == other.fingerprint
+            && self.grid_width == other.grid_width
+            && self.grid_height == other.grid_height
+    }
+}
+
+/// The `world_ref` a `.campaign` file records, read without loading the file.
+pub fn read_file_world_ref(path: &std::path::Path) -> Option<WorldRef> {
+    let src = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let v: String = src
+        .query_row("SELECT value FROM campaign WHERE key = 'world_ref'", [], |r| r.get(0))
+        .ok()?;
+    serde_json::from_str(&v).ok()
+}
+
+/// TWO_APPS slice 4 — `X.campaign` beside `X.worldforge`, offered on open only when it
+/// was saved against THIS (already opened) world.
+pub fn sibling_campaign(world_path: &str, conn: &Connection) -> Option<String> {
+    let cand = std::path::Path::new(world_path).with_extension("campaign");
+    if !cand.is_file() {
+        return None;
+    }
+    let cur = current_world_ref(conn).ok()?;
+    read_file_world_ref(&cand)?
+        .same_world(&cur)
+        .then(|| cand.to_string_lossy().into_owned())
 }
 
 /// Fingerprint of the world's base tiles (lod 0 only — the LOD pyramid is a

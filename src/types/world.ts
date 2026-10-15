@@ -27,6 +27,8 @@ export interface OpenWorldResult {
   /** JSON-encoded step-completion maps persisted by set_progress. */
   world_progress: string | null;
   campaign_progress: string | null;
+  /** Path of a matching `.campaign` beside the world file, to offer loading. */
+  sibling_campaign: string | null;
 }
 
 export interface CampaignInfo {
@@ -35,6 +37,8 @@ export interface CampaignInfo {
   world_match: boolean;
   /** JSON step-completion map for the campaign wizard (steps 7-10). */
   campaign_progress: string | null;
+  /** The world the campaign file says it belongs to. */
+  world_name: string | null;
 }
 
 export interface TileResponse {

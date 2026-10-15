@@ -49,6 +49,9 @@ pub struct OpenWorldResult {
     /// JSON-encoded step-completion maps (empty when never persisted).
     pub world_progress: Option<String>,
     pub campaign_progress: Option<String>,
+    /// A `.campaign` with the same name beside the world file, saved against this
+    /// world — the frontend offers to load it (TWO_APPS slice 4).
+    pub sibling_campaign: Option<String>,
 }
 
 #[tauri::command]
@@ -123,6 +126,7 @@ pub fn open_world(
         campaign_name: metadata::campaign_get(&conn, "name").ok().flatten(),
         world_progress: metadata::get_meta(&conn, "world_progress").ok().flatten(),
         campaign_progress: metadata::campaign_get(&conn, "campaign_progress").ok().flatten(),
+        sibling_campaign: crate::commands::campaign_commands::sibling_campaign(&path, &conn),
     })
 }
 

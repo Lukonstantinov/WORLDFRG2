@@ -398,3 +398,13 @@ panel.
   the campaign-archive path was rerouted. Slice 5 removes the rest.
 - **Slices 3-5 are unbuilt**: no `.wf2` bundle, no sibling-file pairing, no
   drag-and-drop.
+
+### 8.7 Slice 4 — sibling-file pairing (2026-10-15)
+
+`open_world` now returns `sibling_campaign`: the path of `X.campaign` beside the opened
+`X.worldforge`, but only when that file's recorded `world_ref` is the same world
+(`WorldRef::same_world` — fingerprint + grid, now shared with `open_campaign`'s own
+check). `App.tsx` offers to load it with the dialog plugin's `ask`. The mismatch
+warning on opening a `.campaign` now names the world it was saved against
+(`CampaignInfo.world_name`). Gate: `commands::old_save_tests` — the old-build fixture
+pair finds its sibling; a lone world file offers none. Slices 3 and 5 remain queued.
