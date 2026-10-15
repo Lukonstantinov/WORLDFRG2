@@ -8053,7 +8053,7 @@ pub struct CampaignSim {
     #[serde(default)] pub diag_lost: u32,        // voyages lost (storm/ambush)
     #[serde(default)] pub diag_volume: f32,      // total goods volume shipped
     /// Rolling log of recently dispatched trades (for the Market "recent deals").
-    #[serde(default)] pub recent_trades: Vec<RecentTrade>,
+    #[serde(default)] pub recent_trades: std::collections::VecDeque<RecentTrade>,
     /// DLC 3 · cached speculation read, recomputed once per year at the yearly
     /// hook (`compute_speculation`). Empty until the first New Year of a campaign.
     #[serde(default)] pub spec_centers: Vec<SpecCenter>,
@@ -10333,6 +10333,7 @@ impl CampaignSim {
         // can be attributed to a specific phase instead of guessed. Off → ~zero cost.
         let profile = std::env::var("WF2_PROFILE").is_ok();
         let (mut t_rebuild, mut t_trade, mut t_events, mut t_houses) = (0f32, 0f32, 0f32, 0f32);
+        let (mut t_weekly, mut t_yearly, mut t_pre, mut t_post, mut t_arrive) = (0f32, 0f32, 0f32, 0f32, 0f32);
 
         // Per-tick scratch matrices (n×ng), reused across the whole advance so a long
         // run doesn't reallocate them every tick. Resized/cleared inside the loop.
@@ -10372,6 +10373,7 @@ impl CampaignSim {
             // Living World row 02 (02_PEOPLE.md) · the new WEEKLY cadence hook
             // (00_INDEX "Cadence hooks") — expires modifiers, fires due life
             // events. `O(people)` with small constants.
+            let _s_wk = std::time::Instant::now();
             if tick % 7 == 0 {
                 self.people_weekly_pass();
                 // Living World row 04 (04_GOVERNMENT_AND_EDICTS.md) · the same
@@ -10395,6 +10397,8 @@ impl CampaignSim {
                 self.classify_hubs();
                 self.classify_development();
             }
+            t_weekly += _s_wk.elapsed().as_secs_f32() * 1000.0;
+            let _s_yr = std::time::Instant::now();
             if tick % TICKS_PER_YEAR == 0 {
                 // v2.0 · close the monetary loop: turn each coin's debasement +
                 // money growth into a real per-city inflation rate and compound the
@@ -10578,6 +10582,8 @@ impl CampaignSim {
                     *l = LedgerAcc { year: yr, ..Default::default() };
                 }
             }
+            t_yearly += _s_yr.elapsed().as_secs_f32() * 1000.0;
+            let _s_pre = std::time::Instant::now();
 
             // Phase 4 (flavour) · open any trade fair / pilgrimage season beginning
             // today (checked every tick — they open mid-year on their month).
@@ -10975,6 +10981,7 @@ impl CampaignSim {
             // 3.5) Futures contracts deliver FIRST — the contracted quantity is
             //      reserved from each seller's source depot before the spot market
             //      runs, giving the buyer city forward supply security.
+            t_pre += _s_pre.elapsed().as_secs_f32() * 1000.0;
             let _s_trade = std::time::Instant::now();
             self.fulfill_contracts(&needs);
             // 4) Merchant dispatch (arbitrage → in-transit cargo).
@@ -10985,6 +10992,7 @@ impl CampaignSim {
             // `BARTER_DOSE = 0.0`, a true no-op (see `coinage.rs`'s own header).
             self.barter_settlement_pass();
             t_trade += _s_trade.elapsed().as_secs_f32() * 1000.0;
+            let _s_arr = std::time::Instant::now();
 
             // 5) Arrivals. Decay each hub's by-sea/by-land supply tally, then add
             //    today's landings tagged by how they travelled (ships vs caravans).
@@ -11116,6 +11124,7 @@ impl CampaignSim {
             }
 
             // 6) Events.
+            t_arrive += _s_arr.elapsed().as_secs_f32() * 1000.0;
             let _s_ev = std::time::Instant::now();
             self.roll_events();
             // Phase 5 (flavour) · plague travels the trade lanes from any active focus.
@@ -11132,6 +11141,7 @@ impl CampaignSim {
             let _s_h = std::time::Instant::now();
             self.update_houses(&needs);
             t_houses += _s_h.elapsed().as_secs_f32() * 1000.0;
+            let _s_post = std::time::Instant::now();
 
             // 8.5) Population sentiment (mood + drivers).
             self.update_sentiment();
@@ -11158,15 +11168,18 @@ impl CampaignSim {
 
             // Per-year profiler dump (opt-in). Counters reveal what is GROWING
             // (hubs/houses/warehouses/contracts) alongside where the ms go.
+            t_post += _s_post.elapsed().as_secs_f32() * 1000.0;
             if profile && tick % TICKS_PER_YEAR == 0 {
                 eprintln!(
                     "[WF2 yr {:>3}] hubs={:>4} houses={:>3} wh={:>4} contracts={:>4} intransit={:>5} | \
-                     trade={:>5.0} houses={:>5.0} events={:>4.0} rebuild={:>5.0} ms/yr",
+                     trade={:>5.0} houses={:>5.0} events={:>4.0} rebuild={:>5.0} \
+                     weekly={:>5.0} yearly={:>5.0} pre={:>5.0} post={:>5.0} arrive={:>5.0} ms/yr",
                     tick / TICKS_PER_YEAR, self.hubs.len(), self.houses.len(),
                     self.warehouses.len(), self.contracts.len(), self.in_transit.len(),
-                    t_trade, t_houses, t_events, t_rebuild,
+                    t_trade, t_houses, t_events, t_rebuild, t_weekly, t_yearly, t_pre, t_post, t_arrive,
                 );
                 t_rebuild = 0.0; t_trade = 0.0; t_events = 0.0; t_houses = 0.0;
+                t_weekly = 0.0; t_yearly = 0.0; t_pre = 0.0; t_post = 0.0; t_arrive = 0.0;
             }
         }
     }

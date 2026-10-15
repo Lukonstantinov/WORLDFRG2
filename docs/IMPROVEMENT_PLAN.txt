@@ -101,10 +101,10 @@ Phase 1 - Save safety  (I-4)
 
 Phase 2 - Measure  (I-5, I-6)
 - [x] Target: 8 GB RAM Windows laptop; budget 3 GB peak working set (MEM_BUDGET_MB in real_world_diagnostics.rs; change there if the owner picks another).
-- [ ] Profile one campaign on a 3600x1800 world, well past year 30 (aim for year 60), recording peak memory (working set) and seconds per simulated year. WF2_PROFILE=1 already gives the per-phase time.
-- [ ] Record the numbers as a new row in docs/SCOREBOARD.md.
-- [ ] If memory is over the limit, find the growing structure (same method as the journal fix). If over budget because of the tile/WorldBuffer design itself, put claim 4 back on trial.
-- [ ] Next target for speed: shipment logic in dispatch() (CLAUDE.md section 5.5 names it as the largest remaining cost).
+- [~] Profiled 3600x1800 to year 12 (owner stopped it: enough evidence). Harness: real_world_diagnostics::measure_full_size_campaign on a cached mock world. Peak ~2.2-2.4 GB after fixes; 40-60 s per simulated year. Owner target: 200 years — speed is now the blocker, not memory.
+- [x] SCOREBOARD 2026-10-15 + 2026-10-16.
+- [x] Growth found: transient whole-sim copies in advance_resilient (3 -> 2 copies) + autosave as one giant String (now streamed). Steady memory is not climbing. Claim 4 stands.
+- [ ] Speed for 200 years: dispatch (~20 s/yr), relay hops (~7 M/yr), daily in_transit sweep. recent_trades ring buffer shipped (-15%); FxHash tried and reverted (negative result).
 
 Phase 3 - Decide the product  (I-7)
 - [x] One app, map first (owner, 2026-10-15). Recorded at the top of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md.

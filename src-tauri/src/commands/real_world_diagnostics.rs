@@ -373,6 +373,41 @@ fn rss_mb(peak: bool) -> f64 {
 /// (`MEM_BUDGET_MB`) — leaves room for the OS and the WebView. Override the length
 /// with `WF2_MEASURE_YEARS` (default 60). Run in release:
 /// `cargo test --release --lib measure_full_size_campaign -- --ignored --nocapture`
+/// A finalized world with its economy, ready for `campaign_start_sim`, CACHED as a
+/// `.worldforge` file under `target/` (never committed) so a campaign measurement does
+/// not regenerate the world every run. First run: generate + save (~90 s at 3600×1800);
+/// later runs: open the file. `WF2_REGEN_WORLD=1` forces a fresh world — do that after
+/// changing world generation, or the cached world will not reflect it.
+fn load_or_build_world(state: &tauri::State<'_, WorldDb>, w: u32, h: u32, seed: u64) {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join(format!("target/wf2_mock_world_{w}x{h}_{seed}.worldforge"));
+    let t0 = std::time::Instant::now();
+    let regen = std::env::var("WF2_REGEN_WORLD").is_ok();
+    if !regen && path.is_file() {
+        match crate::commands::file_commands::open_world(path.to_string_lossy().into_owned(), state.clone()) {
+            Ok(_) => {
+                println!("[measure] loaded cached world {} in {:.0} s", path.display(), t0.elapsed().as_secs_f64());
+                return;
+            }
+            // e.g. an older SAVE_FORMAT — fall through and rebuild it.
+            Err(e) => println!("[measure] cached world unusable ({e}); regenerating"),
+        }
+    }
+    world_commands::new_world("mock".into(), w, h, state.clone()).expect("new_world");
+    let run = sim_commands::sim_run_all(seed, 10, "plates".into(), 0.5, 0.5, 0.5, 0.5, state.clone())
+        .expect("sim_run_all");
+    let econ = compute_economy(
+        serde_json::to_string(&run.settlements).unwrap(), serde_json::to_string(&run.rivers).unwrap(),
+        0, 0.15, false, 6, 0.5, 0.0, -1, 1, state.clone(),
+    ).expect("compute_economy");
+    finalize_world(state.clone()).expect("finalize_world");
+    let _ = std::fs::remove_file(&path);
+    crate::commands::file_commands::save_world_as(path.to_string_lossy().into_owned(), state.clone())
+        .expect("cache the world");
+    println!("[measure] generated {w}x{h}: {} settlements, {} hubs, {:.0} s, peak {:.0} MB — cached at {}",
+        run.settlements.len(), econ.hubs.len(), t0.elapsed().as_secs_f64(), peak_rss_mb(), path.display());
+}
+
 #[tokio::test]
 #[ignore]
 async fn measure_full_size_campaign() {
@@ -381,22 +416,8 @@ async fn measure_full_size_campaign() {
     let app = tauri::test::mock_app();
     app.manage(WorldDb::in_memory().expect("in-memory WorldDb"));
     let state = app.state::<WorldDb>();
-    let t0 = std::time::Instant::now();
-
-    world_commands::new_world("measure".into(), 3600, 1800, state.clone()).expect("new_world");
     let seed = 20261015u64;
-    let run = sim_commands::sim_run_all(seed, 10, "plates".into(), 0.5, 0.5, 0.5, 0.5, state.clone())
-        .expect("sim_run_all");
-    let econ = compute_economy(
-        serde_json::to_string(&run.settlements).unwrap(), serde_json::to_string(&run.rivers).unwrap(),
-        0, 0.15, false, 6, 0.5, 0.0, -1, 1, state.clone(),
-    ).expect("compute_economy");
-    let gen_s = t0.elapsed().as_secs_f64();
-    let gen_mb = peak_rss_mb();
-    println!("[measure] worldgen 3600x1800: {} settlements, {} hubs, {gen_s:.0} s, peak {gen_mb:.0} MB",
-        run.settlements.len(), econ.hubs.len());
-
-    finalize_world(state.clone()).expect("finalize_world");
+    load_or_build_world(&state, 3600, 1800, seed);
     campaign_start_sim(seed, state.clone()).expect("campaign_start_sim");
     let mut worst_s = 0.0f64;
     let camp0 = std::time::Instant::now();
@@ -413,6 +434,28 @@ async fn measure_full_size_campaign() {
     let peak = peak_rss_mb();
     println!("[measure] {years} years: mean {:.1} s/yr, worst {worst_s:.1} s/yr, PEAK {peak:.0} MB (budget {MEM_BUDGET_MB:.0})",
         camp0.elapsed().as_secs_f64() / years as f64);
+
+    // What one autosave costs at this size, piece by piece.
+    {
+        use base64::Engine as _;
+        let conn = state.conn.lock().unwrap();
+        let sim = get_sim(&state, &conn).unwrap().expect("sim");
+        let t = std::time::Instant::now();
+        let copy = (*sim).clone();
+        let t_clone = t.elapsed().as_secs_f64();
+        drop(copy);
+        let t = std::time::Instant::now();
+        let json = serde_json::to_vec(&*sim).unwrap();
+        let t_json = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let z = zstd::encode_all(&json[..], 3).unwrap();
+        let t_zstd = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
+        let b64 = base64::engine::general_purpose::STANDARD.encode(&z);
+        let t_b64 = t.elapsed().as_secs_f64();
+        println!("[measure] autosave pieces: clone {t_clone:.2} s | json {t_json:.2} s ({:.0} MB) | zstd {t_zstd:.2} s ({:.0} MB) | base64 {t_b64:.2} s ({:.0} MB)",
+            json.len() as f64 / 1e6, z.len() as f64 / 1e6, b64.len() as f64 / 1e6);
+    }
     assert!(peak.is_nan() || peak <= MEM_BUDGET_MB, "peak {peak:.0} MB is over the {MEM_BUDGET_MB:.0} MB budget");
 }
 
@@ -431,12 +474,8 @@ async fn diag_what_grows() {
     let app = tauri::test::mock_app();
     app.manage(WorldDb::in_memory().expect("in-memory WorldDb"));
     let state = app.state::<WorldDb>();
-    world_commands::new_world("grow".into(), w, w / 2, state.clone()).expect("new_world");
     let seed = 20261015u64;
-    let run = sim_commands::sim_run_all(seed, 10, "plates".into(), 0.5, 0.5, 0.5, 0.5, state.clone()).unwrap();
-    compute_economy(serde_json::to_string(&run.settlements).unwrap(), serde_json::to_string(&run.rivers).unwrap(),
-        0, 0.15, false, 6, 0.5, 0.0, -1, 1, state.clone()).unwrap();
-    finalize_world(state.clone()).unwrap();
+    load_or_build_world(&state, w, w / 2, seed);
     campaign_start_sim(seed, state.clone()).unwrap();
 
     let snapshot = |state: &tauri::State<'_, WorldDb>| -> BTreeMap<String, usize> {

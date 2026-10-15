@@ -91,7 +91,7 @@
             ship_leg_max_km: f32::INFINITY, caravan_leg_max_km: f32::INFINITY,
             local_haul_bind_days: f32::INFINITY,
             route_post_max_home_km: f32::INFINITY,
-            recent_trades: vec![],
+            recent_trades: Default::default(),
             spec_centers: vec![], spec_year: 0, spec_prev_profit: vec![],
             banks: vec![], crashes: vec![], wars: vec![], war_log: vec![],
             flow_year: vec![], flow_accum: std::collections::HashMap::new(),
@@ -3674,7 +3674,7 @@
         // so barter has an obvious payment good to reach for.
         hubs[1].stock[0 * GRADE_BANDS + 1] = 500.0; // good 0 (wheat), common band
         let mut s = sim(hubs, goods);
-        s.recent_trades.push(RecentTrade {
+        s.recent_trades.push_back(RecentTrade {
             from: 0, to: 1, good: 1, amount: 4.0, owner: -1, sea: false, river: false,
             price: 20.0, tick: s.tick,
         });
@@ -3713,7 +3713,7 @@
         hubs[1].coin_trust = 1.0;
         hubs[1].coin_name = "Strong Ducat".into();
         let mut s = sim(hubs, goods);
-        s.recent_trades.push(RecentTrade {
+        s.recent_trades.push_back(RecentTrade {
             from: 0, to: 1, good: 1, amount: 4.0, owner: -1, sea: false, river: false,
             price: 20.0, tick: s.tick,
         });

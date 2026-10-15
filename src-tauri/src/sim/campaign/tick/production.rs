@@ -3010,9 +3010,11 @@ impl CampaignSim {
     /// extinction and political power.
     /// Log a dispatched trade for the Market "recent deals" rows (rolling, capped).
     pub(crate) fn log_trade(&mut self, from: u32, to: u32, good: usize, amount: f32, owner: i32, sea: bool, river: bool, price: f32) {
-        self.recent_trades.push(RecentTrade { from, to, good, amount, owner, sea, river, price, tick: self.tick });
-        let n = self.recent_trades.len();
-        if n > 400 { self.recent_trades.drain(0..n - 400); }
+        // A ring buffer: dropping the oldest is O(1). As a Vec, `drain(0..1)` shifted all
+        // 400 entries on EVERY call — millions of calls a year (each shipment and each
+        // relay hop): ~15% of a full-size campaign year (SCOREBOARD 2026-10-15).
+        self.recent_trades.push_back(RecentTrade { from, to, good, amount, owner, sea, river, price, tick: self.tick });
+        while self.recent_trades.len() > 400 { self.recent_trades.pop_front(); }
         // Accumulate the year's trade flows for the Flows subtab: this shipment is an
         // INBOUND flow at `to` (from `from`) and an OUTBOUND flow at `from` (to `to`).
         if amount > 0.0 {

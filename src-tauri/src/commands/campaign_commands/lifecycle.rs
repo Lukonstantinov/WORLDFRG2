@@ -994,7 +994,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         route_post_max_home_km: crate::sim::tick::route_post_max_home_km_default(),
         diag_lost: 0,
         diag_volume: 0.0,
-        recent_trades: vec![],
+        recent_trades: Default::default(),
         spec_centers: vec![],
         spec_year: 0,
         spec_prev_profit: vec![],
@@ -1442,6 +1442,9 @@ pub fn campaign_new_game(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignSn
 #[tauri::command]
 pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<CampaignSnapshot, String> {
     let ticks_run = ticks.clamp(1, 3650);
+    // WF2_PROFILE: where one call's wall time goes outside `advance` itself.
+    let profile = std::env::var("WF2_PROFILE").is_ok();
+    let t_call = std::time::Instant::now();
 
     // Phase 1 — ensure the sim is resident (needs conn+campaign, in lock order) and
     // read the autosave-cadence flags, then release BOTH locks. The heavy compute
@@ -1501,7 +1504,9 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
     // tick so the simulation ALWAYS keeps moving forward. State is preserved (never
     // discarded), so the run can always be continued. (A true allocation failure still
     // aborts — catch_unwind can't catch `abort()` — pointing at OOM, not a logic bug.)
+    let t_pre = t_call.elapsed().as_secs_f32();
     let t0 = std::time::Instant::now();
+    let (mut t_adv, mut t_snap, mut t_enc) = (0f32, 0f32, 0f32);
     let (snap, json) = {
         let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
         {
@@ -1510,16 +1515,22 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
             let sim = std::sync::Arc::make_mut(cache.sim.as_mut()
                 .ok_or_else(|| "No active campaign sim — start it first.".to_string())?);
             advance_resilient(sim, ticks_run);
+            t_adv = t0.elapsed().as_secs_f32();
             sim.last_tick_ms = t0.elapsed().as_secs_f32() * 1000.0 / ticks_run.max(1) as f32;
         }
         let sim = cache.sim.as_ref().expect("present after a resilient advance");
+        let ts = std::time::Instant::now();
         let snap = build_snapshot(sim);
+        t_snap = ts.elapsed().as_secs_f32();
         // Serialize ONLY when it's time to autosave — every 2 sim-years (crossing an
         // even-year boundary) or the wall-clock safety; otherwise the change just stays
         // resident and dirty. `AUTOSAVE_EVERY_YEARS` = 2 per the campaign save cadence.
         let crossed_autosave = (sim.year() / AUTOSAVE_EVERY_YEARS) != (year_before / AUTOSAVE_EVERY_YEARS);
+        let te = std::time::Instant::now();
         let json = if crossed_autosave || stale {
-            Some(encode_campaign_blob(sim.as_ref())?)
+            let j = Some(encode_campaign_blob(sim.as_ref())?);
+            t_enc = te.elapsed().as_secs_f32();
+            j
         } else {
             None
         };
@@ -1539,6 +1550,10 @@ pub async fn campaign_advance(ticks: u32, db: State<'_, WorldDb>) -> Result<Camp
             let mut cache = db.campaign.lock().map_err(|e| e.to_string())?;
             cache.dirty = true;
         }
+    }
+    if profile {
+        eprintln!("[WF2 call] {ticks_run} ticks: total {:.1} s = pre (site recompute) {t_pre:.1} + advance {t_adv:.1} + snapshot {t_snap:.1} + autosave encode {t_enc:.1} + rest",
+            t_call.elapsed().as_secs_f32());
     }
     Ok(snap)
 }

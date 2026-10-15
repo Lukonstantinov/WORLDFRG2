@@ -49,6 +49,11 @@ cargo test --lib econ_ -- --nocapture                          # ECONOMY FIDELIT
 cargo test --release --lib bench_phase2 -- --ignored --nocapture                 # phase-2 (terrain) ms breakdown
 cargo test --release --lib bench_ocean_atmosphere -- --ignored --nocapture       # phase-3 ms breakdown (§8.9)
 cargo test --release --lib ocean_atmosphere_field_checksums -- --ignored --nocapture  # phase-3 bit-exactness
+# FULL-SIZE campaign: s/yr + peak memory on a 3600×1800 mock world, cached in target/
+# (first run generates it; WF2_REGEN_WORLD=1 after worldgen changes). WF2_MEASURE_YEARS=N,
+# WF2_PROFILE=1 adds the per-phase and per-call breakdown (SCOREBOARD 2026-10-16).
+cargo test --release --lib measure_full_size_campaign -- --ignored --nocapture
+cargo test --release --lib diag_what_grows -- --ignored --nocapture   # which state grows
 ```
 
 > The full Tauri build needs GTK/WebKit system libs. On a headless Linux box:
@@ -1500,6 +1505,18 @@ debug-only feature, which is exactly what §8.9's own "off → ~zero cost"
 discipline forbids). If `house_for`'s own cost needs relocating again later,
 re-add the same shape of timer, measure, then strip it again before commit —
 it is not meant to be a standing instrument, `bench_campaign_tick_large` is.
+
+**2026-10-16 — a real full-size world is a different regime** (SCOREBOARD 2026-10-16).
+`bench_campaign_tick_large` (synthetic, 8-10 s/yr of trade) badly understates a real
+3600×1800 campaign: 40-60 s per simulated year, of which trade ~20 s and ARRIVALS
+~12 s — mostly N1c relay hops (~4.6-7 M a year) plus the daily sweep of ~800k
+in-flight cargoes. Measure with `measure_full_size_campaign` (cached mock world).
+`WF2_PROFILE=1` now also prints `weekly/yearly/pre/post/arrive` per year and a
+per-`campaign_advance` line (site recompute · advance · snapshot · autosave encode) —
+cheap per-tick `Instant`s like the original four, not per-shipment counters.
+`recent_trades` is a `VecDeque` ring buffer: as a `Vec` its `drain(0..1)` ran on every
+shipment and relay hop (−15% of a year). FxHash on the trade-flow maps was measured
+and REVERTED (no gain beyond noise: cache misses, not hashing).
 
 Gates run: `cargo check --lib --tests`, `cargo test --lib tick::tests`
 (261/261, `simulate_decades_reports_dynamics` unchanged — sustained richest
@@ -3848,3 +3865,9 @@ Three rules:
     category — "nobody will do this" — does not exist; if a thing genuinely should
     never be built, the reason is a measurement or a rule, and that is what gets
     written down.
+37. **A test that opens or generates a real world must not run in the shared test process.**
+    `open_world`/`sim_run_all` set the PROCESS-GLOBAL active culture map
+    (`cultures::ensure_active`), which every economy test reads when naming houses —
+    so such a test running beside `econ_`/`tick::tests` changes their results and they
+    flake (CI was red for three pushes on 2026-10-15/16 from exactly this). Mark it
+    `#[ignore]` and give it its own CI step (`save_roundtrip_tests` is the pattern).

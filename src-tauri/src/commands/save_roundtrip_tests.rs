@@ -2,6 +2,11 @@
 //! format load; anything older is refused with a clear message. These tests make a
 //! world + campaign with the current build, save both, reopen them in a fresh app,
 //! and check that an unstamped (older) file is refused without touching the open world.
+//!
+//! `#[ignore]`d because opening/generating a world sets the PROCESS-GLOBAL active
+//! culture map (`cultures::ensure_active`), which the economy tests running in parallel
+//! also read — that made `econ_` and `tick::tests` flake on CI. CI runs these in their
+//! own process: `cargo test --lib save_roundtrip_tests -- --ignored`.
 
 use crate::db::WorldDb;
 use crate::commands::{sim_commands, world_commands};
@@ -36,6 +41,7 @@ async fn make_saves(dir: &std::path::Path) -> (String, String) {
 }
 
 #[tokio::test]
+#[ignore = "opens real worlds, which set the process-global culture map; run alone: cargo test --lib save_roundtrip_tests -- --ignored"]
 async fn a_new_world_and_campaign_save_reopen_and_resume() {
     let dir = temp_dir("roundtrip");
     let (w, c) = make_saves(&dir).await;
@@ -67,6 +73,7 @@ async fn a_new_world_and_campaign_save_reopen_and_resume() {
 }
 
 #[tokio::test]
+#[ignore = "opens real worlds, which set the process-global culture map; run alone: cargo test --lib save_roundtrip_tests -- --ignored"]
 async fn an_unstamped_older_save_is_refused_cleanly() {
     let dir = temp_dir("unstamped");
     let (w, c) = make_saves(&dir).await;
@@ -91,6 +98,7 @@ async fn an_unstamped_older_save_is_refused_cleanly() {
 /// fault on one tick must neither crash nor stall the run — the bad tick is skipped,
 /// every other tick simulates, and the advance completes in full.
 #[tokio::test]
+#[ignore = "opens real worlds, which set the process-global culture map; run alone: cargo test --lib save_roundtrip_tests -- --ignored"]
 async fn a_faulting_tick_is_skipped_and_the_advance_completes() {
     use crate::sim::tick::TEST_PANIC_AT_TICK;
     let dir = temp_dir("fault");

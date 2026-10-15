@@ -9,6 +9,35 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-10-16 — Phase 2 follow-up: where the memory and the time actually go (full-size, measured)
+
+Same harness, now on a CACHED mock world (`load_or_build_world`: generated once to
+`target/wf2_mock_world_3600x1800_20261015.worldforge`, then opened in <1 s; set
+`WF2_REGEN_WORLD=1` after worldgen changes). Every fix below is behaviour-identical:
+relay hops (4,635,545 in year 1) and in-flight cargo counts match run for run.
+
+**Memory.** Steady working set does NOT grow steadily (year 6 → 8: 2,084 → 1,885 MB);
+the rising PEAK was transient copies. `advance_resilient` held up to three whole-sim
+copies per advance — now at most two. Year-8 peak 2,634 → 2,435 MB; year-6 2,534 →
+2,283 MB. Autosave text is now streamed (it was ~400-700 MB as one String); measured
+autosave cost: clone 0.5 s, JSON 1.9 s (411 MB), zstd 1.9 s (48 MB), base64 0.06 s.
+Diagnosis tools: `diag_what_grows` (serialized size per field) — `in_transit`
+(~800k cargoes, ~280 MB JSON / ~60 MB RAM) and last year's trade-flow tables are the
+largest; per-hub history is capped at 30 years.
+
+**Time per simulated year (year 1, profile phases, ms):** trade 19,000-23,000 ·
+arrivals 11,500-13,500 (of which relay hops 6.4-8.3 s for 4.6 M hops; full-list
+sweep 2.9 s; landing 1.0 s; return legs 0.2 s) · daily pre-trade 5,800 · yearly
+1,800 · rest <1,000. Fixed: `recent_trades` was a Vec trimmed with `drain(0..1)` on
+every shipment and relay hop — now a ring buffer: year 1 44.6 → 37.8-40.6 s.
+**Negative result:** FxHash on the trade-flow maps moved `log_trade` 4.8 → 4.3 s
+(noise) — the cost is cache misses on a very large map, not hashing; reverted.
+
+**Where 200 years stands:** ~40-60 s per simulated year ⇒ ~3 hours for 200 years;
+peak memory ~2.2-2.4 GB, under the 3 GB budget so far. Next targets, largest first:
+`dispatch` (trade), relay volume (7 M hops/yr — a carriage-design question, N1c),
+and the per-day full sweep of `in_transit` (bucket by arrival day).
+
 ## 2026-10-15 — First full-size campaign measurement (IMPROVEMENT_PLAN Phase 2): memory and speed both grow with campaign age
 
 `real_world_diagnostics::measure_full_size_campaign`, release build, owner's Windows

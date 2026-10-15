@@ -93,6 +93,12 @@ jobs:
         working-directory: src-tauri
         run: cargo test --lib
 
+      # Save/load round trip on real worlds. In its own process: opening a world sets the
+      # process-global culture map, which would race the economy tests above.
+      - name: Save round trip
+        working-directory: src-tauri
+        run: cargo test --lib save_roundtrip_tests -- --ignored
+
   # The product ships on Windows and macOS. Building only on Linux means a
   # platform-specific compile or link failure (exactly the LNK2019 class noted in
   # src-tauri/Cargo.toml) reaches customers before it reaches CI. This is a
