@@ -1,6 +1,8 @@
 # WorldForge 2
 
-**A desktop fantasy-world map generator that simulates a planet from tectonics to a living trade economy.**
+**Build a believable fantasy world from the physics up — continents, climate, rivers and resources — export it as maps for your novel or tabletop campaign, then press play to watch its cities, merchant houses and states rise and fall.**
+
+*For fantasy authors, tabletop game masters and worldbuilding hobbyists first (generate and export the map); the living trade-and-history simulation is a second mode on the same world.*
 
 WorldForge 2 is a [Tauri](https://tauri.app/) desktop application that procedurally generates plausible, science-grounded world maps — and then lets a **living economy** play out on top of them. Starting from either tectonic plates or a hand-drawn/imported landmass, it runs a multi-stage physical simulation (elevation, ocean currents, salinity, climate, rivers, soils, settlements, trade goods), solves a market economy, and can then **advance time** as merchant houses, banks, coinage, wars and crashes shape the world. Everything renders as a fully zoomable, layered map.
 
@@ -204,4 +206,4 @@ worldforge2/
 
 ## License
 
-No license has been specified yet. All rights reserved by the author until one is added.
+Proprietary, all rights reserved — see [`LICENSE`](./LICENSE). Released builds come with [`EULA.md`](./EULA.md). Third-party components keep their own licences: [`docs/THIRD_PARTY_LICENSES.md`](./docs/THIRD_PARTY_LICENSES.md).

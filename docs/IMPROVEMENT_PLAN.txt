@@ -80,7 +80,7 @@ I-9  Quality debt  [medium]
 - There are 116 git branches. Prune the merged ones.
 
 I-10  Local test environment  [low]
-- cargo test binaries fail to launch on the owner's Windows machine (STATUS_ENTRYPOINT_NOT_FOUND). Use cargo check locally and rely on CI for tests.
+- FIXED 2026-10-15: build.rs now embeds the Common-Controls manifest for every target; local `cargo test` launches again.
 
 
 3. The plan
@@ -91,7 +91,7 @@ checkable. Tick items here ([x]) as they land, and regenerate the PDF.
 
 Phase 0 - Feature freeze  (now)
 - [x] Freeze written into CLAUDE.md section 0: no new Living World / people-layer / campaign features until v0.1 has shipped to testers. Bug fixes, performance, save safety and release work are allowed.
-- [ ] Decide with the owner what happens to unfinished Living World rows: park them on a branch or leave them as-is. Do not extend them.
+- [x] Living World rows: owner decided 2026-10-15 — LEAVE AS-IS, frozen on main, not extended.
 
 Phase 1 - Save safety  (I-4)
 - [ ] Commit an old-save fixture: a small .worldforge (+ .campaign) written by an older build, under src-tauri/tests or test fixtures.
@@ -107,13 +107,13 @@ Phase 2 - Measure  (I-5, I-6)
 - [ ] Next target for speed: shipment logic in dispatch() (CLAUDE.md section 5.5 names it as the largest remaining cost).
 
 Phase 3 - Decide the product  (I-7)
-- [ ] One app or two. The court's lean: ONE app, map tool first, campaign as a mode. Record the decision at the top of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md.
-- [ ] Write the one-sentence pitch and put it as the first line of README.md.
-- [ ] Name the first buyer (for example: fantasy authors, TTRPG game masters, worldbuilding hobbyists).
+- [x] One app, map first (owner, 2026-10-15). Recorded at the top of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md.
+- [x] Pitch written as the headline of README.md.
+- [x] First buyers: fantasy authors, TTRPG GMs, worldbuilding hobbyists (map + export); sim players for the campaign mode.
 
 Phase 4 - Legal basics  (I-8)
-- [ ] Choose a licence model (closed commercial, or source-available) and add LICENSE.
-- [ ] Generate a dependency licence report (cargo-about or cargo-license for Rust, license-checker for npm) and save it in docs/.
+- [x] Closed commercial licence chosen; LICENSE added (EULA.md still to draft).
+- [x] docs/THIRD_PARTY_LICENSES.md via `node scripts/license_report.mjs`: 0 npm flags, 5 MPL-2.0 crates via Tauri (OK unmodified).
 - [ ] Check the licence of the Koppen-Geiger dataset and the commodity-history text, and replace anything that cannot be sold.
 - [ ] Draft a short EULA. Have it, and the AI-code question, reviewed once.
 

@@ -1,5 +1,12 @@
 # Two Apps? — and the File-Upload Viability Audit
 
+> **DECISION (owner, 2026-10-15 — IMPROVEMENT_PLAN Phase 3): ONE APP, MAP FIRST.**
+> WorldForge 2 ships as one application. Its front door is the world generator and
+> map export (fantasy authors, tabletop GMs, worldbuilding hobbyists); the living
+> campaign (trade, houses, the rise and fall of cities and states) is a second mode
+> on the same world, for players who want to watch history happen. No binary split
+> before testers have used it (court, claim 3). Pitch: first line of `README.md`.
+
 **Status: AUDIT COMPLETE · SLICES 1 & 2 BUILT, plus the campaign LIBRARY and
 START OVER (neither in the original plan — both asked for after it).
 Slices 3-5 (`.wf2` bundle · sibling-file pairing · drag-and-drop) NOT built.**

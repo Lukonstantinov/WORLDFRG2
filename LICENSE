@@ -1,0 +1,24 @@
+WorldForge 2 — Proprietary Software Licence
+
+Copyright (c) 2026 Luka Konstantinov ("the Author"). All rights reserved.
+
+This software and its source code, documentation, artwork and data files (together,
+"the Software") are the proprietary property of the Author.
+
+No licence is granted to use, copy, modify, merge, publish, distribute, sublicense,
+sell, or create derivative works of the Software, in whole or in part, except:
+
+  1. under a separate written licence or end-user agreement issued by the Author
+     (see EULA.md for the terms that accompany released builds), or
+  2. where a component is third-party software distributed under its own licence;
+     those components remain under their own terms (see
+     docs/THIRD_PARTY_LICENSES.md).
+
+Viewing the source on a public hosting service does not grant any of the rights
+above.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED,
+INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR ITS USE.
