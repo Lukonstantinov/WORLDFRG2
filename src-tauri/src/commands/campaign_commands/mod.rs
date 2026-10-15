@@ -1526,33 +1526,47 @@ fn recompute_satellite_sites(
 ///      poisoned tick (the clock still advances) and simulating every good tick.
 /// State is preserved throughout (never discarded), so any batch — even one that hits a
 /// deterministic bug — completes and the run stays continuable.
+///
+/// Memory: at most TWO copies of the sim exist at once (the live one + one checkpoint).
+/// The old version re-cloned after every chunk, including the last, while the previous
+/// checkpoint was still alive — three full copies at peak, growing with campaign age
+/// (SCOREBOARD 2026-10-15). A checkpoint is dropped before the next one is taken, and
+/// none is taken after the final chunk.
 fn advance_resilient(sim: &mut crate::sim::tick::CampaignSim, ticks: u32) {
     use std::panic::{catch_unwind, AssertUnwindSafe};
-    use crate::sim::tick::TICKS_PER_YEAR;
+    use crate::sim::tick::{CampaignSim, TICKS_PER_YEAR};
+    /// Replace `cp` with a fresh copy of `sim`, freeing the old copy first.
+    fn retake(cp: &mut Option<CampaignSim>, sim: &CampaignSim) {
+        *cp = None;
+        *cp = Some(sim.clone());
+    }
     if ticks == 0 { return; }
     let chunk_len = TICKS_PER_YEAR.max(1);
-    let mut checkpoint = sim.clone();
+    let mut checkpoint = Some(sim.clone());
     let mut done = 0u32;
     while done < ticks {
         let chunk = (ticks - done).min(chunk_len);
+        let more = done + chunk < ticks;
         // Fast path — the chunk simulates cleanly.
         if catch_unwind(AssertUnwindSafe(|| sim.advance(chunk))).is_ok() {
-            checkpoint = sim.clone();
             done += chunk;
+            if more { retake(&mut checkpoint, sim); } else { checkpoint = None; }
             continue;
         }
         // Recovery step 1 — restore, freeze expansion, retry the whole chunk once.
-        *sim = checkpoint.clone();
+        *sim = checkpoint.take().expect("a checkpoint exists before every chunk");
+        retake(&mut checkpoint, sim);
         sim.expansion_frozen_until = sim.tick + chunk_len + chunk;
         if catch_unwind(AssertUnwindSafe(|| sim.advance(chunk))).is_ok() {
-            checkpoint = sim.clone();
             done += chunk;
+            if more { retake(&mut checkpoint, sim); } else { checkpoint = None; }
             continue;
         }
         // Recovery step 2 — restore and step tick-by-tick, skipping only bad ticks so
-        // the run can never stall on a persistent, deterministic fault.
-        *sim = checkpoint.clone();
-        let mut tick_cp = checkpoint.clone();
+        // the run can never stall on a persistent, deterministic fault. (Rare path: it
+        // keeps a per-tick checkpoint, so up to three copies here is acceptable.)
+        *sim = checkpoint.take().expect("re-taken before the retry");
+        let mut tick_cp = sim.clone();
         for _ in 0..chunk {
             match catch_unwind(AssertUnwindSafe(|| sim.advance(1))) {
                 Ok(()) => tick_cp = sim.clone(),
@@ -1566,8 +1580,9 @@ fn advance_resilient(sim: &mut crate::sim::tick::CampaignSim, ticks: u32) {
                 }
             }
         }
-        checkpoint = sim.clone();
+        drop(tick_cp);
         done += chunk;
+        if more { retake(&mut checkpoint, sim); }
     }
 }
 

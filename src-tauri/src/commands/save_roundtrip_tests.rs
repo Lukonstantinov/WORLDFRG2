@@ -86,3 +86,32 @@ async fn an_unstamped_older_save_is_refused_cleanly() {
     assert!(open_campaign(c, s.clone()).err().expect("refused").contains("older version"));
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `advance_resilient` (now holding at most two copies of the sim): a persistent
+/// fault on one tick must neither crash nor stall the run — the bad tick is skipped,
+/// every other tick simulates, and the advance completes in full.
+#[tokio::test]
+async fn a_faulting_tick_is_skipped_and_the_advance_completes() {
+    use crate::sim::tick::TEST_PANIC_AT_TICK;
+    let dir = temp_dir("fault");
+    let app = tauri::test::mock_app();
+    app.manage(WorldDb::in_memory().unwrap());
+    let s = app.state::<WorldDb>();
+    world_commands::new_world("fault".into(), 256, 128, s.clone()).unwrap();
+    let run = sim_commands::sim_run_all(7, 8, "plates".into(), 0.5, 0.5, 0.5, 0.5, s.clone()).unwrap();
+    compute_economy(serde_json::to_string(&run.settlements).unwrap(), serde_json::to_string(&run.rivers).unwrap(),
+        0, 0.15, false, 6, 0.5, 0.0, -1, 1, s.clone()).unwrap();
+    finalize_world(s.clone()).unwrap();
+    let start = campaign_start_sim(7, s.clone()).unwrap().clock.tick;
+
+    TEST_PANIC_AT_TICK.with(|t| t.set(Some(start + 10)));
+    let after = campaign_advance(30, s.clone()).await.expect("never errors on a tick fault");
+    TEST_PANIC_AT_TICK.with(|t| t.set(None));
+    assert_eq!(after.clock.tick, start + 30, "the advance completes in full");
+    let conn = s.conn.lock().unwrap();
+    let sim = get_sim(&s, &conn).unwrap().unwrap();
+    assert!(sim.journal.iter().any(|j| j.text.contains("troubled season")),
+        "the poisoned tick is recorded as skipped");
+    drop(conn);
+    let _ = std::fs::remove_dir_all(&dir);
+}

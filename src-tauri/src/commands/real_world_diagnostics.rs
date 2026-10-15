@@ -345,17 +345,20 @@ async fn real_world_craft_spread() {
 
 /// Peak working set of THIS process in MB (cumulative, never decreases). No extra
 /// crates: Linux reads `VmHWM`, Windows asks PowerShell about our own PID.
-fn peak_rss_mb() -> f64 {
+fn peak_rss_mb() -> f64 { rss_mb(true) }
+/// Current working set in MB (goes down as well as up).
+fn now_rss_mb() -> f64 { rss_mb(false) }
+fn rss_mb(peak: bool) -> f64 {
     #[cfg(target_os = "linux")]
     {
         let s = std::fs::read_to_string("/proc/self/status").unwrap_or_default();
-        return s.lines().find(|l| l.starts_with("VmHWM:"))
+        return s.lines().find(|l| l.starts_with(if peak { "VmHWM:" } else { "VmRSS:" }))
             .and_then(|l| l.split_whitespace().nth(1)?.parse::<f64>().ok())
             .map_or(f64::NAN, |kb| kb / 1024.0);
     }
     #[cfg(windows)]
     {
-        let cmd = format!("(Get-Process -Id {}).PeakWorkingSet64", std::process::id());
+        let cmd = format!("(Get-Process -Id {}).{}", std::process::id(), if peak { "PeakWorkingSet64" } else { "WorkingSet64" });
         let out = std::process::Command::new("powershell").args(["-NoProfile", "-Command", &cmd]).output();
         return out.ok().and_then(|o| String::from_utf8_lossy(&o.stdout).trim().parse::<f64>().ok())
             .map_or(f64::NAN, |b| b / 1_048_576.0);
@@ -402,8 +405,9 @@ async fn measure_full_size_campaign() {
         campaign_advance(365, state.clone()).await.expect("campaign_advance");
         let s = ty.elapsed().as_secs_f64();
         worst_s = worst_s.max(s);
-        if y % 10 == 0 || y == 1 {
-            println!("[measure] year {y:>3}: {s:6.1} s/yr, peak {:6.0} MB", peak_rss_mb());
+        if y % 2 == 0 || y == 1 {
+            let in_transit = { let c = state.conn.lock().unwrap(); get_sim(&state, &c).unwrap().map_or(0, |s| s.in_transit.len()) };
+            println!("[measure] year {y:>3}: {s:6.1} s/yr, now {:6.0} MB, peak {:6.0} MB, in_transit {in_transit}", now_rss_mb(), peak_rss_mb());
         }
     }
     let peak = peak_rss_mb();

@@ -5108,6 +5108,12 @@ pub(crate) const LAW_ENTREPOT: u8 = 7;
 /// Serde default for `owner_house` so old saves / non-estate hubs read −1, not 0
 /// (which would point at house index 0).
 fn neg_one_i32() -> i32 { -1 }
+#[cfg(test)]
+thread_local! {
+    /// Test-only fault injection: `advance` panics on reaching this tick (exercises the
+    /// crash-recovery path in `campaign_commands::advance_resilient`).
+    pub static TEST_PANIC_AT_TICK: std::cell::Cell<Option<u32>> = const { std::cell::Cell::new(None) };
+}
 /// JSON has no infinity: serde_json writes a non-finite f32 as `null` and then refuses
 /// to read `null` back as f32 — so every save whose route matrix held an unreachable
 /// pair (`f32::INFINITY`) could not be reopened. Reads `null` back as infinity.
@@ -10343,6 +10349,8 @@ impl CampaignSim {
         for _ in 0..n_ticks {
             self.tick += 1;
             let tick = self.tick;
+            #[cfg(test)]
+            if TEST_PANIC_AT_TICK.with(|t| t.get()) == Some(tick) { panic!("injected test fault at tick {tick}"); }
             // Rebuild the route matrix + neighbour lists at most once per tick if a
             // hub was added/removed last tick (estate/colony). Batching this keeps
             // the O(n²) rebuild from running once per estate creation, and ensures
