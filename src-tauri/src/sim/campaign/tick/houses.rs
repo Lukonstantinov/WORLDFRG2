@@ -55,9 +55,10 @@ impl CampaignSim {
             cap_sea[i] = h.fleet_sea as i32;
             cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
         }
-        for c in &self.in_transit {
-            if c.owner >= 0 { let oi = c.owner as usize;
-                if oi < nh { if c.sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; } } }
+        for oi in 0..nh {
+            let b = self.in_transit.busy(oi);
+            cap_sea[oi] -= b.sea;
+            cap_land[oi] -= b.land;
         }
         let mut remove: Vec<usize> = Vec::new();
         for ci in 0..self.contracts.len() {
@@ -4745,11 +4746,10 @@ impl CampaignSim {
         let nh = self.houses.len();
         let mut used_sea = vec![0i32; nh];
         let mut used_land = vec![0i32; nh];
-        for c in &self.in_transit {
-            if c.owner >= 0 {
-                let oi = c.owner as usize;
-                if oi < nh { if c.sea { used_sea[oi] += 1; } else { used_land[oi] += 1; } }
-            }
+        for oi in 0..nh {
+            let b = self.in_transit.busy(oi);
+            used_sea[oi] = b.sea;
+            used_land[oi] = b.land;
         }
         let mut out = Vec::with_capacity(nh);
         for hi in 0..nh {

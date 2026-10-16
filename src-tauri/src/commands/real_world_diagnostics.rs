@@ -427,8 +427,11 @@ async fn measure_full_size_campaign() {
         let s = ty.elapsed().as_secs_f64();
         worst_s = worst_s.max(s);
         if y % 2 == 0 || y == 1 {
-            let in_transit = { let c = state.conn.lock().unwrap(); get_sim(&state, &c).unwrap().map_or(0, |s| s.in_transit.len()) };
-            println!("[measure] year {y:>3}: {s:6.1} s/yr, now {:6.0} MB, peak {:6.0} MB, in_transit {in_transit}", now_rss_mb(), peak_rss_mb());
+            // The fingerprint is how a performance-only edit proves it is bit-identical
+            // on a real full-size world, not just on the synthetic bench (CLAUDE.md §5.5).
+            let (in_transit, fp) = { let c = state.conn.lock().unwrap(); get_sim(&state, &c).unwrap()
+                .map_or((0, 0), |s| (s.in_transit.len(), crate::sim::tick::tests::sim_fingerprint(&s))) };
+            println!("[measure] year {y:>3}: {s:6.1} s/yr, now {:6.0} MB, peak {:6.0} MB, in_transit {in_transit}, fingerprint {fp:016x}", now_rss_mb(), peak_rss_mb());
         }
     }
     let peak = peak_rss_mb();

@@ -5266,8 +5266,10 @@ pub struct TradeCur {
     /// `TickHub.river` hubs) — the rest, `amount - sea_amount - river_amount`,
     /// went by caravan. See `RecentTrade.river`'s own doc comment.
     #[serde(default)] pub river_amount: f32,
-    /// house index (u32::MAX = no named owner) → volume carried.
-    pub carriers: std::collections::HashMap<u32, f32>,
+    /// house index (u32::MAX = no named owner) → volume carried. A short list,
+    /// not a map: nearly every flow has one or two carriers, and a heap map per
+    /// flow was most of `log_trade`'s cost (cache misses, SCOREBOARD 2026-10-16b).
+    pub carriers: Vec<(u32, f32)>,
 }
 
 /// One relayed through-route, end to end, for the last completed year.
@@ -7852,7 +7854,8 @@ pub struct CampaignSim {
     pub tick: u32,
     pub goods: Vec<TickGood>,
     pub hubs: Vec<TickHub>,
-    pub in_transit: Vec<InTransit>,
+    /// Cargo in flight, filed by arrival day (`transit.rs`).
+    pub in_transit: TransitBook,
     pub houses: Vec<House>,
     pub active_events: Vec<ActiveEvent>,
     pub journal: Vec<JournalEntry>,
@@ -8135,13 +8138,15 @@ pub struct CampaignSim {
     #[serde(default)]
     pub contracts: Vec<Contract>,
     /// THIS year's trade-flow accumulator for the settlement Flows subtab, keyed by
-    /// (hub, good, partner, dir, season — 0..3, the calendar quarter `log_trade` was
-    /// called in). In-memory only (`skip`) — a mid-year save/reload loses just the
+    /// (from, to, good, season — 0..3, the calendar quarter `log_trade` was called
+    /// in). Each shipment is stored ONCE; `fold_trade_year` expands it into the
+    /// inbound row at `to` and the outbound row at `from`, which always held the
+    /// identical sums. In-memory only (`skip`) — a mid-year save/reload loses just the
     /// partial current year; completed years live in `trade_last`/`trade_last_
     /// season`/`trade_hist`. Observability only; never feeds back into the
     /// simulation, so it has no bearing on determinism.
     #[serde(skip)]
-    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8, u8), TradeCur>,
+    pub trade_cur: std::collections::HashMap<(u32, u32, u32, u8), TradeCur>,
     /// Per-hub trade DOMINATOR (house index, −1 = none), recomputed monthly from
     /// `House.influence`. Derived → not serialized. Drives the dominance trade edge.
     #[serde(skip)]
@@ -8166,6 +8171,10 @@ pub struct CampaignSim {
     /// instead of either a teleport or an orphaned first leg. Observability only.
     #[serde(skip)]
     pub relay_cur: std::collections::HashMap<(u32, u32, u32), (f32, u32)>,
+    /// `staging_hop` answers for today, keyed by (from, to): (tick, hub count, map).
+    /// Everything `staging_hop` reads is fixed within a day, so this is exact.
+    #[serde(skip)]
+    pub stage_memo: (u32, usize, std::collections::HashMap<(u32, u32), i32>),
     /// The last completed year's relayed shipments (see `relay_cur`).
     #[serde(default)]
     pub relay_last: Vec<RelayAgg>,
@@ -11009,16 +11018,10 @@ impl CampaignSim {
             // short haul; `via` (TRADE_STAGING_AND_POSTS_PLAN.md slice 4) names a
             // REAL destination beyond this arrival when the leg that just landed was
             // only the first hop of a composed entrepôt route.
-            let mut landed: Vec<(usize, usize, f32, bool, u8, i32, i32, bool, i32, f32, u8, f32)> = Vec::new();
-            self.in_transit.retain(|c| {
-                if c.eta_tick <= tick {
-                    landed.push((c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price, c.hops, c.origin_km));
-                    false
-                } else {
-                    true
-                }
-            });
-            for (to, g, amt, sea, phase, home, owner, local, via, price, hops, origin_km) in landed {
+            let landed = self.in_transit.take_due(tick);
+            for c in landed {
+                let (to, g, amt, sea, phase, home, owner, local, via, price, hops, origin_km) =
+                    (c.to as usize, c.good, c.amount, c.sea, c.phase, c.home, c.owner, c.local, c.via, c.price, c.hops, c.origin_km);
                 // TRADE_STAGING_AND_POSTS_PLAN.md slice 4 — a leg composed through
                 // an entrepôt outlet (`via >= 0`) does NOT take delivery here: the
                 // buyer at the real destination already settled this trade at
@@ -11052,7 +11055,7 @@ impl CampaignSim {
                         self.hubs[to].coastal && self.hubs[b].coastal,
                         self.ship_leg_max_km, self.caravan_leg_max_km,
                     ) {
-                        self.staging_hop(to, b, self.ship_leg_max_km, self.caravan_leg_max_km)
+                        self.staged_stop(to, b)
                     } else { None };
                     // No stop available for a still-over-range leg means the last
                     // stretch is run as one long haul rather than stranding the
@@ -12019,6 +12022,8 @@ impl CampaignSim {
 
 // ── impl CampaignSim split across theme modules (methods live in child files) ──
 mod money;
+pub mod transit;
+pub use transit::TransitBook;
 mod war;
 mod disease;
 mod colonies;
@@ -12259,7 +12264,7 @@ pub fn merchant_pops(h: &TickHub) -> (f32, f32, f32) {
 }
 
 #[cfg(test)]
-mod tests;
+pub(crate) mod tests;
 
 /// The economy fidelity gate — the campaign's counterpart to the Earth climate
 /// scorecard. See `economy_validation.rs` for the method and the sources.

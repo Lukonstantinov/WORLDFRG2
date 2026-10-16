@@ -1453,6 +1453,22 @@ impl CampaignSim {
         best.map(|(p, _)| p)
     }
 
+    /// `staging_hop` at the sim's own range caps, cached for the day (`stage_memo`).
+    pub(crate) fn staged_stop(&mut self, a: usize, b: usize) -> Option<usize> {
+        let (tick, n) = (self.tick, self.hubs.len());
+        if self.stage_memo.0 != tick || self.stage_memo.1 != n {
+            self.stage_memo.0 = tick;
+            self.stage_memo.1 = n;
+            self.stage_memo.2.clear();
+        }
+        if let Some(&p) = self.stage_memo.2.get(&(a as u32, b as u32)) {
+            return if p >= 0 { Some(p as usize) } else { None };
+        }
+        let p = self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km);
+        self.stage_memo.2.insert((a as u32, b as u32), p.map_or(-1, |p| p as i32));
+        p
+    }
+
     /// Arbitrage one round: each surplus hub ships toward the best reachable
     /// deficit hubs, creating in-transit cargo with an ETA. Bounded per hub.
     pub(crate) fn dispatch(&mut self, needs: &[Vec<f32>]) {
@@ -1542,13 +1558,12 @@ impl CampaignSim {
             cap_sea[i] = h.fleet_sea as i32;
             cap_land[i] = (h.fleet_river + h.fleet_caravan) as i32;
         }
-        for c in &self.in_transit {
-            // Contract deliveries are covered by the standing reservation below — don't
-            // subtract them here too, or the same ship is counted busy twice.
-            if c.owner >= 0 && !c.contract {
-                let oi = c.owner as usize;
-                if oi < nh { if c.sea { cap_sea[oi] -= 1; } else { cap_land[oi] -= 1; } }
-            }
+        // Contract deliveries are covered by the standing reservation below — the
+        // running `*_spot` counters leave them out, or the same ship is counted busy twice.
+        for oi in 0..nh {
+            let b = self.in_transit.busy(oi);
+            cap_sea[oi] -= b.sea_spot;
+            cap_land[oi] -= b.land_spot;
         }
         // Futures contracts reserve dedicated vessels up front: hold back the ships /
         // caravans each ACTIVE contract needs for its monthly delivery, so opportunistic
@@ -1931,7 +1946,7 @@ impl CampaignSim {
                         && hash01(self.seed, (tick as u64) ^ 0xB10CADE ^ ((a as u64) << 8) ^ (b as u64), g as u64)
                             < BLOCKADE_STAGING_DOSE
                     {
-                        if let Some(p) = self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                        if let Some(p) = self.staged_stop(a, b) {
                             staged = p as i32;
                             self.diag_relay_staged += 1;
                             // Chronicle ONCE per war, on the first shipment actually
@@ -1970,7 +1985,7 @@ impl CampaignSim {
                         // reachable stop at all is refused, the same "genuinely cannot
                         // happen" case N1c reserves refusal for.
                         if days > self.local_haul_bind_days {
-                            match self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                            match self.staged_stop(a, b) {
                                 Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
                                 None => {
                                     self.diag_why_no_carrier_bind += 1;
@@ -1990,7 +2005,7 @@ impl CampaignSim {
                     // ownerless-only version was the thing that broke the
                     // inheritance gate. Dead code at INFINITY.
                     if staged < 0 && Self::leg_exceeds_range(self.hub_km(a, b), sea, self.ship_leg_max_km, self.caravan_leg_max_km) {
-                        match self.staging_hop(a, b, self.ship_leg_max_km, self.caravan_leg_max_km) {
+                        match self.staged_stop(a, b) {
                             Some(p) => { staged = p as i32; self.diag_relay_staged += 1; }
                             // NO STOP EXISTS — and the cargo still sails. This is
                             // the design's single most important line, and getting
@@ -3030,12 +3045,13 @@ impl CampaignSim {
             // annual `trade_last`. Kept as a SEPARATE accumulator key so the annual
             // fold (summed back across all 4 quarters) stays bit-identical.
             let season = (((self.tick % 365) / 91) as u8).min(3);
-            for key in [(to, g, from, 0u8, season), (from, g, to, 1u8, season)] {
-                let e = self.trade_cur.entry(key).or_default();
-                e.amount += amount;
-                if sea { e.sea_amount += amount; }
-                else if river { e.river_amount += amount; }
-                *e.carriers.entry(carrier).or_insert(0.0) += amount;
+            let e = self.trade_cur.entry((from, to, g, season)).or_default();
+            e.amount += amount;
+            if sea { e.sea_amount += amount; }
+            else if river { e.river_amount += amount; }
+            match e.carriers.iter_mut().find(|c| c.0 == carrier) {
+                Some(c) => c.1 += amount,
+                None => e.carriers.push((carrier, amount)),
             }
         }
     }
@@ -3046,18 +3062,23 @@ impl CampaignSim {
     /// trend history (goods that DIDN'T trade get a 0, so a fallen trade shows its
     /// decline), then clear the accumulator for the new year.
     pub(crate) fn fold_trade_year(&mut self) {
-        fn sorted_carriers(carriers: &std::collections::HashMap<u32, f32>) -> Vec<(u32, f32)> {
+        fn sorted_carriers(carriers: &[(u32, f32)]) -> Vec<(u32, f32)> {
             // Carriers, largest first, so the panel's "who supplies this" reads
             // in order without re-sorting; ties break on the index so the fold
             // stays deterministic.
-            let mut v: Vec<(u32, f32)> = carriers.iter().map(|(&k, &v)| (k, v)).collect();
+            let mut v: Vec<(u32, f32)> = carriers.to_vec();
             v.sort_by(|a, b| b.1.partial_cmp(&a.1)
                 .unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
             v
         }
         // The real per-quarter breakdown, straight from the season-keyed accumulator.
-        let mut last_season: Vec<TradeFlowAgg> = self.trade_cur.iter()
-            .map(|(&(hub, good, partner, dir, season), cur)| TradeFlowAgg {
+        // Each stored flow is the inbound row at `to` AND the outbound row at `from`.
+        let rows: Vec<((u32, u32, u32, u8, u8), &TradeCur)> = self.trade_cur.iter()
+            .flat_map(|(&(from, to, good, season), cur)|
+                [((to, good, from, 0u8, season), cur), ((from, good, to, 1u8, season), cur)])
+            .collect();
+        let mut last_season: Vec<TradeFlowAgg> = rows.iter()
+            .map(|&((hub, good, partner, dir, season), cur)| TradeFlowAgg {
                 hub, good, partner, dir, season,
                 amount: cur.amount, sea_amount: cur.sea_amount, river_amount: cur.river_amount,
                 carriers: sorted_carriers(&cur.carriers),
@@ -3073,18 +3094,21 @@ impl CampaignSim {
         // process, so summing in map order would make every downstream figure
         // (and the whole economy's trajectory, over enough years) reproducible
         // only by accident. `econ_scorecard_is_deterministic` caught exactly this.
-        let mut cur_sorted: Vec<(&(u32, u32, u32, u8, u8), &TradeCur)> = self.trade_cur.iter().collect();
-        cur_sorted.sort_by_key(|(k, _)| **k);
+        let mut cur_sorted = rows;
+        cur_sorted.sort_by_key(|(k, _)| *k);
         let mut annual: std::collections::HashMap<(u32, u32, u32, u8), TradeCur> = std::collections::HashMap::new();
-        for (&(hub, good, partner, dir, _season), cur) in cur_sorted {
+        for ((hub, good, partner, dir, _season), cur) in cur_sorted {
             let e = annual.entry((hub, good, partner, dir)).or_default();
             e.amount += cur.amount;
             e.sea_amount += cur.sea_amount;
             e.river_amount += cur.river_amount;
-            let mut carriers_sorted: Vec<(&u32, &f32)> = cur.carriers.iter().collect();
-            carriers_sorted.sort_by_key(|(k, _)| **k);
-            for (&carrier, &amt) in carriers_sorted {
-                *e.carriers.entry(carrier).or_insert(0.0) += amt;
+            let mut carriers_sorted = cur.carriers.clone();
+            carriers_sorted.sort_by_key(|c| c.0);
+            for (carrier, amt) in carriers_sorted {
+                match e.carriers.iter_mut().find(|c| c.0 == carrier) {
+                    Some(c) => c.1 += amt,
+                    None => e.carriers.push((carrier, amt)),
+                }
             }
         }
         let mut last: Vec<TradeFlowAgg> = annual.iter()

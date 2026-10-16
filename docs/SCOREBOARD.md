@@ -9,6 +9,35 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-10-16b — Carriage data redesigned: arrival calendar, single-entry trade log, per-day route cache (bit-identical)
+
+Same harness (`measure_full_size_campaign`, cached 3600×1800 mock world, release,
+`WF2_PROFILE=1`), which now prints `sim_fingerprint` every other year. **Every
+fingerprint matched the pre-change run** (yr 1 `10312fa4fef2bba7`, yr 2
+`7df5c345ec022d51`), so all three changes are storage changes, not behaviour changes.
+
+| Change | What it removed |
+|---|---|
+| `TransitBook` (`tick/transit.rs`): cargo filed by arrival day + running per-house busy-vessel counters | the daily `retain` over ~800k cargoes and the two daily busy-vessel recounts (`fulfill_contracts`, `dispatch`) |
+| `trade_cur` keyed once per flow `(from, to, good, season)`, carriers as a short list | a second map entry per shipment (the inbound and outbound rows held identical sums) and one heap `HashMap` per flow |
+| `stage_memo`: `staging_hop` answers cached for the day | re-routing the same lane for every good and every relay cargo that day |
+
+**Measured, same seed (s per simulated year):**
+
+| Year | before | after | arrive | trade |
+|---|---|---|---|---|
+| 1 | 16.9 | 13.0 | 4.6 → 2.6 s | 8.5 → 7.2 s |
+| 2 | 23.0 | 17.6 | 7.2 → 4.0 s | 10.1 → 8.5 s |
+
+12 years after the change: **17-20 s/yr, flat** once houses exist (yr 6: 619
+houses, 2,747 warehouses; yr 12: 698 houses, 4,081 warehouses, 944k in flight); peak
+2,271 MB (budget 3,072). 200 years ≈ 65-70 min. Year-1 volume: 5.7 M shipments,
+4.6 M relay hops, 9.6 M landings. Where the rest goes (yr 12): trade ~9.5 s (ranking
+scan ~4 s, staging checks 1.8 s, trade log 1.8 s, cargo filing 0.8 s), pre-trade
+consumption/prices ~3.2 s, arrivals ~3.9 s (relay hops ~6 M/yr). Note: this
+session's pre-change baseline (16.9 s yr 1) is well below the 37.8-40.6 s recorded
+above on the same harness, so compare within a dated entry, not across them.
+
 ## 2026-10-16 — Phase 2 follow-up: where the memory and the time actually go (full-size, measured)
 
 Same harness, now on a CACHED mock world (`load_or_build_world`: generated once to

@@ -1518,6 +1518,20 @@ cheap per-tick `Instant`s like the original four, not per-shipment counters.
 shipment and relay hop (−15% of a year). FxHash on the trade-flow maps was measured
 and REVERTED (no gain beyond noise: cache misses, not hashing).
 
+**2026-10-16b — the carriage data, restructured (SCOREBOARD 2026-10-16b, bit-identical).**
+Three daily costs scaled with the STOCK of cargo in flight (~800k) rather than the
+day's flow; all three are gone, and the full-size harness's per-year `sim_fingerprint`
+proves nothing moved. (1) `in_transit` is a `TransitBook` (`tick/transit.rs`): cargo
+filed by `eta_tick`, landed with `take_due(tick)` (same order the old `retain` gave),
+plus running per-house busy-vessel counters (`busy(oi)`: all owned / owned non-contract,
+sea and land) in place of three full scans. It serialises as the same flat list, and
+`for c in &sim.in_transit` still works — **push through `in_transit.push`, never
+rebuild the list by hand, or the counters drift.** (2) `trade_cur` stores each flow
+ONCE, keyed `(from, to, good, season)`, carriers as a short `Vec`; `fold_trade_year`
+expands it into the inbound and outbound rows, which always held identical sums.
+(3) `staged_stop(a, b)` caches `staging_hop` for the day (`stage_memo`) — everything it
+reads is fixed within a tick. Result: 17-20 s per simulated year, flat through year 12.
+
 Gates run: `cargo check --lib --tests`, `cargo test --lib tick::tests`
 (261/261, `simulate_decades_reports_dynamics` unchanged — sustained richest
 486401 over 50y, identical to the pre-optimisation run), `cargo test --lib
@@ -2930,7 +2944,9 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   cultural caps + theft/looting (§5.12); venues.rs =
                                   row 08, leisure families + venues + games (§5.13);
                                   hordes.rs = row 09 Part D, barbarians/hordes (§5.14);
-                                  schism.rs = Phase 4.1,
+                                  transit.rs = the ARRIVAL CALENDAR (`TransitBook`:
+                                  cargo in flight by arrival day + busy-vessel
+                                  counters, §5.5); schism.rs = Phase 4.1,
                                   Quarrel/Departure (a simplified `tension` proxy,
                                   monthly; Rupture deferred); foreign_hand.rs = Phase
                                   4.4, the two-channel rival-leverage loyalty decay —

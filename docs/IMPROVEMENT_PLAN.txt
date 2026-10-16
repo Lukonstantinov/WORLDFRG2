@@ -104,7 +104,7 @@ Phase 2 - Measure  (I-5, I-6)
 - [~] Profiled 3600x1800 to year 12 (owner stopped it: enough evidence). Harness: real_world_diagnostics::measure_full_size_campaign on a cached mock world. Peak ~2.2-2.4 GB after fixes; 40-60 s per simulated year. Owner target: 200 years — speed is now the blocker, not memory.
 - [x] SCOREBOARD 2026-10-15 + 2026-10-16.
 - [x] Growth found: transient whole-sim copies in advance_resilient (3 -> 2 copies) + autosave as one giant String (now streamed). Steady memory is not climbing. Claim 4 stands.
-- [ ] Speed for 200 years: dispatch (~20 s/yr), relay hops (~7 M/yr), daily in_transit sweep. recent_trades ring buffer shipped (-15%); FxHash tried and reverted (negative result).
+- [~] Speed for 200 years: recent_trades ring buffer shipped (-15%); FxHash tried and reverted (negative result). 2026-10-16b: carriage data restructured, bit-identical (arrival calendar tick/transit.rs, single-entry trade log, per-day route cache) -> 17-20 s per simulated year, flat through year 12, i.e. ~65-70 min for 200 years (SCOREBOARD 2026-10-16b). OPEN (owner): is ~1 hour for 200 years acceptable? Next costs if not: dispatch ranking scan (~4 s/yr), pre-trade consumption/prices (~3 s/yr), relay hops (~6 M/yr, a carriage-design question).
 
 Phase 3 - Decide the product  (I-7)
 - [x] One app, map first (owner, 2026-10-15). Recorded at the top of docs/TWO_APPS_AND_FILE_UPLOAD_PLAN.md.

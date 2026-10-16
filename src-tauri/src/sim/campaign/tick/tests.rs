@@ -61,7 +61,7 @@
 
     pub(super) fn sim(hubs: Vec<TickHub>, goods: Vec<TickGood>) -> CampaignSim {
         let mut s = CampaignSim {
-            seed: 42, tick: 0, goods, hubs, in_transit: vec![], houses: vec![],
+            seed: 42, tick: 0, goods, hubs, in_transit: Default::default(), houses: vec![],
             active_events: vec![], journal: vec![], days_per_cell: 0.2, freight_per_day: 0.01,
             k: 0.6, margin: 0.05, need_scale: 1.0, world_w: 100.0, world_h: 100.0, last_tick_ms: 0.0,
             last_month_pop: 0.0, last_month_index: 0.0, seed_house_count: 0,
@@ -111,6 +111,7 @@
             trade_last: vec![],
             trade_last_season: vec![],
             relay_cur: Default::default(),
+            stage_memo: Default::default(),
             relay_last: vec![],
             trade_hist: vec![],
             figures: vec![],
@@ -3308,7 +3309,7 @@
     /// float sum would hide exactly the last-ulp drift this exists to catch,
     /// and in a FIXED index order (hubs, then goods, then houses) so it never
     /// depends on iteration or thread scheduling.
-    pub(super) fn sim_fingerprint(s: &CampaignSim) -> u64 {
+    pub(crate) fn sim_fingerprint(s: &CampaignSim) -> u64 {
         let mut acc: u64 = 0xcbf2_9ce4_8422_2325;
         let mut mix = |v: u64| {
             acc ^= v;

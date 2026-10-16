@@ -928,7 +928,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         tick: 0,
         goods,
         hubs,
-        in_transit: vec![],
+        in_transit: Default::default(),
         houses,
         active_events: vec![],
         journal: vec![JournalEntry {
@@ -1029,6 +1029,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         trade_last: vec![],
         trade_last_season: vec![],
         relay_cur: Default::default(),
+        stage_memo: Default::default(),
         relay_last: vec![],
         trade_hist: vec![],
         figures: vec![],
