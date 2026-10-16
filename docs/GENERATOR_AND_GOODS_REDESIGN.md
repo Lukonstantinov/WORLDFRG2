@@ -695,3 +695,21 @@ not observed user behaviour.
    "monster-guarded", "cursed")? Still open from round 1.
 10. **Merge the duplicate goods** (gemstones vs individual gems, salt vs bay salt, spices vs
     pepper/cloves, incense vs frankincense, ceramics placed vs crafted)? Still open from round 1.
+
+---
+
+## 12. Owner decisions, round 2 (2026-10-17)
+
+| # | Topic | Decision |
+|---|---|---|
+| 1 | 6 stages + Report | **Accepted.** |
+| 2 | Layers / goods defaults | "By default enable all, but add the ability to create your own roster, good icon and good generator." Clarification pending (§13 Q1). |
+| 3 | Clean default / realms in view | **Parked.** Realm logic is to be investigated in depth later; no decision on campaign defaults yet. |
+| 4 | Cultural valuations | **Both:** a sensible default is derived, and the author can set any culture by hand. |
+| 5 | Reach grows in campaign (crop spread, stolen secrets) | **Yes.** |
+| 6 | Deposit discovery | **Nearby towns, and over time as a city explores deeper into its province, finding new and DEEPER deposits as its mining technology allows.** Deposits already carry `depth` and `depth_workability` (`deposits.rs:83-287`), so depth tiers have real data behind them. |
+| 7 | Planet size | **A setting; default Earth-like.** |
+| 8 | Borders at year 0 | **Yes: People generates starting borders.** |
+| 9 | Fantasy genes | **The six properties are enough.** Fantasy goods are parked. |
+| 10 | Merge duplicate goods | **Yes, but keep the quality factor.** A merged family (e.g. Gems) keeps each member's own grade/terroir and its own deposits; the family only shares demand and substitution. Merging never flattens quality. |
+| 11 | Mock-ups | **HTML mock-ups are allowed for this project** (an exception to CLAUDE.md §2.2). They must look good and be iterated. |
