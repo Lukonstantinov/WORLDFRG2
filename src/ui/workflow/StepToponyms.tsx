@@ -124,16 +124,16 @@ export function StepToponyms() {
           </div>
 
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#7a98b8", fontSize: 10, cursor: "pointer" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, color: "#b3a07f", fontSize: 10, cursor: "pointer" }}>
               <input type="checkbox" defaultChecked onChange={(e) => setOverlayVisible("toponyms", e.target.checked)}
-                style={{ accentColor: "#3a80c0" }} />
+                style={{ accentColor: "#a58855" }} />
               labels
             </label>
             <button onClick={() => setShowVisibilityPanel((v) => !v)}
               style={{
                 marginLeft: "auto", fontSize: 10, padding: "2px 6px", borderRadius: 4, cursor: "pointer",
-                border: "1px solid #1e2e42", background: showVisibilityPanel ? "#19324a" : "#0c1622",
-                color: showVisibilityPanel ? "#cfe2f6" : "#7a98b8",
+                border: "1px solid #3e3422", background: showVisibilityPanel ? "#413622" : "#1e1910",
+                color: showVisibilityPanel ? "#cfe2f6" : "#b3a07f",
               }}>
               {showVisibilityPanel ? "Hide which show ▲" : "Which show on map ▼"}
             </button>
@@ -145,15 +145,15 @@ export function StepToponyms() {
           {showVisibilityPanel && (
             <div style={{
               display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 8px",
-              padding: "6px 8px", background: "#0c1622", border: "1px solid #1e2e42", borderRadius: 4,
+              padding: "6px 8px", background: "#1e1910", border: "1px solid #3e3422", borderRadius: 4,
             }}>
               {VISIBILITY_KINDS.map(({ kind, key, label }) => (
-                <label key={key} style={{ display: "flex", alignItems: "center", gap: 5, color: "#8aa0b8", fontSize: 10.5, cursor: "pointer" }}>
+                <label key={key} style={{ display: "flex", alignItems: "center", gap: 5, color: "#b5a68d", fontSize: 10.5, cursor: "pointer" }}>
                   <input
                     type="checkbox"
                     checked={overlayVisibility[key] !== false}
                     onChange={() => toggleOverlay(key)}
-                    style={{ accentColor: "#3a80c0" }}
+                    style={{ accentColor: "#a58855" }}
                   />
                   <span>{KIND_ICON[kind]} {label}{counts[kind] ? ` (${counts[kind]})` : ""}</span>
                 </label>
@@ -172,7 +172,7 @@ export function StepToponyms() {
 
           <button onClick={persist} disabled={!dirty} style={{
             ...genBtn, textAlign: "center",
-            background: dirty ? "#1a4a5a" : "#151d28", color: dirty ? "#a0d0e0" : "#506070",
+            background: dirty ? "#4d3f27" : "#262017", color: dirty ? "#dbc7a5" : "#6c6354",
           }}>
             {dirty ? "Save renamed places" : "Saved"}
           </button>
@@ -186,13 +186,13 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   return (
     <button onClick={onClick} style={{
       padding: "2px 7px", borderRadius: 10, fontSize: 10, cursor: "pointer",
-      border: `1px solid ${on ? "#3a80c0" : "#1e2e42"}`,
-      background: on ? "#19324a" : "#0c1622", color: on ? "#cfe2f6" : "#7a98b8",
+      border: `1px solid ${on ? "#a58855" : "#3e3422"}`,
+      background: on ? "#413622" : "#1e1910", color: on ? "#cfe2f6" : "#b3a07f",
     }}>{children}</button>
   );
 }
 
 const nameInput: React.CSSProperties = {
-  flex: 1, background: "#080c12", border: "1px solid #1e2e42", color: "#cfe0f4",
+  flex: 1, background: "#110e09", border: "1px solid #3e3422", color: "#cfe0f4",
   padding: "2px 5px", borderRadius: 4, fontSize: 11, minWidth: 0,
 };

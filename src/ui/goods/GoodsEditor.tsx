@@ -25,20 +25,20 @@ const panel: React.CSSProperties = {
 };
 const sheet: React.CSSProperties = {
   width: "min(880px, 94vw)", maxHeight: "88vh", overflow: "auto",
-  background: "#161b22", border: "1px solid #2c3442", borderRadius: 8,
-  padding: 14, color: "#cfd8e3", fontSize: 12,
+  background: "#201d18", border: "1px solid #3f392f", borderRadius: 8,
+  padding: 14, color: "#e2dbd0", fontSize: 12,
 };
 const btn: React.CSSProperties = {
-  background: "#222b38", color: "#cfd8e3", border: "1px solid #36425a",
+  background: "#352f25", color: "#e2dbd0", border: "1px solid #564c3b",
   borderRadius: 4, padding: "4px 9px", cursor: "pointer", fontSize: 11,
 };
-const primaryBtn: React.CSSProperties = { ...btn, background: "#2d5fa8", borderColor: "#3f74c0", color: "#fff" };
+const primaryBtn: React.CSSProperties = { ...btn, background: "#8d7448", borderColor: "#a88a57", color: "#fff" };
 const row: React.CSSProperties = {
   display: "grid", gridTemplateColumns: "20px 22px 1.4fr 0.9fr 0.9fr 1fr 1fr 60px 56px",
-  gap: 6, alignItems: "center", padding: "4px 0", borderBottom: "1px solid #232b36",
+  gap: 6, alignItems: "center", padding: "4px 0", borderBottom: "1px solid #342e25",
 };
 const input: React.CSSProperties = {
-  background: "#0e1218", color: "#cfd8e3", border: "1px solid #2c3442", borderRadius: 3,
+  background: "#17140f", color: "#e2dbd0", border: "1px solid #3f392f", borderRadius: 3,
   padding: "2px 4px", fontSize: 11, width: "100%",
 };
 
@@ -93,7 +93,7 @@ export function GoodsEditor() {
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <strong style={{ fontSize: 14 }}>Trade Goods Library</strong>
-          <span style={{ color: "#7a8aa0" }}>
+          <span style={{ color: "#9d917d" }}>
             {enabledCount} enabled · {specs.length} total{dirty ? " · unsaved" : ""}
           </span>
         </div>
@@ -110,7 +110,7 @@ export function GoodsEditor() {
           <button style={btn} onClick={() => setOpen(false)}>Close</button>
         </div>
 
-        <div style={{ ...row, fontWeight: 600, color: "#8aa0b8", borderBottom: "1px solid #36425a" }}>
+        <div style={{ ...row, fontWeight: 600, color: "#b5a68d", borderBottom: "1px solid #564c3b" }}>
           <span>On</span><span></span><span>Name</span><span>Domain</span><span>Dist.</span>
           <span>Rarity</span><span>Desire</span><span>Lux</span><span></span>
         </div>
@@ -123,8 +123,8 @@ export function GoodsEditor() {
           />
         ))}
 
-        <div style={{ marginTop: 8, color: "#7a8aa0", minHeight: 16 }}>{status}</div>
-        <div style={{ marginTop: 4, color: "#5a6a80", fontSize: 10 }}>
+        <div style={{ marginTop: 8, color: "#9d917d", minHeight: 16 }}>{status}</div>
+        <div style={{ marginTop: 4, color: "#7b715f", fontSize: 10 }}>
           Apply to world, then re-run the Biological-Trade step to regenerate goods with these settings.
           Built-in goods keep their original scoring unless duplicated into a custom good.
         </div>
@@ -160,7 +160,7 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
         </div>
       </div>
       {expanded && (
-        <div style={{ padding: "8px 6px 12px 28px", borderBottom: "1px solid #232b36", display: "flex", flexWrap: "wrap", gap: 14 }}>
+        <div style={{ padding: "8px 6px 12px 28px", borderBottom: "1px solid #342e25", display: "flex", flexWrap: "wrap", gap: 14 }}>
           <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
             Icon <input style={{ ...input, width: 50 }} value={g.icon} onChange={(e) => update(i, { icon: e.target.value })} />
           </label>
@@ -200,7 +200,7 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
           {manufactured
             ? <RecipeEditor i={i} g={g} allSpecs={allSpecs} update={update} />
             : g.builtin
-              ? <span style={{ color: "#7a8aa0", flexBasis: "100%" }}>Built-in scoring (duplicate to customize its climate/temperature envelope).</span>
+              ? <span style={{ color: "#9d917d", flexBasis: "100%" }}>Built-in scoring (duplicate to customize its climate/temperature envelope).</span>
               : <EnvelopeEditor i={i} env={g.scoring ?? null} update={update} />}
           {!manufactured && <PreviewCanvas spec={g} />}
         </div>
@@ -232,19 +232,19 @@ function RecipeEditor({ i, g, allSpecs, update }: {
 
   return (
     <div style={{ flexBasis: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
-      <div style={{ color: "#8aa0b8" }}>
-        Recipe — made in cities from these raws (no map belt). <span style={{ color: "#7a8aa0" }}>{summary}</span>
+      <div style={{ color: "#b5a68d" }}>
+        Recipe — made in cities from these raws (no map belt). <span style={{ color: "#9d917d" }}>{summary}</span>
       </div>
       {inputs.map((inp, k) => {
         const prob = problem(inp);
         return (
           <div key={k} style={{ display: "flex", gap: 6, alignItems: "center" }}>
-            <select style={{ ...input, width: 180, borderColor: prob ? "#c06060" : "#2c3442" }} value={inp.good}
+            <select style={{ ...input, width: 180, borderColor: prob ? "#c06060" : "#3f392f" }} value={inp.good}
               onChange={(e) => setInputs(inputs.map((x, j) => j === k ? { ...x, good: e.target.value } : x))}>
               {!byId.has(inp.good) && <option value={inp.good}>{inp.good} (?)</option>}
               {options.map((s) => <option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
             </select>
-            <span style={{ color: "#7a8aa0" }}>×</span>
+            <span style={{ color: "#9d917d" }}>×</span>
             <input type="number" min={0} step={0.1} style={{ ...input, width: 56 }} value={inp.qty}
               onChange={(e) => setInputs(inputs.map((x, j) => j === k ? { ...x, qty: Math.max(0, Number(e.target.value) || 0) } : x))} />
             {prob && <span style={{ color: "#e08080", fontSize: 10 }}>{prob}</span>}
@@ -254,7 +254,7 @@ function RecipeEditor({ i, g, allSpecs, update }: {
       })}
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
         <button style={btn} onClick={() => setInputs([...inputs, { good: options[0]?.id ?? "", qty: 1 }])}>+ Add input</button>
-        <label style={{ display: "flex", gap: 6, alignItems: "center", color: "#8aa0b8" }} title="Output rate ∝ city population × this. Higher = a major manufacturing centre.">
+        <label style={{ display: "flex", gap: 6, alignItems: "center", color: "#b5a68d" }} title="Output rate ∝ city population × this. Higher = a major manufacturing centre.">
           Labor {num(g.labor ?? 1)}
           <input type="range" min={0.2} max={3} step={0.1} value={g.labor ?? 1}
             onChange={(e) => update(i, { labor: parseFloat(e.target.value) })} />
@@ -282,13 +282,13 @@ function EnvelopeEditor({ i, env, update }: {
   return (
     <div style={{ flexBasis: "100%", display: "flex", flexDirection: "column", gap: 6 }}>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-        <span style={{ color: "#8aa0b8", alignSelf: "center" }}>Climate:</span>
+        <span style={{ color: "#b5a68d", alignSelf: "center" }}>Climate:</span>
         {CLIMATE_PRESETS.map((p) => (
           <button key={p.label}
-            style={{ ...btn, background: presetOn(p.codes) ? "#2d5fa8" : "#222b38", padding: "2px 7px" }}
+            style={{ ...btn, background: presetOn(p.codes) ? "#8d7448" : "#352f25", padding: "2px 7px" }}
             onClick={() => togglePreset(p.codes)}>{p.label}</button>
         ))}
-        <span style={{ color: "#5a6a80", alignSelf: "center" }}>(none = any climate)</span>
+        <span style={{ color: "#7b715f", alignSelf: "center" }}>(none = any climate)</span>
       </div>
       <Range label="Temp °C" lo={e.temp?.[0] ?? 18} width={e.temp?.[1] ?? 8}
         onLo={(v) => setEnv({ temp: [v, e.temp?.[1] ?? 8] })} onWidth={(v) => setEnv({ temp: [e.temp?.[0] ?? 18, v] })}
@@ -312,13 +312,13 @@ function Slider({ value, onChange }: { value: number; onChange: (v: number) => v
     <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
       <input type="range" min={0} max={1} step={0.05} value={value}
         onChange={(e) => onChange(parseFloat(e.target.value))} style={{ width: "100%" }} />
-      <span style={{ color: "#8aa0b8", width: 24, fontSize: 10 }}>{num(value)}</span>
+      <span style={{ color: "#b5a68d", width: 24, fontSize: 10 }}>{num(value)}</span>
     </div>
   );
 }
 
 function Labeled({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label style={{ display: "flex", flexDirection: "column", gap: 2, color: "#8aa0b8" }}>{label}{children}</label>;
+  return <label style={{ display: "flex", flexDirection: "column", gap: 2, color: "#b5a68d" }}>{label}{children}</label>;
 }
 
 function Range({ label, lo, width, onLo, onWidth, loMin, loMax, wMin, wMax }: {
@@ -399,12 +399,12 @@ function PreviewCanvas({ spec }: { spec: GoodSpec }) {
   }, [key]);
   return (
     <div style={{ flexBasis: "100%" }}>
-      <div style={{ fontSize: 10, color: "#7a8aa0", marginBottom: 3 }}>
+      <div style={{ fontSize: 10, color: "#9d917d", marginBottom: 3 }}>
         Suitability preview (brighter = better fit) — updates as you edit
       </div>
       <canvas ref={ref} style={{
         width: 280, height: 140, imageRendering: "pixelated",
-        border: "1px solid #2a3442", borderRadius: 4, background: "#06090d",
+        border: "1px solid #3f382d", borderRadius: 4, background: "#0c0a07",
       }} />
     </div>
   );

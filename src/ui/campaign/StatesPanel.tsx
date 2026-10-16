@@ -95,12 +95,12 @@ function RealmMiniMap({ states, focus }: { states: StateRegion[]; focus: StateRe
   return (
     <div style={{ position: "relative", marginBottom: SPACE.sm }} data-no-drag>
       <canvas ref={ref} width={336} height={140}
-        style={{ width: "100%", height: 140, borderRadius: 4, background: "#0c1420",
+        style={{ width: "100%", height: 140, borderRadius: 4, background: "#1d180f",
           border: `1px solid ${T.lineSoft}`, display: "block" }} />
       <button onClick={() => setWorldView((v) => !v)}
         title={worldView ? "Frame this realm + its neighbours" : "See this realm within the whole world"}
         style={{ position: "absolute", top: 5, right: 5, fontSize: FZ.micro, cursor: "pointer",
-          background: "rgba(10,16,26,0.82)", color: T.parchment, border: `1px solid ${T.lineSoft}`,
+          background: "rgba(24,20,12,0.82)", color: T.parchment, border: `1px solid ${T.lineSoft}`,
           borderRadius: 10, padding: "2px 8px" }}>
         {worldView ? "🔍 realm" : "🌍 world"}
       </button>

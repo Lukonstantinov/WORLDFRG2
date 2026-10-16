@@ -9,7 +9,7 @@ export type CoinMetal = "gold" | "silver" | "electrum" | "bronze";
 interface Palette { hi: string; mid: string; lo: string; edge: string; rimHi: string; rimLo: string; wear: string }
 const METALS: Record<CoinMetal, Palette> = {
   gold:     { hi: "#fdec95", mid: "#e8c452", lo: "#aa7a1b", edge: "#7a530f", rimHi: "#ffe98f", rimLo: "#6b4a0d", wear: "#3a2c0c" },
-  silver:   { hi: "#f6f8fb", mid: "#c4cdd8", lo: "#8b98a6", edge: "#5b6773", rimHi: "#fbfdff", rimLo: "#4c5661", wear: "#20262c" },
+  silver:   { hi: "#fbf9f6", mid: "#d6d0c6", lo: "#a49c8d", edge: "#70695e", rimHi: "#fbfdff", rimLo: "#5e594f", wear: "#2a2722" },
   electrum: { hi: "#f5edb8", mid: "#dcd083", lo: "#a99a4e", edge: "#736a32", rimHi: "#f8f0be", rimLo: "#645c2b", wear: "#2f2c12" },
   bronze:   { hi: "#efc196", mid: "#c07f45", lo: "#824c22", edge: "#532f14", rimHi: "#f2c99e", rimLo: "#48280f", wear: "#2a1608" },
 };

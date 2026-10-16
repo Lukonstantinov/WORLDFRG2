@@ -302,11 +302,11 @@ export function MapCanvas() {
 
     // Clear
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.fillStyle = "#080e18";
+    ctx.fillStyle = "#15110b";
     ctx.fillRect(0, 0, w, h);
 
     // Debug: draw a visible border so we know the canvas renders
-    ctx.strokeStyle = "#304060";
+    ctx.strokeStyle = "#5a4d36";
     ctx.lineWidth = 2;
     ctx.strokeRect(1, 1, w - 2, h - 2);
 
@@ -2450,7 +2450,7 @@ export function MapCanvas() {
       style={{
         width: "100%", height: "100%",
         display: "flex", alignItems: "center", justifyContent: "center",
-        background: "#080e18", overflow: "hidden",
+        background: "#15110b", overflow: "hidden",
       }}
     >
     <div
@@ -2496,9 +2496,9 @@ export function MapCanvas() {
         >
           <div style={{ position: "absolute", top: 0, bottom: 0, width: 2, background: "#cfe2f6", opacity: 0.85 }} />
           <div style={{
-            width: 14, height: 34, borderRadius: 7, background: "#0e1826",
-            border: "1px solid #4a90d0", display: "flex", alignItems: "center",
-            justifyContent: "center", color: "#9fc4e0", fontSize: 9, letterSpacing: -1,
+            width: 14, height: 34, borderRadius: 7, background: "#221c12",
+            border: "1px solid #c09b5a", display: "flex", alignItems: "center",
+            justifyContent: "center", color: "#dbc7a4", fontSize: 9, letterSpacing: -1,
           }}>◀▶</div>
         </div>
       )}
@@ -2517,7 +2517,7 @@ export function MapCanvas() {
         <div style={{
           position: "absolute", top: "50%", left: "50%",
           transform: "translate(-50%, -50%)",
-          color: "#4a6080", fontSize: 13,
+          color: "#796a51", fontSize: 13,
         }}>
           {initStatus}
         </div>

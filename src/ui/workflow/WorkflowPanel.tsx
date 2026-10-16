@@ -329,11 +329,11 @@ export function WorkflowPanel() {
 
   return (
     <div style={{
-      width: 220, background: "#0d1219", borderRight: "1px solid #1e2a38",
+      width: 220, background: "#18140e", borderRight: "1px solid #352e21",
       padding: "8px", overflowY: "auto", display: "flex", flexDirection: "column",
       gap: 4, fontSize: 12,
     }}>
-      <div style={{ color: "#3a80c0", fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
+      <div style={{ color: "#a58855", fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
         World Generation
       </div>
 
@@ -345,9 +345,9 @@ export function WorkflowPanel() {
           <button key={m} onClick={() => setWizardMode(m)}
             style={{
               flex: 1, fontSize: 10.5, padding: "3px 0", borderRadius: 4, cursor: "pointer",
-              border: `1px solid ${wizardMode === m ? "#4a90d0" : "#26374d"}`,
-              background: wizardMode === m ? "#16324a" : "#0e1826",
-              color: wizardMode === m ? "#cfe2f6" : "#6a86a6", fontWeight: wizardMode === m ? 600 : 400,
+              border: `1px solid ${wizardMode === m ? "#c09b5a" : "#483d2b"}`,
+              background: wizardMode === m ? "#3f3421" : "#221c12",
+              color: wizardMode === m ? "#cfe2f6" : "#a28f6e", fontWeight: wizardMode === m ? 600 : 400,
             }}>
             {m === "quick" ? "Quick" : "Detailed"}
           </button>
@@ -357,7 +357,7 @@ export function WorkflowPanel() {
       {/* GENERATION_UX_REDESIGN_PLAN.md Slice 5 — world presets: pick one,
           press Generate World below, get a whole world. */}
       <div style={{ opacity: frozen ? 0.5 : 1, pointerEvents: frozen ? "none" : undefined }}>
-        <div style={{ color: "#8098b0", fontSize: 10.5, marginBottom: 3 }}>Presets</div>
+        <div style={{ color: "#ac9d84", fontSize: 10.5, marginBottom: 3 }}>Presets</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
           {WORLD_PRESETS.map((p) => (
             <button key={p.id} onClick={() => applyWorldPreset(p)} disabled={presetBusy}
@@ -365,33 +365,33 @@ export function WorkflowPanel() {
               style={{
                 fontSize: 9.5, padding: "3px 2px", borderRadius: 4, cursor: presetBusy ? "wait" : "pointer",
                 textAlign: "center", lineHeight: 1.25,
-                border: `1px solid ${selectedPreset === p.id ? "#4a90d0" : "#26374d"}`,
-                background: selectedPreset === p.id ? "#16324a" : "#131c28",
-                color: selectedPreset === p.id ? "#cfe2f6" : "#8098b0",
+                border: `1px solid ${selectedPreset === p.id ? "#c09b5a" : "#483d2b"}`,
+                background: selectedPreset === p.id ? "#3f3421" : "#252016",
+                color: selectedPreset === p.id ? "#cfe2f6" : "#ac9d84",
               }}>
               {p.icon} {p.label}
             </button>
           ))}
         </div>
         {selectedPreset && (
-          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 4, lineHeight: 1.35 }}>
+          <div style={{ fontSize: 9, color: "#897a61", marginTop: 4, lineHeight: 1.35 }}>
             {WORLD_PRESETS.find((p) => p.id === selectedPreset)?.expect}
           </div>
         )}
       </div>
 
-      <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
+      <div style={{ borderTop: "1px solid #3b311f", margin: "2px 0" }} />
 
       {/* Seed & Plates */}
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        <label style={{ color: "#607090", fontSize: 11, minWidth: 30 }}>Seed</label>
+        <label style={{ color: "#8a7d66", fontSize: 11, minWidth: 30 }}>Seed</label>
         <input type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value))}
           style={inputStyle} />
         <button onClick={() => setSeed(Math.floor(Math.random() * 999999))}
           style={{ ...smallBtn, width: "auto", padding: "2px 6px" }}>New</button>
       </div>
       <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-        <label style={{ color: "#607090", fontSize: 11, minWidth: 30 }}>Plates</label>
+        <label style={{ color: "#8a7d66", fontSize: 11, minWidth: 30 }}>Plates</label>
         <input type="number" value={plateCount} min={4} max={40}
           onChange={(e) => setPlateCount(Number(e.target.value))} style={inputStyle} />
       </div>
@@ -401,28 +401,28 @@ export function WorkflowPanel() {
         title={frozen ? "World is finalized — unfreeze to regenerate geography" : undefined}
         style={{
           ...genBtn,
-          background: willUsePlates ? "#1a5a2a" : "#1a4a5a",
+          background: willUsePlates ? "#1a5a2a" : "#4d3f27",
           border: `1px solid ${willUsePlates ? "#2a7040" : "#2a6070"}`,
-          color: willUsePlates ? "#a0e0b0" : "#a0d0e0",
+          color: willUsePlates ? "#a0e0b0" : "#dbc7a5",
           fontWeight: 600, textAlign: "center", opacity: frozen ? 0.5 : 1,
         }}>
         {simRunning ? "Generating..." : "Generate World"}
       </button>
-      <div style={{ fontSize: 9.5, color: "#5a7390", lineHeight: 1.4, margin: "-1px 0 2px" }}>
+      <div style={{ fontSize: 9.5, color: "#897a61", lineHeight: 1.4, margin: "-1px 0 2px" }}>
         {willUsePlates
           ? "Generating from plates — your landmass will be regenerated."
           : "Generating from your painted landmass — your coastlines are kept."}
       </div>
       {landmassExists && landmassSource !== "plates" && (
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "#8098b0", margin: "0 0 2px" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10.5, color: "#ac9d84", margin: "0 0 2px" }}>
           <input type="checkbox" checked={regenerateLandmassToo}
             onChange={(e) => setRegenerateLandmassToo(e.target.checked)}
-            style={{ accentColor: "#4a90d0", width: 12, height: 12 }} />
+            style={{ accentColor: "#c09b5a", width: 12, height: 12 }} />
           Regenerate the landmass too (from plates)
         </label>
       )}
 
-      <div style={{ borderTop: "1px solid #1a2a40", margin: "2px 0" }} />
+      <div style={{ borderTop: "1px solid #3b311f", margin: "2px 0" }} />
 
       {/* GENERATION_UX_REDESIGN_PLAN.md Slice 9 \u2014 the Quick-mode summary:
           no 13-step list, just where the world stands and the one button
@@ -441,13 +441,13 @@ export function WorkflowPanel() {
               </button>
             </>
           ) : (
-            <div style={{ fontSize: 10.5, color: "#5a7390", lineHeight: 1.4 }}>
+            <div style={{ fontSize: 10.5, color: "#897a61", lineHeight: 1.4 }}>
               Pick a preset above (or just press Generate World) for a complete,
               playable world \u2014 settlements, trade routes and economy included.
             </div>
           )}
           <button onClick={() => setWizardMode("detailed")}
-            style={{ ...navBtn, width: "100%", marginTop: 6, background: "transparent", color: "#6a86a6" }}>
+            style={{ ...navBtn, width: "100%", marginTop: 6, background: "transparent", color: "#a28f6e" }}>
             Switch to Detailed for step-by-step control \u2192
           </button>
         </div>
@@ -471,19 +471,19 @@ export function WorkflowPanel() {
         return (
           <div key={step}>
           {step === 7 && (
-            <div style={{ borderTop: "1px solid #1a2a40", margin: "6px 0 4px", paddingTop: 6 }}>
-              <div style={{ color: "#3a80c0", fontWeight: 700, fontSize: 12, marginBottom: 3 }}>
+            <div style={{ borderTop: "1px solid #3b311f", margin: "6px 0 4px", paddingTop: 6 }}>
+              <div style={{ color: "#a58855", fontWeight: 700, fontSize: 12, marginBottom: 3 }}>
                 Settlements, Trade &amp; Economy
               </div>
-              <div style={{ color: "#506080", fontSize: 10, marginBottom: 4 }}>
+              <div style={{ color: "#7a6d56", fontSize: 10, marginBottom: 4 }}>
                 People, goods and the market \u2014 all generated here in Forge. Finalize
                 after Economy to lock the map and play the campaign in Chronicle.
               </div>
             </div>
           )}
           <div style={{
-            border: isActive ? "1px solid #1e3a58" : "1px solid transparent",
-            borderRadius: 5, background: isActive ? "#0e1824" : "transparent",
+            border: isActive ? "1px solid #4e4028" : "1px solid transparent",
+            borderRadius: 5, background: isActive ? "#211b11" : "transparent",
             padding: isActive ? "6px" : "4px 6px",
             opacity: locked ? 0.45 : 1,
           }}>
@@ -495,7 +495,7 @@ export function WorkflowPanel() {
               }}
               style={{
                 cursor: locked ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 4,
-                color: isActive ? "#c0d8f0" : isDone ? "#60a060" : "#607090",
+                color: isActive ? "#c0d8f0" : isDone ? "#60a060" : "#8a7d66",
                 fontWeight: isActive ? 600 : 400, fontSize: 12,
               }}>
               <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : locked ? "\ud83d\udd12" : step === 0 ? "\u2699\ufe0f" : `${step}.`}</span>
@@ -505,7 +505,7 @@ export function WorkflowPanel() {
             {/* Expanded content */}
             {isActive && (
               <div style={{ marginTop: 6 }}>
-                <div style={{ color: "#506080", fontSize: 11, marginBottom: 6 }}>{desc}</div>
+                <div style={{ color: "#7a6d56", fontSize: 11, marginBottom: 6 }}>{desc}</div>
 
                 {step === 0 && <StepWorldCharacteristics />}
                 {step === 1 && <StepLandmass {...stepProps} />}
@@ -533,8 +533,8 @@ export function WorkflowPanel() {
                   <div style={{ flex: 1 }} />
                   {step !== 10 && step !== 12 ? (
                     <button onClick={goNext} disabled={!canAdvance(step) || simRunning}
-                      style={{ ...navBtn, background: canAdvance(step) ? "#2a5080" : "#1a2a40",
-                        color: canAdvance(step) ? "#fff" : "#405060" }}>
+                      style={{ ...navBtn, background: canAdvance(step) ? "#705c3a" : "#3b311f",
+                        color: canAdvance(step) ? "#fff" : "#5c5344" }}>
                       Continue \u2192
                     </button>
                   ) : (
@@ -542,8 +542,8 @@ export function WorkflowPanel() {
                       title={canAdvance(10)
                         ? "Lock & save the finished world, then play the campaign in Chronicle"
                         : "Build the Economy (step 10) first"}
-                      style={{ ...navBtn, background: canAdvance(10) ? "#2a6a3a" : "#1a2a40",
-                        color: canAdvance(10) ? "#a0e0b0" : "#405060", fontWeight: 600 }}>
+                      style={{ ...navBtn, background: canAdvance(10) ? "#2a6a3a" : "#3b311f",
+                        color: canAdvance(10) ? "#a0e0b0" : "#5c5344", fontWeight: 600 }}>
                       \ud83d\udd12 Finalize &amp; Play \u2192
                     </button>
                   )}
@@ -560,18 +560,18 @@ export function WorkflowPanel() {
 
 // Shared styles
 const inputStyle: React.CSSProperties = {
-  flex: 1, padding: "3px 6px", background: "#080c12", border: "1px solid #1e2e42",
-  borderRadius: 4, color: "#b0c0d0", fontSize: 11, outline: "none",
+  flex: 1, padding: "3px 6px", background: "#110e09", border: "1px solid #3e3422",
+  borderRadius: 4, color: "#cec4b2", fontSize: 11, outline: "none",
 };
 
 const smallBtn: React.CSSProperties = {
-  padding: "4px 8px", borderRadius: 4, border: "1px solid #1a2a40",
-  background: "#151d28", color: "#6a8aaa", cursor: "pointer", fontSize: 11,
+  padding: "4px 8px", borderRadius: 4, border: "1px solid #3b311f",
+  background: "#262017", color: "#a5916f", cursor: "pointer", fontSize: 11,
 };
 
 const navBtn: React.CSSProperties = {
-  padding: "4px 10px", borderRadius: 4, border: "1px solid #1a2a40",
-  background: "#151d28", color: "#6a8aaa", cursor: "pointer", fontSize: 11,
+  padding: "4px 10px", borderRadius: 4, border: "1px solid #3b311f",
+  background: "#262017", color: "#a5916f", cursor: "pointer", fontSize: 11,
 };
 
 // genBtn now lives in a leaf module (workflowStyles) to break the WorkflowPanel↔Step*

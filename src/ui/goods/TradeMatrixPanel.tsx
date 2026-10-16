@@ -93,7 +93,7 @@ export function TradeMatrixPanel() {
       background: "rgba(0,0,0,0.7)", zIndex: 120,
     }}>
       <div style={{
-        background: "#0e141d", border: "1px solid #1e2e42", borderRadius: 10,
+        background: "#1b1710", border: "1px solid #3e3422", borderRadius: 10,
         padding: "18px 20px", maxWidth: "92%", maxHeight: "88%", overflow: "auto",
         boxShadow: "0 12px 40px rgba(0,0,0,0.55)", minWidth: 360,
       }}>
@@ -101,11 +101,11 @@ export function TradeMatrixPanel() {
           <h2 style={{ margin: 0, color: "#c0d8f0", fontSize: 16, fontWeight: 600 }}>Global Trade</h2>
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             {hasEconomy && (
-              <button onClick={handleExport} style={{ ...tabBtn, background: "#16324a", color: "#9cc4e4" }}
+              <button onClick={handleExport} style={{ ...tabBtn, background: "#3f3421", color: "#dcc8a4" }}
                 title="Export the economy as CSV or JSON">⤓ Export</button>
             )}
             <span onClick={() => setShow(false)}
-              style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
+              style={{ color: "#ab9775", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
           </div>
         </div>
 
@@ -114,15 +114,15 @@ export function TradeMatrixPanel() {
           {(["regions", "hubs", "corridors", "prices"] as Tab[]).map((t) => (
             <button key={t} onClick={() => setTab(t)} style={{
               ...tabBtn,
-              background: tab === t ? "#1e3a58" : "#0b1320",
-              color: tab === t ? "#dce6f0" : "#6a86a6",
+              background: tab === t ? "#4e4028" : "#1c170f",
+              color: tab === t ? "#eee8de" : "#a28f6e",
             }}>{t[0].toUpperCase() + t.slice(1)}</button>
           ))}
         </div>
 
         {tab === "regions" && (
           <>
-            {loading && <div style={{ color: "#5a7898", fontSize: 12 }}>Computing…</div>}
+            {loading && <div style={{ color: "#907f62", fontSize: 12 }}>Computing…</div>}
             {!loading && (!matrix || matrix.regions.length === 0) && (
               <div style={{ color: "#7a6a4a", fontSize: 12, maxWidth: 360 }}>
                 No trade regions yet. Generate settlements (Step 7) and the biological
@@ -131,14 +131,14 @@ export function TradeMatrixPanel() {
             )}
             {!loading && matrix && matrix.regions.length > 0 && (
               <>
-                <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 8 }}>
+                <div style={{ color: "#907f62", fontSize: 11, marginBottom: 8 }}>
                   Net balance per good (green = export surplus, red = import demand).
                   {matrix.regions.length} regions, {matrix.flows.length} active flows.
                 </div>
                 <table style={{ borderCollapse: "collapse", fontSize: 11 }}>
                   <thead>
                     <tr>
-                      <th style={{ ...th, textAlign: "left", position: "sticky", left: 0, background: "#0e141d" }}>Region</th>
+                      <th style={{ ...th, textAlign: "left", position: "sticky", left: 0, background: "#1b1710" }}>Region</th>
                       {matrix.goods.map((g) => (
                         <th key={g} style={th} title={labelFor(g)}>{emojiFor(g)}</th>
                       ))}
@@ -147,9 +147,9 @@ export function TradeMatrixPanel() {
                   <tbody>
                     {matrix.regions.map((r) => (
                       <tr key={r.id}>
-                        <td style={{ ...td, textAlign: "left", color: "#a8c0d8", whiteSpace: "nowrap", position: "sticky", left: 0, background: "#0e141d" }}>{r.name}</td>
+                        <td style={{ ...td, textAlign: "left", color: "#d4c5ac", whiteSpace: "nowrap", position: "sticky", left: 0, background: "#1b1710" }}>{r.name}</td>
                         {r.net.map((v, gi) => (
-                          <td key={gi} style={{ ...td, background: netColor(v), color: "#dce6f0" }}
+                          <td key={gi} style={{ ...td, background: netColor(v), color: "#eee8de" }}
                             title={`${labelFor(matrix.goods[gi])}: prod ${r.production[gi].toFixed(2)} / dem ${r.demand[gi].toFixed(2)}`}>
                             {Math.abs(v) < 0.05 ? "" : (v > 0 ? "+" : "") + v.toFixed(1)}
                           </td>
@@ -181,7 +181,7 @@ export function TradeMatrixPanel() {
               {hubsByPower.slice(0, 40).map((h) => (
                 <tr key={h.id} onClick={() => { setSelectedHub(h.id); setShow(false); }}
                   style={{ cursor: "pointer" }}>
-                  <td style={{ ...td, textAlign: "left", color: "#dce6f0", whiteSpace: "nowrap" }}>
+                  <td style={{ ...td, textAlign: "left", color: "#eee8de", whiteSpace: "nowrap" }}>
                     <span style={{ color: "#ffd24a" }}>{"★".repeat(Math.max(1, Math.min(5, h.stars)))}</span> {h.name}
                   </td>
                   <td style={td}>{h.power.toFixed(2)}</td>
@@ -198,7 +198,7 @@ export function TradeMatrixPanel() {
 
         {tab === "corridors" && hasEconomy && (
           <>
-            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 8 }}>
+            <div style={{ color: "#907f62", fontSize: 11, marginBottom: 8 }}>
               Strategic chokepoints — the busiest straits &amp; passes, by share of all routed volume.
             </div>
             <table style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
@@ -224,7 +224,7 @@ export function TradeMatrixPanel() {
 
         {tab === "prices" && hasEconomy && (
           <>
-            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 8 }}>
+            <div style={{ color: "#907f62", fontSize: 11, marginBottom: 8 }}>
               Price dynamics — cheapest at source, dearest at the market that pays most.
             </div>
             <table style={{ borderCollapse: "collapse", fontSize: 11, width: "100%" }}>
@@ -237,7 +237,7 @@ export function TradeMatrixPanel() {
               <tbody>
                 {priceRows.map((r) => (
                   <tr key={r.gi}>
-                    <td style={{ ...td, textAlign: "left", color: "#dce6f0", whiteSpace: "nowrap" }}>
+                    <td style={{ ...td, textAlign: "left", color: "#eee8de", whiteSpace: "nowrap" }}>
                       {emojiFor(r.id)} {labelFor(r.id)}
                     </td>
                     <td style={{ ...td, color: "#80dc8c" }}>{r.origin > 0 ? r.origin.toFixed(1) + "×" : "—"}</td>
@@ -256,14 +256,14 @@ export function TradeMatrixPanel() {
 }
 
 const th: React.CSSProperties = {
-  padding: "4px 6px", color: "#6a86a6", fontWeight: 600, fontSize: 12,
-  borderBottom: "1px solid #1e2e42", textAlign: "center",
+  padding: "4px 6px", color: "#a28f6e", fontWeight: 600, fontSize: 12,
+  borderBottom: "1px solid #3e3422", textAlign: "center",
 };
 const td: React.CSSProperties = {
-  padding: "3px 6px", textAlign: "center", borderBottom: "1px solid #14202e",
+  padding: "3px 6px", textAlign: "center", borderBottom: "1px solid #2b2417",
   fontFamily: "monospace",
 };
 const tabBtn: React.CSSProperties = {
-  padding: "3px 10px", fontSize: 11, border: "1px solid #1e2e42", borderRadius: 5,
+  padding: "3px 10px", fontSize: 11, border: "1px solid #3e3422", borderRadius: 5,
   cursor: "pointer", fontWeight: 600,
 };

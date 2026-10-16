@@ -123,11 +123,11 @@ export function CampaignTopBar() {
                 Day {clock.day} · {clock.season}
               </span>
             </div>
-            <div style={{ height: 3, background: "#0a1018", borderRadius: 2, marginTop: 4, overflow: "hidden", position: "relative" }}
+            <div style={{ height: 3, background: "#16120c", borderRadius: 2, marginTop: 4, overflow: "hidden", position: "relative" }}
               title={`Day ${clock.day} of 365 · sim tick ${clock.last_tick_ms.toFixed(1)} ms`}>
               <div style={{ width: `${dayFrac * 100}%`, height: "100%", background: `linear-gradient(90deg, ${T.goldDim}, ${T.gold})` }} />
               {[0.25, 0.5, 0.75].map((q) => (
-                <span key={q} style={{ position: "absolute", left: `${q * 100}%`, top: 0, bottom: 0, width: 1, background: "#1c2a3c" }} />
+                <span key={q} style={{ position: "absolute", left: `${q * 100}%`, top: 0, bottom: 0, width: 1, background: "#382f20" }} />
               ))}
             </div>
           </>
@@ -214,7 +214,7 @@ export function CampaignTopBar() {
           style={{
             padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
             border: `1px solid ${ui.showAtlas ? T.goldDim : T.line}`,
-            background: ui.showAtlas ? "#241d0c" : "rgba(12,18,26,0.6)",
+            background: ui.showAtlas ? "#241d0c" : "rgba(24,20,14,0.6)",
             color: ui.showAtlas ? T.gold : T.inkDim, fontWeight: ui.showAtlas ? 700 : 400,
           }}>🗺 Atlas</button>
         {/* The Peoples panel — living cultures, diasporas, minority quarters. */}
@@ -223,7 +223,7 @@ export function CampaignTopBar() {
           style={{
             padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
             border: `1px solid ${ui.showPeoples ? T.goldDim : T.line}`,
-            background: ui.showPeoples ? "#241d0c" : "rgba(12,18,26,0.6)",
+            background: ui.showPeoples ? "#241d0c" : "rgba(24,20,14,0.6)",
             color: ui.showPeoples ? T.gold : T.inkDim, fontWeight: ui.showPeoples ? 700 : 400,
           }}>👥 Peoples</button>
         {/* Map lenses: quick toggles for the trade overlays. */}
@@ -244,7 +244,7 @@ export function CampaignTopBar() {
                 style={{
                   padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
                   border: `1px solid ${openCount > 0 || isOpen ? T.accent : T.line}`,
-                  background: isOpen ? T.accentSoft : openCount > 0 ? "#132638" : "rgba(12,18,26,0.6)",
+                  background: isOpen ? T.accentSoft : openCount > 0 ? "#32291a" : "rgba(24,20,14,0.6)",
                   color: openCount > 0 || isOpen ? T.ink : T.inkDim,
                   fontWeight: openCount > 0 ? 600 : 400,
                 }}>
@@ -252,7 +252,7 @@ export function CampaignTopBar() {
                 {openCount > 0 && (
                   <span style={{
                     marginLeft: 5, padding: "0 5px", borderRadius: 8, fontSize: 9, fontWeight: 700,
-                    background: T.accent, color: "#08141f", verticalAlign: 1,
+                    background: T.accent, color: "#1a150d", verticalAlign: 1,
                   }}>{openCount}</span>
                 )}
                 <span style={{ marginLeft: 4, fontSize: 8, color: T.inkFaint }}>▼</span>
@@ -329,14 +329,14 @@ const bar: React.CSSProperties = {
   position: "absolute", top: 0, left: 0, right: 0, zIndex: 130,
   display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap",
   padding: "6px 12px",
-  background: "linear-gradient(180deg, rgba(11,17,26,0.97), rgba(9,13,20,0.93))",
+  background: "linear-gradient(180deg, rgba(24,20,13,0.97), rgba(19,16,10,0.93))",
   borderBottom: `1px solid ${T.line}`,
   borderTop: `2px solid ${T.lineGold}`,
   boxShadow: "0 6px 22px rgba(0,0,0,0.45)",
 };
 
 const pulseTile: React.CSSProperties = {
-  background: "#0c1420", border: `1px solid ${T.lineSoft}`, borderRadius: 6,
+  background: "#1d180f", border: `1px solid ${T.lineSoft}`, borderRadius: 6,
   padding: "3px 9px", minWidth: 64,
 };
 const pulseLabel: React.CSSProperties = {
@@ -346,7 +346,7 @@ const pulseLabel: React.CSSProperties = {
 const menu: React.CSSProperties = {
   position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 150,
   display: "flex", flexDirection: "column", minWidth: 210, padding: 4,
-  background: "rgba(10,15,23,0.98)", border: `1px solid ${T.line}`, borderRadius: 8,
+  background: "rgba(21,18,12,0.98)", border: `1px solid ${T.line}`, borderRadius: 8,
   boxShadow: "0 10px 30px rgba(0,0,0,0.6)",
 };
 const menuItem: React.CSSProperties = {
@@ -358,13 +358,13 @@ const menuItem: React.CSSProperties = {
 const lensChip = (on: boolean, hue: string): React.CSSProperties => ({
   width: 28, height: 26, borderRadius: 6, fontSize: 12, cursor: "pointer",
   border: `1px solid ${on ? hue : T.line}`,
-  background: on ? "rgba(255,255,255,0.05)" : "rgba(12,18,26,0.6)",
+  background: on ? "rgba(255,255,255,0.05)" : "rgba(24,20,14,0.6)",
   opacity: on ? 1 : 0.6,
 });
 
 const chromeChip = (on: boolean): React.CSSProperties => ({
   padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
   border: `1px solid ${on ? T.accent : T.line}`,
-  background: on ? T.accentSoft : "rgba(12,18,26,0.6)",
+  background: on ? T.accentSoft : "rgba(24,20,14,0.6)",
   color: on ? T.ink : T.inkDim, fontWeight: on ? 600 : 400,
 });

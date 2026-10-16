@@ -263,13 +263,13 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
     onChange: (v: number) => void, hint?: string) => (
     <div style={{ marginBottom: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ color: "#607090", fontSize: 10 }}>{label}</span>
-        <span style={{ color: "#8090b0", fontSize: 10 }}>{value}</span>
+        <span style={{ color: "#8a7d66", fontSize: 10 }}>{label}</span>
+        <span style={{ color: "#ac9d84", fontSize: 10 }}>{value}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ width: "100%", height: 12 }} />
-      {hint && <div style={{ color: "#405060", fontSize: 9 }}>{hint}</div>}
+      {hint && <div style={{ color: "#5c5344", fontSize: 9 }}>{hint}</div>}
     </div>
   );
 
@@ -281,8 +281,8 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
         </div>
       )}
 
-      <div style={{ background: "#0a1018", border: "1px solid #2a3a50", borderRadius: 4, padding: 6, marginBottom: 2 }}>
-        <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
+      <div style={{ background: "#16120c", border: "1px solid #4b412f", borderRadius: 4, padding: 6, marginBottom: 2 }}>
+        <div style={{ color: "#aa9166", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           Generation Mode
         </div>
         {ELEV_FAMILIES.map((fam) => {
@@ -296,7 +296,7 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
                 onClick={() => setOpenFamily(isOpen && !famHasActive ? null : fam)}
                 style={{
                   width: "100%", textAlign: "left", padding: "3px 4px", fontSize: 9.5,
-                  background: "transparent", border: "none", color: famHasActive ? "#8ab0d0" : "#5a7390",
+                  background: "transparent", border: "none", color: famHasActive ? "#cbb58f" : "#897a61",
                   cursor: "pointer", fontWeight: famHasActive ? 600 : 400,
                 }}>
                 {isOpen ? "▾" : "▸"} {fam}
@@ -308,9 +308,9 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
                       style={{
                         flex: 1, padding: "4px 2px", borderRadius: 3, cursor: "pointer", fontSize: 9,
                         lineHeight: 1.15,
-                        border: elevMode === m.id ? "1px solid #3a7ac0" : "1px solid #1e2e42",
-                        background: elevMode === m.id ? "#1a3a5a" : "#0d1219",
-                        color: elevMode === m.id ? "#c0ddf0" : "#6a8aaa",
+                        border: elevMode === m.id ? "1px solid #a58855" : "1px solid #3e3422",
+                        background: elevMode === m.id ? "#4d3f27" : "#18140e",
+                        color: elevMode === m.id ? "#c0ddf0" : "#a5916f",
                         fontWeight: elevMode === m.id ? 600 : 400,
                       }}>
                       {m.label}
@@ -321,14 +321,14 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
             </div>
           );
         })}
-        <div style={{ color: "#5a7390", fontSize: 9, lineHeight: 1.4, marginBottom: 6, marginTop: 3 }}>
+        <div style={{ color: "#897a61", fontSize: 9, lineHeight: 1.4, marginBottom: 6, marginTop: 3 }}>
           {activeMode.blurb}
         </div>
 
-        <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
+        <div style={{ color: "#aa9166", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           Terrain Generation Settings
         </div>
-        <div style={{ color: "#506880", fontSize: 9, marginBottom: 3 }}>Presets (click, then Generate):</div>
+        <div style={{ color: "#7a6d56", fontSize: 9, marginBottom: 3 }}>Presets (click, then Generate):</div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 6 }}>
           {TERRAIN_PRESETS.map((p) => {
             const active = mountainDensity === p.density && mountainHeight === p.height
@@ -340,9 +340,9 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
                 })}
                 style={{
                   padding: "2px 6px", borderRadius: 3, cursor: "pointer", fontSize: 9,
-                  border: active ? "1px solid #3a7ac0" : "1px solid #1e2e42",
-                  background: active ? "#1a3a5a" : "#0d1219",
-                  color: active ? "#c0ddf0" : "#6a8aaa",
+                  border: active ? "1px solid #a58855" : "1px solid #3e3422",
+                  background: active ? "#4d3f27" : "#18140e",
+                  color: active ? "#c0ddf0" : "#a5916f",
                 }}>
                 {p.label}
               </button>
@@ -357,10 +357,10 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
       </div>
 
       <button onClick={handleGenerateElevation} disabled={simRunning || !step1Done}
-        style={{ ...genBtn, background: "#16324a", color: "#c8e2f8" }}>
+        style={{ ...genBtn, background: "#3f3421", color: "#c8e2f8" }}>
         ⛰️ Generate Elevation — {activeMode.label}
       </button>
-      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6a8aaa" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#a5916f" }}>
         <input type="checkbox" checked={lockSeed} onChange={(e) => setLockSeed(e.target.checked)} />
         Lock seed (iterate sliders on this same relief)
       </label>
@@ -369,11 +369,11 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
         🎲 Randomize Terrain (new seed, ignores lock)
       </button>
 
-      <div style={{ background: "#0a1018", border: "1px solid #3a2e20", borderRadius: 4, padding: 6, marginTop: 2 }}>
+      <div style={{ background: "#16120c", border: "1px solid #3a2e20", borderRadius: 4, padding: 6, marginTop: 2 }}>
         <div style={{ color: "#c98a4a", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           ✏️ Draw Mountain Ridges
         </div>
-        <div style={{ color: "#506880", fontSize: 9, marginBottom: 5, lineHeight: 1.35 }}>
+        <div style={{ color: "#7a6d56", fontSize: 9, marginBottom: 5, lineHeight: 1.35 }}>
           Draw lines where ranges should run, then Generate. Pen <b>width</b> = ridge
           footprint, <b>height</b> = peak, <b>character</b> = ruggedness. Shift-drag
           flattens (draw over a range to remove it). Ridges blend onto the existing
@@ -415,9 +415,9 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
       </button>
 
       {showAdjust && (
-        <div style={{ background: "#0a1018", border: "1px solid #2a3a50", borderRadius: 4, padding: 6 }}>
+        <div style={{ background: "#16120c", border: "1px solid #4b412f", borderRadius: 4, padding: 6 }}>
           {slider("Elevation Scale", elevPercent, 25, 200, 5, setElevPercent, `${elevPercent}% of current height`)}
-          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#607090", fontSize: 10, margin: "4px 0" }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#8a7d66", fontSize: 10, margin: "4px 0" }}>
             <input type="checkbox" checked={lockPeaks} onChange={(e) => setLockPeaks(e.target.checked)} />
             Lock highest peaks (keep above threshold fixed)
           </label>
@@ -427,7 +427,7 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
             style={{ ...genBtn, background: "#2a2440", color: "#c0b0e0", textAlign: "center" }}>
             Apply Scale
           </button>
-          <div style={{ color: "#405060", fontSize: 9, marginTop: 2 }}>
+          <div style={{ color: "#5c5344", fontSize: 9, marginTop: 2 }}>
             Scales relief on the existing elevation. Lock peaks to lower/raise only the
             lowlands. Re-run later phases (climate, rivers) to reflect changes.
           </div>
@@ -439,19 +439,19 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
       </button>
 
       {showShelfDialog && (
-        <div style={{ background: "#0a1018", border: "1px solid #2a3a50", borderRadius: 4, padding: 6 }}>
+        <div style={{ background: "#16120c", border: "1px solid #4b412f", borderRadius: 4, padding: 6 }}>
           {slider("Shelf Width", shelfWidth, 1, 20, 1, setShelfWidth, "Narrow \u2194 Wide")}
           {slider("Noise Variation", shelfNoise, 0, 1, 0.05, setShelfNoise, "Uniform \u2194 Natural")}
           {slider("Depth Profile", shelfProfile, 0, 1, 0.05, setShelfProfile, "Linear \u2194 Exponential")}
           {slider("Drop-off Width", shelfDropoff, 1, 20, 1, setShelfDropoff, "Abrupt \u2194 Gradual")}
           <button onClick={handleGenerateShelves} disabled={simRunning}
-            style={{ ...genBtn, background: "#1a3a50", color: "#80b0d0", textAlign: "center" }}>
+            style={{ ...genBtn, background: "#463a24", color: "#cab186", textAlign: "center" }}>
             Generate Shelves
           </button>
         </div>
       )}
 
-      <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
+      <div style={{ color: "#5c5344", fontSize: 10, marginTop: 2 }}>
         All three modes keep your existing land/sea and are driven entirely by the
         sliders above. Use 🎲 Randomize for a new seed with the same settings, draw
         ridges by hand for specific ranges, or the Elevation paint tool for manual

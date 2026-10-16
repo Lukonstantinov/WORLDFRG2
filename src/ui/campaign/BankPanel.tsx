@@ -114,7 +114,7 @@ export function BankPanel() {
 function Overview({ bank }: { bank: BankBrief }) {
   const assets = [
     { label: "Reserves (specie)", v: bank.reserves, c: "#e0c452" },
-    { label: "Loans outstanding", v: bank.loans_out, c: "#5f97c0" },
+    { label: "Loans outstanding", v: bank.loans_out, c: "#b99a66" },
     { label: "Equity stakes", v: bank.stake_book, c: "#6fae8a" },
     { label: "Property / branches", v: bank.real_estate, c: "#9a8aa0" },
   ].filter((r) => r.v > 0.01);
@@ -187,7 +187,7 @@ function Charts({ hist }: { hist: BankSnapshot[] }) {
         series={[{ label: "equity", color: "#7fcf9f", vals: hist.map((h) => h.equity) }]} />
       <Chart title="Assets" years={years} series={[
         { label: "reserves", color: "#e0c452", vals: hist.map((h) => h.reserves) },
-        { label: "loans", color: "#5f97c0", vals: hist.map((h) => h.loans) },
+        { label: "loans", color: "#b99a66", vals: hist.map((h) => h.loans) },
         { label: "stakes", color: "#6fae8a", vals: hist.map((h) => h.stakes) },
       ]} />
       <Chart title="Liabilities" years={years} series={[

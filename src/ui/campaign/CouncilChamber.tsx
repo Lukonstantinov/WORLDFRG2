@@ -22,7 +22,7 @@ import { CouncilRoom, ROOM_LABEL, type RoomKind } from "@ui/campaign/CouncilRoom
 const ALLEGIANCE = [
   { word: "house", color: "#c9a227" },
   { word: "ruler's kin", color: "#7fd0a0" },
-  { word: "commons", color: "#6a86a6" },
+  { word: "commons", color: "#a28f6e" },
 ];
 const FAMILY_ICON: Record<string, string> = {
   "citizenship and culture": "🪪", foreigners: "🧳", learning: "📚", welfare: "🌾",
@@ -37,7 +37,7 @@ function seatRing(s: SeatBrief): string {
 function leanColor(v: number): string {
   if (v > 0.15) return "#5fc08a";
   if (v < -0.15) return "#e0735a";
-  return "#9fb4cc";
+  return "#c9bba2";
 }
 
 export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; compact?: boolean }) {
@@ -89,7 +89,7 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: FZ.micro, color: T.inkDim }}>conservative</span>
-        <div style={{ position: "relative", flex: 1, height: 6, borderRadius: 3, background: "linear-gradient(90deg,#8e9dd8,#2a3a52 50%,#c9a227)" }}>
+        <div style={{ position: "relative", flex: 1, height: 6, borderRadius: 3, background: "linear-gradient(90deg,#d2bb94,#4d422f 50%,#c9a227)" }}>
           <span style={{ position: "absolute", top: -3, left: `calc(${((brief.gov_position + 1) / 2) * 100}% - 6px)`, width: 12, height: 12, borderRadius: "50%", background: T.parchment, border: `2px solid ${T.panel}` }} />
         </div>
         <span style={{ fontSize: FZ.micro, color: T.inkDim }}>libertarian</span>
@@ -148,7 +148,7 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
           )}
           <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
             <span style={{ fontSize: FZ.micro, color: "#e0735a" }}>fail</span>
-            <div style={{ position: "relative", flex: 1, height: 7, borderRadius: 4, background: "linear-gradient(90deg,#5a2a24,#1e2e42 50%,#244a34)" }}>
+            <div style={{ position: "relative", flex: 1, height: 7, borderRadius: 4, background: "linear-gradient(90deg,#5a2a24,#3e3422 50%,#244a34)" }}>
               <span style={{ position: "absolute", top: -2, left: `calc(${((deb.tally + 1) / 2) * 100}% - 5px)`, width: 10, height: 11, borderRadius: 3, background: "#5fd0ff" }} />
             </div>
             <span style={{ fontSize: FZ.micro, color: "#5fc08a" }}>pass</span>
@@ -160,7 +160,7 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
             ))}
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,minmax(0,1fr))", gap: 5, marginTop: 6 }}>
-            {([["aye", "#5fc08a", (v: number) => v > 0.15], ["wavering", "#9fb4cc", (v: number) => Math.abs(v) <= 0.15], ["nay", "#e0735a", (v: number) => v < -0.15]] as const).map(([word, col, test]) => {
+            {([["aye", "#5fc08a", (v: number) => v > 0.15], ["wavering", "#c9bba2", (v: number) => Math.abs(v) <= 0.15], ["nay", "#e0735a", (v: number) => v < -0.15]] as const).map(([word, col, test]) => {
               const hit = brief.seats.map((s, i) => ({ s, i })).filter((e) => test(e.s.vote_lean ?? 0));
               return (
                 <div key={word} style={{ borderRadius: RADIUS.md, border: `1px solid ${T.lineSoft}`, background: "rgba(0,0,0,.18)", padding: "4px 6px" }}>
@@ -200,7 +200,7 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
                 the <b>{m.culture}</b>: {m.from_tier} → <b style={{ color: m.warmer ? "#7fd0a0" : "#e08a6a" }}>{m.to_tier}</b>
                 {m.reason && <span style={{ color: T.inkFaint }}> · {m.reason}</span>}
               </span>
-              <div style={{ position: "relative", width: 60, height: 5, borderRadius: 3, background: "linear-gradient(90deg,#5a2a24,#1e2e42 50%,#244a34)" }}>
+              <div style={{ position: "relative", width: 60, height: 5, borderRadius: 3, background: "linear-gradient(90deg,#5a2a24,#3e3422 50%,#244a34)" }}>
                 <span style={{ position: "absolute", top: -2, left: `calc(${((m.tally + 1) / 2) * 100}% - 3px)`, width: 6, height: 9, borderRadius: 2, background: "#5fd0ff" }} />
               </div>
             </div>

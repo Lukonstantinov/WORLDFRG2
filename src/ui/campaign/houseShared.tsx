@@ -23,7 +23,7 @@ export const tierOf = (h: HouseBrief) => (h.tier && h.tier >= 1 && h.tier <= 4 ?
  *  houses, so the civic bodies are visually distinct. */
 export function dull(hex: string): string {
   const m = /^#?([0-9a-f]{6})$/i.exec(hex || "");
-  if (!m) return "#7a8694";
+  if (!m) return "#928a7c";
   const n = parseInt(m[1], 16);
   const mix = (c: number) => Math.round(c * 0.45 + 0x86 * 0.55);
   const r = mix((n >> 16) & 255), g = mix((n >> 8) & 255), b = mix(n & 255);

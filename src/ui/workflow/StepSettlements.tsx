@@ -147,11 +147,11 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
 
   const iconBtn: React.CSSProperties = {
     padding: "0 3px", border: "none", background: "transparent", cursor: "pointer",
-    color: "#7a8aa0", fontSize: 10, lineHeight: 1,
+    color: "#9d917d", fontSize: 10, lineHeight: 1,
   };
   const miniInput: React.CSSProperties = {
-    padding: "2px 5px", background: "#080c12", border: "1px solid #1e2e42",
-    borderRadius: 3, color: "#b0c0d0", fontSize: 10, outline: "none",
+    padding: "2px 5px", background: "#110e09", border: "1px solid #3e3422",
+    borderRadius: 3, color: "#cec4b2", fontSize: 10, outline: "none",
   };
 
   return (
@@ -162,13 +162,13 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         </div>
       )}
       <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", color: "#8090b0", fontSize: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#ac9d84", fontSize: 10 }}>
           <span>Density / realism</span>
           <span>{settlementRealism <= 0.33 ? "Sparse · strict" : settlementRealism >= 0.7 ? "Dense" : "Balanced"} ({Math.round(settlementRealism * 100)})</span>
         </div>
         <input type="range" min={0} max={1} step={0.05} value={settlementRealism}
           onChange={(e) => setSettlementRealism(parseFloat(e.target.value))} />
-        <div style={{ color: "#405060", fontSize: 9 }}>
+        <div style={{ color: "#5c5344", fontSize: 9 }}>
           Low = fewer, only genuinely viable sites (no marginal polar/desert specks);
           high = denser and more permissive.
         </div>
@@ -176,13 +176,13 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
 
       {/* Hard count cap (20..1000; 0 = auto). Overrides the density slider's count. */}
       <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", color: "#8090b0", fontSize: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#ac9d84", fontSize: 10 }}>
           <span>Limit total settlements</span>
           <span>{settlementCap === 0 ? "Auto (no limit)" : `${settlementCap}`}</span>
         </div>
         <input type="range" min={0} max={1000} step={10} value={settlementCap}
           onChange={(e) => { const v = parseInt(e.target.value, 10); setSettlementCap(v === 0 ? 0 : Math.max(20, v)); }} />
-        <div style={{ color: "#405060", fontSize: 9 }}>
+        <div style={{ color: "#5c5344", fontSize: 9 }}>
           0 = auto (density slider decides). Otherwise a hard cap of 20–1000 settlements
           scattered across the world (keeps the strongest sites).
         </div>
@@ -190,13 +190,13 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
 
       {/* Cultures 2.0 · initial number of cultures/peoples (0 = auto by land area). */}
       <div style={{ display: "flex", flexDirection: "column", gap: 2, marginTop: 2 }}>
-        <div style={{ display: "flex", justifyContent: "space-between", color: "#8090b0", fontSize: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", color: "#ac9d84", fontSize: 10 }}>
           <span>Cultures at world start</span>
           <span>{cultureCount === 0 ? "Auto (by land area)" : `${cultureCount}`}</span>
         </div>
         <input type="range" min={0} max={24} step={1} value={cultureCount}
           onChange={(e) => onCultureCount(parseInt(e.target.value, 10))} />
-        <div style={{ color: "#405060", fontSize: 9 }}>
+        <div style={{ color: "#5c5344", fontSize: 9 }}>
           How many distinct peoples/language-hearths seed the map (0 = auto, ~5–14 by
           size). More = a patchier cultural map. Applied when settlements are generated.
         </div>
@@ -214,7 +214,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         <>
           <button onClick={() => setTool(activeTool === "placeSettlement" ? "select" : "placeSettlement")}
             style={{ ...genBtn, marginBottom: 0,
-              background: activeTool === "placeSettlement" ? "#2a5080" : undefined,
+              background: activeTool === "placeSettlement" ? "#705c3a" : undefined,
               color: activeTool === "placeSettlement" ? "#fff" : undefined }}>
             {activeTool === "placeSettlement" ? "📍 Click the map to place…" : "📍 Place Settlement"}
           </button>
@@ -222,7 +222,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
               choice, never an implicit "manual ⇒ capital" rule: this settlement
               only guarantees its own province (marked `.primary`) when the
               placer says so. */}
-          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#7a8aa0", marginTop: 2 }}>
+          <label style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 10, color: "#9d917d", marginTop: 2 }}>
             <input type="checkbox" checked={placeSettlementIsCapital}
               onChange={(e) => setPlaceSettlementIsCapital(e.target.checked)} />
             Place as province capital
@@ -239,15 +239,15 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
                 title="Click to locate on the map"
                 style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "1px 3px",
                   cursor: "pointer" }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = "#16202e")}
+                onMouseEnter={(e) => (e.currentTarget.style.background = "#2b2419")}
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}>
-                <span style={{ color: "#8090b0", fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}>
+                <span style={{ color: "#ac9d84", fontSize: 10, display: "flex", alignItems: "center", gap: 3 }}>
                   {dot(s.size)} #{i + 1} {s.size}
                   {s.manual && <span title="Hand-placed" style={{ color: "#6ab0e0" }}>📍</span>}
                   {s.edited && !s.manual && <span title="Hand-edited" style={{ color: "#e0b06a" }}>✎</span>}
                 </span>
                 <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                  <span style={{ color: "#7a8aa0", fontSize: 10 }}>
+                  <span style={{ color: "#9d917d", fontSize: 10 }}>
                     {s.population >= 1000 ? `${(s.population / 1000).toFixed(s.population >= 10000 ? 0 : 1)}k` : s.population}
                   </span>
                   <button onClick={(e) => { e.stopPropagation(); startEdit(s); }}
@@ -272,26 +272,26 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
                       onChange={(e) => setDraft({ ...draft, population: Math.max(1, Number(e.target.value)) })}
                       style={{ ...miniInput, width: 70 }} />
                   </div>
-                  <div style={{ color: "#405060", fontSize: 8.5 }}>
+                  <div style={{ color: "#5c5344", fontSize: 8.5 }}>
                     The world's own figure was {s.population >= 1000 ? `${(s.population / 1000).toFixed(1)}k` : s.population}.
                     A hand-set population is no longer a consequence of the land.
                   </div>
                   <div style={{ display: "flex", gap: 3 }}>
                     <button onClick={() => saveEdit(s)} style={{ ...genBtn, flex: 1, marginBottom: 0 }}>Save</button>
                     <button onClick={() => { setEditingId(null); setDraft(null); }}
-                      style={{ ...genBtn, flex: 1, marginBottom: 0, background: "#1a2a40" }}>Cancel</button>
+                      style={{ ...genBtn, flex: 1, marginBottom: 0, background: "#3b311f" }}>Cancel</button>
                   </div>
                 </div>
               )}
             </div>
           ))}
           {settlements.length > 60 && (
-            <div style={{ color: "#405060", fontSize: 9 }}>... and {settlements.length - 60} more</div>
+            <div style={{ color: "#5c5344", fontSize: 9 }}>... and {settlements.length - 60} more</div>
           )}
         </div>
       )}
 
-      <div style={{ color: "#405060", fontSize: 10 }}>
+      <div style={{ color: "#5c5344", fontSize: 10 }}>
         The Habitability heatmap shows where civilization is most likely
         (climate 40% + fertility 20% + water 20% + terrain 10% + trade 10%).
         Cities are placed highest-probability first; dot size = settlement rank.
@@ -307,10 +307,10 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
             settlements above — open the Provinces panel (top bar) to inspect them.
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "#607090", fontSize: 10 }}>Province size</span>
+            <span style={{ color: "#8a7d66", fontSize: 10 }}>Province size</span>
             <input type="range" min={0} max={1} step={0.05} value={provGranularity}
               onChange={(e) => setProvGranularity(parseFloat(e.target.value))} style={{ flex: 1 }} />
-            <span style={{ width: 72, color: "#8090b0", fontSize: 9, textAlign: "right" }}>
+            <span style={{ width: 72, color: "#ac9d84", fontSize: 9, textAlign: "right" }}>
               {provGranularity < 0.34 ? "few · large" : provGranularity > 0.66 ? "many · small" : "balanced"}
             </span>
           </div>
@@ -326,7 +326,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
             <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#8fbf9f", fontSize: 10, cursor: "pointer" }}>
               <input type="checkbox" checked={provincesVisible}
                 onChange={(e) => setOverlayVisible("provinces", e.target.checked)}
-                style={{ accentColor: "#4a90d0", width: 12, height: 12 }} />
+                style={{ accentColor: "#c09b5a", width: 12, height: 12 }} />
               Show provinces on map
             </label>
           )}

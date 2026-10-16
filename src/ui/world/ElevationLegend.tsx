@@ -52,20 +52,20 @@ export function ElevationLegend() {
 
 const container: React.CSSProperties = {
   position: "absolute", bottom: 8, left: 8,
-  background: "rgba(10, 15, 24, 0.94)",
-  border: "1px solid #1e2e42", borderRadius: 6,
+  background: "rgba(22,18,12, 0.94)",
+  border: "1px solid #3e3422", borderRadius: 6,
   padding: 10, minWidth: 100, zIndex: 20,
   backdropFilter: "blur(8px)",
 };
 
 const title: React.CSSProperties = {
-  fontSize: 10, color: "#8890a0", textTransform: "uppercase",
+  fontSize: 10, color: "#9e978a", textTransform: "uppercase",
   letterSpacing: 1, marginBottom: 4,
 };
 
 const gradientBar: React.CSSProperties = {
   width: 16, height: 100, display: "flex", flexDirection: "column",
-  borderRadius: 2, overflow: "hidden", border: "1px solid #2a3a50",
+  borderRadius: 2, overflow: "hidden", border: "1px solid #4b412f",
 };
 
 const labelsCol: React.CSSProperties = {
@@ -73,7 +73,7 @@ const labelsCol: React.CSSProperties = {
 };
 
 const labelText: React.CSSProperties = {
-  fontSize: 9, color: "#8890a0", fontFamily: "monospace",
+  fontSize: 9, color: "#9e978a", fontFamily: "monospace",
 };
 
 const swatchRow: React.CSSProperties = {
@@ -81,5 +81,5 @@ const swatchRow: React.CSSProperties = {
 };
 
 const swatch: React.CSSProperties = {
-  width: 14, height: 10, borderRadius: 2, border: "1px solid #2a3a50",
+  width: 14, height: 10, borderRadius: 2, border: "1px solid #4b412f",
 };

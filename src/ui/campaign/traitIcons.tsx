@@ -88,17 +88,17 @@ export const PATH_META: Record<string, { icon: string; color: string; short: str
   "military success": { icon: "⚔", color: "#e07a5a", short: "war hero" },
   "wealth": { icon: "💰", color: "#d8b24a", short: "wealth" },
   "guild representative": { icon: "🔨", color: "#c98a3a", short: "guild" },
-  "scholar/orator": { icon: "📜", color: "#6a8fd8", short: "scholar" },
+  "scholar/orator": { icon: "📜", color: "#cbac77", short: "scholar" },
   "elected by the commons": { icon: "🗳", color: "#7fd0a0", short: "elected" },
   "bribed in": { icon: "🪙", color: "#e08a6a", short: "bribed" },
-  "appointed": { icon: "📋", color: "#9fb4cc", short: "appointed" },
+  "appointed": { icon: "📋", color: "#c9bba2", short: "appointed" },
 };
 export const pathMeta = (p: string) => PATH_META[p] ?? { icon: "•", color: T.inkMid, short: p };
 
 /** The four ideology axes, both poles named. */
 export const IDEOLOGY_AXES: { name: string; neg: string; pos: string; color: string }[] = [
   { name: "Authority", neg: "strong hand", pos: "the many", color: "#d88a6a" },
-  { name: "Tradition", neg: "piety", pos: "inquiry", color: "#8a9ad8" },
+  { name: "Tradition", neg: "piety", pos: "inquiry", color: "#d2ba90" },
   { name: "Openness", neg: "blood & soil", pos: "open gates", color: "#6ac0a0" },
   { name: "Economy", neg: "just price", pos: "free trade", color: "#d8b24a" },
 ];

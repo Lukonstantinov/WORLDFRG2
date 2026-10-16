@@ -48,19 +48,19 @@ export function CultureFigures({ name, kit, kit2, color }: {
     <div>
       <div style={{
         display: "flex", alignItems: "flex-end", justifyContent: "center", gap: 12,
-        height: 132, background: plate, border: "1px solid #16202e", borderRadius: 6, padding: "4px 8px",
+        height: 132, background: plate, border: "1px solid #2b2419", borderRadius: 6, padding: "4px 8px",
       }}>
         <canvas ref={bustRef} style={{ display: "block" }} />
         <canvas ref={figRef} style={{ display: "block" }} />
       </div>
       <div style={{ display: "flex", justifyContent: "center", marginTop: 5 }}>
-        <div style={{ display: "flex", border: "1px solid rgba(180,190,205,0.25)", borderRadius: 12, overflow: "hidden" }}>
+        <div style={{ display: "flex", border: "1px solid rgba(203,195,182,0.25)", borderRadius: 12, overflow: "hidden" }}>
           {REGISTERS.map((o) => (
             <button key={o} onClick={() => setOccasion(o)} title={OCCASION_TITLE[o]}
               style={{
                 fontSize: 9.5, padding: "2px 10px", cursor: "pointer", border: "none", textTransform: "capitalize",
                 background: occasion === o ? "rgba(180,150,90,0.28)" : "transparent",
-                color: occasion === o ? "#e6cf9a" : "#8b93a0", fontWeight: occasion === o ? 700 : 400,
+                color: occasion === o ? "#e6cf9a" : "#9e988d", fontWeight: occasion === o ? 700 : 400,
               }}>
               {o}
             </button>

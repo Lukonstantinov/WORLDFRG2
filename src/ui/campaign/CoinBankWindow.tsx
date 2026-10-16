@@ -25,14 +25,14 @@ import {
 // reserve-ratio gauge, and a per-coin (rather than world-wide) holder ledger.
 
 const METAL: Record<string, [string, string]> = {
-  gold: ["#e8c452", "#8a6a1c"], silver: ["#c4cdd8", "#6a7686"], electrum: ["#dcd083", "#7c7234"], bronze: ["#c07f45", "#6a4020"],
+  gold: ["#e8c452", "#8a6a1c"], silver: ["#d6d0c6", "#827b6e"], electrum: ["#dcd083", "#7c7234"], bronze: ["#c07f45", "#6a4020"],
 };
 const BAD_EVENT = new Set(["debasement", "run", "crash"]);
 const PURPOSE: Record<string, string> = {
   trade: "trade venture", guild_factory: "guild factory", guild_civic: "guild civic works",
   treasury: "public works", colony: "colony venture", estate: "estate", structure: "building", mine: "mine",
 };
-const KIND_COLOR: Record<string, string> = { house: "#c8813a", guild: "#6fc3b0", polis: "#5a8ac8" };
+const KIND_COLOR: Record<string, string> = { house: "#c8813a", guild: "#6fc3b0", polis: "#c09d62" };
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
 
 /** The floating host: open with `useUIStore.setCoinWindow(coinName)`. */
@@ -203,7 +203,7 @@ function CoinWindow({ mint: m, usage, chron, banks, ledger, year, onClose, onDra
 function WhereItSits({ ledger, metalCol }: { ledger: CoinLedgerSummary | null; metalCol: string }) {
   const L = ledger;
   const parts: [string, number, string][] = L ? [
-    ["City treasuries", L.in_city_treasuries, "#c8813a"], ["Households", L.in_households, "#6aa05a"], ["Local merchants", L.in_local_merchants, "#5a8ac8"],
+    ["City treasuries", L.in_city_treasuries, "#c8813a"], ["Households", L.in_households, "#6aa05a"], ["Local merchants", L.in_local_merchants, "#c09d62"],
     ["Banks & houses", Math.max(0, L.total_struck - L.in_city_treasuries - L.in_households - L.in_local_merchants), metalCol],
   ] : [];
   return (

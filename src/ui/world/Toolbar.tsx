@@ -22,7 +22,7 @@ function hexOfBorder(css: string): string {
     const h = (n: string) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, "0");
     return "#" + h(m[1]) + h(m[2]) + h(m[3]);
   }
-  return "#0a0e14";
+  return "#13100b";
 }
 
 const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
@@ -280,7 +280,7 @@ export function Toolbar() {
   return (
     <div style={{
       display: "flex", flexDirection: "column", gap: 0,
-      background: "#0d1219", borderLeft: "1px solid #1e2a38",
+      background: "#18140e", borderLeft: "1px solid #352e21",
       width: 170, overflowY: "auto", fontSize: 11,
     }}>
       {/* Tools row */}
@@ -295,8 +295,8 @@ export function Toolbar() {
               style={{
                 padding: "4px 0", border: "none", borderRadius: 4, cursor: "pointer",
                 fontSize: 11, width: 48, textAlign: "center",
-                background: activeTool === t.id ? "#2a5080" : "#151d28",
-                color: activeTool === t.id ? "#e0eeff" : "#7088a0",
+                background: activeTool === t.id ? "#705c3a" : "#262017",
+                color: activeTool === t.id ? "#e0eeff" : "#9c8d74",
                 fontWeight: activeTool === t.id ? 600 : 400,
               }}
             >
@@ -354,9 +354,9 @@ export function Toolbar() {
                   onClick={() => setMapStyle(m.id)}
                   style={{
                     padding: "4px 2px", borderRadius: 4, fontSize: 10, cursor: "pointer",
-                    border: `1px solid ${on ? "#c9a24a" : "#20304a"}`,
-                    background: on ? "#3a2f1a" : "#0e1826",
-                    color: on ? "#f0dcaa" : "#7d97b0", fontWeight: on ? 600 : 400,
+                    border: `1px solid ${on ? "#c9a24a" : "#453925"}`,
+                    background: on ? "#3a2f1a" : "#221c12",
+                    color: on ? "#f0dcaa" : "#ac9c81", fontWeight: on ? 600 : 400,
                   }}>{m.name}</button>
               );
             })}
@@ -375,9 +375,9 @@ export function Toolbar() {
                     display: "flex", alignItems: "center", gap: 5, overflow: "hidden",
                     padding: "4px 6px", borderRadius: 4, fontSize: 10.5, textAlign: "left",
                     cursor: ready ? "pointer" : "not-allowed",
-                    border: `1px solid ${on ? "#4a90d0" : "#20304a"}`,
-                    background: on ? "#1e3a58" : "#0e1826",
-                    color: !ready ? "#3d4c5e" : on ? "#cfe2f6" : "#7d97b0",
+                    border: `1px solid ${on ? "#c09b5a" : "#453925"}`,
+                    background: on ? "#4e4028" : "#221c12",
+                    color: !ready ? "#5a5141" : on ? "#cfe2f6" : "#ac9c81",
                     fontWeight: on ? 600 : 400,
                   }}
                 >
@@ -387,7 +387,7 @@ export function Toolbar() {
               );
             })}
           </div>
-          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 5, lineHeight: 1.45 }}>
+          <div style={{ fontSize: 9, color: "#897a61", marginTop: 5, lineHeight: 1.45 }}>
             {activePlate
               ? activePlate.blurb
               : "Custom view. A plate composes base layer, overlays and label typography together."}
@@ -418,15 +418,15 @@ export function Toolbar() {
                     display: "flex", alignItems: "center", gap: 6,
                     padding: "3px 8px", borderRadius: 3, cursor: "pointer",
                     fontSize: 11, marginBottom: 1,
-                    background: activeLayer === l.id ? "#1e3a58" : "transparent",
-                    color: activeLayer === l.id ? "#c0ddf0" : ready ? "#6880a0" : "#3d4c5e",
+                    background: activeLayer === l.id ? "#4e4028" : "transparent",
+                    color: activeLayer === l.id ? "#c0ddf0" : ready ? "#9c8a6c" : "#5a5141",
                     fontWeight: activeLayer === l.id ? 600 : 400,
-                    borderLeft: activeLayer === l.id ? "2px solid #4a90d0" : "2px solid transparent",
+                    borderLeft: activeLayer === l.id ? "2px solid #c09b5a" : "2px solid transparent",
                   }}
                 >
                   <span style={{ flex: 1, minWidth: 0 }}>{l.label}</span>
                   {!ready && (
-                    <span style={{ fontSize: 8.5, color: "#33445a", fontVariantNumeric: "tabular-nums" }}>
+                    <span style={{ fontSize: 8.5, color: "#554a38", fontVariantNumeric: "tabular-nums" }}>
                       step {LAYER_REQUIRES[l.id]}
                     </span>
                   )}
@@ -451,8 +451,8 @@ export function Toolbar() {
               value={elevationStyle ?? ""}
               onChange={(e) => setElevationStyle(e.target.value || null)}
               style={{
-                flex: 1, minWidth: 0, background: "#0e1826", color: "#a8bed4",
-                border: "1px solid #20304a", borderRadius: 4, fontSize: 10, padding: "2px 4px",
+                flex: 1, minWidth: 0, background: "#221c12", color: "#d1c3ab",
+                border: "1px solid #453925", borderRadius: 4, fontSize: 10, padding: "2px 4px",
               }}
             >
               <option value="">Default</option>
@@ -475,9 +475,9 @@ export function Toolbar() {
               type="checkbox"
               checked={!!overlayVisibility.plateMotion}
               onChange={() => toggleOverlay("plateMotion")}
-              style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+              style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
             />
-            <span style={{ color: overlayVisibility.plateMotion ? "#b0c8e0" : "#5a6a80" }}>
+            <span style={{ color: overlayVisibility.plateMotion ? "#dccdb4" : "#7b715f" }}>
               {"➤"} Plate Motion
             </span>
           </label>
@@ -495,8 +495,8 @@ export function Toolbar() {
             value={compareLayer ?? ""}
             onChange={(e) => setCompareLayer((e.target.value || null) as ActiveLayer | null)}
             style={{
-              flex: 1, minWidth: 0, background: "#0e1826", color: "#a8bed4",
-              border: "1px solid #20304a", borderRadius: 4, fontSize: 10, padding: "2px 4px",
+              flex: 1, minWidth: 0, background: "#221c12", color: "#d1c3ab",
+              border: "1px solid #453925", borderRadius: 4, fontSize: 10, padding: "2px 4px",
             }}
           >
             <option value="">off</option>
@@ -508,7 +508,7 @@ export function Toolbar() {
           </select>
         </div>
         {compareLayer && (
-          <div style={{ fontSize: 9, color: "#5a7390", marginTop: 4, lineHeight: 1.4 }}>
+          <div style={{ fontSize: 9, color: "#897a61", marginTop: 4, lineHeight: 1.4 }}>
             Drag the divider on the map. {compareLayer} draws to its right, over the
             same ground.
           </div>
@@ -537,7 +537,7 @@ export function Toolbar() {
         {/* The trade map means different things per mode: in Forge the routes/flows
             are the worldgen equilibrium *preview* (potential); in Chronicle the
             routes remain but flow activity is the *live* simulated volume. */}
-        <div style={{ fontSize: 9, color: "#5a7390", marginBottom: 5, lineHeight: 1.4 }}>
+        <div style={{ fontSize: 9, color: "#897a61", marginBottom: 5, lineHeight: 1.4 }}>
           {appMode === "chronicle"
             ? "Trade: routes inherited from the world · flow = live campaign volume (Dynamic Trade Flow)"
             : "Trade routes & flows show the worldgen equilibrium (potential)"}
@@ -549,9 +549,9 @@ export function Toolbar() {
                 type="checkbox"
                 checked={!!overlayVisibility[o.id]}
                 onChange={() => toggleOverlay(o.id)}
-                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
               />
-              <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+              <span style={{ color: overlayVisibility[o.id] ? "#dccdb4" : "#7b715f" }}>
                 {o.label}
               </span>
             </label>
@@ -563,7 +563,7 @@ export function Toolbar() {
                   onChange={(e) => setOverlayOpacity(o.id, Number(e.target.value) / 100)}
                   style={{ ...rangeStyle, height: 3 }}
                 />
-                <span style={{ fontSize: 8.5, color: "#5a7390", minWidth: 24, textAlign: "right" }}>
+                <span style={{ fontSize: 8.5, color: "#897a61", minWidth: 24, textAlign: "right" }}>
                   {Math.round((overlayOpacity[o.id] ?? 1) * 100)}%
                 </span>
               </div>
@@ -575,9 +575,9 @@ export function Toolbar() {
                   <button key={m} onClick={() => setMigrationMode(m)}
                     style={{
                       flex: 1, fontSize: 9.5, padding: "2px 0", borderRadius: 4, cursor: "pointer",
-                      border: `1px solid ${migrationMode === m ? "#4a90d0" : "#26374d"}`,
-                      background: migrationMode === m ? "#16324a" : "#0e1826",
-                      color: migrationMode === m ? "#cfe2f6" : "#6a86a6",
+                      border: `1px solid ${migrationMode === m ? "#c09b5a" : "#483d2b"}`,
+                      background: migrationMode === m ? "#3f3421" : "#221c12",
+                      color: migrationMode === m ? "#cfe2f6" : "#a28f6e",
                     }}
                     title={m === "focus" ? "Only the selected city's inbound flows" : m === "dots" ? "Dots riding the trade routes" : "Culture ribbons, width = volume"}>
                     {m}
@@ -593,9 +593,9 @@ export function Toolbar() {
             type="checkbox"
             checked={showBankIcons}
             onChange={() => setShowBankIcons(!showBankIcons)}
-            style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+            style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
           />
-          <span style={{ color: showBankIcons ? "#b0c8e0" : "#5a6a80" }}>{"\u{1F3E6}"} Banks</span>
+          <span style={{ color: showBankIcons ? "#dccdb4" : "#7b715f" }}>{"\u{1F3E6}"} Banks</span>
         </label>
         </>)}
       </div>
@@ -606,7 +606,7 @@ export function Toolbar() {
         <SectionHead title="Climate" open={openSection.Climate} onToggle={() => toggleSection("Climate")} />
         {openSection.Climate && (
           <div>
-            <div style={{ fontSize: 9, color: "#5a7390", marginBottom: 4, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 9, color: "#897a61", marginBottom: 4, lineHeight: 1.4 }}>
               Circulation bands from the planet settings — the ITCZ rain line and the
               subtropical-high / polar-front belts move with rotation &amp; warmth.
               Set them in <b>Workflow step 0 · World Characteristics</b> (left panel),
@@ -618,9 +618,9 @@ export function Toolbar() {
                   type="checkbox"
                   checked={!!overlayVisibility[o.id]}
                   onChange={() => toggleOverlay(o.id)}
-                  style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                  style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
                 />
-                <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+                <span style={{ color: overlayVisibility[o.id] ? "#dccdb4" : "#7b715f" }}>
                   {o.label}
                 </span>
               </label>
@@ -645,9 +645,9 @@ export function Toolbar() {
                 type="checkbox"
                 checked={!!overlayVisibility[o.id]}
                 onChange={() => toggleOverlay(o.id)}
-                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
               />
-              <span style={{ color: overlayVisibility[o.id] ? "#b0c8e0" : "#5a6a80" }}>
+              <span style={{ color: overlayVisibility[o.id] ? "#dccdb4" : "#7b715f" }}>
                 {o.label}
               </span>
             </label>
@@ -659,7 +659,7 @@ export function Toolbar() {
                   onChange={(e) => setOverlayOpacity(o.id, Number(e.target.value) / 100)}
                   style={{ ...rangeStyle, height: 3 }}
                 />
-                <span style={{ fontSize: 8.5, color: "#5a7390", minWidth: 24, textAlign: "right" }}>
+                <span style={{ fontSize: 8.5, color: "#897a61", minWidth: 24, textAlign: "right" }}>
                   {Math.round((overlayOpacity[o.id] ?? 1) * 100)}%
                 </span>
               </div>
@@ -671,7 +671,7 @@ export function Toolbar() {
             {o.id === "merchantRoutes" && overlayVisibility[o.id] && (
               <label style={{
                 display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                fontSize: 9, color: "#8aa0b8", margin: "0 0 3px 22px", userSelect: "none",
+                fontSize: 9, color: "#b5a68d", margin: "0 0 3px 22px", userSelect: "none",
               }}>
                 <input
                   type="checkbox"
@@ -683,11 +683,11 @@ export function Toolbar() {
                 {merchantRouteRisk && (
                   <span style={{ display: "flex", alignItems: "center", gap: 3, marginLeft: 2 }}>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#469c46" }} />
-                    <span style={{ color: "#5a7390" }}>safe</span>
+                    <span style={{ color: "#897a61" }}>safe</span>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e0c93c", marginLeft: 3 }} />
-                    <span style={{ color: "#5a7390" }}>risky</span>
+                    <span style={{ color: "#897a61" }}>risky</span>
                     <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e0562a", marginLeft: 3 }} />
-                    <span style={{ color: "#5a7390" }}>perilous</span>
+                    <span style={{ color: "#897a61" }}>perilous</span>
                   </span>
                 )}
               </label>
@@ -700,9 +700,9 @@ export function Toolbar() {
                     onClick={() => setRouteColorMode(m)}
                     style={{
                       padding: "2px 7px", borderRadius: 3, cursor: "pointer", fontSize: 9,
-                      border: `1px solid ${routeColorMode === m ? "#c9a24a" : "#20304a"}`,
-                      background: routeColorMode === m ? "#3a2f1a" : "#0e1826",
-                      color: routeColorMode === m ? "#f0dcaa" : "#7d97b0",
+                      border: `1px solid ${routeColorMode === m ? "#c9a24a" : "#453925"}`,
+                      background: routeColorMode === m ? "#3a2f1a" : "#221c12",
+                      color: routeColorMode === m ? "#f0dcaa" : "#ac9c81",
                     }}>{m === "network" ? "by network" : "by good"}</button>
                 ))}
               </div>
@@ -712,9 +712,9 @@ export function Toolbar() {
         {/* Seasonal storm month: 0 = combined annual extent, 1..months scrubs
             the cyclone season (zones fade out in their calm months). */}
         <div style={{ marginTop: 4, opacity: overlayVisibility.stormZones ? 1 : 0.5 }}>
-          <div style={{ fontSize: 10, color: "#8aa0b8", display: "flex", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
             <span>{"\u{1F300}"} Storm month</span>
-            <span style={{ color: "#b0c8e0" }}>
+            <span style={{ color: "#dccdb4" }}>
               {bioParams.stormMonth === 0 ? "All year" : `Moon ${bioParams.stormMonth}`}
             </span>
           </div>
@@ -732,16 +732,16 @@ export function Toolbar() {
         {/* Trade-hub marker display: size + highlight intensity (affects the
             "Trade Hubs" overlay markers across the map). */}
         <div style={{ marginTop: 6, opacity: overlayVisibility.politicalInfluence ? 1 : 0.5 }}>
-          <div style={{ fontSize: 10, color: "#8aa0b8", display: "flex", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
             <span>{"\u{1F535}"} Hub size</span>
-            <span style={{ color: "#b0c8e0" }}>{hubDisplay.size.toFixed(1)}×</span>
+            <span style={{ color: "#dccdb4" }}>{hubDisplay.size.toFixed(1)}×</span>
           </div>
           <input type="range" min={0.5} max={4} step={0.1} value={hubDisplay.size}
             onChange={(e) => setHubDisplay({ size: parseFloat(e.target.value) })}
             style={{ width: "100%", accentColor: "#3a86d6" }} />
-          <div style={{ fontSize: 10, color: "#8aa0b8", display: "flex", justifyContent: "space-between" }}>
+          <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
             <span>Hub highlight</span>
-            <span style={{ color: "#b0c8e0" }}>{Math.round(hubDisplay.intensity * 100)}%</span>
+            <span style={{ color: "#dccdb4" }}>{Math.round(hubDisplay.intensity * 100)}%</span>
           </div>
           <input type="range" min={0} max={1} step={0.05} value={hubDisplay.intensity}
             onChange={(e) => setHubDisplay({ intensity: parseFloat(e.target.value) })}
@@ -758,7 +758,7 @@ export function Toolbar() {
         <button
           onClick={() => setShowGoodsBrowser(true)}
           style={{ width: "100%", marginBottom: 6, padding: "4px 6px", fontSize: 10,
-            background: "#16243a", color: "#cfe0f4", border: "1px solid #2a3e58",
+            background: "#352b1b", color: "#cfe0f4", border: "1px solid #524630",
             borderRadius: 4, cursor: "pointer" }}>
           📖 Browse goods by origin
         </button>
@@ -779,9 +779,9 @@ export function Toolbar() {
                   style={{
                     fontSize: 10, padding: "1px 7px", borderRadius: 3, userSelect: "none",
                     cursor: "pointer", flex: 1, textAlign: "center",
-                    color: active ? "#0a1620" : "#7d93ab",
-                    background: active ? "#7fa8c8" : "transparent",
-                    border: `1px solid ${active ? "#7fa8c8" : "#2a3e58"}`,
+                    color: active ? "#1c170e" : "#a89980",
+                    background: active ? "#c3ac84" : "transparent",
+                    border: `1px solid ${active ? "#c3ac84" : "#524630"}`,
                   }}>
                   {active ? "☑" : "☐"} {label}
                 </span>
@@ -802,28 +802,28 @@ export function Toolbar() {
             title="Quality paint: hue-mix (toward the good's own colour) vs. a heat ramp (blue = poor, red = fine) that reads more clearly for muted colours"
             style={{
               display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-              fontSize: 9.5, color: "#93a8bd", marginBottom: 6, padding: "1px 2px",
+              fontSize: 9.5, color: "#baad96", marginBottom: 6, padding: "1px 2px",
               userSelect: "none",
             }}>
             <span>Quality paint:</span>
-            <span style={{ color: !goodQualityHeatmap ? "#cfe0f4" : "#5f7390", fontWeight: !goodQualityHeatmap ? 600 : 400 }}>
+            <span style={{ color: !goodQualityHeatmap ? "#cfe0f4" : "#8a7c65", fontWeight: !goodQualityHeatmap ? 600 : 400 }}>
               hue
             </span>
             <span style={{
               position: "relative", width: 26, height: 13, borderRadius: 7,
-              background: goodQualityHeatmap ? "#3a5a86" : "#243449",
-              border: "1px solid #2a3e58", flex: "0 0 auto",
+              background: goodQualityHeatmap ? "#7c6844" : "#443a29",
+              border: "1px solid #524630", flex: "0 0 auto",
             }}>
               <span style={{
                 position: "absolute", top: 1, left: goodQualityHeatmap ? 13 : 1,
                 width: 11, height: 11, borderRadius: "50%",
                 background: goodQualityHeatmap
                   ? "linear-gradient(135deg, #c42020, #f0d640)"
-                  : "linear-gradient(135deg, #7fa8c8, #eceae0)",
+                  : "linear-gradient(135deg, #c3ac84, #eceae0)",
                 transition: "left 0.12s ease",
               }} />
             </span>
-            <span style={{ color: goodQualityHeatmap ? "#cfe0f4" : "#5f7390", fontWeight: goodQualityHeatmap ? 600 : 400 }}>
+            <span style={{ color: goodQualityHeatmap ? "#cfe0f4" : "#8a7c65", fontWeight: goodQualityHeatmap ? 600 : 400 }}>
               🌡 heatmap
             </span>
           </div>
@@ -843,7 +843,7 @@ export function Toolbar() {
               <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "3px 0 1px" }}>
                 <span
                   onClick={() => setExpandedCats((e) => ({ ...e, [cat]: !e[cat] }))}
-                  style={{ cursor: "pointer", color: "#5f7390", fontSize: 9, width: 9, userSelect: "none" }}
+                  style={{ cursor: "pointer", color: "#8a7c65", fontSize: 9, width: 9, userSelect: "none" }}
                   title={expanded ? "Collapse" : "Expand to toggle individual goods"}
                 >{expanded ? "▼" : "▶"}</span>
                 <input
@@ -851,11 +851,11 @@ export function Toolbar() {
                   checked={allOn}
                   ref={(el) => { if (el) el.indeterminate = someOn; }}
                   onChange={() => setOverlaysVisible(keys, !allOn)}
-                  style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                  style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
                 />
                 <span
                   onClick={() => setExpandedCats((e) => ({ ...e, [cat]: !e[cat] }))}
-                  style={{ cursor: "pointer", color: shownCount > 0 ? "#9fb6d0" : "#5f7390",
+                  style={{ cursor: "pointer", color: shownCount > 0 ? "#ccbda3" : "#8a7c65",
                     fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, flex: 1, userSelect: "none" }}
                 >
                   {cat}{shownCount > 0 ? ` (${shownCount}/${keys.length})` : ""}
@@ -869,12 +869,12 @@ export function Toolbar() {
                       type="checkbox"
                       checked={!!overlayVisibility[key]}
                       onChange={() => toggleOverlay(key)}
-                      style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                      style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
                     />
                     <span
                       onClick={() => setGoodDetail(g.id)}
                       title="Show seeding climates & heatmap"
-                      style={{ color: overlayVisibility[key] ? "#b0c8e0" : "#5a6a80", cursor: "pointer", flex: 1 }}
+                      style={{ color: overlayVisibility[key] ? "#dccdb4" : "#7b715f", cursor: "pointer", flex: 1 }}
                     >
                       <GoodIcon name={g.id} size={16} style={{ display: "inline-block", verticalAlign: "middle", marginRight: 3 }} />{g.name}
                     </span>
@@ -897,20 +897,20 @@ export function Toolbar() {
                 type="checkbox"
                 checked={!!overlayVisibility.provinces}
                 onChange={() => toggleOverlay("provinces")}
-                style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+                style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
                 disabled={provinces.length === 0}
               />
-              <span style={{ color: overlayVisibility.provinces ? "#b0c8e0" : "#5a6a80" }}>
+              <span style={{ color: overlayVisibility.provinces ? "#dccdb4" : "#7b715f" }}>
                 🗺 Culture fill + borders
               </span>
             </label>
             {provinces.length === 0 && (
-              <div style={{ fontSize: 9, color: "#5a7390", lineHeight: 1.4 }}>
+              <div style={{ fontSize: 9, color: "#897a61", lineHeight: 1.4 }}>
                 No provinces yet. Open the Provinces window (top bar) after Step 7 to generate them.
               </div>
             )}
             {provinces.length > 0 && (
-              <div style={{ fontSize: 9, color: "#5a7390" }}>
+              <div style={{ fontSize: 9, color: "#897a61" }}>
                 {provinces.length} provinces · click a cell to inspect
               </div>
             )}
@@ -963,9 +963,9 @@ export function Toolbar() {
               onClick={() => setShowProvinces(!showProvinces)}
               style={{
                 padding: "3px 6px", fontSize: 10, borderRadius: 4, cursor: "pointer",
-                border: `1px solid ${showProvinces ? "#3a80c0" : "#1e2e42"}`,
-                background: showProvinces ? "#19324a" : "#0e1826",
-                color: showProvinces ? "#cfe2f6" : "#6a86a6",
+                border: `1px solid ${showProvinces ? "#a58855" : "#3e3422"}`,
+                background: showProvinces ? "#413622" : "#221c12",
+                color: showProvinces ? "#cfe2f6" : "#a28f6e",
               }}>
               {showProvinces ? "Close" : "Open"} Province Panel
             </button>
@@ -984,9 +984,9 @@ export function Toolbar() {
             type="checkbox"
             checked={stretchToFit}
             onChange={(e) => setStretchToFit(e.target.checked)}
-            style={{ accentColor: "#4a90d0", width: 12, height: 12 }}
+            style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
           />
-          <span style={{ color: stretchToFit ? "#b0c8e0" : "#5a6a80" }}>
+          <span style={{ color: stretchToFit ? "#dccdb4" : "#7b715f" }}>
             Stretch to fill
           </span>
         </label>
@@ -1015,17 +1015,17 @@ const section: React.CSSProperties = {
 };
 
 const sectionHeader: React.CSSProperties = {
-  fontSize: 10, color: "#4a6a8a", textTransform: "uppercase", letterSpacing: 1.2,
+  fontSize: 10, color: "#827052", textTransform: "uppercase", letterSpacing: 1.2,
   marginBottom: 5, fontWeight: 600,
 };
 
 const groupLabel: React.CSSProperties = {
-  fontSize: 9, color: "#3a4e64", marginTop: 2, marginBottom: 1, paddingLeft: 8,
+  fontSize: 9, color: "#5f533f", marginTop: 2, marginBottom: 1, paddingLeft: 8,
   textTransform: "uppercase", letterSpacing: 0.8,
 };
 
 const divider: React.CSSProperties = {
-  height: 1, background: "#1a2535", margin: "2px 8px",
+  height: 1, background: "#322a1d", margin: "2px 8px",
 };
 
 const sliderRow: React.CSSProperties = {
@@ -1033,11 +1033,11 @@ const sliderRow: React.CSSProperties = {
 };
 
 const sliderLabel: React.CSSProperties = {
-  fontSize: 10, color: "#5a7090",
+  fontSize: 10, color: "#897a61",
 };
 
 const sliderValue: React.CSSProperties = {
-  fontSize: 10, color: "#8aa0c0", fontFamily: "monospace",
+  fontSize: 10, color: "#bcab8e", fontFamily: "monospace",
 };
 
 const rangeStyle: React.CSSProperties = {

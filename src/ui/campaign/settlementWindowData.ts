@@ -12,7 +12,7 @@ import type { CaravanKind, LandmarkKind, ShipKind, SlotStatus, StyleKey, WaterKi
 import { toHex } from "@canvas/cityArt";
 
 export const TIER_NAMES = ["", "Outpost", "Market", "Guild Town", "Free City", "Emporium"];
-export const CIVIC_COLOR = "#7a8aa0";
+export const CIVIC_COLOR = "#9d917d";
 
 // ── architectural family ──────────────────────────────────────────────────────
 

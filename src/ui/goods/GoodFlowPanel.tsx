@@ -75,7 +75,7 @@ export function GoodFlowPanel() {
 
       {/* Who moves the most of it + who craves it */}
       {gstat && (
-        <div style={{ color: "#9ab0c8", fontSize: 9, marginBottom: 4, lineHeight: 1.5 }}>
+        <div style={{ color: "#c5b69d", fontSize: 9, marginBottom: 4, lineHeight: 1.5 }}>
           {gstat.top_exporter >= 0 && <>Greatest exporter: <b style={{ color: "#7fd0a0" }}>{hubName(gstat.top_exporter)}</b>. </>}
           {gstat.top_importer >= 0 && <>Hungriest market: <b style={{ color: "#ff9a6a" }}>{hubName(gstat.top_importer)}</b>. </>}
           {gstat.biggest_desire_class && <>Most desired by the <b style={{ color: "#e0c060" }}>{gstat.biggest_desire_class}</b>.</>}
@@ -90,13 +90,13 @@ export function GoodFlowPanel() {
         <>
           {/* Price-vs-days graph (multi-line) */}
           <div style={sectionHdr}>Price along the journey (× base vs. travel days)</div>
-          <svg width={W} height={H} style={{ display: "block", background: "#0b1622", borderRadius: 4 }}>
-            <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#24364e" />
-            <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#24364e" />
-            <text x={2} y={padT + 6} fill="#5a7090" fontSize={8}>{maxPrice.toFixed(1)}×</text>
-            <text x={2} y={H - padB} fill="#5a7090" fontSize={8}>1×</text>
-            <text x={W - padR} y={H - 6} fill="#5a7090" fontSize={8} textAnchor="end">{Math.round(maxDays)}d</text>
-            <text x={padL} y={H - 6} fill="#5a7090" fontSize={8}>0d</text>
+          <svg width={W} height={H} style={{ display: "block", background: "#1e180f", borderRadius: 4 }}>
+            <line x1={padL} y1={padT} x2={padL} y2={H - padB} stroke="#493d29" />
+            <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#493d29" />
+            <text x={2} y={padT + 6} fill="#897a61" fontSize={8}>{maxPrice.toFixed(1)}×</text>
+            <text x={2} y={H - padB} fill="#897a61" fontSize={8}>1×</text>
+            <text x={W - padR} y={H - 6} fill="#897a61" fontSize={8} textAnchor="end">{Math.round(maxDays)}d</text>
+            <text x={padL} y={H - 6} fill="#897a61" fontSize={8}>0d</text>
             {graphRoutes.map((r, ri) => {
               const color = LINE_COLORS[ri % LINE_COLORS.length];
               const active = openRoads.includes(r.id);
@@ -123,13 +123,13 @@ export function GoodFlowPanel() {
               const term = r.stops.length > 0 ? r.stops[r.stops.length - 1].price : 1;
               return (
                 <div key={r.id} onClick={() => toggleOpenRoad(r.id)}
-                  style={{ ...rowS, cursor: "pointer", background: active ? "#1a2c40" : "transparent" }}>
+                  style={{ ...rowS, cursor: "pointer", background: active ? "#3b311f" : "transparent" }}>
                   <span style={{ width: 8, height: 8, borderRadius: 8, background: LINE_COLORS[ri % LINE_COLORS.length], flex: "0 0 auto" }} />
-                  <span style={{ flex: 1, color: active ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ flex: 1, color: active ? "#e8d8b0" : "#ded4c2", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {hubName(origin)} → {hubName(dest)}
                   </span>
-                  <span style={{ color: "#8aa0c0", fontSize: 9 }} title={MODE_LABEL[r.mode]}>{MODE_ICON[r.mode]}</span>
-                  <span style={{ color: "#9ab0c8", fontSize: 9, minWidth: 28, textAlign: "right" }}>{Math.round(r.days)}d</span>
+                  <span style={{ color: "#bcab8e", fontSize: 9 }} title={MODE_LABEL[r.mode]}>{MODE_ICON[r.mode]}</span>
+                  <span style={{ color: "#c5b69d", fontSize: 9, minWidth: 28, textAlign: "right" }}>{Math.round(r.days)}d</span>
                   <span style={{ color: "#ff9a6a", fontSize: 9, minWidth: 30, textAlign: "right" }}>{term.toFixed(1)}×</span>
                 </div>
               );
@@ -142,7 +142,7 @@ export function GoodFlowPanel() {
             .filter((r): r is EconChain => !!r)
             .map((r) => <RoadDetail key={r.id} chain={r} hubName={hubName} hubById={hubById} iconFor={(id) => <GoodIcon name={id} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />} labelFor={(id) => goodMeta(id).name} />)}
 
-          <div style={{ color: "#506680", fontSize: 9, marginTop: 4 }}>
+          <div style={{ color: "#7a6d56", fontSize: 9, marginTop: 4 }}>
             {MODE_ICON.join(" ")} = overland / sea / river · click roads to open several at once.
           </div>
         </>
@@ -162,25 +162,25 @@ function RoadDetail({ chain, hubName, hubById, iconFor, labelFor }: {
 }) {
   const tollTotal = chain.stops.reduce((a, s) => a + (s.toll ?? 0), 0);
   return (
-    <div style={{ marginTop: 6, padding: "6px 8px", background: "#0b1622", borderRadius: 5, border: "1px solid #1e3550" }}>
-      <div style={{ color: "#9ab0c8", fontSize: 10, marginBottom: 4 }}>
+    <div style={{ marginTop: 6, padding: "6px 8px", background: "#1e180f", borderRadius: 5, border: "1px solid #493c25" }}>
+      <div style={{ color: "#c5b69d", fontSize: 10, marginBottom: 4 }}>
         {iconFor(chain.good_name)} {hubName(chain.stops[0]?.hub ?? 0)} → {hubName(chain.stops[chain.stops.length - 1]?.hub ?? 0)}
-        <span style={{ color: "#6a86a6" }}>{`  ·  ${Math.round(chain.days)}d`}{tollTotal > 0 ? `  ·  tolls +${Math.round(tollTotal * 100)}%` : ""}</span>
+        <span style={{ color: "#a28f6e" }}>{`  ·  ${Math.round(chain.days)}d`}{tollTotal > 0 ? `  ·  tolls +${Math.round(tollTotal * 100)}%` : ""}</span>
       </div>
       {/* Price ladder per stop */}
       {chain.stops.map((s, i) => (
         <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 9, marginBottom: 1 }}>
-          <span style={{ color: "#5a7090", minWidth: 14 }}>{i === 0 ? "◉" : "→"}</span>
+          <span style={{ color: "#897a61", minWidth: 14 }}>{i === 0 ? "◉" : "→"}</span>
           <span style={{ flex: 1, color: i === 0 ? "#80dc8c" : i === chain.stops.length - 1 ? "#ff9a6a" : "#e0c060", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {hubName(s.hub)}
           </span>
           {(s.toll ?? 0) > 0 && <span style={{ color: "#d98a5a", fontSize: 8 }} title="toll">+{Math.round((s.toll ?? 0) * 100)}%🛃</span>}
           {(s.demand_spike ?? 0) > 0.25 && <span style={{ color: "#d97fb0", fontSize: 8 }} title="demand spike">▲</span>}
-          <span style={{ color: "#c0d0e0", minWidth: 30, textAlign: "right" }}>{s.price.toFixed(1)}×</span>
+          <span style={{ color: "#ded4c2", minWidth: 30, textAlign: "right" }}>{s.price.toFixed(1)}×</span>
         </div>
       ))}
       {/* Merchant's tale */}
-      <div style={{ marginTop: 4, color: "#a8bcd4", fontSize: 9.5, fontStyle: "italic", lineHeight: 1.45 }}>
+      <div style={{ marginTop: 4, color: "#d1c3ab", fontSize: 9.5, fontStyle: "italic", lineHeight: 1.45 }}>
         {merchantStory(chain, hubName, hubById, labelFor)}
       </div>
     </div>
@@ -228,17 +228,17 @@ function merchantStory(
 
 const panel: React.CSSProperties = {
   position: "absolute", width: 360, maxHeight: "90vh", overflowY: "auto",
-  background: "rgba(12,18,26,0.97)", border: "1px solid #24364e", borderRadius: 8,
+  background: "rgba(24,20,14,0.97)", border: "1px solid #493d29", borderRadius: 8,
   padding: "8px 10px", zIndex: 120, boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
 };
 const header: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
   marginBottom: 6, color: "#e8d8b0", fontWeight: 700, cursor: "grab", userSelect: "none",
 };
-const closeBtn: React.CSSProperties = { color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 };
+const closeBtn: React.CSSProperties = { color: "#ab9775", cursor: "pointer", fontSize: 18, lineHeight: 1 };
 const sectionHdr: React.CSSProperties = {
-  color: "#6a86a6", fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-  letterSpacing: 0.5, borderBottom: "1px solid #1e2e42", paddingBottom: 2, marginBottom: 4,
+  color: "#a28f6e", fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+  letterSpacing: 0.5, borderBottom: "1px solid #3e3422", paddingBottom: 2, marginBottom: 4,
 };
 const rowS: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "2px 3px", borderRadius: 3 };
-const emptyTxt: React.CSSProperties = { color: "#506680", fontSize: 10, fontStyle: "italic", padding: "2px 3px" };
+const emptyTxt: React.CSSProperties = { color: "#7a6d56", fontSize: 10, fontStyle: "italic", padding: "2px 3px" };

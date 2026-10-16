@@ -95,7 +95,7 @@ export function AtlasPanel() {
     if (h.starving > 0.5) return { label: "starving", color: T.badInk, bg: "#2a1218" };
     if (h.growth > 0.003) return { label: "growing", color: T.goodInk, bg: "#122a1a" };
     if (h.growth < -0.003) return { label: "declining", color: "#e0b080", bg: "#2a2012" };
-    return { label: "steady", color: T.inkDim, bg: "#131c28" };
+    return { label: "steady", color: T.inkDim, bg: "#252016" };
   };
 
   // Timeline kinds → filter groups + colours.
@@ -107,7 +107,7 @@ export function AtlasPanel() {
     return null;
   };
   const groupColor: Record<string, string> = {
-    lifecycle: T.gold, war: "#e08080", finance: "#8ab0e0", plague: "#c07070",
+    lifecycle: T.gold, war: "#e08080", finance: "#d6be94", plague: "#c07070",
   };
   const timeline = useMemo(() => {
     const rows = journal
@@ -153,7 +153,7 @@ export function AtlasPanel() {
             border: `1px solid ${heatOn ? "#d9a441" : T.line}`,
             background: heatOn ? "#2a230e" : "transparent", color: heatOn ? "#ffd75e" : T.inkDim,
           }}>🔥 Heat</button>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setOpen(false)}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={() => setOpen(false)}>✕</span>
       </div>
 
       <div style={{ display: "flex", borderBottom: `1px solid ${T.lineSoft}`, padding: "0 6px" }}>
@@ -435,7 +435,7 @@ function Chart({ title, rows, color, fmt, markers }: {
         <span style={{ flex: 1 }} />
         <span style={{ color, fontSize: 11, fontWeight: 700 }}>{fmt(ys[ys.length - 1])}</span>
       </div>
-      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", background: "#0b1622", borderRadius: 4 }}>
+      <svg width="100%" height={h} viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" style={{ display: "block", background: "#1e180f", borderRadius: 4 }}>
         <polyline points={pts} fill="none" stroke={color} strokeWidth={1.6} />
         {markers?.map((m, i) => (
           <text key={i} x={px(m.x)} y={h - 3} textAnchor="middle" fontSize={9} fill={m.color}>{m.label}</text>

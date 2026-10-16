@@ -70,7 +70,7 @@ export function StepOceanAtmo({ invalidateTiles }: Props) {
           View Currents
         </button>
       </div>
-      <div style={{ color: "#405060", fontSize: 10 }}>
+      <div style={{ color: "#5c5344", fontSize: 10 }}>
         This step computes: wind belts (trade winds, westerlies, polar easterlies),
         ocean current gyres, temperature (latitude + altitude + currents),
         and precipitation (moisture advection, ITCZ, orographic lift).

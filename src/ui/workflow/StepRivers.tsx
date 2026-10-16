@@ -83,13 +83,13 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
     onChange: (v: number) => void, fmt: (v: number) => string, hint?: string) => (
     <div style={{ marginBottom: 4 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ color: "#607090", fontSize: 10 }}>{label}</span>
-        <span style={{ color: "#8090b0", fontSize: 10 }}>{fmt(value)}</span>
+        <span style={{ color: "#8a7d66", fontSize: 10 }}>{label}</span>
+        <span style={{ color: "#ac9d84", fontSize: 10 }}>{fmt(value)}</span>
       </div>
       <input type="range" min={min} max={max} step={step} value={value}
         onChange={(e) => onChange(Number(e.target.value))}
         style={{ width: "100%", height: 12 }} />
-      {hint && <div style={{ color: "#405060", fontSize: 9 }}>{hint}</div>}
+      {hint && <div style={{ color: "#5c5344", fontSize: 9 }}>{hint}</div>}
     </div>
   );
 
@@ -107,8 +107,8 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
         </div>
       )}
 
-      <div style={{ background: "#0a1018", border: "1px solid #2a3a50", borderRadius: 4, padding: 6, marginBottom: 2 }}>
-        <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
+      <div style={{ background: "#16120c", border: "1px solid #4b412f", borderRadius: 4, padding: 6, marginBottom: 2 }}>
+        <div style={{ color: "#aa9166", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           River & Lake Settings
         </div>
         {slider("River Density", riverParams.density, 0.1, 1.5, 0.05,
@@ -117,7 +117,7 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
         {slider("Lake Depth Threshold", riverParams.lakeFillDepth, 0.001, 0.02, 0.001,
           (v) => setRiverParams({ lakeFillDepth: v }), (v) => `${Math.round(v * 8848)}m`,
           "More lakes ↔ Only deep basins")}
-        <div style={{ color: "#405060", fontSize: 9, marginTop: 2 }}>
+        <div style={{ color: "#5c5344", fontSize: 9, marginTop: 2 }}>
           River width is derived from discharge (precipitation × drainage area ×
           climate) — wider, deeper-blue downstream; arid rivers stay thin.
         </div>
@@ -134,14 +134,14 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
 
       <button onClick={handleRefresh} disabled={simRunning || !step2Done || !step4Done}
         title="Re-run hydrology → soil/fertility → biology on the existing world: adds meanders, oxbow backwaters, salt lakes, delta abundance and salt/goods — without re-rolling terrain or moving settlements."
-        style={{ ...genBtn, background: "#12222e", color: "#8fc0d8", border: "1px solid #244a60" }}>
+        style={{ ...genBtn, background: "#2a2316", color: "#d3bc94", border: "1px solid #57482d" }}>
         🔄 Refresh meanders, salt &amp; goods
       </button>
-      <div style={{ color: "#405060", fontSize: 9 }}>
+      <div style={{ color: "#5c5344", fontSize: 9 }}>
         Refresh updates rivers, lakes, salt &amp; the goods economy on an existing
         world (keeps your terrain &amp; cities). Full regen: use “Complete from Landmass”.
       </div>
-      <div style={{ color: "#405060", fontSize: 10 }}>
+      <div style={{ color: "#5c5344", fontSize: 10 }}>
         Uses D8 steepest-descent flow routing over a depression-filled surface.
         Adjust density for the river network and the lake threshold for how
         readily basins fill.

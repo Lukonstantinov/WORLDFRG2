@@ -65,8 +65,8 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
     const goods = (h.top_goods && h.top_goods.length ? h.top_goods : h.specialties).slice(0, 3);
     return (
       <div key={h.name + i} style={{ ...card, cursor: "pointer" }} onClick={() => selectHouse(h)}
-        onMouseEnter={(e) => { e.currentTarget.style.background = "#152234"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = "#101a26"; }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = "#302819"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = "#231d13"; }}
         title="Open this family's dossier">
         <span style={{ position: "absolute", left: 0, top: 6, bottom: 6, width: 3, borderRadius: 2, background: accent }} />
         <CoatOfArms name={h.name} size={28} guild={h.is_guild} />
@@ -81,17 +81,17 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
             <span style={{ flex: 1 }} />
             <span style={{ color: "#e0c060", fontWeight: 700, fontSize: 11.5, fontVariantNumeric: "tabular-nums" }}>{fmtWealth(h.wealth)}</span>
           </div>
-          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 1, fontSize: 10, color: "#7a90a8",
+          <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 1, fontSize: 10, color: "#a5967d",
             overflow: "hidden", whiteSpace: "nowrap" }}>
             <span>🏙 {h.home_name}</span>
-            <span style={{ color: "#465870" }}>· {h.head_name}</span>
+            <span style={{ color: "#6b5f4b" }}>· {h.head_name}</span>
             <span style={{ flex: 1 }} />
             {goods.map((g) => <span key={g} title={g}>{goodIcon(g)}</span>)}
             {fleetTotal > 0 && <span title="fleet">{sea > 0 && `🚢${sea}`}{river > 0 && ` 🛶${river}`}{car > 0 && ` 🐫${car}`}</span>}
             {(h.offices?.length ?? 0) > 0 && <span title={`${h.offices!.length} offices abroad`}>🏢{h.offices!.length}</span>}
             {h.rivals.length > 0 && <span title={`Feuding: ${h.rivals.join(", ")}`} style={{ color: "#e0a89a" }}>⚔{h.rivals.length}</span>}
           </div>
-          <div style={{ height: 2, background: "#0a1018", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
+          <div style={{ height: 2, background: "#16120c", borderRadius: 2, overflow: "hidden", marginTop: 3 }}>
             <div style={{ width: `${(h.wealth / maxWealth) * 100}%`, height: "100%", background: accent }} />
           </div>
         </div>
@@ -106,7 +106,7 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
         {list.slice(0, n).map((h, i) => renderHouseCard(h, i))}
         {list.length > n && (
           <div data-no-drag onClick={() => more(key)}
-            style={{ textAlign: "center", color: "#7fb2d8", fontSize: 10.5, padding: "5px 0", cursor: "pointer" }}>
+            style={{ textAlign: "center", color: "#d1b686", fontSize: 10.5, padding: "5px 0", cursor: "pointer" }}>
             show {Math.min(PAGE, list.length - n)} more of {list.length - n} ▾
           </div>
         )}
@@ -120,22 +120,22 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
       {compareOpen && <HouseCompareWindow houses={houses} onClose={() => setCompareOpen(false)} />}
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>{companies ? "🏛 Merchant Companies" : "⚜️ Merchant Houses"}
-          <span style={{ color: "#6a7e96", fontWeight: 400, fontSize: 11 }}> · {kind.filter((h) => !h.defunct).length} active</span>
+          <span style={{ color: "#93856d", fontWeight: 400, fontSize: 11 }}> · {kind.filter((h) => !h.defunct).length} active</span>
         </span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={close}>✕</span>
       </div>
       {companies && (
-        <div style={{ padding: "5px 10px", fontSize: 10, color: "#6f8aa6", borderBottom: "1px solid #1e2e42" }}>
+        <div style={{ padding: "5px 10px", fontSize: 10, color: "#a29173", borderBottom: "1px solid #3e3422" }}>
           Civic firms chartered by their city — they trade in the city&apos;s interest, draw a civic subsidy and never go bankrupt.
         </div>
       )}
       {/* Search · sort · links — one compact row */}
-      <div data-no-drag style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid #1e2e42" }}>
+      <div data-no-drag style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 10px", borderBottom: "1px solid #3e3422" }}>
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="🔎 name, city, head or good…"
-          style={{ flex: 1, minWidth: 0, background: "#0b131d", border: "1px solid #24384e", borderRadius: 5,
-            color: "#dfe8f2", fontSize: 11, padding: "4px 7px" }} />
+          style={{ flex: 1, minWidth: 0, background: "#1a160e", border: "1px solid #493d29", borderRadius: 5,
+            color: "#f1ebe0", fontSize: 11, padding: "4px 7px" }} />
         <select value={sort} onChange={(e) => setSort(e.target.value as typeof sort)}
-          style={{ background: "#0b131d", border: "1px solid #24384e", borderRadius: 5, color: "#cfe2f6", fontSize: 10.5, padding: "3px 4px" }}>
+          style={{ background: "#1a160e", border: "1px solid #493d29", borderRadius: 5, color: "#cfe2f6", fontSize: 10.5, padding: "3px 4px" }}>
           <option value="wealth">wealth</option>
           <option value="standing">standing</option>
           <option value="name">name</option>
@@ -147,7 +147,7 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
           </div>
         )}
         <div onClick={() => setCompareOpen(true)} title="Compare two houses side by side"
-          style={{ padding: "3px 8px", cursor: "pointer", fontSize: 10.5, color: "#cfe2f6", border: "1px solid #2e4864", borderRadius: 5 }}>
+          style={{ padding: "3px 8px", cursor: "pointer", fontSize: 10.5, color: "#cfe2f6", border: "1px solid #5d4e35", borderRadius: 5 }}>
           ⚖ Compare
         </div>
       </div>
@@ -171,15 +171,15 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
                 <div data-no-drag onClick={() => toggleTier(t)} title={meta.band}
                   style={{ display: "flex", alignItems: "center", gap: 7, cursor: "pointer",
                     margin: "8px 0 5px", padding: "4px 9px", borderRadius: 6,
-                    background: t === 1 ? "linear-gradient(90deg, #1c1608, #120e06)" : "#0e1622",
-                    border: `1px solid ${t === 1 ? "#3a2e10" : "#1a2838"}` }}>
+                    background: t === 1 ? "linear-gradient(90deg, #1c1608, #120e06)" : "#201a10",
+                    border: `1px solid ${t === 1 ? "#3a2e10" : "#342c1e"}` }}>
                   <span style={{ color: "#c9a227", fontSize: 12 }}>{meta.glyph}</span>
-                  <span style={{ color: t === 1 ? "#e8d090" : "#9ab0c8", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>
+                  <span style={{ color: t === 1 ? "#e8d090" : "#c5b69d", fontSize: 10.5, fontWeight: 700, letterSpacing: 0.4 }}>
                     {meta.name.toUpperCase()}
                   </span>
-                  <span style={{ color: "#4e6480", fontSize: 9.5 }}>({group.length})</span>
+                  <span style={{ color: "#7a6c54", fontSize: 9.5 }}>({group.length})</span>
                   <span style={{ flex: 1 }} />
-                  <span style={{ color: "#5a6a7e", fontSize: 9 }}>{collapsed ? "▸" : "▾"}</span>
+                  <span style={{ color: "#7a705e", fontSize: 9 }}>{collapsed ? "▸" : "▾"}</span>
                 </div>
                 {!collapsed && pageOf(`t${t}`, group)}
               </div>
@@ -191,7 +191,7 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
         {gone.length > 0 && (
           <>
             <div data-no-drag onClick={() => setShowFallen((v) => !v)}
-              style={{ color: "#5a6a7e", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, cursor: "pointer",
+              style={{ color: "#7a705e", fontSize: 9.5, fontWeight: 700, letterSpacing: 0.4, cursor: "pointer",
                 margin: "12px 0 6px", padding: "0 2px", textTransform: "uppercase" }}>
               🪦 Fallen ({gone.length}) {showFallen ? "▾" : "▸"}
             </div>
@@ -199,14 +199,14 @@ export function HousesPanel({ companies = false }: { companies?: boolean }) {
               <div key={"d" + i} style={{ ...card, padding: "5px 10px", opacity: 0.6, cursor: "pointer" }} onClick={() => openTimeline(h.name)} title="View this family's timeline">
                 <CoatOfArms name={h.name} size={20} guild={h.is_guild} />
                 <div style={{ flex: 1, display: "flex", alignItems: "baseline", gap: 6, minWidth: 0 }}>
-                  <span style={{ color: "#9aa6b4", fontSize: 11, textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
-                  <span style={{ color: "#4a5c72", fontSize: 9.5 }}>once of {h.home_name}</span>
+                  <span style={{ color: "#b2aa9c", fontSize: 11, textDecoration: "line-through", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{h.name}</span>
+                  <span style={{ color: "#6d624f", fontSize: 9.5 }}>once of {h.home_name}</span>
                 </div>
               </div>
             ))}
             {showFallen && gone.length > (shown.fallen ?? PAGE) && (
               <div data-no-drag onClick={() => more("fallen")}
-                style={{ textAlign: "center", color: "#7fb2d8", fontSize: 10.5, padding: "5px 0", cursor: "pointer" }}>
+                style={{ textAlign: "center", color: "#d1b686", fontSize: 10.5, padding: "5px 0", cursor: "pointer" }}>
                 show more ▾
               </div>
             )}
@@ -278,7 +278,7 @@ function BumpBand({ bump, ineq, onSelect }: { bump: BumpChart | null; ineq: Ineq
   };
 
   return (
-    <div style={{ display: "flex", gap: 8, padding: "8px 10px", borderBottom: "1px solid #1e2e42", background: "#0a1119" }}>
+    <div style={{ display: "flex", gap: 8, padding: "8px 10px", borderBottom: "1px solid #3e3422", background: "#17130c" }}>
       <div style={{ flex: "0 0 auto" }} title="The top houses' wealth rank over the last decades — a line crossing above another is a house overtaking it; a line that stops is a house that died">
         <svg width={W} height={H} style={{ display: "block" }}>
           {bump.lines.map((l) => {
@@ -297,7 +297,7 @@ function BumpBand({ bump, ineq, onSelect }: { bump: BumpChart | null; ineq: Ineq
             );
           })}
         </svg>
-        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#4a5c72", padding: "0 4px" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#6d624f", padding: "0 4px" }}>
           <span>{bump.years[0]}</span>
           <span title="Wealth rank, oldest → newest">rank over time</span>
           <span>{bump.years[n - 1]}</span>
@@ -335,7 +335,7 @@ function Gauge({ label, value, series, color }: { label: string; value: string; 
           <polyline points={pts} fill="none" stroke={color} strokeWidth={1.3} opacity={0.85} />
         </svg>
       )}
-      <div style={{ color: "#5a6a7e", fontSize: 8.5 }}>{label}</div>
+      <div style={{ color: "#7a705e", fontSize: 8.5 }}>{label}</div>
     </div>
   );
 }
@@ -346,7 +346,7 @@ function PlainStat({ label, value, color }: { label: string; value: string; colo
   return (
     <div style={gaugeCell}>
       <span style={{ color, fontWeight: 700, fontSize: 12 }}>{value}</span>
-      <div style={{ color: "#5a6a7e", fontSize: 8.5, marginTop: 1 }}>{label}</div>
+      <div style={{ color: "#7a705e", fontSize: 8.5, marginTop: 1 }}>{label}</div>
     </div>
   );
 }
@@ -368,13 +368,13 @@ function PulseTicker({ entries }: { entries: JournalEntry[] }) {
   if (recent.length === 0) return null;
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 10px",
-      borderTop: "1px solid #1a2a3e", background: "#080d13", overflowX: "auto", whiteSpace: "nowrap" }}
+      borderTop: "1px solid #3a301e", background: "#120f09", overflowX: "auto", whiteSpace: "nowrap" }}
       title="The pulse — recent house events world-wide">
-      <span style={{ color: "#3e4e64", fontSize: 9 }}>♥</span>
+      <span style={{ color: "#5f5543", fontSize: 9 }}>♥</span>
       {recent.map((e, i) => (
-        <span key={i} style={{ fontSize: 9.5, color: "#7a90a8", display: "inline-flex", alignItems: "center", gap: 3 }}>
+        <span key={i} style={{ fontSize: 9.5, color: "#a5967d", display: "inline-flex", alignItems: "center", gap: 3 }}>
           <span>{PULSE_ICON[e.kind] ?? "•"}</span>
-          <span style={{ color: "#9ab0c8" }}>{e.text}</span>
+          <span style={{ color: "#c5b69d" }}>{e.text}</span>
         </span>
       ))}
     </div>
@@ -393,7 +393,7 @@ function TradeDiagnostics({ diag }: { diag: CampaignDiagnostics }) {
   const stat = (label: string, value: string, color = "#cfe0f4", title?: string) => (
     <div style={diagCell} title={title}>
       <div style={{ color, fontWeight: 700, fontSize: 12 }}>{value}</div>
-      <div style={{ color: "#6a86a6", fontSize: 9 }}>{label}</div>
+      <div style={{ color: "#a28f6e", fontSize: 9 }}>{label}</div>
     </div>
   );
   return (
@@ -404,13 +404,13 @@ function TradeDiagnostics({ diag }: { diag: CampaignDiagnostics }) {
           {moving ? "Trade is flowing" : "No shipments last advance"}
         </span>
         <span style={{ flex: 1 }} />
-        <span style={{ color: "#6a86a6", fontSize: 9 }}>year {diag.year}</span>
+        <span style={{ color: "#a28f6e", fontSize: 9 }}>year {diag.year}</span>
       </div>
       <div style={{ display: "flex", gap: 4 }}>
         {stat("shipped", String(diag.shipments_last), "#cfe0f4", "Shipments dispatched last advance")}
-        {stat("by houses", `${housePct}%`, housePct > 0 ? "#e0c060" : "#7a90a8", `${diag.by_house} financed by a house, ${diag.by_guild} by local guilds`)}
-        {stat("lost", String(diag.lost_last), diag.lost_last > 0 ? "#e0a09a" : "#7a90a8", "Voyages lost to storm/ambush last advance")}
-        {stat("in transit", String(diag.in_transit), "#9ab0c8", "Shipments currently in flight")}
+        {stat("by houses", `${housePct}%`, housePct > 0 ? "#e0c060" : "#a5967d", `${diag.by_house} financed by a house, ${diag.by_guild} by local guilds`)}
+        {stat("lost", String(diag.lost_last), diag.lost_last > 0 ? "#e0a09a" : "#a5967d", "Voyages lost to storm/ambush last advance")}
+        {stat("in transit", String(diag.in_transit), "#c5b69d", "Shipments currently in flight")}
       </div>
       <div style={{ display: "flex", gap: 4, marginTop: 4 }}>
         {stat("controls", String(diag.controlled_settlements), diag.controlled_settlements > 0 ? "#9fe0b8" : "#d06a5f", "Settlements a house controls (>=50% of trade throughput)")}
@@ -425,12 +425,12 @@ function TradeDiagnostics({ diag }: { diag: CampaignDiagnostics }) {
 const panel: React.CSSProperties = {
   position: "absolute", top: 60, right: 360, width: 396, maxHeight: "80vh",
   display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #24364e", borderRadius: 10,
+  background: "#1c170e", border: "1px solid #493d29", borderRadius: 10,
   boxShadow: "0 12px 36px rgba(0,0,0,0.55)", zIndex: 40,
 };
 const header: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "10px 12px", borderBottom: "1px solid #1a2a3e",
+  padding: "10px 12px", borderBottom: "1px solid #3a301e",
   color: "#e8dcc0", fontWeight: 700, fontSize: 13, letterSpacing: 0.2,
 };
 /** One house's card: a raised tile (not just a bottom-rule row) so a dense list of
@@ -439,8 +439,8 @@ const header: React.CSSProperties = {
  *  reader reaches the coat of arms — the same trick a kanban/ticket card uses. */
 const card: React.CSSProperties = {
   display: "flex", gap: 10, alignItems: "flex-start", padding: "9px 10px 9px 12px",
-  margin: "0 0 6px", borderRadius: 7, background: "#101a26",
-  border: "1px solid #1c2c3f", position: "relative", cursor: "default",
+  margin: "0 0 6px", borderRadius: 7, background: "#231d13",
+  border: "1px solid #3b3120", position: "relative", cursor: "default",
   transition: "background 0.12s, border-color 0.12s",
 };
 /** A small rounded label — the unit every "fact" (fleet count, office count, a
@@ -448,19 +448,19 @@ const card: React.CSSProperties = {
  *  Consistent chip styling is what turns six stacked sentences into one scannable row. */
 const chip: React.CSSProperties = {
   display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9.5,
-  padding: "1.5px 6px", borderRadius: 9, background: "#0a1420",
-  border: "1px solid #1e3048", color: "#9ab0c8", lineHeight: 1.5, whiteSpace: "nowrap",
+  padding: "1.5px 6px", borderRadius: 9, background: "#1c170e",
+  border: "1px solid #433723", color: "#c5b69d", lineHeight: 1.5, whiteSpace: "nowrap",
 };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "14px 6px", textAlign: "center" };
+const empty: React.CSSProperties = { color: "#7a6d56", fontSize: 11, padding: "14px 6px", textAlign: "center" };
 const diagBar: React.CSSProperties = {
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e", background: "#0a1119",
+  padding: "8px 10px", borderBottom: "1px solid #3a301e", background: "#17130c",
 };
 const diagCell: React.CSSProperties = {
   flex: 1, textAlign: "center", padding: "4px 2px", borderRadius: 5,
-  background: "#101c28", border: "1px solid #16222e",
+  background: "#251e13", border: "1px solid #2b2419",
 };
 const gaugeCell: React.CSSProperties = {
-  padding: "4px 6px", borderRadius: 5, background: "#101c28", border: "1px solid #16222e",
+  padding: "4px 6px", borderRadius: 5, background: "#251e13", border: "1px solid #2b2419",
   minWidth: 0,
 };
 
@@ -489,14 +489,14 @@ function HouseLanesWindow({ houseIdx, houseName }: { houseIdx: number; houseName
     <div data-draggable onPointerDown={onPointerDown}
       style={{ ...rootStyle, position: "fixed", right: 16, top: 90, width: 270, maxHeight: "60vh", zIndex: 60,
         display: "flex", flexDirection: "column", border: "1px solid #3a2a22", borderRadius: 8,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.5)", fontSize: 11, color: "#d8e2ee" }}>
+        boxShadow: "0 8px 24px rgba(0,0,0,0.5)", fontSize: 11, color: "#ece5da" }}>
       <div style={{ ...header, cursor: "move", fontSize: 11.5 }}>
         <span>🧭 Trade lanes by good</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={() => setMin((v) => !v)}>{min ? "▸" : "▾"}</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={() => setMin((v) => !v)}>{min ? "▸" : "▾"}</span>
       </div>
       {!min && (
         <div data-no-drag style={{ overflowY: "auto", padding: "6px 8px" }}>
-          <div style={{ color: "#6f8aa6", fontSize: 10, marginBottom: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <div style={{ color: "#a29173", fontSize: 10, marginBottom: 5, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {houseName}
           </div>
           <div onClick={() => setPick(null)}
@@ -504,29 +504,29 @@ function HouseLanesWindow({ houseIdx, houseName }: { houseIdx: number; houseName
               background: pick == null ? "#3a1616" : "transparent", border: `1px solid ${pick == null ? "#eb4646" : "#2a1c1c"}` }}>
             <span style={{ width: 16, height: 3, background: "rgba(235,70,70,0.95)", borderRadius: 2 }} />
             <span style={{ flex: 1, fontWeight: 600 }}>All trade lanes</span>
-            <span style={{ color: "#8aa0c0" }}>{atlas?.partners.length ?? 0} cities</span>
+            <span style={{ color: "#bcab8e" }}>{atlas?.partners.length ?? 0} cities</span>
           </div>
-          {atlas == null && <div style={{ color: "#6a7e96", padding: 6 }}>Loading…</div>}
-          {atlas && goods.length === 0 && <div style={{ color: "#6a7e96", padding: 6 }}>No goods recorded for this house yet.</div>}
+          {atlas == null && <div style={{ color: "#93856d", padding: 6 }}>Loading…</div>}
+          {atlas && goods.length === 0 && <div style={{ color: "#93856d", padding: 6 }}>No goods recorded for this house yet.</div>}
           {goods.map((g) => {
             const on = pick === g.good;
             const n = lanesFor(g).length;
             return (
               <div key={g.good} onClick={() => setPick(on ? null : g.good)}
                 style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 6px", marginTop: 3, borderRadius: 5, cursor: "pointer",
-                  background: on ? "#1c2636" : "transparent", border: `1px solid ${on ? "#c9a227" : "transparent"}` }}>
+                  background: on ? "#332c1f" : "transparent", border: `1px solid ${on ? "#c9a227" : "transparent"}` }}>
                 <span style={{ width: 16, textAlign: "center" }}>{goodIcon(g.name)}</span>
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                  color: on ? "#f0d890" : "#d8e2ee" }}>{g.name}</span>
-                <span style={{ color: "#8aa0c0", fontSize: 10 }}>{n} lane{n === 1 ? "" : "s"}</span>
+                  color: on ? "#f0d890" : "#ece5da" }}>{g.name}</span>
+                <span style={{ color: "#bcab8e", fontSize: 10 }}>{n} lane{n === 1 ? "" : "s"}</span>
                 <span style={{ width: 40, textAlign: "right", color: "#e0c060", fontSize: 10 }}>{fmtV(g.volume)}</span>
               </div>
             );
           })}
           {book && (
-            <div style={{ marginTop: 8, padding: "6px 7px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+            <div style={{ marginTop: 8, padding: "6px 7px", background: "#1f1a10", border: "1px solid #56472c", borderRadius: 6 }}>
               <div style={{ fontWeight: 700, color: "#f0d890", marginBottom: 3 }}>{goodIcon(book.name)} {book.name}</div>
-              <div style={{ color: "#8aa0c0", fontSize: 10 }}>
+              <div style={{ color: "#bcab8e", fontSize: 10 }}>
                 profit {fmtV(book.profit)} · moved {fmtV(book.volume)}
               </div>
               {book.bought_at.length > 0 && (
@@ -539,7 +539,7 @@ function HouseLanesWindow({ houseIdx, houseName }: { houseIdx: number; houseName
                   <span style={{ color: "#ffce5f" }}>▶ sold at </span>{book.sold_at.map(hubName).join(", ")}
                 </div>
               )}
-              <div style={{ marginTop: 4, color: "#6a7e96", fontSize: 9.5 }}>
+              <div style={{ marginTop: 4, color: "#93856d", fontSize: 9.5 }}>
                 Only this good&apos;s lanes are drawn on the map, in its colour.
               </div>
             </div>

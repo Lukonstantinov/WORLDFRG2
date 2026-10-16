@@ -186,15 +186,15 @@ export function StepWorldCharacteristics() {
   };
 
   if (!meta) {
-    return <div style={{ color: "#607090", fontSize: 11 }}>Create a world first.</div>;
+    return <div style={{ color: "#8a7d66", fontSize: 11 }}>Create a world first.</div>;
   }
   if (!planet) {
-    return <div style={{ color: "#607090", fontSize: 11 }}>Loading…</div>;
+    return <div style={{ color: "#8a7d66", fontSize: 11 }}>Loading…</div>;
   }
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <div style={{ color: "#506080", fontSize: 10.5, lineHeight: 1.4, marginBottom: 2 }}>
+      <div style={{ color: "#7a6d56", fontSize: 10.5, lineHeight: 1.4, marginBottom: 2 }}>
         Your land is on the map — now decide the world it sits in. Everything that
         governs where climate belts, deserts and seasons fall lives here, and all
         of it is read first by <b>Ocean &amp; Atmosphere (3)</b>, so set it before
@@ -205,8 +205,8 @@ export function StepWorldCharacteristics() {
       </div>
 
       {/* ── The zonal strip: always visible, redraws on every change ── */}
-      <div style={{ background: "#0a1018", border: "1px solid #1e2a38", borderRadius: 4, padding: 6 }}>
-        <div style={{ color: "#6090b0", fontSize: 10, fontWeight: 600, marginBottom: 3 }}>
+      <div style={{ background: "#16120c", border: "1px solid #352e21", borderRadius: 4, padding: 6 }}>
+        <div style={{ color: "#aa9166", fontSize: 10, fontWeight: 600, marginBottom: 3 }}>
           What this world does
         </div>
         <ZonalStrip profile={zonal} />
@@ -233,8 +233,8 @@ export function StepWorldCharacteristics() {
         {settings && (() => {
           const diff = earthDiff(settings);
           return (
-            <div style={{ fontSize: 9, color: diff.length ? "#7f95ad" : "#456", marginTop: 5,
-              borderTop: "1px solid #16202c", paddingTop: 4, lineHeight: 1.45 }}>
+            <div style={{ fontSize: 9, color: diff.length ? "#aa9b82" : "#625848", marginTop: 5,
+              borderTop: "1px solid #292319", paddingTop: 4, lineHeight: 1.45 }}>
               {diff.length === 0
                 ? "Earth standard — every knob at its calibrated value (exact no-op)."
                 : <>{diff.length} setting{diff.length === 1 ? "" : "s"} differ from Earth: {diff.join(" · ")}</>}
@@ -245,7 +245,7 @@ export function StepWorldCharacteristics() {
 
       {/* ── Archetypes ── */}
       <Section title="🧭 World archetypes" open={open.Archetypes} onToggle={() => toggle("Archetypes")}>
-        <div style={{ color: "#506880", fontSize: 9, lineHeight: 1.4, marginBottom: 5 }}>
+        <div style={{ color: "#7a6d56", fontSize: 9, lineHeight: 1.4, marginBottom: 5 }}>
           Each archetype is a <b>span</b>, not a fixed point — pick one, then use its
           dial to decide how far to take it. Only the knobs an archetype names are
           touched, so your other settings survive.
@@ -258,9 +258,9 @@ export function StepWorldCharacteristics() {
                 onClick={() => { setArchId(a.id); setIntensity(a.defaultIntensity); applyArchetype(a.id, a.defaultIntensity); }}
                 style={{
                   padding: "3px 5px", borderRadius: 3, cursor: "pointer", fontSize: 9,
-                  border: active ? "1px solid #3a7ac0" : "1px solid #1e2e42",
-                  background: active ? "#1a3a5a" : "#0d1219",
-                  color: active ? "#c0ddf0" : "#6a8aaa",
+                  border: active ? "1px solid #a58855" : "1px solid #3e3422",
+                  background: active ? "#4d3f27" : "#18140e",
+                  color: active ? "#c0ddf0" : "#a5916f",
                   fontWeight: active ? 600 : 400,
                 }}>
                 {a.icon} {a.label}
@@ -274,7 +274,7 @@ export function StepWorldCharacteristics() {
           const variable = a.id !== "earth" && a.id !== "retrograde";
           return (
             <div style={{ marginTop: 6 }}>
-              <div style={{ color: "#8aa0b8", fontSize: 9.5, lineHeight: 1.45, marginBottom: 4 }}>
+              <div style={{ color: "#b5a68d", fontSize: 9.5, lineHeight: 1.45, marginBottom: 4 }}>
                 {a.blurb}
               </div>
               {variable && (
@@ -291,21 +291,21 @@ export function StepWorldCharacteristics() {
                 </>
               )}
               {!variable && (
-                <div style={{ fontSize: 9, color: "#506880" }}>{a.dial}</div>
+                <div style={{ fontSize: 9, color: "#7a6d56" }}>{a.dial}</div>
               )}
-              <div style={{ fontSize: 9, color: "#5a7390", marginTop: 4, lineHeight: 1.45,
-                background: "#0d1622", borderLeft: "2px solid #24405c", padding: "4px 6px", borderRadius: 2 }}>
-                <b style={{ color: "#7fa8c8" }}>Expect:</b> {a.expect}
+              <div style={{ fontSize: 9, color: "#897a61", marginTop: 4, lineHeight: 1.45,
+                background: "#1f1a10", borderLeft: "2px solid #54452c", padding: "4px 6px", borderRadius: 2 }}>
+                <b style={{ color: "#c3ac84" }}>Expect:</b> {a.expect}
               </div>
             </div>
           );
         })()}
 
-        <div style={{ color: "#3a5e70", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6,
+        <div style={{ color: "#695a41", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6,
           marginTop: 8, marginBottom: 3 }}>
           Map frame
         </div>
-        <div style={{ color: "#506880", fontSize: 9, lineHeight: 1.4, marginBottom: 4 }}>
+        <div style={{ color: "#7a6d56", fontSize: 9, lineHeight: 1.4, marginBottom: 4 }}>
           Not physics — which latitudes the map SHOWS. Useful when fitting a drawn
           or imported map.
         </div>
@@ -315,7 +315,7 @@ export function StepWorldCharacteristics() {
               onClick={() => applyFrame(f.equatorOffset, f.latScale)}
               style={{
                 padding: "3px 5px", borderRadius: 3, cursor: "pointer", fontSize: 9,
-                border: "1px solid #1e2e42", background: "#0d1219", color: "#6a8aaa",
+                border: "1px solid #3e3422", background: "#18140e", color: "#a5916f",
               }}>
               {f.label}
             </button>
@@ -332,10 +332,10 @@ export function StepWorldCharacteristics() {
           presets={[["Slow ½×", 0.5], ["Earth 1×", 1], ["Fast 2×", 2]]}
           hint="Sets the wind belts / Hadley cell: slower = wider tropics, deserts & storm tracks pushed poleward, fewer bands; faster = tighter banding."
         />
-        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#5a7090", cursor: "pointer", marginTop: 3 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#897a61", cursor: "pointer", marginTop: 3 }}>
           <input type="checkbox" checked={planet.rotationRate < 0}
             onChange={(e) => commitPlanet({ ...planet, rotationRate: Math.abs(planet.rotationRate) * (e.target.checked ? -1 : 1) })}
-            style={{ accentColor: "#3a80c0" }} />
+            style={{ accentColor: "#a58855" }} />
           Retrograde (spins backwards — mirrors trade-wind direction and which
           coasts get the warm/cold boundary currents; belt latitudes are unchanged)
         </label>
@@ -424,11 +424,11 @@ export function StepWorldCharacteristics() {
       </Section>
 
       {/* ── Climate mix: the real chain on the real landmass ── */}
-      <div style={{ background: "#0a1018", border: "1px solid #223c30", borderRadius: 4, padding: 6 }}>
+      <div style={{ background: "#16120c", border: "1px solid #223c30", borderRadius: 4, padding: 6 }}>
         <div style={{ color: "#6ab08a", fontSize: 10, fontWeight: 600, marginBottom: 3 }}>
           🗺 Climate mix on your land
         </div>
-        <div style={{ color: "#506880", fontSize: 9, lineHeight: 1.4, marginBottom: 5 }}>
+        <div style={{ color: "#7a6d56", fontSize: 9, lineHeight: 1.4, marginBottom: 5 }}>
           The strip above knows how wide the desert BELT is. Only this knows whether
           your continent sits under it. Runs the real Ocean &amp; Atmosphere → Köppen
           chain on a downsampled copy of your landmass — a second or so, and nothing
@@ -470,19 +470,19 @@ function Section({ title, open, onToggle, children }: {
   title: string; open: boolean; onToggle: () => void; children: React.ReactNode;
 }) {
   return (
-    <div style={{ background: "#0a1018", border: "1px solid #1e2a38", borderRadius: 4, marginBottom: 2 }}>
+    <div style={{ background: "#16120c", border: "1px solid #352e21", borderRadius: 4, marginBottom: 2 }}>
       <div
         onClick={onToggle}
         title={open ? "Collapse" : "Expand"}
         style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
           padding: "5px 7px", cursor: "pointer", userSelect: "none",
-          fontSize: 10, fontWeight: 600, color: "#6090b0",
+          fontSize: 10, fontWeight: 600, color: "#aa9166",
           letterSpacing: 0.4,
         }}
       >
         <span>{title}</span>
-        <span style={{ fontSize: 8, color: "#4a6a8a" }}>{open ? "▼" : "▶"}</span>
+        <span style={{ fontSize: 8, color: "#827052" }}>{open ? "▼" : "▶"}</span>
       </div>
       {open && <div style={{ padding: "0 7px 7px" }}>{children}</div>}
     </div>

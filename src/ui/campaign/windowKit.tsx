@@ -16,10 +16,10 @@ import {
 
 /** Chronicle-dark tokens, from the handoff's token table. */
 export const K = {
-  bg: "#0d1521", head: "#111b2a", card: "#0f1826", bd: "#1e2e42", tx: "#cfe2f6", mu: "#9fb4cc", fa: "#6f88a6",
+  bg: "#1e1910", head: "#272014", card: "#231d12", bd: "#3e3422", tx: "#cfe2f6", mu: "#c9bba2", fa: "#a29173",
   ac: "#d8b24a", acBg: "rgba(216,178,74,.14)", acBd: "rgba(216,178,74,.38)", pos: "#7fd0a0", neg: "#e8a07c",
   bar: "#1a2536", sea: "#5aa8d8", river: "#6fc3b0", land: "#d8a656", chip: "rgba(9,14,20,.84)", lock: "#4a5c72",
-  scene: "#0a1018", hf: SERIF, bf: "system-ui,-apple-system,'Segoe UI',sans-serif",
+  scene: "#16120c", hf: SERIF, bf: "system-ui,-apple-system,'Segoe UI',sans-serif",
 } as const;
 export const SCENE_W = 1180, SCENE_H = 420;
 /** The floating-window width that hosts a 1180px window plus its own padding. */

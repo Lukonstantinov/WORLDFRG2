@@ -146,7 +146,7 @@ export function GuildsPanel() {
             {/* What the world's workshops make — a ranked bar per craft, click to filter. */}
             <div style={{
               padding: "7px 9px 6px", marginBottom: SPACE.md, borderRadius: RADIUS.md,
-              border: `1px solid ${T.lineSoft}`, background: "linear-gradient(135deg, rgba(216,178,74,0.06), rgba(10,16,24,0.5))",
+              border: `1px solid ${T.lineSoft}`, background: "linear-gradient(135deg, rgba(216,178,74,0.06), rgba(22,18,12,0.5))",
             }}>
               <div style={{ display: "flex", alignItems: "center", marginBottom: 5 }}>
                 <span style={{ color: T.inkDim, fontSize: FZ.tiny, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.6 }}>

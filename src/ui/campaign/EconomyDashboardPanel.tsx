@@ -112,7 +112,7 @@ export function EconomyDashboardPanel() {
                   return (
                     <div key={c.name} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                       <span style={{ width: 96, color: T.inkMid, fontSize: FZ.small, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
-                      <Meter value={Math.max(3, pct)} max={100} height={8} color={dear ? "#d07a5a" : "#5aa0c0"} />
+                      <Meter value={Math.max(3, pct)} max={100} height={8} color={dear ? "#d07a5a" : "#b89962"} />
                       <span style={{ width: 34, textAlign: "right", color: dear ? T.warn : T.goodInk, fontSize: FZ.small, fontWeight: 600 }}>
                         {Math.round(c.index)}
                       </span>

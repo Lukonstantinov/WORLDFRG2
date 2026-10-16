@@ -57,21 +57,21 @@ function GaugeCard({ g }: { g: Gauge }) {
       // and the phrase is the product ("in the red 7 of 12 months" became
       // "in the red 7 of 12 months —…"). They now wrap to a 3+2 grid with a floor
       // wide enough for the longest phrase the backend can emit.
-      flex: "1 1 132px", minWidth: 132, background: "#0d1622",
-      border: `1px solid ${g.warn ? "#5a3630" : "#1e2e42"}`, borderRadius: 5,
+      flex: "1 1 132px", minWidth: 132, background: "#1f1a10",
+      border: `1px solid ${g.warn ? "#5a3630" : "#3e3422"}`, borderRadius: 5,
       padding: "5px 6px",
     }} title={g.phrase}>
       <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
         <span style={{ fontSize: 9 }}>{GAUGE_ICON[g.key] ?? "•"}</span>
         <span style={{
-          color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.5,
+          color: "#a28f6e", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.5,
         }}>{g.label}</span>
       </div>
       <div style={{ display: "flex", gap: 2, margin: "3px 0 2px" }}>
         {[1, 2, 3, 4, 5].map((p) => (
           <span key={p} style={{
             width: 6, height: 6, borderRadius: "50%",
-            background: p <= g.pips ? color : "#1b2736",
+            background: p <= g.pips ? color : "#332b1e",
           }} />
         ))}
       </div>
@@ -113,15 +113,15 @@ function GaugeRadar({ gauges, medians }: { gauges: Gauge[]; medians: GaugeMedian
         {/* Grid rings */}
         {[0.25, 0.5, 0.75, 1].map((f, i) => (
           <polygon key={i} points={gauges.map((_, gi) => ptAt(gi, f).join(",")).join(" ")}
-            fill="none" stroke="#1c2c40" strokeWidth={0.6} />
+            fill="none" stroke="#3c3220" strokeWidth={0.6} />
         ))}
         {/* Spokes */}
         {gauges.map((_, i) => {
           const [x, y] = ptAt(i, 1);
-          return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#1c2c40" strokeWidth={0.6} />;
+          return <line key={i} x1={cx} y1={cy} x2={x} y2={y} stroke="#3c3220" strokeWidth={0.6} />;
         })}
         {/* Tier-1 median, quiet grey fill */}
-        <path d={medPath} fill="rgba(150,160,175,0.14)" stroke="#7a8aa0" strokeWidth={1} strokeDasharray="2,2" />
+        <path d={medPath} fill="rgba(173,165,152,0.14)" stroke="#9d917d" strokeWidth={1} strokeDasharray="2,2" />
         {/* This house, gold */}
         <path d={selfPath} fill="rgba(201,162,39,0.22)" stroke="#c9a227" strokeWidth={1.3} />
         {gauges.map((g, i) => {
@@ -129,9 +129,9 @@ function GaugeRadar({ gauges, medians }: { gauges: Gauge[]; medians: GaugeMedian
           return <text key={i} x={x} y={y} textAnchor="middle" dominantBaseline="middle" fontSize={8}>{GAUGE_ICON[g.key] ?? "•"}</text>;
         })}
       </svg>
-      <div style={{ fontSize: 9, color: "#8fa6be" }}>
+      <div style={{ fontSize: 9, color: "#baac93" }}>
         <div><span style={{ color: "#c9a227" }}>■</span> this house</div>
-        <div><span style={{ color: "#7a8aa0" }}>┅</span> tier-1 median ({medians.n})</div>
+        <div><span style={{ color: "#9d917d" }}>┅</span> tier-1 median ({medians.n})</div>
       </div>
     </div>
   );
@@ -189,10 +189,10 @@ export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey
         <div style={dim}>Nothing committed — the family owes no-one.</div>
       ) : st.liabilities.map((l, i) => (
         <div key={i} style={{ display: "flex", gap: 6, fontSize: 9, padding: "1px 0" }}>
-          <span style={{ color: "#9ab0c8", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ color: "#c5b69d", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {l.label}
           </span>
-          <span style={{ color: "#6a86a6", flex: "0 1 auto", fontSize: 8, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          <span style={{ color: "#a28f6e", flex: "0 1 auto", fontSize: 8, maxWidth: 160, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
             {l.note}
           </span>
           <span style={{ color: "#e0c060", minWidth: 44, textAlign: "right" }}>{fmt(l.amount)}</span>
@@ -221,7 +221,7 @@ export function HouseStandingView({ idx, refreshKey }: { idx: number; refreshKey
 // ── Feuds ───────────────────────────────────────────────────────────────────
 
 /** Stage colours, cold → hot. The stage is what a feud DOES, so it carries the colour. */
-const STAGE_COLOR = ["#7a90a8", "#d8b45c", "#d98040", "#c9503f"];
+const STAGE_COLOR = ["#a5967d", "#d8b45c", "#d98040", "#c9503f"];
 const STAGE_ICON = ["·", "⚔", "🚫", "🗡"];
 
 /** How a feud ended, as a chip. The old model had no endings at all — a quarrel ran
@@ -230,9 +230,9 @@ function OutcomeChip({ f }: { f: FeudRow }) {
   if (f.running) return null;
   const tint: Record<string, string> = {
     arbitrated: "#7fd0c0", "sealed by marriage": "#d8a0c8",
-    "ended in ruin": "#c9503f", cooled: "#7a90a8",
+    "ended in ruin": "#c9503f", cooled: "#a5967d",
   };
-  const c = tint[f.outcome] ?? "#7a90a8";
+  const c = tint[f.outcome] ?? "#a5967d";
   return (
     <span style={{
       fontSize: 8, color: c, border: `1px solid ${c}55`, borderRadius: 3,
@@ -288,7 +288,7 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
   const theirLoss = weAreA ? f.damage_b : f.damage_a;
   return (
     <div style={{
-      background: "#0d1622", border: "1px solid #1e2e42", borderRadius: 5,
+      background: "#1f1a10", border: "1px solid #3e3422", borderRadius: 5,
       padding: "5px 7px", marginBottom: 4, opacity: f.running ? 1 : 0.7,
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 5 }}>
@@ -304,7 +304,7 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
         <OutcomeChip f={f} />
       </div>
 
-      <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>
+      <div style={{ color: "#c5b69d", fontSize: 9, marginTop: 1 }}>
         over {f.cause}
         {f.good ? ` · ${f.good}` : ""}
         {f.city ? ` · at ${f.city}` : ""}
@@ -313,7 +313,7 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
       {/* Temperature. A feud is not on/off — this is the axis the flat rival list
           could not express, and it is what decides which weapon comes out. */}
       <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 3 }}>
-        <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+        <div style={{ flex: 1, height: 4, background: "#16120c", borderRadius: 2, overflow: "hidden" }}>
           <div style={{
             width: `${Math.min(100, f.intensity * 100)}%`, height: "100%",
             background: STAGE_COLOR[stage],
@@ -325,7 +325,7 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
       </div>
       <FeudTemperatureLine f={f} />
 
-      <div style={{ color: "#6a86a6", fontSize: 8, marginTop: 2 }}>
+      <div style={{ color: "#a28f6e", fontSize: 8, marginTop: 2 }}>
         {f.running ? `running ${f.years}y` : `ran ${f.years}y from ${f.started_year}`}
         {" · "}{f.flares} flare{f.flares === 1 ? "" : "s"}
         {focus !== undefined
@@ -336,13 +336,13 @@ function FeudCard({ f, focus }: { f: FeudRow; focus?: number }) {
       {f.log.length > 0 && (
         <>
           <div onClick={() => setOpen((o) => !o)} style={{
-            color: "#7090b0", fontSize: 9, cursor: "pointer", marginTop: 3,
+            color: "#ab9775", fontSize: 9, cursor: "pointer", marginTop: 3,
           }}>
             {open ? "▾" : "▸"} {f.log.length} recorded episode{f.log.length === 1 ? "" : "s"}
           </div>
           {open && f.log.slice().reverse().map((l, i) => (
-            <div key={i} style={{ fontSize: 9, color: "#bcd0e4", padding: "1px 0 1px 10px" }}>
-              <span style={{ color: "#6a86a6" }}>yr {l.year}</span>{" "}
+            <div key={i} style={{ fontSize: 9, color: "#e1d5bf", padding: "1px 0 1px 10px" }}>
+              <span style={{ color: "#a28f6e" }}>yr {l.year}</span>{" "}
               {l.text}
               {l.cost > 0.05 && <span style={{ color: "#c98" }}> (−{fmt(l.cost)})</span>}
             </div>
@@ -384,7 +384,7 @@ export function FeudsView({ house = -1, refreshKey }: { house?: number; refreshK
       {done.length > 0 && (
         <>
           <div onClick={() => setShowSettled((s) => !s)} style={{
-            color: "#7090b0", fontSize: 9, cursor: "pointer", margin: "6px 0 3px",
+            color: "#ab9775", fontSize: 9, cursor: "pointer", margin: "6px 0 3px",
             textTransform: "uppercase", letterSpacing: 0.4,
           }}>
             {showSettled ? "▾" : "▸"} Settled ({done.length})
@@ -402,8 +402,8 @@ export function FeudsView({ house = -1, refreshKey }: { house?: number; refreshK
 function SubHead({ children }: { children: React.ReactNode }) {
   return (
     <div style={{
-      color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.5,
-      margin: "7px 0 2px", borderBottom: "1px solid #1a2a3e", paddingBottom: 1,
+      color: "#a28f6e", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.5,
+      margin: "7px 0 2px", borderBottom: "1px solid #3a301e", paddingBottom: 1,
     }}>{children}</div>
   );
 }
@@ -411,8 +411,8 @@ function SubHead({ children }: { children: React.ReactNode }) {
 function KV({ k, v }: { k: string; v: string }) {
   return (
     <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, padding: "1px 0" }}>
-      <span style={{ color: "#6a86a6" }}>{k}</span>
-      <span style={{ color: "#bcd0e4" }}>{v}</span>
+      <span style={{ color: "#a28f6e" }}>{k}</span>
+      <span style={{ color: "#e1d5bf" }}>{v}</span>
     </div>
   );
 }
@@ -420,18 +420,18 @@ function KV({ k, v }: { k: string; v: string }) {
 function Bar({ label, frac, warn }: { label: string; frac: number; warn?: boolean }) {
   return (
     <div style={{ margin: "2px 0 4px" }}>
-      <div style={{ height: 4, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+      <div style={{ height: 4, background: "#16120c", borderRadius: 2, overflow: "hidden" }}>
         <div style={{
           width: `${Math.min(100, frac * 100)}%`, height: "100%",
-          background: warn ? "#c9503f" : "#5a9bd4",
+          background: warn ? "#c9503f" : "#c6a368",
         }} />
       </div>
-      <div style={{ color: warn ? "#e0a09a" : "#9ab0c8", fontSize: 9 }}>{label}</div>
+      <div style={{ color: warn ? "#e0a09a" : "#c5b69d", fontSize: 9 }}>{label}</div>
     </div>
   );
 }
 
-const dim: React.CSSProperties = { color: "#6a86a6", fontSize: 9, padding: "4px 0" };
+const dim: React.CSSProperties = { color: "#a28f6e", fontSize: 9, padding: "4px 0" };
 
 // ═════════════════════════════════════════════════════════════════════════════════
 //  THE DETAIL WINDOW — moved verbatim from HousesPanel.tsx (S10 split)
@@ -451,8 +451,8 @@ const TRAIT_VALENCE: Record<string, 1 | 0 | -1> = {
   // rooted ↔ expansive
   insular: -1, rooted: 0, expansive: 1, "far-reaching": 1,
 };
-const TRAIT_COLOR: Record<number, string> = { 1: "#7fd0a0", 0: "#9aa6b4", [-1]: "#e0857f" };
-const TRAIT_BG: Record<number, string> = { 1: "rgba(127,208,160,0.12)", 0: "rgba(154,166,180,0.10)", [-1]: "rgba(224,133,127,0.12)" };
+const TRAIT_COLOR: Record<number, string> = { 1: "#7fd0a0", 0: "#b2aa9c", [-1]: "#e0857f" };
+const TRAIT_BG: Record<number, string> = { 1: "rgba(127,208,160,0.12)", 0: "rgba(178,170,156,0.10)", [-1]: "rgba(224,133,127,0.12)" };
 /** Split a `character_phrase` ("Bold, grasping, expansive.") into coloured chips. */
 function traitChips(phrase: string): { word: string; v: number }[] {
   return phrase.replace(/\.\s*$/, "").split(",").map((w) => w.trim()).filter(Boolean)
@@ -463,7 +463,7 @@ function traitChips(phrase: string): { word: string; v: number }[] {
  *  cross-imported — the two files must not depend on each other's internals. */
 const dossierHeader: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "10px 12px", borderBottom: "1px solid #1a2a3e",
+  padding: "10px 12px", borderBottom: "1px solid #3a301e",
   color: "#e8dcc0", fontWeight: 700, fontSize: 13, letterSpacing: 0.2,
 };
 
@@ -553,8 +553,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
   const goodsStr = (gs: [string, number][]) => gs.length === 0 ? "—" : gs.slice(0, 3).map(([g, v]) => <span key={g}>{goodIcon(g)}{fmtW(v)} </span>);
   const Row = ({ label, children }: { label: string; children: React.ReactNode }) => (
     <div style={{ fontSize: 9, marginTop: 3 }}>
-      <span style={{ color: "#6a86a6", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</span>
-      <div style={{ color: "#bcd0e4" }}>{children}</div>
+      <span style={{ color: "#a28f6e", textTransform: "uppercase", letterSpacing: 0.4 }}>{label}</span>
+      <div style={{ color: "#e1d5bf" }}>{children}</div>
     </div>
   );
   // The house portrait now wears the SAME pixel-treated dress-plate art the
@@ -604,8 +604,8 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
             at the shoulder, and the tier glyph. */}
         <div style={{ position: "relative", width: 130, flex: "0 0 auto" }} title={`${TIER_META[tierOf(h)].name} · standing ${((h.standing ?? 0) * 100).toFixed(0)}%`}>
           <div style={{
-            width: 130, height: 295, borderRadius: 6, overflow: "hidden", background: "#0a1119",
-            border: `3px solid ${h.is_guild ? dull(h.color ?? "") : (h.color ?? "#3a5570")}`,
+            width: 130, height: 295, borderRadius: 6, overflow: "hidden", background: "#17130c",
+            border: `3px solid ${h.is_guild ? dull(h.color ?? "") : (h.color ?? "#695a41")}`,
             boxShadow: h.tier === 1 ? "0 0 16px rgba(201,162,39,0.4)" : "none",
             display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 6,
           }}>
@@ -629,13 +629,13 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
           textDecoration: h.owns_bank ? "underline" : "none", textDecorationColor: "#c9a227" }}>{h.name}</span>
         {h.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>COMPANY</span>}
         <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={onClose} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
+        <span data-no-drag onClick={onClose} style={{ color: "#ab9775", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
       </div>
-      <div style={{ color: "#9ab0c8", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
+      <div style={{ color: "#c5b69d", fontSize: 10 }}>{h.head_name} · of {h.home_name} · gen {h.generation}</div>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <span style={{ color: "#c9a227", fontSize: 11, fontWeight: 700 }}>wealth {fmtW(h.wealth)}</span>
         {h.coin_name && (h.coin_value ?? 0) > 0 && (
-          <span style={{ color: "#9ab0c8", fontSize: 9 }} title={`Wealth denominated in the family's coin (grain-equivalent ÷ coin value ${(h.coin_value ?? 0).toFixed(2)}×)`}>
+          <span style={{ color: "#c5b69d", fontSize: 9 }} title={`Wealth denominated in the family's coin (grain-equivalent ÷ coin value ${(h.coin_value ?? 0).toFixed(2)}×)`}>
             ≈ {fmtW(h.wealth / (h.coin_value ?? 1))} {h.coin_name}
           </span>
         )}
@@ -649,13 +649,13 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
 
       {/* The ruler card — fills the header beside the figure (previously blank): who
           rules, how long, their character as coloured traits, and the latest deeds. */}
-      <div style={{ marginTop: 7, borderTop: "1px solid #1a2a3e", paddingTop: 6 }}>
+      <div style={{ marginTop: 7, borderTop: "1px solid #3a301e", paddingTop: 6 }}>
         <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
           <span style={{ fontSize: 11 }}>👑</span>
           <span style={{ color: "#e8dcc0", fontSize: 11, fontWeight: 600 }}>{h.head_name}</span>
-          <span style={{ color: "#8fa6be", fontSize: 9 }}>{h.head_female ? "♀" : "♂"}</span>
+          <span style={{ color: "#baac93", fontSize: 9 }}>{h.head_female ? "♀" : "♂"}</span>
           <span style={{ flex: 1 }} />
-          <span style={{ color: "#9ab0c8", fontSize: 9.5 }} title="Years the current head has led the house">
+          <span style={{ color: "#c5b69d", fontSize: 9.5 }} title="Years the current head has led the house">
             {h.head_age > 0 ? `has ruled ${h.head_age}y` : "newly acceded"}
           </span>
         </div>
@@ -670,20 +670,20 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
             ))}
           </div>
         ) : (
-          <div style={{ color: "#6a7a8a", fontSize: 9, marginTop: 4, fontStyle: "italic" }}>
+          <div style={{ color: "#867d6e", fontSize: 9, marginTop: 4, fontStyle: "italic" }}>
             {h.is_guild ? "A civic guild — no single ruler's temperament." : "An even-tempered head — nothing marked."}
           </div>
         )}
         {recentEvents.length > 0 && (
           <div style={{ marginTop: 6 }}>
-            <div style={{ color: "#6a86a6", fontSize: 8.5, textTransform: "uppercase", letterSpacing: 0.4 }}>Latest</div>
+            <div style={{ color: "#a28f6e", fontSize: 8.5, textTransform: "uppercase", letterSpacing: 0.4 }}>Latest</div>
             {recentEvents.map((e, i) => (
               <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 9.5, marginTop: 2 }}>
                 <span style={{ flex: "0 0 auto" }}>{EVENT_ICON[e.kind] ?? "·"}</span>
-                <span style={{ color: EVENT_COLOR[e.kind] ?? "#9ab0c8", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.text}>
+                <span style={{ color: EVENT_COLOR[e.kind] ?? "#c5b69d", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={e.text}>
                   {e.text}
                 </span>
-                <span style={{ color: "#56708e", flex: "0 0 auto" }}>yr {e.year}</span>
+                <span style={{ color: "#87785d", flex: "0 0 auto" }}>yr {e.year}</span>
               </div>
             ))}
           </div>
@@ -703,7 +703,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
       {/* Subtabs — Chronicle first (§2.3: the dossier has nothing to DECIDE, so the
           record is the primary artefact). Accountant gets its own roomy view so
           expenses aren't clipped. */}
-      <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 4, margin: "7px 0 5px", borderBottom: "1px solid #3a301e", flexWrap: "wrap" }}>
         {(["chronicle", "plate", "summary", ...(kin.length > 0 ? ["kin" as const] : []),
            ...(goals && (goals.active.length > 0 || goals.history.length > 0) ? ["goals" as const] : []),
            ...(crisis && (crisis.active || crisis.history.length > 0) ? ["crisis" as const] : []),
@@ -713,7 +713,7 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
            "standing", "feuds", ...(bank ? ["bank" as const] : []), "ledger"] as const).map((t) => (
           <div key={t} onClick={() => setView(t)} style={{
             fontSize: 10, padding: "3px 9px", cursor: "pointer",
-            color: view === t ? "#e8dcc0" : "#7090b0", fontWeight: view === t ? 700 : 400,
+            color: view === t ? "#e8dcc0" : "#ab9775", fontWeight: view === t ? 700 : 400,
             borderBottom: view === t ? "2px solid #c9a227" : "2px solid transparent",
           }}>{t === "chronicle" ? "📜 Chronicle"
             : t === "plate" ? "🏛 Overview"
@@ -761,14 +761,14 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
           <HouseStatGrid h={h} fmt={fmtW} />
           {h.active && h.active.length > 0 ? (
             <div style={{ margin: "2px 0 5px" }}>
-              <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>
+              <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4 }}>
                 Active in ({h.active.length}) — most influential first
               </div>
               {h.active.slice(0, 12).map((c, i) => {
                 const mark = c.role === "seat" ? "👑" : c.role === "bailo" ? "🏛️"
                   : c.role === "owner" ? "🏭" : c.role === "dominant" ? "◆" : c.role === "office" ? "◇" : "·";
                 const roleColor = c.role === "seat" ? "#f4c430" : c.role === "bailo" ? "#e0863a"
-                  : c.role === "owner" ? "#d8a85a" : c.role === "dominant" ? "#cfe2f6" : "#9fb4cc";
+                  : c.role === "owner" ? "#d8a85a" : c.role === "dominant" ? "#cfe2f6" : "#c9bba2";
                 return (
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0" }}>
                     <span style={{ width: 16, textAlign: "center" }}>{mark}</span>
@@ -776,10 +776,10 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
                       {c.name}{c.role === "bailo" ? " · BAILO" : c.role === "dominant" ? " · dominates" : c.role === "owner" ? " · owns works here" : c.role === "office" ? " · office" : ""}
                       {c.contested && <span style={{ color: "#e08a8a" }}> ⚔</span>}
                     </span>
-                    <div style={{ width: 54, height: 6, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: 54, height: 6, background: "#292319", borderRadius: 3, overflow: "hidden" }}>
                       <div style={{ width: `${Math.round(Math.min(1, c.influence) * 100)}%`, height: "100%", background: roleColor }} />
                     </div>
-                    <span style={{ width: 30, textAlign: "right", color: "#7a90a8", fontSize: 9 }}>{c.influence.toFixed(2)}</span>
+                    <span style={{ width: 30, textAlign: "right", color: "#a5967d", fontSize: 9 }}>{c.influence.toFixed(2)}</span>
                   </div>
                 );
               })}
@@ -801,22 +801,22 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
           {h.barred && h.barred.length > 0 && (
             <div style={{ fontSize: 9, marginTop: 3, color: "#e08a8a" }}>⚔ Barred from (trade war): {h.barred.join(" · ")}</div>
           )}
-          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6 }}>Top routes (back &amp; forth)</div>
-          {routes.length === 0 && <div style={{ color: "#56708e", fontSize: 9 }}>no active routes right now</div>}
+          <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 6 }}>Top routes (back &amp; forth)</div>
+          {routes.length === 0 && <div style={{ color: "#87785d", fontSize: 9 }}>no active routes right now</div>}
           {routes.map((r, i) => (
-            <div key={i} style={{ fontSize: 9, marginBottom: 3, borderBottom: "1px solid #131f2c", paddingBottom: 2 }}>
+            <div key={i} style={{ fontSize: 9, marginBottom: 3, borderBottom: "1px solid #292216", paddingBottom: 2 }}>
               <div style={{ color: "#cfe0f4" }}>{r.sea ? "🚢" : "🐫"} {r.a_name} ⇄ {r.b_name} <span style={{ color: "#6a86a6" }}>· vol {fmtW(r.volume)}</span></div>
-              <div style={{ color: "#9ab0c8" }}>→ {goodsStr(r.out_goods)} · ← {goodsStr(r.ret_goods)}</div>
+              <div style={{ color: "#c5b69d" }}>→ {goodsStr(r.out_goods)} · ← {goodsStr(r.ret_goods)}</div>
             </div>
           ))}
-          <div onClick={() => onChronicle(h.name)} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 5, textDecoration: "underline" }}>
+          <div onClick={() => onChronicle(h.name)} style={{ color: "#c3af8d", fontSize: 9, cursor: "pointer", marginTop: 5, textDecoration: "underline" }}>
             View family chronicle →
           </div>
         </>
       ) : ledger ? (
         <LedgerView l={ledger} fmt={fmtW} />
       ) : (
-        <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No completed year yet — the first year's books appear after a full year passes.</div>
+        <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>No completed year yet — the first year's books appear after a full year passes.</div>
       )}
     </div>
   );
@@ -829,12 +829,12 @@ export function HouseDetail({ h, onClose, onChronicle, onSelectHouse }:
 function ChronicleTab({ h, chron, onExpand, fmt }:
   { h: HouseBrief; chron: HouseHistory | null; onExpand: () => void; fmt: (v: number) => string }) {
   const nowYear = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
-  if (!chron) return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>Loading…</div>;
+  if (!chron) return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>Loading…</div>;
   const line = chron.line ?? [];
   const peakYear = Math.floor((h.peak_wealth_tick ?? 0) / 365);
   return (
     <div>
-      <div style={{ color: "#9ab0c8", fontSize: 10, marginBottom: 6 }}>
+      <div style={{ color: "#c5b69d", fontSize: 10, marginBottom: 6 }}>
         {chron.founder || `Founded in year ${chron.founded_year}`}
         {chron.defunct && <span style={{ color: "#d88" }}> · fallen</span>}
       </div>
@@ -858,10 +858,10 @@ function ChronicleTab({ h, chron, onExpand, fmt }:
               return (
                 <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 5, padding: "1px 0", fontSize: 10 }}>
                   <span style={{ width: 12, textAlign: "center" }}>{p.female ? "♀" : "♂"}</span>
-                  <span style={{ color: living ? "#e8dcc0" : "#9ab0c8", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ color: living ? "#e8dcc0" : "#c5b69d", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {p.name}{p.epithet ? ` ${p.epithet}` : ""}
                   </span>
-                  <span style={{ color: "#6a86a6", fontSize: 9 }}>
+                  <span style={{ color: "#a28f6e", fontSize: 9 }}>
                     gen {p.generation} · {p.since_year}{living ? "–present" : `–${p.until_year}`}
                     {" "}· ruled {ruled}y
                   </span>
@@ -875,9 +875,9 @@ function ChronicleTab({ h, chron, onExpand, fmt }:
         </>
       )}
 
-      <div style={timelineHdr}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
+      <div style={timelineHdr}>Chronicle <span style={{ color: "#87785d", fontWeight: 400 }}>(click a year)</span></div>
       <YearChronicle entries={chron.events} icons={EVENT_ICON} colors={EVENT_COLOR} />
-      <div onClick={onExpand} style={{ color: "#88a8c8", fontSize: 9, cursor: "pointer", marginTop: 6, textDecoration: "underline" }}>
+      <div onClick={onExpand} style={{ color: "#c3af8d", fontSize: 9, cursor: "pointer", marginTop: 6, textDecoration: "underline" }}>
         Expand chronicle (goods, colonies) →
       </div>
     </div>
@@ -892,7 +892,7 @@ function ChronicleTab({ h, chron, onExpand, fmt }:
 function ExpeditionsTab({ expeds, fmt }: { expeds: ExpeditionView[]; fmt: (v: number) => string }) {
   const setSelectedProvince = useUIStore((s) => s.setSelectedProvince);
   if (expeds.length === 0) {
-    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No live expeditions right now.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>No live expeditions right now.</div>;
   }
   return (
     <div>
@@ -902,24 +902,24 @@ function ExpeditionsTab({ expeds, fmt }: { expeds: ExpeditionView[]; fmt: (v: nu
         return (
           <div key={e.id}
             onClick={() => e.dest_province >= 0 && setSelectedProvince(e.dest_province)}
-            style={{ fontSize: 10, marginBottom: 6, borderBottom: "1px solid #131f2c", paddingBottom: 4,
+            style={{ fontSize: 10, marginBottom: 6, borderBottom: "1px solid #292216", paddingBottom: 4,
               cursor: e.dest_province >= 0 ? "pointer" : "default" }}
             title={e.dest_province >= 0 ? "Show the destination province on the map" : undefined}>
             <div style={{ color: "#cfe0f4" }}>
-              {kind} {e.leader} <span style={{ color: "#6a86a6" }}>→ {e.dest}</span>
-              {e.dest_province >= 0 && <span style={{ color: "#88a8c8" }}> 🗺</span>}
+              {kind} {e.leader} <span style={{ color: "#a28f6e" }}>→ {e.dest}</span>
+              {e.dest_province >= 0 && <span style={{ color: "#c3af8d" }}> 🗺</span>}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
-              <span style={{ color: "#9ab0c8", fontSize: 9, width: 62 }}>{leg}</span>
-              <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden" }}>
+              <span style={{ color: "#c5b69d", fontSize: 9, width: 62 }}>{leg}</span>
+              <div style={{ flex: 1, height: 4, background: "#16120c", borderRadius: 3, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(e.progress * 100)}%`, height: "100%",
                   background: e.outbound ? "#7fb0e0" : "#7fd0a0" }} />
               </div>
-              <span style={{ color: "#7a90a8", fontSize: 9, width: 30, textAlign: "right" }}>
+              <span style={{ color: "#a5967d", fontSize: 9, width: 30, textAlign: "right" }}>
                 {Math.round(e.progress * 100)}%
               </span>
             </div>
-            <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>
+            <div style={{ color: "#c5b69d", fontSize: 9, marginTop: 1 }}>
               {e.ships > 0 && `${e.ships} ships `}{e.caravans > 0 && `${e.caravans} caravans `}
               {goodIcon(e.good)} {e.good} · cost {fmt(e.cost)}
               {e.survived < 1 && <span style={{ color: "#e0a09a" }}> · {Math.round(e.survived * 100)}% survived</span>}
@@ -943,7 +943,7 @@ function ExpeditionsTab({ expeds, fmt }: { expeds: ExpeditionView[]; fmt: (v: nu
  *  attempted here — see this tab's call site for why. */
 function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) => string }) {
   if (!atlas || (atlas.partners.length === 0 && atlas.goods.length === 0)) {
-    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No live trade to chart yet.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>No live trade to chart yet.</div>;
   }
   const hubName = (id: number) => atlas.partners.find((p) => p.hub === id)?.name ?? `hub #${id}`;
   const partners = [...atlas.partners].sort((a, b) => (b.volume_in + b.volume_out) - (a.volume_in + a.volume_out)).slice(0, 10);
@@ -955,7 +955,7 @@ function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) =
     <div>
       {partners.length > 0 && (
         <div style={{ marginBottom: 8 }}>
-          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+          <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
             Partner cities — by volume
           </div>
           {partners.map((p) => (
@@ -963,12 +963,12 @@ function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) =
               <span style={{ flex: 1, minWidth: 0, color: "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {p.name}
               </span>
-              <div style={{ width: 60, height: 5, background: "#0a1018", borderRadius: 3, overflow: "hidden", display: "flex" }}
+              <div style={{ width: 60, height: 5, background: "#16120c", borderRadius: 3, overflow: "hidden", display: "flex" }}
                 title={`in ${fmt(p.volume_in)} · out ${fmt(p.volume_out)}`}>
                 <div style={{ width: `${Math.round((p.volume_in / maxVol) * 100)}%`, background: "#7fb0e0" }} />
                 <div style={{ width: `${Math.round((p.volume_out / maxVol) * 100)}%`, background: "#7fd0a0" }} />
               </div>
-              <span style={{ color: "#7a90a8", fontSize: 9, width: 44, textAlign: "right" }}>
+              <span style={{ color: "#a5967d", fontSize: 9, width: 44, textAlign: "right" }}>
                 {fmt(p.volume_in + p.volume_out)}
               </span>
             </div>
@@ -977,14 +977,14 @@ function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) =
       )}
       {goods.length > 0 && (
         <div style={{ marginBottom: 8 }}>
-          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
+          <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}>
             Goods portfolio
           </div>
           {goods.map((g) => (
             <div key={g.good} style={{ fontSize: 10, marginBottom: 3 }}>
-              <div style={{ color: "#e8dcc0" }}>{goodIcon(g.name)} {g.name} <span style={{ color: "#9ab0c8" }}>· {fmt(g.volume)} · profit {fmt(g.profit)}</span></div>
+              <div style={{ color: "#e8dcc0" }}>{goodIcon(g.name)} {g.name} <span style={{ color: "#c5b69d" }}>· {fmt(g.volume)} · profit {fmt(g.profit)}</span></div>
               {(g.bought_at.length > 0 || g.sold_at.length > 0) && (
-                <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                <div style={{ color: "#a5967d", fontSize: 9 }}>
                   {g.bought_at.length > 0 && <>bought at {g.bought_at.slice(0, 3).map(hubName).join(", ")} </>}
                   {g.sold_at.length > 0 && <>· sold at {g.sold_at.slice(0, 3).map(hubName).join(", ")}</>}
                 </div>
@@ -995,7 +995,7 @@ function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) =
       )}
       {atlas.seasons.some((v) => v > 0) && (
         <div>
-          <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}
+          <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 3 }}
             title="Relative ease of this house's own lanes by month — taller is cheaper/easier">
             Seasonal lane ease
           </div>
@@ -1003,7 +1003,7 @@ function AtlasTab({ atlas, fmt }: { atlas: HouseAtlas | null; fmt: (v: number) =
             {atlas.seasons.map((v, i) => (
               <div key={i} title={`${monthNames[i]}: ${(v).toFixed(2)}`} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center" }}>
                 <div style={{ width: "100%", height: Math.max(2, Math.round((v / maxEase) * 28)), background: "#7fb0e0", borderRadius: 2 }} />
-                <span style={{ color: "#5a6a7e", fontSize: 7.5, marginTop: 2 }}>{monthNames[i]}</span>
+                <span style={{ color: "#7a705e", fontSize: 7.5, marginTop: 2 }}>{monthNames[i]}</span>
               </div>
             ))}
           </div>
@@ -1094,8 +1094,8 @@ function TimelinePlate({
         {/* Head segments */}
         {line.map((h, i) => (
           <rect key={i} x={xAt(h.since_year)} y={BAND_TOP} width={Math.max(1, xAt(segEnd(h)) - xAt(h.since_year))}
-            height={BAND_H} fill={h.female ? "#b06fa0" : "#4a7ab0"} opacity={h.until_year === 0 ? 0.9 : 0.65}
-            stroke="#0c141e" strokeWidth={0.5}>
+            height={BAND_H} fill={h.female ? "#b06fa0" : "#a38757"} opacity={h.until_year === 0 ? 0.9 : 0.65}
+            stroke="#1c170e" strokeWidth={0.5}>
             <title>{`${h.name}${h.epithet ? ` "${h.epithet}"` : ""} — ${h.since_year}–${h.until_year > 0 ? h.until_year : "present"} (${h.accession})`}</title>
           </rect>
         ))}
@@ -1136,7 +1136,7 @@ function TimelinePlate({
           <line x1={xAt(scrubYear)} x2={xAt(scrubYear)} y1={2} y2={H - 2} stroke="#7fd0c0" strokeWidth={1} strokeDasharray="2,2" />
         )}
       </svg>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#4a5c72", padding: "0 2px" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#6d624f", padding: "0 2px" }}>
         <span>{minY}</span>
         {scrubYear != null ? (
           <span style={{ color: "#7fd0c0" }} data-no-drag onClick={() => onScrub(null)} title="Clear the scrub cursor">
@@ -1158,43 +1158,43 @@ function TimelinePlate({
  *  run. Nothing here is wired to any decision yet — Phase 2.4/2.5, unbuilt. */
 function KinTab({ kin }: { kin: KinBrief[] }) {
   if (kin.length === 0) {
-    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No roster on record.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>No roster on record.</div>;
   }
   const roleMark: Record<string, string> = {
     head: "★", heir: "◆", factor: "◇", idle: "·", "married out": "✕", dead: "†",
   };
   const roleColor: Record<string, string> = {
-    head: "#e8dcc0", heir: "#cfe2f6", factor: "#9fb4cc", idle: "#7a90a8",
-    "married out": "#6a7a8a", dead: "#566",
+    head: "#e8dcc0", heir: "#cfe2f6", factor: "#c9bba2", idle: "#a5967d",
+    "married out": "#867d6e", dead: "#566",
   };
   return (
     <div>
       {kin.map((k, i) => (
-        <div key={i} style={{ padding: "4px 2px", borderBottom: "1px solid #131f2c" }}>
+        <div key={i} style={{ padding: "4px 2px", borderBottom: "1px solid #292216" }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-            <span style={{ width: 12, textAlign: "center", color: roleColor[k.role] ?? "#9ab0c8" }}>
+            <span style={{ width: 12, textAlign: "center", color: roleColor[k.role] ?? "#c5b69d" }}>
               {roleMark[k.role] ?? "·"}
             </span>
-            <span style={{ color: roleColor[k.role] ?? "#9ab0c8", fontSize: 11, fontWeight: k.role === "head" ? 700 : 400 }}>
+            <span style={{ color: roleColor[k.role] ?? "#c5b69d", fontSize: 11, fontWeight: k.role === "head" ? 700 : 400 }}>
               {k.name}
             </span>
-            <span style={{ color: "#6a86a6", fontSize: 9 }}>{k.female ? "♀" : "♂"} {k.age}y</span>
+            <span style={{ color: "#a28f6e", fontSize: 9 }}>{k.female ? "♀" : "♂"} {k.age}y</span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: "#7a90a8", fontSize: 9 }}>{k.role}{k.posted_name ? ` · ${k.posted_name}` : ""}</span>
+            <span style={{ color: "#a5967d", fontSize: 9 }}>{k.role}{k.posted_name ? ` · ${k.posted_name}` : ""}</span>
           </div>
           {k.character_phrase && (
-            <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1, fontStyle: "italic" }}>{k.character_phrase}</div>
+            <div style={{ color: "#c5b69d", fontSize: 9, marginTop: 1, fontStyle: "italic" }}>{k.character_phrase}</div>
           )}
           <div style={{ display: "flex", gap: 10, marginTop: 2 }}>
             <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-              <span style={{ color: "#6a86a6", fontSize: 8 }}>loyal</span>
-              <div style={{ width: 36, height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+              <span style={{ color: "#a28f6e", fontSize: 8 }}>loyal</span>
+              <div style={{ width: 36, height: 3, background: "#16120c", borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(k.loyalty * 100)}%`, height: "100%", background: "#7fd0a0" }} />
               </div>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
-              <span style={{ color: "#6a86a6", fontSize: 8 }}>skill</span>
-              <div style={{ width: 36, height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+              <span style={{ color: "#a28f6e", fontSize: 8 }}>skill</span>
+              <div style={{ width: 36, height: 3, background: "#16120c", borderRadius: 2, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(k.skill * 100)}%`, height: "100%", background: "#7fb0e0" }} />
               </div>
             </div>
@@ -1214,7 +1214,7 @@ function KinTab({ kin }: { kin: KinBrief[] }) {
 function GoalsTab({ goals }: { goals: GoalsBrief | null }) {
   const year = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
   if (!goals || (goals.active.length === 0 && goals.history.length === 0)) {
-    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No ambitions on record.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>No ambitions on record.</div>;
   }
   return (
     <div>
@@ -1227,14 +1227,14 @@ function GoalsTab({ goals }: { goals: GoalsBrief | null }) {
                 <span style={{ fontSize: 11 }}>🎯</span>
                 <span style={{ color: "#e8dcc0", fontSize: 11 }}>{g.what}</span>
                 <span style={{ flex: 1 }} />
-                <span style={{ color: "#7a90a8", fontSize: 9 }}>by {g.deadline_year}</span>
+                <span style={{ color: "#a5967d", fontSize: 9 }}>by {g.deadline_year}</span>
               </div>
               {g.progress_frac >= 0 ? (
-                <div style={{ height: 4, background: "#0a1018", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
+                <div style={{ height: 4, background: "#16120c", borderRadius: 3, overflow: "hidden", marginTop: 2 }}>
                   <div style={{ width: `${Math.round(g.progress_frac * 100)}%`, height: "100%", background: "#c9a227" }} />
                 </div>
               ) : (
-                <div style={{ color: "#6a86a6", fontSize: 9, marginTop: 1 }}>
+                <div style={{ color: "#a28f6e", fontSize: 9, marginTop: 1 }}>
                   {g.deadline_year > year ? `${g.deadline_year - year} years left` : "due"}
                 </div>
               )}
@@ -1250,9 +1250,9 @@ function GoalsTab({ goals }: { goals: GoalsBrief | null }) {
               <span style={{ color: g.state === 1 ? "#7fd0a0" : "#c98", fontSize: 10 }}>
                 {g.state === 1 ? "✓" : "✗"}
               </span>
-              <span style={{ color: "#9ab0c8", fontSize: 10 }}>{g.what}</span>
+              <span style={{ color: "#c5b69d", fontSize: 10 }}>{g.what}</span>
               <span style={{ flex: 1 }} />
-              <span style={{ color: "#6a86a6", fontSize: 9 }}>{g.set_year}–{g.deadline_year}</span>
+              <span style={{ color: "#a28f6e", fontSize: 9 }}>{g.set_year}–{g.deadline_year}</span>
             </div>
           ))}
         </>
@@ -1273,7 +1273,7 @@ const CRISIS_ACTION_LABEL: Record<number, string> = {
  *  `HOUSE_SUCCESSION_CRISIS.md` decision 2) — every choice is the AI's. */
 function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
   if (!crisis || (!crisis.active && crisis.history.length === 0)) {
-    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>No rising on record.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>No rising on record.</div>;
   }
   const c = crisis.active;
   return (
@@ -1288,7 +1288,7 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
           <div style={{ color: "#e08a8a", fontSize: 10, marginBottom: 2 }}>
             ⚠ SUCCESSION CRISIS · opened {c.opened_year} · round {c.round} of {c.round_cap}
           </div>
-          <div style={{ color: "#9ab0c8", fontSize: 9, marginBottom: 4 }}>cause: {c.cause}</div>
+          <div style={{ color: "#c5b69d", fontSize: 9, marginBottom: 4 }}>cause: {c.cause}</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
@@ -1297,11 +1297,11 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
                 <span style={{ flex: 1 }} />
                 <span style={{ color: "#cfe0f4", fontSize: 10 }}>{Math.round(c.head_support * 100)}%</span>
               </div>
-              <div style={{ height: 5, background: "#0a1018", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
+              <div style={{ height: 5, background: "#16120c", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(c.head_support * 100)}%`, height: "100%", background: c.loyalist_tint }} />
               </div>
               {c.head_motive && (
-                <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 3 }}>▸ {c.head_motive}</div>
+                <div style={{ color: "#a5967d", fontSize: 9, marginTop: 3 }}>▸ {c.head_motive}</div>
               )}
             </div>
             <div>
@@ -1311,7 +1311,7 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
                 <span style={{ flex: 1 }} />
                 <span style={{ color: "#cfe0f4", fontSize: 10 }}>{Math.round(c.plot_support * 100)}%</span>
               </div>
-              <div style={{ height: 5, background: "#0a1018", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
+              <div style={{ height: 5, background: "#16120c", borderRadius: 3, marginTop: 2, overflow: "hidden" }}>
                 <div style={{ width: `${Math.round(c.plot_support * 100)}%`, height: "100%", background: c.plot_tint }} />
               </div>
               {c.plot_leader_name && (
@@ -1322,18 +1322,18 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
             </div>
           </div>
           {c.heir_choice !== 2 && (
-            <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 1 }}>
+            <div style={{ color: "#a5967d", fontSize: 9, marginTop: 1 }}>
               the heir {c.heir_choice === 0 ? "stood with the ruler" : "turned to the plot"}
             </div>
           )}
           {c.rounds.length > 0 && (
             <div style={{ marginTop: 6 }}>
               {c.rounds.map((r, i) => (
-                <div key={i} style={{ fontSize: 9, padding: "2px 0", borderTop: "1px solid #16202c" }}>
-                  <span style={{ color: r.result > 0 ? "#7fd0a0" : r.result < 0 ? "#e08a8a" : "#7a90a8" }}>
+                <div key={i} style={{ fontSize: 9, padding: "2px 0", borderTop: "1px solid #292319" }}>
+                  <span style={{ color: r.result > 0 ? "#7fd0a0" : r.result < 0 ? "#e08a8a" : "#a5967d" }}>
                     {r.result > 0 ? "✓" : r.result < 0 ? "✗" : "○"}
                   </span>{" "}
-                  <span style={{ color: "#9ab0c8" }}>{CRISIS_ACTION_LABEL[r.action] ?? "acted"} — {r.text}</span>
+                  <span style={{ color: "#c5b69d" }}>{CRISIS_ACTION_LABEL[r.action] ?? "acted"} — {r.text}</span>
                 </div>
               ))}
             </div>
@@ -1346,14 +1346,14 @@ function CrisisTab({ crisis }: { crisis: CrisisBrief | null }) {
           {crisis.history.map((r, i) => (
             <div key={i} style={{ marginBottom: 5, fontSize: 9 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                <span style={{ color: "#9ab0c8" }}>{r.opened_year}–{r.closed_year}</span>
+                <span style={{ color: "#c5b69d" }}>{r.opened_year}–{r.closed_year}</span>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: r.loyalist_tint }} />
                 <span style={{ color: "#cfe0f4" }}>{r.loyalist_name}</span>
-                <span style={{ color: "#6a86a6" }}>vs</span>
+                <span style={{ color: "#a28f6e" }}>vs</span>
                 <span style={{ width: 7, height: 7, borderRadius: "50%", background: r.plot_tint }} />
                 <span style={{ color: "#cfe0f4" }}>{r.plot_name}</span>
               </div>
-              <div style={{ color: "#7a90a8", marginTop: 1 }}>
+              <div style={{ color: "#a5967d", marginTop: 1 }}>
                 opened over {r.cause} · {r.rounds} rounds · peak plot {Math.round(r.peak_plot * 100)}%
               </div>
               <div style={{ color: r.outcome === 1 ? "#7fd0a0" : "#e08a8a", marginTop: 1 }}>
@@ -1379,7 +1379,7 @@ const ORIGIN_LABEL: Record<number, string> = {
 const ORIGIN_TAG: Record<number, { label: string; color: string }> = {
   1: { label: "GUILD-SEEDED", color: "#c9a227" },
   2: { label: "BRANCH", color: "#7fd0a0" },
-  3: { label: "DIVISION", color: "#7fb0d0" },
+  3: { label: "DIVISION", color: "#cab185" },
   4: { label: "DEPARTED", color: "#e08a8a" },
   5: { label: "INDEPENDENCE", color: "#c9a227" },
 };
@@ -1395,7 +1395,7 @@ function LineageTab({ lineage, current, onJump, line }:
   const nowYear = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
   const hasTree = !!lineage && (lineage.ancestors.length > 0 || lineage.offshoots.length > 0);
   if (!hasTree && line.length === 0) {
-    return <div style={{ color: "#56708e", fontSize: 10, padding: "8px 2px" }}>An original founding — no recorded ancestry or offshoots.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, padding: "8px 2px" }}>An original founding — no recorded ancestry or offshoots.</div>;
   }
   const Node = ({ n, self: isSelf }: { n: LineageNode; self?: boolean }) => (
     <div
@@ -1419,9 +1419,9 @@ function LineageTab({ lineage, current, onJump, line }:
               {ORIGIN_TAG[n.origin_kind].label}
             </span>
           )}
-          <span style={{ color: "#6a86a6", fontSize: 9 }}>{n.origin_year}</span>
+          <span style={{ color: "#a28f6e", fontSize: 9 }}>{n.origin_year}</span>
         </div>
-        <div style={{ color: "#9ab0c8", fontSize: 10, marginTop: 1, lineHeight: 1.4 }}>{n.origin_text}</div>
+        <div style={{ color: "#c5b69d", fontSize: 10, marginTop: 1, lineHeight: 1.4 }}>{n.origin_text}</div>
       </div>
     </div>
   );
@@ -1433,13 +1433,13 @@ function LineageTab({ lineage, current, onJump, line }:
             <>
               <div style={timelineHdr}>Descent ({lineage.ancestors.length} generation{lineage.ancestors.length === 1 ? "" : "s"})</div>
               {lineage.ancestors.map((n, i) => (
-                <div key={n.idx} style={{ marginLeft: i * 14, borderLeft: i > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: i > 0 ? 10 : 0 }}>
+                <div key={n.idx} style={{ marginLeft: i * 14, borderLeft: i > 0 ? "1px dashed #4d422f" : "none", paddingLeft: i > 0 ? 10 : 0 }}>
                   <Node n={n} />
                 </div>
               ))}
             </>
           )}
-          <div style={{ marginLeft: lineage.ancestors.length * 14, borderLeft: lineage.ancestors.length > 0 ? "1px dashed #2a3d52" : "none", paddingLeft: lineage.ancestors.length > 0 ? 10 : 0, marginTop: 2 }}>
+          <div style={{ marginLeft: lineage.ancestors.length * 14, borderLeft: lineage.ancestors.length > 0 ? "1px dashed #4d422f" : "none", paddingLeft: lineage.ancestors.length > 0 ? 10 : 0, marginTop: 2 }}>
             <Node n={{
               idx: current.idx ?? -1, name: current.name, alive: !current.defunct,
               tier: current.tier ?? 0, origin_kind: 0, origin_year: current.founded_year ?? 0,
@@ -1450,7 +1450,7 @@ function LineageTab({ lineage, current, onJump, line }:
             <>
               <div style={{ ...timelineHdr, marginTop: 10 }}>Split off this house ({lineage.offshoots.length})</div>
               {lineage.offshoots.map((n) => (
-                <div key={n.idx} style={{ marginLeft: 14, borderLeft: "1px dashed #2a3d52", paddingLeft: 10 }}>
+                <div key={n.idx} style={{ marginLeft: 14, borderLeft: "1px dashed #4d422f", paddingLeft: 10 }}>
                   <Node n={n} />
                 </div>
               ))}
@@ -1474,19 +1474,19 @@ function LineageTab({ lineage, current, onJump, line }:
             return (
               <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6, padding: "2px 4px", fontSize: 10,
                 background: living ? "rgba(201,162,39,0.08)" : "transparent", borderRadius: 3 }}>
-                <span style={{ width: 14, textAlign: "center", color: "#8fa6be" }}>{p.female ? "♀" : "♂"}</span>
+                <span style={{ width: 14, textAlign: "center", color: "#baac93" }}>{p.female ? "♀" : "♂"}</span>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ color: living ? "#e8dcc0" : "#c3d2e2", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <div style={{ color: living ? "#e8dcc0" : "#e0d6c5", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {p.name}{p.epithet ? ` ${p.epithet}` : ""}
                     {living && <span style={{ color: "#c9a227", fontSize: 8.5 }}> · reigning</span>}
                   </div>
-                  <div style={{ color: "#6a86a6", fontSize: 8.5 }}>
+                  <div style={{ color: "#a28f6e", fontSize: 8.5 }}>
                     gen {p.generation} · {p.accession} · acceded age {p.age_at_accession}
                   </div>
                 </div>
                 <div style={{ textAlign: "right", flex: "0 0 auto" }}>
                   <div style={{ color: "#c9a227", fontSize: 10, fontWeight: 600 }}>ruled {ruled}y</div>
-                  <div style={{ color: "#56708e", fontSize: 8.5 }}>
+                  <div style={{ color: "#87785d", fontSize: 8.5 }}>
                     {p.since_year}{living ? "–now" : `–${p.until_year}`}
                     {!living && <span style={{ color: grew ? "#7fd0a0" : "#e0857f" }}> {grew ? "▲" : "▼"}</span>}
                   </div>
@@ -1505,11 +1505,11 @@ function HouseStatGrid({ h, fmt }: { h: HouseBrief; fmt: (v: number) => string }
   const year = useCampaignStore((s) => Math.floor((s.snapshot?.clock.tick ?? 0) / 365));
   const age = h.founded_year !== undefined ? Math.max(0, year - h.founded_year) : undefined;
   const Cell = ({ label, value, bar }: { label: string; value: React.ReactNode; bar?: number }) => (
-    <div style={{ background: "#0a1119", border: "1px solid #1a2a3c", borderRadius: 4, padding: "3px 5px" }}>
-      <div style={{ color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
+    <div style={{ background: "#17130c", border: "1px solid #382e1e", borderRadius: 4, padding: "3px 5px" }}>
+      <div style={{ color: "#a28f6e", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
       <div style={{ color: "#cfe0f4", fontSize: 10, fontWeight: 700 }}>{value}</div>
       {bar !== undefined && (
-        <div style={{ height: 3, background: "#0a1018", borderRadius: 2, marginTop: 1, overflow: "hidden" }}>
+        <div style={{ height: 3, background: "#16120c", borderRadius: 2, marginTop: 1, overflow: "hidden" }}>
           <div style={{ width: `${Math.min(100, bar * 100)}%`, height: "100%", background: "#c9a227" }} />
         </div>
       )}
@@ -1543,29 +1543,29 @@ function BankSheet({ b, fmt }: { b: BankBrief; fmt: (v: number) => string }) {
   const fragile = b.reserve_ratio < 0.22;
   const Side = ({ title, rows, total, color }: { title: string; rows: [string, number][]; total: number; color: string }) => (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ color: "#8aa8c8", fontSize: 9, fontWeight: 700, borderBottom: "1px solid #1c2c40", paddingBottom: 2, marginBottom: 2 }}>{title}</div>
+      <div style={{ color: "#c3b08f", fontSize: 9, fontWeight: 700, borderBottom: "1px solid #3c3220", paddingBottom: 2, marginBottom: 2 }}>{title}</div>
       {rows.map(([k, v]) => (
-        <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#b8c8da" }}>
+        <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#d7cdbb" }}>
           <span>{k}</span><span>{fmt(v)}</span>
         </div>
       ))}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 700, color, borderTop: "1px solid #1c2c40", marginTop: 2, paddingTop: 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 700, color, borderTop: "1px solid #3c3220", marginTop: 2, paddingTop: 1 }}>
         <span>Σ</span><span>{fmt(total)}</span>
       </div>
     </div>
   );
   return (
-    <div style={{ padding: "2px 4px 6px", border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
+    <div style={{ padding: "2px 4px 6px", border: "1px solid #382f1f", borderRadius: 4, background: "#17130c" }}>
       <div style={{ color: "#e8dcc0", fontSize: 11, fontWeight: 700 }}>{b.name}{b.defunct ? " · FAILED" : ""}</div>
-      <div style={{ color: "#9ab0c8", fontSize: 9, marginBottom: 4 }}>{b.seat} · est. {b.founded_year}</div>
+      <div style={{ color: "#c5b69d", fontSize: 9, marginBottom: 4 }}>{b.seat} · est. {b.founded_year}</div>
       <div style={{ display: "flex", gap: 12 }}>
         <Side title="Assets" color="#80c890" total={assets}
           rows={[["Specie reserves", b.reserves], ["Loans out", b.loans_out], ["Real estate", b.real_estate]]} />
         <Side title="Liabilities" color="#e0a880" total={liab}
           rows={[["Deposits", b.deposits], ["Notes issued", b.notes_issued], ["Equity", b.equity]]} />
       </div>
-      <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 4, flexWrap: "wrap" }}>
-        <span style={{ color: fragile ? "#e6303a" : "#8aa8c8" }} title="Reserves ÷ liabilities — below 22% = fragile">
+      <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#c3b08f", marginTop: 4, flexWrap: "wrap" }}>
+        <span style={{ color: fragile ? "#e6303a" : "#c3b08f" }} title="Reserves ÷ liabilities — below 22% = fragile">
           reserve ratio {Number.isFinite(b.reserve_ratio) ? `${Math.round(b.reserve_ratio * 100)}%` : "—"}{fragile ? " ⚠" : ""}
         </span>
         <span>{b.n_loans} loans</span>
@@ -1573,10 +1573,10 @@ function BankSheet({ b, fmt }: { b: BankBrief; fmt: (v: number) => string }) {
         {b.losses > 0.01 && <span style={{ color: "#e08080" }}>−{fmt(b.losses)} lost</span>}
       </div>
       {b.branches.length > 0 && (
-        <div style={{ fontSize: 9, color: "#7fa0c0", marginTop: 2 }}>Counting-houses: {b.branches.join(", ")}</div>
+        <div style={{ fontSize: 9, color: "#bba784", marginTop: 2 }}>Counting-houses: {b.branches.join(", ")}</div>
       )}
       {b.events.length > 0 && (
-        <div style={{ fontSize: 9, color: "#6a86a6", marginTop: 2, fontStyle: "italic" }}>{b.events[0]}</div>
+        <div style={{ fontSize: 9, color: "#a28f6e", marginTop: 2, fontStyle: "italic" }}>{b.events[0]}</div>
       )}
     </div>
   );
@@ -1634,11 +1634,11 @@ function WaterfallChart({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string
   const yAt = (v: number) => padT + (1 - (v - lo) / span) * (H - padT - padB);
   return (
     <div style={{ marginTop: 8 }}>
-      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
+      <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
         This year, step by step
       </div>
       <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-        <line x1={0} y1={yAt(0)} x2={W} y2={yAt(0)} stroke="#1c2c40" strokeWidth={0.6} />
+        <line x1={0} y1={yAt(0)} x2={W} y2={yAt(0)} stroke="#3c3220" strokeWidth={0.6} />
         {bars.map((b, i) => {
           const x = padL + i * slotW + (slotW - barW) / 2;
           const up = b.amount >= 0;
@@ -1664,7 +1664,7 @@ function WaterfallChart({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string
           );
         })()}
       </svg>
-      <div style={{ color: "#4a5c72", fontSize: 7.5, textAlign: "right" }}>hover a bar for its line</div>
+      <div style={{ color: "#6d624f", fontSize: 7.5, textAlign: "right" }}>hover a bar for its line</div>
     </div>
   );
 }
@@ -1730,7 +1730,7 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
       {l.warehouse.length > 0 && (
         <div>
           <div style={head}>Warehouse · {l.warehouse_city}</div>
-          <div style={{ fontSize: 11, color: "#bcd0e4", lineHeight: 1.6 }}>{l.warehouse.map((w, i) => <span key={i}>{goodIcon(w.label)}{fmt(w.amount)}  </span>)}</div>
+          <div style={{ fontSize: 11, color: "#e1d5bf", lineHeight: 1.6 }}>{l.warehouse.map((w, i) => <span key={i}>{goodIcon(w.label)}{fmt(w.amount)}  </span>)}</div>
         </div>
       )}
     </div>
@@ -1755,26 +1755,26 @@ function WealthGraph({ data, startYear, yearly, fmt }:
   const mid = (max + min) / 2;
   return (
     <div style={{ marginTop: 7 }}>
-      <div style={{ color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
+      <div style={{ color: "#a28f6e", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 2 }}>
         Wealth — {yearly ? `past ${data.length} year${data.length > 1 ? "s" : ""}` : "through the year"}
         <span style={{ color: stroke, marginLeft: 6, fontWeight: 700 }}>{up ? "▲" : "▼"} {growth >= 0 ? "+" : ""}{growth.toFixed(0)}%</span>
       </div>
-      <svg width={W} height={H} style={{ display: "block", background: "#0a1119", border: "1px solid #1b2a3c", borderRadius: 3 }}>
+      <svg width={W} height={H} style={{ display: "block", background: "#17130c", border: "1px solid #382f1f", borderRadius: 3 }}>
         {/* Axes */}
-        <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="#26384c" strokeWidth={1} />
-        <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="#26384c" strokeWidth={1} />
+        <line x1={padL} y1={padT} x2={padL} y2={padT + plotH} stroke="#473d2b" strokeWidth={1} />
+        <line x1={padL} y1={padT + plotH} x2={W - padR} y2={padT + plotH} stroke="#473d2b" strokeWidth={1} />
         {/* Y grid + labels (max / mid / min) */}
         {[max, mid, min].map((v, k) => (
           <g key={k}>
-            <line x1={padL} y1={Y(v)} x2={W - padR} y2={Y(v)} stroke="#13202c" strokeWidth={1} />
-            <text x={padL - 3} y={Y(v) + 3} textAnchor="end" fill="#6a86a6" fontSize={8}>{fmt(v)}</text>
+            <line x1={padL} y1={Y(v)} x2={W - padR} y2={Y(v)} stroke="#292216" strokeWidth={1} />
+            <text x={padL - 3} y={Y(v) + 3} textAnchor="end" fill="#a28f6e" fontSize={8}>{fmt(v)}</text>
           </g>
         ))}
         <polyline points={pts} fill="none" stroke={stroke} strokeWidth={1.6} strokeLinejoin="round" />
         <circle cx={X(data.length - 1)} cy={Y(data[data.length - 1])} r={2.2} fill={stroke} />
         {/* X labels (first / last) */}
-        <text x={padL} y={H - 4} fill="#7a8aa0" fontSize={8}>{yearly ? `yr ${startYear}` : "start"}</text>
-        <text x={W - padR} y={H - 4} textAnchor="end" fill="#7a8aa0" fontSize={8}>
+        <text x={padL} y={H - 4} fill="#9d917d" fontSize={8}>{yearly ? `yr ${startYear}` : "start"}</text>
+        <text x={W - padR} y={H - 4} textAnchor="end" fill="#9d917d" fontSize={8}>
           {yearly ? `yr ${startYear + data.length - 1}` : "now"}
         </text>
       </svg>
@@ -1784,7 +1784,7 @@ function WealthGraph({ data, startYear, yearly, fmt }:
 
 const detailPanel: React.CSSProperties = {
   position: "absolute", top: 40, right: 690, width: 720, maxHeight: "88vh", overflowY: "auto",
-  background: "#0c141e", border: "1px solid #24364e", borderRadius: 8,
+  background: "#1c170e", border: "1px solid #493d29", borderRadius: 8,
   padding: "12px 16px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", zIndex: 45,
 };
 
@@ -1799,11 +1799,11 @@ const EVENT_ICON: Record<string, string> = {
   goal_set: "🎯", goal_achieved: "✓", goal_failed: "✗",
 };
 const EVENT_COLOR: Record<string, string> = {
-  founded: "#cfe0f4", succession: "#9ab0c8", monopoly: "#e0b060", monopoly_lost: "#b08a5a",
+  founded: "#cfe0f4", succession: "#c5b69d", monopoly: "#e0b060", monopoly_lost: "#b08a5a",
   control_gained: "#7fd0a0", control_lost: "#d88", loss: "#e08a5a",
-  branch: "#9fe07a", dissolved: "#8a93a0", figure: "#e6c878", marriage: "#e6a6c8", piracy: "#c07070",
-  tier_up: "#7fd0a0", golden_age: "#e6c878", dynasty: "#e6c878", inheritance: "#9ab0c8",
-  goal_set: "#9ab0c8", goal_achieved: "#7fd0a0", goal_failed: "#c98",
+  branch: "#9fe07a", dissolved: "#9e978c", figure: "#e6c878", marriage: "#e6a6c8", piracy: "#c07070",
+  tier_up: "#7fd0a0", golden_age: "#e6c878", dynasty: "#e6c878", inheritance: "#c5b69d",
+  goal_set: "#c5b69d", goal_achieved: "#7fd0a0", goal_failed: "#c98",
 };
 
 /** A house's chronicle as a vertical timeline: founding, successions, monopolies,
@@ -1815,16 +1815,16 @@ export function HouseTimeline({ history, onClose }: { history: HouseHistory; onC
   const maxProfit = Math.max(1e-6, ...history.top_goods.map(([, p]) => p));
   return (
     <div style={timelinePanel}>
-      <div style={{ ...dossierHeader, borderBottom: "1px solid #1a2a3e" }}>
+      <div style={{ ...dossierHeader, borderBottom: "1px solid #3a301e" }}>
         <span style={{ display: "flex", alignItems: "center", gap: 7 }}>
           <span style={{ width: 11, height: 11, borderRadius: 2, background: history.color }} />
           <CoatOfArms name={history.name} size={22} />
           <span>{history.name}</span>
         </span>
-        <span style={{ cursor: "pointer", color: "#7a90a8" }} onClick={onClose}>✕</span>
+        <span style={{ cursor: "pointer", color: "#a5967d" }} onClick={onClose}>✕</span>
       </div>
       <div style={{ overflowY: "auto", padding: "8px 12px 12px" }}>
-        <div style={{ color: "#9ab0c8", fontSize: 10, marginBottom: 8 }}>
+        <div style={{ color: "#c5b69d", fontSize: 10, marginBottom: 8 }}>
           {history.founder || `Founded in year ${history.founded_year}`}
           {history.defunct && <span style={{ color: "#d88" }}> · fallen</span>}
         </div>
@@ -1837,7 +1837,7 @@ export function HouseTimeline({ history, onClose }: { history: HouseHistory; onC
               <div key={g} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
                 <span style={{ fontSize: 12, width: 16 }}>{goodIcon(g)}</span>
                 <span style={{ color: "#cdbb88", fontSize: 10, width: 78, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{clarifyGemLabel(g, history.gem_variety)}</span>
-                <div style={{ flex: 1, height: 4, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+                <div style={{ flex: 1, height: 4, background: "#16120c", borderRadius: 2, overflow: "hidden" }}>
                   <div style={{ width: `${(p / maxProfit) * 100}%`, height: "100%", background: "#c9a227" }} />
                 </div>
               </div>
@@ -1856,14 +1856,14 @@ export function HouseTimeline({ history, onClose }: { history: HouseHistory; onC
                 <span style={{ width: 9, height: 9, borderRadius: c.colony_kind === 2 ? 2 : "50%",
                   background: c.colony_kind === 2 ? "#c9a96a" : "#c08cff", flex: "0 0 auto" }} />
                 <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#d8c8f4", fontSize: 10 }}>{c.name}</span>
-                <span style={{ color: "#7a90a8", fontSize: 9 }}>{c.colony_kind === 2 ? "outpost" : "colony"}</span>
+                <span style={{ color: "#a5967d", fontSize: 9 }}>{c.colony_kind === 2 ? "outpost" : "colony"}</span>
               </div>
             ))}
           </>
         )}
 
         {/* Timeline — grouped by year; click a year to expand what happened. */}
-        <div style={{ ...timelineHdr, marginTop: 10 }}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
+        <div style={{ ...timelineHdr, marginTop: 10 }}>Chronicle <span style={{ color: "#87785d", fontWeight: 400 }}>(click a year)</span></div>
         <YearChronicle entries={ev} icons={EVENT_ICON} colors={EVENT_COLOR} />
       </div>
     </div>
@@ -1873,10 +1873,10 @@ export function HouseTimeline({ history, onClose }: { history: HouseHistory; onC
 const timelinePanel: React.CSSProperties = {
   position: "absolute", top: 0, right: 326, width: 300, maxHeight: "78vh",
   display: "flex", flexDirection: "column",
-  background: "#0a121c", border: "1px solid #1e3450", borderRadius: 8,
+  background: "#19150d", border: "1px solid #493c25", borderRadius: 8,
   boxShadow: "0 8px 28px rgba(0,0,0,0.6)", zIndex: 41,
 };
 const timelineHdr: React.CSSProperties = {
-  color: "#7a90a8", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4,
-  margin: "4px 0 3px", borderBottom: "1px solid #16222e", paddingBottom: 2,
+  color: "#a5967d", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4,
+  margin: "4px 0 3px", borderBottom: "1px solid #2b2419", paddingBottom: 2,
 };

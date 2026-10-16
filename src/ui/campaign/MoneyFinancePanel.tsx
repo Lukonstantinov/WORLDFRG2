@@ -101,13 +101,13 @@ export function MoneyFinancePanel() {
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>💰 Money &amp; Finance</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={close}>✕</span>
       </div>
-      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #3e3422", flexWrap: "wrap" }}>
         {tabs.map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
             style={{ padding: "4px 8px", cursor: "pointer", fontSize: 10.5, fontWeight: tab === id ? 700 : 400,
-              color: tab === id ? "#cfe2f6" : "#6a86a6",
+              color: tab === id ? "#cfe2f6" : "#a28f6e",
               borderBottom: tab === id ? "2px solid #c8a23a" : "2px solid transparent" }}>
             {lbl}
           </div>
@@ -130,7 +130,7 @@ export function MoneyFinancePanel() {
               Every council seat as a unified mint, ranked by coin strength. One headline
               <b style={{ color: "#cbb88a" }}> strength</b> = fineness × acceptance; the civic treasury and
               tariffs behind it, its reach, and the local price level all sit on the same card.
-              <div style={{ marginTop: 3, color: "#5a7290" }}>Click a mint for the full explanation + who uses the coin.</div>
+              <div style={{ marginTop: 3, color: "#897a61" }}>Click a mint for the full explanation + who uses the coin.</div>
             </div>
           )}
           {mints.map((m, i) => (
@@ -220,7 +220,7 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
     : coined.length > 0
     ? { icon: "☀", color: "#6fce9a", bg: "#122019",
         text: `The money is sound — ${reserves.length} reserve coin${reserves.length === 1 ? "" : "s"} accepted across borders.` }
-    : { icon: "◌", color: "#7e93ab", bg: "#121a24",
+    : { icon: "◌", color: "#a89a81", bg: "#221d14",
         text: "No coin struck yet — councils mint their first at New Year." };
 
   return (
@@ -231,7 +231,7 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
         <span style={{ fontSize: 22 }}>{weather.icon}</span>
         <div style={{ flex: 1 }}>
           <div style={{ color: weather.color, fontWeight: 700, fontSize: 11 }}>State of the money</div>
-          <div style={{ color: "#c0d0e0", fontSize: 10, lineHeight: 1.4 }}>{weather.text}</div>
+          <div style={{ color: "#ded4c2", fontSize: 10, lineHeight: 1.4 }}>{weather.text}</div>
         </div>
       </div>
 
@@ -255,7 +255,7 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
           <div key={m.hub} style={{ ...card, cursor: "pointer" }} onClick={() => onOpen("mints")}
             title="Open the full mint card">
             <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-              <span style={{ color: "#6a86a6", fontSize: 10, width: 14 }}>#{i + 1}</span>
+              <span style={{ color: "#a28f6e", fontSize: 10, width: 14 }}>#{i + 1}</span>
               <CoinIcon issuer={m.issuer || m.city} value={m.value} metal={m.metal as CoinMetal} size={26} />
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
@@ -263,11 +263,11 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
                   {m.is_reserve && <span style={{ color: "#37a05a", fontSize: 8.5, fontWeight: 700 }}>RESERVE</span>}
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 5, marginTop: 2 }}>
-                  <span style={{ flex: 1, height: 6, background: "#141f2c", borderRadius: 3, overflow: "hidden" }}>
+                  <span style={{ flex: 1, height: 6, background: "#292217", borderRadius: 3, overflow: "hidden" }}>
                     <span style={{ display: "block", height: "100%", width: `${Math.max(3, Math.min(100, m.strength))}%`, background: strengthColor }} />
                   </span>
                   <span style={{ color: strengthColor, fontSize: 10, fontWeight: 700 }}>{m.strength.toFixed(0)}</span>
-                  <span style={{ color: METAL_COLOR[m.metal] ?? "#9ab0c8", fontSize: 8.5, textTransform: "capitalize" }}>◈ {m.metal}</span>
+                  <span style={{ color: METAL_COLOR[m.metal] ?? "#c5b69d", fontSize: 8.5, textTransform: "capitalize" }}>◈ {m.metal}</span>
                 </div>
               </div>
             </div>
@@ -277,7 +277,7 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
                 <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} width={340} landGrid={landGrid} />
               </div>
             )}
-            <div style={{ display: "flex", gap: 10, fontSize: 8.5, color: "#7e93ab", marginTop: 4 }}>
+            <div style={{ display: "flex", gap: 10, fontSize: 8.5, color: "#a89a81", marginTop: 4 }}>
               <span>held in {m.held_in} {m.held_in === 1 ? "city" : "cities"}</span>
               {m.abroad > 0 && <span style={{ color: "#6fce9a" }}>{m.abroad} abroad</span>}
               <span>prices ×{m.price_level.toFixed(2)}</span>
@@ -301,7 +301,7 @@ function SummaryTab({ mints, coinUse, crashes, wars, worldW, worldH, backdrop, y
 
 /** Tint for the metal label (matches the struck-coin palettes). */
 const METAL_COLOR: Record<string, string> = {
-  gold: "#e8c452", silver: "#c4cdd8", electrum: "#dcd083", bronze: "#c07f45",
+  gold: "#e8c452", silver: "#d6d0c6", electrum: "#dcd083", bronze: "#c07f45",
 };
 /** Tint for the bullion-supply (coin-supply limit) label. */
 const BULLION_COLOR: Record<string, string> = {
@@ -312,11 +312,11 @@ const BULLION_COLOR: Record<string, string> = {
 function DriverBar({ label, frac, color, text }: { label: string; frac: number; color: string; text: string }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
-      <span style={{ color: "#7e93ab", fontSize: 8.5 }}>{label}</span>
-      <span style={{ width: 42, height: 5, background: "#1a2636", borderRadius: 3, overflow: "hidden", flex: "0 0 auto" }}>
+      <span style={{ color: "#a89a81", fontSize: 8.5 }}>{label}</span>
+      <span style={{ width: 42, height: 5, background: "#322b1e", borderRadius: 3, overflow: "hidden", flex: "0 0 auto" }}>
         <span style={{ display: "block", height: "100%", width: `${Math.max(3, Math.min(100, frac * 100))}%`, background: color }} />
       </span>
-      <span style={{ color: "#9ab0c8", fontSize: 8.5 }}>{text}</span>
+      <span style={{ color: "#c5b69d", fontSize: 8.5 }}>{text}</span>
     </span>
   );
 }
@@ -337,10 +337,10 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
   const strengthColor = m.is_reserve ? "#37a05a" : sc >= 40 ? "#c8a23a" : "#d08a3a";
   const cpi = m.price_level;
   return (
-    <div style={{ ...card, cursor: "pointer", border: onMap ? "1px solid #3a80c0" : card.border }} onClick={() => setOpen((v) => !v)}>
+    <div style={{ ...card, cursor: "pointer", border: onMap ? "1px solid #a58855" : card.border }} onClick={() => setOpen((v) => !v)}>
       {/* Title row */}
       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-        <span style={{ color: "#6a86a6", fontSize: 9, width: 16, flex: "0 0 auto" }}>#{rank}</span>
+        <span style={{ color: "#a28f6e", fontSize: 9, width: 16, flex: "0 0 auto" }}>#{rank}</span>
         {hasCoin
           ? <CoinIcon issuer={m.issuer || m.city} value={m.value} metal={m.metal as CoinMetal} size={22}
               title={`${m.coin_name} · ${m.metal} · strength ${sc.toFixed(0)} · value ${m.value.toFixed(2)}×`} />
@@ -352,43 +352,43 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
         {hasCoin && (
           <span onClick={(e) => { e.stopPropagation(); toggleMap(); }} title="Highlight the cities that use this coin on the map"
             style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4,
-              border: `1px solid ${onMap ? "#3a80c0" : "#24364e"}`, background: onMap ? "#19324a" : "transparent",
-              color: onMap ? "#cfe2f6" : "#7fa0c4" }}>📍 map</span>
+              border: `1px solid ${onMap ? "#a58855" : "#493d29"}`, background: onMap ? "#413622" : "transparent",
+              color: onMap ? "#cfe2f6" : "#bfa984" }}>📍 map</span>
         )}
         {hasCoin && (
           <span onClick={(e) => { e.stopPropagation(); useUIStore.getState().setCoinWindow(m.coin_name); }}
             title="Open the coin & bank window — biography, cities, chronicle and the bank that banks in it"
-            style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4, border: "1px solid #24364e", color: "#d8b24a" }}>⤢ window</span>
+            style={{ fontSize: 10, padding: "1px 6px", borderRadius: 4, marginLeft: 4, border: "1px solid #493d29", color: "#d8b24a" }}>⤢ window</span>
         )}
-        <span style={{ color: "#5a7290", fontSize: 10, marginLeft: 4 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ color: "#897a61", fontSize: 10, marginLeft: 4 }}>{open ? "▾" : "▸"}</span>
       </div>
 
       {/* MONEY row — one headline strength bar + the two drivers */}
       {hasCoin ? (
         <div style={{ marginTop: 4 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "#7a90a8", fontSize: 8.5, width: 40, flex: "0 0 auto", textTransform: "uppercase", letterSpacing: 0.4 }}>Money</span>
-            <span style={{ flex: 1, height: 8, background: "#141f2c", borderRadius: 4, overflow: "hidden" }}>
+            <span style={{ color: "#a5967d", fontSize: 8.5, width: 40, flex: "0 0 auto", textTransform: "uppercase", letterSpacing: 0.4 }}>Money</span>
+            <span style={{ flex: 1, height: 8, background: "#292217", borderRadius: 4, overflow: "hidden" }}>
               <span style={{ display: "block", height: "100%", width: `${Math.max(3, Math.min(100, sc))}%`, background: strengthColor }} />
             </span>
             <span style={{ color: strengthColor, fontSize: 11, fontWeight: 700, width: 20, textAlign: "right" }}>{sc.toFixed(0)}</span>
-            <span style={{ color: m.value >= 1.05 ? "#e0c060" : "#9ab0c8", fontSize: 9 }} title="Exchange agio vs grain">
+            <span style={{ color: m.value >= 1.05 ? "#e0c060" : "#c5b69d", fontSize: 9 }} title="Exchange agio vs grain">
               {m.value.toFixed(2)}×
             </span>
           </div>
           <div style={{ display: "flex", gap: 12, marginTop: 3, marginLeft: 46, alignItems: "center" }}>
-            <DriverBar label="fineness" frac={m.fineness} color={debased ? "#e0a020" : "#8ab0d0"}
+            <DriverBar label="fineness" frac={m.fineness} color={debased ? "#e0a020" : "#cbb58f"}
               text={`${(m.fineness * 100).toFixed(0)}%${debased ? " ✂" : ""}`} />
             <DriverBar label="trust" frac={m.trust} color={m.is_reserve ? "#37a05a" : "#c8a23a"}
               text={`${(m.trust * 100).toFixed(0)}%`} />
-            <span style={{ color: METAL_COLOR[m.metal] ?? "#9ab0c8", fontSize: 8.5, textTransform: "capitalize" }}
+            <span style={{ color: METAL_COLOR[m.metal] ?? "#c5b69d", fontSize: 8.5, textTransform: "capitalize" }}
               title="The metal this coin is struck in — set by the bullion the polis's region can reach">
               ◈ {m.metal}
             </span>
           </div>
         </div>
       ) : (
-        <div style={{ color: "#6a86a6", fontSize: 9.5, marginTop: 3, marginLeft: 22 }}>
+        <div style={{ color: "#a28f6e", fontSize: 9.5, marginTop: 3, marginLeft: 22 }}>
           {m.has_mint
             ? "Holds the right of the mint — its first coin is struck at New Year."
             : "No mint right — not yet a large enough commercial centre to be chartered a mint."}
@@ -399,21 +399,21 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 4, flexWrap: "wrap", fontSize: 9 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
           <span style={{ width: 8, height: 8, borderRadius: 2, background: m.council_color }} />
-          <span style={{ color: "#9ab0c8" }}>{m.council}{m.council_archetype ? ` · ${m.council_archetype}` : ""}</span>
+          <span style={{ color: "#c5b69d" }}>{m.council}{m.council_archetype ? ` · ${m.council_archetype}` : ""}</span>
         </span>
         <span style={{ color: "#d8c878" }} title="Retained civic treasury">🏛 {fmtk(m.treasury)}</span>
-        <span style={{ color: "#8aa8c8" }} title="Export / import tariff">⬆{(m.tariff_export * 100).toFixed(1)}% ⬇{(m.tariff_import * 100).toFixed(1)}%</span>
-        <span style={{ color: cpi >= 1.15 ? "#e0a880" : "#8aa8c8" }} title="Local price level (CPI, 1.0 = par at start) — rises with debasement / money growth">
+        <span style={{ color: "#c3b08f" }} title="Export / import tariff">⬆{(m.tariff_export * 100).toFixed(1)}% ⬇{(m.tariff_import * 100).toFixed(1)}%</span>
+        <span style={{ color: cpi >= 1.15 ? "#e0a880" : "#c3b08f" }} title="Local price level (CPI, 1.0 = par at start) — rises with debasement / money growth">
           prices ×{cpi.toFixed(2)}
         </span>
         {m.bullion && (
-          <span style={{ color: BULLION_COLOR[m.bullion] ?? "#8aa8c8" }}
+          <span style={{ color: BULLION_COLOR[m.bullion] ?? "#c3b08f" }}
             title="Bullion supply — how much gold/silver the region can mint. Scarce bullion caps fineness (forces debasement); it is the hard limit on coin supply.">
             ⛏ {m.bullion}
           </span>
         )}
         {m.debt_principal > 0 && (
-          <span style={{ color: m.debt_ratio >= 3 ? "#e0a880" : "#9ab0c8" }}
+          <span style={{ color: m.debt_ratio >= 3 ? "#e0a880" : "#c5b69d" }}
             title={`Civic public debt (Monte): ${fmtk(m.debt_principal)} owed to ${m.debt_holders} bondholder(s) at ${(m.debt_coupon * 100).toFixed(1)}% · ${m.debt_ratio.toFixed(1)}× yearly trade${m.debt_ratio >= 3 ? " — fiscal strain" : ""}`}>
             📜 debt {fmtk(m.debt_principal)} ({m.debt_ratio.toFixed(1)}×)
           </span>
@@ -422,10 +422,10 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
       </div>
 
       {open && (
-        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #1b2a3c", fontSize: 10, lineHeight: 1.5 }}>
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #382f1f", fontSize: 10, lineHeight: 1.5 }}>
           {hasCoin ? (
             <>
-              <div style={{ color: "#8aa8c8", marginBottom: 3 }}>
+              <div style={{ color: "#c3b08f", marginBottom: 3 }}>
                 Minted by <b style={{ color: "#cfe2f6" }}>{m.city}</b>{m.issuer ? ` · council ${m.issuer}` : ""}.
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 4, margin: "2px 0 5px" }}>
@@ -437,7 +437,7 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
                 <Stat label="Specie" value={`${m.exchange.toFixed(1)}ag`} hint="Intrinsic metal value in the silver-coin numeraire (silver = 1). A gold coin ≈ 13× a silver one of equal fineness — this is the metal it actually contains." />
                 {xrate && <Stat label={`vs ${topCoin!.coin_name.split(" ")[0]}`} value={`${xrate.toFixed(2)}×`} hint={`1 ${m.coin_name} ≈ ${xrate.toFixed(2)} ${topCoin!.coin_name} by METAL content (bimetallic rate)`} />}
               </div>
-              <div style={{ color: "#8aa8c8", marginBottom: 4 }}>
+              <div style={{ color: "#c3b08f", marginBottom: 4 }}>
                 {debased ? "⚠ Debased coin — " : m.value >= 1.05 ? "★ Hard premium coin — " : "Sound coin — "}
                 {m.is_reserve ? "trusted enough to serve as an international reserve." : "circulates mainly in its home market."}
                 {m.reformed && <span style={{ color: "#7fd0a0" }}> Has been reformed (called in &amp; re-struck at full fineness).</span>}
@@ -456,13 +456,13 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
                   text={`Funded civic debt held by ${m.debt_holders} patrician bondholder(s) — a permanent institution (like Venice's Monte) that finances public works, servicing a yearly coupon from the treasury. At ${m.debt_ratio.toFixed(1)}× yearly trade it is ${m.debt_ratio >= 3 ? "STRAINED — a fiscal collapse would force a haircut on the bonds" : "comfortably serviceable"}.`} />
               )}
               {worldW > 0 && usage.length > 0 && (
-                <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+                <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #382f1f" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-                    <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Where it circulates</span>
+                    <span style={{ color: "#c3b08f", fontSize: 10, fontWeight: 700, flex: 1 }}>Where it circulates</span>
                     <span onClick={(e) => { e.stopPropagation(); toggleMap(); }} title="Highlight this coin on the main map"
                       style={{ fontSize: 9, padding: "1px 6px", borderRadius: 4, cursor: "pointer",
-                        border: `1px solid ${onMap ? "#3a80c0" : "#24364e"}`, background: onMap ? "#19324a" : "transparent",
-                        color: onMap ? "#cfe2f6" : "#7fa0c4" }}>📍 big map</span>
+                        border: `1px solid ${onMap ? "#a58855" : "#493d29"}`, background: onMap ? "#413622" : "transparent",
+                        color: onMap ? "#cfe2f6" : "#bfa984" }}>📍 big map</span>
                   </div>
                   <CoinMiniMap usage={usage} worldW={worldW} worldH={worldH} backdrop={backdrop} landGrid={landGrid} />
                   <CoinMiniMapLegend />
@@ -472,7 +472,7 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
               <CoinUsageChart usage={usage} />
             </>
           ) : (
-            <div style={{ color: "#7e93ab" }}>
+            <div style={{ color: "#a89a81" }}>
               {m.has_mint
                 ? "This council seat has just been granted the right of the mint (a charter) and will strike its own coin at New Year. Until then its trade settles in neighbours' currency."
                 : "Minting is a privilege of substantial commercial centres. This seat isn't busy or large enough to be chartered a mint yet, so its trade settles in neighbours' currency or by barter."}
@@ -485,7 +485,7 @@ function MintCard({ m, rank, topCoin, usage, onMap, toggleMap, worldW, worldH, b
 }
 
 const ISSUE_CAUSE_LABEL: Record<number, string> = { 0: "first struck", 1: "debased", 2: "reformed" };
-const ISSUE_CAUSE_COLOR: Record<number, string> = { 0: "#8aa8c8", 1: "#e0a020", 2: "#7fd0a0" };
+const ISSUE_CAUSE_COLOR: Record<number, string> = { 0: "#c3b08f", 1: "#e0a020", 2: "#7fd0a0" };
 const DENOM_TIER_LABEL: Record<number, string> = { 0: "Gold", 1: "Silver", 2: "Petty" };
 
 /** Metal tint per denomination tier (§4.1/D7), read straight off `Denom.tier`
@@ -522,7 +522,7 @@ function CatalogueTab({ catalogue }: { catalogue: CoinCatalogue }) {
             Every mint that has ever struck a coin, with its denominations and the dated timeline of issues
             behind each — first striking, debasement, reform, each shown as a real obverse/reverse coin card.
           </div>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "4px 4px 10px", borderBottom: "1px solid #131e2a", marginBottom: 6 }}
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", padding: "4px 4px 10px", borderBottom: "1px solid #272116", marginBottom: 6 }}
             title="M3's parallel ledger (§3.1/§3.2) — real Purses computed alongside the existing wealth/treasury numbers, not yet reconciled with them. No coin has ever been spent, melted, lost or hoarded in this ledger yet, so struck and held always agree exactly.">
             <Stat label="Struck (all-time)" value={fmtk(l.total_struck)} hint="Σ every issue's face value ever struck, this ledger's own count" />
             <Stat label="In treasuries" value={fmtk(l.in_city_treasuries)} hint="seigniorage collected by minting cities" />
@@ -557,9 +557,9 @@ function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
         {!c.open && <span style={{ color: "#8a6a6a", fontSize: 9 }}>closed {c.closed_year}</span>}
         <span style={{ flex: 1 }} />
         <span style={{ color: strengthColor, fontSize: 11, fontWeight: 700 }}>{c.strength.toFixed(0)}</span>
-        <span style={{ color: "#5a7290", fontSize: 10 }}>{open ? "▾" : "▸"}</span>
+        <span style={{ color: "#897a61", fontSize: 10 }}>{open ? "▾" : "▸"}</span>
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 3, fontSize: 9, color: "#8aa8c8" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginTop: 3, fontSize: 9, color: "#c3b08f" }}>
         <span>{c.mint_city}</span>
         {c.unit_of_account && <span title="Unit of account (§3.4)">reckoned in {c.unit_of_account}</span>}
         <span>{c.denoms.length} denomination{c.denoms.length === 1 ? "" : "s"}</span>
@@ -567,11 +567,11 @@ function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
         <span>fineness {(c.current_fineness * 100).toFixed(0)}% · trust {(c.trust * 100).toFixed(0)}%</span>
       </div>
       {open && (
-        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+        <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid #382f1f" }}>
           {c.denoms.map((d) => (
             <div key={d.tier} style={{ marginBottom: 10 }}>
               <div style={{ color: "#cbb88a", fontSize: 10, fontWeight: 700, marginBottom: 4 }}>
-                {DENOM_TIER_LABEL[d.tier] ?? "Denom"} — {d.name} <span style={{ color: "#5a7290", fontWeight: 400 }}>({d.standard_grams.toFixed(1)}g standard)</span>
+                {DENOM_TIER_LABEL[d.tier] ?? "Denom"} — {d.name} <span style={{ color: "#897a61", fontWeight: 400 }}>({d.standard_grams.toFixed(1)}g standard)</span>
               </div>
               {d.issues.map((iss) => <IssueRow key={iss.id} iss={iss} tier={d.tier} />)}
             </div>
@@ -585,7 +585,7 @@ function CurrencyCatalogueCard({ c }: { c: CatalogueCurrency }) {
 function IssueRow({ iss, tier }: { iss: CatalogueIssue; tier: number }) {
   const metal = METAL_FOR_TIER[tier] ?? "silver";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 9.5, padding: "3px 0 3px 8px", borderLeft: "2px solid #1b2a3c" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 9.5, padding: "3px 0 3px 8px", borderLeft: "2px solid #382f1f" }}>
       {/* The coin card (D7, §4.1) — obverse (the striking authority's own
           arms) beside reverse (the denomination's tier motif), both tinted
           by metal and worn by this issue's own fineness. */}
@@ -595,14 +595,14 @@ function IssueRow({ iss, tier }: { iss: CatalogueIssue; tier: number }) {
         <CoinIcon face="reverse" reverseTier={tier as DenomTier} value={iss.fineness} metal={metal} size={24}
           title={`Reverse — ${DENOM_TIER_LABEL[tier] ?? "denomination"}`} />
       </span>
-      <span style={{ color: "#7a90a8", width: 36, flex: "0 0 auto" }}>{iss.year}</span>
-      <span style={{ color: ISSUE_CAUSE_COLOR[iss.cause] ?? "#9ab0c8", width: 62, flex: "0 0 auto" }}>
+      <span style={{ color: "#a5967d", width: 36, flex: "0 0 auto" }}>{iss.year}</span>
+      <span style={{ color: ISSUE_CAUSE_COLOR[iss.cause] ?? "#c5b69d", width: 62, flex: "0 0 auto" }}>
         {ISSUE_CAUSE_LABEL[iss.cause] ?? "issue"}
       </span>
-      <span style={{ color: "#9ab0c8" }}>{iss.cognomen}</span>
+      <span style={{ color: "#c5b69d" }}>{iss.cognomen}</span>
       <span style={{ flex: 1 }} />
-      <span style={{ color: "#8aa8c8" }}>{(iss.fineness * 100).toFixed(0)}% fine</span>
-      <span style={{ color: "#6a86a6" }} title="Struck by">{iss.authority}</span>
+      <span style={{ color: "#c3b08f" }}>{(iss.fineness * 100).toFixed(0)}% fine</span>
+      <span style={{ color: "#a28f6e" }} title="Struck by">{iss.authority}</span>
     </div>
   );
 }
@@ -612,26 +612,26 @@ function Explain({ label, value, text }: { label: string; value: string; text: s
     <div style={{ marginBottom: 3 }}>
       <span style={{ color: "#cbb88a", fontWeight: 700 }}>{label}: </span>
       <span style={{ color: "#cfe2f6" }}>{value}</span>
-      <div style={{ color: "#7e93ab" }}>{text}</div>
+      <div style={{ color: "#a89a81" }}>{text}</div>
     </div>
   );
 }
 
 function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
   return (
-    <div title={hint} style={{ background: "#0e1925", border: "1px solid #1c2c40", borderRadius: 4, padding: "2px 7px", minWidth: 52 }}>
-      <div style={{ color: "#6a86a6", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
+    <div title={hint} style={{ background: "#221c11", border: "1px solid #3c3220", borderRadius: 4, padding: "2px 7px", minWidth: 52 }}>
+      <div style={{ color: "#a28f6e", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</div>
       <div style={{ color: "#cfe2f6", fontSize: 11, fontWeight: 700 }}>{value}</div>
     </div>
   );
 }
 
-const COIN_PALETTE = ["#f0d77a", "#c9a227", "#b88f20", "#9c7a1c", "#6fae8a", "#5f97c0", "#52708e"];
+const COIN_PALETTE = ["#f0d77a", "#c9a227", "#b88f20", "#9c7a1c", "#6fae8a", "#b99a66", "#86765a"];
 
 /** Which settlements use this coin most — donut (default) / bar. */
 function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
   const [mode, setMode] = useState<"donut" | "bar">("donut");
-  if (usage.length === 0) return <div style={{ color: "#56708e", fontSize: 9, marginTop: 6 }}>No settlements settle in this coin yet.</div>;
+  if (usage.length === 0) return <div style={{ color: "#87785d", fontSize: 9, marginTop: 6 }}>No settlements settle in this coin yet.</div>;
   const sorted = [...usage].sort((a, b) => b.volume - a.volume);
   const top = sorted.slice(0, 6);
   const restVol = sorted.slice(6).reduce((s, u) => s + u.volume, 0);
@@ -640,9 +640,9 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
   const total = rows.reduce((s, r) => s + r.vol, 0) || 1;
   const tag = (r: { mint: boolean; reserve: boolean }) => (r.mint ? " ★" : r.reserve ? " ⇄" : "");
   return (
-    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #382f1f" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
-        <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Used by settlements</span>
+        <span style={{ color: "#c3b08f", fontSize: 10, fontWeight: 700, flex: 1 }}>Used by settlements</span>
         <span onClick={(e) => { e.stopPropagation(); setMode("donut"); }} style={chipS(mode === "donut")}>◍</span>
         <span onClick={(e) => { e.stopPropagation(); setMode("bar"); }} style={chipS(mode === "bar")}>▭</span>
       </div>
@@ -656,13 +656,13 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
               const large = rw.vol / total > 0.5 ? 1 : 0;
               const d = `M${p(a0, r)} A${r},${r} 0 ${large} 1 ${p(a1, r)} L${p(a1, ri)} A${ri},${ri} 0 ${large} 0 ${p(a0, ri)} Z`;
               a0 = a1;
-              return <path key={i} d={d} fill={COIN_PALETTE[i % COIN_PALETTE.length]} stroke="#0b1420" strokeWidth={1} />;
+              return <path key={i} d={d} fill={COIN_PALETTE[i % COIN_PALETTE.length]} stroke="#1c170f" strokeWidth={1} />;
             });
           })()}
           {rows.map((rw, i) => (
             <g key={i}>
               <rect x={120} y={8 + i * 17 - 8} width={9} height={9} rx={2} fill={COIN_PALETTE[i % COIN_PALETTE.length]} />
-              <text x={133} y={8 + i * 17} fontSize={9} fill="#c7d6e8">{rw.name}{tag(rw)} {Math.round((rw.vol / total) * 100)}%</text>
+              <text x={133} y={8 + i * 17} fontSize={9} fill="#e6dbc9">{rw.name}{tag(rw)} {Math.round((rw.vol / total) * 100)}%</text>
             </g>
           ))}
         </svg>
@@ -670,11 +670,11 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
         <div>
           {rows.map((rw, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, padding: "1px 0", fontSize: 9 }}>
-              <span style={{ width: 96, color: "#c7d6e8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rw.name}{tag(rw)}</span>
-              <div style={{ flex: 1, height: 8, background: "#16202c", borderRadius: 3, overflow: "hidden" }}>
+              <span style={{ width: 96, color: "#e6dbc9", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{rw.name}{tag(rw)}</span>
+              <div style={{ flex: 1, height: 8, background: "#292319", borderRadius: 3, overflow: "hidden" }}>
                 <div style={{ width: `${(rw.vol / total) * 100}%`, height: "100%", background: COIN_PALETTE[i % COIN_PALETTE.length] }} />
               </div>
-              <span style={{ width: 28, textAlign: "right", color: "#9ab0c8" }}>{Math.round((rw.vol / total) * 100)}%</span>
+              <span style={{ width: 28, textAlign: "right", color: "#c5b69d" }}>{Math.round((rw.vol / total) * 100)}%</span>
             </div>
           ))}
         </div>
@@ -685,7 +685,7 @@ function CoinUsageChart({ usage }: { usage: CoinUseCity[] }) {
 
 function chipS(on: boolean): React.CSSProperties {
   return { fontSize: 11, padding: "1px 7px", borderRadius: 4, cursor: "pointer",
-    border: `1px solid ${on ? "#3a80c0" : "#24364e"}`, background: on ? "#19324a" : "transparent", color: on ? "#cfe2f6" : "#7fa0c4" };
+    border: `1px solid ${on ? "#a58855" : "#493d29"}`, background: on ? "#413622" : "transparent", color: on ? "#cfe2f6" : "#bfa984" };
 }
 
 // ── A3 · Coin biography — the yearly fineness/trust/price history sparklines ───
@@ -711,7 +711,7 @@ function CoinBiography({ hub, open }: { hub: number; open: boolean }) {
   }, [open, hub]);
   if (!open || hist.length < 2) {
     return !open ? null : (
-      <div style={{ color: "#56708e", fontSize: 9, marginTop: 7 }}>The coin's history builds year by year — advance the campaign to grow its biography.</div>
+      <div style={{ color: "#87785d", fontSize: 9, marginTop: 7 }}>The coin's history builds year by year — advance the campaign to grow its biography.</div>
     );
   }
   const W = 344, H = 74, pad = 4;
@@ -726,20 +726,20 @@ function CoinBiography({ hub, open }: { hub: number; open: boolean }) {
   const pNorm = (p: number) => (pMax > pMin ? (p - pMin) / (pMax - pMin) : 0.5);
   const events = hist.filter((s) => s.event && EVENT_MARK[s.event]);
   return (
-    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #1b2a3c" }}>
+    <div style={{ marginTop: 7, paddingTop: 6, borderTop: "1px solid #382f1f" }}>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
-        <span style={{ color: "#8aa8c8", fontSize: 10, fontWeight: 700, flex: 1 }}>Coin biography · y{y0}–y{y1}</span>
-        <span style={{ color: "#8ab0d0", fontSize: 8 }}>▬ fineness</span>
+        <span style={{ color: "#c3b08f", fontSize: 10, fontWeight: 700, flex: 1 }}>Coin biography · y{y0}–y{y1}</span>
+        <span style={{ color: "#cbb58f", fontSize: 8 }}>▬ fineness</span>
         <span style={{ color: "#c8a23a", fontSize: 8 }}>▬ trust</span>
         <span style={{ color: "#e0a880", fontSize: 8 }}>┈ prices</span>
       </div>
-      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", background: "#0a121c", borderRadius: 5, border: "1px solid #16273a" }}>
-        {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={pad} y1={sy(g)} x2={W - pad} y2={sy(g)} stroke="#12202e" strokeWidth={0.5} />)}
+      <svg viewBox={`0 0 ${W} ${H}`} width="100%" style={{ display: "block", background: "#19150d", borderRadius: 5, border: "1px solid #352b1b" }}>
+        {[0.25, 0.5, 0.75].map((g) => <line key={g} x1={pad} y1={sy(g)} x2={W - pad} y2={sy(g)} stroke="#2a2316" strokeWidth={0.5} />)}
         {/* price level (secondary, dashed, min-max normalized) */}
         <path d={hist.map((s, i) => `${i === 0 ? "M" : "L"}${sx(s.year).toFixed(1)},${sy(pNorm(s.price_level)).toFixed(1)}`).join("")}
           fill="none" stroke="#e0a880" strokeWidth={1} strokeDasharray="3 2" opacity={0.7} />
         <path d={line((s) => s.trust)} fill="none" stroke="#c8a23a" strokeWidth={1.3} />
-        <path d={line((s) => s.fineness)} fill="none" stroke="#8ab0d0" strokeWidth={1.3} />
+        <path d={line((s) => s.fineness)} fill="none" stroke="#cbb58f" strokeWidth={1.3} />
         {/* event markers */}
         {events.map((s, i) => {
           const m = EVENT_MARK[s.event];
@@ -752,7 +752,7 @@ function CoinBiography({ hub, open }: { hub: number; open: boolean }) {
         })}
       </svg>
       {events.length > 0 && (
-        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 8.5, color: "#7e93ab", marginTop: 3 }}>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 8.5, color: "#a89a81", marginTop: 3 }}>
           {[...new Set(events.map((e) => e.event))].map((ev) => (
             <span key={ev}><span style={{ color: EVENT_MARK[ev].color }}>{EVENT_MARK[ev].icon}</span> {EVENT_MARK[ev].label}</span>
           ))}
@@ -813,16 +813,16 @@ function ReserveCard({ h }: { h: ReserveHolder }) {
             const large = (s.share / total) > 0.5 ? 1 : 0;
             const d = `M${p(a0, r)} A${r},${r} 0 ${large} 1 ${p(a1, r)} L${p(a1, ri)} A${ri},${ri} 0 ${large} 0 ${p(a0, ri)} Z`;
             a0 = a1;
-            return <path key={i} d={d} fill={s.color} stroke={s.primary ? "#f2ead0" : "#0b1420"} strokeWidth={s.primary ? 1.4 : 0.8} />;
+            return <path key={i} d={d} fill={s.color} stroke={s.primary ? "#f2ead0" : "#1c170f"} strokeWidth={s.primary ? 1.4 : 0.8} />;
           })}
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
             <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{kindLabel} {h.name}</span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: "#8aa8c8", fontSize: 9 }} title="Total reserves / wealth (grain-equivalent)">{fmtk(h.total)}</span>
+            <span style={{ color: "#c3b08f", fontSize: 9 }} title="Total reserves / wealth (grain-equivalent)">{fmtk(h.total)}</span>
           </div>
-          <div style={{ color: "#7a90a8", fontSize: 8.5 }}>
+          <div style={{ color: "#a5967d", fontSize: 8.5 }}>
             {h.seat && <span>{h.seat} · </span>}
             {primary ? <span>holds mainly <b style={{ color: "#d8c878" }}>{primary.coin_name.split(" ")[0]}</b>{primary.mint ? " ★" : ""}</span> : "barter / no coin"}
           </div>
@@ -830,10 +830,10 @@ function ReserveCard({ h }: { h: ReserveHolder }) {
             {h.slices.slice(0, 4).map((s, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, padding: "0.5px 0" }}>
                 <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, flex: "0 0 auto" }} />
-                <span style={{ flex: 1, color: s.primary ? "#cfe2f6" : "#9ab0c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                  {s.coin_name.split(" ")[0]}{s.mint ? " ★" : ""} <span style={{ color: METAL_COLOR[s.metal] ?? "#7a90a8" }}>◈</span>{s.primary ? " · primary" : s.share >= 0.2 ? " · reserve" : ""}
+                <span style={{ flex: 1, color: s.primary ? "#cfe2f6" : "#c5b69d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  {s.coin_name.split(" ")[0]}{s.mint ? " ★" : ""} <span style={{ color: METAL_COLOR[s.metal] ?? "#a5967d" }}>◈</span>{s.primary ? " · primary" : s.share >= 0.2 ? " · reserve" : ""}
                 </span>
-                <span style={{ color: "#8aa8c8" }}>{Math.round((s.share / total) * 100)}%</span>
+                <span style={{ color: "#c3b08f" }}>{Math.round((s.share / total) * 100)}%</span>
               </div>
             ))}
           </div>
@@ -855,15 +855,15 @@ function SpecCard({ c }: { c: SpecCenter }) {
         <span style={{ color: col, fontSize: 10, fontWeight: 700 }}>{c.tier} {c.risk.toFixed(2)}</span>
         <span style={{ color: "#d8c060", fontSize: 10 }}>{"★".repeat(c.stars)}</span>
         <span style={{ flex: 1 }} />
-        <span style={{ color: "#8aa0b8", fontSize: 9, fontStyle: "italic" }}>{c.pattern_tag}</span>
+        <span style={{ color: "#b5a68d", fontSize: 9, fontStyle: "italic" }}>{c.pattern_tag}</span>
       </div>
       <div style={{ marginTop: 4 }}>
         {c.drivers.map((d) => (
           <div key={d.key} style={{ display: "flex", alignItems: "center", gap: 5, marginBottom: 2 }}>
-            <span style={{ color: "#9ab0c8", fontSize: 9, width: 78, flex: "0 0 auto" }}>{d.label}</span>
+            <span style={{ color: "#c5b69d", fontSize: 9, width: 78, flex: "0 0 auto" }}>{d.label}</span>
             <span style={{ height: 5, background: col, opacity: 0.8, borderRadius: 2,
               width: `${Math.max(3, Math.min(100, d.weight * 320))}px`, flex: "0 0 auto" }} />
-            <span style={{ color: "#c0d0e0", fontSize: 9 }}>{d.detail}</span>
+            <span style={{ color: "#ded4c2", fontSize: 9 }}>{d.detail}</span>
           </div>
         ))}
       </div>
@@ -876,7 +876,7 @@ function SpecCard({ c }: { c: SpecCenter }) {
 
 // ── Shocks (wars + crashes + monetary chronicle, interleaved by year) ──────────
 const CHRON_ICON: Record<string, string> = { coinage: "🪙", charter: "⚒", reform: "⚖", run: "🏦", bank: "🏦", crash: "📉" };
-const CHRON_COLOR: Record<string, string> = { coinage: "#d8c878", charter: "#c0b088", reform: "#7fd0a0", run: "#e0a880", bank: "#8ab0d0", crash: "#e6303a" };
+const CHRON_COLOR: Record<string, string> = { coinage: "#d8c878", charter: "#c0b088", reform: "#7fd0a0", run: "#e0a880", bank: "#cbb58f", crash: "#e6303a" };
 function ShocksTab({ wars, crashes, chronicle }:
   { wars: WarsPayload; crashes: CrashRecord[]; chronicle: MonetaryEvent[] }) {
   const nothing = wars.active.length === 0 && wars.log.length === 0 && crashes.length === 0 && chronicle.length === 0;
@@ -890,9 +890,9 @@ function ShocksTab({ wars, crashes, chronicle }:
           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
             <span style={{ color: "#e88", fontWeight: 700, fontSize: 12 }}>⚔ {w.a} vs {w.b}</span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: "#8aa0b8", fontSize: 9 }}>{w.years}y · {w.cause}</span>
+            <span style={{ color: "#b5a68d", fontSize: 9 }}>{w.years}y · {w.cause}</span>
           </div>
-          <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 2 }}>
+          <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#c3b08f", marginTop: 2 }}>
             <span title="War chest spent by each side">chest {fmtk(w.chest_a)} / {fmtk(w.chest_b)}</span>
             <span style={{ color: "#e0b080" }} title="Total levied from resident houses">levied {fmtk(w.levies)}</span>
             <span style={{ flex: 1 }} />
@@ -902,7 +902,7 @@ function ShocksTab({ wars, crashes, chronicle }:
           {/* §3.4a · the war score — a bidirectional accumulator, positive favours the
               first-named side. A quiet meter, the same "show it while it's live" rule
               the crisis engine's round log already follows. */}
-          <div style={{ position: "relative", height: 5, background: "#1a2230", borderRadius: 3, marginTop: 4, overflow: "hidden" }}
+          <div style={{ position: "relative", height: 5, background: "#2d271d", borderRadius: 3, marginTop: 4, overflow: "hidden" }}
             title={`War score ${w.score.toFixed(0)} (±100 ends it outright)`}>
             <div style={{
               position: "absolute", top: 0, bottom: 0,
@@ -910,7 +910,7 @@ function ShocksTab({ wars, crashes, chronicle }:
               width: `${Math.min(100, Math.abs(w.score)) / 2}%`,
               background: w.score >= 0 ? "#7fb0e0" : "#e08a7f",
             }} />
-            <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#3a4658" }} />
+            <div style={{ position: "absolute", left: "50%", top: 0, bottom: 0, width: 1, background: "#544c3e" }} />
           </div>
         </div>
       ))}
@@ -920,14 +920,14 @@ function ShocksTab({ wars, crashes, chronicle }:
         <div key={`c${i}`} style={card}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
             <span style={{ color: "#e6303a", fontWeight: 700, fontSize: 12 }}>Year {c.year}</span>
-            <span style={{ color: "#9ab0c8", fontSize: 10 }}>· {c.origin_name}</span>
+            <span style={{ color: "#c5b69d", fontSize: 10 }}>· {c.origin_name}</span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: "#8aa0b8", fontSize: 9, fontStyle: "italic" }}>{c.cause}</span>
+            <span style={{ color: "#b5a68d", fontSize: 9, fontStyle: "italic" }}>{c.cause}</span>
           </div>
-          <div style={{ color: "#c0d0e0", fontSize: 9.5, marginTop: 2 }}>{c.text}</div>
-          <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 2 }}>
+          <div style={{ color: "#ded4c2", fontSize: 9.5, marginTop: 2 }}>{c.text}</div>
+          <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#c3b08f", marginTop: 2 }}>
             <span>🏙 {c.cities_hit} cities</span>
-            <span style={{ color: c.banks_failed > 0 ? "#e08080" : "#8aa8c8" }}>🏦 {c.banks_failed} banks failed</span>
+            <span style={{ color: c.banks_failed > 0 ? "#e08080" : "#c3b08f" }}>🏦 {c.banks_failed} banks failed</span>
           </div>
         </div>
       ))}
@@ -937,10 +937,10 @@ function ShocksTab({ wars, crashes, chronicle }:
         <div key={`l${i}`} style={card}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
             <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>{w.winner}</span>
-            <span style={{ color: "#7a90a8", fontSize: 9 }}>beat {w.loser} · yr {w.end_year}</span>
+            <span style={{ color: "#a5967d", fontSize: 9 }}>beat {w.loser} · yr {w.end_year}</span>
           </div>
-          <div style={{ color: "#c0d0e0", fontSize: 9.5, marginTop: 1 }}>{w.text}</div>
-          <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 1 }}>
+          <div style={{ color: "#ded4c2", fontSize: 9.5, marginTop: 1 }}>{w.text}</div>
+          <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#c3b08f", marginTop: 1 }}>
             <span style={{ color: "#c9a227" }}>reparations {fmtk(w.reparations)}</span>
             <span>levied {fmtk(w.levies_total)}</span>
           </div>
@@ -949,10 +949,10 @@ function ShocksTab({ wars, crashes, chronicle }:
 
       {chronicle.length > 0 && <div style={sectLabel}>🪙 Monetary chronicle</div>}
       {chronicle.slice(0, 60).map((e, i) => (
-        <div key={`m${i}`} style={{ display: "flex", gap: 7, alignItems: "baseline", padding: "3px 2px", borderBottom: "1px solid #101a26" }}>
-          <span style={{ color: "#5a7290", fontSize: 9, width: 30, flex: "0 0 auto" }}>y{e.year}</span>
+        <div key={`m${i}`} style={{ display: "flex", gap: 7, alignItems: "baseline", padding: "3px 2px", borderBottom: "1px solid #231d13" }}>
+          <span style={{ color: "#897a61", fontSize: 9, width: 30, flex: "0 0 auto" }}>y{e.year}</span>
           <span style={{ flex: "0 0 auto" }}>{CHRON_ICON[e.kind] ?? "•"}</span>
-          <span style={{ color: CHRON_COLOR[e.kind] ?? "#c0d0e0", fontSize: 9.5, lineHeight: 1.4 }}>{e.text}</span>
+          <span style={{ color: CHRON_COLOR[e.kind] ?? "#ded4c2", fontSize: 9.5, lineHeight: 1.4 }}>{e.text}</span>
         </div>
       ))}
     </div>
@@ -965,13 +965,13 @@ function Side({ title, rows, total, totalColor }: {
 }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ color: "#8aa8c8", fontSize: 9, fontWeight: 700, borderBottom: "1px solid #1c2c40", paddingBottom: 2, marginBottom: 2 }}>{title}</div>
+      <div style={{ color: "#c3b08f", fontSize: 9, fontWeight: 700, borderBottom: "1px solid #3c3220", paddingBottom: 2, marginBottom: 2 }}>{title}</div>
       {rows.map(([k, v]) => (
-        <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#b8c8da" }}>
+        <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, color: "#d7cdbb" }}>
           <span>{k}</span><span>{fmtk(v)}</span>
         </div>
       ))}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 700, color: totalColor, borderTop: "1px solid #1c2c40", marginTop: 2, paddingTop: 1 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5, fontWeight: 700, color: totalColor, borderTop: "1px solid #3c3220", marginTop: 2, paddingTop: 1 }}>
         <span>Σ</span><span>{fmtk(total)}</span>
       </div>
     </div>
@@ -1004,13 +1004,13 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
           ? <span style={{ color: "#e6303a", fontSize: 9, fontWeight: 700 }}>FAILED</span>
           : <span style={{ color: "#d8c878", fontSize: 10 }} title="Equity (net worth)">≋ {fmtk(b.equity)}</span>}
       </div>
-      <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>
+      <div style={{ color: "#c5b69d", fontSize: 9, marginTop: 1 }}>
         {b.seat} · {b.owner} · est. {b.founded_year}
         {b.coin_name && <span title="The coin this bank banks in (its seat city's coin)" style={{ color: "#d8c878" }}> · banks in {b.coin_name}</span>}
-        <span onClick={() => setShowWhy((s) => !s)} title="Why this bank opened" style={{ color: "#7fb0d8", cursor: "pointer", marginLeft: 6 }}>
+        <span onClick={() => setShowWhy((s) => !s)} title="Why this bank opened" style={{ color: "#d1b686", cursor: "pointer", marginLeft: 6 }}>
           {showWhy ? "▾ why it opened" : "▸ why it opened"}
         </span>
-        <span onClick={() => setShowInfo((s) => !s)} title="What the balance sheet means" style={{ color: "#7fb0d8", cursor: "pointer", marginLeft: 6 }}>
+        <span onClick={() => setShowInfo((s) => !s)} title="What the balance sheet means" style={{ color: "#d1b686", cursor: "pointer", marginLeft: 6 }}>
           {showInfo ? "▾ explain" : "▸ explain"}
         </span>
       </div>
@@ -1020,7 +1020,7 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
         </div>
       )}
       {showInfo && (
-        <div style={{ margin: "4px 0", padding: "5px 7px", background: "#0e1a27", border: "1px solid #1e2e42", borderRadius: 6, fontSize: 10, lineHeight: 1.5 }}>
+        <div style={{ margin: "4px 0", padding: "5px 7px", background: "#231d12", border: "1px solid #3e3422", borderRadius: 6, fontSize: 10, lineHeight: 1.5 }}>
           {inCoin && <div style={{ color: "#d8c878", marginBottom: 3 }}>Amounts below are grain-equivalent; in {b.coin_name} the reserves ≈ {inCoin(b.reserves)}.</div>}
           <Explain label="Specie reserves" value={inCoin ? inCoin(b.reserves) : fmtk(b.reserves)} text="Hard money (coin/bullion) in the vault — what actually backs the bank. The founding 40k starts here." />
           <Explain label="Loans out" value={fmtk(b.loans_out)} text="Credit lent to houses (trade) and to the city treasury (public works), earning interest — an asset until repaid or defaulted." />
@@ -1032,13 +1032,13 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
         </div>
       )}
       {showWhy && (
-        <div style={{ margin: "4px 0", padding: "5px 7px", background: "#0e1a27", border: "1px solid #1e2e42", borderRadius: 6 }}>
-          <div style={{ fontSize: 9, color: "#9ab0c8", marginBottom: 3 }}>Chartered in {b.founded_year} because {b.owner} met every founding condition:</div>
+        <div style={{ margin: "4px 0", padding: "5px 7px", background: "#231d12", border: "1px solid #3e3422", borderRadius: 6 }}>
+          <div style={{ fontSize: 9, color: "#c5b69d", marginBottom: 3 }}>Chartered in {b.founded_year} because {b.owner} met every founding condition:</div>
           {BANK_GATES.map((g) => (
             <div key={g.label} style={{ display: "flex", gap: 7, alignItems: "baseline", fontSize: 10, padding: "1px 0" }}>
               <span style={{ color: "#5fbf6f", fontWeight: 700, width: 12 }}>✓</span>
-              <span style={{ flex: 1, color: "#cbd8e6" }}>{g.label} <span style={{ color: "#6a86a6" }}>{g.need}</span></span>
-              <span style={{ color: "#9ab0c8", fontFamily: "ui-monospace,monospace" }}>{house ? g.get(house) : "✓"}</span>
+              <span style={{ flex: 1, color: "#e4dccd" }}>{g.label} <span style={{ color: "#a28f6e" }}>{g.need}</span></span>
+              <span style={{ color: "#c5b69d", fontFamily: "ui-monospace,monospace" }}>{house ? g.get(house) : "✓"}</span>
             </div>
           ))}
         </div>
@@ -1049,20 +1049,20 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
         <Side title="Liabilities" totalColor="#e0a880" total={liab}
           rows={[["Deposits", b.deposits], ["Notes issued", b.notes_issued], ["Equity", b.equity]]} />
       </div>
-      <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#8aa8c8", marginTop: 4, flexWrap: "wrap" }}>
-        <span style={{ color: fragile ? "#e6303a" : "#8aa8c8" }} title="Reserves ÷ liabilities — below 22% the bank is fragile (run risk)">
+      <div style={{ display: "flex", gap: 10, fontSize: 9, color: "#c3b08f", marginTop: 4, flexWrap: "wrap" }}>
+        <span style={{ color: fragile ? "#e6303a" : "#c3b08f" }} title="Reserves ÷ liabilities — below 22% the bank is fragile (run risk)">
           reserve ratio {Number.isFinite(b.reserve_ratio) ? `${(b.reserve_ratio * 100).toFixed(0)}%` : "—"}{fragile ? " ⚠" : ""}
         </span>
         <span>{b.n_loans} loans</span>
         <span style={{ color: "#80c890" }} title="Cumulative interest earned">+{fmtk(b.interest_earned)}</span>
-        {b.bills_income > 0.01 && <span style={{ color: "#9ac0e0" }} title="Cumulative bills-of-exchange (FX-spread) income — earned settling trade across branch cities that use different coins">⇄{fmtk(b.bills_income)}</span>}
+        {b.bills_income > 0.01 && <span style={{ color: "#dbc59f" }} title="Cumulative bills-of-exchange (FX-spread) income — earned settling trade across branch cities that use different coins">⇄{fmtk(b.bills_income)}</span>}
         {b.losses > 0.01 && <span style={{ color: "#e08080" }} title="Losses written off">−{fmtk(b.losses)}</span>}
       </div>
       {b.branches.length > 0 && (
-        <div style={{ fontSize: 9, color: "#7fa0c0", marginTop: 2 }}>Counting-houses: {b.branches.join(", ")}</div>
+        <div style={{ fontSize: 9, color: "#bba784", marginTop: 2 }}>Counting-houses: {b.branches.join(", ")}</div>
       )}
       {b.events.length > 0 && (
-        <div style={{ fontSize: 9, color: "#6a86a6", marginTop: 2, fontStyle: "italic" }}>{b.events[0]}</div>
+        <div style={{ fontSize: 9, color: "#a28f6e", marginTop: 2, fontStyle: "italic" }}>{b.events[0]}</div>
       )}
     </div>
   );
@@ -1072,8 +1072,8 @@ function BankCard({ b, house }: { b: BankBrief; house?: HouseBrief }) {
 function Chip({ text, sub, color }: { text: string; sub?: string; color?: string }) {
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "2px 7px", margin: 2,
-      background: "#13202e", border: `1px solid ${color ?? "#22364c"}`, borderRadius: 5, fontSize: 9.5, color: "#cbd8e6" }}>
-      {text}{sub ? <span style={{ color: "#7a90a8" }}>· {sub}</span> : null}
+      background: "#2b2316", border: `1px solid ${color ?? "#473b27"}`, borderRadius: 5, fontSize: 9.5, color: "#e4dccd" }}>
+      {text}{sub ? <span style={{ color: "#a5967d" }}>· {sub}</span> : null}
     </span>
   );
 }
@@ -1083,7 +1083,7 @@ function SchematicCard({ s }: { s: CitySchematic }) {
     <div style={card}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 12 }}>{s.name}</span>
-        <span style={{ color: "#6a86a6", fontSize: 9 }}>· {s.population.toLocaleString()}</span>
+        <span style={{ color: "#a28f6e", fontSize: 9 }}>· {s.population.toLocaleString()}</span>
         <span style={{ flex: 1 }} />
         {s.coin_name ? (
           <span style={{ display: "inline-flex", alignItems: "center", gap: 4, color: "#d8c878", fontSize: 9 }}>
@@ -1091,7 +1091,7 @@ function SchematicCard({ s }: { s: CitySchematic }) {
           </span>
         ) : null}
       </div>
-      {s.council ? <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 1 }}>Council: {s.council}</div> : null}
+      {s.council ? <div style={{ color: "#c5b69d", fontSize: 9, marginTop: 1 }}>Council: {s.council}</div> : null}
       <div style={{ marginTop: 4 }}>
         <div style={blueprintLabel}>Buildings</div>
         {s.buildings.length === 0 ? <span style={none}>none</span> :
@@ -1104,7 +1104,7 @@ function SchematicCard({ s }: { s: CitySchematic }) {
           <div style={blueprintLabel}>Banks</div>
           <div style={{ display: "flex", flexWrap: "wrap" }}>
             {s.banks_seated.map((b, i) => <Chip key={`s${i}`} text={`🏦 ${b}`} sub="seat" color="#3a6a44" />)}
-            {s.bank_branches.map((b, i) => <Chip key={`br${i}`} text={`🏦 ${b}`} sub="branch" color="#2a4a64" />)}
+            {s.bank_branches.map((b, i) => <Chip key={`br${i}`} text={`🏦 ${b}`} sub="branch" color="#5d4d31" />)}
           </div>
         </div>
       )}
@@ -1123,18 +1123,18 @@ function SchematicCard({ s }: { s: CitySchematic }) {
 const panel: React.CSSProperties = {
   position: "absolute", top: 60, right: 360, width: 372, maxHeight: "82vh",
   display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
+  background: "#1c170e", border: "1px solid #493c25", borderRadius: 8,
   boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
 };
 const header: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
+  padding: "8px 10px", borderBottom: "1px solid #3a301e",
   color: "#cfe0f4", fontWeight: 700, fontSize: 12,
 };
 const scroll: React.CSSProperties = { overflowY: "auto", padding: "6px 8px 10px" };
-const card: React.CSSProperties = { display: "flex", flexDirection: "column", padding: "6px 4px", borderBottom: "1px solid #131e2a" };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "12px 10px", lineHeight: 1.5 };
-const hint: React.CSSProperties = { color: "#6a86a6", fontSize: 9, marginBottom: 6, lineHeight: 1.5 };
-const sectLabel: React.CSSProperties = { color: "#5a6a7e", fontSize: 9, margin: "8px 0 2px", textTransform: "uppercase", letterSpacing: 0.5 };
-const blueprintLabel: React.CSSProperties = { color: "#7a90a8", fontSize: 8.5, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 1 };
-const none: React.CSSProperties = { color: "#445268", fontSize: 9, fontStyle: "italic" };
+const card: React.CSSProperties = { display: "flex", flexDirection: "column", padding: "6px 4px", borderBottom: "1px solid #272116" };
+const empty: React.CSSProperties = { color: "#7a6d56", fontSize: 11, padding: "12px 10px", lineHeight: 1.5 };
+const hint: React.CSSProperties = { color: "#a28f6e", fontSize: 9, marginBottom: 6, lineHeight: 1.5 };
+const sectLabel: React.CSSProperties = { color: "#7a705e", fontSize: 9, margin: "8px 0 2px", textTransform: "uppercase", letterSpacing: 0.5 };
+const blueprintLabel: React.CSSProperties = { color: "#a5967d", fontSize: 8.5, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 1 };
+const none: React.CSSProperties = { color: "#645a48", fontSize: 9, fontStyle: "italic" };

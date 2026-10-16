@@ -11,17 +11,17 @@ const panel: React.CSSProperties = {
 };
 const sheet: React.CSSProperties = {
   width: "min(1000px, 96vw)", maxHeight: "92vh", overflow: "auto",
-  background: "#13181f", border: "1px solid #2c3442", borderRadius: 8,
-  padding: 16, color: "#cfd8e3", fontSize: 12,
+  background: "#1d1a14", border: "1px solid #3f392f", borderRadius: 8,
+  padding: 16, color: "#e2dbd0", fontSize: 12,
 };
 const btn: React.CSSProperties = {
-  background: "#222b38", color: "#cfd8e3", border: "1px solid #36425a",
+  background: "#352f25", color: "#e2dbd0", border: "1px solid #564c3b",
   borderRadius: 4, padding: "5px 11px", cursor: "pointer", fontSize: 12,
 };
 const primaryBtn: React.CSSProperties = { ...btn, background: "#2d7a3f", borderColor: "#3f9a53", color: "#fff", fontWeight: 600 };
 const chip = (color: string): React.CSSProperties => ({
   display: "inline-flex", alignItems: "center", gap: 5, padding: "3px 8px", margin: 3,
-  borderRadius: 12, background: "#1b2230", border: `1px solid ${color}55`,
+  borderRadius: 12, background: "#2d281e", border: `1px solid ${color}55`,
 });
 
 /** Always-shown review before goods generation: planted/extracted vs manufactured
@@ -49,9 +49,9 @@ export function GoodsChainReview() {
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
           <strong style={{ fontSize: 15 }}>Goods &amp; Chains — review before generating</strong>
-          <span style={{ color: "#7a8aa0" }}>
+          <span style={{ color: "#9d917d" }}>
             {planted.length} planted · {extracted.length} extracted · {manufactured.length} manufactured
-            <span style={{ color: "#5a6a80" }}> · {specs.length}/{allSpecs.length} enabled</span>
+            <span style={{ color: "#7b715f" }}> · {specs.length}/{allSpecs.length} enabled</span>
           </span>
         </div>
 
@@ -61,7 +61,7 @@ export function GoodsChainReview() {
           <Column title="🏭 Manufactured" note="made in cities — no map belt" goods={manufactured} />
         </div>
 
-        <div style={{ fontWeight: 600, color: "#8aa0b8", marginBottom: 6 }}>Schematic — production chains (DAG)</div>
+        <div style={{ fontWeight: 600, color: "#b5a68d", marginBottom: 6 }}>Schematic — production chains (DAG)</div>
         <ChainGraph specs={specs} />
 
         <div style={{ display: "flex", gap: 8, marginTop: 14, justifyContent: "flex-end" }}>
@@ -86,16 +86,16 @@ function Column({ title, note, goods }: { title: string; note: string; goods: Go
     .map((cat) => ({ cat, items: goods.filter((g) => goodCategory(g.id) === cat) }))
     .filter((g) => g.items.length > 0);
   return (
-    <div style={{ background: "#0e1218", border: "1px solid #232b36", borderRadius: 6, padding: 10 }}>
+    <div style={{ background: "#17140f", border: "1px solid #342e25", borderRadius: 6, padding: 10 }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-        <span style={{ color: "#aeb9c8" }}>{title}</span>
-        <span style={{ color: "#5a6a80", fontSize: 11 }}>{goods.length}</span>
+        <span style={{ color: "#c6beb0" }}>{title}</span>
+        <span style={{ color: "#7b715f", fontSize: 11 }}>{goods.length}</span>
       </div>
-      <div style={{ color: "#5a6a80", fontSize: 10, marginBottom: 6 }}>{note}</div>
-      {goods.length === 0 && <span style={{ color: "#5a6a80" }}>none</span>}
+      <div style={{ color: "#7b715f", fontSize: 10, marginBottom: 6 }}>{note}</div>
+      {goods.length === 0 && <span style={{ color: "#7b715f" }}>none</span>}
       {byCat.map(({ cat, items }) => (
         <div key={cat} style={{ marginBottom: 5 }}>
-          <div style={{ color: "#5f7390", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 1 }}>
+          <div style={{ color: "#8a7c65", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 1 }}>
             {cat} · {items.length}
           </div>
           <div>
@@ -124,14 +124,14 @@ function ChainGraph({ specs }: { specs: GoodSpec[] }) {
     [specs],
   );
   if (recipes.length === 0) {
-    return <div style={{ color: "#5a6a80", padding: "8px 0" }}>No production chains defined — every good is extracted or grown from the land.</div>;
+    return <div style={{ color: "#7b715f", padding: "8px 0" }}>No production chains defined — every good is extracted or grown from the land.</div>;
   }
   const cats = CATEGORY_ORDER.filter((c) => recipes.some((r) => goodCategory(r.id) === c));
   return (
-    <div style={{ background: "#0b0e13", border: "1px solid #232b36", borderRadius: 6, padding: "8px 10px" }}>
+    <div style={{ background: "#12100c", border: "1px solid #342e25", borderRadius: 6, padding: "8px 10px" }}>
       {cats.map((cat) => (
         <div key={cat} style={{ marginBottom: 7 }}>
-          <div style={{ color: "#5f7390", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>{cat}</div>
+          <div style={{ color: "#8a7c65", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 2 }}>{cat}</div>
           {recipes.filter((r) => goodCategory(r.id) === cat).map((r) => (
             <RecipeRow key={r.id} product={r} byId={byId} />
           ))}
@@ -145,24 +145,24 @@ function ChainGraph({ specs }: { specs: GoodSpec[] }) {
 function RecipeRow({ product, byId }: { product: GoodSpec; byId: Map<string, GoodSpec> }) {
   const inputs = product.inputs ?? [];
   const tier = product.network_luxury ? "luxury" : ((product.need_tier ?? 0) >= 1 ? "comfort" : "common");
-  const tierColor = product.network_luxury ? "#d9b06a" : "#6a7a90";
+  const tierColor = product.network_luxury ? "#d9b06a" : "#8b816f";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 3, flexWrap: "wrap", padding: "3px 0", borderBottom: "1px solid #161d27" }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 3, flexWrap: "wrap", padding: "3px 0", borderBottom: "1px solid #252018" }}>
       {inputs.map((inp, k) => {
         const s = byId.get(inp.good);
         const bad = !s?.enabled;
         return (
           <span key={inp.good} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-            {k > 0 && <span style={{ color: "#5a6a80", margin: "0 1px" }}>+</span>}
+            {k > 0 && <span style={{ color: "#7b715f", margin: "0 1px" }}>+</span>}
             <span style={chip(s?.color ?? "#c06060")} title={bad ? `${inp.good} — disabled or missing!` : inp.good}>
               <GoodIcon name={inp.good} color={s?.color} size={15} />
               <span style={{ color: bad ? "#e08080" : undefined }}>{trim(s?.name ?? inp.good)}</span>
-              {inp.qty !== 1 && <span style={{ color: "#6a7a90", fontSize: 10 }}>×{round(inp.qty)}</span>}
+              {inp.qty !== 1 && <span style={{ color: "#8b816f", fontSize: 10 }}>×{round(inp.qty)}</span>}
             </span>
           </span>
         );
       })}
-      <span style={{ color: "#7a8aa0", margin: "0 4px", fontWeight: 700 }}>→</span>
+      <span style={{ color: "#9d917d", margin: "0 4px", fontWeight: 700 }}>→</span>
       <span style={chip(product.color)} title={`${product.id} · value ${round(product.base_value)} · bulk ${round(product.bulk ?? 1)}`}>
         <GoodIcon name={product.id} color={product.color} size={15} /><span style={{ fontWeight: 600 }}>{trim(product.name)}</span>
       </span>

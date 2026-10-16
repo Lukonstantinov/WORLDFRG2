@@ -9,11 +9,11 @@ import type { CSSProperties } from "react";
  *  (`SettlementOverviewTab.tsx`) all render through `<GovFormBadge/>`, so
  *  the icon/colour can never drift between the three. */
 const KIND_META: Record<string, { icon: string; color: string; short: string }> = {
-  council: { icon: "🏛", color: "#7a94c0", short: "Council" },
+  council: { icon: "🏛", color: "#bba57f", short: "Council" },
   ruler: { icon: "👑", color: "#d8b24a", short: "One ruler" },
   assembly: { icon: "🗳", color: "#7fd0a0", short: "Assembly" },
 };
-const FALLBACK = { icon: "⚖", color: "#9fb4cc", short: "" };
+const FALLBACK = { icon: "⚖", color: "#c9bba2", short: "" };
 
 /** Which of the three kinds a form NAME is, for callers that only have the
  *  name (a culture's own word — "Althing", "Signoria" — or the old generic). */

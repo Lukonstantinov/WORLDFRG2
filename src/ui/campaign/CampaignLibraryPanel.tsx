@@ -96,7 +96,7 @@ export function CampaignLibraryPanel({ onClose, onOpen, canSave }: Props) {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <h2 style={{ margin: 0, color: "#e6d3a3", fontSize: 17, fontWeight: 600 }}>📚 Campaigns</h2>
           <span onClick={onClose} title="Close"
-            style={{ color: "#7090b0", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</span>
+            style={{ color: "#ab9775", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</span>
         </div>
 
         <div style={{ color: muted, fontSize: 11, margin: "6px 0 10px" }}>
@@ -106,8 +106,8 @@ export function CampaignLibraryPanel({ onClose, onOpen, canSave }: Props) {
 
         {/* The folder itself: shown in full, because the point is that the user can find it. */}
         <div style={folderBar}>
-          <span style={{ color: "#8fb0cc", fontSize: 10, flexShrink: 0 }}>📁</span>
-          <code style={{ flex: 1, fontSize: 10, color: "#9fc0dc", wordBreak: "break-all" }}>
+          <span style={{ color: "#c7b494", fontSize: 10, flexShrink: 0 }}>📁</span>
+          <code style={{ flex: 1, fontSize: 10, color: "#d7c4a4", wordBreak: "break-all" }}>
             {dir || "…"}
           </code>
           <button style={miniBtn} onClick={() => void revealCampaignLibrary()} title="Open this folder in your file manager">Open folder</button>
@@ -138,12 +138,12 @@ export function CampaignLibraryPanel({ onClose, onOpen, canSave }: Props) {
               ...card,
               // A save for a different world is legible but visibly set apart — it can
               // still be opened, it just will not line up with the map on screen.
-              borderColor: r.world_match ? "#2c4a68" : "#4a3a22",
+              borderColor: r.world_match ? "#605034" : "#4a3a22",
             }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
                   <span style={{ color: "#e6d3a3", fontWeight: 600, fontSize: 13 }}>{r.name}</span>
-                  <span style={{ color: "#7fa8cc", fontSize: 12 }}>
+                  <span style={{ color: "#c6ae85", fontSize: 12 }}>
                     {r.tick > 0 || r.has_header ? `Year ${r.year}` : "not yet begun"}
                     {!r.has_header && r.tick > 0 ? " ≈" : ""}
                   </span>
@@ -186,7 +186,7 @@ function fmtSize(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-const muted = "#6b8299";
+const muted = "#96876e";
 
 const backdrop: React.CSSProperties = {
   position: "absolute", inset: 0, display: "flex",
@@ -195,24 +195,24 @@ const backdrop: React.CSSProperties = {
 };
 
 const shell: React.CSSProperties = {
-  background: "#111820", border: "1px solid #2a3a4e", borderRadius: 10,
+  background: "#1e1a13", border: "1px solid #4a402e", borderRadius: 10,
   padding: "20px 22px", width: 560, maxHeight: "84%", overflowY: "auto",
   boxShadow: "0 12px 40px rgba(0,0,0,0.5)", color: "#cfe2f6",
 };
 
 const folderBar: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 8,
-  background: "#0b1119", border: "1px solid #1a2838", borderRadius: 7, padding: "7px 9px",
+  background: "#17130d", border: "1px solid #342c1e", borderRadius: 7, padding: "7px 9px",
 };
 
 const card: React.CSSProperties = {
   display: "flex", gap: 10, alignItems: "center",
-  background: "#0d1520", border: "1px solid #2c4a68", borderRadius: 8, padding: "9px 11px",
+  background: "#1e180f", border: "1px solid #605034", borderRadius: 8, padding: "9px 11px",
 };
 
 const miniBtn: React.CSSProperties = {
   padding: "4px 9px", borderRadius: 6, fontSize: 11, cursor: "pointer",
-  border: "1px solid #23405c", background: "#0f1a26", color: "#9fc0dc",
+  border: "1px solid #54452b", background: "#231d12", color: "#d7c4a4",
 };
 
 const primaryBtn: React.CSSProperties = {
@@ -226,6 +226,6 @@ const dangerBtn: React.CSSProperties = {
 };
 
 const noteBox: React.CSSProperties = {
-  background: "#0b1119", border: "1px solid #1a2838", borderRadius: 7,
-  padding: "7px 9px", fontSize: 11, color: "#9fc0dc", marginBottom: 6,
+  background: "#17130d", border: "1px solid #342c1e", borderRadius: 7,
+  padding: "7px 9px", fontSize: 11, color: "#d7c4a4", marginBottom: 6,
 };

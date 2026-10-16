@@ -106,88 +106,88 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       )}
 
       {/* Generation parameters */}
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61" }}>
         <span title="Ore and gem districts scale with this world's land area automatically; this sets how rich the crust is (6 = Earth-like).">Ore richness</span>
-        <span style={{ color: "#8aa0c0" }}>×{(bioParams.gemDeposits / 6).toFixed(2)}</span>
+        <span style={{ color: "#bcab8e" }}>×{(bioParams.gemDeposits / 6).toFixed(2)}</span>
       </div>
       <input type="range" min={0} max={16} value={bioParams.gemDeposits}
         onChange={(e) => setBioParams({ gemDeposits: Number(e.target.value) })}
         style={{ width: "100%" }} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61", marginTop: 2 }}>
         <span>Climate strictness</span>
-        <span style={{ color: "#8aa0c0" }}>
+        <span style={{ color: "#bcab8e" }}>
           {bioParams.climateStrictness < 0.4 ? "diffuse" : bioParams.climateStrictness > 0.6 ? "tight" : "neutral"}
         </span>
       </div>
       <input type="range" min={0} max={100} value={Math.round(bioParams.climateStrictness * 100)}
         onChange={(e) => setBioParams({ climateStrictness: Number(e.target.value) / 100 })}
         style={{ width: "100%" }} />
-      <div style={{ fontSize: 9, color: "#5a7090" }}>
+      <div style={{ fontSize: 9, color: "#897a61" }}>
         How tightly each good hugs its ideal climate (tight = smaller, more clustered belts).
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
-        <span>Economic regions</span><span style={{ color: "#8aa0c0" }}>{bioParams.economicRegions}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61", marginTop: 2 }}>
+        <span>Economic regions</span><span style={{ color: "#bcab8e" }}>{bioParams.economicRegions}</span>
       </div>
       <input type="range" min={4} max={40} value={bioParams.economicRegions}
         onChange={(e) => setBioParams({ economicRegions: Number(e.target.value) })}
         style={{ width: "100%" }} />
-      <div style={{ fontSize: 9, color: "#5a7090" }}>
+      <div style={{ fontSize: 9, color: "#897a61" }}>
         Granularity of trade regions &amp; political hubs (also scales route hubs).
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61", marginTop: 2 }}>
         <span>Demand bias</span>
-        <span style={{ color: "#8aa0c0" }}>
+        <span style={{ color: "#bcab8e" }}>
           {bioParams.luxuryBias < 0.4 ? "subsistence" : bioParams.luxuryBias > 0.6 ? "mercantile" : "balanced"}
         </span>
       </div>
       <input type="range" min={0} max={100} value={Math.round(bioParams.luxuryBias * 100)}
         onChange={(e) => setBioParams({ luxuryBias: Number(e.target.value) / 100 })}
         style={{ width: "100%" }} />
-      <div style={{ fontSize: 9, color: "#5a7090" }}>
+      <div style={{ fontSize: 9, color: "#897a61" }}>
         Subsistence worlds trade staples; mercantile worlds prize distant luxuries (silk, spices).
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61", marginTop: 2 }}>
         <span>Piracy</span>
-        <span style={{ color: "#8aa0c0" }}>
+        <span style={{ color: "#bcab8e" }}>
           {bioParams.piracyLevel < 0.1 ? "safe seas" : bioParams.piracyLevel > 0.6 ? "infested" : "some raiders"}
         </span>
       </div>
       <input type="range" min={0} max={100} value={Math.round(bioParams.piracyLevel * 100)}
         onChange={(e) => setBioParams({ piracyLevel: Number(e.target.value) / 100 })}
         style={{ width: "100%" }} />
-      <div style={{ fontSize: 9, color: "#5a7090" }}>
+      <div style={{ fontSize: 9, color: "#897a61" }}>
         Raiders make coastal narrows &amp; straits costlier — trade hugs safe coasts, detours or goes overland.
       </div>
 
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61", marginTop: 2 }}>
         <span>Trade season</span>
-        <span style={{ color: "#8aa0c0" }}>
+        <span style={{ color: "#bcab8e" }}>
           {bioParams.tradeSeason === 0 ? "all year" : `moon ${bioParams.tradeSeason}/${bioParams.calendarMonths}`}
         </span>
       </div>
       <input type="range" min={0} max={bioParams.calendarMonths} value={bioParams.tradeSeason}
         onChange={(e) => setBioParams({ tradeSeason: Number(e.target.value) })}
         style={{ width: "100%" }} />
-      <div style={{ fontSize: 9, color: "#5a7090" }}>
+      <div style={{ fontSize: 9, color: "#897a61" }}>
         Seasonal closures: winter snows shut high mountain passes; monsoon/cyclone seas close their sailing windows, so routes detour. Routes redraw live as you slide.
       </div>
 
-      <div style={{ fontSize: 10, color: "#5a7090", marginTop: 2 }}>Trade reach</div>
+      <div style={{ fontSize: 10, color: "#897a61", marginTop: 2 }}>Trade reach</div>
       <select value={bioParams.tradeReach}
         onChange={(e) => setBioParams({ tradeReach: Number(e.target.value) })}
-        style={{ width: "100%", background: "#080c12", color: "#b0c0d0", border: "1px solid #1e2e42", borderRadius: 4, fontSize: 10, padding: "2px 4px" }}>
+        style={{ width: "100%", background: "#110e09", color: "#cec4b2", border: "1px solid #3e3422", borderRadius: 4, fontSize: 10, padding: "2px 4px" }}>
         {REACH_LABELS.map((l, i) => <option key={i} value={i}>{l}</option>)}
       </select>
 
       {bioParams.tradeReach === 1 && (
         <>
-          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#5a7090", marginTop: 2 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#897a61", marginTop: 2 }}>
             <span>Max open-water crossing</span>
-            <span style={{ color: "#8aa0c0" }}>{Math.round(bioParams.maxCrossing * KM_EQUATOR)} km</span>
+            <span style={{ color: "#bcab8e" }}>{Math.round(bioParams.maxCrossing * KM_EQUATOR)} km</span>
           </div>
           {/* Stated in KM, not "% of map width" — a fraction of the map is not a
               distance anyone can reason about, and reading it as one is how the
@@ -196,7 +196,7 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
             value={Math.round(bioParams.maxCrossing * KM_EQUATOR)}
             onChange={(e) => setBioParams({ maxCrossing: Number(e.target.value) / KM_EQUATOR })}
             style={{ width: "100%" }} />
-          <div style={{ fontSize: 9, color: "#5a7090" }}>
+          <div style={{ fontSize: 9, color: "#897a61" }}>
             The longest stretch of OPEN water a route may cross without sight of land.
             Coast-hugging and island-hopping are unlimited — shelf and coastal water
             reset the run — so a network still reaches a long way, one hop at a time.
@@ -204,12 +204,12 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         </>
       )}
 
-      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#8aa0c0", marginTop: 4, cursor: "pointer" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#bcab8e", marginTop: 4, cursor: "pointer" }}>
         <input type="checkbox" checked={bioParams.desertRoutes}
           onChange={(e) => setBioParams({ desertRoutes: e.target.checked })} />
         Silk Road caravans (overland steppe &amp; desert)
       </label>
-      <div style={{ fontSize: 9, color: "#5a7090", marginTop: 1 }}>
+      <div style={{ fontSize: 9, color: "#897a61", marginTop: 1 }}>
         Trade threads overland steppe corridors and deserts (Silk-Road style) when storms/reefs make the seas perilous.
       </div>
 
@@ -248,7 +248,7 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       )}
       {reportOpen && <GoodsReportPanel onClose={() => setReportOpen(false)} />}
 
-      <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
+      <div style={{ color: "#5c5344", fontSize: 10, marginTop: 2 }}>
         Shark waters: warm, shallow, frequented coasts (bull/tiger-shark habitat).
         Trade goods: {GOOD_DEFS.length} climate/terrain belts, each a toggle in the
         Toolbar &rsaquo; Trade Goods. The Trade Matrix &amp; economy now live in the

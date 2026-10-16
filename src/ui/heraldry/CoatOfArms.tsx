@@ -11,18 +11,18 @@
 
 const TINCTURES = [
   "#b32d2d", // gules (red)
-  "#2a5fa0", // azure (blue)
+  "#856e45", // azure (blue)
   "#2f7d44", // vert (green)
   "#6a3d9a", // purpure (purple)
-  "#1d2733", // sable (near-black)
+  "#302a20", // sable (near-black)
   "#c9a227", // or (gold)
-  "#c8ced6", // argent (silver)
+  "#d5d1c9", // argent (silver)
   "#b5651d", // tenné (orange-brown)
 ];
 // Heraldic "metals" (light) vs "colours" (dark) — a charge must contrast its field
 // (the rule of tincture), so a colour field takes a metal charge and vice-versa.
-const METALS = ["#c9a227", "#c8ced6", "#e8e2d0"];
-const COLOURS = ["#b32d2d", "#2a5fa0", "#2f7d44", "#6a3d9a", "#1d2733", "#b5651d"];
+const METALS = ["#c9a227", "#d5d1c9", "#e8e2d0"];
+const COLOURS = ["#b32d2d", "#856e45", "#2f7d44", "#6a3d9a", "#302a20", "#b5651d"];
 
 /** Shield SHAPES (paths in the 32×38 box). Houses pick one by hash; guilds keep
  *  the classic heater. */
@@ -63,7 +63,7 @@ export function blazonOf(name: string): string {
   return HOUSE_CHARGE_NAMES[(h >>> 23) % HOUSE_CHARGE_NAMES.length];
 }
 
-const INK = "#0c1118";
+const INK = "#16130e";
 function starPoints(r: number, pts = 5): string {
   let s = "";
   for (let i = 0; i < pts * 2; i++) {
@@ -232,7 +232,7 @@ export function CoatOfArms({ name, size = 26, guild = false }: { name: string; s
           {division === 3 && <path d="M0 0 L32 0 L32 38 Z" fill={field2} />}
           {guildCharge(h >>> 23, chargeTint)}
         </g>
-        <path d={HEATER} fill="none" stroke="#0c1118" strokeWidth="1.6" />
+        <path d={HEATER} fill="none" stroke="#16130e" strokeWidth="1.6" />
         <path d={HEATER} fill="none" stroke="#c9a227" strokeWidth="0.6" opacity="0.6" />
       </svg>
     );
@@ -257,15 +257,15 @@ export function CoatOfArms({ name, size = 26, guild = false }: { name: string; s
         <clipPath id={sid}><path d={shapePath} /></clipPath>
         {furKind === "ermine" && (
           <pattern id={`fur${sid}`} width="10" height="12" patternUnits="userSpaceOnUse">
-            <rect width="10" height="12" fill="#eef0f2" />
-            <path d="M5,3 q-1.6,2 -0.6,4 h1.2 q1,-2 -0.6,-4 Z" fill="#1d2733" />
-            <circle cx="3.4" cy="2.2" r="0.5" fill="#1d2733" /><circle cx="6.6" cy="2.2" r="0.5" fill="#1d2733" /><circle cx="5" cy="3.4" r="0.5" fill="#1d2733" />
+            <rect width="10" height="12" fill="#f2f0ee" />
+            <path d="M5,3 q-1.6,2 -0.6,4 h1.2 q1,-2 -0.6,-4 Z" fill="#302a20" />
+            <circle cx="3.4" cy="2.2" r="0.5" fill="#302a20" /><circle cx="6.6" cy="2.2" r="0.5" fill="#302a20" /><circle cx="5" cy="3.4" r="0.5" fill="#302a20" />
           </pattern>
         )}
         {furKind === "vair" && (
           <pattern id={`fur${sid}`} width="8" height="10" patternUnits="userSpaceOnUse">
-            <rect width="8" height="10" fill="#c8ced6" />
-            <path d="M0,0 Q4,7 8,0 Z" fill="#2a5fa0" /><path d="M-4,5 Q0,12 4,5 Z" fill="#2a5fa0" /><path d="M4,5 Q8,12 12,5 Z" fill="#2a5fa0" />
+            <rect width="8" height="10" fill="#d5d1c9" />
+            <path d="M0,0 Q4,7 8,0 Z" fill="#856e45" /><path d="M-4,5 Q0,12 4,5 Z" fill="#856e45" /><path d="M4,5 Q8,12 12,5 Z" fill="#856e45" />
           </pattern>
         )}
       </defs>
@@ -294,7 +294,7 @@ export function CoatOfArms({ name, size = 26, guild = false }: { name: string; s
         {houseCharge(chargeIdx, chargeTint)}
       </g>
       {/* A house wears a richer border: dark edge + inner gold fillet. */}
-      <path d={shapePath} fill="none" stroke="#0c1118" strokeWidth="1.8" />
+      <path d={shapePath} fill="none" stroke="#16130e" strokeWidth="1.8" />
       <path d={shapePath} fill="none" stroke="#c9a227" strokeWidth="0.9" opacity="0.85" />
     </svg>
   );

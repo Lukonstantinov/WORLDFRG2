@@ -190,7 +190,7 @@ export function ChroniclePanel() {
                 legend={[
                   { label: "Basic", color: "#ff8a6a" },
                   { label: "Comfort", color: "#e0c060" },
-                  { label: "Luxury", color: "#9ab0c8" },
+                  { label: "Luxury", color: "#c5b69d" },
                 ]}
               />
               <div style={{ ...sectionHdr, marginTop: 8 }}>Merchant population (world)</div>
@@ -200,7 +200,7 @@ export function ChroniclePanel() {
                 legend={[
                   { label: "🧺 Local", color: "#7fd0a0" },
                   { label: "🏛 Houses", color: "#e0c060" },
-                  { label: "⚖ Guilds", color: "#8aa0c0" },
+                  { label: "⚖ Guilds", color: "#bcab8e" },
                 ]}
               />
             </div>
@@ -318,7 +318,7 @@ function Sparkline({ series }: { series: [number, number][] }) {
     .join(" ");
   return (
     <svg width={w} height={h} style={{ display: "block" }}>
-      <polyline points={pts} fill="none" stroke="#4a90c0" strokeWidth={1.5} />
+      <polyline points={pts} fill="none" stroke="#b79253" strokeWidth={1.5} />
     </svg>
   );
 }
@@ -345,7 +345,7 @@ function WorldLines({ rows, legend, min, max, fmt }: {
   const last = rows[rows.length - 1];
   return (
     <>
-      <svg width={w} height={h} style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
+      <svg width={w} height={h} style={{ display: "block", background: "#1e180f", borderRadius: 3 }}>
         {[1, 2, 3].map((c) => (
           <polyline key={c} points={line(c as 1 | 2 | 3)} fill="none"
             stroke={legend[c - 1]?.color ?? "#888"} strokeWidth={1.5} />
@@ -353,7 +353,7 @@ function WorldLines({ rows, legend, min, max, fmt }: {
       </svg>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
         {legend.map((l, i) => (
-          <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, color: "#9ab0c8" }}>
+          <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, color: "#c5b69d" }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: l.color }} />
             {l.label} <span style={{ color: l.color, fontWeight: 700 }}>{fmt(last[(i + 1) as 1 | 2 | 3])}</span>
           </span>
@@ -382,7 +382,7 @@ function eventColor(kind: string): string {
     case "wonder": return "#b8c8a0";     // civic wonders
     case "piracy": return "#c07070";     // corsair raids
     case "diaspora": return "#8ac0c0";   // diaspora quarters
-    default: return "#a8bcd4";
+    default: return "#d1c3ab";
   }
 }
 

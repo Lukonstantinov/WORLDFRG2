@@ -79,10 +79,10 @@ export function StepClimate({ invalidateTiles }: Props) {
         </button>
       </div>
 
-      <div style={{ color: "#607090", fontSize: 10, fontWeight: 600, marginTop: 4 }}>
+      <div style={{ color: "#8a7d66", fontSize: 10, fontWeight: 600, marginTop: 4 }}>
         K{"\u00F6"}ppen Zone Legend
       </div>
-      <div style={{ color: "#405060", fontSize: 9, lineHeight: 1.35 }}>
+      <div style={{ color: "#5c5344", fontSize: 9, lineHeight: 1.35 }}>
         These are CLIMATE zones. The ecological biomes they feed (rainforest,
         taiga, mangrove, steppe, gallery forest…) are classified in Step 6, once
         rivers and soil exist.
@@ -95,9 +95,9 @@ export function StepClimate({ invalidateTiles }: Props) {
               background: b.color,
             }} />
             <div>
-              <span style={{ color: "#8090b0", fontSize: 10 }}>{b.code}</span>
-              <span style={{ color: "#506080", fontSize: 10 }}> {b.name}</span>
-              <div style={{ color: "#405060", fontSize: 9 }}>{b.desc}</div>
+              <span style={{ color: "#ac9d84", fontSize: 10 }}>{b.code}</span>
+              <span style={{ color: "#7a6d56", fontSize: 10 }}> {b.name}</span>
+              <div style={{ color: "#5c5344", fontSize: 9 }}>{b.desc}</div>
             </div>
           </div>
         ))}

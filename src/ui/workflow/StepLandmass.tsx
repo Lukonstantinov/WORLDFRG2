@@ -16,11 +16,11 @@ interface Props {
 }
 
 const panelStyle: React.CSSProperties = {
-  border: "1px solid #22384f", borderRadius: 4, padding: 6, marginTop: 6,
+  border: "1px solid #493d28", borderRadius: 4, padding: 6, marginTop: 6,
   display: "flex", flexDirection: "column", gap: 5,
 };
 const rowStyle: React.CSSProperties = { display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 11 };
-const labelStyle: React.CSSProperties = { color: "#8ba3bd", minWidth: 60 };
+const labelStyle: React.CSSProperties = { color: "#b9aa8f", minWidth: 60 };
 const smallBtn: React.CSSProperties = {
   ...genBtn, padding: "3px 8px", fontSize: 11, marginTop: 0,
 };
@@ -303,7 +303,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
       <button onClick={() => handleGeneratePlates(lockSeed ? seed : randomSeed())} disabled={simRunning} style={genBtn}>
         Generate from Plates
       </button>
-      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#6a8aaa" }}>
+      <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, color: "#a5916f" }}>
         <input type="checkbox" checked={lockSeed} onChange={(e) => setLockSeed(e.target.checked)} />
         Lock seed (iterate settings on this same landmass)
       </label>
@@ -319,7 +319,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
 
       {variants && (
         <div style={panelStyle}>
-          <div style={{ fontSize: 11, color: "#8ba3bd" }}>Two generated variants — pick one:</div>
+          <div style={{ fontSize: 11, color: "#b9aa8f" }}>Two generated variants — pick one:</div>
           <div style={{ display: "flex", gap: 8 }}>
             <VariantThumb label="A" data={variants.a} onKeep={() => keepVariant("a")} disabled={simRunning} />
             <VariantThumb label="B (on map)" data={variants.b} onKeep={() => keepVariant("b")} disabled={simRunning} highlight />
@@ -330,20 +330,20 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
       {/* GENERATION_UX_REDESIGN_PLAN.md Slice 6 — draw plate seeds. */}
       <button
         onClick={() => setSeedsOpen((v) => !v)}
-        style={{ ...genBtn, background: "transparent", border: "1px solid #22384f", textAlign: "left" }}
+        style={{ ...genBtn, background: "transparent", border: "1px solid #493d28", textAlign: "left" }}
       >
         {seedsOpen ? "▾" : "▸"} Draw Plate Seeds {plateSeeds.length > 0 ? `(${plateSeeds.length})` : ""}
       </button>
       {seedsOpen && (
         <div style={panelStyle}>
-          <div style={{ fontSize: 10, color: "#5a7591", lineHeight: 1.4 }}>
+          <div style={{ fontSize: 10, color: "#8a7b61", lineHeight: 1.4 }}>
             Click the map to drop a plate's centre. Seeds you place override the
             nearest auto-generated site; the rest fill in around them. Drag the
             "Plates" count above to control the total.
           </div>
           <div style={rowStyle}>
             <button onClick={() => setTool(activeTool === "plateSeed" ? "pan" : "plateSeed")}
-              style={{ ...smallBtn, background: activeTool === "plateSeed" ? "#2a5080" : undefined,
+              style={{ ...smallBtn, background: activeTool === "plateSeed" ? "#705c3a" : undefined,
                 color: activeTool === "plateSeed" ? "#fff" : undefined }}>
               {activeTool === "plateSeed" ? "📍 Click the map…" : "📍 Draw seeds"}
             </button>
@@ -366,14 +366,14 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
               Continental
             </button>
             <button onClick={() => setPlateSeedDraft({ isOceanic: true })}
-              style={{ ...smallBtn, flex: 1, background: plateSeedDraft.isOceanic ? "#1a3a5a" : undefined }}>
+              style={{ ...smallBtn, flex: 1, background: plateSeedDraft.isOceanic ? "#4d3f27" : undefined }}>
               Oceanic
             </button>
           </div>
           {plateSeeds.length > 0 && (
             <div style={{ maxHeight: 100, overflowY: "auto", display: "flex", flexDirection: "column", gap: 1 }}>
               {plateSeeds.map((s, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#8090b0" }}>
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#ac9d84" }}>
                   <span>
                     {["Giant", "Large", "Medium", "Small"][s.sizeClass]} · {s.isOceanic ? "Oceanic" : "Continental"} @ {s.x},{s.y}
                   </span>
@@ -388,7 +388,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
               Generate from Seeds
             </button>
             <button onClick={clearPlateSeeds} disabled={plateSeeds.length === 0}
-              style={{ ...smallBtn, background: "#1a2a40" }}>
+              style={{ ...smallBtn, background: "#3b311f" }}>
               Clear
             </button>
           </div>
@@ -397,20 +397,20 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
 
       <button
         onClick={() => setPlatesOpen((v) => !v)}
-        style={{ ...genBtn, background: "transparent", border: "1px solid #22384f", textAlign: "left" }}
+        style={{ ...genBtn, background: "transparent", border: "1px solid #493d28", textAlign: "left" }}
       >
         {platesOpen ? "▾" : "▸"} Plates {plates.length > 0 ? `(${plates.length})` : ""}
       </button>
       {platesOpen && (
         <div style={panelStyle}>
           {plates.length === 0 ? (
-            <div style={{ fontSize: 10, color: "#5a7591" }}>
+            <div style={{ fontSize: 10, color: "#8a7b61" }}>
               No plate data yet — Generate from Plates first. (A template or painted
               landmass has no plates to inspect.)
             </div>
           ) : (
             <>
-              <div style={{ fontSize: 10, color: "#5a7591" }}>
+              <div style={{ fontSize: 10, color: "#8a7b61" }}>
                 Click Flip to swap a plate between Oceanic and Continental and
                 rebuild the coastline from it — same plate shapes, new land/sea.
               </div>
@@ -419,17 +419,17 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
                   <div key={p.id} style={{
                     display: "flex", alignItems: "center", gap: 5, fontSize: 10.5,
                     padding: "2px 4px", borderRadius: 3,
-                    background: p.is_oceanic ? "rgba(40,90,140,0.25)" : "rgba(90,110,50,0.25)",
+                    background: p.is_oceanic ? "rgba(119,98,61,0.25)" : "rgba(90,110,50,0.25)",
                   }}>
                     <span style={{
                       width: 8, height: 8, borderRadius: "50%", flexShrink: 0,
-                      background: p.is_oceanic ? "#3a7ac0" : "#7a9a4a",
+                      background: p.is_oceanic ? "#a58855" : "#7a9a4a",
                     }} />
-                    <span style={{ color: "#9ab0c8", minWidth: 24 }}>#{p.id}</span>
-                    <span style={{ color: "#c0d0e0", minWidth: 66 }}>
+                    <span style={{ color: "#c5b69d", minWidth: 24 }}>#{p.id}</span>
+                    <span style={{ color: "#ded4c2", minWidth: 66 }}>
                       {p.is_oceanic ? "Oceanic" : "Continental"}
                     </span>
-                    <span style={{ color: "#6a8aaa", minWidth: 40 }}>
+                    <span style={{ color: "#a5916f", minWidth: 40 }}>
                       {(p.area_frac * 100).toFixed(1)}%
                     </span>
                     <button
@@ -449,7 +449,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
 
       <button
         onClick={() => setAreaOpen((v) => !v)}
-        style={{ ...genBtn, background: "transparent", border: "1px solid #22384f", textAlign: "left" }}
+        style={{ ...genBtn, background: "transparent", border: "1px solid #493d28", textAlign: "left" }}
       >
         {areaOpen ? "▾" : "▸"} Area tools {hasLasso ? "(lasso drawn)" : ""}
       </button>
@@ -458,7 +458,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
           <div style={rowStyle}>
             <button
               onClick={() => setTool(activeTool === "lasso" ? "pan" : "lasso")}
-              style={{ ...smallBtn, background: activeTool === "lasso" ? "#2a5a7a" : undefined }}
+              style={{ ...smallBtn, background: activeTool === "lasso" ? "#6c5938" : undefined }}
             >
               {activeTool === "lasso" ? "Drawing lasso… click to stop" : "✏️ Draw lasso"}
             </button>
@@ -466,12 +466,12 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
               <button onClick={clearLasso} style={smallBtn}>Clear</button>
             )}
           </div>
-          <div style={{ fontSize: 10, color: "#5a7591" }}>
+          <div style={{ fontSize: 10, color: "#8a7b61" }}>
             Freehand-drag a selection on the map, then apply an op below. Every
             op fades out at the lasso edge instead of cutting a hard line.
           </div>
 
-          <div style={{ borderTop: "1px solid #1a2c3f", paddingTop: 5 }}>
+          <div style={{ borderTop: "1px solid #3a301f", paddingTop: 5 }}>
             <div style={rowStyle}>
               <span style={labelStyle}>Smooth↔Rough</span>
               <input
@@ -484,11 +484,11 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
             <div style={rowStyle}>
               <button onClick={applySmoothRoughen} disabled={simRunning || !hasLasso} style={smallBtn}>Apply</button>
               <button onClick={() => reroll(applySmoothRoughen)} disabled={simRunning || !hasLasso} style={smallBtn}>Re-roll</button>
-              <span style={{ fontSize: 9, color: "#4a6580" }}>seed {lastOpSeed}</span>
+              <span style={{ fontSize: 9, color: "#796a51" }}>seed {lastOpSeed}</span>
             </div>
           </div>
 
-          <div style={{ borderTop: "1px solid #1a2c3f", paddingTop: 5 }}>
+          <div style={{ borderTop: "1px solid #3a301f", paddingTop: 5 }}>
             <div style={rowStyle}>
               <span style={labelStyle}>Fjords</span>
               <span>count</span>
@@ -507,7 +507,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
             </div>
           </div>
 
-          <div style={{ borderTop: "1px solid #1a2c3f", paddingTop: 5 }}>
+          <div style={{ borderTop: "1px solid #3a301f", paddingTop: 5 }}>
             <div style={rowStyle}>
               <span style={labelStyle}>Islands</span>
               <select value={islandKind} onChange={(e) => setIslandKind(e.target.value as IslandKind)}>
@@ -529,7 +529,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
             </div>
           </div>
 
-          <div style={{ borderTop: "1px solid #1a2c3f", paddingTop: 5 }}>
+          <div style={{ borderTop: "1px solid #3a301f", paddingTop: 5 }}>
             <div style={rowStyle}>
               <span style={labelStyle}>Fill</span>
               <button onClick={() => applyFill(true)} disabled={simRunning || !hasLasso} style={smallBtn}>Land</button>
@@ -539,7 +539,7 @@ export function StepLandmass({ seed, plateCount, invalidateTiles }: Props) {
         </div>
       )}
 
-      <div style={{ color: "#3a5068", fontSize: 10, marginTop: 2 }}>
+      <div style={{ color: "#625640", fontSize: 10, marginTop: 2 }}>
         Template images are auto-resized to fit the world grid.
         Use the Paint tool to draw landmasses manually. Shift+drag to erase.
       </div>
@@ -578,12 +578,12 @@ function VariantThumb({
   return (
     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 3, alignItems: "center" }}>
       <div style={{
-        border: highlight ? "1px solid #4ad0e0" : "1px solid #22384f",
+        border: highlight ? "1px solid #4ad0e0" : "1px solid #493d28",
         width: "100%", aspectRatio: `${data.w} / ${data.h}`, overflow: "hidden", borderRadius: 3,
       }}>
         {src && <img src={src} alt={label} style={{ width: "100%", height: "100%", imageRendering: "pixelated" }} />}
       </div>
-      <div style={{ fontSize: 10, color: "#8ba3bd" }}>{label}</div>
+      <div style={{ fontSize: 10, color: "#b9aa8f" }}>{label}</div>
       <button onClick={onKeep} disabled={disabled} style={smallBtn}>Keep {label[0]}</button>
     </div>
   );

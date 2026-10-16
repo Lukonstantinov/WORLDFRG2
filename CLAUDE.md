@@ -3570,7 +3570,9 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   `TV` the same tokens as CSS variables, which the `@ui/kit`
                                   primitives use so `<Ledger>` (paper, dark ink, red-ink
                                   headings) repaints them; `useFloatingWindow`'s rootStyle
-                                  gives every floating window the bronze frame)
+                                  gives every floating window the bronze frame; the
+                                  slate-blue chrome hand-coded across ~80 panels was turned to
+                                  the bronze hue at the SAME lightness, water/sea lines kept blue)
   cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art.
                                   `cultureFigure.ts` draws an INDIVIDUAL (a `sex` axis,
                                   per-person seed) — still the renderer for House

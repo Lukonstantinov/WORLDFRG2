@@ -35,7 +35,7 @@ import {
 
 const SOCIETY = [
   { key: "patrician", label: "Patricians", color: "#c8813a" },
-  { key: "burgher", label: "Burghers", color: "#5a8ac8" },
+  { key: "burgher", label: "Burghers", color: "#c09d62" },
   { key: "commoner", label: "Commoners", color: "#6aa05a" },
   { key: "underclass", label: "Underclass", color: "#9a8a78" },
 ] as const;
@@ -190,7 +190,7 @@ export function CityView({ detail }: { detail: HubDetail }) {
         <div data-no-drag style={{ position: "absolute", right: 12, top: 12, display: "flex", background: K.chip, border: `1px solid ${K.bd}`, borderRadius: 4, padding: 2, gap: 2 }}>
           {(["iso", "plan"] as const).map((m) => (
             <button key={m} onClick={() => setMode(m)} style={{ all: "unset", cursor: "pointer", padding: "4px 12px", borderRadius: 4,
-              font: `600 11px/1.2 ${K.bf}`, background: mode === m ? K.ac : "transparent", color: mode === m ? "#0b1420" : K.mu }}>
+              font: `600 11px/1.2 ${K.bf}`, background: mode === m ? K.ac : "transparent", color: mode === m ? "#1c170f" : K.mu }}>
               {m === "iso" ? "Isometric" : "Plan"}
             </button>
           ))}

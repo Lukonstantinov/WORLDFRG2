@@ -12,10 +12,10 @@ const BAND_TABS = [
   ["2", "Luxury"],
 ] as const;
 
-const GRADE_COLOR = ["#6a5a3a", "#7fa0c0", "#d8b24a"]; // coarse · common · fine
+const GRADE_COLOR = ["#6a5a3a", "#bba784", "#d8b24a"]; // coarse · common · fine
 // D20's five seller classes, in supply_shares order.
 const SUPPLY_LABELS = ["🏛 City", "🏠 Houses", "⚒ Guilds", "🏪 Local", "🌍 Foreign"] as const;
-const SUPPLY_COLOR = ["#7fa0c0", "#d8b24a", "#8a6fb0", "#6a86a6", "#4cae7a"];
+const SUPPLY_COLOR = ["#bba784", "#d8b24a", "#8a6fb0", "#a28f6e", "#4cae7a"];
 
 function fmt(n: number): string {
   const a = Math.abs(n);

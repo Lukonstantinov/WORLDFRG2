@@ -75,7 +75,7 @@ export function PeoplesPanel() {
           <button data-no-drag onClick={() => setSelected(null)} title="Clear the map colouring"
             style={clearBtn}>clear map</button>
         )}
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8", marginLeft: 8 }} onClick={() => setOpen(false)}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d", marginLeft: 8 }} onClick={() => setOpen(false)}>✕</span>
       </div>
 
       {!active && <div style={hint}>Begin a campaign — the peoples of the world fill in as it lives.</div>}
@@ -348,7 +348,7 @@ function CulturePresence({ name, color }: { name: string; color: [number, number
       {show && (
         <>
           <canvas ref={ref} style={{ width: "100%", height: 118, imageRendering: "pixelated",
-            border: `1px solid ${T.lineSoft}`, borderRadius: 5, background: "#06090d", display: "block" }} />
+            border: `1px solid ${T.lineSoft}`, borderRadius: 5, background: "#0c0a07", display: "block" }} />
           <div style={{ color: T.inkFaint, fontSize: 9, marginTop: 3 }}>
             Full colour = where this people is <b>dominant</b> (homeland &amp; majority) · faint
             wash = where it lives as a <b>minority</b> · dim = other land.

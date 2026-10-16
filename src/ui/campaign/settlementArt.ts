@@ -20,7 +20,7 @@ function rng(seed: number) { let a = seed >>> 0; return () => { a |= 0; a = (a +
 // ── isometric building kit ──────────────────────────────────────────────────
 const INK = "#3f3120", GOLD = "#c9a24a";
 const PLAS = ["#ecdcb4", "#cdba8c"], STON = ["#dccfa8", "#bcae84"], WOOD = ["#caa974", "#a98b58"];
-const TERR = ["#cf7a47", "#a3542f"], SLAT = ["#7d8a98", "#5c6675"];
+const TERR = ["#cf7a47", "#a3542f"], SLAT = ["#968e7f", "#726b5f"];
 function isoP(cx: number, cy: number, s: number, x: number, y: number, z: number) { return [cx + (x - y) * s, cy + (x + y) * s * 0.5 - z * s]; }
 function fc(g: G, pts: number[][], fill: string, sw?: number) { g.appendChild(el("polygon", { points: pts.map((p) => p[0].toFixed(1) + "," + p[1].toFixed(1)).join(" "), fill, stroke: INK, "stroke-width": sw == null ? 0.5 : sw, "stroke-linejoin": "round" })); }
 function gshadow(g: G, cx: number, cy: number, s: number, w: number) { g.appendChild(el("ellipse", { cx: cx.toFixed(1), cy: (cy + s * 0.16).toFixed(1), rx: (w * s).toFixed(1), ry: (w * s * 0.42).toFixed(1), fill: "#000", "fill-opacity": .13 })); }
@@ -38,7 +38,7 @@ function house(g: G, x: number, b: number, s: number) { gshadow(g, x, b, s, 0.8)
 function manor(g: G, x: number, b: number, s: number) { gshadow(g, x, b, s, 1.1); isoBox(g, x - 0.5 * s, b + 0.26 * s, s, 0.75, 0.75, 0.6, 0.45, PLAS, TERR); isoBox(g, x, b, s, 1.55, 1.05, 0.78, 0.55, PLAS, TERR); door(g, x, b, s); }
 function warehouse(g: G, x: number, b: number, s: number) { gshadow(g, x, b, s, 1.05); isoBox(g, x, b, s, 1.8, 1.0, 0.62, 0.4, WOOD, TERR); const P = (X: number, Y: number, Z: number) => isoP(x, b, s, X, Y, Z); for (const dx of [-0.5, 0.08]) fc(g, [P(dx, 0.5, 0), P(dx + 0.34, 0.5, 0), P(dx + 0.34, 0.5, 0.38), P(dx, 0.5, 0.38)], "#4f3320", .3); }
 function granary(g: G, x: number, b: number, s: number) { gshadow(g, x, b, s, 1.0); isoBox(g, x + 0.72 * s, b + 0.36 * s, s, 0.44, 0.44, 0.98, 0.16, STON, ["#9c5a34", "#7f4a2a"]); isoBox(g, x, b, s, 1.1, 0.86, 0.56, 0.48, ["#d8b27c", "#bb9560"], ["#9c5a34", "#7f4a2a"]); }
-function workshop(g: G, x: number, b: number, s: number) { house(g, x, b, s); isoBox(g, x + 0.3 * s, b + 0.1 * s, s, 0.18, 0.18, 1.05, 0, ["#8a684a", "#6c5036"], ["#6c5036", "#56432e"]); for (let i = 0; i < 3; i++) g.appendChild(el("circle", { cx: (x + 0.3 * s).toFixed(1), cy: (b - 1.0 * s - i * 4).toFixed(1), r: (2 + i), fill: "#d3dae0", "fill-opacity": (.5 - i * .13).toFixed(2) })); }
+function workshop(g: G, x: number, b: number, s: number) { house(g, x, b, s); isoBox(g, x + 0.3 * s, b + 0.1 * s, s, 0.18, 0.18, 1.05, 0, ["#8a684a", "#6c5036"], ["#6c5036", "#56432e"]); for (let i = 0; i < 3; i++) g.appendChild(el("circle", { cx: (x + 0.3 * s).toFixed(1), cy: (b - 1.0 * s - i * 4).toFixed(1), r: (2 + i), fill: "#dfdbd4", "fill-opacity": (.5 - i * .13).toFixed(2) })); }
 function guildhall(g: G, x: number, b: number, s: number) { gshadow(g, x, b, s, 1.15); isoBox(g, x, b, s, 1.5, 1.1, 0.78, 0.5, STON, SLAT); const tx = x + 0.74 * s; isoBox(g, tx, b, s, 0.5, 0.5, 1.0, 0, STON, STON); const P = (X: number, Y: number, Z: number) => isoP(tx, b, s, X, Y, Z); fc(g, [P(-0.25, 0.25, 1.0), P(0.25, 0.25, 1.0), P(0, 0, 1.6)], TERR[0]); fc(g, [P(0.25, -0.25, 1.0), P(0.25, 0.25, 1.0), P(0, 0, 1.6)], TERR[1]); flag(g, tx, b, s, 1.6, GOLD); }
 function shipyard(g: G, x: number, b: number, s: number) { const P = (X: number, Y: number, Z: number) => isoP(x, b, s, X, Y, Z); fc(g, [P(-0.45, 0.85, 0), P(0.2, 0.85, 0), P(0.2, 1.9, 0), P(-0.45, 1.9, 0)], "#7a5a36", .3); boat(g, P(-0.12, 2.15, 0)[0], P(-0.12, 2.15, 0)[1], s * 0.55); gshadow(g, x, b, s, 1.0); isoBox(g, x, b, s, 1.45, 0.92, 0.6, 0.42, WOOD, TERR); }
 function windmill(g: G, x: number, b: number, s: number) { gshadow(g, x, b, s, 0.7); isoBox(g, x, b, s, 0.62, 0.62, 1.3, 0.32, STON, TERR); const hub = isoP(x, b, s, 0, -0.32, 1.45), hx = hub[0], hy = hub[1]; for (const a of [0.5, 2.07, 3.64, 5.21]) g.appendChild(el("line", { x1: hx.toFixed(1), y1: hy.toFixed(1), x2: (hx + Math.cos(a) * s * 1.0).toFixed(1), y2: (hy + Math.sin(a) * s * 1.0).toFixed(1), stroke: INK, "stroke-width": 1.5 })); g.appendChild(el("circle", { cx: hx.toFixed(1), cy: hy.toFixed(1), r: 1.8, fill: INK })); }
@@ -49,15 +49,15 @@ const ICONS: Record<string, (g: G, x: number, b: number, s: number) => void> = {
 function iconFor(t: string) { return ICONS[t] || house; }
 
 // ── climate ground + vegetation ─────────────────────────────────────────────
-const GROUND = ["#c4d59a", "#e6cf90", "#aedd92", "#c6d2bd", "#dfeaf0"];
-const TILEG = ["#e9eecb", "#f4e7bc", "#dcf0c0", "#e3e8d6", "#eef4f7"];
-const SEA = ["#6f9fb6", "#3d6b91"];
+const GROUND = ["#c4d59a", "#e6cf90", "#aedd92", "#c6d2bd", "#efe9e0"];
+const TILEG = ["#e9eecb", "#f4e7bc", "#dcf0c0", "#e3e8d6", "#f6f4ef"];
+const SEA = ["#b19b74", "#866f48"];
 function tDecid(g: G, x: number, b: number, s: number) { g.appendChild(el("line", { x1: x.toFixed(1), y1: b.toFixed(1), x2: x.toFixed(1), y2: (b - s * 0.55).toFixed(1), stroke: "#6b4f2e", "stroke-width": Math.max(1, s * 0.14) })); g.appendChild(el("ellipse", { cx: x.toFixed(1), cy: (b - s * 0.95).toFixed(1), rx: (s * 0.6).toFixed(1), ry: (s * 0.55).toFixed(1), fill: "#5e8a3e", stroke: "#456a2c", "stroke-width": .5 })); g.appendChild(el("ellipse", { cx: (x - s * 0.18).toFixed(1), cy: (b - s * 1.12).toFixed(1), rx: (s * 0.24).toFixed(1), ry: (s * 0.2).toFixed(1), fill: "#80ad5b", "fill-opacity": .7 })); }
 function tConifer(g: G, x: number, b: number, s: number) { g.appendChild(el("line", { x1: x.toFixed(1), y1: b.toFixed(1), x2: x.toFixed(1), y2: (b - s * 0.3).toFixed(1), stroke: "#5a3f24", "stroke-width": Math.max(1, s * 0.12) })); for (let i = 0; i < 3; i++) { const yy = b - s * 0.28 - i * s * 0.4; g.appendChild(el("path", { d: `M${(x - s * (0.5 - i * 0.1)).toFixed(1)} ${yy.toFixed(1)} L${x.toFixed(1)} ${(yy - s * 0.62).toFixed(1)} L${(x + s * (0.5 - i * 0.1)).toFixed(1)} ${yy.toFixed(1)} Z`, fill: i === 2 ? "#43723c" : "#37602f", stroke: "#28492a", "stroke-width": .4 })); } }
 function tPalm(g: G, x: number, b: number, s: number) { const tx = x + s * 0.08, ty = b - s * 1.1; g.appendChild(el("path", { d: `M${x.toFixed(1)} ${b.toFixed(1)} Q${(x - s * 0.12).toFixed(1)} ${(b - s * 0.6).toFixed(1)} ${tx.toFixed(1)} ${ty.toFixed(1)}`, fill: "none", stroke: "#8a6638", "stroke-width": Math.max(1.3, s * 0.16) })); for (const a of [-2.5, -1.9, -1.25, -0.6, 0.0]) g.appendChild(el("path", { d: `M${tx.toFixed(1)} ${ty.toFixed(1)} q${(Math.cos(a) * s * 0.5).toFixed(1)} ${(Math.sin(a) * s * 0.4).toFixed(1)} ${(Math.cos(a) * s * 0.95).toFixed(1)} ${(Math.sin(a) * s * 0.35 + s * 0.25).toFixed(1)}`, fill: "none", stroke: "#4e9040", "stroke-width": 1.4, "stroke-linecap": "round" })); g.appendChild(el("circle", { cx: tx.toFixed(1), cy: ty.toFixed(1), r: 1.6, fill: "#8a6638" })); }
 function tCactus(g: G, x: number, b: number, s: number) { const w = s * 0.32; g.appendChild(el("rect", { x: (x - w / 2).toFixed(1), y: (b - s * 0.95).toFixed(1), width: w.toFixed(1), height: (s * 0.95).toFixed(1), rx: (w / 2).toFixed(1), fill: "#5b8a4a", stroke: "#3f6a34", "stroke-width": .5 })); g.appendChild(el("path", { d: `M${(x + w * 0.3).toFixed(1)} ${(b - s * 0.55).toFixed(1)} q${(s * 0.3).toFixed(1)} 0 ${(s * 0.3).toFixed(1)} ${(-s * 0.3).toFixed(1)}`, fill: "none", stroke: "#5b8a4a", "stroke-width": Math.max(2, w * 0.7), "stroke-linecap": "round" })); g.appendChild(el("path", { d: `M${(x - w * 0.3).toFixed(1)} ${(b - s * 0.4).toFixed(1)} q${(-s * 0.28).toFixed(1)} 0 ${(-s * 0.28).toFixed(1)} ${(-s * 0.28).toFixed(1)}`, fill: "none", stroke: "#5b8a4a", "stroke-width": Math.max(2, w * 0.7), "stroke-linecap": "round" })); }
 function tShrub(g: G, x: number, b: number, s: number) { for (const dx of [-0.32, 0, 0.32]) g.appendChild(el("circle", { cx: (x + dx * s).toFixed(1), cy: (b - s * 0.22).toFixed(1), r: (s * 0.3).toFixed(1), fill: "#86954e", "fill-opacity": .92 })); }
-function tRock(g: G, x: number, b: number, s: number) { g.appendChild(el("path", { d: `M${(x - s * 0.45).toFixed(1)} ${b.toFixed(1)} L${(x - s * 0.2).toFixed(1)} ${(b - s * 0.42).toFixed(1)} L${(x + s * 0.18).toFixed(1)} ${(b - s * 0.48).toFixed(1)} L${(x + s * 0.45).toFixed(1)} ${b.toFixed(1)} Z`, fill: "#9a958c", stroke: "#6f6a60", "stroke-width": .5 })); g.appendChild(el("path", { d: `M${(x - s * 0.2).toFixed(1)} ${(b - s * 0.42).toFixed(1)} L${(x + s * 0.18).toFixed(1)} ${(b - s * 0.48).toFixed(1)} L${(x + s * 0.05).toFixed(1)} ${(b - s * 0.4).toFixed(1)} Z`, fill: "#eef1f3" })); }
+function tRock(g: G, x: number, b: number, s: number) { g.appendChild(el("path", { d: `M${(x - s * 0.45).toFixed(1)} ${b.toFixed(1)} L${(x - s * 0.2).toFixed(1)} ${(b - s * 0.42).toFixed(1)} L${(x + s * 0.18).toFixed(1)} ${(b - s * 0.48).toFixed(1)} L${(x + s * 0.45).toFixed(1)} ${b.toFixed(1)} Z`, fill: "#9a958c", stroke: "#6f6a60", "stroke-width": .5 })); g.appendChild(el("path", { d: `M${(x - s * 0.2).toFixed(1)} ${(b - s * 0.42).toFixed(1)} L${(x + s * 0.18).toFixed(1)} ${(b - s * 0.48).toFixed(1)} L${(x + s * 0.05).toFixed(1)} ${(b - s * 0.4).toFixed(1)} Z`, fill: "#f3f1ee" })); }
 function plant(band: number, g: G, x: number, b: number, s: number, alt: boolean) {
   if (band === 1) return (alt ? tCactus : tPalm)(g, x, b, s);
   if (band === 2) return tPalm(g, x, b, s);
@@ -148,7 +148,7 @@ function tile(svg: G, b: SceneBldg, x: number, y: number, w: number, h: number, 
   if (b.goodIcon) goodBadge(svg, cx + u * 0.7, baseY - u * 1.5, b.goodIcon);
   txt(svg, cx, y + h * 0.70, 11.5, b.name, "#3f3120", 700, "middle");
   const owner = b.owner || "Settlement", isCity = /^Settlement$|^City of/.test(owner);
-  txt(svg, cx, y + h * 0.83, 10, owner, isCity ? "#6a7c92" : "#b07b34", isCity ? 400 : 600, "middle");
+  txt(svg, cx, y + h * 0.83, 10, owner, isCity ? "#8d826f" : "#b07b34", isCity ? 400 : 600, "middle");
   const chips: string[] = []; if (b.tier) chips.push("Tier " + b.tier); if (b.guild) chips.push("GUILD");
   if (chips.length) txt(svg, cx, y + h * 0.94, 8.5, chips.join("   ·   "), b.guild ? "#c89a5a" : "#8a7a58", 600, "middle");
 }
@@ -159,8 +159,8 @@ function drawSea(g: G, x: number, y: number, w: number, h: number, seed: number)
   let d = `M${x.toFixed(1)} ${(y + 6).toFixed(1)} `; for (let i = 0; i <= w; i += 16) d += `q8 -5 16 0 `; d += `L${(x + w).toFixed(1)} ${y.toFixed(1)} L${x.toFixed(1)} ${y.toFixed(1)} Z`;
   grp.appendChild(el("path", { d, fill: SEA[0] }));
   let f = `M${x.toFixed(1)} ${(y + 6).toFixed(1)} `; for (let i = 0; i <= w; i += 16) f += `q8 -5 16 0 `;
-  grp.appendChild(el("path", { d: f, fill: "none", stroke: "#dfeef4", "stroke-width": 1.4, "stroke-opacity": .8 }));
-  for (let i = 0; i < w / 30; i++) grp.appendChild(el("line", { x1: (x + 10 + i * 30).toFixed(1), y1: (y + 16).toFixed(1), x2: (x + 18 + i * 30).toFixed(1), y2: (y + 16).toFixed(1), stroke: "#bfe0ec", "stroke-width": 1, "stroke-opacity": .5 }));
+  grp.appendChild(el("path", { d: f, fill: "none", stroke: "#f2ece1", "stroke-width": 1.4, "stroke-opacity": .8 }));
+  for (let i = 0; i < w / 30; i++) grp.appendChild(el("line", { x1: (x + 10 + i * 30).toFixed(1), y1: (y + 16).toFixed(1), x2: (x + 18 + i * 30).toFixed(1), y2: (y + 16).toFixed(1), stroke: "#e8dac3", "stroke-width": 1, "stroke-opacity": .5 }));
   boat(grp, x + w * 0.7, y + 18, 6);
-  txt(g, x + w - 4, y + h - 4, 9, "⚓ harbour", "#dfeef4", 600, "end");
+  txt(g, x + w - 4, y + h - 4, 9, "⚓ harbour", "#f2ece1", 600, "end");
 }

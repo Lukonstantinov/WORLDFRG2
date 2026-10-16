@@ -8,7 +8,7 @@ import { GOOD_DEFS } from "@goods";
  *  anchored at the map's old flat placeholder green so the plate doesn't jump in
  *  hue at zero elevation, rising through olive/tan/brown to a pale peak. */
 function reliefColor(elev: number, isLand: boolean): string {
-  if (!isLand) return "#1e3a52";
+  if (!isLand) return "#4a3d26";
   const stops: [number, string][] = [
     [0.00, "#3f6d55"], [0.15, "#5c7a4a"], [0.35, "#8a8248"],
     [0.55, "#8a6a4a"], [0.75, "#8a8078"], [1.00, "#e8e4dc"],
@@ -79,24 +79,24 @@ function hillshadeFactor(
 
 // ── Custom minimalist building icons (tiny SVG, no emoji). kind: 0 estate ·
 //    1 manufactory · 2 warehouse · 3 bank · 4 mint. Drawn centred on (0,0). ──
-const B_COLOR = ["#7fb069", "#d98c40", "#5a9bd4", "#e3c14a", "#c9a24a"];
+const B_COLOR = ["#7fb069", "#d98c40", "#c6a368", "#e3c14a", "#c9a24a"];
 const B_LABEL = ["Estate", "Manufactory", "Depot", "Bank", "Mint"];
 function BuildingGlyph({ kind, s }: { kind: number; s: number }) {
   const c = B_COLOR[kind] ?? "#aaa";
   switch (kind) {
     case 0: // estate — filled field square
-      return <rect x={-s} y={-s} width={2 * s} height={2 * s} rx={1} fill={c} stroke="#0a1620" strokeWidth={0.6} />;
+      return <rect x={-s} y={-s} width={2 * s} height={2 * s} rx={1} fill={c} stroke="#1c170e" strokeWidth={0.6} />;
     case 1: // manufactory — roof/triangle
-      return <path d={`M0 ${-s * 1.2} L ${s} ${s} L ${-s} ${s} Z`} fill={c} stroke="#0a1620" strokeWidth={0.6} />;
+      return <path d={`M0 ${-s * 1.2} L ${s} ${s} L ${-s} ${s} Z`} fill={c} stroke="#1c170e" strokeWidth={0.6} />;
     case 2: // warehouse — crate (outlined square with a bar)
-      return <g stroke="#0a1620" strokeWidth={0.6}>
+      return <g stroke="#1c170e" strokeWidth={0.6}>
         <rect x={-s} y={-s} width={2 * s} height={2 * s} rx={0.5} fill={c} />
-        <line x1={-s} y1={0} x2={s} y2={0} stroke="#0a1620" strokeWidth={0.7} />
+        <line x1={-s} y1={0} x2={s} y2={0} stroke="#1c170e" strokeWidth={0.7} />
       </g>;
     case 3: // bank — diamond
-      return <path d={`M0 ${-s * 1.3} L ${s * 1.1} 0 L 0 ${s * 1.3} L ${-s * 1.1} 0 Z`} fill={c} stroke="#0a1620" strokeWidth={0.6} />;
+      return <path d={`M0 ${-s * 1.3} L ${s * 1.1} 0 L 0 ${s * 1.3} L ${-s * 1.1} 0 Z`} fill={c} stroke="#1c170e" strokeWidth={0.6} />;
     case 4: // mint — coin (circle + dot)
-      return <g stroke="#0a1620" strokeWidth={0.6}><circle r={s} fill={c} /><circle r={s * 0.35} fill="#0a1620" /></g>;
+      return <g stroke="#1c170e" strokeWidth={0.6}><circle r={s} fill={c} /><circle r={s * 0.35} fill="#1c170e" /></g>;
     default:
       return <circle r={s} fill={c} />;
   }
@@ -131,7 +131,7 @@ const LANDUSE = [
 /** Tenure classes. The house share is drawn in the holding family's OWN colour where
  *  there is exactly one; otherwise a generic private tint. */
 const TENURE = [
-  { key: "civic", label: "civic & crown", color: "#5a7fa8" },
+  { key: "civic", label: "civic & crown", color: "#a28a60" },
   { key: "house", label: "house & noble", color: "#b06a4a" },
   { key: "temple", label: "temple", color: "#9b7fc0" },
   { key: "common", label: "common land", color: "#6f8f6a" },
@@ -443,7 +443,7 @@ export function ProvinceMiniMap({
     <div style={{ display: "flex", gap: 10, position: "relative", flexWrap: "wrap" }}>
       {/* The plate */}
       <svg width={boxW} height={boxH} viewBox={`0 0 ${vw} ${vh}`}
-        style={{ background: "#0a1620", border: "1px solid #1c3242", borderRadius: 6, flexShrink: 0 }}
+        style={{ background: "#1c170e", border: "1px solid #3d3321", borderRadius: 6, flexShrink: 0 }}
         onMouseLeave={() => setHover(null)}>
         {/* 1 · relief — the ground. Real elevation/land when the crop has loaded
                (§2.3); the old flat fill is the fallback while it loads or on a
@@ -489,14 +489,14 @@ export function ProvinceMiniMap({
                proportional scatter (honest about carrying no course) otherwise. */}
         {on("water") && riverSegments.length > 0 && riverSegments.map((seg, i) => (
           <polyline key={`wr${i}`} points={seg.map(([lx, ly]) => `${lx},${ly}`).join(" ")}
-            fill="none" stroke="#4a90c4" strokeWidth={Math.max(0.6, stride * 0.35)}
+            fill="none" stroke="#bb9553" strokeWidth={Math.max(0.6, stride * 0.35)}
             strokeLinecap="round" strokeLinejoin="round" opacity={0.85} />
         ))}
         {on("water") && riverSegments.length === 0 && waterFrac > 0 && cells.map(([rx, ry], i) =>
           cellHash(rx, ry, 23, stride) < waterFrac ? (
             <rect key={`w${i}`} x={rx - ox + stride * 0.2} y={ry - oy + stride * 0.35}
               width={stride * 0.7} height={stride * 0.28} rx={stride * 0.14}
-              fill="#4a90c4" opacity={0.8} />
+              fill="#bb9553" opacity={0.8} />
           ) : null)}
 
         {/* 6a · GOODS — coverage AND quality as ONE plate (F5 / slice 2 merged the old
@@ -574,8 +574,8 @@ export function ProvinceMiniMap({
               {s.seat
                 ? <path transform={`scale(${dotScale * psc})`}
                     d="M0 -2.2 L0.7 -0.7 L2.2 -0.7 L1 0.4 L1.4 2 L0 1 L-1.4 2 L-1 0.4 L-2.2 -0.7 L-0.7 -0.7 Z"
-                    fill="#fff" stroke="#0a1620" strokeWidth={0.4 / (dotScale * psc)} />
-                : <circle r={r} fill="#e8eef4" stroke="#0a1620" strokeWidth={0.4} />}
+                    fill="#fff" stroke="#1c170e" strokeWidth={0.4 / (dotScale * psc)} />
+                : <circle r={r} fill="#f3efe9" stroke="#1c170e" strokeWidth={0.4} />}
             </g>
           );
         })}
@@ -714,7 +714,7 @@ export function ProvinceMiniMap({
                           working (a circle, plate 6b) or a belt cell (a square). */}
                       <path d={`M ${lx} ${ly - r} L ${lx + r} ${ly} L ${lx} ${ly + r} L ${lx - r} ${ly} Z`}
                         fill={colorOf(l.good)} opacity={0.55 + 0.45 * g}
-                        stroke="#0a1620" strokeWidth={Math.max(0.4, stride * 0.18)} />
+                        stroke="#1c170e" strokeWidth={Math.max(0.4, stride * 0.18)} />
                     </g>
                   );
                 })}
@@ -738,8 +738,8 @@ export function ProvinceMiniMap({
                 rows: [["grade", `${Math.round(d.grade * 100)}%`], ["depth", ["surface", "shallow", "deep", "flooded"][Math.max(0, Math.min(3, d.depth))]]],
               })}
               onMouseLeave={() => setHover(null)}>
-              <circle r={r} fill={col} stroke="#0a1620" strokeWidth={0.5} opacity={0.9} />
-              <circle r={r * 0.4} fill="#0a1620" opacity={0.55} />
+              <circle r={r} fill={col} stroke="#1c170e" strokeWidth={0.5} opacity={0.9} />
+              <circle r={r * 0.4} fill="#1c170e" opacity={0.55} />
             </g>
           );
         })}
@@ -797,9 +797,9 @@ export function ProvinceMiniMap({
       {hover && (
         <div style={{
           position: "absolute", left: Math.min(hover.x + 12, boxW - 40), top: hover.y + 8,
-          background: "#10202c", border: "1px solid #2a4a5a",
+          background: "#282114", border: "1px solid #544730",
           borderRadius: 6, padding: "6px 8px", pointerEvents: "none", zIndex: 60,
-          font: "11px/1.35 system-ui", color: "#dceaf4", boxShadow: "0 4px 14px rgba(0,0,0,.5)",
+          font: "11px/1.35 system-ui", color: "#f2ebde", boxShadow: "0 4px 14px rgba(0,0,0,.5)",
           maxWidth: 220,
         }}>
           <div style={{ fontWeight: 600, marginBottom: 3 }}>{hover.title}</div>
@@ -856,7 +856,7 @@ export function PlateToggles({ plates, setPlates, disabled = [] }: {
               fontSize: 10, padding: "1px 6px", borderRadius: 3, userSelect: "none",
               cursor: off ? "default" : "pointer",
               opacity: off ? 0.35 : 1,
-              color: active ? "#0a1620" : "#9ab0c8",
+              color: active ? "#1c170e" : "#c5b69d",
               background: active ? "#8fb89a" : "transparent",
               border: `1px solid ${active ? "#8fb89a" : "#2a4436"}`,
             }}>

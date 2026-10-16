@@ -79,7 +79,7 @@ export function CoinMiniMap({
   if (worldW <= 0 || worldH <= 0) return null;
 
   return (
-    <div style={{ position: "relative", display: "block", borderRadius: 5, overflow: "hidden", border: "1px solid #16273a", background: "#0a121c" }}>
+    <div style={{ position: "relative", display: "block", borderRadius: 5, overflow: "hidden", border: "1px solid #352b1b", background: "#19150d" }}>
       {/* Land/sea background canvas — painted by the useEffect above */}
       <canvas ref={canvasRef} style={{ display: "block", width: "100%", height: "auto" }} />
       {/* SVG dots layer floated on top of the canvas */}
@@ -90,7 +90,7 @@ export function CoinMiniMap({
 
       {/* backdrop: every coin-holding city, faint — the coined world for context */}
       {backdrop.map((c, i) => (
-        <circle key={`b${i}`} cx={sx(c.x + 0.5)} cy={sy(c.y + 0.5)} r={0.8} fill="#2a3c52" />
+        <circle key={`b${i}`} cx={sx(c.x + 0.5)} cy={sy(c.y + 0.5)} r={0.8} fill="#4d422f" />
       ))}
 
       {/* the coin's core territory */}
@@ -105,7 +105,7 @@ export function CoinMiniMap({
           return (
             <g key={i}>
               <circle cx={cx} cy={cy} r={r} fill={u.mint ? "#f6df85" : coinColor} fillOpacity={u.mint ? 1 : 0.55 + 0.4 * t}
-                stroke={u.mint ? "#fff3c0" : "#0c1826"} strokeWidth={u.mint ? 0.9 : 0.5} />
+                stroke={u.mint ? "#fff3c0" : "#211b11"} strokeWidth={u.mint ? 0.9 : 0.5} />
               {u.mint && <circle cx={cx} cy={cy} r={r + 1.6} fill="none" stroke="#f6df85" strokeOpacity={0.5} strokeWidth={0.6} />}
             </g>
           );
@@ -137,11 +137,11 @@ function convexHull(pts: { x: number; y: number }[]): { x: number; y: number }[]
 /** A tiny legend strip explaining the minimap tiers (shared by callers). */
 export function CoinMiniMapLegend() {
   return (
-    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 8, color: "#7e93ab", marginTop: 3 }}>
+    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", fontSize: 8, color: "#a89a81", marginTop: 3 }}>
       <span><span style={{ color: "#f6df85" }}>★</span> mint</span>
       <span><span style={{ color: "#c9a227" }}>●</span> primary turf</span>
       <span><span style={{ color: "#37a05a" }}>◌</span> held abroad (reserve)</span>
-      <span><span style={{ color: "#4a5e76" }}>·</span> minor holding</span>
+      <span><span style={{ color: "#706450" }}>·</span> minor holding</span>
     </div>
   );
 }

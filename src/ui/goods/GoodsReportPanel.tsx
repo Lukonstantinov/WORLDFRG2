@@ -145,8 +145,8 @@ export function GoodsReportPanel({ onClose }: { onClose: () => void }) {
 function Stat({ n, label, tone }: { n: number; label: string; tone?: string }) {
   return (
     <div style={{ textAlign: "center", minWidth: 54 }}>
-      <div style={{ fontSize: 16, fontWeight: 600, color: tone ?? "#d8e0e8" }}>{n}</div>
-      <div style={{ fontSize: 9, color: "#7a8794" }}>{label}</div>
+      <div style={{ fontSize: 16, fontWeight: 600, color: tone ?? "#e7e2d9" }}>{n}</div>
+      <div style={{ fontSize: 9, color: "#928a7c" }}>{label}</div>
     </div>
   );
 }
@@ -167,12 +167,12 @@ function Row({ r }: { r: GoodPlacementRow }) {
     <div style={row} onClick={() => setOpen((v) => !v)}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
         <span style={{ width: 16 }}>{r.icon}</span>
-        <span style={{ flex: 1, color: "#d8e0e8" }}>{r.name}</span>
+        <span style={{ flex: 1, color: "#e7e2d9" }}>{r.name}</span>
         {flag && (
           <span style={{ ...pill, color: flag.tone, borderColor: flag.tone }}>{flag.label}</span>
         )}
         {!flag && (
-          <span style={{ fontSize: 10, color: "#7a8794" }}>
+          <span style={{ fontSize: 10, color: "#928a7c" }}>
             {/* Land share is the honest headline number: "how much of this world
                 grows it", which a raw cell count cannot convey across world sizes. */}
             {(r.land_share * 100).toFixed(r.land_share < 0.01 ? 2 : 1)}%
@@ -189,7 +189,7 @@ function Row({ r }: { r: GoodPlacementRow }) {
             {r.mean_grade > 0 && <> · mean grade {Math.round(r.mean_grade * 100)}%</>}
           </div>
           {r.notable.length > 0 && (
-            <div style={{ color: "#9fb0c0" }}>
+            <div style={{ color: "#beb3a1" }}>
               Notable: {r.notable.slice(0, 6).join(", ")}
               {r.notable.length > 6 && ` +${r.notable.length - 6} more`}
             </div>
@@ -207,33 +207,33 @@ function Row({ r }: { r: GoodPlacementRow }) {
 
 const wrap: React.CSSProperties = {
   display: "flex", flexDirection: "column", gap: 2, fontSize: 11,
-  background: "#0e1620", border: "1px solid #24313d", borderRadius: 4,
+  background: "#1e1910", border: "1px solid #3a3327", borderRadius: 4,
   padding: 8, maxHeight: "70vh", overflowY: "auto",
 };
 const header: React.CSSProperties = {
   display: "flex", alignItems: "center", justifyContent: "space-between",
-  color: "#d8e0e8", marginBottom: 4,
+  color: "#e7e2d9", marginBottom: 4,
 };
 const closeBtn: React.CSSProperties = {
-  background: "none", border: "none", color: "#7a8794", fontSize: 15, cursor: "pointer",
+  background: "none", border: "none", color: "#928a7c", fontSize: 15, cursor: "pointer",
 };
 const summary: React.CSSProperties = {
   display: "flex", gap: 10, justifyContent: "space-around",
-  padding: "6px 0", borderBottom: "1px solid #1c2733", marginBottom: 2,
+  padding: "6px 0", borderBottom: "1px solid #302a1f", marginBottom: 2,
 };
 const sectionTitle: React.CSSProperties = {
   fontSize: 10, textTransform: "uppercase", letterSpacing: 0.5,
-  color: "#7a8794", margin: "6px 0 2px",
+  color: "#928a7c", margin: "6px 0 2px",
 };
 const row: React.CSSProperties = {
-  padding: "3px 4px", borderRadius: 3, cursor: "pointer", background: "#121b25",
+  padding: "3px 4px", borderRadius: 3, cursor: "pointer", background: "#231d14",
   marginBottom: 2,
 };
 const detail: React.CSSProperties = {
-  fontSize: 10, color: "#8fa0b0", padding: "3px 0 1px 22px",
+  fontSize: 10, color: "#aea391", padding: "3px 0 1px 22px",
   display: "flex", flexDirection: "column", gap: 2,
 };
 const pill: React.CSSProperties = {
   fontSize: 9, padding: "0 4px", border: "1px solid", borderRadius: 3,
 };
-const note: React.CSSProperties = { color: "#8fa0b0", fontSize: 10, padding: "6px 2px" };
+const note: React.CSSProperties = { color: "#aea391", fontSize: 10, padding: "6px 2px" };

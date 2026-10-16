@@ -293,13 +293,13 @@ export function ProvincePanel() {
   return (
     <div style={{
       position: "absolute", top: 60, right: 60, width: 640, maxHeight: "82vh",
-      background: "#0a1620", border: "1px solid #204058", borderRadius: 10,
-      color: "#cfe3ef", font: "13px/1.4 system-ui, sans-serif", zIndex: 40,
+      background: "#1c170e", border: "1px solid #4f4129", borderRadius: 10,
+      color: "#ede3d1", font: "13px/1.4 system-ui, sans-serif", zIndex: 40,
       display: "flex", flexDirection: "column", boxShadow: "0 8px 30px rgba(0,0,0,.5)",
     }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px",
-        borderBottom: "1px solid #152535" }}>
+        borderBottom: "1px solid #312819" }}>
         <strong style={{ fontSize: 14 }}>🗺 Provinces</strong>
         <span style={{ opacity: 0.6 }}>{provinces.length}</span>
         <div style={{ flex: 1 }} />
@@ -308,7 +308,7 @@ export function ProvincePanel() {
 
       {/* Generate controls */}
       <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px",
-        borderBottom: "1px solid #152535", background: "#0c1a24" }}>
+        borderBottom: "1px solid #312819", background: "#201a10" }}>
         <label style={{ opacity: 0.8 }}>Granularity</label>
         <input type="range" min={0} max={1} step={0.05} value={granularity}
           onChange={(e) => setGranularity(parseFloat(e.target.value))} style={{ flex: 1 }} />
@@ -317,7 +317,7 @@ export function ProvincePanel() {
         </span>
         <button onClick={generate} disabled={busy || campaignActive}
           title={campaignActive ? "Locked: a campaign is running — provinces are frozen" : ""}
-          style={{ ...btn, background: busy || campaignActive ? "#1a2a38" : "#1d4d6b", opacity: campaignActive ? 0.5 : 1 }}>
+          style={{ ...btn, background: busy || campaignActive ? "#342c1e" : "#5a4a2e", opacity: campaignActive ? 0.5 : 1 }}>
           {busy ? "…" : provinces.length ? "Regenerate" : "Generate"}
         </button>
         {provinces.length > 0 && (
@@ -326,7 +326,7 @@ export function ProvincePanel() {
               : markedProvinces.length
               ? `Merge the ${markedProvinces.length} marked province(s) into their neighbours`
               : "Absorb the tiniest sliver provinces (never islands) into their largest neighbour"}
-            style={{ ...btn, background: busy || campaignActive ? "#1a2a38" : "#2a3d1d", opacity: campaignActive ? 0.5 : 1 }}>
+            style={{ ...btn, background: busy || campaignActive ? "#342c1e" : "#2a3d1d", opacity: campaignActive ? 0.5 : 1 }}>
             {markedProvinces.length ? "Merge marked" : "Merge small"}
           </button>
         )}
@@ -336,7 +336,7 @@ export function ProvincePanel() {
               : markedProvinces.length
               ? `Split the ${markedProvinces.length} marked province(s) — organic, feature-following`
               : "Split the oversized non-polar provinces (huge deserts/steppes) into smaller ones; arctic/antarctic left untouched"}
-            style={{ ...btn, background: busy || campaignActive ? "#1a2a38" : "#3d2f1d", opacity: campaignActive ? 0.5 : 1 }}>
+            style={{ ...btn, background: busy || campaignActive ? "#342c1e" : "#3d2f1d", opacity: campaignActive ? 0.5 : 1 }}>
             {markedProvinces.length ? "Split marked" : "Split large"}
           </button>
         )}
@@ -349,7 +349,7 @@ export function ProvincePanel() {
           the map (or the 📌 in a row below) to mark it; empty = affect all. */}
       {provinces.length > 0 && (
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "5px 12px",
-          borderBottom: "1px solid #152535", background: "#0c1a24", fontSize: 12 }}>
+          borderBottom: "1px solid #312819", background: "#201a10", fontSize: 12 }}>
           {markedProvinces.length ? (
             <>
               <span style={{ color: "#5adcf0" }}>◈ {markedProvinces.length} marked</span>
@@ -374,7 +374,7 @@ export function ProvincePanel() {
         <>
           {/* Filters + sort */}
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, padding: "7px 12px",
-            borderBottom: "1px solid #152535", alignItems: "center" }}>
+            borderBottom: "1px solid #312819", alignItems: "center" }}>
             <select value={cultureFilter} onChange={(e) => setCultureFilter(e.target.value)} style={sel}>
               <option value="">All cultures</option>
               {cultures.map((c) => <option key={c} value={c}>{c}</option>)}
@@ -398,14 +398,14 @@ export function ProvincePanel() {
           {/* Split: list rail + detail card */}
           <div style={{ display: "flex", minHeight: 0, flex: 1 }}>
             {/* List rail */}
-            <div style={{ width: 220, overflowY: "auto", borderRight: "1px solid #152535" }}>
+            <div style={{ width: 220, overflowY: "auto", borderRight: "1px solid #312819" }}>
               {rows.map((p) => {
                 const isSel = selected?.id === p.id;
                 const isMarked = markedProvinces.includes(p.id);
                 return (
                   <div key={p.id} onClick={() => { setSelId(p.id); setSelectedProvince(p.id); }}
                     style={{ padding: "6px 10px", cursor: "pointer", display: "flex", gap: 6, alignItems: "center",
-                      background: isSel ? "#12293a" : "transparent",
+                      background: isSel ? "#32291a" : "transparent",
                       borderLeft: isSel ? "3px solid #3d9bd4" : isMarked ? "3px solid #5adcf0" : "3px solid transparent" }}>
                     <span onClick={(e) => { e.stopPropagation(); toggleMarkedProvince(p.id); }}
                       title={isMarked ? "Marked for merge/split — click to unmark" : "Mark for merge/split"}
@@ -554,8 +554,8 @@ export function ProvincePanel() {
                       </div>
                     ))}
 
-                    <div style={{ marginTop: 12, padding: "8px 10px", background: "#0c1a24",
-                      border: "1px solid #152535", borderRadius: 6 }}>
+                    <div style={{ marginTop: 12, padding: "8px 10px", background: "#201a10",
+                      border: "1px solid #312819", borderRadius: 6 }}>
                       <div style={{ opacity: 0.8 }}>🌍 <b>Looks most like</b></div>
                       <div style={{ marginBottom: 8 }}>{selected.analog}</div>
                       <div style={{ opacity: 0.8 }}>📜 <b>History</b></div>
@@ -581,10 +581,10 @@ function Row({ k, v }: { k: string; v: string }) {
 }
 
 const btn: React.CSSProperties = {
-  background: "#152535", color: "#cfe3ef", border: "1px solid #204058",
+  background: "#312819", color: "#ede3d1", border: "1px solid #4f4129",
   borderRadius: 5, padding: "3px 9px", cursor: "pointer", fontSize: 13,
 };
 const sel: React.CSSProperties = {
-  background: "#0c1a24", color: "#cfe3ef", border: "1px solid #204058",
+  background: "#201a10", color: "#ede3d1", border: "1px solid #4f4129",
   borderRadius: 5, padding: "3px 6px", fontSize: 12,
 };

@@ -42,9 +42,9 @@ export function WindowBar() {
     <button key={c.label} onClick={() => c.set(!c.on)} title={`Toggle ${c.label}`}
       style={{
         padding: "3px 9px", borderRadius: 5, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
-        border: `1px solid ${c.on ? "#3a80c0" : "#1e2e42"}`,
-        background: c.on ? "#19324a" : "rgba(12,18,26,0.6)",
-        color: c.on ? "#cfe2f6" : "#6a86a6", fontWeight: c.on ? 600 : 400,
+        border: `1px solid ${c.on ? "#a58855" : "#3e3422"}`,
+        background: c.on ? "#413622" : "rgba(24,20,14,0.6)",
+        color: c.on ? "#cfe2f6" : "#a28f6e", fontWeight: c.on ? 600 : 400,
       }}>{c.label}</button>
   );
 
@@ -53,11 +53,11 @@ export function WindowBar() {
       position: "absolute", top: 8, left: "50%", transform: "translateX(-50%)", zIndex: 130,
       display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", justifyContent: "center",
       maxWidth: "78%", padding: "5px 8px", borderRadius: 8,
-      background: "rgba(9,14,20,0.92)", border: "1px solid #1e2e42",
+      background: "rgba(19,16,10,0.92)", border: "1px solid #3e3422",
       boxShadow: "0 6px 22px rgba(0,0,0,0.5)",
     }}>
       {chips.map(chip)}
-      <span style={{ width: 1, height: 18, background: "#24364e", margin: "0 2px" }} />
+      <span style={{ width: 1, height: 18, background: "#493d29", margin: "0 2px" }} />
       {chrome.map(chip)}
       <button onClick={hideAll} title="Hide every window, the workflow panel and the toolbar"
         style={{

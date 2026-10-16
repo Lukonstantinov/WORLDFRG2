@@ -326,7 +326,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
       background: "rgba(0,0,0,0.75)", zIndex: 100,
     }}>
       <div style={{
-        background: "#111820", border: "1px solid #1e2e42", borderRadius: 10,
+        background: "#1e1a13", border: "1px solid #3e3422", borderRadius: 10,
         padding: "24px 28px", minWidth: 380, maxHeight: "80%", overflowY: "auto",
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
       }}>
@@ -338,9 +338,9 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
             <button key={t} onClick={() => setTab(t)}
               style={{
                 flex: 1, padding: "6px 0", borderRadius: 6, cursor: "pointer", fontSize: 12,
-                border: `1px solid ${tab === t ? "#4a90d0" : "#1e2e42"}`,
-                background: tab === t ? "#16324a" : "#0d1219",
-                color: tab === t ? "#cfe2f6" : "#7090b0", fontWeight: tab === t ? 600 : 400,
+                border: `1px solid ${tab === t ? "#c09b5a" : "#3e3422"}`,
+                background: tab === t ? "#3f3421" : "#18140e",
+                color: tab === t ? "#cfe2f6" : "#ab9775", fontWeight: tab === t ? 600 : 400,
               }}>
               {t === "map" ? "Map (PNG)" : t === "layers" ? "Layers (raw)" : "Atlas (PDF)"}
             </button>
@@ -349,7 +349,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
 
         {tab === "map" ? (
           <>
-            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
+            <div style={{ color: "#907f62", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
               Captures the map exactly as shown — base layer, every visible
               overlay (rivers, cities, borders, names, trade routes…) and their
               opacity. Set up the view you want first, or pick a plate below.
@@ -370,7 +370,7 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
                 ))}
               </select>
               {activeMapTheme && (
-                <div style={{ color: "#405060", fontSize: 9, marginTop: 3 }}>
+                <div style={{ color: "#5c5344", fontSize: 9, marginTop: 3 }}>
                   Give the map a moment to finish redrawing before exporting.
                 </div>
               )}
@@ -382,15 +382,15 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
                   <button key={m} onClick={() => setResMultiplier(m)}
                     style={{
                       flex: 1, padding: "6px 0", borderRadius: 6, cursor: "pointer", fontSize: 12,
-                      border: `1px solid ${resMultiplier === m ? "#4a90d0" : "#1e2e42"}`,
-                      background: resMultiplier === m ? "#16324a" : "#0d1219",
-                      color: resMultiplier === m ? "#cfe2f6" : "#7090b0", fontWeight: resMultiplier === m ? 600 : 400,
+                      border: `1px solid ${resMultiplier === m ? "#c09b5a" : "#3e3422"}`,
+                      background: resMultiplier === m ? "#3f3421" : "#18140e",
+                      color: resMultiplier === m ? "#cfe2f6" : "#ab9775", fontWeight: resMultiplier === m ? 600 : 400,
                     }}>
                     {m}×
                   </button>
                 ))}
               </div>
-              <div style={{ color: "#405060", fontSize: 9, marginTop: 3 }}>
+              <div style={{ color: "#5c5344", fontSize: 9, marginTop: 3 }}>
                 Extra pixel density over the current view — a real re-render at
                 the higher resolution, not a stretched screenshot. Higher
                 multiples take longer and produce a larger file.
@@ -398,52 +398,52 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
             </div>
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={onClose} disabled={busy}
-                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #3e3422", background: "#18140e", color: "#ab9775", cursor: "pointer", fontSize: 13 }}>
                 Cancel
               </button>
               <button onClick={handleExportMap} disabled={busy}
-                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#463a24" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
                 {busy ? "Exporting..." : "Save Map PNG…"}
               </button>
             </div>
           </>
         ) : tab === "layers" ? (
           <>
-            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10 }}>
+            <div style={{ color: "#907f62", fontSize: 11, marginBottom: 10 }}>
               Each selected layer is saved as <code>{base}_&lt;layer&gt;.png</code> at full
               grid resolution — raw data, no overlays. Use "Map (PNG)" for a real map.
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px", marginBottom: 14 }}>
               {EXPORTABLE_LAYERS.map((l) => (
-                <label key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", padding: "2px 0" }}>
+                <label key={l.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#ccbda4", padding: "2px 0" }}>
                   <input type="checkbox" checked={selected.has(l.id)} onChange={() => toggle(l.id)}
-                    style={{ accentColor: "#4a90d0" }} />
+                    style={{ accentColor: "#c09b5a" }} />
                   {l.label}
                 </label>
               ))}
             </div>
 
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #1a2535" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#ccbda4", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #322a1d" }}>
               <input type="checkbox" checked={heightmap} onChange={() => setHeightmap((v) => !v)}
-                style={{ accentColor: "#4a90d0" }} />
+                style={{ accentColor: "#c09b5a" }} />
               16-bit grayscale heightmap (for game engines)
             </label>
 
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={onClose} disabled={busy}
-                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #3e3422", background: "#18140e", color: "#ab9775", cursor: "pointer", fontSize: 13 }}>
                 Cancel
               </button>
               <button onClick={handleExportLayers} disabled={busy || (selected.size === 0 && !heightmap)}
-                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#463a24" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
                 {busy ? "Exporting..." : "Choose Folder & Export"}
               </button>
             </div>
           </>
         ) : (
           <>
-            <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
+            <div style={{ color: "#907f62", fontSize: 11, marginBottom: 10, lineHeight: 1.4 }}>
               A multi-page PDF: one full-bleed page per selected plate (real
               vector title/caption text, no font embedding needed) plus an
               optional gazetteer listing settlements, provinces, rivers and
@@ -454,29 +454,29 @@ function ExportDialog({ name, onClose }: { name: string; onClose: () => void }) 
               <label style={dialogLabel}>Plates</label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "2px 12px", maxHeight: 160, overflowY: "auto" }}>
                 {MAP_THEMES.map((t) => (
-                  <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", padding: "2px 0" }}>
+                  <label key={t.id} style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#ccbda4", padding: "2px 0" }}>
                     <input type="checkbox" checked={atlasPlates.has(t.id)} onChange={() => toggleAtlasPlate(t.id)}
-                      style={{ accentColor: "#4a90d0" }} />
+                      style={{ accentColor: "#c09b5a" }} />
                     {t.name}
                   </label>
                 ))}
               </div>
             </div>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#a0b8d0", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #1a2535" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer", fontSize: 12, color: "#ccbda4", marginBottom: 16, paddingTop: 8, borderTop: "1px solid #322a1d" }}>
               <input type="checkbox" checked={atlasGazetteer} onChange={() => setAtlasGazetteer((v) => !v)}
-                style={{ accentColor: "#4a90d0" }} />
+                style={{ accentColor: "#c09b5a" }} />
               Gazetteer pages (settlements, provinces, rivers, lakes)
             </label>
             {atlasProgress && (
-              <div style={{ color: "#4a90d0", fontSize: 11, marginBottom: 10 }}>{atlasProgress}</div>
+              <div style={{ color: "#c09b5a", fontSize: 11, marginBottom: 10 }}>{atlasProgress}</div>
             )}
             <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
               <button onClick={onClose} disabled={busy}
-                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+                style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #3e3422", background: "#18140e", color: "#ab9775", cursor: "pointer", fontSize: 13 }}>
                 Cancel
               </button>
               <button onClick={handleExportAtlas} disabled={busy || (atlasPlates.size === 0 && !atlasGazetteer)}
-                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+                style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#463a24" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
                 {busy ? "Building..." : "Build Atlas PDF…"}
               </button>
             </div>
@@ -523,7 +523,7 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
       background: "rgba(0,0,0,0.75)", zIndex: 100,
     }}>
       <div style={{
-        background: "#111820", border: "1px solid #1e2e42",
+        background: "#1e1a13", border: "1px solid #3e3422",
         borderRadius: 10, padding: "28px 32px", minWidth: 380,
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
       }}>
@@ -548,9 +548,9 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
                 onClick={() => { setWidth(p.w); setHeight(p.h); }}
                 style={{
                   padding: "5px 12px", borderRadius: 5, cursor: "pointer", fontSize: 11,
-                  border: width === p.w && height === p.h ? "1px solid #3a7ac0" : "1px solid #1e2e42",
-                  background: width === p.w && height === p.h ? "#1a3a5a" : "#0d1219",
-                  color: width === p.w && height === p.h ? "#c0ddf0" : "#5a7090",
+                  border: width === p.w && height === p.h ? "1px solid #a58855" : "1px solid #3e3422",
+                  background: width === p.w && height === p.h ? "#4d3f27" : "#18140e",
+                  color: width === p.w && height === p.h ? "#c0ddf0" : "#897a61",
                   fontWeight: width === p.w && height === p.h ? 600 : 400,
                 }}
               >
@@ -563,7 +563,7 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
               type="number" value={width} onChange={(e) => setWidth(Number(e.target.value))}
               style={{ ...dialogInput, width: 90 }}
             />
-            <span style={{ color: "#3a5070" }}>\u00D7</span>
+            <span style={{ color: "#695a41" }}>\u00D7</span>
             <input
               type="number" value={height} onChange={(e) => setHeight(Number(e.target.value))}
               style={{ ...dialogInput, width: 90 }}
@@ -571,7 +571,7 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
           </div>
         </div>
 
-        <div style={{ color: "#3a5070", fontSize: 11, marginBottom: 18 }}>
+        <div style={{ color: "#695a41", fontSize: 11, marginBottom: 18 }}>
           {Math.ceil(width / 128)} \u00D7 {Math.ceil(height / 128)} = {Math.ceil(width / 128) * Math.ceil(height / 128)} tiles
         </div>
 
@@ -581,7 +581,7 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
           style={{
             width: "100%", padding: "10px 0", borderRadius: 6,
             border: "none", cursor: creating ? "wait" : "pointer",
-            background: creating ? "#1a3050" : "#2060a0", color: "#fff",
+            background: creating ? "#463a24" : "#2060a0", color: "#fff",
             fontSize: 14, fontWeight: 600, letterSpacing: 0.3,
             transition: "background 0.15s",
           }}
@@ -590,9 +590,9 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
         </button>
 
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "14px 0" }}>
-          <div style={{ flex: 1, height: 1, background: "#1e2e42" }} />
-          <span style={{ color: "#3a5070", fontSize: 10 }}>or</span>
-          <div style={{ flex: 1, height: 1, background: "#1e2e42" }} />
+          <div style={{ flex: 1, height: 1, background: "#3e3422" }} />
+          <span style={{ color: "#695a41", fontSize: 10 }}>or</span>
+          <div style={{ flex: 1, height: 1, background: "#3e3422" }} />
         </div>
 
         <button
@@ -600,14 +600,14 @@ function NewWorldDialog({ onCreated, onOpenExisting }: { onCreated: () => void; 
           disabled={creating}
           style={{
             width: "100%", padding: "9px 0", borderRadius: 6,
-            border: "1px solid #2a3a50", cursor: creating ? "wait" : "pointer",
-            background: "transparent", color: "#8ab0d0",
+            border: "1px solid #4b412f", cursor: creating ? "wait" : "pointer",
+            background: "transparent", color: "#cbb58f",
             fontSize: 13, fontWeight: 500,
           }}
         >
           📂 Open Existing World...
         </button>
-        <div style={{ color: "#3a5070", fontSize: 10, marginTop: 8, lineHeight: 1.4 }}>
+        <div style={{ color: "#695a41", fontSize: 10, marginTop: 8, lineHeight: 1.4 }}>
           Upload a .worldforge file saved at ANY point mid-generation — the
           Workflow panel picks up right where it left off, with completed
           steps checked and the rest ready to continue.
@@ -652,14 +652,14 @@ function NewCampaignDialog({
       }}
     >
       <div style={{
-        background: "#111820", border: "1px solid #1e2e42",
+        background: "#1e1a13", border: "1px solid #3e3422",
         borderRadius: 10, padding: "28px 32px", minWidth: 380,
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
       }}>
         <h2 style={{ margin: "0 0 8px", color: "#c0d8f0", fontSize: 18, fontWeight: 600 }}>
           New Campaign
         </h2>
-        <p style={{ margin: "0 0 20px", color: "#5a7090", fontSize: 11, lineHeight: 1.5 }}>
+        <p style={{ margin: "0 0 20px", color: "#897a61", fontSize: 11, lineHeight: 1.5 }}>
           The world's geography is kept. Settlements, economy and history start over.
         </p>
 
@@ -678,8 +678,8 @@ function NewCampaignDialog({
             onClick={onCancel}
             style={{
               flex: "0 0 auto", padding: "10px 18px", borderRadius: 6,
-              border: "1px solid #1e2e42", cursor: "pointer",
-              background: "#0d1219", color: "#5a7090", fontSize: 13,
+              border: "1px solid #3e3422", cursor: "pointer",
+              background: "#18140e", color: "#897a61", fontSize: 13,
             }}
           >
             Cancel
@@ -690,8 +690,8 @@ function NewCampaignDialog({
             style={{
               flex: 1, padding: "10px 0", borderRadius: 6,
               border: "none", cursor: trimmed ? "pointer" : "not-allowed",
-              background: trimmed ? "#2060a0" : "#1a3050",
-              color: trimmed ? "#fff" : "#54708f",
+              background: trimmed ? "#2060a0" : "#463a24",
+              color: trimmed ? "#fff" : "#88775b",
               fontSize: 14, fontWeight: 600, letterSpacing: 0.3,
               transition: "background 0.15s",
             }}
@@ -990,18 +990,18 @@ export default function App() {
   };
 
   return (
-    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#080c12" }}>
+    <div style={{ width: "100%", height: "100%", display: "flex", flexDirection: "column", background: "#110e09" }}>
       {/* Header bar */}
       <div style={{
         height: 38, display: "flex", alignItems: "center", padding: "0 12px",
-        background: "#0a0f18", borderBottom: "1px solid #1a2535",
+        background: "#16120c", borderBottom: "1px solid #322a1d",
         gap: 0, flexShrink: 0,
       }}>
-        <span style={{ fontWeight: 700, fontSize: 14, color: "#3a80c0", letterSpacing: 0.5, marginRight: 12 }}>
+        <span style={{ fontWeight: 700, fontSize: 14, color: "#a58855", letterSpacing: 0.5, marginRight: 12 }}>
           WorldForge 2
         </span>
         {meta && (
-          <span style={{ color: "#4a6080", fontSize: 12, marginRight: 16 }}>
+          <span style={{ color: "#796a51", fontSize: 12, marginRight: 16 }}>
             {meta.name}
           </span>
         )}
@@ -1010,7 +1010,7 @@ export default function App() {
             living campaign). Chronicle unlocks only once the world is finalized. */}
         {isLoaded && (
           <div style={{ display: "flex", gap: 0, marginRight: 12,
-            border: "1px solid #1e3450", borderRadius: 6, overflow: "hidden" }}>
+            border: "1px solid #493c25", borderRadius: 6, overflow: "hidden" }}>
             <button onClick={() => setAppMode("forge")} style={modeBtn(appMode === "forge")}
               title="World generation — paint & simulate the map (editable until finalized)">
               🛠 Forge
@@ -1175,31 +1175,31 @@ function parseProgress(json: string | null): number[] {
 }
 
 const dialogLabel: React.CSSProperties = {
-  color: "#5a7898", fontSize: 11, display: "block", marginBottom: 4, fontWeight: 500,
+  color: "#907f62", fontSize: 11, display: "block", marginBottom: 4, fontWeight: 500,
 };
 
 const dialogInput: React.CSSProperties = {
-  width: "100%", padding: "7px 10px", background: "#080c12",
-  border: "1px solid #1e2e42", borderRadius: 5, color: "#c0d0e0", fontSize: 13,
+  width: "100%", padding: "7px 10px", background: "#110e09",
+  border: "1px solid #3e3422", borderRadius: 5, color: "#ded4c2", fontSize: 13,
   outline: "none",
 };
 
 const headerBtn: React.CSSProperties = {
-  padding: "4px 12px", borderRadius: 4, border: "1px solid #1a2a40",
-  background: "transparent", color: "#6a8aaa", cursor: "pointer", fontSize: 11,
+  padding: "4px 12px", borderRadius: 4, border: "1px solid #3b311f",
+  background: "transparent", color: "#a5916f", cursor: "pointer", fontSize: 11,
   fontWeight: 500, transition: "background 0.1s",
 };
 // Campaign save/load — accented so they're easy to find (the user couldn't tell
 // the feature existed). Resume a campaign from the exact saved year.
 const campaignBtn: React.CSSProperties = {
-  padding: "4px 12px", borderRadius: 4, border: "1px solid #2f5a86",
-  background: "#16324a", color: "#bcd9f4", cursor: "pointer", fontSize: 11,
+  padding: "4px 12px", borderRadius: 4, border: "1px solid #77623e",
+  background: "#3f3421", color: "#bcd9f4", cursor: "pointer", fontSize: 11,
   fontWeight: 600, transition: "background 0.1s",
 };
 // Subproduct switch segment — active segment reads as a filled accent tab.
 const modeBtn = (active: boolean): React.CSSProperties => ({
   padding: "4px 12px", border: "none", cursor: "pointer", fontSize: 11,
   fontWeight: 600, transition: "background 0.1s",
-  background: active ? "#2a5a8a" : "transparent",
-  color: active ? "#eaf4ff" : "#6a8aaa",
+  background: active ? "#77623d" : "transparent",
+  color: active ? "#eaf4ff" : "#a5916f",
 });

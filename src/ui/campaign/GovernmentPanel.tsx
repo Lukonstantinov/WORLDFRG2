@@ -66,7 +66,7 @@ export function GovernmentPanel() {
                   {["Authority", "Tradition", "Openness", "Economy"].map((axis, i) => (
                     <div key={axis} style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
                       <span style={{ fontSize: 11, opacity: 0.7, width: 66 }}>{axis}</span>
-                      <Meter value={ideology.government[i] + 5} max={10} color="#7bb0d8" />
+                      <Meter value={ideology.government[i] + 5} max={10} color="#d0b483" />
                       <span style={{ fontSize: 10, opacity: 0.6 }}>{ideology.government[i].toFixed(1)}</span>
                     </div>
                   ))}

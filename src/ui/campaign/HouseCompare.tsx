@@ -38,14 +38,14 @@ function HouseSearchField({ houses, value, onPick, placeholder }:
         onChange={(e) => setQuery(e.target.value)}
         onBlur={() => setTimeout(() => setOpen(false), 150)}
         style={{
-          width: "100%", background: "#0a1119", border: "1px solid #24364e", borderRadius: 4,
+          width: "100%", background: "#17130c", border: "1px solid #493d29", borderRadius: 4,
           color: "#e8dcc0", fontSize: 12, padding: "6px 9px", fontFamily: "inherit",
         }}
       />
       {open && matches.length > 0 && (
         <div style={{
           position: "absolute", top: "100%", left: 0, right: 0, zIndex: 60, marginTop: 2,
-          background: "#0f1822", border: "1px solid #24364e", borderRadius: 4,
+          background: "#201a11", border: "1px solid #493d29", borderRadius: 4,
           maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 20px rgba(0,0,0,0.5)",
         }}>
           {matches.map((h) => (
@@ -53,13 +53,13 @@ function HouseSearchField({ houses, value, onPick, placeholder }:
               key={h.idx}
               onMouseDown={() => { onPick(h); setOpen(false); }}
               style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 9px", cursor: "pointer", fontSize: 11 }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = "#16202c")}
+              onMouseEnter={(e) => (e.currentTarget.style.background = "#292319")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
             >
               <span style={{ width: 8, height: 8, borderRadius: 2, background: h.color ?? "#888", flex: "0 0 auto" }} />
-              <span style={{ color: h.defunct ? "#5a6f82" : "#cfe0f4" }}>{h.name}{h.defunct ? " (defunct)" : ""}</span>
+              <span style={{ color: h.defunct ? "#7d725f" : "#cfe0f4" }}>{h.name}{h.defunct ? " (defunct)" : ""}</span>
               <span style={{ flex: 1 }} />
-              <span style={{ color: "#6a86a6", fontSize: 9.5 }}>{fmt(h.wealth)}</span>
+              <span style={{ color: "#a28f6e", fontSize: 9.5 }}>{fmt(h.wealth)}</span>
             </div>
           ))}
         </div>
@@ -78,11 +78,11 @@ function Row({ label, a, b, format, lowerIsBetter }:
   const bWins = lowerIsBetter ? b < a : b > a;
   const tie = a === b;
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 1fr", alignItems: "center", padding: "4px 0", borderBottom: "1px solid #16202c" }}>
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 110px 1fr", alignItems: "center", padding: "4px 0", borderBottom: "1px solid #292319" }}>
       <span style={{ textAlign: "right", fontSize: 11, color: aWins && !tie ? "#7fd0a0" : "#cfe0f4", fontWeight: aWins && !tie ? 700 : 400, fontVariantNumeric: "tabular-nums" }}>
         {f(a)}
       </span>
-      <span style={{ textAlign: "center", fontSize: 9.5, color: "#6a86a6", textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</span>
+      <span style={{ textAlign: "center", fontSize: 9.5, color: "#a28f6e", textTransform: "uppercase", letterSpacing: 0.3 }}>{label}</span>
       <span style={{ fontSize: 11, color: bWins && !tie ? "#7fd0a0" : "#cfe0f4", fontWeight: bWins && !tie ? 700 : 400, fontVariantNumeric: "tabular-nums" }}>
         {f(b)}
       </span>
@@ -100,7 +100,7 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
   const add = (p: [number, number] | undefined, kind: string, color: string, label: string, owner: 0 | 1) => {
     if (p && (p[0] !== 0 || p[1] !== 0)) points.push({ x: p[0], y: p[1], kind, color, label, owner });
   };
-  const cA = a.color ?? "#b32d2d", cB = b.color ?? "#2a5fa0";
+  const cA = a.color ?? "#b32d2d", cB = b.color ?? "#856e45";
   add(a.seat, "seat", cA, a.name, 0);
   add(b.seat, "seat", cB, b.name, 1);
   (a.offices ?? []).forEach(([nm, p]) => add(p, "office", cA, nm, 0));
@@ -137,7 +137,7 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
   }, [raster]);
 
   if (points.length === 0) {
-    return <div style={{ color: "#56708e", fontSize: 10, textAlign: "center", padding: 20 }}>No located operations to plot.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10, textAlign: "center", padding: 20 }}>No located operations to plot.</div>;
   }
 
   const seats = points.filter((p) => p.kind === "seat");
@@ -164,7 +164,7 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
     };
     return (
       <svg viewBox={`0 0 ${VBW} ${VBH}`} width="100%" height="240" preserveAspectRatio="xMidYMid meet"
-        style={{ background: "#06090d", borderRadius: 6, border: "1px solid #1c2b3c", display: "block" }}>
+        style={{ background: "#0c0a07", borderRadius: 6, border: "1px solid #382f20", display: "block" }}>
         <image href={base.url} x={0} y={0} width={VBW} height={VBH} preserveAspectRatio="none" style={{ imageRendering: "pixelated" }} />
         {spokes.map((e, i) => (
           <path key={"l" + i} d={arc(e.s, e.p)} fill="none" stroke={e.p.color} strokeWidth={VBW * 0.0018} opacity={0.5} />
@@ -173,10 +173,10 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
           <g key={i}>
             <circle cx={lx(p.x)} cy={ly(p.y)} r={rFor(p.kind)} fill={p.color}
               opacity={p.kind === "partner" ? 0.55 : p.kind === "controls" ? 0.75 : 0.95}
-              stroke={p.kind === "seat" ? "#e8dcc0" : "#06090d"} strokeWidth={p.kind === "seat" ? VBW * 0.003 : VBW * 0.001} />
+              stroke={p.kind === "seat" ? "#e8dcc0" : "#0c0a07"} strokeWidth={p.kind === "seat" ? VBW * 0.003 : VBW * 0.001} />
             {p.kind === "seat" && (
               <text x={lx(p.x) + rFor("seat") + 2} y={ly(p.y) + 3} fontSize={VBW * 0.016} fill="#eaf2fb"
-                stroke="#06090d" strokeWidth={VBW * 0.004} paintOrder="stroke">{p.label}</text>
+                stroke="#0c0a07" strokeWidth={VBW * 0.004} paintOrder="stroke">{p.label}</text>
             )}
           </g>
         ))}
@@ -195,8 +195,8 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
   const py = (y: number) => ((y - minY) / h) * VB;
   const rFor = (kind: string) => (kind === "seat" ? 6 : kind === "office" ? 4 : kind === "controls" ? 4 : 2.4);
   return (
-    <svg viewBox={`0 0 ${VB} ${VB}`} width="100%" height="220" style={{ background: "#0a1119", borderRadius: 6, border: "1px solid #1c2b3c" }}>
-      <rect x="1" y="1" width={VB - 2} height={VB - 2} fill="none" stroke="#16202c" />
+    <svg viewBox={`0 0 ${VB} ${VB}`} width="100%" height="220" style={{ background: "#17130c", borderRadius: 6, border: "1px solid #382f20" }}>
+      <rect x="1" y="1" width={VB - 2} height={VB - 2} fill="none" stroke="#292319" />
       {spokes.map((e, i) => (
         <line key={"l" + i} x1={px(e.s.x)} y1={py(e.s.y)} x2={px(e.p.x)} y2={py(e.p.y)}
           stroke={e.p.color} strokeWidth={0.6} opacity={0.28} />
@@ -220,7 +220,7 @@ function OperationsMap({ a, b }: { a: HouseBrief; b: HouseBrief }) {
 function GoodsLedger({ h }: { h: HouseBrief }) {
   const rows = h.goods_ledger ?? [];
   if (rows.length === 0) {
-    return <div style={{ color: "#56708e", fontSize: 10 }}>No trade recorded yet.</div>;
+    return <div style={{ color: "#87785d", fontSize: 10 }}>No trade recorded yet.</div>;
   }
   const bestProfit = rows.reduce((m, r) => (r.profit > m.profit ? r : m), rows[0]);
   const maxVol = Math.max(...rows.map((r) => r.volume), 1);
@@ -234,10 +234,10 @@ function GoodsLedger({ h }: { h: HouseBrief }) {
             <span style={{ width: 88, color: top ? "#e6c878" : "#cfe0f4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {clarifyGemLabel(r.good, h.gem_variety)}{top ? " ★" : ""}
             </span>
-            <div style={{ flex: 1, height: 5, background: "#0f1822", borderRadius: 3, overflow: "hidden" }}>
-              <div style={{ width: `${Math.round((r.volume / maxVol) * 100)}%`, height: "100%", background: h.color ?? "#6a86a6", opacity: 0.75 }} />
+            <div style={{ flex: 1, height: 5, background: "#201a11", borderRadius: 3, overflow: "hidden" }}>
+              <div style={{ width: `${Math.round((r.volume / maxVol) * 100)}%`, height: "100%", background: h.color ?? "#a28f6e", opacity: 0.75 }} />
             </div>
-            <span style={{ width: 46, textAlign: "right", color: "#9ab0c8", fontVariantNumeric: "tabular-nums" }}>{fmt(r.volume)}</span>
+            <span style={{ width: 46, textAlign: "right", color: "#c5b69d", fontVariantNumeric: "tabular-nums" }}>{fmt(r.volume)}</span>
             <span style={{ width: 52, textAlign: "right", color: r.profit >= 0 ? "#7fd0a0" : "#e0a09a", fontVariantNumeric: "tabular-nums" }}
               title="cumulative profit on this good">{r.profit >= 0 ? "+" : ""}{fmt(r.profit)}</span>
           </div>
@@ -287,8 +287,8 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
     return (
       <div style={{ position: "relative", width: 96, height: 218, margin: "0 auto" }}>
         <div style={{
-          width: 96, height: 218, borderRadius: 6, overflow: "hidden", background: "#0a1119",
-          border: `3px solid ${h.color ?? "#3a5570"}`,
+          width: 96, height: 218, borderRadius: 6, overflow: "hidden", background: "#17130c",
+          border: `3px solid ${h.color ?? "#695a41"}`,
           display: "flex", alignItems: "flex-end", justifyContent: "center", paddingBottom: 4,
         }}>
           <canvas ref={ref} style={{ display: "block" }} />
@@ -302,14 +302,14 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
     <div data-draggable style={{
       position: "absolute", top: 40, left: "50%", transform: "translateX(-50%)",
       width: 780, maxHeight: "88vh", overflowY: "auto",
-      background: "#0c141e", border: "1px solid #24364e", borderRadius: 8,
+      background: "#1c170e", border: "1px solid #493d29", borderRadius: 8,
       boxShadow: "0 8px 28px rgba(0,0,0,0.55)", zIndex: 50, padding: "12px 16px",
       ...rootStyle,
     }} onPointerDown={onPointerDown}>
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10, cursor: "move" }}>
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13 }}>⚖ Compare Houses</span>
         <span style={{ flex: 1 }} />
-        <span data-no-drag onClick={onClose} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
+        <span data-no-drag onClick={onClose} style={{ color: "#ab9775", cursor: "pointer", fontSize: 16, lineHeight: 1 }}>×</span>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
@@ -319,23 +319,23 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
       </div>
 
       {!a || !b ? (
-        <div style={{ color: "#56708e", fontSize: 11, textAlign: "center", padding: 30 }}>Pick two houses to compare.</div>
+        <div style={{ color: "#87785d", fontSize: 11, textAlign: "center", padding: 30 }}>Pick two houses to compare.</div>
       ) : (
         <>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginBottom: 14 }}>
             <div style={{ textAlign: "center" }}>
               <Figure h={a} />
               <div style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13, marginTop: 6 }}>{a.name}</div>
-              <div style={{ color: "#9ab0c8", fontSize: 10 }}>{a.head_name} · {a.home_name} · gen {a.generation}</div>
+              <div style={{ color: "#c5b69d", fontSize: 10 }}>{a.head_name} · {a.home_name} · gen {a.generation}</div>
             </div>
             <div style={{ textAlign: "center" }}>
               <Figure h={b} />
               <div style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13, marginTop: 6 }}>{b.name}</div>
-              <div style={{ color: "#9ab0c8", fontSize: 10 }}>{b.head_name} · {b.home_name} · gen {b.generation}</div>
+              <div style={{ color: "#c5b69d", fontSize: 10 }}>{b.head_name} · {b.home_name} · gen {b.generation}</div>
             </div>
           </div>
 
-          <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Standing</div>
+          <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, marginBottom: 4 }}>Standing</div>
           <Row label="Wealth" a={a.wealth} b={b.wealth} format={fmt} />
           <Row label="Prestige" a={a.prestige} b={b.prestige} format={(v) => v.toFixed(2)} />
           <Row label="Political power" a={a.political_power} b={b.political_power} format={(v) => v.toFixed(2)} />
@@ -343,7 +343,7 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
           <Row label="Standing score" a={a.standing ?? 0} b={b.standing ?? 0} format={(v) => v.toFixed(2)} />
           <Row label="Founded" a={-(a.founded_year ?? 0)} b={-(b.founded_year ?? 0)} format={() => `${a.founded_year ?? "—"}`} />
 
-          <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>Trade &amp; transport</div>
+          <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>Trade &amp; transport</div>
           <Row label="Trade volume" a={a.volume ?? 0} b={b.volume ?? 0} format={fmt} />
           <Row label="Fleet (sea)" a={a.fleet_sea ?? 0} b={b.fleet_sea ?? 0} format={(v) => `${v}`} />
           <Row label="Fleet (river)" a={a.fleet_river ?? 0} b={b.fleet_river ?? 0} format={(v) => `${v}`} />
@@ -352,13 +352,13 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
           <Row label="Estates" a={(a.estates ?? []).length} b={(b.estates ?? []).length} format={(v) => `${v}`} />
           <Row label="Monopolies" a={a.monopolies.length} b={b.monopolies.length} format={(v) => `${v}`} />
 
-          <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>Trading strategy</div>
+          <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>Trading strategy</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, fontSize: 10.5 }}>
             {[a, b].map((h, i) => (
               <div key={i}>
                 <div style={{ color: "#9fd0c0" }}>{h.archetype_label ?? "—"}{h.archetype_perk ? ` · ${h.archetype_perk}` : ""}</div>
-                <div style={{ color: "#7a90a8", marginTop: 3 }}>Specialises in: {h.specialties.length ? h.specialties.map((g) => clarifyGemLabel(g, h.gem_variety)).join(", ") : "—"}</div>
-                <div style={{ color: "#7a90a8", marginTop: 2 }}>Best known for: {h.top_goods.length ? h.top_goods.slice(0, 4).map((g) => clarifyGemLabel(g, h.gem_variety)).join(", ") : "—"}</div>
+                <div style={{ color: "#a5967d", marginTop: 3 }}>Specialises in: {h.specialties.length ? h.specialties.map((g) => clarifyGemLabel(g, h.gem_variety)).join(", ") : "—"}</div>
+                <div style={{ color: "#a5967d", marginTop: 2 }}>Best known for: {h.top_goods.length ? h.top_goods.slice(0, 4).map((g) => clarifyGemLabel(g, h.gem_variety)).join(", ") : "—"}</div>
                 {h.monopolies.length > 0 && (
                   <div style={{ color: "#c9a227", marginTop: 2 }}>
                     Monopolies: {h.monopolies.slice(0, 4).map(([g, s]) => `${clarifyGemLabel(g, h.gem_variety)} (${Math.round(s * 100)}%)`).join(", ")}
@@ -368,15 +368,15 @@ export function HouseCompareWindow({ houses, initialA, initialB, onClose }:
             ))}
           </div>
 
-          <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>
-            Goods traded most <span style={{ color: "#56708e", textTransform: "none", letterSpacing: 0 }}>(amount shipped · profit · ★ most profitable)</span>
+          <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>
+            Goods traded most <span style={{ color: "#87785d", textTransform: "none", letterSpacing: 0 }}>(amount shipped · profit · ★ most profitable)</span>
           </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
             <GoodsLedger h={a} />
             <GoodsLedger h={b} />
           </div>
 
-          <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>
+          <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "uppercase", letterSpacing: 0.4, margin: "10px 0 4px" }}>
             Where they operate — {a.name} <span style={{ color: a.color }}>⬤</span> vs {b.name} <span style={{ color: b.color }}>⬤</span>
           </div>
           <OperationsMap a={a} b={b} />

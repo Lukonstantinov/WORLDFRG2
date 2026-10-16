@@ -98,9 +98,9 @@ function fontKeyOf(family: string): LabelFontKey | "" {
   return hit ?? "";
 }
 
-const muted = "#6a86a6";
+const muted = "#a28f6e";
 const inputStyle: React.CSSProperties = {
-  background: "#0e1a27", color: "#cfe2f6", border: "1px solid #1e2e42",
+  background: "#231d12", color: "#cfe2f6", border: "1px solid #3e3422",
   borderRadius: 7, padding: "5px 9px", fontSize: 12,
 };
 
@@ -118,14 +118,14 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
       background: "rgba(0,0,0,0.75)", zIndex: 100,
     }} onClick={onClose}>
       <div onClick={(e) => e.stopPropagation()} style={{
-        background: "#111820", border: "1px solid #1e2e42", borderRadius: 10,
+        background: "#1e1a13", border: "1px solid #3e3422", borderRadius: 10,
         padding: "22px 26px", width: 460, maxHeight: "82%", overflowY: "auto",
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)", color: "#cfe2f6",
       }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
           <h2 style={{ margin: 0, color: "#c0d8f0", fontSize: 17, fontWeight: 600 }}>⚙ Appearance</h2>
           <span onClick={onClose} title="Close"
-            style={{ color: "#7090b0", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</span>
+            style={{ color: "#ab9775", cursor: "pointer", fontSize: 20, lineHeight: 1 }}>×</span>
         </div>
         <div style={{ color: muted, fontSize: 11, marginBottom: 12 }}>
           Restyle the map's lines and place names. Changes apply instantly, persist on
@@ -137,9 +137,9 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           {([["plates", "Map plates"], ["lines", "Overlay lines"], ["labels", "Map labels"], ["symbols", "Map symbols"]] as const).map(([id, lbl]) => (
             <button key={id} onClick={() => setTab(id)} style={{
               padding: "5px 12px", borderRadius: 7, fontSize: 12, cursor: "pointer",
-              border: `1px solid ${tab === id ? "#2c5a86" : "#1e2e42"}`,
-              background: tab === id ? "#16293c" : "#0d1219",
-              color: tab === id ? "#cfe2f6" : "#7d97b0",
+              border: `1px solid ${tab === id ? "#75613d" : "#3e3422"}`,
+              background: tab === id ? "#362c1c" : "#18140e",
+              color: tab === id ? "#cfe2f6" : "#ac9c81",
             }}>{lbl}</button>
           ))}
         </div>
@@ -161,12 +161,12 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
           <span style={{ color: muted, fontSize: 12 }}>Theme</span>
           <select value={preset in COLOR_PRESETS ? preset : "Custom"}
             onChange={(e) => { const v = e.target.value; if (v in COLOR_PRESETS) applyPreset(v as PresetKey); }}
-            style={{ background: "#0e1a27", color: "#cfe2f6", border: "1px solid #1e2e42", borderRadius: 7, padding: "5px 9px", fontSize: 12 }}>
+            style={{ background: "#231d12", color: "#cfe2f6", border: "1px solid #3e3422", borderRadius: 7, padding: "5px 9px", fontSize: 12 }}>
             {Object.keys(COLOR_PRESETS).map((p) => <option key={p} value={p}>{p}</option>)}
             {!(preset in COLOR_PRESETS) && <option value="Custom">Custom</option>}
           </select>
           <button onClick={resetAll}
-            style={{ marginLeft: "auto", padding: "5px 11px", borderRadius: 7, border: "1px solid #1e2e42", background: "#0d1219", color: "#9fb6cc", cursor: "pointer", fontSize: 12 }}>
+            style={{ marginLeft: "auto", padding: "5px 11px", borderRadius: 7, border: "1px solid #3e3422", background: "#18140e", color: "#c9bba2", cursor: "pointer", fontSize: 12 }}>
             Reset all
           </button>
         </div>
@@ -178,13 +178,13 @@ export function SettingsPanel({ onClose }: { onClose: () => void }) {
               const hex = lineColors[k];
               const changed = hex !== LINE_COLOR_DEFAULTS[k];
               return (
-                <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "1px solid #14222f" }}>
+                <div key={k} style={{ display: "flex", alignItems: "center", gap: 10, padding: "5px 0", borderBottom: "1px solid #2c2417" }}>
                   <span style={{ flex: 1, fontSize: 12.5 }}>{label}</span>
                   <span style={{ fontFamily: "ui-monospace, monospace", fontSize: 11, color: muted, width: 64 }}>{hex}</span>
                   <input type="color" value={hex} onChange={(e) => setLineColor(k, e.target.value)}
-                    style={{ width: 30, height: 24, border: "1px solid #1e2e42", borderRadius: 5, background: "none", padding: 0, cursor: "pointer" }} />
+                    style={{ width: 30, height: 24, border: "1px solid #3e3422", borderRadius: 5, background: "none", padding: 0, cursor: "pointer" }} />
                   <span onClick={() => resetLineColor(k)} title="Reset to default"
-                    style={{ width: 16, textAlign: "center", cursor: "pointer", fontSize: 14, color: changed ? "#9fb6cc" : "#2c4055" }}>↺</span>
+                    style={{ width: 16, textAlign: "center", cursor: "pointer", fontSize: 14, color: changed ? "#c9bba2" : "#504531" }}>↺</span>
                 </div>
               );
             })}
@@ -227,26 +227,26 @@ function PlateSection() {
               display: "flex", gap: 10, alignItems: "flex-start",
               padding: "9px 10px", marginBottom: 5, borderRadius: 8,
               cursor: ready ? "pointer" : "not-allowed",
-              border: `1px solid ${on ? "#2c5a86" : "#17222f"}`,
-              background: on ? "#16293c" : "#0d1219",
+              border: `1px solid ${on ? "#75613d" : "#2c251a"}`,
+              background: on ? "#362c1c" : "#18140e",
               opacity: ready ? 1 : 0.5,
             }}
           >
             <span style={{
               width: 26, height: 26, flex: "0 0 auto", borderRadius: 6,
               display: "flex", alignItems: "center", justifyContent: "center",
-              fontSize: 14, background: on ? "#1e3a58" : "#111b26",
-              border: `1px solid ${on ? "#3c6f9e" : "#1c2836"}`,
-              color: on ? "#cfe2f6" : "#6a86a6",
+              fontSize: 14, background: on ? "#4e4028" : "#231e14",
+              border: `1px solid ${on ? "#90764a" : "#332c1f"}`,
+              color: on ? "#cfe2f6" : "#a28f6e",
             }}>{t.glyph}</span>
             <div style={{ minWidth: 0, flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "#cfe2f6" : "#a8bed4" }}>
+              <div style={{ fontSize: 13, fontWeight: on ? 600 : 500, color: on ? "#cfe2f6" : "#d1c3ab" }}>
                 {t.name}
               </div>
               <div style={{ fontSize: 11, color: muted, lineHeight: 1.45, marginTop: 1 }}>
                 {t.blurb}
               </div>
-              <div style={{ fontSize: 10, color: "#4d6480", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
+              <div style={{ fontSize: 10, color: "#7a6c53", marginTop: 4, fontFamily: "ui-monospace, monospace" }}>
                 {ready
                   ? `${t.overlays.length} overlays${t.labelTheme ? ` · ${t.labelTheme} labels` : ""}`
                   : `needs step ${t.requires}`}
@@ -284,7 +284,7 @@ function LabelSection({
           {!known && <option value="Custom">Custom</option>}
         </select>
         <button onClick={resetLabels}
-          style={{ marginLeft: "auto", padding: "5px 11px", borderRadius: 7, border: "1px solid #1e2e42", background: "#0d1219", color: "#9fb6cc", cursor: "pointer", fontSize: 12 }}>
+          style={{ marginLeft: "auto", padding: "5px 11px", borderRadius: 7, border: "1px solid #3e3422", background: "#18140e", color: "#c9bba2", cursor: "pointer", fontSize: 12 }}>
           Reset labels
         </button>
       </div>
@@ -302,7 +302,7 @@ function LabelSection({
             const d = LABEL_STYLE_DEFAULTS[k];
             const changed = (Object.keys(d) as (keyof typeof d)[]).some((f) => st[f] !== d[f]);
             return (
-              <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #14222f" }}>
+              <div key={k} style={{ display: "flex", alignItems: "center", gap: 8, padding: "6px 0", borderBottom: "1px solid #2c2417" }}>
                 {/* Live specimen — the class's own name, in the class's own style. */}
                 <span style={{
                   flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis",
@@ -322,9 +322,9 @@ function LabelSection({
                   ))}
                 </select>
                 <input type="color" value={st.color} onChange={(e) => setLabelStyle(k, { color: e.target.value })}
-                  style={{ width: 30, height: 24, border: "1px solid #1e2e42", borderRadius: 5, background: "none", padding: 0, cursor: "pointer" }} />
+                  style={{ width: 30, height: 24, border: "1px solid #3e3422", borderRadius: 5, background: "none", padding: 0, cursor: "pointer" }} />
                 <span onClick={() => resetLabelStyle(k)} title="Reset to default"
-                  style={{ width: 16, textAlign: "center", cursor: "pointer", fontSize: 14, color: changed ? "#9fb6cc" : "#2c4055" }}>↺</span>
+                  style={{ width: 16, textAlign: "center", cursor: "pointer", fontSize: 14, color: changed ? "#c9bba2" : "#504531" }}>↺</span>
               </div>
             );
           })}
@@ -392,7 +392,7 @@ function SymbolSection({
           shape, a river's weight rule, a lake's fill, a border's line.
         </div>
         <button onClick={resetSymbolStyles}
-          style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid #1e2e42", background: "#0d1219", color: "#9fb6cc", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
+          style={{ padding: "5px 11px", borderRadius: 7, border: "1px solid #3e3422", background: "#18140e", color: "#c9bba2", cursor: "pointer", fontSize: 12, whiteSpace: "nowrap" }}>
           Reset symbols
         </button>
       </div>
@@ -406,14 +406,14 @@ function SymbolSection({
                 <label key={c.value} style={{
                   display: "flex", alignItems: "flex-start", gap: 8, padding: "6px 8px",
                   borderRadius: 7, cursor: "pointer",
-                  border: `1px solid ${active ? "#2c5a86" : "#1e2e42"}`,
-                  background: active ? "#16293c" : "transparent",
+                  border: `1px solid ${active ? "#75613d" : "#3e3422"}`,
+                  background: active ? "#362c1c" : "transparent",
                 }}>
                   <input type="radio" name={`symbol-${cat.key}`} checked={active}
                     onChange={() => setSymbolStyle(cat.key, c.value as never)}
                     style={{ marginTop: 3 }} />
                   <div>
-                    <div style={{ fontSize: 12.5, color: active ? "#cfe2f6" : "#a0b8d0" }}>{c.label}</div>
+                    <div style={{ fontSize: 12.5, color: active ? "#cfe2f6" : "#ccbda4" }}>{c.label}</div>
                     <div style={{ fontSize: 10.5, color: muted, lineHeight: 1.4 }}>{c.blurb}</div>
                   </div>
                 </label>

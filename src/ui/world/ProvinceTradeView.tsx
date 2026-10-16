@@ -21,7 +21,7 @@ import type { ProvinceTrade } from "@types";
  *  province where nothing has moved yet. */
 
 const CIVIC = "#c7a24a";   // a guild slice — civic gold, distinct from any house hue
-const OTHERS = "#5b6b7d";  // the long-tail aggregate
+const OTHERS = "#796f5f";  // the long-tail aggregate
 
 /** Deterministic fallback hue for a city name (cities have no heraldic colour). */
 function cityColor(s: string): string {
@@ -54,10 +54,10 @@ function Donut({ slices, size = 104 }: { slices: Slice[]; size?: number }) {
         {arcs.length <= 1 ? (
           <>
             <circle cx={cx} cy={cy} r={r} fill={arcs[0].color} stroke={arcs[0].ring ? "#ffe08a" : "none"} strokeWidth={arcs[0].ring ? 2.5 : 0} />
-            <circle cx={cx} cy={cy} r={ir} fill="#0a1018" />
+            <circle cx={cx} cy={cy} r={ir} fill="#16120c" />
           </>
         ) : arcs.map((a, i) => (
-          <path key={i} d={a.d} fill={a.color} stroke={a.ring ? "#ffe08a" : "#0a1018"} strokeWidth={a.ring ? 2.5 : 1} />
+          <path key={i} d={a.d} fill={a.color} stroke={a.ring ? "#ffe08a" : "#16120c"} strokeWidth={a.ring ? 2.5 : 1} />
         ))}
       </svg>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
@@ -67,7 +67,7 @@ function Donut({ slices, size = 104 }: { slices: Slice[]; size?: number }) {
             <span style={{ flex: 1, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {a.name}{a.sub ? <span style={{ opacity: 0.55 }}> · {a.sub}</span> : null}
             </span>
-            <span style={{ color: "#9ab0c8" }}>{a.pct}%</span>
+            <span style={{ color: "#c5b69d" }}>{a.pct}%</span>
           </div>
         ))}
       </div>
@@ -119,10 +119,10 @@ export function ProvinceTradeView({ provinceId, reload }: { provinceId: number; 
         <span style={{ flex: 1, minWidth: 0, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {def?.label ?? `good ${g.good}`}
         </span>
-        <span style={{ flex: "0 0 auto", width: 70, height: 5, background: "#182534", borderRadius: 3, overflow: "hidden" }}>
-          <span style={{ display: "block", height: "100%", width: `${denom > 0 ? Math.round((g.amount / denom) * 100) : 0}%`, background: def?.color ?? "#6d88a8" }} />
+        <span style={{ flex: "0 0 auto", width: 70, height: 5, background: "#30291c", borderRadius: 3, overflow: "hidden" }}>
+          <span style={{ display: "block", height: "100%", width: `${denom > 0 ? Math.round((g.amount / denom) * 100) : 0}%`, background: def?.color ?? "#a49171" }} />
         </span>
-        <span style={{ flex: "0 0 auto", width: 44, textAlign: "right", color: "#9ab0c8" }}>{fmt(g.amount)}</span>
+        <span style={{ flex: "0 0 auto", width: 44, textAlign: "right", color: "#c5b69d" }}>{fmt(g.amount)}</span>
       </div>
     );
   };

@@ -1142,7 +1142,7 @@ export function FlowsView({ hubId, active, tick, setFlowHighlight, tariffIncome 
                               flex: 1, minWidth: 60, color: c.house < 0 ? T.inkDim : T.ink,
                               fontSize: FZ.tiny, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                             }}>{c.name}</span>
-                            <Meter value={c.pct} max={100} color={c.is_guild ? "#7fb2d8" : "#c99a3a"} height={5} />
+                            <Meter value={c.pct} max={100} color={c.is_guild ? "#d1b686" : "#c99a3a"} height={5} />
                             <span style={{ width: 34, textAlign: "right", color: T.inkMid, fontSize: FZ.tiny }}>
                               {c.pct.toFixed(0)}%
                             </span>

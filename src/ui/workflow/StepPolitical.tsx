@@ -70,10 +70,10 @@ export function StepPolitical(_props: Props) {
           {centers.slice(0, 14).map((c) => (
             <div key={c.rank} style={{
               display: "flex", justifyContent: "space-between", alignItems: "center",
-              fontSize: 10, padding: "2px 4px", borderBottom: "1px solid #14202e", color: "#a8c0d8",
+              fontSize: 10, padding: "2px 4px", borderBottom: "1px solid #2b2417", color: "#d4c5ac",
             }}>
               <span>#{c.rank + 1}</span>
-              <span style={{ color: "#8aa0c0" }}>power {c.power.toFixed(2)}</span>
+              <span style={{ color: "#bcab8e" }}>power {c.power.toFixed(2)}</span>
               <span style={{ minWidth: 70, textAlign: "right" }}>
                 {c.monopolies.slice(0, 4).map((m) => emojiFor(m))}
               </span>
@@ -82,7 +82,7 @@ export function StepPolitical(_props: Props) {
         </div>
       )}
 
-      <div style={{ color: "#405060", fontSize: 10, marginTop: 2 }}>
+      <div style={{ color: "#5c5344", fontSize: 10, marginTop: 2 }}>
         Re-ranks settlements by <b>trade power</b> = base habitability + route
         centrality + good monopoly. Bigger magenta discs = greater influence.
         Monopolized goods (shown as emoji) come from being the sole producer of a

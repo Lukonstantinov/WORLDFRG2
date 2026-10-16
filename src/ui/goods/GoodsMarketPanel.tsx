@@ -103,7 +103,7 @@ export function GoodsMarketPanel() {
                 <div style={{ ...row, cursor: "pointer" }} onClick={() => toggleRow(g.good)} title="Click to see the grade-by-grade breakdown">
                   <span style={{ flex: "0 0 150px", color: T.parchment, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     <span style={{ color: T.inkDim, fontSize: FZ.tiny }}>{g.grades.length > 1 ? (isOpen ? "▾ " : "▸ ") : "  "}</span>
-                    <GoodIcon name={g.good} size={16} style={{ display: "inline-block", verticalAlign: "-3px", marginRight: 4 }} /> {label(g.good)}{g.manufactured ? <span title="manufactured" style={{ color: "#7fa0c0" }}> ⚒</span> : null}
+                    <GoodIcon name={g.good} size={16} style={{ display: "inline-block", verticalAlign: "-3px", marginRight: 4 }} /> {label(g.good)}{g.manufactured ? <span title="manufactured" style={{ color: "#bba784" }}> ⚒</span> : null}
                   </span>
                   <span style={{ flex: 1, display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
                     <span style={{ width: 90, height: 8, background: T.raised, borderRadius: 3, overflow: "hidden", flex: "0 0 auto" }}>

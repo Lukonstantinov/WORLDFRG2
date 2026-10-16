@@ -70,10 +70,10 @@ export function CultureDonut({ majority, minorities, size = 92 }: {
       <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} style={{ flex: "0 0 auto" }}>
         {arcs.length <= 1 ? (
           <>
-            <circle cx={cx} cy={cy} r={r} fill={arcs[0]?.color ?? "#39506a"} />
-            <circle cx={cx} cy={cy} r={ir} fill="#0a1018" />
+            <circle cx={cx} cy={cy} r={r} fill={arcs[0]?.color ?? "#64563f"} />
+            <circle cx={cx} cy={cy} r={ir} fill="#16120c" />
           </>
-        ) : arcs.map((a, i) => <path key={i} d={a.d} fill={a.color} stroke="#0a1018" strokeWidth={1} />)}
+        ) : arcs.map((a, i) => <path key={i} d={a.d} fill={a.color} stroke="#16120c" strokeWidth={1} />)}
       </svg>
       <div style={{ flex: 1, minWidth: 0, display: "flex", flexDirection: "column", gap: 2 }}>
         {arcs.map((a, i) => (
@@ -82,7 +82,7 @@ export function CultureDonut({ majority, minorities, size = 92 }: {
             <span style={{ flex: 1, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {a.name}{a.major ? " · majority" : ""}
             </span>
-            <span style={{ color: "#9ab0c8" }}>{a.pct}%</span>
+            <span style={{ color: "#c5b69d" }}>{a.pct}%</span>
           </div>
         ))}
       </div>

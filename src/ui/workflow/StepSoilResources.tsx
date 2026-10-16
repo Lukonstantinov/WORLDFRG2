@@ -124,18 +124,18 @@ export function StepSoilResources({ invalidateTiles }: Props) {
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Biomes</button>
       </div>
 
-      <div style={{ color: "#405060", fontSize: 10 }}>
+      <div style={{ color: "#5c5344", fontSize: 10 }}>
         Soil types derived from K{"ö"}ppen climate. Fertility = soil (30%) + precipitation (20%)
         + temperature (15%) + river proximity (20%) + coast (10%) + volcanic (5%).
         Fisheries from upwelling zones + river mouths.
       </div>
 
       {/* ── Biomes (phase 6b) ── */}
-      <div style={{ background: "#0a1018", border: "1px solid #223c30", borderRadius: 4, padding: 6, marginTop: 2 }}>
+      <div style={{ background: "#16120c", border: "1px solid #223c30", borderRadius: 4, padding: 6, marginTop: 2 }}>
         <div style={{ color: "#6ab08a", fontSize: 10, fontWeight: 600, marginBottom: 4 }}>
           🌿 Biomes
         </div>
-        <div style={{ color: "#506880", fontSize: 9, lineHeight: 1.4, marginBottom: 5 }}>
+        <div style={{ color: "#7a6d56", fontSize: 9, lineHeight: 1.4, marginBottom: 5 }}>
           41 ecological biomes from biotemperature (heat plants can actually use)
           × the potential-evapotranspiration ratio × K{"ö"}ppen's seasonality,
           then overridden by local water: mangrove and salt marsh on tidal
@@ -162,14 +162,14 @@ export function StepSoilResources({ invalidateTiles }: Props) {
         {showLegend && (
           <div style={{ marginTop: 5, maxHeight: 260, overflowY: "auto" }}>
             {totalCells === 0 && (
-              <div style={{ color: "#506880", fontSize: 9 }}>
+              <div style={{ color: "#7a6d56", fontSize: 9 }}>
                 No biomes classified yet — run the step above.
               </div>
             )}
             {Object.entries(grouped).map(([group, items]) => (
               <div key={group} style={{ marginBottom: 4 }}>
                 <div style={{
-                  fontSize: 9, color: "#3a5e70", textTransform: "uppercase",
+                  fontSize: 9, color: "#695a41", textTransform: "uppercase",
                   letterSpacing: 0.6, marginBottom: 2,
                 }}>
                   {group}
@@ -181,8 +181,8 @@ export function StepSoilResources({ invalidateTiles }: Props) {
                       background: biomeSwatch(b.code),
                       border: "1px solid #00000060",
                     }} />
-                    <span style={{ color: "#7f95ad", fontSize: 10, flex: 1 }}>{b.name}</span>
-                    <span style={{ color: "#4a6076", fontSize: 9, fontFamily: "monospace" }}>
+                    <span style={{ color: "#aa9b82", fontSize: 10, flex: 1 }}>{b.name}</span>
+                    <span style={{ color: "#706450", fontSize: 9, fontFamily: "monospace" }}>
                       {((b.cells / totalCells) * 100).toFixed(1)}%
                     </span>
                   </div>

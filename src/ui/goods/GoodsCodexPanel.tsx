@@ -128,7 +128,7 @@ export function GoodsCodexPanel() {
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>📖 Goods Codex</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={close}>✕</span>
       </div>
 
       {/* Picker: search + select + prev/next */}
@@ -152,7 +152,7 @@ export function GoodsCodexPanel() {
           : <span style={{ fontSize: 30, lineHeight: 1 }}>📦</span>}
         <div style={{ minWidth: 0 }}>
           <div style={{ color: "#eaf2fb", fontWeight: 700, fontSize: 15 }}>{m?.name ?? "—"}</div>
-          <div style={{ color: "#6a86a6", fontSize: 9.5, textTransform: "capitalize" }}>{subtitle}</div>
+          <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "capitalize" }}>{subtitle}</div>
         </div>
         <span style={{ flex: 1 }} />
         <span style={{ ...badge, color: scar.color, background: scar.bg, borderColor: scar.color + "55" }}>{scar.label}</span>
@@ -195,11 +195,11 @@ export function GoodsCodexPanel() {
       )}
 
       {/* Tabs */}
-      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #1e2e42" }}>
+      <div style={{ display: "flex", gap: 2, padding: "0 8px", borderBottom: "1px solid #3e3422" }}>
         {([["overview", "Overview"], ["places", "Places"], ["markets", "Markets"], ["story", "Story"]] as const).map(([id, lbl]) => (
           <div key={id} onClick={() => setTab(id)}
             style={{ padding: "5px 10px", cursor: "pointer", fontSize: 11, fontWeight: tab === id ? 700 : 400,
-              color: tab === id ? "#cfe2f6" : "#6a86a6",
+              color: tab === id ? "#cfe2f6" : "#a28f6e",
               borderBottom: tab === id ? "2px solid #6a9adf" : "2px solid transparent" }}>
             {lbl}
           </div>
@@ -265,12 +265,12 @@ export function GoodsCodexPanel() {
                     atlas.flows.slice(0, 10).map((f, i) => (
                       <div key={i} style={rankRow}>
                         <span style={ellip}>{hubName(f.from)} → {hubName(f.to)}</span>
-                        <span style={{ color: "#8aa8c8" }}>{fmtn(f.amount)}</span>
+                        <span style={{ color: "#c3b08f" }}>{fmtn(f.amount)}</span>
                       </div>
                     ))}
                 </>
               )}
-              <div style={{ color: "#5a6a80", fontSize: 9, marginTop: 8 }}>
+              <div style={{ color: "#7b715f", fontSize: 9, marginTop: 8 }}>
                 Toggle ⭐ Quality / 🔀 Flow above to paint the map. Click a city to fly there.
               </div>
               {flowOn && codexGood && (() => {
@@ -278,11 +278,11 @@ export function GoodsCodexPanel() {
                 const effective = goodFlowColorGlobal ?? goodFlowColors[codexGood] ?? def?.color ?? "#e0b24a";
                 return (
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
-                    <span style={{ color: "#8aa0b8", fontSize: 10 }}>Lane colour</span>
+                    <span style={{ color: "#b5a68d", fontSize: 10 }}>Lane colour</span>
                     <input type="color" value={effective} disabled={!!goodFlowColorGlobal}
                       onChange={(e) => setGoodFlowColor(codexGood, e.target.value)}
-                      style={{ width: 30, height: 20, padding: 0, border: "1px solid #2a3a4a", borderRadius: 4, background: "none" }} />
-                    <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9.5, color: "#8aa0b8" }}>
+                      style={{ width: 30, height: 20, padding: 0, border: "1px solid #463d2e", borderRadius: 4, background: "none" }} />
+                    <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9.5, color: "#b5a68d" }}>
                       <input type="checkbox" checked={!!goodFlowColorGlobal}
                         onChange={(e) => setGoodFlowColorGlobal(e.target.checked ? effective : null)} /> same for all
                     </label>
@@ -304,7 +304,7 @@ export function GoodsCodexPanel() {
                   <span style={{ flex: 1 }} />
                   <span style={{ color: lg.world_price >= 1.3 ? "#e08080" : lg.world_price <= 0.77 ? "#7fd0a0" : "#cfe2f6", fontWeight: 700, fontSize: 12 }}>{lg.world_price.toFixed(2)}×</span>
                 </div>
-                <div style={{ color: "#8aa0b8", fontSize: 9.5, marginTop: 2 }}>
+                <div style={{ color: "#b5a68d", fontSize: 9.5, marginTop: 2 }}>
                   {lg.producers} producing {lg.producers === 1 ? "city" : "cities"}{lg.top_hub ? <> · top: <span style={{ color: "#cfe2f6" }}>{lg.top_hub}</span></> : null}
                 </div>
               </div>
@@ -330,7 +330,7 @@ export function GoodsCodexPanel() {
                 </div>
               </div>
             )}
-            <div style={{ color: "#5a6a80", fontSize: 9, marginTop: 8 }}>Premium = local price ÷ base value. A merchant buys cheap and carries to the dear markets.</div>
+            <div style={{ color: "#7b715f", fontSize: 9, marginTop: 8 }}>Premium = local price ÷ base value. A merchant buys cheap and carries to the dear markets.</div>
           </>
         )}
 
@@ -357,12 +357,12 @@ export function GoodsCodexPanel() {
                 <div key={r.id} style={routeCard}>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                     <span style={{ color: "#7fd0a0", fontWeight: 600, fontSize: 11 }}>{hubName(first?.hub)}</span>
-                    <span style={{ color: "#5a6a80" }}>→</span>
+                    <span style={{ color: "#7b715f" }}>→</span>
                     <span style={{ color: "#ff9a6a", fontWeight: 600, fontSize: 11 }}>{hubName(last?.hub)}</span>
                     <span style={{ flex: 1 }} />
-                    <span style={{ color: "#8aa8c8", fontSize: 9 }}>{Math.round(r.km)} km · {r.days.toFixed(0)}d</span>
+                    <span style={{ color: "#c3b08f", fontSize: 9 }}>{Math.round(r.km)} km · {r.days.toFixed(0)}d</span>
                   </div>
-                  <div style={{ color: "#9ab0c8", fontSize: 9, marginTop: 2 }}>{r.stops.map((s) => hubName(s.hub)).join(" → ")}</div>
+                  <div style={{ color: "#c5b69d", fontSize: 9, marginTop: 2 }}>{r.stops.map((s) => hubName(s.hub)).join(" → ")}</div>
                 </div>
               );
             })}
@@ -385,18 +385,18 @@ const fmtn = (n: number) => Math.round(n).toLocaleString();
 
 function scarcity(price: number | null, producing?: number): { label: string; color: string; bg: string } {
   if (producing === 0) return { label: "ABSENT", color: "#ff8a8a", bg: "#2e1414" };
-  if (price == null) return { label: "—", color: "#8aa0b8", bg: "#0c1622" };
+  if (price == null) return { label: "—", color: "#b5a68d", bg: "#1e1910" };
   if (price >= 1.5) return { label: "VERY SCARCE", color: "#ff9a6a", bg: "#2e1a10" };
   if (price >= 1.2) return { label: "SCARCE", color: "#e0b060", bg: "#241f10" };
   if (price <= 0.8) return { label: "ABUNDANT", color: "#7fd0a0", bg: "#0e2418" };
-  return { label: "NORMAL", color: "#9ab0c8", bg: "#0c1622" };
+  return { label: "NORMAL", color: "#c5b69d", bg: "#1e1910" };
 }
 
 function Vital({ label, value, color = "#cfe2f6" }: { label: string; value: string; color?: string }) {
   return (
-    <div style={{ flex: 1, background: "#0c1622", border: "1px solid #16283c", borderRadius: 5, padding: "4px 5px", minWidth: 0 }}>
+    <div style={{ flex: 1, background: "#1e1910", border: "1px solid #362c1c", borderRadius: 5, padding: "4px 5px", minWidth: 0 }}>
       <div style={{ color, fontWeight: 700, fontSize: 12.5, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{value}</div>
-      <div style={{ color: "#6a86a6", fontSize: 8, whiteSpace: "nowrap" }}>{label}</div>
+      <div style={{ color: "#a28f6e", fontSize: 8, whiteSpace: "nowrap" }}>{label}</div>
     </div>
   );
 }
@@ -404,13 +404,13 @@ function Vital({ label, value, color = "#cfe2f6" }: { label: string; value: stri
 function Banner({ tone, text, action }: { tone: "info" | "warn"; text: string; action?: { label: string; onClick: () => void } }) {
   const c = tone === "warn"
     ? { bg: "rgba(224,150,80,0.10)", bd: "rgba(224,150,80,0.35)", fg: "#f0cfa4" }
-    : { bg: "rgba(90,140,220,0.08)", bd: "rgba(90,140,220,0.25)", fg: "#a9c4e6" };
+    : { bg: "rgba(90,140,220,0.08)", bd: "rgba(90,140,220,0.25)", fg: "#e0ceaf" };
   return (
     <div style={{ margin: "0 10px 8px", padding: "6px 8px", background: c.bg, border: `1px solid ${c.bd}`, borderRadius: 6 }}>
       <div style={{ fontSize: 10.5, color: c.fg, lineHeight: 1.45 }}>{tone === "warn" ? "⚠ " : "ℹ "}{text}</div>
       {action && (
         <button data-no-drag onClick={action.onClick}
-          style={{ marginTop: 5, padding: "3px 8px", fontSize: 10, borderRadius: 4, cursor: "pointer", border: "1px solid #2a4a6a", background: "#123", color: "#bcd8f4" }}>
+          style={{ marginTop: 5, padding: "3px 8px", fontSize: 10, borderRadius: 4, cursor: "pointer", border: "1px solid #625032", background: "#2d2517", color: "#bcd8f4" }}>
           {action.label}
         </button>
       )}
@@ -422,8 +422,8 @@ function Chip({ on, onClick, children }: { on: boolean; onClick: () => void; chi
   return (
     <button data-no-drag onClick={onClick} style={{
       padding: "3px 9px", borderRadius: 12, fontSize: 10, cursor: "pointer", whiteSpace: "nowrap",
-      border: `1px solid ${on ? "#5a9adf" : "#1e2e42"}`, background: on ? "#12314e" : "transparent",
-      color: on ? "#cfe6ff" : "#6a86a6", fontWeight: on ? 700 : 400,
+      border: `1px solid ${on ? "#5a9adf" : "#3e3422"}`, background: on ? "#12314e" : "transparent",
+      color: on ? "#cfe6ff" : "#a28f6e", fontWeight: on ? 700 : 400,
     }}>{children}</button>
   );
 }
@@ -439,7 +439,7 @@ function QualityHist({ hist }: { hist: number[] }) {
             style={{ flex: 1, height: `${(c / mx) * 100}%`, minHeight: c > 0 ? 2 : 0, background: `hsl(${140 - i * 11} 55% 50%)`, borderRadius: 1 }} />
         ))}
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#5a6a80" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8, color: "#7b715f" }}>
         <span>coarse</span><span>ordinary</span><span>good</span><span>fine</span><span>exquisite</span>
       </div>
       {total === 0 && <div style={empty}>—</div>}
@@ -454,13 +454,13 @@ function ChipRow({ label, items, meta, onPick }: {
   if (items.length === 0) return null;
   return (
     <div style={{ margin: "3px 0" }}>
-      {label && <span style={{ color: "#6a86a6", fontSize: 9, marginRight: 6 }}>{label}</span>}
+      {label && <span style={{ color: "#a28f6e", fontSize: 9, marginRight: 6 }}>{label}</span>}
       <span style={{ display: "inline-flex", flexWrap: "wrap", gap: 5 }}>
         {items.map((it) => (
           <button key={it.id} data-no-drag onClick={() => onPick(it.id)}
             style={{ ...tag, display: "inline-flex", alignItems: "center", gap: 4 }} title="Trace this good">
             <GoodIcon name={it.id} size={16} />
-            {meta(it.id).name}{it.qty != null ? <span style={{ color: "#7fa0c0", marginLeft: 3 }}>×{it.qty}</span> : null}
+            {meta(it.id).name}{it.qty != null ? <span style={{ color: "#bba784", marginLeft: 3 }}>×{it.qty}</span> : null}
           </button>
         ))}
       </span>
@@ -477,11 +477,11 @@ function AtlasBars({ rows, color, fmt, norm }: {
     <div>
       {rows.slice(0, 8).map((r, i) => (
         <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, padding: "1.5px 0" }}>
-          <span style={{ width: 92, fontSize: 9.5, color: "#bcd0e4", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
-          <div style={{ flex: 1, height: 8, background: "#0c1622", borderRadius: 3, overflow: "hidden" }}>
+          <span style={{ width: 92, fontSize: 9.5, color: "#e1d5bf", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r.label}</span>
+          <div style={{ flex: 1, height: 8, background: "#1e1910", borderRadius: 3, overflow: "hidden" }}>
             <div style={{ width: `${Math.min(100, (r.value / mx) * 100)}%`, height: "100%", background: color, borderRadius: 3 }} />
           </div>
-          <span style={{ width: 46, textAlign: "right", fontSize: 9, color: "#8aa0b8" }}>{fmt(r.value)}</span>
+          <span style={{ width: 46, textAlign: "right", fontSize: 9, color: "#b5a68d" }}>{fmt(r.value)}</span>
         </div>
       ))}
     </div>
@@ -493,34 +493,34 @@ const GRADES = ["coarse", "ordinary", "good", "fine", "exquisite"];
 const panel: React.CSSProperties = {
   position: "absolute", top: 60, left: 70, width: 360, maxHeight: "84vh",
   display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
+  background: "#1c170e", border: "1px solid #493c25", borderRadius: 8,
   boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
 };
 const headerBase: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e", color: "#cfe0f4", fontWeight: 700, fontSize: 12,
+  padding: "8px 10px", borderBottom: "1px solid #3a301e", color: "#cfe0f4", fontWeight: 700, fontSize: 12,
 };
 const header = headerBase;
 const search: React.CSSProperties = {
-  width: 110, background: "#080c12", border: "1px solid #1e2e42", color: "#cfe0f4",
+  width: 110, background: "#110e09", border: "1px solid #3e3422", color: "#cfe0f4",
   padding: "3px 6px", borderRadius: 4, fontSize: 10.5,
 };
 const select: React.CSSProperties = {
-  flex: 1, background: "#080c12", border: "1px solid #1e2e42", color: "#cfe0f4",
+  flex: 1, background: "#110e09", border: "1px solid #3e3422", color: "#cfe0f4",
   padding: "3px 5px", borderRadius: 4, fontSize: 11, minWidth: 0,
 };
 const navBtn: React.CSSProperties = {
-  background: "#0c1622", border: "1px solid #1e2e42", color: "#8aa8c8",
+  background: "#1e1910", border: "1px solid #3e3422", color: "#c3b08f",
   borderRadius: 4, padding: "3px 6px", fontSize: 10, cursor: "pointer",
 };
 const badge: React.CSSProperties = {
   fontSize: 9, fontWeight: 700, letterSpacing: 0.4, padding: "2px 7px", borderRadius: 10, border: "1px solid",
 };
-const sectionHdr: React.CSSProperties = { color: "#8aa0b8", fontSize: 10, fontWeight: 600, marginBottom: 2 };
-const routeCard: React.CSSProperties = { background: "#0c1622", borderBottom: "1px solid #131e2a", padding: "5px 2px" };
+const sectionHdr: React.CSSProperties = { color: "#b5a68d", fontSize: 10, fontWeight: 600, marginBottom: 2 };
+const routeCard: React.CSSProperties = { background: "#1e1910", borderBottom: "1px solid #272116", padding: "5px 2px" };
 const liveCard: React.CSSProperties = { marginBottom: 10, padding: "6px 8px", background: "#0d1a14", border: "1px solid #1e3a2a", borderRadius: 6 };
-const tag: React.CSSProperties = { background: "#0c1622", border: "1px solid #1e2e42", color: "#cfe0f4", borderRadius: 5, padding: "3px 7px", fontSize: 10, cursor: "pointer" };
-const rankRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", fontSize: 10, color: "#bcd0e4", padding: "2px 0" };
+const tag: React.CSSProperties = { background: "#1e1910", border: "1px solid #3e3422", color: "#cfe0f4", borderRadius: 5, padding: "3px 7px", fontSize: 10, cursor: "pointer" };
+const rankRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", fontSize: 10, color: "#e1d5bf", padding: "2px 0" };
 const clickRow: React.CSSProperties = { ...rankRow, cursor: "pointer", borderRadius: 3 };
 const ellip: React.CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "6px 0" };
+const empty: React.CSSProperties = { color: "#7a6d56", fontSize: 11, padding: "6px 0" };

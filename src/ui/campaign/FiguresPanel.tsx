@@ -32,12 +32,12 @@ const ROLE: Record<string, RoleSpec> = {
   "Merchant Prince": { emoji: "💰", color: "#e0a83a", plural: "Merchant Princes", occasion: "ceremonial", verb: "Commands the market" },
   "Guildmaster": { emoji: "🏛", color: "#c98a3a", plural: "Guildmasters", occasion: "everyday", verb: "Leads the guild" },
   "Philosopher": { emoji: "📖", color: "#8a7ad8", plural: "Philosophers", occasion: "national", verb: "Shapes how the city thinks" },
-  "Scholar": { emoji: "🎓", color: "#6a8fd8", plural: "Scholars", occasion: "national", verb: "Studies and teaches" },
+  "Scholar": { emoji: "🎓", color: "#cbac77", plural: "Scholars", occasion: "national", verb: "Studies and teaches" },
   "Ideologue": { emoji: "🔥", color: "#c85a7a", plural: "Ideologues", occasion: "national", verb: "Carries a cause" },
   "Physician": { emoji: "⚕", color: "#4ac09a", plural: "Physicians", occasion: "everyday", verb: "Treats the sick" },
   "Artisan": { emoji: "🖌", color: "#d8a24a", plural: "Artisans", occasion: "everyday", verb: "Makes fine things" },
   "Performer": { emoji: "🎭", color: "#e07ab0", plural: "Performers", occasion: "everyday", verb: "Holds a crowd" },
-  "Official": { emoji: "📜", color: "#7a8ca0", plural: "Officials", occasion: "everyday", verb: "Runs the office" },
+  "Official": { emoji: "📜", color: "#9d917d", plural: "Officials", occasion: "everyday", verb: "Runs the office" },
   "Horde Leader": { emoji: "🐎", color: "#b0503a", plural: "Horde Leaders", occasion: "national", verb: "Rides at the head of a horde" },
   "Alderman": { emoji: "🏘", color: "#8a9a4a", plural: "Aldermen", occasion: "everyday", verb: "Sits on the council" },
 };
@@ -124,7 +124,7 @@ export function FiguresPanel() {
           <div style={{
             display: "flex", gap: SPACE.lg, alignItems: "center", marginBottom: SPACE.md,
             padding: "8px 10px", borderRadius: RADIUS.md, border: `1px solid ${T.lineSoft}`,
-            background: "linear-gradient(135deg, rgba(216,178,74,0.07), rgba(10,16,24,0.6))",
+            background: "linear-gradient(135deg, rgba(216,178,74,0.07), rgba(22,18,12,0.6))",
           }}>
             <Donut slices={slices} size={82} thickness={11} center={String(living)} sub="LIVING" />
             <div style={{ flex: 1, minWidth: 0 }}>

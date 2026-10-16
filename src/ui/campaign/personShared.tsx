@@ -20,7 +20,7 @@ const SCHOLARLY_ROLES = ["Scholar", "Philosopher", "Ideologue"];
 /** Same blue `FiguresPanel.tsx` already uses for its "Scholar" role card —
  *  reused here rather than inventing a second blue, per this task's own
  *  "pick one blue and use it everywhere" rule. */
-export const SCHOLAR_BLUE = "#6a8fd8";
+export const SCHOLAR_BLUE = "#cbac77";
 
 /** True when a person is one of the scholarly roles, OR when the seat they
  *  hold was won by `PATH_SCHOLAR` ("scholar/orator") — a seat installed
@@ -48,7 +48,7 @@ export function Bust({ person, size = 32 }: { person: IndividualBrief; size?: nu
       cols: size >= 90 ? 52 : 44,
     });
   }, [person, size]);
-  return <canvas ref={ref} style={{ width: size, height: size, borderRadius: 6, flexShrink: 0, background: "#0d1622" }} />;
+  return <canvas ref={ref} style={{ width: size, height: size, borderRadius: 6, flexShrink: 0, background: "#1f1a10" }} />;
 }
 
 /** The expanded life-story block — bigger bust, the full trait list, and the
@@ -58,7 +58,7 @@ function PersonExpanded({ person }: { person: IndividualBrief }) {
     <div style={{ marginTop: 5, display: "flex", gap: 8 }}>
       <Bust person={person} size={48} />
       <div style={{ minWidth: 0, flex: 1 }}>
-        <div style={{ color: "#7a8aa0", fontSize: 9, marginBottom: 3 }}>
+        <div style={{ color: "#9d917d", fontSize: 9, marginBottom: 3 }}>
           {person.alive ? `Debuted ${person.debut_year}` : `${person.debut_year} – ${person.death_year} (${person.death_cause})`}
           {person.age ? ` · age ${person.age}` : ""}
           {person.roles.length > 1 ? ` · ${person.roles.join(" → ")}` : ""}
@@ -108,7 +108,7 @@ export function PersonChip({
         <div style={{ color: tint ?? "#e8dcc0", fontWeight: 600, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {label ?? person.name}
         </div>
-        {sub && <div style={{ color: "#7a90a8", fontSize: 9 }}>{sub}</div>}
+        {sub && <div style={{ color: "#a5967d", fontSize: 9 }}>{sub}</div>}
         {expanded && <PersonExpanded person={person} />}
       </div>
     </div>
@@ -120,14 +120,14 @@ export function PersonChip({
 /** One colour per role, so a role reads the same on a ladder, a ring and a chip. */
 export const ROLE_COLOR: Record<string, string> = {
   Doge: "#d8b24a", Jarl: "#d8b24a", Khan: "#d8b24a", Burgomaster: "#d8b24a", Treasurer: "#e0a83a", "Harbour Master": "#5fa8e8",
-  "Master of the Horse": "#b0503a", Justiciar: "#9fb4cc", Councillor: "#8a9a4a", Alderman: "#8a9a4a", Admiral: "#5fa8e8",
+  "Master of the Horse": "#b0503a", Justiciar: "#c9bba2", Councillor: "#8a9a4a", Alderman: "#8a9a4a", Admiral: "#5fa8e8",
   Demagogue: "#e0735a", "Master Craftsman": "#d8b24a", "Great Banker": "#5cc08a", Explorer: "#b48ae0", Diplomat: "#4ac0c0",
-  "Merchant Prince": "#e0a83a", Guildmaster: "#c98a3a", Philosopher: "#8a7ad8", Scholar: "#6a8fd8", Ideologue: "#c85a7a",
-  Physician: "#4ac09a", Artisan: "#d8a24a", Official: "#7a8ca0", "Horde Leader": "#b0503a", Factor: "#9a8a6a",
-  Apprentice: "#7a7a6a", Journeyman: "#a08a5a", Student: "#6a8fd8", Captain: "#5fa8e8", Soldier: "#b07a5a", Merchant: "#c8a060",
+  "Merchant Prince": "#e0a83a", Guildmaster: "#c98a3a", Philosopher: "#8a7ad8", Scholar: "#cbac77", Ideologue: "#c85a7a",
+  Physician: "#4ac09a", Artisan: "#d8a24a", Official: "#9d917d", "Horde Leader": "#b0503a", Factor: "#9a8a6a",
+  Apprentice: "#7a7a6a", Journeyman: "#a08a5a", Student: "#cbac77", Captain: "#5fa8e8", Soldier: "#b07a5a", Merchant: "#c8a060",
   Envoy: "#4ac0c0", Exile: "#7a6a8a", Priest: "#b8a0d0", Performer: "#d890b0",
 };
-export const roleColor = (r: string | undefined): string => (r && ROLE_COLOR[r]) || "#9fb4cc";
+export const roleColor = (r: string | undefined): string => (r && ROLE_COLOR[r]) || "#c9bba2";
 
 /** The compact career ladder: each rung a role, rising — the latest in full ink.
  *  `roles` is the sim's own role list, oldest first (years are not served yet). */
@@ -141,7 +141,7 @@ export function CareerLadder({ roles, max = 4 }: { roles: string[]; max?: number
         return (
           <span key={i} style={{ display: "inline-flex", alignItems: "flex-end", gap: 3 }}>
             {i > 0 && <span style={{ fontSize: 10, color: T_FAINT, paddingBottom: 1 }}>›</span>}
-            <span style={{ display: "inline-flex", alignItems: "flex-end", gap: 4, fontSize: 10, lineHeight: 1.5, whiteSpace: "nowrap", color: last ? "#cfe2f6" : "#9fb4cc", fontWeight: last ? 600 : 400 }}>
+            <span style={{ display: "inline-flex", alignItems: "flex-end", gap: 4, fontSize: 10, lineHeight: 1.5, whiteSpace: "nowrap", color: last ? "#cfe2f6" : "#c9bba2", fontWeight: last ? 600 : 400 }}>
               <span style={{ width: 4, height: 5 + i * 3, borderRadius: 1, background: c, opacity: last ? 1 : 0.65, marginBottom: 2 }} />
               {r}
             </span>
@@ -151,4 +151,4 @@ export function CareerLadder({ roles, max = 4 }: { roles: string[]; max?: number
     </div>
   );
 }
-const T_FAINT = "#46586e";
+const T_FAINT = "#695e4b";

@@ -79,7 +79,7 @@ export function GoodsBrowserPanel() {
           <div style={{ width: 150, flex: "0 0 auto" }}>
             <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search…"
               style={{ width: "100%", boxSizing: "border-box", marginBottom: 4, padding: "2px 5px",
-                background: "#0b1622", border: "1px solid #24364e", borderRadius: 4, color: "#cfe0f4", fontSize: 11 }} />
+                background: "#1e180f", border: "1px solid #493d29", borderRadius: 4, color: "#cfe0f4", fontSize: 11 }} />
             <div style={{ maxHeight: 320, overflowY: "auto" }}>
               {CATEGORY_ORDER.map((cat) => {
                 const items = allGoods.filter((g) => goodCategory(g) === cat
@@ -90,9 +90,9 @@ export function GoodsBrowserPanel() {
                     <div style={catHdr}>{cat}</div>
                     {items.map((g) => (
                       <div key={g} onClick={() => { setGood(g); setOrigin(null); setSelectedGood(g); }}
-                        style={{ ...goodRow, background: good === g ? "#1a2c40" : "transparent" }}>
+                        style={{ ...goodRow, background: good === g ? "#3b311f" : "transparent" }}>
                         <GoodIcon name={g} size={20} title={goodMeta(g).name} />
-                        <span style={{ flex: 1, color: good === g ? "#e8d8b0" : "#c0d0e0",
+                        <span style={{ flex: 1, color: good === g ? "#e8d8b0" : "#ded4c2",
                           overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goodMeta(g).name}</span>
                       </div>
                     ))}
@@ -116,15 +116,15 @@ export function GoodsBrowserPanel() {
                   {origins.map(({ hub, p }) => (
                     <div key={hub.id}
                       onClick={() => { setOrigin(origin === hub.id ? null : hub.id); focusOn(hub.x, hub.y); }}
-                      style={{ ...row, cursor: "pointer", background: origin === hub.id ? "#1a2c40" : "transparent" }}>
-                      <span style={{ flex: 1, color: origin === hub.id ? "#e8d8b0" : "#c0d0e0",
+                      style={{ ...row, cursor: "pointer", background: origin === hub.id ? "#3b311f" : "transparent" }}>
+                      <span style={{ flex: 1, color: origin === hub.id ? "#e8d8b0" : "#ded4c2",
                         overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {hub.emporium ? "🔴 " : ""}{hub.name}
                         {hub.top_export === good && (
                           <span title="This city's most valuable trade" style={{ marginLeft: 4 }}>💰</span>
                         )}
                       </span>
-                      <span style={{ color: "#9ab0c8", fontSize: 9 }}>{p!.grade}</span>
+                      <span style={{ color: "#c5b69d", fontSize: 9 }}>{p!.grade}</span>
                       <span style={{ color: "#e0c060", fontSize: 10, minWidth: 36, textAlign: "right" }}
                         title="local wholesale price (× base)">{p!.price.toFixed(2)}×</span>
                     </div>
@@ -140,9 +140,9 @@ export function GoodsBrowserPanel() {
                         const dest = c.stops[c.stops.length - 1];
                         return (
                           <div key={c.id} style={row}>
-                            <span style={{ flex: 1, color: "#c0d0e0", overflow: "hidden",
+                            <span style={{ flex: 1, color: "#ded4c2", overflow: "hidden",
                               textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{hubName(dest.hub)}</span>
-                            <span style={{ color: "#9ab0c8", fontSize: 9, minWidth: 30, textAlign: "right" }}>{Math.round(c.days)}d</span>
+                            <span style={{ color: "#c5b69d", fontSize: 9, minWidth: 30, textAlign: "right" }}>{Math.round(c.days)}d</span>
                             <span style={{ color: "#ff9a6a", fontSize: 10, minWidth: 38, textAlign: "right" }}
                               title="delivered price (× base)">{dest.price.toFixed(2)}×</span>
                           </div>
@@ -161,25 +161,25 @@ export function GoodsBrowserPanel() {
 }
 
 const panel: React.CSSProperties = {
-  position: "absolute", width: 430, background: "rgba(12,18,26,0.97)",
-  border: "1px solid #24364e", borderRadius: 8, padding: "8px 10px", zIndex: 125,
+  position: "absolute", width: 430, background: "rgba(24,20,14,0.97)",
+  border: "1px solid #493d29", borderRadius: 8, padding: "8px 10px", zIndex: 125,
   boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
 };
 const header: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
   marginBottom: 6, color: "#e8d8b0", fontWeight: 700, cursor: "grab", userSelect: "none",
 };
-const closeBtn: React.CSSProperties = { color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 };
+const closeBtn: React.CSSProperties = { color: "#ab9775", cursor: "pointer", fontSize: 18, lineHeight: 1 };
 const sectionHdr: React.CSSProperties = {
-  color: "#6a86a6", fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-  letterSpacing: 0.5, borderBottom: "1px solid #1e2e42", paddingBottom: 2, marginBottom: 4,
+  color: "#a28f6e", fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+  letterSpacing: 0.5, borderBottom: "1px solid #3e3422", paddingBottom: 2, marginBottom: 4,
 };
 const catHdr: React.CSSProperties = {
-  color: "#5f7390", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.4, margin: "3px 0 1px",
+  color: "#8a7c65", fontSize: 8, textTransform: "uppercase", letterSpacing: 0.4, margin: "3px 0 1px",
 };
 const goodRow: React.CSSProperties = {
   display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "2px 3px",
   borderRadius: 3, cursor: "pointer",
 };
 const row: React.CSSProperties = { display: "flex", alignItems: "center", gap: 5, fontSize: 11, padding: "2px 3px", borderRadius: 3 };
-const emptyTxt: React.CSSProperties = { color: "#506680", fontSize: 10, fontStyle: "italic", padding: "4px 3px" };
+const emptyTxt: React.CSSProperties = { color: "#7a6d56", fontSize: 10, fontStyle: "italic", padding: "4px 3px" };

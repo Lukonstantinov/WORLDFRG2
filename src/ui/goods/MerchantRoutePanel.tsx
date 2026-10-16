@@ -40,12 +40,12 @@ export function MerchantRoutePanel() {
   const Leg = ({ title, from, to, goods }:
     { title: string; from: string; to: string; goods: [string, number][] }) => (
     <div style={{ marginBottom: 6 }}>
-      <div style={{ color: "#9ab0c8", fontSize: 10 }}>
+      <div style={{ color: "#c5b69d", fontSize: 10 }}>
         {title} <span style={{ color: "#cfe0f4" }}>{from}</span> → <span style={{ color: "#cfe0f4" }}>{to}</span>
       </div>
-      {goods.length === 0 && <div style={{ color: "#56708e", fontSize: 9, fontStyle: "italic" }}>nothing this way yet</div>}
+      {goods.length === 0 && <div style={{ color: "#87785d", fontSize: 9, fontStyle: "italic" }}>nothing this way yet</div>}
       {goods.slice(0, 8).map(([g, v]) => (
-        <div key={g} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#c0d0e0" }}>
+        <div key={g} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#ded4c2" }}>
           <span>{icon(g)} {label(g)}</span>
           <span style={{ color: "#7fd0a0" }}>{fmt(v)}</span>
         </div>
@@ -54,7 +54,7 @@ export function MerchantRoutePanel() {
   );
 
   const LegStats = ({ l }: { l: MerchantRoute }) => (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", fontSize: 9.5, color: "#8aa0c0", margin: "2px 0 4px" }}>
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", fontSize: 9.5, color: "#bcab8e", margin: "2px 0 4px" }}>
       <span>{modeIcon(l)} {modeLabel(l)}</span>
       {(l.km ?? 0) > 0 && <span>{Math.round(l.km!).toLocaleString()} km</span>}
       {(l.days ?? 0) > 0 && <span>{l.days!.toFixed(1)}d</span>}
@@ -73,23 +73,23 @@ export function MerchantRoutePanel() {
         <span style={{ color: "#e8dcc0", fontWeight: 700, fontSize: 13 }}>{route.holder}</span>
         {route.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
         <span style={{ flex: 1 }} />
-        <span onClick={() => close(null)} style={{ color: "#7090b0", cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Close">×</span>
+        <span onClick={() => close(null)} style={{ color: "#ab9775", cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Close">×</span>
       </div>
 
       {/* The whole journey, origin to destination, naming the break-of-bulk port
           if there is one — the thing the map's teal ring marks but never names. */}
-      <div style={{ color: "#8aa0c0", fontSize: 10, marginBottom: 2 }}>
+      <div style={{ color: "#bcab8e", fontSize: 10, marginBottom: 2 }}>
         {originName}
         {relayName ? <> <span style={{ color: "#2fd1c9" }}>⚓ {relayName}</span> </> : " ⇄ "}
         {relayName && destName}
-        <span style={{ color: "#6a86a6" }}> · volume {fmt(route.volume)}</span>
+        <span style={{ color: "#a28f6e" }}> · volume {fmt(route.volume)}</span>
       </div>
       {relayName && (
         <div style={{ color: "#2fd1c9", fontSize: 9, fontStyle: "italic", marginBottom: 4 }}>
           breaks bulk at {relayName} — cargo lands and re-embarks under new terms, not a straight-through voyage
         </div>
       )}
-      <div style={{ display: "flex", gap: 10, fontSize: 9.5, color: "#c0d0e0", marginBottom: 6 }}>
+      <div style={{ display: "flex", gap: 10, fontSize: 9.5, color: "#ded4c2", marginBottom: 6 }}>
         <span>total {Math.round(totalKm).toLocaleString()} km</span>
         <span>{totalDays.toFixed(1)} days</span>
       </div>
@@ -107,6 +107,6 @@ export function MerchantRoutePanel() {
 
 const panel: React.CSSProperties = {
   position: "absolute", bottom: 40, left: 12, width: 280,
-  background: "rgba(12,18,26,0.97)", border: "1px solid #24364e", borderRadius: 8,
+  background: "rgba(24,20,14,0.97)", border: "1px solid #493d29", borderRadius: 8,
   padding: "9px 11px", zIndex: 115, boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
 };

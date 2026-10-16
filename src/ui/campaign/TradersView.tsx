@@ -321,7 +321,7 @@ export function TradersView({ hubId, active, tick }: { hubId: number; active: bo
           // swatches, its offices and its lanes on the map already use, so a family
           // is one identity everywhere. A left rail carries it rather than the text,
           // which keeps names legible at any hue.
-          const tint = t.color ?? (isResidual ? T.inkFaint : t.is_guild ? "#7fb2d8" : "#c99a3a");
+          const tint = t.color ?? (isResidual ? T.inkFaint : t.is_guild ? "#d1b686" : "#c99a3a");
           const nameInk = isResidual ? T.inkDim : isMajor ? tint : T.inkMid;
           return (
             <div key={key}>

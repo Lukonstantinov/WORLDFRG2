@@ -41,7 +41,7 @@ const HUB_EVENT_ICON: Record<string, string> = {
 };
 const HUB_EVENT_COLOR: Record<string, string> = {
   estate: "#7fd0a0", starvation: "#ff7a6a", succession: "#c0a0e0", structure: "#cdbb88",
-  coinage: "#d8c878", bank: "#9fd0e0", crash: "#e6303a", war: "#e88", event: "#b8c8da",
+  coinage: "#d8c878", bank: "#9fd0e0", crash: "#e6303a", war: "#e88", event: "#d7cdbb",
   figure: "#e6c878", fair: "#6fceb0", pilgrimage: "#c6a6e6", temple: "#e0cf9a",
   contagion: "#c07070", marriage: "#e6a6c8", feud: "#d88a6a", guild_strike: "#d0a060",
   guildhall: "#cdbb88", fashion: "#e0a0d0", wonder: "#b8c8a0", piracy: "#c07070", diaspora: "#8ac0c0",
@@ -49,8 +49,8 @@ const HUB_EVENT_COLOR: Record<string, string> = {
 
 type Tab = "overview" | "summary" | "city" | "govt" | "trade" | "estates" | "warehouse" | "people" | "supply" | "provision" | "life";
 
-const LOCAL_COLOR = "#5d6675";  // unaffiliated local merchants (grey)
-const GUILD_COLOR = "#4a6a8a";  // organised merchant guilds (slate blue)
+const LOCAL_COLOR = "#726b60";  // unaffiliated local merchants (grey)
+const GUILD_COLOR = "#827052";  // organised merchant guilds (slate blue)
 const ESTATE_EMOJI: Record<number, string> = { 1: "🌾", 2: "⛏️", 3: "🌿", 4: "🎣", 5: "🍇", 6: "🏭" };
 const ESTATE_LABEL: Record<number, string> = { 1: "Farm", 2: "Mine", 3: "Plantation", 4: "Fishery", 5: "Vineyard", 6: "Manufactory" };
 const STRUCT_EMOJI: Record<string, string> = {
@@ -59,7 +59,7 @@ const STRUCT_EMOJI: Record<string, string> = {
 
 /** Hex colour → rgba() with alpha (for translucent tile fills). */
 function hexA(hex: string, a: number): string {
-  const h = (hex || "#7a8aa0").replace("#", "");
+  const h = (hex || "#9d917d").replace("#", "");
   const r = parseInt(h.slice(0, 2), 16) || 122;
   const g = parseInt(h.slice(2, 4), 16) || 138;
   const b = parseInt(h.slice(4, 6), 16) || 160;
@@ -99,7 +99,7 @@ function WardGrid({ buildings }: { buildings: BuildingInfo[] }) {
         ))}
       </div>
       {s && (
-        <div style={{ fontSize: 10, background: "#0d1622", border: "1px solid #24405e",
+        <div style={{ fontSize: 10, background: "#1f1a10", border: "1px solid #56472c",
           borderRadius: 6, padding: "5px 7px", margin: "0 0 5px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ fontSize: 14 }}>{s.emoji || "🏗️"}</span>
@@ -109,16 +109,16 @@ function WardGrid({ buildings }: { buildings: BuildingInfo[] }) {
             <span style={{ color: s.color, fontWeight: 600 }}>{s.owner}</span>
           </div>
           {BUILDING_INFO[s.label] && (
-            <div style={{ color: "#9ab0c8", marginTop: 2, lineHeight: 1.4 }}>{BUILDING_INFO[s.label]}</div>
+            <div style={{ color: "#c5b69d", marginTop: 2, lineHeight: 1.4 }}>{BUILDING_INFO[s.label]}</div>
           )}
           <div style={{ color: "#7fbf9a", marginTop: 2 }}>{s.effect}</div>
         </div>
       )}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 9, color: "#9ab0c8" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, fontSize: 9, color: "#c5b69d" }}>
         {[...owners.entries()].map(([name, o]) => (
           <span key={name} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: o.color, display: "inline-block" }} />
-            {name} <span style={{ color: "#6a86a6" }}>×{o.count}</span>
+            {name} <span style={{ color: "#a28f6e" }}>×{o.count}</span>
           </span>
         ))}
       </div>
@@ -162,20 +162,20 @@ function HouseSharePie({ houses, localVolume, guildVolume, merchants }:
     <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 6px" }}>
       <svg width={68} height={68} viewBox="0 0 68 68" style={{ flex: "0 0 auto" }}>
         {slices.map((s) => (
-          <path key={s.name} d={arc(s.frac)} fill={s.color} stroke="#0c1118" strokeWidth={0.6}>
+          <path key={s.name} d={arc(s.frac)} fill={s.color} stroke="#16130e" strokeWidth={0.6}>
             <title>{`${s.name}: ${Math.round(s.frac * 100)}%`}</title>
           </path>
         ))}
-        {slices.length === 0 && <circle cx={cx} cy={cy} r={R} fill="#16222e" />}
+        {slices.length === 0 && <circle cx={cx} cy={cy} r={R} fill="#2b2419" />}
       </svg>
-      <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.5 }}>
+      <div style={{ fontSize: 10, color: "#c5b69d", lineHeight: 1.5 }}>
         <div style={{ color: "#cfe0f4", fontWeight: 600 }}>
           {nHouses} {nHouses === 1 ? "house" : "houses"} · {Math.round(merchants)} merchants
         </div>
         {top && (
           <div>Leads trade: <span style={{ color: top.color, fontWeight: 600 }}>{top.name}</span> ({Math.round(top.frac * 100)}%)</div>
         )}
-        <div style={{ color: "#7f8a99" }}>by trade volume moved</div>
+        <div style={{ color: "#978f81" }}>by trade volume moved</div>
       </div>
     </div>
   );
@@ -225,12 +225,12 @@ function TradeSignature({ mix, iconFor, labelFor }:
     <div style={{ display: "flex", gap: 10, alignItems: "center", margin: "2px 0 6px" }}>
       <svg width={68} height={68} viewBox="0 0 68 68" style={{ flex: "0 0 auto" }}>
         {slices.map((s) => (
-          <path key={s.good} d={arc(s.frac)} fill={s.color} stroke="#0c1118" strokeWidth={0.6}>
+          <path key={s.good} d={arc(s.frac)} fill={s.color} stroke="#16130e" strokeWidth={0.6}>
             <title>{`${labelFor(s.good)}: ${Math.round(s.frac * 100)}%`}</title>
           </path>
         ))}
       </svg>
-      <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.5 }}>
+      <div style={{ fontSize: 10, color: "#c5b69d", lineHeight: 1.5 }}>
         <div style={{ color: tier.color, fontWeight: 700 }}>
           {tier.icon} {tier.label}
         </div>
@@ -238,7 +238,7 @@ function TradeSignature({ mix, iconFor, labelFor }:
           Leads with: <span style={{ fontWeight: 600 }}>{iconFor(top.good)} {labelFor(top.good)}</span>
           {" "}({Math.round(top.frac * 100)}%)
         </div>
-        <div style={{ color: "#7f8a99" }}>{slices.length} good{slices.length === 1 ? "" : "s"} in its trade mix</div>
+        <div style={{ color: "#978f81" }}>{slices.length} good{slices.length === 1 ? "" : "s"} in its trade mix</div>
       </div>
     </div>
   );
@@ -526,10 +526,10 @@ export function HubPanel() {
             {isTop && <span style={{ color: "#f4c430", fontSize: 9, marginLeft: 5 }}>GREATEST HUB</span>}
             {!isTop && isEmporium && <span style={{ color: "#ff6a4a", fontSize: 9, marginLeft: 5 }}>EMPORIUM</span>}
           </div>
-          <div style={{ color: "#8aa0c0", fontSize: 10 }}>
+          <div style={{ color: "#bcab8e", fontSize: 10 }}>
             <span style={{ color: "#ffd24a" }}>{"★".repeat(stars)}</span>
             {`  ${cmp}`}
-            {showRank && <span style={{ color: "#6a86a6" }}>{`  ·  wealth rank #${wealthRank}/${rankTotal}`}</span>}
+            {showRank && <span style={{ color: "#a28f6e" }}>{`  ·  wealth rank #${wealthRank}/${rankTotal}`}</span>}
             {hub.sea_access === false && <span style={{ color: "#6a86a6" }}>{"  ·  lake/inland"}</span>}
           </div>
           {detail?.patron && (
@@ -540,18 +540,18 @@ export function HubPanel() {
           )}
         </div>
         <span data-no-drag onClick={() => setSelectedHub(null)}
-          style={{ color: "#7090b0", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
+          style={{ color: "#ab9775", cursor: "pointer", fontSize: 18, lineHeight: 1 }} title="Close">×</span>
       </div>
 
       {/* ── Tab bar (wraps so every tab — incl. People — stays visible even when a
              colony shows all 8; a non-wrapping row used to clip the last tabs) ── */}
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 2, margin: "2px 0 6px", borderBottom: "1px solid #1e2e42" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: 2, margin: "2px 0 6px", borderBottom: "1px solid #3e3422" }}>
         {TABS.map((t) => (
           <div key={t.id} onClick={() => setTab(t.id)}
             style={{
               padding: "4px 8px", cursor: "pointer", fontSize: 11, fontWeight: tab === t.id ? 700 : 400,
-              color: tab === t.id ? "#cfe2f6" : "#6a86a6",
-              borderBottom: tab === t.id ? "2px solid #3a80c0" : "2px solid transparent",
+              color: tab === t.id ? "#cfe2f6" : "#a28f6e",
+              borderBottom: tab === t.id ? "2px solid #a58855" : "2px solid transparent",
               whiteSpace: "nowrap",
             }}>
             {t.label}
@@ -568,8 +568,8 @@ export function HubPanel() {
           {detail.coin_basket && detail.coin_basket.length > 0 ? (
             <CurrencyBasket basket={detail.coin_basket} />
           ) : campActive ? (
-            <div style={{ marginTop: 8, padding: "6px 8px", background: "#0b1622", border: "1px solid #1e2e42", borderRadius: 6, fontSize: 10, color: "#8aa0bc" }}>
-              <span style={{ color: "#7fa0c4", fontWeight: 600 }}>🤝 Barter economy</span> — no coin reaches this market;
+            <div style={{ marginTop: 8, padding: "6px 8px", background: "#1e180f", border: "1px solid #3e3422", borderRadius: 6, fontSize: 10, color: "#b8a98e" }}>
+              <span style={{ color: "#bfa984", fontWeight: 600 }}>🤝 Barter economy</span> — no coin reaches this market;
               trade here is settled good-for-good.
             </div>
           ) : null}
@@ -583,7 +583,7 @@ export function HubPanel() {
                   <span style={{ width: 9, height: 9, borderRadius: c.colony_kind === 2 ? 2 : "50%",
                     background: c.colony_kind === 2 ? "#c9a96a" : "#c08cff", flex: "0 0 auto" }} />
                   <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#d8c8f4", fontSize: 11 }}>{c.name}</span>
-                  <span style={{ color: "#7a90a8", fontSize: 10 }}>
+                  <span style={{ color: "#a5967d", fontSize: 10 }}>
                     {c.colony_kind === 2 ? "outpost" : (["", "outpost", "colony", "town", "city"][c.colony_stage] || "colony")}
                     {" · "}{c.population >= 1000 ? `${(c.population / 1000).toFixed(0)}k` : Math.round(c.population)}
                   </span>
@@ -594,7 +594,7 @@ export function HubPanel() {
         </>
       )}
       {tab === "city" && !detail && (
-        <div style={{ color: "#7a8aa0", fontSize: 11, padding: "8px 2px" }}>
+        <div style={{ color: "#9d917d", fontSize: 11, padding: "8px 2px" }}>
           The building schematic appears once a campaign is running.
         </div>
       )}
@@ -603,7 +603,7 @@ export function HubPanel() {
       {tab === "govt" && (() => {
         const g = detail?.government;
         if (!g) return (
-          <div style={{ color: "#7a8aa0", fontSize: 11, padding: "8px 2px" }}>
+          <div style={{ color: "#9d917d", fontSize: 11, padding: "8px 2px" }}>
             The city government appears once a campaign is running.
           </div>
         );
@@ -611,12 +611,12 @@ export function HubPanel() {
         const tierColor = g.spec_tier === "HIGH" ? "#ff6a4a" : g.spec_tier === "MED" ? "#f4c430" : "#6fae6f";
         const govRow = (label: string, val: string, warn = false) => (
           <div style={{ display: "flex", justifyContent: "space-between", padding: "2px 0", fontSize: 11 }}>
-            <span style={{ color: "#8aa0c0" }}>{label}</span>
+            <span style={{ color: "#bcab8e" }}>{label}</span>
             <span style={{ color: warn ? "#ff8a6a" : "#e8dcc0", fontWeight: 600 }}>{val}</span>
           </div>
         );
         return (
-          <div style={{ fontSize: 11, color: "#c7d6e8" }}>
+          <div style={{ fontSize: 11, color: "#e6dbc9" }}>
             {/* living_world/04_GOVERNMENT_AND_EDICTS.md 04.7 · the reworked
                 Government system, in place of the old leader/council/regime/
                 officials display it supersedes: real seats (path/
@@ -624,7 +624,7 @@ export function HubPanel() {
                 — row 02), the debate in progress, edicts actually in force,
                 and recent history. */}
             {!govBrief ? (
-              <div style={{ color: "#6a86a6", fontSize: 10, marginBottom: 6 }}>
+              <div style={{ color: "#a28f6e", fontSize: 10, marginBottom: 6 }}>
                 This city's government has not been seated yet.
               </div>
             ) : (
@@ -638,7 +638,7 @@ export function HubPanel() {
                 "how is this city run" question. */}
             <div style={sectionHdr}>Development</div>
             {!dev ? (
-              <div style={{ color: "#6a86a6", fontSize: 10, marginBottom: 6 }}>
+              <div style={{ color: "#a28f6e", fontSize: 10, marginBottom: 6 }}>
                 No development data yet — check back after the campaign has run a year.
               </div>
             ) : (() => {
@@ -646,19 +646,19 @@ export function HubPanel() {
               const BREAKDOWN_NAMES = ["Trade", "Partner reach", "Welfare", "Diffusion", "Decay"] as const;
               return (
                 <>
-                  <div style={{ fontSize: 11, color: "#c9d6e3", marginBottom: 4 }}>
+                  <div style={{ fontSize: 11, color: "#e1d9cb", marginBottom: 4 }}>
                     Development factor: <b>{dev.dev.toFixed(2)}</b>
                   </div>
-                  <div style={{ fontSize: 9, color: "#7a90a8", marginBottom: 10 }}>
+                  <div style={{ fontSize: 9, color: "#a5967d", marginBottom: 10 }}>
                     This year: {BREAKDOWN_NAMES.map((n, i) => `${n} ${dev.dev_breakdown[i] >= 0 ? "+" : ""}${dev.dev_breakdown[i].toFixed(2)}`).join(" · ")}
                   </div>
                   {TRACK_NAMES.map((name, k) => (
                     <div key={name} style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 4 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#c9d6e3" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: "#e1d9cb" }}>
                         <span>{name}</span>
                         <span>level {dev.track_level[k]} · {dev.track_points[k].toFixed(1)} pts</span>
                       </div>
-                      <div style={{ fontSize: 9, color: "#7a90a8", marginTop: 2 }}>
+                      <div style={{ fontSize: 9, color: "#a5967d", marginTop: 2 }}>
                         {dev.track_buildings[k] > 0
                           ? `built to level ${dev.track_buildings[k]}`
                           : "no building raised yet"}
@@ -668,7 +668,7 @@ export function HubPanel() {
                       </div>
                     </div>
                   ))}
-                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 2, marginBottom: 6 }}>
+                  <div style={{ color: "#a5967d", fontSize: 9, marginTop: 2, marginBottom: 6 }}>
                     Building effects (army strength, warehouse capacity, population
                     ceiling, idea spread…) are not wired up yet — 03.7's dose walk.
                     This shows what the city has actually built, nothing more.
@@ -684,10 +684,10 @@ export function HubPanel() {
                   <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0" }}>
                     <span style={{ width: 9, height: 9, borderRadius: 2, background: f.color, flex: "0 0 auto" }} />
                     <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#cfe0f4", fontSize: 11 }}>{f.name}</span>
-                    <div style={{ width: 70, height: 6, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
+                    <div style={{ width: 70, height: 6, background: "#3e3422", borderRadius: 3, overflow: "hidden" }}>
                       <div style={{ width: `${Math.round(f.pct * 100)}%`, height: "100%", background: f.color }} />
                     </div>
-                    <span style={{ color: "#8aa6c0", fontSize: 10, minWidth: 30, textAlign: "right" }}>{Math.round(f.pct * 100)}%</span>
+                    <span style={{ color: "#bcab8e", fontSize: 10, minWidth: 30, textAlign: "right" }}>{Math.round(f.pct * 100)}%</span>
                   </div>
                 ))}
               </>
@@ -695,19 +695,19 @@ export function HubPanel() {
 
             <div style={sectionHdr}>🔒 Charters granted</div>
             {(g.charters ?? []).length === 0 ? (
-              <div style={{ color: "#6a86a6", fontSize: 10 }}>This city has chartered no goods to any house or guild.</div>
+              <div style={{ color: "#a28f6e", fontSize: 10 }}>This city has chartered no goods to any house or guild.</div>
             ) : (g.charters ?? []).map((c) => (
               <div key={c.house} data-no-drag onClick={() => useUIStore.getState().setDossierHouse(c.house)}
                 title="Open this house's dossier"
                 style={{ display: "flex", alignItems: "flex-start", gap: 7, margin: "4px 0", padding: "4px 6px", cursor: "pointer",
-                  background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+                  background: "#1f1a10", border: "1px solid #56472c", borderRadius: 6 }}>
                 <CoatOfArms name={c.name} size={24} guild={c.is_guild} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ color: c.color, fontWeight: 700, fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {c.name} <span style={{ color: "#6a86a6", fontWeight: 400 }}>· {c.is_guild ? "company" : "house"} ▸</span>
+                    {c.name} <span style={{ color: "#a28f6e", fontWeight: 400 }}>· {c.is_guild ? "company" : "house"} ▸</span>
                   </div>
                   {c.goods.map((cg) => (
-                    <div key={cg.good} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#9fb4cc" }}>
+                    <div key={cg.good} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 10, color: "#c9bba2" }}>
                       <span style={{ flex: 1 }}>{cg.name}</span>
                       <span title="share of this good's trade here the holder actually carried last year"
                         style={{ color: cg.holder_share >= 0.5 ? "#7fd0a0" : "#e6a07a" }}>
@@ -721,7 +721,7 @@ export function HubPanel() {
 
             <div style={sectionHdr}>
               Fiscal policy{" "}
-              {g.tariff_default && <span style={{ color: "#6a86a6", fontWeight: 400, fontSize: 9 }}>(default — no council yet)</span>}
+              {g.tariff_default && <span style={{ color: "#a28f6e", fontWeight: 400, fontSize: 9 }}>(default — no council yet)</span>}
             </div>
             {govRow("Export tariff", pct(g.tariff_export))}
             {govRow("Import tariff", pct(g.tariff_import))}
@@ -734,8 +734,8 @@ export function HubPanel() {
               <>
                 <div style={sectionHdr}>Laws &amp; decrees</div>
                 {g.laws.map((l, i) => (
-                  <div key={i} style={{ fontSize: 10, color: "#9fb4cc", margin: "1px 0" }}>
-                    <span style={{ color: "#6a86a6" }}>Y{l.year} </span>{l.text}
+                  <div key={i} style={{ fontSize: 10, color: "#c9bba2", margin: "1px 0" }}>
+                    <span style={{ color: "#a28f6e" }}>Y{l.year} </span>{l.text}
                   </div>
                 ))}
               </>
@@ -746,7 +746,7 @@ export function HubPanel() {
             {govRow("Circulating civic pool", fmt(g.civic_pool))}
             {g.civic_goods.length > 0 && (
               <>
-                <div style={{ color: "#6a86a6", fontSize: 9, margin: "4px 0 1px" }}>Government granary / stores</div>
+                <div style={{ color: "#a28f6e", fontSize: 9, margin: "4px 0 1px" }}>Government granary / stores</div>
                 {g.civic_goods.map((c, i) => govRow(c.name, fmt(c.amount)))}
               </>
             )}
@@ -757,13 +757,13 @@ export function HubPanel() {
                 <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3, flexWrap: "wrap" }}>
                   <span style={{ color: tierColor, fontWeight: 700 }}>{g.spec_tier}</span>
                   <span style={{ color: "#ffd24a" }}>
-                    {"●".repeat(g.spec_stars)}<span style={{ color: "#33404f" }}>{"○".repeat(Math.max(0, 5 - g.spec_stars))}</span>
+                    {"●".repeat(g.spec_stars)}<span style={{ color: "#4c4436" }}>{"○".repeat(Math.max(0, 5 - g.spec_stars))}</span>
                   </span>
-                  <span style={{ color: "#8aa0c0" }}>({g.spec_risk.toFixed(2)})</span>
-                  <span style={{ color: "#7a8aa0", fontStyle: "italic" }}>{g.spec_pattern}</span>
+                  <span style={{ color: "#bcab8e" }}>({g.spec_risk.toFixed(2)})</span>
+                  <span style={{ color: "#9d917d", fontStyle: "italic" }}>{g.spec_pattern}</span>
                 </div>
                 {g.spec_drivers.slice(0, 4).map((d, i) => (
-                  <div key={i} style={{ color: "#9fb4cc", fontSize: 10, marginLeft: 4 }}>• {d}</div>
+                  <div key={i} style={{ color: "#c9bba2", fontSize: 10, marginLeft: 4 }}>• {d}</div>
                 ))}
                 {g.spec_watch.length > 0 && (
                   <div style={{ color: "#c9a227", fontSize: 10, marginTop: 3 }}>Watch goods: {g.spec_watch.join(", ")}</div>
@@ -781,22 +781,22 @@ export function HubPanel() {
                 {cultureAcceptance.map((c) => {
                   const tierColorFor = c.tier <= 1 ? "#7fd0a0" : c.tier === 2 ? "#a8c97f" : c.tier === 3 ? "#e6c86a" : c.tier === 4 ? "#e6a07a" : "#ff6a4a";
                   return (
-                    <div key={c.culture} style={{ margin: "4px 0", padding: "4px 6px", background: "#0d1622", border: "1px solid #24405e", borderRadius: 6 }}>
+                    <div key={c.culture} style={{ margin: "4px 0", padding: "4px 6px", background: "#1f1a10", border: "1px solid #56472c", borderRadius: 6 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                         <span style={{ color: "#e8dcc0", fontWeight: 600, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.culture}</span>
                         <span style={{ color: tierColorFor, fontWeight: 700, fontSize: 10 }}>{c.tier_name}</span>
-                        <span style={{ color: c.trend > 0 ? "#7fd0a0" : c.trend < 0 ? "#ff8a6a" : "#6a86a6", fontSize: 10, minWidth: 14, textAlign: "right" }}>
+                        <span style={{ color: c.trend > 0 ? "#7fd0a0" : c.trend < 0 ? "#ff8a6a" : "#a28f6e", fontSize: 10, minWidth: 14, textAlign: "right" }}>
                           {c.trend > 0.05 ? "▲" : c.trend < -0.05 ? "▼" : "·"}
                         </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 2 }}>
-                        <div style={{ flex: 1, height: 5, background: "#1e2e42", borderRadius: 3, overflow: "hidden" }}>
+                        <div style={{ flex: 1, height: 5, background: "#3e3422", borderRadius: 3, overflow: "hidden" }}>
                           <div style={{ width: `${Math.round(((c.score + 100) / 200) * 100)}%`, height: "100%", background: tierColorFor }} />
                         </div>
-                        <span style={{ color: "#8aa0c0", fontSize: 9, minWidth: 30, textAlign: "right" }}>{c.score.toFixed(0)}</span>
-                        <span style={{ color: "#6a86a6", fontSize: 9, minWidth: 34, textAlign: "right" }}>{Math.round(c.residents_frac * 100)}%</span>
+                        <span style={{ color: "#bcab8e", fontSize: 9, minWidth: 30, textAlign: "right" }}>{c.score.toFixed(0)}</span>
+                        <span style={{ color: "#a28f6e", fontSize: 9, minWidth: 34, textAlign: "right" }}>{Math.round(c.residents_frac * 100)}%</span>
                       </div>
-                      {c.reason && <div style={{ color: "#7a8aa0", fontSize: 9, marginTop: 1 }}>{c.reason}</div>}
+                      {c.reason && <div style={{ color: "#9d917d", fontSize: 9, marginTop: 1 }}>{c.reason}</div>}
                       {c.proposed_tier >= 0 && (
                         <div style={{ color: "#c9a227", fontSize: 9, marginTop: 1 }}>
                           ⚖ a proposal to move to {acceptanceTierLabel(c.proposed_tier)} is being debated
@@ -831,7 +831,7 @@ export function HubPanel() {
                 <Stat label="Wealth" value={fmt((detail.trade_wealth ?? 0) + (detail.grain_wealth ?? 0))} />
                 <Stat label="Population" value={detail.population.toLocaleString()} />
               </div>
-              <div style={{ fontSize: 9, color: "#5a7088", margin: "3px 2px 0", letterSpacing: "0.03em" }}>
+              <div style={{ fontSize: 9, color: "#827660", margin: "3px 2px 0", letterSpacing: "0.03em" }}>
                 live · recent trade this year
               </div>
             </>
@@ -855,7 +855,7 @@ export function HubPanel() {
                 <span style={{ flex: 1 }} />
                 <span style={{ color: "#7fd0a0", fontSize: 9 }}>income → owner</span>
               </div>
-              <div style={{ color: "#9ab0c8", fontSize: 10, marginTop: 2 }}>
+              <div style={{ color: "#c5b69d", fontSize: 10, marginTop: 2 }}>
                 Owned by <span style={{ color: "#e8dcc0" }}>{detail.estate_owner || "—"}</span>
                 {detail.estate_good && <> · works {iconFor(detail.estate_good)} {labelFor(detail.estate_good)}</>}
               </div>
@@ -872,18 +872,18 @@ export function HubPanel() {
               views carry the real, moving equivalent. */}
           {!campActive && hub.top_export && (
             <div style={{ color: "#e0c060", fontSize: 11, margin: "5px 0 2px", display: "flex", gap: 6, alignItems: "baseline" }}>
-              <span style={{ color: "#6a86a6", fontSize: 10 }}>Richest trade:</span>
+              <span style={{ color: "#a28f6e", fontSize: 10 }}>Richest trade:</span>
               <span style={{ fontWeight: 700 }}>{iconFor(hub.top_export)} {labelFor(hub.top_export)}</span>
               {hub.top_export_share !== undefined && hub.top_export_share > 0 && (
-                <span style={{ color: "#9ab0c8", fontSize: 10 }}>
+                <span style={{ color: "#c5b69d", fontSize: 10 }}>
                   {Math.round(hub.top_export_share * 100)}% of export value
                 </span>
               )}
             </div>
           )}
           {!campActive && hub.monopolies && hub.monopolies.length > 0 && (
-            <div style={{ color: "#9ab0c8", fontSize: 10, margin: "4px 0 2px" }}>
-              <span style={{ color: "#6a86a6" }}>Monopolies: </span>
+            <div style={{ color: "#c5b69d", fontSize: 10, margin: "4px 0 2px" }}>
+              <span style={{ color: "#a28f6e" }}>Monopolies: </span>
               {hub.monopolies.map((m, i) => <span key={m}>{i > 0 && ", "}{iconFor(m)} {labelFor(m)}</span>)}
             </div>
           )}
@@ -974,9 +974,9 @@ export function HubPanel() {
             {(["market", "flows", "internal", "traders"] as const).map((v) => (
               <div key={v} onClick={() => setTradeView(v)} style={{
                 padding: "2px 10px", cursor: "pointer", fontSize: 10, borderRadius: 4,
-                background: tradeView === v ? "#21344a" : "#16202c",
-                color: tradeView === v ? "#cfe2f6" : "#6a86a6",
-                border: tradeView === v ? "1px solid #3a80c0" : "1px solid #1e2e42",
+                background: tradeView === v ? "#453a26" : "#292319",
+                color: tradeView === v ? "#cfe2f6" : "#a28f6e",
+                border: tradeView === v ? "1px solid #a58855" : "1px solid #3e3422",
               }}>{v === "market" ? "Market" : v === "flows" ? "Flows" : v === "internal" ? "Internal" : "Traders"}</div>
             ))}
           </div>
@@ -1120,7 +1120,7 @@ export function HubPanel() {
       {tab === "estates" && (
         <>
           <div style={sectionHdr}>Holdings — estates &amp; manufactories</div>
-          <div style={{ color: "#6a86a6", fontSize: 9, margin: "0 0 4px" }}>
+          <div style={{ color: "#a28f6e", fontSize: 9, margin: "0 0 4px" }}>
             Linked to this city — all their trade routes through here.
             <span style={{ color: "#4fc06a", marginLeft: 6 }}>▬ manufactory</span>
             <span style={{ color: "#ffe14a", marginLeft: 6 }}>▬ estate</span>
@@ -1143,7 +1143,7 @@ export function HubPanel() {
               return (
               <div key={i}>
                 <div onClick={() => setExpandedEstate(expanded ? null : e.hub)}
-                  style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #131f2c", cursor: "pointer" }}>
+                  style={{ display: "flex", alignItems: "baseline", gap: 6, fontSize: 10, padding: "2px 2px", borderBottom: "1px solid #292216", cursor: "pointer" }}>
                   <span style={{ alignSelf: "stretch", width: 4, borderRadius: 3, background: lineColor }} title={isManu ? "manufactory (green line)" : "estate (yellow line)"} />
                   <span style={{ fontSize: 13 }}>{ESTATE_EMOJI[e.kind] ?? "🏡"}</span>
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -1153,10 +1153,10 @@ export function HubPanel() {
                         {isManu ? "MANUFACTORY" : "ESTATE"}
                       </span>
                       <span style={{ color: "#e0c060", fontSize: 9, marginLeft: 4 }} title="upgrade tier (owners invest to raise output)">
-                        {"★".repeat(e.tier ?? 1)}<span style={{ color: "#3a4a5e" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
+                        {"★".repeat(e.tier ?? 1)}<span style={{ color: "#5a503f" }}>{"★".repeat(Math.max(0, 5 - (e.tier ?? 1)))}</span>
                       </span>
                     </div>
-                    <div style={{ color: "#7a90a8", fontSize: 9 }}>
+                    <div style={{ color: "#a5967d", fontSize: 9 }}>
                       owner: <span style={{ color: ownerColor }}>{ownerLabel}</span> · tier {e.tier ?? 1}/5
                       {(e.damage ?? 0) > 0.01 && (
                         <span style={{ color: "#e0764a", fontWeight: 700, marginLeft: 5 }}
@@ -1167,7 +1167,7 @@ export function HubPanel() {
                     </div>
                   </div>
                   <span style={{ color: "#7fd0a0", fontSize: 10 }}>▲ {fmt(e.output)}/day</span>
-                  <span style={{ color: "#5a7390", fontSize: 9 }}>{expanded ? "▾" : "▸"}</span>
+                  <span style={{ color: "#897a61", fontSize: 9 }}>{expanded ? "▾" : "▸"}</span>
                 </div>
                 {expanded && <WorksCard hub={e.hub} tick={campTick} />}
               </div>
@@ -1180,7 +1180,7 @@ export function HubPanel() {
           {campActive && (
             <div onClick={() => useUIStore.getState().setShowWarehouses(true)}
               title="Every house warehouse & manufactory in the world, filtered to this city"
-              style={{ marginTop: 8, cursor: "pointer", color: "#9ab0c8", fontSize: 10 }}>
+              style={{ marginTop: 8, cursor: "pointer", color: "#c5b69d", fontSize: 10 }}>
               🏬 Full warehouse &amp; futures-supply view →
             </div>
           )}
@@ -1195,13 +1195,13 @@ export function HubPanel() {
       {tab === "supply" && colony && (
         <>
           <div style={sectionHdr}>Colony</div>
-          <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.6 }}>
+          <div style={{ fontSize: 10, color: "#c5b69d", lineHeight: 1.6 }}>
             <div>Metropolis: <span style={{ color: "#cfe0f4" }}>{colony.founder_name || "—"}</span></div>
             <div>Supplied: <span style={{ color: colony.supply_years >= 5 ? "#7fd0a0" : "#f4c430" }}>{colony.supply_years.toFixed(1)} yr</span> (need 5 to grow)</div>
           </div>
           <div onClick={() => setShowColonial(true)}
             title="Stage, charter, reserve buffer, backers and the full supplier roster"
-            style={{ marginTop: 8, cursor: "pointer", color: "#9ab0c8", fontSize: 10 }}>
+            style={{ marginTop: 8, cursor: "pointer", color: "#c5b69d", fontSize: 10 }}>
             🚢 Full Colonial Office view →
           </div>
         </>
@@ -1209,7 +1209,7 @@ export function HubPanel() {
 
       {/* ════════════ PROVISION (council right-of-first-buy / civic reserve) ════════════ */}
       {tab === "provision" && (() => {
-        if (!prov) return <div style={{ color: "#6a86a6", fontSize: 11, padding: 6 }}>No provisioning data.</div>;
+        if (!prov) return <div style={{ color: "#a28f6e", fontSize: 11, padding: 6 }}>No provisioning data.</div>;
         if (!detail) return null;
         return (
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 4 }}>
@@ -1224,13 +1224,13 @@ export function HubPanel() {
                 ? `✔ Right of first buy: ACTIVE — the council pre-empts arriving merchants for the goods it needs. Houses carry ${Math.round(prov.dominant_share * 100)}% of trade (< 60%).`
                 : `✖ First buy SUSPENDED — ${prov.dominant_house ? `House ${prov.dominant_house} controls the government` : `merchant houses carry ${Math.round(prov.dominant_share * 100)}% of trade`} and take the market first. The council must buy at a retail premium.`}
             </div>
-            <div style={{ fontSize: 11, color: "#9ab0c8" }}>
+            <div style={{ fontSize: 11, color: "#c5b69d" }}>
               Provisioning <b>{prov.dependents}</b> {prov.dependents === 1 ? "dependent" : "dependents"} (colonies + satellites)
               {" · "}reserve target {prov.reserve_target.toFixed(0)}/good
               {prov.bought_month > 0 && <> · <span style={{ color: "#7fd0a0" }}>secured {prov.bought_month.toFixed(0)} gr-eq this month</span></>}
             </div>
             {detail.city_stores && (
-              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#0c1622", border: "1px solid #1d3450" }}>
+              <div style={{ padding: "8px 10px", borderRadius: 6, background: "#1e1910", border: "1px solid #483b25" }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#cfe0f4" }}>🏛 City Stores</span>
                   {typeof detail.dev_tier === "number" && detail.dev_tier > 0 && (
@@ -1239,7 +1239,7 @@ export function HubPanel() {
                     </span>
                   )}
                 </div>
-                <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#9ab0c8", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 12, fontSize: 11, color: "#c5b69d", flexWrap: "wrap" }}>
                   <span>💰 Riches in goods: <b style={{ color: "#e8cf8a" }}>{Math.round(detail.city_stores.goods_value).toLocaleString()}</b> gr-eq</span>
                   <span>📦 {Math.round(detail.city_stores.goods_units).toLocaleString()} units held</span>
                   <span>🍞 Food reserve: <b style={{ color: "#7fd0a0" }}>{Math.round(detail.city_stores.food_reserve).toLocaleString()}</b></span>
@@ -1249,7 +1249,7 @@ export function HubPanel() {
                   <div style={{ marginTop: 6 }}>
                     <div style={{ fontSize: 10, color: "#7fb0e0", fontWeight: 600, marginBottom: 2 }}>Richest goods held here</div>
                     {detail.city_stores.top_goods.slice(0, 6).map((g, i) => (
-                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#a8bcd4" }}>
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#d1c3ab" }}>
                         <span><GoodIcon name={g.name} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {g.name}</span>
                         <span>{Math.round(g.amount).toLocaleString()}</span>
                       </div>
@@ -1260,23 +1260,23 @@ export function HubPanel() {
             )}
             <div style={{ fontSize: 11, color: "#7fb0e0", fontWeight: 600 }}>Secured in the civic warehouse</div>
             {prov.goods.length === 0 && (
-              <div style={{ color: "#6a86a6", fontSize: 10 }}>Nothing secured yet — the council stocks up as goods arrive.</div>
+              <div style={{ color: "#a28f6e", fontSize: 10 }}>Nothing secured yet — the council stocks up as goods arrive.</div>
             )}
             {prov.goods.map((g, i) => {
               const pct = prov.reserve_target > 0 ? Math.min(1, g.secured / prov.reserve_target) : 0;
               return (
                 <div key={i} style={{ display: "flex", flexDirection: "column", gap: 1 }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#a8bcd4" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#d1c3ab" }}>
                     <span><GoodIcon name={g.good} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} /> {g.good}{g.food ? " 🍞" : ""}</span>
-                    <span style={{ color: "#7a8aa0" }}>{g.secured.toFixed(0)} / {g.target.toFixed(0)}</span>
+                    <span style={{ color: "#9d917d" }}>{g.secured.toFixed(0)} / {g.target.toFixed(0)}</span>
                   </div>
-                  <div style={{ height: 8, borderRadius: 4, background: "#0e1a27", border: "1px solid #1c2c40", overflow: "hidden" }}>
-                    <div style={{ height: "100%", width: `${pct * 100}%`, background: g.food ? "#5fc88a" : "#5f9fd0" }} />
+                  <div style={{ height: 8, borderRadius: 4, background: "#231d12", border: "1px solid #3c3220", overflow: "hidden" }}>
+                    <div style={{ height: "100%", width: `${pct * 100}%`, background: g.food ? "#5fc88a" : "#c6a469" }} />
                   </div>
                 </div>
               );
             })}
-            <div style={{ fontSize: 9, color: "#56708e", marginTop: 2, lineHeight: 1.4 }}>
+            <div style={{ fontSize: 9, color: "#87785d", marginTop: 2, lineHeight: 1.4 }}>
               The council invests treasury to secure staples + colonial supply in warehouses.
               Its colonies and satellite builds draw this reserve first — an investment that
               pays back as they grow and ship goods home.
@@ -1301,14 +1301,14 @@ export function HubPanel() {
             <CityWarehousePanel hub={selectedHub} tick={campTick} />
             <div onClick={() => useUIStore.getState().setShowWarehouses(true)}
               title="Every house warehouse & manufactory in the world, filtered to this city"
-              style={{ marginTop: 8, cursor: "pointer", color: "#9ab0c8", fontSize: 10 }}>
+              style={{ marginTop: 8, cursor: "pointer", color: "#c5b69d", fontSize: 10 }}>
               🏬 Warehouses &amp; estates here →
             </div>
             <div style={{ ...sectionHdr, marginTop: 8 }}>Futures supply links</div>
-            <div style={{ fontSize: 10, color: "#9ab0c8", padding: "2px 2px" }}>
+            <div style={{ fontSize: 10, color: "#c5b69d", padding: "2px 2px" }}>
               <span style={{ color: "#7fd0a0" }}>Imports ←</span> {cityList(inbound, (l) => l.a_name)}
             </div>
-            <div style={{ fontSize: 10, color: "#9ab0c8", padding: "2px 2px" }}>
+            <div style={{ fontSize: 10, color: "#c5b69d", padding: "2px 2px" }}>
               <span style={{ color: "#e0a060" }}>Exports →</span> {cityList(outbound, (l) => l.b_name)}
             </div>
             <div onClick={focusCity} style={{ marginTop: 6, cursor: "pointer", color: "#ffcf3f", fontSize: 10 }}
@@ -1333,7 +1333,7 @@ export function HubPanel() {
       )}
       {tab === "life" && (() => {
         if (annals.length === 0) {
-          return <div style={{ color: "#7a90a8", fontSize: 10 }}>No annals recorded yet — check back after the campaign has run a year.</div>;
+          return <div style={{ color: "#a5967d", fontSize: 10 }}>No annals recorded yet — check back after the campaign has run a year.</div>;
         }
         const latest = annals[annals.length - 1];
         const first = annals[0];
@@ -1359,11 +1359,11 @@ export function HubPanel() {
               {headline}
             </div>
             <div style={{ display: "flex", gap: 12, fontSize: 10, marginBottom: 6, flexWrap: "wrap" }}>
-              <span style={{ color: "#9ab0c8" }}>Population {Math.round(latest.population).toLocaleString()}
+              <span style={{ color: "#c5b69d" }}>Population {Math.round(latest.population).toLocaleString()}
                 {popTrend !== 0 && <span style={{ color: popTrend > 0 ? "#7fcf8f" : "#e0a0a0" }}> ({popTrend > 0 ? "+" : ""}{Math.round(popTrend).toLocaleString()} since {first.year})</span>}
               </span>
-              <span style={{ color: "#9ab0c8" }}>Grain {latest.grain_price.toFixed(2)}</span>
-              <span style={{ color: "#9ab0c8" }}>Mood {Math.round(latest.mood * 100)}%</span>
+              <span style={{ color: "#c5b69d" }}>Grain {latest.grain_price.toFixed(2)}</span>
+              <span style={{ color: "#c5b69d" }}>Mood {Math.round(latest.mood * 100)}%</span>
             </div>
             <div style={{ ...sectionHdr, marginTop: 4 }}>Bread against wages (welfare ratio, recent years)</div>
             <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 40, marginBottom: 2 }}>
@@ -1376,7 +1376,7 @@ export function HubPanel() {
                 );
               })}
             </div>
-            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#6a86a6" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#a28f6e" }}>
               <span>{rows[0].year}</span>
               <span title="1.0 = bare subsistence">— 1.0 ≈ bare subsistence —</span>
               <span>{rows[rows.length - 1].year}</span>
@@ -1387,18 +1387,18 @@ export function HubPanel() {
               const deaths = latest.deaths_by_cause;
               const totalDeaths = deaths ? deaths.reduce((a, b) => a + b, 0) : 0;
               const DEATH_LABELS = ["Famine", "Plague", "Fever", "War", "Fire", "Flood", "Old age", "Infancy"];
-              const DEATH_COLORS = ["#c05a4a", "#8a5ac0", "#c0904a", "#a03030", "#e0703a", "#3a80c0", "#6a86a6", "#7a5ac0"];
+              const DEATH_COLORS = ["#c05a4a", "#8a5ac0", "#c0904a", "#a03030", "#e0703a", "#a58855", "#a28f6e", "#7a5ac0"];
               return (
                 <>
                   <div style={{ ...sectionHdr, marginTop: 10 }}>Age pyramid</div>
                   {!hasAges ? (
-                    <div style={{ color: "#7a90a8", fontSize: 9 }}>Not yet recorded — an annal from before this feature shipped.</div>
+                    <div style={{ color: "#a5967d", fontSize: 9 }}>Not yet recorded — an annal from before this feature shipped.</div>
                   ) : (
                     <div style={{ display: "flex", flexDirection: "column", gap: 3, marginBottom: 4 }}>
                       {(["Children", "Adults", "Elders"] as const).map((label, i) => (
                         <div key={label} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 9.5 }}>
-                          <span style={{ width: 52, color: "#9ab0c8", flexShrink: 0 }}>{label}</span>
-                          <div style={{ flex: 1, background: "#16222e", borderRadius: 2, height: 10, overflow: "hidden" }}>
+                          <span style={{ width: 52, color: "#c5b69d", flexShrink: 0 }}>{label}</span>
+                          <div style={{ flex: 1, background: "#2b2419", borderRadius: 2, height: 10, overflow: "hidden" }}>
                             <div style={{ width: `${Math.round(ages[i] * 100)}%`, height: "100%", background: "#4a8a6a" }} />
                           </div>
                           <span style={{ width: 30, color: "#cfe2f6", textAlign: "right", flexShrink: 0 }}>{Math.round(ages[i] * 100)}%</span>
@@ -1408,7 +1408,7 @@ export function HubPanel() {
                   )}
                   <div style={{ ...sectionHdr, marginTop: 8 }}>Causes of death (since founding)</div>
                   {totalDeaths < 0.5 ? (
-                    <div style={{ color: "#7a90a8", fontSize: 9 }}>No recorded deaths yet.</div>
+                    <div style={{ color: "#a5967d", fontSize: 9 }}>No recorded deaths yet.</div>
                   ) : (
                     <>
                       <div style={{ display: "flex", height: 8, borderRadius: 2, overflow: "hidden", marginBottom: 4 }}>
@@ -1419,7 +1419,7 @@ export function HubPanel() {
                       </div>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "2px 10px", fontSize: 9 }}>
                         {deaths.map((d, i) => d > 0.5 ? (
-                          <span key={i} style={{ color: "#9ab0c8" }}>
+                          <span key={i} style={{ color: "#c5b69d" }}>
                             <span style={{ color: DEATH_COLORS[i] }}>●</span> {DEATH_LABELS[i]} {Math.round((d / totalDeaths) * 100)}%
                           </span>
                         ) : null)}
@@ -1433,7 +1433,7 @@ export function HubPanel() {
               const crowdRows = annals.slice(-12).filter((y) => y.crowding > 0.001);
               if (crowdRows.length === 0) {
                 return (
-                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
+                  <div style={{ color: "#a5967d", fontSize: 9, marginTop: 8 }}>
                     Housing not yet recorded — an annal from before this feature shipped.
                   </div>
                 );
@@ -1444,7 +1444,7 @@ export function HubPanel() {
               return (
                 <>
                   <div style={{ ...sectionHdr, marginTop: 10 }}>Housing (crowding = population ÷ housing)</div>
-                  <div style={{ fontSize: 10, color: latestCrowd > 1.2 ? "#e0a06a" : "#9ab0c8", marginBottom: 4 }}>
+                  <div style={{ fontSize: 10, color: latestCrowd > 1.2 ? "#e0a06a" : "#c5b69d", marginBottom: 4 }}>
                     {latestCrowd.toFixed(2)}× — {crowdWord}
                   </div>
                   <div style={{ display: "flex", alignItems: "flex-end", gap: 2, height: 28, marginBottom: 2 }}>
@@ -1452,11 +1452,11 @@ export function HubPanel() {
                       const h = Math.max(2, Math.round((y.crowding / maxCrowd) * 26));
                       return (
                         <div key={y.year} title={`${y.year}: crowding ${y.crowding.toFixed(2)}×`}
-                          style={{ flex: 1, height: h, background: y.crowding > 1.2 ? "#c07a4a" : "#4a7a8a", borderRadius: "1px 1px 0 0", minWidth: 3 }} />
+                          style={{ flex: 1, height: h, background: y.crowding > 1.2 ? "#c07a4a" : "#827052", borderRadius: "1px 1px 0 0", minWidth: 3 }} />
                       );
                     })}
                   </div>
-                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#6a86a6" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 8.5, color: "#a28f6e" }}>
                     <span>{crowdRows[0].year}</span>
                     <span title="crowding = 1.0 means housing exactly meets population">— 1.0 ≈ fully housed —</span>
                     <span>{crowdRows[crowdRows.length - 1].year}</span>
@@ -1474,7 +1474,7 @@ export function HubPanel() {
                     return (
                       <div key={i} style={{ fontSize: 10, color: "#cfe2f6" }}>
                         <div>
-                          <span style={{ color: "#9ab0c8" }}>{NOTABLE_ROLE_NAMES[n.role] ?? "Notable"}</span> — {n.name}
+                          <span style={{ color: "#c5b69d" }}>{NOTABLE_ROLE_NAMES[n.role] ?? "Notable"}</span> — {n.name}
                         </div>
                         {person && person.traits.length > 0 && (
                           <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 2 }}>
@@ -1486,7 +1486,7 @@ export function HubPanel() {
                             ))}
                           </div>
                         )}
-                        <div style={{ fontSize: 9, color: "#7a90a8", fontStyle: "italic", marginTop: 1 }}>
+                        <div style={{ fontSize: 9, color: "#a5967d", fontStyle: "italic", marginTop: 1 }}>
                           {lastLine ?? (person ? "A quiet life, so far." : "")}
                         </div>
                       </div>
@@ -1495,7 +1495,7 @@ export function HubPanel() {
                 </div>
               </>
             )}
-            <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 8 }}>
+            <div style={{ color: "#a5967d", fontSize: 9, marginTop: 8 }}>
               The church and the watch have no mechanism behind them at all —
               that is L9/L10 of the plan, still queued. The bishop, the
               physician, and the captain of the watch (L12's other three
@@ -1516,21 +1516,21 @@ export function HubPanel() {
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                 <div style={sectionHdr}>Peoples</div>
                 <span onClick={() => useUIStore.getState().setShowImmigration(true)} title="Migration & immigration for this city"
-                  style={{ fontSize: 9, color: "#9ab0c8", cursor: "pointer", border: "1px solid #2a3a4a", borderRadius: 10, padding: "1px 7px" }}>
+                  style={{ fontSize: 9, color: "#c5b69d", cursor: "pointer", border: "1px solid #463d2e", borderRadius: 10, padding: "1px 7px" }}>
                   🧭 Migration
                 </span>
               </div>
               {/* Culture composition as a circular diagram: majority + minority quarters. */}
               <CultureDonut majority={detail.culture} minorities={(detail.minorities ?? []) as [string, number][]} />
               {(detail.minorities ?? []).filter(([, s]) => s > 0.005).length === 0 && (
-                <div style={{ color: "#7a90a8", fontSize: 10, marginBottom: 2 }}>No minority quarters — a homogeneous population.</div>
+                <div style={{ color: "#a5967d", fontSize: 10, marginBottom: 2 }}>No minority quarters — a homogeneous population.</div>
               )}
               {/* Contentment of peoples — are each culture's prized goods supplied here? */}
               {(detail.culture_moods?.length ?? 0) > 0 && (
                 <div style={{ marginTop: 8 }}>
                   <div style={sectionHdr}>Contentment — is what they crave supplied?</div>
                   {detail.culture_moods!.map((m) => <CultureMoodRow key={m.name} m={m} />)}
-                  <div style={{ color: "#7a90a8", fontSize: 9, marginTop: 3 }}>
+                  <div style={{ color: "#a5967d", fontSize: 9, marginTop: 3 }}>
                     Unmet cravings feed unrest — a large discontented people grows restive.
                   </div>
                 </div>
@@ -1558,14 +1558,14 @@ export function HubPanel() {
               <>
                 <div style={{ ...sectionHdr, marginTop: 6 }}>How goods arrive</div>
                 {tot < 1e-4 ? (
-                  <div style={{ color: "#7a90a8", fontSize: 10 }}>No trade arriving yet.</div>
+                  <div style={{ color: "#a5967d", fontSize: 10 }}>No trade arriving yet.</div>
                 ) : (
                   <>
-                    <div style={{ display: "flex", height: 8, borderRadius: 3, overflow: "hidden", background: "#0a1018" }}>
+                    <div style={{ display: "flex", height: 8, borderRadius: 3, overflow: "hidden", background: "#16120c" }}>
                       <div style={{ width: `${seaPct}%`, background: "#4a6a8a" }} title={`Ships (sea): ${seaPct}%`} />
                       <div style={{ width: `${100 - seaPct}%`, background: "#b5894a" }} title={`Caravans (land): ${100 - seaPct}%`} />
                     </div>
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#9ab0c8", marginTop: 2 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#c5b69d", marginTop: 2 }}>
                       <span>🚢 ships {seaPct}%</span>
                       <span>{100 - seaPct}% caravans 🐫</span>
                     </div>
@@ -1604,12 +1604,12 @@ export function HubPanel() {
             return (
               <>
                 <div style={{ ...sectionHdr, marginTop: 6 }}>Ships &amp; caravans working this port</div>
-                <div style={{ fontSize: 10, color: "#9ab0c8", lineHeight: 1.6 }}>
+                <div style={{ fontSize: 10, color: "#c5b69d", lineHeight: 1.6 }}>
                   <div>
                     <span style={{ color: "#cdbb88", fontWeight: 600 }}>Houses</span>
                     {hVessels > 0
                       ? <> · 🚢 {hSea} · 🛶 {hRiver} · 🐫 {hCar}</>
-                      : <span style={{ color: "#6a86a6" }}> · no resident house fleet</span>}
+                      : <span style={{ color: "#a28f6e" }}> · no resident house fleet</span>}
                   </div>
                   <div style={{ color: LOCAL_COLOR }}>
                     <span style={{ fontWeight: 600 }}>Local merchants</span>
@@ -1619,7 +1619,7 @@ export function HubPanel() {
                     <span style={{ fontWeight: 600 }}>Merchant guilds</span>
                     <span style={{ color: "#7a90a8" }}> ≈ 🚢 {gld.ships} · 🐫 {gld.land}</span>
                   </div>
-                  <div style={{ color: "#56708e", fontSize: 8 }}>house counts exact · local/guild estimated from trade share</div>
+                  <div style={{ color: "#87785d", fontSize: 8 }}>house counts exact · local/guild estimated from trade share</div>
                 </div>
               </>
             );
@@ -1639,11 +1639,11 @@ export function HubPanel() {
                       <span style={{ color: "#e8dcc0", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{o.holder}</span>
                       {o.is_guild && <span style={{ fontSize: 8, color: "#7fd0c0" }}>GUILD</span>}
                       <span style={{ flex: 1 }} />
-                      <span style={{ color: "#9ab0c8", fontSize: 9 }} title="share of this city's live trade throughput">
+                      <span style={{ color: "#c5b69d", fontSize: 9 }} title="share of this city's live trade throughput">
                         {o.throughput_pct >= 0.5 ? `${Math.round(o.throughput_pct)}%` : "—"}
                       </span>
                     </div>
-                    <div style={{ color: "#7a90a8", fontSize: 9, paddingLeft: 13 }}>
+                    <div style={{ color: "#a5967d", fontSize: 9, paddingLeft: 13 }}>
                       from {o.origin || "—"}
                       {o.goods.length > 0 && <> · {o.goods.slice(0, 5).map((g, i) => <span key={g}>{i > 0 && ", "}{iconFor(g)} {labelFor(g)}</span>)}</>}
                     </div>
@@ -1675,11 +1675,11 @@ export function HubPanel() {
                         <span style={{ flex: 1 }} />
                         <span style={{ color: "#c9a227", fontSize: 10 }}>{Math.round((Math.max(0, h.wealth) / total) * 100)}%</span>
                       </div>
-                      <div style={{ height: 3, background: "#0a1018", borderRadius: 2, overflow: "hidden" }}>
+                      <div style={{ height: 3, background: "#16120c", borderRadius: 2, overflow: "hidden" }}>
                         <div style={{ width: `${(Math.max(0, h.wealth) / total) * 100}%`, height: "100%", background: "#c9a227" }} />
                       </div>
                       {h.specialties.length > 0 && (
-                        <div style={{ color: "#9ab0c8", fontSize: 9 }}>
+                        <div style={{ color: "#c5b69d", fontSize: 9 }}>
                           {h.head_name} · {h.specialties.join(", ")}
                           {h.monopolies.length > 0 && (
                             <span style={{ color: "#e0b060" }}> ({h.monopolies.map(([g, s]) => `${g} ${Math.round(s * 100)}%`).join(", ")})</span>
@@ -1709,15 +1709,15 @@ export function HubPanel() {
                   const klass = desireClass(l.good_name);
                   return (
                     <div key={l.good} style={{ marginBottom: 3 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#c0d0e0" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#ded4c2" }}>
                         <span>{iconFor(l.good_name)} {labelFor(l.good_name)}
-                          {klass && <span style={{ color: "#7a90a8" }}> · {klass} crave it</span>}</span>
-                        <span style={{ color: l.received < l.demand * 0.6 ? "#ff9a6a" : "#9ab0c8" }}>
+                          {klass && <span style={{ color: "#a5967d" }}> · {klass} crave it</span>}</span>
+                        <span style={{ color: l.received < l.demand * 0.6 ? "#ff9a6a" : "#c5b69d" }}>
                           {l.received < l.demand * 0.6 ? "shortage " : ""}{l.price.toFixed(1)}×
                         </span>
                       </div>
-                      <div style={{ position: "relative", height: 6, background: "#13202e", borderRadius: 2 }}>
-                        <div style={{ position: "absolute", inset: 0, width: `${(l.demand / maxD) * 100}%`, background: "#2a4060", borderRadius: 2 }} title={`demand ${l.demand.toFixed(2)}`} />
+                      <div style={{ position: "relative", height: 6, background: "#2b2316", borderRadius: 2 }}>
+                        <div style={{ position: "absolute", inset: 0, width: `${(l.demand / maxD) * 100}%`, background: "#594a31", borderRadius: 2 }} title={`demand ${l.demand.toFixed(2)}`} />
                         <div style={{ position: "absolute", inset: 0, width: `${(l.received / maxD) * 100}%`, background: "#5fc8a8", borderRadius: 2 }} title={`received ${l.received.toFixed(2)}`} />
                       </div>
                     </div>
@@ -1734,7 +1734,7 @@ export function HubPanel() {
                 <div key={s.good} style={{ ...row, fontSize: 10 }}>
                   <span style={{ minWidth: 14 }}>{iconFor(s.good_name)}</span>
                   <span style={{ color: "#e0b090", minWidth: 64 }}>{labelFor(s.good_name)}</span>
-                  <span style={{ flex: 1, color: "#9ab0c8", fontStyle: "italic" }}>{shortageReason(s.reason)}</span>
+                  <span style={{ flex: 1, color: "#c5b69d", fontStyle: "italic" }}>{shortageReason(s.reason)}</span>
                   <span style={{ color: "#ff9a6a", fontSize: 9 }}>{Math.round(s.severity * 100)}% short</span>
                 </div>
               ))}
@@ -1747,15 +1747,15 @@ export function HubPanel() {
               <div style={{ display: "flex", gap: 8 }}>
                 {([["→ outbound", outCargo], ["← inbound", inCargo]] as const).map(([title, col]) => (
                   <div key={title} style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ color: "#6a86a6", fontSize: 9, marginBottom: 3 }}>{title} · {col.length}</div>
+                    <div style={{ color: "#a28f6e", fontSize: 9, marginBottom: 3 }}>{title} · {col.length}</div>
                     {col.length === 0 && <div style={emptyTxt}>—</div>}
                     {col.slice(0, 10).map((g) => (
                       <div key={g.good_name} style={{ marginBottom: 2 }}>
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#c0d0e0" }}>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: "#ded4c2" }}>
                           <span>{iconFor(g.good_name)} {labelFor(g.good_name)}</span>
-                          <span style={{ color: "#9ab0c8" }}>{g.value.toFixed(1)}</span>
+                          <span style={{ color: "#c5b69d" }}>{g.value.toFixed(1)}</span>
                         </div>
-                        <div style={{ height: 4, background: "#13202e", borderRadius: 2 }}>
+                        <div style={{ height: 4, background: "#2b2316", borderRadius: 2 }}>
                           <div style={{ height: 4, width: `${(g.value / cargoMax) * 100}%`, background: "#5fc8a8", borderRadius: 2 }} />
                         </div>
                       </div>
@@ -1773,8 +1773,8 @@ export function HubPanel() {
                 {economy.class_stats.map((cs) => (
                   <div key={cs.label} style={{ ...statTile, flex: 1 }}>
                     <div style={{ color: cs.label === "emporiums" ? "#e63030" : cs.label === "outposts" ? "#aaaaaa" : "#5fc8d8", fontSize: 12, fontWeight: 700 }}>{cs.count}</div>
-                    <div style={{ color: "#6a86a6", fontSize: 8, textTransform: "capitalize" }}>{cs.label}</div>
-                    <div style={{ color: "#7a90a8", fontSize: 7 }}>{cs.population.toLocaleString()} ppl</div>
+                    <div style={{ color: "#a28f6e", fontSize: 8, textTransform: "capitalize" }}>{cs.label}</div>
+                    <div style={{ color: "#a5967d", fontSize: 7 }}>{cs.population.toLocaleString()} ppl</div>
                   </div>
                 ))}
               </div>
@@ -1786,12 +1786,12 @@ export function HubPanel() {
               <div style={{ ...sectionHdr, marginTop: 6 }}>Wealthiest hubs</div>
               {wealthSorted.slice(0, 5).map((h, i) => (
                 <div key={h.id} onClick={() => setSelectedHub(h.id)}
-                  style={{ ...row, cursor: "pointer", background: h.id === hub.id ? "#1a2c40" : "transparent" }}>
-                  <span style={{ color: "#6a86a6", minWidth: 16 }}>#{i + 1}</span>
-                  <span style={{ flex: 1, color: h.id === hub.id ? "#e8d8b0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  style={{ ...row, cursor: "pointer", background: h.id === hub.id ? "#3b311f" : "transparent" }}>
+                  <span style={{ color: "#a28f6e", minWidth: 16 }}>#{i + 1}</span>
+                  <span style={{ flex: 1, color: h.id === hub.id ? "#e8d8b0" : "#ded4c2", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {h.id === topHubStatic?.id ? "🟨 " : h.emporium ? "🔺 " : ""}{h.name}
                   </span>
-                  <span style={{ color: "#9ab0c8", fontSize: 9 }}>{h.population.toLocaleString()}</span>
+                  <span style={{ color: "#c5b69d", fontSize: 9 }}>{h.population.toLocaleString()}</span>
                   <span style={{ color: "#7fd0a0", fontSize: 10, minWidth: 32, textAlign: "right" }}>{Math.round(h.wealth * 100)}%</span>
                 </div>
               ))}
@@ -1810,8 +1810,8 @@ export function HubPanel() {
                   color="#e0c060" fmt={(v) => v.toFixed(2)} mt />
                 <Sparkline values={detail.history.map((s) => s.wealth)} color="#e0c060" />
                 <SeriesStat label="Mood" values={detail.history.map((s) => s.mood)}
-                  color="#9ab0c8" fmt={(v) => `${Math.round(v * 100)}%`} mt />
-                <Sparkline values={detail.history.map((s) => s.mood)} color="#9ab0c8" min={0} max={1} />
+                  color="#c5b69d" fmt={(v) => `${Math.round(v * 100)}%`} mt />
+                <Sparkline values={detail.history.map((s) => s.mood)} color="#c5b69d" min={0} max={1} />
 
                 <div style={{ ...sectionHdr, marginTop: 8 }}>People lacking goods (% of demand unmet)</div>
                 <MultiSeriesChart
@@ -1819,7 +1819,7 @@ export function HubPanel() {
                   series={[
                     { label: "Basic", color: "#ff8a6a", values: detail.history.map((s) => s.lack_basic ?? 0) },
                     { label: "Comfort", color: "#e0c060", values: detail.history.map((s) => s.lack_comfort ?? 0) },
-                    { label: "Luxury", color: "#9ab0c8", values: detail.history.map((s) => s.lack_luxury ?? 0) },
+                    { label: "Luxury", color: "#c5b69d", values: detail.history.map((s) => s.lack_luxury ?? 0) },
                   ]}
                 />
 
@@ -1829,14 +1829,14 @@ export function HubPanel() {
                   series={[
                     { label: "🧺 Local", color: "#7fd0a0", values: detail.history.map((s) => s.pop_local ?? 0) },
                     { label: "🏛 Houses", color: "#e0c060", values: detail.history.map((s) => s.pop_house ?? 0) },
-                    { label: "⚖ Guilds", color: "#8aa0c0", values: detail.history.map((s) => s.pop_guild ?? 0) },
+                    { label: "⚖ Guilds", color: "#bcab8e", values: detail.history.map((s) => s.pop_guild ?? 0) },
                   ]}
                 />
               </>
             ) : (
               <div style={emptyTxt}>Advance the campaign a few weeks to chart this city's history.</div>
             )}
-            <div style={{ ...sectionHdr, marginTop: 6 }}>Chronicle <span style={{ color: "#56708e", fontWeight: 400 }}>(click a year)</span></div>
+            <div style={{ ...sectionHdr, marginTop: 6 }}>Chronicle <span style={{ color: "#87785d", fontWeight: 400 }}>(click a year)</span></div>
             <YearChronicle
               entries={detail.events.map((e) => ({ year: Math.floor(e.tick / 365), kind: e.kind, text: e.text }))}
               icons={HUB_EVENT_ICON}
@@ -1861,7 +1861,7 @@ function CityFinances({ detail }: { detail: HubDetail }) {
   const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
     amt > 0.01 ? (
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9.5 }}>
-        <span style={{ color: "#9ab0c8" }}>{label}</span>
+        <span style={{ color: "#c5b69d" }}>{label}</span>
         <span style={{ color: neg ? "#e0a0a0" : "#7fcf8f" }}>{neg ? "−" : "+"}{fmtN(amt)}</span>
       </div>
     ) : null
@@ -1874,7 +1874,7 @@ function CityFinances({ detail }: { detail: HubDetail }) {
     <>
       <div style={{ ...sectionHdr, marginTop: 6 }}>City finances</div>
       <div style={{ display: "flex", alignItems: "center", gap: 10, fontSize: 10, flexWrap: "wrap" }}>
-        <span style={{ color: treasuryOk ? "#8aa0b8" : "#ff8a6a", fontWeight: treasuryOk ? 400 : 700 }}
+        <span style={{ color: treasuryOk ? "#b5a68d" : "#ff8a6a", fontWeight: treasuryOk ? 400 : 700 }}
           title={treasuryOk ? undefined : "the treasury is empty — spending is outrunning income"}>
           🏛 Treasury {fmtN(detail.treasury ?? 0)}{!treasuryOk && " — empty"}
         </span>
@@ -1890,7 +1890,7 @@ function CityFinances({ detail }: { detail: HubDetail }) {
       {f && (f.year > 0 || (detail.treasury ?? 0) > 0) && (
         <div style={{ display: "flex", gap: 12, marginTop: 4 }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "#6a86a6", fontSize: 8.5, textTransform: "uppercase" }}>Income · yr {f.year}</div>
+            <div style={{ color: "#a28f6e", fontSize: 8.5, textTransform: "uppercase" }}>Income · yr {f.year}</div>
             <Line label="Trade tariffs" amt={f.tax_trade} />
             <Line label="Estate tax" amt={f.tax_estate} />
             <Line label="Manufacturing tax" amt={f.tax_manufacture} />
@@ -1900,7 +1900,7 @@ function CityFinances({ detail }: { detail: HubDetail }) {
             <Line label="Reparations" amt={f.reparations_in} />
           </div>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: "#6a86a6", fontSize: 8.5, textTransform: "uppercase" }}>Spending</div>
+            <div style={{ color: "#a28f6e", fontSize: 8.5, textTransform: "uppercase" }}>Spending</div>
             <Line label="To the people" amt={f.spent_civic} neg />
             <Line label="War effort" amt={f.spent_war} neg />
             <Line label="Public works" amt={f.spent_works} neg />
@@ -1971,7 +1971,7 @@ function PeoplePowers({ hub }: { hub: number }) {
   const minorities = data.groups.filter((g) => !g.is_majority);
   const clamp = (v: number) => Math.max(0, Math.min(1, v));
   const Bar = ({ v, color }: { v: number; color: string }) => (
-    <div style={{ width: 34, height: 5, background: "#0a1018", borderRadius: 2, overflow: "hidden", flex: "0 0 auto" }}>
+    <div style={{ width: 34, height: 5, background: "#16120c", borderRadius: 2, overflow: "hidden", flex: "0 0 auto" }}>
       <div style={{ width: `${Math.round(clamp(v) * 100)}%`, height: "100%", background: color }} />
     </div>
   );
@@ -1980,17 +1980,17 @@ function PeoplePowers({ hub }: { hub: number }) {
     <>
       <div style={{ ...sectionHdr, marginTop: 8 }}>Powers — who commands the city</div>
       {majority && (
-        <div style={{ fontSize: 10, color: "#9ab0c8", marginBottom: 5 }}>
+        <div style={{ fontSize: 10, color: "#c5b69d", marginBottom: 5 }}>
           Majority <b style={{ color: "#cfe2f6" }}>{majority.culture}</b> {Math.round(majority.pop_share * 100)}%
           {" "}{majority.traits.map((t) => t.emoji).join("")}
           {majority.council_seat && <span style={{ color: "#7fd0a0" }}> · holds the seat</span>}
         </div>
       )}
       {minorities.length === 0 ? (
-        <div style={{ color: "#7a90a8", fontSize: 10 }}>No minority holds notable power here.</div>
+        <div style={{ color: "#a5967d", fontSize: 10 }}>No minority holds notable power here.</div>
       ) : (
         <>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 8, color: "#6a86a6", marginBottom: 2 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 8, color: "#a28f6e", marginBottom: 2 }}>
             <span style={{ flex: 1 }} />
             <span style={{ width: 34, textAlign: "center" }}>pop</span>
             <span style={{ width: 34, textAlign: "center" }}>civic</span>
@@ -2005,12 +2005,12 @@ function PeoplePowers({ hub }: { hub: number }) {
                   {g.traits[0]?.emoji ?? "•"} {g.culture}
                   {g.fondaco && <span title="keeps a fondaco — a foreign trading quarter" style={{ color: "#e0b050" }}> 🏛</span>}
                 </span>
-                <Bar v={g.pop_share} color="#8aa0c0" />
+                <Bar v={g.pop_share} color="#bcab8e" />
                 <Bar v={g.civic} color="#5fc8a8" />
                 <Bar v={g.market} color="#e0c060" />
                 <span style={{ width: 44, textAlign: "right", fontSize: 10, color: "#e0b050", letterSpacing: 0.5 }}>{pips(g.power)}</span>
               </div>
-              {g.note && <div style={{ fontSize: 9, color: "#7a90a8", marginLeft: 16 }}>{g.note}</div>}
+              {g.note && <div style={{ fontSize: 9, color: "#a5967d", marginLeft: 16 }}>{g.note}</div>}
             </div>
           ))}
         </>
@@ -2029,7 +2029,7 @@ function CultureMoodRow({ m }: { m: CultureMood }) {
       <span style={{ width: 9, height: 9, borderRadius: 2, background: rgb, flex: "0 0 auto", border: "1px solid rgba(0,0,0,0.4)" }} />
       <span style={{ width: 84, color: "#cfe2f6", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{m.name}</span>
       <span style={{ fontSize: 13 }} title={`${Math.round(s * 100)}% of what they crave is supplied`}>{face}</span>
-      <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: "#8aa0b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+      <span style={{ flex: 1, minWidth: 0, textAlign: "right", color: "#b5a68d", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
         {m.unmet.length > 0
           ? <span style={{ color: fc }}>craves {m.unmet.map((g) => <GoodIcon key={g} name={g} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />)}</span>
           : <span style={{ color: "#7fa090" }}>content {m.met.slice(0, 3).map((g) => <GoodIcon key={g} name={g} size={14} style={{ display: "inline-block", verticalAlign: "middle" }} />)}</span>}
@@ -2049,12 +2049,12 @@ function MoodCard({ detail }: { detail: HubDetail }) {
     <div style={{ margin: "2px 0 4px" }}>
       <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginBottom: 3 }}>
         <span style={{ color: moodColor, fontSize: 12, fontWeight: 700 }}>{face}</span>
-        <span style={{ color: "#7a90a8", fontSize: 10 }}>{Math.round(mood * 100)}%</span>
+        <span style={{ color: "#a5967d", fontSize: 10 }}>{Math.round(mood * 100)}%</span>
         {detail.starving > 0.4 && <span style={{ color: "#ff6a4a", fontSize: 9 }}>· starving</span>}
       </div>
       <DriverBar label="Food" frac={detail.sent_food} color="#5fc8a8" />
       <DriverBar label="Prosperity" frac={detail.sent_prosperity} color="#e0c060" />
-      <DriverBar label={`Stability${stabNote}`} frac={detail.sent_stability} color="#8aa0c0" />
+      <DriverBar label={`Stability${stabNote}`} frac={detail.sent_stability} color="#bcab8e" />
     </div>
   );
 }
@@ -2064,7 +2064,7 @@ const STRATA = [
   { key: "patrician", label: "Patrician", color: "#ffd700" },
   { key: "burgher", label: "Burgher", color: "#ff8844" },
   { key: "commoner", label: "Commoner", color: "#e8d8b0" },
-  { key: "underclass", label: "Underclass", color: "#7a8aa0" },
+  { key: "underclass", label: "Underclass", color: "#9d917d" },
 ] as const;
 
 function SocietyCard({ society }: { society: SocietyBrief }) {
@@ -2077,7 +2077,7 @@ function SocietyCard({ society }: { society: SocietyBrief }) {
   return (
     <div style={{ margin: "2px 0 4px" }}>
       {/* stacked strata bar */}
-      <div style={{ display: "flex", height: 12, borderRadius: 3, overflow: "hidden", border: "1px solid #1e2e42" }}>
+      <div style={{ display: "flex", height: 12, borderRadius: 3, overflow: "hidden", border: "1px solid #3e3422" }}>
         {STRATA.map((s) => {
           const v = (society as unknown as Record<string, number>)[s.key];
           return v > 0.001 ? <div key={s.key} title={`${s.label} ${Math.round(v * 100)}%`}
@@ -2088,7 +2088,7 @@ function SocietyCard({ society }: { society: SocietyBrief }) {
         {STRATA.map((s) => {
           const v = (society as unknown as Record<string, number>)[s.key];
           return (
-            <span key={s.key} style={{ fontSize: 9, color: "#7a90a8", display: "flex", alignItems: "center", gap: 3 }}>
+            <span key={s.key} style={{ fontSize: 9, color: "#a5967d", display: "flex", alignItems: "center", gap: 3 }}>
               <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color, display: "inline-block" }} />
               {s.label} {Math.round(v * 100)}%
             </span>
@@ -2107,8 +2107,8 @@ function SocietyCard({ society }: { society: SocietyBrief }) {
 function DriverBar({ label, frac, color }: { label: string; frac: number; color: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "1px 0" }}>
-      <span style={{ color: "#6a86a6", fontSize: 9, minWidth: 96 }}>{label}</span>
-      <div style={{ flex: 1, height: 5, background: "#13202e", borderRadius: 2 }}>
+      <span style={{ color: "#a28f6e", fontSize: 9, minWidth: 96 }}>{label}</span>
+      <div style={{ flex: 1, height: 5, background: "#2b2316", borderRadius: 2 }}>
         <div style={{ height: 5, width: `${Math.max(2, Math.min(100, frac * 100))}%`, background: color, borderRadius: 2 }} />
       </div>
     </div>
@@ -2127,7 +2127,7 @@ function SeriesStat({ label, values, color, fmt, mt }: {
   const dAll = cur - first;
   const pct = (d: number, base: number) => (Math.abs(base) < 1e-6 ? 0 : (d / Math.abs(base)) * 100);
   const sign = (d: number) => (d > 0 ? "+" : d < 0 ? "−" : "±");
-  const col = (d: number) => (d > 0 ? "#7fd0a0" : d < 0 ? "#ff8a6a" : "#6a86a6");
+  const col = (d: number) => (d > 0 ? "#7fd0a0" : d < 0 ? "#ff8a6a" : "#a28f6e");
   return (
     <div style={{ display: "flex", alignItems: "baseline", gap: 8, marginTop: mt ? 6 : 0 }}>
       <span style={{ ...sectionHdr, margin: 0, flex: "0 0 auto" }}>{label}</span>
@@ -2159,9 +2159,9 @@ function Sparkline({ values, color, min, max, baseline }: {
   }).join(" ");
   const baseY = baseline !== undefined ? H - ((baseline - lo) / span) * (H - 4) - 2 : null;
   return (
-    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
+    <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ display: "block", background: "#1e180f", borderRadius: 3 }}>
       {baseY !== null && baseY >= 0 && baseY <= H && (
-        <line x1={0} y1={baseY} x2={W} y2={baseY} stroke="#2a3a50" strokeWidth={1} strokeDasharray="3 3" />
+        <line x1={0} y1={baseY} x2={W} y2={baseY} stroke="#4b412f" strokeWidth={1} strokeDasharray="3 3" />
       )}
       <polyline points={pts} fill="none" stroke={color} strokeWidth={1.6} />
     </svg>
@@ -2184,7 +2184,7 @@ function MultiSeriesChart({ series, min, max, fmt }: {
   return (
     <>
       <svg width="100%" viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none"
-        style={{ display: "block", background: "#0b1622", borderRadius: 3 }}>
+        style={{ display: "block", background: "#1e180f", borderRadius: 3 }}>
         {series.map((s, si) => {
           const pts = s.values.map((v, i) => {
             const x = (i / (s.values.length - 1)) * W;
@@ -2196,7 +2196,7 @@ function MultiSeriesChart({ series, min, max, fmt }: {
       </svg>
       <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 2 }}>
         {series.map((s, si) => (
-          <span key={si} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, color: "#9ab0c8" }}>
+          <span key={si} style={{ display: "inline-flex", alignItems: "center", gap: 3, fontSize: 9, color: "#c5b69d" }}>
             <span style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} />
             {s.label} <span style={{ color: s.color, fontWeight: 700 }}>{fmt(s.values[s.values.length - 1] ?? 0)}</span>
           </span>
@@ -2278,8 +2278,8 @@ function peopleSummary(hub: EconHub, labelFor: (id: string) => string, topName?:
 function Stat({ label, value }: { label: string; value: string }) {
   return (
     <div style={statTile}>
-      <div style={{ color: "#d8e4f0", fontSize: 12, fontWeight: 700 }}>{value}</div>
-      <div style={{ color: "#6a86a6", fontSize: 8 }}>{label}</div>
+      <div style={{ color: "#eee7da", fontSize: 12, fontWeight: 700 }}>{value}</div>
+      <div style={{ color: "#a28f6e", fontSize: 8 }}>{label}</div>
     </div>
   );
 }
@@ -2306,26 +2306,26 @@ function CurrencyCard({ currencies, iconFor, labelFor }: {
     <div style={currencyBox}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 3 }}>
         <span style={{ color: "#e0c060", fontSize: 10, fontWeight: 700 }}>💰 Coin of the realm</span>
-        <span style={{ color: "#56708e", fontSize: 8 }}>why these goods are money</span>
+        <span style={{ color: "#87785d", fontSize: 8 }}>why these goods are money</span>
       </div>
       {currencies.map((c, i) => (
         <div key={c.good} style={{ marginBottom: 4 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 5, fontSize: 10 }}>
             <span style={{ color: "#e8d8b0", fontWeight: 600 }}>{iconFor(c.name)} {labelFor(c.name)}</span>
-            <span style={{ color: "#7a90a8", fontSize: 8 }}>{i === 0 ? "primary money" : "everyday change"}</span>
+            <span style={{ color: "#a5967d", fontSize: 8 }}>{i === 0 ? "primary money" : "everyday change"}</span>
             <span style={{ flex: 1 }} />
-            <span style={{ color: "#9ab0c8", fontSize: 9 }}>{c.price.toFixed(1)} grain</span>
+            <span style={{ color: "#c5b69d", fontSize: 9 }}>{c.price.toFixed(1)} grain</span>
           </div>
           <div style={{ display: "flex", gap: 4, marginTop: 2 }}>
             <CurBar label="Liquidity" frac={c.liquidity / maxLiq} color="#5fc8a8" hint={`${c.liquidity.toFixed(0)} trade partners`} />
             <CurBar label="Value" frac={c.value / maxVal} color="#e0c060" hint={`base value ${c.value.toFixed(1)}`} />
-            <CurBar label="Stability" frac={c.stability} color="#8aa0c0" hint={`${Math.round(c.stability * 100)}% steady price`} />
+            <CurBar label="Stability" frac={c.stability} color="#bcab8e" hint={`${Math.round(c.stability * 100)}% steady price`} />
           </div>
         </div>
       ))}
       {ratios.length > 0 && (
-        <div style={{ color: "#a8bcd4", fontSize: 9, marginTop: 1, borderTop: "1px solid #1e2e42", paddingTop: 3 }}>
-          <span style={{ color: "#6a86a6" }}>Exchange: </span>
+        <div style={{ color: "#d1c3ab", fontSize: 9, marginTop: 1, borderTop: "1px solid #3e3422", paddingTop: 3 }}>
+          <span style={{ color: "#a28f6e" }}>Exchange: </span>
           1 {labelFor(primary.name)} ≈ {ratios.join(" ≈ ")}
         </div>
       )}
@@ -2336,8 +2336,8 @@ function CurrencyCard({ currencies, iconFor, labelFor }: {
 function CurBar({ label, frac, color, hint }: { label: string; frac: number; color: string; hint: string }) {
   return (
     <div style={{ flex: 1, minWidth: 0 }} title={hint}>
-      <div style={{ color: "#6a86a6", fontSize: 7 }}>{label}</div>
-      <div style={{ height: 4, background: "#13202e", borderRadius: 2 }}>
+      <div style={{ color: "#a28f6e", fontSize: 7 }}>{label}</div>
+      <div style={{ height: 4, background: "#2b2316", borderRadius: 2 }}>
         <div style={{ height: 4, width: `${Math.max(4, Math.min(100, frac * 100))}%`, background: color, borderRadius: 2 }} />
       </div>
     </div>
@@ -2362,7 +2362,7 @@ function acceptanceTierLabel(tier: number): string {
   }
 }
 
-const BASKET_PALETTE = ["#f0d77a", "#c9a227", "#6fae8a", "#5f97c0", "#52708e"];
+const BASKET_PALETTE = ["#f0d77a", "#c9a227", "#6fae8a", "#b99a66", "#86765a"];
 
 /** The city's currency basket as a small donut + legend — which coins circulate
  *  here and their share (main ★, foreign reserve ⇄). */
@@ -2372,8 +2372,8 @@ function CurrencyBasket({ basket }: { basket: CoinShare[] }) {
   const cx = 34, cy = 34, r = 28, ri = 15;
   let a0 = -Math.PI / 2;
   return (
-    <div style={{ marginTop: 8, padding: "6px 8px", background: "#0b1622", border: "1px solid #1e2e42", borderRadius: 6 }}>
-      <div style={{ color: "#7fa0c4", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 4 }}>
+    <div style={{ marginTop: 8, padding: "6px 8px", background: "#1e180f", border: "1px solid #3e3422", borderRadius: 6 }}>
+      <div style={{ color: "#bfa984", fontSize: 10, textTransform: "uppercase", letterSpacing: 0.4, fontWeight: 600, marginBottom: 4 }}>
         Currency in circulation
       </div>
       <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
@@ -2384,20 +2384,20 @@ function CurrencyBasket({ basket }: { basket: CoinShare[] }) {
             const large = b.share / total > 0.5 ? 1 : 0;
             const d = `M${p(a0, r)} A${r},${r} 0 ${large} 1 ${p(a1, r)} L${p(a1, ri)} A${ri},${ri} 0 ${large} 0 ${p(a0, ri)} Z`;
             a0 = a1;
-            return <path key={i} d={d} fill={BASKET_PALETTE[i % BASKET_PALETTE.length]} stroke="#0b1420" strokeWidth={0.8} />;
+            return <path key={i} d={d} fill={BASKET_PALETTE[i % BASKET_PALETTE.length]} stroke="#1c170f" strokeWidth={0.8} />;
           })}
         </svg>
         <div style={{ flex: 1, minWidth: 0 }}>
           {rows.map((b, i) => (
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 10, padding: "1px 0" }}>
               <span style={{ width: 9, height: 9, borderRadius: 2, background: BASKET_PALETTE[i % BASKET_PALETTE.length], flex: "0 0 auto" }} />
-              <span style={{ flex: 1, color: b.main ? "#e8dcc0" : "#c0d0e0", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <span style={{ flex: 1, color: b.main ? "#e8dcc0" : "#ded4c2", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {b.coin_name}{b.main ? " ★" : b.reserve ? " ⇄" : ""}
               </span>
-              <span style={{ color: "#9ab0c8" }}>{Math.round((b.share / total) * 100)}%</span>
+              <span style={{ color: "#c5b69d" }}>{Math.round((b.share / total) * 100)}%</span>
             </div>
           ))}
-          <div style={{ color: "#5a7290", fontSize: 8.5, marginTop: 2 }}>★ main coin · ⇄ foreign reserve</div>
+          <div style={{ color: "#897a61", fontSize: 8.5, marginTop: 2 }}>★ main coin · ⇄ foreign reserve</div>
         </div>
       </div>
     </div>
@@ -2406,22 +2406,22 @@ function CurrencyBasket({ basket }: { basket: CoinShare[] }) {
 
 const panel: React.CSSProperties = {
   position: "absolute", top: 12, right: 12, width: 360, maxHeight: "90vh", overflowY: "auto",
-  background: "rgba(12,18,26,0.97)", border: "1px solid #24364e", borderRadius: 8,
+  background: "rgba(24,20,14,0.97)", border: "1px solid #493d29", borderRadius: 8,
   padding: "10px 12px", zIndex: 110, boxShadow: "0 8px 30px rgba(0,0,0,0.5)",
 };
 const statGrid: React.CSSProperties = {
   display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 4, marginTop: 2,
 };
 const statTile: React.CSSProperties = {
-  background: "#0e1925", border: "1px solid #1c2c40", borderRadius: 4, padding: "3px 5px", textAlign: "center",
+  background: "#221c11", border: "1px solid #3c3220", borderRadius: 4, padding: "3px 5px", textAlign: "center",
 };
 const blurbBox: React.CSSProperties = {
-  marginTop: 6, padding: "5px 7px", background: "#0b1622", borderLeft: "2px solid #2a4868",
-  borderRadius: 3, color: "#a8bcd4", fontSize: 10, fontStyle: "italic", lineHeight: 1.4,
+  marginTop: 6, padding: "5px 7px", background: "#1e180f", borderLeft: "2px solid #604f32",
+  borderRadius: 3, color: "#d1c3ab", fontSize: 10, fontStyle: "italic", lineHeight: 1.4,
 };
 const sectionHdr: React.CSSProperties = {
-  color: "#6a86a6", fontSize: 10, fontWeight: 700, textTransform: "uppercase",
-  letterSpacing: 0.5, borderBottom: "1px solid #1e2e42", paddingBottom: 2, marginBottom: 3,
+  color: "#a28f6e", fontSize: 10, fontWeight: 700, textTransform: "uppercase",
+  letterSpacing: 0.5, borderBottom: "1px solid #3e3422", paddingBottom: 2, marginBottom: 3,
 };
 const currencyBox: React.CSSProperties = {
   margin: "2px 0 6px", padding: "5px 7px", background: "#0d1a14",
@@ -2432,4 +2432,4 @@ const estateBox: React.CSSProperties = {
   border: "1px solid #4a3f1e", borderRadius: 5,
 };
 const row: React.CSSProperties = { display: "flex", alignItems: "center", gap: 4, fontSize: 11, padding: "1px 2px" };
-const emptyTxt: React.CSSProperties = { color: "#506680", fontSize: 10, fontStyle: "italic", padding: "2px 3px" };
+const emptyTxt: React.CSSProperties = { color: "#7a6d56", fontSize: 10, fontStyle: "italic", padding: "2px 3px" };

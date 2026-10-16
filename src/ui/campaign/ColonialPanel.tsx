@@ -113,7 +113,7 @@ export function ColonialPanel() {
     <div data-draggable style={{ ...panel, ...rootStyle }} onPointerDown={onPointerDown}>
       <div style={{ ...header, cursor: "move" }} onPointerDown={onPointerDown}>
         <span>🏛 Colonial Office & Expeditions</span>
-        <span data-no-drag style={{ cursor: "pointer", color: "#7a90a8" }} onClick={close}>✕</span>
+        <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={close}>✕</span>
       </div>
 
       {!active && (
@@ -143,7 +143,7 @@ export function ColonialPanel() {
               <div key={gi} style={{ marginBottom: 10 }}>
                 <div style={metroHead}>
                   <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#ffd700", display: "inline-block" }} />
-                  {g.founder} <span style={{ color: "#5a7290" }}>— {g.rows.length}</span>
+                  {g.founder} <span style={{ color: "#897a61" }}>— {g.rows.length}</span>
                 </div>
                 {g.rows.map((c) => (
                   <ColonyRow key={c.id} c={c} selected={sel === c.id}
@@ -178,8 +178,8 @@ function ExpeditionsSection({ expeditions, failedCount, corridors, onFocus }: {
   if (expeditions.length === 0 && corridors.length === 0 && failedCount === 0) {
     return (
       <div style={{ ...card, marginTop: 0 }}>
-        <div style={{ fontWeight: 700, color: "#dce8f6", marginBottom: 2 }}>⛵ Expeditions & Corridors</div>
-        <div style={{ fontSize: 10.5, color: "#7a90a8", lineHeight: 1.5 }}>
+        <div style={{ fontWeight: 700, color: "#f3ecdf", marginBottom: 2 }}>⛵ Expeditions & Corridors</div>
+        <div style={{ fontSize: 10.5, color: "#a5967d", lineHeight: 1.5 }}>
           From year 15, wealthy houses fund ventures toward distant, unconnected cities. Most early
           attempts are lost to fever, storms or native raids; only after several proven round-trips does
           a lasting corridor open — founding port &amp; caravanserai villages along it. Turn on the
@@ -191,8 +191,8 @@ function ExpeditionsSection({ expeditions, failedCount, corridors, onFocus }: {
   return (
     <div style={{ ...card, marginTop: 0 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
-        <span style={{ fontWeight: 700, color: "#dce8f6" }}>⛵ Expeditions &amp; Corridors</span>
-        <span style={{ fontSize: 9.5, color: "#7a90a8" }}>
+        <span style={{ fontWeight: 700, color: "#f3ecdf" }}>⛵ Expeditions &amp; Corridors</span>
+        <span style={{ fontSize: 9.5, color: "#a5967d" }}>
           {expeditions.length} en route · {corridors.length} corridors · {failedCount} lost
         </span>
       </div>
@@ -206,16 +206,16 @@ function ExpeditionsSection({ expeditions, failedCount, corridors, onFocus }: {
           <div key={e.id} style={{ ...expRow }} onClick={() => onFocus(e.x, e.y)}>
             <span style={{ width: 9, height: 9, borderRadius: e.ships > e.caravans ? 2 : "50%", background: col, flex: "0 0 auto", marginTop: 3 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ fontSize: 11, color: "#dce8f6", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+              <div style={{ fontSize: 11, color: "#f3ecdf", fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                 {e.origin} → {e.dest}
               </div>
-              <div style={{ fontSize: 9.5, color: "#8aa6c0" }}>
+              <div style={{ fontSize: 9.5, color: "#bcab8e" }}>
                 {e.leader} · {fleet} · {e.good || "goods"} · {e.outbound ? "outbound" : "returning"}
               </div>
               <div style={{ ...bar, marginTop: 3 }}>
                 <i style={{ width: `${Math.round(e.progress * 100)}%`, background: col, display: "block", height: "100%", borderRadius: 5 }} />
               </div>
-              <div style={{ fontSize: 9, color: survived < 50 ? WARN : "#6a86a6", marginTop: 1 }}>
+              <div style={{ fontSize: 9, color: survived < 50 ? WARN : "#a28f6e", marginTop: 1 }}>
                 {survived}% of the fleet survives{last ? ` · last struck by ${HAZARD_LABEL[last[2]] ?? "peril"}` : ""}
               </div>
             </div>
@@ -236,7 +236,7 @@ function ExpeditionsSection({ expeditions, failedCount, corridors, onFocus }: {
                   <div style={{ fontSize: 10.5, color: "#cfe0f4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                     {c.origin} ↔ {c.dest}
                   </div>
-                  <div style={{ fontSize: 9.5, color: "#7a90a8" }}>
+                  <div style={{ fontSize: 9.5, color: "#a5967d" }}>
                     {c.owner} · {c.good || "trade"} · {Math.round(c.km).toLocaleString()} km
                     {ports > 0 && ` · ⚓${ports}`}{cara > 0 && ` · 🐫${cara}`}
                   </div>
@@ -254,7 +254,7 @@ function Stat({ n, l, warn }: { n: number; l: string; warn?: boolean }) {
   return (
     <div style={statBox}>
       <div style={{ fontSize: 16, fontWeight: 700, color: warn && n > 0 ? WARN : "#eaf3ff" }}>{n}</div>
-      <div style={{ fontSize: 9.5, color: "#6a86a6" }}>{l}</div>
+      <div style={{ fontSize: 9.5, color: "#a28f6e" }}>{l}</div>
     </div>
   );
 }
@@ -280,10 +280,10 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <span style={{ fontWeight: 600, color: "#dce8f6", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
+          <span style={{ fontWeight: 600, color: "#f3ecdf", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.name}</span>
           <span style={badge(c.autonomous)}>{stage}</span>
         </div>
-        <div style={{ fontSize: 10, color: "#7a90a8" }}>
+        <div style={{ fontSize: 10, color: "#a5967d" }}>
           {(outpost || routePost)
             ? `${c.owner_house_name} · pop ${fmtPop(c.population)}`
             : `pop ${fmtPop(c.population)}${c.coin_name ? ` · ${c.coin_name}` : ""}${c.charter_open ? " · charter ✔" : ""}`}
@@ -291,7 +291,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
         {settlementColony && !c.autonomous && (
           <>
             <div style={{ ...bar, marginTop: 4 }}><i style={{ width: `${frac * 100}%`, background: reserveColor(frac), display: "block", height: "100%", borderRadius: 5 }} /></div>
-            <div style={{ fontSize: 9.5, color: frac < 0.25 ? WARN : "#6a86a6", marginTop: 1 }}>
+            <div style={{ fontSize: 9.5, color: frac < 0.25 ? WARN : "#a28f6e", marginTop: 1 }}>
               food {c.reserve_food.toFixed(1)}/{c.reserve_cap.toFixed(0)} mo · supplied {c.supply_years.toFixed(0)}y
               {c.supply_ships > 0 && <span style={{ color: "#7fb8ff" }}> · 🚢{c.supply_ships}</span>}
             </div>
@@ -300,7 +300,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
       </div>
       {(settlementColony || satellite) && !c.autonomous && (
         <div style={{ textAlign: "right", flex: "0 0 auto" }}>
-          <div style={{ fontSize: 9, color: "#6a86a6" }}>independence</div>
+          <div style={{ fontSize: 9, color: "#a28f6e" }}>independence</div>
           <div style={{ fontSize: 10.5, color: c.indep_in_years <= 0 ? OK : GOLD }}>
             {c.indep_in_years <= 0 ? "eligible" : `in ${c.indep_in_years}y`}
           </div>
@@ -313,7 +313,7 @@ function ColonyRow({ c, selected, onClick }: { c: ColonySummary; selected: boole
 function DetailCard({ detail, colony }: { detail: ColonyDetail; colony?: ColonySummary }) {
   return (
     <div style={card}>
-      <div style={{ fontWeight: 700, color: "#dce8f6", marginBottom: 4 }}>{colony?.name ?? "Colony"} — detail</div>
+      <div style={{ fontWeight: 700, color: "#f3ecdf", marginBottom: 4 }}>{colony?.name ?? "Colony"} — detail</div>
       <KV k="Metropolis" v={detail.founder_name || "—"} />
       <KV k="Stage" v={STAGE[detail.stage] || "Colony"} />
       <KV k="Bank / mint" v={`${detail.main_bank_name || "—"}${detail.coin_name ? ` · ${detail.coin_name}` : ""}`} />
@@ -328,7 +328,7 @@ function DetailCard({ detail, colony }: { detail: ColonyDetail; colony?: ColonyS
             <span style={{ fontSize: 14 }}>🚢</span>
             <span style={{ flex: 1 }}>
               <b>{detail.supply_ships}</b> dedicated supply ship{detail.supply_ships === 1 ? "" : "s"}
-              <span style={{ color: "#7a90a8" }}> · {Math.round(detail.supply_capacity).toLocaleString()}/mo carriage</span>
+              <span style={{ color: "#a5967d" }}> · {Math.round(detail.supply_capacity).toLocaleString()}/mo carriage</span>
             </span>
           </div>
           <KV k="Food source" v={detail.supply_source || "— none sufficient —"} />
@@ -337,7 +337,7 @@ function DetailCard({ detail, colony }: { detail: ColonyDetail; colony?: ColonyS
               width: `${detail.supply_capacity > 0 ? Math.min(100, (detail.supply_delivered / detail.supply_capacity) * 100) : 0}%`,
               background: detail.supply_delivered > 0 ? OK : WARN, display: "block", height: "100%", borderRadius: 5 }} />
           </div>
-          <div style={{ fontSize: 9.5, color: detail.supply_delivered <= 0 ? WARN : "#6a86a6", marginTop: 2 }}>
+          <div style={{ fontSize: 9.5, color: detail.supply_delivered <= 0 ? WARN : "#a28f6e", marginTop: 2 }}>
             delivered {Math.round(detail.supply_delivered).toLocaleString()}/mo of {Math.round(detail.supply_capacity).toLocaleString()} capacity
           </div>
         </>
@@ -350,7 +350,7 @@ function DetailCard({ detail, colony }: { detail: ColonyDetail; colony?: ColonyS
             <div key={i} style={{ display: "flex", alignItems: "center", gap: 6, margin: "2px 0" }}>
               <span style={{ width: 9, height: 9, borderRadius: 2, background: b.color, flex: "0 0 auto" }} />
               <span style={{ flex: 1, fontSize: 11, color: "#cfe0f4", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{b.name}</span>
-              <span style={{ fontSize: 11, color: "#8aa6c0" }}>{(b.share * 100).toFixed(0)}%</span>
+              <span style={{ fontSize: 11, color: "#bcab8e" }}>{(b.share * 100).toFixed(0)}%</span>
             </div>
           ))}
         </>
@@ -360,9 +360,9 @@ function DetailCard({ detail, colony }: { detail: ColonyDetail; colony?: ColonyS
         <>
           <div style={sec}>Supply roster</div>
           {detail.supply.map((s, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#9fb4cc", margin: "1px 0" }}>
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 10.5, color: "#c9bba2", margin: "1px 0" }}>
               <span>{s.supplier} → {s.good}</span>
-              <span style={{ color: "#7a90a8" }}>{s.qty.toFixed(0)}/yr</span>
+              <span style={{ color: "#a5967d" }}>{s.qty.toFixed(0)}/yr</span>
             </div>
           ))}
         </>
@@ -383,8 +383,8 @@ function GateCard({ gates }: { gates: ColonyGateStatus | null }) {
   ];
   return (
     <div style={card}>
-      <div style={{ fontWeight: 700, color: "#dce8f6", marginBottom: 2 }}>No colonies founded yet</div>
-      <div style={{ fontSize: 10.5, color: "#7a90a8", marginBottom: 8 }}>
+      <div style={{ fontWeight: 700, color: "#f3ecdf", marginBottom: 2 }}>No colonies founded yet</div>
+      <div style={{ fontSize: 10.5, color: "#a5967d", marginBottom: 8 }}>
         Colonisation opens once the world matures and a venture can be backed. Outstanding gates:
       </div>
       {rows.map((r) => {
@@ -396,13 +396,13 @@ function GateCard({ gates }: { gates: ColonyGateStatus | null }) {
             border: blocking ? `1px solid ${WARN}` : "1px solid transparent",
           }}>
             <span style={{ color: r.ok ? OK : WARN, fontWeight: 700, width: 12 }}>{r.ok ? "✔" : "✗"}</span>
-            <span style={{ flex: 1, fontSize: 10.5, color: r.ok ? "#9fb4cc" : "#cfe0f4" }}>{r.label}</span>
-            <span style={{ fontSize: 10, color: r.ok ? "#6a86a6" : WARN }}>{r.detail}</span>
+            <span style={{ flex: 1, fontSize: 10.5, color: r.ok ? "#c9bba2" : "#cfe0f4" }}>{r.label}</span>
+            <span style={{ fontSize: 10, color: r.ok ? "#a28f6e" : WARN }}>{r.detail}</span>
           </div>
         );
       })}
       {block === "bank" && (
-        <div style={{ fontSize: 10, color: "#7a90a8", marginTop: 8, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 10, color: "#a5967d", marginTop: 8, lineHeight: 1.5 }}>
           The <b style={{ color: "#cfe0f4" }}>bank gate</b> is the usual blocker: a settlement colony needs a
           bank to stake the venture and mint its coin — and banks are themselves slow to charter.
         </div>
@@ -414,7 +414,7 @@ function GateCard({ gates }: { gates: ColonyGateStatus | null }) {
 function KV({ k, v }: { k: string; v: string }) {
   return (
     <div style={{ display: "flex", gap: 8, fontSize: 11, margin: "2px 0" }}>
-      <span style={{ color: "#6a86a6", minWidth: 92 }}>{k}</span>
+      <span style={{ color: "#a28f6e", minWidth: 92 }}>{k}</span>
       <span style={{ color: "#cfe0f4" }}>{v}</span>
     </div>
   );
@@ -431,19 +431,19 @@ function badge(autonomous: boolean): React.CSSProperties {
 const panel: React.CSSProperties = {
   position: "absolute", top: 60, right: 360, width: 360, maxHeight: "80vh",
   display: "flex", flexDirection: "column",
-  background: "#0c141e", border: "1px solid #1e3450", borderRadius: 8,
+  background: "#1c170e", border: "1px solid #493c25", borderRadius: 8,
   boxShadow: "0 8px 28px rgba(0,0,0,0.5)", zIndex: 40,
 };
 const header: React.CSSProperties = {
   display: "flex", justifyContent: "space-between", alignItems: "center",
-  padding: "8px 10px", borderBottom: "1px solid #1a2a3e",
+  padding: "8px 10px", borderBottom: "1px solid #3a301e",
   color: "#cfe0f4", fontWeight: 700, fontSize: 12,
 };
 const statRow: React.CSSProperties = {
-  display: "flex", gap: 5, padding: "8px 10px", borderBottom: "1px solid #1a2a3e", flexWrap: "wrap",
+  display: "flex", gap: 5, padding: "8px 10px", borderBottom: "1px solid #3a301e", flexWrap: "wrap",
 };
 const statBox: React.CSSProperties = {
-  background: "rgba(12,18,26,0.6)", border: "1px solid #1e2e42", borderRadius: 6,
+  background: "rgba(24,20,14,0.6)", border: "1px solid #3e3422", borderRadius: 6,
   padding: "4px 9px", minWidth: 56, textAlign: "center",
 };
 const scroll: React.CSSProperties = { overflowY: "auto", padding: "6px 8px 10px" };
@@ -453,19 +453,19 @@ const metroHead: React.CSSProperties = {
 };
 const rowS: React.CSSProperties = {
   display: "flex", gap: 9, padding: "7px 8px", margin: "4px 0 4px 12px", cursor: "pointer",
-  background: "rgba(12,18,26,0.55)", border: "1px solid #16242f", borderRadius: 8,
+  background: "rgba(24,20,14,0.55)", border: "1px solid #2c2519", borderRadius: 8,
 };
 const rowSel: React.CSSProperties = { borderColor: COLONY_VIOLET, boxShadow: `0 0 0 1px ${COLONY_VIOLET} inset` };
 const expRow: React.CSSProperties = {
   display: "flex", gap: 8, padding: "6px 6px", margin: "3px 0", cursor: "pointer",
-  background: "rgba(12,18,26,0.5)", border: "1px solid #16242f", borderRadius: 7,
+  background: "rgba(24,20,14,0.5)", border: "1px solid #2c2519", borderRadius: 7,
 };
-const bar: React.CSSProperties = { height: 6, borderRadius: 5, background: "#16242f", overflow: "hidden" };
+const bar: React.CSSProperties = { height: 6, borderRadius: 5, background: "#2c2519", overflow: "hidden" };
 const card: React.CSSProperties = {
-  marginTop: 6, padding: "8px 10px", background: "rgba(12,18,26,0.6)",
-  border: "1px solid #1e2e42", borderRadius: 8,
+  marginTop: 6, padding: "8px 10px", background: "rgba(24,20,14,0.6)",
+  border: "1px solid #3e3422", borderRadius: 8,
 };
 const sec: React.CSSProperties = {
-  color: "#7a90a8", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6, margin: "8px 0 3px",
+  color: "#a5967d", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6, margin: "8px 0 3px",
 };
-const empty: React.CSSProperties = { color: "#506080", fontSize: 11, padding: "12px 10px", lineHeight: 1.5 };
+const empty: React.CSSProperties = { color: "#7a6d56", fontSize: 11, padding: "12px 10px", lineHeight: 1.5 };

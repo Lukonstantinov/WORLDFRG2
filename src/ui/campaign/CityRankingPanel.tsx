@@ -36,7 +36,7 @@ export function CityRankingPanel() {
     mode === "prosperity" ? b.prosperity - a.prosperity : b.trade - a.trade);
   const chip = (on: boolean): React.CSSProperties => ({
     fontSize: FZ.small, padding: "2px 8px", borderRadius: 4, cursor: "pointer",
-    border: `1px solid ${on ? "#3a80c0" : T.lineSoft}`, background: on ? "#19324a" : "transparent",
+    border: `1px solid ${on ? "#a58855" : T.lineSoft}`, background: on ? "#413622" : "transparent",
     color: on ? "#cfe2f6" : T.inkMid,
   });
 

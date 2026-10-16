@@ -5,29 +5,29 @@ import { useRef, useState, useCallback } from "react";
  *  a near-opaque dark colour with a subtle hue so text stays readable. Mirrored in
  *  docs/mockups/_archive/floating-window-tints.html. */
 export const PANEL_TINTS = {
-  settlement: "rgba(12,18,26,0.97)", // 🏙 Settlement window — neutral slate (base)
+  settlement: "rgba(24,20,14,0.97)", // 🏙 Settlement window — neutral slate (base)
   house: "rgba(28,20,12,0.97)",     // ⚜️ House detail popup — bronze
   coin: "rgba(18,24,14,0.97)",      // 🪙 Coin/Credit — olive-gold
   speculation: "rgba(24,16,28,0.97)", // 📈 Speculation/Poleis — plum
   houses: "rgba(26,18,16,0.97)",    // 🏛 Houses — sienna
   goods: "rgba(14,24,24,0.97)",     // 📦 Goods market — teal
-  trade: "rgba(14,22,30,0.97)",     // 🔀 Trade matrix — steel-blue
+  trade: "rgba(28,24,16,0.97)",     // 🔀 Trade matrix — steel-blue
   ranking: "rgba(24,22,12,0.97)",   // 🏆 City ranking — amber
   warehouses: "rgba(16,22,16,0.97)", // 🏚 Warehouses — moss
   futures: "rgba(22,14,22,0.97)",   // 📜 Futures — mauve
-  news: "rgba(12,20,28,0.97)",      // 📰 News feed — slate
+  news: "rgba(26,22,14,0.97)",      // 📰 News feed — slate
   goodflow: "rgba(14,26,20,0.97)",  // 🌊 Good flow — sea-green
   goodbrowser: "rgba(20,18,26,0.97)", // 📒 Goods browser — indigo
   route: "rgba(26,20,14,0.97)",     // 🐫 Merchant route — tan
-  bank: "rgba(16,20,28,0.97)",      // 🏦 Bank — deep blue-steel
+  bank: "rgba(26,23,17,0.97)",      // 🏦 Bank — deep blue-steel
   plague: "rgba(26,14,14,0.97)",    // Plagues & Epidemics — sickly red
   guild: "rgba(24,20,12,0.97)",     // Guilds & Crafts — guild gold
   figures: "rgba(20,16,26,0.97)",   // Notable Figures — royal violet
   landmarks: "rgba(14,22,22,0.97)", // Landmarks & Sacred Sites — verdigris
   dynasties: "rgba(26,18,20,0.97)", // Dynasties & Alliances — claret
-  atlas: "rgba(12,19,27,0.97)",     // 🗺 World Atlas — deep chart-blue
+  atlas: "rgba(25,21,14,0.97)",     // 🗺 World Atlas — deep chart-blue
   hydrology: "rgba(10,22,30,0.97)", // 🌊 Hydrology — deep river-teal
-  immigration: "rgba(14,20,26,0.97)", // 🧭 Migration & Immigration — dusk indigo
+  immigration: "rgba(24,21,15,0.97)", // 🧭 Migration & Immigration — dusk indigo
   province: "rgba(16,22,18,0.97)",  // 🏞 Province Inspector — moss-slate
   war: "rgba(26,15,13,0.97)",       // ⚔ War Council — iron-crimson
   feuds: "rgba(24,14,14,0.97)",     // ⚔ Feuds & Alliances — a shade off war's crimson

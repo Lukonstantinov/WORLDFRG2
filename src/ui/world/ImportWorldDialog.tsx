@@ -70,14 +70,14 @@ export function ImportWorldDialog({ onClose }: { onClose: () => void }) {
       background: "rgba(0,0,0,0.75)", zIndex: 100,
     }}>
       <div style={{
-        background: "#111820", border: "1px solid #1e2e42", borderRadius: 10,
+        background: "#1e1a13", border: "1px solid #3e3422", borderRadius: 10,
         padding: "24px 28px", minWidth: 400, maxHeight: "80%", overflowY: "auto",
         boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
       }}>
         <h2 style={{ margin: "0 0 8px", color: "#c0d8f0", fontSize: 17, fontWeight: 600 }}>
           Import World Layers
         </h2>
-        <div style={{ color: "#5a7898", fontSize: 11, marginBottom: 14 }}>
+        <div style={{ color: "#907f62", fontSize: 11, marginBottom: 14 }}>
           Copy chosen layers from another world of the SAME grid size into this one.
           Unticked layers keep their current data.
         </div>
@@ -86,10 +86,10 @@ export function ImportWorldDialog({ onClose }: { onClose: () => void }) {
           {GROUPS.map((g) => (
             <label key={g.id} style={{ display: "flex", alignItems: "flex-start", gap: 8, cursor: "pointer" }}>
               <input type="checkbox" checked={selected.has(g.id)} onChange={() => toggle(g.id)}
-                style={{ accentColor: "#4a90d0", marginTop: 2 }} />
+                style={{ accentColor: "#c09b5a", marginTop: 2 }} />
               <span>
-                <span style={{ color: "#a0b8d0", fontSize: 12, fontWeight: 600 }}>{g.label}</span>
-                <span style={{ color: "#506080", fontSize: 11, display: "block" }}>{g.desc}</span>
+                <span style={{ color: "#ccbda4", fontSize: 12, fontWeight: 600 }}>{g.label}</span>
+                <span style={{ color: "#7a6d56", fontSize: 11, display: "block" }}>{g.desc}</span>
               </span>
             </label>
           ))}
@@ -97,11 +97,11 @@ export function ImportWorldDialog({ onClose }: { onClose: () => void }) {
 
         <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
           <button onClick={onClose} disabled={busy}
-            style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #1e2e42", background: "#0d1219", color: "#7090b0", cursor: "pointer", fontSize: 13 }}>
+            style={{ padding: "8px 16px", borderRadius: 6, border: "1px solid #3e3422", background: "#18140e", color: "#ab9775", cursor: "pointer", fontSize: 13 }}>
             Cancel
           </button>
           <button onClick={handleImport} disabled={busy || selected.size === 0}
-            style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#1a3050" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
+            style={{ padding: "8px 18px", borderRadius: 6, border: "none", background: busy ? "#463a24" : "#2060a0", color: "#fff", cursor: busy ? "wait" : "pointer", fontSize: 13, fontWeight: 600 }}>
             {busy ? "Importing..." : "Choose World & Import"}
           </button>
         </div>

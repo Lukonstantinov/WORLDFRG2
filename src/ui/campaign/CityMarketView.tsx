@@ -52,9 +52,9 @@ import { MarketSquare } from "@ui/campaign/MarketSquare";
  *  ───────────────────────────────────────────────────────────────────────────── */
 
 const C = {
-  ink: "#c0d0e0", inkMid: "#9ab0c8", inkDim: "#6a86a6", faint: "#56708e",
+  ink: "#ded4c2", inkMid: "#c5b69d", inkDim: "#a28f6e", faint: "#87785d",
   gold: "#e0c060", good: "#7fd0a0", warn: "#e08080", buy: "#7fd0a0", sell: "#e0a080",
-  line: "#1e2e42", lineSoft: "#131f2c", card: "#0b1622", raised: "#16202c",
+  line: "#3e3422", lineSoft: "#292216", card: "#1e180f", raised: "#292319",
   head: "#e8d8b0",
 };
 
@@ -229,7 +229,7 @@ function Spark({ vals, base, w = 62, h = 14 }: { vals: number[]; base: number; w
   return (
     <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
       <svg width={w} height={h} style={{ display: "block", background: C.card, borderRadius: 2 }}>
-        <line x1={0} y1={oneY} x2={w} y2={oneY} stroke="#2a3a4e" strokeWidth={0.5} strokeDasharray="2 2" />
+        <line x1={0} y1={oneY} x2={w} y2={oneY} stroke="#4a402e" strokeWidth={0.5} strokeDasharray="2 2" />
         <polyline points={pts} fill="none" stroke={C.gold} strokeWidth={1} />
       </svg>
       {rising ? <span style={{ color: C.warn, fontSize: 8 }}>▲</span>
@@ -285,7 +285,7 @@ function QuayColumn({ quays, side, openCity, setOpenCity, icon, label, focus, la
             <div onClick={() => setOpenCity(isOpen ? null : q.city)}
               style={{ display: "flex", alignItems: "center", gap: 4, cursor: "pointer",
                 fontSize: 9.5, padding: "1px 2px", borderRadius: 3,
-                background: isOpen ? "#16263a" : "transparent" }}
+                background: isOpen ? "#352b1b" : "transparent" }}
               title={`${q.lines.length} cargo${q.lines.length === 1 ? "" : "es"} \u00b7 ${fmt(q.value)} gr-eq`}>
               <span style={{ color: C.faint, fontSize: 8 }}>{isOpen ? "\u25BE" : "\u25B8"}</span>
               <span style={{ flex: 1, color: "#cfe0f4", fontWeight: 600, overflow: "hidden",
@@ -378,7 +378,7 @@ const SORTS: [Sort, string][] = [
 
 /** The five seller classes of `SUPPLY_*`, in payload order. */
 const SUPPLY_LABEL = ["city", "houses", "guilds", "local", "foreign"] as const;
-const SUPPLY_TINT = ["#8aa0c0", "#c9a04a", "#7fa0c0", "#8fbf8f", "#c07a5a"];
+const SUPPLY_TINT = ["#bcab8e", "#c9a04a", "#bba784", "#8fbf8f", "#c07a5a"];
 
 /** Estate kind → the word a reader knows it by (1 farm … 6 manufactory). */
 const ESTATE_WORD = ["works", "farm", "mine", "plantation", "fishery", "vineyard", "manufactory"];
@@ -539,18 +539,18 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
         {(["city", "good"] as const).map((gmode) => (
           <span key={gmode} onClick={() => setGroup(gmode)} style={{
             cursor: "pointer", fontSize: 9, padding: "1px 6px", borderRadius: 3,
-            background: group === gmode ? "#21344a" : "transparent",
+            background: group === gmode ? "#453a26" : "transparent",
             color: group === gmode ? "#cfe2f6" : C.inkDim,
-            border: `1px solid ${group === gmode ? "#3a80c0" : "transparent"}`,
+            border: `1px solid ${group === gmode ? "#a58855" : "transparent"}`,
           }}>{gmode === "city" ? "by city" : "by good"}</span>
         ))}
         <span style={{ width: 6 }} />
         {SORTS.map(([id, lbl]) => (
           <span key={id} onClick={() => setSort(id)} style={{
             cursor: "pointer", fontSize: 9, padding: "1px 6px", borderRadius: 3,
-            background: sort === id ? "#21344a" : "transparent",
+            background: sort === id ? "#453a26" : "transparent",
             color: sort === id ? "#cfe2f6" : C.inkDim,
-            border: `1px solid ${sort === id ? "#3a80c0" : "transparent"}`,
+            border: `1px solid ${sort === id ? "#a58855" : "transparent"}`,
           }}>{lbl}</span>
         ))}
       </div>
@@ -630,7 +630,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
                     style={{ display: "flex", gap: 4, alignItems: "center", fontSize: 9,
                       padding: "1px 2px", cursor: "pointer", borderRadius: 3,
                       borderBottom: `1px solid ${C.lineSoft}`,
-                      background: isOpen ? "#16263a" : "transparent" }}
+                      background: isOpen ? "#352b1b" : "transparent" }}
                     title="Click for this good's book — who supplied it, where it went, and its price history"
                   >
                     <span style={{ flex: 1, color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -707,7 +707,7 @@ export function CityMarketView({ detail, compact, onFocusGood }: {
               }}
               style={{ display: "flex", alignItems: "center", fontSize: 9.5, padding: "2px 2px",
                 borderBottom: `1px solid ${C.lineSoft}`, cursor: "pointer",
-                background: isOpen ? "#16263a" : "transparent" }}
+                background: isOpen ? "#352b1b" : "transparent" }}
               title="Click to open this good's book — who supplied it, where it went, and its history"
             >
               <span style={{ flex: "0 0 108px", color: C.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>

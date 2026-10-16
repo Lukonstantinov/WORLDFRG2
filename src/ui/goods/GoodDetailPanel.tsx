@@ -14,12 +14,12 @@ const panel: React.CSSProperties = {
 };
 const sheet: React.CSSProperties = {
   width: "min(620px, 94vw)", maxHeight: "90vh", overflow: "auto",
-  background: "#13181f", border: "1px solid #2c3442", borderRadius: 8,
-  padding: 16, color: "#cfd8e3", fontSize: 12,
+  background: "#1d1a14", border: "1px solid #3f392f", borderRadius: 8,
+  padding: 16, color: "#e2dbd0", fontSize: 12,
 };
 const tag: React.CSSProperties = {
   display: "inline-block", padding: "2px 7px", borderRadius: 10, fontSize: 11,
-  background: "#1b2230", border: "1px solid #2c3442", marginRight: 5,
+  background: "#2d281e", border: "1px solid #3f392f", marginRight: 5,
 };
 
 function prodType(d: GoodSpec["distribution"]): { label: string; emoji: string } {
@@ -50,7 +50,7 @@ export function GoodDetailPanel() {
   const tintRgb: [number, number, number] = useMemo(() => {
     if (climates.length > 0) return koppenRgb(climates[0][0]);
     // No climate envelope (built-in scorer / deposit) → fall back to good colour.
-    const c = spec?.color ?? "#7aa0c8";
+    const c = spec?.color ?? "#c2aa80";
     const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c);
     return m ? [parseInt(m[1], 16), parseInt(m[2], 16), parseInt(m[3], 16)] : [122, 160, 200];
   }, [climates, spec]);
@@ -126,12 +126,12 @@ export function GoodDetailPanel() {
         </div>
 
         <div style={{ marginBottom: 10 }}>
-          <span style={{ ...tag, borderColor: "#3a5070" }}>{pt.emoji} {pt.label}</span>
+          <span style={{ ...tag, borderColor: "#695a41" }}>{pt.emoji} {pt.label}</span>
           <span style={tag}>{goodCategory(spec.id)}</span>
           <span style={tag}>domain: {spec.domain}</span>
           {spec.network_luxury && <span style={{ ...tag, color: "#d9b06a", borderColor: "#6a5a30" }}>luxury</span>}
         </div>
-        <div style={{ marginBottom: 12, color: "#8aa0b8" }}>
+        <div style={{ marginBottom: 12, color: "#b5a68d" }}>
           <span style={tag}>value ≈ {spec.base_value}× grain</span>
           <span style={tag}>bulk {spec.bulk ?? 1}</span>
           {(spec.perishable ?? 0) > 0 && (
@@ -149,14 +149,14 @@ export function GoodDetailPanel() {
         )}
 
         {isManufactured ? (
-          <div style={{ background: "#0e1218", border: "1px solid #232b36", borderRadius: 6, padding: 12 }}>
-            <div style={{ color: "#8aa0b8", marginBottom: 6 }}>Made in cities from a recipe — no map belt of its own.</div>
+          <div style={{ background: "#17140f", border: "1px solid #342e25", borderRadius: 6, padding: 12 }}>
+            <div style={{ color: "#b5a68d", marginBottom: 6 }}>Made in cities from a recipe — no map belt of its own.</div>
             <div style={{ display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", marginBottom: 8 }}>
               {(spec.inputs ?? []).map((inp, k) => {
                 const s = byId.get(inp.good);
                 return (
                   <span key={inp.good} style={{ display: "inline-flex", alignItems: "center", gap: 3 }}>
-                    {k > 0 && <span style={{ color: "#5a6a80" }}>+</span>}
+                    {k > 0 && <span style={{ color: "#7b715f" }}>+</span>}
                     <span style={{ ...tag, marginRight: 0, cursor: s ? "pointer" : "default",
                       display: "inline-flex", alignItems: "center", gap: 4 }}
                       onClick={() => s && close(s.id)}>
@@ -166,13 +166,13 @@ export function GoodDetailPanel() {
                   </span>
                 );
               })}
-              <span style={{ color: "#7a8aa0", margin: "0 4px", fontWeight: 700 }}>→</span>
+              <span style={{ color: "#9d917d", margin: "0 4px", fontWeight: 700 }}>→</span>
               <span style={{ ...tag, marginRight: 0, borderColor: spec.color,
                 display: "inline-flex", alignItems: "center", gap: 4 }}>
                 <GoodIcon name={spec.id} color={spec.color} size={18} /> {spec.name}
               </span>
             </div>
-            <div style={{ color: "#5f7390", fontSize: 11 }}>
+            <div style={{ color: "#8a7c65", fontSize: 11 }}>
               A city's manufacture guild produces it wherever the inputs arrive — so it appears
               in big trading hubs that import {(spec.inputs ?? []).map((i) => byId.get(i.good)?.name ?? i.good).join(", ")}.
             </div>
@@ -180,23 +180,23 @@ export function GoodDetailPanel() {
         ) : (
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
             <div>
-              <div style={{ color: "#8aa0b8", marginBottom: 4 }}>Appears in climates</div>
+              <div style={{ color: "#b5a68d", marginBottom: 4 }}>Appears in climates</div>
               {climates.length === 0 && (
-                <div style={{ color: "#5f7390" }}>
+                <div style={{ color: "#8a7c65" }}>
                   Built-in climate scorer — no explicit zone list. The heatmap shows where it suits this world.
                 </div>
               )}
               {climates.map(([code, wt]) => (
                 <div key={code} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
                   <span style={{ width: 13, height: 13, borderRadius: 3, background: koppenHex(code), border: "1px solid #00000055", flex: "0 0 auto" }} />
-                  <span style={{ flex: 1, color: "#c0ccda" }}>{koppenName(code)}</span>
-                  <span style={{ width: 46, height: 5, background: "#1b2230", borderRadius: 3, overflow: "hidden" }}>
+                  <span style={{ flex: 1, color: "#d8d0c2" }}>{koppenName(code)}</span>
+                  <span style={{ width: 46, height: 5, background: "#2d281e", borderRadius: 3, overflow: "hidden" }}>
                     <span style={{ display: "block", height: "100%", width: `${Math.round(wt * 100)}%`, background: koppenHex(code) }} />
                   </span>
                 </div>
               ))}
               {sc && (
-                <div style={{ marginTop: 8, color: "#7a8aa0", fontSize: 11, lineHeight: 1.6 }}>
+                <div style={{ marginTop: 8, color: "#9d917d", fontSize: 11, lineHeight: 1.6 }}>
                   {sc.temp && <div>🌡 temp ≈ {sc.temp[0]}°C (±{sc.temp[1]})</div>}
                   {sc.precip && <div>🌧 rain {sc.precip[0]}–{sc.precip[1]} mm</div>}
                   {sc.abs_lat && <div>🧭 latitude {sc.abs_lat[0]}–{sc.abs_lat[1]}°</div>}
@@ -207,19 +207,19 @@ export function GoodDetailPanel() {
               )}
             </div>
             <div>
-              <div style={{ color: "#8aa0b8", marginBottom: 4 }}>Where it could appear — this world</div>
+              <div style={{ color: "#b5a68d", marginBottom: 4 }}>Where it could appear — this world</div>
               <canvas
                 ref={canvasRef}
                 style={{
                   width: "100%", imageRendering: "pixelated", borderRadius: 4,
-                  border: "1px solid #232b36", background: "#0b0e13",
+                  border: "1px solid #342e25", background: "#12100c",
                   display: grid ? "block" : "none",
                 }}
               />
-              {!grid && !err && <div style={{ color: "#5f7390" }}>Generate a world first to preview placement…</div>}
+              {!grid && !err && <div style={{ color: "#8a7c65" }}>Generate a world first to preview placement…</div>}
               {err && <div style={{ color: "#c08080" }}>Preview needs a generated world.</div>}
               {grid && (
-                <div style={{ color: "#5f7390", fontSize: 10, marginTop: 4 }}>
+                <div style={{ color: "#8a7c65", fontSize: 10, marginTop: 4 }}>
                   brightness = suitability · tinted with{" "}
                   {climates.length > 0 ? `the ${koppenName(climates[0][0])} climate colour` : "the good's colour"}
                 </div>

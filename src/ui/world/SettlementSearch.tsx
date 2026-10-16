@@ -66,22 +66,22 @@ export function SettlementSearch() {
         <div style={dropStyle}
           onMouseDown={() => { if (blurTimer.current) window.clearTimeout(blurTimer.current); }}>
           {results.length === 0 && (
-            <div style={{ padding: "8px 10px", color: "#56708e", fontSize: 11 }}>No settlement matches “{query}”.</div>
+            <div style={{ padding: "8px 10px", color: "#87785d", fontSize: 11 }}>No settlement matches “{query}”.</div>
           )}
           {results.map((s, i) => (
             <div key={s.id}
               onMouseEnter={() => setActive(i)}
               onClick={() => choose(s)}
-              style={{ ...rowStyle, background: i === active ? "#16273c" : "transparent" }}>
+              style={{ ...rowStyle, background: i === active ? "#362c1c" : "transparent" }}>
               <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
                 <span style={{ fontSize: 11 }}>📍</span>
                 <span style={{ color: "#e8dcc0", fontWeight: 600, fontSize: 12, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{s.name}</span>
-                <span style={{ color: "#9ab0c8", fontSize: 10 }}>{s.population.toLocaleString()}</span>
+                <span style={{ color: "#c5b69d", fontSize: 10 }}>{s.population.toLocaleString()}</span>
                 {s.culture && <span style={cultureTag}>{s.culture}</span>}
-                <span style={{ color: "#5a7090", fontSize: 11 }}>▸</span>
+                <span style={{ color: "#897a61", fontSize: 11 }}>▸</span>
               </div>
               {(s.site || s.region) && (
-                <div style={{ color: "#6a86a6", fontSize: 9, marginLeft: 17 }}>
+                <div style={{ color: "#a28f6e", fontSize: 9, marginLeft: 17 }}>
                   {[s.site, s.region].filter(Boolean).join(" · ")}
                 </div>
               )}
@@ -95,16 +95,16 @@ export function SettlementSearch() {
 
 const inputStyle: React.CSSProperties = {
   width: "100%", boxSizing: "border-box", height: 24,
-  background: "#0c141e", border: "1px solid #243650", borderRadius: 5,
+  background: "#1c170e", border: "1px solid #4a3e2a", borderRadius: 5,
   color: "#cfe0f4", fontSize: 12, padding: "0 8px", outline: "none",
 };
 const dropStyle: React.CSSProperties = {
   position: "absolute", top: 28, right: 0, width: 300, maxHeight: "60vh", overflowY: "auto",
-  background: "#0b1320", border: "1px solid #243650", borderRadius: 6,
+  background: "#1c170f", border: "1px solid #4a3e2a", borderRadius: 6,
   boxShadow: "0 10px 30px rgba(0,0,0,0.55)", zIndex: 200, padding: "3px 0",
 };
 const rowStyle: React.CSSProperties = {
-  padding: "4px 9px", cursor: "pointer", borderBottom: "1px solid #111c2a",
+  padding: "4px 9px", cursor: "pointer", borderBottom: "1px solid #272014",
 };
 const cultureTag: React.CSSProperties = {
   fontSize: 8, color: "#7fd0c0", border: "1px solid #2e5a52", borderRadius: 3, padding: "0 3px",

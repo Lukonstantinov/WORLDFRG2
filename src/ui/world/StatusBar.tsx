@@ -27,10 +27,10 @@ export function StatusBar() {
   return (
     <div style={{
       height: 24, display: "flex", alignItems: "center", gap: 16,
-      padding: "0 12px", background: "#0a0f18", borderTop: "1px solid #1a2535",
-      fontSize: 11, color: "#4a6080", flexShrink: 0,
+      padding: "0 12px", background: "#16120c", borderTop: "1px solid #322a1d",
+      fontSize: 11, color: "#796a51", flexShrink: 0,
     }}>
-      <span style={{ color: "#6a8aa8" }}>{statusText}</span>
+      <span style={{ color: "#a3906f" }}>{statusText}</span>
 
       {hover && (
         <span style={{
@@ -38,10 +38,10 @@ export function StatusBar() {
           fontFamily: "ui-monospace, monospace", fontSize: 10,
           fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap",
         }}>
-          <span style={{ color: "#3a5068" }}>{latLon(hover)}</span>
-          <span style={{ color: "#3a5068" }}>{hover.wx},{hover.wy}</span>
+          <span style={{ color: "#625640" }}>{latLon(hover)}</span>
+          <span style={{ color: "#625640" }}>{hover.wx},{hover.wy}</span>
           {value && (
-            <span style={{ color: "#8fb0cc", fontWeight: 600 }}>{value}</span>
+            <span style={{ color: "#c7b494", fontWeight: 600 }}>{value}</span>
           )}
         </span>
       )}
@@ -49,7 +49,7 @@ export function StatusBar() {
       {meta && (
         <span style={{
           marginLeft: hover ? 0 : "auto", fontFamily: "ui-monospace, monospace",
-          fontSize: 10, color: "#2f4258", whiteSpace: "nowrap",
+          fontSize: 10, color: "#534834", whiteSpace: "nowrap",
         }}>
           {meta.grid_width}&#215;{meta.grid_height}
         </span>

@@ -114,7 +114,7 @@ function Header({ p }: { p: IndividualBrief }) {
             <div style={{ width: `${Math.round(p.fame * 100)}%`, height: "100%", background: T.gold }} />
           </div>
           <span style={{ fontSize: FZ.micro, color: T.inkMid }}>{Math.round(p.fame * 100)}</span>
-          {p.ideology_name && <Tag color="#8a9ad8">⚑ {p.ideology_name}</Tag>}
+          {p.ideology_name && <Tag color="#d2ba90">⚑ {p.ideology_name}</Tag>}
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
           {p.traits.map((t, i) => <TraitChip key={t} name={t} strength={p.trait_strength?.[i] ?? 1} />)}
@@ -122,7 +122,7 @@ function Header({ p }: { p: IndividualBrief }) {
         {p.roles.length > 1 && <div style={{ marginTop: 8 }}><CareerLadder roles={p.roles} max={5} /></div>}
         <div style={{ fontSize: FZ.micro, color: T.inkFaint, marginTop: 6 }}>{describePerson(individualPerson(p))}</div>
       </div>
-      <div style={{ flex: "none", display: "flex", justifyContent: "center", alignItems: "flex-end", padding: "8px 14px 6px", borderRadius: RADIUS.md, background: "linear-gradient(#111b2a,#0a1018)", border: `1px solid ${T.line}`, filter: p.alive ? undefined : "grayscale(.85) brightness(.9)" }}>
+      <div style={{ flex: "none", display: "flex", justifyContent: "center", alignItems: "flex-end", padding: "8px 14px 6px", borderRadius: RADIUS.md, background: "linear-gradient(#272014,#16120c)", border: `1px solid ${T.line}`, filter: p.alive ? undefined : "grayscale(.85) brightness(.9)" }}>
         <PixelFigure person={individualPerson(p)} w={66} occasion={p.alive && p.famous ? "ceremonial" : "national"} />
       </div>
     </div>
@@ -218,7 +218,7 @@ function LifeLeaf({ p, decisions }: { p: IndividualBrief; decisions: LifeEntryBr
 const KIND_META: Record<string, { icon: string; label: string; color: string }> = {
   dilemma: { icon: "⚖", label: "A dilemma", color: "#d8b24a" },
   journey: { icon: "🧭", label: "A journey's end", color: VISIT },
-  study: { icon: "📚", label: "Study abroad?", color: "#6a8fd8" },
+  study: { icon: "📚", label: "Study abroad?", color: "#cbac77" },
   career: { icon: "🎓", label: "A scholar's road", color: "#7ab0e8" },
   commission: { icon: "🎨", label: "The call of a greater city", color: "#e0a0c0" },
 };
@@ -508,7 +508,7 @@ function RoadMap({ road, thumb }: { road: ReturnType<typeof useRoad>; thumb: { u
   const fs = sw / VW * 10;
   const lastHub = legs.length ? legs.filter((l) => !l.pl.visit).slice(-1)[0]?.to : stops[0];
   return (
-    <svg viewBox={`${minX} ${minY} ${sw} ${sh}`} width="100%" style={{ display: "block", aspectRatio: `${VW} / ${VH}`, background: "#0e2436", borderRadius: RADIUS.md, border: `1px solid ${T.line}` }}>
+    <svg viewBox={`${minX} ${minY} ${sw} ${sh}`} width="100%" style={{ display: "block", aspectRatio: `${VW} / ${VH}`, background: "#2d2517", borderRadius: RADIUS.md, border: `1px solid ${T.line}` }}>
       {thumb && [-W, 0, W].map((off) => (
         <image key={off} href={thumb.url} x={off} y={0} width={W} height={H} preserveAspectRatio="none" opacity={0.75} style={{ imageRendering: "pixelated" }} />
       ))}
@@ -596,7 +596,7 @@ function CharacterLeaf({ p }: { p: IndividualBrief }) {
           </div>
         </>
       )}
-      <SectionTitle right={p.ideology_name ? <Tag color="#8a9ad8">⚑ leans toward {p.ideology_name}</Tag> : undefined}>Beliefs</SectionTitle>
+      <SectionTitle right={p.ideology_name ? <Tag color="#d2ba90">⚑ leans toward {p.ideology_name}</Tag> : undefined}>Beliefs</SectionTitle>
       {IDEOLOGY_AXES.map((a, i) => {
         const v = Math.max(-5, Math.min(5, p.ideology?.[i] ?? 0));
         return (

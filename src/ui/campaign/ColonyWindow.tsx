@@ -124,7 +124,7 @@ export function ColonyWindow({ summary, roster, gates, onBack, onClose, onDragSt
               {cfg && <IsoThumb cfg={cfg} W={272} H={176} N={28} R={2 + s} TW={12}
                 style={fut ? { filter: "saturate(.35) brightness(1.04)", opacity: .55 } : undefined} />}
               <div style={{ position: "absolute", left: 8, top: 8, display: "flex", gap: 5, alignItems: "center" }}>
-                <span style={{ background: now ? K.ac : K.chip, color: now ? "#0b1420" : K.tx, border: `1px solid ${now ? K.ac : K.bd}`,
+                <span style={{ background: now ? K.ac : K.chip, color: now ? "#1c170f" : K.tx, border: `1px solid ${now ? K.ac : K.bd}`,
                   borderRadius: 4, padding: "2px 9px", font: `600 10.5px/1.3 ${K.bf}` }}>{s} · {STAGES[s]}</span>
                 {fut && <span style={{ background: K.chip, color: K.fa, border: `1px dashed ${K.bd}`, borderRadius: 4, padding: "2px 8px", font: `600 10px/1.3 ${K.bf}` }}>projected</span>}
               </div>

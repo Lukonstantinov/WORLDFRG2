@@ -75,11 +75,11 @@ export function SatelliteConstructionPanel() {
             <div key={i} style={{ display: "flex", alignItems: "center", flex: i < 4 ? 1 : "0 0 auto" }}>
               <div style={{
                 width: 15, height: 15, borderRadius: "50%", flex: "0 0 auto",
-                border: `2px solid ${i <= stageIdx ? T.accent : "#2a3d52"}`,
+                border: `2px solid ${i <= stageIdx ? T.accent : "#4d422f"}`,
                 background: i < stageIdx ? T.accent : i === stageIdx ? "#ffd75e" : T.raised,
                 boxShadow: i === stageIdx ? "0 0 0 3px rgba(255,215,94,0.18)" : "none",
               }} />
-              {i < 4 && <div style={{ height: 3, flex: 1, background: i < stageIdx ? T.accent : "#243650" }} />}
+              {i < 4 && <div style={{ height: 3, flex: 1, background: i < stageIdx ? T.accent : "#4a3e2a" }} />}
             </div>
           ))}
         </div>
@@ -87,7 +87,7 @@ export function SatelliteConstructionPanel() {
           {STAGE_NAMES.map((s, i) => <span key={i} style={{ color: i === stageIdx ? "#ffd75e" : undefined }}>{s}</span>)}
         </div>
         <Meter value={brief.overall} height={12} track={T.raised}
-          color="linear-gradient(90deg,#2f6ea6,#4bc07a)" style={barStyle} />
+          color="linear-gradient(90deg,#8d7448,#4bc07a)" style={barStyle} />
         <div style={{ ...row, marginTop: 4 }}>
           <span style={{ color: T.inkMid }}>Stage {brief.stage}/5 · {STAGE_NAMES[stageIdx]}</span>
           <span><b>{pct}%</b> built</span>
@@ -108,7 +108,7 @@ export function SatelliteConstructionPanel() {
           {brief.supply.map((s, i) => (
             <div key={i} data-no-drag onClick={() => setTab(i)} style={{
               flex: 1, textAlign: "center", padding: "5px 2px", borderRadius: RADIUS.md, fontSize: FZ.body, cursor: "pointer",
-              border: `1px solid ${tab === i ? CAT_COLOR[i] : "#243650"}`,
+              border: `1px solid ${tab === i ? CAT_COLOR[i] : "#4a3e2a"}`,
               color: tab === i ? CAT_COLOR[i] : T.inkMid,
               background: tab === i ? T.accentSoft : T.raised,
             }}>{CAT_ICON[i]} {s.category}</div>

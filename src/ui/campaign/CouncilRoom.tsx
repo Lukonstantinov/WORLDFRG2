@@ -15,8 +15,8 @@ import { PixelBust } from "@ui/campaign/PixelBust";
 export type RoomKind = "chamber" | "table" | "hemicycle";
 export const ROOM_LABEL: Record<RoomKind, string> = { chamber: "Chamber", table: "Table", hemicycle: "Hemicycle" };
 
-const KIN = "#7fd0a0", COMMONS = "#8aa0bc";
-export const leanColor = (v: number) => (v > 0.15 ? "#5fc08a" : v < -0.15 ? "#e0735a" : "#9fb4cc");
+const KIN = "#7fd0a0", COMMONS = "#b8a98e";
+export const leanColor = (v: number) => (v > 0.15 ? "#5fc08a" : v < -0.15 ? "#e0735a" : "#c9bba2");
 const ringOf = (s: SeatBrief) => (s.allegiance === 0 && s.house_name ? houseColor(s.house_name) : s.allegiance === 1 ? KIN : COMMONS);
 
 /** Which hall a people sits in — from the head's own culture kit. */
@@ -39,7 +39,7 @@ function Stage({ w, h, children, onScale }: { w: number; h: number; children: (s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [w]);
   return (
-    <div ref={box} style={{ width: "100%", height: h * scale, position: "relative", overflow: "hidden", borderRadius: 8, border: `1px solid ${T.line}`, background: "#0a1018" }}>
+    <div ref={box} style={{ width: "100%", height: h * scale, position: "relative", overflow: "hidden", borderRadius: 8, border: `1px solid ${T.line}`, background: "#16120c" }}>
       <div style={{ position: "absolute", left: "50%", top: 0, width: w, height: h, transform: `translateX(-50%) scale(${scale})`, transformOrigin: "50% 0" }}>
         {children(scale)}
       </div>
@@ -77,7 +77,7 @@ type RoomProps = { brief: GovernmentBrief; seats: SceneSeat[]; headIdx: number; 
 function Label({ name, office, ring, big }: { name: string; office: string; ring: string; big?: boolean }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", alignItems: "center", pointerEvents: "none" }}>
-      <span style={{ background: "rgba(9,14,20,.86)", border: `1px solid ${ring}88`, borderRadius: 4, padding: "1px 7px", font: `600 ${big ? 13 : 10.5}px/1.35 system-ui,sans-serif`, color: "#e8d9b0", whiteSpace: "nowrap" }}>{name}</span>
+      <span style={{ background: "rgba(19,16,10,.86)", border: `1px solid ${ring}88`, borderRadius: 4, padding: "1px 7px", font: `600 ${big ? 13 : 10.5}px/1.35 system-ui,sans-serif`, color: "#e8d9b0", whiteSpace: "nowrap" }}>{name}</span>
       <span style={{ font: `600 ${big ? 10.5 : 8.5}px/1.4 system-ui,sans-serif`, letterSpacing: 0.5, textTransform: "uppercase", color: "#c9b88a", textShadow: "0 1px 2px #000" }}>{office}</span>
     </div>
   );
@@ -85,12 +85,12 @@ function Label({ name, office, ring, big }: { name: string; office: string; ring
 
 function TallyChips({ seats, debate, hall }: { seats: SceneSeat[]; debate: boolean; hall?: string }) {
   const n = (f: (l: number) => boolean) => seats.filter((s) => f(s.lean)).length;
-  const chip = (t: ReactNode) => <span style={{ background: "rgba(9,14,20,.86)", color: "#cfe2f6", border: "1px solid #1e2e42", borderRadius: 4, padding: "3px 9px", font: "600 10.5px/1.3 system-ui,sans-serif", whiteSpace: "nowrap" }}>{t}</span>;
+  const chip = (t: ReactNode) => <span style={{ background: "rgba(19,16,10,.86)", color: "#cfe2f6", border: "1px solid #3e3422", borderRadius: 4, padding: "3px 9px", font: "600 10.5px/1.3 system-ui,sans-serif", whiteSpace: "nowrap" }}>{t}</span>;
   const dot = (c: string) => <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: c, marginRight: 4 }} />;
   return (
     <div style={{ position: "absolute", left: 12, top: 12, display: "flex", gap: 6 }}>
       {hall && chip(`${debate ? "In session" : "Sitting"} · ${hall}`)}
-      {debate && chip(<>{dot("#5fc08a")}aye {n((l) => l > 0.15)}  {dot("#e0735a")}nay {n((l) => l < -0.15)}  {dot("#9fb4cc")}wavering {n((l) => Math.abs(l) <= 0.15)}</>)}
+      {debate && chip(<>{dot("#5fc08a")}aye {n((l) => l > 0.15)}  {dot("#e0735a")}nay {n((l) => l < -0.15)}  {dot("#c9bba2")}wavering {n((l) => Math.abs(l) <= 0.15)}</>)}
     </div>
   );
 }
@@ -139,11 +139,11 @@ function TableRoom({ brief, seats, headIdx, debate, toggle }: RoomProps) {
     return (
       <div key={idx} onClick={() => toggle(idx)} title={`${s.office_title} ${s.name}`}
         style={{ position: "absolute", left: X - S / 2, top: below ? Y - S / 2 : Y - S / 2 - 36, display: "flex", flexDirection: below ? "column" : "column-reverse", alignItems: "center", gap: 4, cursor: "pointer" }}>
-        <div style={{ position: "relative", width: S, height: S, borderRadius: "50%", overflow: "hidden", boxShadow: `0 0 0 3px ${ring}`, background: "#0a1018" }}>
+        <div style={{ position: "relative", width: S, height: S, borderRadius: "50%", overflow: "hidden", boxShadow: `0 0 0 3px ${ring}`, background: "#16120c" }}>
           <PixelBust person={seats[idx].person} size={S} />
-          {debate && <span style={{ position: "absolute", right: 2, bottom: 2, width: 12, height: 12, borderRadius: "50%", background: leanColor(seats[idx].lean), boxShadow: "0 0 0 2px #0d1521" }} />}
+          {debate && <span style={{ position: "absolute", right: 2, bottom: 2, width: 12, height: 12, borderRadius: "50%", background: leanColor(seats[idx].lean), boxShadow: "0 0 0 2px #1e1910" }} />}
         </div>
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", background: "rgba(9,14,20,.9)", border: `1px solid ${ring}`, borderRadius: 999, padding: "2px 10px", boxShadow: "0 2px 6px rgba(0,0,0,.18)" }}>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", background: "rgba(19,16,10,.9)", border: `1px solid ${ring}`, borderRadius: 999, padding: "2px 10px", boxShadow: "0 2px 6px rgba(0,0,0,.18)" }}>
           <span style={{ font: "600 11px/1.25 system-ui,sans-serif", color: T.ink, whiteSpace: "nowrap" }}>{s.name}</span>
           <span style={{ font: "600 8.5px/1.3 system-ui,sans-serif", letterSpacing: 0.5, textTransform: "uppercase", color: T.inkDim, whiteSpace: "nowrap" }}>{s.office_title}</span>
         </div>
@@ -208,7 +208,7 @@ function Hemicycle({ brief, seats, headIdx, debate, toggle }: RoomProps) {
   return (
     <Stage w={Wd} h={Hh}>
       {(scale) => (
-        <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 50% 100%,#2a2418,#0a1018 70%)" }}>
+        <div style={{ position: "absolute", inset: 0, background: "radial-gradient(ellipse at 50% 100%,#2a2418,#16120c 70%)" }}>
           <svg width={Wd} height={Hh} style={{ position: "absolute", inset: 0 }}>
             <path d={arc(306, 132, 0, Math.PI)} fill="#1a1a14" />
             {[306, 220, 132].map((r) => <path key={r} d={`M${cx - r},${cy} A${r} ${r} 0 0 1 ${cx + r},${cy}`} fill="none" stroke="#5a4a28" strokeDasharray={r === 220 ? "3 5" : undefined} />)}
@@ -218,8 +218,8 @@ function Hemicycle({ brief, seats, headIdx, debate, toggle }: RoomProps) {
             const { r, a } = slots[i], X = cx - Math.cos(a) * r, Y = cy - Math.sin(a) * r, S = r > 220 ? 56 : 52, ring = seats[e.i].ring;
             return (
               <div key={e.i} onClick={() => toggle(e.i)} title={`${e.s.office_title} ${e.s.name}`} style={{ position: "absolute", left: X - S / 2, top: Y - S / 2, cursor: "pointer" }}>
-                <div style={{ width: S, height: S, borderRadius: "50%", overflow: "hidden", boxShadow: `0 0 0 3px ${ring}`, background: "#0a1018" }}><PixelBust person={seats[e.i].person} size={S} /></div>
-                {debate && <span style={{ position: "absolute", left: "50%", bottom: -6, transform: "translateX(-50%)", width: 12, height: 12, borderRadius: "50%", background: leanColor(seats[e.i].lean), boxShadow: "0 0 0 2px #0d1521" }} />}
+                <div style={{ width: S, height: S, borderRadius: "50%", overflow: "hidden", boxShadow: `0 0 0 3px ${ring}`, background: "#16120c" }}><PixelBust person={seats[e.i].person} size={S} /></div>
+                {debate && <span style={{ position: "absolute", left: "50%", bottom: -6, transform: "translateX(-50%)", width: 12, height: 12, borderRadius: "50%", background: leanColor(seats[e.i].lean), boxShadow: "0 0 0 2px #1e1910" }} />}
                 {scale >= 0.5 && <span style={{ position: "absolute", left: "50%", top: S + 8, transform: "translateX(-50%)", font: "600 10px/1.2 system-ui,sans-serif", color: T.ink, whiteSpace: "nowrap", textShadow: "0 1px 2px #000" }}>{e.s.name.split(" ")[0]}</span>}
               </div>
             );
@@ -234,7 +234,7 @@ function Hemicycle({ brief, seats, headIdx, debate, toggle }: RoomProps) {
           })}
           {/* rostrum + the head */}
           <div style={{ position: "absolute", left: cx - 70, top: cy - 64, width: 140, height: 110, borderRadius: "70px 70px 0 0", background: "#2a2214", boxShadow: "0 0 0 2px #6a5a30" }} />
-          <div onClick={() => toggle(headIdx)} style={{ position: "absolute", left: cx - 40, top: cy - 92, cursor: "pointer", width: 80, height: 80, borderRadius: "50%", overflow: "hidden", boxShadow: `0 0 0 4px ${seats[headIdx].ring}, 0 0 12px ${seats[headIdx].ring}55`, background: "#0a1018" }}>
+          <div onClick={() => toggle(headIdx)} style={{ position: "absolute", left: cx - 40, top: cy - 92, cursor: "pointer", width: 80, height: 80, borderRadius: "50%", overflow: "hidden", boxShadow: `0 0 0 4px ${seats[headIdx].ring}, 0 0 12px ${seats[headIdx].ring}55`, background: "#16120c" }}>
             <PixelBust person={seats[headIdx].person} size={80} occasion="ceremonial" />
           </div>
           <div style={{ position: "absolute", left: cx, top: cy - 4, transform: "translateX(-50%)", textAlign: "center", whiteSpace: "nowrap" }}>
@@ -246,7 +246,7 @@ function Hemicycle({ brief, seats, headIdx, debate, toggle }: RoomProps) {
               <div style={{ font: "600 9.5px system-ui,sans-serif", letterSpacing: 0.6, textTransform: "uppercase", color: T.inkDim }}>Motion · round {d.round} of {d.round_cap}</div>
               <div style={{ fontFamily: SERIF, fontSize: 16, lineHeight: 1.2, color: T.ink }}>To {d.what || d.family}</div>
               <div style={{ display: "flex", height: 10, borderRadius: 999, overflow: "hidden", background: T.lineSoft }}>
-                {[[n((l) => l > 0.15), "#5fc08a"], [n((l) => Math.abs(l) <= 0.15), "#9fb4cc"], [n((l) => l < -0.15), "#e0735a"]].map(([c, col], k) => <span key={k} style={{ flex: Number(c), background: String(col) }} />)}
+                {[[n((l) => l > 0.15), "#5fc08a"], [n((l) => Math.abs(l) <= 0.15), "#c9bba2"], [n((l) => l < -0.15), "#e0735a"]].map(([c, col], k) => <span key={k} style={{ flex: Number(c), background: String(col) }} />)}
               </div>
             </div>
           )}

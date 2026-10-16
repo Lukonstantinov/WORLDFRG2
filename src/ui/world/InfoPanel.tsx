@@ -152,23 +152,23 @@ export function InfoPanel() {
 
   const row = (label: React.ReactNode, value: string) => (
     <div style={{ display: "flex", justifyContent: "space-between", padding: "1px 0" }}>
-      <span style={{ color: "#607090" }}>{label}</span>
-      <span style={{ color: "#c0d0e0" }}>{value}</span>
+      <span style={{ color: "#8a7d66" }}>{label}</span>
+      <span style={{ color: "#ded4c2" }}>{value}</span>
     </div>
   );
 
   const bar = (label: string, value: number) => (
     <div style={{ marginBottom: 2 }}>
       <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ color: "#607090" }}>{label}</span>
-        <span style={{ color: "#c0d0e0" }}>{(value * 100).toFixed(0)}%</span>
+        <span style={{ color: "#8a7d66" }}>{label}</span>
+        <span style={{ color: "#ded4c2" }}>{(value * 100).toFixed(0)}%</span>
       </div>
-      <div style={{ height: 4, background: "#1a2a40", borderRadius: 2 }}>
+      <div style={{ height: 4, background: "#3b311f", borderRadius: 2 }}>
         <div
           style={{
             height: "100%",
             width: `${value * 100}%`,
-            background: "#4a8acf",
+            background: "#c09a59",
             borderRadius: 2,
           }}
         />
@@ -177,7 +177,7 @@ export function InfoPanel() {
   );
 
   const section = (title: string) => (
-    <div style={{ color: "#3a6a9f", fontSize: 10, fontWeight: 600, marginTop: 6, marginBottom: 2, borderTop: "1px solid #1e2e42", paddingTop: 4 }}>
+    <div style={{ color: "#8f764a", fontSize: 10, fontWeight: 600, marginTop: 6, marginBottom: 2, borderTop: "1px solid #3e3422", paddingTop: 4 }}>
       {title}
     </div>
   );
@@ -189,8 +189,8 @@ export function InfoPanel() {
         top: 8,
         right: 8,
         width: 240,
-        background: "rgba(10, 15, 24, 0.94)",
-        border: "1px solid #1e2e42",
+        background: "rgba(22,18,12, 0.94)",
+        border: "1px solid #3e3422",
         borderRadius: 6,
         padding: 10,
         fontSize: 11,
@@ -201,12 +201,12 @@ export function InfoPanel() {
       }}
     >
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 }}>
-        <span style={{ color: "#4a8acf", fontWeight: 700, fontSize: 12 }}>
+        <span style={{ color: "#c09a59", fontWeight: 700, fontSize: 12 }}>
           Cell Info ({info.wx}, {info.wy})
         </span>
         <span
           onClick={() => setInspectedCell(null)}
-          style={{ color: "#607090", cursor: "pointer", fontSize: 14, lineHeight: 1 }}
+          style={{ color: "#8a7d66", cursor: "pointer", fontSize: 14, lineHeight: 1 }}
           title="Close"
         >
           \u00D7
@@ -226,8 +226,8 @@ export function InfoPanel() {
           title="Rebuild this world's landmass with this plate's type switched"
           style={{
             width: "100%", marginTop: 2, marginBottom: 2, padding: "3px 6px",
-            fontSize: 10, background: "#16283c", border: "1px solid #2a5a7a",
-            borderRadius: 3, color: "#8ab4d8", cursor: (flippingPlate || simRunning) ? "default" : "pointer",
+            fontSize: 10, background: "#362c1c", border: "1px solid #6c5938",
+            borderRadius: 3, color: "#d2ba90", cursor: (flippingPlate || simRunning) ? "default" : "pointer",
             opacity: (flippingPlate || simRunning) ? 0.6 : 1,
           }}
         >
@@ -238,7 +238,7 @@ export function InfoPanel() {
       {story && (
         <>
           {section(story.name)}
-          <div style={{ color: "#a8c0d8", fontSize: 10.5, lineHeight: 1.5, fontStyle: "italic", padding: "1px 0 2px" }}>
+          <div style={{ color: "#d4c5ac", fontSize: 10.5, lineHeight: 1.5, fontStyle: "italic", padding: "1px 0 2px" }}>
             {story.text}
           </div>
         </>

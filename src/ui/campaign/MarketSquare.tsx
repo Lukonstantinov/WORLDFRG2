@@ -64,7 +64,7 @@ export function MarketSquare({ detail }: { detail: HubDetail }) {
   return (
     <canvas ref={ref} style={{
       display: "block", width: "100%", height: "auto", aspectRatio: `${SQUARE_W} / ${SQUARE_H}`,
-      borderBottom: "1px solid #1e2e42",
+      borderBottom: "1px solid #3e3422",
     }} />
   );
 }
