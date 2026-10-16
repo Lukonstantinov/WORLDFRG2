@@ -84,13 +84,13 @@ export const MAP_STYLES: MapStyle[] = [
     terrain: null, labelTheme: DEFAULT_LABEL_THEME, linePreset: "Default", symbols: SYMBOL_STYLE_DEFAULTS },
   { id: "atlas", name: "Atlas", blurb: "Green lowlands to brown uplands, red borders, a school atlas.",
     terrain: "atlas", labelTheme: "Atlas", linePreset: "Atlas",
-    symbols: { settlement: "rankDot", border: "single", borderColor: "#c4161c", borderWidth: 1.6, cityFill: "#8c1d1d", provinceFill: 0 } },
+    symbols: { settlement: "rankDot", border: "single", borderColor: "#c4161c", borderWidth: 1.6, cityFill: "#8c1d1d", provinceFill: 0, routes: "road" } },
   { id: "parchment", name: "Parchment", blurb: "Paper land and a muted sea; the overlays carry the picture.",
     terrain: "parchment", labelTheme: "Parchment", linePreset: "Parchment",
-    symbols: { settlement: "rankDot", border: "single", borderColor: "rgba(120,100,70,0.75)", borderWidth: 1, cityFill: "#4d4335", provinceFill: 0.35 } },
+    symbols: { settlement: "rankDot", border: "single", borderColor: "rgba(120,100,70,0.75)", borderWidth: 1, cityFill: "#4d4335", provinceFill: 0.35, routes: "road" } },
   { id: "game", name: "Game Board", blurb: "Rich relief, tinted realms, carved names — a strategy board.",
     terrain: "game", labelTheme: "Game Board", linePreset: "Default",
-    symbols: { settlement: "graduated", border: "casing", borderColor: "rgba(20,16,10,0.8)", borderWidth: 1.4, cityFill: "", provinceFill: 1.15 } },
+    symbols: { settlement: "graduated", border: "casing", borderColor: "rgba(20,16,10,0.8)", borderWidth: 1.4, cityFill: "", provinceFill: 1.15, routes: "road" } },
 ];
 const LS_MAP_STYLE_KEY = "wf2.appearance.mapStyle";
 function loadMapStyle(): MapStyleId {

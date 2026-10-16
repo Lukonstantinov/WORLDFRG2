@@ -215,6 +215,8 @@ export function Toolbar() {
   const toggleGoodQualityHeatmap = useUIStore((s) => s.toggleGoodQualityHeatmap);
   const merchantRouteRisk = useUIStore((s) => s.merchantRouteRisk);
   const toggleMerchantRouteRisk = useUIStore((s) => s.toggleMerchantRouteRisk);
+  const routeColorMode = useUIStore((s) => s.routeColorMode);
+  const setRouteColorMode = useUIStore((s) => s.setRouteColorMode);
   const migrationMode = useUIStore((s) => s.migrationMode);
   const setMigrationMode = useUIStore((s) => s.setMigrationMode);
   const showBankIcons = useUIStore((s) => s.showBankIcons);
@@ -689,6 +691,21 @@ export function Toolbar() {
                   </span>
                 )}
               </label>
+            )}
+            {o.id === "merchantRoutes" && overlayVisibility[o.id] && !merchantRouteRisk && (
+              <div role="radiogroup" aria-label="Colour routes by"
+                style={{ display: "flex", gap: 3, margin: "0 0 3px 22px", fontSize: 9 }}>
+                {(["network", "good"] as const).map((m) => (
+                  <button key={m} role="radio" aria-checked={routeColorMode === m}
+                    onClick={() => setRouteColorMode(m)}
+                    style={{
+                      padding: "2px 7px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                      border: `1px solid ${routeColorMode === m ? "#c9a24a" : "#20304a"}`,
+                      background: routeColorMode === m ? "#3a2f1a" : "#0e1826",
+                      color: routeColorMode === m ? "#f0dcaa" : "#7d97b0",
+                    }}>{m === "network" ? "by network" : "by good"}</button>
+                ))}
+              </div>
             )}
           </div>
         ))}

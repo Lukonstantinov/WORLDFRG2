@@ -140,6 +140,11 @@ interface UIStore {
    *  each voyage — this just makes it visible before the loss happens rather
    *  than only after, as a chronicle event. */
   merchantRouteRisk: boolean;
+  /** Merchant routes coloured by their NETWORK (the carrying house or company's own
+   *  colour) or by the GOOD they mostly carry. */
+  routeColorMode: "network" | "good";
+  /** What the route legend lists for the current mode: top entries by volume. */
+  routeLegend: { label: string; color: string }[];
   /** SWIPE COMPARE: a second layer drawn to the right of a draggable divider.
    *  Every causal chain in this app is a two-layer question — precipitation against
    *  elevation for rain shadow, currents against temperature, biomes against Köppen
@@ -398,6 +403,8 @@ interface UIStore {
   setGoodQualityHeatmap: (on: boolean) => void;
   toggleGoodQualityHeatmap: () => void;
   toggleMerchantRouteRisk: () => void;
+  setRouteColorMode: (m: "network" | "good") => void;
+  setRouteLegend: (l: { label: string; color: string }[]) => void;
   setCompareLayer: (l: ActiveLayer | null) => void;
   setComparePos: (p: number) => void;
   setLandmassSource: (source: LandmassSource) => void;
@@ -558,6 +565,8 @@ export const useUIStore = create<UIStore>((set) => ({
   elevationStyle: null,
   goodQualityHeatmap: false,
   merchantRouteRisk: false,
+  routeColorMode: "network",
+  routeLegend: [],
   compareLayer: null,
   comparePos: 0.5,
   stretchToFit: true,
@@ -708,6 +717,8 @@ export const useUIStore = create<UIStore>((set) => ({
   setGoodQualityHeatmap: (on) => set({ goodQualityHeatmap: on }),
   toggleGoodQualityHeatmap: () => set((state) => ({ goodQualityHeatmap: !state.goodQualityHeatmap })),
   toggleMerchantRouteRisk: () => set((state) => ({ merchantRouteRisk: !state.merchantRouteRisk })),
+  setRouteColorMode: (m) => set({ routeColorMode: m }),
+  setRouteLegend: (l) => set({ routeLegend: l }),
   setCompareLayer: (l) => set({ compareLayer: l }),
   setComparePos: (p) => set({ comparePos: Math.max(0, Math.min(1, p)) }),
 

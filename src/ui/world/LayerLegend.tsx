@@ -309,3 +309,34 @@ export function GoodQualityLegend() {
     </div>
   );
 }
+
+/** The trade-route key: which network (house / company) or good each colour is,
+ *  top entries by volume. Set in the trade-map register of a printed atlas legend. */
+export function RouteLegend() {
+  const on = useUIStore((s) => !!s.overlayVisibility.merchantRoutes);
+  const mode = useUIStore((s) => s.routeColorMode);
+  const entries = useUIStore((s) => s.routeLegend);
+  if (!on || entries.length === 0) return null;
+  return (
+    <div role="note" aria-label="Trade route legend" style={{
+      position: "absolute", right: 8, bottom: 8, zIndex: 12, pointerEvents: "none",
+      background: "rgba(244,236,218,0.94)", border: "1px solid #a99a7b",
+      padding: "8px 12px", color: "#3e3528", fontSize: 11, minWidth: 150,
+      boxShadow: "0 4px 14px rgba(0,0,0,0.3)", display: "grid", gap: 4,
+    }}>
+      <div style={{ fontVariant: "small-caps", letterSpacing: "0.08em", fontSize: 12, color: "#6d5d43" }}>
+        {mode === "good" ? "Routes by good" : "Routes by network"}
+      </div>
+      {entries.map((e) => (
+        <div key={e.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span style={{ width: 28, height: 4, borderRadius: 2, background: e.color, flex: "none" }} />
+          <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: 170 }}>{e.label}</span>
+        </div>
+      ))}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6d5d43" }}>
+        <span style={{ width: 28, borderTop: "3px dotted #7d6f57", flex: "none" }} />
+        <span>Sea crossing</span>
+      </div>
+    </div>
+  );
+}

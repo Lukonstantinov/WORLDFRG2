@@ -558,10 +558,12 @@ export interface SymbolStyles {
   cityFill: string;
   /** Multiplier on the province colour wash (0 = borders only, as on an atlas). */
   provinceFill: number;
+  /** World trade routes as dotted caravan TRACKS, or solid cased ROADS (map styles). */
+  routes: "track" | "road";
 }
 export const SYMBOL_STYLE_DEFAULTS: SymbolStyles = {
   settlement: "graduated", river: "discharge", lake: "filled", border: "single",
-  borderColor: "", borderWidth: 1, cityFill: "", provinceFill: 1,
+  borderColor: "", borderWidth: 1, cityFill: "", provinceFill: 1, routes: "track",
 };
 export const symbolStyles: SymbolStyles = { ...SYMBOL_STYLE_DEFAULTS };
 export function setSymbolStyles(partial: Partial<SymbolStyles>) {
@@ -2156,6 +2158,62 @@ export class OverlayManager {
     this.expeditions = active;
     this.expeditionFails = failed;
     if (gridW > 0) this.worldW = gridW;
+  }
+
+  private routeColorMode: "network" | "good" = "network";
+  setRouteColorMode(m: "network" | "good") { this.routeColorMode = m; }
+
+  /** The good a route mostly carries (both directions), or "" if it carries none. */
+  private static routeMainGood(r: MerchantRoute): string {
+    let best = "", amt = 0;
+    for (const [g, a] of [...r.out_goods, ...r.ret_goods]) if (a > amt) { amt = a; best = g; }
+    return best;
+  }
+  private static goodColor(name: string): string {
+    return GOOD_DEFS.find((d) => d.name === name)?.color ?? "#9a8c78";
+  }
+  /** A route's colour in the current mode (risk mode overrides both). */
+  private routeColor(r: MerchantRoute): string {
+    if (this.merchantRouteRisk) return OverlayManager.riskColor(r.risk ?? 0);
+    if (this.routeColorMode === "good") return OverlayManager.goodColor(OverlayManager.routeMainGood(r));
+    return r.color || "#cccccc";
+  }
+  /** Legend entries for the current colour mode: the top networks or goods by volume. */
+  merchantRouteLegend(): { label: string; color: string }[] {
+    const tally = new Map<string, { color: string; vol: number }>();
+    for (const r of this.merchantRoutes) {
+      const good = OverlayManager.routeMainGood(r);
+      const key = this.routeColorMode === "good" ? good : r.holder;
+      if (!key) continue;
+      const e = tally.get(key) ?? { color: this.routeColor(r), vol: 0 };
+      e.vol += r.volume;
+      tally.set(key, e);
+    }
+    const label = (k: string) => this.routeColorMode === "good"
+      ? (GOOD_DEFS.find((d) => d.name === k)?.label ?? k) : k;
+    return [...tally.entries()].sort((a, b) => b[1].vol - a[1].vol).slice(0, 8)
+      .map(([k, v]) => ({ label: label(k), color: v.color }));
+  }
+
+  /** Stroke a cell-by-cell corridor as a smooth curve: thin the points, then draw
+   *  through their midpoints, so a road reads as a road rather than a staircase.
+   *  Breaks at the cylindrical wrap seam like `strokeFlowPolyline`. */
+  private strokeSmooth(ctx: CanvasRenderingContext2D, pts: [number, number][], W: number) {
+    const stride = Math.max(1, Math.round(3 / Math.sqrt(Math.max(this.currentScale, 0.05))));
+    const p: [number, number][] = [];
+    for (let i = 0; i < pts.length; i += stride) p.push([pts[i][0] + 0.5, pts[i][1] + 0.5]);
+    const last = pts[pts.length - 1];
+    if (p.length === 0 || p[p.length - 1][0] !== last[0] + 0.5 || p[p.length - 1][1] !== last[1] + 0.5) p.push([last[0] + 0.5, last[1] + 0.5]);
+    ctx.beginPath();
+    ctx.moveTo(p[0][0], p[0][1]);
+    for (let i = 1; i < p.length; i++) {
+      // Wrap seam: half the world when its width is known, else the old 20-cell gap.
+      if (Math.abs(p[i][0] - p[i - 1][0]) > (W > 0 ? W / 2 : 20)) { ctx.stroke(); ctx.beginPath(); ctx.moveTo(p[i][0], p[i][1]); continue; }
+      if (i === p.length - 1) { ctx.lineTo(p[i][0], p[i][1]); break; }
+      const mx = (p[i][0] + p[i + 1][0]) / 2, my = (p[i][1] + p[i + 1][1]) / 2;
+      ctx.quadraticCurveTo(p[i][0], p[i][1], mx, my);
+    }
+    ctx.stroke();
   }
 
   drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
@@ -3811,27 +3869,28 @@ export class OverlayManager {
     const dash = Math.max(1.5, 4 / Math.sqrt(this.currentScale));
     // Distinguish routes by line STYLE, not just colour (flat map redesign):
     // sea = long rhumb-line dashes · river = even dash · land = fine dotted caravan track.
-    const pattern = route.kind === 1 ? [dash * 2.2, dash]
+    const road = symbolStyles.routes === "road";
+    // ROAD (map styles): land and river routes solid over a soft casing, sea a dotted
+    // lane. TRACK (classic): sea long dashes · river even dash · land dotted track.
+    const pattern = route.kind === 1 ? (road ? [Math.max(0.4, dash * 0.3), dash * 1.2] : [dash * 2.2, dash])
+      : road ? []
       : route.kind === 2 ? [dash, dash]
       : [Math.max(0.8, dash * 0.5), dash * 1.5];
 
-    ctx.globalAlpha = route.minor ? 0.5 : 0.8;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = lineWidth;
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
-    ctx.setLineDash(pattern);
-
-    const seamGap = 20;
-    ctx.beginPath();
-    let started = false;
-    for (let i = 0; i < pts.length; i++) {
-      const [x, y] = pts[i];
-      if (i > 0 && Math.abs(x - pts[i - 1][0]) > seamGap) started = false;
-      if (!started) { ctx.moveTo(x + 0.5, y + 0.5); started = true; }
-      else ctx.lineTo(x + 0.5, y + 0.5);
+    if (road && route.kind !== 1) {
+      ctx.setLineDash([]);
+      ctx.globalAlpha = route.minor ? 0.18 : 0.3;
+      ctx.strokeStyle = "rgba(30,20,10,0.9)";
+      ctx.lineWidth = lineWidth * 1.4 + 1.6 / Math.sqrt(this.currentScale);
+      this.strokeSmooth(ctx, pts.map(([x, y]) => [x, y] as [number, number]), this.worldW);
     }
-    ctx.stroke();
+    ctx.globalAlpha = route.minor ? 0.5 : road ? 0.9 : 0.8;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = road && !route.minor ? lineWidth * 1.4 : lineWidth;
+    ctx.setLineDash(pattern);
+    this.strokeSmooth(ctx, pts.map(([x, y]) => [x, y] as [number, number]), this.worldW);
     ctx.setLineDash([]);
     ctx.globalAlpha = 1;
   }
@@ -4934,9 +4993,8 @@ export class OverlayManager {
       const pts = r.path;
       if (!pts || pts.length < 2) continue;
       const norm = r.volume / maxVol;
-      ctx.strokeStyle = this.merchantRouteRisk
-        ? OverlayManager.riskColor(r.risk ?? 0) : (r.color || "#cccccc");
-      ctx.lineWidth = Math.max(0.5, (0.8 + norm * 4.0) / Math.sqrt(this.currentScale));
+      const col = this.routeColor(r);
+      const lw = Math.max(0.6, (1.2 + norm * 4.0) / Math.sqrt(this.currentScale));
       // Stroked one MEDIUM at a time (rule 35/§8.5's mediumRuns discipline): a
       // house's own account often carries cargo overland to a port, by sea,
       // then overland again, and drawing that as ONE uniform dash style is
@@ -4947,15 +5005,20 @@ export class OverlayManager {
       const seaAt = this.merchantLaneSea[ri] ?? pts.map(() => r.sea);
       const runs = this.mediumRuns(pts, seaAt, W);
       for (const run of runs) {
-        ctx.globalAlpha = (0.5 + 0.4 * norm) * (run.sea ? 0.85 : 1.0);
-        ctx.setLineDash(run.sea ? [dash, dash] : []);
-        ctx.beginPath();
-        let started = false;
-        for (const [px0, py0] of run.pts) {
-          const px = px0 + 0.5, py = py0 + 0.5;
-          if (!started) { ctx.moveTo(px, py); started = true; } else { ctx.lineTo(px, py); }
+        // A soft dark casing under land roads (as on a printed trade map), then the
+        // coloured road. Open water stays a dotted lane with no casing (rule 35).
+        if (!run.sea) {
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 0.35;
+          ctx.strokeStyle = "rgba(30,20,10,0.9)";
+          ctx.lineWidth = lw + 2 / Math.sqrt(this.currentScale);
+          this.strokeSmooth(ctx, run.pts, W);
         }
-        ctx.stroke();
+        ctx.globalAlpha = (0.65 + 0.35 * norm) * (run.sea ? 0.85 : 1.0);
+        ctx.strokeStyle = col;
+        ctx.lineWidth = run.sea ? lw * 0.8 : lw;
+        ctx.setLineDash(run.sea ? [Math.max(0.4, dash * 0.35), dash * 1.3] : []);
+        this.strokeSmooth(ctx, run.pts, W);
       }
       ctx.setLineDash([]);
       // Every GEOMETRIC medium change along this route's own corridor (rings),
@@ -4964,7 +5027,7 @@ export class OverlayManager {
       this.drawMediumTransitionRings(ctx, runs, Math.max(1.2, 2.2 / Math.sqrt(this.currentScale)));
       const dotR = Math.max(0.8, 1.6 / Math.sqrt(this.currentScale));
       ctx.globalAlpha = 0.85;
-      ctx.fillStyle = r.color || "#cccccc";
+      ctx.fillStyle = col;
       const a = pts[0], b = pts[pts.length - 1];
       ctx.beginPath(); ctx.arc(a[0] + 0.5, a[1] + 0.5, dotR, 0, Math.PI * 2); ctx.fill();
       ctx.beginPath(); ctx.arc(b[0] + 0.5, b[1] + 0.5, dotR, 0, Math.PI * 2); ctx.fill();

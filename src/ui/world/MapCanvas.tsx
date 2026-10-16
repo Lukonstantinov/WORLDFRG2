@@ -1162,6 +1162,7 @@ export function MapCanvas() {
     campaignMerchantRoutes().then((routes) => {
       om.drawMerchantRoutes(routes, meta.grid_width);
       merchantRoutesRef.current = routes;
+      useUIStore.getState().setRouteLegend(om.merchantRouteLegend());
       requestRender();
     }).catch(() => {});
   }, [overlayVisibility.merchantRoutes, campaignSnapshot?.active, campaignSnapshot?.clock.tick, meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1494,13 +1495,16 @@ export function MapCanvas() {
     om.setGoodQualityHeatmap(goodQualityHeatmap);
     requestRender();
   }, [goodQualityHeatmap, requestRender]);
-  // Merchant Routes: colour by voyage risk instead of the carrying house.
+  // Merchant Routes: colour by voyage risk, or by network / by good.
+  const routeColorMode = useUIStore((s) => s.routeColorMode);
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om) return;
     om.setMerchantRouteRisk(merchantRouteRisk);
+    om.setRouteColorMode(routeColorMode);
+    useUIStore.getState().setRouteLegend(merchantRouteRisk ? [] : om.merchantRouteLegend());
     requestRender();
-  }, [merchantRouteRisk, requestRender]);
+  }, [merchantRouteRisk, routeColorMode, requestRender]);
 
   // Merchant-family control overlay — which settlements each house holds. Driven
   // by the live campaign houses (updates dynamically as the campaign advances).
