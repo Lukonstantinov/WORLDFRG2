@@ -547,7 +547,8 @@ export function resolveLabelTheme(
  *  variants (pictorial settlements, double-line navigable rivers, a
  *  shore-banded lake, a hatched frontier band) left for a future pass. */
 export interface SymbolStyles {
-  settlement: "graduated" | "rankDot";
+  /** "token" = Game Board city tokens (realm-coloured, capitals carry a pennant). */
+  settlement: "graduated" | "rankDot" | "token";
   river: "discharge" | "constant";
   lake: "filled" | "outlined";
   border: "single" | "casing";
@@ -560,10 +561,14 @@ export interface SymbolStyles {
   provinceFill: number;
   /** World trade routes as dotted caravan TRACKS, or solid cased ROADS (map styles). */
   routes: "track" | "road";
+  /** Tint provinces by the REALM that holds them (free land a faint neutral veil)
+   *  instead of one colour per province — the Game Board's political wash. */
+  ownerTint: boolean;
 }
 export const SYMBOL_STYLE_DEFAULTS: SymbolStyles = {
   settlement: "graduated", river: "discharge", lake: "filled", border: "single",
   borderColor: "", borderWidth: 1, cityFill: "", provinceFill: 1, routes: "track",
+  ownerTint: false,
 };
 export const symbolStyles: SymbolStyles = { ...SYMBOL_STYLE_DEFAULTS };
 export function setSymbolStyles(partial: Partial<SymbolStyles>) {
@@ -915,9 +920,21 @@ export class OverlayManager {
     const rgb: [number, number, number][] = [];
     const single = hexToRgb(this.provinceSingleColor);
     for (const id of this.provinceIdList) {
-      rgb[id] = this.provinceFillMode === "single" ? single : provinceColorRGB(id);
+      rgb[id] = symbolStyles.ownerTint
+        ? (this.provinceRealm.get(id) ?? [222, 212, 186])
+        : this.provinceFillMode === "single" ? single : provinceColorRGB(id);
     }
     this.buildProvinceRender(rgb);
+  }
+
+  /** Re-tint provinces after a map-style change (owner tint on/off). */
+  refreshProvinceColors() { this.rebuildProvinceColors(); }
+
+  /** Realm colour per province id, and the cells of realm capitals ("x,y"). */
+  private provinceRealm = new Map<number, [number, number, number]>();
+  private realmCapitals = new Set<string>();
+  setRealmCapitals(cells: [number, number][]) {
+    this.realmCapitals = new Set(cells.map(([x, y]) => `${Math.round(x)},${Math.round(y)}`));
   }
 
   /** Province appearance from the Settings panel: a single flat fill (borders carry the
@@ -2049,6 +2066,9 @@ export class OverlayManager {
    *  Rendered on the province raster so its border is the province border exactly. */
   drawStates(states: StateRegion[]) {
     this.stateRegions = states;
+    this.provinceRealm = new Map();
+    for (const st of states) for (const p of st.province_ids) this.provinceRealm.set(p, st.color);
+    if (symbolStyles.ownerTint) this.rebuildProvinceColors();
     this.statesDirty = true;
   }
 
@@ -3486,6 +3506,33 @@ export class OverlayManager {
           ctx.moveTo(cx, cy - r * 1.15); ctx.lineTo(cx, cy + r);
           ctx.moveTo(cx - r * 0.75, cy - r * 0.45); ctx.lineTo(cx + r * 0.75, cy - r * 0.45);
           ctx.stroke();
+          continue;
+        }
+        // GAME BOARD city token: a dark disc, the holding realm's colour inside, a
+        // gold ring; a realm capital flies a pennant. Free cities take a neutral bronze.
+        if (symbolStyles.settlement === "token") {
+          const dinv = 1 / Math.sqrt(this.currentScale);
+          const cx = s.x + 0.5, cy = s.y + 0.5, pop = s.population;
+          const r = Math.max(0.9, (pop >= 100_000 ? 3.2 : pop >= 20_000 ? 2.5 : s.size === "village" || s.size === "outpost" ? 1.4 : 1.9) * dinv);
+          const prov = this.provinceAt(s.x, s.y);
+          const rc = prov !== null ? this.provinceRealm.get(prov) : undefined;
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = "rgba(20,14,8,0.55)";
+          ctx.beginPath(); ctx.arc(cx, cy + r * 0.25, r * 1.05, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = "#2b2116";
+          ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fill();
+          ctx.fillStyle = rc ? `rgb(${rc[0]},${rc[1]},${rc[2]})` : "#b8a27a";
+          ctx.beginPath(); ctx.arc(cx, cy, r * 0.72, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = "#e8c46c"; ctx.lineWidth = Math.max(0.2, r * 0.16);
+          ctx.stroke();
+          if (this.realmCapitals.has(`${Math.round(s.x)},${Math.round(s.y)}`)) {
+            const top = cy - r * 3.4;
+            ctx.lineWidth = Math.max(0.15, r * 0.12);
+            ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, top); ctx.stroke();
+            ctx.fillStyle = rc ? `rgb(${rc[0]},${rc[1]},${rc[2]})` : "#7d1f1f";
+            ctx.beginPath(); ctx.moveTo(cx, top); ctx.lineTo(cx + r * 1.9, top + r * 0.55); ctx.lineTo(cx, top + r * 1.1); ctx.closePath();
+            ctx.fill(); ctx.stroke();
+          }
           continue;
         }
         // GENERATION_UX_REDESIGN_PLAN.md Slice 11(b) — the "rank-tiered dot"

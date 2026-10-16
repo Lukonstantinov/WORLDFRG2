@@ -1308,16 +1308,29 @@ export function MapCanvas() {
   useEffect(() => {
     const om = overlayManagerRef.current;
     if (!om || !meta) return;
-    if (!overlayVisibility.states || !campaignSnapshot?.active) {
+    // The Game Board style tints provinces by realm and crowns capitals, so it needs
+    // realm data even while the States overlay itself is off.
+    if (!(overlayVisibility.states || mapStyle === "game") || !campaignSnapshot?.active) {
       om.drawStates([]);
       requestRender();
       return;
     }
     computeStates().then((states) => {
+      const hubs = useCampaignStore.getState().snapshot?.hubs ?? [];
+      om.setRealmCapitals(states.flatMap((st) => {
+        const h = hubs.find((x) => x.id === st.capital_hub);
+        return h ? [[h.x, h.y] as [number, number]] : [];
+      }));
       om.drawStates(states);
       requestRender();
     }).catch(() => {});
-  }, [overlayVisibility.states, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [overlayVisibility.states, mapStyle, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365), meta, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A map-style change can switch the province wash to the realm tint and back.
+  useEffect(() => {
+    overlayManagerRef.current?.refreshProvinceColors();
+    requestRender();
+  }, [mapStyle, requestRender]);
 
   // Expeditions — financed ventures crawling toward distant cities + recent failed
   // ✕'s. Cheap read (no routing), so it refreshes every tick to show them moving.
@@ -2453,6 +2466,13 @@ export function MapCanvas() {
       onPointerLeave={() => { clearPaintOverlay(); onPointerUp(); }}
       onContextMenu={(e) => e.preventDefault()}
     >
+      {mapStyle === "game" && (
+        // Game Board mist: the map's edges fade, like fog over unexplored land.
+        <div aria-hidden style={{
+          position: "absolute", inset: 0, pointerEvents: "none", zIndex: 5,
+          background: "radial-gradient(ellipse at center, rgba(0,0,0,0) 58%, rgba(214,220,214,0.22) 84%, rgba(200,206,200,0.42) 100%)",
+        }} />
+      )}
       {compareLayer && (
         <div
           onPointerDown={(e) => {

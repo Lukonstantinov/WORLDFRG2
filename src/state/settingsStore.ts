@@ -90,7 +90,7 @@ export const MAP_STYLES: MapStyle[] = [
     symbols: { settlement: "rankDot", border: "single", borderColor: "rgba(120,100,70,0.75)", borderWidth: 1, cityFill: "#4d4335", provinceFill: 0.35, routes: "road" } },
   { id: "game", name: "Game Board", blurb: "Rich relief, tinted realms, carved names — a strategy board.",
     terrain: "game", labelTheme: "Game Board", linePreset: "Default",
-    symbols: { settlement: "graduated", border: "casing", borderColor: "rgba(20,16,10,0.8)", borderWidth: 1.4, cityFill: "", provinceFill: 1.15, routes: "road" } },
+    symbols: { settlement: "token", border: "casing", borderColor: "rgba(20,16,10,0.8)", borderWidth: 1.4, cityFill: "", provinceFill: 0.45, routes: "road", ownerTint: true } },
 ];
 const LS_MAP_STYLE_KEY = "wf2.appearance.mapStyle";
 function loadMapStyle(): MapStyleId {
