@@ -6,21 +6,23 @@ Owner rules: physics follows planet settings honestly; animations = cross-fade, 
 summer/winter toggle. Every batch gated by `cargo test --lib earth_` + full test suite.
 
 ## Batch 0 - correctness bugs (small, do first)
-- [ ] **Noise hash bug** `step2_terrain/elevation.rs:14-16` - signed `>>` clears top bit, all
+- [x] **Noise hash bug** `step2_terrain/elevation.rs:14-16` - signed `>>` clears top bit, all
       noise in [0,0.5). Ridged noise never ridges, warps biased up-left, seamounts never spawn.
       Fix `((h as u32) >> 16) as i32`, then re-measure `FBM_LO/HI`, `FBM_MEASURED_*`, `-0.5`
       warp constants and thresholds in rivers/biological/deposits. Every seed changes.
-- [ ] **Per-step != Run-All** (`world_buffer.rs` column masks): rivers step misses
+- [x] **Per-step != Run-All** (`world_buffer.rs` column masks): rivers step misses
       temperature+snow_frac (D1); biological misses soil (D2); provinces built before goods (D3);
       shelf params hard-coded in elevation cmds + `sim_run_all_from_terrain` (D4); lake-floor 4 vs 20 (D5);
       StepRivers Refresh hard-codes goods params (D6).
-- [ ] **Elevation sliders ignored in plates mode** (`elevation.rs:738-739` hard 0.5).
-- [ ] **Salinity reads stale precipitation** (`ocean.rs:1131`) - step 3 not idempotent.
-- [ ] **SST vs ocean temperature mismatch** - `compute_sst` lacks EBM anomaly; shelf-ice cooling after SST.
-- [ ] **Lakes**: query depth uses spill level not trimmed surface; panel salinity ignores
+- [x] **Elevation sliders ignored in plates mode** (`elevation.rs:738-739` hard 0.5).
+- [x] **Salinity reads stale precipitation** (`ocean.rs:1131`) - step 3 not idempotent.
+- [x] **SST vs ocean temperature mismatch** - `compute_sst` lacks EBM anomaly; shelf-ice cooling after SST.
+- [x] **Lakes**: query depth uses spill level not trimmed surface; panel salinity ignores
       `lk.salinity_ppt`; 4 lake types return empty fish lists; >60 ppt must hold no fish.
-- [ ] **Cell area ignores cos(lat)** (rivers.rs:603,765,1497) - boreal rivers/lakes ~2x too big.
-- [ ] **Staleness**: re-running step N must invalidate dependants (uiStore `markStepCompleted`).
+- [x] **Cell area ignores cos(lat)** (rivers.rs:603,765,1497) - boreal rivers/lakes ~2x too big.
+- [x] **Staleness**: re-running step N must invalidate dependants (uiStore `markStepCompleted`).
+- [ ] **Found 2026-10-17 (pre-existing, not the noise fix):** analytical relief shows stepped,
+  diamond-shaped blocks across shallow shelves around every coast (dump_elevation_style_sheet).
 
 ## Batch 1 - terrain randomness (owner priority)
 - Noise wavelengths in km not cells; add ~3000 km continent octave; ridge layer 9 octaves.
