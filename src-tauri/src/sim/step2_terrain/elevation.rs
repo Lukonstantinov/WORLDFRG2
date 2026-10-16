@@ -12,9 +12,11 @@ fn hash_grid(x: i32, y: i32, seed: u64) -> f32 {
     h = h.wrapping_mul(1).wrapping_add(x.wrapping_mul(374761393));
     h ^= y.wrapping_mul(668265263);
     h = h.wrapping_mul(1274126177);
-    h ^= h >> 16;
+    // LOGICAL shifts: a signed `>>` copies the sign bit down and the xor then
+    // clears bit 31, which kept every value below 0.5 (test: noise_spans_...).
+    h ^= ((h as u32) >> 16) as i32;
     h = h.wrapping_mul(1911520717);
-    h ^= h >> 16;
+    h ^= ((h as u32) >> 16) as i32;
     (h as u32) as f32 / 4294967296.0
 }
 
@@ -634,8 +636,8 @@ pub fn generate_elevation_tuned(buf: &mut WorldBuffer, seed: u64, density: f32, 
             // Normalised on the measured spread first (as `plates.rs` does), the
             // intended swing is real: some stretches stand at full height, others
             // fall to a third of it, and the range reads as a range.
-            const FBM_LO: f32 = 0.11;
-            const FBM_HI: f32 = 0.40;
+            const FBM_LO: f32 = 0.21; // 4-octave p1/p99, re-measured after the hash fix
+            const FBM_HI: f32 = 0.79;
             let belt_noise = fbm_noise(ax * f_base * 2.3 + 19.0, ay * f_base * 2.3 + 5.0,
                                        seed.wrapping_add(0xB317), 4, 2.0, 0.5);
             let belt_n01 = ((belt_noise - FBM_LO) / (FBM_HI - FBM_LO)).clamp(0.0, 1.0);
@@ -1899,7 +1901,8 @@ fn walk_spine(
     let Some(i0) = idx(x, y) else { return Vec::new() };
     // Hold the offset the seed started at, drifting slowly so the chain wanders
     // toward and away from the coast instead of tracking it rigidly.
-    let mut target = coast_dist[i0] as f32;
+    let start = coast_dist[i0] as f32;
+    let mut target = start;
 
     let mut out = Vec::new();
     let mut last: Option<usize> = None;
@@ -1939,8 +1942,12 @@ fn walk_spine(
         }
         // Organic wander, and a slow drift of the offset itself.
         heading += (fbm_noise(step as f32 / 34.0, seed as f32 % 97.0, seed, 3, 2.0, 0.5) - 0.5) * 0.42;
-        target += (fbm_noise(step as f32 / 70.0, 11.0, seed.wrapping_add(7), 2, 2.0, 0.5) - 0.5) * 1.1;
-        target = target.clamp(2.0, 90.0);
+        // A BOUNDED drift about the starting offset (±30%). This was a running sum
+        // of the noise: while the noise sat below 0.5 (hash bug) it slid every
+        // crest to the 2-cell floor, i.e. onto the shoreline; with unbiased noise
+        // it random-walks without limit. Neither is "wander toward and away".
+        let drift = fbm_noise(step as f32 / 70.0, 11.0, seed.wrapping_add(7), 2, 2.0, 0.5) - 0.5;
+        target = (start + drift * 2.0 * (start * 0.3).max(2.0)).clamp(2.0, 90.0);
 
         x += heading.cos() * 1.6;
         y += heading.sin() * 1.6;
@@ -3361,6 +3368,33 @@ mod tests {
 
     use crate::sim::world_buffer::ColumnSet;
 
+    /// Percentiles of `fbm_noise` over a large sample, per octave count — the
+    /// measured spread the `FBM_*` normalising constants are set from.
+    fn fbm_percentiles(octaves: u32, persistence: f32) -> (f32, f32, f32, f32) {
+        let mut v: Vec<f32> = (0..200_000u32)
+            .map(|i| fbm_noise((i % 500) as f32 * 0.037 + 0.13, (i / 500) as f32 * 0.041 + 0.71, 0xABCD, octaves, 2.0, persistence))
+            .collect();
+        v.sort_by(|a, b| a.total_cmp(b));
+        let p = |q: f32| v[((v.len() - 1) as f32 * q) as usize];
+        (p(0.01), p(0.5), p(0.99), v.iter().sum::<f32>() / v.len() as f32)
+    }
+
+    /// THE NOISE MUST SPAN 0..1. A signed `>>` in `hash_grid` once cleared the top
+    /// bit, so every value sat in [0, 0.5): ridged noise never folded into ridges,
+    /// every `- 0.5` warp pushed one way, and seamounts (`> 0.80`) never formed.
+    #[test]
+    fn noise_spans_zero_to_one_centred_on_half() {
+        let h: Vec<f32> = (0..20_000).map(|i| hash_grid(i % 211, i / 211, 7)).collect();
+        assert!(h.iter().any(|&v| v > 0.9) && h.iter().any(|&v| v < 0.1), "hash not uniform on 0..1");
+        let mean = h.iter().sum::<f32>() / h.len() as f32;
+        assert!((mean - 0.5).abs() < 0.02, "hash mean {mean}");
+        for oct in [2u32, 3, 4] {
+            let (p1, p50, p99, m) = fbm_percentiles(oct, 0.5);
+            println!("fbm {oct} oct: p1 {p1:.3} p50 {p50:.3} p99 {p99:.3} mean {m:.3}");
+            assert!((m - 0.5).abs() < 0.04, "fbm {oct}-octave mean {m} is not centred on 0.5");
+        }
+    }
+
     /// A rectangular continent inside a sea frame, for the coast-relative tests.
     pub fn continent(w: u32, h: u32, margin: u32) -> WorldBuffer {
         let n = (w * h) as usize;
@@ -3472,6 +3506,7 @@ mod tests {
         };
         let cord_spread = spread(&cord);
         let noise_spread = spread(&noisy);
+        println!("crest spread: cordillera {cord_spread:.2} vs ridged {noise_spread:.2}");
         assert!(cord_spread < noise_spread * 0.80,
             "a cordillera's crest must hug one distance from the coast: \
              spread {cord_spread:.1} cells vs ridged noise {noise_spread:.1}");
@@ -4601,8 +4636,8 @@ mod tests {
     /// near-constant modulation fails by construction.
     #[test]
     fn a_mountain_belt_varies_along_its_own_strike() {
-        const FBM_LO: f32 = 0.11;
-        const FBM_HI: f32 = 0.40;
+        const FBM_LO: f32 = 0.21; // 4-octave p1/p99, re-measured after the hash fix
+        const FBM_HI: f32 = 0.79;
         let (w, h) = (600u32, 300u32);
         let f_base = 1.0 / 760.0;
         let (mut lo, mut hi) = (f32::MAX, f32::MIN);

@@ -623,6 +623,9 @@ pub fn extract_rivers(
     // sea (a trunk river) or at the confluence where it merges into a larger
     // stream (a tributary â€” the junction cell is appended so the line connects).
     let mut rivers = Vec::new();
+    // Cells of reaches the arid prune deleted (their own course, not the junction
+    // they joined), so streams that flowed INTO a deleted reach can be resolved.
+    let mut pruned_cell = vec![false; buf.total()];
     let major_len = (w as f32 * 0.10).max(60.0);
     // World scale, hoisted: both the transmission-loss walk and the discharge
     // calculation below need it, and it is a world constant, not a per-river one.
@@ -824,7 +827,12 @@ pub fn extract_rivers(
         // the water runs out, not merely that it does), so it wins; order-1 rills
         // are still dropped so a desert reads sparse rather than veined.
         let pruned_as_arid = !is_mouth && order <= 2 && arid_frac > 0.55;
-        if pruned_as_arid && !(ends_dry && order >= 2) { continue; }
+        if pruned_as_arid && !(ends_dry && order >= 2) {
+            // The last point is the junction cell on the larger stream it joined —
+            // that stream lives on, so only this reach's own course is marked.
+            for &(px, py) in &points[..points.len() - 1] { pruned_cell[buf.idx(px, py)] = true; }
+            continue;
+        }
 
         // â”€â”€ Meander scale (gradient-gated) â”€â”€ mean channel gradient over the reach
         // in normalized-elevation units per cell: steep headwaters run straight
@@ -878,6 +886,18 @@ pub fn extract_rivers(
         let braids = build_braids(buf, &render, width, order, mseed ^ 0xB2A1);
 
         rivers.push(River { points, width, discharge_m3s, major, navigable, mouth_kind, delta, tributary, ends_dry, order, meander, render, braids });
+    }
+
+    // A stream that flowed into a reach the arid prune deleted would otherwise end
+    // at nothing (a "dangling stub"). The prune ruled that the downstream desert
+    // swallows that water, so the stream dies there: it ends dry, it is no
+    // tributary. Done after the loop because a tributary can be walked before
+    // the reach it joins.
+    for r in rivers.iter_mut() {
+        if r.ends_dry || !r.tributary { continue; }
+        if let Some(&(x, y)) = r.points.last() {
+            if pruned_cell[buf.idx(x, y)] { r.ends_dry = true; r.tributary = false; }
+        }
     }
 
     rivers

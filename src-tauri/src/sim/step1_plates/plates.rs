@@ -1069,8 +1069,10 @@ const RUGOSITY_WAVELENGTH_FRAC: f32 = 0.35;
 /// reliably swings its full designed range instead of sitting near its own
 /// mean — an un-remapped read would be a near-constant OFFSET, not a
 /// texture change, exactly the mistake §8.24b names and fixed once already.
-const FBM_MEASURED_MIN: f32 = 0.11;
-const FBM_MEASURED_MAX: f32 = 0.40;
+// 3-octave p1/p99, re-measured after the noise-hash fix (was 0.11..0.40 while
+// `hash_grid` never exceeded 0.5).
+const FBM_MEASURED_MIN: f32 = 0.19;
+const FBM_MEASURED_MAX: f32 = 0.81;
 
 /// Re-rasterize landmass (terrain/elevation) and re-roll volcanic zones from a
 /// per-plate oceanic/continental assignment, given plate GEOMETRY that is
@@ -1192,7 +1194,10 @@ fn rasterize_landmass_and_volcanism(
             let rug_t = ((rug_raw - FBM_MEASURED_MIN) / (FBM_MEASURED_MAX - FBM_MEASURED_MIN)).clamp(0.0, 1.0);
             let rug_mult = RUGOSITY_MIN + rug_t * (RUGOSITY_MAX - RUGOSITY_MIN);
             let combined = a * (0.7 - 0.25 * rug_t) + b * (0.3 + 0.25 * rug_t);
-            signed + amp * rug_mult * (combined - 0.5) * 2.0
+            // No `* 2.0`: `amp` was tuned by eye while the noise spanned half its
+            // range (signed-shift hash bug); the full-range noise at the old gain
+            // doubled the wobble and shed a halo of 1-cell islets off every coast.
+            signed + amp * rug_mult * (combined - 0.5)
         })
         .collect();
 
@@ -1819,17 +1824,22 @@ mod tests {
     /// component count on the SAME seed, or the knob is decorative.
     #[test]
     fn a_pangaea_target_fuses_the_continents_an_archipelago_target_does_not() {
+        // CONTINENTS, not islets: only landmasses of at least 1% of all land count.
+        // The knob chooses among plate layouts by continental-plate components;
+        // coastline noise sheds small islets that a raw count adds to both sides
+        // alike, burying the knob's own signal.
         fn count_land_components(buf: &WorldBuffer) -> usize {
-            let w = buf.width as i32;
             let h = buf.height as i32;
+            let min_cells = (buf.terrain.iter().filter(|&&t| t == 1).count() / 100).max(1);
             let mut visited = vec![false; buf.total()];
             let mut components = 0usize;
             for start in 0..buf.total() {
                 if buf.terrain[start] != 1 || visited[start] { continue; }
-                components += 1;
+                let mut size = 0usize;
                 let mut stack = vec![start];
                 visited[start] = true;
                 while let Some(ci) = stack.pop() {
+                    size += 1;
                     let cx = (ci as u32 % buf.width) as i32;
                     let cy = (ci as u32 / buf.width) as i32;
                     for dy in -1..=1i32 {
@@ -1846,6 +1856,7 @@ mod tests {
                         }
                     }
                 }
+                if size >= min_cells { components += 1; }
             }
             components
         }

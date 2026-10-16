@@ -1961,16 +1961,25 @@ fn localize_good(
         let mut best_seed = usize::MAX;
         let mut best_key = -1.0f32;
         let mut fallback = usize::MAX;
-        let mut fallback_score = spread_thresh;
+        let mut fallback_key = -1.0f32;
         for i in 0..n {
             if !passable(i) { continue; }
             if visited[i] { continue; } // already inside an earlier origin's belt
             let s = score[i];
-            if s > fallback_score { fallback_score = s; fallback = i; }
+            // A land homeland is drawn toward ground people can live on: a traded
+            // good is known from where it is gathered (llamas beside Cusco, not on
+            // an empty ridge). Soft — x0.3 on empty land — so a remote homeland
+            // stays possible. Needs step 7's habitability; marine goods skip it.
+            let people = if !marine && buf.habitability.len() == n {
+                0.3 + 0.7 * buf.habitability[i].clamp(0.0, 1.0)
+            } else { 1.0 };
+            // Suitability decides WHETHER a cell may host the fallback; people only
+            // decide WHICH of the suitable cells does.
+            if s > spread_thresh && s * people > fallback_key { fallback_key = s * people; fallback = i; }
             if s >= seed_thresh {
                 // The origin index enters the hash, so origin 2 is not simply the
                 // runner-up of origin 1's ranking — it is its own draw.
-                let key = s * dispersion(i, &repel)
+                let key = s * people * dispersion(i, &repel)
                     * hash01(gs ^ (origin as u64).wrapping_mul(0x9E3779B97F4A7C15)
                         ^ (i as u64).wrapping_mul(0x100000001B3));
                 if key > best_key { best_key = key; best_seed = i; }
