@@ -1134,9 +1134,12 @@ pub fn compute_salinity(buf: &mut WorldBuffer) {
     }
 
     // Coastal runoff freshening: BFS a freshening "plume" out from coasts,
-    // weighted by the precipitation of the adjacent land (a stand-in for river
+    // weighted by the adjacent land's expected rainfall (a stand-in for river
     // discharge, since rivers are extracted in a later step). Wet coasts (Amazon,
-    // SE Asia, NW Europe) get markedly fresher shelf water.
+    // SE Asia, NW Europe) get markedly fresher shelf water. The rainfall is the
+    // LATITUDE curve, not `buf.precipitation`: that field is only written at the
+    // END of this step, so reading it here took last run's rain (or zero on a
+    // first run) and made running step 3 twice give a different ocean.
     let mut fresh = vec![0.0f32; n];
     let mut dist = vec![u32::MAX; n];
     let mut load = vec![0.0f32; n];
@@ -1153,7 +1156,7 @@ pub fn compute_salinity(buf: &mut WorldBuffer) {
                 let ny = buf.clamp_y(y as i32 + dy);
                 let ni = buf.idx(nx, ny);
                 if terrain[ni] == 1 {
-                    let p = (buf.precipitation[ni] / 2000.0).clamp(0.0, 1.0);
+                    let p = ocean_precip_norm(buf.abs_latitude(ny));
                     if p > best { best = p; }
                 }
             }
@@ -1231,10 +1234,21 @@ pub fn compute_sst(buf: &mut WorldBuffer) {
         return;
     }
     let (w, h) = (buf.width, buf.height);
+    // The planet's energy-budget anomaly (tilt / sunlight / greenhouse / rotation),
+    // the same one land temperature gets. Without it a hot or frozen world kept
+    // Earth's sea temperatures, and the rain fed from them. Exactly 0 at Earth values.
+    let ebm_anom = super::ebm::EbmAnomaly::for_world(
+        buf.obliquity, buf.solar_lum, buf.greenhouse, buf.rotation_rate,
+    );
     for y in 0..h {
+        let anom = ebm_anom.sample(buf.latitude(y));
         for x in 0..w {
             let i = buf.idx(x, y);
-            buf.sst[i] = if buf.terrain[i] == 0 { cell_sst(buf, x, y) } else { 0.0 };
+            buf.sst[i] = if buf.terrain[i] == 0 {
+                let t = cell_sst(buf, x, y) + anom;
+                // Seawater freezes near -1.9 °C; only clamp when the anomaly moved it.
+                if anom != 0.0 { t.max(-1.9) } else { t }
+            } else { 0.0 };
         }
     }
 }
@@ -2126,6 +2140,22 @@ mod tests {
             shipworm_risk: Vec::new(), storm_base: Vec::new(), reef_risk: Vec::new(),
             disease_risk: Vec::new(), precip_summer_frac: Vec::new(), seasonal_amp: Vec::new(), sst: Vec::new(), snow_frac: Vec::new(), biome: Vec::new(),
         }
+    }
+
+    #[test]
+    fn sst_follows_the_planet_energy_budget() {
+        let sst_at = |solar_lum: f32| {
+            let mut buf = land_world();
+            buf.solar_lum = solar_lum;
+            let i = buf.idx(5, 4); // 30°
+            buf.terrain[i] = 0;
+            buf.sst = vec![0.0; buf.total()];
+            compute_sst(&mut buf);
+            buf.sst[i]
+        };
+        let (dim, earth, bright) = (sst_at(0.9), sst_at(1.0), sst_at(1.1));
+        assert!(bright > earth + 1.0 && earth > dim + 1.0, "dim {dim} earth {earth} bright {bright}");
+        assert!(dim >= -1.9, "sea below freezing: {dim}");
     }
 
     /// Turn a cell into an enclosed brackish shelf-sea cell (Hudson-Bay-like).
