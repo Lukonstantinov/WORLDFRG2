@@ -1,0 +1,909 @@
+<title>WorldForge Goods Builder</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Alegreya+Sans:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a desktop app frame (stage rail on top, builder below: goods list | good card),
+   collapsing to one column on narrow screens. Two committed skins switched by data-skin. */
+:root {
+  /* Skin A — "Bronze & Ledger": the app's current game frame with paper ledger pages inside */
+  --frame-bg: #14110d; --frame-panel: #1b1712; --frame-raised: #262017;
+  --frame-line: #5d4a2a; --frame-ink: #ecdcb5; --frame-mid: #c9b48a; --frame-dim: #8f7a55;
+  --title: #e0b85c;
+  --page-bg: #f5efe2; --page-raised: #ece3cf; --page-line: #c9b993; --page-soft: #ddd0b2;
+  --page-ink: #2b2419; --page-mid: #4d4030; --page-dim: #6b5b3d; --rubric: #7d1f1f;
+  --accent: #2f6e93; --accent-soft: #dbe6ec;
+  --good: #2f7a4f; --warn: #a8741a; --bad: #a3262a;
+  --sea: #24343c; --sea-deep: #1a262d; --land: #cdbb8e; --land-hi: #a8916a; --land-peak: #e8dcc0;
+  --font-display: 'Palatino Linotype','Book Antiqua',Palatino,'Iowan Old Style',Georgia,serif;
+  --font-body: system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  --font-data: ui-monospace,'Cascadia Mono',Consolas,monospace;
+  --radius: 4px;
+  color-scheme: dark;
+}
+[data-skin="b"] {
+  /* Skin B — "Admiralty Chart": a light sea-chart sheet, navy ink, vermilion survey marks */
+  --frame-bg: #dfe5df; --frame-panel: #e8ede7; --frame-raised: #f2f5f0;
+  --frame-line: #9fb0b4; --frame-ink: #1d2b45; --frame-mid: #3f4f6b; --frame-dim: #6d7a8e;
+  --title: #1d2b45;
+  --page-bg: #fbfcf8; --page-raised: #f0f3ee; --page-line: #c3cdd0; --page-soft: #dde4e4;
+  --page-ink: #1d2b45; --page-mid: #3f4f6b; --page-dim: #6d7a8e; --rubric: #c03a26;
+  --accent: #1f6f78; --accent-soft: #d5ebe9;
+  --good: #2c7a55; --warn: #b07a12; --bad: #b8321f;
+  --sea: #cfe2e0; --sea-deep: #b6d3d2; --land: #f3eedd; --land-hi: #ddd2b4; --land-peak: #c5b68f;
+  --font-display: 'IM Fell English SC','Iowan Old Style',Georgia,serif;
+  --font-body: 'Alegreya Sans','Segoe UI',sans-serif;
+  --font-data: 'IBM Plex Mono',ui-monospace,Consolas,monospace;
+  --radius: 2px;
+  color-scheme: light;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--frame-bg); }
+body { color: var(--frame-ink); font-family: var(--font-body); font-size: 14px; line-height: 1.45;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 16px 40px; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, input:focus-visible, select:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.num { font-family: var(--font-data); font-variant-numeric: tabular-nums; }
+h1, h2, h3 { text-wrap: balance; margin: 0; font-weight: 700; }
+
+/* ── mock-up chrome (outside the app) ── */
+.chrome { max-width: 1320px; margin: 0 auto 12px; display: flex; flex-wrap: wrap; gap: 10px 18px; align-items: center; }
+.chrome h1 { font-family: var(--font-display); color: var(--title); font-size: 20px; letter-spacing: .3px; }
+.chrome .note { color: var(--frame-dim); font-size: 12.5px; flex: 1 1 260px; min-width: 0; }
+.seg { display: inline-flex; border: 1px solid var(--frame-line); border-radius: var(--radius); overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 5px 10px; font-size: 12.5px; color: var(--frame-mid); }
+.seg button[aria-pressed="true"] { background: var(--frame-raised); color: var(--title); font-weight: 700; }
+.seg + .seg { margin-left: 0; }
+.lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--frame-dim); }
+
+/* ── app frame ── */
+.app { max-width: 1320px; margin: 0 auto; border: 1px solid var(--frame-line); border-radius: calc(var(--radius) + 2px);
+  background: var(--frame-panel); box-shadow: 0 0 0 3px var(--frame-bg), 0 0 0 4px var(--frame-line); }
+[data-skin="b"] .app { box-shadow: 0 0 0 4px var(--frame-bg), 0 0 0 5px var(--frame-ink); }
+.rail { display: flex; flex-wrap: wrap; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--frame-line); background: var(--frame-raised); }
+.stage { display: flex; align-items: center; gap: 7px; padding: 5px 10px 5px 7px; border-radius: var(--radius); font-size: 12.5px; color: var(--frame-dim); border: 1px solid transparent; }
+.stage .n { width: 20px; height: 20px; border-radius: 50%; display: grid; place-items: center; font-size: 11px; border: 1px solid var(--frame-line); font-family: var(--font-data); }
+.stage.done { color: var(--frame-mid); }
+.stage.done .n { background: var(--frame-line); color: var(--frame-ink); }
+.stage.on { color: var(--title); border-color: var(--frame-line); background: var(--frame-panel); font-weight: 700; }
+.stage.on .n { background: var(--title); color: var(--frame-bg); border-color: var(--title); }
+[data-skin="b"] .stage.on .n { color: var(--page-bg); }
+.rail .arrow { color: var(--frame-dim); align-self: center; }
+.usesmakes { padding: 8px 14px; font-size: 12.5px; color: var(--frame-mid); border-bottom: 1px solid var(--frame-line); display: flex; flex-wrap: wrap; gap: 4px 20px; }
+.usesmakes b { color: var(--frame-ink); font-weight: 600; }
+
+.bhead { display: flex; flex-wrap: wrap; gap: 12px 20px; align-items: flex-start; padding: 14px; border-bottom: 1px solid var(--frame-line); }
+.bhead h2 { font-family: var(--font-display); color: var(--title); font-size: 22px; }
+.bhead .sub { color: var(--frame-dim); font-size: 12.5px; margin-top: 2px; }
+.presets { display: flex; flex-wrap: wrap; gap: 6px; }
+.preset { border: 1px solid var(--frame-line); background: var(--frame-panel); border-radius: var(--radius); padding: 6px 10px; text-align: left; min-width: 0; }
+.preset b { display: block; font-size: 13px; color: var(--frame-ink); }
+.preset span { font-size: 11.5px; color: var(--frame-dim); }
+.preset[aria-pressed="true"] { border-color: var(--title); background: var(--frame-raised); }
+.preset[aria-pressed="true"] b { color: var(--title); }
+.hbtns { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+.fbtn { border: 1px solid var(--frame-line); background: var(--frame-raised); border-radius: var(--radius); padding: 6px 11px; font-size: 12.5px; color: var(--frame-ink); }
+.fbtn.primary { background: var(--title); color: var(--frame-bg); border-color: var(--title); font-weight: 700; }
+[data-skin="b"] .fbtn.primary { background: var(--rubric); border-color: var(--rubric); color: #fff; }
+
+.slots { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--frame-line); align-items: center; }
+.slot { display: inline-flex; gap: 6px; align-items: center; font-size: 12px; padding: 3px 8px; border-radius: 999px; border: 1px solid var(--frame-line); color: var(--frame-mid); }
+.slot i { font-style: normal; font-weight: 700; }
+.slot.ok i { color: #6fbf8a; } .slot.warn i { color: #e0b04a; } .slot.bad i { color: #e07a6a; }
+[data-skin="b"] .slot.ok i { color: var(--good); } [data-skin="b"] .slot.warn i { color: var(--warn); } [data-skin="b"] .slot.bad i { color: var(--bad); }
+
+.tabs { display: flex; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--frame-line); background: var(--frame-panel); }
+.tab { background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 9px 12px 7px; color: var(--frame-dim); font-size: 13px; }
+.tab[aria-selected="true"] { color: var(--title); border-bottom-color: var(--title); font-weight: 700; }
+
+/* ── ledger page (inside the frame) ── */
+.page { background: var(--page-bg); color: var(--page-ink); border: 1px solid var(--page-line); border-radius: var(--radius); }
+[data-skin="a"] .page, :root:not([data-skin]) .page { box-shadow: inset 0 0 22px rgba(120,90,40,.16); }
+.page h3 { font-family: var(--font-display); color: var(--rubric); font-size: 15px; letter-spacing: .02em; }
+.pdim { color: var(--page-dim); }
+.body { display: grid; grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.25fr); gap: 12px; padding: 12px; }
+@media (max-width: 900px) { .body { grid-template-columns: minmax(0, 1fr); } }
+
+/* goods list */
+.list { padding: 10px 0; max-height: 1180px; overflow: auto; }
+.lhead { display: flex; gap: 8px; padding: 0 12px 8px; align-items: center; flex-wrap: wrap; }
+.lhead input { flex: 1 1 140px; min-width: 0; background: var(--page-raised); border: 1px solid var(--page-line); border-radius: var(--radius); padding: 5px 8px; color: var(--page-ink); font: inherit; font-size: 13px; }
+.group { margin-top: 6px; }
+.ghead { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 12px 4px; border-bottom: 1px solid var(--page-soft); }
+.ghead h3 { font-size: 14px; }
+.ghead span { font-size: 11.5px; color: var(--page-dim); }
+.row { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto auto 34px; gap: 8px; align-items: center; padding: 4px 12px; border-left: 3px solid transparent; cursor: pointer; }
+.row:hover { background: var(--page-raised); }
+.row.sel { background: var(--page-raised); border-left-color: var(--rubric); }
+.row.off { opacity: .45; }
+.row.member { padding-left: 34px; grid-template-columns: 22px minmax(0, 1fr) auto auto 34px; }
+.row .nm { font-size: 13.5px; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .nm small { font-weight: 400; color: var(--page-dim); margin-left: 4px; }
+.ico { image-rendering: pixelated; display: block; }
+.tier { font-size: 10.5px; padding: 1px 6px; border-radius: 999px; border: 1px solid var(--page-line); color: var(--page-mid); white-space: nowrap; }
+.tier.t4 { border-color: #b8902c; color: #8a6510; background: color-mix(in srgb, #e0b85c 18%, transparent); }
+.tier.t3 { border-color: #9c7c4c; }
+.stars { font-size: 10px; letter-spacing: 1px; color: var(--page-mid); white-space: nowrap; }
+.reachdots { display: inline-flex; gap: 2px; }
+.reachdots b { width: 6px; height: 6px; border-radius: 50%; background: var(--page-soft); display: block; }
+.reachdots b.on { background: var(--accent); }
+.tgl { width: 30px; height: 17px; border-radius: 999px; border: 1px solid var(--page-line); background: var(--page-soft); position: relative; padding: 0; }
+.tgl::after { content: ""; position: absolute; top: 2px; left: 2px; width: 11px; height: 11px; border-radius: 50%; background: var(--page-dim); transition: left .15s; }
+.tgl[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.tgl[aria-checked="true"]::after { left: 15px; background: #fff; }
+.famtog { background: none; border: 0; color: var(--page-dim); font-size: 11px; padding: 0 2px; }
+.crafted .row { cursor: default; }
+
+/* good card */
+.card { padding: 14px; display: grid; gap: 14px; min-width: 0; }
+.chead { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 14px; align-items: center; }
+.bigico { width: 72px; height: 72px; border: 1px solid var(--page-line); border-radius: var(--radius); background: var(--page-raised); display: grid; place-items: center; }
+.chead h2 { font-family: var(--font-display); color: var(--page-ink); font-size: 26px; line-height: 1.1; }
+.chead .meta { font-size: 12.5px; color: var(--page-dim); margin-top: 3px; }
+.pbtn { border: 1px solid var(--page-line); background: var(--page-raised); color: var(--page-ink); border-radius: var(--radius); padding: 5px 10px; font-size: 12.5px; }
+.pbtn.on { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 700; }
+.section { border-top: 1px solid var(--page-soft); padding-top: 12px; display: grid; gap: 9px; }
+.genes { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 7px 10px; align-items: center; }
+.genes > span { font-size: 12px; color: var(--page-dim); }
+.chips { display: flex; flex-wrap: wrap; gap: 4px; }
+.chip { border: 1px solid var(--page-line); background: transparent; border-radius: 999px; padding: 2px 9px; font-size: 12px; color: var(--page-mid); }
+.chip[aria-pressed="true"] { background: var(--page-ink); color: var(--page-bg); border-color: var(--page-ink); }
+[data-skin="b"] .chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.starbtn { background: none; border: 0; padding: 0 1px; font-size: 16px; color: var(--page-soft); }
+.starbtn.on { color: var(--rubric); }
+
+.mapwrap { position: relative; border: 1px solid var(--page-line); border-radius: var(--radius); overflow: hidden; background: var(--sea); }
+.mapwrap canvas { display: block; width: 100%; height: auto; aspect-ratio: 2 / 1; max-width: 100%; }
+.mapwrap.pinning canvas { cursor: crosshair; }
+.maptools { display: flex; flex-wrap: wrap; gap: 8px 14px; align-items: center; justify-content: space-between; }
+.reach { display: grid; gap: 4px; }
+.reach input { width: 100%; accent-color: var(--accent); }
+.reachlabels { display: grid; grid-template-columns: repeat(5, 1fr); font-size: 11px; color: var(--page-dim); }
+.reachlabels span { text-align: center; }
+.reachlabels span.on { color: var(--page-ink); font-weight: 700; }
+.reachlabels span:first-child { text-align: left; } .reachlabels span:last-child { text-align: right; }
+.legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--page-dim); }
+.legend i { display: inline-block; width: 12px; height: 9px; vertical-align: -1px; margin-right: 5px; border: 1px solid var(--page-line); }
+.callout { font-size: 12.5px; color: var(--page-mid); background: var(--page-raised); border-left: 3px solid var(--accent); padding: 7px 10px; border-radius: var(--radius); }
+.callout b { color: var(--page-ink); }
+
+.ladder { position: relative; height: 54px; margin: 4px 0 2px; }
+.ladder .band { position: absolute; top: 18px; height: 12px; border-right: 1px solid var(--page-bg); }
+.ladder .tick { position: absolute; top: 0; transform: translateX(-50%); font-size: 10.5px; color: var(--page-dim); white-space: nowrap; }
+.ladder .mk { position: absolute; top: 14px; width: 2px; height: 20px; background: var(--page-dim); transform: translateX(-1px); }
+.ladder .mk.me { background: var(--rubric); width: 3px; height: 26px; top: 11px; }
+.ladder .bl { position: absolute; top: 36px; transform: translateX(-50%); font-size: 10.5px; color: var(--page-mid); white-space: nowrap; }
+.ladder .bl.me { color: var(--rubric); font-weight: 700; }
+.kv { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.kv div { background: var(--page-raised); border: 1px solid var(--page-soft); border-radius: var(--radius); padding: 7px 9px; min-width: 0; }
+.kv span { display: block; font-size: 11px; color: var(--page-dim); text-transform: uppercase; letter-spacing: .06em; }
+.kv b { font-size: 15px; }
+.kv small { display: block; color: var(--page-dim); font-size: 11.5px; }
+.risk { display: grid; gap: 6px; }
+.risk .r { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px; font-size: 12.5px; }
+.risk .r > span { color: var(--page-dim); }
+.meter { height: 6px; background: var(--page-soft); border-radius: 3px; overflow: hidden; margin-top: 4px; }
+.meter b { display: block; height: 100%; background: var(--warn); }
+.members { display: grid; gap: 4px; }
+.members div { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 8px; align-items: center; font-size: 12.5px; }
+.cv { display: flex; flex-wrap: wrap; gap: 6px; }
+.cvt { font-size: 12px; border: 1px solid var(--page-line); border-radius: var(--radius); padding: 3px 8px; }
+.cvt b { color: var(--rubric); }
+
+/* culture tab + balance tab */
+.wide { padding: 12px; display: grid; gap: 12px; }
+.cultures { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px; }
+.cult { padding: 12px; display: grid; gap: 8px; min-width: 0; }
+.cult .top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.cult h3 { font-size: 17px; }
+.src { font-size: 11px; border-radius: 999px; padding: 1px 7px; border: 1px solid var(--page-line); color: var(--page-dim); }
+.src.hand { border-color: var(--rubric); color: var(--rubric); }
+.vrow { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12.5px; }
+.vrow > span { color: var(--page-dim); }
+.vchip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--page-line); border-radius: 999px; padding: 1px 8px 1px 3px; font-size: 12px; margin: 0 4px 4px 0; }
+.vchip button { background: none; border: 0; color: var(--page-dim); padding: 0 0 0 2px; }
+.addsel { font: inherit; font-size: 12px; background: var(--page-raised); border: 1px dashed var(--page-line); border-radius: 999px; color: var(--page-dim); padding: 1px 6px; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+th, td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--page-soft); }
+th { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--page-dim); font-weight: 600; }
+td.r, th.r { text-align: right; }
+.tblwrap { overflow-x: auto; }
+.bar { height: 8px; background: var(--page-soft); border-radius: 4px; overflow: hidden; min-width: 80px; }
+.bar b { display: block; height: 100%; }
+.ratio { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; }
+.ratio div { background: var(--page-raised); border: 1px solid var(--page-soft); border-radius: var(--radius); padding: 8px 10px; }
+.ratio b { font-family: var(--font-data); font-size: 18px; display: block; }
+.mark { font-weight: 700; }
+.mark.ok { color: var(--good); } .mark.warn { color: var(--warn); } .mark.bad { color: var(--bad); }
+
+/* pixel editor */
+.modal { position: fixed; inset: 0; background: rgba(10,8,6,.62); display: grid; place-items: center; padding: 16px; z-index: 10; }
+.modal[hidden] { display: none !important; }
+.ed { max-width: 860px; width: 100%; max-height: calc(100% - 8px); overflow: auto; padding: 16px; display: grid; gap: 12px; }
+.edgrid { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 16px; }
+@media (max-width: 720px) { .edgrid { grid-template-columns: minmax(0, 1fr); } }
+#edCanvas { width: min(384px, 100%); height: auto; aspect-ratio: 1; image-rendering: pixelated; border: 1px solid var(--page-line); cursor: crosshair; touch-action: none; display: block; background-image: linear-gradient(45deg, var(--page-soft) 25%, transparent 25%, transparent 75%, var(--page-soft) 75%), linear-gradient(45deg, var(--page-soft) 25%, transparent 25%, transparent 75%, var(--page-soft) 75%); background-size: 16px 16px; background-position: 0 0, 8px 8px; }
+.pal { display: flex; flex-wrap: wrap; gap: 4px; }
+.pal button { width: 24px; height: 24px; border: 1px solid var(--page-line); border-radius: 3px; padding: 0; }
+.pal button[aria-pressed="true"] { outline: 2px solid var(--rubric); outline-offset: 1px; }
+.prevs { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; }
+.prevs div { display: grid; gap: 3px; justify-items: center; font-size: 11px; color: var(--page-dim); }
+.prevs .dark { background: #1b1712; padding: 6px; border-radius: 3px; }
+.prevs .light { background: #f5efe2; padding: 6px; border-radius: 3px; border: 1px solid var(--page-line); }
+.edtools { display: grid; gap: 10px; align-content: start; min-width: 0; }
+.edtools select, .edtools input[type="color"] { font: inherit; font-size: 12.5px; }
+.edtools select { background: var(--page-raised); color: var(--page-ink); border: 1px solid var(--page-line); border-radius: var(--radius); padding: 4px 6px; max-width: 100%; }
+.uploadhint { font-size: 12px; color: var(--page-dim); }
+.toast { position: fixed; bottom: max(16px, env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--frame-raised); color: var(--frame-ink); border: 1px solid var(--frame-line); padding: 7px 14px; border-radius: var(--radius); font-size: 13px; z-index: 20; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="chrome">
+  <h1>Goods Builder — mock-up</h1>
+  <span class="note">Interactive design mock-up for WorldForge 2. Every number is example data from a made-up world, not a real save. The icons are the app's own pixel art.</span>
+  <span class="lbl">Style</span>
+  <div class="seg" role="group" aria-label="Visual style">
+    <button id="skinA" aria-pressed="true">Bronze &amp; Ledger (current)</button>
+    <button id="skinB" aria-pressed="false">Admiralty Chart (alternative)</button>
+  </div>
+  <span class="lbl">Units</span>
+  <div class="seg" role="group" aria-label="Units">
+    <button id="uMetric" aria-pressed="true">Metric</button>
+    <button id="uImperial" aria-pressed="false">Imperial</button>
+  </div>
+</div>
+
+<div class="app" id="app">
+  <nav class="rail" aria-label="Generation stages">
+    <span class="stage done"><span class="n">1</span>World &amp; Land</span>
+    <span class="stage done"><span class="n">2</span>Relief</span>
+    <span class="stage done"><span class="n">3</span>Climate</span>
+    <span class="stage done"><span class="n">4</span>Water &amp; Life</span>
+    <span class="stage on" aria-current="step"><span class="n">5</span>Resources</span>
+    <span class="stage"><span class="n">6</span>People</span>
+    <span class="arrow" aria-hidden="true">→</span>
+    <span class="stage"><span class="n">R</span>Report &amp; Export</span>
+  </nav>
+  <div class="usesmakes"><span><b>Uses:</b> climate zones, soils, biomes, plates, rivers, habitability</span><span><b>Makes:</b> where each good grows, its homelands, ore deposits (known and hidden)</span></div>
+
+  <div class="bhead">
+    <div>
+      <h2>Goods of this world</h2>
+      <div class="sub" id="presetSub"></div>
+    </div>
+    <div class="presets" id="presets" role="group" aria-label="Goods preset"></div>
+    <div class="hbtns">
+      <button class="fbtn" id="saveRoster">Save as my roster</button>
+      <button class="fbtn" id="newGood">+ New good</button>
+      <button class="fbtn primary" id="placeBtn">Place goods on the map</button>
+    </div>
+  </div>
+  <div class="slots" id="slots" aria-label="Essential needs check"></div>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" id="tabGoods" aria-selected="true">Goods</button>
+    <button class="tab" role="tab" id="tabCult" aria-selected="false">Culture values</button>
+    <button class="tab" role="tab" id="tabBal" aria-selected="false">World balance</button>
+  </div>
+
+  <div id="viewGoods" class="body">
+    <div class="page list" id="list"></div>
+    <div class="page card" id="card"></div>
+  </div>
+  <div id="viewCult" class="wide" hidden></div>
+  <div id="viewBal" class="wide" hidden></div>
+</div>
+
+<div class="modal" id="editor" hidden>
+  <div class="page ed" role="dialog" aria-modal="true" aria-labelledby="edTitle">
+    <div style="display:flex;justify-content:space-between;gap:10px;align-items:baseline;flex-wrap:wrap">
+      <h3 id="edTitle" style="font-size:19px">Icon editor</h3>
+      <span class="pdim" style="font-size:12px">24 × 24 pixels, the same grid as every good in the app</span>
+    </div>
+    <div class="edgrid">
+      <canvas id="edCanvas" width="24" height="24" aria-label="Pixel canvas. Click or drag to paint."></canvas>
+      <div class="edtools">
+        <div><div class="lbl" style="color:var(--page-dim)">Start from</div>
+          <select id="edStart" aria-label="Start from an existing icon"></select></div>
+        <div><div class="lbl" style="color:var(--page-dim)">Tool</div>
+          <div class="chips" id="edTools">
+            <button class="chip" data-t="pen" aria-pressed="true">Pencil</button>
+            <button class="chip" data-t="erase" aria-pressed="false">Eraser</button>
+            <button class="chip" data-t="fill" aria-pressed="false">Fill</button>
+            <button class="chip" data-t="pick" aria-pressed="false">Pick colour</button>
+          </div></div>
+        <div><div class="lbl" style="color:var(--page-dim)">Palette (from the good's colour)</div>
+          <div class="pal" id="edPal"></div>
+          <label style="font-size:12px;display:flex;gap:6px;align-items:center;margin-top:6px">Own colour <input type="color" id="edColor" value="#c8ccd6"></label></div>
+        <div><div class="lbl" style="color:var(--page-dim)">Recolour the whole icon</div>
+          <label style="font-size:12px;display:flex;gap:6px;align-items:center">Tint <input type="color" id="edTint" value="#c8ccd6"></label></div>
+        <div><div class="lbl" style="color:var(--page-dim)">Or upload an image</div>
+          <input type="file" id="edUpload" accept="image/*" aria-label="Upload an image">
+          <div class="uploadhint">Any picture works. It is shrunk to 24 × 24, reduced to 8 colours and given the house outline.</div></div>
+        <div class="prevs" id="edPrev"></div>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap">
+      <button class="pbtn" id="edCancel">Cancel</button>
+      <button class="pbtn on" id="edSave">Use this icon</button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>"use strict";var GoodArt=(()=>{var s1=Object.defineProperty;var P1=Object.getOwnPropertyDescriptor;var R1=Object.getOwnPropertyNames;var E1=Object.prototype.hasOwnProperty;var _1=(e,f)=>{for(var n in f)s1(e,n,{get:f[n],enumerable:!0})},V1=(e,f,n,l)=>{if(f&&typeof f=="object"||typeof f=="function")for(let t of R1(f))!E1.call(e,t)&&t!==n&&s1(e,t,{get:()=>f[t],enumerable:!(l=P1(f,t))||l.enumerable});return e};var I1=e=>V1(s1({},"__esModule",{value:!0}),e);var G1={};_1(G1,{PIXEL_GOODS:()=>j1,SPRITE_GRID:()=>H1,drawPixelIcon:()=>A1,goodSprite:()=>k1,ramp:()=>N});var r1=Math.PI*2;function e1(e){return e=(e||"#888888").replace("#",""),e.length===3&&(e=e.split("").map(f=>f+f).join("")),[0,2,4].map(f=>parseInt(e.slice(f,f+2),16))}function x1(e){return"#"+e.map(f=>Math.max(0,Math.min(255,Math.round(f))).toString(16).padStart(2,"0")).join("")}function Q(e,f,n){let l=e1(e),t=e1(f);return x1(l.map((o,c)=>o+(t[c]-o)*n))}function S1(e){let f=e1(e);return(.299*f[0]+.587*f[1]+.114*f[2])/255}function N(e){return[Q(e,"#140a1e",.74),Q(e,"#1c1230",.44),x1(e1(e)),Q(e,"#fff2cc",.36),Q(e,"#fffcf0",.7)]}var M=["#2a170c","#4e2e16","#7a4a24","#a26a36","#c89058"],_=["#15290f","#244a1a","#3c7228","#5f9a3a","#8cc25a"],Y=["#1e242c","#46505c","#7a8694","#b4c0cc","#e8f0f6"],U=["#3a2814","#664a2a","#94723e","#bc9a5c","#dcc088"],b1=["#1c3a40","#3c7078","#72aab0","#b0e0e0","#f0ffff"],R=["#4a3008","#8a5c10","#c8961e","#ecc44a","#fff0a8"],w=["#5a4a30","#a08c64","#d2c29a","#ece0c0","#fffaea"],B=["#3e1e10","#6e3a20","#a05a34","#c47e50","#e2a878"],C=["#2c2c30","#56565c","#86868c","#b4b4ba","#e0e0e4"],D=["#6a6a74","#a8a8b2","#d8d8de","#f0f0f2","#ffffff"],A=["#3a0a0e","#701620","#b0282c","#d8503a","#f08a6a"],c1=["#7a2a08","#c85a10","#f09a20","#ffd24a","#fff6c0"],p1=["#8a8070","#c8c0b0","#ece6da","#f8f4ec","#ffffff"],z=["#101c3a","#1e3a78","#3462b8","#6a94dc","#b0ccf4"],f1=N("#d8b07a"),i=(e,f,n,l)=>(t,o)=>t>=e&&t<e+n&&o>=f&&o<f+l,s=(e,f,n)=>(l,t)=>{let o=l+.5-e,c=t+.5-f;return o*o+c*c<=n*n},r=(e,f,n,l)=>(t,o)=>{let c=(t+.5-e)/n,v=(o+.5-f)/l;return c*c+v*v<=1},E=(e,f,n,l,t)=>{let o=Math.cos(t),c=Math.sin(t);return(v,b)=>{let d=v+.5-e,u=b+.5-f,m=(d*o+u*c)/n,p=(-d*c+u*o)/l;return m*m+p*p<=1}},D1=(e,f,n,l,t)=>(o,c)=>Math.pow(Math.abs(o+.5-e)/n,t)+Math.pow(Math.abs(c+.5-f)/l,t)<=1,a=e=>(f,n)=>{let l=f+.5,t=n+.5,o=!1;for(let c=0,v=e.length-1;c<e.length;v=c++){let b=e[c][0],d=e[c][1],u=e[v][0],m=e[v][1];d>t!=m>t&&l<(u-b)*(t-d)/(m-d)+b&&(o=!o)}return o},k=(e,f,n,l,t)=>(o,c)=>{let v=o+.5,b=c+.5,d=n-e,u=l-f,m=d*d+u*u||1,p=((v-e)*d+(b-f)*u)/m;p=p<0?0:p>1?1:p;let x=e+p*d-v,h=f+p*u-b;return x*x+h*h<=t*t/4},L=(...e)=>(f,n)=>e.some(l=>l(f,n)),I=(e,f)=>(n,l)=>e(n,l)&&!f(n,l),S=(e,f)=>(n,l)=>e(n,l)&&f(n,l),K=e=>(f,n)=>n<e,X=e=>(f,n)=>n>=e,J=(e,f,n)=>L(s(e,f,n),a([[e-n*.78,f-n*.55],[e,f-n*2.3],[e+n*.78,f-n*.55]])),n1=(e,f,n,l,t)=>a([[e+t,f],[e+n-t,f],[e+n,f+t],[e+n,f+l-t],[e+n-t,f+l],[e+t,f+l],[e,f+l-t],[e,f+t]]);function g(e,f,n,l,t,o=0,c=1){let v=[],b=[];for(let u=0;u<=18;u++){let m=o+(c-o)*u/18,p=1-m,x=p*p*e[0]+2*p*m*f[0]+m*m*n[0],h=p*p*e[1]+2*p*m*f[1]+m*m*n[1],y=2*p*(f[0]-e[0])+2*m*(n[0]-f[0]),H=2*p*(f[1]-e[1])+2*m*(n[1]-f[1]),j=Math.hypot(y,H)||1,O=(l+(t-l)*m)/2,P=-H/j*O,V=y/j*O;v.push([x+P,h+V]),b.push([x-P,h-V])}return a(v.concat(b.reverse()))}function M1(e,f,n,l,t){let o=Math.cos(t),c=Math.sin(t),v=o,b=c,d=-c,u=o,m=[e-v*(n/2-1),f-b*(n/2-1)];return L(E(e,f,n/2,l/2,t),a([m,[m[0]-v*3.6+d*l*.62,m[1]-b*3.6+u*l*.62],[m[0]-v*2.4,m[1]-b*2.4],[m[0]-v*3.6-d*l*.62,m[1]-b*3.6-u*l*.62]]))}function L1(){let e=new Array(576).fill(null),f=(b,d,u)=>{b=Math.floor(b),d=Math.floor(d),b>=0&&d>=0&&b<24&&d<24&&(e[d*24+b]=u)},n=b=>{let d=[],u=24,m=24,p=-1,x=-1;for(let h=0;h<24;h++)for(let y=0;y<24;y++)b(y,h)&&(d.push([y,h]),y<u&&(u=y),y>p&&(p=y),h<m&&(m=h),h>x&&(x=h));return{pts:d,x0:u,y0:m,x1:p,y1:x}};function l(b,d,u="bevel"){let{pts:m,x0:p,y0:x,x1:h,y1:y}=n(b);if(!m.length)return;let H=(p+h+1)/2,j=(x+y+1)/2,O=Math.max(1,(h-p+1)/2),P=Math.max(1,(y-x+1)/2);for(let[V,G]of m){let Z=!b(V,G-1),t1=!b(V-1,G),F=!b(V,G+1),o1=!b(V+1,G),$=2;if(typeof u=="number")$=u;else if(u==="bevel")$=Z||t1?3:F||o1?1:2;else if(u==="ball"){let T=H-O*.36,N1=j-P*.4,a1=Math.hypot((V+.5-T)/O,(G+.5-N1)/P);$=a1<.3?4:a1<.72?3:a1<1.12?2:1,(F||o1)&&$>1&&($=1)}else if(u==="cylV"||u==="cylH"){let T=u==="cylV"?(V+.5-p)/(h-p+1):(G+.5-x)/(y-x+1);$=T<.12?2:T<.24?4:T<.42?3:T<.74?2:1}f(V,G,d[$])}}function t(b,d,u,m){let{pts:p,x0:x,y0:h,x1:y,y1:H}=n(b);if(!p.length)return;let j=(x+y+1)/2,O=(h+H+1)/2;for(let[P,V]of p){let G=P+.5-j,Z=V+.5-O,t1=m?Math.max(Math.abs(G),Math.abs(Z)):Math.hypot(G,Z),F;t1<u?F=G+Z<-u*.5?4:3:(F=Math.floor((Math.atan2(Z,G)+Math.PI)/(Math.PI/4))%8%2?2:1,G+Z<0&&(F+=1)),!b(P+1,V)||!b(P,V+1)?F=Math.min(F,1):(!b(P-1,V)||!b(P,V-1))&&F<3&&(F=3),f(P,V,d[F])}}function o(b,d,u,m,p,x){if(b=Math.round(b),d=Math.round(d),u=Math.round(u),m=Math.round(m),![b,d,u,m].every(Number.isFinite))return;let h=Math.abs(u-b),y=-Math.abs(m-d),H=b<u?1:-1,j=d<m?1:-1,O=h+y;for(let P=0;P<200&&((!x||x(b,d))&&f(b,d,p),!(b===u&&d===m));P++){let V=2*O;V>=y&&(O+=y,b+=H),V<=h&&(O+=h,d+=j)}}return{b:e,f:l,gem:t,line:o,px:(b,d,u)=>f(b,d,u),dots:(b,d)=>b.forEach(([u,m])=>f(u,m,d))}}function q(e,f,n,l,t,o){e.f(a([[f,n],[f+l,n+l/2],[f+l,n+l/2+t],[f,n+t]]),o,2),e.f(a([[f+l,n+l/2],[f+2*l,n],[f+2*l,n+t],[f+l,n+l/2+t]]),o,1),e.f(a([[f,n],[f+l,n-l/2],[f+2*l,n],[f+l,n+l/2]]),o,3),e.line(f+1,n,f+l,n-l/2+.5,o[4])}function i1(e,f,n,l,t,o,c,v){let b=l-f,d=t-n,u=Math.hypot(b,d),m=b/u,p=d/u,x=-p,h=m;e.line(f,n,l-m*2,t-p*2,c[1]);for(let y=o-1;y>=0;y--){let H=u-1.2-y*2.1,j=f+m*H,O=n+p*H;for(let P of[-1,1])e.f(s(j+x*1.25*P,O+h*1.25*P,1.35),c,"bevel"),v&&e.line(j+x*2.2*P,O+h*2.2*P,j+x*(2.2+v*.35)*P+m*v,O+h*(2.2+v*.35)*P+p*v,c[3])}e.f(s(l-m*.6,t-p*.6,1.3),c,"bevel"),v&&e.line(l,t,l+m*v*.8,t+p*v*.8,c[3])}function u1(e,f,n,l){e.f(s(f,n,l),M,"bevel"),e.f(s(f,n,l-1.2),f1,2),e.f(I(s(f,n,l-2.3),s(f,n,l-3.1)),f1,1),e.px(f-.5,n-.5,f1[1]),e.px(f-1.5,n-2.2,f1[4])}function C1(){return a([[7,4],[17,4],[19,8],[19.5,13],[19,17],[17,21],[7,21],[5,17],[4.5,13],[5,8]])}function h1(e,f){let n=C1();e.f(n,f,"cylV");for(let l of[9,12,15])e.line(l,6,l,20,f[1],n);for(let l of[7,18])e.line(4,l,20,l,Y[2],n);for(let l of[8,19])e.line(4,l,20,l,Y[1],n)}function m1(e,f,n,l,t){e.f(a([[f+.5,n],[f+l-.5,n],[f+l,n+4.5],[f,n+4.5]]),t,"bevel"),e.f(a([[f+1.8,n-2.2],[f+l-1.8,n-2.2],[f+l-.5,n],[f+.5,n]]),t,3),e.line(f+2,n-2,f+l-2,n-2,t[4]),e.px(f+l/2-.5,n+2,t[1]),e.px(f+l/2+.5,n+2,t[1])}function W(e,f,n,l,t){e.gem(s(f,n,l),t,l*.48),e.px(f-l*.45,n-l*.5,"#ffffff")}function d1(e,f,n,l,t,o,c){let v=p=>[p[0]+o*(n-p[1]),p[1]],b=f-l/2,d=f+l/2,u=n-t-l*.75;e.f(a([[b,n],[b,n-t],[f,u],[f,n]].map(v)),c,3),e.f(a([[f,n],[f,u],[d,n-t],[d,n]].map(v)),c,1);let m=v([f,u]);e.line(m[0]-.6,m[1]+1.5,m[0]-.6,n-2,c[4])}function v1(e,f,n,l,t){e.f(S(r(f,n+.5,l*.82,l*.55),K(n+1)),t,"ball"),e.f(S(r(f,n,l,l*.78),X(n+.5)),B,"ball"),e.f(i(f-l,n,l*2,1.2),B,3)}var l1={wheat(e,f){for(let[n,l]of[[5,4],[12,2],[19,4]])i1(e,12,21,n,l,5,f,2.4);e.f(i(10,16,5,2),U,"bevel")},rice(e,f){e.f(S(r(12,13.5,9,5.5),K(14)),f,"ball"),e.dots([[7,11],[10,10],[13,9],[16,11],[9,12],[12,12],[15,12],[18,13],[11,11]],f[1]),e.dots([[8,10],[12,9],[14,10],[6,12]],f[4]),e.line(13,11,20,2,M[3]),e.line(15,11,21,4,M[2]),e.f(S(r(12,13,10,8),X(13.5)),z,"ball"),e.f(i(2,13,20,1.2),z,3),e.line(4,16,20,16,D[3],S(r(12,13,10,8),X(13.5))),e.f(i(8,20,8,2),z,"bevel")},barley(e,f){i1(e,6,22,13,4,6,f,5.5),i1(e,11,22,20,7,5,f,5),e.f(i(6,18,6,2),U,"bevel")},millet(e,f){e.f(k(8,17,2,11,1.8),_,"bevel"),e.line(6,22,10,12,_[2]),[[10,12],[10.5,9],[12,6.5],[14.5,5],[17,6],[18.5,8.5],[19,11.5],[18.5,14.5],[17.5,17]].forEach(([l,t],o)=>{e.f(s(l,t,2.3-o*.08),f,"ball"),o>1&&e.f(s(l+1.6,t+1.2,1.4),f,"ball")})},dates(e,f){e.line(3,4,12,6,M[2]),e.line(12,6,19,5,M[2]),e.line(12,5,21,1,_[1]);for(let n=.2;n<1;n+=.2){let l=12+9*n,t=5-4*n;e.line(l,t,l+1,t+2.5,_[3]),e.line(l,t,l-.5,t-2.2,_[2])}for(let[n,l,t]of[[8,10,.3],[11.5,11,0],[15,10.5,-.2],[18.5,9,-.4],[9.5,15.5,.25],[13,16,0],[16.5,15,-.3],[12,20,.1]])e.line(12,6,n,l-2,M[1]),e.f(E(n,l,1.8,2.9,t),f,"ball")},honey(e,f){e.f(k(13,9,21,1.5,1.8),M,"bevel"),e.f(r(11,15,7.5,6.5),B,"ball"),e.f(i(5,7,12,3),B,"bevel"),e.f(r(11,7.5,4.5,1.3),f,2),e.f(a([[5,8],[8,8],[8,13],[7,14.5],[6,13.5],[5.5,11]]),f,"bevel"),e.px(6,15,f[2]),e.dots([[13,14],[14,15],[15,14]],B[3])},wine(e,f){e.line(12,6,13,2,M[2]),e.f(a([[13,4],[19,1.5],[21.5,5],[17.5,7.5]]),_,"bevel"),e.line(14,4,20,3,_[1]);for(let[n,l]of[[6,8.5],[10,8.5],[14,8.5],[18,8.5],[8,12],[12,12],[16,12],[10,15.5],[14,15.5],[12,19]])e.f(s(n,l,2.2),f,"ball")},oliveoil(e,f){for(let n of[-1,1])e.f(I(r(12+n*5,8,2.6,3.4),r(12+n*5,8,1.2,2)),B,"bevel");e.f(L(r(13,12.5,6.5,7),a([[9,17],[17,17],[14,22],[12,22]])),B,"ball"),e.f(i(11,3,4,5),B,"cylV"),e.f(i(10,2,6,2),B,"bevel"),e.f(r(13,2.6,2,.8),f,2),e.line(7,13,19,13,B[1],r(13,12.5,6.5,7)),e.line(1,21,8,15,M[2]),e.f(E(4,15.5,3.2,1.1,-.7),N("#8a9a6a"),"bevel"),e.f(E(7,19.5,3,1,.3),N("#8a9a6a"),"bevel"),e.f(s(4,19.5,1.9),f,"ball"),e.f(s(8,16,1.9),f,"ball")},citrus(e,f){e.f(s(12,13.5,8),f,"ball"),e.dots([[9,12],[13,10],[16,14],[11,17],[15,18],[8,16]],f[3]),e.px(12,5.5,M[1]),e.f(E(16,4.5,4,1.6,-.45),_,"bevel"),e.line(13,5,18,3,_[1])},beer(e,f){e.f(S(I(r(16.5,13.5,4.2,5),r(16.5,13.5,2,3)),n=>n>=15),f,"bevel"),e.f(i(5,7,11,14),f,"cylV"),e.f(i(5,20,11,1),f,1),e.dots([[8,13],[11,16],[9,18],[12,11],[7,16]],f[4]),e.f(L(s(7,6,2.5),s(10.5,5,3),s(14,6,2.5),i(5,6,11,2)),p1,"ball"),e.f(a([[12.5,7],[15,7],[15,11],[14,12],[13,11]]),p1,"bevel")},mead(e,f){e.f(g([5,6],[5,19],[20,18],7.5,1.2),N("#d6b77a"),"bevel"),e.f(g([5,6],[5,19],[20,18],7.5,1.2,0,.1),R,"bevel"),e.f(g([5,6],[5,19],[20,18],7.5,1.2,.5,.56),R,"bevel"),e.f(g([5,6],[5,19],[20,18],7.5,1.2,.92,1),R,"bevel"),e.f(r(5,5.6,3.4,1.3),f,2),e.px(4,5,f[4])},brandy(e,f){e.f(i(10,3,4,7),b1,"cylV"),e.f(i(10,1,4,3),U,"bevel"),e.f(s(12,15.5,6.8),f,"ball"),e.f(i(8,14,8,4),w,"bevel"),e.line(9,16,14,16,w[1]),e.dots([[8,11],[8,12],[7,13]],f[4])},citrus_liqueur(e,f){e.f(i(10,3,4,4),b1,"cylV"),e.f(i(10,1,4,2),R,"bevel"),e.f(L(i(7,9,9,13),a([[7,9.5],[16,9.5],[14,6.5],[9,6.5]])),f,"cylV"),e.f(i(7,13,9,4),w,"bevel"),e.line(8,15,14,15,w[1]);let n=N("#f4d23a");e.f(s(18.5,18.5,4.2),n,3),e.f(I(s(18.5,18.5,4.2),s(18.5,18.5,3.2)),n,1);for(let l=0;l<6;l++){let t=l*r1/6;e.line(18.5,18.5,18.5+Math.cos(t)*2.6,18.5+Math.sin(t)*2.6,n[4])}},sugar(e,f){for(let[n,l,t,o]of[[6,22,9,4],[12,22,12,3],[18,22,15,5]]){e.f(k(n,l,t,o,2.8),f,"cylV");for(let c=.18;c<.98;c+=.21){let v=n+(t-n)*c,b=l+(o-l)*c;e.line(v-1.4,b,v+1.4,b,f[1])}}e.f(k(9,5,3,1.5,1.6),_,"bevel"),e.f(k(12,4,18,1,1.6),_,"bevel"),e.f(k(15,6,21,4,1.6),_,"bevel"),e.f(k(12,9,5,10,1.4),_,"bevel")},refined_sugar(e,f){e.f(a([[12,1.5],[13.4,3],[18.5,20],[5.5,20],[10.6,3]]),f,"cylV"),e.f(a([[6.2,15],[17.8,15],[18.8,21],[5.2,21]]),z,"bevel"),e.line(6,17,18,17,D[3]),e.dots([[12,18],[11,18]],D[3])},tobacco(e,f){for(let[n,l,t]of[[8,10,-.38],[16,10,.38],[12,9,0]])e.f(E(n,l,3.1,8.6,t),f,"bevel"),e.line(12,18,n+8.6*Math.sin(t),l-8.6*Math.cos(t),f[1]);e.line(11,20,10,22,f[1]),e.line(13,20,14,22,f[1]),e.f(i(10,17,5,3),A,"bevel")},indigo(e,f){q(e,2,14,5,5,f),q(e,12,14,5,5,f),q(e,7,9,5,5,f),e.dots([[3,22],[6,23],[18,22],[21,22],[10,22]],f[3])},coffee(e,f){for(let[n,l,t]of[[9.5,7.5,-.5],[15.5,7,.35],[6.5,14,.6],[17.5,14,.7],[12,18,-.3]]){e.f(E(n,l,3,4,t),f,"ball");let o=Math.sin(t),c=Math.cos(t);e.line(n+o*2.6,l-c*2.6,n-o*2.6,l+c*2.6,f[0])}},tea(e,f){e.line(6,21,10,5,f[1]),e.f(E(6,11,2.4,4.6,-1),f,"bevel"),e.f(E(13,8.5,2.4,4.6,.95),f,"bevel"),e.f(E(6.5,17,2.2,4,-1.1),f,"bevel"),e.f(E(10.5,3.5,1.4,2.6,.2),f,3),e.f(S(r(16.5,16,5.6,5.2),X(16)),D,"ball"),e.f(r(16.5,16,5.2,1.3),N("#b0802a"),2),e.f(i(14,20.5,5,1),D,1),e.dots([[15,13],[16,12],[18,13],[17,11]],D[2])},cacao(e,f){e.line(15,4,18,1,M[2]),e.f(E(11,12,5.5,9.5,.55),f,"ball");let n=.55,l=Math.sin(n),t=Math.cos(n);for(let c of[-2.4,0,2.4])e.line(11+t*c+l*7.5,12+l*c-t*7.5,11+t*c-l*7.5,12+l*c+t*7.5,f[1],E(11,12,5.3,9.3,.55));let o=N("#c08a62");e.f(E(18,18.5,2,2.8,.4),o,"ball"),e.f(E(20.5,15,1.8,2.5,-.3),o,"ball")},spices(e,f){e.f(k(13,11,19,2.5,3),C,"bevel"),e.f(s(19,2.8,1.8),C,"ball"),e.f(S(r(12,13,7,3),K(13.5)),f,"ball"),e.f(S(r(12,13.5,9,7.5),X(13.5)),C,"ball"),e.f(i(3,13,18,1.6),C,3),e.f(i(8,20,8,2),C,"bevel"),e.dots([[6,12],[18,12],[15,11]],f[3])},cloves(e,f){for(let[n,l,t,o]of[[6,5,9,19],[12,4,12,20],[18,5,15,19],[4,18,19,15]])e.f(k(n,l,t,o,2),f,"bevel"),e.f(s(n,l,2.1),f,"ball"),e.dots([[n-1.5,l-1.5],[n+1,l-1.5]],f[3])},pepper(e,f){let n=[[19,[4,8,12,16,20]],[15.5,[6,10,14,18]],[12,[8,12,16]],[8.5,[10,14]],[5,[12]]];for(let[l,t]of n)for(let o of t)e.f(s(o,l,2),f,"ball"),e.px(o,l+.5,f[1])},cinnamon(e,f){for(let[n]of[[0],[4],[8]]){let l=3+n*.2,t=19-n,o=19+n*.2,c=9-n;e.f(k(l,t,o,c,3.6),f,"bevel"),e.f(s(l,t,1.8),f,1),e.px(l,t,f[3])}e.line(9,19,13,6,A[2]),e.line(10,19,14,6,A[1])},frankincense(e,f){e.f(r(12,19,9.5,3),M,"bevel");for(let[n,l,t]of[[10,10.5,2.6],[15,10,2.4],[7,15,3],[12,14.5,3.3],[17,15,2.8]])e.f(L(s(n,l,t),s(n+t*.4,l+t*.5,t*.7)),f,"ball"),e.px(n-t*.4,l-t*.5,f[4])},incense(e,f){for(let[n,l,t]of[[10,7,5],[12,12,4],[14,17,6]])e.line(n,14,l,t,M[1]),e.px(l,t,c1[3]),e.dots([[l,t-1.5],[l+1,t-2.5],[l,t-3.5],[l-1,t-4.5]].filter(o=>o[1]>=0),f[3]);e.f(L(S(r(12,17,6.5,5),X(15)),i(5,14,14,2)),B,"ball"),e.f(r(12,14.6,5.8,1.1),U,3)},saffron(e,f){let n=N("#8e5cc8");e.line(12,22,12,13,_[2]),e.line(10,22,6,12,_[3]),e.line(14,22,18,12,_[3]),e.f(E(8.5,9.5,2.6,5,-.5),n,"ball"),e.f(E(15.5,9.5,2.6,5,.5),n,"ball"),e.f(E(12,8.5,2.9,5.6,0),n,"ball");for(let[l,t]of[[8,2],[12,1],[16,2]])e.line(12,9,l,t,A[2]),e.px(l,t,A[3]);e.dots([[11,7],[13,7],[12,6]],f[3]),e.dots([[4,20],[5,21],[19,21],[20,20]],f[2])},perfume(e,f){e.f(i(11,5,2,5),b1,"cylV"),e.f(i(10,8,4,1),R,3),e.f(s(12,15,6.8),f,"ball"),e.line(9,11,9,14,f[4]),e.f(J(12,4.2,1.9),R,"ball")},nutmeg(e,f){e.f(r(10,11.5,6,7.5),f,"ball"),e.dots([[8,8],[9,9],[11,10],[12,11],[8,13],[9,14],[12,15],[7,11]],f[1]),e.f(s(17,17,4.6),f,"bevel"),e.f(s(17,17,3.4),N("#d8b88a"),2),e.dots([[16,16],[17,17],[18,16],[16,18],[18,18],[17,15]],f[1])},mace(e,f){let n=r(12,12.5,6.8,8.8);e.f(n,N("#5a321a"),"ball");for(let[l,t]of[[6.5,17],[9.5,20.5],[14.5,20.5],[17.5,17]])e.f(S(k(12,4,l,t,1.8),n),f,"bevel");e.f(S(k(5,10,19,10,1.5),n),f,"bevel"),e.f(S(k(6,15,18,15,1.5),n),f,"bevel"),e.f(s(12,4,1.8),f,"ball")},dragons_blood(e,f){e.f(J(9,15.5,4.6),f,"ball"),e.f(J(17,18,3),f,"ball"),e.f(J(17,9,2.3),f,"ball"),e.dots([[7,13],[16,16],[16,8]],f[4])},camphor(e,f){q(e,3,9,8,7,f),e.dots([[7,6],[12,5],[10,8]],D[4]),e.f(E(18,18.5,2.3,4.4,.9),_,"bevel"),e.f(E(20.5,14.5,1.8,3.4,-.3),_,"bevel"),e.line(14,21,20,17,_[1])},benzoin(e,f){for(let[n,l,t]of[[12,8.5,3.8],[7.5,15,4.5],[16,16,4.2]])e.f(L(s(n,l,t),s(n+t*.5,l-t*.3,t*.6)),f,"ball"),e.line(n-t*.4,l,n+t*.3,l+t*.35,D[3])},sandalwood(e,f){e.f(i(3,8,14,9),f,"cylH");for(let n of[10,13,15])e.line(4,n,15,n,f[1]);e.f(r(17,12.5,3,4.6),f,1),e.f(r(17,12.5,2.3,3.7),f,4),e.f(I(r(17,12.5,1.6,2.5),r(17,12.5,.8,1.3)),f,2);for(let[n,l]of[[5,20],[10,21],[15,20],[19,21]])e.f(a([[n,l-1],[n+2,l],[n,l+1.2],[n-1.5,l]]),f,3)},silk(e,f){e.f(r(12,18.5,6.5,2),M,"bevel"),e.f(i(7,5,10,14),f,"cylV");for(let n=7;n<18;n+=2)e.line(7,n,16,n,f[1]);e.f(r(12,5,6.5,2),M,"bevel"),e.f(r(12,5,1.5,.8),M,0),e.line(17,12,21,21,f[3]),e.f(E(4.5,19,2.3,3.3,.6),D,"ball")},cotton(e,f){for(let n of[[[12,21],[3,15],[9,13]],[[12,21],[21,15],[15,13]],[[12,21],[10,15],[14,15]]])e.f(a(n),M,"bevel");e.line(12,21,12,23,M[1]);for(let[n,l,t]of[[12,6.5,3.8],[8,10,4.2],[16,10,4.2],[8.5,15,3.9],[15.5,15,3.9]])e.f(s(n,l,t),f,"ball")},flax(e,f){for(let l=-3;l<=3;l++)e.line(12+l*.6,21,12+l*2.3,6,l%2?U[3]:U[2]);e.f(i(9,14,7,2.4),f,"bevel");let n=N("#6f8fe0");for(let l=-3;l<=3;l++){let t=12+l*2.3;l%2?(e.f(s(t,5,1.7),n,"ball"),e.px(t,5,R[3])):e.f(s(t,5.5,1.3),U,"ball")}},wool_fleece(e,f){for(let[n,l,t]of[[7,9,3.6],[12,8,3.8],[17,9,3.5],[4.5,13.5,3.2],[9.5,13,3.8],[14.5,13,3.8],[19.5,13.5,3],[7,18,3.5],[12,18,3.8],[17,18,3.4]])e.f(s(n,l,t),f,"ball"),e.px(n+.8,l+.8,f[1])},wool_llama(e,f){e.f(k(14,2,20,13,1.4),M,3),e.f(k(20,2,14,13,1.4),M,3);let n=s(11,13.5,8);e.f(n,f,"ball");for(let[l,t,o,c]of[[4,10,17,19],[5,7,15,21],[6,17,17,6],[9,20,19,10],[3,13,11,5]])e.line(l,t,o,c,f[1],n);e.line(17,19,22,22,f[2]),e.dots([[20,1],[14,1]],M[4])},furs(e,f){e.f(g([13,19],[20,23],[21,14],3.4,2.2),f,"bevel"),e.f(s(21,14,1.6),D,"ball"),e.f(a([[11,2],[13,3],[14,1.5],[15,5],[16,7],[20,8],[19,10.5],[16,11],[15,14],[20,16],[19,19],[15,18],[13,20],[9,20],[7,18],[3,19],[2,16],[7,14],[6,11],[3,10.5],[2,8],[6,7],[7,5],[8,1.5],[9,3]]),f,"bevel"),e.line(11,5,11,18,f[1]),e.dots([[9,4],[13,4]],f[0]),e.dots([[11,3],[11,2]],f[0])},hides(e,f){e.f(a([[4,4],[9,5],[12,3],[15,5],[20,4],[19,9],[21,13],[19,17],[20,21],[15,19],[12,21],[9,19],[4,21],[5,16],[3,12],[5,8]]),f,"bevel"),e.f(s(9,10,2.6),f,1),e.f(s(15,13,2.1),f,1),e.f(s(10.5,16,1.8),f,1),e.dots([[4,4],[20,4],[4,21],[20,21],[12,3],[12,21]],U[3])},horses(e,f){e.f(a([[6,19],[3,17],[3,14],[7,9],[10,5],[12,1.5],[13,4],[15,2.5],[16,6],[19,10],[20.5,15],[20,21],[12,21],[11,17],[8,19]]),f,"bevel"),e.f(k(14,4,20,13,2.4),N("#3a2418"),"bevel"),e.f(k(11,4,9,7,1.6),N("#3a2418"),2),e.px(9,9,"#140a08"),e.px(8,9,"#f4ece0"),e.px(4,15,f[0]),e.line(6,12,11,15,A[2])},ivory(e,f){e.f(g([17,21],[1,18],[5,3],6,.9),f,"bevel"),e.f(r(17,20.5,3,1.4),f,1);for(let n of[.3,.5,.7]){let l=1-n,t=l*l*17+2*l*n*1+n*n*5,o=l*l*21+2*l*n*18+n*n*3;e.px(t+1,o,f[1])}},cloth(e,f){let n=(l,t,o,c)=>{e.f(i(l,t,o,c),f,"cylH");for(let v=l+3;v<l+o;v+=4)e.line(v,t,v,t+c-1,f[1]);e.f(r(l+o,t+c/2,2.2,c/2),f,3),e.f(I(r(l+o,t+c/2,1.4,c/2-1.2),r(l+o,t+c/2,.6,1)),f,1)};n(4,4,14,7),n(2,12,16,8),e.f(a([[3,19],[15,19],[16,22.5],[5,22.5]]),f,"bevel")},linen(e,f){for(let[n,l,t]of[[3,16,17],[4,11,16],[3,6,17]])e.f(i(n,l,t,5),f,"bevel"),e.line(n+2,l+2,n+t-3,l+2,f[1]);e.f(i(11,6,2,15),z,2),e.dots([[10,5],[13,5],[9,4],[14,4]],z[3])},cotton_cloth(e,f){e.f(a([[8,3],[10,4],[14,4],[16,3],[21.5,6.5],[19.5,11.5],[17,10.5],[17,21],[7,21],[7,10.5],[4.5,11.5],[2.5,6.5]]),f,"bevel"),e.f(a([[10,4],[14,4],[12,7.5]]),f,1),e.line(12,8,12,16,f[1]),e.dots([[13,10],[13,13]],f[4]),e.line(7,10,7,12,f[1]),e.line(17,10,17,12,f[1])},silk_brocade(e,f){let n=a([[5,4],[19,4],[19,18],[17,20.5],[15,18],[13,20.5],[11,18],[9,20.5],[7,18],[5,20.5]]);e.f(n,f,"bevel");for(let l=6;l<18;l++)for(let t=6;t<19;t++)((t+l)%4===0||(t-l+40)%4===0)&&(t+l)%2===0&&n(t,l)&&e.px(t,l,R[3]);e.f(k(3,3.5,21,3.5,2),M,"bevel"),e.dots([[2,3],[21,3]],R[3]),e.dots([[5,21],[9,21],[13,21],[17,21]],R[3])},carpets(e,f){e.f(i(3,5,18,14),f,"bevel"),e.f(i(5,7,14,10),f,2),e.line(5,7,18,7,R[2]),e.line(5,16,18,16,R[2]),e.line(5,7,5,16,R[2]),e.line(18,7,18,16,R[2]),e.f(a([[12,8.5],[15.5,12],[12,15.5],[8.5,12]]),R,"bevel"),e.f(a([[12,10.5],[13.5,12],[12,13.5],[10.5,12]]),z,2);for(let n=6;n<19;n+=2)e.px(2,n,w[3]),e.px(21,n,w[3]);e.dots([[7,9],[16,9],[7,14],[16,14]],z[3])},leather_goods(e,f){e.f(a([[8,2],[15,2],[15,14],[21,16],[21.5,20],[6,20],[6,15],[8,13]]),f,"bevel"),e.f(i(6,20,16,2),M,0),e.f(i(8,2,7,2),f,3),e.dots([[13,6],[13,8],[13,10],[13,12]],f[4]),e.line(9,5,9,12,f[1])},hemp(e,f){e.f(I(s(12,12.5,8.5),s(12,12.5,5.8)),f,"ball"),e.f(I(s(12,12.5,5.2),s(12,12.5,2.6)),f,"ball");for(let n=0;n<12;n++){let l=n*r1/12;e.px(12+Math.cos(l)*7.1,12.5+Math.sin(l)*7.1,f[1]),n%2&&e.px(12+Math.cos(l)*3.9,12.5+Math.sin(l)*3.9,f[1])}e.f(k(17,19,22,22.5,2),f,"bevel")},timber(e,f){u1(e,7.5,16.5,4.6),u1(e,16.5,16.5,4.6),u1(e,12,9,4.6),e.line(15,5,21,1,M[1]),e.dots([[16,3],[17,5],[18,2],[19,4],[20,1],[21,3],[17,3],[19,2]],f[3])},hardwoods(e,f){e.f(a([[3,12],[15,5],[21,8.5],[9,15.5]]),f,3),e.f(a([[9,15.5],[21,8.5],[21,13.5],[9,20.5]]),f,2);for(let n of[1.5,3.2])e.line(10,15.5+n,20,9.5+n,f[1]);e.f(a([[3,12],[9,15.5],[9,20.5],[3,17]]),N(Q(f[2],"#d8b07a",.35)),2),e.dots([[5,15],[6,16],[6,15],[5,16]],N(Q(f[2],"#d8b07a",.35))[1]),e.line(4,12.2,14,6.5,f[4])},paper(e,f){e.f(i(5,6,14,12),f,"bevel");for(let n of[8,10,12,14])e.line(7,n,n===14?12:16,n,f[1]);e.f(i(3,3,18,3),f,"cylH"),e.f(i(3,17,18,3),f,"cylH"),e.f(s(16,15,1.7),A,"ball"),e.dots([[3,4],[20,4],[3,18],[20,18]],f[1])},clay(e,f){e.f(L(r(12,16,8.5,5.5),s(9,11.5,4),s(14.5,11,4.5)),f,"ball"),e.line(8,15,11,17,f[1]),e.line(13,14,16,16,f[1]),e.dots([[10,9],[15,8]],f[4]),e.f(a([[15,17],[21,17],[21,20],[15,20]]),f,"bevel")},ceramics(e,f){let n=L(r(12,14,6.5,6.5),i(10,5,4,4));e.f(n,D,"ball"),e.f(r(12,4.6,3.9,1.3),D,"bevel"),e.f(i(9,20,6,2),D,"bevel"),e.line(4,10,20,10,f[2],n),e.line(4,18,20,18,f[2],n),e.line(9,6,15,6,f[2],n),e.px(12,14,f[1]),e.dots([[11,13],[13,13],[11,15],[13,15]],f[2]),e.dots([[9,15],[15,13]],f[3])},glassware(e,f){e.f(r(12,20,5.6,1.6),f,"bevel"),e.f(i(11,11,2,8),f,"cylV"),e.f(s(12,14.5,1.5),f,"ball"),e.f(a([[6,2],[18,2],[17,7],[14,11],[10,11],[7,7]]),f,"ball"),e.dots([[8,4],[8,5],[9,6]],f[4]),e.line(6,2,18,2,f[4])},books(e,f){let n=(l,t,o,c,v)=>{e.f(i(l,t,o,c),v,"bevel"),e.f(i(l+2,t+1,o-2,c-2),w,2),e.line(l+2,t+2,l+o-1,t+2,w[1]),e.f(i(l,t,2,c),v,"bevel")};n(3,16,18,5,f),n(5,11,15,5,A),n(4,6,16,5,z),e.px(4,8,R[3]),e.px(6,13,R[3]),e.px(4,18,R[3]),e.line(15,6,15,3,A[2])},furniture(e,f){e.f(i(5,14,2,7),f,1),e.f(i(15,12,2,5),f,1),e.f(I(i(6,2,11,10),L(i(8,4,2,7),i(11,4,2,7),i(14,4,1.5,7))),f,"bevel"),e.f(i(7,15,2,7),f,"bevel"),e.f(i(17,15,2,7),f,"bevel"),e.f(a([[5,12],[17,12],[19.5,15],[7,15]]),f,3),e.f(i(7,15,13,1.5),f,1),e.f(a([[7,12.5],[16.5,12.5],[18,14.3],[8.5,14.3]]),A,3)},candles(e,f){e.f(r(12,21,9.5,1.8),R,"bevel"),e.f(i(6,7,4,14),f,"cylV"),e.f(i(13,11,4,10),f,"cylV"),e.dots([[6,8],[6,9],[13,12],[16,12],[16,13]],f[4]),e.px(8,6,M[0]),e.px(15,10,M[0]),e.f(J(8,4.6,1.4),c1,"ball"),e.f(J(15,8.6,1.4),c1,"ball")},soap(e,f){e.f(a([[3,12],[12,16],[12,20],[3,16]]),f,2),e.f(a([[12,16],[21,12],[21,16],[12,20]]),f,1),e.f(a([[3,12],[12,8],[21,12],[12,16]]),f,3),e.f(I(a([[7,12],[12,10],[17,12],[12,14]]),a([[9,12],[12,11],[15,12],[12,13]])),f,2);for(let[n,l,t]of[[17,6,2.6],[8,6,1.8],[13,3,1.3]])e.f(I(s(n,l,t),s(n,l,t-.9)),D,3),e.px(n-t*.5,l-t*.5,D[4])},statuary(e,f){e.f(i(7,17,10,5),C,"bevel"),e.f(i(6,16,12,1.5),C,3),e.f(L(S(r(12,16,6.2,3.4),K(16.5)),i(10.5,10,3,4),r(12,7.6,3.6,4.3),a([[8.4,8],[7.6,9.4],[8.6,9.6]])),f,"ball"),e.px(10,7,f[1]),e.line(9,4,15,4,f[1])},ivory_carvings(e,f){e.f(L(r(12,20,6,1.8),i(7,18,10,2)),f,"bevel"),e.f(a([[9,18],[15,18],[14,11],[10,11]]),f,"cylV"),e.f(i(8,9,8,2),f,"bevel"),e.f(s(12,6.8,3),f,"ball"),e.f(i(11,.5,2,4),f,3),e.f(i(9.5,1.5,5,1.5),f,3),e.line(10,14,14,14,f[1])},pitch(e,f){h1(e,f),e.f(r(12,4.5,5,1.3),f,3),e.f(a([[14.5,4],[17,4],[17,9],[16,10.5],[15,9]]),f,0),e.px(15,6,f[4])},salt(e,f){q(e,6,10,5.5,5.5,f),q(e,2,15,4.5,4.5,f),q(e,12,16,4.5,4,f),e.dots([[8,9],[4,14],[14,15]],"#ffffff")},bay_salt(e,f){e.f(k(13,11,20,3,1.8),M,"bevel"),e.f(r(20,3,1.8,1.2),M,3),e.f(a([[2,21],[5,16],[9,12],[12,10],[15,12],[19,16],[22,21]]),f,"ball"),e.dots([[9,14],[12,12],[15,15],[6,18],[17,19],[11,17]],"#ffffff"),e.dots([[8,17],[14,18],[18,17]],f[1])},iron(e,f){e.f(a([[4,21],[5,15],[9,11.5],[15,12],[19.5,15],[20,21]]),C,"bevel"),e.dots([[8,15],[9,15],[13,17],[14,17],[10,19],[16,15],[17,18]],"#9a4a2a"),e.f(k(7,20,17,5,1.8),M,"bevel"),e.f(a([[10,5.5],[14,3],[18,3],[22,6.5],[18,5.2],[14,5.4]]),f,"bevel")},copper(e,f){e.f(a([[3,6],[8,8],[16,8],[21,6],[19,12],[21,18],[16,16],[8,16],[3,18],[5,12]]),f,"bevel"),e.dots([[9,11],[13,10],[15,13],[11,14],[7,13]],f[1]),e.line(6,8,17,8.5,f[4])},tin(e,f){e.f(a([[4,11],[18,8],[21,17],[7,20]]),f,2),e.line(6,12,18,9.5,f[4]),e.line(7,19,20,16.5,f[1]),e.f(k(5,9,18,6,5.5),f,"cylH"),e.f(r(5,9,2.5,2.8),f,3),e.f(I(r(5,9,1.5,1.7),r(5,9,.7,.8)),f,1)},lead(e,f){e.f(a([[3,12],[21,12],[19,20],[5,20]]),f,"bevel"),e.f(a([[5,8],[19,8],[21,12],[3,12]]),f,3),e.line(6,8.5,18,8.5,f[4]),e.line(10,14,14,18,f[1]),e.line(14,14,10,18,f[1])},gold(e,f){m1(e,1.5,16,10.5,f),m1(e,12,16,10.5,f),m1(e,6.8,10.5,10.5,f),e.px(9,8,"#ffffff")},silver(e,f){e.f(L(i(3,11,11,9),r(8.5,20,5.5,1.8)),f,"cylV");for(let n=13;n<20;n+=2.4)e.line(3,n,13,n,f[1]);e.f(r(8.5,11,5.5,1.8),f,3),e.px(7,10.5,f[4]),e.f(r(17.5,14.5,4,5.6),f,"ball"),e.f(I(r(17.5,14.5,3,4.4),r(17.5,14.5,2.3,3.6)),f,1),e.dots([[17,13],[18,14],[17,15]],f[4])},gemstones(e,f){W(e,8,15.5,4.6,A),W(e,15.5,16.5,4.6,z),W(e,12,8.5,4.2,f),W(e,19,9,3,N("#2cc86a"))},jade(e,f){e.f(I(s(12,11.5,8.5),s(12,11.5,3)),f,"ball"),e.f(I(s(12,11.5,6.2),s(12,11.5,5.4)),f,1),e.dots([[12,5],[17,9],[17,14],[12,18],[7,14],[7,9]],f[3]),e.line(12,20,12,22,A[2]),e.dots([[11,22],[13,22]],A[2])},ruby(e,f){W(e,12,12,9.5,f),e.dots([[7,6],[6,7],[8,7],[7,8]],"#ffffff")},sapphire(e,f){e.gem(D1(12,12,9,8,3.2),f,4.2,!0),e.dots([[7,6],[6,7],[8,7],[7,8]],"#ffffff")},emerald(e,f){e.f(n1(4,3,16,18,2.5),f,"bevel"),e.f(n1(6,5,12,14,2),f,1),e.f(n1(7,6,10,12,1.6),f,3),e.f(n1(8.5,7.5,7,9,1),f,2),e.line(4.5,5,8,7.5,f[4]),e.line(19.5,19,16,16,f[0]),e.line(8,6,11,6,f[4])},diamond(e,f){e.f(a([[3,9],[21,9],[12,21.5]]),f,2),e.f(a([[6.5,5],[17.5,5],[21,9],[3,9]]),f,3);for(let n of[7,12,17])e.line(12,21,n,9,f[1]);e.line(6.5,5,8,9,f[1]),e.line(17.5,5,16,9,f[1]),e.line(10,5,12,9,f[4]),e.line(14,5,12,9,f[1]),e.line(7,5,17,5,f[4]),e.dots([[9,12],[15,13]],"#f0b8d8"),e.dots([[13,11],[10,15]],"#a8d8ff"),e.dots([[6,7],[5,6],[7,6],[6,5]],"#ffffff")},amethyst(e,f){e.f(r(12,20.5,9.5,2.5),C,"bevel"),d1(e,7,20,4.6,7,-.35,f),d1(e,17,20,4.6,6,.35,f),d1(e,12,20,6,9,0,f)},topaz(e,f){e.gem(J(12,15,5.8),f,3.2),e.dots([[9,11],[10,10]],"#ffffff")},garnet(e,f){W(e,8,15,4.4,f),W(e,16,14.5,4.4,f),W(e,12,7.5,3.8,f)},carnelian(e,f){e.f(r(12,12.5,8.5,7),f,"ball"),e.f(I(r(12,12.5,6.4,5),r(12,12.5,5.4,4.1)),f,3),e.f(I(r(12,12.5,3.6,2.8),r(12,12.5,2.6,2)),f,3),e.dots([[8,8],[9,8]],f[4])},turquoise(e,f){e.f(i(11,2,2,3),Y,"bevel"),e.f(r(12,12.5,9,8),Y,"bevel"),e.f(r(12,12.5,7.5,6.5),f,"ball");let n=r(12,12.5,7,6);e.line(6,10,9,12,M[1],n),e.line(9,12,8,16,M[1],n),e.line(13,8,15,11,M[1],n),e.line(15,11,18,12,M[1],n),e.line(12,13,14,17,M[1],n);for(let l=0;l<10;l++){let t=l*r1/10;e.px(12+Math.cos(t)*8.3,12.5+Math.sin(t)*7.4,Y[4])}},marble(e,f){q(e,3,8,9,9,f),e.line(5,13,8,16,C[2]),e.line(8,16,10,20,C[2]),e.line(8,6,12,8,C[2]),e.line(12,8,15,7,C[2]),e.line(15,12,17,16,C[1]),e.line(17,16,19,17,C[1])},lapis_lazuli(e,f){e.f(a([[4,12],[7,6],[13,4],[19,7],[21,13],[17,19],[9,20],[5,17]]),f,"bevel"),e.f(a([[7,6],[13,4],[19,7],[14,10],[8,10]]),f,3),e.dots([[10,13],[15,12],[12,16],[17,15],[8,15],[11,7]],R[3]),e.line(6,15,11,18,D[2])},alum(e,f){e.f(a([[11,2],[11,12],[3.5,12]]),f,3),e.f(a([[11,2],[18.5,12],[11,12]]),f,2),e.f(a([[3.5,12],[11,12],[11,21]]),f,2),e.f(a([[11,12],[18.5,12],[11,21]]),f,1),e.line(11,3,11,20,f[4]),e.f(a([[18,14],[21,17.5],[18,21],[15,17.5]]),f,"bevel")},mercury(e,f){e.f(r(12,20.5,9,1.8),f,"bevel");for(let[n,l,t]of[[10,14,5],[17,17,3],[15.5,8.5,2],[5.5,19,1.8],[20,11,1.3]])e.f(s(n,l,t),f,"ball"),e.px(n-t*.45,l-t*.45,"#ffffff")},bog_iron(e,f){e.line(4,21,5,7,_[2]),e.line(6,21,8,9,_[3]),e.f(E(5,7,1.2,2.4,.05),N("#6a4020"),"bevel");for(let[n,l,t]of[[11,16.5,4.3],[17.5,17,3.6],[14.5,11,3.4],[19,11.5,2.4]])e.f(L(s(n,l,t),s(n-t*.5,l+t*.4,t*.6)),f,"ball");e.dots([[10,15],[12,17],[17,16],[15,10],[19,11]],"#b0602a")},coal(e,f){e.f(a([[6,13],[9,7],[14,6],[16.5,11],[11,14]]),f,"bevel"),e.f(a([[3,20.5],[4,15],[8,13],[11.5,16],[10.5,21]]),f,"bevel"),e.f(a([[9,21],[10,14.5],[15,11],[19.5,14],[20.5,21]]),f,"bevel"),e.dots([[9,8],[10,8],[5,15],[11,15],[15,12],[16,12]],f[4])},metalware(e,f){e.f(s(8.5,11,6.8),M,"ball"),e.f(I(s(8.5,11,6.8),s(8.5,11,5.8)),Y,2),e.f(s(8.5,11,2),Y,"ball"),e.f(k(9,16,20,3,2.2),f,"bevel"),e.line(10,15,19,4,f[4]),e.f(k(5.5,14,12,19.5,1.8),R,"bevel"),e.f(k(7,18,4,21,1.8),M,"bevel"),e.f(s(3.5,21.5,1.4),R,"ball")},bronzeware(e,f){e.f(I(s(12,3.2,2.2),s(12,3.2,1)),f,"bevel"),e.f(L(S(s(12,10,5.2),K(10)),a([[6.8,10],[17.2,10],[19,18],[5,18]]),r(12,18,7.6,1.8)),f,"cylV"),e.line(6,13,18,13,f[1],a([[6.8,10],[17.2,10],[19,18],[5,18]])),e.line(5,16,19,16,f[3],a([[6.8,10],[17.2,10],[19,18],[5,18]])),e.f(s(12,20.5,1.8),f,1)},jewelry(e,f){e.f(I(r(12,15,7.5,6.3),r(12,15,5,4.3)),f,"ball"),e.f(a([[9,9],[15,9],[14,11],[10,11]]),f,"bevel"),W(e,12,6.5,3.4,A)},stockfish(e,f){for(let n of[7.5,16.5]){let l=M1(n,13.5,15,5.2,Math.PI/2);e.f(l,f,"bevel");for(let t=9;t<19;t+=2.5)e.line(n-1.5,t,n+1.5,t,f[1],l);e.px(n-1,19.5,f[0])}e.f(k(2,3,22,3,1.8),M,"bevel"),e.dots([[7,4],[17,4]],U[3])},herring(e,f){let n=M1(13,12,18,8,0);e.f(n,f,"ball"),e.f(S(n,K(9.5)),f,1),e.line(15,9,15,14,f[1],n),e.px(18,11,"#101418"),e.px(18,10,"#ffffff"),e.f(a([[10,15.5],[13,15.5],[11,18]]),f,1),e.f(a([[10,8.5],[14,8.5],[11,6]]),f,1),e.dots([[8,12],[10,11],[12,13],[9,14],[11,12]],f[4])},salted_herring(e,f){h1(e,M),e.f(r(12,5,6.5,2),D,3),e.f(a([[8,6],[6.5,1.5],[9.3,3.3],[11,1],[10.8,6]]),f,"bevel"),e.f(a([[14,5.5],[13.5,1],[15.6,2.8],[18,1.5],[16.8,6]]),f,"bevel"),e.dots([[7,5],[12,5],[17,5]],"#ffffff")},pearls(e,f){let n=N("#9a8aa6");e.f(S(r(12,11,9.5,6.5),K(11.5)),n,"bevel"),e.f(S(r(12,11,7.8,4.8),K(11.5)),N("#e8e0f0"),2),e.f(S(r(12,14.5,10,6.5),X(14)),n,"ball");for(let l of[6,9,12,15,18])e.line(12,14,l,20,n[1],S(r(12,14.5,10,6.5),X(14.8)));e.f(i(2,13.5,20,1.2),N("#e8e0f0"),3),e.f(s(12,12,3.4),f,"ball"),e.px(11,10.5,"#ffffff"),e.f(s(19.5,20,1.8),f,"ball")},whaling(e,f){e.f(a([[11,17],[10.5,11],[7,9.5],[2,9.5],[3.5,6],[9,6.5],[12,9],[15,6.5],[20.5,6],[22,9.5],[17,9.5],[13.5,11],[13,17]]),f,"bevel"),e.px(12,9,f[0]),e.dots([[2,11],[22,11],[3,13],[21,13]],D[3]),e.f(L(i(1,17,22,5),s(5,17,2),s(12,16.5,2.4),s(19,17,2)),z,"bevel"),e.dots([[3,16],[4,15],[10,15],[11,14],[14,15],[18,15],[20,15.5]],"#ffffff")},amber(e,f){e.f(a([[5,11],[8,5],[15,4],[20,9],[19.5,17],[13,21],[6,18.5]]),f,"ball"),e.f(i(11,11,2,3),M,0),e.dots([[10,11],[13,11],[10,13],[13,13],[11,10],[12,10]],M[1]),e.px(12,15,M[1]),e.dots([[8,7],[9,7],[8,8]],f[4])},dyes(e,f){v1(e,12,7.5,6,f),v1(e,6,16,5.4,A),v1(e,18,16,5.4,N("#e8b830"))},tyrian_purple(e,f){e.f(a([[7.5,15],[2,21.5],[6.5,16.5]]),f,"bevel"),e.f(a([[14,9],[20.5,3.5],[18,10.5]]),f,"bevel"),e.f(r(11,13,6.4,5.2),f,"ball");for(let[n,l,t,o]of[[8,8.5,6,5.5],[12,8,12,4.5],[15.5,10,18,8],[5,13,2,12],[16.5,15,19.5,16],[10,18,9,21],[13.5,17.5,15,20.5]])e.line(n,l,t,o,f[3]);e.f(J(19,19.5,2.3),f,"ball")},coral(e,f){for(let[n,l,t,o]of[[12,21,12,14],[12,14,7,8],[12,14,17,6.5],[7,8,5,3.5],[7,8,10,3],[17,6.5,15,2.5],[17,6.5,20,4],[12,17,18,13],[18,13,21,10],[12,16,5,14],[5,14,3,10]])e.f(k(n,l,t,o,2.1),f,"bevel");for(let[n,l]of[[5,3.5],[10,3],[15,2.5],[20,4],[21,10],[3,10]])e.f(s(n,l,1.4),f,3);e.f(r(12,21.5,5,1.4),C,"bevel")},ambergris(e,f){e.f(L(r(12,14,9,6.5),s(8,10,4),s(15,9.5,3.8)),f,"ball"),e.line(6,13,10,15,f[1]),e.line(12,11,17,13,f[1]),e.line(9,17,15,18,f[1]),e.dots([[8,8],[14,8]],f[4])},__crate(e,f){q(e,3,9,9,8,M),e.f(a([[3,11],[12,15.5],[12,18],[3,13.5]]),f,2),e.f(a([[12,15.5],[21,11],[21,13.5],[12,18]]),f,1)}},y1=new Map;function O1(e){let f=e.slice(),n=(l,t)=>l<0||t<0||l>=24||t>=24?null:e[t*24+l];for(let l=0;l<24;l++)for(let t=0;t<24;t++){if(e[l*24+t])continue;let o=n(t,l+1)||n(t+1,l)||n(t,l-1)||n(t-1,l);o&&(f[l*24+t]=Q(o,"#0c0610",.72))}return f}function k1(e,f){let n=e+"|"+f,l=y1.get(n);if(l)return l;let t=L1(),o=N(f||"#9a8a70");(l1[e]||l1.__crate)(t,o);let c=O1(t.b),v=document.createElement("canvas");v.width=v.height=24;let b=document.createElement("canvas");b.width=b.height=24;let d=v.getContext("2d"),u=b.getContext("2d"),m=d.createImageData(24,24),p=u.createImageData(24,24);return c.forEach((x,h)=>{if(!x)return;let y=e1(x);m.data.set([y[0],y[1],y[2],255],h*4),p.data.set([255,248,232,255],h*4)}),d.putImageData(m,0,0),u.putImageData(p,0,0),l={cv:v,lit:b,lum:S1(f||"#9a8a70"),known:!!l1[e]},y1.set(n,l),l}function A1(e,f,n,l,t,o,c={}){let v=k1(o,t),b=Math.abs(e.getTransform?e.getTransform().a:1)||1,d=l*b/24,u=l,m=!0;d>=2&&(d=Math.floor(d),u=d*24/b,m=!1);let p=Math.round((f-u/2)*b)/b,x=Math.round((n-u/2)*b)/b,h=u/24;e.save(),e.imageSmoothingEnabled=m;let y=c.glow??1;if(y&&v.lum<.3){e.globalAlpha=Math.min(.85,.5*y);for(let[H,j]of[[-1,0],[1,0],[0,-1],[0,1]])e.drawImage(v.lit,p+H*h,x+j*h,u,u);e.globalAlpha=1}e.drawImage(v.cv,p,x,u,u),e.restore()}var j1=Object.keys(l1).filter(e=>e!=="__crate"),H1=24;return I1(G1);})();
+</script>
+<script>
+"use strict";
+/* ───────────────────────── data ───────────────────────── */
+const ROLES = ["Staple","Essential","Strategic","Comfort","Luxury","Treasure"];
+const ROLE_BLURB = {
+  Staple: "Food people eat every day. Every region needs one.",
+  Essential: "Salt, fibre, fuel and building stuff. Cities stall without them.",
+  Strategic: "Tool metals, mounts and ship stores. Wars and fleets are built from these.",
+  Comfort: "What a town drinks and enjoys once it is fed.",
+  Luxury: "Bought by the rich, carried far, worth a long voyage.",
+  Treasure: "Hoarded, minted and given as dowry. Works like money, not like food."
+};
+const ORIGINS = ["Grown","Raised","Gathered","Caught","Mined","Crafted"];
+const KEEP = ["Perishable","Seasonal","Storable","Eternal"];
+const REACH = ["Endemic","Local","Regional","Continental","Global"];
+const REACH_TXT = [
+  "Only its homeland. It cannot be grown anywhere else at the start.",
+  "Its homeland and about 300 km of similar country.",
+  "The homeland's whole region.",
+  "Every suitable place on the homeland's continent.",
+  "Every suitable place in the world."
+];
+const TIERS = [
+  { n: "Bulk", lo: 0, hi: 2 }, { n: "Common", lo: 2, hi: 20 }, { n: "Valuable", lo: 20, hi: 200 },
+  { n: "Precious", lo: 200, hi: 2000 }, { n: "Treasure", lo: 2000, hi: Infinity }
+];
+const REGIONS = ["Hesperian Shore","Ammar Coast","Kesh Steppe","Jade Coast","Norrvik Isles"];
+const SLOTS = [
+  { id: "grain", n: "Staple grain" }, { id: "protein", n: "Protein" }, { id: "preserve", n: "Salt" },
+  { id: "fibre", n: "Fibre" }, { id: "fuel", n: "Fuel & building" }, { id: "tool", n: "Tool metal" }
+];
+// value = grain-equivalent per base unit (wheat = 1 per kg). out = world output per year in base units.
+// regs = which example regions have it. suit = map suitability rule.
+function G(o) { return Object.assign({ enabled: true, family: null, slot: null, unit: "kg", tradeUnit: "", diff: 2, keep: "Storable", reach: 4, out: 0, regs: [], icon: null, home: null, tech: 2 }, o); }
+const GOODS = [
+  G({ id:"wheat", label:"Wheat", sprite:"wheat", color:"#d9b94a", role:"Staple", origin:"Grown", reach:4, value:1, diff:1, keep:"Storable", slot:"grain", tradeUnit:"sack (50 kg)", out:2.1e9, regs:[0,1,2], suit:"temperate" }),
+  G({ id:"barley", label:"Barley & Rye", sprite:"barley", color:"#c8a85a", role:"Staple", origin:"Grown", reach:4, value:0.9, diff:1, slot:"grain", out:9.0e8, regs:[0,2,4], suit:"cool" }),
+  G({ id:"rice", label:"Rice", sprite:"rice", color:"#e6e2c8", role:"Staple", origin:"Grown", reach:3, value:1.1, diff:2, slot:"grain", out:1.4e9, regs:[3], suit:"warmwet" }),
+  G({ id:"millet", label:"Millet", sprite:"millet", color:"#d8c070", role:"Staple", origin:"Grown", reach:4, value:0.8, diff:1, slot:"grain", out:3.0e8, regs:[1,2], suit:"dry" }),
+  G({ id:"herring", label:"Herring", sprite:"herring", color:"#7ab8d0", role:"Staple", origin:"Caught", reach:4, value:2.5, diff:2, keep:"Perishable", slot:"protein", tradeUnit:"last (12 barrels)", out:2.2e8, regs:[0,4], suit:"coldsea" }),
+  G({ id:"hides", label:"Herds: Hides & Leather", sprite:"hides", color:"#9a7a50", role:"Staple", origin:"Raised", reach:4, value:4, diff:2, slot:"protein", out:6.0e7, regs:[0,1,2,3,4], suit:"grass" }),
+  G({ id:"salt", label:"Salt", sprite:"salt", color:"#cfd6dc", role:"Essential", origin:"Mined", reach:4, value:3, diff:2, slot:"preserve", family:"salt", out:4.0e8, regs:[0,1,2,3,4], suit:"dry" }),
+  G({ id:"rocksalt", label:"Rock Salt", sprite:"salt", color:"#cfd6dc", role:"Essential", origin:"Mined", value:3, diff:3, member:"salt", quality:"Fine (Wieliczka-type mines)", out:2.5e8, regs:[0,2], suit:"dry" }),
+  G({ id:"baysalt", label:"Bay Salt", sprite:"bay_salt", color:"#e8e0d0", role:"Essential", origin:"Gathered", value:2.6, diff:2, member:"salt", quality:"Good (evaporation pans)", out:1.5e8, regs:[1,3,4], suit:"coast" }),
+  G({ id:"wool", label:"Fleece Wool", sprite:"wool_fleece", color:"#e8e3d8", role:"Essential", origin:"Raised", reach:3, value:8, diff:2, slot:"fibre", tradeUnit:"sack (165 kg)", out:7.0e7, regs:[0,2,4], suit:"cool" }),
+  G({ id:"flax", label:"Flax & Linen", sprite:"flax", color:"#cfe0e8", role:"Essential", origin:"Grown", reach:3, value:5, diff:2, slot:"fibre", out:5.0e7, regs:[0,4], suit:"cool" }),
+  G({ id:"cotton", label:"Cotton", sprite:"cotton", color:"#eef0e8", role:"Essential", origin:"Grown", reach:2, value:7, diff:3, slot:"fibre", out:6.0e7, regs:[1,3], suit:"warmwet" }),
+  G({ id:"timber", label:"Timber", sprite:"timber", color:"#6b8f4e", role:"Essential", origin:"Gathered", reach:4, value:0.3, diff:1, slot:"fuel", unit:"kg", out:5.0e9, regs:[0,3,4], suit:"forest" }),
+  G({ id:"iron", label:"Iron", sprite:"iron", color:"#9aa0a6", role:"Strategic", origin:"Mined", reach:4, value:6, diff:3, slot:"tool", tradeUnit:"bloom", out:1.1e8, regs:[0,2,4], suit:"mountain", deposit:true }),
+  G({ id:"copper", label:"Copper", sprite:"copper", color:"#b06a3a", role:"Strategic", origin:"Mined", reach:2, value:15, diff:3, out:1.5e7, regs:[1,3], suit:"mountain", deposit:true }),
+  G({ id:"tin", label:"Tin", sprite:"tin", color:"#b8bcc0", role:"Strategic", origin:"Mined", reach:1, value:40, diff:4, out:1.2e6, regs:[4], suit:"mountain", deposit:true }),
+  G({ id:"horses", label:"Horses", sprite:"horses", color:"#b5793a", role:"Strategic", origin:"Raised", reach:2, value:900, unit:"head", diff:3, keep:"Perishable", out:4.0e5, regs:[2], suit:"grass" }),
+  G({ id:"hemp", label:"Hemp", sprite:"hemp", color:"#7f8f5a", role:"Strategic", origin:"Grown", reach:4, value:3, diff:2, slot:"fibre", out:3.0e7, regs:[0,4], suit:"cool" }),
+  G({ id:"wine", label:"Wine", sprite:"wine", color:"#9b2d4f", role:"Comfort", origin:"Grown", reach:2, value:4, unit:"l", diff:3, keep:"Seasonal", tradeUnit:"tun (950 l)", out:9.0e8, regs:[0,1], suit:"med" }),
+  G({ id:"beer", label:"Beer & Ale", sprite:"beer", color:"#d09030", role:"Comfort", origin:"Crafted", reach:4, value:1.5, unit:"l", diff:2, keep:"Perishable", out:2.0e9, regs:[0,4], suit:"cool" }),
+  G({ id:"oliveoil", label:"Olive Oil", sprite:"oliveoil", color:"#8ea33a", role:"Comfort", origin:"Grown", reach:2, value:6, unit:"l", diff:3, out:2.0e8, regs:[0,1], suit:"med" }),
+  G({ id:"honey", label:"Honey & Wax", sprite:"honey", color:"#e0a020", role:"Comfort", origin:"Gathered", reach:4, value:10, diff:2, out:1.0e7, regs:[0,2,4], suit:"forest" }),
+  G({ id:"tea", label:"Tea", sprite:"tea", color:"#5fae6f", role:"Comfort", origin:"Grown", reach:1, value:60, diff:4, out:1.2e6, regs:[3], suit:"warmwet" }),
+  G({ id:"spices", label:"Spices", sprite:"spices", color:"#d2622a", role:"Luxury", origin:"Grown", family:"spices", value:150, diff:4, out:0, regs:[3], suit:"tropic" }),
+  G({ id:"pepper", label:"Pepper", sprite:"pepper", color:"#2f2f33", role:"Luxury", origin:"Grown", reach:1, value:80, diff:3, member:"spices", quality:"Fine (Malabar-type wet coast)", out:3.0e6, regs:[3], suit:"tropic" }),
+  G({ id:"cloves", label:"Cloves", sprite:"cloves", color:"#7a3b1e", role:"Luxury", origin:"Grown", reach:0, value:250, diff:4, member:"spices", quality:"Superb (one island chain)", out:2.0e5, regs:[3], suit:"tropic" }),
+  G({ id:"cinnamon", label:"Cinnamon", sprite:"cinnamon", color:"#a9603a", role:"Luxury", origin:"Gathered", reach:1, value:150, diff:3, member:"spices", quality:"Good", out:4.0e5, regs:[3], suit:"tropic" }),
+  G({ id:"nutmeg", label:"Nutmeg", sprite:"nutmeg", color:"#8b5a2b", role:"Luxury", origin:"Grown", reach:0, value:400, diff:5, member:"spices", quality:"Superb (endemic)", out:6.0e4, regs:[3], suit:"tropic" }),
+  G({ id:"silk", label:"Silk", sprite:"silk", color:"#d97fb0", role:"Luxury", origin:"Crafted", reach:1, value:600, diff:5, keep:"Storable", tradeUnit:"bale", out:8.0e5, regs:[3], suit:"warmwet" }),
+  G({ id:"dyes", label:"Dyes", sprite:"dyes", color:"#8a52c0", role:"Luxury", origin:"Gathered", family:"dyes", value:400, diff:4, out:0, regs:[1,3], suit:"tropic" }),
+  G({ id:"indigo", label:"Indigo", sprite:"indigo", color:"#3a4fb0", role:"Luxury", origin:"Grown", reach:2, value:120, diff:3, member:"dyes", quality:"Good", out:1.5e6, regs:[3], suit:"tropic" }),
+  G({ id:"tyrian", label:"Tyrian Purple", sprite:"tyrian_purple", color:"#6a0dad", role:"Luxury", origin:"Caught", reach:0, value:8000, diff:5, member:"dyes", quality:"Superb (murex beds)", out:900, regs:[1], suit:"coast" }),
+  G({ id:"frank", label:"Frankincense", sprite:"frankincense", color:"#c79a4b", role:"Luxury", origin:"Gathered", reach:1, value:60, diff:3, out:2.5e6, regs:[1], suit:"dry" }),
+  G({ id:"furs", label:"Furs", sprite:"furs", color:"#a9763d", role:"Luxury", origin:"Gathered", reach:3, value:60, diff:3, out:3.0e6, regs:[4,2], suit:"cold" }),
+  G({ id:"amber", label:"Amber", sprite:"amber", color:"#e0962a", role:"Luxury", origin:"Gathered", reach:1, value:200, diff:2, out:4.0e5, regs:[4], suit:"coast" }),
+  G({ id:"pearls", label:"Pearls", sprite:"pearls", color:"#d8e4ec", role:"Luxury", origin:"Caught", reach:1, value:15000, diff:5, out:2000, regs:[1,3], suit:"warmsea" }),
+  G({ id:"silver", label:"Silver", sprite:"silver", color:"#c8ccd6", role:"Treasure", origin:"Mined", reach:2, value:2200, diff:4, keep:"Eternal", tradeUnit:"ingot (bar)", out:2.4e4, regs:[0,2,3], suit:"mountain", deposit:true, tech:2 }),
+  G({ id:"gold", label:"Gold", sprite:"gold", color:"#d4af37", role:"Treasure", origin:"Mined", reach:1, value:24000, diff:4, keep:"Eternal", tradeUnit:"mark", out:1.8e3, regs:[1,2], suit:"mountain", deposit:true, tech:2 }),
+  G({ id:"gems", label:"Gems", sprite:"gemstones", color:"#56c8d8", role:"Treasure", origin:"Mined", family:"gems", value:300000, diff:5, keep:"Eternal", out:0, regs:[2,3], suit:"mountain", deposit:true }),
+  G({ id:"ruby", label:"Ruby", sprite:"ruby", color:"#e0294a", role:"Treasure", origin:"Mined", reach:0, value:400000, diff:5, keep:"Eternal", member:"gems", quality:"Superb (marble-hosted)", out:40, regs:[3], suit:"mountain", deposit:true }),
+  G({ id:"sapphire", label:"Sapphire", sprite:"sapphire", color:"#2a5fd0", role:"Treasure", origin:"Mined", reach:1, value:300000, diff:5, keep:"Eternal", member:"gems", quality:"Fine (river gravels)", out:60, regs:[3], suit:"mountain", deposit:true }),
+  G({ id:"emerald", label:"Emerald", sprite:"emerald", color:"#1ea866", role:"Treasure", origin:"Mined", reach:0, value:350000, diff:5, keep:"Eternal", member:"gems", quality:"Good", out:25, regs:[2], suit:"mountain", deposit:true }),
+  G({ id:"jade", label:"Jade", sprite:"jade", color:"#00a86b", role:"Treasure", origin:"Mined", reach:0, value:1200, diff:4, keep:"Eternal", out:3000, regs:[3], suit:"mountain", deposit:true })
+];
+const CRAFTED = [
+  { label:"Woolen Cloth", sprite:"cloth", color:"#d8c8b0", recipe:"Fleece Wool + labour" },
+  { label:"Metalware & Arms", sprite:"metalware", color:"#9099a8", recipe:"Iron + Timber (charcoal)" },
+  { label:"Fine Jewelry", sprite:"jewelry", color:"#d4af37", recipe:"Gold or Silver + Gems" },
+  { label:"Ceramics", sprite:"ceramics", color:"#5a86c8", recipe:"Clay + Timber" },
+  { label:"Bronzeware", sprite:"bronzeware", color:"#b06a3a", recipe:"Copper + Tin" }
+];
+const PRESETS = [
+  { id:"min", n:"Minimal", d:"10 goods, one per need", ids:["wheat","herring","salt","rocksalt","baysalt","wool","timber","iron","wine","spices","pepper","cloves","cinnamon","nutmeg","silver","gold"] },
+  { id:"classic", n:"Classic", d:"30 goods, medieval trade", ids:null },
+  { id:"spice", n:"Age of Spice", d:"60 goods, the full catalogue", ids:null },
+  { id:"mine", n:"My roster: Ammar campaign", d:"Saved 3 days ago", ids:["wheat","rice","herring","hides","salt","rocksalt","baysalt","cotton","timber","iron","copper","horses","wine","tea","spices","pepper","cloves","silk","pearls","silver","gold","gems","ruby","sapphire"] }
+];
+const CULTURES = [
+  { n:"Hesperians", traits:"Mercantile · Devout", home:"Hesperian Shore", src:"auto",
+    v:{ Sacred:["frank"], Prestige:["tyrian"], Staple:["wheat"], Taboo:[], Currency:["silver"] } },
+  { n:"Kesh", traits:"Martial · Nomadic", home:"Kesh Steppe", src:"auto",
+    v:{ Sacred:[], Prestige:["horses"], Staple:["millet"], Taboo:["wine"], Currency:["silver"] } },
+  { n:"Lianhe", traits:"Scholarly · Insular", home:"Jade Coast", src:"hand",
+    v:{ Sacred:["tea"], Prestige:["jade","silk"], Staple:["rice"], Taboo:[], Currency:["silver"] } },
+  { n:"Ammari", traits:"Mercantile · Assimilative", home:"Ammar Coast", src:"auto",
+    v:{ Sacred:["frank"], Prestige:["pearls"], Staple:["wheat"], Taboo:[], Currency:["gold"] } },
+  { n:"Norrvik", traits:"Seafaring · Mercantile", home:"Norrvik Isles", src:"auto",
+    v:{ Sacred:[], Prestige:["amber"], Staple:["barley"], Taboo:[], Currency:["silver"] } }
+];
+const VAL_TXT = {
+  Sacred: "Bought every year whatever the price; temples keep buying in famine years.",
+  Prestige: "The rich pay 1.5 to 3 times the going price and show it off.",
+  Staple: "Their everyday grain. Other grains cost them more.",
+  Taboo: "Nobody there will buy it.",
+  Currency: "The metal they mint and hoard."
+};
+const FAIL = {
+  Grown: { t:"Harvest failure", d:"Bad years strike the whole belt at once. Odds come from how much the rain swings year to year here.", k:0.42 },
+  Raised: { t:"Murrain or a hard winter", d:"Herd disease spreads along the droving routes; a harsh winter thins the flocks.", k:0.25 },
+  Gathered: { t:"Over-harvest", d:"Taken faster than it regrows, the wild source collapses and takes decades to return.", k:0.35 },
+  Caught: { t:"Stock collapse or the shoals move", d:"Fisheries can fail for years, or the fish move to another coast.", k:0.38 },
+  Mined: { t:"Flooding, collapse, poorer ore", d:"Deeper workings flood without pumps; the grade drops as the shafts go down.", k:0.3 },
+  Crafted: { t:"Lost or stolen secret", d:"The craft lives in a few workshops. Masters can be poached and the secret can leak to rivals.", k:0.2 }
+};
+const TECH = ["","Surface & river gravels","Adits into hillsides","Deep shafts","Pumps & drainage"];
+
+/* ───────────────────────── state ───────────────────────── */
+const state = { skin: "a", units: "metric", preset: "classic", sel: "silver", tab: "goods", pin: false, author: true, open: { salt:false, spices:true, dyes:false, gems:false } };
+try { const s = JSON.parse(localStorage.getItem("wf-gb-mock") || "{}"); if (s.skin) state.skin = s.skin; if (s.units) state.units = s.units; } catch (e) {}
+function persist() { try { localStorage.setItem("wf-gb-mock", JSON.stringify({ skin: state.skin, units: state.units })); } catch (e) {} }
+const byId = Object.fromEntries(GOODS.map(g => [g.id, g]));
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+/* ───────────────────────── icons ───────────────────────── */
+const iconCache = {};
+function iconURL(g) {
+  if (g.icon) return g.icon;
+  const k = g.sprite + "|" + g.color;
+  if (!iconCache[k]) {
+    try { iconCache[k] = GoodArt.goodSprite(g.sprite, g.color).cv.toDataURL(); } catch (e) { iconCache[k] = ""; }
+  }
+  return iconCache[k];
+}
+const img = (g, px) => `<img class="ico" src="${iconURL(g)}" width="${px}" height="${px}" alt="">`;
+
+/* ───────────────────────── units ───────────────────────── */
+function tierOf(v) { return TIERS.findIndex(t => v >= t.lo && v < t.hi); }
+function nfmt(x, d) { return x.toLocaleString("en-GB", { maximumFractionDigits: d == null ? (x < 10 ? 1 : 0) : d }); }
+function priceUnit(g) {
+  const imp = state.units === "imperial";
+  if (g.unit === "head") return { per: "head", k: 1 };
+  if (g.unit === "l") return imp ? { per: "gallon", k: 3.785 } : { per: "litre", k: 1 };
+  if (g.role === "Treasure") return imp ? { per: "troy oz", k: 0.0311 } : { per: "kg", k: 1 };
+  return imp ? { per: "lb", k: 0.4536 } : { per: "kg", k: 1 };
+}
+function grainAmount(kg) {
+  if (state.units === "imperial") { const lb = kg * 2.2046; return lb >= 4000 ? nfmt(lb / 2000) + " tons" : nfmt(lb) + " lb"; }
+  return kg >= 1000 ? nfmt(kg / 1000) + " t" : nfmt(kg) + " kg";
+}
+function outFmt(g) {
+  const o = g.out; if (!o) return "—";
+  if (g.unit === "head") return nfmt(o) + " head";
+  if (g.unit === "l") return state.units === "imperial" ? nfmt(o / 3.785 / 1e6) + " M gal" : nfmt(o / 1e5) + " k hl";
+  if (state.units === "imperial") {
+    if (g.role === "Treasure") return nfmt(o / 0.0311) + " troy oz";
+    return o >= 9.07e5 ? nfmt(o / 907.2) + " tons" : nfmt(o * 2.2046) + " lb";
+  }
+  return o >= 1e3 ? nfmt(o / 1e3) + " t" : nfmt(o) + " kg";
+}
+function buysLine(g) {
+  const u = priceUnit(g);
+  const grainKg = g.value * u.k;
+  return `1 ${u.per} of ${g.label} buys about <b>${grainAmount(grainKg)}</b> of grain`;
+}
+
+/* ───────────────────────── world map (procedural example) ───────────────────────── */
+const W = 160, H = 80;
+function hash(x, y, s) { let h = (x * 374761393 + y * 668265263 + s * 2246822519) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); h ^= h >>> 16; return (h >>> 0) / 4294967296; }
+function vnoise(x, y, s) { const xi = Math.floor(x), yi = Math.floor(y), xf = x - xi, yf = y - yi; const u = xf * xf * (3 - 2 * xf), v = yf * yf * (3 - 2 * yf);
+  const a = hash(xi, yi, s), b = hash(xi + 1, yi, s), c = hash(xi, yi + 1, s), d = hash(xi + 1, yi + 1, s); return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v; }
+function fbm(x, y, s, o) { let t = 0, a = 1, f = 1, n = 0; for (let i = 0; i < o; i++) { t += vnoise(x * f, y * f, s + i * 17) * a; n += a; a *= 0.5; f *= 2; } return t / n; }
+const elev = new Float32Array(W * H), moist = new Float32Array(W * H), land = new Uint8Array(W * H), coast = new Uint8Array(W * H), comp = new Int32Array(W * H).fill(-1);
+(function buildWorld() {
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = y * W + x;
+    let e = fbm(x / 34, y / 34, 41207, 5);
+    const ey = Math.abs(y - H / 2) / (H / 2); e -= Math.max(0, ey - 0.78) * 0.9; // polar seas
+    elev[i] = e; moist[i] = fbm(x / 22 + 9, y / 22, 777, 4);
+    land[i] = e > 0.575 ? 1 : 0;
+  }
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (!land[i]) continue;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) { const nx = (x + dx + W) % W, ny = y + dy; if (ny < 0 || ny >= H) continue; if (!land[ny * W + nx]) coast[i] = 1; } }
+  let c = 0; for (let i = 0; i < W * H; i++) { if (!land[i] || comp[i] >= 0) continue; const q = [i]; comp[i] = c;
+    while (q.length) { const j = q.pop(), x = j % W, y = (j / W) | 0; for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) { const nx = (x + dx + W) % W, ny = y + dy; if (ny < 0 || ny >= H) continue; const k = ny * W + nx; if (land[k] && comp[k] < 0) { comp[k] = c; q.push(k); } } } c++; }
+})();
+const lat = (y) => Math.abs((y + 0.5) - H / 2) / (H / 2) * 90;
+function suits(rule, i) {
+  const x = i % W, y = (i / W) | 0, la = lat(y), e = elev[i], m = moist[i], L = land[i];
+  switch (rule) {
+    case "temperate": return L && la > 28 && la < 56 && e < 0.70 && m > 0.38;
+    case "cool": return L && la > 40 && la < 64 && e < 0.72;
+    case "warmwet": return L && la < 30 && m > 0.5 && e < 0.70;
+    case "dry": return L && la > 12 && la < 40 && m < 0.46;
+    case "grass": return L && la > 25 && la < 58 && m < 0.55 && e < 0.70;
+    case "med": return L && la > 30 && la < 44 && e < 0.68 && (coast[i] || m < 0.5);
+    case "forest": return L && la > 35 && la < 66 && m > 0.48;
+    case "tropic": return L && la < 20 && m > 0.46;
+    case "cold": return L && la > 52;
+    case "mountain": return L && e > 0.72;
+    case "coast": return L && coast[i];
+    case "coldsea": case "warmsea": {
+      if (L) return false; const want = rule === "coldsea" ? la > 45 && la < 70 : la < 28; if (!want) return false;
+      for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) { const ny = y + dy; if (ny < 0 || ny >= H) continue; if (land[ny * W + (x + dx + W) % W]) return true; } return false; }
+  }
+  return false;
+}
+const TOWNS = (() => { const t = []; for (let k = 0; k < 4000 && t.length < 16; k++) { const x = (hash(k, 3, 9) * W) | 0, y = (hash(k, 7, 9) * H) | 0, i = y * W + x;
+  if (!land[i] || elev[i] > 0.70 || lat(y) > 62) continue; if (!(coast[i] || moist[i] > 0.5)) continue; if (t.some(p => Math.hypot(p.x - x, p.y - y) < 12)) continue; t.push({ x, y }); } return t; })();
+function suitableCells(g) { const out = []; for (let i = 0; i < W * H; i++) if (suits(g.suit, i)) out.push(i); return out; }
+function autoHome(g) {
+  const cells = suitableCells(g); if (!cells.length) return null;
+  let best = cells[0], bv = -1; for (const i of cells) { const v = hash(i, g.id.length * 31 + g.id.charCodeAt(0), 5); if (v > bv) { bv = v; best = i; } }
+  return { x: best % W, y: (best / W) | 0 };
+}
+function beltOf(g) {
+  if (!g.home) g.home = autoHome(g);
+  const belt = new Uint8Array(W * H); if (!g.home) return belt;
+  const marine = g.suit === "coldsea" || g.suit === "warmsea";
+  if (g.reach === 4) { for (let i = 0; i < W * H; i++) if (suits(g.suit, i)) belt[i] = 1; return belt; }
+  const maxD = [3, 9, 22, 1e9][g.reach];
+  const start = g.home.y * W + g.home.x; const dist = new Int32Array(W * H).fill(-1); dist[start] = 0; const q = [start]; let h = 0;
+  while (h < q.length) { const j = q[h++], x = j % W, y = (j / W) | 0; if (suits(g.suit, j)) belt[j] = 1; if (dist[j] >= maxD) continue;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) { const nx = (x + dx + W) % W, ny = y + dy; if (ny < 0 || ny >= H) continue; const k = ny * W + nx;
+      if (dist[k] >= 0) continue; if (marine ? land[k] : !land[k]) continue; dist[k] = dist[j] + 1; q.push(k); } }
+  return belt;
+}
+function depositsOf(g, belt) {
+  if (!g.deposit) return [];
+  const cells = []; for (let i = 0; i < W * H; i++) if (belt[i]) cells.push(i);
+  const n = Math.min(cells.length, g.role === "Treasure" ? 9 : 12), out = [];
+  for (let k = 0; k < cells.length && out.length < n; k++) { const i = cells[(hash(k, g.id.charCodeAt(0), 11) * cells.length) | 0]; const x = i % W, y = (i / W) | 0;
+    if (out.some(d => Math.hypot(d.x - x, d.y - y) < 6)) continue;
+    const depth = 1 + ((hash(x, y, 23) * 4) | 0); const near = TOWNS.some(t => Math.hypot(t.x - x, t.y - y) < 14);
+    out.push({ x, y, depth, known: near && depth <= g.tech }); }
+  return out;
+}
+function cssVar(n) { return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+function hexA(hex, a) { const h = hex.replace("#", ""); const r = parseInt(h.slice(0,2),16), g = parseInt(h.slice(2,4),16), b = parseInt(h.slice(4,6),16); return `rgba(${r},${g},${b},${a})`; }
+function drawMap(g) {
+  const cv = $("#map"); if (!cv) return; const S = 4; cv.width = W * S; cv.height = H * S; const ctx = cv.getContext("2d");
+  const sea = cssVar("--sea"), seaD = cssVar("--sea-deep"), L0 = cssVar("--land"), L1 = cssVar("--land-hi"), L2 = cssVar("--land-peak"), ink = cssVar("--page-ink"), rub = cssVar("--rubric");
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x, e = elev[i];
+    ctx.fillStyle = land[i] ? (e > 0.74 ? L2 : e > 0.665 ? L1 : L0) : (e < 0.47 ? seaD : sea); ctx.fillRect(x * S, y * S, S, S); }
+  const belt = beltOf(g), deps = depositsOf(g, belt);
+  const showFog = g.deposit && !state.author;
+  for (let i = 0; i < W * H; i++) { if (!belt[i]) continue; const x = i % W, y = (i / W) | 0;
+    ctx.fillStyle = hexA(g.color.length === 7 ? g.color : "#c8ccd6", showFog ? 0.22 : (g.deposit ? 0.3 : 0.55)); ctx.fillRect(x * S, y * S, S, S); }
+  if (showFog) { ctx.save(); ctx.strokeStyle = hexA("#ffffff", 0.18); ctx.lineWidth = 1; for (let k = -H * S; k < W * S; k += 7) { ctx.beginPath(); ctx.moveTo(k, 0); ctx.lineTo(k + H * S, H * S); ctx.stroke(); } ctx.restore();
+    // re-clip hatch to the belt by repainting non-belt cells
+    for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) { const i = y * W + x; if (belt[i]) continue; const e = elev[i];
+      ctx.fillStyle = land[i] ? (e > 0.74 ? L2 : e > 0.665 ? L1 : L0) : (e < 0.47 ? seaD : sea); ctx.fillRect(x * S, y * S, S, S); } }
+  for (const t of TOWNS) { ctx.fillStyle = ink; ctx.fillRect(t.x * S - 2, t.y * S - 2, 5, 5); ctx.fillStyle = cssVar("--page-bg"); ctx.fillRect(t.x * S - 1, t.y * S - 1, 3, 3); }
+  const spr = (() => { try { return GoodArt.goodSprite(g.sprite, g.color).cv; } catch (e) { return null; } })();
+  ctx.imageSmoothingEnabled = false;
+  for (const d of deps) { const cx = d.x * S + 2, cy = d.y * S + 2;
+    if (d.known) { if (spr) ctx.drawImage(spr, cx - 12, cy - 12, 24, 24); }
+    else if (state.author) { ctx.save(); ctx.globalAlpha = 0.85; ctx.setLineDash([3, 3]); ctx.strokeStyle = ink; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.arc(cx, cy, 8, 0, 6.283); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = ink; ctx.font = "bold 9px " + cssVar("--font-data"); ctx.textAlign = "center"; ctx.fillText(d.depth > g.tech ? "D" + d.depth : "?", cx, cy + 3); ctx.restore(); } }
+  if (g.home) { const hx = g.home.x * S + 2, hy = g.home.y * S + 2; ctx.fillStyle = rub; ctx.strokeStyle = cssVar("--page-bg"); ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(hx, hy); ctx.lineTo(hx - 6, hy - 11); ctx.arc(hx, hy - 13, 6, Math.PI * 0.85, Math.PI * 0.15); ctx.closePath(); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = cssVar("--page-bg"); ctx.beginPath(); ctx.arc(hx, hy - 13, 2.2, 0, 6.283); ctx.fill(); }
+  let cnt = 0; for (let i = 0; i < W * H; i++) cnt += belt[i];
+  const km2 = Math.round(cnt * 62000 / 1000) * 1000; // example: one map cell ≈ 250 × 250 km
+  const known = deps.filter(d => d.known).length, deep = deps.filter(d => !d.known && d.depth > g.tech).length, hidden = deps.length - known;
+  const info = $("#mapinfo"); if (info) info.innerHTML = g.deposit
+    ? `<b>${deps.length}</b> deposits in a belt of about ${nfmt(km2)} km². <b>${known}</b> known at the start, <b>${hidden}</b> hidden${deep ? `, of which ${deep} lie too deep for today's mining` : ""}.`
+    : `Grows across about <b>${nfmt(km2)} km²</b> at the start.`;
+}
+
+/* ───────────────────────── rendering ───────────────────────── */
+function visibleGoods() { const p = PRESETS.find(p => p.id === state.preset); return GOODS.filter(g => !p.ids || p.ids.includes(g.id)); }
+function renderPresets() {
+  $("#presets").innerHTML = PRESETS.map(p => `<button class="preset" data-p="${p.id}" aria-pressed="${state.preset === p.id}"><b>${esc(p.n)}</b><span>${esc(p.d)}</span></button>`).join("");
+  const on = GOODS.filter(g => g.enabled && !g.family && visibleGoods().includes(g)).length;
+  $("#presetSub").textContent = `${on} goods switched on · ${CRAFTED.length} crafted goods follow from them`;
+}
+function renderSlots() {
+  const goods = visibleGoods().filter(g => g.enabled);
+  const chips = SLOTS.map(s => {
+    const have = goods.filter(g => g.slot === s.id || (s.id === "tool" && g.id === "copper" && goods.some(h => h.id === "tin")) || (s.id === "preserve" && (g.member === "salt")));
+    const regs = new Set(); have.forEach(g => g.regs.forEach(r => regs.add(r)));
+    const miss = REGIONS.filter((_, i) => !regs.has(i));
+    const cls = !have.length ? "bad" : miss.length ? "warn" : "ok";
+    const mark = cls === "ok" ? "✓" : cls === "warn" ? "!" : "✗";
+    const tip = !have.length ? "No good fills this need. Cities cannot grow." : miss.length ? `Missing in: ${miss.join(", ")}. They will have to import it.` : "Every region has a source.";
+    return `<span class="slot ${cls}" title="${esc(tip)}"><i>${mark}</i>${esc(s.n)}${miss.length && have.length ? ` <span class="num" style="opacity:.8">${miss.length} region${miss.length > 1 ? "s" : ""} import</span>` : ""}</span>`;
+  }).join("");
+  $("#slots").innerHTML = `<span class="lbl" style="margin-right:4px">Essential needs</span>${chips}`;
+}
+function rowHTML(g, member) {
+  const t = tierOf(g.value), fam = g.family;
+  const kids = fam ? GOODS.filter(m => m.member === g.id) : [];
+  const famBtn = fam ? `<button class="famtog" data-fam="${g.id}" aria-expanded="${!!state.open[g.id]}">${state.open[g.id] ? "▾" : "▸"} ${kids.length}</button>` : "";
+  return `<div class="row${member ? " member" : ""}${g.enabled ? "" : " off"}${state.sel === g.id ? " sel" : ""}" data-g="${g.id}" tabindex="0" role="button" aria-label="${esc(g.label)}">
+    ${img(g, member ? 20 : 24)}
+    <span class="nm">${esc(g.label)}${fam ? `<small>family</small> ${famBtn}` : ""}</span>
+    <span class="tier t${t}">${TIERS[t].n}</span>
+    ${fam ? `<span class="stars" title="members differ">mixed</span>` : `<span class="reachdots" title="Reach: ${REACH[g.reach]}">${[0,1,2,3,4].map(k => `<b class="${k <= g.reach ? "on" : ""}"></b>`).join("")}</span>`}
+    <button class="tgl" role="switch" aria-checked="${g.enabled}" data-tg="${g.id}" aria-label="Use ${esc(g.label)}"></button>
+  </div>`;
+}
+function renderList() {
+  const q = ($("#search") && $("#search").value || "").toLowerCase();
+  const vis = visibleGoods();
+  let h = `<div class="lhead"><input id="search" placeholder="Find a good" value="${esc(q)}" aria-label="Find a good"><span class="pdim" style="font-size:12px">${vis.filter(g => !g.member).length} goods</span></div>`;
+  for (const r of ROLES) {
+    const gs = vis.filter(g => g.role === r && !g.member && (!q || g.label.toLowerCase().includes(q) || GOODS.some(m => m.member === g.id && m.label.toLowerCase().includes(q))));
+    if (!gs.length) continue;
+    h += `<div class="group"><div class="ghead"><h3>${r}</h3><span>${esc(ROLE_BLURB[r])}</span></div>`;
+    for (const g of gs) { h += rowHTML(g, false); if (g.family && (state.open[g.id] || q)) for (const m of GOODS.filter(m => m.member === g.id && vis.includes(m))) h += rowHTML(m, true); }
+    h += `</div>`;
+  }
+  h += `<div class="group crafted"><div class="ghead"><h3>Crafted in cities</h3><span>Never placed on the map. Made where inputs and skilled workers meet.</span></div>`;
+  for (const c of CRAFTED) h += `<div class="row"><img class="ico" src="${iconURL(c)}" width="24" height="24" alt=""><span class="nm">${esc(c.label)}</span><span class="tier" style="grid-column:span 3;justify-self:end">${esc(c.recipe)}</span></div>`;
+  h += `</div>`;
+  $("#list").innerHTML = h;
+  const s = $("#search"); s.addEventListener("input", () => { const pos = s.selectionStart; renderList(); const n = $("#search"); n.focus(); n.setSelectionRange(pos, pos); });
+}
+function chipRow(label, opts, cur, key) {
+  return `<span>${label}</span><div class="chips" role="group" aria-label="${label}">${opts.map(o => `<button class="chip" data-k="${key}" data-v="${o}" aria-pressed="${cur === o}">${o}</button>`).join("")}</div>`;
+}
+function ladderHTML(g) {
+  const lo = Math.log10(0.1), hi = Math.log10(2e6), pos = (v) => ((Math.log10(v) - lo) / (hi - lo) * 100).toFixed(2) + "%";
+  const colors = ["#a8a28c", "#8fa07a", "#5f8fa0", "#8a6aa8", "#c8962c"];
+  let h = `<div class="ladder" aria-label="Value ladder">`;
+  TIERS.forEach((t, i) => { const a = Math.max(t.lo, 0.1), b = Math.min(t.hi, 2e6); h += `<div class="band" style="left:${pos(a)};width:calc(${pos(b)} - ${pos(a)});background:${colors[i]};opacity:.55"></div><div class="tick" style="left:calc((${pos(a)} + ${pos(b)}) / 2)">${t.n}</div>`; });
+  const refs = [["wheat","Grain"],["iron","Iron"],["pepper","Pepper"],["silver","Silver"],["gold","Gold"]].filter(([id]) => id !== g.id);
+  for (const [id, n] of refs) { const v = byId[id].value; h += `<div class="mk" style="left:${pos(v)}"></div><div class="bl" style="left:${pos(v)}">${n}</div>`; }
+  h += `<div class="mk me" style="left:${pos(g.value)}"></div><div class="bl me" style="left:${pos(g.value)};top:40px">▲ ${esc(g.label)}</div></div>`;
+  return h;
+}
+function cultureMentions(g) {
+  const out = []; for (const c of CULTURES) for (const [role, ids] of Object.entries(c.v)) if (ids.includes(g.id)) out.push(`<span class="cvt">${esc(c.n)}: <b>${role}</b></span>`);
+  return out.length ? out.join("") : `<span class="pdim" style="font-size:12.5px">No culture gives it a special value yet.</span>`;
+}
+function renderCard() {
+  const g = byId[state.sel]; if (!g) return;
+  const t = tierOf(g.value), u = priceUnit(g), f = FAIL[g.origin];
+  const members = g.family ? GOODS.filter(m => m.member === g.id) : [];
+  const fam = g.member ? byId[g.member] : null;
+  const priceShown = g.value * u.k;
+  let h = `<div class="chead">
+    <div class="bigico">${img(g, 72)}</div>
+    <div style="min-width:0"><h2>${esc(g.label)}</h2>
+      <div class="meta">${esc(g.role)} · ${esc(g.origin)} · ${TIERS[t].n}${fam ? ` · member of the <b>${esc(fam.label)}</b> family` : ""}${g.family ? ` · family of ${members.length}` : ""}</div></div>
+    <div style="display:grid;gap:6px;justify-items:end"><button class="pbtn" id="editIcon">Edit icon</button>
+      <button class="tgl" role="switch" aria-checked="${g.enabled}" data-tg="${g.id}" aria-label="Use ${esc(g.label)}"></button></div>
+  </div>`;
+  if (g.family) {
+    h += `<div class="section"><h3>Members, each with its own quality</h3>
+      <div class="callout">A family shares <b>demand</b>: a jeweller who needs gems takes any of them. Each member keeps its <b>own deposits, grade and price</b>; merging never flattens quality.</div>
+      <div class="members">${members.map(m => `<div>${img(m, 20)}<span><b>${esc(m.label)}</b> <span class="pdim">· ${esc(m.quality || "")}</span></span><span class="num">${nfmt(m.value * priceUnit(m).k)} / ${priceUnit(m).per}</span></div>`).join("")}</div></div>`;
+  }
+  h += `<div class="section"><h3>What kind of good it is</h3><div class="genes">
+    ${chipRow("Role", ROLES, g.role, "role")}
+    ${chipRow("Origin", ORIGINS, g.origin, "origin")}
+    <span>Difficulty</span><div>${[1,2,3,4,5].map(k => `<button class="starbtn${k <= g.diff ? " on" : ""}" data-diff="${k}" aria-label="Difficulty ${k} of 5">★</button>`).join("")}
+      <span class="pdim" style="font-size:12px;margin-left:6px">${["","anyone can","a village can","needs specialists","needs specialists and capital","only a few places in the world"][g.diff]}</span></div>
+    ${chipRow("Keeping", KEEP, g.keep, "keep")}
+  </div></div>`;
+  if (!g.family) {
+    h += `<div class="section"><h3>Where it is</h3>
+      <div class="maptools">
+        <div class="chips"><button class="pbtn${state.pin ? " on" : ""}" id="pinBtn">${state.pin ? "Click the map to set the homeland" : "Pin homeland on the map"}</button>
+          <button class="pbtn" id="autoHome">Auto (best fit)</button></div>
+        ${g.deposit ? `<div class="seg" role="group" aria-label="Map view" style="border-color:var(--page-line)"><button id="vAuthor" aria-pressed="${state.author}" style="color:var(--page-mid)">Author: show all</button><button id="vPlayer" aria-pressed="${!state.author}" style="color:var(--page-mid)">As a player sees it</button></div>` : ""}
+      </div>
+      <div class="mapwrap${state.pin ? " pinning" : ""}"><canvas id="map" width="640" height="320" aria-label="Example world map with the good's belt"></canvas></div>
+      <div class="reach"><label class="lbl" for="reach" style="color:var(--page-dim)">Reach at the start of the world</label>
+        <input type="range" id="reach" min="0" max="4" step="1" value="${g.reach}">
+        <div class="reachlabels">${REACH.map((r, k) => `<span class="${k === g.reach ? "on" : ""}">${r}</span>`).join("")}</div></div>
+      <div class="callout"><b>${REACH[g.reach]}.</b> ${REACH_TXT[g.reach]} <span id="mapinfo"></span>${g.reach < 4 ? " During a campaign it can spread along trade routes to land that suits it." : ""}</div>
+      <div class="legend"><span><i style="background:${g.color}"></i>where it ${g.deposit ? "may be found" : "grows"}</span><span><i style="background:var(--rubric);border-radius:50%"></i>homeland</span><span><i style="background:var(--page-bg)"></i>town</span>${g.deposit ? `<span><i style="border-style:dashed;border-radius:50%"></i>hidden deposit (D = too deep for now)</span>` : ""}</div>
+      ${g.deposit ? `<div class="genes"><span>Mining at start</span><div><input type="range" id="tech" min="1" max="4" step="1" value="${g.tech}" style="width:min(240px,100%);accent-color:var(--accent);vertical-align:middle"> <span style="font-size:12.5px"><b>${g.tech}</b> · ${TECH[g.tech]}</span>
+        <div class="pdim" style="font-size:12px">Towns find deposits near them over time. Deeper ones open up as their mining improves.</div></div></div>` : ""}
+    </div>`;
+  }
+  h += `<div class="section"><h3>What it is worth</h3>
+    ${ladderHTML(g)}
+    <div class="kv">
+      <div><span>Price</span><b class="num">${nfmt(priceShown)}</b> <small>grain-units per ${u.per}</small></div>
+      <div><span>World output / year</span><b class="num">${g.family ? nfmt(members.reduce((a, m) => a + m.out, 0)) + " kg" : outFmt(g)}</b><small>example world</small></div>
+      <div><span>Traded as</span><b style="font-size:13.5px">${esc(g.tradeUnit || "by " + u.per)}</b><small>name shown beside ${state.units === "metric" ? "metric" : "imperial"} units</small></div>
+    </div>
+    <div class="callout">${buysLine(g)}.${g.role === "Treasure" ? " Treasure is hoarded and minted, not eaten, so it piles up in cities and temples instead of being used up." : ""}</div>
+  </div>`;
+  h += `<div class="section"><h3>How hard it is to get</h3><div class="risk">
+    <div class="r"><span>Main risk</span><div><b>${f.t}.</b> ${f.d}<div class="meter" title="Example odds of a bad year"><b style="width:${Math.round(f.k * 100)}%"></b></div><span class="pdim" style="font-size:11.5px">about 1 bad year in ${Math.max(2, Math.round(1 / (f.k * 0.35)))} in this example belt</span></div></div>
+    <div class="r"><span>Start-up</span><div>${{ Grown: g.id === "wine" ? "Vines give a first harvest after 3 to 5 years." : "One season from sowing to harvest.", Raised: "Herds take years to build up.", Gathered: "Works from day one while the wild source lasts.", Caught: "Needs boats and a harbour.", Mined: "Needs prospecting, capital and a shaft before the first ore.", Crafted: "Needs a workshop with masters who hold the secret." }[g.origin]}</div></div>
+  </div></div>`;
+  h += `<div class="section"><h3>Special value to cultures</h3><div class="cv">${cultureMentions(g)}</div></div>`;
+  $("#card").innerHTML = h;
+  if (!g.family) drawMap(g);
+}
+function renderCultures() {
+  const opts = (role, c) => `<select class="addsel" data-addc="${c}" data-role="${role}" aria-label="Add a ${role} good"><option value="">+ add</option>${GOODS.filter(g => !g.family).map(g => `<option value="${g.id}">${esc(g.label)}</option>`).join("")}</select>`;
+  let h = `<div class="page" style="padding:12px 14px"><h3>How each people values goods</h3>
+    <p class="pdim" style="margin:6px 0 0;max-width:75ch;font-size:13px">Prices already differ by region because of supply and distance. These values sit on top: they change how much a people <i>wants</i> a good, not what it costs to make. Each starts from the people's traits and homeland; change anything and it is marked as set by hand.</p>
+    <div class="legend" style="margin-top:8px">${Object.entries(VAL_TXT).map(([k, v]) => `<span><b style="color:var(--rubric)">${k}</b> ${esc(v)}</span>`).join("")}</div></div>
+    <div class="cultures">`;
+  CULTURES.forEach((c, ci) => {
+    h += `<div class="page cult"><div class="top"><h3>${esc(c.n)}</h3><span class="src${c.src === "hand" ? " hand" : ""}">${c.src === "hand" ? "set by hand" : "from traits & homeland"}</span></div>
+      <div class="pdim" style="font-size:12px">${esc(c.traits)} · ${esc(c.home)}</div>`;
+    for (const role of Object.keys(VAL_TXT)) {
+      h += `<div class="vrow"><span>${role}</span><div>${c.v[role].map(id => `<span class="vchip">${img(byId[id], 18)}${esc(byId[id].label)}<button data-rmc="${ci}" data-role="${role}" data-id="${id}" aria-label="Remove">×</button></span>`).join("")}${opts(role, ci)}</div></div>`;
+    }
+    if (c.src === "hand") h += `<button class="pbtn" data-reset="${ci}" style="justify-self:start">Reset to automatic</button>`;
+    h += `</div>`;
+  });
+  h += `</div>`;
+  $("#viewCult").innerHTML = h;
+}
+function renderBalance() {
+  const vis = visibleGoods().filter(g => g.enabled && !g.family);
+  const rows = vis.map(g => ({ g, v: g.out * g.value })).sort((a, b) => b.v - a.v);
+  const total = rows.reduce((a, r) => a + r.v, 0), grainV = byId.wheat.out * byId.wheat.value;
+  let h = `<div class="page" style="padding:12px 14px;display:grid;gap:10px"><h3>Gold and silver, region by region</h3>
+    <p class="pdim" style="margin:0;font-size:13px;max-width:78ch">How much silver one unit of gold buys depends on how much of each a region has and which metal its people prefer. Where the ratio differs, bullion flows between regions by itself.</p>
+    <div class="ratio">
+      <div><span class="lbl" style="color:var(--page-dim)">Hesperian Shore</span><b>1 : 12</b><span class="pdim" style="font-size:12px">silver mines nearby</span></div>
+      <div><span class="lbl" style="color:var(--page-dim)">Ammar Coast</span><b>1 : 10</b><span class="pdim" style="font-size:12px">mints gold</span></div>
+      <div><span class="lbl" style="color:var(--page-dim)">Kesh Steppe</span><b>1 : 9</b><span class="pdim" style="font-size:12px">placer gold in the rivers</span></div>
+      <div><span class="lbl" style="color:var(--page-dim)">Jade Coast</span><b>1 : 6</b><span class="pdim" style="font-size:12px">prefers silver, has little</span></div>
+    </div>
+    <div class="callout"><b>Silver flows east:</b> it is worth twice as much on the Jade Coast as on the Hesperian Shore, so merchants carry it there and bring back silk and tea.</div></div>`;
+  h += `<div class="page" style="padding:12px 14px"><h3>What the world produces in a year</h3><div class="tblwrap"><table><thead><tr><th>Good</th><th>Role</th><th class="r">Output</th><th class="r">Value vs. all grain</th><th style="width:30%">Share of all trade value</th></tr></thead><tbody>`;
+  for (const r of rows) h += `<tr><td>${img(r.g, 18)} <span style="vertical-align:4px">${esc(r.g.label)}</span></td><td>${r.g.role}</td><td class="r num">${outFmt(r.g)}</td><td class="r num">${(r.v / grainV * 100).toFixed(r.v / grainV < 0.01 ? 2 : 1)}%</td><td><div class="bar"><b style="width:${Math.max(0.5, r.v / rows[0].v * 100).toFixed(1)}%;background:${r.g.color}"></b></div></td></tr>`;
+  h += `</tbody></table></div></div>`;
+  h += `<div class="page" style="padding:12px 14px"><h3>Essential needs by region</h3><div class="tblwrap"><table><thead><tr><th>Region</th>${SLOTS.map(s => `<th>${s.n}</th>`).join("")}</tr></thead><tbody>`;
+  const goods = visibleGoods().filter(g => g.enabled);
+  REGIONS.forEach((rn, ri) => {
+    h += `<tr><td><b>${rn}</b></td>`;
+    for (const s of SLOTS) { const local = goods.filter(g => (g.slot === s.id || (s.id === "preserve" && g.member === "salt")) && g.regs.includes(ri));
+      const any = goods.some(g => g.slot === s.id || (s.id === "preserve" && g.member === "salt"));
+      h += local.length ? `<td><span class="mark ok">✓</span> ${esc(local.map(g => g.label).slice(0, 2).join(", "))}</td>` : any ? `<td><span class="mark warn">!</span> imports</td>` : `<td><span class="mark bad">✗</span> none</td>`; }
+    h += `</tr>`;
+  });
+  h += `</tbody></table></div></div>`;
+  $("#viewBal").innerHTML = h;
+}
+function renderAll() { renderPresets(); renderSlots(); renderList(); renderCard(); if (state.tab === "cult") renderCultures(); if (state.tab === "bal") renderBalance(); }
+
+/* ───────────────────────── events ───────────────────────── */
+function toast(t) { const el = $("#toast"); el.textContent = t; el.hidden = false; clearTimeout(toast.h); toast.h = setTimeout(() => el.hidden = true, 2200); }
+function applySkin() { document.documentElement.setAttribute("data-skin", state.skin); $("#skinA").setAttribute("aria-pressed", state.skin === "a"); $("#skinB").setAttribute("aria-pressed", state.skin === "b"); }
+function applyUnits() { $("#uMetric").setAttribute("aria-pressed", state.units === "metric"); $("#uImperial").setAttribute("aria-pressed", state.units === "imperial"); }
+$("#skinA").onclick = () => { state.skin = "a"; persist(); applySkin(); renderAll(); };
+$("#skinB").onclick = () => { state.skin = "b"; persist(); applySkin(); renderAll(); };
+$("#uMetric").onclick = () => { state.units = "metric"; persist(); applyUnits(); renderAll(); };
+$("#uImperial").onclick = () => { state.units = "imperial"; persist(); applyUnits(); renderAll(); };
+function setTab(t) { state.tab = t; [["goods","#tabGoods","#viewGoods"],["cult","#tabCult","#viewCult"],["bal","#tabBal","#viewBal"]].forEach(([k, b, v]) => { $(b).setAttribute("aria-selected", k === t); $(v).hidden = k !== t; }); renderAll(); }
+$("#tabGoods").onclick = () => setTab("goods"); $("#tabCult").onclick = () => setTab("cult"); $("#tabBal").onclick = () => setTab("bal");
+$("#saveRoster").onclick = () => toast("Saved as “My roster”. It appears next to the presets in every new world.");
+$("#placeBtn").onclick = () => toast("In the app this places every good on the map and moves on to People.");
+let newCount = 0;
+$("#newGood").onclick = () => { newCount++; const id = "custom" + newCount;
+  const g = G({ id, label: "New good " + newCount, sprite: "__crate", color: "#9a8a70", role: "Luxury", origin: "Grown", reach: 2, value: 50, diff: 3, out: 1e5, regs: [1], suit: "temperate" });
+  GOODS.push(g); byId[id] = g; const p = PRESETS.find(p => p.id === state.preset); if (p.ids) p.ids.push(id); state.sel = id; setTab("goods"); toast("New good added under Luxury. Give it a name, an icon and a home."); };
+document.addEventListener("click", (e) => {
+  const el = e.target.closest("button, .row, select"); if (!el) return;
+  if (el.dataset.p) { state.preset = el.dataset.p; if (!visibleGoods().includes(byId[state.sel])) state.sel = visibleGoods()[0].id; renderAll(); return; }
+  if (el.dataset.tg) { e.stopPropagation(); const g = byId[el.dataset.tg]; g.enabled = !g.enabled; GOODS.filter(m => m.member === g.id).forEach(m => m.enabled = g.enabled); renderAll(); return; }
+  if (el.dataset.fam) { e.stopPropagation(); state.open[el.dataset.fam] = !state.open[el.dataset.fam]; renderList(); return; }
+  if (el.classList.contains("row") && el.dataset.g) { state.sel = el.dataset.g; state.pin = false; renderList(); renderCard(); return; }
+  if (el.dataset.k) { const g = byId[state.sel]; g[el.dataset.k] = el.dataset.v; renderAll(); return; }
+  if (el.dataset.diff) { byId[state.sel].diff = +el.dataset.diff; renderCard(); renderList(); return; }
+  if (el.id === "pinBtn") { state.pin = !state.pin; renderCard(); return; }
+  if (el.id === "autoHome") { const g = byId[state.sel]; g.home = autoHome(g); state.pin = false; renderCard(); toast("Homeland picked from the best-suited land."); return; }
+  if (el.id === "vAuthor") { state.author = true; renderCard(); return; }
+  if (el.id === "vPlayer") { state.author = false; renderCard(); return; }
+  if (el.id === "editIcon") { openEditor(byId[state.sel]); return; }
+  if (el.dataset.rmc) { const c = CULTURES[+el.dataset.rmc]; c.v[el.dataset.role] = c.v[el.dataset.role].filter(i => i !== el.dataset.id); c.src = "hand"; renderCultures(); return; }
+  if (el.dataset.reset) { const c = CULTURES[+el.dataset.reset]; c.src = "auto"; toast(`${c.n}: values rebuilt from traits and homeland.`); renderCultures(); return; }
+});
+document.addEventListener("change", (e) => {
+  const el = e.target;
+  if (el.dataset && el.dataset.addc && el.value) { const c = CULTURES[+el.dataset.addc]; if (!c.v[el.dataset.role].includes(el.value)) c.v[el.dataset.role].push(el.value); c.src = "hand"; renderCultures(); }
+});
+document.addEventListener("input", (e) => {
+  const el = e.target; const g = byId[state.sel];
+  if (el.id === "reach") { g.reach = +el.value; renderCard(); renderList(); $("#reach").focus(); }
+  if (el.id === "tech") { g.tech = +el.value; renderCard(); $("#tech").focus(); }
+});
+document.addEventListener("keydown", (e) => { const r = e.target.closest && e.target.closest(".row"); if (r && (e.key === "Enter" || e.key === " ") && r.dataset.g) { e.preventDefault(); state.sel = r.dataset.g; renderList(); renderCard(); }
+  if (e.key === "Escape" && !$("#editor").hidden) closeEditor(); });
+document.addEventListener("pointerdown", (e) => {
+  if (e.target.id !== "map" || !state.pin) return; const cv = e.target, r = cv.getBoundingClientRect();
+  const x = Math.floor((e.clientX - r.left) / r.width * W), y = Math.floor((e.clientY - r.top) / r.height * H), i = y * W + x, g = byId[state.sel];
+  const marine = g.suit === "coldsea" || g.suit === "warmsea";
+  if (marine ? land[i] : !land[i]) { toast(marine ? "This good lives at sea. Pick a stretch of coastal water." : "Pick a spot on land."); return; }
+  if (!suits(g.suit, i)) toast("Set. Note: this spot suits it poorly, so the belt may stay small.");
+  g.home = { x, y }; state.pin = false; renderCard();
+});
+
+/* ───────────────────────── pixel editor ───────────────────────── */
+const ed = { g: null, px: new Array(576).fill(null), tool: "pen", color: "#c8ccd6", down: false };
+function spritePixels(name, color) {
+  const out = new Array(576).fill(null); try { const cv = GoodArt.goodSprite(name, color).cv, d = cv.getContext("2d").getImageData(0, 0, 24, 24).data;
+    for (let i = 0; i < 576; i++) if (d[i * 4 + 3] > 0) out[i] = "#" + [0, 1, 2].map(k => d[i * 4 + k].toString(16).padStart(2, "0")).join(""); } catch (e) {} return out;
+}
+function edDraw() {
+  const c = $("#edCanvas").getContext("2d"); c.clearRect(0, 0, 24, 24); ed.px.forEach((p, i) => { if (!p) return; c.fillStyle = p; c.fillRect(i % 24, (i / 24) | 0, 1, 1); });
+  const url = $("#edCanvas").toDataURL();
+  $("#edPrev").innerHTML = [24, 48, 96].map(s => `<div><span class="dark"><img class="ico" src="${url}" width="${s}" height="${s}" alt=""></span>${s}px on frame</div>`).join("") + `<div><span class="light"><img class="ico" src="${url}" width="48" height="48" alt=""></span>on ledger</div>`;
+}
+function edPalette() {
+  let ramp = []; try { ramp = GoodArt.ramp(ed.g.color.length === 7 ? ed.g.color : "#9a8a70"); } catch (e) {}
+  const extra = ["#2a170c","#7a4a24","#c89058","#3c7228","#8cc25a","#46505c","#b4c0cc","#c8961e","#fff0a8","#b0282c","#3462b8","#ffffff"];
+  const all = [...new Set([...ramp, ...extra])];
+  $("#edPal").innerHTML = all.map(c => `<button style="background:${c}" data-col="${c}" aria-pressed="${c === ed.color}" aria-label="Colour ${c}"></button>`).join("");
+}
+function openEditor(g) {
+  ed.g = g; ed.px = g.icon ? ed.px : spritePixels(g.sprite, g.color); ed.color = g.color.length === 7 ? g.color : "#9a8a70";
+  if (g.icon) { const im = new Image(); im.onload = () => { const c = document.createElement("canvas"); c.width = c.height = 24; const x = c.getContext("2d"); x.drawImage(im, 0, 0); const d = x.getImageData(0, 0, 24, 24).data; ed.px = ed.px.map((_, i) => d[i * 4 + 3] ? "#" + [0,1,2].map(k => d[i * 4 + k].toString(16).padStart(2, "0")).join("") : null); edDraw(); }; im.src = g.icon; }
+  $("#edTitle").textContent = "Icon for " + g.label; $("#edColor").value = ed.color; $("#edTint").value = ed.color;
+  $("#edStart").innerHTML = `<option value="">— keep current —</option>` + Object.keys(SPRITE_LABELS).map(k => `<option value="${k}">${esc(SPRITE_LABELS[k])}</option>`).join("");
+  edPalette(); edDraw(); $("#editor").hidden = false; $("#edCanvas").focus();
+}
+function closeEditor() { $("#editor").hidden = true; }
+function edAt(e) { const r = $("#edCanvas").getBoundingClientRect(); const x = Math.floor((e.clientX - r.left) / r.width * 24), y = Math.floor((e.clientY - r.top) / r.height * 24); return x >= 0 && x < 24 && y >= 0 && y < 24 ? y * 24 + x : -1; }
+function edApply(i) {
+  if (i < 0) return;
+  if (ed.tool === "pen") ed.px[i] = ed.color; else if (ed.tool === "erase") ed.px[i] = null;
+  else if (ed.tool === "pick") { if (ed.px[i]) { ed.color = ed.px[i]; $("#edColor").value = ed.color; setTool("pen"); edPalette(); } }
+  else if (ed.tool === "fill") { const from = ed.px[i], q = [i], seen = new Set([i]); while (q.length) { const j = q.pop(); ed.px[j] = ed.color; const x = j % 24, y = (j / 24) | 0;
+    for (const [dx, dy] of [[1,0],[-1,0],[0,1],[0,-1]]) { const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx > 23 || ny > 23) continue; const k = ny * 24 + nx; if (!seen.has(k) && ed.px[k] === from) { seen.add(k); q.push(k); } } } }
+  edDraw();
+}
+function setTool(t) { ed.tool = t; document.querySelectorAll("#edTools .chip").forEach(b => b.setAttribute("aria-pressed", b.dataset.t === t)); }
+$("#edTools").onclick = (e) => { const b = e.target.closest("[data-t]"); if (b) setTool(b.dataset.t); };
+$("#edPal").onclick = (e) => { const b = e.target.closest("[data-col]"); if (!b) return; ed.color = b.dataset.col; $("#edColor").value = ed.color; if (ed.tool === "erase" || ed.tool === "pick") setTool("pen"); edPalette(); };
+$("#edColor").oninput = (e) => { ed.color = e.target.value; edPalette(); };
+$("#edTint").oninput = (e) => { const name = $("#edStart").value || ed.g.sprite; ed.px = spritePixels(name, e.target.value); edDraw(); };
+$("#edStart").onchange = (e) => { if (!e.target.value) return; ed.px = spritePixels(e.target.value, $("#edTint").value); edDraw(); };
+const edc = $("#edCanvas");
+edc.addEventListener("pointerdown", (e) => { ed.down = true; edc.setPointerCapture(e.pointerId); edApply(edAt(e)); });
+edc.addEventListener("pointermove", (e) => { if (ed.down && (ed.tool === "pen" || ed.tool === "erase")) edApply(edAt(e)); });
+edc.addEventListener("pointerup", () => { ed.down = false; });
+edc.addEventListener("contextmenu", (e) => { e.preventDefault(); const i = edAt(e); if (i >= 0) { ed.px[i] = null; edDraw(); } });
+$("#edCancel").onclick = closeEditor;
+$("#editor").addEventListener("click", (e) => { if (e.target.id === "editor") closeEditor(); });
+$("#edSave").onclick = () => { ed.g.icon = $("#edCanvas").toDataURL(); closeEditor(); renderAll(); toast("Icon saved. It is used everywhere this good appears."); };
+$("#edUpload").onchange = (e) => {
+  const f = e.target.files && e.target.files[0]; if (!f) return;
+  const rd = new FileReader(); rd.onload = () => { const im = new Image(); im.onload = () => {
+    const c = document.createElement("canvas"); c.width = c.height = 24; const x = c.getContext("2d"); x.imageSmoothingQuality = "high";
+    const s = Math.min(24 / im.width, 24 / im.height), w = im.width * s, h = im.height * s; x.drawImage(im, (24 - w) / 2, (24 - h) / 2, w, h);
+    const d = x.getImageData(0, 0, 24, 24).data; const pts = []; for (let i = 0; i < 576; i++) if (d[i * 4 + 3] > 110) pts.push([d[i * 4], d[i * 4 + 1], d[i * 4 + 2], i]);
+    // reduce to 8 colours (k-means, 6 rounds)
+    let cents = []; for (let k = 0; k < Math.min(8, pts.length); k++) cents.push(pts[Math.floor(k * pts.length / 8)].slice(0, 3));
+    const assign = new Array(pts.length).fill(0);
+    for (let it = 0; it < 6; it++) { pts.forEach((p, n) => { let b = 0, bd = 1e9; cents.forEach((c, k) => { const dd = (p[0]-c[0])**2 + (p[1]-c[1])**2 + (p[2]-c[2])**2; if (dd < bd) { bd = dd; b = k; } }); assign[n] = b; });
+      cents = cents.map((c, k) => { const m = pts.filter((_, n) => assign[n] === k); if (!m.length) return c; return [0, 1, 2].map(j => m.reduce((a, p) => a + p[j], 0) / m.length); }); }
+    const hex = (c) => "#" + c.map(v => Math.round(v).toString(16).padStart(2, "0")).join("");
+    const px = new Array(576).fill(null); pts.forEach((p, n) => px[p[3]] = hex(cents[assign[n]]));
+    // house outline: each empty pixel next to a filled one takes a darkened copy of it
+    const out = px.slice(); for (let i = 0; i < 576; i++) { if (px[i]) continue; const xx = i % 24, yy = (i / 24) | 0;
+      const nb = [[0,1],[1,0],[0,-1],[-1,0]].map(([dx, dy]) => { const nx = xx + dx, ny = yy + dy; return nx >= 0 && ny >= 0 && nx < 24 && ny < 24 ? px[ny * 24 + nx] : null; }).find(Boolean);
+      if (nb) { const v = [1, 3, 5].map(j => parseInt(nb.slice(j, j + 2), 16) * 0.28 + 12 * 0.72); out[i] = hex(v); } }
+    ed.px = out; edDraw(); toast("Image converted to a 24 × 24 icon. Touch it up with the pencil."); }; im.src = rd.result; }; rd.readAsDataURL(f);
+};
+const SPRITE_LABELS = {};
+(function () { const names = (window.GoodArt && GoodArt.PIXEL_GOODS) || []; const lbl = { wheat:"Grain", iron:"Iron / Ore", gemstones:"Gemstones", wool_fleece:"Fleece Wool", wool_llama:"Highland Wool", oliveoil:"Olive Oil", bay_salt:"Bay Salt", tyrian_purple:"Tyrian Purple", dragons_blood:"Dragon's Blood", lapis_lazuli:"Lapis Lazuli", bog_iron:"Bog Iron", salted_herring:"Salted Herring", refined_sugar:"Refined Sugar", citrus_liqueur:"Citrus Liqueur", cotton_cloth:"Cotton Cloth", silk_brocade:"Silk Brocade", leather_goods:"Leather Goods", ivory_carvings:"Ivory Carvings" };
+  names.slice().sort().forEach(n => SPRITE_LABELS[n] = lbl[n] || n.charAt(0).toUpperCase() + n.slice(1).replace(/_/g, " ")); SPRITE_LABELS.__crate = "Plain crate (blank)"; })();
+
+applySkin(); applyUnits(); renderAll();
+</script>

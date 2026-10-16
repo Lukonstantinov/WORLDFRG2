@@ -725,3 +725,15 @@ not observed user behaviour.
    **and** image upload (downscaled/pixelised to the house style).
 4. **Mock-up order:** Goods Builder first, then the stage wizard + "Why?" inspector, then the
    layers panel.
+
+## 14. Mock-up 1: Goods Builder (2026-10-17)
+`docs/mockups/goods-builder.html` (also published as a private claude.ai artifact). It is
+interactive and self-contained, and it uses the app's real pixel goods art
+(`src/canvas/goodArt.ts`, bundled in). It has two style skins (Bronze & Ledger = current;
+Admiralty Chart = alternative) and a metric/imperial switch. It shows: presets + "My roster",
+essential-needs check by region, goods grouped by Role with families (members keep their own
+quality), the good card (six properties, homeland pin + reach slider on an example map, hidden
+deposits in author vs player view, mining-technology depth, value ladder, failure risk), the
+Culture values tab (auto vs set by hand), the World balance tab (regional gold:silver ratio,
+output and value shares, needs by region), and the icon editor (24×24 pixel editing, start
+from any icon, recolour, image upload → 8 colours + house outline). All numbers are example data.
