@@ -206,12 +206,17 @@ pub fn sim_invert_terrain(db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, Str
 /// Generate elevation from plate tectonics + sea depth.
 /// Phase 2: Terrain → elevation + bathymetry
 #[tauri::command]
-pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i32, i32)>, String> {
+pub fn sim_generate_terrain(
+    seed: u64,
+    mountain_density: Option<f32>,
+    mountain_height: Option<f32>,
+    db: State<'_, WorldDb>,
+) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
-    elevation::generate_elevation(&mut buf, seed);
+    elevation::generate_elevation_tuned(&mut buf, seed, mountain_density.unwrap_or(0.5), mountain_height.unwrap_or(0.5));
     elevation::compute_sea_depth(&mut buf);
     // Proper continental shelf (not just compute_sea_depth's thin ~1px ring) so
     // the Shelf layer is populated after the per-step elevation phase.
@@ -568,7 +573,7 @@ fn apply_elevation_model(
         // "plates" and anything unrecognised: the tectonic model where it can be
         // used, the shape model where it cannot. An unknown string must never
         // leave a world with no elevation at all.
-        _ if allow_plates => elevation::generate_elevation(buf, seed),
+        _ if allow_plates => elevation::generate_elevation_tuned(buf, seed, density, height),
         _ => elevation::generate_elevation_from_terrain(buf, seed, density, height, spread, roughness),
     }
 }

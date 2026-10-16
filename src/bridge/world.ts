@@ -192,8 +192,8 @@ export async function simSetPlateOceanic(plateId: number, isOceanic: boolean): P
   return invoke("sim_set_plate_oceanic", { plateId, isOceanic });
 }
 
-export async function simGenerateTerrain(seed: number): Promise<[number, number][]> {
-  return invoke("sim_generate_terrain", { seed });
+export async function simGenerateTerrain(seed: number, mountainDensity?: number, mountainHeight?: number): Promise<[number, number][]> {
+  return invoke("sim_generate_terrain", { seed, mountainDensity, mountainHeight });
 }
 
 export async function simOceanAtmosphere(): Promise<[number, number][]> {

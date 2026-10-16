@@ -431,6 +431,13 @@ fn isostatic_adjust(
 /// exponential bump from every convergent cell, which left ranges that didn't
 /// track the boundaries and interiors that read flat.
 pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
+    generate_elevation_tuned(buf, seed, 0.5, 0.5);
+}
+
+/// The tectonic model with the Elevation step's Height and Density sliders
+/// (0..1, 0.5 = the old fixed defaults, so `generate_elevation` is unchanged).
+pub fn generate_elevation_tuned(buf: &mut WorldBuffer, seed: u64, density: f32, height: f32) {
+    let (density, height) = (density.clamp(0.0, 1.0), height.clamp(0.0, 1.0));
     let w = buf.width;
     let h = buf.height;
     let n = buf.total();
@@ -733,10 +740,6 @@ pub fn generate_elevation(buf: &mut WorldBuffer, seed: u64) {
         for i in 0..n {
             if terrain[i] == 1 { elevation[i] /= max_h; }
         }
-        // Moderate defaults for the plate path (the per-step sliders belong to the
-        // template models); density biased by how much of the world is orogenic.
-        let height = 0.5f32;
-        let density = 0.5f32;
         for i in 0..n {
             if terrain[i] == 1 { elevation[i] = elevation[i].powf(2.0 - height); }
         }

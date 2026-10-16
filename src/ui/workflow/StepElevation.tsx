@@ -173,9 +173,9 @@ export function StepElevation({ seed, invalidateTiles }: Props) {
     setStatus(`Generating ${modeInfo.label.toLowerCase()} elevation…`);
     try {
       const args = [useSeed, mountainDensity, mountainHeight, mountainSpread, noiseRoughness] as const;
-      // The tectonic model derives its relief from the plate map rather than from
-      // the four sliders, so it takes the seed alone.
-      if (mode === "plates") await simGenerateTerrain(useSeed);
+      // The tectonic model places relief from the plate map; Height and Density
+      // shape its height distribution (Spread/Roughness arrive with the noise rework).
+      if (mode === "plates") await simGenerateTerrain(useSeed, mountainDensity, mountainHeight);
       else if (mode === "ridged") await simGenerateTerrainRidged(...args);
       else if (mode === "cordillera") await simGenerateTerrainCordillera(...args);
       else if (mode === "rift") await simGenerateTerrainRift(...args);
