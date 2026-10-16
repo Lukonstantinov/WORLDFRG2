@@ -29,11 +29,16 @@ export function StepPolitical(_props: Props) {
   const [centers, setCenters] = useState<PoliticalCenter[]>([]);
 
   const step8Done = stepCompleted[8] === true;
+  const step7Done = stepCompleted[7] === true;
 
   const handleCompute = async () => {
     if (simRunning) return;
     if (!step8Done) {
-      setStatus("Step 8 required: generate Goods & Trade (step 8) first (trade power needs goods + routes)");
+      setStatus("Resources first: generate the goods (trade power needs goods + routes)");
+      return;
+    }
+    if (!step7Done) {
+      setStatus("Place the settlements first (trade power ranks cities)");
       return;
     }
     setSimRunning(true);
@@ -59,7 +64,10 @@ export function StepPolitical(_props: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {!step8Done && (
-        <div style={warn}>Complete Step 8 first (trade power is built from goods, routes & monopolies)</div>
+        <div style={warn}>Generate the goods in Resources first (trade power is built from goods, routes &amp; monopolies)</div>
+      )}
+      {step8Done && !step7Done && (
+        <div style={warn}>Place the settlements first (trade power ranks cities)</div>
       )}
 
       <TradeSettings />

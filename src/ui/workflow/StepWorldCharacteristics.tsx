@@ -46,7 +46,13 @@ import { genBtn } from "@ui/workflow/WorkflowPanel";
  *    behind a button, and it answers the question the strip cannot: where the
  *    deserts actually land, and what share of THIS world each climate takes.
  */
-export function StepWorldCharacteristics() {
+/** `part` splits this panel across the stage wizard (GENERATOR_AND_GOODS_REDESIGN.md §8):
+ *  "frame" = where the equator sits (World & Land, judged against your land);
+ *  "planet" = the physics knobs (Climate, next to the Generate they feed);
+ *  "all" = both, as before. */
+export function StepWorldCharacteristics({ part = "all" }: { part?: "all" | "frame" | "planet" } = {}) {
+  const showPlanet = part !== "frame";
+  const showFrame = part !== "planet";
   const meta = useWorldStore((s) => s.meta);
   const setMeta = useWorldStore((s) => s.setMeta);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
@@ -194,6 +200,14 @@ export function StepWorldCharacteristics() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {part === "frame" && (
+        <div style={{ color: "#7a6d56", fontSize: 10.5, lineHeight: 1.4, marginBottom: 2 }}>
+          Decide where the equator and the poles fall across your land. Drag <b>Equator</b> and
+          the latitude lines appear on the map. Planet physics (tilt, rotation, sunlight) is set
+          in the <b>Climate</b> stage, right before it is used.
+        </div>
+      )}
+      {showPlanet && <>
       <div style={{ color: "#7a6d56", fontSize: 10.5, lineHeight: 1.4, marginBottom: 2 }}>
         Your land is on the map — now decide the world it sits in. Everything that
         governs where climate belts, deserts and seasons fall lives here, and all
@@ -301,6 +315,7 @@ export function StepWorldCharacteristics() {
           );
         })()}
 
+        {part === "all" && <>
         <div style={{ color: "#695a41", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.6,
           marginTop: 8, marginBottom: 3 }}>
           Map frame
@@ -321,6 +336,7 @@ export function StepWorldCharacteristics() {
             </button>
           ))}
         </div>
+        </>}
       </Section>
 
       {/* ── 🪐 Planet ── */}
@@ -418,12 +434,31 @@ export function StepWorldCharacteristics() {
         />
       </Section>
 
+      </>}
+
       {/* ── 🧭 Latitude Frame (moved here from the right-side Toolbar) ── */}
+      {showFrame && (
       <Section title="🧭 Latitude Frame" open={open.Latitude} onToggle={() => toggle("Latitude")}>
         <LatitudeFrame />
+        {part === "frame" && (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 3, marginTop: 6 }}>
+            {FRAME_PRESETS.map((f) => (
+              <button key={f.id} title={f.blurb}
+                onClick={() => applyFrame(f.equatorOffset, f.latScale)}
+                style={{
+                  padding: "3px 5px", borderRadius: 3, cursor: "pointer", fontSize: 9,
+                  border: "1px solid #3e3422", background: "#18140e", color: "#a5916f",
+                }}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
       </Section>
+      )}
 
       {/* ── Climate mix: the real chain on the real landmass ── */}
+      {showPlanet && (
       <div style={{ background: "#16120c", border: "1px solid #223c30", borderRadius: 4, padding: 6 }}>
         <div style={{ color: "#6ab08a", fontSize: 10, fontWeight: 600, marginBottom: 3 }}>
           🗺 Climate mix on your land
@@ -447,6 +482,7 @@ export function StepWorldCharacteristics() {
           </div>
         )}
       </div>
+      )}
 
       <button disabled style={{ ...genBtn, opacity: 0.5, cursor: "default", textAlign: "center" }}>
         Settings saved automatically

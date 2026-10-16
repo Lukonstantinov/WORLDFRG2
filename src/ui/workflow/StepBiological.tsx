@@ -39,7 +39,6 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const [reportOpen, setReportOpen] = useState(false);
 
   const step6Done = stepCompleted[6] === true;
-  const step7Done = stepCompleted[7] === true;
   const step8Done = stepCompleted[8] === true;
 
   // The actual generation, run only after the user confirms in the Chain Review.
@@ -79,11 +78,7 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const handleGenerate = async () => {
     if (simRunning) return;
     if (!step6Done) {
-      setStatus("Step 6 required: compute Soil & Fertility first (fisheries drive the fish goods)");
-      return;
-    }
-    if (!step7Done) {
-      setStatus("Step 7 required: place Settlements first (the trade matrix groups them into regions)");
+      setStatus("Water & Life first: compute soils & fertility (fisheries drive the fish goods)");
       return;
     }
     if (goodsSpecs.length === 0) await loadGoodsFromWorld();
@@ -98,10 +93,7 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
       {!step6Done && (
-        <div style={warn}>Complete Step 6 first (fisheries feed the fish-good belts)</div>
-      )}
-      {step6Done && !step7Done && (
-        <div style={warn}>Complete Step 7 first (the trade matrix needs settlements)</div>
+        <div style={warn}>Compute soils &amp; fertility in Water &amp; Life first (fisheries feed the fish-good belts)</div>
       )}
 
       {/* Generation parameters */}
@@ -126,7 +118,7 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
         How tightly each good hugs its ideal climate (tight = smaller, more clustered belts).
       </div>
 
-      <button onClick={handleGenerate} disabled={simRunning || !step6Done || !step7Done} style={{ ...genBtn, marginTop: 2 }}>
+      <button onClick={handleGenerate} disabled={simRunning || !step6Done} style={{ ...genBtn, marginTop: 2 }}>
         Generate Goods &amp; Hazards
       </button>
 

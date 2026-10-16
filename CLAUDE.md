@@ -388,6 +388,15 @@ Run in order. Each phase depends on previous phases' data.
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
 | All | `sim_run_all` | Phases 1-8 from plates |
+
+**Stage order (2026-10-17, `docs/GENERATOR_AND_GOODS_REDESIGN.md` §8):** Goods (8) run
+BEFORE Settlements (7), in both run-alls and the wizard: fever risk → culture map →
+habitability (written) → goods → settlements → provinces. Settlement placement reads
+nothing the goods phase writes, so this reorder changed no generated world; it is
+what lets cities be founded where resources are. `sim_biological` prepares fever,
+culture and habitability itself (`prepare_people_layer`, shared with
+`sim_generate_settlements`), so Goods no longer needs Settlements. Step IDs are NOT
+renumbered; `uiStore.PIPELINE` holds the run order for the staleness chip.
 | All | `sim_run_all_from_terrain` | Phases 2alt-8 keeping existing landmass |
 
 **EIGHT elevation MODELS, one selector.** `sim_commands::apply_elevation_model` is
@@ -3601,7 +3610,12 @@ ui/heraldry/  — heraldry
   CoinIcon.tsx                  ← Heraldic minted coin (coat of arms on gold disc + value tint)
 
 ui/workflow/
-  WorkflowPanel.tsx             ← Generation wizard + "Run All" buttons
+  WorkflowPanel.tsx             ← Generation wizard: SIX STAGES + Report (`STAGES` —
+                                  World & Land · Relief · Climate · Water & Life ·
+                                  Resources · People · Report), each with Uses/Makes,
+                                  part tabs and a re-run chip, over the old step ids.
+                                  StepWorldCharacteristics renders split by `part`
+                                  ("frame" in World & Land, "planet" in Climate)
   StepWorldCharacteristics.tsx  ← Step 0: THE single home for every generation
                                   setting, in collapsible groups — 🪐 Planet
                                   (rotation/retrograde · sunlight · greenhouse ·

@@ -21,34 +21,61 @@ import { StepEconomy } from "@ui/workflow/StepEconomy";
 import { StepToponyms } from "@ui/workflow/StepToponyms";
 import { StepWorldCharacteristics } from "@ui/workflow/StepWorldCharacteristics";
 
-const STEP_INFO = [
-  { step: 1, label: "Landmass", desc: "Paint your landmasses, load an image template, or generate from plates." },
-  // World Characteristics sits AFTER Landmass on purpose. Every one of these
-  // knobs is a decision you make ABOUT a map you can already see — where the
-  // equator falls across your continents, how far the bands stretch, how hard
-  // the seasons bite. Asking for them on an empty canvas meant guessing. They
-  // are still upstream of everything that consumes them: elevation ignores them
-  // entirely, and their first reader is Ocean & Atmosphere (3).
-  // Settings-only — nothing to "generate", so it auto-completes (see
-  // StepWorldCharacteristics) and never blocks Continue.
-  { step: 0, label: "World Characteristics", desc: "Now that you can see your land: frame the latitudes (equator, band expansion, line proportion) and set the planet — rotation (incl. retrograde), axial tilt, sunlight, greenhouse, eccentricity, dryness. These decide where the wind belts, deserts and seasons land, so set them before Ocean & Atmosphere." },
-  { step: 2, label: "Elevation", desc: "Generate terrain height. Mountains, coastlines, sea depth." },
-  { step: 3, label: "Ocean & Atmosphere", desc: "Wind belts, ocean currents, temperature, and precipitation." },
-  { step: 4, label: "Biomes & Climate", desc: "Classify K\u00F6ppen climate zones from temperature & precipitation." },
-  { step: 5, label: "Rivers & Lakes", desc: "Trace rivers downhill and detect lake basins." },
-  { step: 6, label: "Soil & Resources", desc: "Soil types, fertility scores, and fishery zones." },
-  { step: 7, label: "Settlements", desc: "Find optimal locations for cities, towns, and villages." },
-  // Toponyms sits right after Settlements: once cities exist the culture map is
-  // active, so rivers/mountains/lakes/regions can be named in local style. It is
-  // OPTIONAL and off the linear Continue chain (reached by clicking).
-  { step: 12, label: "Toponyms (optional)", desc: "Name rivers, mountains, lakes and regions in the local culture's style. Editable — rename any feature. Needs Rivers (5) + Settlements (7)." },
-  { step: 8, label: "Goods & Trade", desc: "Trade-good belts and ore deposits, storm & reef hazards, trade routes and the regional trade matrix." },
-  { step: 9, label: "Political", desc: "Set trade reach, piracy and regions, then Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
-  { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
-  // Step 11 (Living Trade / the campaign tick) is no longer part of the Forge
-  // wizard — it lives in Chronicle mode (ChroniclePanel). Forge owns generation
-  // only; finalizing after Economy hands off to Chronicle.
-] as const;
+/** GENERATOR_AND_GOODS_REDESIGN.md §8 — six stages + a report, grouped over the
+ *  OLD step ids (kept so saved progress, staleness and every step's own checks
+ *  are untouched). A stage lists its parts; `step` is the id the part completes
+ *  and selects (layer/tool defaults); `need` marks parts the stage needs before
+ *  Continue. Step 0 (planet settings) is split: the map frame belongs with the
+ *  land you judge it against, the physics with the climate it drives. Goods (8)
+ *  now come BEFORE Settlements (7), so cities can be founded where resources are.
+ *  Step 11 (the campaign tick) lives in Chronicle mode, not here. */
+type StagePart = { key: string; step: number; label: string; need: boolean; desc: string };
+const STAGES: { id: string; label: string; uses: string; makes: string; parts: StagePart[] }[] = [
+  { id: "land", label: "World & Land",
+    uses: "your painting, an image, or tectonic plates",
+    makes: "land and sea, plates, where the equator sits",
+    parts: [
+      { key: "land", step: 1, label: "Land", need: true, desc: "Paint your landmasses, load an image template, or generate them from plates." },
+      { key: "frame", step: 0, label: "Map frame", need: false, desc: "Place the equator and poles across your land." },
+    ] },
+  { id: "relief", label: "Relief",
+    uses: "land and plates",
+    makes: "heights, mountain ranges, coasts, sea depth, shelves",
+    parts: [{ key: "elev", step: 2, label: "Elevation", need: true, desc: "Generate terrain height: mountains, coastlines, sea depth." }] },
+  { id: "climate", label: "Climate",
+    uses: "relief and the planet settings",
+    makes: "winds, currents, temperature, rain, seasons, climate zones",
+    parts: [
+      { key: "planet", step: 0, label: "Planet", need: false, desc: "Tilt, rotation, sunlight, greenhouse, dryness. All default to Earth." },
+      { key: "air", step: 3, label: "Winds, sea & rain", need: true, desc: "Wind belts, ocean currents, temperature and rainfall." },
+      { key: "zones", step: 4, label: "Climate zones", need: true, desc: "Sort every place into a Köppen climate zone from its temperature and rain." },
+    ] },
+  { id: "water", label: "Water & Life",
+    uses: "relief and climate",
+    makes: "rivers, lakes, soils, fertility, fisheries, biomes",
+    parts: [
+      { key: "rivers", step: 5, label: "Rivers & lakes", need: true, desc: "Trace rivers downhill and find lake basins." },
+      { key: "soil", step: 6, label: "Soils & biomes", need: true, desc: "Soil types, farmland quality, fisheries and the living biomes." },
+    ] },
+  { id: "resources", label: "Resources",
+    uses: "climate, soils, biomes and plates",
+    makes: "where each good grows, ore deposits, sea hazards",
+    parts: [{ key: "goods", step: 8, label: "Goods", need: true, desc: "Place trade goods and ore deposits. This runs before the cities, so towns can grow where the resources are." }] },
+  { id: "people", label: "People",
+    uses: "everything above",
+    makes: "cultures, cities, provinces, place names, trade powers",
+    parts: [
+      { key: "towns", step: 7, label: "Settlements", need: true, desc: "Found cities, towns and villages where people can live, and divide the land into provinces." },
+      { key: "names", step: 12, label: "Place names", need: false, desc: "Name rivers, mountains, lakes and regions in the local culture's style. Optional, and every name can be edited." },
+      { key: "powers", step: 9, label: "Trade powers", need: true, desc: "Set trade reach and piracy, then rank cities by their trade position." },
+    ] },
+  { id: "report", label: "Report",
+    uses: "cities, goods and routes",
+    makes: "prices, trade flows and chokepoints; the world is ready to play",
+    parts: [{ key: "economy", step: 10, label: "Trade report", need: true, desc: "Solve the market: local prices, who trades what with whom, and the chokepoints." }] },
+];
+/** The stage that holds a step (step 0 resolves to its first home, World & Land). */
+const stageOfStep = (step: number) => Math.max(0, STAGES.findIndex((s) => s.parts.some((p) => p.step === step)));
 
 export function WorkflowPanel() {
   const workflowStep = useUIStore((s) => s.workflowStep);
@@ -137,12 +164,6 @@ export function WorkflowPanel() {
   const frozen = meta?.frozen === true;
   const canAdvance = (step: number) => stepCompleted[step] === true;
 
-  // The steps present in the Forge wizard, in order (11 removed → 10 then optional
-  // 12). Navigation walks this list so the 10→12 gap is skipped cleanly.
-  // Linear Continue/Back chain: the mandatory generation steps in order. Toponyms
-  // (12) is optional and OFF this chain — it's displayed after Settlements but
-  // reached by clicking, so Continue at Settlements goes straight to Biological.
-  const stepOrder: number[] = STEP_INFO.map((s) => s.step).filter((s) => s !== 12);
 
   // Chain the two query-only layers (Political → Economy) the same way their step
   // UIs do, so "Generate Full World" leaves a fully-generated, finalize-ready world.
@@ -218,17 +239,28 @@ export function WorkflowPanel() {
     }
   };
 
-  const goNext = () => {
-    const i = stepOrder.indexOf(workflowStep);
-    if (i >= 0 && i < stepOrder.length - 1) setWorkflowStep(stepOrder[i + 1] as any);
+  // ── Stage navigation (GENERATOR_AND_GOODS_REDESIGN.md §8) ──
+  // Which part of the open stage is showing. Step 0 lives in TWO stages (map frame
+  // and planet), so the part key, not the step id, says which stage is open; it is
+  // ignored once something else (a run-all, a click elsewhere) moves the step.
+  const [partKey, setPartKey] = useState<string | null>(null);
+  const keyStage = partKey
+    ? STAGES.findIndex((s) => s.parts.some((p) => p.key === partKey && p.step === workflowStep))
+    : -1;
+  const activeStage = keyStage >= 0 ? keyStage : stageOfStep(workflowStep);
+  const stageDone = (i: number) => STAGES[i].parts.every((p) => !p.need || stepCompleted[p.step] === true);
+  const stageStale = (i: number) => STAGES[i].parts.some((p) => stepCompleted[p.step] && staleSteps[p.step]);
+  // Geography (stages 1-4 = steps 0-6) locks once the world is finalized.
+  const stageLocked = (i: number) => frozen && STAGES[i].parts.every((p) => p.step <= 6);
+  const openPart = (p: StagePart) => { setPartKey(p.key); setWorkflowStep(p.step as any); };
+  /** Open a stage on the first part it still needs, else its first part. */
+  const openStage = (i: number) => {
+    const st = STAGES[i];
+    if (!st) return;
+    openPart(st.parts.find((p) => p.need && stepCompleted[p.step] !== true) ?? st.parts.find((p) => p.need) ?? st.parts[0]);
   };
-
-  const goBack = () => {
-    // Toponyms (12) is off the linear chain; its Back returns to Settlements.
-    if (workflowStep === 12) { setWorkflowStep(7 as any); return; }
-    const i = stepOrder.indexOf(workflowStep);
-    if (i > 0) setWorkflowStep(stepOrder[i - 1] as any);
-  };
+  const goNext = () => openStage(activeStage + 1);
+  const goBack = () => openStage(activeStage - 1);
 
   /// Both run-alls generate provinces on the Rust side
   /// (`generate_and_persist_provinces`, called from `sim_run_all` and
@@ -451,103 +483,111 @@ export function WorkflowPanel() {
         </div>
       )}
 
-      {/* Steps \u2014 Geography group (1, 0, 2-6) then Detail group (7-10):
-          settlements, trade goods, political & economy. ALL are generation and run
-          in Forge; finalizing after Economy hands the finished world to Chronicle.
-          NOTE the display order: Landmass (1) comes first, then the settings-only
-          World Characteristics (0), then Elevation (2). Step 0 renders a \u2699\ufe0f
-          rather than a number precisely so it can sit out of numeric order without
-          reading as a mistake \u2014 and so its id (and everyone's persisted
-          stepCompleted map) never had to be renumbered. */}
-      {wizardMode === "detailed" && STEP_INFO.map(({ step, label, desc }) => {
-        const isActive = workflowStep === step;
-        const isDone = stepCompleted[step] === true;
-        // Only geography steps (1-6) lock once the world is finalized (frozen);
-        // every generation step is otherwise available in Forge.
-        const locked = step <= 6 && frozen;
-
+      {/* The stage wizard: six stages and a report, each showing what it USES
+          and what it MAKES, its parts as tabs, and a re-run chip when an earlier
+          stage changed. Old step ids underneath, so nothing saved is renumbered. */}
+      {wizardMode === "detailed" && STAGES.map((stage, i) => {
+        const isActive = activeStage === i;
+        const isDone = stageDone(i);
+        const locked = stageLocked(i);
+        const current = stage.parts.find((p) => p.key === partKey && p.step === workflowStep)
+          ?? stage.parts.find((p) => p.step === workflowStep) ?? stage.parts[0];
+        const isReport = stage.id === "report";
         return (
-          <div key={step}>
-          {step === 7 && (
-            <div style={{ borderTop: "1px solid #3b311f", margin: "6px 0 4px", paddingTop: 6 }}>
-              <div style={{ color: "#a58855", fontWeight: 700, fontSize: 12, marginBottom: 3 }}>
-                Settlements, Trade &amp; Economy
-              </div>
-              <div style={{ color: "#7a6d56", fontSize: 10, marginBottom: 4 }}>
-                People, goods and the market \u2014 all generated here in Forge. Finalize
-                after Economy to lock the map and play the campaign in Chronicle.
-              </div>
-            </div>
-          )}
+          <div key={stage.id}>
           <div style={{
             border: isActive ? "1px solid #4e4028" : "1px solid transparent",
             borderRadius: 5, background: isActive ? "#211b11" : "transparent",
             padding: isActive ? "6px" : "4px 6px",
             opacity: locked ? 0.45 : 1,
           }}>
-            {/* Step header */}
             <div onClick={() => {
                 if (simRunning) return;
-                if (locked) { setStatus("World is finalized — unfreeze to edit geography (steps 1-6)."); return; }
-                setWorkflowStep(step as any);
+                if (locked) { setStatus("World is finalized: its geography can no longer be changed."); return; }
+                openStage(i);
               }}
+              role="button" tabIndex={0}
+              onKeyDown={(e) => { if ((e.key === "Enter" || e.key === " ") && !simRunning && !locked) openStage(i); }}
               style={{
-                cursor: locked ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 4,
+                cursor: locked ? "not-allowed" : "pointer", display: "flex", alignItems: "center", gap: 5,
                 color: isActive ? "#c0d8f0" : isDone ? "#60a060" : "#8a7d66",
                 fontWeight: isActive ? 600 : 400, fontSize: 12,
               }}>
-              <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : locked ? "\ud83d\udd12" : step === 0 ? "\u2699\ufe0f" : `${step}.`}</span>
-              <span>{label}</span>
-              {isDone && staleSteps[step] && (
-                <span title="An earlier step changed since this ran. Re-run it to update (you can still continue)."
+              <span style={{ minWidth: 16 }}>{isDone ? "✓" : locked ? "🔒" : isReport ? "R" : `${i + 1}.`}</span>
+              <span>{stage.label}</span>
+              {isDone && stageStale(i) && (
+                <span title="An earlier stage changed since this ran. Re-run it to update (you can still continue)."
                   style={{ marginLeft: "auto", fontSize: 9, padding: "0 5px", borderRadius: 3,
                     color: "#1a1206", background: "#d9a441", fontWeight: 600 }}>{"↻"} re-run</span>
               )}
             </div>
 
-            {/* Expanded content */}
             {isActive && (
               <div style={{ marginTop: 6 }}>
-                <div style={{ color: "#7a6d56", fontSize: 11, marginBottom: 6 }}>{desc}</div>
+                <div style={{ fontSize: 10, color: "#8a7d66", lineHeight: 1.45, marginBottom: 6 }}>
+                  <div><b style={{ color: "#b5a27c" }}>Uses:</b> {stage.uses}</div>
+                  <div><b style={{ color: "#b5a27c" }}>Makes:</b> {stage.makes}</div>
+                </div>
+                {stage.parts.length > 1 && (
+                  <div role="tablist" style={{ display: "flex", flexWrap: "wrap", gap: 3, marginBottom: 6 }}>
+                    {stage.parts.map((p) => {
+                      const on = p.key === current.key;
+                      const done = stepCompleted[p.step] === true && p.step !== 0;
+                      return (
+                        <button key={p.key} role="tab" aria-selected={on} disabled={simRunning}
+                          onClick={() => openPart(p)}
+                          style={{
+                            fontSize: 10, padding: "2px 7px", borderRadius: 999, cursor: "pointer",
+                            border: `1px solid ${on ? "#c09b5a" : "#483d2b"}`,
+                            background: on ? "#3f3421" : "transparent",
+                            color: on ? "#f0dcaa" : done ? "#7fb07f" : "#a28f6e",
+                          }}>
+                          {done ? "✓ " : ""}{p.label}{p.need ? "" : " (optional)"}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <div style={{ color: "#7a6d56", fontSize: 11, marginBottom: 6 }}>{current.desc}</div>
 
-                {step === 0 && <StepWorldCharacteristics />}
-                {step === 1 && <StepLandmass {...stepProps} />}
-                {step === 2 && <StepElevation {...stepProps} />}
-                {step === 3 && <StepOceanAtmo {...stepProps} />}
-                {step === 4 && <StepClimate {...stepProps} />}
-                {step === 5 && <StepRivers {...stepProps} />}
-                {step === 6 && <StepSoilResources {...stepProps} />}
-                {step === 7 && <StepSettlements {...stepProps} />}
-                {step === 8 && <StepBiological {...stepProps} />}
-                {step === 9 && <StepPolitical {...stepProps} />}
-                {step === 12 && <StepToponyms />}
-                {step === 10 && <StepEconomy {...stepProps} />}
+                {current.key === "land" && <StepLandmass {...stepProps} />}
+                {current.key === "frame" && <StepWorldCharacteristics part="frame" />}
+                {current.key === "elev" && <StepElevation {...stepProps} />}
+                {current.key === "planet" && <StepWorldCharacteristics part="planet" />}
+                {current.key === "air" && <StepOceanAtmo {...stepProps} />}
+                {current.key === "zones" && <StepClimate {...stepProps} />}
+                {current.key === "rivers" && <StepRivers {...stepProps} />}
+                {current.key === "soil" && <StepSoilResources {...stepProps} />}
+                {current.key === "goods" && <StepBiological {...stepProps} />}
+                {current.key === "towns" && <StepSettlements {...stepProps} />}
+                {current.key === "names" && <StepToponyms />}
+                {current.key === "powers" && <StepPolitical {...stepProps} />}
+                {current.key === "economy" && <StepEconomy {...stepProps} />}
 
-                {/* Navigation. Economy (10) and the optional Toponyms (12) are the
-                    terminal generation steps \u2014 there the CTA is Finalize & Play
-                    (needs the economy built), which locks the world and enters
-                    Chronicle. Every other step just continues. */}
+                {/* Continue moves to the next stage once this one has everything it
+                    needs; the Report ends in Finalize & Play. */}
                 <div style={{ display: "flex", gap: 4, marginTop: 6 }}>
-                  {step !== stepOrder[0] && (
+                  {i > 0 && (
                     <button onClick={goBack} disabled={simRunning} style={navBtn}>
-                      \u2190 Back
+                      {"←"} Back
                     </button>
                   )}
                   <div style={{ flex: 1 }} />
-                  {step !== 10 && step !== 12 ? (
-                    <button onClick={goNext} disabled={!canAdvance(step) || simRunning}
-                      style={{ ...navBtn, background: canAdvance(step) ? "#705c3a" : "#3b311f",
-                        color: canAdvance(step) ? "#fff" : "#5c5344" }}>
-                      Continue \u2192
+                  {!isReport ? (
+                    <button onClick={goNext} disabled={!isDone || simRunning}
+                      title={isDone ? undefined : "Finish the required parts of this stage first"}
+                      style={{ ...navBtn, background: isDone ? "#705c3a" : "#3b311f",
+                        color: isDone ? "#fff" : "#5c5344" }}>
+                      Continue {"→"}
                     </button>
                   ) : (
                     <button onClick={finalizeAndPlay} disabled={simRunning || !canAdvance(10)}
                       title={canAdvance(10)
                         ? "Lock & save the finished world, then play the campaign in Chronicle"
-                        : "Build the Economy (step 10) first"}
+                        : "Build the trade report first"}
                       style={{ ...navBtn, background: canAdvance(10) ? "#2a6a3a" : "#3b311f",
                         color: canAdvance(10) ? "#a0e0b0" : "#5c5344", fontWeight: 600 }}>
-                      \ud83d\udd12 Finalize &amp; Play \u2192
+                      {"🔒"} Finalize &amp; Play {"→"}
                     </button>
                   )}
                 </div>

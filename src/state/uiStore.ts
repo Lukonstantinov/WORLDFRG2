@@ -19,13 +19,17 @@ function persistProgress(stepCompleted: Record<number, boolean>) {
 import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine, LassoPolygon } from "@types";
 
 /** Steps that read what step `n` produces, in pipeline order (step 0 = planet
- *  settings, first read by Ocean & Atmosphere). Toponyms (12) reads rivers (5)
- *  and settlements (7); Political/Economy (9/10) are queries over step 8. */
-const PIPELINE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+ *  settings, first read by Ocean & Atmosphere). Step ids keep their old numbers,
+ *  but Goods (8) now runs BEFORE Settlements (7) (GENERATOR_AND_GOODS_REDESIGN.md
+ *  §8: cities are founded where resources are). Toponyms (12) reads rivers (5)
+ *  and settlements (7); Political/Economy (9/10) are queries over both. */
+export const PIPELINE = [1, 2, 3, 4, 5, 6, 8, 7, 9, 10];
 export function downstreamSteps(n: number): number[] {
   if (n === 12) return [];
-  const from = n === 0 ? 3 : n + 1;
-  return [...PIPELINE.filter((s) => s >= from), ...(n <= 7 ? [12] : [])];
+  const at = PIPELINE.indexOf(n === 0 ? 3 : n);
+  if (at < 0) return [];
+  const after = PIPELINE.slice(n === 0 ? at : at + 1);
+  return [...after, ...(at <= PIPELINE.indexOf(7) ? [12] : [])];
 }
 import { GOOD_DEFS, goodOverlayKey } from "@goods";
 

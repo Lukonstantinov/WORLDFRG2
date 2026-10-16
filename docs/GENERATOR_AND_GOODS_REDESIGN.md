@@ -774,3 +774,22 @@ Atmosphere has run. It also now shows the exact latitude (the backend applies th
 ratio; the old frontend estimate ignored it). Gates: `cargo test --lib explain_tests` 1/1,
 `cargo check --lib` clean, `tsc` clean, `check_types` 0 drift. Still owed: a per-city
 "why here" breakdown (W2), which needs the settlement scoring terms stored.
+
+**Slice S1: six stages (2026-10-17, done).**
+- The wizard (`WorkflowPanel.tsx`) now shows **World & Land · Relief · Climate · Water & Life ·
+  Resources · People · Report**, each with a Uses/Makes line, its parts as tabs (optional
+  parts marked), a re-run chip, and Continue enabled once the stage's required parts are done.
+  Step ids are unchanged underneath, so saved progress and every step's checks still work.
+- World Characteristics is split: **Map frame** (equator, poles, frame presets) in World & Land;
+  **Planet** (archetypes, rotation, sunlight, greenhouse, eccentricity, tilt, calendar, dryness,
+  climate-mix preview) in Climate, next to the Generate it feeds.
+- **Goods now run before Settlements** in the wizard and in both run-alls. `sim_biological`
+  prepares fever risk, the culture map and habitability itself (`prepare_people_layer`), so
+  Goods only needs Water & Life. Placement reads nothing goods write, so no generated world
+  changed. Political (trade powers) now also requires Settlements.
+- Staleness follows the new order (`uiStore.PIPELINE = [1,2,3,4,5,6,8,7,9,10]`).
+- Gates: tsc clean · `cargo check --lib --tests` clean · `goods_` 18/18 · `settlements` 6/6 ·
+  `world_buffer` 3/3. Not run in the GUI.
+- **Next in this track:** S1c resource towns (People reads deposits/goods and founds mining,
+  salt and pearl towns), then removal of Trade Hubs / Hub Names / Trade Regions with the
+  Political step's replacement by starting realms (§12 decision 8: borders at year 0).

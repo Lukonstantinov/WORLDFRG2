@@ -444,10 +444,17 @@ pub fn sim_biological(
 ) -> Result<Vec<(i32, i32)>, String> {
     db.clear_caches(); // drop the (soon-stale) decompressed snapshot before allocating world buffers
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOLOGICAL)?;
+    // Settlement columns too: Goods now runs BEFORE Settlements (stage order,
+    // GENERATOR_AND_GOODS_REDESIGN.md §8) and reads habitability + the culture map.
+    let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOLOGICAL | ColumnSet::PHASE_SETTLEMENTS)?;
 
     let river_data: Vec<rivers::River> = serde_json::from_str(&rivers_json)
         .unwrap_or_default();
+
+    let hydro = rivers::compute_hydrology(&buf);
+    let lakes = load_lakes(&conn, &buf, &hydro.filled);
+    let hab = prepare_people_layer(&conn, &mut buf, &river_data, &lakes, &hydro.acc, seed)?;
+    settlements::write_habitability(&mut buf, &hab.hab);
 
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_storm_base(&mut buf);
@@ -460,9 +467,8 @@ pub fn sim_biological(
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
 
     // Terminal salt lakes → brine into the salinity column + inland salt-pan
-    // production. Lakes are re-derived here (this phase does not receive them).
-    let hydro = rivers::compute_hydrology(&buf);
-    let mut salt_lakes = load_lakes(&conn, &buf, &hydro.filled);
+    // production, from the world's stored lake set loaded above.
+    let mut salt_lakes = lakes;
     rivers::classify_salt_lakes(&buf, &mut salt_lakes, &river_data);
     biological::apply_salt_pans(&mut buf, &salt_lakes, &goods);
 
@@ -692,19 +698,8 @@ pub fn sim_run_all(
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
-    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
-    // realism/cap sliders, read back instead of hardcoded.
-    let settlement_realism = meta_f32(&conn, "settlements_realism", 0.55);
-    let settlement_cap = meta_u32_opt(&conn, "settlements_max").map(|c| c as usize);
-    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, settlement_realism, settlement_cap);
-    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
-    // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
-    // maxima-of-habitability search structurally cannot find, since a great port need
-    // not sit on the best farmland. Runs after the base pass (so it can respect
-    // spacing from it) and before province generation.
-    generated_settlements.extend(settlements::generate_trade_sites(
-        &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
-    ));
+    // Habitability is written BEFORE goods (they read it); settlements are placed
+    // after them, matching the stage order (Resources, then People).
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
     // Phase 8: Biological — storm/reef hazards + trade-good belts. Runs
@@ -728,6 +723,21 @@ pub fn sim_run_all(
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
+
+    // Phase 7: Settlements (after goods — GENERATOR_AND_GOODS_REDESIGN.md §8).
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
+    // realism/cap sliders, read back instead of hardcoded.
+    let settlement_realism = meta_f32(&conn, "settlements_realism", 0.55);
+    let settlement_cap = meta_u32_opt(&conn, "settlements_max").map(|c| c as usize);
+    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, settlement_realism, settlement_cap);
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
+    // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
+    // maxima-of-habitability search structurally cannot find, since a great port need
+    // not sit on the best farmland. Runs after the base pass (so it can respect
+    // spacing from it) and before province generation.
+    generated_settlements.extend(settlements::generate_trade_sites(
+        &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
+    ));
 
     // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3): partition into
     // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
@@ -1116,19 +1126,8 @@ pub fn sim_run_all_from_terrain(
     let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
     crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
     let hab_fields = settlements::compute_habitability_fields(&buf, &extracted_rivers, &lakes, Some(&hydro.acc));
-    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
-    // realism/cap sliders, read back instead of hardcoded.
-    let settlement_realism = meta_f32(&conn, "settlements_realism", 0.55);
-    let settlement_cap = meta_u32_opt(&conn, "settlements_max").map(|c| c as usize);
-    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, settlement_realism, settlement_cap);
-    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
-    // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
-    // maxima-of-habitability search structurally cannot find, since a great port need
-    // not sit on the best farmland. Runs after the base pass (so it can respect
-    // spacing from it) and before province generation.
-    generated_settlements.extend(settlements::generate_trade_sites(
-        &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
-    ));
+    // Habitability is written BEFORE goods (they read it); settlements are placed
+    // after them, matching the stage order (Resources, then People).
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
     // Phase 8: Biological — storm/reef hazards + trade-good belts. Runs
@@ -1146,6 +1145,21 @@ pub fn sim_run_all_from_terrain(
     persist_goods_placement(&conn, &ore, &localities, &goods_report)?;
     // Terminal salt lakes → brine into the salinity column + inland salt-pan goods.
     biological::apply_salt_pans(&mut buf, &lakes, &goods);
+
+    // Phase 7: Settlements (after goods — GENERATOR_AND_GOODS_REDESIGN.md §8).
+    // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Settlements step's own
+    // realism/cap sliders, read back instead of hardcoded.
+    let settlement_realism = meta_f32(&conn, "settlements_realism", 0.55);
+    let settlement_cap = meta_u32_opt(&conn, "settlements_max").map(|c| c as usize);
+    let mut generated_settlements = settlements::generate_settlements(&buf, &hab_fields.hab, &extracted_rivers, seed, settlement_realism, settlement_cap);
+    // Step 7a (CLAUDE.md §4 step 7a + §7 (ports/junctions, shipped) slice 3) — junction sites
+    // (straits, isthmuses, mountain passes, great river mouths) the base pass' local-
+    // maxima-of-habitability search structurally cannot find, since a great port need
+    // not sit on the best farmland. Runs after the base pass (so it can respect
+    // spacing from it) and before province generation.
+    generated_settlements.extend(settlements::generate_trade_sites(
+        &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
+    ));
 
     // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
     // call in `sim_run_all`; this path was missing it too.
@@ -1212,6 +1226,28 @@ pub fn sim_generate_shelves(
 
 /// Generate optimal settlement locations based on habitability scoring.
 /// Phase 7: Habitability → settlements
+/// Fever risk → the organic culture map (stored + activated, so towns and goods
+/// localities are named in their region's culture) → habitability. Shared by the
+/// Goods step (which now runs first and reads habitability + culture) and the
+/// Settlements step; same inputs give the same values, so running it twice is
+/// harmless. The run-alls do the same three calls inline, in the same order.
+fn prepare_people_layer(
+    conn: &rusqlite::Connection,
+    buf: &mut WorldBuffer,
+    river_data: &[rivers::River],
+    lakes: &[rivers::Lake],
+    acc: &[u32],
+    seed: u64,
+) -> Result<settlements::HabFields, String> {
+    // Malaria/fever (needed before habitability so disease suppresses settlement).
+    biological::compute_disease_risk(buf, river_data);
+    let desired_cultures = crate::db::metadata::get_meta(conn, "culture_count").ok().flatten()
+        .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
+    let cmap = crate::sim::cultures::compute_culture_map(buf, seed, desired_cultures);
+    crate::sim::cultures::store_and_activate(conn, cmap).map_err(|e| e.to_string())?;
+    Ok(settlements::compute_habitability_fields(buf, river_data, lakes, Some(acc)))
+}
+
 #[tauri::command]
 pub fn sim_generate_settlements(
     seed: u64,
@@ -1233,15 +1269,7 @@ pub fn sim_generate_settlements(
     let hydro = rivers::compute_hydrology(&buf);
     let lakes = load_lakes(&conn, &buf, &hydro.filled);
 
-    // Malaria/fever (needed before habitability so disease suppresses settlement).
-    biological::compute_disease_risk(&mut buf, &river_data);
-    // Organic culture map — compute + store + activate BEFORE naming settlements so
-    // each town is named in its region's (mutated) culture.
-    let desired_cultures = crate::db::metadata::get_meta(&conn, "culture_count").ok().flatten()
-        .and_then(|s| s.parse::<usize>().ok()).filter(|&n| n >= 1);
-    let cmap = crate::sim::cultures::compute_culture_map(&buf, seed, desired_cultures);
-    crate::sim::cultures::store_and_activate(&conn, cmap).map_err(|e| e.to_string())?;
-    let hab_fields = settlements::compute_habitability_fields(&buf, &river_data, &lakes, Some(&hydro.acc));
+    let hab_fields = prepare_people_layer(&conn, &mut buf, &river_data, &lakes, &hydro.acc, seed)?;
     let mut result = settlements::generate_settlements(
         &buf, &hab_fields.hab, &river_data, seed, realism.unwrap_or(0.55),
         max_settlements.map(|c| c as usize));
