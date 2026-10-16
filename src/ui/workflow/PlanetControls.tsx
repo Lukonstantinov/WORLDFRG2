@@ -75,23 +75,23 @@ export function LatitudeFrame() {
   // release after a drag commits the final position.
   const commitLive = () => {
     const { equatorOffset: eq, latScale: scale, lineRatio: r } = useWorldStore.getState().latConfig;
-    setLatitudeConfig(eq, scale, r, obliquity).then(setMeta).catch(() => {});
+    setLatitudeConfig(eq, scale, r, obliquity).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
   };
 
   const setEquatorPct = (pct: number, persist: boolean) => {
     const eq = clamp(pct, 0, 100) / 100;
     apply(eq, latScale, lineRatio);
-    if (persist) setLatitudeConfig(eq, latScale, lineRatio, obliquity).then(setMeta).catch(() => {});
+    if (persist) setLatitudeConfig(eq, latScale, lineRatio, obliquity).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
   };
   const setExpansionPct = (pct: number, persist: boolean) => {
     const scale = clamp(pct, 25, 400) / 100;
     apply(equatorOffset, scale, lineRatio);
-    if (persist) setLatitudeConfig(equatorOffset, scale, lineRatio, obliquity).then(setMeta).catch(() => {});
+    if (persist) setLatitudeConfig(equatorOffset, scale, lineRatio, obliquity).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
   };
   const setRatio = (r: number, persist: boolean) => {
     const ratio = clamp(r, 0.5, 5);
     apply(equatorOffset, latScale, ratio);
-    if (persist) setLatitudeConfig(equatorOffset, latScale, ratio, obliquity).then(setMeta).catch(() => {});
+    if (persist) setLatitudeConfig(equatorOffset, latScale, ratio, obliquity).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
   };
 
   const commitEq = () => {
@@ -115,7 +115,7 @@ export function LatitudeFrame() {
 
   const reset = () => {
     apply(0.5, 1, 1);
-    setLatitudeConfig(0.5, 1, 1, obliquity).then(setMeta).catch(() => {});
+    setLatitudeConfig(0.5, 1, 1, obliquity).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
   };
 
   const topLat = latAt(0, equatorOffset, latScale);

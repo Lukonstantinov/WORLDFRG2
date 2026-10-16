@@ -55,7 +55,7 @@ export function StepWorldCharacteristics() {
   const setBioParams = useUIStore((s) => s.setBioParams);
 
   const [planet, setPlanet] = useState<PlanetConfig | null>(null);
-  useEffect(() => { getPlanetConfig().then(setPlanet).catch(() => {}); }, [meta?.name]);
+  useEffect(() => { getPlanetConfig().then((p) => { setPlanet(p); useUIStore.getState().markStale(0); }).catch(() => {}); }, [meta?.name]);
 
   // Collapsible sections. Planet and Latitude Frame open by default — those are
   // the two you can only really judge against a map you can see, which is why
@@ -144,7 +144,7 @@ export function StepWorldCharacteristics() {
     const sc = k.latScale ?? lc.latScale;
     if (k.obliquity !== undefined || k.equatorOffset !== undefined || k.latScale !== undefined) {
       useWorldStore.getState().setLatConfig(eq, sc, lc.lineRatio);
-      setLatitudeConfig(eq, sc, lc.lineRatio, tilt).then(setMeta).catch(() => {});
+      setLatitudeConfig(eq, sc, lc.lineRatio, tilt).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
     }
     // A fresh archetype invalidates the coarse map — it is no longer of this world.
     setCoarse(null);
@@ -153,7 +153,7 @@ export function StepWorldCharacteristics() {
   const applyFrame = (eq: number, sc: number) => {
     const lc = useWorldStore.getState().latConfig;
     useWorldStore.getState().setLatConfig(eq, sc, lc.lineRatio);
-    setLatitudeConfig(eq, sc, lc.lineRatio, meta?.obliquity ?? 23.44).then(setMeta).catch(() => {});
+    setLatitudeConfig(eq, sc, lc.lineRatio, meta?.obliquity ?? 23.44).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
     setCoarse(null);
   };
 
@@ -165,7 +165,7 @@ export function StepWorldCharacteristics() {
 
   const commitPlanet = (next: PlanetConfig) => {
     setPlanet(next); // optimistic
-    setPlanetConfig(next).then(setPlanet).catch(() => {});
+    setPlanetConfig(next).then((p) => { setPlanet(p); useUIStore.getState().markStale(0); }).catch(() => {});
   };
 
   const obliquity = meta?.obliquity ?? 23.44;
@@ -174,7 +174,7 @@ export function StepWorldCharacteristics() {
   const setTilt = (deg: number) => {
     const tilt = Math.max(0, Math.min(80, deg));
     const lc = useWorldStore.getState().latConfig;
-    setLatitudeConfig(lc.equatorOffset, lc.latScale, lc.lineRatio, tilt).then(setMeta).catch(() => {});
+    setLatitudeConfig(lc.equatorOffset, lc.latScale, lc.lineRatio, tilt).then((m) => { setMeta(m); useUIStore.getState().markStale(0); }).catch(() => {});
   };
   const commitTilt = () => {
     const v = parseFloat(tiltStr);

@@ -17,6 +17,16 @@ function persistProgress(stepCompleted: Record<number, boolean>) {
   setProgress("campaign", JSON.stringify(campaign)).catch(() => {});
 }
 import type { ActiveTool, ActiveLayer, WorkflowStep, RidgeLine, LassoPolygon } from "@types";
+
+/** Steps that read what step `n` produces, in pipeline order (step 0 = planet
+ *  settings, first read by Ocean & Atmosphere). Toponyms (12) reads rivers (5)
+ *  and settlements (7); Political/Economy (9/10) are queries over step 8. */
+const PIPELINE = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export function downstreamSteps(n: number): number[] {
+  if (n === 12) return [];
+  const from = n === 0 ? 3 : n + 1;
+  return [...PIPELINE.filter((s) => s >= from), ...(n <= 7 ? [12] : [])];
+}
 import { GOOD_DEFS, goodOverlayKey } from "@goods";
 
 type LandmassSource = "none" | "plates" | "template" | "painted";
@@ -99,6 +109,9 @@ interface UIStore {
    *  reads or writes is the same state either mode uses. */
   wizardMode: "quick" | "detailed";
   stepCompleted: Record<number, boolean>;
+  /** Done steps whose inputs changed since they ran — shown as "re-run needed",
+   *  never blocking (owner decision 2026-10-16). Session-only. */
+  staleSteps: Record<number, boolean>;
   simRunning: boolean;
   overlayVisibility: Record<string, boolean>;
   layerOpacity: number;
@@ -389,6 +402,8 @@ interface UIStore {
   setWorkflowStep: (step: WorkflowStep) => void;
   setWizardMode: (mode: "quick" | "detailed") => void;
   markStepCompleted: (step: number) => void;
+  /** Flag every already-done step downstream of `step` as needing a re-run. */
+  markStale: (step: number) => void;
   setStepsCompleted: (steps: number[]) => void;
   setSimRunning: (running: boolean) => void;
   resetWorkflow: () => void;
@@ -527,6 +542,7 @@ export const useUIStore = create<UIStore>((set) => ({
   workflowStep: 1,
   wizardMode: "quick",
   stepCompleted: {},
+  staleSteps: {},
   simRunning: false,
   overlayVisibility: {
     rivers: true, lakes: true, settlements: true,
@@ -886,7 +902,20 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => {
       const stepCompleted = { ...state.stepCompleted, [step]: true };
       persistProgress(stepCompleted);
-      return { stepCompleted };
+      // Re-running a step makes everything built from its old output stale.
+      // Step 0 is settings-only and marks itself done on mount, so it never does.
+      const staleSteps = { ...state.staleSteps, [step]: false };
+      if (step !== 0 && state.stepCompleted[step]) {
+        for (const s of downstreamSteps(step)) if (stepCompleted[s]) staleSteps[s] = true;
+      }
+      return { stepCompleted, staleSteps };
+    }),
+
+  markStale: (step) =>
+    set((state) => {
+      const staleSteps = { ...state.staleSteps };
+      for (const s of downstreamSteps(step)) if (state.stepCompleted[s]) staleSteps[s] = true;
+      return { staleSteps };
     }),
 
   /** Restore completion state (e.g. from a re-opened world/campaign) without
@@ -895,13 +924,14 @@ export const useUIStore = create<UIStore>((set) => ({
     set(() => {
       const stepCompleted: Record<number, boolean> = {};
       for (const s of steps) stepCompleted[s] = true;
-      return { stepCompleted };
+      return { stepCompleted, staleSteps: {} };
     }),
 
   resetWorkflow: () =>
     set({
       workflowStep: 1,
       stepCompleted: {},
+      staleSteps: {},
       activeLayer: "land",
       activeTool: "paint",
     }),

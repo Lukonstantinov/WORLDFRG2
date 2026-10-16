@@ -53,6 +53,7 @@ const STEP_INFO = [
 export function WorkflowPanel() {
   const workflowStep = useUIStore((s) => s.workflowStep);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
+  const staleSteps = useUIStore((s) => s.staleSteps);
   const setWorkflowStep = useUIStore((s) => s.setWorkflowStep);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const simRunning = useUIStore((s) => s.simRunning);
@@ -499,6 +500,11 @@ export function WorkflowPanel() {
               }}>
               <span style={{ minWidth: 16 }}>{isDone ? "\u2713" : locked ? "\ud83d\udd12" : step === 0 ? "\u2699\ufe0f" : `${step}.`}</span>
               <span>{label}</span>
+              {isDone && staleSteps[step] && (
+                <span title="An earlier step changed since this ran. Re-run it to update (you can still continue)."
+                  style={{ marginLeft: "auto", fontSize: 9, padding: "0 5px", borderRadius: 3,
+                    color: "#1a1206", background: "#d9a441", fontWeight: 600 }}>{"↻"} re-run</span>
+              )}
             </div>
 
             {/* Expanded content */}
