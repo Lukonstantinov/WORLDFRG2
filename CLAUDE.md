@@ -31,6 +31,10 @@ current and which items are still open, before starting other work.
 - **Exception (owner, 2026-10-16):** world-GENERATION realism (steps 1-8 physics,
   ice, per-step UI, cross-fade/tracer/season animations) is UNFROZEN — plan and
   decisions in `docs/GENERATION_REALISM_PLAN.md`.
+- **Exception (owner, 2026-10-17):** the GENERATOR REDESIGN (stage structure, layer
+  cleanup) and the GOODS redesign (goods DNA, physical units, cultural valuations,
+  reach, hidden deposits, Goods Builder) are UNFROZEN — analysis, decisions and open
+  questions in `docs/GENERATOR_AND_GOODS_REDESIGN.md`.
 - If the owner asks for a frozen feature, remind them of the freeze and of the next
   open item, then do what they decide.
 - When an item lands: tick it in `docs/IMPROVEMENT_PLAN.txt`, then run

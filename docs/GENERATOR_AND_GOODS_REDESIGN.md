@@ -427,3 +427,271 @@ that already runs. It also shares the most with the generator ("history pre-roll
 16. The feature freeze from `/court` (2026-10-15) is still formally on for everything except
     generation realism. Does this plan **lift it for goods** too? Goods sit on the boundary
     between generation and campaign.
+
+---
+---
+
+# ROUND 2 (2026-10-17, after the owner's first answers)
+
+## 7. Owner decisions, round 1
+
+| # | Question | Decision |
+|---|---|---|
+| 1 | 12 → 7 stages | **Yes, but iterate again to be sure.** Done in §8; the result is 6 stages + a report. |
+| 2 | Author override brushes | **Yes.** |
+| 3 | Physical units | **Yes. Metric (European) by default; imperial selectable in options.** |
+| 4 | Treasure behaves like money | **Yes, and some goods get special value in certain regions/cultures** (§9.2). **By default the author picks how far each good has spread from its homeland, from endemic to everywhere** (§9.3). |
+| 5 | Hidden deposits | **Tinted on the map while unknown; shown clearly once discovered** (§9.4). |
+| 6 | Trade game: branches anywhere + violence | **Yes to all.** Deeper mechanics exist but are parked for now. |
+| 7 | Lift the feature freeze for goods | **Yes.** Recorded in CLAUDE.md §0. |
+| new | Layers | **Default layers turning on by themselves is annoying. Audit them and say what to delete.** That audit is §10. |
+
+---
+
+## 8. Stage structure, iterated: 6 stages + report
+
+Re-checking §1's seven stages against the **real data dependencies** in the code found two
+errors in the first draft.
+
+**Error 1: the "Planet" stage reads nothing before Climate.** Every World Characteristics
+knob (tilt, rotation, sunlight, greenhouse, eccentricity, dryness) is first read by
+Ocean & Atmosphere (CLAUDE.md §3.5: "elevation ignores them"). A first stage holding only
+these knobs is a stage whose choices do nothing visible until three stages later. That is
+exactly the confusion P5 complains about. **Fix:** the knobs move *into* the Climate stage,
+next to the Generate button they affect. This also solves P2, because the Climate stage
+finally has controls. Two things stay up front, because they really are read early:
+- **planet size**: every km-based constant in plates, noise and erosion reads it;
+- **map frame** (where the equator sits, line proportion): you place it while looking at
+  your land.
+
+A **world archetype** picker ("Ice world", "Desert world", "Earth-like"…) also stays up
+front as a one-click preset that pre-fills the Climate knobs. You state your intent early;
+the physics acts where it belongs.
+
+**Error 2: Resources must come before People, not after.** Checked in code:
+- goods placement (`sim_biological`) takes rivers and the seed, not settlements;
+- it reads **habitability**, a land property that today is only computed inside the
+  settlements step (`settlements::write_habitability`);
+- it reads the **culture map**, only to *name* notable localities
+  (`localities.rs:241-251`, `name_notable_localities`);
+- the trade matrix needs settlements, but that is the Report, not placement.
+
+So: move habitability into Water & Life (it *is* the carrying-capacity layer §2 proposed),
+move locality naming into People, and then People can read Resources. Mining towns, salt
+towns and pearl-fishing villages are then founded **because** the resource is there (§2
+Stage 7's "resource towns" fix), and the order matches history.
+
+**Final structure:**
+
+| # | Stage | Does | First reader of its output |
+|---|---|---|---|
+| 1 | **World & Land** | planet size · map frame · archetype preset · paint/template/plates · ocean % · continents · land readout | Relief |
+| 2 | **Relief** | elevation model · mountains & passes · volcanoes · coasts & harbours · shelves · erosion | Climate, Water |
+| 3 | **Climate** | the planet knobs + Generate → winds, currents, temperature, rain, Köppen, ice · seasons view · climate brush | Water & Life |
+| 4 | **Water & Life** | rivers & lakes (+ draw tools) · soils · biomes · forest/pasture · disease · **habitability** | Resources, People |
+| 5 | **Resources** | the Goods Builder (§9) → belts, homelands, deposits | People |
+| 6 | **People** | cultures · settlements incl. resource towns · provinces · names (places, rivers, *localities*) · starting realms · which deposits are already known | Report, Campaign |
+| → | **Report & Export** | trade report (today's Economy step) · atlas PDF · "Start campaign" | — |
+
+What disappears as a separate step: World Characteristics (split between stages 1 and 3),
+Toponyms (part of People), Political (replaced by real starting realms in People), and
+Economy (becomes the Report).
+
+**Gates this restructure must keep** (from the existing rules): rule 21 (Rivers needs
+Köppen, still true: Water comes after Climate), §3.5 Earth-no-op of the planet knobs
+(unchanged, they just live on a different panel), D1-D6 per-step = Run-All (commit
+`423d219`). The Run-All must run the same new order.
+
+---
+
+## 9. Goods, iteration 2
+
+### 9.1 Units (decision 3)
+- **Stored internally in SI** (kg, litres, km). Prices are per kg or per litre. Display
+  converts, so changing the setting never changes the simulation.
+- **Display defaults: metric.** Grain and bulk goods in tonnes, liquids in litres or
+  hectolitres, precious metals and gems in grams or kg, cloth in metres, timber in m³,
+  livestock in head.
+- **Option:** imperial (lb, bushels, gallons, troy ounces for gold and silver, yards). Lives in
+  Settings → Appearance next to label typography, one switch.
+- **Trade units as flavour, optional:** "sack", "barrel", "bolt", "ingot" can be *named* per
+  good and per culture ("a last of herring", "a picul of pepper"). They display alongside
+  metric and never replace it.
+
+### 9.2 Regional and cultural value (decision 4), iterated
+Prices already differ by region through supply and transport. That is the market, and it
+stays. On top of it, each **culture** gets a small **valuation profile**: up to ~4 goods with
+a role that changes how that people *wants* them, not what they cost to make.
+
+| Valuation | Effect | Historical pattern it reproduces |
+|---|---|---|
+| **Sacred** | steady demand that ignores price (temples buy in famine years too) | incense in the Mediterranean, ghee/sandalwood in India |
+| **Prestige** | elites pay a premium (×1.5-3) and display it | jade in China, horses on the steppe, amber in the Baltic, purple dye in Rome |
+| **Staple preference** | the culture's own staple; substitutes cost it more | rice vs wheat vs millet cultures |
+| **Taboo** | zero demand (the good does not sell there at all) | pork, alcohol, specific meats |
+| **Currency preference** | which treasure metal it mints and hoards | silver in China and the Islamic world, gold in Venice and West Africa |
+
+Currency preference is what makes treasure interesting. **The gold:silver ratio is computed
+per region** from local supply and preference. When it differs between two regions,
+bullion flows from one to the other. That is the real 16th-17th-century silver drain from
+Europe to China, emerging from the model with no scripted event.
+
+**Where profiles come from:** auto-derived by default from the culture's existing traits
+(Martial → horses/arms prestige, Devout → sacred incense or candles, Mercantile → silver
+coinage…) and from **what grows in its homeland** (a culture prizes the local wonder it is
+known for). The author can edit any culture's profile in the Goods Builder.
+
+### 9.3 Homeland and reach (decision 4)
+Every placed good gets two settings in the builder:
+- **Homeland(s):** auto-picked by suitability, OR **clicked on the map** by the author.
+  Multiple homelands are allowed (`origins` already exists, `goods_spec.rs:224`).
+- **Reach at year 0:** a 5-step slider:
+
+| Reach | Meaning | Example |
+|---|---|---|
+| Endemic | only the homeland; cannot be grown elsewhere | nutmeg (Banda) |
+| Local | homeland + ~300 km of similar land | silk early on |
+| Regional | the homeland's region / sub-continent | wine around one sea |
+| Continental | every suitable cell on the homeland's continent | maize before Columbus |
+| Global | every suitable cell anywhere | wheat, timber, fish |
+
+This replaces today's three hidden flags (`Distribution::Global/Local/Endemic`) with one
+honest slider plus a map pin. The engine already has all three modes. Local/Regional need
+only a km cap on the existing flood-fill.
+
+**In the campaign, reach can grow:** crops spread along trade routes over decades (cotton,
+sugar and citrus all did), and a secret good (silk, porcelain) spreads when its secret is
+stolen. Rule: a good spreads only to land that already suits it, and only if a route
+carries it there. This is a later slice, flagged so the reach setting is built to change.
+
+### 9.4 Unknown deposits (decision 5)
+- At world start a deposit is **known** if it sits within reach of a settlement that could
+  plausibly work it (a known placer below a town, a salt pan beside a village). Everything
+  else is **unknown**.
+- **On the map:** unknown deposits are shown as a faint, desaturated tint over the general
+  metallogenic belt ("this mountain country may hold silver"). They never appear as exact
+  sites. A known deposit gets its full colour and its exact working icon.
+- **Discovery in the campaign:** by expedition (they already exist, with hazards and
+  failure), by a mining colony prospecting its province, or by a small yearly chance for a
+  settlement next to it. Discovery is chronicled ("Silver found at Kesh, 1243").
+- **Author view vs player view:** in the Forge the author can switch "show everything"
+  on and off. The player in a campaign sees only what is known.
+
+### 9.5 Goods Builder: the shape (mock-ups come after round 2)
+Three levels so it never overwhelms:
+1. **Preset** (Minimal ~10 / Classic ~30 / Spice Age ~60 / Fantasy) with a one-line summary
+   of each, plus the essential-slot check (6 slots, ✓/⚠ per inhabited region).
+2. **Goods list**, grouped by Role. Each row: icon · name · tier · difficulty · reach slider ·
+   homeland pin · on/off. Most authors stop here.
+3. **Good card** (click a row): the six genes; "where it can grow" (the existing envelope
+   editor: temperature, rain, elevation, soil, relief); unit and trade-unit name; failure
+   risk; cultural valuations that mention it. A live map preview updates as you edit.
+Plus a **Culture valuations** tab (§9.2) and a **World balance** readout (how much gold
+exists, which regions lack an essential).
+
+---
+
+## 10. Layer audit
+
+### 10.1 Inventory
+- **25 base layers** in the Toolbar (`Toolbar.tsx:59-113`): Land, Elevation, Hillshade,
+  Ridges, Plates, Shelf · Currents, SST, Salinity, Fisheries · Temperature, Precipitation,
+  Snow, Wind, Wind Speed · Köppen, Biomes, Natural · Soil, Fertility, Habitability · Storm,
+  Reef, Disease.
+- **~52 overlays**: 5 circulation (`Toolbar.tsx:119`), 11 general (`:126`), 25 "bio/political"
+  (`:166`) plus provinces, toponyms (×7 sub-toggles), good belts (×~100), riverBreaks,
+  travelRoute, goodFlow, goodScarcity and plate motion, which are switched from panels.
+- **18 map plates** (`mapThemes.ts`) + 3 map styles + 10 elevation styles: three separate
+  "how should the map look" systems.
+
+### 10.2 Why layers appear by themselves: root cause
+Overlays are **sticky**. Steps switch them ON and nothing ever switches them OFF:
+
+| Who | Turns on | Where |
+|---|---|---|
+| Default state | migrations, colonies, riverBreaks (+ rivers, lakes, settlements) | `uiStore.ts:548-560` |
+| Generate World (Run-All) | rivers, lakes, settlements, latLines, tradeRoutes, **then** chokepoints, politicalInfluence | `WorkflowPanel.tsx:165-166, 309-313` |
+| Ocean & Atmosphere | wind, currents, latLines | `StepOceanAtmo.tsx:35-37` |
+| Planet controls | latLines | `PlanetControls.tsx:72` |
+| Goods & Trade | stormZones, reefZones, tradeRoutes, tradeFlows | `StepBiological.tsx:67-70` |
+| Settlements | settlements, provinces | `StepSettlements.tsx:100, 135` |
+| Political / Economy | politicalInfluence, chokepoints | `StepPolitical.tsx:53`, `StepEconomy.tsx:64-65` |
+| Opening a world | toponyms (whenever names exist) | `App.tsx:769, 881`, `MapCanvas.tsx:1720` |
+
+So after one Generate World the map draws **8 overlays** (rivers, lakes, settlements, river
+breaks, lat lines, trade routes, chokepoints, trade hubs), plus toponyms when names exist.
+A campaign then adds migrations and colonies, which are on by default and appear as soon as
+there is data. None of it was the user's choice.
+
+**Fix (one rule, not per-overlay patches):** *a stage's overlays are on loan.* Entering a
+stage shows the overlays that stage is about. Leaving it restores the user's own set. Only
+overlays the **user** toggled persist. After generation the map shows a clean default:
+rivers, lakes, settlements, names. A campaign adds realms. Everything else is one click
+away, and every panel's "show on map" button keeps working, because those are user actions.
+
+### 10.3 Delete, merge, keep: recommendation
+
+**Delete: broken or dead (verified)**
+| Item | Why |
+|---|---|
+| Overlay **"Volcanoes"** (`markers`) | The toggle exists (`Toolbar.tsx:164`) but the draw code never reads `visibility.markers`, so it draws nothing. Volcanoes return properly with the Relief stage. |
+| Base layer **Wind** | Muted land plus wind magnitude (`render_wind`); Wind Speed shows magnitude better and the Wind *overlay* shows direction. |
+| Base layer **Currents** | A speed field. The Currents *overlay* (warm/cold streamlines) and SST tell the story better. |
+| Base layers **Storm** and **Reef** | Duplicates of the Hurricanes / Reef Zones overlays, which the Nautical plate already uses. |
+| Overlays **Trade Hubs** (`politicalInfluence`) and **Hub Names** | Products of the Political step (9), which §8 replaces with real starting realms. |
+| Overlay **Trade Regions** | Internal clustering of the economy preview (≤14 regions), not a map fact. |
+
+**Merge: the same information in two places**
+| Merge | Into |
+|---|---|
+| Ridges + Plates | one **Plates** layer with boundary types drawn on it |
+| Shelf | a sub-view of Relief (it is an editing aid, not a map) |
+| Fishery Banks overlay | labels on the Fisheries layer |
+| Monsoon Areas overlay | the planned summer/winter view of the Climate stage |
+| Settlement Names + Hub Names | one **Names** toggle: major only / all |
+| Trade Routes + Trade Corridors (worldgen) | one **Routes** overlay |
+| Trade Flows (worldgen) + Dynamic Trade Flow (campaign) | one **Trade flow** overlay that shows the preview in the Forge and the live flow in a campaign |
+| Lat Lines + Circulation Belts | **Lat Lines** becomes a real graticule: equator, tropics at ±tilt, polar circles at 90°−tilt, so it follows the planet's own tilt. **Circulation Belts** keeps the wind boundaries. Today Lat Lines is hard-coded at 0/±30/±60 (`OverlayManager.ts:2919-2925`), which is wrong on any non-Earth planet. |
+| 18 plates + 3 map styles + 10 elevation styles | Plates = *what* to show (thematic). Styles = *how* it looks. Elevation styles become styles. |
+
+**Keep, but off by default and owned by their panel** (campaign): House Control, Merchant
+Routes, Futures, Caravan Corridors, Expeditions, Trade Heat, Trade Basins, Speculation,
+Coin Dominance, Plague Zones, Guild Cities, Notable Figures, Landmarks, Dynasty Ties. Most
+already switch on from their own panel. The Toolbar keeps a short **Campaign map** list:
+Realms, Provinces, Trade flow, Migrations, Colonies, Plague.
+
+**Keep as is:** Land, Elevation, Hillshade, SST, Salinity, Fisheries, Temperature,
+Precipitation, Snow, Wind Speed, Köppen, Biomes, Natural, Soil, Fertility, Habitability,
+Disease; the Rivers, Lakes, Settlements, Peoples, Wind (arrows), Currents (streamlines),
+ITCZ and Toponym overlays.
+
+**Result:** 25 → 18 base layers, and ~52 → ~26 overlays in the Toolbar. No information is
+lost; everything deleted is broken, duplicated, or a by-product of a step that is being replaced.
+
+**Not measured:** which layers users actually open (there is no usage telemetry). "Not
+really used" above means *broken, duplicated or tied to a removed step*, verified in code,
+not observed user behaviour.
+
+---
+
+## 11. Questions, round 2 (the last before mock-ups)
+
+1. **Stages (§8):** accept 6 stages + Report, with the planet knobs inside Climate and a
+   world-archetype preset in stage 1?
+2. **Layers (§10.3):** approve the delete list and the merge list as written? Anything on
+   them you use and want kept?
+3. **Clean default after generation:** rivers, lakes, settlements and names only (campaign
+   adds realms)? Or a different set?
+4. **Cultural valuations (§9.2):** auto-derived from culture traits with author edits, or
+   authored per culture from scratch?
+5. **Reach over time (§9.3):** should crops spread along trade routes during a campaign, and
+   secret goods spread by theft? Yes / later / no.
+6. **Discovery (§9.4):** who discovers deposits: expeditions and mining colonies only, or
+   also a slow chance for any nearby town?
+7. **Planet size:** a setting (Earth / half / double / custom km)? From round 1, still open.
+8. **Starting realms:** should People generate borders at year 0, or should borders come only
+   from a history pre-roll ("simulate 100 years first")? Still open from round 1.
+9. **Fantasy goods:** are the six genes enough, or do you want extra ones (e.g. "magical",
+   "monster-guarded", "cursed")? Still open from round 1.
+10. **Merge the duplicate goods** (gemstones vs individual gems, salt vs bay salt, spices vs
+    pepper/cloves, incense vs frankincense, ceramics placed vs crafted)? Still open from round 1.
