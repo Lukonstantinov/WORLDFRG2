@@ -1448,7 +1448,10 @@ fn trim_basin_to_water_balance(
         dry * 2 > cells.len()
     };
     let runoff_coeff = if arid { 0.08 } else { 0.35 };
-    let basin_area_km2 = n * cell_area_km2;
+    // A map cell spans fewer km east-west toward the poles (cos lat); without this
+    // a boreal basin counted ~2x its real area at 60°.
+    let cell_km2 = |y: u32| cell_area_km2 * buf.latitude(y).to_radians().cos().max(0.05);
+    let basin_area_km2: f32 = cells.iter().map(|&(_, y)| cell_km2(y)).sum();
     let catchment_km2 = basin_area_km2 * CATCHMENT_RATIO;
     // m³/yr = km² × 1e6 m²/km² × (mm/1000) m
     let inflow_m3 = catchment_km2 * 1.0e6 * (mean_precip_mm / 1000.0) * runoff_coeff;
@@ -1467,11 +1470,6 @@ fn trim_basin_to_water_balance(
     // the retained area matches what the water balance sustains. Sorting by
     // depth is what makes the retained lake the true bottom of the hollow rather
     // than an arbitrary slice of it, so the shoreline lands on a real contour.
-    let keep = ((equilibrium_km2 / cell_area_km2).floor() as usize).max(2);
-    if keep >= cells.len() {
-        let elevation = cells.iter().map(|&(x, y)| filled[buf.idx(x, y)]).sum::<f32>() / n;
-        return Some((cells, elevation));
-    }
     let mut by_depth: Vec<((u32, u32), f32)> = cells.into_iter()
         .map(|(x, y)| {
             let i = buf.idx(x, y);
@@ -1483,6 +1481,11 @@ fn trim_basin_to_water_balance(
         // `detect_lakes` must stay deterministic (§8.10's own rule).
         .unwrap_or(std::cmp::Ordering::Equal)
         .then(a.0.cmp(&b.0)));
+    // Keep the deepest cells until their REAL area reaches the equilibrium area.
+    let mut acc_km2 = 0.0f32;
+    let keep = by_depth.iter()
+        .take_while(|&&((_, y), _)| { acc_km2 += cell_km2(y); acc_km2 <= equilibrium_km2 })
+        .count().max(2);
     by_depth.truncate(keep);
     let kept: Vec<(u32, u32)> = by_depth.into_iter().map(|(p, _)| p).collect();
     if kept.len() < 2 { return None; }
@@ -2236,8 +2239,11 @@ mod tests {
         let lakes = detect_lakes(&buf, &hy.filled, 0.002, ((w * h) as usize / 2000).max(20));
         let km_per_cell = 40075.0f32 / w as f32;
         let cell_km2 = km_per_cell * km_per_cell;
+        // Real area: a cell narrows east-west by cos(lat), as the water balance assumes.
+        let area = |l: &Lake| l.cells.iter()
+            .map(|&(_, y)| cell_km2 * buf.latitude(y).to_radians().cos().max(0.05)).sum::<f32>();
         let biggest = lakes.iter().map(|l| l.cells.len()).max().unwrap_or(0);
-        let biggest_km2 = biggest as f32 * cell_km2;
+        let biggest_km2 = lakes.iter().map(area).fold(0.0f32, f32::max);
         println!("largest lake: {} cells = {:.0} km² (cap {:.0})",
                  biggest, biggest_km2, LAKE_MAX_KM2);
         assert!(biggest_km2 <= LAKE_MAX_KM2 * 1.02,
