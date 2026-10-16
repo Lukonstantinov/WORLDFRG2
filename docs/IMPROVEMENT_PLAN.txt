@@ -132,7 +132,7 @@ Phase 6 - Let the testers steer
 Housekeeping (any time, small)
 - [ ] Fix or explain the red tests on main, bisect the top-10% wealth share drift.
 - [ ] Prune merged branches (116 now).
-- [ ] Add a generated Rust -> TS type check (ts-rs or specta) for the campaign types, or at least one smoke test per panel.
+- [x] Rust -> TS check: scripts/check_types.mjs (no new dependency), run in CI after tsc. Matches 275 TS types to same-named Rust serde structs and fails if TS declares a field Rust never sends (a renamed/removed field). 0 drift today after allowlisting 7 client-side fields. Limits: field NAMES only (not types); a TS type with no same-named Rust struct is not checked; panel smoke tests still not written.
 
 
 4. What NOT to do

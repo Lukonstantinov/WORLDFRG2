@@ -3672,7 +3672,7 @@ Three rules:
 6. **Cylindrical wrapping** — X wraps, Y clamps; all BFS/paint/sim respect it.
 7. **New tile fields append LAST** — v2 self-describing blobs; trailing reads pad zeros. (Files from before `SAVE_FORMAT` are refused outright — §3.4 — but appending keeps saves within one format readable across builds.)
 8. **Every `#[tauri::command]` is registered in `lib.rs`** and gets a wrapper in `bridge/` (via the @bridge barrel).
-9. **New TS types mirror Rust serde structs** in `types/` (world/campaign/goods).
+9. **New TS types mirror Rust serde structs** in `types/` (world/campaign/goods). Keep the SAME NAME as the Rust struct: `node scripts/check_types.mjs` (CI) fails when a TS type declares a field its same-named Rust struct never sends. A field the UI adds itself goes in that script's `CLIENT_ONLY` list.
 10. **Earth params must stay a no-op** — the EBM anomaly and `Circulation` return zero /
     exactly 30°-60° at Earth settings. Never let a planetary knob shift the Earth baseline.
 11. **Phase 3's order is duplicated** in `sim_commands.rs`, `earth_validation.rs` AND

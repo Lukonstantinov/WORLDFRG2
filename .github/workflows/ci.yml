@@ -40,6 +40,11 @@ jobs:
       - name: Type-check
         run: npx tsc --noEmit
 
+      # The hand-written TS types must not declare a field the Rust struct never
+      # sends (a renamed field used to fail silently as `undefined`). IMPROVEMENT_PLAN I-9.
+      - name: Rust <-> TS field check
+        run: node scripts/check_types.mjs
+
       - name: Production build
         run: npx vite build
 
