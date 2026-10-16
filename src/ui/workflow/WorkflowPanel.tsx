@@ -162,8 +162,6 @@ export function WorkflowPanel() {
       if (developed.length > 0) setSettlementsDeveloped(developed);
     } catch { /* keep as-generated populations */ }
     markStepCompleted(10);
-    setOverlayVisible("chokepoints", true);
-    setOverlayVisible("politicalInfluence", true);
   };
 
   // The single Forge → Chronicle handoff: finalize (lock + save) the world, then
@@ -305,12 +303,12 @@ export function WorkflowPanel() {
     setSimRunning(false);
   };
 
+  // A finished world opens on a clean map: water and cities only. Everything else
+  // (trade routes, chokepoints, lat lines…) is one click away in the Toolbar.
   const enableAllOverlays = () => {
     setOverlayVisible("rivers", true);
     setOverlayVisible("lakes", true);
     setOverlayVisible("settlements", true);
-    setOverlayVisible("latLines", true);
-    setOverlayVisible("tradeRoutes", true);
   };
 
   const stepProps = { seed, plateCount, invalidateTiles };

@@ -32,9 +32,9 @@ export function StepOceanAtmo({ invalidateTiles }: Props) {
       invalidateTiles();
       markStepCompleted(3);
       // Auto-enable wind and current overlays so user can see results
-      setOverlayVisible("wind", true);
-      setOverlayVisible("currents", true);
-      setOverlayVisible("latLines", true);
+      useUIStore.getState().borrowOverlay("wind");
+      useUIStore.getState().borrowOverlay("currents");
+      useUIStore.getState().borrowOverlay("latLines");
       setStatus("Wind belts, ocean currents, temperature & precipitation generated");
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);
@@ -61,13 +61,13 @@ export function StepOceanAtmo({ invalidateTiles }: Props) {
         </button>
       </div>
       <div style={{ display: "flex", gap: 4 }}>
-        <button onClick={() => setLayer("wind")}
+        <button onClick={() => useUIStore.getState().toggleOverlay("wind")}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>
-          View Wind
+          Wind arrows on/off
         </button>
-        <button onClick={() => setLayer("currents")}
+        <button onClick={() => useUIStore.getState().toggleOverlay("currents")}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>
-          View Currents
+          Currents on/off
         </button>
       </div>
       <div style={{ color: "#5c5344", fontSize: 10 }}>

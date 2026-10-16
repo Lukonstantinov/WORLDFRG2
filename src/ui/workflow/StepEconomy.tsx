@@ -61,8 +61,8 @@ export function StepEconomy(_props: Props) {
         if (developed.length > 0) setSettlementsDeveloped(developed);
       } catch { /* leave populations as generated if no snapshot */ }
       markStepCompleted(10);
-      setOverlayVisible("chokepoints", true);
-      setOverlayVisible("politicalInfluence", true); // show trade-hub circles
+      useUIStore.getState().borrowOverlay("chokepoints");
+      useUIStore.getState().borrowOverlay("politicalInfluence"); // show trade-hub circles
       setStatus(`Economy built: ${result.hubs.length} hubs, ${result.chains.length} supply chains, ${result.regions.length} regions, ${result.chokepoints.length} chokepoints — settlements developed by trade`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);

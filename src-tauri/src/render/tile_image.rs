@@ -63,13 +63,9 @@ fn render_tile_full(tile: &TileData, layer: &str, n: &TileNeighbors, ctx: &Rende
         "natural" => render_natural(tile, n, ctx, &mut rgba),
         "shelf" => render_shelf(tile, &mut rgba),
         "ridges" => render_ridges(tile, &mut rgba),
-        "wind" => render_wind(tile, &mut rgba),
         "windspeed" => render_windspeed(tile, &mut rgba),
-        "currents" => render_currents(tile, &mut rgba),
         "habitability" => render_habitability(tile, &mut rgba),
         "salinity" => render_salinity(tile, &mut rgba),
-        "storm" => render_storm(tile, &mut rgba),
-        "reef" => render_reef(tile, &mut rgba),
         "disease" => render_disease(tile, &mut rgba),
         _ => render_land(tile, &mut rgba),
     }
@@ -1733,60 +1729,6 @@ fn render_salinity(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn render_storm(tile: &TileData, rgba: &mut [u8]) {
-    // Annual (combined) storm danger: calm blue → violent purple/magenta.
-    for i in 0..PIXEL_COUNT {
-        let offset = i * 4;
-        if tile.terrain[i] == 1 {
-            rgba[offset + 3] = 0; // land transparent
-            continue;
-        }
-        let v = tile.storm_base[i] as f32 / 255.0;
-        if v < 0.01 {
-            rgba[offset] = 8;
-            rgba[offset + 1] = 20;
-            rgba[offset + 2] = 50;
-        } else {
-            let (r, g, b) = if v < 0.5 {
-                lerp_rgb((10, 40, 80), (120, 90, 180), v * 2.0)
-            } else {
-                lerp_rgb((120, 90, 180), (210, 50, 160), (v - 0.5) * 2.0)
-            };
-            rgba[offset] = r;
-            rgba[offset + 1] = g;
-            rgba[offset + 2] = b;
-        }
-        rgba[offset + 3] = 255;
-    }
-}
-
-fn render_reef(tile: &TileData, rgba: &mut [u8]) {
-    // Reef/shoal wreck hazard: deep blue → turquoise → warning yellow.
-    for i in 0..PIXEL_COUNT {
-        let offset = i * 4;
-        if tile.terrain[i] == 1 {
-            rgba[offset + 3] = 0; // land transparent
-            continue;
-        }
-        let v = tile.reef_risk[i] as f32 / 255.0;
-        if v < 0.01 {
-            rgba[offset] = 8;
-            rgba[offset + 1] = 20;
-            rgba[offset + 2] = 50;
-        } else {
-            let (r, g, b) = if v < 0.5 {
-                lerp_rgb((10, 40, 80), (40, 180, 170), v * 2.0)
-            } else {
-                lerp_rgb((40, 180, 170), (230, 210, 70), (v - 0.5) * 2.0)
-            };
-            rgba[offset] = r;
-            rgba[offset + 1] = g;
-            rgba[offset + 2] = b;
-        }
-        rgba[offset + 3] = 255;
-    }
-}
-
 fn render_disease(tile: &TileData, rgba: &mut [u8]) {
     // Malaria/fever risk on LAND: clear green → sickly yellow → fever red/purple.
     for i in 0..PIXEL_COUNT {
@@ -2397,28 +2339,6 @@ fn render_ridges(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn render_wind(tile: &TileData, rgba: &mut [u8]) {
-    for i in 0..PIXEL_COUNT {
-        let offset = i * 4;
-        let vx = tile.wind_vx[i];
-        let vy = tile.wind_vy[i];
-        let mag = (vx * vx + vy * vy).sqrt().clamp(0.0, 2.0) / 2.0;
-
-        if tile.terrain[i] == 1 {
-            // Land: muted base with wind magnitude overlay
-            let (r, g, b) = lerp_rgb((60, 70, 60), (180, 220, 255), mag);
-            rgba[offset] = r;
-            rgba[offset + 1] = g;
-            rgba[offset + 2] = b;
-        } else {
-            let (r, g, b) = lerp_rgb((10, 20, 50), (100, 180, 240), mag);
-            rgba[offset] = r;
-            rgba[offset + 1] = g;
-            rgba[offset + 2] = b;
-        }
-        rgba[offset + 3] = 255;
-    }
-}
 
 /// Wind Speed layer: a filled low-level wind-intensity field (incl. jets like the
 /// Somali Jet) over the whole map, using the classic monsoon-map ramp
@@ -2463,39 +2383,6 @@ fn render_windspeed(tile: &TileData, rgba: &mut [u8]) {
     }
 }
 
-fn render_currents(tile: &TileData, rgba: &mut [u8]) {
-    for i in 0..PIXEL_COUNT {
-        let offset = i * 4;
-        if tile.terrain[i] == 1 {
-            rgba[offset + 3] = 0; // land = transparent
-            continue;
-        }
-        // Boundary currents run along the continental slope, not over the shallow
-        // apron, so the drawn flow stops at the shelf break. This is a RENDERING
-        // choice and lives here deliberately: the simulation keeps a real velocity
-        // on shelf cells because upwelling, the current→coast temperature coupling
-        // and the SST anomaly all read that speed (see the note at the end of
-        // `ocean::generate_ocean_currents`).
-        let mag = if tile.is_shelf[i] != 0 {
-            0.0
-        } else {
-            let vx = tile.current_vx[i];
-            let vy = tile.current_vy[i];
-            (vx * vx + vy * vy).sqrt().clamp(0.0, 3.0) / 3.0
-        };
-        let ct = tile.current_type[i];
-
-        let (r, g, b) = match ct {
-            1 => lerp_rgb((20, 10, 30), (220, 80, 40), mag),   // warm: dark → red
-            2 => lerp_rgb((10, 15, 40), (40, 120, 220), mag),  // cold: dark → blue
-            _ => lerp_rgb((10, 15, 30), (100, 140, 160), mag), // neutral
-        };
-        rgba[offset] = r;
-        rgba[offset + 1] = g;
-        rgba[offset + 2] = b;
-        rgba[offset + 3] = 255;
-    }
-}
 
 fn plate_color(index: u16) -> (u8, u8, u8) {
     // Deterministic distinct colors from plate index

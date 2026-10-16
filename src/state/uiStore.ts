@@ -114,6 +114,10 @@ interface UIStore {
   staleSteps: Record<number, boolean>;
   simRunning: boolean;
   overlayVisibility: Record<string, boolean>;
+  /** Overlays a generation step switched on to show its own result ("on loan",
+   *  GENERATOR_AND_GOODS_REDESIGN.md §10.2). They switch off again when the user
+   *  leaves the step or the mode; a user toggle takes the overlay over for good. */
+  borrowedOverlays: string[];
   layerOpacity: number;
   /** GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — per-OVERLAY opacity, keyed
    *  by the same string `overlayVisibility` uses. Absent = 1 (untouched), so a
@@ -408,6 +412,9 @@ interface UIStore {
   setSimRunning: (running: boolean) => void;
   resetWorkflow: () => void;
   setOverlayVisible: (type: string, visible: boolean) => void;
+  /** Show an overlay only while the current step/mode lasts (see `borrowedOverlays`).
+   *  A no-op when the overlay is already on — then it is the user's, not a loan. */
+  borrowOverlay: (type: string) => void;
   setOverlaysVisible: (types: string[], visible: boolean) => void;
   toggleOverlay: (type: string) => void;
   setLayerOpacity: (opacity: number) => void;
@@ -531,6 +538,14 @@ const STEP_DEFAULTS: Record<number, { layer: ActiveLayer; tool: ActiveTool }> = 
   11: { layer: "land", tool: "select" },
 };
 
+/** Switch every borrowed overlay back off (the step that lent it is over). */
+function returnLoans(state: UIStore): Partial<UIStore> {
+  if (state.borrowedOverlays.length === 0) return {};
+  const overlayVisibility = { ...state.overlayVisibility };
+  for (const t of state.borrowedOverlays) overlayVisibility[t] = false;
+  return { overlayVisibility, borrowedOverlays: [] };
+}
+
 export const useUIStore = create<UIStore>((set) => ({
   appMode: "forge",
   activeTool: "pan",
@@ -546,18 +561,18 @@ export const useUIStore = create<UIStore>((set) => ({
   simRunning: false,
   overlayVisibility: {
     rivers: true, lakes: true, settlements: true,
-    markers: false, wind: false, currents: false, latLines: false,
+    wind: false, currents: false, latLines: false,
     itcz: false, windBelts: false, plateMotion: false,
     tradeRoutes: false, fisheryBanks: false,
     stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false, dynamicFlow: false, tradeHeat: false,
-    tradeBasins: false, migrations: true,
-    colonies: true,
+    tradeBasins: false, migrations: false,
+    colonies: false,
     provinces: false, provinceBorders: false,
     hubNames: false, settlementNames: false, tradeRegions: false, cultures: false,
-    travelRoute: false, goodScarcity: false, toponyms: false, riverBreaks: true,
+    travelRoute: false, goodScarcity: false, toponyms: false, riverBreaks: false,
     goodFlow: false, // Goods Atlas · selected good's yearly flow along trade routes
     // Per-feature-type toponym label toggles (gated under the master `toponyms`).
     toponymsRiver: true, toponymsLake: true, toponymsMountain: true, toponymsRegion: true,
@@ -573,6 +588,7 @@ export const useUIStore = create<UIStore>((set) => ({
     goodCoverage: true, goodQuality: true,
     ...Object.fromEntries(GOOD_DEFS.map((g) => [goodOverlayKey(g.name), false])),
   },
+  borrowedOverlays: [],
   layerOpacity: 1,
   overlayOpacity: {},
   activeMapTheme: null,
@@ -685,10 +701,10 @@ export const useUIStore = create<UIStore>((set) => ({
   setAppMode: (mode) =>
     set((state) =>
       mode === "chronicle"
-        ? { appMode: mode, activeTool: "pan", workflowStep: 11 as WorkflowStep }
+        ? { ...returnLoans(state), appMode: mode, activeTool: "pan", workflowStep: 11 as WorkflowStep }
         // Step 11 (the campaign tick) is Chronicle-only and no longer in the Forge
         // wizard; clamp back to Economy (10) so a Forge step is always expanded.
-        : { appMode: mode, workflowStep: (state.workflowStep === 11 ? 10 : state.workflowStep) as WorkflowStep }
+        : { ...returnLoans(state), appMode: mode, workflowStep: (state.workflowStep === 11 ? 10 : state.workflowStep) as WorkflowStep }
     ),
   setTool: (tool) => set({ activeTool: tool }),
   // Picking a layer or an overlay by hand means the view is no longer the plate
@@ -738,11 +754,22 @@ export const useUIStore = create<UIStore>((set) => ({
   setCompareLayer: (l) => set({ compareLayer: l }),
   setComparePos: (p) => set({ comparePos: Math.max(0, Math.min(1, p)) }),
 
+  // Any explicit set/toggle takes an overlay off loan: it is the user's now.
   setOverlayVisible: (type, visible) =>
     set((state) => ({
       overlayVisibility: { ...state.overlayVisibility, [type]: visible },
+      borrowedOverlays: state.borrowedOverlays.filter((t) => t !== type),
       activeMapTheme: null,
     })),
+
+  borrowOverlay: (type) =>
+    set((state) => state.overlayVisibility[type]
+      ? {}
+      : {
+        overlayVisibility: { ...state.overlayVisibility, [type]: true },
+        borrowedOverlays: [...state.borrowedOverlays, type],
+        activeMapTheme: null,
+      }),
 
   // Bulk-set many overlay keys at once (e.g. a whole good category toggled from
   // its master checkbox).
@@ -750,7 +777,11 @@ export const useUIStore = create<UIStore>((set) => ({
     set((state) => {
       const next = { ...state.overlayVisibility };
       for (const t of types) next[t] = visible;
-      return { overlayVisibility: next, activeMapTheme: null };
+      return {
+        overlayVisibility: next,
+        borrowedOverlays: state.borrowedOverlays.filter((t) => !types.includes(t)),
+        activeMapTheme: null,
+      };
     }),
 
   toggleOverlay: (type) =>
@@ -759,6 +790,7 @@ export const useUIStore = create<UIStore>((set) => ({
         ...state.overlayVisibility,
         [type]: !state.overlayVisibility[type],
       },
+      borrowedOverlays: state.borrowedOverlays.filter((t) => t !== type),
       activeMapTheme: null,
     })),
 
@@ -889,12 +921,13 @@ export const useUIStore = create<UIStore>((set) => ({
 
   setWorkflowStep: (step) => {
     const defaults = STEP_DEFAULTS[step] || { layer: "land", tool: "pan" };
-    set({
+    set((state) => ({
+      ...returnLoans(state),
       workflowStep: step,
       activeLayer: defaults.layer,
       activeTool: defaults.tool,
       activeMapTheme: null,
-    });
+    }));
   },
   setWizardMode: (mode) => set({ wizardMode: mode }),
 

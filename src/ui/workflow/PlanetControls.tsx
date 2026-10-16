@@ -69,7 +69,7 @@ export function LatitudeFrame() {
   // Live overlay update (no IPC) — used while dragging.
   const apply = (eq: number, scale: number, ratio: number) => {
     setLatConfig(eq, scale, ratio);
-    setOverlayVisible("latLines", true);
+    useUIStore.getState().borrowOverlay("latLines");
   };
   // Persist on slider release / typed value, reading the latest live values so a
   // release after a drag commits the final position.

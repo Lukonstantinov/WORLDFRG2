@@ -2827,7 +2827,7 @@ tile/
   lod.rs                        ← LOD supertile pyramid (lod 1-4)
 
 render/
-  mod.rs · tile_image.rs        ← 26 render layers (land, elevation, climate, … see §8.7);
+  mod.rs · tile_image.rs        ← 20 render layers (land, elevation, climate, … see §8.7);
                                   the biomes layer carries PROCEDURAL PATTERN FILLS (§8.12).
                                   Also the SHARED RELIEF CORE (`relief_at`) — two lights +
                                   ambient occlusion — used by both shaded base layers, and
@@ -3080,8 +3080,14 @@ ui/world/  — map & world
   MapCanvas.tsx                 ← PixiJS canvas, pointer events, painting, draws every overlay
   Toolbar.tsx                   ← Tools, PLATE picker (§8.17), layer selector, overlay
                                   toggles (RIGHT side). `layerGroups` classifies the 25
-                                  render layers into SIX groups — Terrain · Ocean ·
-                                  Atmosphere · Climate & Biomes · Settlement · Hazards.
+                                  render layers into FIVE groups — Terrain · Ocean ·
+                                  Atmosphere · Climate & Biomes · Settlement.
+                                  Below the plates: MY LAYER SETS (`LayerSets.tsx`,
+                                  the user's own saved views, localStorage).
+                                  Overlays a step switches on are ON LOAN
+                                  (`uiStore.borrowOverlay`/`borrowedOverlays`):
+                                  they switch off when the step or mode changes;
+                                  any user toggle keeps them
                                   A STYLE picker (§8.22) appears only while
                                   "elevation"/"terrain" is active, reading the served
                                   `elevation_styles` list — never a hard-coded one

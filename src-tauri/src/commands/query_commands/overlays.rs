@@ -114,8 +114,7 @@ pub fn get_current_streamlines(
     // Load the full-resolution current field into flat arrays. `is_shelf` is
     // loaded too so the tracer can stop a streamline at the shelf break — the
     // shallow apron carries a real velocity for the physics, but boundary
-    // currents are DRAWN running along the continental slope, not over it (the
-    // same choice `render_currents` makes with `mag = 0` on shelf cells).
+    // currents are DRAWN running along the continental slope, not over it.
     let mut vx = vec![0.0f32; n];
     let mut vy = vec![0.0f32; n];
     let mut ctype = vec![0u8; n];

@@ -50,7 +50,7 @@ export function StepPolitical(_props: Props) {
       );
       setCenters(result);
       markStepCompleted(9);
-      setOverlayVisible("politicalInfluence", true);
+      useUIStore.getState().borrowOverlay("politicalInfluence");
       setStatus(`Political layer: ${result.length} powers ranked by trade position & monopoly`);
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);

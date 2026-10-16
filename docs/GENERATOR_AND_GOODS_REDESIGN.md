@@ -737,3 +737,27 @@ deposits in author vs player view, mining-technology depth, value ladder, failur
 Culture values tab (auto vs set by hand), the World balance tab (regional gold:silver ratio,
 output and value shares, needs by region), and the icon editor (24×24 pixel editing, start
 from any icon, recolour, image upload → 8 colours + house outline). All numbers are example data.
+
+## 15. Implementation progress
+
+**Slice L1: layer cleanup (2026-10-17, done).**
+- Overlays a step switches on are now **on loan** (`uiStore.borrowOverlay` /
+  `borrowedOverlays`). They switch off when the user changes step, changes app mode, or
+  picks a plate; any user toggle keeps them. Converted: Ocean & Atmosphere (wind,
+  currents, lat lines), planet controls (lat lines), Goods (hurricanes, reefs, trade
+  routes, trade flows), Settlements (provinces), Political and Economy (trade hubs,
+  chokepoints).
+- Generate World now ends on a clean map: rivers, lakes, settlements. It no longer
+  switches on lat lines, trade routes, chokepoints or trade hubs.
+- Default-off now: migrations, colonies, river breaks (they appeared by themselves).
+- Removed: the dead **Volcanoes** toggle, and the **Wind / Currents / Storm / Reef** base
+  layers (Rust `render_*` functions, layer type, Toolbar, readout, step buttons). The step
+  buttons now toggle the matching overlays. Hazards group merged into Settlement (Disease).
+- **My layer sets** (`ui/world/LayerSets.tsx`): save the current view (layer + every overlay
+  switch + elevation style) by name, apply it, delete it. Per user, in localStorage.
+- **Queued with the stage restructure (slice S1):** removing Trade Hubs, Hub Names and
+  Trade Regions. They are the only map output of the Political and Economy steps, which
+  are replaced there, so removing them earlier would leave those steps showing nothing.
+- Gates: `npx tsc --noEmit` clean · `cargo check --lib --tests` clean ·
+  `render::tile_image::tests` 15/15 · `scripts/check_types.mjs` 0 drift.
+- Not verified in the running app (no display in this session).

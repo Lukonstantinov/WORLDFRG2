@@ -874,9 +874,8 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
     //     current→coast coupling was weakest exactly where it should be strongest.
     //   • `ocean.rs::sst_at` scales the SST anomaly by the same speed.
     //
-    // The rendering intent is preserved where it belongs — `render_currents` in
-    // `render/tile_image.rs` draws shelf cells at zero magnitude, and the
-    // streamline overlay is traced by `trace_current_streamlines` (below), which
+    // The rendering intent is preserved where it belongs — the streamline
+    // overlay is traced by `trace_current_streamlines` (below), which
     // terminates a line at the shelf break. So the arrows stop there without the
     // physics paying for it.
     let _ = &shelf;
@@ -889,8 +888,7 @@ pub fn generate_ocean_currents(buf: &mut WorldBuffer) {
 ///
 /// A line is seeded only on OPEN ocean (never land, never the shallow shelf) and
 /// TERMINATES at land AND at the shelf break: boundary currents run along the
-/// continental slope, not over the apron, so the drawn flow stops there — the
-/// same rendering choice `render_currents` makes with `mag = 0` on shelf cells.
+/// continental slope, not over the apron, so the drawn flow stops there.
 /// The simulation still keeps a real velocity on shelf cells (upwelling / SST /
 /// the current→coast coupling read it); only the DRAWING stops at the break.
 ///

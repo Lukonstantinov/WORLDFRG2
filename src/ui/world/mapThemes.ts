@@ -312,13 +312,11 @@ export const LAYER_REQUIRES: Record<ActiveLayer, number> = {
   natural: 6,
   ridges: 2,
   shelf: 2,
-  currents: 3,
   sst: 3,
   salinity: 3,
   temperature: 3,
   precipitation: 3,
   snow: 3,
-  wind: 3,
   windspeed: 3,
   climate: 4,
   fisheries: 6,
@@ -326,8 +324,6 @@ export const LAYER_REQUIRES: Record<ActiveLayer, number> = {
   soil: 6,
   fertility: 6,
   habitability: 7,
-  storm: 8,
-  reef: 8,
   disease: 8,
 };
 
@@ -351,6 +347,8 @@ export function applyMapTheme(theme: MapTheme): void {
   useUIStore.setState((s) => ({
     activeLayer: theme.layer,
     overlayVisibility: { ...s.overlayVisibility, ...patch },
+    // Picking a plate is the user's choice: nothing on screen is on loan any more.
+    borrowedOverlays: [],
     layerOpacity: theme.layerOpacity ?? 1,
     provinceOpacity: theme.provinceOpacity ?? s.provinceOpacity,
     activeMapTheme: theme.id,

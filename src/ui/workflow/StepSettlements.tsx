@@ -132,7 +132,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       // never becomes a real place beyond owning the province's coordinates.
       const founded = res.founded_settlements ?? [];
       if (founded.length > 0) setSettlements([...settlements, ...founded]);
-      setOverlayVisible("provinces", true);
+      useUIStore.getState().borrowOverlay("provinces");
       setStatus(`Generated ${res.provinces.length} provinces`
         + (founded.length > 0 ? ` (founded ${founded.length} new seat${founded.length === 1 ? "" : "s"})` : ""));
     } catch (e) {

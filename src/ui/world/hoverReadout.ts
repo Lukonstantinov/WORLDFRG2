@@ -62,15 +62,8 @@ export function layerReadout(layer: ActiveLayer, c: CellInfo, elevMaxM: number):
       return isSea ? (c.is_shelf ? "continental shelf" : "deep ocean") : "land";
     case "plates":
       return `plate ${c.plate_index}${c.is_volcanic ? " · volcanic" : ""}`;
-    case "currents":
-      return isSea ? `current ${speed(c.current_vx, c.current_vy).toFixed(2)}` : "land";
-    case "wind":
     case "windspeed":
       return `wind ${speed(c.wind_vx, c.wind_vy).toFixed(2)}`;
-    case "storm":
-      return `storm risk ${risk(c.storm_risk)}`;
-    case "reef":
-      return `reef risk ${risk(c.reef_risk)}`;
     case "disease":
       return `disease risk ${risk(c.disease_risk)}`;
     default:

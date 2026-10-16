@@ -829,7 +829,7 @@ export class OverlayManager {
 
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
-    markers: false, wind: false, currents: false, latLines: false,
+    wind: false, currents: false, latLines: false,
     itcz: false, windBelts: false, plateMotion: false,
     tradeRoutes: false, fisheryBanks: false,
     stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,

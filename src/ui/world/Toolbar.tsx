@@ -7,6 +7,7 @@ import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
 import { GoodIcon } from "@ui/goods/GoodIcon";
 import { MAP_THEMES, applyMapTheme, themeReady, layerReady, LAYER_REQUIRES } from "./mapThemes";
+import { LayerSets } from "./LayerSets";
 import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
  *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
@@ -71,7 +72,6 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
   {
     group: "Ocean",
     layers: [
-      { id: "currents", label: "Currents" },
       { id: "sst", label: "Sea-Surface Temp" },
       { id: "salinity", label: "Salinity" },
       { id: "fisheries", label: "Fisheries" },
@@ -83,7 +83,6 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
       { id: "temperature", label: "Temperature" },
       { id: "precipitation", label: "Precipitation" },
       { id: "snow", label: "Snow Cover" },
-      { id: "wind", label: "Wind" },
       { id: "windspeed", label: "Wind Speed" },
     ],
   },
@@ -101,13 +100,6 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
       { id: "soil", label: "Soil" },
       { id: "fertility", label: "Fertility" },
       { id: "habitability", label: "Habitability" },
-    ],
-  },
-  {
-    group: "Hazards",
-    layers: [
-      { id: "storm", label: "Storm Belts" },
-      { id: "reef", label: "Reef Hazards" },
       { id: "disease", label: "Disease (Malaria)" },
     ],
   },
@@ -161,7 +153,6 @@ const overlayTypes = [
   { id: "tradeRoutes", label: "Trade Routes" },
   { id: "tradeFlows", label: "Trade Flows" },
   { id: "fisheryBanks", label: "Fishery Banks" },
-  { id: "markers", label: "Volcanoes" },
 ];
 
 // Biological / political sublayer overlays (grouped separately).
@@ -388,6 +379,7 @@ export function Toolbar() {
               ? activePlate.blurb
               : "Custom view. A plate composes base layer, overlays and label typography together."}
           </div>
+          <LayerSets />
         </>)}
       </div>
 

@@ -383,15 +383,18 @@ Mediterranean (Cs) only forms on **windward (west-facing) coasts** beside a cold
 offshore current (`cold_override` gated on `is_windward_ocean` + no warm influence);
 a warm-current **east** coast reads humid-subtropical (Cfa).
 
-### 8.7 Render layers (26) & paint tools (5)
+### 8.7 Render layers (20) & paint tools (5)
 The **biomes** layer is no longer a Köppen recolour — it reads the `biome` column
 and draws procedural pattern fills (§8.12). **`natural`** is the land-COVER view
 (§8.21) — the only layer whose land colour is not a function of height or class
 index but of what grows there.
-land, elevation, terrain (hillshade), **natural**, plates, shelf, ridges, fisheries, currents,
-**sst** (sea-surface temperature), temperature, precipitation, wind, **windspeed**
+land, elevation, terrain (hillshade), **natural**, plates, shelf, ridges, fisheries,
+**sst** (sea-surface temperature), temperature, precipitation, **windspeed**
 (low-level wind intensity incl. jets), **snow** (annual snow-cover fraction), climate,
-biomes, soil, fertility, salinity, habitability, reef, storm, disease.
+biomes, soil, fertility, salinity, habitability, disease.
+The `wind`, `currents`, `storm` and `reef` base layers were removed 2026-10-17
+(GENERATOR_AND_GOODS_REDESIGN.md §13): each duplicated an overlay (wind arrows,
+current streamlines, Hurricanes, Reef Zones). An unknown layer name renders as `land`.
 Paint: Pan, Paint Land (0/1), Elevation (f32 0-1), Paint Shelf (u8 0/1), Place Volcano (u8 0/1).
 
 ### 8.8 File operations

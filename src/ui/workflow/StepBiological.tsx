@@ -64,10 +64,10 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       markStepCompleted(8); // gates the trade-route / flow computation in MapCanvas
       invalidateTiles();    // bumps tileVersion → refetches goods/routes/flows
       // Surface the new overlays.
-      setOverlayVisible("stormZones", true);
-      setOverlayVisible("reefZones", true);
-      setOverlayVisible("tradeRoutes", true);
-      setOverlayVisible("tradeFlows", true);
+      useUIStore.getState().borrowOverlay("stormZones");
+      useUIStore.getState().borrowOverlay("reefZones");
+      useUIStore.getState().borrowOverlay("tradeRoutes");
+      useUIStore.getState().borrowOverlay("tradeFlows");
       setStatus("Goods & trade computed: hazards, goods, routes & trade matrix");
       setReportOpen(true);
     } catch (err) { setStatus(`Error: ${err}`); }
@@ -131,10 +131,10 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       </button>
 
       <div style={{ display: "flex", gap: 4, marginTop: 2, flexWrap: "wrap" }}>
-        <button onClick={() => setLayer("storm")}
-          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Storm</button>
-        <button onClick={() => setLayer("reef")}
-          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Reef</button>
+        <button onClick={() => useUIStore.getState().toggleOverlay("stormZones")}
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Hurricanes</button>
+        <button onClick={() => useUIStore.getState().toggleOverlay("reefZones")}
+          style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Reefs</button>
         <button onClick={() => setLayer("salinity")}
           style={{ ...genBtn, fontSize: 10, padding: "3px 6px" }}>Salinity</button>
       </div>
