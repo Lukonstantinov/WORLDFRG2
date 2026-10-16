@@ -10,7 +10,7 @@ import { useViewportStore } from "@state/viewportStore";
 import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
-import { useSettingsStore } from "@state/settingsStore";
+import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
@@ -214,6 +214,10 @@ export function MapCanvas() {
   // (`render_tile_full`'s dispatch ignores `#style=` on any other key), so it
   // rides the layer key here exactly like `isolateClass` above.
   const elevationStyle = useUIStore((s) => s.elevationStyle);
+  // MAP STYLE: plates on the flat `land` base or the plain `terrain` hillshade are
+  // drawn on the chosen style's own terrain (Atlas / Parchment / Game Board).
+  const mapStyle = useSettingsStore((s) => s.mapStyle);
+  const mapTerrain = MAP_STYLES.find((m) => m.id === mapStyle)?.terrain ?? null;
   const compareLayer = useUIStore((s) => s.compareLayer);
   const comparePos = useUIStore((s) => s.comparePos);
   const setComparePos = useUIStore((s) => s.setComparePos);
@@ -221,6 +225,9 @@ export function MapCanvas() {
   compareRef.current = { layer: compareLayer, pos: comparePos };
   const activeLayerRef = useRef(activeLayer);
   activeLayerRef.current = (() => {
+    if (mapTerrain && (activeLayer === "land" || activeLayer === "terrain")) {
+      return `terrain#style=${mapTerrain}` as typeof activeLayer;
+    }
     let key: string = activeLayer;
     if (isolateClass !== null) key += `#iso=${isolateClass}`;
     if (elevationStyle && (activeLayer === "elevation" || activeLayer === "terrain")) {
@@ -644,7 +651,7 @@ export function MapCanvas() {
   // switching back is instant. Just (re)load the now-active layer's visible tiles.
   useEffect(() => {
     refreshTiles();
-  }, [activeLayer, isolateClass, elevationStyle, compareLayer, refreshTiles]);
+  }, [activeLayer, isolateClass, elevationStyle, mapTerrain, compareLayer, refreshTiles]);
 
   // Wipe the cache only when the world changes or its data changes (a sim step
   // bumps tileVersion) — every layer's rendered tiles are then stale.

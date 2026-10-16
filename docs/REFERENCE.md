@@ -488,6 +488,7 @@ LABEL_STYLE_DEFAULTS per class: family · weight · italic · caps · tracking �
 labelStyles          the live registry the renderer reads each frame
 setLabelStyles()     partial override, called by settingsStore
 LABEL_THEMES         Mixed Contrast (default) · Classic Atlas · Engraved Antique · Modern Cartographic
+                     · Atlas · Parchment · Game Board (the three MAP STYLES' own themes)
 ```
 
 `LabelKey` covers province · settlement · river · lake · mountain · desert · forest ·
@@ -495,19 +496,10 @@ tundra · cultureRegion · peopleTerritory · tradeBasin. The default follows th
 convention — **nature is serif and leans, human works are sans and stand upright**.
 Road names and river-break markers are deliberately NOT in the registry.
 
-Three rules for anyone touching this:
-
-- **Draw through `drawLabel` / `measureLabel`.** Never set `ctx.font` for a place name
-  again, or that class silently escapes the theme and the Settings panel.
-- **Tracking is drawn CHARACTER BY CHARACTER, never via `ctx.letterSpacing`.** That
-  property is effectively Chromium-only and Tauri runs WebKit2GTK on Linux and WKWebView
-  on macOS, so it would silently do nothing on two of three platforms. Manual drawing is
-  also what makes `measureLabel` exact.
-- **Measure the STYLED string when a label has to fit something.** Province names are
-  tracked capitals, far wider than the raw text; `renderProvinces` only draws a name that
-  fits its inscribed circle, so it degrades **tracked caps → untracked caps → mixed case
-  → hide** instead of hiding the moment the styled form overflows (§8.10's label anchor
-  work is undone otherwise).
+Each class also carries a `halo` ("" = the draw site's own dark halo); the light map
+styles set a pale one. Technical note: tracking is drawn character by character because
+`ctx.letterSpacing` is effectively Chromium-only and does nothing in the WebKit engines
+Tauri uses on Linux and macOS.
 
 Note `OverlayManager.rgba()` only understands `hsl()` and returns a hex unchanged — use
 `labelAlpha()` for label colours, which are all hex.
@@ -954,23 +946,18 @@ overlay-line preset. **Twelve plates ship**, ordered the way the pipeline builds
 world: Physical · Natural Colour · Relief & Height · Ocean & Currents · Climate · Hydrology · Ecology ·
 Settlement · Peoples · Political · Goods & Trade · Hazards.
 
-Four rules for anyone changing this:
+How it works today: applying a plate switches each overlay in `MANAGED_OVERLAYS`
+(derived from the plates) on or off, any manual change clears `activeMapTheme`, and a
+plate whose data isn't generated yet reads dimmed with the step it waits on.
 
-- **A plate is a VIEW, never a decision.** It sets what you SEE, never what the world
-  IS — rule 14 restated. Nothing here is persisted and nothing writes a generation
-  setting, so switching plates can never alter a world or invalidate a tile.
-- **`MANAGED_OVERLAYS` is DERIVED from the plates, never hand-listed.** Applying a
-  plate sets each managed key explicitly — on if the plate lists it, off otherwise —
-  so a plate lands in a KNOWN composition instead of washing additively over
-  leftovers. Deriving the set is what bounds the blast radius: per-good overlays,
-  campaign-only layers and anything else no plate mentions are never touched, so a
-  plate cannot silently clear work done in another panel.
-- **`activeMapTheme` is cleared by any manual change** (`setLayer`, `toggleOverlay`,
-  `setOverlayVisible`, `setOverlaysVisible`, `setWorkflowStep`). A chip that keeps
-  claiming a plate after the view stops being one is worse than no chip.
-- **A plate whose data isn't generated reads dimmed with the step it waits on**, not
-  hidden (`requires` + `themeReady`). Seeing what the finished world will offer is the
-  same logic the workflow panel already uses.
+**Map styles (2026-10-16)** are a second, independent axis: a plate says WHAT the map
+shows, a map style says HOW it is drawn. `settingsStore.MAP_STYLES` — Classic · Atlas ·
+Parchment · Game Board — each bundles a Rust terrain style (`ElevationStyle::Atlas`/
+`Parchment`/`GameBoard`, with a drawn coastline and optional paper grain), a label
+theme, a line palette and symbol styles (border colour/width, city-dot colour,
+province-wash strength). Plates on the `land` or `terrain` base are drawn on the
+style's terrain (`MapCanvas` layer key); while a style other than Classic is active,
+plates no longer change labels or line inks. Switcher: Toolbar ▸ Plates.
 
 The picker exists twice — a compact chip grid in the Toolbar and the full annotated
 list in ⚙ Appearance ▸ Map plates. Both read the same `MAP_THEMES`, so they cannot

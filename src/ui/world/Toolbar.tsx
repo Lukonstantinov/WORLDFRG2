@@ -7,6 +7,7 @@ import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
 import { GoodIcon } from "@ui/goods/GoodIcon";
 import { MAP_THEMES, applyMapTheme, themeReady, layerReady, LAYER_REQUIRES } from "./mapThemes";
+import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
  *  hex). Understands #rgb/#rrggbb and rgb()/rgba(); falls back to dark grey. */
 function hexOfBorder(css: string): string {
@@ -222,6 +223,8 @@ export function Toolbar() {
   const activeMapTheme = useUIStore((s) => s.activeMapTheme);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const activePlate = MAP_THEMES.find((t) => t.id === activeMapTheme);
+  const mapStyle = useSettingsStore((s) => s.mapStyle);
+  const setMapStyle = useSettingsStore((s) => s.setMapStyle);
   const elevationStyle = useUIStore((s) => s.elevationStyle);
   const setElevationStyle = useUIStore((s) => s.setElevationStyle);
   const palettes = usePaletteStore((s) => s.palettes);
@@ -339,6 +342,23 @@ export function Toolbar() {
       <div style={section}>
         <SectionHead title="Plates" open={openSection.Plates} onToggle={() => toggleSection("Plates")} />
         {openSection.Plates && (<>
+          {/* MAP STYLE — how every plate is drawn (Atlas / Parchment / Game Board). */}
+          <div role="radiogroup" aria-label="Map style"
+            style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 2, marginBottom: 6 }}>
+            {MAP_STYLES.map((m) => {
+              const on = mapStyle === m.id;
+              return (
+                <button key={m.id} role="radio" aria-checked={on} title={m.blurb}
+                  onClick={() => setMapStyle(m.id)}
+                  style={{
+                    padding: "4px 2px", borderRadius: 4, fontSize: 10, cursor: "pointer",
+                    border: `1px solid ${on ? "#c9a24a" : "#20304a"}`,
+                    background: on ? "#3a2f1a" : "#0e1826",
+                    color: on ? "#f0dcaa" : "#7d97b0", fontWeight: on ? 600 : 400,
+                  }}>{m.name}</button>
+              );
+            })}
+          </div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
             {MAP_THEMES.map((t) => {
               const ready = themeReady(t, stepCompleted);

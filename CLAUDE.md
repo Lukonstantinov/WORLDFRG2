@@ -3080,7 +3080,7 @@ ui/world/  — map & world
                                   `elevation_styles` list — never a hard-coded one
   mapThemes.ts                  ← MAP PLATES (§8.17): 11 named compositions of base
                                   layer + overlays + label typography + line palette.
-                                  Display-only (rule 14); `MANAGED_OVERLAYS` is DERIVED
+                                  `MANAGED_OVERLAYS` is DERIVED
                                   from the plates, so a plate can only ever clear an
                                   overlay some plate uses
   StatusBar.tsx · WindowBar.tsx ← Bottom status / window chrome. StatusBar carries the
@@ -3685,12 +3685,8 @@ Three rules:
     this file true (§2.7).
 13. **`biome` is descriptive** — nothing downstream may score off it (§8.12), and the
     render palette has a twin in the legend that must move with it.
-14. **Generation settings go in the LEFT panel** (`StepWorldCharacteristics`, step 0,
-    displayed after Landmass — step 0 renders a ⚙️ not a number, which is what lets it
-    sit out of numeric order without renumbering anyone's persisted `stepCompleted`);
-    the right-side Toolbar is display-only (opacity, palettes, overlay toggles). Never
-    reintroduce a duplicate control in both columns — that duplication is what made the
-    planet knobs and the latitude frame drift apart.
+14. *(Removed 2026-10-16 by the owner: where settings and controls live is no longer
+    fixed. The number stays because code comments cite rules by number.)*
 15. **Two fidelity oracles, not one.** `earth_validation.rs` scores the climate against
     the real Köppen map (§2.3); `economy_validation.rs` scores the campaign against
     published pre-modern series (§2.5). Run the one your change touches, every time.

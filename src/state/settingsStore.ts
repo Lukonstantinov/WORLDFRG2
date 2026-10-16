@@ -47,8 +47,58 @@ export const COLOR_PRESETS: Record<string, Partial<LineColors>> = {
     corridor: "#009e8e", corridorArrow: "#4fd0c0", merchantIn: "#56b4e9",
     merchantOut: "#f0e442", manufactory: "#009e73", estate: "#f0e442",
   },
+  // Inks for the light map styles: deep reds, ambers, sea blues and greens that
+  // hold on pale ground (the defaults are pale lines meant for a dark map).
+  Atlas: {
+    tradeTrunk: "#a8322d", tradeTrunkMinor: "#b8786a", dynamicFlow: "#2f6e93",
+    tradeLand: "#a8322d", tradeSea: "#2f6e93", tradeRiver: "#2f6b4f",
+    corridor: "#2f6b4f", corridorArrow: "#2f6b4f", merchantIn: "#2f6e93",
+    merchantOut: "#c48a12", manufactory: "#2f6b4f", estate: "#c48a12",
+    settlementColony: "#6a2c91", houseOutpost: "#5b676d", colonyLane: "#6a2c91",
+  },
+  Parchment: {
+    tradeTrunk: "#a8322d", tradeTrunkMinor: "#9b7a5a", dynamicFlow: "#3f6f7f",
+    tradeLand: "#a8322d", tradeSea: "#2f6e93", tradeRiver: "#2f6b4f",
+    corridor: "#2f6b4f", corridorArrow: "#2f6b4f", merchantIn: "#2f6e93",
+    merchantOut: "#c48a12", manufactory: "#2f6b4f", estate: "#c48a12",
+    settlementColony: "#6a2c91", houseOutpost: "#6d5d43", colonyLane: "#6a2c91",
+  },
 };
 export type PresetKey = keyof typeof COLOR_PRESETS;
+
+/** MAP STYLES — how the map is drawn, independent of WHICH plate (what it shows).
+ *  Each is a bundle of appearance settings that already exist: a terrain style the
+ *  Rust renderer paints (`ElevationStyle`), a label theme, a line palette and the
+ *  symbol styles. Plates on the flat `land` / `terrain` base get the style's terrain;
+ *  "classic" is the look before map styles existed. */
+export type MapStyleId = "classic" | "atlas" | "parchment" | "game";
+export interface MapStyle {
+  id: MapStyleId; name: string; blurb: string;
+  terrain: string | null;        // ElevationStyle key, or null = leave the plate's base
+  labelTheme: string;
+  linePreset: PresetKey;
+  symbols: Partial<SymbolStyles>;
+}
+export const MAP_STYLES: MapStyle[] = [
+  { id: "classic", name: "Classic", blurb: "The original dark-ground look.",
+    terrain: null, labelTheme: DEFAULT_LABEL_THEME, linePreset: "Default", symbols: SYMBOL_STYLE_DEFAULTS },
+  { id: "atlas", name: "Atlas", blurb: "Green lowlands to brown uplands, red borders, a school atlas.",
+    terrain: "atlas", labelTheme: "Atlas", linePreset: "Atlas",
+    symbols: { settlement: "rankDot", border: "single", borderColor: "#c4161c", borderWidth: 1.6, cityFill: "#8c1d1d", provinceFill: 0 } },
+  { id: "parchment", name: "Parchment", blurb: "Paper land and a muted sea; the overlays carry the picture.",
+    terrain: "parchment", labelTheme: "Parchment", linePreset: "Parchment",
+    symbols: { settlement: "rankDot", border: "single", borderColor: "rgba(120,100,70,0.75)", borderWidth: 1, cityFill: "#4d4335", provinceFill: 0.35 } },
+  { id: "game", name: "Game Board", blurb: "Rich relief, tinted realms, carved names — a strategy board.",
+    terrain: "game", labelTheme: "Game Board", linePreset: "Default",
+    symbols: { settlement: "graduated", border: "casing", borderColor: "rgba(20,16,10,0.8)", borderWidth: 1.4, cityFill: "", provinceFill: 1.15 } },
+];
+const LS_MAP_STYLE_KEY = "wf2.appearance.mapStyle";
+function loadMapStyle(): MapStyleId {
+  try {
+    const v = localStorage.getItem(LS_MAP_STYLE_KEY);
+    return MAP_STYLES.some((m) => m.id === v) ? (v as MapStyleId) : "classic";
+  } catch { return "classic"; }
+}
 export type ThemeName = PresetKey | "Custom";
 
 function loadLocal(): Partial<LineColors> {
@@ -175,6 +225,11 @@ export interface SettingsState {
   symbolStyles: SymbolStyles;
   setSymbolStyle: <K extends keyof SymbolStyles>(k: K, v: SymbolStyles[K]) => void;
   resetSymbolStyles: () => void;
+
+  // ── Map style (Atlas / Parchment / Game Board / Classic) ──
+  mapStyle: MapStyleId;
+  /** Switch the whole look: terrain, labels, line palette and symbols together. */
+  setMapStyle: (id: MapStyleId) => void;
 }
 
 /** Push a full appearance state into the renderer, localStorage and (unless we are
@@ -249,6 +304,20 @@ export const useSettingsStore = create<SettingsState>((set, get) => {
       setSymbolStyles(SYMBOL_STYLE_DEFAULTS);
       saveLocalSymbols(SYMBOL_STYLE_DEFAULTS);
       set({ symbolStyles: { ...SYMBOL_STYLE_DEFAULTS } });
+    },
+
+    // ── Map style ──
+    mapStyle: loadMapStyle(),
+    setMapStyle: (id) => {
+      const m = MAP_STYLES.find((x) => x.id === id);
+      if (!m) return;
+      const symbols = { ...SYMBOL_STYLE_DEFAULTS, ...m.symbols };
+      setSymbolStyles(symbols);
+      saveLocalSymbols(symbols);
+      try { localStorage.setItem(LS_MAP_STYLE_KEY, id); } catch { /* ignore */ }
+      apply(set, merge(COLOR_PRESETS[m.linePreset] ?? {}), m.linePreset,
+        resolveLabelTheme(LABEL_THEMES[m.labelTheme] ?? {}), m.labelTheme);
+      set({ mapStyle: id, symbolStyles: symbols });
     },
   };
 });

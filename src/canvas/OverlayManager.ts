@@ -389,6 +389,9 @@ export interface LabelStyle {
   color: string;
   /** Multiplier on the class's existing base size (1 = exactly as before). */
   size: number;
+  /** Halo behind the letters. "" = the draw site's own (dark) halo; a map style
+   *  on light ground sets a pale one so dark text stays legible. */
+  halo: string;
 }
 
 export type LabelKey =
@@ -400,27 +403,27 @@ const F = LABEL_FONTS;
 /** The shipped baseline — the "Mixed Contrast" theme. */
 export const LABEL_STYLE_DEFAULTS: Record<LabelKey, LabelStyle> = {
   // ── Human works: humanist sans, upright ──
-  province:        { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.18, color: "#e8dcc0", size: 1 },
-  settlement:      { family: F.sansHuman,  weight: 600, italic: false, caps: false, tracking: 0,    color: "#f2f6fb", size: 1 },
+  province:        { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.18, color: "#e8dcc0", size: 1, halo: "" },
+  settlement:      { family: F.sansHuman,  weight: 600, italic: false, caps: false, tracking: 0,    color: "#f2f6fb", size: 1, halo: "" },
   // ── Water: serif, leaning ──
-  river:           { family: F.serifNature, weight: 400, italic: true,  caps: false, tracking: 0.04, color: "#7fc8e0", size: 1 },
-  lake:            { family: F.serifNature, weight: 400, italic: true,  caps: false, tracking: 0.04, color: "#9ad0e8", size: 1 },
+  river:           { family: F.serifNature, weight: 400, italic: true,  caps: false, tracking: 0.04, color: "#7fc8e0", size: 1, halo: "" },
+  lake:            { family: F.serifNature, weight: 400, italic: true,  caps: false, tracking: 0.04, color: "#9ad0e8", size: 1, halo: "" },
   // ── Land: serif, upright ──
-  mountain:        { family: F.serifNature, weight: 400, italic: false, caps: false, tracking: 0.02, color: "#d8a878", size: 1 },
-  desert:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#d8b878", size: 1 },
-  forest:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#8fc088", size: 1 },
-  tundra:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#a8c0cc", size: 1 },
+  mountain:        { family: F.serifNature, weight: 400, italic: false, caps: false, tracking: 0.02, color: "#d8a878", size: 1, halo: "" },
+  desert:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#d8b878", size: 1, halo: "" },
+  forest:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#8fc088", size: 1, halo: "" },
+  tundra:          { family: F.serifNature, weight: 700, italic: false, caps: true,  tracking: 0.22, color: "#a8c0cc", size: 1, halo: "" },
   // ── People: sans, widely tracked caps (a people is not a place you can stand in) ──
-  cultureRegion:   { family: F.sansHuman,  weight: 700, italic: false, caps: true,  tracking: 0.30, color: "#caa6e0", size: 1 },
-  peopleTerritory: { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.26, color: "#d8c2ea", size: 1 },
-  tradeBasin:      { family: F.serifNature, weight: 600, italic: true,  caps: false, tracking: 0.06, color: "#8fd0d8", size: 1 },
+  cultureRegion:   { family: F.sansHuman,  weight: 700, italic: false, caps: true,  tracking: 0.30, color: "#caa6e0", size: 1, halo: "" },
+  peopleTerritory: { family: F.sansHuman,  weight: 600, italic: false, caps: true,  tracking: 0.26, color: "#d8c2ea", size: 1, halo: "" },
+  tradeBasin:      { family: F.serifNature, weight: 600, italic: true,  caps: false, tracking: 0.06, color: "#8fd0d8", size: 1, halo: "" },
   // ── Political: a sovereignty label — bold, gold, tracked wider than a mere
   // ── settlement, since a state is a claim over land, not a place on it.
-  state:           { family: F.sansHuman,  weight: 800, italic: false, caps: true,  tracking: 0.24, color: "#e0c878", size: 1.05 },
+  state:           { family: F.sansHuman,  weight: 800, italic: false, caps: true,  tracking: 0.24, color: "#e0c878", size: 1.05, halo: "" },
   // A HOUSE's own trade lane (S11) — human works (a merchant's route), sans and
   // upright per §8.11's own convention, small (a lane label sits ON the line,
   // not naming a region), never tracked wide like the people/state labels above.
-  tradeLane:       { family: F.sansHuman,  weight: 500, italic: false, caps: false, tracking: 0,    color: "#e8dcc0", size: 0.72 },
+  tradeLane:       { family: F.sansHuman,  weight: 500, italic: false, caps: false, tracking: 0,    color: "#e8dcc0", size: 0.72, halo: "" },
 };
 
 /** Coordinated theme presets — sparse overrides on the defaults, exactly like
@@ -446,6 +449,46 @@ export const LABEL_THEMES: Record<string, Partial<Record<LabelKey, Partial<Label
     tradeBasin: { family: F.garamond },
     state: { family: F.engraved, tracking: 0.30 },
     tradeLane: { family: F.garamond },
+  },
+  // MAP STYLES (settingsStore.MAP_STYLES) — dark ink on light ground, pale halo.
+  // Atlas: the school-atlas register — black sans caps for regions, blue italic water.
+  "Atlas": {
+    province: { color: "#1d1d1d", tracking: 0.22, halo: "rgba(255,255,255,0.6)" },
+    settlement: { color: "#1a1a1a", weight: 500, halo: "rgba(255,255,255,0.75)" },
+    river: { color: "#3f7fb8", halo: "rgba(255,255,255,0.6)" },
+    lake: { color: "#3f7fb8", halo: "rgba(255,255,255,0.6)" },
+    mountain: { color: "#6b4a2a", halo: "rgba(255,255,255,0.6)" },
+    desert: { color: "#7a5a2e", halo: "rgba(255,255,255,0.55)" },
+    forest: { color: "#2f5a2a", halo: "rgba(255,255,255,0.55)" },
+    tundra: { color: "#4a5a66", halo: "rgba(255,255,255,0.55)" },
+    cultureRegion: { color: "#5a3a7a", halo: "rgba(255,255,255,0.55)" },
+    peopleTerritory: { color: "#5a3a7a", halo: "rgba(255,255,255,0.55)" },
+    tradeBasin: { color: "#2f6e93", halo: "rgba(255,255,255,0.55)" },
+    state: { color: "#a3262a", halo: "rgba(255,255,255,0.65)" },
+    tradeLane: { color: "#3e3528", halo: "rgba(255,255,255,0.7)" },
+  },
+  // Parchment: engraved capitals and Garamond in sepia inks.
+  "Parchment": {
+    province: { family: F.engraved, color: "#6d5d43", weight: 400, tracking: 0.26, halo: "rgba(236,222,192,0.75)" },
+    settlement: { family: F.garamond, color: "#3e3528", weight: 500, italic: true, halo: "rgba(236,222,192,0.85)" },
+    river: { family: F.garamond, color: "#5f7a82", halo: "rgba(236,222,192,0.7)" },
+    lake: { family: F.garamond, color: "#5f7a82", halo: "rgba(236,222,192,0.7)" },
+    mountain: { family: F.engraved, caps: true, tracking: 0.12, color: "#7a5f3e", halo: "rgba(236,222,192,0.7)" },
+    desert: { family: F.engraved, color: "#8a6f45", halo: "rgba(236,222,192,0.7)" },
+    forest: { family: F.engraved, color: "#56663e", halo: "rgba(236,222,192,0.7)" },
+    tundra: { family: F.engraved, color: "#5d6b70", halo: "rgba(236,222,192,0.7)" },
+    cultureRegion: { family: F.engraved, color: "#6a4a6e", tracking: 0.36, halo: "rgba(236,222,192,0.7)" },
+    peopleTerritory: { family: F.engraved, color: "#6a4a6e", tracking: 0.30, halo: "rgba(236,222,192,0.7)" },
+    tradeBasin: { family: F.garamond, color: "#4f6a72", halo: "rgba(236,222,192,0.7)" },
+    state: { family: F.engraved, color: "#7d1f1f", tracking: 0.30, halo: "rgba(236,222,192,0.8)" },
+    tradeLane: { family: F.garamond, color: "#3e3528", halo: "rgba(236,222,192,0.85)" },
+  },
+  // Game board: carved capitals in cream over a dark halo, like a strategy game.
+  "Game Board": {
+    province: { family: F.engraved, color: "#fff8e6", weight: 400, tracking: 0.2, halo: "rgba(30,20,10,0.75)" },
+    settlement: { color: "#fffaf0", halo: "rgba(25,18,10,0.85)" },
+    state: { family: F.engraved, color: "#ffe08a", tracking: 0.28, halo: "rgba(30,20,10,0.8)" },
+    river: { color: "#d8f0f8" }, lake: { color: "#d8f0f8" },
   },
   // Humanist sans throughout — the Ordnance-Survey register, cleanest zoomed out.
   "Modern Cartographic": {
@@ -508,9 +551,17 @@ export interface SymbolStyles {
   river: "discharge" | "constant";
   lake: "filled" | "outlined";
   border: "single" | "casing";
+  /** Province border colour ("" = the province layer's own) and width in screen px. */
+  borderColor: string;
+  borderWidth: number;
+  /** Rank-dot city fill ("" = the default tier colours). */
+  cityFill: string;
+  /** Multiplier on the province colour wash (0 = borders only, as on an atlas). */
+  provinceFill: number;
 }
 export const SYMBOL_STYLE_DEFAULTS: SymbolStyles = {
   settlement: "graduated", river: "discharge", lake: "filled", border: "single",
+  borderColor: "", borderWidth: 1, cityFill: "", provinceFill: 1,
 };
 export const symbolStyles: SymbolStyles = { ...SYMBOL_STYLE_DEFAULTS };
 export function setSymbolStyles(partial: Partial<SymbolStyles>) {
@@ -2363,7 +2414,7 @@ export class OverlayManager {
     const size = px * st.size;
     ctx.font = this.labelFont(key, px);
     ctx.lineJoin = "round";
-    const halo = opts?.halo ?? "rgba(6,12,18,0.85)";
+    const halo = st.halo || opts?.halo || "rgba(6,12,18,0.85)";
     const haloW = opts?.haloWidth ?? Math.max(0.4, size * 0.2);
     const fill = opts?.color ?? st.color;
 
@@ -2415,8 +2466,8 @@ export class OverlayManager {
     // borders, names and selection outline below stay at full strength, so winding the
     // slider down leaves a clean political outline over the terrain.
     ctx.imageSmoothingEnabled = false;
-    if (this.provinceOpacity > 0) {
-      ctx.globalAlpha = this.provinceOpacity;
+    if (this.provinceOpacity * symbolStyles.provinceFill > 0) {
+      ctx.globalAlpha = this.provinceOpacity * symbolStyles.provinceFill;
       ctx.drawImage(this.provinceCanvas, 0, 0, w, h, 0, 0, gridW, gridH);
       ctx.globalAlpha = 1;
     }
@@ -2431,8 +2482,8 @@ export class OverlayManager {
         ctx.lineWidth = 3 / this.currentScale;
         ctx.stroke(this.provinceBorderPath);
       }
-      ctx.strokeStyle = this.provinceBorderColor;
-      ctx.lineWidth = 1 / this.currentScale;
+      ctx.strokeStyle = symbolStyles.borderColor || this.provinceBorderColor;
+      ctx.lineWidth = symbolStyles.borderWidth / this.currentScale;
       ctx.stroke(this.provinceBorderPath);
     }
 
@@ -3394,8 +3445,9 @@ export class OverlayManager {
             : pop >= 20_000 ? 1.2
             : 0.9;
           ctx.globalAlpha = 0.95;
-          ctx.fillStyle = pop >= 20_000 ? "#ff8a3c" : s.size === "outpost" ? "#9aa7b4" : "#f0f0f0";
-          ctx.strokeStyle = "rgba(0,0,0,0.65)";
+          ctx.fillStyle = symbolStyles.cityFill
+            || (pop >= 20_000 ? "#ff8a3c" : s.size === "outpost" ? "#9aa7b4" : "#f0f0f0");
+          ctx.strokeStyle = symbolStyles.cityFill ? "rgba(255,255,255,0.9)" : "rgba(0,0,0,0.65)";
           ctx.lineWidth = Math.max(0.25, radius * 0.16);
           ctx.beginPath();
           ctx.arc(cx, cy, radius, 0, Math.PI * 2);

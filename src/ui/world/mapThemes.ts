@@ -363,6 +363,8 @@ export function applyMapTheme(theme: MapTheme): void {
   }));
 
   const settings = useSettingsStore.getState();
+  // A chosen map style owns labels and line inks; only the Classic look takes the plate's.
+  if (settings.mapStyle !== "classic") return;
   if (theme.labelTheme) settings.applyLabelTheme(theme.labelTheme);
   if (theme.linePreset && theme.linePreset in COLOR_PRESETS) {
     settings.applyPreset(theme.linePreset);

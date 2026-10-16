@@ -320,6 +320,11 @@ pub enum ElevationStyle {
     Analytical,
     Antique,
     Abyssal,
+    /// The three MAP STYLES (`settingsStore.mapStyle`): a hypsometric school
+    /// atlas, a parchment chart, and a strategy-game board.
+    Atlas,
+    Parchment,
+    GameBoard,
 }
 
 impl ElevationStyle {
@@ -334,6 +339,9 @@ impl ElevationStyle {
             "analytical" => Some(Self::Analytical),
             "antique" => Some(Self::Antique),
             "abyssal" => Some(Self::Abyssal),
+            "atlas" => Some(Self::Atlas),
+            "parchment" => Some(Self::Parchment),
+            "game" => Some(Self::GameBoard),
             _ => None,
         }
     }
@@ -347,6 +355,9 @@ impl ElevationStyle {
             Self::Analytical => "analytical",
             Self::Antique => "antique",
             Self::Abyssal => "abyssal",
+            Self::Atlas => "atlas",
+            Self::Parchment => "parchment",
+            Self::GameBoard => "game",
         }
     }
 
@@ -359,10 +370,13 @@ impl ElevationStyle {
             Self::Analytical => "Analytical",
             Self::Antique => "Antique Plate",
             Self::Abyssal => "Abyssal",
+            Self::Atlas => "Atlas",
+            Self::Parchment => "Parchment",
+            Self::GameBoard => "Game Board",
         }
     }
 
-    pub fn all() -> [Self; 7] {
+    pub fn all() -> [Self; 10] {
         [
             Self::LayerColouring,
             Self::Alpine,
@@ -371,6 +385,9 @@ impl ElevationStyle {
             Self::Analytical,
             Self::Antique,
             Self::Abyssal,
+            Self::Atlas,
+            Self::Parchment,
+            Self::GameBoard,
         ]
     }
 }
@@ -435,6 +452,10 @@ struct StyleParams {
     /// Shadow tints warm/sepia instead of the default cool skylight blue.
     warm_shadow: bool,
     sea_relief_amp: f32,
+    /// A drawn coastline: land cells touching the sea take this colour (`None` = no line).
+    coast: Option<(u8, u8, u8)>,
+    /// 0..1 paper grain: per-cell brightness jitter, world-stable (0 = none).
+    grain: f32,
 }
 
 const LAND_STOPS_LAYERS: [(f32, (u8, u8, u8)); 9] = [
@@ -544,6 +565,52 @@ const SEA_STOPS_ABYSSAL: [(f32, (u8, u8, u8)); 7] = [
     (1.00, (20, 22, 54)),
 ];
 
+// Map styles. Atlas: green lowlands to tan and brown uplands, pale sea, blue
+// coastline. Parchment: flat paper land, muted grey-blue sea, faint relief. Game
+// board: saturated relief with snow, deep-to-shallow water, a pale surf line.
+const LAND_STOPS_ATLAS: [(f32, (u8, u8, u8)); 9] = [
+    (0.0, (159, 203, 134)),
+    (200.0, (188, 217, 152)),
+    (500.0, (223, 226, 166)),
+    (1000.0, (236, 215, 160)),
+    (1800.0, (220, 178, 124)),
+    (3000.0, (191, 141, 95)),
+    (4500.0, (154, 107, 75)),
+    (6500.0, (176, 160, 150)),
+    (8848.0, (245, 242, 238)),
+];
+const SEA_STOPS_ATLAS: [(f32, (u8, u8, u8)); 3] = [
+    (0.00, (200, 230, 246)),
+    (0.15, (184, 220, 242)),
+    (1.00, (164, 206, 236)),
+];
+const LAND_STOPS_PARCHMENT: [(f32, (u8, u8, u8)); 3] = [
+    (0.0, (234, 220, 190)),
+    (3000.0, (226, 210, 176)),
+    (8848.0, (214, 198, 166)),
+];
+const SEA_STOPS_PARCHMENT: [(f32, (u8, u8, u8)); 3] = [
+    (0.00, (186, 205, 206)),
+    (0.40, (170, 192, 196)),
+    (1.00, (150, 175, 182)),
+];
+const LAND_STOPS_GAME: [(f32, (u8, u8, u8)); 8] = [
+    (0.0, (111, 174, 90)),
+    (300.0, (143, 190, 98)),
+    (900.0, (201, 196, 119)),
+    (1800.0, (196, 154, 91)),
+    (3000.0, (154, 115, 80)),
+    (4500.0, (141, 138, 134)),
+    (6500.0, (225, 225, 222)),
+    (8848.0, (250, 250, 248)),
+];
+const SEA_STOPS_GAME: [(f32, (u8, u8, u8)); 4] = [
+    (0.00, (110, 190, 204)),
+    (0.10, (72, 156, 184)),
+    (0.40, (50, 124, 160)),
+    (1.00, (36, 96, 138)),
+];
+
 fn style_params(style: ElevationStyle) -> StyleParams {
     match style {
         ElevationStyle::LayerColouring => StyleParams {
@@ -560,6 +627,8 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: KEY_ALT_DEG,
             warm_shadow: false,
             sea_relief_amp: 0.15,
+            coast: None,
+            grain: 0.0,
         },
         ElevationStyle::Alpine => StyleParams {
             land_stops: &LAND_STOPS_ALPINE,
@@ -575,6 +644,8 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: KEY_ALT_DEG,
             warm_shadow: false,
             sea_relief_amp: 0.22,
+            coast: None,
+            grain: 0.0,
         },
         ElevationStyle::Arid => StyleParams {
             land_stops: &LAND_STOPS_ARID,
@@ -590,6 +661,8 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: 38.0,
             warm_shadow: true,
             sea_relief_amp: 0.18,
+            coast: None,
+            grain: 0.0,
         },
         ElevationStyle::Polar => StyleParams {
             land_stops: &LAND_STOPS_POLAR,
@@ -605,6 +678,8 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: 18.0,
             warm_shadow: false,
             sea_relief_amp: 0.16,
+            coast: None,
+            grain: 0.0,
         },
         ElevationStyle::Analytical => StyleParams {
             land_stops: &LAND_STOPS_ANALYTICAL,
@@ -620,6 +695,8 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: KEY_ALT_DEG,
             warm_shadow: false,
             sea_relief_amp: 0.30,
+            coast: None,
+            grain: 0.0,
         },
         ElevationStyle::Antique => StyleParams {
             land_stops: &LAND_STOPS_ANTIQUE,
@@ -635,6 +712,8 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: KEY_ALT_DEG,
             warm_shadow: true,
             sea_relief_amp: 0.14,
+            coast: None,
+            grain: 0.0,
         },
         ElevationStyle::Abyssal => StyleParams {
             land_stops: &LAND_STOPS_ABYSSAL,
@@ -650,6 +729,59 @@ fn style_params(style: ElevationStyle) -> StyleParams {
             alt_deg: KEY_ALT_DEG,
             warm_shadow: false,
             sea_relief_amp: 0.55,
+            coast: None,
+            grain: 0.0,
+        },
+        ElevationStyle::Atlas => StyleParams {
+            land_stops: &LAND_STOPS_ATLAS,
+            sea_stops: &SEA_STOPS_ATLAS,
+            classed: false,
+            climate_tint: 0.0,
+            snow_boost: 0.5,
+            gray: false,
+            ao_amp: 0.14,
+            shadow_floor: 0.60,
+            contrast_lo: 0.35,
+            contrast_hi: 0.50,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: false,
+            sea_relief_amp: 0.0,
+            coast: Some((86, 140, 186)),
+            grain: 0.0,
+        },
+        ElevationStyle::Parchment => StyleParams {
+            land_stops: &LAND_STOPS_PARCHMENT,
+            sea_stops: &SEA_STOPS_PARCHMENT,
+            classed: false,
+            climate_tint: 0.0,
+            snow_boost: 0.0,
+            gray: false,
+            ao_amp: 0.05,
+            shadow_floor: 0.88,
+            contrast_lo: 0.12,
+            contrast_hi: 0.16,
+            alt_deg: KEY_ALT_DEG,
+            warm_shadow: true,
+            sea_relief_amp: 0.0,
+            coast: Some((128, 146, 142)),
+            grain: 0.05,
+        },
+        ElevationStyle::GameBoard => StyleParams {
+            land_stops: &LAND_STOPS_GAME,
+            sea_stops: &SEA_STOPS_GAME,
+            classed: false,
+            climate_tint: 0.35,
+            snow_boost: 0.7,
+            gray: false,
+            ao_amp: 0.26,
+            shadow_floor: 0.40,
+            contrast_lo: 0.55,
+            contrast_hi: 0.90,
+            alt_deg: 40.0,
+            warm_shadow: false,
+            sea_relief_amp: 0.08,
+            coast: Some((214, 236, 236)),
+            grain: 0.0,
         },
     }
 }
@@ -736,10 +868,29 @@ fn render_elevation_styled(
     rgba: &mut [u8],
 ) {
     let sp = style_params(style);
+    let step = ctx.step.max(1);
     for i in 0..PIXEL_COUNT {
         let offset = i * 4;
         let (x, y) = (i % SIZE, i / SIZE);
+        // World-stable paper grain, so it does not restart at every tile edge.
+        let g = if sp.grain > 0.0 {
+            let wx = (ctx.tx.max(0) as u32 * SIZE as u32 + x as u32) * step;
+            let wy = (ctx.ty.max(0) as u32 * SIZE as u32 + y as u32) * step;
+            1.0 + sp.grain * (hash01(wx, wy, 0x9A9E) - 0.5) * 2.0
+        } else { 1.0 };
         if tile.terrain[i] == 1 {
+            if let Some((cr, cg, cb)) = sp.coast {
+                let (xi, yi) = (x as isize, y as isize);
+                if [(xi - 1, yi), (xi + 1, yi), (xi, yi - 1), (xi, yi + 1)]
+                    .iter().any(|&(a, c)| halo_terrain(tile, n, a, c) == 0)
+                {
+                    rgba[offset] = cr;
+                    rgba[offset + 1] = cg;
+                    rgba[offset + 2] = cb;
+                    rgba[offset + 3] = 255;
+                    continue;
+                }
+            }
             let e = tile.elevation[i];
             let snow = tile.snow_frac.get(i).copied().unwrap_or(0);
             let (br, bg, bb) =
@@ -753,9 +904,9 @@ fn render_elevation_styled(
             } else {
                 relief_channels(&rel)
             };
-            rgba[offset] = (br as f32 * kr).clamp(0.0, 255.0) as u8;
-            rgba[offset + 1] = (bg as f32 * kg).clamp(0.0, 255.0) as u8;
-            rgba[offset + 2] = (bb as f32 * kb).clamp(0.0, 255.0) as u8;
+            rgba[offset] = (br as f32 * kr * g).clamp(0.0, 255.0) as u8;
+            rgba[offset + 1] = (bg as f32 * kg * g).clamp(0.0, 255.0) as u8;
+            rgba[offset + 2] = (bb as f32 * kb * g).clamp(0.0, 255.0) as u8;
             rgba[offset + 3] = 255;
         } else {
             let d = tile.sea_depth[i].clamp(0.0, 1.0);
@@ -767,7 +918,7 @@ fn render_elevation_styled(
             if sp.gray {
                 base = grayscale(base);
             }
-            let m = sea_shade_amp(tile, n, ctx, x, y, sp.sea_relief_amp);
+            let m = sea_shade_amp(tile, n, ctx, x, y, sp.sea_relief_amp) * g;
             rgba[offset] = (base.0 as f32 * m).clamp(0.0, 255.0) as u8;
             rgba[offset + 1] = (base.1 as f32 * m).clamp(0.0, 255.0) as u8;
             rgba[offset + 2] = (base.2 as f32 * m).clamp(0.0, 255.0) as u8;
