@@ -3147,7 +3147,6 @@ fn build_lake_systems(
     let km_per_cell = 40075.0f32 / w as f32;
     let cell_area_km2 = km_per_cell * km_per_cell;
     let idx = |x: u32, y: u32| (y * w + x) as usize;
-    let hydro = crate::sim::rivers::compute_hydrology(buf);
     let have_temp = !buf.temperature.is_empty();
     let have_bound = !buf.boundary_type.is_empty();
     let have_volc = !buf.is_volcanic.is_empty();
@@ -3209,23 +3208,27 @@ fn build_lake_systems(
             sx += cx as u64; sy += cy as u64;
             minx = minx.min(cx); maxx = maxx.max(cx); miny = miny.min(cy); maxy = maxy.max(cy);
             let ci = idx(cx, cy);
-            let d = ((hydro.filled[ci] - buf.elevation[ci]).max(0.0)) * 8848.0;
+            // Depth below the lake's OWN surface. Re-filling the basin here measured a
+            // water-balance-trimmed lake from its old, higher spill level.
+            let d = ((lk.elevation - buf.elevation[ci]).max(0.0)) * 8848.0;
             max_depth = max_depth.max(d); depth_sum += d;
             if have_temp { tsum += buf.temperature[ci]; }
             if !buf.koppen.is_empty() && matches!(buf.koppen[ci],
                 crate::sim::koppen::BWH | crate::sim::koppen::BWK
                     | crate::sim::koppen::BSH | crate::sim::koppen::BSK) { arid_cells += 1; }
             if have_volc && buf.is_volcanic[ci] == 1 { volcanic = true; }
-            if have_bound && buf.boundary_type[ci] != 0 { on_boundary = true; }
+            // Only a DIVERGENT boundary opens a graben; a convergent one does not.
+            if have_bound && buf.boundary_type[ci] == crate::sim::plates::BOUNDARY_DIVERGENT { on_boundary = true; }
         }
         let cx = (sx / n as u64) as u32;
         let cy = (sy / n as u64) as u32;
         let area_km2 = n as f32 * cell_area_km2;
-        // Basins are shallow relative to their fill; scale the modelled fill depth
-        // to a plausible lake depth (rift/crater basins run genuinely deep). Add a
-        // floor so even a shallow pan reads as a few metres.
-        let max_depth_m = (max_depth * 3.0 + 2.0).clamp(2.0, 1600.0);
-        let mean_depth_m = ((depth_sum / n as f32) * 3.0 + 1.0).clamp(1.0, max_depth_m);
+        // The grid's own fill depth, with a floor so a shallow pan reads as a few
+        // metres. A rift graben is narrower than one cell, so the grid averages its
+        // trough away; it alone gets a boost (Baikal 1,642 m, Tanganyika 1,470 m).
+        let rift_boost = if on_boundary { 4.0 } else { 1.0 };
+        let max_depth_m = (max_depth * rift_boost + 2.0).clamp(2.0, 1700.0);
+        let mean_depth_m = ((depth_sum / n as f32) * rift_boost + 1.0).clamp(1.0, max_depth_m);
         let elev_m = lk.elevation * 8848.0;
         let volume_km3 = area_km2 * mean_depth_m / 1000.0;
         let abs_lat = buf.latitude(cy).abs();
@@ -3243,6 +3246,10 @@ fn build_lake_systems(
         };
         let kind = aquatic::classify_lake(&facts);
         let band = aquatic::band_from_temp(mean_temp);
+        // The hydrology step's own brine estimate wins (classify_salt_lakes); the
+        // type-based guess is only for lakes it never measured.
+        let salinity_ppt = if lk.salinity_ppt > 0.0 { lk.salinity_ppt }
+            else { aquatic::lake_salinity_ppt(kind, max_depth_m) };
 
         // Unique culture-styled name at the centroid.
         let name = {
@@ -3285,7 +3292,7 @@ fn build_lake_systems(
             elev_m,
             volume_km3,
             endorheic,
-            salinity_ppt: aquatic::lake_salinity_ppt(kind, max_depth_m),
+            salinity_ppt,
             analog: aquatic::lake_analog(kind, band).into(),
             thermal: aquatic::lake_thermal(kind, band, max_depth_m),
             water: aquatic::lake_water(kind),
@@ -3293,7 +3300,7 @@ fn build_lake_systems(
             wildlife: aquatic::lake_wildlife(kind, band),
             endemism: aquatic::lake_endemism(kind, band),
             blurb: aquatic::lake_blurb(kind, band),
-            species: aquatic::assign_lake_fish(kind, band, aquatic::lake_salinity_ppt(kind, max_depth_m))
+            species: aquatic::assign_lake_fish(kind, band, salinity_ppt)
                 .into_iter()
                 .map(|f| FishSpeciesOut {
                     slug: f.slug.into(), name: f.name.into(), binomial: f.binomial.into(),

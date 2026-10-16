@@ -1059,9 +1059,16 @@ fn fish_by_slug(slug: &str) -> Option<&'static FishSpec> {
 /// lake only brine shrimp). Deterministic; band-filtered so no fish appears out of
 /// its climate. Returns `&'static FishSpec`, empty only for a truly barren water.
 pub fn assign_lake_fish(kind: LakeKind, band: Band, salinity_ppt: f32) -> Vec<&'static FishSpec> {
+    // Salinity outranks lake type: a salt lake in a rift (Dead Sea) is still a salt
+    // lake. Fish fail above roughly 60 ppt (osmotic limit); brine shrimp go on.
+    if salinity_ppt >= 60.0 {
+        return fish_by_slug("brine-shrimp").into_iter().collect();
+    }
     // Candidate slugs per lake type (ordered best-first); band filtering + the
     // per-type cap below produce the variable count.
-    let (want, cap): (&[&str], usize) = match kind {
+    let (want, cap): (&[&str], usize) = if salinity_ppt >= 5.0 {
+        (&["brine-shrimp", "lakeshore-pupfish", "oasis-tilapia", "saltcreek-pupfish"], 3)
+    } else { match kind {
         LakeKind::Rift => if band == Band::Tropical {
             (&["mosaic-cichlid", "azure-mbuna", "marsh-lungfish", "whiskered-redtail", "goldshoal-tilapia"], 5)
         } else {
@@ -1075,17 +1082,13 @@ pub fn assign_lake_fish(kind: LakeKind, band: Band, salinity_ppt: f32) -> Vec<&'
         } else {
             (&["goldshoal-tilapia"], 2)
         },
-        LakeKind::SaltEndorheic => if salinity_ppt >= 120.0 {
-            (&["brine-shrimp"], 1) // hypersaline: brine shrimp & flamingoes, no fish
-        } else {
-            (&["brine-shrimp", "lakeshore-pupfish", "oasis-tilapia"], 3)
-        },
+        LakeKind::SaltEndorheic => (&["brine-shrimp", "lakeshore-pupfish", "oasis-tilapia"], 3),
         LakeKind::Tarn => if band == Band::Tropical {
             (&["goldshoal-tilapia"], 1)
         } else {
             (&["redflank-char"], 1)
         },
-    };
+    } };
     let mut out: Vec<&'static FishSpec> = Vec::new();
     for &slug in want {
         if out.len() >= cap { break; }
@@ -1096,12 +1099,40 @@ pub fn assign_lake_fish(kind: LakeKind, band: Band, salinity_ppt: f32) -> Vec<&'
             }
         }
     }
+    // A type whose roster has nothing for this climate (a tropical lowland lake, a
+    // polar tarn) still holds the band's ordinary still-water fish — never nothing.
+    if out.is_empty() {
+        let fallback: &[&str] = match band {
+            Band::Tropical => &["goldshoal-tilapia", "marsh-lungfish", "emperor-cichlid"],
+            Band::WarmTemperate => &["reed-tench", "marsh-carp", "broadscale-bream"],
+            Band::CoolTemperate => &["marbled-perch", "northern-pike", "reed-tench"],
+            Band::Boreal => &["northern-pike", "broad-whitefish", "marbled-perch"],
+            Band::Polar => &["blackfin-char", "broad-whitefish", "arctic-grayling"],
+        };
+        out.extend(fallback.iter().filter_map(|s| fish_by_slug(s)).filter(|f| f.bands.contains(&band)));
+    }
     out
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_fresh_lake_has_fish_and_brine_has_none() {
+        use LakeKind::*;
+        let bands = [Band::Tropical, Band::WarmTemperate, Band::CoolTemperate, Band::Boreal, Band::Polar];
+        for kind in [Crater, Rift, SaltEndorheic, Glacial, TropicalGreat, Lowland, Tarn] {
+            for band in bands {
+                let fresh = assign_lake_fish(kind, band, 0.2);
+                assert!(!fresh.is_empty(), "{:?}/{:?} has no fish", kind, band);
+                assert!(fresh.iter().all(|f| f.slug == "brine-shrimp" || f.bands.contains(&band)),
+                    "{:?}/{:?} lists a fish out of its climate", kind, band);
+                let brine = assign_lake_fish(kind, band, 150.0);
+                assert!(brine.iter().all(|f| f.slug == "brine-shrimp"), "{:?}/{:?} hypersaline has fish", kind, band);
+            }
+        }
+    }
 
     #[test]
     fn temperate_river_gets_zoned_species() {

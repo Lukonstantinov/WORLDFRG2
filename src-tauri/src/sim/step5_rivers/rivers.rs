@@ -1486,7 +1486,9 @@ fn trim_basin_to_water_balance(
     by_depth.truncate(keep);
     let kept: Vec<(u32, u32)> = by_depth.into_iter().map(|(p, _)| p).collect();
     if kept.len() < 2 { return None; }
-    let elevation = kept.iter().map(|&(x, y)| filled[buf.idx(x, y)]).sum::<f32>() / kept.len() as f32;
+    // The LOWERED surface: just high enough to cover the shallowest kept cell.
+    // Returning the old spill level here made every trimmed lake read too deep.
+    let elevation = kept.iter().map(|&(x, y)| buf.elevation[buf.idx(x, y)]).fold(f32::MIN, f32::max);
     Some((kept, elevation))
 }
 
