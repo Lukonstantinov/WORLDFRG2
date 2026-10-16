@@ -702,6 +702,8 @@ fn print_scorecard(c: &EconScorecard) {
              c.wealth_gini);
     println!("  top-10% wealth share            {:>9.3}     0.60 – 0.90         Alfani",
              c.top10_share);
+    println!("    (ONE seed of ~15-40 houses: seed alone moves this by sd 0.09-0.12 —");
+    println!("     judge drift with econ_measure_top10_seed_spread, SCOREBOARD 2026-10-16c)");
     println!("    (over {:>3} surviving houses — statistics need ≥5 to mean anything)",
              c.houses_alive);
     println!("  banks chartered over the run    {:>9}     recurrent           Mueller & Lane",
@@ -3541,5 +3543,35 @@ fn econ_measure_living_world_census() {
         let mut tiers = [0usize; 6];
         for &h in &live { for r in &s.hubs[h].culture_relations { tiers[(r.tier as usize).min(5)] += 1; } }
         println!("culture relation tiers [_,1..5] {:?}", tiers);
+    }
+}
+
+/// IMPROVEMENT_PLAN housekeeping: "bisect the top-10% wealth share drift". Before
+/// bisecting commits, measure how much the number moves across SEEDS on the SAME
+/// code — the scorecard reads one 60-year trajectory, and every people-layer change
+/// shifts the RNG path. If one build already spans the band, a commit bisect would
+/// chase noise. Prints per-seed top-10% share and Gini for both scorecard worlds.
+///
+/// Run: cargo test --release --lib econ_measure_top10_seed_spread -- --ignored --nocapture
+#[test]
+#[ignore]
+fn econ_measure_top10_seed_spread() {
+    const SEEDS: [u64; 8] = [42, 1, 2, 3, 7, 11, 23, 99];
+    for (label, build) in [("reference", reference_world as fn() -> CampaignSim), ("large", reference_world_large)] {
+        let mut tops = Vec::new();
+        for &sd in &SEEDS {
+            let mut s = build();
+            s.seed = sd;
+            let c = measure(&mut s);
+            println!("[top10] {label:9} seed {sd:>3}: top-10% {:.3}  gini {:.3}  houses {}",
+                c.top10_share, c.wealth_gini, c.houses_alive);
+            tops.push(c.top10_share);
+        }
+        let n = tops.len() as f32;
+        let mean = tops.iter().sum::<f32>() / n;
+        let sd = (tops.iter().map(|t| (t - mean).powi(2)).sum::<f32>() / (n - 1.0)).sqrt();
+        let (lo, hi) = (tops.iter().cloned().fold(f32::MAX, f32::min), tops.iter().cloned().fold(f32::MIN, f32::max));
+        let inband = tops.iter().filter(|t| (0.60..=0.90).contains(*t)).count();
+        println!("[top10] {label:9} mean {mean:.3} sd {sd:.3} range {lo:.3}-{hi:.3}  in band 0.60-0.90: {inband}/{}", tops.len());
     }
 }

@@ -9,6 +9,25 @@ scoreboard whose history is rewritten cannot show a regression.
 
 ---
 
+## 2026-10-16c — The top-10% wealth-share "drift" is seed noise, not a regression (bisect closed)
+
+IMPROVEMENT_PLAN housekeeping asked to bisect why top-10% share left its band
+(2026-09-30b). Measured first: `econ_measure_top10_seed_spread` (new, `#[ignore]`d,
+release, 223 s) runs the SAME code on both scorecard worlds over 8 seeds.
+
+| World | per-seed top-10% (42, 1, 2, 3, 7, 11, 23, 99) | mean | sd | in 0.60–0.90 |
+|---|---|---|---|---|
+| reference | 0.716 0.918 0.709 0.665 0.725 0.711 0.823 0.868 | **0.767** | 0.091 | 7/8 |
+| large | 0.555 0.800 0.716 0.745 0.677 0.570 0.815 0.494 | **0.672** | 0.120 | 5/8 |
+
+The scorecard's single seed (42) sits low on the large world (0.555) while the
+multi-seed mean is in band. The history of this row (0.809 → 0.463 → 0.648 →
+0.597 → 0.416 → 0.716) is the same noise seen through one seed: with 14-40 live
+houses, "the top 10%" is two to four families. **No bisect** — it would chase RNG
+paths, not a cause (§2.4: a diagnosis is a complete task). Use the 8-seed mean when
+judging this metric; the scorecard print now says so. Gates unchanged by this
+entry (diagnostic + print only).
+
 ## 2026-10-16b — Carriage data redesigned: arrival calendar, single-entry trade log, per-day route cache (bit-identical)
 
 Same harness (`measure_full_size_campaign`, cached 3600×1800 mock world, release,

@@ -130,7 +130,7 @@ Phase 6 - Let the testers steer
 - [ ] Re-run /court on claims 1-3 with the tester evidence in the case file.
 
 Housekeeping (any time, small)
-- [ ] Fix or explain the red tests on main, bisect the top-10% wealth share drift.
+- [x] Red tests: CI green on main since 74f10a9 (the 10-15 reds were the shared-process flake, fixed by CLAUDE.md rule 37). Top-10% wealth-share drift: MEASURED as seed noise, not a regression - same code over 8 seeds: reference mean 0.767 (sd 0.09, 7/8 in band), large mean 0.672 (sd 0.12, 5/8); the scorecard reads one seed of 14-40 houses. Bisect closed (SCOREBOARD 2026-10-16c, econ_measure_top10_seed_spread).
 - [ ] Prune merged branches (116 now).
 - [x] Rust -> TS check: scripts/check_types.mjs (no new dependency), run in CI after tsc. Matches 275 TS types to same-named Rust serde structs and fails if TS declares a field Rust never sends (a renamed/removed field). 0 drift today after allowlisting 7 client-side fields. Limits: field NAMES only (not types); a TS type with no same-named Rust struct is not checked; panel smoke tests still not written.
 
