@@ -6,6 +6,7 @@ import { computePolitical } from "@bridge";
 import type { PoliticalCenter } from "@types";
 import { GOOD_DEFS } from "@goods";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
+import { TradeSettings } from "@ui/workflow/TradeSettings";
 
 interface Props {
   seed: number;
@@ -32,7 +33,7 @@ export function StepPolitical(_props: Props) {
   const handleCompute = async () => {
     if (simRunning) return;
     if (!step8Done) {
-      setStatus("Step 8 required: generate the Biological-Trade layer first (trade power needs goods + routes)");
+      setStatus("Step 8 required: generate Goods & Trade (step 8) first (trade power needs goods + routes)");
       return;
     }
     setSimRunning(true);
@@ -60,6 +61,8 @@ export function StepPolitical(_props: Props) {
       {!step8Done && (
         <div style={warn}>Complete Step 8 first (trade power is built from goods, routes & monopolies)</div>
       )}
+
+      <TradeSettings />
 
       <button onClick={handleCompute} disabled={simRunning || !step8Done} style={genBtn}>
         Compute Political Influence

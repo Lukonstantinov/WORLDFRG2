@@ -1,4 +1,4 @@
-import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, SharkZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute, HouseAtlas } from "@types";
+import type { RiverData, LakeData, Settlement, VectorSample, Streamline, TradeRoute, FisheryBank, HazardZone, GoodRegion, GoodBeltMask, QualityStop, RampStop, CultureRegion, TradeTrunk, TradeCorridor, PoliticalCenter, EconChokepoint, EconChain, EconRegion, EconCorridor, HouseBrief, MerchantRoute, FuturesLane, SpecCenter, CoinUseCity, ExpeditionView, ExpeditionFail, RidgeLine, StateRegion, AtlasFlow, PlateMotionArrow, CoarseRoute, HouseAtlas } from "@types";
 import type { ClimateBands } from "@bridge";
 
 /** A drawable lane: the points, the MEDIUM of each point, and whether the whole
@@ -77,8 +77,6 @@ function rampToward(color: string, t: number): string {
 }
 
 const GOOD_BY_NAME = new Map(GOOD_DEFS.map((g) => [g.name, g]));
-const SHARK_COLOR = "#e04040";
-const SHIPWORM_COLOR = "#b98a4a";
 const STORM_COLOR = "#c050d0";
 const MONSOON_COLOR = "#3a9ad0";
 const REEF_COLOR = "#30c0b0";
@@ -709,11 +707,9 @@ export class OverlayManager {
   /** Phase 7 · dynasty ties between house seat cities (ally = gold, feud = red). */
   private dynastyLinks: { ax: number; ay: number; bx: number; by: number; ally: boolean }[] = [];
   private fisheryBanks: FisheryBank[] = [];
-  private sharkZones: SharkZone[] = [];
-  private shipwormZones: SharkZone[] = [];
-  private stormZones: SharkZone[] = [];
-  private monsoonZones: SharkZone[] = [];
-  private reefZones: SharkZone[] = [];
+  private stormZones: HazardZone[] = [];
+  private monsoonZones: HazardZone[] = [];
+  private reefZones: HazardZone[] = [];
   private goodRegions: GoodRegion[] = [];
   // ── CLAUDE.md §8.19 (goods localities, shipped) Slice 5 · the full-resolution belt masks (D3/D9/D10).
   //    `goodRegions` above still supplies each belt's LABEL — the medallion, the
@@ -836,7 +832,7 @@ export class OverlayManager {
     markers: false, wind: false, currents: false, latLines: false,
     itcz: false, windBelts: false, plateMotion: false,
     tradeRoutes: false, fisheryBanks: false,
-    sharkZones: false, shipwormZones: false, stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
+    stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
     speculation: false, coinDominance: false,
     houseControl: false, merchantRoutes: false, futures: false,
@@ -1736,15 +1732,7 @@ export class OverlayManager {
     this.fisheryBanks = banks;
   }
 
-  drawSharkZones(zones: SharkZone[]) {
-    this.sharkZones = zones;
-  }
-
-  drawShipwormZones(zones: SharkZone[]) {
-    this.shipwormZones = zones;
-  }
-
-  drawStormZones(zones: SharkZone[]) {
+  drawStormZones(zones: HazardZone[]) {
     this.stormZones = zones;
   }
 
@@ -1753,11 +1741,11 @@ export class OverlayManager {
     this.climateBands = bands;
   }
 
-  drawMonsoonZones(zones: SharkZone[]) {
+  drawMonsoonZones(zones: HazardZone[]) {
     this.monsoonZones = zones;
   }
 
-  drawReefZones(zones: SharkZone[]) {
+  drawReefZones(zones: HazardZone[]) {
     this.reefZones = zones;
   }
 
@@ -3227,24 +3215,6 @@ export class OverlayManager {
       }
     }
 
-    // Shark-infested water: the highest-risk habitat cells + a shark glyph.
-    if (this.visibility.sharkZones && this.sharkZones.length > 0) {
-      this.withOpacity(ctx, 'sharkZones', (ctx) => {
-      for (const z of this.sharkZones) {
-        this.renderRegionMask(ctx, z.cells, z.cell_size, SHARK_COLOR, "\u{1F988}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
-      }
-    });
-    }
-
-    // Shipworm hull-hazard water: warm brackish coasts marked + a worm glyph.
-    if (this.visibility.shipwormZones && this.shipwormZones.length > 0) {
-      this.withOpacity(ctx, 'shipwormZones', (ctx) => {
-      for (const z of this.shipwormZones) {
-        this.renderRegionMask(ctx, z.cells, z.cell_size, SHIPWORM_COLOR, "\u{1FAB1}", z.x, z.y, 0.16 + 0.22 * Math.min(1, z.score));
-      }
-    });
-    }
-
     // Storm/cyclone belts: open-ocean danger water marked + a cyclone glyph.
     if (this.visibility.stormZones && this.stormZones.length > 0) {
       this.withOpacity(ctx, 'stormZones', (ctx) => {
@@ -4316,7 +4286,7 @@ export class OverlayManager {
   }
 
   /** A filled cell-mask AREA (the real distribution shape) with a boundary
-   *  outline and a centered emoji glyph (shark / trade-good belt). When `values`
+   *  outline and a centered emoji glyph (hazard / trade-good belt). When `values`
    *  is given (per-cell 0..255 abundance) each cell is shaded by its richness. When
    *  `subtypes` + `subPalette` are given (grain species / paper sources), each cell
    *  is tinted by its subtype, boundaries between differing subtypes are drawn (the
@@ -4417,7 +4387,7 @@ export class OverlayManager {
         ctx.textBaseline = "alphabetic";
       }
     } else if (emoji) {
-      // Hazard-zone glyph (shark / shipworm / storm / reef) — kept as an emoji.
+      // Hazard-zone glyph (storm / reef / monsoon) — kept as an emoji.
       const fs = Math.max(6, 16 / this.currentScale);
       ctx.font = `${fs}px sans-serif`;
       ctx.textAlign = "center";
@@ -6571,8 +6541,6 @@ export class OverlayManager {
     this.toponyms = [];
     this.riverBreaks = [];
     this.fisheryBanks = [];
-    this.sharkZones = [];
-    this.shipwormZones = [];
     this.stormZones = [];
     this.monsoonZones = [];
     this.reefZones = [];

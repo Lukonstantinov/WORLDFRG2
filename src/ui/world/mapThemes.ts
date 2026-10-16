@@ -192,7 +192,7 @@ export const MAP_THEMES: MapTheme[] = [
     blurb: "Every risk field at once — what the sea and the air can do to you.",
     layer: "land",
     overlays: [
-      "sharkZones", "shipwormZones", "reefZones", "stormZones", "monsoonZones",
+      "reefZones", "stormZones", "monsoonZones",
       "settlements",
     ],
     linePreset: "High contrast",
@@ -328,8 +328,6 @@ export const LAYER_REQUIRES: Record<ActiveLayer, number> = {
   habitability: 7,
   storm: 8,
   reef: 8,
-  shark: 8,
-  shipworm: 8,
   disease: 8,
 };
 

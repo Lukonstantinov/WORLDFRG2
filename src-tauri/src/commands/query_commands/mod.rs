@@ -54,8 +54,6 @@ pub struct CellInfo {
     pub current_type: u8,
     pub distance_to_ocean: f32,
     pub salinity: f32,    // PSU
-    pub shark_risk: f32,  // 0..1
-    pub shipworm_risk: f32, // 0..1
     pub storm_risk: f32,  // 0..1 (annual storm potential)
     pub reef_risk: f32,   // 0..1
     pub disease_risk: f32, // 0..1 (malaria/fever, land)
@@ -1318,14 +1316,12 @@ pub struct OverlaysResult {
     pub vectors: OverlayVectors,
     pub streamlines: Vec<Streamline>,
     pub fishery_banks: Vec<FisheryBank>,
-    pub shark_zones: Vec<SharkZone>,
-    pub shipworm_zones: Vec<SharkZone>,
-    pub reef_zones: Vec<SharkZone>,
+    pub reef_zones: Vec<HazardZone>,
     pub good_regions: Vec<GoodRegion>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Biological overlays: shark zones, trade-good regions, trade matrix
+// Biological overlays: hazard zones, trade-good regions, trade matrix
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// One connected coarse cluster: the member coarse cells (as world top-left
@@ -1435,7 +1431,7 @@ fn value_noise(cx: i32, cy: i32, cw: i32, period: f32, seed: u64) -> f32 {
 }
 
 #[derive(Serialize, Clone, Debug)]
-pub struct SharkZone {
+pub struct HazardZone {
     pub cells: Vec<[f32; 2]>, // coarse cell top-left world coords (the marked area)
     pub cell_size: f32,       // coarse cell size in world cells
     pub x: f32,               // label centroid

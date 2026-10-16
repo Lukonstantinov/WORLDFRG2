@@ -117,8 +117,6 @@ fn reference_world_with_ore(w: u32, h: u32, seed: u64, richness: u32) -> (
 
     let (_provinces, province_id, _founded) = provinces::generate_provinces(&buf, &extracted_rivers, &lakes, &settled, 0.5);
 
-    biological::compute_shark_risk(&mut buf, &extracted_rivers);
-    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     let specs = goods_spec::default_list();

@@ -1720,7 +1720,7 @@ export interface EconomySnapshot {
   goods: string[];
 }
 
-export interface SharkZone {
+export interface HazardZone {
   cells: [number, number][]; // coarse-cell top-left world coords (marked area)
   cell_size: number;
   x: number;                 // label centroid

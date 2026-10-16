@@ -1,5 +1,5 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
-import type { EconomySnapshot, GoodRegion, LakeData, RiverData, Settlement, SharkZone, VectorSample } from "@types";
+import type { EconomySnapshot, GoodRegion, LakeData, RiverData, Settlement, HazardZone, VectorSample } from "@types";
 
 // --- Overlay / query commands ---
 
@@ -31,9 +31,7 @@ export interface OverlaysResult {
   vectors: OverlayVectors;
   streamlines: Streamline[];
   fishery_banks: FisheryBank[];
-  shark_zones: SharkZone[];
-  shipworm_zones: SharkZone[];
-  reef_zones: SharkZone[];
+  reef_zones: HazardZone[];
   good_regions: GoodRegion[];
 }
 

@@ -43,9 +43,7 @@ fn group_columns(group: &str) -> Option<ColumnSet> {
         // travels with its own phase's group. A partial import leaves it stale
         // until "Reclassify Biomes" is re-run (one click, step 6).
         "soil" => ColumnSet::SOIL | ColumnSet::FERTILITY | ColumnSet::FISHERY | ColumnSet::BIOME,
-        "hazards" => ColumnSet::SHARK
-            | ColumnSet::SHIPWORM
-            | ColumnSet::STORM
+        "hazards" => ColumnSet::STORM
             | ColumnSet::REEF
             | ColumnSet::DISEASE,
         "goods" => ColumnSet::GOODS,

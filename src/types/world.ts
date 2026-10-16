@@ -81,8 +81,6 @@ export interface CellInfo {
   current_type: number;
   distance_to_ocean: number;
   salinity: number;    // PSU
-  shark_risk: number;  // 0..1
-  shipworm_risk: number; // 0..1
   storm_risk: number;  // 0..1
   reef_risk: number;   // 0..1
   disease_risk: number; // 0..1
@@ -118,7 +116,7 @@ export type ActiveLayer =
   | "sst" | "snow"
   | "soil" | "fertility" | "plates"
   | "biomes" | "fisheries" | "terrain" | "natural" | "shelf" | "ridges" | "wind" | "windspeed" | "currents"
-  | "habitability" | "salinity" | "shark" | "shipworm" | "storm" | "reef" | "disease";
+  | "habitability" | "salinity" | "storm" | "reef" | "disease";
 
 export interface VectorSample {
   x: number;

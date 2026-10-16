@@ -67,10 +67,6 @@ export function layerReadout(layer: ActiveLayer, c: CellInfo, elevMaxM: number):
     case "wind":
     case "windspeed":
       return `wind ${speed(c.wind_vx, c.wind_vy).toFixed(2)}`;
-    case "shark":
-      return `shark risk ${risk(c.shark_risk)}`;
-    case "shipworm":
-      return `shipworm risk ${risk(c.shipworm_risk)}`;
     case "storm":
       return `storm risk ${risk(c.storm_risk)}`;
     case "reef":

@@ -42,8 +42,8 @@ const STEP_INFO = [
   // active, so rivers/mountains/lakes/regions can be named in local style. It is
   // OPTIONAL and off the linear Continue chain (reached by clicking).
   { step: 12, label: "Toponyms (optional)", desc: "Name rivers, mountains, lakes and regions in the local culture's style. Editable — rename any feature. Needs Rivers (5) + Settlements (7)." },
-  { step: 8, label: "Biological-Trade", desc: "Shark & shipworm waters, trade-good belts, trade routes, and the regional trade matrix." },
-  { step: 9, label: "Political", desc: "Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
+  { step: 8, label: "Goods & Trade", desc: "Trade-good belts and ore deposits, storm & reef hazards, trade routes and the regional trade matrix." },
+  { step: 9, label: "Political", desc: "Set trade reach, piracy and regions, then Re-rank settlements by trade power (route centrality + good monopoly) and map their influence." },
   { step: 10, label: "Economy", desc: "Solve the market equilibrium: stock-based prices in grain-equivalent, barter ratios, currency goods, grain & trade wealth, supply chains and chokepoints." },
   // Step 11 (Living Trade / the campaign tick) is no longer part of the Forge
   // wizard — it lives in Chronicle mode (ChroniclePanel). Forge owns generation
@@ -309,7 +309,6 @@ export function WorkflowPanel() {
     setOverlayVisible("lakes", true);
     setOverlayVisible("settlements", true);
     setOverlayVisible("latLines", true);
-    setOverlayVisible("sharkZones", true);
     setOverlayVisible("tradeRoutes", true);
   };
 

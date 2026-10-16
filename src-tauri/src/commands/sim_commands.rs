@@ -408,8 +408,8 @@ pub struct BiomeStat {
     pub cells: u32,
 }
 
-/// Run the biological phase: shark-habitat danger + trade-good belts.
-/// Phase 8: Sharks + trade goods (persisted u8 fields).
+/// Run the biological phase: sea hazards (storms, reefs) + trade-good belts.
+/// Phase 8 (persisted u8 fields).
 #[tauri::command]
 pub fn sim_biological(
     seed: u64,
@@ -426,8 +426,6 @@ pub fn sim_biological(
         .unwrap_or_default();
 
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
-    biological::compute_shark_risk(&mut buf, &river_data);
-    biological::compute_shipworm_risk(&mut buf, &river_data);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     // The discrete ORE WORKINGS (grade / extent / depth per deposit) that the u8
@@ -448,7 +446,7 @@ pub fn sim_biological(
     let _ = metadata::set_meta(&conn, "gem_deposits", &gem_deposits.to_string());
     let _ = metadata::set_meta(&conn, "climate_strictness", &climate_strictness.to_string());
 
-    buf.save(&conn, "Biological (sharks, shipworms, storms, reefs & trade goods)")
+    buf.save(&conn, "Biological (storms, reefs & trade goods)")
 }
 
 /// One-click REFRESH of hydrology → biology on an existing world, WITHOUT
@@ -506,8 +504,6 @@ pub fn sim_refresh_hydrology_biology(
     // Phase 8: biological — hazards, trade goods, and inland salt pans.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
     biological::compute_disease_risk(&mut buf, &extracted_rivers);
-    biological::compute_shark_risk(&mut buf, &extracted_rivers);
-    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     let (ore, localities, goods_report) = biological::compute_trade_goods(&mut buf, &extracted_rivers, seed, gem_deposits, climate_strictness, &goods);
@@ -693,7 +689,7 @@ pub fn sim_run_all(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 8: Biological — shark + shipworm waters + trade-good belts. Runs
+    // Phase 8: Biological — storm/reef hazards + trade-good belts. Runs
     // BEFORE province generation now (was after): `Province.good_belt` is a
     // one-time aggregate of the tile `goods` columns taken AT province-generation
     // time (`sim::provinces::generate_provinces`'s `goods_hist` accumulation), so
@@ -704,8 +700,6 @@ pub fn sim_run_all(
     // exactly this frozen field. See CLAUDE.md §8.19/§5 and the campaign_commands
     // fallback this bug defeated.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
-    biological::compute_shark_risk(&mut buf, &extracted_rivers);
-    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Biological step's own
@@ -1119,13 +1113,11 @@ pub fn sim_run_all_from_terrain(
     ));
     settlements::write_habitability(&mut buf, &hab_fields.hab);
 
-    // Phase 8: Biological — shark + shipworm waters + trade-good belts. Runs
+    // Phase 8: Biological — storm/reef hazards + trade-good belts. Runs
     // BEFORE province generation now — see the identical reordering + rationale
     // in `sim_run_all`: province generation freezes `Province.good_belt` from the
     // tile `goods` columns, which are still all-zero until this phase runs.
     let goods = crate::commands::goods_commands::load_world_goods(&conn);
-    biological::compute_shark_risk(&mut buf, &extracted_rivers);
-    biological::compute_shipworm_risk(&mut buf, &extracted_rivers);
     biological::compute_storm_base(&mut buf);
     biological::compute_reef_risk(&mut buf);
     // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — the Biological step's own

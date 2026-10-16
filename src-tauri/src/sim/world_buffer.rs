@@ -257,7 +257,7 @@ impl ColumnSet {
             // coast differently here than the full pipeline does.
             | Self::SHELF.0,
     );
-    /// biological.rs (sharks/shipworms/storms/reefs/goods — phase 8)
+    /// biological.rs (storms/reefs/goods — phase 8)
     /// PLATES is READ-ONLY here: the ore-deposit placer decides a mineral's
     /// tectonic setting (arc / orogen / craton / rift) from `boundary_type`, which
     /// is the organising principle of economic geology and which this phase
@@ -266,7 +266,7 @@ impl ColumnSet {
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SEA_DEPTH.0 | Self::SHELF.0 | Self::CURRENTS.0
             | Self::DIST_OCEAN.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0 | Self::KOPPEN.0
             | Self::PLATES.0 | Self::VOLCANIC.0 | Self::FERTILITY.0 | Self::FISHERY.0
-            | Self::SALINITY.0 | Self::HABITABILITY.0 | Self::SHARK.0 | Self::SHIPWORM.0
+            | Self::SALINITY.0 | Self::HABITABILITY.0
             | Self::STORM.0 | Self::REEF.0 | Self::DISEASE.0 | Self::GOODS.0,
     );
 
@@ -932,8 +932,6 @@ mod tests {
 
         let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_BIOLOGICAL).unwrap();
         let goods = crate::sim::goods_spec::default_list();
-        crate::sim::biological::compute_shark_risk(&mut buf, &rivers);
-        crate::sim::biological::compute_shipworm_risk(&mut buf, &rivers);
         crate::sim::biological::compute_storm_base(&mut buf);
         crate::sim::biological::compute_reef_risk(&mut buf);
         let _ = crate::sim::biological::compute_trade_goods(&mut buf, &rivers, 7, 2, 0.5, &goods);

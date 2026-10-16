@@ -1,6 +1,6 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { CultureRegion, EconomySnapshot, GoodBeltMask, Itinerary, PoliticalCenter, ProvinceGoodMask, Settlement, SharkZone, TradeMatrix } from "@types";
+import type { CultureRegion, EconomySnapshot, GoodBeltMask, Itinerary, PoliticalCenter, ProvinceGoodMask, Settlement, HazardZone, TradeMatrix } from "@types";
 import type { FisheryBank, OverlaysResult, TradeRoute } from "./types";
 
 /** Compute trade routes between the current settlements (pass the store list).
@@ -56,30 +56,20 @@ export async function computeFisheryBanks(): Promise<FisheryBank[]> {
   return invoke("compute_fishery_banks");
 }
 
-/** Cluster the highest-risk shark-infested water into danger zones. */
-export async function computeSharkZones(): Promise<SharkZone[]> {
-  return invoke("compute_shark_zones");
-}
-
-/** Cluster the highest-risk shipworm (Teredo) hull-hazard water into zones. */
-export async function computeShipwormZones(): Promise<SharkZone[]> {
-  return invoke("compute_shipworm_zones");
-}
-
 /** Cluster the highest-risk storm/cyclone water into danger zones. `month <= 0`
  *  is the combined annual extent; 1..months applies the seasonal phase. */
-export async function computeStormZones(month: number, months: number): Promise<SharkZone[]> {
+export async function computeStormZones(month: number, months: number): Promise<HazardZone[]> {
   return invoke("compute_storm_zones", { month, months });
 }
 
 /** Cluster the highest-risk reef/shoal wreck water into danger zones. */
-export async function computeReefZones(): Promise<SharkZone[]> {
+export async function computeReefZones(): Promise<HazardZone[]> {
   return invoke("compute_reef_zones");
 }
 
 /** Cluster the land under a monsoon-type climate into wet-season flood regions
  *  (Natural Disasters overlay, alongside the hurricane/storm zones). */
-export async function computeMonsoonZones(): Promise<SharkZone[]> {
+export async function computeMonsoonZones(): Promise<HazardZone[]> {
   return invoke("compute_monsoon_zones");
 }
 
@@ -130,7 +120,7 @@ export async function computeClimateBands(): Promise<ClimateBands> {
 }
 
 /** One-shot fetch of the *static* map overlays (wind/current vectors +
- *  streamlines, fishery banks, shark/shipworm/reef zones, trade-good regions) in
+ *  streamlines, fishery banks, reef zones, trade-good regions) in
  *  a single IPC round-trip backed by one shared tile-cache read. Storm zones are
  *  fetched separately (`computeStormZones`) because they depend on the month. */
 export async function computeOverlays(): Promise<OverlaysResult> {

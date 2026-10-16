@@ -991,7 +991,7 @@ export function MapCanvas() {
   }, [step8Done, settlements, rivers, tileVersion, bioParams.tradeReach, bioParams.maxCrossing, bioParams.desertRoutes, bioParams.economicRegions, bioParams.piracyLevel, bioParams.tradeSeason, bioParams.calendarMonths, requestRender]);
 
   // All map overlays in ONE IPC round-trip (see `compute_overlays`): wind/current
-  // vectors + streamlines, fishery banks, shark/shipworm/reef/storm danger zones
+  // vectors + streamlines, fishery banks, reef/storm danger zones
   // and trade-good regions. They previously fired as ~8 separate calls that each
   // re-locked the DB and re-read the tile cache; now they share one read. Storm
   // zones are seasonal, so the month sliders are deps too.
@@ -1003,8 +1003,6 @@ export function MapCanvas() {
       om.drawWindArrows(o.vectors.wind, grid_width, grid_height);
       om.drawCurrentStreamlines(o.streamlines);
       om.drawFisheryBanks(o.fishery_banks);
-      om.drawSharkZones(o.shark_zones);
-      om.drawShipwormZones(o.shipworm_zones);
       om.drawReefZones(o.reef_zones);
       om.drawGoodRegions(o.good_regions);
       goodRegionsRef.current = o.good_regions;

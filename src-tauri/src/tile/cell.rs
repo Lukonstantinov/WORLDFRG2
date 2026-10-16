@@ -31,9 +31,9 @@ pub struct TileData {
     pub habitability: Vec<f32>,   // 0.0-1.0 settlement suitability (heatmap layer)
     // ── Salinity + Biological (appended last for save back-compat) ──
     pub salinity: Vec<u8>,        // sea: 0..255 ↔ ~28-42 PSU
-    pub shark_risk: Vec<u8>,      // sea: 0..255 shark-habitat danger
+    pub shark_risk: Vec<u8>,      // RETIRED 2026-10-16: no longer computed/drawn; kept zeroed so SAVE_FORMAT holds
     pub goods: Vec<Vec<u8>>,      // [GOODS_COUNT] trade-good intensity fields (0..255)
-    pub shipworm_risk: Vec<u8>,   // sea: 0..255 shipworm (Teredo) hull-hazard. Serialized AFTER goods.
+    pub shipworm_risk: Vec<u8>,   // RETIRED 2026-10-16 (see shark_risk). Serialized AFTER goods.
     pub storm_base: Vec<u8>,      // sea: 0..255 annual cyclone/storm potential (open ocean).
     pub reef_risk: Vec<u8>,       // sea: 0..255 reef/shoal wreck hazard (warm shallow coast).
     pub disease_risk: Vec<u8>,    // land: 0..255 malaria/fever risk (warm-wet lowland).

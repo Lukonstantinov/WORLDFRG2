@@ -84,8 +84,6 @@ pub fn get_cell_info(
         current_type: tile.current_type[idx],
         distance_to_ocean: tile.distance_to_ocean[idx],
         salinity: SAL_MIN_PSU + (tile.salinity[idx] as f32 / 255.0) * (SAL_MAX_PSU - SAL_MIN_PSU),
-        shark_risk: tile.shark_risk[idx] as f32 / 255.0,
-        shipworm_risk: tile.shipworm_risk[idx] as f32 / 255.0,
         storm_risk: tile.storm_base[idx] as f32 / 255.0,
         reef_risk: tile.reef_risk[idx] as f32 / 255.0,
         disease_risk: tile.disease_risk[idx] as f32 / 255.0,

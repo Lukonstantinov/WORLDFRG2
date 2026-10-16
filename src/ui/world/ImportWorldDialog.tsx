@@ -9,7 +9,7 @@ const GROUPS: { id: string; label: string; desc: string }[] = [
   { id: "climate", label: "Climate", desc: "winds, currents, temperature, precipitation, Köppen, salinity" },
   { id: "hydrology", label: "Rivers & Lakes", desc: "river and lake overlays" },
   { id: "soil", label: "Soil & Fertility", desc: "soil types, fertility, fisheries" },
-  { id: "hazards", label: "Hazards", desc: "sharks, shipworm, storms, reefs, disease" },
+  { id: "hazards", label: "Hazards", desc: "storms, reefs, disease" },
   { id: "goods", label: "Trade Goods", desc: "trade-good belts + the goods catalogue" },
 ];
 

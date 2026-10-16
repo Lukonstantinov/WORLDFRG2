@@ -270,8 +270,8 @@ old blobs. Run-alls load ALL columns.
 - **Cylindrical topology:** X wraps (`wrap_x`), Y clamps at poles (`clamp_y`). All
   BFS, painting, and simulation respect this.
 - Each tile carries 25+ columnar data fields. **Serialization order matters** — the
-  tail is, in order: `salinity` u8 · `shark_risk` u8 · `goods: Vec<Vec<u8>>`
-  (`GOODS_COUNT`=45 belts) · `shipworm_risk` · `storm_base` · `reef_risk` ·
+  tail is, in order: `salinity` u8 · `shark_risk` u8 (retired, always 0) · `goods: Vec<Vec<u8>>`
+  (`GOODS_COUNT`=45 belts) · `shipworm_risk` (retired, always 0) · `storm_base` · `reef_risk` ·
   `disease_risk` · `wind_speed` f32 · `precip_summer_frac` · `seasonal_amp` ·
   `sst` f32 · `snow_frac` · `biome` u8 (**currently last**). Blobs are **v2 self-describing**
   (`[0xF2][2][goods_count u16]`); new fields are **appended last** so older
@@ -380,7 +380,7 @@ Run in order. Each phase depends on previous phases' data.
 | 6b | `sim_classify_biomes` | **41 ecological biomes** (needs rivers+lakes) — see §8.12 |
 | 7 | `sim_generate_settlements` | Habitability scoring → city placement, then step 7a: bounded junction sites (straits/isthmuses/passes/great river mouths) the base local-maxima pass structurally cannot reach — the ports/junctions work (shipped) |
 | 7b | `sim_generate_provinces` | Cost-flood + feature-snap province partition (AFTER settlements, incl. step 7a's junction sites) |
-| 8 | `sim_biological` | Shark + shipworm risk + trade-good belts + ORE DEPOSITS (§8.16; `gem_deposits` now means ORE DISTRICTS) |
+| 8 | `sim_biological` | Storm + reef hazards + trade-good belts + ORE DEPOSITS (§8.16; `gem_deposits` now means ORE DISTRICTS) |
 | 9 | `compute_political` | (query-only) Re-rank settlements by trade power + influence discs |
 | 10 | `compute_economy` | (query-only) **Market equilibrium**: stock-based prices, barter, currency goods, wealth, chokepoints |
 | All | `sim_run_all` | Phases 1-8 from plates |
@@ -2694,7 +2694,7 @@ commands/
                                   mod.rs keeps shared use/structs/helpers + `pub use <child>::*`
                                   so external paths query_commands::* are unchanged):
       cell.rs · routing.rs        cell_info; trade routes/matrix/trunks + compute_itinerary
-      overlays.rs · political.rs  shark/shipworm/reef/storm/monsoon + good/culture regions;
+      overlays.rs · political.rs  reef/storm/monsoon hazard zones + good/culture regions;
                                   overlays.rs also carries `compute_good_belt_masks`
                                   (§8.19) — the FULL-RESOLUTION two-layer belt mask;
       economy.rs · flow.rs        political ranking; market economy; dynamic trade flow
@@ -2899,7 +2899,7 @@ sim/                            ← organised into per-phase step folders; mod.r
   step6_soil_fertility/         ← Ph6: soil.rs (12 soil types) · fertility.rs (fisheries)
                                   · biome.rs (Ph6b: 41 ECOLOGICAL BIOMES — see §8.12)
   step7_settlements/settlements.rs ← Ph7: habitability → city placement (Settlement struct)
-  step8_biological_goods/       ← Ph8: biological.rs (shark/shipworm + belts)
+  step8_biological_goods/       ← Ph8: biological.rs (storm/reef hazards + belts)
                                   · deposits.rs (THE ORE GEOLOGY — 11 deposit
                                     models scored from plate boundaries/volcanism,
                                     belt→district→working hierarchy, per-working
@@ -3621,7 +3621,7 @@ market economy, ore geology, biomes, elevation styles, hydrology, map rendering,
 inheritance law, and more — lives in **[`docs/REFERENCE.md`](docs/REFERENCE.md)**, moved
 out of this always-loaded file to keep it lean. Read it on demand.
 
-Sections there: 8.1 Overlays · 8.2 Climate physics & formulas · 8.3 Salinity/sharks/shipworm ·
+Sections there: 8.1 Overlays · 8.2 Climate physics & formulas · 8.3 Salinity ·
 8.4 Trade goods & production chains · 8.5 Market economy (`market.rs::solve`) · 8.6 Köppen current overrides ·
 8.7 Render layers & paint tools · 8.8 File operations · 8.9 Phase-3 performance shape ·
 8.10 Province borders · 8.11 Map label typography · 8.12 Biomes · 8.13 Cordillera elevation ·

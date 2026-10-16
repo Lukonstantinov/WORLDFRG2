@@ -231,8 +231,6 @@ pub fn compute_overlays(
         vectors: get_overlay_vectors(db.clone())?,
         streamlines: get_current_streamlines(db.clone())?,
         fishery_banks: compute_fishery_banks(db.clone())?,
-        shark_zones: compute_shark_zones(db.clone())?,
-        shipworm_zones: compute_shipworm_zones(db.clone())?,
         reef_zones: compute_reef_zones(db.clone())?,
         good_regions: compute_good_regions(db)?,
     })
@@ -363,125 +361,13 @@ pub fn compute_fishery_banks(
 }
 
 
-/// Cluster shark-infested water into circular danger zones for the overlay.
-#[tauri::command]
-pub fn compute_shark_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
-        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
-        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
-    let world = db.cached_tiles_with_conn(&conn)?;
-
-    // Finer coarse grid than the circle version so the marked area follows the
-    // actual physics-driven shark distribution shape.
-    let f = (grid_w / 300).max(1);
-    let cw = ((grid_w + f - 1) / f) as i32;
-    let ch = ((grid_h + f - 1) / f) as i32;
-    let mut risk = vec![0.0f32; (cw * ch) as usize];
-
-    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
-    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
-    for ty in 0..tiles_y as i32 {
-        for tx in 0..tiles_x as i32 {
-            let tile = world.tile(tx, ty);
-            let base_x = tx as u32 * TILE_SIZE;
-            let base_y = ty as u32 * TILE_SIZE;
-            let max_lx = TILE_SIZE.min(grid_w - base_x);
-            let max_ly = TILE_SIZE.min(grid_h - base_y);
-            for ly in 0..max_ly {
-                for lx in 0..max_lx {
-                    let ti = (ly * TILE_SIZE + lx) as usize;
-                    let v = tile.shark_risk[ti] as f32 / 255.0;
-                    if v <= 0.0 { continue; }
-                    let cx = ((base_x + lx) / f) as i32;
-                    let cy = ((base_y + ly) / f) as i32;
-                    let ci = (cy * cw + cx) as usize;
-                    if v > risk[ci] { risk[ci] = v; }
-                }
-            }
-        }
-    }
-
-    // Only the highest-probability water reads as a "shark zone" — a high
-    // threshold + a higher min-cluster size so sharks aren't tagged everywhere.
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.62, 3)
-        .into_iter()
-        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
-        .collect();
-    // Largest, most dangerous areas first.
-    zones.sort_by(|a, b| {
-        (b.cells.len() as f32 * b.score)
-            .partial_cmp(&(a.cells.len() as f32 * a.score))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    zones.truncate(14);
-    Ok(zones)
-}
-
-
-/// Cluster shipworm hull-hazard water into the highest-risk danger zones (same
-/// shape as shark zones — a Biological hazard sublayer for wooden shipping).
-#[tauri::command]
-pub fn compute_shipworm_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
-    let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
-        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    let grid_h: u32 = metadata::get_meta(&conn, "grid_height")
-        .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
-    if grid_w == 0 || grid_h == 0 { return Ok(vec![]); }
-    let world = db.cached_tiles_with_conn(&conn)?;
-
-    let f = (grid_w / 300).max(1);
-    let cw = ((grid_w + f - 1) / f) as i32;
-    let ch = ((grid_h + f - 1) / f) as i32;
-    let mut risk = vec![0.0f32; (cw * ch) as usize];
-
-    let tiles_x = (grid_w + TILE_SIZE - 1) / TILE_SIZE;
-    let tiles_y = (grid_h + TILE_SIZE - 1) / TILE_SIZE;
-    for ty in 0..tiles_y as i32 {
-        for tx in 0..tiles_x as i32 {
-            let tile = world.tile(tx, ty);
-            let base_x = tx as u32 * TILE_SIZE;
-            let base_y = ty as u32 * TILE_SIZE;
-            let max_lx = TILE_SIZE.min(grid_w - base_x);
-            let max_ly = TILE_SIZE.min(grid_h - base_y);
-            for ly in 0..max_ly {
-                for lx in 0..max_lx {
-                    let ti = (ly * TILE_SIZE + lx) as usize;
-                    let v = tile.shipworm_risk[ti] as f32 / 255.0;
-                    if v <= 0.0 { continue; }
-                    let cx = ((base_x + lx) / f) as i32;
-                    let cy = ((base_y + ly) / f) as i32;
-                    let ci = (cy * cw + cx) as usize;
-                    if v > risk[ci] { risk[ci] = v; }
-                }
-            }
-        }
-    }
-
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.58, 3)
-        .into_iter()
-        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
-        .collect();
-    zones.sort_by(|a, b| {
-        (b.cells.len() as f32 * b.score)
-            .partial_cmp(&(a.cells.len() as f32 * a.score))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-    zones.truncate(14);
-    Ok(zones)
-}
-
-
 /// Cluster the highest-risk storm water into danger zones (open-ocean cyclone
-/// belts; same overlay shape as shark/shipworm zones). `month <= 0` returns the
+/// belts; same overlay shape as reef zones). `month <= 0` returns the
 /// combined annual extent; `month` in 1..=`months` applies the analytic seasonal
 /// phase (`biological::storm_season_phase`) so zones fade out in their calm
 /// season and the hemispheres peak ~half a year apart.
 #[tauri::command]
-pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> Result<Vec<HazardZone>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -538,9 +424,9 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
         }
     }
 
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.50, 3)
+    let mut zones: Vec<HazardZone> = cluster_cells(&risk, cw, ch, f, 0.50, 3)
         .into_iter()
-        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .map(|c| HazardZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
         .collect();
     zones.sort_by(|a, b| {
         (b.cells.len() as f32 * b.score)
@@ -559,7 +445,7 @@ pub fn compute_storm_zones(month: i32, months: u32, db: State<'_, WorldDb>) -> R
 /// supporting signal. Shown on the Natural Disasters overlay alongside the cyclone
 /// (hurricane) zones. Mirrors `compute_storm_zones`.
 #[tauri::command]
-pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<HazardZone>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -666,9 +552,9 @@ pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, S
         }
     }
 
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.45, 4)
+    let mut zones: Vec<HazardZone> = cluster_cells(&risk, cw, ch, f, 0.45, 4)
         .into_iter()
-        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .map(|c| HazardZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
         .collect();
     zones.sort_by(|a, b| {
         (b.cells.len() as f32 * b.score)
@@ -682,7 +568,7 @@ pub fn compute_monsoon_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, S
 
 /// Cluster the highest-risk reef/shoal wreck water into danger zones.
 #[tauri::command]
-pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, String> {
+pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<HazardZone>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let grid_w: u32 = metadata::get_meta(&conn, "grid_width")
         .map_err(|e| e.to_string())?.and_then(|s| s.parse().ok()).unwrap_or(0);
@@ -719,9 +605,9 @@ pub fn compute_reef_zones(db: State<'_, WorldDb>) -> Result<Vec<SharkZone>, Stri
         }
     }
 
-    let mut zones: Vec<SharkZone> = cluster_cells(&risk, cw, ch, f, 0.55, 3)
+    let mut zones: Vec<HazardZone> = cluster_cells(&risk, cw, ch, f, 0.55, 3)
         .into_iter()
-        .map(|c| SharkZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
+        .map(|c| HazardZone { cells: c.cells, cell_size: f as f32, x: c.cx, y: c.cy, score: c.score })
         .collect();
     zones.sort_by(|a, b| {
         (b.cells.len() as f32 * b.score)

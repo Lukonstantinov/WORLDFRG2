@@ -47,8 +47,6 @@ pub fn run() {
             query_commands::get_river_systems,
             query_commands::get_lake_systems,
             query_commands::compute_fishery_banks,
-            query_commands::compute_shark_zones,
-            query_commands::compute_shipworm_zones,
             query_commands::compute_storm_zones,
             query_commands::compute_monsoon_zones,
             query_commands::compute_climate_bands,

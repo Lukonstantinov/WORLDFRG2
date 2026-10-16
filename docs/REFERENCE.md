@@ -7,8 +7,7 @@
 ## 8. Reference — Science & Systems
 
 ### 8.1 Overlays (query commands, NOT stored in tiles)
-- `compute_shark_zones` / `compute_shipworm_zones` → highest-risk hazard cell-masks
-  (Toolbar → Biological: 🦈 / 🪱). Also `compute_reef_zones`, `compute_storm_zones`,
+- Hazard cell-masks (`HazardZone`): `compute_reef_zones`, `compute_storm_zones`,
   `compute_monsoon_zones`.
 - `compute_good_regions` → per-good belt cell-masks. **The FILL it returns is no
   longer drawn** (§8.19) — it now supplies only the LABEL: the medallion centroid,
@@ -84,16 +83,15 @@ maritime coasts under-damp, so the high-mid latitudes read too cold (`D→E` 40%
 seasonality is only two states (July/January), so Köppen's `s`/`w`/`f` third letter
 comes from hand-coded detectors rather than from monthly extremes.
 
-### 8.3 Salinity, sharks, shipworm
+### 8.3 Salinity (sharks & shipworm retired)
 - **Salinity** (`ocean.rs::compute_salinity`, before currents): `S = 35 +
   (evaporation − ocean_precip)·5.5` − coastal runoff + enclosed-sea concentration;
   stored u8 over 28-42 PSU. `apply_thermohaline` couples density → current speed ±25%
   and extends the warm conveyor. `advect_salinity_and_recouple` carries salty
   subtropical water poleward. **Re-run Ocean & Atmosphere THEN Climate after changes.**
-- **Shark risk** (`biological.rs`): `warmth(T)·shallow·coast·prey(fishery) +
-  brackish·coast`; warmth 0 ≤10°C → 1 ≥23°C.
-- **Shipworm risk** (`biological.rs`): `warmth(T 13→24)·shallow·coast·brackish`; a
-  persisted u8 column serialized AFTER goods.
+- **Shark / shipworm risk: RETIRED 2026-10-16** (owner). Computation, render layers,
+  overlays and UI removed. The `shark_risk`/`shipworm_risk` tile columns remain in the
+  save format, always zero, so existing `.worldforge` files still open.
 
 ### 8.4 Trade goods & production chains
 21 belts (`compute_trade_goods`). `good_score` = climate(Köppen) × temp/precip bands
@@ -393,7 +391,7 @@ index but of what grows there.
 land, elevation, terrain (hillshade), **natural**, plates, shelf, ridges, fisheries, currents,
 **sst** (sea-surface temperature), temperature, precipitation, wind, **windspeed**
 (low-level wind intensity incl. jets), **snow** (annual snow-cover fraction), climate,
-biomes, soil, fertility, salinity, habitability, shark, shipworm, reef, storm, disease.
+biomes, soil, fertility, salinity, habitability, reef, storm, disease.
 Paint: Pan, Paint Land (0/1), Elevation (f32 0-1), Paint Shelf (u8 0/1), Place Volcano (u8 0/1).
 
 ### 8.8 File operations

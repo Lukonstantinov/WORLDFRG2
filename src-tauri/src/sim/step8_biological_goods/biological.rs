@@ -1,9 +1,6 @@
 ﻿//! Phase 8 â€” Biological layer.
 //!
-//! Two persisted products:
-//!   â€¢ `shark_risk`  â€” habitat danger for "shark-infested" coastal water
-//!     (bull/tiger-shark style: warm, shallow, frequented coasts; brackish
-//!     river-mouth bonus). People-independent.
+//! Persisted products: sea hazards (`storm_base`, `reef_risk`), land disease risk, and
 //!   â€¢ `goods[GOOD_*]` â€” trade-good belt intensities derived from climate,
 //!     terrain, soil/fertility, coast and ocean productivity. Each good is a
 //!     separate sublayer (land and/or marine).
@@ -341,191 +338,6 @@ fn band(x: f32, lo: f32, hi: f32, edge: f32) -> f32 {
 #[inline]
 fn q(v: f32) -> u8 { (v.clamp(0.0, 1.0) * 255.0) as u8 }
 
-// â”€â”€ Shark waters â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-/// Compute shark-habitat danger for sea cells. Warm, shallow, coastal water,
-/// strongest where prey (fisheries) and brackish river outflow concentrate
-/// large coastal sharks. Independent of settlements.
-pub fn compute_shark_risk(buf: &mut WorldBuffer, rivers: &[River]) {
-    let w = buf.width;
-    let h = buf.height;
-    let n = buf.total();
-
-    // Coast-proximity for sea cells: BFS distance from land (bounded).
-    let max_coast = 8u32;
-    let mut coast_d = vec![u32::MAX; n];
-    let mut queue = VecDeque::new();
-    for i in 0..n {
-        if buf.terrain[i] == 1 {
-            // seed sea neighbours of land at distance 1
-            let x = (i as u32) % w;
-            let y = (i as u32) / w;
-            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                let nx = buf.wrap_x(x as i32 + dx);
-                let ny = buf.clamp_y(y as i32 + dy);
-                let ni = buf.idx(nx, ny);
-                if buf.terrain[ni] == 0 && coast_d[ni] > 1 {
-                    coast_d[ni] = 1;
-                    queue.push_back((nx, ny));
-                }
-            }
-        }
-    }
-    while let Some((x, y)) = queue.pop_front() {
-        let i = buf.idx(x, y);
-        let d = coast_d[i];
-        if d >= max_coast { continue; }
-        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let nx = buf.wrap_x(x as i32 + dx);
-            let ny = buf.clamp_y(y as i32 + dy);
-            let ni = buf.idx(nx, ny);
-            if buf.terrain[ni] == 0 && coast_d[ni] > d + 1 {
-                coast_d[ni] = d + 1;
-                queue.push_back((nx, ny));
-            }
-        }
-    }
-
-    // River-mouth bonus (bull sharks frequent brackish estuaries).
-    let mut river_mouth = vec![false; n];
-    for river in rivers {
-        if let Some(&(mx, my)) = river.points.last() {
-            for dy in -2i32..=2 {
-                for dx in -2i32..=2 {
-                    let nx = buf.wrap_x(mx as i32 + dx);
-                    let ny = buf.clamp_y(my as i32 + dy);
-                    river_mouth[buf.idx(nx, ny)] = true;
-                }
-            }
-        }
-    }
-
-    for y in 0..h {
-        for x in 0..w {
-            let i = buf.idx(x, y);
-            if buf.terrain[i] != 0 { buf.shark_risk[i] = 0; continue; }
-
-            // Warmth: bull/tiger sharks favour warm water; taper out of the cold.
-            let t = buf.temperature[i];
-            let warmth = smoothstep(10.0, 23.0, t); // 0 â‰¤10Â°C, full â‰¥23Â°C
-
-            // Shallow, sunlit shelf water (prey + where people swim/fish).
-            let shallow = if buf.is_shelf[i] == 1 {
-                1.0
-            } else {
-                (1.0 - (buf.sea_depth[i] - 0.10) / 0.10).clamp(0.0, 1.0)
-            };
-
-            // Frequented coast: close to shore.
-            let coast = if coast_d[i] == u32::MAX {
-                0.0
-            } else {
-                (1.0 - coast_d[i] as f32 / max_coast as f32).clamp(0.0, 1.0)
-            };
-
-            // Prey richness from the fishery field.
-            let prey = 0.6 + 0.4 * buf.fishery[i].clamp(0.0, 1.0);
-
-            // Brackish/estuary bonus: river mouths + locally fresher water.
-            let brackish = if river_mouth[i] { 0.25 } else { 0.0 }
-                + (1.0 - buf.salinity[i] as f32 / 255.0) * 0.10;
-
-            let risk = (warmth * shallow * coast * prey + brackish * coast).clamp(0.0, 1.0);
-            buf.shark_risk[i] = q(risk);
-        }
-    }
-}
-
-// â”€â”€ Shipworms (Teredo) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-
-/// Compute shipworm hull-hazard for sea cells. *Teredo navalis* riddles wooden
-/// ships in WARM, SHALLOW, COASTAL water and is worst where salinity is reduced
-/// (estuaries / brackish harbours) and where there is shore timber. Unlike
-/// sharks this is largely prey-independent and leans on warmth + low salinity.
-pub fn compute_shipworm_risk(buf: &mut WorldBuffer, rivers: &[River]) {
-    let w = buf.width;
-    let h = buf.height;
-    let n = buf.total();
-
-    // Coast distance for sea cells (BFS from land, bounded).
-    let max_coast = 7u32;
-    let mut coast_d = vec![u32::MAX; n];
-    let mut queue = VecDeque::new();
-    for i in 0..n {
-        if buf.terrain[i] == 1 {
-            let x = (i as u32) % w;
-            let y = (i as u32) / w;
-            for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-                let nx = buf.wrap_x(x as i32 + dx);
-                let ny = buf.clamp_y(y as i32 + dy);
-                let ni = buf.idx(nx, ny);
-                if buf.terrain[ni] == 0 && coast_d[ni] > 1 {
-                    coast_d[ni] = 1;
-                    queue.push_back((nx, ny));
-                }
-            }
-        }
-    }
-    while let Some((x, y)) = queue.pop_front() {
-        let i = buf.idx(x, y);
-        let d = coast_d[i];
-        if d >= max_coast { continue; }
-        for &(dx, dy) in &[(-1i32, 0i32), (1, 0), (0, -1), (0, 1)] {
-            let nx = buf.wrap_x(x as i32 + dx);
-            let ny = buf.clamp_y(y as i32 + dy);
-            let ni = buf.idx(nx, ny);
-            if buf.terrain[ni] == 0 && coast_d[ni] > d + 1 {
-                coast_d[ni] = d + 1;
-                queue.push_back((nx, ny));
-            }
-        }
-    }
-
-    // Estuary/river-mouth bonus (brackish water shipworms thrive in).
-    let mut river_mouth = vec![false; n];
-    for river in rivers {
-        if let Some(&(mx, my)) = river.points.last() {
-            for dy in -2i32..=2 {
-                for dx in -2i32..=2 {
-                    let nx = buf.wrap_x(mx as i32 + dx);
-                    let ny = buf.clamp_y(my as i32 + dy);
-                    river_mouth[buf.idx(nx, ny)] = true;
-                }
-            }
-        }
-    }
-
-    for y in 0..h {
-        for x in 0..w {
-            let i = buf.idx(x, y);
-            if buf.terrain[i] != 0 { buf.shipworm_risk[i] = 0; continue; }
-
-            // Warm water: shipworm activity rises sharply with temperature.
-            let warmth = smoothstep(13.0, 24.0, buf.temperature[i]);
-
-            // Shallow, coastal water where wooden ships actually sail/moor.
-            let shallow = if buf.is_shelf[i] == 1 {
-                1.0
-            } else {
-                (1.0 - (buf.sea_depth[i] - 0.10) / 0.12).clamp(0.0, 1.0)
-            };
-            let coast = if coast_d[i] == u32::MAX {
-                0.0
-            } else {
-                (1.0 - coast_d[i] as f32 / max_coast as f32).clamp(0.0, 1.0)
-            };
-
-            // Reduced salinity (estuary/brackish) is the shipworm's preferred
-            // habitat. salinity u8 0..255 â†” 28..42 PSU, so low u8 = fresher.
-            let fresher = (1.0 - buf.salinity[i] as f32 / 255.0).clamp(0.0, 1.0);
-            let brackish = 0.45 + 0.55 * fresher + if river_mouth[i] { 0.35 } else { 0.0 };
-
-            let risk = (warmth * shallow * coast * brackish).clamp(0.0, 1.0);
-            buf.shipworm_risk[i] = q(risk);
-        }
-    }
-}
-
 // â”€â”€ Disease (malaria / fever) â€” land hazard â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Per-LAND-cell malaria/fever risk: warm, wet, low-lying ground near standing
@@ -593,7 +405,7 @@ pub fn compute_disease_risk(buf: &mut WorldBuffer, rivers: &[River]) {
 // â”€â”€ Storms / cyclones (open ocean) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute the **annual** storm/cyclone potential of every sea cell. Unlike the
-/// coastal shark/shipworm hazards, cyclones roam open water: the field is warm
+/// coastal reef hazard, cyclones roam open water: the field is warm
 /// tropical SST Ã— a cyclogenesis latitude band (â‰ˆ8â€“30Â°, ~0 on the equator).
 /// Seasonality is derived analytically at query time from this base + latitude
 /// (see `query_commands::compute_storm_zones`), so nothing per-month is stored.
@@ -634,7 +446,7 @@ pub fn compute_storm_base(buf: &mut WorldBuffer) {
 // â”€â”€ Reefs / shoals (warm shallow coast) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /// Compute static reef/shoal wreck hazard for sea cells: warm, very shallow,
-/// coastal water (coral-reef / atoll navigation danger). Mirrors the shark
+/// coastal water (coral-reef / atoll navigation danger). Uses a
 /// coast-BFS but keys on very shallow shelf water rather than prey.
 pub fn compute_reef_risk(buf: &mut WorldBuffer) {
     let w = buf.width;

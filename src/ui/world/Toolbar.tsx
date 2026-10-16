@@ -108,8 +108,6 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
     layers: [
       { id: "storm", label: "Storm Belts" },
       { id: "reef", label: "Reef Hazards" },
-      { id: "shark", label: "Shark Waters" },
-      { id: "shipworm", label: "Shipworm Waters" },
       { id: "disease", label: "Disease (Malaria)" },
     ],
   },
@@ -146,7 +144,7 @@ const OPACITY_CAPABLE = new Set([
   // redirect their drawing; left as a named, deliberate gap rather than
   // wrapped incorrectly.
   "lakes", "rivers", "currents", "wind", "plateMotion", "latLines",
-  "fisheryBanks", "cultures", "states", "sharkZones", "shipwormZones",
+  "fisheryBanks", "cultures", "states",
   "stormZones", "monsoonZones", "reefZones", "tradeRoutes",
   "politicalInfluence", "speculation", "figureMarks", "landmarks",
   "chokepoints", "migrations", "settlements",
@@ -168,8 +166,6 @@ const overlayTypes = [
 
 // Biological / political sublayer overlays (grouped separately).
 const bioOverlays = [
-  { id: "sharkZones", label: "\u{1F988} Shark Zones" },
-  { id: "shipwormZones", label: "\u{1FAB1} Shipworm Zones" },
   { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
   // Natural Disasters — hurricane belts (sea) + monsoon flood areas (land).
   { id: "stormZones", label: "\u{1F300} Hurricanes" },
