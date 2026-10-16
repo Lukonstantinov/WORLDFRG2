@@ -104,8 +104,13 @@ export function useFloatingWindow(tint: string) {
     window.addEventListener("pointerup", up);
   }, [pos]);
 
+  // THE GAME FRAME (2026-10-16 redesign): every floating window gets the same bronze
+  // edge, inset bevel and a faint top-left light over its own identifying tint.
   const rootStyle: React.CSSProperties = {
-    background: tint,
+    background: `radial-gradient(120% 70% at 0% 0%, rgba(255,215,140,0.06), rgba(0,0,0,0) 60%), ${tint}`,
+    border: "1px solid #5d4a2a",
+    borderRadius: 5,
+    boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.55), inset 0 1px 0 rgba(255,220,150,0.08), 0 10px 30px rgba(0,0,0,0.55)",
     ...(pos ? { left: pos.x, top: pos.y, right: "auto", bottom: "auto" } : {}),
   };
   return { rootStyle, onPointerDown };

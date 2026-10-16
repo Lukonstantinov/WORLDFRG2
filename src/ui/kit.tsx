@@ -10,7 +10,8 @@
  *  reference adoption.
  */
 import type { CSSProperties, ReactNode, PointerEvent } from "react";
-import { T, SERIF, RADIUS, SHADOW, SPACE, FZ, TONE, type Tone } from "@ui/campaign/chronicleTheme";
+// The kit paints with the CSS-variable tokens so a <Ledger> can repaint it.
+import { TV as T, SERIF, RADIUS, SHADOW, SPACE, FZ, TONE, type Tone, ledgerVars } from "@ui/campaign/chronicleTheme";
 
 // ── Panel shell ──────────────────────────────────────────────────────────────
 
@@ -32,7 +33,8 @@ export function Panel({
         maxHeight,
         display: "flex",
         flexDirection: "column",
-        background: T.panel,
+        // The game frame: a bronze-edged leather panel, lit from the top-left.
+        background: `radial-gradient(120% 80% at 0% 0%, ${T.raised}, ${T.panel} 60%)`,
         border: `1px solid ${T.line}`,
         borderRadius: RADIUS.lg,
         boxShadow: SHADOW.panel,
@@ -59,11 +61,13 @@ export function PanelHeader({
       style={{
         display: "flex", alignItems: "center", gap: SPACE.md,
         padding: "8px 10px", borderBottom: `1px solid ${T.line}`,
+        background: `linear-gradient(${T.raised}, ${T.panel})`,
+        borderRadius: `${RADIUS.lg}px ${RADIUS.lg}px 0 0`,
         cursor: onDragStart ? "move" : undefined, flex: "0 0 auto",
       }}
     >
       {icon != null && <span style={{ fontSize: FZ.head }}>{icon}</span>}
-      <span style={{ fontFamily: SERIF, color: T.gold, fontWeight: 700, fontSize: FZ.head, letterSpacing: 0.3 }}>
+      <span style={{ fontFamily: SERIF, color: T.gold, fontWeight: 700, fontSize: FZ.head, letterSpacing: 1, fontVariant: "small-caps" }}>
         {title}
       </span>
       <span style={{ flex: 1 }} />
@@ -325,7 +329,7 @@ export function Donut({
   return (
     <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img"
       aria-label={drawn.map((s) => `${s.label} ${Math.round((s.value / total) * 100)}%`).join(", ")}>
-      <circle cx={c} cy={c} r={r} fill="none" stroke={T.raised} strokeWidth={thickness} />
+      <circle cx={c} cy={c} r={r} fill="none" style={{ stroke: T.raised }} strokeWidth={thickness} />
       <g transform={`rotate(-90 ${c} ${c})`}>
         {drawn.map((s, i) => {
           const len = (s.value / total) * circ;
@@ -340,12 +344,12 @@ export function Donut({
         })}
       </g>
       {center && (
-        <text x={c} y={c - 1} textAnchor="middle" fill={T.ink}
-          style={{ fontSize: Math.round(size * 0.145), fontWeight: 600 }}>{center}</text>
+        <text x={c} y={c - 1} textAnchor="middle"
+          style={{ fill: T.ink, fontSize: Math.round(size * 0.145), fontWeight: 600 }}>{center}</text>
       )}
       {sub && (
-        <text x={c} y={c + Math.round(size * 0.115)} textAnchor="middle" fill={T.inkDim}
-          style={{ fontSize: Math.round(size * 0.082), letterSpacing: 0.4 }}>{sub}</text>
+        <text x={c} y={c + Math.round(size * 0.115)} textAnchor="middle"
+          style={{ fill: T.inkDim, fontSize: Math.round(size * 0.082), letterSpacing: 0.4 }}>{sub}</text>
       )}
     </svg>
   );
@@ -453,7 +457,9 @@ export function Button({
     fontFamily: "inherit",
   };
   const skins: Record<string, CSSProperties> = {
-    primary: { background: T.accent, color: "#eaf3ff", border: `1px solid ${T.accent}` },
+    // Carved bronze, the game frame's button; ghost stays a hairline.
+    primary: { background: `linear-gradient(#6d5430, #47371e)`, color: "#f4e6c2", border: `1px solid #a2834a`,
+      fontVariant: "small-caps", letterSpacing: 0.6 },
     ghost: { background: "transparent", color: T.ink, border: `1px solid ${T.line}` },
     subtle: { background: "transparent", color: T.inkMid, border: "none" },
   };
@@ -461,6 +467,21 @@ export function Button({
     <button data-no-drag onClick={disabled ? undefined : onClick} disabled={disabled} title={title} style={{ ...base, ...skins[variant], ...style }}>
       {children}
     </button>
+  );
+}
+
+/** A LEDGER page inside the game frame: paper, dark ink, red-ink headings. Every kit
+ *  primitive (and anything else styled with `T`) inside it repaints automatically,
+ *  because the tokens are CSS variables. For tables, accounts and chronicles. */
+export function Ledger({ children, style }: { children: ReactNode; style?: CSSProperties }) {
+  return (
+    <div style={{
+      ...ledgerVars, background: T.panel, color: T.ink, border: `1px solid ${T.line}`,
+      borderRadius: RADIUS.md, padding: `${SPACE.md}px ${SPACE.lg}px`,
+      fontFamily: SERIF, boxShadow: "inset 0 0 18px rgba(120,90,40,0.18)", ...style,
+    }}>
+      {children}
+    </div>
   );
 }
 

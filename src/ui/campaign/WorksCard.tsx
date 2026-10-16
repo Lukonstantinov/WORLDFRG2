@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { campaignWorksCard } from "@bridge";
 import type { WorksCardInfo } from "@types";
 import { useGoodsStore } from "@state/goodsStore";
-import { T, FZ, RADIUS } from "@ui/campaign/chronicleTheme";
+import { T, FZ, RADIUS, alpha } from "@ui/campaign/chronicleTheme";
 import { Meter, Tabs } from "@ui/kit";
 import { CoatOfArms, houseColor } from "@ui/heraldry/CoatOfArms";
 
@@ -99,7 +99,7 @@ function TierLadder({ tier }: { tier: number }) {
           <span key={r} style={{
             width: 20, height: 20, borderRadius: "50%", display: "grid", placeItems: "center", fontSize: 9, fontWeight: 700,
             background: done ? T.gold : "transparent", color: done ? T.panel : T.inkFaint,
-            border: `1px ${k + 1 === tier + 1 ? "dashed" : "solid"} ${done ? T.gold : T.line}`, boxShadow: cur ? `0 0 0 2px ${T.gold}44` : "none",
+            border: `1px ${k + 1 === tier + 1 ? "dashed" : "solid"} ${done ? T.gold : T.line}`, boxShadow: cur ? `0 0 0 2px ${alpha(T.gold, 0.27)}` : "none",
           }}>{r}</span>
         );
       })}

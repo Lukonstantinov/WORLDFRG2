@@ -5,7 +5,7 @@ import { useViewportStore } from "@state/viewportStore";
 import { campaignGetIndividual, renderWorldThumbnail } from "@bridge";
 import type { IndividualBrief, LifeEntryBrief, DecisionBrief, PlaceBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
-import { T, FZ, SPACE, SERIF, RADIUS } from "@ui/campaign/chronicleTheme";
+import { T, FZ, SPACE, SERIF, RADIUS, alpha } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, PanelBody, Tabs, Chip, EmptyNote } from "@ui/kit";
 import { Bust, CareerLadder } from "@ui/campaign/personShared";
 import { PixelFigure } from "@ui/campaign/PixelBust";
@@ -583,7 +583,7 @@ function CharacterLeaf({ p }: { p: IndividualBrief }) {
       {arc.length > 0 && (
         <>
           <SectionTitle>How life shaped {pr.them}</SectionTitle>
-          <div style={{ borderLeft: `2px solid ${T.gold}44`, marginLeft: 4, paddingLeft: 10 }}>
+          <div style={{ borderLeft: `2px solid ${alpha(T.gold, 0.27)}`, marginLeft: 4, paddingLeft: 10 }}>
             {arc.map((e, i) => (
               <div key={i} style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", padding: "3px 0", fontSize: FZ.tiny }}>
                 <span style={{ color: T.inkFaint, minWidth: 64, fontVariantNumeric: "tabular-nums" }}>{e.year} · age {e.age}</span>
@@ -649,7 +649,7 @@ export function OpenLifeButton({ id, label = "📖 Full life" }: { id: number | 
   return (
     <button data-no-drag onClick={(e) => { e.stopPropagation(); useUIStore.getState().setPersonWindow(id); }}
       title="Open this person's full life: decisions, travels and character"
-      style={{ fontSize: FZ.micro, cursor: "pointer", borderRadius: RADIUS.pill, padding: "1px 8px", color: T.gold, background: "transparent", border: `1px solid ${T.gold}88`, whiteSpace: "nowrap" }}>
+      style={{ fontSize: FZ.micro, cursor: "pointer", borderRadius: RADIUS.pill, padding: "1px 8px", color: T.gold, background: "transparent", border: `1px solid ${alpha(T.gold, 0.53)}`, whiteSpace: "nowrap" }}>
       {label}
     </button>
   );

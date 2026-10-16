@@ -3564,7 +3564,13 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   save date; Open / Delete / Save-here / Open folder /
                                   Change folder. A save whose world does not match the
                                   one open is shown but marked, never hidden
-  YearChronicle.tsx             ← SHARED year-grouped expandable chronicle
+  YearChronicle.tsx             ← SHARED year-grouped expandable chronicle, set as a
+                                  `<Ledger>` page (2026-10-16: "game frame, ledger inside" —
+                                  `chronicleTheme.T` is the bronze frame palette in plain hex;
+                                  `TV` the same tokens as CSS variables, which the `@ui/kit`
+                                  primitives use so `<Ledger>` (paper, dark ink, red-ink
+                                  headings) repaints them; `useFloatingWindow`'s rootStyle
+                                  gives every floating window the bronze frame)
   cultureFigure.ts · chronicleTheme.ts · settlementArt.ts ← helpers/themes/art.
                                   `cultureFigure.ts` draws an INDIVIDUAL (a `sex` axis,
                                   per-person seed) — still the renderer for House

@@ -4,6 +4,8 @@ import { useUIStore } from "@state/uiStore";
 import { CoatOfArms } from "@ui/heraldry/CoatOfArms";
 import { CoinIcon } from "@ui/heraldry/CoinIcon";
 import { YearChronicle } from "@ui/campaign/YearChronicle";
+import { Ledger } from "@ui/kit";
+import { TV } from "@ui/campaign/chronicleTheme";
 import { drawFigure, resolveKit, type Occasion } from "@ui/campaign/cultureDress";
 import { clarifyGemLabel } from "@goods";
 import { goodIcon, TIER_META, tierOf, dull, familyRunAt } from "@ui/campaign/houseShared";
@@ -1668,34 +1670,37 @@ function WaterfallChart({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string
 }
 
 function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) {
-  const head: React.CSSProperties = { color: "#6a86a6", fontSize: 9, textTransform: "uppercase", letterSpacing: 0.4, marginTop: 7, marginBottom: 2 };
+  // The account lines are set as a LEDGER page (dark ink on paper, headings in red
+  // ink, income in green ink, expense in red); the charts below stay in the frame.
+  const head: React.CSSProperties = { color: TV.gold, fontSize: 11, fontVariant: "small-caps", letterSpacing: 0.8, fontWeight: 700, marginTop: 7, marginBottom: 2 };
   const Line = ({ label, amt, neg }: { label: string; amt: number; neg?: boolean }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 10, padding: "1px 0" }}>
-      <span style={{ color: "#9ab0c8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
-      <span style={{ color: neg ? "#e0a0a0" : "#7fcf8f", flexShrink: 0 }}>{neg ? "−" : "+"}{fmt(Math.abs(amt))}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", gap: 8, fontSize: 11, padding: "1px 0", borderBottom: `1px dotted ${TV.lineSoft}` }}>
+      <span style={{ color: TV.ink, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ color: neg ? TV.bad : TV.good, flexShrink: 0, fontVariantNumeric: "tabular-nums" }}>{neg ? "−" : "+"}{fmt(Math.abs(amt))}</span>
     </div>
   );
   const Sub = ({ label, amt, color }: { label: string; amt: number; color: string }) => (
-    <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #1b2a3c", marginTop: 2, paddingTop: 2, fontSize: 10, fontWeight: 700 }}>
-      <span style={{ color: "#8ca4bc" }}>{label}</span>
-      <span style={{ color }}>{amt >= 0 ? "+" : "−"}{fmt(Math.abs(amt))}</span>
+    <div style={{ display: "flex", justifyContent: "space-between", borderTop: `1px solid ${TV.line}`, marginTop: 2, paddingTop: 2, fontSize: 11, fontWeight: 700 }}>
+      <span style={{ color: TV.inkMid }}>{label}</span>
+      <span style={{ color, fontVariantNumeric: "tabular-nums" }}>{amt >= 0 ? "+" : "−"}{fmt(Math.abs(amt))}</span>
     </div>
   );
   const anyExp = l.import_tax.length || l.export_tax.length || l.estate_tax || l.upkeep
     || l.fleet_cost || l.lost_cargo || l.events || l.consumption || l.inflation
     || l.war_levy || l.war_damage;
   return (
-    <div style={{ padding: "2px 4px 6px", border: "1px solid #1b2a3c", borderRadius: 4, background: "#0a1119" }}>
+    <div style={{ padding: "2px 4px 6px" }}>
+      <Ledger>
       <div style={head}>Income</div>
       {l.trade_profit.length === 0 && l.office_income === 0 && l.estate_income === 0 &&
-        <div style={{ color: "#56708e", fontSize: 9 }}>none recorded yet</div>}
+        <div style={{ color: TV.inkDim, fontSize: 10, fontStyle: "italic" }}>none recorded yet</div>}
       {l.trade_profit.map((c, i) => <Line key={i} label={`Trade · ${c.label}`} amt={c.amount} />)}
       {l.office_income > 0 && <Line label="Office income" amt={l.office_income} />}
       {l.estate_income > 0 && <Line label="Estate income" amt={l.estate_income} />}
-      <Sub label="Total income" amt={l.income_total} color="#7fcf8f" />
+      <Sub label="Total income" amt={l.income_total} color={TV.good} />
 
       <div style={head}>Expenditure</div>
-      {!anyExp && <div style={{ color: "#56708e", fontSize: 9 }}>none recorded yet</div>}
+      {!anyExp && <div style={{ color: TV.inkDim, fontSize: 10, fontStyle: "italic" }}>none recorded yet</div>}
       {l.import_tax.map((c, i) => <Line key={`i${i}`} label={`Import tax · ${c.label}`} amt={c.amount} neg />)}
       {l.export_tax.map((c, i) => <Line key={`e${i}`} label={`Export tax · ${c.label}`} amt={c.amount} neg />)}
       {l.estate_tax > 0 && <Line label="Estate tax" amt={l.estate_tax} neg />}
@@ -1707,12 +1712,13 @@ function LedgerView({ l, fmt }: { l: HouseLedger; fmt: (v: number) => string }) 
       {l.inflation > 0 && <Line label="Inflation" amt={l.inflation} neg />}
       {l.war_levy > 0 && <Line label="⚔ War levy" amt={l.war_levy} neg />}
       {l.war_damage > 0 && <Line label="⚔ War damage" amt={l.war_damage} neg />}
-      <Sub label="Total spent" amt={-l.expense_total} color="#e0a0a0" />
+      <Sub label="Total spent" amt={-l.expense_total} color={TV.bad} />
 
-      <div style={{ display: "flex", justifyContent: "space-between", borderTop: "1px solid #24364e", marginTop: 5, paddingTop: 4 }}>
-        <span style={{ color: "#cfe0f4", fontWeight: 700, fontSize: 11 }}>NET</span>
-        <span style={{ color: l.net >= 0 ? "#9fe0a8" : "#e88", fontWeight: 700, fontSize: 11 }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", borderTop: `3px double ${TV.line}`, marginTop: 5, paddingTop: 4 }}>
+        <span style={{ color: TV.gold, fontWeight: 700, fontSize: 12, fontVariant: "small-caps", letterSpacing: 1 }}>Net</span>
+        <span style={{ color: l.net >= 0 ? TV.good : TV.bad, fontWeight: 700, fontSize: 12, fontVariantNumeric: "tabular-nums" }}>{l.net >= 0 ? "+" : "−"}{fmt(Math.abs(l.net))}</span>
       </div>
+      </Ledger>
       <WaterfallChart l={l} fmt={fmt} />
       {((l.wealth_years?.length ?? 0) >= 2 || l.wealth_graph.length >= 2) && (
         <WealthGraph
