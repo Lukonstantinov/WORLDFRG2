@@ -2697,7 +2697,9 @@ commands/
   query_commands/               ← Read-only overlays + coarse routing (split into a folder;
                                   mod.rs keeps shared use/structs/helpers + `pub use <child>::*`
                                   so external paths query_commands::* are unchanged):
-      cell.rs · routing.rs        cell_info; trade routes/matrix/trunks + compute_itinerary
+      cell.rs · routing.rs        cell_info + explain_cell (the "Why?" inspector: belt,
+                                  rain shadow, offshore current, soil, fever — read-only);
+                                  trade routes/matrix/trunks + compute_itinerary
       overlays.rs · political.rs  reef/storm/monsoon hazard zones + good/culture regions;
                                   overlays.rs also carries `compute_good_belt_masks`
                                   (§8.19) — the FULL-RESOLUTION two-layer belt mask;
@@ -3103,7 +3105,7 @@ ui/world/  — map & world
   hoverReadout.ts               ← active layer + CellInfo → the readout string. Values
                                   come from `get_cell_info`, never re-derived from a
                                   pixel colour
-  InfoPanel.tsx                 ← Right-click cell inspector
+  InfoPanel.tsx                 ← Right-click cell inspector + "Why is it like this?" (explain_cell)
   LayerLegend.tsx               ← THE MAP KEY (§8.18) — exact, renderer-sourced keys
                                   for elevation · terrain · temperature · sst ·
                                   precipitation · climate. Colours come from

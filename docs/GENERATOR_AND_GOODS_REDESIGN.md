@@ -761,3 +761,16 @@ from any icon, recolour, image upload → 8 colours + house outline). All number
 - Gates: `npx tsc --noEmit` clean · `cargo check --lib --tests` clean ·
   `render::tile_image::tests` 15/15 · `scripts/check_types.mjs` 0 drift.
 - Not verified in the running app (no display in this session).
+
+**Slice W1: "Why?" inspector (2026-10-17, done).** New read-only Rust command
+`explain_cell(wx, wy)` (`commands/query_commands/cell.rs`) returns a causal chain from stored
+data: the circulation belt for THIS planet (`Circulation`, so belts move with rotation),
+temperature and seasons, altitude cooling, rainfall amount and season, distance from the
+sea, a **rain shadow** found by walking upwind up to 1,800 km, the **current offshore**
+where that walk reaches the sea (cold/warm/neutral, sea temperature), snow, fertility,
+fever country and habitability. Sea cells get sea temperature, current, shelf and storms.
+The cell inspector shows it as "Why is it like this?" with ▲/▼ markers, once Ocean &
+Atmosphere has run. It also now shows the exact latitude (the backend applies the line
+ratio; the old frontend estimate ignored it). Gates: `cargo test --lib explain_tests` 1/1,
+`cargo check --lib` clean, `tsc` clean, `check_types` 0 drift. Still owed: a per-city
+"why here" breakdown (W2), which needs the settlement scoring terms stored.

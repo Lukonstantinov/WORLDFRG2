@@ -2,8 +2,8 @@ import { useState, useEffect, useMemo } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useWorldStore } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
-import { getCellInfo, simSetPlateOceanic } from "@bridge";
-import type { CellInfo } from "@types";
+import { explainCell, getCellInfo, simSetPlateOceanic } from "@bridge";
+import type { CellExplanation, CellInfo } from "@types";
 import { GOOD_DEFS } from "@goods";
 import { GoodIcon } from "@ui/goods/GoodIcon";
 import { settlementStory } from "@app/settlementStory";
@@ -86,6 +86,8 @@ export function InfoPanel() {
   const inspectedCell = useUIStore((s) => s.inspectedCell);
   const setInspectedCell = useUIStore((s) => s.setInspectedCell);
   const simRunning = useUIStore((s) => s.simRunning);
+  // The explanation reads climate fields, so it only means something once Ocean & Atmosphere ran.
+  const climateDone = useUIStore((s) => !!s.stepCompleted[3]);
   const setSimRunning = useUIStore((s) => s.setSimRunning);
   const meta = useWorldStore((s) => s.meta);
   const settlements = useWorldStore((s) => s.settlements);
@@ -93,6 +95,8 @@ export function InfoPanel() {
   const lakes = useWorldStore((s) => s.lakes);
   const toponyms = useWorldStore((s) => s.toponyms);
   const [info, setInfo] = useState<CellInfo | null>(null);
+  const [why, setWhy] = useState<CellExplanation | null>(null);
+  const [whyOpen, setWhyOpen] = useState(true);
   const [flippingPlate, setFlippingPlate] = useState(false);
   const invalidateTiles = useViewportStore((s) => s.invalidateTiles);
   const frozen = meta?.frozen === true;
@@ -100,11 +104,15 @@ export function InfoPanel() {
   useEffect(() => {
     if (!inspectedCell) {
       setInfo(null);
+      setWhy(null);
       return;
     }
     getCellInfo(inspectedCell.wx, inspectedCell.wy)
       .then(setInfo)
       .catch(() => setInfo(null));
+    explainCell(inspectedCell.wx, inspectedCell.wy)
+      .then(setWhy)
+      .catch(() => setWhy(null));
   }, [inspectedCell]);
 
   // The plate inspector's click-to-flip: override this cell's plate, then
@@ -144,7 +152,9 @@ export function InfoPanel() {
   // Rust lat_from_y), so the inspector agrees with what was generated.
   const equatorOffset = meta?.equator_offset ?? 0.5;
   const latScale = (meta?.lat_scale ?? 1) <= 1e-4 ? 1 : (meta?.lat_scale ?? 1);
-  const lat = Math.max(-90, Math.min(90,
+  // The backend explanation carries the exact latitude (it also applies the line
+  // ratio); the linear estimate is only the fallback while it loads.
+  const lat = why ? why.lat : Math.max(-90, Math.min(90,
     (equatorOffset - info.wy / info.grid_height) * 180 / latScale));
   const lon = (info.wx / info.grid_width) * 360 - 180;
   const latDir = lat >= 0 ? "N" : "S";
@@ -241,6 +251,37 @@ export function InfoPanel() {
           <div style={{ color: "#d4c5ac", fontSize: 10.5, lineHeight: 1.5, fontStyle: "italic", padding: "1px 0 2px" }}>
             {story.text}
           </div>
+        </>
+      )}
+
+      {/* GENERATOR_AND_GOODS_REDESIGN.md §2.0 — the "Why?" inspector: the causes
+          behind this cell, read from what each generation step stored. */}
+      {climateDone && why && why.factors.length > 1 && (
+        <>
+          <div onClick={() => setWhyOpen(!whyOpen)} role="button" tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setWhyOpen(!whyOpen); }}
+            style={{ color: "#c09a59", fontSize: 11, fontWeight: 700, marginTop: 6, marginBottom: 3, borderTop: "1px solid #3e3422", paddingTop: 5, cursor: "pointer", display: "flex", justifyContent: "space-between" }}>
+            <span>Why is it like this?</span><span style={{ color: "#8a7d66" }}>{whyOpen ? "▾" : "▸"}</span>
+          </div>
+          {whyOpen && (
+            <>
+              <div style={{ color: "#ded4c2", fontSize: 11, fontWeight: 600, marginBottom: 3 }}>
+                {info.terrain === "land" ? (KOPPEN_NAMES[info.koppen]?.replace(/^\S+ - /, "") || info.biome) : "Open sea"}
+              </div>
+              {why.factors.map((f, k) => (
+                <div key={k} style={{ display: "grid", gridTemplateColumns: "14px 1fr", gap: 5, padding: "2px 0", alignItems: "start" }}>
+                  <span title={f.effect > 0 ? "helps" : f.effect < 0 ? "works against" : "context"}
+                    style={{ color: f.effect > 0 ? "#7fbf86" : f.effect < 0 ? "#d9826a" : "#8a7d66", fontWeight: 700, textAlign: "center", lineHeight: "15px" }}>
+                    {f.effect >= 2 ? "▲" : f.effect === 1 ? "△" : f.effect === 0 ? "·" : f.effect === -1 ? "▽" : "▼"}
+                  </span>
+                  <span style={{ lineHeight: 1.4 }}>
+                    <span style={{ color: "#ded4c2", fontWeight: 600 }}>{f.label}. </span>
+                    <span style={{ color: "#b9ab92" }}>{f.text}</span>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
         </>
       )}
 

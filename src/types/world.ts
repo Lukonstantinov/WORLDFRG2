@@ -87,6 +87,21 @@ export interface CellInfo {
   goods: { name: string; amount: number }[];
 }
 
+/** One cause in the "Why?" inspector (Rust `ExplainFactor`). effect: −2 … +2. */
+export interface ExplainFactor {
+  topic: string;
+  label: string;
+  effect: number;
+  text: string;
+}
+
+/** Rust `CellExplanation` — `explain_cell`. `lat` honours the full latitude frame. */
+export interface CellExplanation {
+  lat: number;
+  is_land: boolean;
+  factors: ExplainFactor[];
+}
+
 export type PaintValue =
   | { type: "terrain"; value: number }
   | { type: "elevation"; value: number }
