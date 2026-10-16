@@ -713,3 +713,15 @@ not observed user behaviour.
 | 9 | Fantasy genes | **The six properties are enough.** Fantasy goods are parked. |
 | 10 | Merge duplicate goods | **Yes, but keep the quality factor.** A merged family (e.g. Gems) keeps each member's own grade/terroir and its own deposits; the family only shares demand and substitution. Merging never flattens quality. |
 | 11 | Mock-ups | **HTML mock-ups are allowed for this project** (an exception to CLAUDE.md §2.2). They must look good and be iterated. |
+
+## 13. Owner decisions, round 3 (2026-10-17)
+1. **Layers:** delete only the dead toggle (Volcanoes) and true duplicates (Wind/Currents/
+   Storm/Reef base layers, Trade Hubs, Hub Names, Trade Regions). Keep everything else
+   available, and add **"My layer sets"** (save your own roster of layers). Overlays stop
+   switching on by themselves (§10.2 rule).
+2. **Mock-up look:** both: one in the current bronze-frame/ledger style, one alternative
+   direction for comparison.
+3. **Custom good icon:** both: a 24×24 pixel editor (start from any existing icon, recolour)
+   **and** image upload (downscaled/pixelised to the house style).
+4. **Mock-up order:** Goods Builder first, then the stage wizard + "Why?" inspector, then the
+   layers panel.
