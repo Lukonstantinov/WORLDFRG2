@@ -105,6 +105,7 @@ export function settlementStory(
     : onLake ? "lakeside town"
     : onRiver && rv?.navigable ? "river port"
     : onRiver ? "river town"
+    : s.site === "mine" ? "mining town"
     : s.site === "hills" ? "hill town"
     : "inland market town";
 

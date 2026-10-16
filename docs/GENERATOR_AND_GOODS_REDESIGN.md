@@ -793,3 +793,12 @@ ratio; the old frontend estimate ignored it). Gates: `cargo test --lib explain_t
 - **Next in this track:** S1c resource towns (People reads deposits/goods and founds mining,
   salt and pearl towns), then removal of Trade Hubs / Hub Names / Trade Regions with the
   Political step's replacement by starting realms (§12 decision 8: borders at year 0).
+
+**Slice S1c: resource towns (2026-10-17, done).** `settlements::generate_resource_towns`:
+after the ordinary and junction towns, a rich, reachable working (`workable_intensity ≥ 0.55`)
+with no town within 150 km founds a small town (`site: "mine"`, id `m-N`), one per ore district,
+richest first, capped at 5% of the settlement count. Wired into both run-alls (from the `ore`
+just placed) and the Settlements step (from the stored `deposits`). Provinces are built after,
+so these towns get their own provinces. The settlement story calls them "mining towns".
+Gates: `resource_town_tests` 1/1 · `settlements` 7/7 · `cargo check --lib --tests` · tsc.
+This DOES change generated worlds (a few extra small towns); saves are unaffected.

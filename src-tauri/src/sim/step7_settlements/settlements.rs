@@ -17,7 +17,7 @@ pub struct Settlement {
     #[serde(default)] pub culture: String,
     /// The region / homeland name (e.g. "Vexillia").
     #[serde(default)] pub region: String,
-    /// The site type: "coast" | "river" | "hills" | "plain".
+    /// The site type: "coast" | "river" | "hills" | "plain" | "port" (junction) | "mine" (resource town).
     #[serde(default)] pub site: String,
     // ── GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8, the settlement editor) ──
     /// True for a hand-placed settlement (`place_settlement_at`). Regenerating
@@ -1148,6 +1148,74 @@ pub fn generate_trade_sites(
     out
 }
 
+/// Distance (km) within which an existing town already works a deposit, so no
+/// separate mining town is founded for it.
+pub const RESOURCE_TOWN_GAP_KM: f32 = 150.0;
+/// Only rich, reachable workings found a town of their own.
+pub const RESOURCE_TOWN_MIN_INTENSITY: f32 = 0.55;
+/// At most this share of the existing settlement count becomes resource towns.
+pub const RESOURCE_TOWN_SHARE: f32 = 0.05;
+
+/// RESOURCE TOWNS (GENERATOR_AND_GOODS_REDESIGN.md §8, slice S1c). Goods are placed
+/// before settlements, so a rich mine, quarry or salt working that no town is
+/// near gets a town BECAUSE of it — Potosí stood at 4,000 m only for its silver.
+/// One town per ore district (the best working in it), spaced from every existing
+/// and newly placed town, capped at a small share of the settlement count, and
+/// seeded small: its size comes later, from what it produces and trades.
+pub fn generate_resource_towns(
+    buf: &WorldBuffer,
+    deposits: &[crate::sim::deposits::Deposit],
+    existing: &[Settlement],
+) -> Vec<Settlement> {
+    let (w, h) = (buf.width, buf.height);
+    if w == 0 || h == 0 || existing.is_empty() { return Vec::new(); }
+    let km_cell = 40075.0 / w as f32;
+    let gap2 = (RESOURCE_TOWN_GAP_KM / km_cell).powi(2);
+    let max_towns = ((existing.len() as f32 * RESOURCE_TOWN_SHARE).ceil() as usize).max(1);
+
+    // Best working per (good, district).
+    let mut best: std::collections::HashMap<(&str, u32), &crate::sim::deposits::Deposit> = std::collections::HashMap::new();
+    for d in deposits {
+        if d.x >= w || d.y >= h { continue; }
+        if buf.terrain[(d.y * w + d.x) as usize] != 1 { continue; }
+        if d.workable_intensity() < RESOURCE_TOWN_MIN_INTENSITY { continue; }
+        let e = best.entry((d.good.as_str(), d.district)).or_insert(d);
+        if d.workable_intensity() > e.workable_intensity() { *e = d; }
+    }
+    let mut cands: Vec<&crate::sim::deposits::Deposit> = best.into_values().collect();
+    // Richest first; ties broken by position so the result never depends on hash order.
+    cands.sort_by(|a, b| b.workable_intensity().total_cmp(&a.workable_intensity())
+        .then(a.y.cmp(&b.y)).then(a.x.cmp(&b.x)).then(a.good.cmp(&b.good)));
+
+    let mut placed: Vec<(u32, u32)> = existing.iter().map(|s| (s.x, s.y)).collect();
+    let mut out = Vec::new();
+    'cand: for d in cands {
+        if out.len() >= max_towns { break; }
+        for &(ex, ey) in &placed {
+            let mut dx = (d.x as i32 - ex as i32).abs();
+            if dx > w as i32 / 2 { dx = w as i32 - dx; }
+            let dy = d.y as i32 - ey as i32;
+            if ((dx * dx + dy * dy) as f32) < gap2 { continue 'cand; }
+        }
+        placed.push((d.x, d.y));
+        let score = d.workable_intensity();
+        let population = (200.0 + 2800.0 * score) as u32;
+        out.push(Settlement {
+            id: format!("m-{}", out.len()),
+            x: d.x, y: d.y,
+            name: crate::sim::names::gen_name_epithet(d.x, d.y, w, h, 0),
+            size: if population >= 2_500 { "town" } else { "village" }.to_string(),
+            population,
+            score,
+            culture: crate::sim::names::culture_label(d.x, d.y, w, h).to_string(),
+            region: crate::sim::names::region_name(d.x, d.y, w, h),
+            site: "mine".to_string(),
+            manual: false, edited: false, primary: false,
+        });
+    }
+    out
+}
+
 /// GENERATION_UX_REDESIGN_PLAN.md Slice 7 (F8) — place ONE settlement by hand
 /// at a clicked cell, derived the same way `generate_settlements` derives a
 /// real one and through the SAME constants (`FOOD_TO_POP`/`TRADE_ALPHA`/
@@ -1533,3 +1601,55 @@ mod trade_site_tests {
 
 
 
+
+#[cfg(test)]
+mod resource_town_tests {
+    use super::*;
+    use crate::sim::deposits::{Deposit, DepositModel, WorkingKind, DEPTH_SURFACE, DEPTH_DEEP};
+    use crate::sim::world_buffer::ColumnSet;
+    use crate::db::schema;
+    use rusqlite::Connection;
+
+    fn land_buf(w: u32, h: u32) -> WorldBuffer {
+        let conn = Connection::open_in_memory().unwrap();
+        schema::create_tables(&conn).unwrap();
+        for (k, v) in [("grid_width", &w.to_string()), ("grid_height", &h.to_string())] {
+            conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v]).unwrap();
+        }
+        let mut buf = WorldBuffer::load_with(&conn, ColumnSet::ALL).unwrap();
+        buf.terrain.iter_mut().for_each(|t| *t = 1);
+        buf
+    }
+    fn town(x: u32, y: u32) -> Settlement {
+        Settlement { id: format!("s{x}"), x, y, name: String::new(), size: "town".into(), population: 3000,
+            score: 0.5, culture: String::new(), region: String::new(), site: "plain".into(),
+            manual: false, edited: false, primary: false }
+    }
+    fn dep(good: &str, district: u32, x: u32, y: u32, grade: f32, depth: u8) -> Deposit {
+        Deposit { good: good.into(), x, y, district, grade, extent: 2, depth,
+            model: DepositModel::Craton, working: WorkingKind::Open }
+    }
+
+    #[test]
+    fn rich_remote_workings_found_one_town_per_district() {
+        // 400 cells wide → 100 km a cell, so the 150 km gap is 1.5 cells.
+        let buf = land_buf(400, 200);
+        let existing: Vec<Settlement> = (0..40).map(|i| town(10 + i, 10)).collect(); // cap = 2 towns
+        let deposits = vec![
+            dep("silver", 0, 200, 100, 0.9, DEPTH_SURFACE),
+            dep("silver", 0, 205, 100, 0.8, DEPTH_SURFACE), // same district: only the best founds a town
+            dep("iron", 1, 11, 11, 0.9, DEPTH_SURFACE),     // next to an existing town: it works it already
+            dep("gold", 2, 300, 150, 0.3, DEPTH_SURFACE),   // too poor
+            dep("tin", 3, 320, 160, 0.9, DEPTH_DEEP),       // too deep to reach yet
+            dep("copper", 4, 300, 60, 0.7, DEPTH_SURFACE),
+        ];
+        let towns = generate_resource_towns(&buf, &deposits, &existing);
+        let at: Vec<(u32, u32)> = towns.iter().map(|t| (t.x, t.y)).collect();
+        assert_eq!(at, vec![(200, 100), (300, 60)], "richest first, one per district, none near a town");
+        assert!(towns.iter().all(|t| t.site == "mine" && t.id.starts_with("m-")));
+        // Deterministic: the same inputs give the same towns.
+        let again: Vec<(u32, u32)> = generate_resource_towns(&buf, &deposits, &existing).iter().map(|t| (t.x, t.y)).collect();
+        assert_eq!(at, again);
+    }
+}

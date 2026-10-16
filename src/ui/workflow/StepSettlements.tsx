@@ -107,8 +107,10 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
       // (straits, isthmuses, passes, great river mouths) the base pass can't reach,
       // reported separately so a handful of new ports is visible, not silent.
       const ports = result.settlements.filter((s) => s.site === "port").length;
+      const mines = result.settlements.filter((s) => s.site === "mine").length;
       setStatus(`${result.settlements.length} sites: ${capitals} capitals, ${cities} cities, ${towns} towns, ${villages} villages`
         + (ports > 0 ? ` (incl. ${ports} trade junction${ports === 1 ? "" : "s"})` : "")
+        + (mines > 0 ? ` (incl. ${mines} mining town${mines === 1 ? "" : "s"})` : "")
         + (kept.length > 0 ? ` + ${kept.length} kept manual/edited` : ""));
     } catch (err) { setStatus(`Error: ${err}`); }
     setSimRunning(false);

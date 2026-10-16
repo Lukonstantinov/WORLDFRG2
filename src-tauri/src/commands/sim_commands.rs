@@ -738,6 +738,8 @@ pub fn sim_run_all(
     generated_settlements.extend(settlements::generate_trade_sites(
         &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
     ));
+    // Slice S1c — a town where a rich working has none nearby (goods were placed above).
+    generated_settlements.extend(settlements::generate_resource_towns(&buf, &ore, &generated_settlements));
 
     // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3): partition into
     // provinces, incl. step 7a's junction sites, and auto-merge slivers. Neither
@@ -1160,6 +1162,8 @@ pub fn sim_run_all_from_terrain(
     generated_settlements.extend(settlements::generate_trade_sites(
         &buf, &hab_fields.trade, &generated_settlements, settlement_realism,
     ));
+    // Slice S1c — a town where a rich working has none nearby (goods were placed above).
+    generated_settlements.extend(settlements::generate_resource_towns(&buf, &ore, &generated_settlements));
 
     // Phase 7b (WORLD_AND_TRADE_MASTER_PLAN.md Part I Slice 3) — see the identical
     // call in `sim_run_all`; this path was missing it too.
@@ -1278,6 +1282,11 @@ pub fn sim_generate_settlements(
     result.extend(settlements::generate_trade_sites(
         &buf, &hab_fields.trade, &result, realism.unwrap_or(0.55),
     ));
+    // Slice S1c — resource towns from the deposits the Goods step stored (none if
+    // Goods has not run yet; then this simply adds nothing).
+    let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits").ok().flatten()
+        .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+    result.extend(settlements::generate_resource_towns(&buf, &deposits, &result));
 
     // Persist the habitability field so the Habitability heatmap layer can render.
     settlements::write_habitability(&mut buf, &hab_fields.hab);
