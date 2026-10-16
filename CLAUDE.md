@@ -28,6 +28,9 @@ current and which items are still open, before starting other work.
   peak memory on a long 3600×1800 campaign → P3 decide one app vs two + one-line pitch →
   P4 LICENSE/EULA/dependency+data licence audit → P5 installer to 5-10 outside testers
   + priced waitlist → P6 let testers decide the campaign's depth.
+- **Exception (owner, 2026-10-16):** world-GENERATION realism (steps 1-8 physics,
+  ice, per-step UI, cross-fade/tracer/season animations) is UNFROZEN — plan and
+  decisions in `docs/GENERATION_REALISM_PLAN.md`.
 - If the owner asks for a frozen feature, remind them of the freeze and of the next
   open item, then do what they decide.
 - When an item lands: tick it in `docs/IMPROVEMENT_PLAN.txt`, then run
