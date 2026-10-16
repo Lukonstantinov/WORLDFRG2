@@ -802,3 +802,8 @@ just placed) and the Settlements step (from the stored `deposits`). Provinces ar
 so these towns get their own provinces. The settlement story calls them "mining towns".
 Gates: `resource_town_tests` 1/1 · `settlements` 7/7 · `cargo check --lib --tests` · tsc.
 This DOES change generated worlds (a few extra small towns); saves are unaffected.
+
+**Climate legend fix (2026-10-17, done).** The Climate stage's hand-copied 16-zone legend
+(colours that had drifted from the renderer; the engine makes 31 zones) is gone. The panel
+now points to the map's own key (`LayerLegend`, renderer-sourced, every zone). Queued: a
+"zones on THIS map with % of land" list, which needs a Köppen histogram query.
