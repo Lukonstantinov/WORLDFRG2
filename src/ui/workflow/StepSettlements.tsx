@@ -305,6 +305,8 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
             Splits the land into provinces whose borders follow rivers, lakes and
             mountain ranges (lowland plains divide organically). Seeds from the
             settlements above — open the Provinces panel (top bar) to inspect them.
+            They are rebuilt automatically after Goods &amp; Trade (step 8), so each
+            province carries its goods.
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
             <span style={{ color: "#8a7d66", fontSize: 10 }}>Province size</span>

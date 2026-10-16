@@ -1,7 +1,7 @@
 import { useUIStore } from "@state/uiStore";
-import { useWorldStore } from "@state/worldStore";
+import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useGoodsStore } from "@state/goodsStore";
-import { simBiological } from "@bridge";
+import { simBiological, simGenerateProvinces } from "@bridge";
 import { GOOD_DEFS, goodOverlayKey } from "@goods";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
 import { GoodsReportPanel } from "@ui/goods/GoodsReportPanel";
@@ -24,6 +24,9 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
   const rivers = useWorldStore((s) => s.rivers);
+  const settlements = useWorldStore((s) => s.settlements);
+  const setSettlements = useWorldStore((s) => s.setSettlements);
+  const setProvinces = useWorldStore((s) => s.setProvinces);
   const openGoodsEditor = useGoodsStore((s) => s.setOpen);
   const loadGoodsFromWorld = useGoodsStore((s) => s.loadFromWorld);
   const goodsSpecs = useGoodsStore((s) => s.specs);
@@ -48,6 +51,16 @@ export function StepBiological({ seed, invalidateTiles }: Props) {
       // Snapshot any edited good specs into the world so generation uses them.
       if (goodsSpecs.length > 0) await applyGoodsToWorld();
       await simBiological(seed, JSON.stringify(rivers), bioParams.gemDeposits, bioParams.climateStrictness);
+      // A province freezes its goods when it is built, so provinces made in step 7
+      // (before any goods existed) carried none. Rebuild them now, at the saved size —
+      // the same order Run-All uses.
+      if (settlements.length > 0) {
+        setStatus("Rebuilding provinces with their goods...");
+        const res = await simGenerateProvinces(settlements, rivers);
+        setProvinces(res.provinces, decodeProvinceRaster(res));
+        const founded = res.founded_settlements ?? [];
+        if (founded.length > 0) setSettlements([...settlements, ...founded]);
+      }
       markStepCompleted(8); // gates the trade-route / flow computation in MapCanvas
       invalidateTiles();    // bumps tileVersion → refetches goods/routes/flows
       // Surface the new overlays.

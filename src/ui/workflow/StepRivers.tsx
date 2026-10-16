@@ -17,6 +17,7 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
   const stepCompleted = useUIStore((s) => s.stepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
   const riverParams = useUIStore((s) => s.riverParams);
+  const bioParams = useUIStore((s) => s.bioParams);
   const setRiverParams = useUIStore((s) => s.setRiverParams);
   const { rivers, lakes, setRivers, setLakes } = useWorldStore();
 
@@ -67,7 +68,8 @@ export function StepRivers({ seed, invalidateTiles }: Props) {
     try {
       const result = await simRefreshHydrologyBiology(
         seed, riverParams.density, 1.0,
-        riverParams.lakeFillDepth, riverParams.lakeMaxFraction, 6, 0.5,
+        // the goods step's own settings, not the defaults
+        riverParams.lakeFillDepth, riverParams.lakeMaxFraction, bioParams.gemDeposits, bioParams.climateStrictness,
       );
       setRivers(result.rivers);
       setLakes(result.lakes);

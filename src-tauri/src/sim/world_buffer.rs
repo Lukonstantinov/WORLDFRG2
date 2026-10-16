@@ -215,7 +215,11 @@ impl ColumnSet {
     /// PRECIPITATION is needed by `extract_rivers` to size channels by discharge.
     pub const PHASE_RIVERS: ColumnSet = ColumnSet(
         Self::TERRAIN.0 | Self::ELEVATION.0 | Self::SEA_DEPTH.0 | Self::SHELF.0 | Self::KOPPEN.0
-            | Self::PRECIPITATION.0,
+            | Self::PRECIPITATION.0
+            // dry-channel losses + lake evaporation read temperature; "no lake under an
+            // ice cap" reads snow cover. Without them the per-step path silently skipped
+            // both and built different rivers than Run-All (which loads every column).
+            | Self::TEMPERATURE.0 | Self::SNOW.0,
     );
     /// soil.rs + fertility.rs (phase 6 chain)
     pub const PHASE_SOIL_FERTILITY: ColumnSet = ColumnSet(
@@ -267,6 +271,7 @@ impl ColumnSet {
             | Self::DIST_OCEAN.0 | Self::TEMPERATURE.0 | Self::PRECIPITATION.0 | Self::KOPPEN.0
             | Self::PLATES.0 | Self::VOLCANIC.0 | Self::FERTILITY.0 | Self::FISHERY.0
             | Self::SALINITY.0 | Self::HABITABILITY.0
+            | Self::SOIL.0 // terroir: goods' soil preference (biological.rs `terroir_factor`)
             | Self::STORM.0 | Self::REEF.0 | Self::DISEASE.0 | Self::GOODS.0,
     );
 

@@ -42,6 +42,26 @@ fn meta_f32(conn: &rusqlite::Connection, key: &str, default: f32) -> f32 {
         .unwrap_or(default)
 }
 
+/// Continental shelves from the Shelf panel's SAVED settings. Every elevation path
+/// calls this, so re-running Elevation no longer resets the shelf panel's work and
+/// the per-step and Run-All paths build the same shelf.
+fn generate_saved_shelves(conn: &rusqlite::Connection, buf: &mut WorldBuffer, seed: u64) {
+    elevation::generate_shelves(
+        buf, seed,
+        meta_f32(conn, "shelf_width", 12.0),
+        meta_f32(conn, "shelf_noise", 0.4),
+        meta_f32(conn, "shelf_depth_profile", 0.3),
+        meta_f32(conn, "shelf_dropoff_width", 8.0),
+    );
+}
+
+/// Largest lake (cells) from the Rivers panel's "max lake size" fraction. ONE floor
+/// (4 cells) on every path — Run-All used 20 and the Rivers step 4, so the same
+/// settings kept different small lakes depending on which button built the world.
+fn lake_cap_cells(buf: &WorldBuffer, lake_max_fraction: f32) -> usize {
+    (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4)
+}
+
 fn meta_u32(conn: &rusqlite::Connection, key: &str, default: u32) -> u32 {
     metadata::get_meta(conn, key).ok().flatten()
         .and_then(|s| s.parse::<u32>().ok())
@@ -195,7 +215,7 @@ pub fn sim_generate_terrain(seed: u64, db: State<'_, WorldDb>) -> Result<Vec<(i3
     elevation::compute_sea_depth(&mut buf);
     // Proper continental shelf (not just compute_sea_depth's thin ~1px ring) so
     // the Shelf layer is populated after the per-step elevation phase.
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate terrain & depth")
 }
 
@@ -272,8 +292,7 @@ pub fn sim_rivers_hydrology(
     crate::commands::campaign_commands::ensure_unfrozen(&conn)?; // geography is frozen once a campaign starts
     let buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_RIVERS)?;
 
-    let max_cells = ((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize;
-    let max_cells = max_cells.max(4);
+    let max_cells = lake_cap_cells(&buf, lake_max_fraction);
     // ONE call for flow + lakes: the two must agree, or a river ends at a shoreline
     // the renderer never draws (see `compute_world_hydrology`).
     let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, max_cells);
@@ -477,7 +496,7 @@ pub fn sim_refresh_hydrology_biology(
     // the renderer never draws (`compute_world_hydrology`). This site was missed in
     // the first pass of that fix, so every REFRESH regenerated the truncated rivers
     // the generate path had just stopped producing.
-    let max_cells = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(4);
+    let max_cells = lake_cap_cells(&buf, lake_max_fraction);
     let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, max_cells);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
@@ -594,13 +613,7 @@ pub fn sim_run_all(
     // Phase 2b: continental shelves. Without this the only shelf-tagged cells
     // are the thin 1-shelf ring compute_sea_depth marks, so the shelf layer
     // looked empty and upwelling/fisheries had almost nothing to work with.
-    elevation::generate_shelves(
-        &mut buf, seed,
-        meta_f32(&conn, "shelf_width", 12.0),
-        meta_f32(&conn, "shelf_noise", 0.4),
-        meta_f32(&conn, "shelf_depth_profile", 0.3),
-        meta_f32(&conn, "shelf_dropoff_width", 8.0),
-    );
+    generate_saved_shelves(&conn, &mut buf, seed);
 
     // Phase 3: Ocean & atmosphere (salinity before currents for thermohaline coupling)
     ocean::compute_wind_belts(&mut buf);
@@ -644,7 +657,7 @@ pub fn sim_run_all(
     let lake_max_fraction = meta_f32(&conn, "lake_max_fraction", 0.0005); // matches the old `total/2000` default
     let river_density = meta_f32(&conn, "river_density", 0.5);
     let river_width = meta_f32(&conn, "river_width", 1.0);
-    let lake_max = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(20);
+    let lake_max = lake_cap_cells(&buf, lake_max_fraction);
     let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, lake_max);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
@@ -757,7 +770,7 @@ pub fn sim_generate_terrain_from_template(
     // all-in-one "Complete from Landmass" ran generate_shelves; the per-step
     // path left just compute_sea_depth's ~4-cell ring (≈1px at 3600-wide → the
     // Shelf layer looked empty). This makes per-step match Run-All.
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate elevation from template")
 }
 
@@ -778,7 +791,7 @@ pub fn sim_generate_terrain_ridged(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_ridged(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate ridged elevation")
 }
 
@@ -801,7 +814,7 @@ pub fn sim_generate_terrain_cordillera(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_cordillera(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate cordillera elevation")
 }
 
@@ -823,7 +836,7 @@ pub fn sim_generate_terrain_rift(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_rift(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate rift elevation")
 }
 
@@ -847,7 +860,7 @@ pub fn sim_generate_terrain_glaciated(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_glaciated(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate glaciated elevation")
 }
 
@@ -868,7 +881,7 @@ pub fn sim_generate_terrain_plateau(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_plateau(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate plateau elevation")
 }
 
@@ -890,7 +903,7 @@ pub fn sim_generate_terrain_volcanic(
     let mut buf = WorldBuffer::load_with(&conn, ColumnSet::PHASE_ELEVATION)?;
     elevation::generate_elevation_volcanic(&mut buf, seed, mountain_density, mountain_height, mountain_spread, noise_roughness);
     elevation::compute_sea_depth(&mut buf);
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
     buf.save(&conn, "Generate volcanic elevation")
 }
 
@@ -1024,7 +1037,7 @@ pub fn sim_run_all_from_terrain(
     // Phase 2b: continental shelves (default params) — previously omitted here
     // despite the doc-comment claiming it ran, so template worlds had no visible
     // shelf and broken upwelling/fisheries.
-    elevation::generate_shelves(&mut buf, seed, 12.0, 0.4, 0.3, 8.0);
+    generate_saved_shelves(&conn, &mut buf, seed);
 
     // Phase 3: Ocean & atmosphere (salinity before currents for thermohaline coupling)
     ocean::compute_wind_belts(&mut buf);
@@ -1068,7 +1081,7 @@ pub fn sim_run_all_from_terrain(
     let lake_max_fraction = meta_f32(&conn, "lake_max_fraction", 0.0005); // matches the old `total/2000` default
     let river_density = meta_f32(&conn, "river_density", 0.5);
     let river_width = meta_f32(&conn, "river_width", 1.0);
-    let lake_max = (((buf.total() as f32) * lake_max_fraction.clamp(0.000002, 0.05)) as usize).max(20);
+    let lake_max = lake_cap_cells(&buf, lake_max_fraction);
     let wh = rivers::compute_world_hydrology(&buf, lake_fill_depth, lake_max);
     let hydro = wh.hydro;
     let mut lakes = wh.lakes;
@@ -1499,8 +1512,8 @@ fn load_lakes(
             if !lakes.is_empty() { return lakes; }
         }
     }
-    let lake_max = (buf.total() / 2000).max(20);
-    rivers::detect_lakes(buf, filled, 0.004, lake_max)
+    let lake_max = lake_cap_cells(buf, meta_f32(conn, "lake_max_fraction", 0.0005));
+    rivers::detect_lakes(buf, filled, meta_f32(conn, "lake_fill_depth", 0.004), lake_max)
 }
 
 const AUTO_MERGE_FLOOR_KM2: f32 = 8000.0;
@@ -1596,9 +1609,14 @@ pub fn sim_generate_provinces(
     let settle: Vec<settlements::Settlement> = serde_json::from_str(&settlements_json).unwrap_or_default();
 
     // GENERATION_UX_REDESIGN_PLAN.md Slice 3 (F1) — record for `sim_run_all`.
-    let _ = metadata::set_meta(&conn, "province_granularity", &granularity.unwrap_or(0.5).to_string());
+    // `None` reuses the saved size: step 8 rebuilds provinces once goods exist
+    // (a province's goods are frozen when it is built) without knowing the slider.
+    let granularity = match granularity {
+        Some(g) => { let _ = metadata::set_meta(&conn, "province_granularity", &g.to_string()); g }
+        None => meta_f32(&conn, "province_granularity", 0.5),
+    };
 
-    generate_and_persist_provinces(&conn, &buf, &river_data, &settle, granularity.unwrap_or(0.5))
+    generate_and_persist_provinces(&conn, &buf, &river_data, &settle, granularity)
 }
 
 /// Read back the stored province list (for reopening a world / panel refresh).
