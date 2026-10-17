@@ -764,3 +764,20 @@ export async function getProvinceTerrainCrop(
 export async function getRenderPalettes(): Promise<RenderPalettes> {
   return await invoke("get_render_palettes");
 }
+
+/** Merge the chosen provinces into ONE (the largest keeps its identity). */
+export async function simMergeSelectedProvinces(ids: number[]): Promise<import("@types").SimProvincesResult> {
+  return invoke("sim_merge_selected_provinces", { ids });
+}
+/** Border edit: hand the painted land cells (world x,y) to `province`. */
+export async function simPaintProvinceCells(province: number, cells: [number, number][]): Promise<import("@types").SimProvincesResult> {
+  return invoke("sim_paint_province_cells", { province, cells });
+}
+/** Check the partition for cut-off pieces, empty and oversized provinces. */
+export async function simCheckProvinces(): Promise<import("@types").ProvinceIssue[]> {
+  return invoke("sim_check_provinces");
+}
+/** Hand every cut-off piece to the neighbour it touches most. */
+export async function simFixProvinceFragments(): Promise<{ result: import("@types").SimProvincesResult; moved: number }> {
+  return invoke("sim_fix_province_fragments");
+}

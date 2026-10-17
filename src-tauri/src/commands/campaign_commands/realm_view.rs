@@ -19,14 +19,30 @@ pub struct RealmGood { pub good: String, pub amount: f32 }
 #[derive(Serialize, Clone)]
 pub struct GovernorBrief { pub name: String, pub loyalty: f32, pub honesty: f32, pub years: u32, pub skim: f32, pub breakaway_risk: f32 }
 
+/// A town of a province, for the province view.
+#[derive(Serialize, Clone)]
+pub struct TownBrief { pub hub: u32, pub name: String, pub population: f32, pub capital: bool, pub tier: u8, pub hub_class: u8, pub colony: bool }
+
 #[derive(Serialize, Clone)]
 pub struct RealmProvinceRow {
     pub id: u32, pub name: String, pub rural: f32, pub urban: f32, pub tax: f32, pub unrest: f32, pub culture: String,
     pub exports: Vec<RealmGood>, pub governor: Option<GovernorBrief>, pub capital: bool, pub town_hub: i32,
+    /// The dues rate the province pays (0..), the surplus the countryside made beyond its own
+    /// food, and the arrears owed — what `tax` is made of, so a zero can be explained.
+    pub tax_rate: f32, pub surplus: f32, pub arrears: f32,
+    /// Who the dues go to: a realm's crown, a city treasury or a house.
+    pub dues_to: String,
+    pub towns: Vec<TownBrief>,
 }
 
+/// One seat of the royal council. `kind`: 0 ruler · 1 the ruler's kin · 2 a great house ·
+/// 3 a famous notable · 4 a city's delegate. `individual_id` links a notable to the life
+/// window (−1 where the person is only a name in a family or house roster).
 #[derive(Serialize, Clone)]
-pub struct CouncilSeat { pub office: String, pub name: String, pub from: String, pub stance: String }
+pub struct CouncilSeat {
+    pub office: String, pub name: String, pub from: String, pub stance: String,
+    pub female: bool, pub age: u32, pub individual_id: i32, pub house: i32, pub house_name: String, pub kind: u8,
+}
 
 #[derive(Serialize, Clone)]
 pub struct RealmLawsBrief {
@@ -84,11 +100,16 @@ pub fn campaign_realm_overview(realm: u32, db: State<'_, WorldDb>) -> Result<Opt
         if p >= np { continue; }
         let mut urban = 0.0f32;
         let mut town: (i32, f32) = (-1, -1.0);
+        let mut towns: Vec<TownBrief> = Vec::new();
         for (h, hub) in sim.hubs.iter().enumerate() {
             if hub.is_estate || hub.abandoned || sim.hub_province.get(h).copied().unwrap_or(-1) != p as i32 { continue; }
             urban += hub.population;
             if hub.population > town.1 { town = (h as i32, hub.population); }
+            towns.push(TownBrief { hub: h as u32, name: hub.name.clone(), population: hub.population,
+                capital: h as u32 == r.capital_hub, tier: hub.tier, hub_class: hub.hub_class, colony: hub.colony_kind != 0 });
         }
+        towns.sort_by(|a, b| b.population.partial_cmp(&a.population).unwrap_or(std::cmp::Ordering::Equal));
+        towns.truncate(14);
         let rural = sim.prov_rural.get(p).copied().unwrap_or(0.0);
         let mut ex: Vec<RealmGood> = Vec::new();
         if sim.prov_export_year.len() == np * ng {
@@ -108,10 +129,20 @@ pub fn campaign_realm_overview(realm: u32, db: State<'_, WorldDb>) -> Result<Opt
             name: g.name.clone(), loyalty: g.loyalty, honesty: g.honesty,
             years: sim.tick.saturating_sub(g.since_tick) / TICKS_PER_YEAR, skim: g.skim(), breakaway_risk: sim.breakaway_risk(p),
         });
+        let dues_to = {
+            let hh = sim.prov_holder_house.get(p).copied().unwrap_or(-1);
+            if hh >= 0 && (hh as usize) < sim.houses.len() && !sim.houses[hh as usize].defunct {
+                format!("House {}", sim.houses[hh as usize].name)
+            } else if let Some(seat) = sim.province_seat_hub(p) {
+                format!("the treasury of {}", sim.hubs[seat].name)
+            } else { "no one (free land)".into() }
+        };
         rows.push(RealmProvinceRow {
             id: p as u32, name: names.get(p).cloned().unwrap_or_else(|| format!("Province {p}")),
             rural, urban, tax: sim.prov_revenue.get(p).copied().unwrap_or(0.0), unrest: sim.prov_unrest.get(p).copied().unwrap_or(0.0),
             culture, exports: ex, governor, capital: p as i32 == capital_prov, town_hub: town.0,
+            tax_rate: sim.prov_tax.get(p).copied().unwrap_or(0.0), surplus: sim.prov_surplus.get(p).copied().unwrap_or(0.0),
+            arrears: sim.prov_arrears.get(p).copied().unwrap_or(0.0), dues_to, towns,
         });
     }
     let total: f32 = cultures.values().sum::<f32>().max(1.0);
@@ -130,34 +161,50 @@ pub fn campaign_realm_overview(realm: u32, db: State<'_, WorldDb>) -> Result<Opt
             .min_by_key(|p| p.born_tick).map(|p| p.name.clone()).unwrap_or_default()
     } else { String::new() };
 
-    // The royal council, derived: kin, great houses, famous people, the largest city.
-    let mut council = vec![CouncilSeat { office: "Ruler".into(), name: ruler.clone(), from: r.title.clone(), stance: "The crown first".into() }];
+    // The royal council, derived: kin, great houses, famous people, the largest city. Each
+    // seat carries the person's sex and age (for a portrait) and, where the sim tracks one
+    // as an Individual, the id that opens their life.
+    let age_of = |born: u32| sim.tick.saturating_sub(born) / TICKS_PER_YEAR;
+    let ruler_person = if r.ruler >= 0 { r.family.get(r.ruler as usize) } else { None };
+    let mut council = vec![CouncilSeat {
+        office: "Ruler".into(), name: ruler.clone(), from: r.title.clone(), stance: "The crown first".into(),
+        female: ruler_person.map(|p| p.female).unwrap_or(false), age: ruler_person.map(|p| age_of(p.born_tick)).unwrap_or(45),
+        individual_id: -1, house: -1, house_name: String::new(), kind: 0,
+    }];
     let kin: Vec<&crate::sim::tick::Person> = r.family.iter().enumerate()
         .filter(|(i, p)| *i as i32 != r.ruler && p.died_tick == 0).map(|(_, p)| p).collect();
-    let mut houses: Vec<&House> = sim.houses.iter()
-        .filter(|h| !h.defunct && (h.hub as usize) < sim.hubs.len() && sim.hubs[h.hub as usize].realm == ri as i32).collect();
-    houses.sort_by(|a, b| b.wealth.partial_cmp(&a.wealth).unwrap_or(std::cmp::Ordering::Equal));
+    let mut houses: Vec<(usize, &House)> = sim.houses.iter().enumerate()
+        .filter(|(_, h)| !h.defunct && (h.hub as usize) < sim.hubs.len() && sim.hubs[h.hub as usize].realm == ri as i32).collect();
+    houses.sort_by(|a, b| b.1.wealth.partial_cmp(&a.1.wealth).unwrap_or(std::cmp::Ordering::Equal));
     let mut famous: Vec<&crate::sim::tick::Individual> = sim.people.iter()
         .filter(|i| i.death_tick == 0 && i.current_hub >= 0 && (i.current_hub as usize) < sim.hubs.len() && sim.hubs[i.current_hub as usize].realm == ri as i32).collect();
     famous.sort_by(|a, b| b.fame.partial_cmp(&a.fame).unwrap_or(std::cmp::Ordering::Equal));
     let mut kin_i = kin.into_iter();
     let mut house_i = houses.into_iter();
     let mut fame_i = famous.into_iter();
+    let house_seat = |(hi, h): (usize, &House)| {
+        let k = h.kin.first();
+        (k.map(|k| k.name.clone()).unwrap_or_default(), format!("House {}", h.name), k.map(|k| k.female).unwrap_or(false),
+         k.map(|k| age_of(k.born_tick)).unwrap_or(45), hi as i32, h.name.clone())
+    };
     for (office, stance) in [("Chancellor", "Keep the peace with neighbours"), ("Treasurer", "Lower tolls, more trade"),
                              ("Marshal", "Raise the levies"), ("Steward", "Roads and granaries")] {
         let seat = match office {
-            "Treasurer" => house_i.next().map(|h| (h.kin.first().map(|k| k.name.clone()).unwrap_or_default(), format!("House {}", h.name))),
-            "Steward" => fame_i.next().map(|i| (i.name.clone(), "a famous notable".to_string())),
-            _ => kin_i.next().map(|p| (p.name.clone(), "the ruler's kin".to_string()))
-                .or_else(|| house_i.next().map(|h| (h.kin.first().map(|k| k.name.clone()).unwrap_or_default(), format!("House {}", h.name)))),
+            "Treasurer" => house_i.next().map(|h| { let (n, f, fe, ag, hi, hn) = house_seat(h); (n, f, fe, ag, -1, hi, hn, 2u8) }),
+            "Steward" => fame_i.next().map(|i| (i.name.clone(), "a famous notable".to_string(), i.female, age_of(i.birth_tick), i.id as i32, -1, String::new(), 3u8)),
+            _ => kin_i.next().map(|p| (p.name.clone(), "the ruler's kin".to_string(), p.female, age_of(p.born_tick), -1, -1, String::new(), 1u8))
+                .or_else(|| house_i.next().map(|h| { let (n, f, fe, ag, hi, hn) = house_seat(h); (n, f, fe, ag, -1, hi, hn, 2u8) })),
         };
-        if let Some((name, from)) = seat { council.push(CouncilSeat { office: office.into(), name, from, stance: stance.into() }); }
+        if let Some((name, from, female, age, ind, house, house_name, kind)) = seat {
+            council.push(CouncilSeat { office: office.into(), name, from, stance: stance.into(), female, age, individual_id: ind, house, house_name, kind });
+        }
     }
     if let Some((h, hub)) = sim.hubs.iter().enumerate()
         .filter(|(h, x)| x.realm == ri as i32 && !x.is_estate && *h != r.capital_hub as usize)
         .max_by(|a, b| a.1.population.partial_cmp(&b.1.population).unwrap_or(std::cmp::Ordering::Equal)) {
         let _ = h;
-        council.push(CouncilSeat { office: "City delegate".into(), name: format!("Delegate of {}", hub.name), from: format!("{}'s own council", hub.name), stance: "Keep the town fee low".into() });
+        council.push(CouncilSeat { office: "City delegate".into(), name: format!("Delegate of {}", hub.name), from: format!("{}'s own council", hub.name),
+            stance: "Keep the town fee low".into(), female: false, age: 40, individual_id: -1, house: -1, house_name: String::new(), kind: 4 });
     }
 
     let powers: Vec<f32> = (0..sim.realms.len()).filter(|&k| sim.realms[k].fallen_tick == 0).map(|k| realm_power(&sim, k)).collect();
@@ -241,6 +288,7 @@ pub(crate) fn apply_start_realms(conn: &Connection, sim: &mut CampaignSim) {
     } else {
         metadata::get_meta(conn, "start_realms").ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
     };
+    let prov_names: Vec<String> = stored_provinces(conn).into_iter().map(|p| p.name).collect();
     for r in &realms {
         let provs: Vec<u32> = r.provinces.iter().copied().filter(|&p| (p as usize) < sim.prov_realm.len()).collect();
         if provs.is_empty() { continue; }
@@ -248,7 +296,14 @@ pub(crate) fn apply_start_realms(conn: &Connection, sim: &mut CampaignSim) {
         let seat = std::iter::once(r.capital).chain(provs.iter().copied())
             .find_map(|p| sim.province_seat_hub(p as usize));
         let Some(seat) = seat else { continue };
-        sim.found_start_realm(seat, r.name.clone(), r.color, &provs);
+        // A realm generated as "Kingdom of <capital PROVINCE>" is named for its capital CITY
+        // once the campaign knows it (province and town names differ). A name the author
+        // edited by hand is left exactly as written.
+        let mut name = r.name.clone();
+        if let (Some(pn), Some(hub)) = (prov_names.get(r.capital as usize), sim.hubs.get(seat)) {
+            if !pn.is_empty() && name.ends_with(pn.as_str()) { name = format!("{}{}", &name[..name.len() - pn.len()], hub.name); }
+        }
+        sim.found_start_realm(seat, name, r.color, &provs);
     }
 }
 
@@ -310,7 +365,7 @@ pub fn campaign_standings(db: State<'_, WorldDb>) -> Result<Option<Standings>, S
 }
 
 #[derive(Serialize, Clone)]
-pub struct ProvinceGoodShare { pub province: u32, pub goods: Vec<RealmGood>, pub unrest: f32, pub culture: String }
+pub struct ProvinceGoodShare { pub province: u32, pub goods: Vec<RealmGood>, pub unrest: f32, pub culture: String, pub rural: f32, pub urban: f32 }
 
 /// Each province's production split by VALUE across the goods it makes (shares sum
 /// to 1; goods under 8% are dropped, at most four kept, largest first). The
@@ -324,18 +379,25 @@ pub fn campaign_province_good_shares(db: State<'_, WorldDb>) -> Result<Vec<Provi
     if ng == 0 { return Ok(vec![]); }
     let actual = sim.province_good_actual();
     let np = actual.len() / ng;
+    let mut urban_by = vec![0.0f32; np];
+    for (h, hub) in sim.hubs.iter().enumerate() {
+        if hub.is_estate || hub.abandoned { continue; }
+        let p = sim.hub_province.get(h).copied().unwrap_or(-1);
+        if p >= 0 && (p as usize) < np { urban_by[p as usize] += hub.population; }
+    }
     let mut out = Vec::new();
     for p in 0..np {
+        let (rural, urban) = (sim.prov_rural.get(p).copied().unwrap_or(0.0), urban_by[p]);
         let vals: Vec<f32> = (0..ng).map(|g| actual[p * ng + g].max(0.0) * sim.goods[g].base_value.max(0.0)).collect();
         let total: f32 = vals.iter().sum();
         let unrest = sim.prov_unrest.get(p).copied().unwrap_or(0.0);
         let culture = sim.prov_culture.get(p).cloned().unwrap_or_default();
-        if total <= 0.0 { out.push(ProvinceGoodShare { province: p as u32, goods: vec![], unrest, culture }); continue; }
+        if total <= 0.0 { out.push(ProvinceGoodShare { province: p as u32, goods: vec![], unrest, culture, rural, urban }); continue; }
         let mut goods: Vec<RealmGood> = (0..ng).filter(|&g| vals[g] / total >= 0.08)
             .map(|g| RealmGood { good: sim.goods[g].name.clone(), amount: vals[g] / total }).collect();
         goods.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
         goods.truncate(4);
-        out.push(ProvinceGoodShare { province: p as u32, goods, unrest, culture });
+        out.push(ProvinceGoodShare { province: p as u32, goods, unrest, culture, rural, urban });
     }
     Ok(out)
 }

@@ -371,6 +371,11 @@ pub struct ProvinceGoodExploit {
     /// consumed by the very population that produced it (§2.5's market↔local
     /// split, from the real per-hub local-demand formula).
     pub market_share: f32,
+    /// This good's share (0..1) of the province's production by VALUE — what the
+    /// political map's 30% icon rule reads. `exploitation` can exceed 1 (towns' workshops
+    /// and growth push output past what the land's own carrying capacity predicts); the
+    /// share cannot.
+    pub value_share: f32,
 }
 
 /// Every good this province actually produces (or has produced recently enough
@@ -385,6 +390,7 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
     let p = id as usize;
     if p >= np { return Ok(vec![]); }
     let actual_all = sim.province_good_actual();
+    let total_value: f32 = (0..ng).map(|g| actual_all.get(p * ng + g).copied().unwrap_or(0.0).max(0.0) * sim.goods[g].base_value.max(0.0)).sum();
     // A manufactured good is made in a city from a recipe, not grown on this
     // land — it has no belt and no deposit, so it must never appear among a
     // province's goods (see `strip_manufactured_from_province_goods`).
@@ -443,7 +449,8 @@ pub fn campaign_province_goods(id: u32, db: State<'_, WorldDb>) -> Result<Vec<Pr
         let potential = sim.province_good_potential(p, g);
         let exploitation = if potential > 1e-6 { actual / potential } else { 0.0 };
         let market_share = sim.province_good_market_share(p, g, actual);
-        out.push(ProvinceGoodExploit { good: g as u8, potential, actual, exploitation, depletion, market_share });
+        let value_share = if total_value > 0.0 { actual.max(0.0) * sim.goods[g].base_value.max(0.0) / total_value } else { 0.0 };
+        out.push(ProvinceGoodExploit { good: g as u8, potential, actual, exploitation, depletion, market_share, value_share });
     }
     out.sort_by(|a, b| b.actual.partial_cmp(&a.actual).unwrap_or(std::cmp::Ordering::Equal));
     Ok(out)

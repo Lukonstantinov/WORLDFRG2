@@ -5,7 +5,7 @@ import { TileManager } from "@canvas/TileManager";
 import { OverlayManager, type ColonyMarker } from "@canvas/OverlayManager";
 import { setExportSnapshotFn, setExportSnapshotRawFn } from "@canvas/mapExport";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "@canvas/PaintOverlay";
-import { useWorldStore } from "@state/worldStore";
+import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
 import { useUIStore } from "@state/uiStore";
 import { useGoodsStore } from "@state/goodsStore";
@@ -16,7 +16,7 @@ import { FORGE_ONLY } from "./mapThemes";
 import { plateName } from "./plateNames";
 import { RealmLayer } from "@canvas/RealmLayer";
 import { usePoliticalStore, loadPolitical } from "@state/politicalStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites, campaignExploitedGoods } from "@bridge";
+import { simPaintProvinceCells, paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites, campaignExploitedGoods } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -373,6 +373,19 @@ export function MapCanvas() {
       }
     }
 
+    // Political fill + borders for EVERY copy first; labels follow in the overlay pass below.
+    if (politicalOn && m) {
+      for (const c of copies) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(c.k * gw, 0, gw, gh);
+        ctx.clip();
+        ctx.translate(c.k * gw, 0);
+        realmLayerRef.current.renderFill(ctx, viewport.scale);
+        ctx.restore();
+      }
+    }
+
     // Overlays are vector data positioned once in canonical [0, gw) space, so
     // they are drawn again per visible copy (capped: redrawing rivers/labels/
     // routes N times per frame is real cost, unlike a tile blit), shifted by
@@ -395,7 +408,7 @@ export function MapCanvas() {
         ctx.clip();
         if (k !== 0) ctx.translate(k * gw, 0);
         if (politicalOn) {
-          realmLayerRef.current.render(ctx, viewport.scale, {
+          realmLayerRef.current.renderLabelPass(ctx, viewport.scale, {
             x0: (0 - viewport.x) / viewport.scaleX - k * gw, x1: (w - viewport.x) / viewport.scaleX - k * gw,
             y0: (0 - viewport.y) / viewport.scaleY, y1: (h - viewport.y) / viewport.scaleY,
           });
@@ -1462,9 +1475,10 @@ export function MapCanvas() {
     // The Fisheries layer carries its grand-bank circles; circulation belts ride on Wind.
     om.setVisible("fisheryBanks", activeLayer === "fisheries");
     om.setVisible("plateNames", activeLayer === "plates");
+    if (meta) om.setWorldWidth(meta.grid_width);
     om.setVisible("windBelts", !!overlayVisibility.wind);
     requestRender();
-  }, [overlayVisibility, activeLayer, appMode, requestRender]);
+  }, [overlayVisibility, activeLayer, appMode, meta, requestRender]);
 
   // POLITICAL LAYER: load realms/culture/order/goods shares whenever the layer is on and
   // the campaign year turns (or the provinces change), and hand them to the renderer.
@@ -1480,17 +1494,17 @@ export function MapCanvas() {
     const names = new Map(provinces.map((p) => [p.id, p.name]));
     realmLayerRef.current.setData({
       raster: provinceRaster, owner: political.owner, names, cultures: political.culture,
-      unrest: political.unrest, shares: political.shares,
+      unrest: political.unrest, shares: political.shares, pop: political.pop,
     });
     requestRender();
   }, [provinceRaster, provinces, politicalVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     realmLayerRef.current.setView({
-      fill: political.fill, borders: political.borders, goods: political.goods, names: political.names,
+      fill: political.fill, borders: political.borders, goods: political.goods, names: political.names, popMode: political.popMode,
       selected: selectedProvince, goodFilter: political.goodFilter,
     });
     requestRender();
-  }, [political.fill, political.borders, political.goods, political.names, political.goodFilter, selectedProvince, requestRender]);
+  }, [political.fill, political.borders, political.goods, political.names, political.popMode, political.goodFilter, selectedProvince, requestRender]);
 
   // The picked plate rings its name on the Plates layer.
   useEffect(() => {
@@ -2160,7 +2174,7 @@ export function MapCanvas() {
         if (pid !== null) {
           // Shift-click MARKS a province for the batch merge/split "affect only these"
           // set; a plain click selects it (and opens its dossier).
-          if (e.shiftKey) useUIStore.getState().toggleMarkedProvince(pid);
+          if (e.shiftKey || useUIStore.getState().provinceSelectMode) useUIStore.getState().toggleMarkedProvince(pid);
           else useUIStore.getState().setSelectedProvince(pid);
           return;
         }
@@ -2186,10 +2200,10 @@ export function MapCanvas() {
     const tool = activeToolRef.current;
     // A finalized (locked) map is read-only — geography edits are disabled in the
     // UI (the backend also rejects them via ensure_unfrozen).
-    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano" || tool === "ridge" || tool === "lasso")) {
+    if (m.frozen && (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "volcano" || tool === "ridge" || tool === "lasso" || tool === "provinceBrush")) {
       return;
     }
-    if (tool === "paint" || tool === "elevation" || tool === "shelf") {
+    if (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "provinceBrush") {
       isPaintingRef.current = true;
       isErasingRef.current = e.shiftKey;
       pendingCellsRef.current.clear();
@@ -2360,7 +2374,7 @@ export function MapCanvas() {
     }
 
     const tool = activeToolRef.current;
-    if (tool === "paint" || tool === "elevation" || tool === "shelf") {
+    if (tool === "paint" || tool === "elevation" || tool === "shelf" || tool === "provinceBrush") {
       if (!isPaintingRef.current) {
         drawCursorRing(screenX, screenY, getBrushScreenRadius(), getPaintMode(e.shiftKey));
       }
@@ -2463,6 +2477,20 @@ export function MapCanvas() {
       let value: PaintValue;
       const tool = activeToolRef.current;
 
+      // Border edit: the painted land cells go to the province being edited.
+      if (tool === "provinceBrush") {
+        const target = useUIStore.getState().provinceEditTarget;
+        isPaintingRef.current = false; isErasingRef.current = false;
+        if (target !== null) {
+          try {
+            const res = await simPaintProvinceCells(target, cells);
+            useWorldStore.getState().setProvinces(res.provinces, decodeProvinceRaster(res));
+            setStatus("Border updated");
+          } catch (err) { setStatus(`Border edit failed: ${err}`); }
+        }
+        return;
+      }
+
       if (tool === "elevation") {
         value = { type: "elevation", value: erasing ? 0.0 : elevationValueRef.current };
       } else if (tool === "shelf") {
@@ -2487,7 +2515,7 @@ export function MapCanvas() {
   const getCursor = (): string => {
     if (activeTool === "pan") return "grab";
     if (activeTool === "select") return "pointer";
-    if (activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf") return "none";
+    if (activeTool === "paint" || activeTool === "elevation" || activeTool === "shelf" || activeTool === "provinceBrush") return "none";
     if (activeTool === "ridge" || activeTool === "lasso") return "crosshair";
     return "crosshair";
   };

@@ -3256,6 +3256,31 @@ LAYERS & PANELS REWORK (2026-10-18, owner request) — what changed in ui/world 
     Provinces browser, City Ranking (now Atlas stats), Good-flow "price along the journey".
     Atlas = Overview · Cities · Realms & Provinces (`campaign_standings`) · Records · Timeline.
 
+SECOND PASS (2026-10-19):
+  · PROVINCE HAND-EDITING (`ui/workflow/ProvinceTools.tsx`, Settlements step): multi-select
+    provinces on the map (`uiStore.provinceSelectMode` / `markedProvinces`), merge a set into ONE
+    (`sim_merge_selected_provinces`, the largest keeps its identity), split the marked into 2-6
+    (`sim_split_large_provinces` with a forced size), repaint a border with the `provinceBrush` tool
+    (`sim_paint_province_cells` hands land cells to the edited province), `sim_check_provinces`
+    (cut-off pieces, empty, over 3× the median) and `sim_fix_province_fragments`. All in
+    `sim/shared/provinces.rs` (`merge_group_wh`, `assign_cells_wh`, `check_provinces_wh`,
+    `fix_fragments_wh`; tests `hand_edits_keep_the_partition_consistent`, `border_check_finds…`).
+    Realms are re-rolled only when the province COUNT changes.
+  · TRADE ROUTES: the long horizontal lines were `strokeSmooth` bending a curve to the midpoint of
+    a seam jump (it now cuts at the seam first and runs each side to the edge); chokepoint links
+    skip a seam straddle. `compute_trade_routes` now thins the major network (an edge a–b is dropped
+    when a third hub is clearly between them; each hub's nearest link is always kept), routes shortest
+    edges first, simplifies + rounds each polyline (`tidy_polyline`) and marks a lesser road that only
+    runs alongside an existing one `shadow` (kept in the graph, not drawn).
+  · REALM WINDOW: province tab is a dossier (people, tax with the reason when it is 0, towns with a
+    council button, goods as value-share bars — NOT land-capacity %, which can exceed 100% because the
+    calibration is a world average and towns' workshops out-produce the countryside's own land);
+    Government tab seats the royal council in `CouncilChamber` (`realm` prop) with portraits, ages and
+    lives where the seat is an Individual; PEOPLE chips print population on every province (also on the
+    world political layer). Start realms are named for their capital CITY at campaign start.
+  · GOODS: manufactured goods are not in the placement report (they never had a belt); Salted Herring
+    removed; the Goods Builder lists your own (`custom_*`) goods first and has a Toolbar entry.
+
 ui/goods/  — goods
   GoodIcon.tsx                   ← React wrapper over `canvas/goodArt.ts`'s pixel sprite,
                                   backed at device resolution. Every panel that shows a

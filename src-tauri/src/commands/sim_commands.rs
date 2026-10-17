@@ -2422,3 +2422,109 @@ mod elevation_model_tests {
         assert_eq!(land, land_elevations(&shape), "the fallback must BE the shape model");
     }
 }
+
+// ── Province hand-editing commands (merge a set · repaint a border · check · repair) ──────
+
+/// The stored partition: provinces + the full-resolution id map.
+fn load_partition(conn: &rusqlite::Connection) -> Result<(Vec<crate::sim::provinces::Province>, u32, u32, Vec<u32>), String> {
+    let provinces: Vec<crate::sim::provinces::Province> =
+        metadata::get_meta(conn, "provinces").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if provinces.is_empty() { return Err("No provinces yet — generate the province layer first.".into()); }
+    let (w, h, mut rle): (u32, u32, Vec<u32>) =
+        metadata::get_meta(conn, "province_raster_rle").map_err(|e| e.to_string())?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .ok_or("province raster not found — regenerate the province layer")?;
+    crate::sim::provinces::migrate_rle_sentinel(&mut rle);
+    let total = (w as usize) * (h as usize);
+    if total == 0 { return Err("world grid not initialised".into()); }
+    let mut pid = vec![crate::sim::provinces::NO_PROVINCE; total];
+    let (mut idx, mut i) = (0usize, 0usize);
+    while i + 1 < rle.len() {
+        let end = (idx + rle[i + 1] as usize).min(total);
+        for slot in &mut pid[idx..end] { *slot = rle[i]; }
+        idx += rle[i + 1] as usize;
+        i += 2;
+    }
+    Ok((provinces, w, h, pid))
+}
+
+/// Persist an edited partition exactly as generation does (list + downsampled raster +
+/// full-resolution RLE). New starting realms are rolled only when the province COUNT
+/// changed — a repainted border keeps every id, so the realms stay as the user left them.
+fn save_partition(
+    conn: &rusqlite::Connection, old_count: usize,
+    provinces: Vec<crate::sim::provinces::Province>, pid: Vec<u32>, w: u32, h: u32,
+) -> Result<SimProvincesResult, String> {
+    metadata::set_meta(conn, "provinces", &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    if provinces.len() != old_count {
+        crate::commands::campaign_commands::roll_start_realms(conn, provinces.len() as u64 ^ 0x5EA1_C0DE)?;
+    }
+    let cap = 768u32;
+    let step = ((w.max(h) + cap - 1) / cap).max(1);
+    let (rw, rh) = ((w + step - 1) / step, (h + step - 1) / step);
+    let mut raster = vec![crate::sim::provinces::NO_PROVINCE; (rw * rh) as usize];
+    for ry in 0..rh {
+        for rx in 0..rw {
+            raster[(ry * rw + rx) as usize] = pid[((ry * step).min(h - 1) * w + (rx * step).min(w - 1)) as usize];
+        }
+    }
+    metadata::set_meta(conn, "province_raster", &serde_json::to_string(&(rw, rh, w, h, &raster)).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    let raster_rle = rle_encode_provinces(&pid);
+    metadata::set_meta(conn, "province_raster_rle", &serde_json::to_string(&(w, h, &raster_rle)).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    Ok(SimProvincesResult {
+        provinces, raster, raster_w: rw, raster_h: rh, grid_w: w, grid_h: h, raster_rle,
+        founded_settlements: Vec::new(),
+    })
+}
+
+/// MERGE the selected provinces into one (the largest keeps its identity).
+#[tauri::command]
+pub fn sim_merge_selected_provinces(ids: Vec<u32>, db: State<'_, WorldDb>) -> Result<SimProvincesResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let (provinces, w, h, pid) = load_partition(&conn)?;
+    if ids.len() < 2 { return Err("Select at least two provinces to merge.".into()); }
+    let (np, npid) = crate::sim::provinces::merge_group_wh(&pid, &provinces, &ids, w, h);
+    save_partition(&conn, provinces.len(), np, npid, w, h)
+}
+
+/// BORDER EDIT: give the painted land cells to `province`.
+#[tauri::command]
+pub fn sim_paint_province_cells(province: u32, cells: Vec<[u32; 2]>, db: State<'_, WorldDb>) -> Result<SimProvincesResult, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let (provinces, w, h, mut pid) = load_partition(&conn)?;
+    let cells: Vec<(u32, u32)> = cells.into_iter().map(|c| (c[0] % w.max(1), c[1])).collect();
+    let (np, npid) = crate::sim::provinces::assign_cells_wh(&mut pid, &provinces, province, &cells, w, h);
+    save_partition(&conn, provinces.len(), np, npid, w, h)
+}
+
+/// Check the borders: detached pieces, empty and oversized provinces.
+#[tauri::command]
+pub fn sim_check_provinces(db: State<'_, WorldDb>) -> Result<Vec<crate::sim::provinces::ProvinceIssue>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let (provinces, w, h, pid) = load_partition(&conn)?;
+    Ok(crate::sim::provinces::check_provinces_wh(&pid, &provinces, w, h))
+}
+
+#[derive(serde::Serialize)]
+pub struct FragmentFix { pub result: SimProvincesResult, pub moved: usize }
+
+/// Repair detached pieces by giving each to the neighbour it touches most.
+#[tauri::command]
+pub fn sim_fix_province_fragments(db: State<'_, WorldDb>) -> Result<FragmentFix, String> {
+    db.clear_caches();
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    crate::commands::campaign_commands::ensure_unfrozen(&conn)?;
+    let (provinces, w, h, mut pid) = load_partition(&conn)?;
+    let (np, npid, moved) = crate::sim::provinces::fix_fragments_wh(&mut pid, &provinces, w, h);
+    let result = save_partition(&conn, provinces.len(), np, npid, w, h)?;
+    Ok(FragmentFix { result, moved })
+}
+

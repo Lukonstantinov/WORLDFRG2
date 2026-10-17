@@ -4,6 +4,7 @@ import { useWorldStore, decodeProvinceRaster } from "@state/worldStore";
 import { useViewportStore } from "@state/viewportStore";
 import { simGenerateSettlements, simGenerateProvinces, setCultureCount as saveCultureCount, getCultureCount } from "@bridge";
 import { genBtn } from "@ui/workflow/WorkflowPanel";
+import { ProvinceTools } from "@ui/workflow/ProvinceTools";
 import type { Settlement } from "@types";
 
 interface Props {
@@ -299,43 +300,7 @@ export function StepSettlements({ seed, invalidateTiles }: Props) {
         Cities are placed highest-probability first; dot size = settlement rank.
       </div>
 
-      {settlements.length > 0 && (
-        <div style={{ marginTop: 6, padding: "6px 7px", background: "#0e1a12", borderRadius: 4,
-          border: "1px solid #1a3020", display: "flex", flexDirection: "column", gap: 5 }}>
-          <div style={{ color: "#6a9a6a", fontSize: 10, fontWeight: 600 }}>🗺 Provinces — partition the land</div>
-          <div style={{ color: "#4a6a4a", fontSize: 9, lineHeight: 1.4 }}>
-            Splits the land into provinces whose borders follow rivers, lakes and
-            mountain ranges (lowland plains divide organically). Seeds from the
-            settlements above — open the Provinces panel (top bar) to inspect them.
-            They are rebuilt automatically after Goods &amp; Trade (step 8), so each
-            province carries its goods.
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ color: "#8a7d66", fontSize: 10 }}>Province size</span>
-            <input type="range" min={0} max={1} step={0.05} value={provGranularity}
-              onChange={(e) => setProvGranularity(parseFloat(e.target.value))} style={{ flex: 1 }} />
-            <span style={{ width: 72, color: "#ac9d84", fontSize: 9, textAlign: "right" }}>
-              {provGranularity < 0.34 ? "few · large" : provGranularity > 0.66 ? "many · small" : "balanced"}
-            </span>
-          </div>
-          <div style={{ color: "#4a6a4a", fontSize: 9 }}>
-            Drag right for smaller, more numerous provinces. Size also scales with the
-            land: bigger in polar / desert / mountain country, smaller in fertile land.
-          </div>
-          <button onClick={handleGenerateProvinces} disabled={provBusy || simRunning}
-            style={{ ...genBtn, marginBottom: 0, background: "#183024", color: "#8fd0a0", textAlign: "center" }}>
-            {provBusy ? "Partitioning…" : provinces.length ? `Regenerate Provinces (${provinces.length})` : "Generate Provinces"}
-          </button>
-          {provinces.length > 0 && (
-            <label style={{ display: "flex", alignItems: "center", gap: 6, color: "#8fbf9f", fontSize: 10, cursor: "pointer" }}>
-              <input type="checkbox" checked={provincesVisible}
-                onChange={(e) => setOverlayVisible("provinces", e.target.checked)}
-                style={{ accentColor: "#c09b5a", width: 12, height: 12 }} />
-              Show provinces on map
-            </label>
-          )}
-        </div>
-      )}
+      {settlements.length > 0 && <ProvinceTools />}
     </div>
   );
 }

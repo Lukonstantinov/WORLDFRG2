@@ -3241,6 +3241,8 @@ export interface ProvinceGoodExploit {
   /** Share of `actual` that leaves the province via trade rather than being
    *  consumed by the very population that produced it. */
   market_share: number;
+  /** This good's share (0..1) of the province's production by value. */
+  value_share: number;
 }
 
 /** One trader's slice of a province's organized commerce. */
@@ -3729,12 +3731,21 @@ export interface RealmGood { good: string; amount: number; }
 /** A province's governor. Mirrors `GovernorBrief`. */
 export interface GovernorBrief { name: string; loyalty: number; honesty: number; years: number; skim: number; breakaway_risk: number; }
 /** One province of a realm. Mirrors `RealmProvinceRow`. */
+export interface TownBrief { hub: number; name: string; population: number; capital: boolean; tier: number; hub_class: number; colony: boolean; }
 export interface RealmProvinceRow {
   id: number; name: string; rural: number; urban: number; tax: number; unrest: number; culture: string;
   exports: RealmGood[]; governor: GovernorBrief | null; capital: boolean; town_hub: number;
+  /** The dues rate, the countryside's surplus beyond its own food, arrears, and who the dues go to. */
+  tax_rate: number; surplus: number; arrears: number; dues_to: string;
+  towns: TownBrief[];
 }
 /** A royal council seat. Mirrors `CouncilSeat`. */
-export interface CouncilSeat { office: string; name: string; from: string; stance: string; }
+export interface CouncilSeat {
+  office: string; name: string; from: string; stance: string;
+  female: boolean; age: number; individual_id: number; house: number; house_name: string;
+  /** 0 ruler · 1 the ruler's kin · 2 a great house · 3 a famous notable · 4 a city's delegate. */
+  kind: number;
+}
 /** The crown's laws. Mirrors `RealmLawsBrief`. Levels are 1 light … 3 heavy. */
 export interface RealmLawsBrief { tax: number; levy: number; succession: string; trade: string; town_fee: number; tolerance: string; }
 /** Everything the realm window shows, in one read. Mirrors `RealmOverview`. */
@@ -3757,4 +3768,7 @@ export interface StandingRow {
 /** Mirrors `Standings`. */
 export interface Standings { realms: StandingRow[]; provinces: StandingRow[]; }
 /** A province's production split by value; `goods[].amount` is the 0..1 share. Mirrors `ProvinceGoodShare`. */
-export interface ProvinceGoodShare { province: number; goods: RealmGood[]; unrest: number; culture: string; }
+export interface ProvinceGoodShare { province: number; goods: RealmGood[]; unrest: number; culture: string; rural: number; urban: number; }
+
+/** One finding of the province border check. Mirrors `ProvinceIssue`. */
+export interface ProvinceIssue { province: number; kind: string; cells: number; x: number; y: number; detail: string; }

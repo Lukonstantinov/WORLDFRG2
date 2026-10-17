@@ -2363,9 +2363,290 @@ pub fn real_world_analog(koppen: u8, elev_class: u8, coastal: bool) -> &'static 
     }
 }
 
+
+// ── Hand editing of the partition: merge a chosen set, repaint a border, check, repair ─────
+
+/// Relabel a province map after some provinces were folded into others (`fold[old]` =
+/// the surviving OLD id) and rebuild the province list: ids are recompacted to 0..m, the
+/// survivor absorbs the additive fields of everything folded into it, neighbours are
+/// recomputed from the raster. Shared by "merge selected" and the fragment repair.
+fn compact_after_fold(
+    province_id: &[u32], provinces: &[Province], fold: &[u32], w: u32, h: u32,
+) -> (Vec<Province>, Vec<u32>) {
+    let n = provinces.len();
+    let mut survivors: Vec<u32> = (0..n as u32).filter(|&p| fold[p as usize] == p).collect();
+    survivors.sort_unstable();
+    let mut new_of = vec![u32::MAX; n];
+    for (new, &old) in survivors.iter().enumerate() { new_of[old as usize] = new as u32; }
+    let new_pid: Vec<u32> = province_id.iter().map(|&p| {
+        if p == NO_PROVINCE || (p as usize) >= n { NO_PROVINCE } else { new_of[fold[p as usize] as usize] }
+    }).collect();
+    let mut out: Vec<Province> = survivors.iter().map(|&old| {
+        let mut pr = provinces[old as usize].clone();
+        pr.id = new_of[old as usize];
+        pr
+    }).collect();
+    for old in 0..n {
+        if fold[old] as usize == old { continue; }
+        let dst = new_of[fold[old] as usize] as usize;
+        let src = &provinces[old];
+        let d = &mut out[dst];
+        d.cells += src.cells;
+        d.area_km2 += src.area_km2;
+        d.rural_pop = d.rural_pop.saturating_add(src.rural_pop);
+        d.coast_cells += src.coast_cells;
+        d.river_cells += src.river_cells;
+        d.lake_cells += src.lake_cells;
+        d.coastal |= src.coastal;
+        d.navigable_river |= src.navigable_river;
+        d.food_capacity += src.food_capacity;
+        d.rural_cap = d.rural_cap.saturating_add(src.rural_cap);
+        for s in &src.settlements { if !d.settlements.contains(s) { d.settlements.push(s.clone()); } }
+    }
+    rebuild_neighbors_from_raster(&mut out, &new_pid, w, h);
+    (out, new_pid)
+}
+
+/// MERGE a chosen set of provinces into ONE. The largest keeps its name, seat and
+/// identity; the others are absorbed (their cells, area, people and towns join it).
+pub fn merge_group_wh(
+    province_id: &[u32], provinces: &[Province], group: &[u32], w: u32, h: u32,
+) -> (Vec<Province>, Vec<u32>) {
+    let n = provinces.len();
+    let ids: Vec<u32> = group.iter().copied().filter(|&g| (g as usize) < n).collect();
+    if ids.len() < 2 || province_id.len() != (w as usize) * (h as usize) {
+        return (provinces.to_vec(), province_id.to_vec());
+    }
+    let root = *ids.iter().max_by_key(|&&g| (provinces[g as usize].cells, std::cmp::Reverse(g))).unwrap();
+    let fold: Vec<u32> = (0..n as u32).map(|p| if ids.contains(&p) { root } else { p }).collect();
+    compact_after_fold(province_id, provinces, &fold, w, h)
+}
+
+/// BORDER EDIT: hand the listed land cells (`(x, y)` in the world grid) to `target`.
+/// Sea cells are never claimed. A province left with no cells is folded away. Counts,
+/// area, people and neighbours are updated in proportion to the cells that moved.
+pub fn assign_cells_wh(
+    province_id: &mut [u32], provinces: &[Province], target: u32, cells: &[(u32, u32)], w: u32, h: u32,
+) -> (Vec<Province>, Vec<u32>) {
+    let n = provinces.len();
+    let total = (w as usize) * (h as usize);
+    if (target as usize) >= n || province_id.len() != total {
+        return (provinces.to_vec(), province_id.to_vec());
+    }
+    let mut out: Vec<Province> = provinces.to_vec();
+    // Per-cell weight of every province BEFORE the move, so area/people move in proportion.
+    let per_cell = |p: &Province| -> (f32, f32) {
+        let c = p.cells.max(1) as f32;
+        (p.area_km2 as f32 / c, p.rural_pop as f32 / c)
+    };
+    for &(x, y) in cells {
+        if x >= w || y >= h { continue; }
+        let i = (y as usize) * (w as usize) + x as usize;
+        let old = province_id[i];
+        if old == NO_PROVINCE || old == target || (old as usize) >= n { continue; }
+        let (a, r) = per_cell(&provinces[old as usize]);
+        let o = &mut out[old as usize];
+        o.cells = o.cells.saturating_sub(1);
+        o.area_km2 = (o.area_km2 as f32 - a).max(0.0) as _;
+        o.rural_pop = (o.rural_pop as f32 - r).max(0.0) as _;
+        let t = &mut out[target as usize];
+        t.cells += 1;
+        t.area_km2 = (t.area_km2 as f32 + a) as _;
+        t.rural_pop = (t.rural_pop as f32 + r) as _;
+        province_id[i] = target;
+    }
+    // A province that lost everything is folded into the target.
+    let fold: Vec<u32> = (0..n as u32).map(|p| if p != target && out[p as usize].cells == 0 { target } else { p }).collect();
+    let (mut res, new_pid) = compact_after_fold(province_id, &out, &fold, w, h);
+    for p in res.iter_mut() { p.cells = p.cells.max(1); }
+    (res, new_pid)
+}
+
+/// One finding of the border check.
+#[derive(serde::Serialize, Clone, Debug)]
+pub struct ProvinceIssue {
+    pub province: u32,
+    /// "fragment" (a piece cut off from its body that touches another province — fixable)
+    /// · "island_piece" (a detached piece with no neighbour: a real island, fine)
+    /// · "empty" · "huge" (over 3× the median size).
+    pub kind: String,
+    pub cells: u32,
+    pub x: f32,
+    pub y: f32,
+    pub detail: String,
+}
+
+/// Connected components (4-neighbour, wrapping in x) of every province.
+fn province_components(province_id: &[u32], n: usize, w: u32, h: u32) -> Vec<Vec<(u32, Vec<usize>)>> {
+    // out[province] = list of (component id, cells)
+    let (wu, hu) = (w as usize, h as usize);
+    let mut comp = vec![u32::MAX; province_id.len()];
+    let mut out: Vec<Vec<(u32, Vec<usize>)>> = vec![Vec::new(); n];
+    let mut next = 0u32;
+    let mut stack: Vec<usize> = Vec::new();
+    for start in 0..province_id.len() {
+        let p = province_id[start];
+        if p == NO_PROVINCE || (p as usize) >= n || comp[start] != u32::MAX { continue; }
+        let mut cells = Vec::new();
+        comp[start] = next; stack.push(start);
+        while let Some(i) = stack.pop() {
+            cells.push(i);
+            let (x, y) = (i % wu, i / wu);
+            let nb = [
+                (y * wu + (x + 1) % wu) as usize,
+                (y * wu + (x + wu - 1) % wu) as usize,
+                if y > 0 { (y - 1) * wu + x } else { usize::MAX },
+                if y + 1 < hu { (y + 1) * wu + x } else { usize::MAX },
+            ];
+            for &j in &nb {
+                if j != usize::MAX && comp[j] == u32::MAX && province_id[j] == p { comp[j] = next; stack.push(j); }
+            }
+        }
+        out[p as usize].push((next, cells));
+        next += 1;
+    }
+    out
+}
+
+/// Check the partition: pieces cut off from their province, empty provinces, giants.
+pub fn check_provinces_wh(province_id: &[u32], provinces: &[Province], w: u32, h: u32) -> Vec<ProvinceIssue> {
+    let n = provinces.len();
+    let wu = w as usize;
+    let comps = province_components(province_id, n, w, h);
+    let mut issues = Vec::new();
+    let mut sizes: Vec<u32> = comps.iter().map(|c| c.iter().map(|(_, v)| v.len() as u32).sum()).filter(|&s| s > 0).collect();
+    sizes.sort_unstable();
+    let median = sizes.get(sizes.len() / 2).copied().unwrap_or(0);
+    for (p, cs) in comps.iter().enumerate() {
+        if cs.is_empty() {
+            issues.push(ProvinceIssue { province: p as u32, kind: "empty".into(), cells: 0, x: provinces[p].seat_x as f32, y: provinces[p].seat_y as f32,
+                detail: "owns no land".into() });
+            continue;
+        }
+        let total: usize = cs.iter().map(|(_, v)| v.len()).sum();
+        if median > 0 && total as u32 > median * 3 {
+            let (sx, sy) = cs[0].1.iter().fold((0u64, 0u64), |a, &i| (a.0 + (i % wu) as u64, a.1 + (i / wu) as u64));
+            issues.push(ProvinceIssue { province: p as u32, kind: "huge".into(), cells: total as u32,
+                x: (sx / total as u64) as f32, y: (sy / total as u64) as f32,
+                detail: format!("{total} cells, {:.1}× the median province — select it and split it", total as f32 / median as f32) });
+        }
+        if cs.len() < 2 { continue; }
+        let main = cs.iter().enumerate().max_by_key(|(_, (_, v))| v.len()).map(|(k, _)| k).unwrap();
+        for (k, (_, cells)) in cs.iter().enumerate() {
+            if k == main { continue; }
+            let touches = piece_neighbour(province_id, cells, p as u32, w, h).is_some();
+            let (sx, sy) = cells.iter().fold((0u64, 0u64), |a, &i| (a.0 + (i % wu) as u64, a.1 + (i / wu) as u64));
+            issues.push(ProvinceIssue {
+                province: p as u32,
+                kind: if touches { "fragment" } else { "island_piece" }.into(),
+                cells: cells.len() as u32,
+                x: (sx / cells.len() as u64) as f32, y: (sy / cells.len() as u64) as f32,
+                detail: if touches { format!("{} cells cut off from the rest of the province and touching another one", cells.len()) }
+                        else { format!("{} cells on a separate island", cells.len()) },
+            });
+        }
+    }
+    issues
+}
+
+/// The province a detached piece shares the most border with (other than `own`).
+fn piece_neighbour(province_id: &[u32], cells: &[usize], own: u32, w: u32, h: u32) -> Option<u32> {
+    let (wu, hu) = (w as usize, h as usize);
+    let mut tally: std::collections::HashMap<u32, u32> = std::collections::HashMap::new();
+    for &i in cells {
+        let (x, y) = (i % wu, i / wu);
+        let nb = [
+            y * wu + (x + 1) % wu, y * wu + (x + wu - 1) % wu,
+            if y > 0 { (y - 1) * wu + x } else { usize::MAX },
+            if y + 1 < hu { (y + 1) * wu + x } else { usize::MAX },
+        ];
+        for &j in &nb {
+            if j == usize::MAX { continue; }
+            let q = province_id[j];
+            if q != NO_PROVINCE && q != own { *tally.entry(q).or_insert(0) += 1; }
+        }
+    }
+    tally.into_iter().max_by_key(|&(q, c)| (c, q)).map(|(q, _)| q)
+}
+
+/// REPAIR: every detached piece that touches another province is handed to the
+/// neighbour it shares the most border with, so each province is one connected body
+/// (true island pieces are left alone). Returns how many pieces moved.
+pub fn fix_fragments_wh(province_id: &mut [u32], provinces: &[Province], w: u32, h: u32) -> (Vec<Province>, Vec<u32>, usize) {
+    let n = provinces.len();
+    let comps = province_components(province_id, n, w, h);
+    let mut moves: Vec<(u32, Vec<usize>)> = Vec::new();
+    for (p, cs) in comps.iter().enumerate() {
+        if cs.len() < 2 { continue; }
+        let main = cs.iter().enumerate().max_by_key(|(_, (_, v))| v.len()).map(|(k, _)| k).unwrap();
+        for (k, (_, cells)) in cs.iter().enumerate() {
+            if k == main { continue; }
+            if let Some(q) = piece_neighbour(province_id, cells, p as u32, w, h) { moves.push((q, cells.clone())); }
+        }
+    }
+    let moved = moves.len();
+    let mut cells_by_target: std::collections::HashMap<u32, Vec<(u32, u32)>> = std::collections::HashMap::new();
+    for (q, cells) in moves {
+        let e = cells_by_target.entry(q).or_default();
+        for i in cells { e.push(((i % w as usize) as u32, (i / w as usize) as u32)); }
+    }
+    let mut cur: Vec<Province> = provinces.to_vec();
+    let mut pid_out = province_id.to_vec();
+    for (q, cells) in cells_by_target {
+        let (np, npid) = assign_cells_wh(&mut pid_out, &cur, q, &cells, w, h);
+        cur = np; pid_out = npid;
+        // Ids were recompacted only if a province emptied; fragments never empty one, so q stays valid.
+    }
+    (cur, pid_out, moved)
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn mini(id: u32, cells: u32) -> Province {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "name": format!("P{id}"), "seat_x": 0, "seat_y": 0, "cells": cells, "area_km2": cells * 10,
+            "island": 0, "neighbors": [], "koppen": 1, "elevation_class": 0, "mean_fertility": 0.5, "coastal": false,
+            "goods": [], "culture": "x", "rural_pop": cells * 5, "analog": "", "settlements": []
+        })).unwrap()
+    }
+
+    #[test]
+    fn hand_edits_keep_the_partition_consistent() {
+        // 6x2 world, three 4-cell provinces side by side.
+        let pid: Vec<u32> = vec![0, 0, 1, 1, 2, 2, 0, 0, 1, 1, 2, 2];
+        let provs = vec![mini(0, 4), mini(1, 4), mini(2, 4)];
+        // merge 0+1 -> one province of 8 cells, ids recompacted to 0..1
+        let (m, mp) = merge_group_wh(&pid, &provs, &[0, 1], 6, 2);
+        assert_eq!(m.len(), 2);
+        assert_eq!(m[0].cells, 8);
+        assert_eq!(mp.iter().filter(|&&p| p == 0).count(), 8);
+        // repaint: give province 1 two cells of province 0
+        let mut pid2 = pid.clone();
+        let (e, ep) = assign_cells_wh(&mut pid2, &provs, 1, &[(1, 0), (1, 1)], 6, 2);
+        assert_eq!(e.len(), 3);
+        assert_eq!((e[0].cells, e[1].cells), (2, 6));
+        assert_eq!(ep.iter().filter(|&&p| p == 1).count(), 6);
+        // emptying a province folds it away
+        let mut pid3 = pid.clone();
+        let (g, _) = assign_cells_wh(&mut pid3, &provs, 1, &[(0, 0), (1, 0), (0, 1), (1, 1)], 6, 2);
+        assert_eq!(g.len(), 2);
+    }
+
+    #[test]
+    fn border_check_finds_and_repairs_a_cut_off_piece() {
+        // 4x1 ring: province 0 sits at x=0 and x=2 with province 1 between/around them.
+        let pid: Vec<u32> = vec![0, 1, 0, 1];
+        let provs = vec![mini(0, 2), mini(1, 2)];
+        let issues = check_provinces_wh(&pid, &provs, 4, 1);
+        assert!(issues.iter().any(|i| i.kind == "fragment"), "{:?}", issues);
+        let mut p = pid.clone();
+        let (fixed, _, moved) = fix_fragments_wh(&mut p, &provs, 4, 1);
+        assert_eq!(moved, 2); // both provinces are cut into two pieces; each loses one
+        assert_eq!(fixed.iter().map(|x| x.cells).sum::<u32>(), 4);
+    }
+
     use crate::db::schema;
     use crate::sim::world_buffer::ColumnSet;
     use rusqlite::Connection;

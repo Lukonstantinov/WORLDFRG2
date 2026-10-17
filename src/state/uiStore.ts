@@ -303,6 +303,12 @@ interface UIStore {
   /** Provinces MARKED for a batch merge/split (shift-click on the map, or the pin in the
    *  Provinces panel). When non-empty, Merge/Split affect ONLY these; empty = affect all. */
   markedProvinces: number[];
+  /** While on, a plain click on the map marks/unmarks provinces (multi-select). */
+  provinceSelectMode: boolean;
+  setProvinceSelectMode: (v: boolean) => void;
+  /** The province the border brush paints cells INTO, or null. */
+  provinceEditTarget: number | null;
+  setProvinceEditTarget: (id: number | null) => void;
   /** Opacity of the province colour FILL, 0..1. Borders, names and the selection
    *  outline always draw at full strength, so winding this down leaves a clean
    *  political outline over the terrain rather than removing the layer. */
@@ -669,6 +675,10 @@ export const useUIStore = create<UIStore>((set) => ({
   showProvinceInspector: false,
   selectedProvince: null,
   markedProvinces: [],
+  provinceSelectMode: false,
+  setProvinceSelectMode: (v) => set({ provinceSelectMode: v }),
+  provinceEditTarget: null,
+  setProvinceEditTarget: (id) => set({ provinceEditTarget: id }),
   provinceOpacity: 0.5,
   provinceFillMode: "distinct",
   provinceSingleColor: "#3a5a7c",

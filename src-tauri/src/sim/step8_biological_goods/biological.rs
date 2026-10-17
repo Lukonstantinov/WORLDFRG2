@@ -1192,7 +1192,9 @@ fn build_placement_report(
 
     let mut report = GoodsPlacementReport::default();
     for (slot, spec) in specs.iter().enumerate() {
-        if !spec.enabled { continue; }
+        // A manufactured good is made in cities from a recipe: it has no belt, no
+        // homeland and nothing to place, so it is not part of the placement report.
+        if !spec.enabled || matches!(spec.distribution, Distribution::Manufactured) { continue; }
         report.enabled += 1;
         let marine = matches!(spec.domain, Domain::Marine);
         let col = buf.goods.get(slot);

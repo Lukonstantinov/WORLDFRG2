@@ -670,6 +670,14 @@ export function Toolbar() {
             borderRadius: 4, cursor: "pointer" }}>
           📖 Browse goods by origin
         </button>
+        <button
+          onClick={() => { void useGoodsStore.getState().loadFromWorld(); useGoodsStore.getState().setOpen(true); }}
+          title="Add your own goods, edit recipes and values, switch goods on or off"
+          style={{ width: "100%", marginBottom: 6, padding: "4px 6px", fontSize: 10,
+            background: "#4e4028", color: "#f0dcaa", border: "1px solid #7a6540",
+            borderRadius: 4, cursor: "pointer" }}>
+          ✎ Goods Builder (add custom goods)
+        </button>
         {/* CLAUDE.md §8.19 (goods localities, shipped) D9 · the TWO layers a belt carries, switched
             independently of each other and of WHICH goods are shown below. Coverage
             = "can it grow here" (the belt's honest extent + its outline, so a belt

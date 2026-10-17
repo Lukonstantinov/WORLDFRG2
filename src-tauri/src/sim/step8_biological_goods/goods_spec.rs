@@ -924,14 +924,8 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             vec![("wool_fleece", 1.2), ("dyes", 0.3)]),
         mg("leather_goods", "Leather Goods", "\u{1F45E}", "#7a4a2a", 4.0, 0.9, 0.0, false, 1.0,
             vec![("hides", 1.0), ("salt", 0.1)]),
-        // Salted Herring ← fresh herring + salt (the preservative). Fresh herring
-        // (built-in "herring") is highly perishable and eaten at its origin port;
-        // ONLY once salted in a curing town does it keep long enough to be shipped
-        // across the network. Salt (rock salt) is the cure — bay salt is an
-        // interchangeable preservative once category-substitution covers inputs.
-        // Cheap bulk protein, no luxury, low labor (the great Hanseatic staple).
-        mg("salted_herring", "Salted Herring", "\u{1F9C2}", "#88b8c0", 3.0, 1.5, 0.0, false, 0.9,
-            vec![("herring", 1.0), ("salt", 0.3)]),
+        // (Salted herring was a manufactured good here; removed — a cured fish is a
+        // product of the fishery, not a good of its own. Stockfish covers the keeping fish.)
         // Metalwork
         mg("bronzeware", "Bronzeware", "\u{1F514}", "#b06a3a", 6.0, 1.4, 0.0, false, 1.0,
             vec![("copper", 0.9), ("tin", 0.1)]),

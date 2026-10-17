@@ -118,7 +118,7 @@ export type PaintValue =
   | { type: "shelf"; value: number }
   | { type: "volcanic"; value: number };
 
-export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge" | "lasso" | "placeSettlement" | "plateSeed";
+export type ActiveTool = "pan" | "select" | "paint" | "elevation" | "shelf" | "volcano" | "ridge" | "lasso" | "placeSettlement" | "plateSeed" | "provinceBrush";
 
 /** A hand-drawn mountain-ridge line: a polyline spine (world cells) whose stroke
  *  width encodes the range's footprint width, opacity encodes peak height, and a
@@ -185,6 +185,7 @@ export interface TradeRoute {
   points: [number, number][];
   kind: number; // 0=overland caravan, 1=maritime, 2=river
   minor: boolean; // lesser town's single connector road (drawn thinner)
+  shadow?: boolean; // runs alongside an existing road: kept in the graph, not drawn
 }
 
 export interface FisheryBank {

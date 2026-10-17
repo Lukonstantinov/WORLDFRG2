@@ -34,6 +34,12 @@ export function PoliticalLegend() {
         <Chip on={p.names} onClick={() => p.patch({ names: !p.names })}>Names</Chip>
         <Chip on={p.goods} onClick={() => p.patch({ goods: !p.goods })}>Goods</Chip>
       </div>
+      <div style={{ color: T.inkDim, fontSize: FZ.micro, letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 }}>People on each province</div>
+      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", marginBottom: 7 }}>
+        {([["off", "Off"], ["all", "Everyone"], ["rural", "Countryside"], ["urban", "Towns"]] as const).map(([m, l]) => (
+          <Chip key={m} on={p.popMode === m} onClick={() => p.patch({ popMode: m })}>{l}</Chip>
+        ))}
+      </div>
       <div style={{ color: T.inkDim, fontSize: FZ.micro, letterSpacing: 1, textTransform: "uppercase", marginBottom: 3 }}>
         Main goods — an icon shows at 30% of a province's production
       </div>

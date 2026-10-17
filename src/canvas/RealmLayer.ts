@@ -24,9 +24,11 @@ export interface RealmLayerData {
   cultures: Map<number, string>;
   unrest: Map<number, number>;
   shares: Map<number, { good: string; share: number }[]>;
+  pop: Map<number, { rural: number; urban: number }>;
 }
 export interface RealmLayerView {
   fill: PoliticalFill; borders: boolean; goods: boolean; names: boolean;
+  popMode: "off" | "all" | "rural" | "urban";
   selected: number | null; goodFilter: string | null;
 }
 
@@ -53,8 +55,8 @@ function orderColor(u: number): RGB {
 interface Stat { x: number; y: number; r: number }
 
 export class RealmLayer {
-  private data: RealmLayerData = { raster: null, owner: new Map(), names: new Map(), cultures: new Map(), unrest: new Map(), shares: new Map() };
-  private view: RealmLayerView = { fill: "realm", borders: true, goods: true, names: true, selected: null, goodFilter: null };
+  private data: RealmLayerData = { raster: null, owner: new Map(), names: new Map(), cultures: new Map(), unrest: new Map(), shares: new Map(), pop: new Map() };
+  private view: RealmLayerView = { fill: "realm", borders: true, goods: true, names: true, popMode: "off", selected: null, goodFilter: null };
   private fillCanvas: HTMLCanvasElement | null = null;
   private provPath: Path2D | null = null;
   private realmPath: Path2D | null = null;
@@ -160,7 +162,10 @@ export class RealmLayer {
     const { w, h, data, gridW, gridH } = r;
     const sx = gridW / w, sy = gridH / h;
     const prov = new Path2D(), realm = new Path2D(), coast = new Path2D();
-    const acc = new Map<number, { n: number; s: number; c: number; y: number }>();
+    // Per province: a circular mean of x (a province may straddle the seam), the y sum,
+    // and the linear sums of its west and east halves so a straddler can be labelled on
+    // its bigger side instead of exactly on the seam, where the icon would be cut.
+    const acc = new Map<number, { n: number; s: number; c: number; y: number; nl: number; xl: number; nr: number; xr: number; west: boolean; east: boolean }>();
     const edge = (a: number, b: number, x: number, y0: number, y1: number, x0: number, x1: number, y: number, vertical: boolean) => {
       if (a === b) return;
       const path = a === NO || b === NO ? coast
@@ -175,9 +180,12 @@ export class RealmLayer {
         const i = ry * w + rx;
         const id = data[i];
         if (id !== NO) {
-          const a = acc.get(id) ?? { n: 0, s: 0, c: 0, y: 0 };
-          const ang = (2 * Math.PI * (rx + 0.5)) / w; // circular mean: a province may straddle the seam
+          const a = acc.get(id) ?? { n: 0, s: 0, c: 0, y: 0, nl: 0, xl: 0, nr: 0, xr: 0, west: false, east: false };
+          const ang = (2 * Math.PI * (rx + 0.5)) / w;
           a.n++; a.s += Math.sin(ang); a.c += Math.cos(ang); a.y += ry + 0.5;
+          if (rx < w / 2) { a.nl++; a.xl += rx + 0.5; } else { a.nr++; a.xr += rx + 0.5; }
+          if (rx <= 1) a.west = true;
+          if (rx >= w - 2) a.east = true;
           acc.set(id, a);
         }
         const x1 = (rx + 1) * sx, y0 = ry * sy, y1 = (ry + 1) * sy;
@@ -186,8 +194,15 @@ export class RealmLayer {
       }
     }
     for (const [id, a] of acc) {
-      let ang = Math.atan2(a.s, a.c); if (ang < 0) ang += 2 * Math.PI;
-      this.stats.set(id, { x: (ang / (2 * Math.PI)) * gridW, y: (a.y / a.n) * sy, r: Math.sqrt((a.n * sx * sy) / Math.PI) });
+      let x: number;
+      if (a.west && a.east) {
+        // Straddles the seam: label the bigger side, at its own centre.
+        x = a.nl >= a.nr ? (a.xl / a.nl) * sx : (a.xr / a.nr) * sx;
+      } else {
+        let ang = Math.atan2(a.s, a.c); if (ang < 0) ang += 2 * Math.PI;
+        x = (ang / (2 * Math.PI)) * gridW;
+      }
+      this.stats.set(id, { x, y: (a.y / a.n) * sy, r: Math.sqrt((a.n * sx * sy) / Math.PI) });
     }
     this.provPath = prov; this.realmPath = realm; this.coastPath = coast;
   }
@@ -213,9 +228,10 @@ export class RealmLayer {
     this.selPath = path;
   }
 
-  /** Draw one world copy. `vis` is the visible world rectangle in this copy's own
-   *  coordinates (used only to skip names/icons that are off screen). */
-  render(ctx: CanvasRenderingContext2D, scale: number, vis: { x0: number; x1: number; y0: number; y1: number }) {
+  /** Pass 1 for one world copy: the fill, the borders and the selection outline. Every
+   *  copy's fill is drawn BEFORE any copy's labels, or the next copy's fill would paint
+   *  over an icon that spills across the seam. */
+  renderFill(ctx: CanvasRenderingContext2D, scale: number) {
     const r = this.data.raster;
     if (!r) return;
     if (this.dirtyGeo) this.rebuildGeo();
@@ -236,12 +252,27 @@ export class RealmLayer {
       ctx.strokeStyle = "rgba(6,12,20,0.9)"; ctx.lineWidth = 4.5 * inv; ctx.stroke(this.selPath);
       ctx.strokeStyle = "rgba(255,226,138,0.98)"; ctx.lineWidth = 2 * inv; ctx.stroke(this.selPath);
     }
-    if (this.view.names || this.view.goods) this.renderLabels(ctx, scale, vis);
     ctx.restore();
+  }
+
+  /** Pass 2 for one world copy: province names and goods icons. `vis` is the visible
+   *  world rectangle in this copy's own coordinates (off-screen labels are skipped). */
+  renderLabelPass(ctx: CanvasRenderingContext2D, scale: number, vis: { x0: number; x1: number; y0: number; y1: number }) {
+    if (!this.data.raster || !(this.view.names || this.view.goods || this.view.popMode !== "off")) return;
+    ctx.save();
+    this.renderLabels(ctx, scale, vis);
+    ctx.restore();
+  }
+
+  private popOf(id: number): number {
+    const p = this.data.pop.get(id);
+    if (!p) return 0;
+    return this.view.popMode === "rural" ? p.rural : this.view.popMode === "urban" ? p.urban : p.rural + p.urban;
   }
 
   private renderLabels(ctx: CanvasRenderingContext2D, scale: number, vis: { x0: number; x1: number; y0: number; y1: number }) {
     const inv = 1 / scale;
+    const showPop = this.view.popMode !== "off";
     ctx.textAlign = "center"; ctx.textBaseline = "middle";
     for (const [id, s] of this.stats) {
       if (s.x + s.r < vis.x0 || s.x - s.r > vis.x1 || s.y + s.r < vis.y0 || s.y - s.r > vis.y1) continue;
@@ -252,24 +283,48 @@ export class RealmLayer {
         ? (this.data.shares.get(id) ?? []).filter((g) => g.share >= GOOD_SHARE_MIN).slice(0, 3) : [];
       const fpx = Math.max(9, Math.min(15, diam * 0.11));
       const isz = Math.max(16, Math.min(26, diam * 0.13));
-      if (this.view.names) {
-        const name = (this.data.names.get(id) ?? "").toUpperCase();
-        if (name) {
-          const ny = s.y - (icons.length ? (isz * 0.45) * inv : 0);
-          ctx.font = `600 ${fpx * inv}px ${SERIF}`;
-          ctx.lineWidth = 3 * inv; ctx.strokeStyle = "rgba(10,8,5,0.8)"; ctx.fillStyle = "#f5efe2";
-          ctx.strokeText(name, s.x, ny); ctx.fillText(name, s.x, ny);
-        }
+      const name = this.view.names ? (this.data.names.get(id) ?? "").toUpperCase() : "";
+      const pop = showPop ? this.popOf(id) : 0;
+      // A vertical stack — name, then people, then the goods — centred on the province.
+      const rows: number[] = [];
+      if (name) rows.push(fpx * 1.15);
+      if (showPop) rows.push(fpx * 1.0);
+      if (icons.length) rows.push(isz + 2);
+      let y = s.y * scale - rows.reduce((a, b) => a + b, 0) / 2;
+      const px = (h: number) => (y += h, (y - h / 2) * inv);
+      let k = 0;
+      if (name) {
+        const ny = px(rows[k++]);
+        ctx.font = `600 ${fpx * inv}px ${SERIF}`;
+        ctx.lineWidth = 3 * inv; ctx.strokeStyle = "rgba(10,8,5,0.8)"; ctx.fillStyle = "#f5efe2";
+        ctx.strokeText(name, s.x, ny); ctx.fillText(name, s.x, ny);
       }
-      icons.forEach((g, k) => {
-        const ix = s.x + (k - (icons.length - 1) / 2) * (isz + 5) * inv;
-        const iy = s.y + ((this.view.names ? fpx * 0.5 : 0) + isz * 0.65) * inv;
-        const sel = this.view.goodFilter === g.good;
-        ctx.fillStyle = sel ? "rgba(255,226,138,0.97)" : "rgba(245,239,226,0.88)";
-        ctx.beginPath(); ctx.arc(ix, iy, isz * 0.62 * inv, 0, Math.PI * 2); ctx.fill();
-        drawPixelIcon(ctx, ix, iy, isz * 0.9 * inv, goodColor.get(g.good) ?? "#9a8a70", g.good);
-      });
+      if (showPop) {
+        const py = px(rows[k++]);
+        const txt = fmtPop(pop);
+        ctx.font = `600 ${fpx * 0.92 * inv}px system-ui, sans-serif`;
+        ctx.lineWidth = 3 * inv; ctx.strokeStyle = "rgba(10,8,5,0.85)"; ctx.fillStyle = "#ffe9a8";
+        ctx.strokeText(txt, s.x, py); ctx.fillText(txt, s.x, py);
+      }
+      if (icons.length) {
+        const iy = px(rows[k++]);
+        icons.forEach((g, j) => {
+          const ix = s.x + (j - (icons.length - 1) / 2) * (isz + 5) * inv;
+          // No backing disc: the sprite carries its own dark outline/glow. The picked
+          // good is ringed in gold instead.
+          if (this.view.goodFilter === g.good) {
+            ctx.strokeStyle = "rgba(255,226,138,0.95)"; ctx.lineWidth = 1.6 * inv;
+            ctx.beginPath(); ctx.arc(ix, iy, isz * 0.62 * inv, 0, Math.PI * 2); ctx.stroke();
+          }
+          drawPixelIcon(ctx, ix, iy, isz * 0.9 * inv, goodColor.get(g.good) ?? "#9a8a70", g.good);
+        });
+      }
     }
     ctx.textAlign = "start"; ctx.textBaseline = "alphabetic";
   }
+}
+
+/** 12,400 → "12.4k", 1,230,000 → "1.23M". */
+function fmtPop(n: number): string {
+  return n >= 1e6 ? `${(n / 1e6).toFixed(2)}M` : n >= 1e4 ? `${Math.round(n / 1e3)}k` : n >= 1e3 ? `${(n / 1e3).toFixed(1)}k` : `${Math.round(n)}`;
 }

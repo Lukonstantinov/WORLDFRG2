@@ -6,6 +6,8 @@ import { GOOD_SHARE_MIN, type PoliticalFill } from "@canvas/RealmLayer";
 
 type RGB = [number, number, number];
 export interface Share { good: string; share: number }
+export type PopMode = "off" | "all" | "rural" | "urban";
+export interface Pop { rural: number; urban: number }
 
 /** Everything the political layer shows, plus the switches on its legend. */
 interface PoliticalState {
@@ -13,6 +15,10 @@ interface PoliticalState {
   shares: Map<number, Share[]>;
   unrest: Map<number, number>;
   culture: Map<number, string>;
+  /** People per province, countryside and towns. */
+  pop: Map<number, Pop>;
+  /** Which population number to print on each province. */
+  popMode: PopMode;
   version: number;
   fill: PoliticalFill;
   borders: boolean; goods: boolean; names: boolean;
@@ -22,7 +28,7 @@ interface PoliticalState {
 }
 
 export const usePoliticalStore = create<PoliticalState>((set) => ({
-  owner: new Map(), shares: new Map(), unrest: new Map(), culture: new Map(), version: 0,
+  owner: new Map(), shares: new Map(), unrest: new Map(), culture: new Map(), pop: new Map(), popMode: "off", version: 0,
   fill: "realm", borders: true, goods: true, names: true, goodFilter: null,
   patch: (p) => set(p),
 }));
@@ -42,8 +48,9 @@ export async function loadPolitical(campaignActive: boolean): Promise<void> {
   const shares = new Map<number, Share[]>();
   const unrest = new Map<number, number>();
   const culture = new Map<number, string>();
+  const pop = new Map<number, Pop>();
   const provinces = useWorldStore.getState().provinces;
-  for (const p of provinces) culture.set(p.id, p.culture);
+  for (const p of provinces) { culture.set(p.id, p.culture); pop.set(p.id, { rural: p.rural_pop, urban: 0 }); }
 
   if (campaignActive) {
     const [states, per] = await Promise.all([
@@ -53,6 +60,7 @@ export async function loadPolitical(campaignActive: boolean): Promise<void> {
     for (const row of per) {
       shares.set(row.province, row.goods.map((g) => ({ good: g.good, share: g.amount })));
       unrest.set(row.province, row.unrest);
+      pop.set(row.province, { rural: row.rural, urban: row.urban });
       if (row.culture) culture.set(row.province, row.culture);
     }
   } else {
@@ -66,5 +74,5 @@ export async function loadPolitical(campaignActive: boolean): Promise<void> {
       shares.set(p.id, top.map((g) => ({ good: specs[g.good]?.id ?? "", share: g.quality / total })).filter((s) => s.good));
     }
   }
-  usePoliticalStore.setState((s) => ({ owner, shares, unrest, culture, version: s.version + 1 }));
+  usePoliticalStore.setState((s) => ({ owner, shares, unrest, culture, pop, version: s.version + 1 }));
 }

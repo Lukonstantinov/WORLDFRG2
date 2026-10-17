@@ -40,7 +40,7 @@ function leanColor(v: number): string {
   return "#c9bba2";
 }
 
-export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; compact?: boolean }) {
+export function CouncilChamber({ brief, compact, realm }: { brief: GovernmentBrief; compact?: boolean; realm?: boolean }) {
   const [people, setPeople] = useState<Record<number, IndividualBrief>>({});
   const [openSeat, setOpenSeat] = useState<number | null>(null);
   const [room, setRoom] = useState<RoomKind>(() => {
@@ -85,8 +85,9 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
         {brief.head_title && <span style={{ fontSize: FZ.tiny, color: T.inkMid }}>led by the <b style={{ color: T.parchment }}>{brief.head_title}</b></span>}
         <span style={{ flex: 1 }} />
         <Gauge label="legitimacy" value={brief.legitimacy} color={brief.legitimacy >= 0.5 ? T.good : brief.legitimacy >= 0.3 ? T.warn : T.bad} />
-        <Gauge label="political pts" value={Math.min(1, brief.gov_points / 4)} text={brief.gov_points.toFixed(1)} color="#8e7bd8" />
+        {!realm && <Gauge label="political pts" value={Math.min(1, brief.gov_points / 4)} text={brief.gov_points.toFixed(1)} color="#8e7bd8" />}
       </div>
+      {!realm && (<>
       <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
         <span style={{ fontSize: FZ.micro, color: T.inkDim }}>conservative</span>
         <div style={{ position: "relative", flex: 1, height: 6, borderRadius: 3, background: "linear-gradient(90deg,#d2bb94,#4d422f 50%,#c9a227)" }}>
@@ -114,6 +115,8 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
       ) : (
         <div style={{ fontSize: FZ.micro, color: T.inkDim, margin: "2px 0 8px" }}>No doctrine holds the streets yet.</div>
       )}
+
+      </>)}
 
       {/* ── The room: chamber · table · hemicycle ─────────────────────── */}
       <div style={{ display: "flex", gap: 4, marginBottom: 4, alignItems: "center" }}>
@@ -230,7 +233,8 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
         );
       })()}
 
-      {/* ── Edicts in force · recent history ──────────────────────────── */}
+      {/* ── Edicts in force · recent history (a city's; a realm has none yet) ── */}
+      {!realm && (
       <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: compact ? "1fr" : "1fr 1fr", gap: 8 }}>
         <div>
           <SubHead>Edicts in force ({brief.edicts.length})</SubHead>
@@ -258,6 +262,7 @@ export function CouncilChamber({ brief, compact }: { brief: GovernmentBrief; com
           })}
         </div>
       </div>
+      )}
     </div>
   );
 }

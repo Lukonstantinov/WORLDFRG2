@@ -2236,17 +2236,41 @@ export class OverlayManager {
     for (let i = 0; i < pts.length; i += stride) p.push([pts[i][0] + 0.5, pts[i][1] + 0.5]);
     const last = pts[pts.length - 1];
     if (p.length === 0 || p[p.length - 1][0] !== last[0] + 0.5 || p[p.length - 1][1] !== last[1] + 0.5) p.push([last[0] + 0.5, last[1] + 0.5]);
-    ctx.beginPath();
-    ctx.moveTo(p[0][0], p[0][1]);
+    // Wrap seam: a jump of more than half the world (else the old 20-cell gap) is the
+    // antimeridian. The line is CUT there first and each side smoothed on its own — the
+    // smoothing used the midpoint of the next pair as its end, so a jump between i and
+    // i+1 used to bend a curve to the middle of the world: the long horizontal lines.
+    // With the world width known, each side also runs to the edge so the road reaches it.
+    const gap = W > 0 ? W / 2 : 20;
+    const runs: [number, number][][] = [[p[0]]];
     for (let i = 1; i < p.length; i++) {
-      // Wrap seam: half the world when its width is known, else the old 20-cell gap.
-      if (Math.abs(p[i][0] - p[i - 1][0]) > (W > 0 ? W / 2 : 20)) { ctx.stroke(); ctx.beginPath(); ctx.moveTo(p[i][0], p[i][1]); continue; }
-      if (i === p.length - 1) { ctx.lineTo(p[i][0], p[i][1]); break; }
-      const mx = (p[i][0] + p[i + 1][0]) / 2, my = (p[i][1] + p[i + 1][1]) / 2;
-      ctx.quadraticCurveTo(p[i][0], p[i][1], mx, my);
+      const a = p[i - 1], b = p[i];
+      if (Math.abs(b[0] - a[0]) > gap) {
+        if (W > 0) {
+          const toRight = a[0] > b[0]; // leaving east, re-entering west (or the reverse)
+          const bx = toRight ? b[0] + W : b[0] - W;
+          const t = (toRight ? W - a[0] : -a[0]) / (bx - a[0]);
+          const y = a[1] + t * (b[1] - a[1]);
+          runs[runs.length - 1].push([toRight ? W : 0, y]);
+          runs.push([[toRight ? 0 : W, y], b]);
+        } else runs.push([b]);
+      } else runs[runs.length - 1].push(b);
     }
-    ctx.stroke();
+    for (const run of runs) {
+      if (run.length < 2) continue;
+      ctx.beginPath();
+      ctx.moveTo(run[0][0], run[0][1]);
+      for (let i = 1; i < run.length; i++) {
+        if (i === run.length - 1) { ctx.lineTo(run[i][0], run[i][1]); break; }
+        const mx = (run[i][0] + run[i + 1][0]) / 2, my = (run[i][1] + run[i + 1][1]) / 2;
+        ctx.quadraticCurveTo(run[i][0], run[i][1], mx, my);
+      }
+      ctx.stroke();
+    }
   }
+
+  /** The world's width in cells, so seam-aware strokes know where the wrap is. */
+  setWorldWidth(w: number) { if (w > 0) this.worldW = w; }
 
   drawMerchantRoutes(routes: MerchantRoute[], gridW: number) {
     this.merchantRoutes = routes;
@@ -4011,7 +4035,7 @@ export class OverlayManager {
 
   private renderTradeRoute(ctx: CanvasRenderingContext2D, route: TradeRoute) {
     const pts = route.points;
-    if (pts.length < 2) return;
+    if (pts.length < 2 || route.shadow) return;
 
     const color = route.kind === 1 ? lineColors.tradeSea : route.kind === 2 ? lineColors.tradeRiver : lineColors.tradeLand;
     // Minor connector roads (a lesser town's single link) are drawn thinner and
@@ -6404,17 +6428,21 @@ export class OverlayManager {
   private renderChokepoint(ctx: CanvasRenderingContext2D, cp: EconChokepoint) {
     if (cp.points.length < 2) return;
     const [a, b] = cp.points;
-    const mx = (a[0] + b[0]) / 2 + 0.5;
+    const straddle = this.worldW > 0 && Math.abs(a[0] - b[0]) > this.worldW / 2;
+    const mx = straddle ? (((a[0] + b[0] + this.worldW) / 2) % this.worldW) + 0.5 : (a[0] + b[0]) / 2 + 0.5;
     const my = (a[1] + b[1]) / 2 + 0.5;
     const r = Math.max(1.5, (3 + 6 * cp.share) / Math.sqrt(this.currentScale));
 
-    // Gateway link.
-    ctx.beginPath();
-    ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
-    ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
-    ctx.lineWidth = Math.max(0.5, 1.6 / Math.sqrt(this.currentScale));
-    ctx.strokeStyle = "rgba(230,90,70,0.85)";
-    ctx.stroke();
+    // Gateway link — skipped when the two ends straddle the wrap seam (a straight line
+    // between them would run the whole width of the map).
+    if (!(this.worldW > 0 && Math.abs(a[0] - b[0]) > this.worldW / 2)) {
+      ctx.beginPath();
+      ctx.moveTo(a[0] + 0.5, a[1] + 0.5);
+      ctx.lineTo(b[0] + 0.5, b[1] + 0.5);
+      ctx.lineWidth = Math.max(0.5, 1.6 / Math.sqrt(this.currentScale));
+      ctx.strokeStyle = "rgba(230,90,70,0.85)";
+      ctx.stroke();
+    }
 
     // Marker ring.
     ctx.beginPath();

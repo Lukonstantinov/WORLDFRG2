@@ -89,6 +89,27 @@ fn compute_trade_routes_impl(
     for i in 0..hubs {
         for j in nearest_k(i, 3) { major_edges.insert((i.min(j), i.max(j))); }
     }
+    // TIDY NETWORK: three-nearest-neighbours draws a triangle for almost every trio of
+    // hubs, and the parallel roads read as spaghetti. An edge a–b is redundant when some
+    // third hub k sits clearly "between" them (both a–k and k–b shorter than 0.9·a–b), so
+    // the traffic can go a–k–b. Each hub's single nearest link is always kept, so no hub
+    // is ever cut off by this pass.
+    let cdist = |a: usize, b: usize| -> f32 {
+        let mut dx = (nodes[a].0 - nodes[b].0).abs();
+        if dx > cw / 2 { dx = cw - dx; }
+        let dy = (nodes[a].1 - nodes[b].1) as f32;
+        ((dx * dx) as f32 + dy * dy).sqrt()
+    };
+    let nearest_of: Vec<usize> = (0..hubs).map(|i| {
+        (0..nn).filter(|&j| j != i)
+            .min_by(|&p, &q| cdist(i, p).partial_cmp(&cdist(i, q)).unwrap_or(std::cmp::Ordering::Equal))
+            .unwrap_or(i)
+    }).collect();
+    major_edges.retain(|&(a, b)| {
+        if (a < hubs && nearest_of[a] == b) || (b < hubs && nearest_of[b] == a) { return true; }
+        let dab = cdist(a, b);
+        !(0..hubs).any(|k| k != a && k != b && cdist(a, k).max(cdist(k, b)) < dab * 0.9)
+    });
     // B3 (ROUTES_ISOLATION_AND_CARRIAGE_REVIEW.md §4/§9) — each lesser town gets
     // a RANKED shortlist of candidate hubs (nearest first), not just the single
     // nearest. The single-candidate version dropped a town SILENTLY whenever its
@@ -115,7 +136,11 @@ fn compute_trade_routes_impl(
         town_candidates[i] = nearest_hubs_ranked(i, MINOR_FALLBACK_K);
     }
 
-    let all_edges: Vec<((usize, usize), bool)> = major_edges.iter().map(|&e| (e, false)).collect();
+    let mut all_edges: Vec<((usize, usize), bool)> = major_edges.iter().map(|&e| (e, false)).collect();
+    all_edges.sort_by(|x, y| {
+        let (a, b) = (x.0, y.0);
+        cdist(a.0, a.1).partial_cmp(&cdist(b.0, b.1)).unwrap_or(std::cmp::Ordering::Equal).then(a.cmp(&b))
+    });
     // ONE DIJKSTRA PER SOURCE, NOT PER EDGE (P2/A1) — every edge/candidate pair
     // is grouped by its coarse SOURCE node before batching, so testing several
     // fallback candidates per town costs nothing beyond what testing only the
@@ -135,7 +160,26 @@ fn compute_trade_routes_impl(
     let (major_paths, town_paths) = all_paths.split_at(all_edges.len());
 
     let mut routes: Vec<TradeRoute> = Vec::new();
+    // Coarse cells already carried by a road (dilated by one), so a lesser road that
+    // would only run alongside an existing one is dropped instead of drawn twice.
+    let mut covered = vec![false; cc.cw as usize * cc.ch as usize];
+    let seam = grid_w as f32 / 2.0;
     let mut push_route = |path: Vec<usize>, minor: bool, routes: &mut Vec<TradeRoute>| {
+        let mut shadow = false;
+        if minor && path.len() > 4 {
+            let inner = &path[1..path.len() - 1];
+            let hit = inner.iter().filter(|&&c| covered[c]).count();
+            shadow = hit as f32 >= inner.len() as f32 * 0.8;
+        }
+        for &c in &path {
+            let (x, y) = ((c as i32) % cc.cw, (c as i32) / cc.cw);
+            for dy in -1..=1 {
+                for dx in -1..=1 {
+                    let (nx, ny) = (((x + dx) % cc.cw + cc.cw) % cc.cw, y + dy);
+                    if ny >= 0 && ny < cc.ch { covered[(ny * cc.cw + nx) as usize] = true; }
+                }
+            }
+        }
         let mut sea_cells = 0u32;
         let mut river_cells = 0u32;
         let pts: Vec<[f32; 2]> = path.iter().map(|&c| {
@@ -150,7 +194,7 @@ fn compute_trade_routes_impl(
         } else {
             0
         };
-        routes.push(TradeRoute { points: pts, kind, minor });
+        routes.push(TradeRoute { points: tidy_polyline(&pts, cc.f as f32 * 0.9, seam), kind, minor, shadow });
     };
     for (&(_, minor), path) in all_edges.iter().zip(major_paths.iter()) {
         let path = match path { Some(p) => p.clone(), None => continue };
@@ -192,6 +236,50 @@ fn compute_trade_routes_impl(
     Ok(routes)
 }
 
+
+/// Tidy a route polyline: Douglas–Peucker (drops the one-cell staircase of an
+/// 8-direction grid path) then one Chaikin corner-cut so the turns are soft. A jump
+/// bigger than `seam` is the antimeridian wrap, so the line is cut there and each side
+/// is tidied on its own (never smoothed ACROSS the seam).
+fn tidy_polyline(pts: &[[f32; 2]], eps: f32, seam: f32) -> Vec<[f32; 2]> {
+    fn dp(p: &[[f32; 2]], eps: f32, keep: &mut Vec<bool>, lo: usize, hi: usize) {
+        if hi <= lo + 1 { return; }
+        let (a, b) = (p[lo], p[hi]);
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let len2 = dx * dx + dy * dy;
+        let (mut worst, mut wi) = (0.0f32, lo);
+        for i in lo + 1..hi {
+            let t = if len2 > 0.0 { (((p[i][0] - a[0]) * dx + (p[i][1] - a[1]) * dy) / len2).clamp(0.0, 1.0) } else { 0.0 };
+            let (cx, cy) = (a[0] + t * dx, a[1] + t * dy);
+            let d = ((p[i][0] - cx).powi(2) + (p[i][1] - cy).powi(2)).sqrt();
+            if d > worst { worst = d; wi = i; }
+        }
+        if worst > eps { keep[wi] = true; dp(p, eps, keep, lo, wi); dp(p, eps, keep, wi, hi); }
+    }
+    let mut runs: Vec<Vec<[f32; 2]>> = vec![Vec::new()];
+    for (i, &q) in pts.iter().enumerate() {
+        if i > 0 && (q[0] - pts[i - 1][0]).abs() > seam { runs.push(Vec::new()); }
+        runs.last_mut().unwrap().push(q);
+    }
+    let mut out: Vec<[f32; 2]> = Vec::with_capacity(pts.len());
+    for run in runs {
+        if run.len() < 3 { out.extend(run); continue; }
+        let mut keep = vec![false; run.len()];
+        keep[0] = true; keep[run.len() - 1] = true;
+        dp(&run, eps, &mut keep, 0, run.len() - 1);
+        let simp: Vec<[f32; 2]> = run.iter().zip(keep.iter()).filter(|(_, &k)| k).map(|(p, _)| *p).collect();
+        if simp.len() < 3 { out.extend(simp); continue; }
+        // Chaikin: each corner replaced by points a quarter of the way along both legs.
+        out.push(simp[0]);
+        for w in simp.windows(2) {
+            let (a, b) = (w[0], w[1]);
+            out.push([a[0] * 0.75 + b[0] * 0.25, a[1] * 0.75 + b[1] * 0.25]);
+            out.push([a[0] * 0.25 + b[0] * 0.75, a[1] * 0.25 + b[1] * 0.75]);
+        }
+        out.push(*simp.last().unwrap());
+    }
+    out
+}
 
 /// Travel-time / itinerary calculator (#23). Least-cost route between two world
 /// cells over the same coarse grid trade uses, then per-mode journey times. Reuses

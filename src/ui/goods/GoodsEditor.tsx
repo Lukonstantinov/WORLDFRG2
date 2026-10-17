@@ -162,9 +162,15 @@ export function GoodsEditor() {
   };
   const on = specs.filter((g) => g.enabled);
   const q = query.trim().toLowerCase();
+  // Goods YOU made (+ Add custom / Duplicate) get their own group at the top: a new
+  // good has no role yet, so it used to be filed into Essentials by name and was
+  // invisible in the long list ("I cannot add custom goods").
+  const isMine = (g: GoodSpec) => g.id.startsWith("custom_");
+  const mine = specs.map((g, i) => ({ g, i })).filter(({ g }) => isMine(g) && (!q || g.name.toLowerCase().includes(q)));
   const groups = ROLES.map((role) => ({
     role,
     rows: specs.map((g, i) => ({ g, i }))
+      .filter(({ g }) => !isMine(g))
       .filter(({ g }) => (g.dna?.role ?? "comfort") === role)
       .filter(({ g }) => !q || g.name.toLowerCase().includes(q) || g.id.includes(q))
       .sort((a, b) => a.g.name.localeCompare(b.g.name)),
@@ -188,7 +194,11 @@ export function GoodsEditor() {
         </div>
 
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 8 }}>
-          <button style={btn} onClick={addCustom}>+ Add custom</button>
+          <button style={primaryBtn} onClick={() => {
+            const at = specs.length;
+            addCustom(); setQuery(""); setTab("goods"); setExpanded(at);
+            setStatus("New good added at the top of the list — name it, set how it is made, then Apply to world.");
+          }}>+ Add custom</button>
           <button style={btn} onClick={act("Loaded global library", loadFromLibrary)}>Load library</button>
           <button style={btn} title="Add-only: import an INI-ish .txt of new goods (never replaces an existing id)" onClick={handleImportTxt}>Import .txt</button>
           <button style={btn} onClick={act("Reset to defaults", resetDefaults)}>Reset to defaults</button>
@@ -199,6 +209,7 @@ export function GoodsEditor() {
           <button style={btn} onClick={() => setOpen(false)}>Close</button>
         </div>
 
+        {status && <div style={{ margin: "-2px 0 8px", color: status.startsWith("Error") ? "#e08080" : "#bcd8a0" }}>{status}</div>}
         {tab === "balance" ? <WorldBalance specs={specs} /> : tab === "cultures" ? <CultureValues specs={specs} /> : (<>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           <span style={{ color: "#b5a68d" }}>Preset</span>
@@ -233,6 +244,21 @@ export function GoodsEditor() {
           <span>On</span><span></span><span>Name</span><span>Value</span><span>Difficulty</span>
           <span>Reach</span><span>Origin</span><span></span>
         </div>
+
+        {mine.length > 0 && (
+          <div>
+            <div style={{ marginTop: 10, padding: "3px 0", color: "#f0dcaa", fontWeight: 600, borderBottom: "1px solid #6a5a3a" }}>
+              Your goods <span style={{ color: "#8a7d66", fontWeight: 400 }}>· {mine.length}</span>
+            </div>
+            {mine.map(({ g, i }) => (
+              <GoodRow
+                key={`${g.id}_${i}`} g={g} i={i} expanded={expanded === i}
+                onToggleExpand={() => setExpanded(expanded === i ? null : i)}
+                update={update} duplicate={duplicate} remove={remove} allSpecs={specs}
+              />
+            ))}
+          </div>
+        )}
 
         {groups.map((grp) => (
           <div key={grp.role}>

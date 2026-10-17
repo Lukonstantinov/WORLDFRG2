@@ -77,7 +77,6 @@ export const GOOD_DEFS: GoodDef[] = [
   // ── Clay (raw input) + manufactured chain goods (mirror goods_spec.rs) ──
   { name: "clay", label: "Clay", emoji: "\u{1F94C}", color: "#b07a52" },
   { name: "cloth", label: "Woolen Cloth", emoji: "\u{1F45A}", color: "#d8c8b0" },
-  { name: "salted_herring", label: "Salted Herring", emoji: "\u{1F9C2}", color: "#88b8c0" },
   { name: "metalware", label: "Metalware & Arms", emoji: "\u{2694}\u{FE0F}", color: "#9099a8" },
   { name: "refined_sugar", label: "Refined Sugar", emoji: "\u{1F367}", color: "#f0e8d8" },
   { name: "citrus_liqueur", label: "Citrus Liqueur", emoji: "\u{1F378}", color: "#e8b24a" },
@@ -229,7 +228,7 @@ const GOOD_CATEGORY: Record<string, string> = {
   turquoise: "Minerals & Metals", bog_iron: "Minerals & Metals", coal: "Minerals & Metals",
   garnet: "Minerals & Metals", carnelian: "Minerals & Metals",
   // Marine — sea catch/harvest AND the salted fish preserved for transport
-  stockfish: "Marine", herring: "Marine", salted_herring: "Marine", pearls: "Marine",
+  stockfish: "Marine", herring: "Marine", pearls: "Marine",
   whaling: "Marine", amber: "Marine", dyes: "Marine", tyrian_purple: "Marine",
   coral: "Marine", ambergris: "Marine",
 };

@@ -70,7 +70,8 @@ export function GoodsReportPanel({ onClose }: { onClose: () => void }) {
   }, []);
 
   const { absent, flagged, healthy } = useMemo(() => {
-    const rows = report?.rows ?? [];
+    // Manufactured goods are made in cities and have nothing to place (old reports listed them).
+    const rows = (report?.rows ?? []).filter((r) => r.distribution !== "manufactured");
     return {
       absent: rows.filter((r) => r.flags.includes("absent")),
       flagged: rows.filter((r) => r.flags.length > 0 && !r.flags.includes("absent")),

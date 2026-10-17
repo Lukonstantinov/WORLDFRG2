@@ -175,6 +175,11 @@ pub struct TradeRoute {
     /// True for a minor connector road (a lesser town's single link to the
     /// network) so the overlay can draw it thinner than a major trunk route.
     pub minor: bool,
+    /// A lesser road that only runs alongside an existing one: kept in the data (it is
+    /// the town's attachment to the road graph) but not drawn, so corridors read as one
+    /// road instead of two parallel lines.
+    #[serde(default)]
+    pub shadow: bool,
 }
 
 // ── Shared coarse movement-cost grid ─────────────────────────────────────────

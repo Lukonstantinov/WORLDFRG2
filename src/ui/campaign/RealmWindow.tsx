@@ -6,7 +6,7 @@ import {
   computeStates, campaignRealmOverview, campaignGetRealmFamily, campaignRealmWatch, campaignProvinceGoods, campaignGetGovernment,
   getStartRealms, setStartRealms, regenerateStartRealms, getRealmStartMode, setRealmStartMode,
 } from "@bridge";
-import type { PersonBrief, RealmWatch, StateRegion, RealmOverview, RealmProvinceRow, ProvinceGoodExploit, GovernmentBrief, StartRealm } from "@types";
+import type { PersonBrief, RealmWatch, StateRegion, RealmOverview, RealmProvinceRow, ProvinceGoodExploit, GovernmentBrief, StartRealm, SeatBrief } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, FZ, SPACE, SERIF } from "@ui/campaign/chronicleTheme";
 import { Panel, PanelHeader, Tabs, Badge, Chip, Ledger } from "@ui/kit";
@@ -14,7 +14,7 @@ import { GoodIcon } from "@ui/goods/GoodIcon";
 import { CouncilChamber } from "@ui/campaign/CouncilChamber";
 import { drawPixelIcon } from "@canvas/goodArt";
 import { GOOD_DEFS } from "@goods";
-import { usePoliticalStore, loadPolitical, type Share } from "@state/politicalStore";
+import { usePoliticalStore, loadPolitical, type Share, type Pop, type PopMode } from "@state/politicalStore";
 import { GOOD_SHARE_MIN } from "@canvas/RealmLayer";
 
 /** THE ONE REALM WINDOW (PROVINCES_REALMS_LOGISTICS_REDESIGN.md §5/§8, mock-up v2):
@@ -60,8 +60,8 @@ function centroids(r: ProvinceRaster): Map<number, [number, number]> {
 
 /** The realm map: provinces filled by realm / culture / order, province and realm
  *  borders, each province's main exports as icons, towns, and country → market arrows. */
-function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHover, onPick, shares, goodFilter }: {
-  shares: Map<number, Share[]>; goodFilter: string | null;
+function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHover, onPick, shares, goodFilter, pop, popMode }: {
+  shares: Map<number, Share[]>; goodFilter: string | null; pop: Map<number, Pop>; popMode: PopMode;
   raster: ProvinceRaster; owner: Map<number, Owner>; focus: Set<number>; fill: Fill;
   marks: { borders: boolean; goods: boolean; cities: boolean; trade: boolean };
   rows: Map<number, RealmProvinceRow>; towns: { x: number; y: number; id: number; capital: boolean }[];
@@ -140,8 +140,7 @@ function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHov
         const main = (shares.get(p) ?? []).filter((s) => s.share >= GOOD_SHARE_MIN).slice(0, 3);
         const ex = main.length ? main.map((s) => ({ good: s.good })) : shares.has(p) ? [] : r.exports.slice(0, 3);
         ex.forEach((e, k) => {
-          const gx = px + (k - (ex.length - 1) / 2) * 26, gy = py + 14;
-          ctx.fillStyle = "rgba(245,239,226,.85)"; ctx.beginPath(); ctx.arc(gx, gy, 12, 0, 7); ctx.fill();
+          const gx = px + (k - (ex.length - 1) / 2) * 26, gy = py + (popMode !== "off" ? 28 : 14);
           drawPixelIcon(ctx, gx, gy, 20, goodColor(e.good), e.good);
         });
       }
@@ -149,13 +148,25 @@ function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHov
       ctx.font = `600 11px ${SERIF}`; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,8,5,.8)"; ctx.fillStyle = "#f5efe2";
       ctx.strokeText(name.toUpperCase(), px, py - 8); ctx.fillText(name.toUpperCase(), px, py - 8);
     }
+    // People on every province in view: countryside, towns or both.
+    if (popMode !== "off") {
+      ctx.font = `600 10.5px system-ui, sans-serif`; ctx.lineWidth = 3; ctx.strokeStyle = "rgba(10,8,5,.85)"; ctx.fillStyle = "#ffe9a8";
+      for (const [p, c] of cents) {
+        const pp = pop.get(p); if (!pp) continue;
+        const [px, py] = toPx(c[0], c[1]); if (px < -20 || py < -20 || px > W + 20 || py > H + 20) continue;
+        const v = popMode === "rural" ? pp.rural : popMode === "urban" ? pp.urban : pp.rural + pp.urban;
+        const txt = fmt(v);
+        const y = focus.has(p) ? py + 6 : py;
+        ctx.strokeText(txt, px, y); ctx.fillText(txt, px, y);
+      }
+    }
     if (marks.cities) for (const t of towns) {
       const [x, y] = toPx(t.x, t.y); if (x < 0 || y < 0 || x > W || y > H) continue;
       ctx.fillStyle = "#14110d"; ctx.beginPath(); ctx.arc(x, y, t.capital ? 6 : 4, 0, 7); ctx.fill();
       ctx.fillStyle = t.capital ? T.gold : T.ink; ctx.beginPath(); ctx.arc(x, y, t.capital ? 4 : 2.5, 0, 7); ctx.fill();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raster, owner, focus, fill, marks, rows, towns, hover, view, shares, goodFilter]);
+  }, [raster, owner, focus, fill, marks, rows, towns, hover, view, shares, goodFilter, pop, popMode]);
   const local = (e: React.MouseEvent<HTMLCanvasElement>): [number, number] => {
     const b = e.currentTarget.getBoundingClientRect();
     return [((e.clientX - b.left) / b.width) * W, ((e.clientY - b.top) / b.height) * H];
@@ -236,6 +247,8 @@ export function RealmWindow() {
   const realmFocus = useUIStore((s) => s.realmFocus);
   const shares = usePoliticalStore((s) => s.shares);
   const goodFilter = usePoliticalStore((s) => s.goodFilter);
+  const pop = usePoliticalStore((s) => s.pop);
+  const popMode = usePoliticalStore((s) => s.popMode);
   useEffect(() => { if (open) loadPolitical(active).catch(() => {}); }, [open, active, year]);
 
   useEffect(() => {
@@ -267,7 +280,7 @@ export function RealmWindow() {
   const rows = useMemo(() => {
     const m = new Map<number, RealmProvinceRow>();
     if (ov) ov.provinces.forEach((r) => m.set(r.id, r));
-    else for (const p of provinces) m.set(p.id, { id: p.id, name: p.name, rural: p.rural_pop, urban: 0, tax: 0, unrest: 0.2, culture: p.culture, exports: [], governor: null, capital: false, town_hub: -1 });
+    else for (const p of provinces) m.set(p.id, { id: p.id, name: p.name, rural: p.rural_pop, urban: 0, tax: 0, unrest: 0.2, culture: p.culture, exports: [], governor: null, capital: false, town_hub: -1, tax_rate: 0, surplus: 0, arrears: 0, dues_to: "", towns: [] });
     return m;
   }, [ov, provinces]);
   const towns = useMemo(() => (snapshot?.hubs ?? []).filter((h) => !h.is_estate && rows.get(raster ? (centroidOf(raster, h.x, h.y) ?? -1) : -1) && focus.has(centroidOf(raster!, h.x, h.y) ?? -1))
@@ -341,13 +354,19 @@ export function RealmWindow() {
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.05fr) minmax(0,1fr)", minHeight: 0, overflow: "hidden" }}>
         <div style={{ padding: SPACE.lg, borderRight: `1px solid ${T.line}` }}>
           {raster ? <RealmMap raster={raster} owner={owner} focus={focus} fill={fill} marks={marks} rows={rows} towns={towns}
-            hover={hover} onHover={setHover} onPick={pickProvince} shares={shares} goodFilter={goodFilter} /> : <div style={{ color: T.inkDim }}>Generate provinces to see the map.</div>}
+            hover={hover} onHover={setHover} onPick={pickProvince} shares={shares} goodFilter={goodFilter} pop={pop} popMode={popMode} /> : <div style={{ color: T.inkDim }}>Generate provinces to see the map.</div>}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, alignItems: "center", fontSize: FZ.small, color: T.inkDim }} data-no-drag>
             <span>FILL</span>
             {(["realm", "culture", "order"] as const).map((f) => <Chip key={f} on={fill === f} onClick={() => setFill(f)}>{f === "realm" ? "Realms" : f === "culture" ? "Cultures" : "Public order"}</Chip>)}
             <span style={{ marginLeft: 6 }}>SHOW</span>
             {(["borders", "goods", "cities", "trade"] as const).map((k) => <Chip key={k} on={marks[k]} onClick={() => setMarks((m) => ({ ...m, [k]: !m[k] }))}>
               {k === "borders" ? "Borders" : k === "goods" ? "Goods exports" : k === "cities" ? "Cities" : "Country → market"}</Chip>)}
+          </div>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, alignItems: "center", fontSize: FZ.small, color: T.inkDim }} data-no-drag>
+            <span>PEOPLE</span>
+            {([["off", "Off"], ["all", "Everyone"], ["rural", "Countryside"], ["urban", "Towns"]] as const).map(([m, l]) => (
+              <Chip key={m} on={popMode === m} onClick={() => usePoliticalStore.getState().patch({ popMode: m })}>{l}</Chip>
+            ))}
           </div>
           <GoodChips focus={focus} shares={shares} goodFilter={goodFilter} />
           {hover !== null && <div style={{ marginTop: 4, fontSize: FZ.small, color: T.inkMid }}>{rows.get(hover)?.name}</div>}
@@ -361,7 +380,7 @@ export function RealmWindow() {
             {curTab === "gov" && ov && <GovernmentPane ov={ov} family={family} />}
             {curTab === "provinces" && ov && <ProvincesPane ov={ov} hover={hover} onHover={setHover} onOpen={(p) => { setProv(p); setTab("province"); }} />}
             {curTab === "goods" && ov && <GoodsPane ov={ov} />}
-            {curTab === "province" && prow && <ProvincePane row={prow} goods={goods} />}
+            {curTab === "province" && prow && <ProvincePane row={prow} goods={goods} realmName={title} onTown={(h) => { setCity(h); setTab("city"); }} />}
             {curTab === "pgov" && prow && <ProvinceGovPane row={prow} />}
             {curTab === "city" && (gov ? <CouncilChamber brief={gov} compact /> : <div>Loading the city council…</div>)}
             {curTab === "edit" && !active && (
@@ -410,24 +429,41 @@ function OverviewPane({ ov }: { ov: RealmOverview }) {
       {ov.goods.filter((g) => g.amount > 0).slice(0, 5).map((g) => <span key={g.good} style={{ display: "flex", gap: 6, alignItems: "center" }}><GoodIcon name={g.good} color={goodColor(g.good)} size={24} /><span><b style={{ fontFamily: SERIF }}>{fmt(g.amount)}</b><br />{label(g.good)}</span></span>)}
     </div>
     <H3>Standing</H3>
-    <KV rows={[["Ruler", ov.ruler || "—"], ["Heir", ov.heir || "—"], ["Legitimacy", <Meter v={ov.legitimacy} />], ["Cohesion", <Meter v={ov.cohesion} />]]} />
+    <KV rows={[["Capital", ov.capital_name || "—"], ["Ruler", ov.ruler || "—"], ["Heir", ov.heir || "—"], ["Legitimacy", <Meter v={ov.legitimacy} />], ["Cohesion", <Meter v={ov.cohesion} />]]} />
     {ov.recent.length > 0 && <><H3>Recent</H3>{ov.recent.map((r, k) => <div key={k} style={{ fontSize: FZ.small, color: "#4d4030" }}>{r}</div>)}</>}
   </>);
+}
+
+/** The realm's royal council as the same ROOM a city council sits in — chamber, table or
+ *  hemicycle — with a portrait for every seat, office icons and, for anyone the sim keeps a
+ *  life for, their whole story one click away. */
+function realmBrief(ov: RealmOverview): GovernmentBrief {
+  const seats: SeatBrief[] = ov.council.map((c, i) => ({
+    role: i === 0 ? 0 : 1, office_title: c.office, name: c.name, individual_id: c.individual_id,
+    path: c.from, suitability: 0.7,
+    allegiance: c.kind <= 1 ? 1 : c.kind === 2 ? 0 : 2,
+    house: c.house, house_name: c.house_name, control: 0,
+    age: c.age, female: c.female, famous: c.individual_id >= 0, roles: [c.office],
+  }));
+  return {
+    hub: ov.capital_hub, city: ov.name, form: ov.title || "Crown", form_kind: ov.ruler.startsWith("the council") ? "council" : "ruler",
+    head_title: ov.title, legitimacy: ov.legitimacy, gov_points: 0, gov_position: 0,
+    seats, blocs: [], debate: null, edicts: [], history: [],
+  };
 }
 
 function GovernmentPane({ ov, family }: { ov: RealmOverview; family: PersonBrief[] | undefined }) {
   const L = ov.laws;
   return (<>
+    <H3>The royal council</H3>
+    <div style={{ background: "#1a150e", border: "1px solid #3e3422", borderRadius: 6, padding: 8, margin: "2px 0 6px" }}>
+      <CouncilChamber brief={realmBrief(ov)} compact realm />
+    </div>
+    <div style={{ fontSize: FZ.small, color: "#6b5b3d", marginBottom: 4 }}>
+      Click a seat for the person. Notables open their whole life; the ruler's kin and the great houses are read from the dynasty and house rolls.
+    </div>
     <H3>The crown</H3>
-    <KV rows={[["Ruler", ov.ruler || "a council"], ["Heir", ov.heir || "—"], ["Regent", ov.regent || "none"], ["Legitimacy", <Meter v={ov.legitimacy} />], ["Cohesion", <Meter v={ov.cohesion} />]]} />
-    <H3>Royal council</H3>
-    {ov.council.length === 0 && <div style={{ fontSize: FZ.small }}>No council seated yet.</div>}
-    {ov.council.map((m) => (
-      <div key={m.office} style={{ display: "grid", gridTemplateColumns: "100px minmax(0,1fr) 150px", gap: 8, padding: "4px 0", borderBottom: "1px solid #e3d8bf", fontSize: FZ.base }}>
-        <span style={{ fontFamily: SERIF, color: "#7d1f1f" }}>{m.office}</span>
-        <span><b>{m.name}</b><br /><span style={{ color: "#6b5b3d", fontSize: FZ.small }}>{m.from}</span></span>
-        <span style={{ color: "#6b5b3d", fontSize: FZ.small, textAlign: "right" }}>{m.stance}</span>
-      </div>))}
+    <KV rows={[["Capital", ov.capital_name || "—"], ["Ruler", ov.ruler || "a council"], ["Heir", ov.heir || "—"], ["Regent", ov.regent || "none"], ["Legitimacy", <Meter v={ov.legitimacy} />], ["Cohesion", <Meter v={ov.cohesion} />]]} />
     <H3>Laws of the realm</H3>
     <KV rows={[["Crown tax", `${LEVEL[L.tax]} — more treasury, less loyalty and growth`], ["Levies", `${LEVEL[L.levy]} — men each province must raise`],
       ["Succession", L.succession], ["Trade policy", L.trade], ["Town privileges", `${LEVEL[L.town_fee]} fee — cities keep their own councils and pay this`], ["Minority peoples", L.tolerance]]} />
@@ -471,28 +507,75 @@ function GoodsPane({ ov }: { ov: RealmOverview }) {
   </>);
 }
 
-function ProvincePane({ row, goods }: { row: RealmProvinceRow; goods: ProvinceGoodExploit[] }) {
+/** A province, as a dossier: who lives there, what it pays and why, its towns (open one for
+ *  its council), and what it lives on. */
+function ProvincePane({ row, goods, realmName, onTown }: {
+  row: RealmProvinceRow; goods: ProvinceGoodExploit[]; realmName: string; onTown: (hub: number) => void;
+}) {
   // The campaign's goods are the year-0 economy's goods, in the same order.
   const names = useWorldStore((s) => s.economy?.goods ?? []);
+  const people = row.rural + row.urban;
+  const whyNoTax = row.tax > 0 ? "" : row.unrest > 0.6 ? "The province is seething: the dues have stopped coming in."
+    : row.tax_rate <= 0 ? "No dues are being levied here."
+    : row.surplus <= 0 ? "The countryside grows no more than it eats, so there is nothing to tax."
+    : "Everything assessed this year was evaded or lost to unrest.";
+  const tile = (k: string, v: React.ReactNode, sub: React.ReactNode) => (
+    <div style={{ background: "#efe6d0", border: "1px solid #d8cba9", borderRadius: 4, padding: "6px 9px", minWidth: 0 }}>
+      <div style={{ fontSize: FZ.micro, letterSpacing: 1, textTransform: "uppercase", color: "#6b5b3d" }}>{k}</div>
+      <div style={{ fontFamily: SERIF, fontSize: 19, color: "#2a2114", lineHeight: 1.15 }}>{v}</div>
+      <div style={{ fontSize: FZ.tiny, color: "#6b5b3d", overflowWrap: "anywhere" }}>{sub}</div>
+    </div>
+  );
+  const orderCol = row.unrest > 0.6 ? "#a3262a" : row.unrest > 0.4 ? "#a8741a" : "#2f7a4f";
+  const classLabel = (t: { hub_class: number; colony: boolean }) => t.hub_class >= 2 ? "entrepôt" : t.hub_class === 1 ? "trade hub" : t.colony ? "colony" : "";
   return (<>
-    <div style={{ fontFamily: SERIF, fontSize: 20, color: "#7d1f1f" }}>{row.name}</div>
-    <div style={{ fontSize: FZ.small, color: "#6b5b3d" }}>{row.culture} people · click its town on the map to open its council</div>
-    <H3>Main exports</H3>
-    <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>{row.exports.slice(0, 3).map((e) => <span key={e.good} style={{ display: "flex", gap: 6, alignItems: "center" }}><GoodIcon name={e.good} color={goodColor(e.good)} size={24} /><span><b style={{ fontFamily: SERIF }}>{fmt(e.amount)}</b><br />{label(e.good)} / yr</span></span>)}</div>
-    <H3>People</H3>
-    <KV rows={[["Countryside", `${fmt(row.rural)} — eat their own grain, sell the surplus in town, buy salt, tools and cloth back`], ["Towns", fmt(row.urban)], ["Order", ORDER(row.unrest)], ["Tax", `${fmt(row.tax)} a year`]]} />
-    <H3>Goods of the land</H3>
+    <div style={{ display: "flex", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+      <span style={{ fontFamily: SERIF, fontSize: 22, color: "#7d1f1f" }}>{row.capital ? "★ " : ""}{row.name}</span>
+      <span style={{ fontSize: FZ.small, color: "#6b5b3d" }}>{row.culture} people{realmName ? ` · ${realmName}` : ""}{row.capital ? " · the realm's capital province" : ""}</span>
+    </div>
+
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 6, margin: "8px 0" }}>
+      {tile("People", fmt(people), `${fmt(row.rural)} in the countryside · ${fmt(row.urban)} in towns`)}
+      {tile("Tax paid a year", <span style={{ color: row.tax > 0 ? "#2f7a4f" : "#a3262a" }}>{fmt(row.tax)}</span>,
+        row.tax > 0 ? `${Math.round(row.tax_rate * 100)}% of a ${fmt(row.surplus)} surplus · to ${row.dues_to}` : whyNoTax)}
+      {tile("Public order", <span style={{ color: orderCol }}>{ORDER(row.unrest)}</span>, <Meter v={1 - row.unrest} />)}
+      {tile("Towns", String(row.towns.length), row.towns[0] ? `largest: ${row.towns[0].name}` : "none — the countryside only")}
+    </div>
+
+    <H3>Towns</H3>
+    {row.towns.length === 0 && <div style={{ fontSize: FZ.small }}>No town stands here yet.</div>}
+    {row.towns.map((t) => (
+      <div key={t.hub} onClick={() => onTown(t.hub)} title="Open this town's council"
+        style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) auto auto", gap: 8, alignItems: "baseline", padding: "4px 2px", borderBottom: "1px solid #e3d8bf", cursor: "pointer", fontSize: FZ.base }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {t.capital ? <span title="capital of the realm" style={{ color: "#a8741a" }}>★ </span> : null}<b>{t.name}</b>
+          {classLabel(t) && <span style={{ marginLeft: 6, fontSize: FZ.micro, color: "#7d5f2e", border: "1px solid #c9b993", borderRadius: 8, padding: "0 5px" }}>{classLabel(t)}</span>}
+        </span>
+        <span style={{ fontVariantNumeric: "tabular-nums" }}>{fmt(t.population)}</span>
+        <span style={{ color: "#7d1f1f", fontSize: FZ.small }}>council ›</span>
+      </div>))}
+
+    <H3>What the province lives on</H3>
     {goods.length === 0 && <div style={{ fontSize: FZ.small }}>Nothing worked here yet.</div>}
-    {goods.map((g) => {
+    {goods.filter((g) => g.value_share >= 0.01 || g.actual > 0).map((g) => {
       const name = names[g.good] ?? String(g.good);
-      const state = g.actual > 0 ? "worked" : "known, untapped";
+      const share = Math.min(1, g.value_share);
       return (
-        <div key={g.good} style={{ display: "grid", gridTemplateColumns: "24px 120px minmax(0,1fr)", gap: 6, alignItems: "center", fontSize: FZ.base, opacity: g.actual > 0 ? 1 : 0.55 }}>
+        <div key={g.good} style={{ display: "grid", gridTemplateColumns: "24px 118px minmax(0,1fr) 44px", gap: 6, alignItems: "center", fontSize: FZ.base, padding: "1px 0" }}>
           <GoodIcon name={name} color={goodColor(name)} size={20} /><span>{label(name)}</span>
-          <span style={{ color: "#6b5b3d" }}>{state}{g.actual > 0 ? ` · ${Math.round(g.exploitation * 100)}% of what the land can give` : ""}</span>
+          <span style={{ height: 8, background: "#e3d8bf", borderRadius: 4, overflow: "hidden" }}>
+            <i style={{ display: "block", height: "100%", width: `${Math.round(share * 100)}%`, background: share >= 0.3 ? "#7d5f2e" : "#b9a77e" }} />
+          </span>
+          <span style={{ textAlign: "right", fontVariantNumeric: "tabular-nums" }}
+            title={g.exploitation > 1.05 ? "Output beyond what the countryside's own land predicts — the surplus is made up by the towns' workshops and growth since the campaign began." : "Share of the province's output by value"}>
+            {Math.round(share * 100)}%
+          </span>
         </div>);
     })}
-    <div style={{ fontSize: FZ.small, color: "#6b5b3d", marginTop: 6 }}>Only goods of the land (grown, raised, gathered, caught, mined). Goods made in workshops never appear here.</div>
+    <div style={{ fontSize: FZ.small, color: "#6b5b3d", marginTop: 6 }}>
+      Bars are each good's share of the province's output by value; a bold bar (30% or more) earns the icon on the map. Goods made in workshops count here too, once a town makes them.
+    </div>
+    {row.arrears > 1 && <div style={{ fontSize: FZ.small, color: "#a8741a", marginTop: 4 }}>Owes {fmt(row.arrears)} in arrears.</div>}
   </>);
 }
 
