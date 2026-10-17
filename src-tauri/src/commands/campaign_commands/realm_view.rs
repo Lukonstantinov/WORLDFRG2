@@ -310,7 +310,7 @@ pub fn campaign_standings(db: State<'_, WorldDb>) -> Result<Option<Standings>, S
 }
 
 #[derive(Serialize, Clone)]
-pub struct ProvinceGoodShare { pub province: u32, pub goods: Vec<RealmGood> }
+pub struct ProvinceGoodShare { pub province: u32, pub goods: Vec<RealmGood>, pub unrest: f32, pub culture: String }
 
 /// Each province's production split by VALUE across the goods it makes (shares sum
 /// to 1; goods under 8% are dropped, at most four kept, largest first). The
@@ -328,12 +328,14 @@ pub fn campaign_province_good_shares(db: State<'_, WorldDb>) -> Result<Vec<Provi
     for p in 0..np {
         let vals: Vec<f32> = (0..ng).map(|g| actual[p * ng + g].max(0.0) * sim.goods[g].base_value.max(0.0)).collect();
         let total: f32 = vals.iter().sum();
-        if total <= 0.0 { continue; }
+        let unrest = sim.prov_unrest.get(p).copied().unwrap_or(0.0);
+        let culture = sim.prov_culture.get(p).cloned().unwrap_or_default();
+        if total <= 0.0 { out.push(ProvinceGoodShare { province: p as u32, goods: vec![], unrest, culture }); continue; }
         let mut goods: Vec<RealmGood> = (0..ng).filter(|&g| vals[g] / total >= 0.08)
             .map(|g| RealmGood { good: sim.goods[g].name.clone(), amount: vals[g] / total }).collect();
         goods.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
         goods.truncate(4);
-        out.push(ProvinceGoodShare { province: p as u32, goods });
+        out.push(ProvinceGoodShare { province: p as u32, goods, unrest, culture });
     }
     Ok(out)
 }

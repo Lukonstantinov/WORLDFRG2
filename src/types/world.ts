@@ -141,7 +141,7 @@ export type ActiveLayer =
   | "sst" | "snow"
   | "soil" | "fertility" | "plates"
   | "biomes" | "fisheries" | "terrain" | "natural" | "shelf" | "ridges" | "windspeed"
-  | "habitability" | "salinity" | "disease";
+  | "habitability" | "salinity" | "disease" | "political";
 
 export interface VectorSample {
   x: number;

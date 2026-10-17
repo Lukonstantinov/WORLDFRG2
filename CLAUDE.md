@@ -3230,6 +3230,32 @@ ui/world/  — map & world
   ErrorBoundary.tsx             ← React error boundary
   useFloatingWindow.ts          ← Floating/dockable window hook
 
+LAYERS & PANELS REWORK (2026-10-18, owner request) — what changed in ui/world + ui/campaign:
+  · INFINITE SCROLL: the map wraps at EXACTLY `grid_width`. `MapCanvas.visibleCopies` lists the
+    world-width copies on screen; each copy draws the CANONICAL tile columns (0..baseTilesX-1)
+    translated by `k·grid_width` and clipped to one world width, so the 128-cell tile padding no
+    longer shows as a seam. `TileManager.loadVisibleTiles` takes column RANGES (never an
+    out-of-world tile index). Clicks go through `TileViewport.screenToWorldWrapped`.
+  · POLITICAL LAYER (`activeLayer === "political"`, default on entering a campaign): drawn by
+    `canvas/RealmLayer.ts` in the realm window's minimap style — dark sea, opaque realm /
+    culture / public-order fill, thin province borders, heavy realm frontiers, names and goods
+    icons. A good's icon shows only where it is ≥30% of the province's VALUE of production
+    (`campaign_province_good_shares`, `GOOD_SHARE_MIN`); pressing a good (PoliticalLegend or the
+    realm window's MAIN GOODS chips — one shared `state/politicalStore.ts`) lights every such
+    province. A click selects a province (others dim) and opens the REALM WINDOW on it
+    (`uiStore.realmFocus`). Before a campaign the realms are the authored starting realms.
+  · LAYERS removed from the picker: hillshade, ridges, natural colour, disease, shelf (the shelf
+    wash + edge line is now part of `render_elevation`). Plates keep a layer: generated names
+    (`plateNames.ts`) on the map and `PlateInspector` (measured area, land share, edge mix, drift).
+    Volcano tool removed. The map-plate (theme) picker is hidden; Classic/Atlas/Parchment/Game
+    Board remain, and the rank-dot styles now share the city ladder + hub marks.
+  · OVERLAYS: campaign hides hubNames/peoples/tradeRoutes/tradeFlows (`FORGE_ONLY`); settlements
+    carry names + colonies sub-toggles; wind carries the circulation belts; reefs + hurricanes are
+    one switch; "Other" holds the non-biological overlays; fishery banks ride the Fisheries layer.
+  · PANELS deleted: Economy Dashboard, Trade Matrix, Warehouses, Government, Dynasties, Landmarks,
+    Provinces browser, City Ranking (now Atlas stats), Good-flow "price along the journey".
+    Atlas = Overview · Cities · Realms & Provinces (`campaign_standings`) · Records · Timeline.
+
 ui/goods/  — goods
   GoodIcon.tsx                   ← React wrapper over `canvas/goodArt.ts`'s pixel sprite,
                                   backed at device resolution. Every panel that shows a

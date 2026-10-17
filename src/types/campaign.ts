@@ -3757,4 +3757,4 @@ export interface StandingRow {
 /** Mirrors `Standings`. */
 export interface Standings { realms: StandingRow[]; provinces: StandingRow[]; }
 /** A province's production split by value; `goods[].amount` is the 0..1 share. Mirrors `ProvinceGoodShare`. */
-export interface ProvinceGoodShare { province: number; goods: RealmGood[]; }
+export interface ProvinceGoodShare { province: number; goods: RealmGood[]; unrest: number; culture: string; }

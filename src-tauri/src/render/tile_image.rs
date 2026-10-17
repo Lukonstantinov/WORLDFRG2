@@ -118,7 +118,14 @@ fn render_elevation(tile: &TileData, rgba: &mut [u8]) {
             // Sea: the SHARED bathymetry ramp. This layer used to invert it —
             // dark shelf brightening to abyss — which is what made its own legend
             // wrong. See BATHYMETRY_STOPS.
-            let (r, g, b) = bathymetry_color(tile.sea_depth[i]);
+            let (mut r, mut g, mut b) = bathymetry_color(tile.sea_depth[i]);
+            // The continental shelf is part of this layer now: a pale-blue wash over the
+            // shelf and a warm line at its edge (the old separate Shelf layer's content).
+            if tile.is_shelf_edge[i] != 0 {
+                (r, g, b) = lerp_rgb((r, g, b), (200, 140, 60), 0.6);
+            } else if tile.is_shelf[i] != 0 {
+                (r, g, b) = lerp_rgb((r, g, b), (110, 190, 225), 0.22);
+            }
             rgba[offset] = r;
             rgba[offset + 1] = g;
             rgba[offset + 2] = b;

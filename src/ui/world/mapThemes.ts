@@ -259,6 +259,7 @@ export const LAYER_REQUIRES: Record<ActiveLayer, number> = {
   fertility: 6,
   habitability: 7,
   disease: 8,
+  political: 7,
 };
 
 export function layerReady(layer: ActiveLayer, stepCompleted: Record<number, boolean>): boolean {

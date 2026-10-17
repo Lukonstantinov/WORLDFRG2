@@ -97,6 +97,12 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
       { id: "habitability", label: "Habitability" },
     ],
   },
+  {
+    group: "Political",
+    layers: [
+      { id: "political", label: "Realms & Provinces" },
+    ],
+  },
 ];
 
 // Climate-circulation overlays (the winds, the ITCZ rain line, the belt latitudes

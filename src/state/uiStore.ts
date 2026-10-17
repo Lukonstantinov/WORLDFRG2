@@ -108,6 +108,9 @@ interface UIStore {
   inspectedCell: { wx: number; wy: number } | null;
   /** The plate picked on the Plates layer (its `plate_index`), or null. */
   selectedPlate: number | null;
+  /** A province the realm window should open on (set by a click on the political map). */
+  realmFocus: { prov: number; nonce: number } | null;
+  setRealmFocus: (prov: number | null) => void;
   workflowStep: WorkflowStep;
   /** GENERATION_UX_REDESIGN_PLAN.md Slice 9 (F9) — the wizard's two-mode head.
    *  "quick" = preset → Generate → done, the 90% path; "detailed" = the full
@@ -562,6 +565,7 @@ export const useUIStore = create<UIStore>((set) => ({
   statusText: "",
   inspectedCell: null,
   selectedPlate: null,
+  realmFocus: null,
   workflowStep: 1,
   wizardMode: "quick",
   stepCompleted: {},
@@ -709,7 +713,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setAppMode: (mode) =>
     set((state) =>
       mode === "chronicle"
-        ? { ...returnLoans(state), appMode: mode, activeTool: "pan", workflowStep: 11 as WorkflowStep }
+        ? { ...returnLoans(state), appMode: mode, activeTool: "pan", workflowStep: 11 as WorkflowStep, activeLayer: "political" as const, activeMapTheme: null }
         // Step 11 (the campaign tick) is Chronicle-only and no longer in the Forge
         // wizard; clamp back to Economy (10) so a Forge step is always expanded.
         : { ...returnLoans(state), appMode: mode, workflowStep: (state.workflowStep === 11 ? 10 : state.workflowStep) as WorkflowStep }
@@ -723,6 +727,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setStatus: (text) => set({ statusText: text }),
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
   setSelectedPlate: (id) => set({ selectedPlate: id }),
+  setRealmFocus: (prov) => set({ realmFocus: prov === null ? null : { prov, nonce: Date.now() } }),
   setSelectedHub: (id) => {
     set({ selectedHub: id, selectedChain: null, selectedExport: null });
     // A dependent colony (colony_kind 1) or house outpost (2) has no normal city

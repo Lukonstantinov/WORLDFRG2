@@ -14,6 +14,8 @@ import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
 import { FORGE_ONLY } from "./mapThemes";
 import { plateName } from "./plateNames";
+import { RealmLayer } from "@canvas/RealmLayer";
+import { usePoliticalStore, loadPolitical } from "@state/politicalStore";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites, campaignExploitedGoods } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
@@ -119,6 +121,8 @@ export function MapCanvas() {
   const viewportRef = useRef<TileViewport | null>(null);
   const tileManagerRef = useRef<TileManager | null>(null);
   const overlayManagerRef = useRef<OverlayManager | null>(null);
+  const realmLayerRef = useRef(new RealmLayer());
+  const politicalDownRef = useRef<{ x: number; y: number; wx: number; wy: number } | null>(null);
   const isPaintingRef = useRef(false);
   const hoveredHubRef = useRef<number>(-1);
   const isErasingRef = useRef(false);
@@ -227,6 +231,7 @@ export function MapCanvas() {
   compareRef.current = { layer: compareLayer, pos: comparePos };
   const activeLayerRef = useRef(activeLayer);
   activeLayerRef.current = (() => {
+    if (activeLayer === "political") return "land" as typeof activeLayer;
     if (mapTerrain && (activeLayer === "land" || activeLayer === "terrain")) {
       return `terrain#style=${mapTerrain}` as typeof activeLayer;
     }
@@ -336,9 +341,12 @@ export function MapCanvas() {
     const visible = viewport.getVisibleTileRange(w, h);
     const baseAlpha = layerOpacityRef.current;
     const cmp = compareRef.current;
+    // The political layer paints the whole world itself (sea included), so the tiles
+    // under it are not drawn while it has provinces to show.
+    const politicalOn = useUIStore.getState().activeLayer === "political" && realmLayerRef.current.ready;
     if (!m) {
       tileManager.draw(ctx, visible);
-    } else {
+    } else if (!politicalOn) {
       for (const c of copies) {
         const range = { txMin: c.txMin, txMax: c.txMax, tyMin: visible.tyMin, tyMax: visible.tyMax };
         ctx.save();
@@ -386,6 +394,12 @@ export function MapCanvas() {
         ctx.rect(k * gw - margin, 0, gw + 2 * margin, gh);
         ctx.clip();
         if (k !== 0) ctx.translate(k * gw, 0);
+        if (politicalOn) {
+          realmLayerRef.current.render(ctx, viewport.scale, {
+            x0: (0 - viewport.x) / viewport.scaleX - k * gw, x1: (w - viewport.x) / viewport.scaleX - k * gw,
+            y0: (0 - viewport.y) / viewport.scaleY, y1: (h - viewport.y) / viewport.scaleY,
+          });
+        }
         overlayManager.render(ctx);
         ctx.restore();
       }
@@ -1442,7 +1456,8 @@ export function MapCanvas() {
     const om = overlayManagerRef.current;
     if (!om) return;
     for (const [type, visible] of Object.entries(overlayVisibility)) {
-      om.setVisible(type, visible && !(appMode === "chronicle" && FORGE_ONLY.has(type)));
+      om.setVisible(type, visible && !(appMode === "chronicle" && FORGE_ONLY.has(type))
+        && !(activeLayer === "political" && (type === "provinces" || type === "states")));
     }
     // The Fisheries layer carries its grand-bank circles; circulation belts ride on Wind.
     om.setVisible("fisheryBanks", activeLayer === "fisheries");
@@ -1450,6 +1465,32 @@ export function MapCanvas() {
     om.setVisible("windBelts", !!overlayVisibility.wind);
     requestRender();
   }, [overlayVisibility, activeLayer, appMode, requestRender]);
+
+  // POLITICAL LAYER: load realms/culture/order/goods shares whenever the layer is on and
+  // the campaign year turns (or the provinces change), and hand them to the renderer.
+  const campaignActive = !!campaignSnapshot?.active;
+  const polYear = Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365);
+  useEffect(() => {
+    if (activeLayer !== "political" || !provinceRaster) return;
+    loadPolitical(campaignActive).catch(() => {});
+  }, [activeLayer, provinceRaster, provinces, campaignActive, polYear]);
+  const politicalVersion = usePoliticalStore((s) => s.version);
+  const political = usePoliticalStore();
+  useEffect(() => {
+    const names = new Map(provinces.map((p) => [p.id, p.name]));
+    realmLayerRef.current.setData({
+      raster: provinceRaster, owner: political.owner, names, cultures: political.culture,
+      unrest: political.unrest, shares: political.shares,
+    });
+    requestRender();
+  }, [provinceRaster, provinces, politicalVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    realmLayerRef.current.setView({
+      fill: political.fill, borders: political.borders, goods: political.goods, names: political.names,
+      selected: selectedProvince, goodFilter: political.goodFilter,
+    });
+    requestRender();
+  }, [political.fill, political.borders, political.goods, political.names, political.goodFilter, selectedProvince, requestRender]);
 
   // The picked plate rings its name on the Plates layer.
   useEffect(() => {
@@ -2020,6 +2061,7 @@ export function MapCanvas() {
     const viewport = viewportRef.current;
     const m = metaRef.current;
     if (!viewport || !m) return;
+    politicalDownRef.current = null;
 
     if (e.button === 2 || e.altKey) {
       const rect = containerRef.current?.getBoundingClientRect();
@@ -2108,7 +2150,11 @@ export function MapCanvas() {
       // Gated on the province layer being visible so it never hijacks ordinary map
       // use. The full-resolution raster already lives on the client, so this is one
       // array read, no IPC.
-      if (rect && overlayVisibilityRef.current.provinces) {
+      const politicalPick = useUIStore.getState().activeLayer === "political" && realmLayerRef.current.ready;
+      if (rect && politicalPick) {
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
+        politicalDownRef.current = { x: e.clientX, y: e.clientY, wx, wy };
+      } else if (rect && overlayVisibilityRef.current.provinces) {
         const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         const pid = overlayManagerRef.current?.provinceAt(wx, wy) ?? null;
         if (pid !== null) {
@@ -2356,10 +2402,21 @@ export function MapCanvas() {
     }
   }, [applyBrush, refreshTiles, setStatus, getBrushScreenRadius, getPaintMode, requestRender]);
 
-  const onPointerUp = useCallback(async () => {
+  const onPointerUp = useCallback(async (e?: React.PointerEvent) => {
     const viewport = viewportRef.current;
     if (viewport) viewport.endPan();
     clearPaintOverlay();
+
+    // A click (not a drag) on the political map picks the province under it and opens
+    // the realm window on it — its realm, its goods, its people.
+    const down = politicalDownRef.current;
+    politicalDownRef.current = null;
+    if (down && e && Math.hypot(e.clientX - down.x, e.clientY - down.y) < 5) {
+      const pid = realmLayerRef.current.provinceAt(down.wx, down.wy);
+      const ui = useUIStore.getState();
+      ui.setSelectedProvince(pid);
+      if (pid !== null) { ui.setShowProvinceInspector(false); ui.setShowStates(true); ui.setRealmFocus(pid); }
+    }
 
     // Ridge tool: commit the drawn polyline to the store (transient — one-shot).
     if (isPaintingRef.current && activeToolRef.current === "ridge") {

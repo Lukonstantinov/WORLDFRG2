@@ -23,6 +23,7 @@ import { GoodsCodexPanel } from "@ui/goods/GoodsCodexPanel";
 import { HydrologyPanel } from "@ui/world/HydrologyPanel";
 import { ProvinceInspector } from "@ui/world/ProvinceInspector";
 import { PlateInspector } from "@ui/world/PlateInspector";
+import { PoliticalLegend } from "@ui/world/PoliticalLegend";
 import { AtlasPanel } from "@ui/campaign/AtlasPanel";
 import { PeoplesPanel } from "@ui/campaign/PeoplesPanel";
 import { ColonialPanel } from "@ui/campaign/ColonialPanel";
@@ -1109,6 +1110,7 @@ export default function App() {
           <FuturesLanePanel />
           <FuturesPanel />
           <LayerLegend />
+          <PoliticalLegend />
           <RouteLegend />
           <GoodQualityLegend />
           </ErrorBoundary>

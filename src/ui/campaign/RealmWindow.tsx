@@ -14,6 +14,8 @@ import { GoodIcon } from "@ui/goods/GoodIcon";
 import { CouncilChamber } from "@ui/campaign/CouncilChamber";
 import { drawPixelIcon } from "@canvas/goodArt";
 import { GOOD_DEFS } from "@goods";
+import { usePoliticalStore, loadPolitical, type Share } from "@state/politicalStore";
+import { GOOD_SHARE_MIN } from "@canvas/RealmLayer";
 
 /** THE ONE REALM WINDOW (PROVINCES_REALMS_LOGISTICS_REDESIGN.md §5/§8, mock-up v2):
  *  realm › province › city in one window, a realm map with toggles on the left and
@@ -58,7 +60,8 @@ function centroids(r: ProvinceRaster): Map<number, [number, number]> {
 
 /** The realm map: provinces filled by realm / culture / order, province and realm
  *  borders, each province's main exports as icons, towns, and country → market arrows. */
-function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHover, onPick }: {
+function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHover, onPick, shares, goodFilter }: {
+  shares: Map<number, Share[]>; goodFilter: string | null;
   raster: ProvinceRaster; owner: Map<number, Owner>; focus: Set<number>; fill: Fill;
   marks: { borders: boolean; goods: boolean; cities: boolean; trade: boolean };
   rows: Map<number, RealmProvinceRow>; towns: { x: number; y: number; id: number; capital: boolean }[];
@@ -93,7 +96,9 @@ function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHov
     for (let i = 0; i < W * H; i++) {
       const p = ids[i]; const o = i * 4;
       if (p < 0) { img.data.set([30, 44, 52, 255], o); continue; }
-      const own = owner.get(p); const mine = focus.has(p);
+      const own = owner.get(p);
+      // A picked good lights every province where it is a main product, wherever it is.
+      const mine = goodFilter ? (shares.get(p) ?? []).some((s) => s.good === goodFilter && s.share >= GOOD_SHARE_MIN) : focus.has(p);
       let c: [number, number, number] = own?.color ?? [120, 112, 96];
       if (fill === "culture") c = hashColor(rows.get(p)?.culture ?? String(own?.realm ?? p));
       if (fill === "order") { const u = rows.get(p)?.unrest ?? 0.2; c = u > 0.6 ? [163, 38, 42] : u > 0.4 ? [192, 106, 42] : u > 0.2 ? [201, 162, 58] : [79, 138, 90]; }
@@ -130,7 +135,10 @@ function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHov
       const c = cents.get(p); const r = rows.get(p); if (!c) continue;
       const [px, py] = toPx(c[0], c[1]); if (px < -20 || py < -20 || px > W + 20 || py > H + 20) continue;
       if (marks.goods && r) {
-        const ex = r.exports.slice(0, 3);
+        // An icon shows only where the good is at least 30% of the province's production
+        // (one icon = a specialist, three = balanced); before a campaign, its best land.
+        const main = (shares.get(p) ?? []).filter((s) => s.share >= GOOD_SHARE_MIN).slice(0, 3);
+        const ex = main.length ? main.map((s) => ({ good: s.good })) : shares.has(p) ? [] : r.exports.slice(0, 3);
         ex.forEach((e, k) => {
           const gx = px + (k - (ex.length - 1) / 2) * 26, gy = py + 14;
           ctx.fillStyle = "rgba(245,239,226,.85)"; ctx.beginPath(); ctx.arc(gx, gy, 12, 0, 7); ctx.fill();
@@ -147,7 +155,7 @@ function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHov
       ctx.fillStyle = t.capital ? T.gold : T.ink; ctx.beginPath(); ctx.arc(x, y, t.capital ? 4 : 2.5, 0, 7); ctx.fill();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [raster, owner, focus, fill, marks, rows, towns, hover, view]);
+  }, [raster, owner, focus, fill, marks, rows, towns, hover, view, shares, goodFilter]);
   const local = (e: React.MouseEvent<HTMLCanvasElement>): [number, number] => {
     const b = e.currentTarget.getBoundingClientRect();
     return [((e.clientX - b.left) / b.width) * W, ((e.clientY - b.top) / b.height) * H];
@@ -162,6 +170,33 @@ function RealmMap({ raster, owner, focus, fill, marks, rows, towns, hover, onHov
         const t = towns.find((tt) => { const tx = (tt.x - view.x0) * view.s, ty = (tt.y - view.y0) * view.s; return (tx - x) ** 2 + (ty - y) ** 2 < 100; });
         onPick(p, t ? t.id : null);
       }} />
+  );
+}
+
+/** The goods this ground lives on (a good counts where it is ≥30% of a province's
+ *  production). Press one to light every such province, here and on the world map. */
+function GoodChips({ focus, shares, goodFilter }: { focus: Set<number>; shares: Map<number, Share[]>; goodFilter: string | null }) {
+  const census = useMemo(() => {
+    const n = new Map<string, number>();
+    for (const p of focus) for (const s of shares.get(p) ?? []) if (s.share >= GOOD_SHARE_MIN) n.set(s.good, (n.get(s.good) ?? 0) + 1);
+    return [...n].sort((a, b) => b[1] - a[1]);
+  }, [focus, shares]);
+  if (census.length === 0) return null;
+  const set = usePoliticalStore.getState().patch;
+  return (
+    <div style={{ display: "flex", gap: 4, flexWrap: "wrap", alignItems: "center", marginTop: 6, fontSize: FZ.small, color: T.inkDim }} data-no-drag>
+      <span>MAIN GOODS</span>
+      {census.map(([g, n]) => {
+        const on = goodFilter === g;
+        return (
+          <span key={g} onClick={() => set({ goodFilter: on ? null : g })} title={`${label(g)} — click to show every province where it is at least 30% of production`}
+            style={{ display: "inline-flex", alignItems: "center", gap: 3, padding: "1px 6px 1px 3px", borderRadius: 10, cursor: "pointer",
+              border: `1px solid ${on ? T.gold : T.lineSoft}`, background: on ? "#3a2f1a" : "transparent", color: on ? T.gold : T.inkMid }}>
+            <GoodIcon name={g} color={goodColor(g)} size={16} />{n}
+          </span>
+        );
+      })}
+    </div>
   );
 }
 
@@ -198,6 +233,10 @@ export function RealmWindow() {
   const [status, setStatus] = useState("");
   const [family, setFamily] = useState<PersonBrief[] | undefined>(undefined);
   const [watch, setWatch] = useState<RealmWatch | null>(null);
+  const realmFocus = useUIStore((s) => s.realmFocus);
+  const shares = usePoliticalStore((s) => s.shares);
+  const goodFilter = usePoliticalStore((s) => s.goodFilter);
+  useEffect(() => { if (open) loadPolitical(active).catch(() => {}); }, [open, active, year]);
 
   useEffect(() => {
     if (!open) return;
@@ -233,6 +272,16 @@ export function RealmWindow() {
   }, [ov, provinces]);
   const towns = useMemo(() => (snapshot?.hubs ?? []).filter((h) => !h.is_estate && rows.get(raster ? (centroidOf(raster, h.x, h.y) ?? -1) : -1) && focus.has(centroidOf(raster!, h.x, h.y) ?? -1))
     .map((h) => ({ x: h.x, y: h.y, id: h.id, capital: h.id === ov?.capital_hub })), [snapshot, rows, focus, raster, ov]);
+
+  // A click on the political map opens this window on that province: its realm, then it.
+  useEffect(() => {
+    if (!realmFocus || !open) return;
+    const o = owner.get(realmFocus.prov);
+    // Owners load with the window; keep the request until the province's realm is known.
+    if (!o) return;
+    setRealm(o.realm); setProv(realmFocus.prov); setCity(null); setTab("province");
+    useUIStore.getState().setRealmFocus(null);
+  }, [realmFocus, open, owner]);
 
   if (!open) return null;
   const pickProvince = (p: number, town: number | null) => {
@@ -292,7 +341,7 @@ export function RealmWindow() {
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1.05fr) minmax(0,1fr)", minHeight: 0, overflow: "hidden" }}>
         <div style={{ padding: SPACE.lg, borderRight: `1px solid ${T.line}` }}>
           {raster ? <RealmMap raster={raster} owner={owner} focus={focus} fill={fill} marks={marks} rows={rows} towns={towns}
-            hover={hover} onHover={setHover} onPick={pickProvince} /> : <div style={{ color: T.inkDim }}>Generate provinces to see the map.</div>}
+            hover={hover} onHover={setHover} onPick={pickProvince} shares={shares} goodFilter={goodFilter} /> : <div style={{ color: T.inkDim }}>Generate provinces to see the map.</div>}
           <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6, alignItems: "center", fontSize: FZ.small, color: T.inkDim }} data-no-drag>
             <span>FILL</span>
             {(["realm", "culture", "order"] as const).map((f) => <Chip key={f} on={fill === f} onClick={() => setFill(f)}>{f === "realm" ? "Realms" : f === "culture" ? "Cultures" : "Public order"}</Chip>)}
@@ -300,6 +349,7 @@ export function RealmWindow() {
             {(["borders", "goods", "cities", "trade"] as const).map((k) => <Chip key={k} on={marks[k]} onClick={() => setMarks((m) => ({ ...m, [k]: !m[k] }))}>
               {k === "borders" ? "Borders" : k === "goods" ? "Goods exports" : k === "cities" ? "Cities" : "Country → market"}</Chip>)}
           </div>
+          <GoodChips focus={focus} shares={shares} goodFilter={goodFilter} />
           {hover !== null && <div style={{ marginTop: 4, fontSize: FZ.small, color: T.inkMid }}>{rows.get(hover)?.name}</div>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
