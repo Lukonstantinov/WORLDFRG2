@@ -2935,7 +2935,9 @@ sim/                            ← organised into per-phase step folders; mod.r
                                     §8.20; `Distribution::Endemic`, §8.20)
                                   · goods_validation.rs (test-only — Slice 0's coverage
                                     diagnostic, §8.19)
-  shared/                       ← cultures.rs (organic peoples map + 14 traits + per-kit
+  shared/                       ← culture_values.rs (goods G7: each people's Prestige/Sacred/
+                                    Staple/Taboo/Currency goods; derived or hand-set)
+                                  · cultures.rs (organic peoples map + 14 traits + per-kit
                                     male AND female given names) · inheritance.rs (the LAW
                                     OF INHERITANCE — line rule + division rule per culture,
                                     §8.15) · toponyms.rs
