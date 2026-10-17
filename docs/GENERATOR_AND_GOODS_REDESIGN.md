@@ -807,3 +807,16 @@ This DOES change generated worlds (a few extra small towns); saves are unaffecte
 (colours that had drifted from the renderer; the engine makes 31 zones) is gone. The panel
 now points to the map's own key (`LayerLegend`, renderer-sourced, every zone). Queued: a
 "zones on THIS map with % of land" list, which needs a Köppen histogram query.
+
+**Slice G1: goods DNA (2026-10-17, done).** New `sim/step8_biological_goods/goods_dna.rs`:
+every good carries the six properties (§4.1) as `GoodSpec.dna` — Role (staple · essential ·
+strategic · comfort · luxury · treasure), Origin (grown · raised · gathered · caught · mined ·
+crafted), Value tier (Bulk ×1 … Treasure ×2,000+), Difficulty 1-5, Keeping (perishable ·
+seasonal · storable · eternal); Geography is the existing `distribution`. All ~100 shipped
+goods are classified BY HAND (gold, silver, diamonds, pearls, jewellery = Treasure, eternal;
+iron = Strategic; grain = Staple); a custom good gets a heuristic from its other fields
+(`dna_of`). `backfill_market_fields` fills `dna` on load, so old worlds and imported
+libraries get it too. The goods editor shows and edits the six properties. **No behaviour
+reads them yet** (the next slices do), so no generated world or campaign changed.
+Gates: `goods_` 21/21 (3 new: every shipped good hand-classified, treasure is never a tool
+metal, crafted goods are crafted), tsc clean, `check_types` 0 drift (278).

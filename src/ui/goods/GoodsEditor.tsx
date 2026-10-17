@@ -2,12 +2,18 @@ import { useEffect, useRef, useState } from "react";
 import { useGoodsStore } from "@state/goodsStore";
 import { useUIStore } from "@state/uiStore";
 import { previewGoodScore, importGoodsTxt } from "@bridge";
-import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput } from "@types";
+import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput, GoodDna, GoodRole, GoodOrigin, GoodKeeping } from "@types";
 import { GoodIcon } from "./GoodIcon";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
 const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
 const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "deposits", "manufactured"];
+const ROLES: GoodRole[] = ["staple", "essential", "strategic", "comfort", "luxury", "treasure"];
+const ORIGINS: GoodOrigin[] = ["grown", "raised", "gathered", "caught", "mined", "crafted"];
+const KEEPINGS: GoodKeeping[] = ["perishable", "seasonal", "storable", "eternal"];
+const TIERS = ["Bulk ×1", "Common ×3-10", "Valuable ×30-100", "Precious ×300-1,000", "Treasure ×2,000+"];
+/** Shown while a spec has no `dna` yet (the backend fills it on load). */
+const DNA_FALLBACK: GoodDna = { role: "comfort", origin: "grown", tier: 1, difficulty: 2, keeping: "storable" };
 
 // Climate presets → Köppen zone codes (see sim/koppen.rs).
 const CLIMATE_PRESETS: { label: string; codes: number[] }[] = [
@@ -196,6 +202,7 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
             Cadence <input type="number" min={1} step={1} style={{ ...input, width: 50 }} value={g.consumption_interval ?? 30}
               onChange={(e) => update(i, { consumption_interval: Math.max(1, Number(e.target.value) || 30) })} /> d
           </label>
+          <DnaEditor dna={g.dna ?? DNA_FALLBACK} onChange={(dna) => update(i, { dna })} />
           <button style={btn} onClick={() => duplicate(i)}>Duplicate as custom</button>
           {manufactured
             ? <RecipeEditor i={i} g={g} allSpecs={allSpecs} update={update} />
@@ -206,6 +213,38 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
         </div>
       )}
     </>
+  );
+}
+
+/** The six goods properties (plan §4.1). Geography is the Distribution column. */
+function DnaEditor({ dna, onChange }: { dna: GoodDna; onChange: (d: GoodDna) => void }) {
+  const set = (patch: Partial<GoodDna>) => onChange({ ...dna, ...patch });
+  const pick = <T extends string>(label: string, title: string, value: T, opts: readonly T[], f: (v: T) => void) => (
+    <label style={{ display: "flex", gap: 4, alignItems: "center" }} title={title}>
+      {label} <select style={input} value={value} onChange={(e) => f(e.target.value as T)}>
+        {opts.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
+  );
+  return (
+    <div style={{ flexBasis: "100%", display: "flex", flexWrap: "wrap", gap: 12, padding: "6px 0", borderTop: "1px dashed #3f392f" }}>
+      {pick("Role", "Why people want it: staples are eaten daily, treasure is hoarded and minted", dna.role, ROLES, (role) => set({ role }))}
+      {pick("Origin", "How it is obtained; each origin has its own way to fail", dna.origin, ORIGINS, (origin) => set({ origin }))}
+      <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="Value per weight, as a multiple of grain">
+        Value tier <select style={input} value={dna.tier} onChange={(e) => set({ tier: Number(e.target.value) })}>
+          {TIERS.map((t, k) => <option key={k} value={k}>{t}</option>)}
+        </select>
+      </label>
+      <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="1 = anyone can; 5 = specialists, capital and years">
+        Difficulty <span style={{ display: "inline-flex", gap: 1 }}>
+          {[1, 2, 3, 4, 5].map((k) => (
+            <button key={k} onClick={() => set({ difficulty: k })} title={`${k} of 5`}
+              style={{ background: "none", border: "none", padding: 0, cursor: "pointer", fontSize: 13, color: k <= dna.difficulty ? "#e0b050" : "#4a4336" }}>★</button>
+          ))}
+        </span>
+      </label>
+      {pick("Keeping", "How long it keeps; only eternal goods can serve as money", dna.keeping, KEEPINGS, (keeping) => set({ keeping }))}
+    </div>
   );
 }
 

@@ -2923,6 +2923,9 @@ sim/                            ← organised into per-phase step folders; mod.r
                                     counterpart of deposits.rs — belt→locality
                                     hierarchy + full modulation for every
                                     Global/Local good, see §8.19)
+                                  · goods_dna.rs (THE SIX GOODS PROPERTIES — role, origin,
+                                    value tier, difficulty, keeping; hand table + heuristic;
+                                    `GoodSpec.dna`, filled by backfill_market_fields)
                                   · goods_spec.rs (GoodSpec, 45 belts + ~21 manufactured;
                                     `marine_band` — Inshore/Bank/Either, §8.19;
                                     `origins` — independent homelands per good;

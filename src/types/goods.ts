@@ -70,6 +70,21 @@ export interface GoodSpec {
   /** Demand cadence in days — how often a person consumes a unit (food ~7,
    *  comfort ~45, durables/luxuries ~180). Long = weak local pull → wholesale. */
   consumption_interval?: number;
+  /** The six goods properties (geography is `distribution`). Mirrors `goods_dna::GoodDna`. */
+  dna?: GoodDna | null;
+}
+
+export type GoodRole = "staple" | "essential" | "strategic" | "comfort" | "luxury" | "treasure";
+export type GoodOrigin = "grown" | "raised" | "gathered" | "caught" | "mined" | "crafted";
+export type GoodKeeping = "perishable" | "seasonal" | "storable" | "eternal";
+
+/** Mirrors `goods_dna::GoodDna`. tier 0 Bulk … 4 Treasure; difficulty 1-5. */
+export interface GoodDna {
+  role: GoodRole;
+  origin: GoodOrigin;
+  tier: number;
+  difficulty: number;
+  keeping: GoodKeeping;
 }
 
 /** One good's line in the post-generation placement report (§8.20). Mirrors
