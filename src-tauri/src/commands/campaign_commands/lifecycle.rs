@@ -630,6 +630,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 last_reform_tick: 0,
                 reform_until: 0,
                 coin_metal: 0,
+                coin_good: -1,
                 coin_history: Vec::new(),
                 debt_principal: 0.0,
                 debt_coupon: 0.0,

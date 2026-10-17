@@ -12,7 +12,7 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
-import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites } from "@bridge";
+import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites, campaignExploitedGoods } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
 import type { PaintValue, EconChain, Settlement, CampaignHubBrief } from "@types";
@@ -1402,6 +1402,19 @@ export function MapCanvas() {
     // During a campaign, discoveries change it yearly (G5b).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [worldKey, step8Done, step7Known, overlayVisibility.deposits, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365)]);
+
+  // Owner 2026-10-17: the map shows every good; in a campaign the belts nobody works
+  // yet are tinted and the exploited ones stay clear. Refreshed yearly.
+  useEffect(() => {
+    const om = overlayManagerRef.current;
+    if (!om) return;
+    if (!campaignSnapshot?.active) { om.setExploitedGoods(null); requestRender(); return; }
+    campaignExploitedGoods().then((rows) => {
+      om.setExploitedGoods(new Map(rows.map((r) => [r.good, new Set(r.provinces)])));
+      requestRender();
+    }).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365)]);
 
   // Economy chokepoints + trade-region territories — product of the Economy step.
   useEffect(() => {

@@ -292,7 +292,7 @@ impl CampaignSim {
     fn denom_tiers_for_metal(metal: u8) -> &'static [u8] {
         match metal {
             1 | 2 => &[DENOM_GOLD, DENOM_SILVER],
-            3 => &[DENOM_PETTY],
+            3 | COIN_IRON | COIN_COMMODITY | COIN_RECKONING => &[DENOM_PETTY],
             _ => &[DENOM_SILVER, DENOM_PETTY],
         }
     }

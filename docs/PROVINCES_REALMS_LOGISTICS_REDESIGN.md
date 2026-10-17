@@ -173,3 +173,41 @@ and hectolitres for drink and oil, metres for cloth, head for horses; imperial =
 lb, gallons, yards, troy ounces for treasure. Settings → Appearance has the Units
 switch (metric default). Shown first in the city market (made here, arrivals,
 departures); the rest of the panels still show model units — queued, panel by panel.
+
+**Step 1e: the money ladder (2026-10-17, done).** `coin_metal_for` used to treat any
+region with no gold, silver, copper or tin as if it imported silver. It now climbs down
+the historical ladder: gold / silver / electrum → bronze (copper or tin) → **iron**
+(`COIN_IRON`, struck as "Iron Bar of …": Spartan iron, Celtic currency bars, Song iron
+cash) → **commodity money** (`COIN_COMMODITY`, the region's most money-like good it
+actually makes, weighted salt 1.0 · cloth 0.9 · linen 0.85 · tea 0.8 · fleece 0.7 ·
+hides/horses 0.6 · grain 0.45-0.5 — "Salt Bar", "Cloth Ell", "Tea Brick", "Head of
+Cattle", "Grain Measure"; `TickHub.coin_good`) → **grain reckoning** (`COIN_RECKONING`,
+barter with a unit of account). Lower rungs strike petty denominations only. Their
+economic effect (`MONEY_LADDER_DOSE`): cheaper exchange value than silver (iron 0.04,
+commodity 0.25, reckoning 0.5 of a silver coin) and a weaker pull as a store of value
+(0.6 / 0.5 / 0.4). **Dose walk:** 1.0 broke `econ_inheritance_rules_fragment_differently`;
+0.5 passes it and all `tick::tests` (418) — shipped at 0.5. Gate:
+`a_region_without_precious_metal_climbs_down_the_money_ladder`.
+**Queued:** commodity-money inflation from its own supply (a salt glut inflates prices;
+the cowrie-flood case) and trade friction outside the producing region.
+
+**Step 1f: unexploited goods tinted in a campaign (2026-10-17, done; not seen in the
+app).** The map always shows every good's belt. During a campaign,
+`campaign_exploited_goods` lists, per good, the provinces that actually produce it
+(`province_good_actual > 0`); `OverlayManager` draws the belt at full colour there and as
+a faint grey hint everywhere else. Refreshed each campaign year. Outside a campaign
+nothing is tinted.
+
+**Step 2a: organic province borders (2026-10-17, done; not seen in the app).** The flood
+that draws provinces used a WHITE cost noise (a fresh random number per step), which
+averages away along a path and left borders on straight weighted-Voronoi lines. It now
+multiplies each step's cost by e^(±0.55) from a SMOOTH noise field (`border_noise`: a
+~65 km layer warped by a ~28 km one, X-wrapped, at least 2 cells per wave), so the line
+where two provinces meet meanders at 20-80 km. Within ~3 cells of a dividing river, a
+lake or a crest the noise is off (fading in to 6 cells), so borders still ride the
+features and never zig-zag across a river. The white term stays only as a tie-breaker
+(0.02). Size by density already existed (fertile heartlands get smaller provinces,
+hostile land larger, `local_sep2`). Gates: `provinces` 25/25, incl. the existing
+crest/river-coincidence tests and new `border_noise_is_smooth_varied_and_wraps`.
+**Queued:** smoothing the drawn borders (they are drawn as raw cell edges) and a
+connected-component guard if the snap stage ever splits a province.

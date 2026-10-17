@@ -217,6 +217,11 @@ export async function campaignMarketCities(): Promise<import("@types").MarketCit
   return invoke("campaign_market_cities");
 }
 
+/** Per good, the provinces that actually work it this campaign (the map tints the rest). */
+export async function campaignExploitedGoods(): Promise<{ good: string; provinces: number[] }[]> {
+  return invoke("campaign_exploited_goods");
+}
+
 /** Cereal units one person eats a day — the anchor for metric goods units. */
 export async function campaignUnitScale(): Promise<{ grain_units_per_person_day: number }> {
   return invoke("campaign_unit_scale");

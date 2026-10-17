@@ -1767,7 +1767,7 @@ impl CampaignSim {
             estate_kind: 0, estate_tier: 0, mine_depth: 0, mine_extent: unknown_extent(), is_mining_settlement: false, last_upgrade_tick: self.tick, owner_house: -1, stake_bank: -1, stake_share: 0.0, damage: 0.0, structures: vec![],
             treasury: 0.0, tariff_export: 0.0, tariff_import: 0.0, mint_fineness: 1.0, council_house: -1,
             finance: CityFinance::default(), war_with: -1, war_since: 0, war_effort: 0.0, war_manpower: 0.0, tribute_to: -1, tribute_until: 0,
-            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
+            coin_name: String::new(), coin_trust: 0.0, settle_coin: -1, coin_basket: Vec::new(), mint_fineness_prev: 0.0, price_level: 1.0, coin_circ_prev: 0.0, last_reform_tick: 0, reform_until: 0, coin_metal: 0, coin_good: -1, coin_history: Vec::new(), debt_principal: 0.0, debt_coupon: 0.0, debt_holders: Vec::new(), mint_bullion_ratio: 1.0, has_mint: false,
             quality: vec![0.0f32; ng], tradition: vec![0.0f32; ng], made_from: Vec::new(), stolen_good: -1, stolen_from: -1,
             colony_kind: 1, colony_stage: 1, autonomous: false, founder_hub: founder as i32, backers,
             reserve_food: 30.0, reserve_cap: 365.0, supply_years: 0.0, supply_shortfall_days: 0.0, colony_founded_tick: self.tick,

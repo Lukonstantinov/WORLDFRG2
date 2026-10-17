@@ -1288,3 +1288,25 @@ pub fn campaign_realm_watch(db: State<'_, WorldDb>) -> Result<RealmWatch, String
     };
     Ok(out)
 }
+
+/// Owner 2026-10-17 · per good, the provinces that actually produce it in this
+/// campaign (`province_good_actual > 0`). The map draws every good's belt and tints it
+/// where nobody works it yet. Empty when no campaign is running.
+#[derive(serde::Serialize)]
+pub struct ExploitedGood {
+    pub good: String,
+    pub provinces: Vec<u32>,
+}
+
+#[tauri::command]
+pub fn campaign_exploited_goods(db: State<'_, WorldDb>) -> Result<Vec<ExploitedGood>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(Vec::new()) };
+    let ng = sim.goods.len();
+    let actual = sim.province_good_actual();
+    let np = if ng > 0 { actual.len() / ng } else { 0 };
+    Ok((0..ng).map(|g| ExploitedGood {
+        good: sim.goods[g].name.clone(),
+        provinces: (0..np).filter(|&p| actual[p * ng + g] > 0.0).map(|p| p as u32).collect(),
+    }).filter(|e| !e.provinces.is_empty()).collect())
+}

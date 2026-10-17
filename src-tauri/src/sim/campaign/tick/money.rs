@@ -40,6 +40,24 @@ impl CampaignSim {
     }
 
 
+    /// The money ladder's own names: "Iron Bar", "Salt Bar", "Cloth Ell", "Tea Brick",
+    /// "Grain Measure". None for gold, silver, electrum and bronze (they keep a coin name).
+    fn ladder_money_name(&self, h: usize, gi: Option<usize>, si: Option<usize>, ci: Option<usize>, ti: Option<usize>) -> Option<String> {
+        Some(match self.coin_metal_for(h, gi, si, ci, ti) {
+            COIN_IRON => "Iron Bar".into(),
+            COIN_COMMODITY => match self.goods.get(self.commodity_money_good(h).max(0) as usize).map(|g| g.name.as_str()) {
+                Some("salt") | Some("bay_salt") => "Salt Bar".into(),
+                Some("cloth") | Some("linen") => "Cloth Ell".into(),
+                Some("tea") => "Tea Brick".into(),
+                Some("wool_fleece") => "Fleece".into(),
+                Some("hides") | Some("horses") => "Head of Cattle".into(),
+                _ => "Grain Measure".into(),
+            },
+            COIN_RECKONING => "Grain Reckoning".into(),
+            _ => return None,
+        })
+    }
+
     /// v2.0 · the monetary METAL a mint strikes, from the bullion its trade region
     /// can reach: gold if a gold province lies in the region, silver if silver hills,
     /// electrum where both are plentiful and balanced, bronze/billon where only base
@@ -72,7 +90,29 @@ impl CampaignSim {
         } else if has_g { 1 }
         else if has_s { 0 }
         else if base > EPS { 3 }
-        else { 0 } // no precious metal in the region → assume imported silver specie
+        else if self.region_produces(region, &["iron", "bog_iron"]) { COIN_IRON }
+        else if self.commodity_money_good(hub) >= 0 { COIN_COMMODITY }
+        else { COIN_RECKONING }
+    }
+
+    /// Whether any live town in trade region `region` produces one of `names`.
+    fn region_produces(&self, region: u32, names: &[&str]) -> bool {
+        let idx: Vec<usize> = (0..self.goods.len()).filter(|&g| names.contains(&self.goods[g].name.as_str())).collect();
+        self.hubs.iter().any(|h| !h.is_estate && h.component == region && idx.iter().any(|&g| h.production.get(g).copied().unwrap_or(0.0) > EPS))
+    }
+
+    /// The good a region with no metal reckons its money in: the best money-like
+    /// good it produces (`COMMODITY_MONEY`, weighted by how much it makes). -1 = none.
+    pub(crate) fn commodity_money_good(&self, hub: usize) -> i32 {
+        let region = self.hubs[hub].component;
+        let mut best = (-1i32, 0.0f32);
+        for (name, w) in COMMODITY_MONEY {
+            let Some(g) = self.goods.iter().position(|tg| tg.name == name) else { continue };
+            let made: f32 = self.hubs.iter().filter(|h| !h.is_estate && h.component == region)
+                .map(|h| h.production.get(g).copied().unwrap_or(0.0)).sum();
+            if made > EPS && made * w > best.1 { best = (g as i32, made * w); }
+        }
+        best.0
     }
 
 
@@ -174,7 +214,8 @@ impl CampaignSim {
             }
             // A chartered council seat with no coin yet strikes its first.
             if council >= 0 && has_mint && coin_name.is_empty() {
-                let denom = self.coin_denomination(h);
+                // Lower rungs of the money ladder name their money after what it is.
+                let denom = self.ladder_money_name(h, gi, si, cui, tii).unwrap_or_else(|| self.coin_denomination(h).to_string());
                 let city = self.hubs[h].name.clone();
                 coin_name = format!("{} of {}", denom, city);
                 coin_trust = 0.35;
@@ -235,6 +276,7 @@ impl CampaignSim {
             self.hubs[h].coin_name = c.coin_name;
             self.hubs[h].coin_trust = c.coin_trust;
             self.hubs[h].coin_metal = c.coin_metal;
+            self.hubs[h].coin_good = if c.coin_metal == COIN_COMMODITY { self.commodity_money_good(h) } else { -1 };
             self.hubs[h].mint_bullion_ratio = c.mint_bullion_ratio;
             self.hubs[h].mint_fineness = c.mint_fineness;
             self.hubs[h].mint_fineness_prev = c.mint_fineness_prev;
@@ -311,7 +353,11 @@ impl CampaignSim {
         let attr = |h: &TickHub| {
             let metal_pref = match h.coin_metal {
                 1 => COIN_METAL_GOLD_PREF, 2 => COIN_METAL_ELECTRUM_PREF,
-                3 => COIN_METAL_BRONZE_PREF, _ => 1.0,
+                3 => COIN_METAL_BRONZE_PREF,
+                COIN_IRON => 1.0 + MONEY_LADDER_DOSE * (COIN_IRON_PREF - 1.0),
+                COIN_COMMODITY => 1.0 + MONEY_LADDER_DOSE * (COIN_COMMODITY_PREF - 1.0),
+                COIN_RECKONING => 1.0 + MONEY_LADDER_DOSE * (COIN_RECKONING_PREF - 1.0),
+                _ => 1.0,
             };
             (coin_value(h.mint_fineness, h.coin_trust) * h.coin_trust * metal_pref).max(EPS)
         };

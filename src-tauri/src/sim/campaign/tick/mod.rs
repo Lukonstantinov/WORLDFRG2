@@ -2772,6 +2772,9 @@ pub fn coin_specie(metal: u8, fineness: f32) -> f32 {
         1 => GOLD_SILVER_RATIO,                 // gold
         2 => 0.5 * (GOLD_SILVER_RATIO + 1.0),   // electrum (gold+silver alloy)
         3 => 0.08,                              // bronze/billon — token money
+        COIN_IRON => 1.0 + MONEY_LADDER_DOSE * (0.04 - 1.0),      // iron bars — heavy, cheap
+        COIN_COMMODITY => 1.0 + MONEY_LADDER_DOSE * (0.25 - 1.0), // a commodity as money
+        COIN_RECKONING => 1.0 + MONEY_LADDER_DOSE * (0.5 - 1.0),  // grain reckoning, no coin
         _ => 1.0,                               // silver standard
     };
     m * f
@@ -3459,6 +3462,29 @@ const COIN_HOME_BIAS: f32 = 3.0;          // weight multiplier for the city's ow
 const COIN_METAL_GOLD_PREF: f32 = 1.35;     // gold — the reserve/prestige money
 const COIN_METAL_ELECTRUM_PREF: f32 = 1.20; // electrum (gold+silver alloy)
 const COIN_METAL_BRONZE_PREF: f32 = 0.70;   // bronze/billon — shunned as a store of value
+
+// ── The money ladder (owner 2026-10-17): regions with no gold or silver ─────────
+// History: precious metal where it is found; copper/bronze where it is not (Roman
+// aes, Chinese cash); iron where even copper is missing (Spartan iron, Celtic
+// currency bars, Song iron cash); then a commodity everyone needs from the region's
+// own goods (Ethiopian salt bars, Icelandic cloth, Tibetan tea bricks, cattle,
+// grain); with none of these, barter reckoned in measures of grain.
+pub(crate) const COIN_IRON: u8 = 4;
+pub(crate) const COIN_COMMODITY: u8 = 5;
+pub(crate) const COIN_RECKONING: u8 = 6;
+/// Commodity-money candidates and how well each serves as money (durable,
+/// divisible, needed by everyone): salt first, grain last (bulky, rots).
+pub(crate) const COMMODITY_MONEY: [(&str, f32); 11] = [
+    ("salt", 1.0), ("bay_salt", 1.0), ("cloth", 0.9), ("linen", 0.85), ("tea", 0.8),
+    ("wool_fleece", 0.7), ("hides", 0.6), ("horses", 0.6), ("wheat", 0.5), ("rice", 0.5), ("barley", 0.45),
+];
+/// How far the lower rungs' own money behaviour applies: cheaper exchange value and
+/// a weaker pull as a store of value than imported silver. 0 = they behave like
+/// the old "assume imported silver" fallback and only their NAME changes.
+pub(crate) const MONEY_LADDER_DOSE: f32 = 0.5;
+const COIN_IRON_PREF: f32 = 0.60;
+const COIN_COMMODITY_PREF: f32 = 0.50;
+const COIN_RECKONING_PREF: f32 = 0.40;
 const COIN_FLIP_MARGIN: f32 = 1.08;       // a rival must lead the main coin by this to flip
 /// Seigniorage (to the issuing polis treasury) per unit of trade circulating in its
 /// coin abroad, and a tiny prestige bump to the issuing council house. Small so the
@@ -4234,6 +4260,9 @@ pub struct TickHub {
     /// its trade region can reach: 0 = silver (default/imported), 1 = gold,
     /// 2 = electrum (both gold & silver), 3 = bronze/billon (only base metal).
     #[serde(default)] pub coin_metal: u8,
+    /// For `coin_metal == COIN_COMMODITY`, the good the region's money is reckoned in
+    /// (salt bars, cloth, tea bricks, cattle, grain); -1 otherwise.
+    #[serde(default = "neg_one_i32")] pub coin_good: i32,
     /// A3 · yearly coin-biography snapshots (fineness/trust/value/price over time)
     /// for the Money panel sparklines. Capped at `COIN_HISTORY_CAP`. serde-defaulted.
     #[serde(default)] pub coin_history: Vec<CoinSnapshot>,

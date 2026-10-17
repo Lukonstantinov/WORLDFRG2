@@ -213,7 +213,9 @@ pub fn campaign_get_mints(db: State<'_, WorldDb>) -> Result<Vec<MintBrief>, Stri
                 council, council_archetype: arch, council_color: color, war_with,
                 coin_name: h.coin_name.clone(),
                 issuer: if ci >= 0 { sim.houses.get(ci as usize).map(|x| x.name.clone()).unwrap_or_default() } else { String::new() },
-                metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
+                metal: match h.coin_metal { 1 => "gold".to_string(), 2 => "electrum".to_string(), 3 => "bronze".to_string(), 4 => "iron".to_string(),
+                    5 => sim.goods.get(h.coin_good.max(0) as usize).map(|g| g.name.replace('_', " ")).unwrap_or_else(|| "commodity".into()),
+                    6 => "grain reckoning".to_string(), _ => "silver".to_string() },
                 trust: h.coin_trust,
                 fineness,
                 value: if has_coin { coin_value(h.mint_fineness, h.coin_trust) } else { 0.0 },
@@ -394,7 +396,7 @@ pub fn campaign_reserves(db: State<'_, WorldDb>) -> Result<ReservesPayload, Stri
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
     let sim = match get_sim(&db, &conn)? { Some(s) => s, None => return Ok(ReservesPayload { cities: vec![], banks: vec![], houses: vec![] }) };
     let n = sim.hubs.len();
-    let metal_name = |m: u8| match m { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string();
+    let metal_name = |m: u8| match m { 1 => "gold", 2 => "electrum", 3 => "bronze", 4 => "iron", 5 => "commodity", 6 => "grain reckoning", _ => "silver" }.to_string();
     // Per-coin metadata (name/colour/metal) keyed by issuing-mint hub INDEX.
     let coin_meta = |k: usize| -> Option<(String, String, String)> {
         let h = sim.hubs.get(k)?;

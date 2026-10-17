@@ -814,7 +814,9 @@ pub fn campaign_get_schematics(db: State<'_, WorldDb>) -> Result<Vec<CitySchemat
             hub: h.id, name: h.name.clone(), x: h.x, y: h.y,
             population: h.population as u32,
             coin_name: h.coin_name.clone(), coin_trust: h.coin_trust,
-            coin_metal: match h.coin_metal { 1 => "gold", 2 => "electrum", 3 => "bronze", _ => "silver" }.to_string(),
+            coin_metal: match h.coin_metal { 1 => "gold".to_string(), 2 => "electrum".to_string(), 3 => "bronze".to_string(), 4 => "iron".to_string(),
+                    5 => sim.goods.get(h.coin_good.max(0) as usize).map(|g| g.name.replace('_', " ")).unwrap_or_else(|| "commodity".into()),
+                    6 => "grain reckoning".to_string(), _ => "silver".to_string() },
             council, buildings, estates, banks_seated, bank_branches,
         });
     }

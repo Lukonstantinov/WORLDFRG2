@@ -200,6 +200,7 @@ pub fn run() {
             campaign_commands::campaign_city_notables,
             campaign_commands::campaign_market_cities,
             campaign_commands::campaign_unit_scale,
+            campaign_commands::campaign_exploited_goods,
             campaign_commands::campaign_get_colony,
             campaign_commands::campaign_get_satellite,
             campaign_commands::campaign_get_migration_routes,

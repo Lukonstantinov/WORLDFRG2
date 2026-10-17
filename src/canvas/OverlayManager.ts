@@ -726,6 +726,13 @@ export class OverlayManager {
     x0: number; y0: number; w: number; h: number;
   }>();
   private goodMasksDirty = false;
+  /** In a campaign: per good, the provinces that actually work it. Belts elsewhere
+   *  draw tinted (unexploited); null outside a campaign (everything at full colour). */
+  private exploitedGoods: Map<string, Set<number>> | null = null;
+  setExploitedGoods(m: Map<string, Set<number>> | null) {
+    this.exploitedGoods = m;
+    this.goodMasksDirty = true;
+  }
   /** The layer/scale state the cached renders were built under, so a change to
    *  either invalidates them (quality is baked into the pixels). */
   private goodRenderKey = "";
@@ -1967,6 +1974,7 @@ export class OverlayManager {
         ? subPalette!.map((s) => parseColor(s.color))
         : [];
       const [pr, pg, pb] = this.goodQualityPale;
+      const exploited = this.exploitedGoods ? (this.exploitedGoods.get(m.good) ?? new Set<number>()) : null;
 
       const canvas = document.createElement("canvas");
       canvas.width = cw; canvas.height = ch;
@@ -2007,6 +2015,15 @@ export class OverlayManager {
                 g = Math.round(pg + (col[1] - pg) * k);
                 b = Math.round(pb + (col[2] - pb) * k);
               }
+            }
+          }
+          // Campaign: where nobody works this good yet, the belt is a faint grey hint.
+          if (exploited) {
+            const pid = this.provinceAt(m.x0 + cx * step, m.y0 + cy * step);
+            if (pid === null || !exploited.has(pid)) {
+              const grey = (r + g + b) / 3;
+              r = Math.round(r * 0.35 + grey * 0.65); g = Math.round(g * 0.35 + grey * 0.65); b = Math.round(b * 0.35 + grey * 0.65);
+              a *= 0.4;
             }
           }
           const o = ci * 4;

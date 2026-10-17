@@ -779,6 +779,49 @@ const SNAP_R: u32 = 3;
 const FLAT_ANCHOR: f64 = 0.8;
 /// Crest prominence that counts as a ridge frontier when labelling border kinds.
 const RIDGE_MIN_BORDER: f32 = 0.010;
+/// How strongly the smooth border-noise bends the flood's step cost in open country:
+/// a step costs ×e^(±BORDER_WANDER), about ×0.58 … ×1.73. The old noise was white
+/// (fresh per step), averaged out along a path, and left borders on straight
+/// weighted-Voronoi lines; noise that varies smoothly over tens of km makes the line
+/// where two provinces meet meander instead.
+const BORDER_WANDER: f32 = 0.55;
+/// Wavelengths of the two smooth noise layers, km (broad lobes, then finer wiggle).
+const BORDER_NOISE_KM: (f32, f32) = (65.0, 28.0);
+
+/// Smooth value noise in [0,1] over the world grid, X-wrapped, with one domain warp:
+/// a broad layer (`BORDER_NOISE_KM.0`) displaced by a fine one. Deterministic in `salt`.
+fn border_noise(w: u32, h: u32, salt: u64) -> Vec<f32> {
+    let km = 40075.0 / w.max(1) as f32;
+    // Lattice columns are a whole number so the field wraps seamlessly in X.
+    let layer = |lam_km: f32, salt: u64| {
+        // At least 2 cells per wave, or a coarse world turns this back into white noise.
+        let gx = ((w as f32 * km / lam_km).round() as i64).clamp(1, (w / 2).max(1) as i64);
+        let cell = w as f32 / gx as f32;
+        move |x: f32, y: f32| -> f32 {
+            let (fx, fy) = (x / cell, y / cell);
+            let (ix, iy) = (fx.floor() as i64, fy.floor() as i64);
+            let (tx, ty) = (fx - ix as f32, fy - iy as f32);
+            let (u, v) = (tx * tx * (3.0 - 2.0 * tx), ty * ty * (3.0 - 2.0 * ty));
+            let at = |a: i64, b: i64| (hash2(a.rem_euclid(gx) as u64 ^ salt, b as u64) % 10_000) as f32 / 10_000.0;
+            let (a, b, c, d) = (at(ix, iy), at(ix + 1, iy), at(ix, iy + 1), at(ix + 1, iy + 1));
+            a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v
+        }
+    };
+    let broad = layer(BORDER_NOISE_KM.0, salt);
+    let fine = layer(BORDER_NOISE_KM.1, salt ^ 0x5EED_F00D);
+    let fine2 = layer(BORDER_NOISE_KM.1, salt ^ 0x0BAD_CAFE);
+    let warp = BORDER_NOISE_KM.1 / km * 0.35; // ~10 km of displacement
+    let mut out = vec![0.0f32; (w * h) as usize];
+    for y in 0..h {
+        for x in 0..w {
+            let (xf, yf) = (x as f32, y as f32);
+            let wx = xf + warp * (fine(xf, yf) * 2.0 - 1.0);
+            let wy = yf + warp * (fine2(xf, yf) * 2.0 - 1.0);
+            out[(y * w + x) as usize] = 0.7 * broad(wx, wy) + 0.3 * fine(wx, wy);
+        }
+    }
+    out
+}
 /// Belt-value histogram resolution for the robust good-quality statistic.
 const GOOD_BINS: usize = 16;
 
@@ -1256,6 +1299,34 @@ pub fn generate_provinces(
 
     // ── Multi-source cost-flood (Dijkstra) over land. Sets province COUNT, SIZE and
     //    TOPOLOGY; the border LINES are re-placed afterwards by the snap stage. ──
+    // Organic borders: smooth noise bends the step cost in OPEN country only. Within
+    // ~3 cells of a dividing river, a lake or a crest it is switched off (fading to
+    // full by 6), so borders still ride the features and never zig-zag across a river.
+    // No world seed reaches this function; the town layout is unique per world.
+    let bsalt = settlements.iter().fold(0xB0_4DE5u64, |a, s| hash2(a, ((s.x as u64) << 32) | s.y as u64));
+    let bnoise = border_noise(w, h, bsalt);
+    let mut near_feature = vec![u8::MAX; total];
+    {
+        let mut q: std::collections::VecDeque<usize> = std::collections::VecDeque::new();
+        for c in 0..total {
+            if river_divide[c] > 0.0 || is_lake[c] || ridge[c] > RIDGE_MIN_BORDER { near_feature[c] = 0; q.push_back(c); }
+        }
+        while let Some(c) = q.pop_front() {
+            let d = near_feature[c];
+            if d >= 6 { continue; }
+            let (cx, cy) = ((c as u32 % w) as i32, (c as u32 / w) as i32);
+            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                let ny = cy + dy;
+                if ny < 0 || ny >= hi { continue; }
+                let ni = buf.widx(cx + dx, ny);
+                if near_feature[ni] > d + 1 { near_feature[ni] = d + 1; q.push_back(ni); }
+            }
+        }
+    }
+    let wander = |c: usize| -> f64 {
+        let open = (near_feature[c] as f32 - 3.0).clamp(0.0, 3.0) / 3.0;
+        (BORDER_WANDER * (2.0 * bnoise[c] - 1.0) * open).exp() as f64
+    };
     let mut owner = vec![u32::MAX; total];
     let mut dist = vec![f64::INFINITY; total];
     let have_shelf = !buf.is_shelf.is_empty();
@@ -1301,7 +1372,7 @@ pub fn generate_provinces(
                 // A shelf-sea hop carries only the flat crossing cost; land carries the
                 // full valley-unite / altitude / crest / river-divide terrain terms.
                 let (step, alt, crest, cross) = if land {
-                    let mut step = base_step;
+                    let mut step = base_step * wander(ni);
                     if river_unite[ni] { step *= RIVER_UNITE; }
                     // Crest prominence divides; a weak absolute term keeps the great
                     // massifs bodily expensive.
@@ -1317,7 +1388,8 @@ pub fn generate_provinces(
                 } else {
                     (base_step * SEA_HOP, 0.0, 0.0, 0.0)
                 };
-                let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.35;
+                // A tiny white term only breaks exact ties; the shape comes from `wander`.
+                let noise = (hash2(cell as u64, ni as u64) % 1000) as f64 / 1000.0 * 0.02;
                 let nc = cost + step + alt + crest + cross + noise;
                 if nc < dist[ni] {
                     dist[ni] = nc;
@@ -2297,6 +2369,30 @@ mod tests {
     use crate::db::schema;
     use crate::sim::world_buffer::ColumnSet;
     use rusqlite::Connection;
+
+
+    /// Organic borders · the border noise is SMOOTH (neighbouring cells barely differ,
+    /// unlike the old per-step white noise that averaged away), VARIED (it spans most of
+    /// [0,1] across a world, so it really bends borders) and WRAPS in X (no seam at
+    /// the date line).
+    #[test]
+    fn border_noise_is_smooth_varied_and_wraps() {
+        let (w, h) = (3600u32, 180u32); // the real ~11 km cells (a strip, to keep it quick)
+        let n = border_noise(w, h, 7);
+        let at = |x: u32, y: u32| n[(y * w + x) as usize];
+        let (mut lo, mut hi, mut sum, mut cnt) = (1.0f32, 0.0f32, 0.0f64, 0u32);
+        for y in 0..h { for x in 0..w {
+            let v = at(x, y); lo = lo.min(v); hi = hi.max(v);
+            if x + 1 < w { sum += (v - at(x + 1, y)).abs() as f64; cnt += 1; }
+        } }
+        let step = (sum / cnt as f64) as f32;
+        assert!(lo >= 0.0 && hi <= 1.0);
+        assert!(hi - lo > 0.5, "the field must vary enough to bend borders ({lo}..{hi})");
+        // White noise averages ~0.33 between neighbours; smooth noise far less.
+        assert!(step < 0.08, "neighbouring cells must change gently on average, got {step}");
+        for y in (0..h).step_by(37) { assert!((at(0, y) - at(w - 1, y)).abs() < 0.35, "seam at row {y}"); }
+        assert_eq!(n, border_noise(w, h, 7), "deterministic");
+    }
 
     const TW: u32 = 96;
     const TH: u32 = 64;
