@@ -526,6 +526,13 @@ impl CampaignSim {
                 // The land still physically feeds the seat city either way — only the
                 // MONETARY dues redirect to a house holder.
                 let to_market = (surplus - collected).max(0.0) * maturity;
+                // Step 3a · part of it now goes to market month by month instead.
+                let monthly = to_market * PROVINCE_MONTHLY_DOSE;
+                if PROVINCE_MONTHLY_DOSE > 0.0 {
+                    if self.prov_market_food.len() != np { self.prov_market_food.resize(np, 0.0); }
+                    self.prov_market_food[p] = monthly;
+                }
+                let to_market = to_market - monthly;
                 if let Some(fg) = food_good {
                     if fg < self.goods.len() {
                         stock_add_ungraded(&mut self.hubs[seat].stock, fg, to_market);
@@ -1043,6 +1050,54 @@ impl CampaignSim {
 
     /// The hub that administers province `p`: its largest live member city. Returns
     /// `None` for a province with no standing town (a frontier — nobody collects there).
+    /// Step 3a · each month the countryside carries 1/12 of its yearly market food to
+    /// its market towns — the province's one or two largest live towns, by size — and
+    /// takes `RURAL_BUYBACK_FRAC` of that value back in town goods it cannot make
+    /// itself (`RURAL_BASKET`). A barter: no money is created. Drawn from the town's
+    /// own market, so a countryside that needs salt makes salt dearer in its town.
+    /// A no-op when `prov_market_food` is empty (dose 0, old saves, no provinces).
+    pub(crate) fn province_market_pass(&mut self) {
+        if self.prov_market_food.iter().all(|&v| v <= 0.0) { return; }
+        let ng = self.goods.len();
+        let Some(food) = (0..ng).find(|&g| self.goods[g].food) else { return };
+        let basket: Vec<usize> = RURAL_BASKET.iter()
+            .filter_map(|n| self.goods.iter().position(|g| g.name == *n)).collect();
+        let np = self.prov_market_food.len();
+        let mut towns: Vec<Vec<(usize, f32)>> = vec![Vec::new(); np];
+        for h in 0..self.hubs.len() {
+            if self.hubs[h].is_estate || self.hubs[h].abandoned { continue; }
+            if let Some(&pid) = self.hub_province.get(h) {
+                if pid >= 0 && (pid as usize) < np { towns[pid as usize].push((h, self.hubs[h].population)); }
+            }
+        }
+        for p in 0..np {
+            let month = self.prov_market_food[p] / 12.0;
+            if month <= 0.0 { continue; }
+            let t = &mut towns[p];
+            t.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal).then(a.0.cmp(&b.0)));
+            t.truncate(2);
+            if t.is_empty() { if let Some(seat) = self.province_seat_hub(p) { t.push((seat, 1.0)); } else { continue; } }
+            let total: f32 = t.iter().map(|x| x.1.max(1.0)).sum();
+            let food_value = self.goods[food].base_value.max(0.01);
+            for &(h, pop) in t.iter() {
+                let share = pop.max(1.0) / total;
+                stock_add_ungraded(&mut self.hubs[h].stock, food, month * share);
+                // What the countryside takes home, spread over the basket goods the
+                // town actually has, at their world value.
+                let mut budget = month * share * food_value * RURAL_BUYBACK_FRAC;
+                for &g in &basket {
+                    if budget <= 0.0 { break; }
+                    let have = stock_of(&self.hubs[h].stock, g);
+                    if have <= 0.0 { continue; }
+                    let v = self.goods[g].base_value.max(0.01);
+                    let take = (budget / v).min(have * 0.25);
+                    stock_take(&mut self.hubs[h].stock, g, take);
+                    budget -= take * v;
+                }
+            }
+        }
+    }
+
     pub(crate) fn province_seat_hub(&self, p: usize) -> Option<usize> {
         let mut best: Option<(usize, f32)> = None;
         for h in 0..self.hubs.len() {

@@ -1109,7 +1109,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // Province trade flow — accumulated in play (`accrue_flow`), snapshotted
         // yearly; empty at start like every other in-year accumulator.
         prov_export_accum: vec![], prov_import_accum: vec![],
-        prov_export_year: vec![], prov_import_year: vec![],
+        prov_export_year: vec![], prov_import_year: vec![], prov_market_food: vec![],
         // YARDS_VESSELS_AND_DEPOTS_PLAN.md · `seed_vessels_from_fleets` (called
         // just below) populates `vessels` from the fresh fleet counters.
         vessels: vec![], next_vessel_id: 0, fondacos: vec![],

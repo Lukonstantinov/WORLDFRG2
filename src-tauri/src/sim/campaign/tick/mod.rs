@@ -617,6 +617,17 @@ pub(crate) const RELAY_MAX_HOPS: u8 = 6;
 /// 0.0 (a true no-op) and queued with the province/logistics overhaul, which
 /// changes who supplies what.
 pub(crate) const INBOUND_ROOM_DOSE: f32 = 0.0;
+
+// ── Step 3a · the countryside goes to market (PROVINCES_REALMS_LOGISTICS_REDESIGN.md) ──
+/// Share of a province's yearly food surplus that goes to market MONTHLY, spread over
+/// its one or two largest towns, instead of arriving as one lump at the seat at the
+/// year's end. 0 = the old yearly lump exactly (a true no-op).
+pub(crate) const PROVINCE_MONTHLY_DOSE: f32 = 1.0;
+/// Of what it sells, the countryside takes this share back in town goods (salt, iron,
+/// cloth, drink — peasants bought what they could not make: 10-15%).
+pub(crate) const RURAL_BUYBACK_FRAC: f32 = 0.12;
+/// What a peasant household goes to market for, in order of need.
+pub(crate) const RURAL_BASKET: [&str; 8] = ["salt", "bay_salt", "iron", "metalware", "cloth", "linen", "beer", "wine"];
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
 /// (`House.charters`, already granted to a POLITICAL house or a chartered guild
 /// that dominates its own seat, on its own specialty goods) today only earns the
@@ -8570,6 +8581,10 @@ pub struct CampaignSim {
     /// Last full year's exports per (province, good) — the figure the UI and the
     /// realm trade-share eligibility read (a stable yearly total, not mid-year noise).
     #[serde(default)] pub prov_export_year: Vec<f32>,
+    /// Step 3a (PROVINCES_REALMS_LOGISTICS_REDESIGN.md) · the share of this year's food
+    /// surplus still to be carried to market, per province; `province_market_pass`
+    /// delivers 1/12 of the year's amount each month. Empty = old behaviour.
+    #[serde(default)] pub prov_market_food: Vec<f32>,
     /// Last full year's imports per (province, good).
     #[serde(default)] pub prov_import_year: Vec<f32>,
 
@@ -11261,6 +11276,8 @@ impl CampaignSim {
             //    snapshot (charts + growth movers), the world price-index point
             //    (sparkline), and a rich world-summary chronicle row with numbers.
             if tick % 30 == 0 {
+                // Step 3a · the countryside's monthly market (no-op at dose 0).
+                self.province_market_pass();
                 self.council_provision_pass(); // councils pre-empt needed goods into civic warehouses
                 // …and, in a dearth, open that same granary again and bar food exports.
                 // Runs AFTER provisioning on purpose: a council in famine finds nothing

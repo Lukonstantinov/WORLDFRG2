@@ -151,7 +151,7 @@
             // structural no-op here and the dynamics run stays bit-identical.
             realms: vec![], leagues: vec![], kontors: vec![], prov_realm: vec![],
             prov_export_accum: vec![], prov_import_accum: vec![],
-            prov_export_year: vec![], prov_import_year: vec![],
+            prov_export_year: vec![], prov_import_year: vec![], prov_market_food: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
             culture_values: vec![],
@@ -288,6 +288,8 @@
         for yr in 0..60u32 {
             s.province_demography_pass();
             s.province_land_pass(yr);
+            // Step 3a · the year's market food arrives month by month.
+            for _ in 0..12 { s.province_market_pass(); }
         }
         let seat = s.province_seat_hub(0).expect("still has a seat");
         // ── THE FEEDBACK EDGE: the countryside fed the city and paid it dues.
@@ -3245,6 +3247,8 @@
 
         young.province_land_pass(1);
         mature.province_land_pass(1);
+        // Step 3a · the countryside now carries part of the harvest to market month by month.
+        for _ in 0..12 { young.province_market_pass(); mature.province_market_pass(); }
 
         let stock_young = stock_of(&young.hubs[0].stock, 0);
         let stock_mature = stock_of(&mature.hubs[0].stock, 0);
@@ -9370,6 +9374,25 @@
     /// (8) — the two kinds this session split apart, so `MINE_UPGRADE_COST_MULT`
     /// (depth) can never gate a quarry and the transport gate can never gate a
     /// mine.
+    #[test]
+    fn the_countryside_goes_to_market_each_month_and_buys_salt_back() {
+        // Step 3a. One province, two towns (3:1 by size). A month carries 1/12 of the
+        // year's market food, split by town size, and takes salt home in return.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.8, true), good("salt", 6, 0, 2.5, 0.7, false)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 30_000.0, vec![0.0, 0.0], 0), hub(1, 2.0, 0.0, 10_000.0, vec![0.0, 0.0], 0)], goods);
+        s.hub_province = vec![0, 0];
+        s.prov_market_food = vec![1_200.0];
+        stock_add(&mut s.hubs[0].stock, 1, 0, 500.0);
+        let wheat0 = |s: &CampaignSim, h: usize| stock_of(&s.hubs[h].stock, 0);
+        s.province_market_pass();
+        assert!((wheat0(&s, 0) - 75.0).abs() < 1e-3 && (wheat0(&s, 1) - 25.0).abs() < 1e-3, "100 a month, split 3:1");
+        assert!(stock_of(&s.hubs[0].stock, 1) < 500.0, "the countryside takes salt home from the bigger town");
+        // Nothing queued → nothing moves (the shipped dose of 0 is a true no-op).
+        let mut idle = sim(vec![hub(0, 0.0, 0.0, 30_000.0, vec![0.0, 0.0], 0)], vec![good("wheat", 0, 0, 1.0, 0.8, true)]);
+        idle.province_market_pass();
+        assert_eq!(stock_of(&idle.hubs[0].stock, 0), 0.0);
+    }
+
     #[test]
     fn a_region_without_precious_metal_climbs_down_the_money_ladder() {
         // Iron → iron bars; no metal but salt → salt money; nothing → grain reckoning.

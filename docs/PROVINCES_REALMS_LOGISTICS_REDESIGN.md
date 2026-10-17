@@ -211,3 +211,21 @@ hostile land larger, `local_sep2`). Gates: `provinces` 25/25, incl. the existing
 crest/river-coincidence tests and new `border_noise_is_smooth_varied_and_wraps`.
 **Queued:** smoothing the drawn borders (they are drawn as raw cell edges) and a
 connected-component guard if the snap stage ever splits a province.
+
+**Step 3a: the countryside goes to market every month (2026-10-17, done).** The yearly
+lump of food surplus dumped into the seat city at the year's end is replaced: each
+month `province_market_pass` carries 1/12 of it to the province's one or two largest
+towns (split by size, falling back to the seat), and the countryside takes 12% of that
+value back in town goods it cannot make (`RURAL_BASKET`: salt, iron, metalware, cloth,
+linen, beer, wine) from those towns' own markets — a barter, no money created, so a
+countryside short of salt makes salt dearer in its market town. Colony maturity still
+scales what a young colony receives. `PROVINCE_MONTHLY_DOSE` walked: 0.0 bit-identical,
+**1.0 passes `econ_` 6/6** (inheritance gate holds) and, after updating the two land tests
+that read the seat's stock right after the harvest to let the year's monthly deliveries
+run first, `tick::tests` 419/419 — shipped at 1.0. Gate: new
+`the_countryside_goes_to_market_each_month_and_buys_salt_back`.
+**Next (3b):** the province's rural population takes over RAW production from all its
+land (today only land inside a city's 50-120 km circle produces), sold to its market
+towns — the largest economic change of the plan, walked in doses with `econ_` per step.
+Then 3c (rural workforce staffs mines and estates), 4 (realms at world end), 5 (crown
+council, laws, governors), 6 (the one window).
