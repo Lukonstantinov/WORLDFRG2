@@ -923,3 +923,24 @@ goods editor (`ui/goods/GoodsEditor.tsx`) is now the **Goods Builder** of §9.5:
 Gates: tsc clean, check_types 0 drift, `cargo check --lib --tests`.
 **Queued (rule 36):** per-region needs and a regional gold:silver ratio in World balance
 (needs a region id on each economy hub); the Culture values tab (slice G7).
+
+**Slice G7: cultural valuations (2026-10-17, done).** New `sim/shared/culture_values.rs`:
+each people values up to a few goods as **Prestige · Sacred · Staple · Taboo · Currency**
+(§9.2). The default profile is derived (`auto_values`): the people's kit tastes as
+Prestige (exactly the old "cultural taste"), plus what its traits imply — Devout keeps
+incense (or candles) sacred, Martial/Nomadic prize horses, Pastoral eats from its herds
+(hides as staple), Mercantile mints silver. The author can replace any people's profile
+by hand in the Goods Builder's new **Culture values** tab (stored in world metadata
+`culture_values`, read at campaign start into `CampaignSim.culture_values`).
+In the campaign the existing cultural-taste demand term now reads the full profile
+(`CampaignSim::culture_profile`): Prestige keeps the old lift unchanged, Sacred +0.3,
+Staple +0.25 (scaled by the people's share, capped as before), and a **Taboo** good loses
+that people's share of the city's demand. **Currency** decides which metal a mint strikes
+when both gold and silver are in reach (`coin_metal_for`), instead of electrum. Every
+non-taboo lift is computed with the same arithmetic as before, so a world without
+taboos or trait extras is bit-identical. Gates: new
+`a_taboo_good_is_not_bought_and_a_currency_preference_picks_the_mint_metal`,
+`goods_culture_values_follow_traits_and_hand_entries_replace_them`, `tick::tests`, `econ_`,
+tsc, check_types 0 drift (281). **Queued:** the regional gold:silver ratio emerging from
+currency preference + local supply (§9.2's silver drain) needs bullion trade between
+regions to respond to it — a later money slice with its own econ_ walk.

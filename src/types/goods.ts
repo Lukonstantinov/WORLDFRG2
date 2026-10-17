@@ -80,6 +80,13 @@ export interface GoodSpec {
   pixels?: string | null;
 }
 
+/** Goods batch G7 · how a people values a good. Mirrors `culture_values::ValueKind`. */
+export type ValueKind = "sacred" | "prestige" | "staple" | "taboo" | "currency";
+/** Mirrors `culture_values::CultureValue`. */
+export interface CultureValue { culture: string; good: string; kind: ValueKind; }
+/** Mirrors `goods_commands::CultureValueProfile`. */
+export interface CultureValueProfile { culture: string; traits: string[]; auto: CultureValue[]; custom: CultureValue[]; }
+
 export type GoodRole = "staple" | "essential" | "strategic" | "comfort" | "luxury" | "treasure";
 export type GoodOrigin = "grown" | "raised" | "gathered" | "caught" | "mined" | "crafted";
 export type GoodKeeping = "perishable" | "seasonal" | "storable" | "eternal";

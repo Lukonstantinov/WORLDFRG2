@@ -158,3 +158,50 @@ pub fn get_goods_report(
     }
     serde_json::from_str(&raw).map_err(|e| e.to_string())
 }
+
+/// Goods batch G7 · one people's valuation profile for the Goods Builder's Culture
+/// values tab: its traits, the profile derived from them (`auto`), and the
+/// author's hand-set entries (`custom`, empty = the derived profile is in force).
+#[derive(serde::Serialize)]
+pub struct CultureValueProfile {
+    pub culture: String,
+    pub traits: Vec<String>,
+    pub auto: Vec<crate::sim::culture_values::CultureValue>,
+    pub custom: Vec<crate::sim::culture_values::CultureValue>,
+}
+
+/// Every people on this world with its derived and hand-set valuations. Empty
+/// before the People stage has placed cultures.
+#[tauri::command]
+pub fn get_culture_values(db: State<'_, WorldDb>) -> Result<Vec<CultureValueProfile>, String> {
+    use crate::sim::{cultures, culture_values};
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let specs = load_world_goods(&conn);
+    let ids: Vec<&str> = specs.iter().filter(|s| s.enabled).map(|s| s.id.as_str()).collect();
+    let custom: Vec<culture_values::CultureValue> = metadata::get_meta(&conn, "culture_values").ok().flatten()
+        .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
+    let Some(map) = cultures::active() else { return Ok(Vec::new()) };
+    let mut out: Vec<CultureValueProfile> = Vec::new();
+    for h in &map.hearths {
+        if out.iter().any(|p| p.culture == h.people) { continue; }
+        let kit = h.kit as usize;
+        // Same derivation the campaign uses (`CampaignSim::culture_trait_ids`).
+        let traits = cultures::kit_traits(kit, crate::sim::tick::CampaignSim::culture_mobility(&h.people), h.mut_seed);
+        out.push(CultureValueProfile {
+            culture: h.people.clone(),
+            traits: traits.iter().filter_map(|&t| cultures::TRAITS.get(t)).map(|t| t.name.to_string()).collect(),
+            auto: culture_values::auto_values(&h.people, cultures::kit_desired_goods(kit), &traits, &ids),
+            custom: custom.iter().filter(|v| v.culture == h.people).cloned().collect(),
+        });
+    }
+    out.sort_by(|a, b| a.culture.cmp(&b.culture));
+    Ok(out)
+}
+
+/// Store the author's hand-set valuations (all peoples). Read at campaign start.
+#[tauri::command]
+pub fn set_culture_values(values: Vec<crate::sim::culture_values::CultureValue>, db: State<'_, WorldDb>) -> Result<(), String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    metadata::set_meta(&conn, "culture_values", &serde_json::to_string(&values).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())
+}

@@ -74,6 +74,8 @@ pub fn run() {
             goods_commands::default_goods,
             goods_commands::get_goods_spec,
             goods_commands::set_goods_spec,
+            goods_commands::get_culture_values,
+            goods_commands::set_culture_values,
             goods_commands::preview_good_score,
             goods_commands::preview_land_grid,
             goods_commands::get_goods_report,

@@ -8532,6 +8532,10 @@ pub struct CampaignSim {
     /// save, a template/painted world, or a world generated before slice 1 — every
     /// reader treats that as "no depth data", never as "no deposit exists".
     #[serde(default)] pub mine_deposits: Vec<MineSite>,
+    /// Goods batch G7 · the author's hand-set cultural valuations (world metadata
+    /// `culture_values`, loaded at campaign start). A people with none here uses
+    /// its derived profile (`culture_values::auto_values`).
+    #[serde(default)] pub culture_values: Vec<crate::sim::culture_values::CultureValue>,
     /// Per-(province, good) sum of `extent × depth_workability` over this world's
     /// real workings — what `province_good_potential_base` reads for a deposit
     /// good. Both inputs (`mine_deposits`, the province seats) are fixed once a
@@ -10793,7 +10797,7 @@ impl CampaignSim {
             // + fashion so the prized good genuinely pulls more demand.
             let name_to_g: std::collections::HashMap<&str, usize> =
                 self.goods.iter().enumerate().map(|(g, tg)| (tg.name.as_str(), g)).collect();
-            let mut culture_goods: std::collections::HashMap<String, Vec<usize>> = std::collections::HashMap::new();
+            let mut culture_goods: std::collections::HashMap<String, Vec<(usize, crate::sim::culture_values::ValueKind)>> = std::collections::HashMap::new();
             let mut hub_desire: Vec<Vec<(usize, f32)>> = vec![Vec::new(); n];
             for h in 0..n {
                 if self.hubs[h].is_estate { continue; }
@@ -10806,20 +10810,37 @@ impl CampaignSim {
                     for (c, s) in mins { if *s > 0.02 { present.push((c.clone(), *s)); } }
                 }
                 let mut boost: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
+                // G7 · a taboo good loses this share of the city's demand.
+                let mut taboo: std::collections::HashMap<usize, f32> = std::collections::HashMap::new();
                 for (c, share) in present {
                     if !culture_goods.contains_key(&c) {
-                        let gis: Vec<usize> = self.culture_desired_goods(&c).iter()
-                            .filter_map(|nm| name_to_g.get(nm).copied()).collect();
+                        let gis: Vec<(usize, crate::sim::culture_values::ValueKind)> = self.culture_profile(&c).iter()
+                            .filter_map(|v| name_to_g.get(v.good.as_str()).map(|&g| (g, v.kind))).collect();
                         culture_goods.insert(c.clone(), gis);
                     }
-                    for &gi in &culture_goods[&c] {
-                        *boost.entry(gi).or_insert(0.0) += share * CULTURE_DESIRE_BOOST;
+                    for &(gi, kind) in &culture_goods[&c] {
+                        use crate::sim::culture_values::{lift, ValueKind};
+                        match kind {
+                            ValueKind::Taboo => *taboo.entry(gi).or_insert(0.0) += share,
+                            ValueKind::Currency => {}
+                            // Prestige is the old cultural-taste boost, unchanged.
+                            ValueKind::Prestige => *boost.entry(gi).or_insert(0.0) += share * CULTURE_DESIRE_BOOST,
+                            k => *boost.entry(gi).or_insert(0.0) += share * lift(k),
+                        }
                     }
                 }
+                for &gi in taboo.keys() { boost.entry(gi).or_insert(0.0); }
                 // DETERMINISM: `hub_desire` is read as a Vec downstream, so building it
                 // in HashMap order makes its order vary run to run. Sort by good index.
+                // `needs *= 1 + b` downstream: a taboo folds in as (1 + lift)(1 - share) - 1.
                 let mut bs: Vec<(usize, f32)> = boost.into_iter()
-                    .map(|(gi, b)| (gi, b.min(CULTURE_DESIRE_MAX))).collect();
+                    .map(|(gi, b)| {
+                        let t = taboo.get(&gi).copied().unwrap_or(0.0).clamp(0.0, 1.0);
+                        let b = b.min(CULTURE_DESIRE_MAX);
+                        // Only touch the arithmetic when there is a taboo, so every other
+                        // lift stays bit-identical to the old cultural taste.
+                        (gi, if t > 0.0 { (1.0 + b) * (1.0 - t) - 1.0 } else { b })
+                    }).collect();
                 bs.sort_by_key(|&(gi, _)| gi);
                 hub_desire[h] = bs;
             }
@@ -11681,6 +11702,16 @@ impl CampaignSim {
 
     /// Good ids a culture PRIZES (creole → both parents' tastes; hearth culture → its
     /// kit's tastes). Empty for an unknown/legacy culture.
+    /// Goods batch G7 · a people's valuation profile in force: the author's entries,
+    /// else its kit tastes (Prestige) plus what its traits imply.
+    pub(crate) fn culture_profile(&self, culture: &str) -> Vec<crate::sim::culture_values::CultureValue> {
+        crate::sim::culture_values::profile(culture, &self.culture_values, || {
+            let ids: Vec<&str> = self.goods.iter().map(|g| g.name.as_str()).collect();
+            crate::sim::culture_values::auto_values(culture, &self.culture_desired_goods(culture),
+                &self.culture_trait_ids(culture), &ids)
+        })
+    }
+
     pub(crate) fn culture_desired_goods(&self, culture: &str) -> Vec<&'static str> {
         if let Some(cr) = self.creoles.iter().find(|c| c.name == culture) {
             let mut v = crate::sim::cultures::kit_desired_goods(cr.kit_a as usize).to_vec();

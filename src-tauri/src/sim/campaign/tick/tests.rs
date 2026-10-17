@@ -154,6 +154,7 @@
             prov_export_year: vec![], prov_import_year: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
+            culture_values: vec![],
             deposit_potential_cache: Default::default(),
             units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
             people: vec![], hall_of_dead: vec![], people_tombstones: vec![], next_individual_id: 0, people_migrated: true, gov_forms_migrated: false,
@@ -9369,6 +9370,34 @@
     /// (8) — the two kinds this session split apart, so `MINE_UPGRADE_COST_MULT`
     /// (depth) can never gate a quarry and the transport gate can never gate a
     /// mine.
+    #[test]
+    fn a_taboo_good_is_not_bought_and_a_currency_preference_picks_the_mint_metal() {
+        // Goods batch G7. One city of one people, holding wine it does not make. With
+        // wine taboo for that people, it eats none of it; without, it does.
+        use crate::sim::culture_values::{CultureValue, ValueKind};
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.8, true), good("wine", 1, 1, 3.0, 0.6, false),
+            good("gold", 5, 2, 50.0, 0.6, false), good("silver", 6, 2, 5.0, 0.6, false)];
+        let value = |good: &str, kind| CultureValue { culture: "Vexillia".into(), good: good.into(), kind };
+        let mk = |values: Vec<CultureValue>| {
+            let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![100.0, 0.0, 1.0, 1.0], 0)], goods.clone());
+            s.hub_culture = vec!["Vexillia".into()];
+            stock_add(&mut s.hubs[0].stock, 1, 0, 500.0);
+            s.culture_values = values;
+            s
+        };
+        let (mut open, mut taboo) = (mk(vec![]), mk(vec![value("wine", ValueKind::Taboo)]));
+        open.advance(5);
+        taboo.advance(5);
+        let wine = |s: &CampaignSim| stock_of(&s.hubs[0].stock, 1);
+        assert!(wine(&taboo) > wine(&open), "a people for whom wine is taboo must not drink it ({} vs {})", wine(&taboo), wine(&open));
+        // Both metals in reach in equal measure: electrum by default, the preferred
+        // metal when the people has one.
+        let plain = mk(vec![]);
+        assert_eq!(plain.coin_metal_for(0, Some(2), Some(3), None, None), 2);
+        let silver = mk(vec![value("silver", ValueKind::Currency)]);
+        assert_eq!(silver.coin_metal_for(0, Some(2), Some(3), None, None), 0);
+    }
+
     #[test]
     fn deposits_are_discovered_near_towns_and_deep_ones_wait_for_technology() {
         // Goods batch G5b. 3600 cells wide → ~11 km/cell; both workings sit ~55 km

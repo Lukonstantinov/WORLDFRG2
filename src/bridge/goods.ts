@@ -1,6 +1,16 @@
 // Split from the former monolithic src/bridge/tauri.ts (invoke wrappers, one per Rust command).
 import { invoke } from "@tauri-apps/api/core";
-import type { GoodRegion, GoodSpec, GoodsPlacementReport } from "@types";
+import type { GoodRegion, GoodSpec, GoodsPlacementReport, CultureValue, CultureValueProfile } from "@types";
+
+// ── Cultural valuations (goods batch G7) ──
+/** Every people with its derived and hand-set valuations. */
+export async function getCultureValues(): Promise<CultureValueProfile[]> {
+  return invoke("get_culture_values");
+}
+/** Store the hand-set valuations (all peoples); read when a campaign starts. */
+export async function setCultureValues(values: CultureValue[]): Promise<void> {
+  return invoke("set_culture_values", { values });
+}
 
 // ── Trade-good library (editable specs; per-world + global) ──
 /** The shipped 30-good defaults (for "reset to default"). */

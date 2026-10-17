@@ -56,6 +56,15 @@ impl CampaignSim {
             if let Some(i) = ti { base += h.production.get(i).copied().unwrap_or(0.0); }
         }
         let (has_g, has_s) = (g > EPS, s > EPS);
+        // G7 · the city's people may prefer one metal (silver in China and the
+        // Islamic world, gold in Venice and West Africa).
+        let maj = self.hub_culture.get(hub).cloned().unwrap_or_default();
+        let prefer = if maj.is_empty() || maj == "—" { None } else {
+            self.culture_profile(&maj).into_iter()
+                .find(|v| v.kind == crate::sim::culture_values::ValueKind::Currency)
+                .and_then(|v| match v.good.as_str() { "gold" => Some(1u8), "silver" => Some(0u8), _ => None })
+        };
+        if has_g && has_s && prefer.is_some() { return prefer.unwrap(); }
         if has_g && has_s {
             // Both metals in reach → a balanced supply is struck as electrum, else
             // the region coins its dominant precious metal.

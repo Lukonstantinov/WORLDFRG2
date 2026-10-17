@@ -7,6 +7,7 @@ import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput,
 import { GoodIcon } from "./GoodIcon";
 import { PixelIconEditor } from "./PixelIconEditor";
 import { WorldBalance } from "./WorldBalance";
+import { CultureValues } from "./CultureValues";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
 const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "bullion", "gem", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
@@ -106,7 +107,7 @@ export function GoodsEditor() {
   const [expanded, setExpanded] = useState<number | null>(null);
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
-  const [tab, setTab] = useState<"goods" | "balance">("goods");
+  const [tab, setTab] = useState<"goods" | "cultures" | "balance">("goods");
 
   useEffect(() => { if (editorOpen && specs.length === 0) void loadFromWorld(); }, [editorOpen, specs.length, loadFromWorld]);
   // Load the world's goods on open too, so author-drawn icons show everywhere.
@@ -175,9 +176,9 @@ export function GoodsEditor() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
           <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
             <strong style={{ fontSize: 14 }}>Goods Builder</strong>
-            {(["goods", "balance"] as const).map((t) => (
+            {(["goods", "cultures", "balance"] as const).map((t) => (
               <button key={t} style={{ ...btn, background: tab === t ? "#5a4a30" : btn.background }} onClick={() => setTab(t)}>
-                {t === "goods" ? "Goods" : "World balance"}
+                {t === "goods" ? "Goods" : t === "cultures" ? "Culture values" : "World balance"}
               </button>
             ))}
           </span>
@@ -198,7 +199,7 @@ export function GoodsEditor() {
           <button style={btn} onClick={() => setOpen(false)}>Close</button>
         </div>
 
-        {tab === "balance" ? <WorldBalance specs={specs} /> : (<>
+        {tab === "balance" ? <WorldBalance specs={specs} /> : tab === "cultures" ? <CultureValues specs={specs} /> : (<>
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
           <span style={{ color: "#b5a68d" }}>Preset</span>
           {PRESETS.map((pr) => (

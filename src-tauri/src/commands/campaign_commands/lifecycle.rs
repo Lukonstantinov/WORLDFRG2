@@ -1102,6 +1102,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // just below) populates `vessels` from the fresh fleet counters.
         vessels: vec![], next_vessel_id: 0, fondacos: vec![],
         mine_deposits: vec![],
+        culture_values: vec![],
         deposit_potential_cache: Default::default(),
         units_of_account: vec![], currencies: vec![], issues: vec![], next_issue_id: 0, purses: vec![], diag_barter_trades: 0, diag_barter_volume: 0.0,
         people: vec![], hall_of_dead: vec![], people_tombstones: vec![], next_individual_id: 0, people_migrated: false, gov_forms_migrated: false,
@@ -1109,6 +1110,9 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         ideologies: vec![], schools: vec![], next_ideology_id: 0, next_school_id: 0, masterworks: vec![], next_masterwork_id: 0, venues: vec![], next_venue_id: 0, hordes: vec![], next_horde_id: 0,
     };
     seed_mine_deposits(&conn, &mut sim);
+    // Goods batch G7 · the author's hand-set cultural valuations, if any.
+    sim.culture_values = metadata::get_meta(&conn, "culture_values").ok().flatten()
+        .and_then(|j| serde_json::from_str(&j).ok()).unwrap_or_default();
     // Backfill the colonization pool if the saved economy predates the feature (its
     // `colonizable_sites` deserialized to the serde default — empty). Without this a
     // campaign built on an older economy snapshot can NEVER found colonies/outposts.

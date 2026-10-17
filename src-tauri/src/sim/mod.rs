@@ -60,6 +60,7 @@ pub use campaign::manufacture;
 pub mod shared;
 pub use shared::names;
 pub use shared::cultures;
+pub use shared::culture_values;
 pub use shared::inheritance;
 pub use shared::toponyms;
 pub use shared::provinces;
