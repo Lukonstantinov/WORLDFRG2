@@ -812,6 +812,8 @@ impl CampaignSim {
             self.splinter_pass(self.tick / TICKS_PER_YEAR);
             // Connect sub-cap villages to the trade network via their nearest market town.
             self.hinterland_pass();
+            // Goods batch G5b · towns find the ore around them (deeper with technology).
+            self.discover_deposits();
             // Rare merchant expeditions reach the far, isolated outposts trade misses.
             self.expedition_pass(self.tick / TICKS_PER_YEAR);
             // Financed EXPEDITIONS toward distant unconnected cities — the way a

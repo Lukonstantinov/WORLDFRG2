@@ -1376,7 +1376,7 @@ fn seed_mine_deposits(conn: &Connection, sim: &mut CampaignSim) {
     let deposits: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(conn, "deposits")
         .ok().flatten().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     sim.mine_deposits = deposits.into_iter()
-        .map(|d| MineSite { good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth, extent: d.extent, district: d.district, working: d.working })
+        .map(|d| MineSite { known: d.known, good: d.good, x: d.x as f32, y: d.y as f32, depth: d.depth, extent: d.extent, district: d.district, working: d.working })
         .collect();
 }
 

@@ -1397,10 +1397,11 @@ export function MapCanvas() {
   const step7Known = useUIStore((s) => s.stepCompleted[7]);
   useEffect(() => {
     const om = overlayManagerRef.current;
-    if (!om || !worldKey || !meta) return;
+    if (!om || !worldKey || !meta || !overlayVisibility.deposits) return;
     getDepositSites().then((s) => { om.setDepositSites(s, meta.grid_width); requestRender(); }).catch(() => {});
+    // During a campaign, discoveries change it yearly (G5b).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [worldKey, step8Done, step7Known]);
+  }, [worldKey, step8Done, step7Known, overlayVisibility.deposits, campaignSnapshot?.active, Math.floor((campaignSnapshot?.clock.tick ?? 0) / 365)]);
 
   // Economy chokepoints + trade-region territories — product of the Economy step.
   useEffect(() => {

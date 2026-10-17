@@ -9302,9 +9302,9 @@
         // No data at all ⇒ ungated.
         assert_eq!(s.mine_depth_at("iron", 0.0, 0.0), crate::sim::deposits::DEPTH_SURFACE);
         s.mine_deposits = vec![
-            MineSite { good: "iron".into(), x: 2.0, y: 0.0, depth: crate::sim::deposits::DEPTH_DEEP, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft },
-            MineSite { good: "iron".into(), x: 500.0, y: 0.0, depth: crate::sim::deposits::DEPTH_FLOODED, extent: crate::sim::deposits::EXTENT_MODERATE, district: 1, working: crate::sim::deposits::WorkingKind::Shaft },
-            MineSite { good: "silver".into(), x: 0.0, y: 0.0, depth: crate::sim::deposits::DEPTH_SHALLOW, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft },
+            MineSite { known: true, good: "iron".into(), x: 2.0, y: 0.0, depth: crate::sim::deposits::DEPTH_DEEP, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft },
+            MineSite { known: true, good: "iron".into(), x: 500.0, y: 0.0, depth: crate::sim::deposits::DEPTH_FLOODED, extent: crate::sim::deposits::EXTENT_MODERATE, district: 1, working: crate::sim::deposits::WorkingKind::Shaft },
+            MineSite { known: true, good: "silver".into(), x: 0.0, y: 0.0, depth: crate::sim::deposits::DEPTH_SHALLOW, extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft },
         ];
         // The nearest IRON working wins over a farther one and over a
         // same-position working of a different good.
@@ -9369,6 +9369,36 @@
     /// (8) — the two kinds this session split apart, so `MINE_UPGRADE_COST_MULT`
     /// (depth) can never gate a quarry and the transport gate can never gate a
     /// mine.
+    #[test]
+    fn deposits_are_discovered_near_towns_and_deep_ones_wait_for_technology() {
+        // Goods batch G5b. 3600 cells wide → ~11 km/cell; both workings sit ~55 km
+        // from the only town. The shallow one is found within a few decades; the
+        // deep one cannot be found until mining technology reaches the threshold.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.8, true), good("silver", 5, 2, 5.0, 0.6, false)];
+        let mut s = sim(vec![hub(0, 100.0, 50.0, 10_000.0, vec![100.0, 0.0], 0)], goods);
+        s.world_w = 3600.0;
+        let site = |x: f32, depth: u8| MineSite { known: false, good: "silver".into(), x, y: 50.0, depth,
+            extent: crate::sim::deposits::EXTENT_MODERATE, district: 0, working: crate::sim::deposits::WorkingKind::Shaft };
+        s.mine_deposits = vec![site(105.0, crate::sim::deposits::DEPTH_SHALLOW), site(95.0, crate::sim::deposits::DEPTH_DEEP)];
+        for year in 0..60u32 {
+            s.tick = year * 365;
+            s.discover_deposits();
+        }
+        assert!(s.mine_deposits[0].known, "a shallow working beside a town is found within 60 years");
+        assert!(!s.mine_deposits[1].known, "a deep working waits for mining technology");
+        assert!(s.journal.iter().any(|j| j.kind == "discovery" && j.text.contains("Silver")), "the find is chronicled");
+        s.tech_factor = DISCOVERY_DEEP_TECH;
+        for year in 60..200u32 {
+            s.tick = year * 365;
+            s.discover_deposits();
+        }
+        assert!(s.mine_deposits[1].known, "with the technology, the deep working is found too");
+        // Nothing to find → the pass touches nothing.
+        let before = s.journal.len();
+        s.discover_deposits();
+        assert_eq!(s.journal.len(), before);
+    }
+
     #[test]
     fn a_treasure_estate_is_mined_at_treasure_volume() {
         // Goods batch G2: the estate output floor is a rate for ordinary goods; a
@@ -9517,7 +9547,7 @@
             reserves: 50.0, loans: vec![], real_estate: 1.0, deposits: 0.0, notes_issued: 0.0,
             branches: vec![0], prestige: 0.6, interest_earned: 0.0, losses: 0.0, stakes: vec![], dividends_earned: 0.0, bills_income: 0.0, history: vec![], events: vec![],
         });
-        s.mine_deposits = vec![MineSite {
+        s.mine_deposits = vec![MineSite { known: true,
             good: "silver".into(), x: 2.0, y: 0.0,
             depth: crate::sim::deposits::DEPTH_SHALLOW, extent: crate::sim::deposits::EXTENT_WORLD_CLASS,
             district: 0, working: crate::sim::deposits::WorkingKind::Shaft,

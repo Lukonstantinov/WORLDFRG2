@@ -1508,6 +1508,7 @@ impl CampaignSim {
         // Nearest GREAT/WORLD-CLASS working with no real settlement already on it.
         let mut best_site: Option<(usize, f32)> = None; // (deposit index, dist)
         for (di, d) in self.mine_deposits.iter().enumerate() {
+            if !d.known { continue; } // G5b · only a found working draws a mining colony
             if d.extent < crate::sim::deposits::EXTENT_GREAT { continue; }
             let mut dx = (d.x - fx).abs();
             if ww > 1.0 { dx = dx.min(ww - dx); }

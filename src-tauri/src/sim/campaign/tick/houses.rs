@@ -839,6 +839,58 @@ impl CampaignSim {
     }
 
 
+    /// Goods batch G5b · towns find the ore around them. Yearly, an unknown working
+    /// with a live town within `DISCOVERY_REACH_KM` may be found — the chance falls
+    /// with distance and triples where a mine or quarry is already worked nearby
+    /// (prospectors). Deep and flooded workings wait for mining technology. Each find
+    /// is chronicled. A no-op when every working is already known (old saves, every
+    /// test fixture), so it cannot move a world that has nothing to find.
+    pub(crate) fn discover_deposits(&mut self) {
+        if self.mine_deposits.iter().all(|d| d.known) { return; }
+        let ww = self.world_w.max(1.0);
+        let km = EARTH_EQUATOR_KM / ww;
+        for di in 0..self.mine_deposits.len() {
+            let d = &self.mine_deposits[di];
+            if d.known { continue; }
+            let need_tech = match d.depth {
+                crate::sim::deposits::DEPTH_SURFACE | crate::sim::deposits::DEPTH_SHALLOW => 0.0,
+                crate::sim::deposits::DEPTH_DEEP => DISCOVERY_DEEP_TECH,
+                _ => DISCOVERY_FLOODED_TECH,
+            };
+            if self.tech_factor < need_tech { continue; }
+            let (mut town, mut prospectors) = (None::<(usize, f32)>, false);
+            for (h, hub) in self.hubs.iter().enumerate() {
+                if hub.abandoned { continue; }
+                let mut dx = (hub.x - d.x).abs();
+                if ww > 1.0 { dx = dx.min(ww - dx); }
+                let dy = hub.y - d.y;
+                let dist_km = (dx * dx + dy * dy).sqrt() * km;
+                if dist_km > DISCOVERY_REACH_KM { continue; }
+                if hub.is_estate {
+                    prospectors |= hub.estate_kind == 2 || hub.estate_kind == 8;
+                } else if town.map(|(_, b)| dist_km < b).unwrap_or(true) {
+                    town = Some((h, dist_km));
+                }
+            }
+            let Some((h, dist_km)) = town else { continue };
+            let mut chance = DISCOVERY_CHANCE * (1.0 - dist_km / DISCOVERY_REACH_KM);
+            if prospectors { chance *= DISCOVERY_PROSPECTOR_MULT; }
+            if hash01(self.seed ^ 0xD15C_0BE7, self.tick as u64, di as u64) >= chance { continue; }
+            self.mine_deposits[di].known = true;
+            let good_id = self.mine_deposits[di].good.clone();
+            let g = self.goods.iter().position(|tg| tg.name.eq_ignore_ascii_case(&good_id)).map(|g| g as i32).unwrap_or(-1);
+            let mut label = good_id.replace('_', " ");
+            if let Some(f) = label.get(0..1) { label = f.to_uppercase() + &label[1..]; }
+            let deep = need_tech > 0.0;
+            let city = self.hubs[h].name.clone();
+            self.journal.push(JournalEntry {
+                tick: self.tick, kind: "discovery".into(), hub: h as i32, good: g, value: dist_km,
+                text: if deep { format!("Deep {label} is found below the hills near {city}, now that miners can reach it") }
+                      else { format!("{label} is found near {city}") },
+            });
+        }
+    }
+
     /// MONEY_MINES_AND_GOODS_PLAN.md slice 5b/5c · founds a Mine/Quarry estate
     /// starting from the ORE (`mine_deposits`), not from a per-capita score
     /// that a sparse deposit good can never win (F3a) and not at a hash offset
@@ -859,6 +911,7 @@ impl CampaignSim {
         // cannot leave by any legal route.
         let mut best: Option<(usize, usize, f32)> = None; // (deposit idx, founder hub, score)
         for (di, d) in self.mine_deposits.iter().enumerate() {
+            if !d.known { continue; } // G5b · nobody can work what nobody has found
             let Some(g) = self.goods.iter().position(|tg| tg.name.eq_ignore_ascii_case(&d.good)) else { continue };
             let expect_kind = d.working.estate_kind();
             let served = self.hubs.iter().any(|h| {

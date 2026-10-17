@@ -1738,8 +1738,16 @@ pub struct DepositSite {
 #[tauri::command]
 pub fn get_deposit_sites(db: State<'_, WorldDb>) -> Result<Vec<DepositSite>, String> {
     let conn = db.conn.lock().map_err(|e| e.to_string())?;
-    let ds: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits").ok().flatten()
+    let mut ds: Vec<crate::sim::deposits::Deposit> = metadata::get_meta(&conn, "deposits").ok().flatten()
         .and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    // G5b · during a campaign, what is known is the campaign's own record (towns
+    // find workings over the years). It is seeded from this list in the same order,
+    // so it lines up by index; anything that does not line up keeps the world flag.
+    if let Ok(Some(sim)) = crate::commands::campaign_commands::get_sim(&db, &conn) {
+        for (d, m) in ds.iter_mut().zip(sim.mine_deposits.iter()) {
+            if d.good == m.good && d.x as f32 == m.x && d.y as f32 == m.y { d.known = m.known; }
+        }
+    }
     Ok(ds.into_iter()
         .map(|d| DepositSite { good: d.good, x: d.x, y: d.y, grade: d.grade, depth: d.depth, known: d.known })
         .collect())

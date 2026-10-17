@@ -3950,6 +3950,19 @@ pub(crate) const WORK_PAN: u8 = 4;
 pub(crate) const WORK_UNKNOWN: u8 = 0;
 fn default_working() -> u8 { WORK_UNKNOWN }
 fn default_volume() -> f32 { 1.0 }
+fn default_mine_known() -> bool { true }
+
+// ── Goods batch G5b · deposit discovery ─────────────────────────────────────
+/// A town explores this far into its hinterland for ore.
+pub(crate) const DISCOVERY_REACH_KM: f32 = 250.0;
+/// Yearly chance a working right beside a town is found; falls to 0 at the reach.
+pub(crate) const DISCOVERY_CHANCE: f32 = 0.08;
+/// Prospectors: a mine or quarry already worked within reach triples the chance.
+pub(crate) const DISCOVERY_PROSPECTOR_MULT: f32 = 3.0;
+/// Mining technology (`tech_factor`, 1.0 at founding, +1.5%/yr) needed to find a
+/// deep working (~20 years) and a flooded one (~40 years).
+pub(crate) const DISCOVERY_DEEP_TECH: f32 = 1.35;
+pub(crate) const DISCOVERY_FLOODED_TECH: f32 = 1.8;
 
 /// One settlement participating in the living economy.
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -8625,6 +8638,10 @@ pub struct CampaignSim {
 /// depth class (`sim::deposits::DEPTH_SURFACE`/`_SHALLOW`/`_DEEP`/`_FLOODED`).
 #[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct MineSite {
+    /// Goods batch G5b · whether this working has been found. Mirrored from
+    /// `Deposit.known` at campaign start; `discover_deposits` flips it. Only a
+    /// known working can be founded as a mine. Defaults to true (old saves).
+    #[serde(default = "default_mine_known")] pub known: bool,
     pub good: String,
     pub x: f32,
     pub y: f32,

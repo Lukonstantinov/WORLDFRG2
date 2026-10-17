@@ -885,3 +885,18 @@ test now also asserts an undiscovered working beside a town produces nothing,
 **Next (G5b):** discovery in the campaign — a town finds the workings around it over
 time, deeper ones as mining technology grows, chronicled ("Silver found near Kesh, 1243").
 **Queued:** the province views still list every deposit; they should mark unknown ones.
+
+**Slice G5b: discovery in the campaign (2026-10-17, done).** `MineSite.known` mirrors
+`Deposit.known` at campaign start. Yearly, `discover_deposits` (`tick/houses.rs`, called
+from the yearly hook beside `hinterland_pass`) gives each unknown working with a live
+town within `DISCOVERY_REACH_KM` (250 km) a chance to be found: `DISCOVERY_CHANCE` (8%/yr)
+right beside a town, falling to zero at the reach, ×3 where a mine or quarry is already
+worked nearby (prospectors). Deep workings wait until mining technology (`tech_factor`)
+reaches `DISCOVERY_DEEP_TECH` (1.35, ~20 years); flooded ones `DISCOVERY_FLOODED_TECH`
+(1.8, ~40 years). Each find is chronicled (`kind: "discovery"`: "Silver is found near
+Kesh"; a deep find says miners can now reach it). Only a known working can be founded as a
+mine (`maybe_found_extraction_estate`) or draw a mining colony (`maybe_found_mining_colony`).
+The Deposits map layer shows the campaign's own discoveries while a campaign runs
+(refetched each year). Every working in the existing test fixtures is known, so the pass
+is a no-op there. Gates: new `deposits_are_discovered_near_towns_and_deep_ones_wait_for_technology`,
+`tick::tests`, `econ_`, tsc, check_types 0 drift.

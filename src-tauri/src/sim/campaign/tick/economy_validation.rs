@@ -3231,7 +3231,7 @@ fn s5_ore_ceiling_at_zero_is_a_noop() {
     let small = hub(1, 10.0, 0.0, 4_000.0, vec![4_000.0 * 20.0, 4_000.0 * 0.02], 0);
     let mut s = sim(vec![big, small], goods);
     // A real, hard-capping deposit sits right on the big city.
-    s.mine_deposits.push(MineSite {
+    s.mine_deposits.push(MineSite { known: true,
         good: "gemstones".into(), x: 0.0, y: 0.0,
         depth: crate::sim::deposits::DEPTH_SURFACE,
         extent: crate::sim::deposits::EXTENT_WEAK, district: 0,
