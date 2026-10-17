@@ -293,6 +293,17 @@ pub struct GoodSpec {
     /// geography is `distribution`). `None` = derive (`goods_dna::dna_of`).
     #[serde(default)]
     pub dna: Option<super::goods_dna::GoodDna>,
+    /// Goods batch G4 · how far a SEEDED good spreads from its homeland at year 0,
+    /// in km. `None` = no cap: the homeland fills every connected suitable cell
+    /// ("continental", the old behaviour). The builder's Reach slider writes this
+    /// with `distribution`: Endemic · Local 300 km · Regional 1,200 km ·
+    /// Continental (None) · Global.
+    #[serde(default)]
+    pub reach_km: Option<f32>,
+    /// Goods batch G4 · homeland cells pinned by the author, `[x, y]` in world
+    /// cells; one per origin. Empty = auto-picked by suitability (the old way).
+    #[serde(default)]
+    pub homeland: Vec<[u32; 2]>,
 }
 
 fn default_base_value() -> f32 {
@@ -511,7 +522,7 @@ pub fn default_list() -> Vec<GoodSpec> {
                 labor: 1.0,
                 // Cadence by need: staples eaten ~weekly, comfort monthly-ish,
                 // luxuries/durables seasonally → weak daily pull (wholesale skew).
-                consumption_interval: match GOOD_NEED_TIER[g] { 0 => 7.0, 1 => 45.0, _ => 180.0 }, dna: None,
+                consumption_interval: match GOOD_NEED_TIER[g] { 0 => 7.0, 1 => 45.0, _ => 180.0 }, dna: None, reach_km: None, homeland: Vec::new(),
             }
         })
         .collect();
@@ -620,7 +631,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             relief: None,
             category: String::new(), need_tier: 0, base_value: 1.0,
             bulk: 1.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
-            consumption_interval: 45.0, dna: None,
+            consumption_interval: 45.0, dna: None, reach_km: None, homeland: Vec::new(),
         }
     }
     // A Manufactured chain good: made in cities from `inputs`, no per-cell belt.
@@ -640,7 +651,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: None, category: String::new(), need_tier: 0, base_value,
             bulk, perishable: perish, labor,
             inputs: inputs.into_iter().map(|(g, q)| RecipeInput { good: g.into(), qty: q }).collect(),
-            consumption_interval: if luxury { 180.0 } else { 60.0 }, dna: None,
+            consumption_interval: if luxury { 180.0 } else { 60.0 }, dna: None, reach_km: None, homeland: Vec::new(),
         }
     }
     let dep = |min_elev: f32, num: u32, den: u32| Some(DepositSpec {
@@ -682,7 +693,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: Some(env),
             category: category.into(), need_tier, base_value, bulk, perishable: 0.0,
             inputs: Vec::new(), labor: 1.0,
-            consumption_interval: if luxury { 180.0 } else { 45.0 }, dna: None,
+            consumption_interval: if luxury { 180.0 } else { 45.0 }, dna: None, reach_km: None, homeland: Vec::new(),
         }
     }
 
@@ -886,7 +897,7 @@ fn default_custom_goods() -> Vec<GoodSpec> {
             scoring: Some(env(vec![], None, None, Some([0.0, 0.30, 0.20]), None, 0.5, 0.0)),
             category: "construction".into(), need_tier: 1, base_value: 0.5,
             bulk: 2.0, perishable: 0.0, inputs: Vec::new(), labor: 1.0,
-            consumption_interval: 90.0, dna: None,
+            consumption_interval: 90.0, dna: None, reach_km: None, homeland: Vec::new(),
         },
 
         // ── Ported richer manufactured library (on top of the PR's cloth / metalware

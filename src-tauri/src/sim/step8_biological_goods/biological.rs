@@ -1075,9 +1075,16 @@ pub fn compute_trade_goods(
                 };
                 let endemic = matches!(spec.distribution, Distribution::Endemic);
                 let best_score = score.iter().copied().fold(0.0f32, f32::max);
+                // G4 · reach cap and pinned homelands, in cells.
+                let km_per_cell = 40075.0f32 / w.max(1) as f32;
+                let reach_cells = spec.reach_km.filter(|k| *k > 0.0).map(|k| k / km_per_cell);
+                let pins: Vec<usize> = spec.homeland.iter()
+                    .filter(|p| p[0] < w && p[1] < h)
+                    .map(|p| buf.idx(p[0], p[1]))
+                    .collect();
                 let (mut belt, seed_cells, endemic_comp) = localize_good(
                     buf, &score, marine, unlimited, spec.rarity, salt, seed, &placed_seeds,
-                    spec.origins, endemic, Some(&land_ctx), &endemic_claims);
+                    spec.origins, endemic, Some(&land_ctx), &endemic_claims, reach_cells, &pins);
                 // Remember every homeland so the next good is seeded elsewhere.
                 placed_seeds.extend(seed_cells.iter().copied());
                 if let Some(c) = endemic_comp {
@@ -1804,7 +1811,7 @@ fn score_signature(score: &[f32]) -> u64 {
 fn localize_good(
     buf: &WorldBuffer, score: &[f32], marine: bool, unlimited: bool, rarity: f32, salt: u64, seed: u64,
     existing: &[usize], origins: u8, endemic: bool, lm: Option<&LandmassContext>,
-    endemic_claims: &[(u32, u64)],
+    endemic_claims: &[(u32, u64)], reach_cells: Option<f32>, pins: &[usize],
 ) -> (Vec<u8>, Vec<usize>, Option<u32>) {
     let w = buf.width;
     let h = buf.height;
@@ -1835,7 +1842,13 @@ fn localize_good(
     // on a size threshold alone and all six shipped endemics measured ZERO cells —
     // a silent total failure of the feature, which is the exact outcome §8.16's
     // "a mineral must never silently vanish" rule exists to prevent.
-    let endemic_comp: Option<u32> = if endemic {
+    // G4 · an author's pin chooses the endemic's landmass outright.
+    let pinned_comp = pins.first()
+        .and_then(|&p| lm.and_then(|l| l.id.get(p).copied()))
+        .filter(|&c| c != u32::MAX);
+    let endemic_comp: Option<u32> = if endemic && pinned_comp.is_some() {
+        pinned_comp
+    } else if endemic {
         let sig = score_signature(score);
         // TWO PRODUCTS OF ONE TREE share a home. Checked first, so the dispersion
         // rule below can never separate nutmeg from mace.
@@ -1935,7 +1948,7 @@ fn localize_good(
     // `origins` is 1 for every good that predates the field, in which case this is
     // exactly the old single-homeland behaviour.
     let gs = seed ^ salt;
-    let n_origins = origins.max(1) as usize;
+    let n_origins = (origins.max(1) as usize).max(pins.len());
     // The extreme-rarity homeland cap is a budget for the good AS A WHOLE, split
     // between its origins — two origins of a rare good are two small patches, not
     // two full-size ones (which would double the world's supply of it).
@@ -1962,6 +1975,28 @@ fn localize_good(
         let mut best_key = -1.0f32;
         let mut fallback = usize::MAX;
         let mut fallback_key = -1.0f32;
+        // G4 · a pinned homeland snaps to the best-suited free cell within ~150 km
+        // of the pin (an author clicks near a valley, not on its exact cell). A pin
+        // with nothing suitable nearby founds no homeland — the honest answer.
+        if let Some(&pin) = pins.get(origin) {
+            let r = ((150.0 / (40075.0 / w as f32)).round() as i32).max(2);
+            let (px, py) = ((pin as u32 % w) as i32, (pin as u32 / w) as i32);
+            let mut best: Option<(f32, usize)> = None;
+            for dy in -r..=r {
+                let y = py + dy;
+                if y < 0 || y >= h as i32 { continue; }
+                for dx in -r..=r {
+                    if dx * dx + dy * dy > r * r { continue; }
+                    let i = buf.idx(buf.wrap_x(px + dx), y as u32);
+                    if !passable(i) || visited[i] || score[i] < spread_thresh { continue; }
+                    if best.map(|b| score[i] > b.0).unwrap_or(true) { best = Some((score[i], i)); }
+                }
+            }
+            match best {
+                Some((_, i)) => { best_seed = i; }
+                None => continue,
+            }
+        } else {
         for i in 0..n {
             if !passable(i) { continue; }
             if visited[i] { continue; } // already inside an earlier origin's belt
@@ -1985,6 +2020,7 @@ fn localize_good(
                 if key > best_key { best_key = key; best_seed = i; }
             }
         }
+        } // end of the auto-picked (unpinned) search
         let seed_cell = if best_seed != usize::MAX {
             best_seed
         } else if origin == 0 && fallback != usize::MAX {
@@ -2003,6 +2039,14 @@ fn localize_good(
         queue.clear();
         queue.push_back(seed_cell);
         let mut placed = 0usize;
+        // G4 · the reach cap: nothing farther than `reach_cells` from this origin.
+        let (ox, oy) = ((seed_cell as u32 % w) as i32, (seed_cell as u32 / w) as i32);
+        let within_reach = |ni: usize| -> bool {
+            let Some(rc) = reach_cells else { return true };
+            let dx = wrapdx((ni as u32 % w) as i32, ox) as f32;
+            let dy = ((ni as u32 / w) as i32 - oy) as f32;
+            dx * dx + dy * dy <= rc * rc
+        };
         while let Some(ci) = queue.pop_front() {
             out[ci] = q(score[ci]);
             placed += 1;
@@ -2017,7 +2061,7 @@ fn localize_good(
                     if ny < 0 || ny >= h as i32 { break; }
                     let ni = buf.idx(nx, ny as u32);
                     if !passable(ni) { continue; } // still in the gap - keep probing
-                    if !visited[ni] && score[ni] >= spread_thresh {
+                    if !visited[ni] && score[ni] >= spread_thresh && within_reach(ni) {
                         visited[ni] = true;
                         queue.push_back(ni);
                     }
@@ -2161,7 +2205,7 @@ mod tests {
             let probe = 3 * w as usize + islands[k as usize];
             sc[probe] = 0.89;
             let (_belt, _seeds, comp) = localize_good(
-                &buf, &sc, false, false, 0.5, k.wrapping_mul(0x9E37), 42, &[], 1, true, Some(&lm), &claims);
+                &buf, &sc, false, false, 0.5, k.wrapping_mul(0x9E37), 42, &[], 1, true, Some(&lm), &claims, None, &[]);
             let c = comp.expect("an endemic good must always be given a home");
             homes.push(c);
             claims.push((c, score_signature(&sc)));
@@ -2177,13 +2221,39 @@ mod tests {
         // every repeat.
         let mut claims2: Vec<(u32, u64)> = Vec::new();
         let (_b1, _s1, c1) = localize_good(
-            &buf, &score, false, false, 0.5, 7, 42, &[], 1, true, Some(&lm), &claims2);
+            &buf, &score, false, false, 0.5, 7, 42, &[], 1, true, Some(&lm), &claims2, None, &[]);
         claims2.push((c1.unwrap(), score_signature(&score)));
         let (_b2, _s2, c2) = localize_good(
-            &buf, &score, false, false, 0.5, 99, 42, &[], 1, true, Some(&lm), &claims2);
+            &buf, &score, false, false, 0.5, 99, 42, &[], 1, true, Some(&lm), &claims2, None, &[]);
         assert_eq!(c1, c2,
             "two goods with an IDENTICAL suitability field are one plant sold as two \
              products (nutmeg and mace) and must share an island — got {c1:?} and {c2:?}");
+    }
+
+    /// Goods batch G4 · the reach cap bounds a seeded homeland, and an author's pin
+    /// places it. All-land world, every cell equally suitable: without a cap the
+    /// homeland fills the whole map; with a 10-cell cap it stays within 10 cells of
+    /// its seed, and the seed lands next to the pin rather than wherever the hash
+    /// would have put it.
+    #[test]
+    fn goods_reach_caps_the_homeland_and_a_pin_places_it() {
+        let (w, h) = (200u32, 40u32);
+        let buf = scoring_buf(w, h);
+        let score = vec![0.9f32; buf.total()];
+        let pin = buf.idx(150, 20);
+        let (open, _, _) = localize_good(&buf, &score, false, false, 0.5, 1, 42, &[], 1, false, None, &[], None, &[]);
+        assert_eq!(open.iter().filter(|&&v| v > 0).count(), buf.total(), "no cap fills every suitable cell");
+        let (belt, seeds, _) = localize_good(&buf, &score, false, false, 0.5, 1, 42, &[], 1, false, None, &[], Some(10.0), &[pin]);
+        let (sx, sy) = ((seeds[0] as u32 % w) as i32, (seeds[0] as u32 / w) as i32);
+        assert!((sx - 150).abs() <= 2 && (sy - 20).abs() <= 2, "the homeland must sit at the pin, got ({sx},{sy})");
+        let mut placed = 0;
+        for (i, &v) in belt.iter().enumerate() {
+            if v == 0 { continue; }
+            placed += 1;
+            let (x, y) = ((i as u32 % w) as i32, (i as u32 / w) as i32);
+            assert!(((x - sx).pow(2) + (y - sy).pow(2)) as f32 <= 100.0, "cell ({x},{y}) is past the 10-cell reach");
+        }
+        assert!(placed > 200, "a capped homeland must still be a real patch, got {placed} cells");
     }
 
     /// A minimal all-land world buffer for scoring tests. Mirrors the literal in

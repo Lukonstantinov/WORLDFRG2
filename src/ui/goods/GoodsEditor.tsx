@@ -1,13 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import { useGoodsStore } from "@state/goodsStore";
 import { useUIStore } from "@state/uiStore";
+import { useWorldStore } from "@state/worldStore";
 import { previewGoodScore, importGoodsTxt } from "@bridge";
 import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput, GoodDna, GoodRole, GoodOrigin, GoodKeeping } from "@types";
 import { GoodIcon } from "./GoodIcon";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
 const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "bullion", "gem", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
-const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "deposits", "manufactured"];
+const DISTRIBUTIONS: GoodDistribution[] = ["global", "local", "endemic", "deposits", "manufactured"];
+/** G4 · the Reach slider: one honest scale over distribution + reach_km. */
+const REACHES: { label: string; hint: string; distribution: GoodDistribution; reach_km: number | null }[] = [
+  { label: "Endemic", hint: "only its one homeland landmass; cannot be grown elsewhere", distribution: "endemic", reach_km: null },
+  { label: "Local", hint: "the homeland and about 300 km of similar land", distribution: "local", reach_km: 300 },
+  { label: "Regional", hint: "the homeland's region, about 1,200 km", distribution: "local", reach_km: 1200 },
+  { label: "Continental", hint: "every connected suitable cell from the homeland", distribution: "local", reach_km: null },
+  { label: "Global", hint: "every suitable cell anywhere; no homeland", distribution: "global", reach_km: null },
+];
+function reachIndex(g: GoodSpec): number {
+  if (g.distribution === "endemic") return 0;
+  if (g.distribution === "global") return 4;
+  const r = g.reach_km ?? null;
+  return r === null ? 3 : r <= 600 ? 1 : 2;
+}
 const ROLES: GoodRole[] = ["staple", "essential", "strategic", "comfort", "luxury", "treasure"];
 const ORIGINS: GoodOrigin[] = ["grown", "raised", "gathered", "caught", "mined", "crafted"];
 const KEEPINGS: GoodKeeping[] = ["perishable", "seasonal", "storable", "eternal"];
@@ -209,7 +224,9 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
             : g.builtin
               ? <span style={{ color: "#9d917d", flexBasis: "100%" }}>Built-in scoring (duplicate to customize its climate/temperature envelope).</span>
               : <EnvelopeEditor i={i} env={g.scoring ?? null} update={update} />}
-          {!manufactured && <PreviewCanvas spec={g} />}
+          {!manufactured && g.distribution !== "deposits" && <ReachEditor g={g} onChange={(patch) => update(i, patch)} />}
+          {!manufactured && <PreviewCanvas spec={g} onPin={g.distribution === "global" || g.distribution === "deposits" ? undefined
+            : (cell) => update(i, { homeland: cell ? [cell] : [] })} />}
         </div>
       )}
     </>
@@ -405,9 +422,26 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } {
   return { r: (v >> 16) & 255, g: (v >> 8) & 255, b: v & 255 };
 }
 
-/** Live suitability heatmap for a good spec (debounced; brighter = better fit). */
-function PreviewCanvas({ spec }: { spec: GoodSpec }) {
+/** G4 · Reach at year 0 (5 steps) for a placed good. */
+function ReachEditor({ g, onChange }: { g: GoodSpec; onChange: (p: Partial<GoodSpec>) => void }) {
+  const k = reachIndex(g);
+  return (
+    <div style={{ flexBasis: "100%", display: "flex", gap: 10, alignItems: "center" }}>
+      <span title="How far this good has spread at year 0">Reach</span>
+      <input type="range" min={0} max={4} step={1} value={k} style={{ width: 160 }}
+        onChange={(e) => { const r = REACHES[Number(e.target.value)]; onChange({ distribution: r.distribution, reach_km: r.reach_km }); }} />
+      <b>{REACHES[k].label}</b>
+      <span style={{ color: "#9d917d" }}>{REACHES[k].hint}</span>
+    </div>
+  );
+}
+
+/** Live suitability heatmap for a good spec (debounced; brighter = better fit).
+ *  With `onPin`, a click pins the homeland there (G4); the pin draws as a ring. */
+function PreviewCanvas({ spec, onPin }: { spec: GoodSpec; onPin?: (cell: [number, number] | null) => void }) {
   const ref = useRef<HTMLCanvasElement>(null);
+  const meta = useWorldStore((s) => s.meta);
+  const pin = spec.homeland?.[0] ?? null;
   const key = JSON.stringify(spec);
   useEffect(() => {
     let cancelled = false;
@@ -431,6 +465,11 @@ function PreviewCanvas({ spec }: { spec: GoodSpec }) {
           img.data[o + 3] = 255;
         }
         ctx.putImageData(img, 0, 0);
+        if (pin && meta) {
+          const px = (pin[0] / meta.grid_width) * grid.width, py = (pin[1] / meta.grid_height) * grid.height;
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5;
+          ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.stroke();
+        }
       }).catch(() => {});
     }, 350);
     return () => { cancelled = true; clearTimeout(t); };
@@ -440,8 +479,14 @@ function PreviewCanvas({ spec }: { spec: GoodSpec }) {
     <div style={{ flexBasis: "100%" }}>
       <div style={{ fontSize: 10, color: "#9d917d", marginBottom: 3 }}>
         Suitability preview (brighter = better fit) — updates as you edit
+        {onPin && <> · <b>click to pin the homeland</b>{pin && <> · <button style={{ ...btn, padding: "0 5px" }} onClick={() => onPin(null)}>clear pin</button></>}</>}
       </div>
-      <canvas ref={ref} style={{
+      <canvas ref={ref} onClick={(e) => {
+        if (!onPin || !meta) return;
+        const r = e.currentTarget.getBoundingClientRect();
+        const fx = (e.clientX - r.left) / r.width, fy = (e.clientY - r.top) / r.height;
+        onPin([Math.min(meta.grid_width - 1, Math.floor(fx * meta.grid_width)), Math.min(meta.grid_height - 1, Math.floor(fy * meta.grid_height))]);
+      }} style={{ cursor: onPin ? "crosshair" : undefined,
         width: 280, height: 140, imageRendering: "pixelated",
         border: "1px solid #3f382d", borderRadius: 4, background: "#0c0a07",
       }} />

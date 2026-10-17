@@ -260,7 +260,7 @@ mod tests {
             soil: Vec::new(),
             relief: None,
             scoring: None, category: "x".into(), need_tier: 1, base_value: 1.0,
-            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0, dna: None,
+            bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0, dna: None, reach_km: None, homeland: Vec::new(),
         }
     }
     fn made(id: &str, inputs: Vec<(&str, f32)>) -> GoodSpec {

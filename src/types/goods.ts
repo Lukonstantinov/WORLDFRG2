@@ -2,7 +2,7 @@
 
 // ── Editable trade-good specs (mirror sim/goods_spec.rs) ──
 export type GoodDomain = "marine" | "coastal" | "continental" | "island";
-export type GoodDistribution = "global" | "local" | "deposits" | "manufactured";
+export type GoodDistribution = "global" | "local" | "endemic" | "deposits" | "manufactured";
 /** CLAUDE.md §8.19 (goods localities, shipped) Slice 2 — which part of the shelf a marine good may
  *  occupy. "either" reproduces the old undifferentiated `sea_coastal` gate. */
 export type MarineBand = "either" | "inshore" | "bank";
@@ -72,6 +72,10 @@ export interface GoodSpec {
   consumption_interval?: number;
   /** The six goods properties (geography is `distribution`). Mirrors `goods_dna::GoodDna`. */
   dna?: GoodDna | null;
+  /** G4 · how far a seeded good spreads from its homeland at year 0, km (null = no cap). */
+  reach_km?: number | null;
+  /** G4 · author-pinned homeland cells [x, y], one per origin (empty = auto). */
+  homeland?: [number, number][];
 }
 
 export type GoodRole = "staple" | "essential" | "strategic" | "comfort" | "luxury" | "treasure";

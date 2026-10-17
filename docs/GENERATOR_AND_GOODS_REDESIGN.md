@@ -850,3 +850,19 @@ else moved. New gates: `treasure_is_scarce_in_volume_but_still_produced_where_mi
 volume), `goods_treasure_has_real_value_and_its_own_category` (incl. the load repair),
 `a_treasure_estate_is_mined_at_treasure_volume`. **Owed:** a look at a real generated
 world's gold/silver prices and producer count in the running app (no display here).
+
+**Slice G4: reach and homeland pin (2026-10-17, done).** Two new per-good settings
+(§9.3): `GoodSpec.reach_km` caps how far a seeded good spreads from its homeland at
+year 0 (the flood-fill in `localize_good` stops at that distance from its origin), and
+`GoodSpec.homeland` holds author-pinned cells, one per origin. A pin snaps to the
+best-suited free cell within ~150 km (an author clicks near a valley, not on its cell);
+a pin with nothing suitable nearby founds no homeland, which is reported as absent
+rather than faked. An endemic's pin chooses its landmass outright. The goods editor
+has a 5-step **Reach** slider (Endemic · Local 300 km · Regional 1,200 km · Continental
+· Global) that writes `distribution` + `reach_km`, and the suitability map now takes a
+click to pin the homeland (white ring; "clear pin"). Unset fields reproduce the old
+placement exactly. Gates: `goods_` 23/23 incl. new
+`goods_reach_caps_the_homeland_and_a_pin_places_it`; `endemic_goods_take_different_islands`;
+tsc; check_types 0 drift. **Queued** (rule 36): reach GROWING in the campaign (crops
+spreading along trade routes, stolen secrets) — §9.3's later slice, needs a tick pass
+and the econ_ gates.
