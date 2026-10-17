@@ -626,6 +626,17 @@ pub(crate) const PROVINCE_MONTHLY_DOSE: f32 = 1.0;
 /// Of what it sells, the countryside takes this share back in town goods (salt, iron,
 /// cloth, drink — peasants bought what they could not make: 10-15%).
 pub(crate) const RURAL_BUYBACK_FRAC: f32 = 0.12;
+/// Step 3b · share of a town's RAW production that comes from its province's
+/// countryside (all the province's land, worked by its rural people) instead of the
+/// town's own 50-120 km catchment circle fixed at campaign start. 0 = the old
+/// catchment exactly (a true no-op).
+pub(crate) const PROVINCE_PRODUCTION_DOSE: f32 = 1.0;
+/// Step 3c · mines and estates are worked by their province's rural people: output
+/// scales with the workforce (`prov_rural / prov_cap`, clamped 0.2..1.5), so a mine in an
+/// emptied province slows and one in a crowded province runs full. 0 = a true no-op.
+/// Walked 0 → 1.0: `tick::tests` 422/422, `econ_` 6/6 (partible 73563 vs primogeniture
+/// 111250 on the printed seed) — shipped at 1.0.
+pub(crate) const ESTATE_WORKFORCE_DOSE: f32 = 1.0;
 /// What a peasant household goes to market for, in order of need.
 pub(crate) const RURAL_BASKET: [&str; 8] = ["salt", "bay_salt", "iron", "metalware", "cloth", "linen", "beer", "wine"];
 /// Charter EXCLUSIVITY — the market-square counterpart of N1/N2. A charter
@@ -8585,6 +8596,15 @@ pub struct CampaignSim {
     /// surplus still to be carried to market, per province; `province_market_pass`
     /// delivers 1/12 of the year's amount each month. Empty = old behaviour.
     #[serde(default)] pub prov_market_food: Vec<f32>,
+    /// Step 3b · daily raw output each province's countryside can produce, per good
+    /// (`np * ng`): potential × rural workforce. Rebuilt yearly; not saved.
+    #[serde(skip)] pub prov_prod_cache: Vec<f32>,
+    /// Step 3b · each town's share of its province's countryside output (by size).
+    #[serde(skip)] pub hub_prov_share: Vec<f32>,
+    /// Step 3b · goods whose output the countryside has taken over (others stay with towns).
+    #[serde(skip)] pub prov_prod_goods: Vec<bool>,
+    /// Step 5 · each province's governor (`crown.rs`); empty until a realm holds land.
+    #[serde(default)] pub prov_governor: Vec<Governor>,
     /// Last full year's imports per (province, good).
     #[serde(default)] pub prov_import_year: Vec<f32>,
 
@@ -9179,6 +9199,10 @@ pub struct Realm {
     /// styled "King". This is the split that lets Venice and Castile exist in one
     /// model instead of forcing every polity through a bloodline.
     #[serde(default)] pub government: u8,
+    /// The colour the world's author gave this realm (start realms); None = derived.
+    #[serde(default)] pub color: Option<[u8; 3]>,
+    /// The crown's laws (`crown.rs`); all-zero until the first yearly crown pass.
+    #[serde(default)] pub laws: RealmLaws,
 }
 
 /// R3 · one active tax farm — `publicani`/*iltizam*, sell N years of collection for
@@ -10720,6 +10744,10 @@ impl CampaignSim {
             // 03_DEVELOPMENT_TRACKS.md 03.7 · a true no-op at DEV_PRODUCTION_DOSE
             // = 0.0 (every entry reads self.tech_factor, unchanged from before).
             let tech_by_hub = self.dev_blended_tech(DEV_PRODUCTION_DOSE);
+            if PROVINCE_PRODUCTION_DOSE > 0.0 && !self.prov_good_belt.is_empty()
+                && (self.prov_prod_cache.is_empty() || tick % 365 == 1) {
+                self.refresh_province_production();
+            }
             // Extracted (non-recipe) FOOD goods — for the subsistence-farming floor.
             let food_gs: Vec<usize> = (0..ng)
                 .filter(|&g| self.goods[g].food && self.goods[g].inputs.is_empty())
@@ -10770,7 +10798,26 @@ impl CampaignSim {
                     let price_mult = production_price_mult(
                         self.hubs[h].price.get(g).copied().unwrap_or(self.goods[g].base_value),
                         self.goods[g].base_value);
-                    let mut realized = percap * pop * self.seasonal_mult(h, g, doy)
+                    // Step 3b · blend the town's old catchment rate with its share of the
+                    // province countryside's output. At dose 0 this is exactly `percap * pop`.
+                    let own = percap * pop * if ESTATE_WORKFORCE_DOSE > 0.0 && self.hubs[h].is_estate {
+                        // No province layer (or a province with no people data) = fully staffed.
+                        let wf = self.hub_province.get(h).copied().filter(|&p| p >= 0)
+                            .and_then(|p| Some((*self.prov_rural.get(p as usize)?, *self.prov_cap.get(p as usize)?)))
+                            .filter(|&(_, cap)| cap > 0.0)
+                            .map(|(rural, cap)| (rural / cap).clamp(0.2, 1.5)).unwrap_or(1.0);
+                        1.0 + ESTATE_WORKFORCE_DOSE * (wf - 1.0)
+                    } else { 1.0 };
+                    let base_amt = if PROVINCE_PRODUCTION_DOSE > 0.0 && !self.prov_prod_cache.is_empty() {
+                        match (self.hub_province.get(h).copied(), self.hub_prov_share.get(h).copied()) {
+                            (Some(p), Some(share)) if p >= 0 && share > 0.0 && self.prov_prod_goods.get(g).copied().unwrap_or(false) => {
+                                let prov = self.prov_prod_cache.get(p as usize * ng + g).copied().unwrap_or(0.0);
+                                own * (1.0 - PROVINCE_PRODUCTION_DOSE) + PROVINCE_PRODUCTION_DOSE * prov * share
+                            }
+                            _ => own,
+                        }
+                    } else { own };
+                    let mut realized = base_amt * self.seasonal_mult(h, g, doy)
                         * prod_mult[h][g] * tech_by_hub[h] * struct_bonus * eff * price_mult;
                     // S5 · a real ore body caps output regardless of population.
                     // `ORE_CEILING_DOSE == 0.0` short-circuits before touching
@@ -12258,6 +12305,8 @@ pub(crate) use venues::{
 };
 mod hordes;
 pub use hordes::Horde;
+pub(crate) mod crown;
+pub use crown::{Governor, RealmLaws};
 pub(crate) use hordes::{
     HORDE_GOAL_PLUNDER, HORDE_GOAL_LAND, HORDE_GOAL_REVENGE, HORDE_GOAL_CROWN, HORDE_GOAL_TRIBUTE,
     HORDE_STAGE_RAIDING, HORDE_STAGE_MARCHING, HORDE_STAGE_SETTLED, HORDE_STAGE_PAID,

@@ -1109,7 +1109,7 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
         // Province trade flow — accumulated in play (`accrue_flow`), snapshotted
         // yearly; empty at start like every other in-year accumulator.
         prov_export_accum: vec![], prov_import_accum: vec![],
-        prov_export_year: vec![], prov_import_year: vec![], prov_market_food: vec![],
+        prov_export_year: vec![], prov_import_year: vec![], prov_market_food: vec![], prov_prod_cache: vec![], hub_prov_share: vec![], prov_prod_goods: vec![], prov_governor: vec![],
         // YARDS_VESSELS_AND_DEPOTS_PLAN.md · `seed_vessels_from_fleets` (called
         // just below) populates `vessels` from the fresh fleet counters.
         vessels: vec![], next_vessel_id: 0, fondacos: vec![],
@@ -1220,6 +1220,8 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
     // Provinces (Phase 2b): seed the rural reservoir from the stored partition so the
     // countryside can feed the cities. No-op when no province layer was generated.
     seed_campaign_provinces(&conn, &mut sim);
+    // Steps 4-6 · the world's authored realms go live (or random ones, or none).
+    super::realm_view::apply_start_realms(&conn, &mut sim);
     // WORLD_AND_TRADE_MASTER_PLAN.md Part III §1/§3.1 — every house's and city's
     // MAP knowledge, from what it already holds. Must run AFTER `hub_province`/
     // `prov_neighbors` exist (just above); a no-op on a provinceless world.

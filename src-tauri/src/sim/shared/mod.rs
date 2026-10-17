@@ -4,3 +4,4 @@ pub mod culture_values;
 pub mod inheritance;
 pub mod toponyms;
 pub mod provinces;
+pub mod start_realms;

@@ -3722,3 +3722,29 @@ export interface GovernmentBrief {
   /** 2026-09-30b · one civic agenda: open culture-tier questions (row 05). */
   culture_motions?: CultureMotionBrief[];
 }
+
+// ── The one realm window (PROVINCES_REALMS_LOGISTICS_REDESIGN.md, steps 4-6) ──
+/** A good and an amount (exports, net balance, culture share). Mirrors `RealmGood`. */
+export interface RealmGood { good: string; amount: number; }
+/** A province's governor. Mirrors `GovernorBrief`. */
+export interface GovernorBrief { name: string; loyalty: number; honesty: number; years: number; skim: number; breakaway_risk: number; }
+/** One province of a realm. Mirrors `RealmProvinceRow`. */
+export interface RealmProvinceRow {
+  id: number; name: string; rural: number; urban: number; tax: number; unrest: number; culture: string;
+  exports: RealmGood[]; governor: GovernorBrief | null; capital: boolean; town_hub: number;
+}
+/** A royal council seat. Mirrors `CouncilSeat`. */
+export interface CouncilSeat { office: string; name: string; from: string; stance: string; }
+/** The crown's laws. Mirrors `RealmLawsBrief`. Levels are 1 light … 3 heavy. */
+export interface RealmLawsBrief { tax: number; levy: number; succession: string; trade: string; town_fee: number; tolerance: string; }
+/** Everything the realm window shows, in one read. Mirrors `RealmOverview`. */
+export interface RealmOverview {
+  id: number; name: string; title: string; color: [number, number, number]; rank: number;
+  capital_hub: number; capital_name: string; ruler: string; heir: string; regent: string;
+  legitimacy: number; cohesion: number; treasury: number; revenue: number;
+  economy_index: number; power: number; power_word: string; urban: number; rural: number;
+  provinces: RealmProvinceRow[]; goods: RealmGood[]; cultures: RealmGood[];
+  council: CouncilSeat[]; laws: RealmLawsBrief; recent: string[];
+}
+/** A realm as authored for a world before its campaign. Mirrors `start_realms::StartRealm`. */
+export interface StartRealm { name: string; color: [number, number, number]; capital: number; provinces: number[]; }

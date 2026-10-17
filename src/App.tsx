@@ -22,7 +22,7 @@ import { GovernmentPanel } from "@ui/campaign/GovernmentPanel";
 import { BarbarianTribesPanel } from "@ui/campaign/BarbarianTribesPanel";
 import { MoneyFinancePanel } from "@ui/campaign/MoneyFinancePanel";
 import { WarPanel } from "@ui/campaign/WarPanel";
-import { StatesPanel } from "@ui/campaign/StatesPanel";
+import { RealmWindow } from "@ui/campaign/RealmWindow";
 import { ItineraryPanel } from "@ui/goods/ItineraryPanel";
 import { GoodsCodexPanel } from "@ui/goods/GoodsCodexPanel";
 import { EconomyDashboardPanel } from "@ui/campaign/EconomyDashboardPanel";
@@ -1098,7 +1098,7 @@ export default function App() {
           <BarbarianTribesPanel />
           <MoneyFinancePanel />
           <WarPanel />
-          <StatesPanel />
+          <RealmWindow />
           <ItineraryPanel />
           <GoodsCodexPanel />
           <EconomyDashboardPanel />

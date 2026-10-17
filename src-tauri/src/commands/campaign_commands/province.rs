@@ -1011,7 +1011,7 @@ pub struct StateRegion {
 /// a HOUSE id numerically collide — two different index spaces. Keyed on the
 /// realm's own id (stable for its whole life), not its capital hub, so a future
 /// capital move (the Karakorum rule) never reassigns the colour.
-fn state_color(realm_id: usize) -> [u8; 3] {
+pub(crate) fn state_color(realm_id: usize) -> [u8; 3] {
     let hue = (realm_id as f32 * 137.508 + 53.0) % 360.0;
     let (s, l) = (0.40f32, 0.44f32);
     let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
@@ -1089,7 +1089,7 @@ pub fn compute_states(db: State<'_, WorldDb>) -> Result<Vec<StateRegion>, String
             capital_hub: realm.capital_hub,
             name: realm.name.clone(),
             title: realm.title.clone(),
-            color: state_color(realm.id as usize),
+            color: realm.color.unwrap_or_else(|| state_color(realm.id as usize)),
             cell_size,
             x: sx / n + cell_size * 0.5,
             y: sy / n + cell_size * 0.5,

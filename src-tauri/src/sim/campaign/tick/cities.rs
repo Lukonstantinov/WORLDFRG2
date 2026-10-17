@@ -565,6 +565,16 @@ impl CampaignSim {
                             // centralized crown squeezes harder, an autonomous one
                             // leaves more with its provinces.
                             let to_crown = collected * efficiency * autonomy_revenue_mult(self.realms[ri].autonomy);
+                            // Step 5 · the crown's tax law, and what the governor keeps (he
+                            // lives at the seat, so the skim stays in the province's town).
+                            let to_crown = if crown::CROWN_DOSE > 0.0 {
+                                let law = crown::CROWN_TAX_MULT[self.realms[ri].laws.tax.min(3) as usize];
+                                let skim = self.prov_governor.get(p).filter(|g| g.realm == ri as i32).map(|g| g.skim()).unwrap_or(0.0);
+                                let gross = to_crown * (1.0 + crown::CROWN_DOSE * (law - 1.0));
+                                let kept = gross * skim * crown::CROWN_DOSE;
+                                self.hubs[seat].treasury += kept;
+                                gross - kept
+                            } else { to_crown };
                             // A tax farm on the tithe redirects the crown's share to
                             // the farming house instead — it already paid up front.
                             let farmer = self.realms[ri].tax_farm.as_ref().map(|f| f.house);
@@ -1096,6 +1106,60 @@ impl CampaignSim {
                 }
             }
         }
+    }
+
+    /// Step 3b · what each province's countryside produces per day, per raw good:
+    /// its calibrated potential (belt × land × land use, or its real workings) × the
+    /// rural workforce (people against carrying capacity) × the good's volume (treasure
+    /// stays scarce). And each town's share of it, by size among its province's towns.
+    pub(crate) fn refresh_province_production(&mut self) {
+        let ng = self.goods.len();
+        if ng == 0 { return; }
+        let np = self.prov_good_belt.len() / ng;
+        let mut cache = vec![0.0f32; np * ng];
+        for p in 0..np {
+            let cap = self.prov_cap.get(p).copied().unwrap_or(0.0).max(1.0);
+            let rural = self.prov_rural.get(p).copied().unwrap_or(0.0).max(0.0);
+            let workforce = (rural / cap).clamp(0.2, 1.5);
+            for g in 0..ng {
+                if !self.goods[g].inputs.is_empty() { continue; }
+                let vol = if self.goods[g].volume > 0.0 { self.goods[g].volume } else { 1.0 };
+                cache[p * ng + g] = self.province_good_potential(p, g) * workforce * vol;
+            }
+        }
+        let mut tot = vec![0.0f32; np];
+        for (h, hub) in self.hubs.iter().enumerate() {
+            if hub.is_estate || hub.abandoned { continue; }
+            if let Some(&p) = self.hub_province.get(h) { if p >= 0 && (p as usize) < np { tot[p as usize] += hub.population.max(0.0); } }
+        }
+        // CONSERVE each good's world total: scale the countryside's output so it sums to
+        // what the towns' own catchments made. The takeover then moves WHERE a good comes
+        // from (by land and workforce), never HOW MUCH exists. A good no province can
+        // produce stays with the towns (`prov_prod_goods` false).
+        let mut own = vec![0.0f32; ng];
+        for (h, hub) in self.hubs.iter().enumerate() {
+            if hub.is_estate || hub.abandoned { continue; }
+            let Some(&p) = self.hub_province.get(h) else { continue };
+            if p < 0 || (p as usize) >= np { continue; }
+            for g in 0..ng { own[g] += hub.base_per_capita.get(g).copied().unwrap_or(0.0) * hub.population.max(0.0); }
+        }
+        self.prov_prod_goods = vec![false; ng];
+        for g in 0..ng {
+            let sum: f32 = (0..np).map(|p| cache[p * ng + g]).sum();
+            if sum > 0.0 && own[g] > 0.0 {
+                let k = own[g] / sum;
+                for p in 0..np { cache[p * ng + g] *= k; }
+                self.prov_prod_goods[g] = true;
+            }
+        }
+        self.hub_prov_share = self.hubs.iter().enumerate().map(|(h, hub)| {
+            if hub.is_estate || hub.abandoned { return 0.0; }
+            match self.hub_province.get(h) {
+                Some(&p) if p >= 0 && (p as usize) < np && tot[p as usize] > 0.0 => hub.population.max(0.0) / tot[p as usize],
+                _ => 0.0,
+            }
+        }).collect();
+        self.prov_prod_cache = cache;
     }
 
     pub(crate) fn province_seat_hub(&self, p: usize) -> Option<usize> {

@@ -3774,6 +3774,8 @@ mod read_ideology;
 mod read_masterworks;
 mod read_venues;
 mod read_hordes;
+mod realm_view;
+pub use realm_view::*;
 pub use lifecycle::*;
 pub use read_people::*;
 pub use read_colonies::*;

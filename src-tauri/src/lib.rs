@@ -139,6 +139,12 @@ pub fn run() {
             campaign_commands::campaign_province_trade,
             campaign_commands::campaign_province_potential,
             campaign_commands::compute_states,
+            campaign_commands::campaign_realm_overview,
+            campaign_commands::get_start_realms,
+            campaign_commands::set_start_realms,
+            campaign_commands::regenerate_start_realms,
+            campaign_commands::get_realm_start_mode,
+            campaign_commands::set_realm_start_mode,
             campaign_commands::campaign_get_realm_family,
             campaign_commands::campaign_realm_watch,
             // House Dossier: the stability gauges and the feud board.

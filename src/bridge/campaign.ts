@@ -662,3 +662,27 @@ export async function repairProvinceSettlements(
     settlementsJson: JSON.stringify(settlements),
   });
 }
+
+// ── The one realm window ──
+/** Everything the realm window shows for one live realm, in one read. */
+export async function campaignRealmOverview(realm: number): Promise<import("@types").RealmOverview | null> {
+  return invoke("campaign_realm_overview", { realm });
+}
+/** The world's authored starting realms (generated with the provinces; editable). */
+export async function getStartRealms(): Promise<import("@types").StartRealm[]> {
+  return invoke("get_start_realms");
+}
+export async function setStartRealms(realms: import("@types").StartRealm[]): Promise<void> {
+  return invoke("set_start_realms", { realms });
+}
+/** Throw the starting realms away and roll new random ones. */
+export async function regenerateStartRealms(): Promise<import("@types").StartRealm[]> {
+  return invoke("regenerate_start_realms");
+}
+/** "continue" | "random" | "zero" — what a new campaign does with the starting realms. */
+export async function getRealmStartMode(): Promise<string> {
+  return invoke("get_realm_start_mode");
+}
+export async function setRealmStartMode(mode: string): Promise<void> {
+  return invoke("set_realm_start_mode", { mode });
+}

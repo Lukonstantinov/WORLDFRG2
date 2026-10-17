@@ -2790,6 +2790,13 @@ commands/
                                   measured funnel (`econ_measure_realm_formation`)
                                   collapsed exactly at the writ gate (24 tier-1-2
                                   dynasties, only 3 hold one)
+      realm_view.rs               THE ONE REALM WINDOW's reads (PROVINCES_REALMS_LOGISTICS_
+                                  REDESIGN.md steps 4-6): `campaign_realm_overview` (provinces
+                                  with top exports, goods net, cultures, economy index, power,
+                                  the DERIVED royal council, laws, governors — one read), the
+                                  world's starting realms (`get/set/regenerate_start_realms`,
+                                  `get/set_realm_start_mode`) and `apply_start_realms`, called
+                                  at campaign start
   read_culture.rs                 living_world/05_CULTURE_ACCEPTANCE.md slice 05.6 ·
                                   `campaign_get_culture_acceptance(hub)` — the sparse
                                   per-culture tier/score/trend/reason table, a pure
@@ -2942,6 +2949,8 @@ sim/                            ← organised into per-phase step folders; mod.r
                                     OF INHERITANCE — line rule + division rule per culture,
                                     §8.15) · toponyms.rs
                                   · names.rs (deterministic place/family/head names)
+                                  · start_realms.rs (random-size contiguous starting realms,
+                                    generated with every province set; metadata `start_realms`)
                                   · provinces.rs (TWO-STAGE partition — see §8.10; the
                                     natural world↔campaign join layer, see FIX_PLAN B1)
   campaign/                     ← the campaign half:
@@ -2969,6 +2978,9 @@ sim/                            ← organised into per-phase step folders; mod.r
                                   cultural caps + theft/looting (§5.12); venues.rs =
                                   row 08, leisure families + venues + games (§5.13);
                                   hordes.rs = row 09 Part D, barbarians/hordes (§5.14);
+                                  crown.rs = realm LAWS + province GOVERNORS (skim,
+                                  replacement, breakaway) + town fees, yearly
+                                  (`CROWN_DOSE`, PROVINCES_REALMS_LOGISTICS_REDESIGN.md §9);
                                   transit.rs = the ARRIVAL CALENDAR (`TransitBook`:
                                   cargo in flight by arrival day + busy-vessel
                                   counters, §5.5); schism.rs = Phase 4.1,
@@ -3572,6 +3584,13 @@ MERCHANT_VESSELS_AND_INFORMATION_PLAN.md` §2). The
                                   buyers/upgrades/master (not served by the sim), light theme
   traitIcons.tsx                ← ONE icon vocabulary: traits, offices, seat paths,
                                   ideology axes (`TraitChip`, `IdeologyBars`)
+  RealmWindow.tsx               ← THE ONE REALM WINDOW (replaces StatesPanel, same toggle):
+                                  realm map (fill/marks toggles) + Overview/Government/
+                                  Provinces/Goods tabs, Realm › Province › town breadcrumb,
+                                  and BEFORE a campaign the starting-realms editor (palette,
+                                  assign by clicking, new realm, start mode), the royal
+                                  family and the realm watch (rising powers). StatesPanel.tsx
+                                  is deleted
   NotablesPanel.tsx             ← 02_PEOPLE.md (Living World row 02) — the
                                   40-cap notable roster + the Hall of the
                                   Dead, plain-list (not yet a portrait

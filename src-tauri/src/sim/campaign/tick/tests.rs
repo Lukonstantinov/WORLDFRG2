@@ -151,7 +151,7 @@
             // structural no-op here and the dynamics run stays bit-identical.
             realms: vec![], leagues: vec![], kontors: vec![], prov_realm: vec![],
             prov_export_accum: vec![], prov_import_accum: vec![],
-            prov_export_year: vec![], prov_import_year: vec![], prov_market_food: vec![],
+            prov_export_year: vec![], prov_import_year: vec![], prov_market_food: vec![], prov_prod_cache: vec![], hub_prov_share: vec![], prov_prod_goods: vec![], prov_governor: vec![],
             vessels: vec![], next_vessel_id: 0, fondacos: vec![],
             mine_deposits: vec![],
             culture_values: vec![],
@@ -8616,7 +8616,7 @@
             legitimacy: 0.5, cohesion: 0.5, founded_tick: 0, fallen_tick: 0,
             events: vec![], ruler: -1, regent: -1, family: vec![],
             tax_rates: [0.0, 0.0], tithe_last_year: 0.0, tax_farm: None,
-            founding_path: 0, government: 0,
+            founding_path: 0, government: 0, color: None, laws: RealmLaws::default(),
         });
         assert_eq!(s.choose_boycott_target(0, 0), Some(1),
             "no war anywhere ⇒ fall back to the threatening realm's capital");
@@ -9391,6 +9391,88 @@
         let mut idle = sim(vec![hub(0, 0.0, 0.0, 30_000.0, vec![0.0, 0.0], 0)], vec![good("wheat", 0, 0, 1.0, 0.8, true)]);
         idle.province_market_pass();
         assert_eq!(stock_of(&idle.hubs[0].stock, 0), 0.0);
+    }
+
+    #[test]
+    fn the_countryside_takes_over_raw_production_without_changing_the_total() {
+        // Step 3b. Two provinces, one equal town each; the land of province 0 is far
+        // richer in wheat. The takeover moves output toward the better land, but the
+        // world makes exactly as much wheat as the towns made on their own.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.8, true)];
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![120.0], 0), hub(1, 4.0, 0.0, 10_000.0, vec![120.0], 0)], goods);
+        s.hub_province = vec![0, 1];
+        s.prov_cap = vec![50_000.0, 50_000.0];
+        s.prov_rural = vec![40_000.0, 40_000.0];
+        s.prov_arable = vec![0.5, 0.5];
+        s.prov_forest = vec![0.2, 0.2];
+        s.prov_pasture = vec![0.2, 0.2];
+        s.prov_good_belt = vec![0.9, 0.1];
+        s.refresh_province_production();
+        assert!(s.prov_prod_goods[0], "wheat is a good the land can produce");
+        let own: f32 = s.hubs.iter().map(|h| h.base_per_capita[0] * h.population).sum();
+        let prov: f32 = s.prov_prod_cache.iter().sum();
+        assert!((prov - own).abs() < own * 1e-4, "conserved: {prov} vs {own}");
+        assert!(s.prov_prod_cache[0] > 3.0 * s.prov_prod_cache[1], "the better land grows more");
+    }
+
+    #[test]
+    fn a_start_realm_goes_live_with_its_provinces_and_the_crown_seats_governors() {
+        // Steps 4-5. Three towns in three provinces; the author drew one realm of the
+        // first two. It founds at town 0 with exactly those provinces, name and colour;
+        // the crown seats a governor in province 1 only (the capital has none), and at
+        // CROWN_DOSE 0 no treasury moves.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.8, true)];
+        let hubs = (0..3).map(|i| hub(i, i as f32 * 3.0, 0.0, 8_000.0, vec![100.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![0, 1, 2];
+        s.prov_realm = vec![-1; 3];
+        s.prov_seat = vec![[0.0, 0.0], [3.0, 0.0], [6.0, 0.0]];
+        let id = s.found_start_realm(0, "Kingdom of Test".into(), [10, 20, 30], &[0, 1]) as usize;
+        assert_eq!(s.prov_realm, vec![id as i32, id as i32, -1]);
+        assert_eq!(s.realms[id].name, "Kingdom of Test");
+        assert_eq!(s.realms[id].color, Some([10, 20, 30]));
+        assert_eq!(s.hubs[1].realm, id as i32, "the member town joins its crown");
+        let treasuries: Vec<f32> = s.hubs.iter().map(|h| h.treasury).collect();
+        let crown = s.realms[id].treasury;
+        s.crown_yearly_pass();
+        assert!(s.realms[id].laws.tax >= 1 && s.realms[id].laws.tax <= 3, "laws are seated");
+        assert_eq!(s.prov_governor[0].realm, -1, "the capital province has no governor");
+        assert_eq!(s.prov_governor[1].realm, id as i32, "a governor rules province 1");
+        assert!(!s.prov_governor[1].name.is_empty());
+        assert_eq!(s.prov_governor[2].realm, -1, "free land has none");
+        if crown::CROWN_DOSE <= 0.0 {
+            assert_eq!(s.hubs.iter().map(|h| h.treasury).collect::<Vec<_>>(), treasuries);
+            assert_eq!(s.realms[id].treasury, crown);
+        }
+        // A province the author gave twice stays with the first realm.
+        assert_eq!(s.found_start_realm(2, "Duchy".into(), [1, 2, 3], &[1, 2]) as usize, id + 1);
+        assert_eq!(s.prov_realm, vec![id as i32, id as i32, id as i32 + 1]);
+    }
+
+    #[test]
+    fn a_disloyal_governor_breaks_away_with_his_province() {
+        // Step 5. A realm of two provinces; the governor of the far one turns. His
+        // province leaves as its own one-province realm, chronicled; the old realm keeps
+        // its capital province.
+        let goods = vec![good("wheat", 0, 0, 1.0, 0.8, true)];
+        let hubs = (0..2).map(|i| hub(i, i as f32 * 3.0, 0.0, 8_000.0, vec![100.0], 0)).collect();
+        let mut s = sim(hubs, goods);
+        s.hub_province = vec![0, 1];
+        s.prov_realm = vec![-1; 2];
+        s.prov_seat = vec![[0.0, 0.0], [3.0, 0.0]];
+        let id = s.found_start_realm(0, "Old Crown".into(), [9, 9, 9], &[0, 1]) as usize;
+        s.crown_yearly_pass();
+        s.prov_governor[1].loyalty = 0.05;
+        s.prov_unrest = vec![0.0, 0.9];
+        assert!(s.breakaway_risk(1) > 0.6, "disloyal and restless: risk {}", s.breakaway_risk(1));
+        assert_eq!(s.breakaway_risk(0), 0.0, "the capital has no governor to turn");
+        s.governor_breaks_away(1);
+        let new = s.prov_realm[1];
+        assert!(new >= 0 && new as usize != id, "province 1 is its own realm now");
+        assert_eq!(s.realms[id].provinces, vec![0]);
+        assert_eq!(s.realms[new as usize].provinces, vec![1]);
+        assert_eq!(s.prov_governor[1].realm, -1, "the rebel rules; there is no governor");
+        assert!(s.journal.iter().any(|j| j.kind == "breakaway"));
     }
 
     #[test]
@@ -10905,7 +10987,7 @@
             ],
             ruler: -1, regent: -1, family: vec![],
             tax_rates: [0.0, 0.0], tithe_last_year: 0.0, tax_farm: None,
-            founding_path: 0, government: 0,
+            founding_path: 0, government: 0, color: None, laws: RealmLaws::default(),
         });
         s.push_prov_event(0, 0, "granted", "A house is granted the writ".into());
         s.push_prov_event(0, 0, "dearth", "A poor harvest".into());

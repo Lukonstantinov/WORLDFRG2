@@ -320,6 +320,10 @@ export function ProvincePanel() {
           style={{ ...btn, background: busy || campaignActive ? "#342c1e" : "#5a4a2e", opacity: campaignActive ? 0.5 : 1 }}>
           {busy ? "…" : provinces.length ? "Regenerate" : "Generate"}
         </button>
+        {provinces.length > 0 && !campaignActive && (
+          <button onClick={() => useUIStore.getState().setShowStates(true)} style={btn}
+            title="The countries generated with these provinces: recolour, rename, assign provinces, and choose what a new campaign does with them">👑 Starting realms</button>
+        )}
         {provinces.length > 0 && (
           <button onClick={mergeSmall} disabled={busy || campaignActive}
             title={campaignActive ? "Locked: a campaign is running — provinces are frozen"

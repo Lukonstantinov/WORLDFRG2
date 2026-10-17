@@ -748,6 +748,8 @@ impl CampaignSim {
             self.realm_expansion_pass(yr_now);
             self.realm_vassalage_pass(yr_now);
             self.realm_secession_pass(yr_now);
+            // Step 5 · laws, governors (skim, replacement, breakaway), town fees.
+            self.crown_yearly_pass();
             self.collect_realm_levies();
             for ri in 0..self.realms.len() { self.decide_realm_taxes(ri, self.tick / TICKS_PER_YEAR); }
             self.assign_realm_ranks();

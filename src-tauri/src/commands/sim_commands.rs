@@ -1630,6 +1630,8 @@ fn generate_and_persist_provinces(
     metadata::set_meta(conn, "provinces",
         &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    // Steps 4-6 · every set of provinces comes with random starting realms to edit.
+    crate::commands::campaign_commands::roll_start_realms(conn, provinces.len() as u64 ^ 0x5EA1_C0DE)?;
 
     // Downsample the id map for transport / overlay. A finer cap gives crisper
     // province borders on the map (fewer stair-steps) at a modest payload cost.
@@ -1836,6 +1838,8 @@ pub fn repair_province_settlements(
     metadata::set_meta(&conn, "provinces",
         &serde_json::to_string(&provinces).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    // Steps 4-6 · every set of provinces comes with random starting realms to edit.
+    crate::commands::campaign_commands::roll_start_realms(&conn, provinces.len() as u64 ^ 0x5EA1_C0DE)?;
 
     Ok(ProvinceRepairReport {
         provinces: provinces.len(),
@@ -1908,6 +1912,8 @@ pub fn sim_merge_small_provinces(
     metadata::set_meta(&conn, "provinces",
         &serde_json::to_string(&new_provinces).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    // Steps 4-6 · every set of provinces comes with random starting realms to edit.
+    crate::commands::campaign_commands::roll_start_realms(&conn, new_provinces.len() as u64 ^ 0x5EA1_C0DE)?;
 
     let cap = 768u32;
     let step = ((w.max(h) + cap - 1) / cap).max(1);
@@ -2001,6 +2007,8 @@ pub fn sim_split_large_provinces(
     metadata::set_meta(&conn, "provinces",
         &serde_json::to_string(&new_provinces).map_err(|e| e.to_string())?)
         .map_err(|e| e.to_string())?;
+    // Steps 4-6 · every set of provinces comes with random starting realms to edit.
+    crate::commands::campaign_commands::roll_start_realms(&conn, new_provinces.len() as u64 ^ 0x5EA1_C0DE)?;
     let cap = 768u32;
     let step = ((w.max(h) + cap - 1) / cap).max(1);
     let rw = (w + step - 1) / step;

@@ -229,3 +229,92 @@ land (today only land inside a city's 50-120 km circle produces), sold to its ma
 towns — the largest economic change of the plan, walked in doses with `econ_` per step.
 Then 3c (rural workforce staffs mines and estates), 4 (realms at world end), 5 (crown
 council, laws, governors), 6 (the one window).
+
+**Step 3b: the countryside takes over raw production (2026-10-17, done).** Each town's
+own catchment rate is blended (`PROVINCE_PRODUCTION_DOSE`) with its population share of
+its province's countryside output: `province_good_potential` (belt × land use × depletion)
+× workforce (`prov_rural / prov_cap`, clamped 0.2..1.5), refreshed yearly
+(`refresh_province_production`). **The first cut failed** the inheritance gate at 1.0
+(419/419 tick tests passed, `econ_` 5/6): the potential is calibrated to *mean
+exploitation ≈ 1*, not to the towns' totals, so the takeover changed how much of each good
+the world made, not just where. **Fix:** each good's provincial output is rescaled to sum
+to exactly what the towns made on their own (`prov_prod_goods` marks goods the land can
+produce; others stay with the towns). The takeover moves output toward better land and a
+fuller workforce and never changes the total. Shipped at **1.0**: `tick::tests` 419/419,
+`econ_` 6/6 (partible 82533/85359/64485 vs primogeniture 93544/105556/85893 per seed).
+Gate: `the_countryside_takes_over_raw_production_without_changing_the_total`.
+
+**Step 4: starting realms (2026-10-17, done).** `sim/shared/start_realms.rs`: whenever
+provinces are generated, edited or merged, `generate_start_realms` groups them into
+contiguous realms of random size (about 30% single-province free cities, the rest
+2..16 provinces), each with a palette colour no neighbour uses, a capital (the most
+populous province) and a name by size (Free City · County · Duchy · Kingdom), stored as
+metadata `start_realms`. Commands `get/set/regenerate_start_realms`,
+`get/set_realm_start_mode` ("continue" · "random" · "zero"). At campaign start
+`apply_start_realms` makes them live through `found_start_realm` (a commonwealth founded
+at the capital's seat, then given exactly the authored provinces, name and colour);
+`Realm.color` now drives the map tint (`compute_states`). Gates:
+`start_realms_cover_every_province_once_contiguously_with_varied_sizes`,
+`a_start_realm_goes_live_with_its_provinces_and_the_crown_seats_governors`. The seed is
+mixed with splitmix64 first: the plain `seed | 1` made seeds 42 and 43 identical, which
+the test caught.
+
+**Step 6: the one realm window (2026-10-17, built; not yet seen in a running app).**
+`ui/campaign/RealmWindow.tsx` replaces the Realms panel (same toggle, `uiStore.showStates`)
+and follows mock-up v2. On the left, a realm map drawn from the province raster, with Fill
+(Realms · Cultures · Public order) and Show (Borders · Goods exports · Cities ·
+Country → market). On the right, tabs: Overview · Government · Provinces · Goods. A
+breadcrumb runs Realm › Province › town: click a province to open it (Province ·
+Government tabs), then its town to open the city's own council (`CouncilChamber`).
+Everything comes from one read, `campaign_realm_overview`: province rows with top-3
+exports, the realm's goods surplus/deficit, cultures, economy index, power and its word,
+the council, laws and governors. **Before a campaign** the same window edits the world's
+starting realms: recolour from the 16-colour palette or a free picker, rename, assign
+provinces by clicking the map, add a new realm, regenerate, and choose the campaign-start
+mode. It opens from the Provinces browser ("👑 Starting realms"). The royal council is
+derived where it is read (the ruler, kin, the richest houses, a famous notable, and a
+delegate of the largest member city), so it cannot move the economy.
+
+**Step 3c: the countryside staffs mines and estates (2026-10-17, done).** An estate's
+output (mine, plantation, vineyard…) scales with its province's workforce,
+`prov_rural / prov_cap` clamped 0.2..1.5 (`ESTATE_WORKFORCE_DOSE`): a mine in an emptied
+province slows and one in a crowded province runs full. An estate with no province data
+counts as fully staffed. Walked at 1.0: `tick::tests` 422/422, `econ_` 6/6; the numbers
+moved (partible 73563 vs primogeniture 111250), so the gate did test it. Shipped at 1.0.
+
+**Step 5: the crown's government (2026-10-17, done).** `tick/crown.rs`, yearly after
+the realm consolidation passes:
+- **Laws** per realm (`Realm.laws`), seated once from the realm's seed: crown tax and
+  levies (light · moderate · heavy), succession, trade policy, the town fee, and minority
+  tolerance.
+- **Governors** for every province of a realm except the capital's
+  (`CampaignSim.prov_governor`), named in the province's own culture, with loyalty and
+  honesty. Loyalty drifts with the realm's cohesion and the province's unrest.
+  - A dishonest governor SKIMS up to a quarter of the crown's dues. The skim stays in the
+    seat town's treasury (he lives there), so no money vanishes.
+  - The crown REPLACES a disloyal or greedy governor, and the realm chronicle records it.
+  - A disloyal governor over restless people far from the capital may BREAK AWAY. His
+    province becomes its own one-province realm, at most one a year world-wide.
+- **Money:** the tax law scales what the crown collects (×0.8 / ×1 / ×1.25). Member
+  cities (never the seat) pay the crown a town fee of 1-4% of their treasury a year. They
+  always keep their own councils.
+
+`CROWN_DOSE` was walked 0 → 1.0: `tick::tests` 421/421 and `econ_` 6/6 at both, with
+**identical** `econ_` numbers. **No economy fixture has a realm holding provinces under a
+governor, so the gate cannot see this mechanism.** It is shipped at 1.0, and
+`a_disloyal_governor_breaks_away_with_his_province` and
+`a_start_realm_goes_live_with_its_provinces_and_the_crown_seats_governors` are what test
+it.
+
+The **royal council** has no state of its own. It is derived when read (step 6), so it
+cannot move the economy.
+
+**Queued (rule 36):**
+- Q-R1: levy, succession, trade-policy and tolerance laws have NO effect yet. They are
+  shown, not enforced. Each needs its reader (levy → `raise_manpower_levy`; succession →
+  `realm_family_pass`; trade → tariffs in `dispatch`; tolerance → row 05's acceptance
+  drift) and its own dose walk.
+- Q-R2: an economy fixture with start realms, so `econ_` can actually measure `CROWN_DOSE`.
+- Q-R3: the player cannot yet change a law or dismiss a governor. These are verbs, the
+  `campaign_set_province_tax` pattern.
+- Q-R4: the realm window has not been opened in a running app.

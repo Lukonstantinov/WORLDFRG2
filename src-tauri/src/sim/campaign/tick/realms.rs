@@ -474,6 +474,7 @@ impl CampaignSim {
             ruler: -1, regent: -1, family: Vec::new(),
             tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
             founding_path: path, government: REALM_GOV_CIVIC,
+            color: None, laws: RealmLaws::default(),
         };
         self.realms.push(realm);
 
@@ -795,6 +796,29 @@ impl CampaignSim {
     /// Attach province `p` to realm `ri`, with its seat city. The ONE place
     /// territory is added, so expansion, integration and war can never drift on
     /// what "gaining a province" means.
+    /// A realm the world's author drew (start_realms.rs), made live at campaign start:
+    /// founded like a commonwealth at `seat`, then given exactly the authored provinces,
+    /// name and colour. A province another realm already holds is left with it.
+    pub(crate) fn found_start_realm(&mut self, seat: usize, name: String, color: [u8; 3], provinces: &[u32]) -> u32 {
+        if self.hubs.get(seat).map(|h| h.realm >= 0).unwrap_or(true) { return u32::MAX; }
+        let id = self.found_civic_realm(seat, self.tick / TICKS_PER_YEAR, 0);
+        let ri = id as usize;
+        for p in std::mem::take(&mut self.realms[ri].provinces) {
+            if !provinces.contains(&p) { self.prov_realm[p as usize] = -1; } else { self.realms[ri].provinces.push(p); }
+        }
+        for &p in provinces {
+            if self.prov_realm.get(p as usize).copied().unwrap_or(0) < 0 { self.attach_province(ri, p as usize); }
+        }
+        let n = self.realms[ri].provinces.len();
+        let rank = if n >= 12 { REALM_GREAT_POWER } else if n >= 3 { REALM_KINGDOM } else { REALM_CITY_STATE };
+        let r = &mut self.realms[ri];
+        r.rank = rank;
+        r.title = realm_title_for(rank, REALM_GOV_CIVIC, id as u64);
+        r.name = name;
+        r.color = Some(color);
+        id
+    }
+
     fn attach_province(&mut self, ri: usize, p: usize) {
         if p >= self.prov_realm.len() { return; }
         self.prov_realm[p] = ri as i32;
@@ -1266,6 +1290,7 @@ impl CampaignSim {
             ruler: 0, regent: -1, family: vec![founder],
             tax_rates: [0.0; 2], tithe_last_year: 0.0, tax_farm: None,
             founding_path: path, government: REALM_GOV_DYNASTIC,
+            color: None, laws: RealmLaws::default(),
         };
         self.realms.push(realm);
 
@@ -1762,6 +1787,7 @@ impl CampaignSim {
                 // partition splits a state, it does not re-found one.
                 founding_path: self.realms[ri].founding_path,
                 government: self.realms[ri].government,
+                color: None, laws: self.realms[ri].laws,
             };
             self.realms.push(new_realm);
             for &p in &heir_provs {
