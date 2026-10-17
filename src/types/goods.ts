@@ -76,6 +76,8 @@ export interface GoodSpec {
   reach_km?: number | null;
   /** G4 · author-pinned homeland cells [x, y], one per origin (empty = auto). */
   homeland?: [number, number][];
+  /** Author-drawn 24×24 icon: 576 × `rrggbb` (`......` = empty). Mirrors `GoodSpec.pixels`. */
+  pixels?: string | null;
 }
 
 export type GoodRole = "staple" | "essential" | "strategic" | "comfort" | "luxury" | "treasure";

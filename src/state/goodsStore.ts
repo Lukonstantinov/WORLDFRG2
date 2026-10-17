@@ -4,6 +4,7 @@ import {
   getGoodsSpec, setGoodsSpec, getGoodsLibrary, saveGoodsLibrary, defaultGoods,
 } from "@bridge";
 import { GOOD_DEFS } from "@goods";
+import { registerCustomIcons } from "@canvas/goodIconCache";
 
 /** Fallback metadata from the static defaults (used before specs are fetched). */
 const FALLBACK = new Map(GOOD_DEFS.map((g) => [g.name, g]));
@@ -131,3 +132,6 @@ export const useGoodsStore = create<GoodsStore>((set, get) => ({
     return fb ? { name: fb.label, icon: fb.emoji, color: fb.color } : { name: id, icon: "\u{1F4E6}", color: "#cccccc" };
   },
 }));
+
+// Author-drawn icons (Goods Builder) are drawn app-wide as soon as specs load or change.
+useGoodsStore.subscribe((s) => registerCustomIcons(s.specs));

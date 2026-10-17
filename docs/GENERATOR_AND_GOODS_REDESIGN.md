@@ -900,3 +900,26 @@ The Deposits map layer shows the campaign's own discoveries while a campaign run
 (refetched each year). Every working in the existing test fixtures is known, so the pass
 is a no-op there. Gates: new `deposits_are_discovered_near_towns_and_deep_ones_wait_for_technology`,
 `tick::tests`, `econ_`, tsc, check_types 0 drift.
+
+**Slice G6: the Goods Builder (2026-10-17, done; not yet seen in the running app).** The
+goods editor (`ui/goods/GoodsEditor.tsx`) is now the **Goods Builder** of §9.5:
+- **Presets** that only switch goods on/off (nothing is deleted): Minimal (10: one per
+  essential need, a wine, a spice, silver, gold), Classic (~40 medieval), Spice Age
+  (every shipped good). **My roster** saves and re-applies your own set (per user).
+- **Essential needs check**: six chips (staple grain, protein, preservative, fibre, fuel &
+  building, tool metal), ✓ with the goods covering it, ⚠ when nothing switched on does.
+- **Goods grouped by Role** (Staples … Treasure) with a search box; each row shows value
+  tier, difficulty stars, reach (📍 when a homeland is pinned) and origin. Domain,
+  distribution, rarity and desire moved into the good's card with the six properties,
+  reach slider, homeland pin and the climate envelope.
+- **Icon editor** (`PixelIconEditor.tsx`): a 24×24 pixel grid with ink/eraser, "start
+  from" any shipped icon, "recolour body", and image upload (shrunk to 22×22, cut to 8
+  colours, given the dark house outline). Stored as `GoodSpec.pixels`; `goodArt`
+  draws it in place of the shipped sprite everywhere in the app (`setCustomPixels`,
+  registered whenever specs load).
+- **World balance** tab (`WorldBalance.tsx`): per good, towns producing it, year-0
+  output, share of all output value, workings known/total; headline treasure share of
+  output value, silver-per-gold output ratio, gold towns and known gold workings.
+Gates: tsc clean, check_types 0 drift, `cargo check --lib --tests`.
+**Queued (rule 36):** per-region needs and a regional gold:silver ratio in World balance
+(needs a region id on each economy hub); the Culture values tab (slice G7).

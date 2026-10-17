@@ -2,9 +2,22 @@
 // `GoodIcon` — the sprite is already cached by `goodSprite`, this caches the
 // scaled blit so a list of every good costs one drawImage per row.
 
-import { drawPixelIcon } from "./goodArt";
+import { drawPixelIcon, setCustomPixels } from "./goodArt";
 
 const cache = new Map<string, HTMLCanvasElement>();
+
+/** Register every spec's author-drawn icon (Goods Builder) and drop the stale
+ *  blits, so each icon redraws with it everywhere in the app. */
+const lastPixels = new Map<string, string | null>();
+export function registerCustomIcons(specs: { id: string; pixels?: string | null }[]) {
+  for (const s of specs) {
+    const enc = s.pixels ?? null;
+    if ((lastPixels.get(s.id) ?? null) === enc) continue;
+    lastPixels.set(s.id, enc);
+    setCustomPixels(s.id, enc);
+    for (const k of [...cache.keys()]) if (k.startsWith(s.id + ":")) cache.delete(k);
+  }
+}
 
 /** Rasterise (or fetch) one good's icon. `size` is the CSS size in px; the
  *  returned canvas is `size * scale` device px square. */

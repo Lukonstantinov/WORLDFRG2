@@ -293,7 +293,7 @@ fn build_good(sec: &RawSection, report: &mut ImportReport) -> Option<GoodSpec> {
         perishable,
         inputs: Vec::new(),
         labor: 1.0,
-        consumption_interval: if network_luxury { 180.0 } else { 45.0 }, dna: None, reach_km: None, homeland: Vec::new(),
+        consumption_interval: if network_luxury { 180.0 } else { 45.0 }, dna: None, reach_km: None, homeland: Vec::new(), pixels: None,
     })
 }
 
@@ -425,7 +425,7 @@ mod tests {
             rarity: 0.5, desire: 0.5, network_luxury: false, builtin: true, deposit: None, scoring: None,
             marine_band: crate::sim::goods_spec::MarineBand::Either,
             category: "metal".into(), need_tier: 1, base_value: 3.0, bulk: 1.0, perishable: 0.0,
-            inputs: Vec::new(), labor: 1.0, consumption_interval: 45.0, dna: None, reach_km: None, homeland: Vec::new(),
+            inputs: Vec::new(), labor: 1.0, consumption_interval: 45.0, dna: None, reach_km: None, homeland: Vec::new(), pixels: None,
         }];
         let (parsed, mut report) = parse_goods_txt("[iron]\nname = New Iron\n");
         merge_add_only(&mut existing, parsed, &mut report);

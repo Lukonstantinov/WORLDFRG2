@@ -5,6 +5,8 @@ import { useWorldStore } from "@state/worldStore";
 import { previewGoodScore, importGoodsTxt } from "@bridge";
 import type { GoodSpec, GoodDomain, GoodDistribution, GoodEnvelope, RecipeInput, GoodDna, GoodRole, GoodOrigin, GoodKeeping } from "@types";
 import { GoodIcon } from "./GoodIcon";
+import { PixelIconEditor } from "./PixelIconEditor";
+import { WorldBalance } from "./WorldBalance";
 
 const DOMAINS: GoodDomain[] = ["marine", "coastal", "continental", "island"];
 const CATEGORIES = ["cereal", "protein", "oil", "fiber", "drink", "sweetener", "preservative", "metal", "bullion", "gem", "construction", "dye", "aromatic", "craft", "prestige", "livestock", "manufacture", "misc"] as const;
@@ -29,6 +31,37 @@ const KEEPINGS: GoodKeeping[] = ["perishable", "seasonal", "storable", "eternal"
 const TIERS = ["Bulk ×1", "Common ×3-10", "Valuable ×30-100", "Precious ×300-1,000", "Treasure ×2,000+"];
 /** Shown while a spec has no `dna` yet (the backend fills it on load). */
 const DNA_FALLBACK: GoodDna = { role: "comfort", origin: "grown", tier: 1, difficulty: 2, keeping: "storable" };
+
+/** Builder presets (plan §4.5): which goods are switched on. Presets only toggle
+ *  `enabled`; nothing is deleted, so switching back is always possible. */
+const PRESET_MINIMAL = ["wheat", "stockfish", "salt", "wool_fleece", "timber", "iron", "wine", "pepper", "silver", "gold"];
+const PRESET_CLASSIC = [...PRESET_MINIMAL, "barley", "rice", "herring", "bay_salt", "flax", "hides", "copper", "tin", "lead",
+  "horses", "oliveoil", "honey", "beer", "furs", "amber", "cinnamon", "silk", "incense", "pearls", "ruby", "marble",
+  "cloth", "linen", "leather_goods", "metalware", "armour", "ceramics", "jewelry"];
+/** Shipped disabled as duplicates or out of period (`default_list`). */
+const RETIRED = ["tobacco", "frankincense", "indigo", "gemstones", "dyes"];
+const ROSTER_KEY = "wf2.goodsRoster";
+const PRESETS: { label: string; hint: string; ids: (all: GoodSpec[]) => Set<string> }[] = [
+  { label: "Minimal", hint: "about ten goods: one per essential need, a wine, a spice, silver and gold", ids: () => new Set(PRESET_MINIMAL) },
+  { label: "Classic", hint: "about forty goods of a medieval world", ids: () => new Set(PRESET_CLASSIC) },
+  { label: "Spice Age", hint: "every shipped good (the default)", ids: (all) => new Set(all.map((g) => g.id).filter((id) => !RETIRED.includes(id))) },
+];
+const ROLE_LABEL: Record<GoodRole, string> = {
+  staple: "Staples — eaten every day", essential: "Essentials — salt, fibre, fuel, building",
+  strategic: "Strategic — tools, war and ships", comfort: "Comforts — bought when there is money",
+  luxury: "Luxuries — status and pleasure, carried far", treasure: "Treasure — hoarded, minted, given",
+};
+/** The six essential needs (plan §4.5): a world lacking one cannot grow cities. */
+const NEEDS: { label: string; ok: (g: GoodSpec) => boolean }[] = [
+  { label: "Staple grain", ok: (g) => g.category === "cereal" },
+  { label: "Protein", ok: (g) => g.category === "protein" },
+  { label: "Preservative", ok: (g) => g.category === "preservative" },
+  { label: "Fibre", ok: (g) => g.category === "fiber" && (g.dna?.role === "essential" || g.dna?.role === "staple") },
+  { label: "Fuel & building", ok: (g) => g.category === "construction" || g.category === "fuel" },
+  { label: "Tool metal", ok: (g) => g.category === "metal" && g.distribution !== "manufactured" },
+];
+const STARS = (n: number) => "★".repeat(n) + "☆".repeat(Math.max(0, 5 - n));
+const TIER_SHORT = ["Bulk", "Common", "Valuable", "Precious", "Treasure"];
 
 // Climate presets → Köppen zone codes (see sim/koppen.rs).
 const CLIMATE_PRESETS: { label: string; codes: number[] }[] = [
@@ -55,7 +88,7 @@ const btn: React.CSSProperties = {
 };
 const primaryBtn: React.CSSProperties = { ...btn, background: "#8d7448", borderColor: "#a88a57", color: "#fff" };
 const row: React.CSSProperties = {
-  display: "grid", gridTemplateColumns: "20px 22px 1.4fr 0.9fr 0.9fr 1fr 1fr 60px 56px",
+  display: "grid", gridTemplateColumns: "20px 22px 1.5fr 0.8fr 0.8fr 0.9fr 0.8fr 56px",
   gap: 6, alignItems: "center", padding: "4px 0", borderBottom: "1px solid #342e25",
 };
 const input: React.CSSProperties = {
@@ -72,8 +105,13 @@ export function GoodsEditor() {
   } = useGoodsStore();
   const [expanded, setExpanded] = useState<number | null>(null);
   const [status, setStatus] = useState("");
+  const [query, setQuery] = useState("");
+  const [tab, setTab] = useState<"goods" | "balance">("goods");
 
   useEffect(() => { if (editorOpen && specs.length === 0) void loadFromWorld(); }, [editorOpen, specs.length, loadFromWorld]);
+  // Load the world's goods on open too, so author-drawn icons show everywhere.
+  const worldName = useWorldStore((s) => s.meta?.name ?? null);
+  useEffect(() => { if (worldName) void loadFromWorld(); }, [worldName, loadFromWorld]);
 
   if (!editorOpen) return null;
 
@@ -108,12 +146,41 @@ export function GoodsEditor() {
   };
 
   const enabledCount = specs.filter((s) => s.enabled).length;
+  const applyIds = (ids: Set<string>) => specs.forEach((g, i) => {
+    if (g.enabled !== ids.has(g.id)) update(i, { enabled: ids.has(g.id) });
+  });
+  const saveRoster = () => {
+    try { localStorage.setItem(ROSTER_KEY, JSON.stringify(specs.filter((g) => g.enabled).map((g) => g.id))); setStatus("Saved as My roster"); }
+    catch { setStatus("Could not save the roster"); }
+  };
+  const loadRoster = () => {
+    try {
+      const ids = JSON.parse(localStorage.getItem(ROSTER_KEY) ?? "null") as string[] | null;
+      if (ids) { applyIds(new Set(ids)); setStatus("Applied My roster"); } else setStatus("No roster saved yet");
+    } catch { setStatus("Could not read the roster"); }
+  };
+  const on = specs.filter((g) => g.enabled);
+  const q = query.trim().toLowerCase();
+  const groups = ROLES.map((role) => ({
+    role,
+    rows: specs.map((g, i) => ({ g, i }))
+      .filter(({ g }) => (g.dna?.role ?? "comfort") === role)
+      .filter(({ g }) => !q || g.name.toLowerCase().includes(q) || g.id.includes(q))
+      .sort((a, b) => a.g.name.localeCompare(b.g.name)),
+  })).filter((grp) => grp.rows.length > 0);
 
   return (
     <div style={panel} onClick={() => setOpen(false)}>
       <div style={sheet} onClick={(e) => e.stopPropagation()}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-          <strong style={{ fontSize: 14 }}>Trade Goods Library</strong>
+          <span style={{ display: "flex", gap: 10, alignItems: "center" }}>
+            <strong style={{ fontSize: 14 }}>Goods Builder</strong>
+            {(["goods", "balance"] as const).map((t) => (
+              <button key={t} style={{ ...btn, background: tab === t ? "#5a4a30" : btn.background }} onClick={() => setTab(t)}>
+                {t === "goods" ? "Goods" : "World balance"}
+              </button>
+            ))}
+          </span>
           <span style={{ color: "#9d917d" }}>
             {enabledCount} enabled · {specs.length} total{dirty ? " · unsaved" : ""}
           </span>
@@ -131,22 +198,60 @@ export function GoodsEditor() {
           <button style={btn} onClick={() => setOpen(false)}>Close</button>
         </div>
 
-        <div style={{ ...row, fontWeight: 600, color: "#b5a68d", borderBottom: "1px solid #564c3b" }}>
-          <span>On</span><span></span><span>Name</span><span>Domain</span><span>Dist.</span>
-          <span>Rarity</span><span>Desire</span><span>Lux</span><span></span>
+        {tab === "balance" ? <WorldBalance specs={specs} /> : (<>
+        <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+          <span style={{ color: "#b5a68d" }}>Preset</span>
+          {PRESETS.map((pr) => (
+            <button key={pr.label} style={btn} title={pr.hint}
+              onClick={() => { applyIds(pr.ids(specs)); setStatus(`Applied ${pr.label}`); }}>{pr.label}</button>
+          ))}
+          <span style={{ color: "#564c3b" }}>|</span>
+          <button style={btn} title="Switch on exactly the goods you saved" onClick={loadRoster}>My roster</button>
+          <button style={btn} title="Remember the goods switched on now as My roster" onClick={saveRoster}>Save as my roster</button>
+          <div style={{ flex: 1 }} />
+          <input style={{ ...input, width: 160 }} placeholder="Find a good…" value={query} onChange={(e) => setQuery(e.target.value)} />
         </div>
 
-        {specs.map((g, i) => (
-          <GoodRow
-            key={`${g.id}_${i}`} g={g} i={i} expanded={expanded === i}
-            onToggleExpand={() => setExpanded(expanded === i ? null : i)}
-            update={update} duplicate={duplicate} remove={remove} allSpecs={specs}
-          />
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}
+          title="A world needs at least one good for each of these, or its cities cannot grow. Checked for the whole world; per region comes with the world-balance view.">
+          {NEEDS.map((n) => {
+            const have = on.filter(n.ok);
+            return (
+              <span key={n.label} style={{
+                padding: "2px 7px", borderRadius: 10, fontSize: 11,
+                background: have.length ? "#22311f" : "#3a2a17", border: `1px solid ${have.length ? "#4c6a3f" : "#8a6a30"}`,
+                color: have.length ? "#bfe0a8" : "#f0c070",
+              }} title={have.length ? have.map((g) => g.name).join(", ") : "nothing switched on covers this need"}>
+                {have.length ? "✓" : "⚠"} {n.label}{have.length ? ` · ${have.length}` : ""}
+              </span>
+            );
+          })}
+        </div>
+
+        <div style={{ ...row, fontWeight: 600, color: "#b5a68d", borderBottom: "1px solid #564c3b" }}>
+          <span>On</span><span></span><span>Name</span><span>Value</span><span>Difficulty</span>
+          <span>Reach</span><span>Origin</span><span></span>
+        </div>
+
+        {groups.map((grp) => (
+          <div key={grp.role}>
+            <div style={{ marginTop: 10, padding: "3px 0", color: "#d8c49a", fontWeight: 600, borderBottom: "1px solid #4a4031" }}>
+              {ROLE_LABEL[grp.role]} <span style={{ color: "#8a7d66", fontWeight: 400 }}>· {grp.rows.filter(({ g }) => g.enabled).length}/{grp.rows.length} on</span>
+            </div>
+            {grp.rows.map(({ g, i }) => (
+              <GoodRow
+                key={`${g.id}_${i}`} g={g} i={i} expanded={expanded === i}
+                onToggleExpand={() => setExpanded(expanded === i ? null : i)}
+                update={update} duplicate={duplicate} remove={remove} allSpecs={specs}
+              />
+            ))}
+          </div>
         ))}
+        </>)}
 
         <div style={{ marginTop: 8, color: "#9d917d", minHeight: 16 }}>{status}</div>
         <div style={{ marginTop: 4, color: "#7b715f", fontSize: 10 }}>
-          Apply to world, then re-run the Biological-Trade step to regenerate goods with these settings.
+          Apply to world, then re-run the Resources stage to place goods with these settings.
           Built-in goods keep their original scoring unless duplicated into a custom good.
         </div>
       </div>
@@ -160,21 +265,17 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
   duplicate: (i: number) => void; remove: (i: number) => void; allSpecs: GoodSpec[];
 }) {
   const manufactured = g.distribution === "manufactured";
+  const [drawIcon, setDrawIcon] = useState(false);
   return (
     <>
       <div style={row}>
         <input type="checkbox" checked={g.enabled} onChange={(e) => update(i, { enabled: e.target.checked })} />
         <GoodIcon name={g.id} color={g.color} size={20} title={g.id} />
         <input style={input} value={g.name} onChange={(e) => update(i, { name: e.target.value })} />
-        <select style={input} value={g.domain} onChange={(e) => update(i, { domain: e.target.value as GoodDomain })}>
-          {DOMAINS.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        <select style={input} value={g.distribution} onChange={(e) => update(i, { distribution: e.target.value as GoodDistribution })}>
-          {DISTRIBUTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
-        </select>
-        <Slider value={g.rarity} onChange={(v) => update(i, { rarity: v })} />
-        <Slider value={g.desire} onChange={(v) => update(i, { desire: v })} />
-        <input type="checkbox" checked={g.network_luxury} onChange={(e) => update(i, { network_luxury: e.target.checked })} />
+        <span style={{ color: "#c8b48a" }} title={TIERS[g.dna?.tier ?? 1]}>{TIER_SHORT[g.dna?.tier ?? 1]}</span>
+        <span style={{ color: "#e0b050", letterSpacing: -1 }} title={`difficulty ${g.dna?.difficulty ?? 2} of 5`}>{STARS(g.dna?.difficulty ?? 2)}</span>
+        <span style={{ color: "#9db0c0" }}>{manufactured ? "made in cities" : g.distribution === "deposits" ? "deposits" : REACHES[reachIndex(g)].label}{g.homeland?.length ? " 📍" : ""}</span>
+        <span style={{ color: "#a99c84" }}>{g.dna?.origin ?? "—"}</span>
         <div style={{ display: "flex", gap: 3 }}>
           <button style={{ ...btn, padding: "2px 5px" }} title="Icon / color / envelope" onClick={onToggleExpand}>⋯</button>
           {!g.builtin && <button style={{ ...btn, padding: "2px 5px", color: "#e08080" }} title="Delete" onClick={() => remove(i)}>✕</button>}
@@ -182,11 +283,28 @@ function GoodRow({ g, i, expanded, onToggleExpand, update, duplicate, remove, al
       </div>
       {expanded && (
         <div style={{ padding: "8px 6px 12px 28px", borderBottom: "1px solid #342e25", display: "flex", flexWrap: "wrap", gap: 14 }}>
-          <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            Icon <input style={{ ...input, width: 50 }} value={g.icon} onChange={(e) => update(i, { icon: e.target.value })} />
-          </label>
+          <button style={btn} title="Draw this good's icon, start from another, or upload an image" onClick={() => setDrawIcon(!drawIcon)}>
+            {drawIcon ? "Close icon editor" : "✎ Draw icon"}
+          </button>
+          {drawIcon && <PixelIconEditor id={g.id} color={g.color} pixels={g.pixels} onChange={(pixels) => update(i, { pixels })} />}
           <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
             Color <input type="color" value={g.color} onChange={(e) => update(i, { color: e.target.value })} />
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }} title="Where it can grow at all (distribution, below, says how far it spreads)">
+            Domain <select style={input} value={g.domain} onChange={(e) => update(i, { domain: e.target.value as GoodDomain })}>
+              {DOMAINS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
+            Distribution <select style={input} value={g.distribution} onChange={(e) => update(i, { distribution: e.target.value as GoodDistribution })}>
+              {DISTRIBUTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
+            </select>
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center", width: 170 }} title="Higher = a smaller, harder-to-seed belt">
+            Rarity <Slider value={g.rarity} onChange={(v) => update(i, { rarity: v })} />
+          </label>
+          <label style={{ display: "flex", gap: 4, alignItems: "center", width: 170 }} title="How much people want it">
+            Desire <Slider value={g.desire} onChange={(v) => update(i, { desire: v })} />
           </label>
           <label style={{ display: "flex", gap: 4, alignItems: "center" }}>
             <input type="checkbox" checked={g.network_luxury} onChange={(e) => update(i, { network_luxury: e.target.checked })} /> network luxury

@@ -665,6 +665,31 @@ const SPR: Record<string, (g: Painter, T: Ramp) => void> = {
 interface Sprite { cv: HTMLCanvasElement; lit: HTMLCanvasElement; lum: number; known: boolean }
 const CACHE = new Map<string, Sprite>();
 
+/** Author-drawn icons (Goods Builder): finished 24×24 pixels per good name, used in
+ *  place of the shipped sprite. Encoded as 576 × `rrggbb` (or `......` = empty). */
+const CUSTOM = new Map<string, (string|null)[]>();
+export function decodePixels(enc:string):(string|null)[]{
+  const out:(string|null)[]=[];
+  for(let i=0;i<N*N;i++){ const c=enc.slice(i*6,i*6+6); out.push(/^[0-9a-f]{6}$/i.test(c)?"#"+c:null); }
+  return out;
+}
+export function encodePixels(px:(string|null)[]):string{
+  return px.map(c=>c?c.replace("#","").slice(0,6).padEnd(6,"0"):"......").join("");
+}
+/** Use (or with null, stop using) an author-drawn icon for `name`. */
+export function setCustomPixels(name:string,enc:string|null|undefined){
+  const had=CUSTOM.has(name);
+  if(enc) CUSTOM.set(name,decodePixels(enc)); else CUSTOM.delete(name);
+  if(had||enc) for(const k of [...CACHE.keys()]) if(k.startsWith(name+"|")) CACHE.delete(k);
+}
+/** The finished pixels the app draws for `name` (custom, shipped or the crate). */
+export function spritePixels(name:string,color:string):(string|null)[]{
+  const c=CUSTOM.get(name); if(c) return c.slice();
+  const g=painter(); (SPR[name]||SPR.__crate)(g,ramp(color||"#9a8a70")); return finish(g.b);
+}
+/** The dark house outline every shipped sprite gets, for an uploaded image. */
+export function outlinePixels(px:(string|null)[]):(string|null)[]{ return finish(px); }
+
 function finish(b:(string|null)[]){
   const out=b.slice(), at=(x:number,y:number)=>x<0||y<0||x>=N||y>=N?null:b[y*N+x];
   for(let y=0;y<N;y++)for(let x=0;x<N;x++){ if(b[y*N+x]) continue;
@@ -679,16 +704,14 @@ function finish(b:(string|null)[]){
 export function goodSprite(name:string,color:string):Sprite{
   const key=name+"|"+color;
   let s=CACHE.get(key); if(s) return s;
-  const g=painter(); const T=ramp(color||"#9a8a70");
-  (SPR[name]||SPR.__crate)(g,T);
-  const px=finish(g.b);
+  const px=spritePixels(name,color);
   const cv=document.createElement("canvas"); cv.width=cv.height=N;
   const lit=document.createElement("canvas"); lit.width=lit.height=N;
   const a=cv.getContext("2d")!, l=lit.getContext("2d")!;
   const id=a.createImageData(N,N), il=l.createImageData(N,N);
   px.forEach((c,i)=>{ if(!c) return; const v=hx(c); id.data.set([v[0],v[1],v[2],255],i*4); il.data.set([255,248,232,255],i*4); });
   a.putImageData(id,0,0); l.putImageData(il,0,0);
-  s={cv,lit,lum:lumOf(color||"#9a8a70"),known:!!SPR[name]};
+  s={cv,lit,lum:lumOf(color||"#9a8a70"),known:!!SPR[name]||CUSTOM.has(name)};
   CACHE.set(key,s); return s;
 }
 

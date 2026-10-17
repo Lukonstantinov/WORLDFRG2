@@ -264,7 +264,7 @@ mod tests {
             rarity: 0.5, desire: 0.85, network_luxury: false, builtin: true,
             deposit: None, scoring: None, marine_band: MarineBand::Either, origins: 1, soil: Vec::new(), relief: None,
             category: "cereal".into(), need_tier: 0, base_value: 1.0, bulk: 3.0, perishable: 0.02,
-            inputs: Vec::new(), labor: 1.0, consumption_interval: 7.0, dna: None, reach_km: None, homeland: Vec::new(),
+            inputs: Vec::new(), labor: 1.0, consumption_interval: 7.0, dna: None, reach_km: None, homeland: Vec::new(), pixels: None,
         }
     }
 
