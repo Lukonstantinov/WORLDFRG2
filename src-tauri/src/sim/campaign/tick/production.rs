@@ -1260,6 +1260,29 @@ impl CampaignSim {
                         }
                     }
                 }
+                // Goods batch G8 · origin failures.
+                "crop_blight" | "stock_collapse" | "murrain" => {
+                    // Regional, like a drought: one crop's blight, one fishery's
+                    // shoals, or (murrain) every herd good around the event hub.
+                    let center = if e.hub >= 0 { e.hub as usize } else { continue };
+                    let (cx, cy) = (self.hubs[center].x, self.hubs[center].y);
+                    for h in 0..n {
+                        let mut dx = (self.hubs[h].x - cx).abs();
+                        if self.world_w > 1.0 { dx = dx.min(self.world_w - dx); }
+                        let dy = self.hubs[h].y - cy;
+                        if (dx * dx + dy * dy).sqrt() >= self.world_w * 0.12 { continue; }
+                        for g in 0..ng {
+                            let hit = if e.kind == "murrain" { self.goods[g].origin == ORIGIN_RAISED } else { g as i32 == e.good };
+                            if hit { m[h][g] *= 1.0 - e.magnitude; }
+                        }
+                    }
+                }
+                "overharvest" | "mine_flood" => {
+                    // Local: one hub's grounds stripped, or one hub's workings flooded.
+                    if e.hub >= 0 && e.good >= 0 {
+                        m[e.hub as usize][e.good as usize] *= 1.0 - e.magnitude;
+                    }
+                }
                 "embargo" | "guild_strike" => {
                     // A trade embargo, or a craft guild downing tools — the good
                     // stops being made at that hub for the duration.
@@ -2619,6 +2642,55 @@ impl CampaignSim {
         (dx * dx + dy * dy).sqrt()
     }
 
+
+    /// Goods batch G8 · getting a good is hard, and it can fail — each origin its own
+    /// way (plan §4.3): a crop's blight, a murrain in the herds, gathered grounds
+    /// stripped bare, a fishery's shoals gone, a mine flooded. Monthly, on its own
+    /// random stream (so every other event keeps its sequence): with
+    /// `ORIGIN_FAILURE_MONTHLY_CHANCE`, one producing (hub, good) is struck, picked
+    /// with weight difficulty², so hard goods fail far more than easy ones. The
+    /// output loss is floored like every event (`EVENT_PROD_FLOOR`). Crafted goods
+    /// are not struck here: manufacture does not read event multipliers (queued).
+    /// Goods with `ORIGIN_UNKNOWN` (old saves, every test fixture) never fail.
+    pub(crate) fn roll_origin_failures(&mut self) {
+        let tick = self.tick;
+        if hash01(self.seed ^ 0xFA11_0BE7, tick as u64, 1) >= ORIGIN_FAILURE_MONTHLY_CHANCE { return; }
+        let mut cands: Vec<(usize, usize, f32)> = Vec::new();
+        let mut total = 0.0f32;
+        for (h, hub) in self.hubs.iter().enumerate() {
+            if hub.abandoned { continue; }
+            for (g, tg) in self.goods.iter().enumerate() {
+                if tg.origin == ORIGIN_UNKNOWN || tg.origin == ORIGIN_CRAFTED || tg.difficulty == 0 { continue; }
+                if hub.production.get(g).copied().unwrap_or(0.0) <= EPS { continue; }
+                if self.active_events.iter().any(|e| e.hub == h as i32 && e.good == g as i32) { continue; }
+                let w = (tg.difficulty as f32).powi(2);
+                total += w;
+                cands.push((h, g, w));
+            }
+        }
+        if cands.is_empty() { return; }
+        let mut pick = hash01(self.seed ^ 0xFA11_0BE7, tick as u64, 2) * total;
+        let (hub, g) = cands.iter().find(|c| { pick -= c.2; pick <= 0.0 }).map(|c| (c.0, c.1))
+            .unwrap_or((cands[cands.len() - 1].0, cands[cands.len() - 1].1));
+        let (kind, mag, days) = match self.goods[g].origin {
+            ORIGIN_GROWN => ("crop_blight", 0.5, 150),
+            ORIGIN_RAISED => ("murrain", 0.4, 240),
+            ORIGIN_GATHERED => ("overharvest", 0.6, 730),
+            ORIGIN_CAUGHT => ("stock_collapse", 0.5, 365),
+            _ => ("mine_flood", 0.7, 365),
+        };
+        self.active_events.push(ActiveEvent { kind: kind.into(), hub: hub as i32, good: g as i32, magnitude: mag, until_tick: tick + days });
+        let city = self.hubs[hub].name.clone();
+        let good = self.goods[g].name.replace('_', " ");
+        let text = match kind {
+            "crop_blight" => format!("Blight ruins the {good} around {city}"),
+            "murrain" => format!("Murrain sweeps the herds around {city}"),
+            "overharvest" => format!("The {good} grounds of {city} are stripped bare and must recover"),
+            "stock_collapse" => format!("The {good} shoals desert the waters off {city}"),
+            _ => format!("The {good} workings at {city} flood"),
+        };
+        self.journal.push(JournalEntry { tick, kind: "failure".into(), hub: hub as i32, good: g as i32, value: mag, text });
+    }
 
     /// Roll low-probability events for this tick.
     pub(crate) fn roll_events(&mut self) {

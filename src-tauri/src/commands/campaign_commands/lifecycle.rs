@@ -391,6 +391,15 @@ pub fn campaign_start_sim(seed: u64, db: State<'_, WorldDb>) -> Result<CampaignS
                 // with no spec, or one whose `distribution` isn't Deposits,
                 // degrades to `WORK_UNKNOWN`, which keeps `estate_kind_for_good`'s
                 // substring cascade as the fallback.
+                origin: spec.map(|s| match crate::sim::goods_dna::dna_of(s).origin {
+                    crate::sim::goods_dna::GoodOrigin::Grown => crate::sim::tick::ORIGIN_GROWN,
+                    crate::sim::goods_dna::GoodOrigin::Raised => crate::sim::tick::ORIGIN_RAISED,
+                    crate::sim::goods_dna::GoodOrigin::Gathered => crate::sim::tick::ORIGIN_GATHERED,
+                    crate::sim::goods_dna::GoodOrigin::Caught => crate::sim::tick::ORIGIN_CAUGHT,
+                    crate::sim::goods_dna::GoodOrigin::Mined => crate::sim::tick::ORIGIN_MINED,
+                    crate::sim::goods_dna::GoodOrigin::Crafted => crate::sim::tick::ORIGIN_CRAFTED,
+                }).unwrap_or(crate::sim::tick::ORIGIN_UNKNOWN),
+                difficulty: spec.map(|s| crate::sim::goods_dna::dna_of(s).difficulty).unwrap_or(0),
                 volume: match spec {
                     Some(s) if crate::sim::goods_dna::dna_of(s).role == crate::sim::goods_dna::GoodRole::Treasure => crate::sim::goods_dna::TREASURE_VOLUME,
                     _ => 1.0,

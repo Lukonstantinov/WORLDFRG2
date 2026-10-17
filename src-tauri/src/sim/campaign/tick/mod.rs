@@ -3933,7 +3933,24 @@ pub struct TickGood {
     /// a new estate or mine sets its own output rate (`create_estate`), so a house's
     /// gold mine stays as scarce as the world's own.
     #[serde(default = "default_volume")] pub volume: f32,
+    /// Goods batch G8 · how the good is obtained (`ORIGIN_*`), from its goods DNA.
+    /// `ORIGIN_UNKNOWN` (the default: old saves, test fixtures) never fails.
+    #[serde(default)] pub origin: u8,
+    /// Goods batch G8 · difficulty 1-5 from the goods DNA (0 = unknown): harder
+    /// goods fail more often.
+    #[serde(default)] pub difficulty: u8,
 }
+
+pub(crate) const ORIGIN_UNKNOWN: u8 = 0;
+pub(crate) const ORIGIN_GROWN: u8 = 1;
+pub(crate) const ORIGIN_RAISED: u8 = 2;
+pub(crate) const ORIGIN_GATHERED: u8 = 3;
+pub(crate) const ORIGIN_CAUGHT: u8 = 4;
+pub(crate) const ORIGIN_MINED: u8 = 5;
+pub(crate) const ORIGIN_CRAFTED: u8 = 6;
+/// Goods batch G8 · chance per month that SOME producer somewhere suffers an
+/// origin failure (~4 a year world-wide), the victim weighted by difficulty².
+pub(crate) const ORIGIN_FAILURE_MONTHLY_CHANCE: f32 = 0.35;
 
 pub(crate) const DIST_GLOBAL: u8 = 0;
 pub(crate) const DIST_LOCAL: u8 = 1;
@@ -11175,6 +11192,8 @@ impl CampaignSim {
             t_arrive += _s_arr.elapsed().as_secs_f32() * 1000.0;
             let _s_ev = std::time::Instant::now();
             self.roll_events();
+            // Goods batch G8 · a good fails the way its origin does (monthly).
+            if tick % 30 == 0 { self.roll_origin_failures(); }
             // Phase 5 (flavour) · plague travels the trade lanes from any active focus.
             self.spread_epidemics();
             t_events += _s_ev.elapsed().as_secs_f32() * 1000.0;

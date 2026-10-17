@@ -944,3 +944,43 @@ taboos or trait extras is bit-identical. Gates: new
 tsc, check_types 0 drift (281). **Queued:** the regional gold:silver ratio emerging from
 currency preference + local supply (§9.2's silver drain) needs bullion trade between
 regions to respond to it — a later money slice with its own econ_ walk.
+
+**Slice G8: goods can fail, each the way its origin does (2026-10-17, done).** Each
+campaign good now carries its DNA `origin` and `difficulty` (`TickGood`, from `dna_of`
+at campaign start). Monthly, `roll_origin_failures` (`tick/production.rs`), on its own
+random stream so every existing event keeps its sequence, strikes one producing
+(town, good) with `ORIGIN_FAILURE_MONTHLY_CHANCE` (0.35, ~4 a year world-wide), the
+victim weighted by difficulty² so hard goods fail far more than easy ones:
+| origin | failure | reach | loss | lasts |
+|---|---|---|---|---|
+| grown | crop blight (that crop) | regional | 50% | ~5 months |
+| raised | murrain (every herd good) | regional | 40% | ~8 months |
+| gathered | grounds stripped bare | the town | 60% | 2 years |
+| caught | the shoals leave | regional | 50% | 1 year |
+| mined | the workings flood | the town | 70% | 1 year |
+Losses are floored like every event (`EVENT_PROD_FLOOR` 0.5: a bad year, never a wipe-out).
+Each failure is chronicled (`kind: "failure"`). Goods of unknown origin (old saves, every
+test fixture) never fail, so the gates stay bit-identical. Gates: new
+`goods_fail_the_way_their_origin_does_and_hard_ones_fail_more`, `tick::tests`, `econ_`.
+**Queued (rule 36):** crafted goods' failure (lost know-how) — manufacture
+(`manufacture_pass`) does not read event multipliers, so it needs its own hook.
+**Finding:** for the same reason the existing `guild_strike` event, which writes the
+event multiplier for a manufactured good, appears to change nothing — worth a check.
+
+**Queued from batch G (rule 36), in the order they should be picked up:**
+1. **Units (G3).** Metric display (imperial option) needs the model's abstract units
+   anchored to something physical first — e.g. grain consumed per person per day
+   (~0.6 kg) read from the campaign's own `base_need`, then each good's kg per unit from
+   its value and value-per-weight. Converting with a guessed factor would print precise
+   kilograms that mean nothing, so it waits for that anchor (a query + a display helper;
+   gate: a test that a city of N people eats about N × 0.6 kg of grain a day).
+2. **Duplicate families, quality kept.** `spices` (generic) beside pepper/cloves/
+   cinnamon/nutmeg/mace, and culture tastes that still name retired generics
+   (`gemstones`, `dyes`, `spices`). Needs a family alias so a taste for "spices" reaches
+   the members; members keep their own grade and deposits (§12 decision 10).
+3. **Per-region World balance** and the **regional gold:silver ratio / silver drain**
+   (§9.2): needs a region id on each economy hub, then bullion trade responding to the
+   ratio (a money slice with its own econ_ walk).
+4. **Reach grows in the campaign**: crops spreading along routes, stolen secrets (§9.3).
+5. **Crafted failure** (lost know-how) via `manufacture_pass`, and the `guild_strike` check.
+6. Province views marking undiscovered workings.

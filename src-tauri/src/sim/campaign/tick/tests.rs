@@ -4,7 +4,7 @@
         TickGood { name: name.into(), category: cat, need_tier: tier, base_value: val, desire, food,
             fungible_input: false,
             bulk: 1.0, perishable: 0.0, inputs: vec![], labor: 1.0, consumption_interval: 30.0,
-            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN, volume: 1.0 }
+            distribution: DIST_UNKNOWN, working: WORK_UNKNOWN, volume: 1.0, origin: ORIGIN_UNKNOWN, difficulty: 0 }
     }
 
     pub(super) fn hub(id: u32, x: f32, y: f32, pop: f32, prod: Vec<f32>, comp: u32) -> TickHub {
@@ -9370,6 +9370,45 @@
     /// (8) — the two kinds this session split apart, so `MINE_UPGRADE_COST_MULT`
     /// (depth) can never gate a quarry and the transport gate can never gate a
     /// mine.
+    #[test]
+    fn goods_fail_the_way_their_origin_does_and_hard_ones_fail_more() {
+        // Goods batch G8. Two cities: one grows an easy crop (difficulty 1) and mines a
+        // hard metal (difficulty 5); the other raises horses. Over many months the
+        // failures that fire must be the right kind for each origin, the hard good must
+        // be struck far more often than the easy one, and a struck good must lose output.
+        let mut goods = vec![good("wheat", 0, 0, 1.0, 0.8, true), good("gold", 5, 2, 50.0, 0.6, false), good("horses", 7, 1, 12.0, 0.5, false)];
+        (goods[0].origin, goods[0].difficulty) = (ORIGIN_GROWN, 1);
+        (goods[1].origin, goods[1].difficulty) = (ORIGIN_MINED, 5);
+        (goods[2].origin, goods[2].difficulty) = (ORIGIN_RAISED, 3);
+        let mut s = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![100.0, 5.0, 0.0], 0), hub(1, 1.0, 0.0, 10_000.0, vec![100.0, 0.0, 8.0], 0)], goods);
+        for h in 0..2 { s.hubs[h].production = s.hubs[h].base_per_capita.iter().map(|p| p * 10_000.0).collect(); }
+        let (mut wheat, mut gold) = (0, 0);
+        for month in 1..=600u32 {
+            s.tick = month * 30;
+            s.active_events.clear();
+            s.roll_origin_failures();
+            for e in &s.active_events {
+                match (e.good, e.kind.as_str()) {
+                    (0, k) => { assert_eq!(k, "crop_blight"); wheat += 1; }
+                    (1, k) => { assert_eq!(k, "mine_flood"); gold += 1; }
+                    (2, k) => assert_eq!(k, "murrain"),
+                    other => panic!("unexpected failure {other:?}"),
+                }
+            }
+        }
+        assert!(gold > 3 * wheat.max(1), "a hard good fails far more than an easy one (gold {gold}, wheat {wheat})");
+        s.active_events = vec![ActiveEvent { kind: "mine_flood".into(), hub: 0, good: 1, magnitude: 0.7, until_tick: u32::MAX }];
+        let mut m = Vec::new();
+        s.fill_event_production_mult(&mut m);
+        assert!(m[0][1] < 1.0 && m[0][0] == 1.0 && m[1][1] == 1.0, "a flood strikes only that mine");
+        assert!(s.journal.iter().any(|j| j.kind == "failure"));
+        // Unknown origin (old saves, every other fixture) never fails.
+        let mut plain = sim(vec![hub(0, 0.0, 0.0, 10_000.0, vec![100.0], 0)], vec![good("wheat", 0, 0, 1.0, 0.8, true)]);
+        plain.hubs[0].production = vec![1_000.0];
+        for month in 1..=200u32 { plain.tick = month * 30; plain.roll_origin_failures(); }
+        assert!(plain.active_events.is_empty());
+    }
+
     #[test]
     fn a_taboo_good_is_not_bought_and_a_currency_preference_picks_the_mint_metal() {
         // Goods batch G7. One city of one people, holding wine it does not make. With
