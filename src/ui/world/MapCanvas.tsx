@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { initPixiApp, type MapApp } from "@canvas/PixiApp";
 import { TileViewport } from "@canvas/TileViewport";
-import { TileManager, lodForScale } from "@canvas/TileManager";
+import { TileManager } from "@canvas/TileManager";
 import { OverlayManager, type ColonyMarker } from "@canvas/OverlayManager";
 import { setExportSnapshotFn, setExportSnapshotRawFn } from "@canvas/mapExport";
 import { createPaintOverlay, drawCursorRing, paintStamp, clearPaintOverlay } from "@canvas/PaintOverlay";
@@ -12,6 +12,8 @@ import { useGoodsStore } from "@state/goodsStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 import { usePaletteStore } from "@state/paletteStore";
+import { FORGE_ONLY } from "./mapThemes";
+import { plateName } from "./plateNames";
 import { paintStroke, undoAction, redoAction, computeOverlays, computeGoodBeltMasks, campaignGoodAtlas, computeStormZones, computeMonsoonZones, computeClimateBands, computeCultureRegions, computeTradeRoutes, computeTradeMatrix, computePolitical, getEconomy, getRiverSystems, getLakeSystems, campaignMerchantRoutes, campaignFuturesLanes, campaignGetSpeculation, campaignGetTradeFlow, campaignGetCorridors, campaignGetExpeditions, campaignCoinUsage, campaignGetBanks, campaignGetEpidemics, campaignGetGuilds, campaignGetFigures, campaignGetLandmarks, campaignGetDynasties, campaignGetTradeBasins, campaignGetGoodHeat, campaignGetCultures, campaignCultureHubs, campaignGetMigrationRoutes, computeStates, getCellInfo, getPlateMotion, computeCoarseRoute, placeSettlementAt, campaignHouseAtlas, getDepositSites, campaignExploitedGoods } from "@bridge";
 import type { MerchantRoute, FuturesLane, Toponym, CoarseRoute } from "@types";
 import { goodOverlayKey, GOOD_DEFS } from "@goods";
@@ -53,47 +55,45 @@ const CAMPAIGN_ROUTE_MAX_CROSSING = 1.0;
  *  `TileManager.ts` / `TileViewport.ts`). */
 const TILE_SIZE = 128;
 
-/** The world's REAL wrap period for tile content is not `grid_width` — tiles
- *  are 128-cell blocks and no shipped grid width (1800/3600/7200) is a
- *  multiple of that, so the backend's cylindrical wrap (`wrap_tx` in
- *  `tile_commands.rs`) operates on whole TILE INDICES, repeating every
- *  `ceil(grid_width / TILE_SIZE) * TILE_SIZE` cells — e.g. 3712 for a
- *  3600-wide world, not 3600. Before this, the render loop below wrapped
- *  OVERLAYS (settlements/rivers/routes) every `grid_width` cells while the
- *  TILES underneath them kept repeating every `paddedWidth` cells: the two
- *  periods diverge by `paddedWidth - grid_width` at copy 1, twice that at
- *  copy 2, and so on — settlements drifting further from their own
- *  coastline with every world-copy the viewport scrolls past, and the
- *  `[grid_width, paddedWidth)` padding band (real but ungenerated "sea",
- *  the tail of the world's last partial tile column) showing through as a
- *  bright, uniform vertical stripe at every seam. Copy placement below now
- *  uses this SAME period for both tiles and overlays — each copy still only
- *  shows its first `grid_width` real cells (the clip rects stay `grid_width`
- *  wide), so the padding band is hidden rather than mis-explained.
- *
- *  That fixed LOD 0. It is WRONG at LOD>0 — a real, separate bug: the
- *  backend regroups tiles into `2^lod`-wide supertiles before wrapping
- *  (`wrap_bound_at_lod` in `tile_commands.rs`), and rounds the base-tile
- *  count UP to a whole number of supertiles, which is a DIFFERENT cell
- *  count from the LOD-0 period whenever `base_tiles_x` isn't a multiple of
- *  `2^lod` — e.g. 29 base tiles at LOD 1 (S=2) wrap every `ceil(29/2)*256 =
- *  3840` cells, not the LOD-0 period's 3712. Any zoomed-out view (LOD>0) —
- *  which is exactly the view that shows a wrap seam at all, since the whole
- *  point of zooming out is to fit more than one world-width on screen — was
- *  still clipping/translating copies at the LOD-0 period while the fetched
- *  tiles actually wrapped `period(lod) - period(0)` cells further along.
- *  That gap (uncovered by ANY copy's clip rect, since copy k ends at
- *  `k*period(0)+grid_width` and copy k+1 starts at `(k+1)*period(0)`, short
- *  of where the real wrapped content actually resumes) painted through as
- *  the canvas's own background fill — a solid near-black band at the seam.
- *  `lod` must be the SAME one `TileManager` is actually fetching at
- *  (`lodForScale(viewport.scale)`), or the two disagree again. */
-function wrapPeriod(gridWidth: number, lod = 0): number {
-  if (gridWidth <= 0) return 0;
-  const baseTilesX = Math.ceil(gridWidth / TILE_SIZE);
-  const s = 1 << Math.max(0, Math.min(4, lod));
-  const tilesXAtLod = Math.max(1, Math.ceil(baseTilesX / s));
-  return tilesXAtLod * TILE_SIZE * s;
+/** WORLD-WIDTH COPIES (infinite horizontal scroll). The world is a cylinder with
+ *  period EXACTLY `grid_width` cells, but tiles are 128-cell blocks and no shipped
+ *  width is a multiple of 128 (3600 = 28.1 tiles), so the last tile column is
+ *  partly sea padding. Wrapping the TILE grid (3712 cells) put that padding strip
+ *  in the middle of the scroll as a pale band with cut coastlines. Instead each
+ *  visible copy k is drawn from the CANONICAL tile columns 0..baseTilesX-1,
+ *  translated by `k * grid_width` and clipped to one world width, so copy k's
+ *  last real cell touches copy k+1's first one with nothing between. Returns, per
+ *  visible copy, the canonical tile-column range it needs. */
+function visibleCopies(viewX: number, scaleX: number, screenW: number, gridW: number) {
+  if (gridW <= 0 || !(scaleX > 0)) return [];
+  const baseTilesX = Math.ceil(gridW / TILE_SIZE);
+  const leftWorld = (0 - viewX) / scaleX;
+  const rightWorld = (screenW - viewX) / scaleX;
+  const kMin = Math.floor(leftWorld / gridW);
+  const kMax = Math.floor(rightWorld / gridW);
+  const out: { k: number; txMin: number; txMax: number }[] = [];
+  for (let k = kMin; k <= kMax; k++) {
+    const lo = Math.max(0, leftWorld - k * gridW);
+    const hi = Math.min(gridW - 1, rightWorld - k * gridW);
+    out.push({
+      k,
+      txMin: Math.max(0, Math.floor(lo / TILE_SIZE) - 1),
+      txMax: Math.min(baseTilesX - 1, Math.floor(hi / TILE_SIZE) + 1),
+    });
+  }
+  return out;
+}
+
+/** Distinct canonical tile-column intervals the visible copies need (a view that
+ *  straddles the seam wants the tail AND the head, not the whole row). */
+function tileColumnRanges(copies: { txMin: number; txMax: number }[]): [number, number][] {
+  const seen = new Set<string>();
+  const out: [number, number][] = [];
+  for (const c of copies) {
+    const key = `${c.txMin}:${c.txMax}`;
+    if (!seen.has(key)) { seen.add(key); out.push([c.txMin, c.txMax]); }
+  }
+  return out;
 }
 
 /** Largest box with the world's aspect ratio that fits inside the pane. */
@@ -145,6 +145,8 @@ export function MapCanvas() {
   const economy = useWorldStore((s) => s.economy);
   const setEconomy = useWorldStore((s) => s.setEconomy);
   const activeLayer = useUIStore((s) => s.activeLayer);
+  const selectedPlate = useUIStore((s) => s.selectedPlate);
+  const appMode = useUIStore((s) => s.appMode);
   const activeTool = useUIStore((s) => s.activeTool);
   const brushRadius = useUIStore((s) => s.brushRadius);
   const elevationValue = useUIStore((s) => s.elevationValue);
@@ -315,77 +317,17 @@ export function MapCanvas() {
     ctx.setTransform(dpr * viewport.scaleX, 0, 0, dpr * viewport.scaleY, dpr * viewport.x, dpr * viewport.y);
     ctx.imageSmoothingEnabled = false;
 
-    // The world is cylindrical (X wraps, rule 6) and the viewport is free to
-    // pan past either edge (TileViewport applies no X clamp) so the map
-    // scrolls infinitely like an EU4-style globe. `kMin..kMax` is which whole
-    // world-width COPIES are visible on screen right now — 0 unless the pan
-    // has actually crossed a seam. Tiles already resolve an out-of-range tx to
-    // its real wrapped content one screen position at a time (`get_tiles_
-    // packed`'s own wrap + `TileManager`'s now-unclamped fetch), so they need
-    // no extra pass here — only a wider clip so the sea-padding strip at each
-    // grid edge is hidden at every copy, not just the original one. OVERLAYS
-    // (rivers, settlements, routes, labels…) are vector data positioned once
-    // in canonical `[0, grid_width)` space, so making them reappear at a
-    // wrapped position needs `overlayManager.render` called again per visible
-    // copy, each time with the coordinate space shifted by `k * period`
-    // (`period`, not `grid_width` — see `wrapPeriod`'s own doc comment).
+    // The world is cylindrical (X wraps, rule 6) and the viewport pans freely past
+    // either edge, so the map scrolls infinitely: see `visibleCopies`.
     const m = metaRef.current;
-    // Must match the LOD `TileManager.loadVisibleTiles` actually fetched at
-    // (same `viewport.scale` input, same `lodForScale`), or the copy seam
-    // computed here disagrees with where the fetched tiles really wrap.
-    const period = m ? wrapPeriod(m.grid_width, lodForScale(viewport.scale)) : 0;
-    // TRUE span: every world-copy actually touching the screen right now,
-    // UNCAPPED. A rect-union clip costs nothing per extra copy, so the tile
-    // background always gets the real span — nothing here may ever leave a
-    // genuinely visible strip of screen with no clip rect over it.
-    let kMin = 0, kMax = 0;
-    if (m && period > 0) {
-      const leftWorldX = (0 - viewport.x) / viewport.scaleX;
-      const rightWorldX = (w - viewport.x) / viewport.scaleX;
-      kMin = Math.floor(Math.min(leftWorldX, rightWorldX) / period);
-      kMax = Math.floor(Math.max(leftWorldX, rightWorldX) / period);
-    }
-    // OVERLAY span: the same copies, but capped — redrawing rivers/settlements/
-    // labels/routes N times per frame is real render cost, unlike a clip rect,
-    // so a pathologically zoomed-out view bounds how many copies pay for it.
-    // This used to be the SAME kMin/kMax the tile clip used, which meant
-    // capping it also clipped tiles out of a still-visible strip of screen —
-    // the "map goes blank at the edge when zoomed out / panned far" bug.
-    let kMinO = kMin, kMaxO = kMax;
-    const MAX_COPIES = 6;
-    if (kMaxO - kMinO + 1 > MAX_COPIES) {
-      const mid = Math.round((kMinO + kMaxO) / 2);
-      kMinO = mid - Math.floor(MAX_COPIES / 2);
-      kMaxO = kMinO + MAX_COPIES - 1;
-    }
-
-    // Clip to `period`-wide bands, one PER COPY, laid edge-to-edge with zero
-    // gap between them — `period` (not `grid_width`) is what tiles actually
-    // repeat on at this LOD (`wrapPeriod`'s own doc comment), so spacing
-    // consecutive copies by anything narrower than `period` misaligns their
-    // tiles, and clipping any one copy to less than its own full `period`
-    // reopens a strip neither copy draws into. Tiles are 128×128, so the
-    // world grid (e.g. 3600×1800) is covered by tiles that extend past the
-    // true edge (29×15 → 3712×1920); the last partial tile row/column past
-    // `grid_width` is default-sea, which bleeds in as a thin ocean strip at
-    // the edge of every copy. An earlier version clipped each copy down to
-    // exactly `grid_width` to hide that bleed — which left literal unpainted
-    // canvas (background, i.e. BLACK) in the `period − grid_width` gap this
-    // opened at every INTERNAL seam between copies, a far worse defect than
-    // the thin sea-bleed it was trying to hide. Clipping to the full `period`
-    // instead keeps every copy touching its neighbour with nothing between,
-    // and only ever shows that bleed strip at the two true OUTER edges of the
-    // whole visible span — harmless, off at the screen's periphery. One rect
-    // per copy in the same path unions correctly under the canvas's default
-    // nonzero winding rule (all rects wind the same way).
-    ctx.save();
-    if (m) {
-      ctx.beginPath();
-      for (let k = kMin; k <= kMax; k++) {
-        ctx.rect(k * period, 0, period, m.grid_height);
-      }
-      ctx.clip();
-    }
+    const gw = m ? m.grid_width : 0;
+    const gh = m ? m.grid_height : 0;
+    viewport.wrapWidth = gw;
+    // Every whole world-width COPY touching the screen, each with the canonical
+    // tile columns it needs (`visibleCopies`). Tiles of copy k are the SAME
+    // canonical columns translated by `k * gw` and clipped to one world width, so
+    // the seam between copies is the world's real wrap with no padding strip.
+    const copies = m ? visibleCopies(viewport.x, viewport.scaleX, w, gw) : [];
 
     // Draw tiles (only those within the visible tile range).
     // GENERATION_UX_REDESIGN_PLAN.md Slice 10 (F11) — the base layer's own
@@ -393,45 +335,62 @@ export function MapCanvas() {
     // renderer ever read `uiStore.layerOpacity`).
     const visible = viewport.getVisibleTileRange(w, h);
     const baseAlpha = layerOpacityRef.current;
-    if (baseAlpha < 1) ctx.globalAlpha = Math.max(0, baseAlpha);
-    tileManager.draw(ctx, visible);
-    if (baseAlpha < 1) ctx.globalAlpha = 1;
-
-    // SWIPE COMPARE: the second layer over the same ground, clipped to the right
-    // of the divider. The clip is computed in WORLD space (the active transform),
-    // by converting the divider's screen fraction back through the viewport — the
-    // canvas is mid-transform here, so a screen-space rect would be wrong.
     const cmp = compareRef.current;
-    if (cmp.layer && m) {
-      const dividerWorldX = (w * cmp.pos - viewport.x) / viewport.scaleX;
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(dividerWorldX, 0, kMax * period + m.grid_width - dividerWorldX, m.grid_height);
-      ctx.clip();
-      tileManager.draw(ctx, visible, cmp.layer);
-      ctx.restore();
+    if (!m) {
+      tileManager.draw(ctx, visible);
+    } else {
+      for (const c of copies) {
+        const range = { txMin: c.txMin, txMax: c.txMax, tyMin: visible.tyMin, tyMax: visible.tyMax };
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(c.k * gw, 0, gw, gh);
+        ctx.clip();
+        ctx.translate(c.k * gw, 0);
+        if (baseAlpha < 1) ctx.globalAlpha = Math.max(0, baseAlpha);
+        tileManager.draw(ctx, range);
+        ctx.globalAlpha = 1;
+        // SWIPE COMPARE: the second layer over the same ground, clipped to the right
+        // of the divider (computed in this copy's local world space).
+        if (cmp.layer) {
+          const dividerWorldX = (w * cmp.pos - viewport.x) / viewport.scaleX - c.k * gw;
+          const x0 = Math.max(0, Math.min(gw, dividerWorldX));
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(x0, 0, gw - x0, gh);
+          ctx.clip();
+          tileManager.draw(ctx, range, cmp.layer);
+          ctx.restore();
+        }
+        ctx.restore();
+      }
     }
 
-    // Draw overlays — once per visible world-copy (capped at MAX_COPIES, see
-    // kMinO/kMaxO above), each shifted so canonical `[0, grid_width)` content
-    // lands at world position `[k*period, k*period + grid_width)` — the SAME
-    // period the tile clip above uses, so a settlement lands on the real
-    // wrapped copy of its own coastline instead of drifting off it.
-    if (overlayManager) {
+    // Overlays are vector data positioned once in canonical [0, gw) space, so
+    // they are drawn again per visible copy (capped: redrawing rivers/labels/
+    // routes N times per frame is real cost, unlike a tile blit), shifted by
+    // `k * gw`. The clip is a little wider than the world so a label or glyph
+    // hanging over the seam is not sliced off.
+    if (overlayManager && m) {
+      const MAX_COPIES = 6;
+      let kMinO = copies.length ? copies[0].k : 0;
+      let kMaxO = copies.length ? copies[copies.length - 1].k : 0;
+      if (kMaxO - kMinO + 1 > MAX_COPIES) {
+        const mid = Math.round((kMinO + kMaxO) / 2);
+        kMinO = mid - Math.floor(MAX_COPIES / 2);
+        kMaxO = kMinO + MAX_COPIES - 1;
+      }
+      const margin = 48;
       for (let k = kMinO; k <= kMaxO; k++) {
         ctx.save();
-        if (m) {
-          ctx.beginPath();
-          ctx.rect(k * period, 0, m.grid_width, m.grid_height);
-          ctx.clip();
-        }
-        if (k !== 0) ctx.translate(k * period, 0);
+        ctx.beginPath();
+        ctx.rect(k * gw - margin, 0, gw + 2 * margin, gh);
+        ctx.clip();
+        if (k !== 0) ctx.translate(k * gw, 0);
         overlayManager.render(ctx);
         ctx.restore();
       }
     }
 
-    ctx.restore();
     // Reset transform
     ctx.setTransform(1, 0, 0, 1, 0, 0);
   }, []);
@@ -497,22 +456,21 @@ export function MapCanvas() {
     const m = metaRef.current;
     if (!viewport || !tileManager || !el || !m) return;
 
-    const { txMin, txMax, tyMin, tyMax } = viewport.getVisibleTileRange(
-      el.clientWidth, el.clientHeight
-    );
+    const { tyMin, tyMax } = viewport.getVisibleTileRange(el.clientWidth, el.clientHeight);
+    const cols = tileColumnRanges(visibleCopies(viewport.x, viewport.scaleX, el.clientWidth, m.grid_width));
 
     // viewport.scale picks the LOD: zoomed out → coarser supertiles, so the
     // request size stays bounded no matter how much of the world is visible.
     const cmpLayer = compareRef.current.layer;
     Promise.all([
       tileManager.loadVisibleTiles(
-        txMin, txMax, tyMin, tyMax,
+        cols, tyMin, tyMax,
         activeLayerRef.current, m.grid_width, m.grid_height,
         viewport.scale,
       ),
       cmpLayer
         ? tileManager.loadVisibleTiles(
-            txMin, txMax, tyMin, tyMax,
+        cols, tyMin, tyMax,
             cmpLayer, m.grid_width, m.grid_height,
             viewport.scale,
           )
@@ -1029,6 +987,7 @@ export function MapCanvas() {
     // its own fetch rather than folding into `compute_overlays`' per-cell payload.
     getPlateMotion().then((arrows) => {
       om.drawPlateMotion(arrows, grid_width);
+      om.setPlateLabels(arrows.map((a) => ({ id: a.id, x: a.x, y: a.y, oceanic: a.is_oceanic, name: plateName(a.id, a.is_oceanic, worldKey ?? "world") })));
       requestRender();
     }).catch(() => {});
   }, [worldKey, tileVersion, requestRender]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -1483,10 +1442,20 @@ export function MapCanvas() {
     const om = overlayManagerRef.current;
     if (!om) return;
     for (const [type, visible] of Object.entries(overlayVisibility)) {
-      om.setVisible(type, visible);
+      om.setVisible(type, visible && !(appMode === "chronicle" && FORGE_ONLY.has(type)));
     }
+    // The Fisheries layer carries its grand-bank circles; circulation belts ride on Wind.
+    om.setVisible("fisheryBanks", activeLayer === "fisheries");
+    om.setVisible("plateNames", activeLayer === "plates");
+    om.setVisible("windBelts", !!overlayVisibility.wind);
     requestRender();
-  }, [overlayVisibility, requestRender]);
+  }, [overlayVisibility, activeLayer, appMode, requestRender]);
+
+  // The picked plate rings its name on the Plates layer.
+  useEffect(() => {
+    overlayManagerRef.current?.setSelectedPlate(selectedPlate);
+    requestRender();
+  }, [selectedPlate, requestRender]);
 
   // CLAUDE.md §8.19 (goods localities, shipped) Slice 5 · the FULL-RESOLUTION belt masks, fetched for
   // the goods actually toggled on. They are a real payload (a full-resolution
@@ -2026,7 +1995,7 @@ export function MapCanvas() {
     const m = metaRef.current;
     if (!viewport || !rect || !m) return;
 
-    const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+    const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
     const r = brushRadiusRef.current;
     for (let dy = -r; dy <= r; dy++) {
       for (let dx = -r; dx <= r; dx++) {
@@ -2055,7 +2024,7 @@ export function MapCanvas() {
     if (e.button === 2 || e.altKey) {
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
           setInspectedCell({ wx, wy });
         }
@@ -2070,7 +2039,7 @@ export function MapCanvas() {
       if (econ && econ.hubs.length > 0) {
         const rect = containerRef.current?.getBoundingClientRect();
         if (rect) {
-          const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+          const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
           // Screen-space hit radius: ~10px regardless of zoom, capped at 8 world cells
           // so clicking 5 cm away never accidentally selects a settlement when zoomed in.
           const thresh = Math.min(8, 10 / viewport.scaleX);
@@ -2121,7 +2090,7 @@ export function MapCanvas() {
       // good-flow panel (routes + price/days graph for that good).
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect && goodRegionsRef.current.length > 0) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         const vis = overlayVisibilityRef.current;
         for (const r of goodRegionsRef.current) {
           if (!vis[goodOverlayKey(r.good)]) continue;
@@ -2140,7 +2109,7 @@ export function MapCanvas() {
       // use. The full-resolution raster already lives on the client, so this is one
       // array read, no IPC.
       if (rect && overlayVisibilityRef.current.provinces) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         const pid = overlayManagerRef.current?.provinceAt(wx, wy) ?? null;
         if (pid !== null) {
           // Shift-click MARKS a province for the batch merge/split "affect only these"
@@ -2160,7 +2129,7 @@ export function MapCanvas() {
     if (activeToolRef.current === "select") {
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
           setInspectedCell({ wx, wy });
         }
@@ -2183,7 +2152,7 @@ export function MapCanvas() {
     } else if (tool === "volcano") {
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
           const wrappedX = ((wx % m.grid_width) + m.grid_width) % m.grid_width;
           const val: PaintValue = { type: "volcanic", value: e.shiftKey ? 0 : 1 };
@@ -2202,7 +2171,7 @@ export function MapCanvas() {
       // `settlements` in its dependency array).
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
           const wrappedX = Math.floor(((wx % m.grid_width) + m.grid_width) % m.grid_width);
           const wrappedY = Math.floor(wy);
@@ -2228,7 +2197,7 @@ export function MapCanvas() {
       // together when the panel's own Generate button is pressed.
       const rect = containerRef.current?.getBoundingClientRect();
       if (rect) {
-        const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+        const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
         if (wx >= 0 && wx < m.grid_width && wy >= 0 && wy < m.grid_height) {
           const wrappedX = Math.floor(((wx % m.grid_width) + m.grid_width) % m.grid_width);
           const wrappedY = Math.floor(wy);
@@ -2251,7 +2220,7 @@ export function MapCanvas() {
       // is pushed straight onto the overlay so it draws live.
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
       isPaintingRef.current = true;
       isErasingRef.current = e.shiftKey;
       ridgeDraftRef.current = [[wx, wy]];
@@ -2264,7 +2233,7 @@ export function MapCanvas() {
       // pointer-move and commit to the store on pointer-up.
       const rect = containerRef.current?.getBoundingClientRect();
       if (!rect) return;
-      const { wx, wy } = viewport.screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+      const { wx, wy } = viewport.screenToWorldWrapped(e.clientX - rect.left, e.clientY - rect.top);
       isPaintingRef.current = true;
       lassoDraftRef.current = [[wx, wy]];
       overlayManagerRef.current?.setLassoSketch(lassoDraftRef.current);
@@ -2288,7 +2257,7 @@ export function MapCanvas() {
 
     const screenX = e.clientX - rect.left;
     const screenY = e.clientY - rect.top;
-    const { wx, wy } = viewport.screenToWorld(screenX, screenY);
+    const { wx, wy } = viewport.screenToWorldWrapped(screenX, screenY);
 
     // STATUSBAR HOVER READOUT (§8.18) — the map key for the layers that have no
     // legend. De-duplicated by CELL and time-throttled, so a fast sweep costs one

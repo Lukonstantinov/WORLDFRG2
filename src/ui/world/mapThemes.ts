@@ -58,7 +58,7 @@ export const MAP_THEMES: MapTheme[] = [
     name: "Physical",
     glyph: "▲",
     blurb: "Shaded relief with its water and the named country of the land.",
-    layer: "terrain",
+    layer: "land",
     overlays: [
       "rivers", "lakes", "riverBreaks", "latLines",
       "toponyms", "toponymsMountain", "toponymsRiver", "toponymsLake",
@@ -66,16 +66,6 @@ export const MAP_THEMES: MapTheme[] = [
     ],
     labelTheme: "Engraved Antique",
     requires: 2,
-  },
-  {
-    id: "natural",
-    name: "Natural Colour",
-    glyph: "\u25D5",
-    blurb: "The land as it would look from orbit — cover, not height — over shaded relief and shaded sea.",
-    layer: "natural",
-    overlays: ["rivers", "lakes", "latLines"],
-    labelTheme: "Modern Cartographic",
-    requires: 6,
   },
   {
     id: "relief",
@@ -98,7 +88,7 @@ export const MAP_THEMES: MapTheme[] = [
     glyph: "≈",
     blurb: "Sea-surface temperature with the gyres and the banks they feed.",
     layer: "sst",
-    overlays: ["currents", "fisheryBanks", "latLines"],
+    overlays: ["currents","latLines"],
     labelTheme: "Modern Cartographic",
     requires: 3,
   },
@@ -146,44 +136,18 @@ export const MAP_THEMES: MapTheme[] = [
     requires: 7,
   },
   {
-    id: "peoples",
-    name: "Peoples",
-    glyph: "☗",
-    blurb: "Culture territory and the migration that moves it.",
-    layer: "land",
-    overlays: [
-      "cultures", "settlements", "settlementNames", "migrations",
-      "toponyms", "toponymsRegion",
-    ],
-    labelTheme: "Classic Atlas",
-    requires: 7,
-  },
-  {
     id: "political",
     name: "Political",
     glyph: "❖",
     blurb: "Province writ, realm borders and the reach of each seat.",
     layer: "land",
     overlays: [
-      "provinces", "provinceBorders", "states", "politicalInfluence",
-      "settlements", "settlementNames", "hubNames",
+      "provinces", "provinceBorders", "states",
+      "settlements", "settlementNames",
     ],
     provinceOpacity: 0.55,
     labelTheme: "Modern Cartographic",
     requires: 7,
-  },
-  {
-    id: "goods",
-    name: "Goods & Trade",
-    glyph: "⚖",
-    blurb: "Trunks, corridors and the chokepoints that price them.",
-    layer: "land",
-    overlays: [
-      "tradeRoutes", "tradeCorridors", "tradeRegions", "tradeBasins",
-      "chokepoints", "settlements", "hubNames",
-    ],
-    labelTheme: "Modern Cartographic",
-    requires: 8,
   },
   {
     id: "hazards",
@@ -212,43 +176,10 @@ export const MAP_THEMES: MapTheme[] = [
     blurb: "Realms, their writ over the land, and who commands each city.",
     layer: "land",
     overlays: [
-      "provinces", "provinceBorders", "states", "houseControl",
-      "settlements", "hubNames",
-    ],
-    provinceOpacity: 0.5,
-    labelTheme: "Modern Cartographic",
-    requires: 10,
-  },
-  {
-    id: "commerce",
-    name: "Commerce",
-    glyph: "⚜",
-    blurb: "Live trade volume, corridors and who actually carries it.",
-    layer: "land",
-    overlays: [
-      "dynamicFlow", "tradeHeat", "campaignCorridors", "merchantRoutes",
+      "provinces", "provinceBorders", "states",
       "settlements",
     ],
-    labelTheme: "Modern Cartographic",
-    requires: 10,
-  },
-  {
-    id: "crisis",
-    name: "Crisis",
-    glyph: "☠",
-    blurb: "Plague, migration and where people are fleeing from.",
-    layer: "land",
-    overlays: ["plagueZones", "migrations", "settlements", "settlementNames"],
-    linePreset: "High contrast",
-    requires: 10,
-  },
-  {
-    id: "colonial",
-    name: "Colonial",
-    glyph: "⛶",
-    blurb: "Outposts, colonies and the expeditions reaching for new ground.",
-    layer: "land",
-    overlays: ["colonies", "expeditions", "migrations", "settlements", "settlementNames"],
+    provinceOpacity: 0.5,
     labelTheme: "Modern Cartographic",
     requires: 10,
   },
@@ -289,6 +220,9 @@ export const MAP_THEMES: MapTheme[] = [
 export const MANAGED_OVERLAYS: string[] = Array.from(
   new Set(MAP_THEMES.flatMap((t) => t.overlays)),
 );
+
+/** Worldgen-only overlays: in a campaign the live economy replaces them. */
+export const FORGE_ONLY = new Set(["cultures", "tradeRoutes", "tradeFlows"]);
 
 export function mapThemeById(id: string | null): MapTheme | undefined {
   return id ? MAP_THEMES.find((t) => t.id === id) : undefined;

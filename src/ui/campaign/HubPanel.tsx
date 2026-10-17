@@ -1177,13 +1177,6 @@ export function HubPanel() {
           <div style={{ ...sectionHdr, marginTop: 8 }}>Buildings &amp; control</div>
           <WardGrid buildings={detail?.buildings ?? []} />
 
-          {campActive && (
-            <div onClick={() => useUIStore.getState().setShowWarehouses(true)}
-              title="Every house warehouse & manufactory in the world, filtered to this city"
-              style={{ marginTop: 8, cursor: "pointer", color: "#c5b69d", fontSize: 10 }}>
-              🏬 Full warehouse &amp; futures-supply view →
-            </div>
-          )}
         </>
       )}
 
@@ -1299,11 +1292,6 @@ export function HubPanel() {
         return (
           <>
             <CityWarehousePanel hub={selectedHub} tick={campTick} />
-            <div onClick={() => useUIStore.getState().setShowWarehouses(true)}
-              title="Every house warehouse & manufactory in the world, filtered to this city"
-              style={{ marginTop: 8, cursor: "pointer", color: "#c5b69d", fontSize: 10 }}>
-              🏬 Warehouses &amp; estates here →
-            </div>
             <div style={{ ...sectionHdr, marginTop: 8 }}>Futures supply links</div>
             <div style={{ fontSize: 10, color: "#c5b69d", padding: "2px 2px" }}>
               <span style={{ color: "#7fd0a0" }}>Imports ←</span> {cityList(inbound, (l) => l.a_name)}

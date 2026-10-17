@@ -210,24 +210,21 @@ export class TileManager {
    *  converted to supertile coords, and ONLY the missing supertiles are
    *  fetched, in chunks of at most CHUNK_SIZE per invoke. */
   async loadVisibleTiles(
-    txMin: number, txMax: number,
+    txRanges: [number, number][],
     tyMin: number, tyMax: number,
     layer: string,
-    gridWidth: number, gridHeight: number,
+    _gridWidth: number, gridHeight: number,
     scale = 1,
   ): Promise<void> {
     const maxTy = Math.ceil(gridHeight / TILE_SIZE) - 1;
-    // X is NOT clamped — the world is cylindrical (rule 6) and the backend
-    // (`get_tiles_packed`) now wraps an out-of-range tx onto its real column,
-    // so a viewport panned past either edge keeps fetching real tiles instead
-    // of hitting a void (EU4-style infinite horizontal scroll). Y still
-    // clamps: the sim clamps Y at the poles, there is nothing to wrap onto.
-    const cTxMin = txMin;
-    const cTxMax = txMax;
+    // `txRanges` are CANONICAL base-tile columns (0..baseTilesX-1), one interval
+    // per visible world-width copy — the renderer repeats the canonical tiles
+    // every `grid_width` cells instead of wrapping the tile grid, so no tile index
+    // outside the world is ever requested. Y clamps: nothing wraps over a pole.
     const cTyMin = Math.max(0, tyMin);
     const cTyMax = Math.min(maxTy, tyMax);
 
-    if (cTxMin > cTxMax || cTyMin > cTyMax) return;
+    if (txRanges.length === 0 || cTyMin > cTyMax) return;
 
     const lod = lodForScale(scale);
     const S = 1 << lod;
@@ -236,23 +233,27 @@ export class TileManager {
     this.currentLayer = layer;
     this.currentLod = lod;
 
-    // Convert the base-tile range to supertile coords.
-    const sTxMin = Math.floor(cTxMin / S);
-    const sTxMax = Math.floor(cTxMax / S);
     const sTyMin = Math.floor(cTyMin / S);
     const sTyMax = Math.floor(cTyMax / S);
 
     // Only the supertiles that are neither cached nor currently in flight.
     const needed: [number, number][] = [];
     const now = Date.now();
-    for (let sty = sTyMin; sty <= sTyMax; sty++) {
-      for (let stx = sTxMin; stx <= sTxMax; stx++) {
-        const k = this.key(layer, lod, stx, sty);
-        const cached = this.cache.get(k);
-        if (cached) {
-          cached.lastUsed = now;
-        } else if (!this.loading.has(k)) {
-          needed.push([stx, sty]);
+    const seen = new Set<string>();
+    for (const [txMin, txMax] of txRanges) {
+      const sTxMin = Math.floor(txMin / S);
+      const sTxMax = Math.floor(txMax / S);
+      for (let sty = sTyMin; sty <= sTyMax; sty++) {
+        for (let stx = sTxMin; stx <= sTxMax; stx++) {
+          const k = this.key(layer, lod, stx, sty);
+          if (seen.has(k)) continue;
+          seen.add(k);
+          const cached = this.cache.get(k);
+          if (cached) {
+            cached.lastUsed = now;
+          } else if (!this.loading.has(k)) {
+            needed.push([stx, sty]);
+          }
         }
       }
     }

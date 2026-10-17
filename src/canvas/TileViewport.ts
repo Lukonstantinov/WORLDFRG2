@@ -124,6 +124,17 @@ export class TileViewport {
     return { wx, wy };
   }
 
+  /** The world's width in cells, set by the map each frame; 0 = no wrapping. */
+  wrapWidth = 0;
+
+  /** Like `screenToWorld` but X is wrapped into [0, wrapWidth): the map scrolls
+   *  infinitely, so a click on any copy of the world lands on the real cell. */
+  screenToWorldWrapped(sx: number, sy: number): { wx: number; wy: number } {
+    const { wx, wy } = this.screenToWorld(sx, sy);
+    const w = this.wrapWidth;
+    return { wx: w > 0 ? ((wx % w) + w) % w : wx, wy };
+  }
+
   /** Center the view on a world cell, zooming in to at least `minScale`. */
   centerOn(wx: number, wy: number, screenWidth: number, screenHeight: number, minScale = 4) {
     if (this._scaleX < minScale) this._scaleX = minScale;

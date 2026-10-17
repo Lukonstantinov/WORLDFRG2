@@ -686,3 +686,12 @@ export async function getRealmStartMode(): Promise<string> {
 export async function setRealmStartMode(mode: string): Promise<void> {
   return invoke("set_realm_start_mode", { mode });
 }
+
+/** Every living realm and province with population and economy index (the Atlas ranks these). */
+export async function campaignStandings(): Promise<import("@types").Standings | null> {
+  return invoke("campaign_standings");
+}
+/** Each province's production share by good — drives the political map's goods icons. */
+export async function campaignProvinceGoodShares(): Promise<import("@types").ProvinceGoodShare[]> {
+  return invoke("campaign_province_good_shares");
+}

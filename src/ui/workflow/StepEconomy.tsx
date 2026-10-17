@@ -15,7 +15,6 @@ export function StepEconomy(_props: Props) {
   const setStatus = useUIStore((s) => s.setStatus);
   const markStepCompleted = useUIStore((s) => s.markStepCompleted);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
-  const setShowTradeMatrix = useUIStore((s) => s.setShowTradeMatrix);
   const overlayVisibility = useUIStore((s) => s.overlayVisibility);
   const reachGood = useUIStore((s) => s.reachGood);
   const setReachGood = useUIStore((s) => s.setReachGood);
@@ -80,10 +79,6 @@ export function StepEconomy(_props: Props) {
 
       {economy && economy.hubs.length > 0 && (
         <>
-          <button onClick={() => setShowTradeMatrix(true)} style={{ ...genBtn, marginTop: 4 }}>
-            📊 Open Trade Matrix
-          </button>
-
           {/* Per-good reach: highlight which hubs a good reaches on the map. */}
           <div style={{ marginTop: 5 }}>
             <div style={{ fontSize: 10, color: "#bcab8e", marginBottom: 2 }}>Good reach (highlight on map)</div>

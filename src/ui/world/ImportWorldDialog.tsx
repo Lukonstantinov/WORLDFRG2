@@ -5,7 +5,7 @@ import { useViewportStore } from "@state/viewportStore";
 import { useUIStore } from "@state/uiStore";
 
 const GROUPS: { id: string; label: string; desc: string }[] = [
-  { id: "terrain", label: "Terrain & Elevation", desc: "land/sea, elevation, sea depth, shelves, plates, volcanoes" },
+  { id: "terrain", label: "Terrain & Elevation", desc: "land/sea, elevation, sea depth, shelves, plates" },
   { id: "climate", label: "Climate", desc: "winds, currents, temperature, precipitation, Köppen, salinity" },
   { id: "hydrology", label: "Rivers & Lakes", desc: "river and lake overlays" },
   { id: "soil", label: "Soil & Fertility", desc: "soil types, fertility, fisheries" },

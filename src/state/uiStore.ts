@@ -106,6 +106,8 @@ interface UIStore {
   elevationValue: number;
   statusText: string;
   inspectedCell: { wx: number; wy: number } | null;
+  /** The plate picked on the Plates layer (its `plate_index`), or null. */
+  selectedPlate: number | null;
   workflowStep: WorkflowStep;
   /** GENERATION_UX_REDESIGN_PLAN.md Slice 9 (F9) — the wizard's two-mode head.
    *  "quick" = preset → Generate → done, the 90% path; "detailed" = the full
@@ -399,6 +401,7 @@ interface UIStore {
   setElevationValue: (v: number) => void;
   setStatus: (text: string) => void;
   setInspectedCell: (cell: { wx: number; wy: number } | null) => void;
+  setSelectedPlate: (id: number | null) => void;
   setSelectedHub: (id: number | null) => void;
   setSelectedMerchantRoute: (r: MerchantRoute | null, sibling?: MerchantRoute | null) => void;
   setSelectedFuturesLane: (r: FuturesLane | null) => void;
@@ -558,6 +561,7 @@ export const useUIStore = create<UIStore>((set) => ({
   elevationValue: 0.5,
   statusText: "",
   inspectedCell: null,
+  selectedPlate: null,
   workflowStep: 1,
   wizardMode: "quick",
   stepCompleted: {},
@@ -718,6 +722,7 @@ export const useUIStore = create<UIStore>((set) => ({
   setElevationValue: (v) => set({ elevationValue: v }),
   setStatus: (text) => set({ statusText: text }),
   setInspectedCell: (cell) => set({ inspectedCell: cell }),
+  setSelectedPlate: (id) => set({ selectedPlate: id }),
   setSelectedHub: (id) => {
     set({ selectedHub: id, selectedChain: null, selectedExport: null });
     // A dependent colony (colony_kind 1) or house outpost (2) has no normal city

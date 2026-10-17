@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useUIStore } from "@state/uiStore";
 import { useCampaignStore } from "@state/campaignStore";
 import { useViewportStore } from "@state/viewportStore";
-import { campaignGetJournal, campaignGetTradeBasins, campaignGetEraFrame } from "@bridge";
-import type { CampaignHubBrief, JournalEntry, TradeBasin } from "@types";
+import { campaignGetJournal, campaignStandings, campaignCityRanking } from "@bridge";
+import type { CampaignHubBrief, JournalEntry, Standings, StandingRow, CityRank } from "@types";
 import { useFloatingWindow, PANEL_TINTS } from "@ui/world/useFloatingWindow";
 import { T, SERIF } from "@ui/campaign/chronicleTheme";
 
@@ -19,18 +19,14 @@ import { T, SERIF } from "@ui/campaign/chronicleTheme";
 export function AtlasPanel() {
   const open = useUIStore((s) => s.showAtlas);
   const setOpen = useUIStore((s) => s.setShowAtlas);
-  const toggleOverlay = useUIStore((s) => s.toggleOverlay);
-  const heatOn = useUIStore((s) => s.overlayVisibility.tradeHeat ?? false);
-  const basinsOverlayOn = useUIStore((s) => s.overlayVisibility.tradeBasins ?? false);
   const snapshot = useCampaignStore((s) => s.snapshot);
   const worldEconomy = useCampaignStore((s) => s.worldEconomy);
   const setSearchPin = useViewportStore((s) => s.setSearchPin);
-  const [tab, setTab] = useState<"overview" | "cities" | "regions" | "records" | "timeline">("overview");
-  const eraFrame = useUIStore((s) => s.eraFrame);
-  const setEraFrame = useUIStore((s) => s.setEraFrame);
+  const [tab, setTab] = useState<"overview" | "cities" | "realms" | "records" | "timeline">("overview");
   const [sortBy, setSortBy] = useState<"population" | "growth" | "trade" | "wealth">("population");
   const [journal, setJournal] = useState<JournalEntry[]>([]);
-  const [basins, setBasins] = useState<TradeBasin[]>([]);
+  const [standings, setStandings] = useState<Standings | null>(null);
+  const [cityRank, setCityRank] = useState<CityRank[]>([]);
   const [kindFilter, setKindFilter] = useState<Record<string, boolean>>({
     lifecycle: true, war: true, finance: true, plague: true,
   });
@@ -46,25 +42,14 @@ export function AtlasPanel() {
     return () => { alive = false; };
   }, [open, active, tab, year]);
 
-  // The Regions tab reads the named trade basins — refetch as years pass.
+  // Realm/province standings and the city ranking — refetch as years pass.
   useEffect(() => {
-    if (!open || !active || tab !== "regions") return;
+    if (!open || !active || (tab !== "realms" && tab !== "overview")) return;
     let alive = true;
-    campaignGetTradeBasins().then((r) => { if (alive) setBasins(r); }).catch(() => {});
+    campaignStandings().then((r) => { if (alive) setStandings(r); }).catch(() => {});
+    campaignCityRanking().then((r) => { if (alive) setCityRank(r); }).catch(() => {});
     return () => { alive = false; };
   }, [open, active, tab, year]);
-
-  // Closing the Atlas always returns the map to the present.
-  useEffect(() => {
-    if (!open) setEraFrame(null);
-  }, [open, setEraFrame]);
-
-  // Era scrubber: slide to a past year → the MAP time-travels (markers + heat);
-  // sliding back to the far right returns to the live world.
-  const scrubTo = (y: number, maxYear: number) => {
-    if (y >= maxYear) { setEraFrame(null); return; }
-    campaignGetEraFrame(y).then((f) => setEraFrame(f)).catch(() => {});
-  };
 
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.atlas);
 
@@ -147,19 +132,13 @@ export function AtlasPanel() {
           {active ? `Year ${year} · ${alive_n} towns alive${ruins > 0 ? ` · ${ruins} ruins` : ""}` : "no campaign"}
         </span>
         <span style={{ flex: 1 }} />
-        <button data-no-drag onClick={() => toggleOverlay("tradeHeat")} title="Toggle the Trade Heat map overlay"
-          style={{
-            padding: "2px 8px", borderRadius: 5, fontSize: 10, cursor: "pointer", marginRight: 8,
-            border: `1px solid ${heatOn ? "#d9a441" : T.line}`,
-            background: heatOn ? "#2a230e" : "transparent", color: heatOn ? "#ffd75e" : T.inkDim,
-          }}>🔥 Heat</button>
         <span data-no-drag style={{ cursor: "pointer", color: "#a5967d" }} onClick={() => setOpen(false)}>✕</span>
       </div>
 
       <div style={{ display: "flex", borderBottom: `1px solid ${T.lineSoft}`, padding: "0 6px" }}>
         {tabBtn("overview", "📈 Overview")}
         {tabBtn("cities", "🏙 Cities")}
-        {tabBtn("regions", "🏞 Regions")}
+        {tabBtn("realms", "👑 Realms & Provinces")}
         {tabBtn("records", "🏆 Records")}
         {tabBtn("timeline", "📜 Timeline")}
       </div>
@@ -178,37 +157,14 @@ export function AtlasPanel() {
               <Tile label="Abandoned" value={`−${last ? last[5] : 0}`} color="#c0a0a0" />
               <Tile label="Trade (yr)" value={fmtNum(last ? last[2] : 0)} color="#7fd0c0" />
             </div>
-            {/* ── Era scrubber: drag into the past; the MAP follows. ── */}
-            <div style={{
-              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
-              background: eraFrame ? "#241d0c" : T.card,
-              border: `1px solid ${eraFrame ? T.goldDim : T.lineSoft}`,
-              borderRadius: 6, padding: "6px 10px",
-            }}>
-              <span style={{ fontFamily: SERIF, color: eraFrame ? T.gold : T.inkDim, fontSize: 12, fontWeight: 700, whiteSpace: "nowrap" }}>
-                {eraFrame ? `⏳ Year ${eraFrame.year}` : "⏳ Present"}
-              </span>
-              <input
-                type="range"
-                min={series[0][0]}
-                max={year}
-                step={1}
-                value={eraFrame ? eraFrame.year : year}
-                onChange={(e) => scrubTo(Number(e.target.value), year)}
-                style={{ flex: 1, accentColor: "#d8b24a" }}
-                title="Drag into the past — the map's markers and heat time-travel"
-              />
-              {eraFrame && (
-                <button onClick={() => setEraFrame(null)} style={{
-                  padding: "2px 9px", borderRadius: 5, fontSize: 10, cursor: "pointer",
-                  border: `1px solid ${T.goldDim}`, background: "transparent", color: T.gold,
-                }}>return to present</button>
-              )}
-            </div>
             <Chart title="World population" rows={series.map((r) => [r[0], r[1]])} color="#6ab0e8" fmt={fmtNum} />
             <Chart title="Trade volume (grain-eq / year)" rows={series.map((r) => [r[0], r[2]])} color="#4fd0c0" fmt={fmtNum} />
             <Chart title="Towns alive — ▲ founded · † abandoned" rows={series.map((r) => [r[0], r[3]])}
               color="#d8b24a" fmt={(v) => String(Math.round(v))} markers={lifecycleMarkers(series)} />
+            <CityStats rows={cityRank} onPick={(id) => {
+              const h = hubs.find((x) => x.id === id);
+              if (h) setSearchPin(h.x, h.y);
+            }} />
           </>
         )}
 
@@ -257,43 +213,17 @@ export function AtlasPanel() {
           </>
         )}
 
-        {active && tab === "regions" && (
+        {active && tab === "realms" && (
           <>
-            <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
-              <span style={{ color: T.inkDim, fontSize: 11 }}>
-                Named trade basins — clusters bound by their strongest trade ties.
-              </span>
-              <span style={{ flex: 1 }} />
-              <button onClick={() => toggleOverlay("tradeBasins")} style={{
-                padding: "2px 9px", borderRadius: 5, fontSize: 10, cursor: "pointer",
-                border: `1px solid ${basinsOverlayOn ? T.gold : T.line}`,
-                background: basinsOverlayOn ? "#241d0c" : "transparent",
-                color: basinsOverlayOn ? T.gold : T.inkDim,
-              }}>🏞 show on map</button>
-            </div>
-            {basins.length === 0 && <div style={hint}>No basins yet — trade needs a full year on the ledger.</div>}
-            {basins.map((b, i) => (
-              <div key={b.name + i} onClick={() => setSearchPin(b.cx, b.cy)}
-                title="Click to pin this basin's heart on the map"
-                style={{
-                  display: "flex", alignItems: "baseline", gap: 8, cursor: "pointer",
-                  background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6,
-                  borderLeft: `3px solid ${BASIN_UI_COLORS[i % BASIN_UI_COLORS.length]}`,
-                  padding: "6px 9px", marginBottom: 5,
-                }}>
-                <span style={{ fontFamily: SERIF, color: BASIN_UI_COLORS[i % BASIN_UI_COLORS.length], fontWeight: 700, fontSize: 13 }}>
-                  {b.name}
-                </span>
-                <span style={{ color: T.inkDim, fontSize: 10 }}>{b.hub_ids.length} towns</span>
-                {b.top_goods.length > 0 && (
-                  <span style={{ color: "#c9b96a", fontSize: 10 }}>{b.top_goods.join(" · ")}</span>
-                )}
-                <span style={{ flex: 1 }} />
-                <span style={{ color: T.inkDim, fontSize: 10 }}>busiest</span>
-                <span style={{ color: T.inkMid, fontSize: 11 }}>{b.top_city}</span>
-                <span style={{ color: "#7fd0c0", fontSize: 12, fontWeight: 700 }}>{fmtNum(b.volume)}</span>
-              </div>
-            ))}
+            {!standings && <div style={hint}>No realms yet — they form as the campaign runs.</div>}
+            {standings && (
+              <>
+                <Ranking title="Most populous realms" rows={standings.realms} by="population" fmt={fmtNum} onPick={(r) => setSearchPin(r.x, r.y)} />
+                <Ranking title="Most prosperous realms (economy index, world = 100)" rows={standings.realms} by="economy_index" fmt={(v) => String(Math.round(v))} onPick={(r) => setSearchPin(r.x, r.y)} />
+                <Ranking title="Most populous provinces" rows={standings.provinces} by="population" fmt={fmtNum} onPick={(r) => setSearchPin(r.x, r.y)} />
+                <Ranking title="Most prosperous provinces (economy index, world = 100)" rows={standings.provinces} by="economy_index" fmt={(v) => String(Math.round(v))} onPick={(r) => setSearchPin(r.x, r.y)} />
+              </>
+            )}
           </>
         )}
 
@@ -398,11 +328,61 @@ function Spark({ values, dead }: { values: number[]; dead: boolean }) {
 /** Census grid template (City · History spark · Pop · Δ · Trade · Wealth · Status). */
 const CENSUS_COLS = "1.45fr 62px 0.7fr 0.55fr 0.7fr 0.7fr 1fr";
 
-/** Mirror of the map overlay's basin palette (OverlayManager BASIN_COLORS). */
-const BASIN_UI_COLORS = [
-  "#4fd0c0", "#d8b24a", "#c08cff", "#7fd08a", "#e08a6a", "#6aa9e8",
-  "#e0a0d0", "#c9c96a", "#8ad0e0", "#d88a8a", "#a9c96a", "#c0a06a",
-];
+/** Top-N list of realms or provinces by one number; click pins the place on the map. */
+function Ranking({ title, rows, by, fmt, onPick }: {
+  title: string; rows: StandingRow[]; by: "population" | "economy_index";
+  fmt: (v: number) => string; onPick: (r: StandingRow) => void;
+}) {
+  const top = [...rows].sort((a, b) => b[by] - a[by]).slice(0, 8);
+  const max = Math.max(1e-6, ...top.map((r) => r[by]));
+  return (
+    <div style={{ background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6, padding: "6px 8px", marginBottom: 8 }}>
+      <div style={{ color: T.inkDim, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{title}</div>
+      {top.map((r, i) => (
+        <div key={r.id} onClick={() => onPick(r)} title="Click to pin on the map"
+          style={{ display: "flex", alignItems: "center", gap: 6, padding: "2px 0", cursor: "pointer" }}>
+          <span style={{ color: T.inkFaint, fontSize: 10, minWidth: 16, textAlign: "right" }}>{i + 1}</span>
+          <span style={{ width: 9, height: 9, borderRadius: 2, background: `rgb(${r.color.join(",")})`, border: "1px solid #000", flex: "0 0 auto" }} />
+          <span style={{ color: T.ink, fontSize: 11.5, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {r.name}{r.realm_name && r.realm_name !== r.name ? <span style={{ color: T.inkDim }}> · {r.realm_name}</span> : null}
+          </span>
+          <div style={{ width: 70, height: 5, background: "#1e180f", borderRadius: 3 }}>
+            <div style={{ width: `${(r[by] / max) * 100}%`, height: "100%", background: T.gold, borderRadius: 3 }} />
+          </div>
+          <span style={{ color: T.gold, fontSize: 11, fontWeight: 700, minWidth: 44, textAlign: "right" }}>{fmt(r[by])}</span>
+        </div>
+      ))}
+      {top.length === 0 && <div style={{ color: T.inkDim, fontSize: 11 }}>Nothing to rank yet.</div>}
+    </div>
+  );
+}
+
+/** The old City Ranking window, as a stat: the most prosperous and the busiest towns. */
+function CityStats({ rows, onPick }: { rows: CityRank[]; onPick: (id: number) => void }) {
+  if (rows.length === 0) return null;
+  const col = (title: string, key: "prosperity" | "trade") => {
+    const top = [...rows].sort((a, b) => b[key] - a[key]).slice(0, 6);
+    const max = Math.max(1e-6, ...top.map((r) => r[key]));
+    return (
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ color: T.inkDim, fontSize: 10, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{title}</div>
+        {top.map((c, i) => (
+          <div key={c.id} onClick={() => onPick(c.id)} style={{ display: "flex", gap: 5, alignItems: "baseline", padding: "1px 0", cursor: "pointer" }}>
+            <span style={{ color: T.inkFaint, fontSize: 10, minWidth: 14, textAlign: "right" }}>{i + 1}</span>
+            <span style={{ color: T.ink, fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{c.name}</span>
+            <span style={{ color: T.gold, fontSize: 10.5, fontWeight: 700 }}>{Math.round((c[key] / max) * 100)}</span>
+          </div>
+        ))}
+      </div>
+    );
+  };
+  return (
+    <div style={{ display: "flex", gap: 14, background: T.card, border: `1px solid ${T.lineSoft}`, borderRadius: 6, padding: "6px 8px", marginBottom: 8 }}>
+      {col("Most prosperous cities", "prosperity")}
+      {col("Busiest by trade", "trade")}
+    </div>
+  );
+}
 
 function Tile({ label, value, color }: { label: string; value: string; color?: string }) {
   return (

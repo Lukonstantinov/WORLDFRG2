@@ -13,19 +13,14 @@ export function WindowBar() {
     { label: "🏛 Colonies", on: s.showColonial, set: s.setShowColonial },
     { label: "⚖ Markets", on: s.showMarkets, set: s.setShowMarkets },
     { label: "📦 Goods", on: s.showGoodsWindow, set: s.setShowGoodsWindow },
-    { label: "🏆 Cities", on: s.showCityRanking, set: s.setShowCityRanking },
-    { label: "🏬 Depots", on: s.showWarehouses, set: s.setShowWarehouses },
-    { label: "📜 Futures", on: s.showFutures, set: s.setShowFutures },
-    { label: "🔀 Trade", on: s.showTradeMatrix, set: s.setShowTradeMatrix },
+    { label: "📜 Contracts", on: s.showFutures, set: s.setShowFutures },
     { label: "🧭 Itinerary", on: s.showItinerary, set: s.setShowItinerary },
     { label: "🌊 Hydrology", on: s.showHydrology, set: s.setShowHydrology },
-    { label: "🗺 Provinces", on: s.showProvinces, set: s.setShowProvinces },
     // Reopens the dossier for the province last picked on the map. Only offered once
     // something IS picked — the window has nothing to show otherwise.
     ...(s.selectedProvince !== null
       ? [{ label: "🏞 Province", on: s.showProvinceInspector, set: s.setShowProvinceInspector }]
       : []),
-    { label: "📊 Economy", on: s.showEconomyDashboard, set: s.setShowEconomyDashboard },
     { label: "📖 Codex", on: s.showGoodsCodex, set: s.setShowGoodsCodex },
   ];
   const chrome: { label: string; on: boolean; set: (v: boolean) => void }[] = [

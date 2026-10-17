@@ -251,3 +251,89 @@ pub(crate) fn apply_start_realms(conn: &Connection, sim: &mut CampaignSim) {
         sim.found_start_realm(seat, r.name.clone(), r.color, &provs);
     }
 }
+
+// ── Atlas standings & the political map's goods ────────────────────────────────
+
+#[derive(Serialize, Clone)]
+pub struct StandingRow {
+    pub id: u32, pub name: String, pub color: [u8; 3], pub realm: i32, pub realm_name: String,
+    pub population: f32, pub economy_index: f32, pub x: f32, pub y: f32,
+}
+
+#[derive(Serialize, Clone)]
+pub struct Standings { pub realms: Vec<StandingRow>, pub provinces: Vec<StandingRow> }
+
+/// Every living realm and every province with its population and economy index
+/// (output value per head, world average = 100) — the Atlas ranks these, so the
+/// window needs one read instead of one overview per realm.
+#[tauri::command]
+pub fn campaign_standings(db: State<'_, WorldDb>) -> Result<Option<Standings>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(None) };
+    let names: Vec<String> = stored_provinces(&conn).into_iter().map(|p| p.name).collect();
+    let np = sim.prov_realm.len();
+    let world = value_per_head(&sim, None).max(1e-6);
+    let (mut urban, mut value) = (vec![0.0f32; np], vec![0.0f32; np]);
+    for (h, hub) in sim.hubs.iter().enumerate() {
+        if hub.is_estate || hub.abandoned { continue; }
+        let p = sim.hub_province.get(h).copied().unwrap_or(-1);
+        if p < 0 || p as usize >= np { continue; }
+        let p = p as usize;
+        urban[p] += hub.population;
+        for (g, &q) in hub.production.iter().enumerate() { value[p] += q.max(0.0) * sim.goods.get(g).map(|tg| tg.base_value).unwrap_or(1.0); }
+    }
+    let realm_color = |ri: usize| sim.realms[ri].color.unwrap_or_else(|| super::province::state_color(sim.realms[ri].id as usize));
+    let mut realms = Vec::new();
+    for (ri, r) in sim.realms.iter().enumerate() {
+        if r.fallen_tick != 0 { continue; }
+        let pop: f32 = r.provinces.iter().map(|&p| sim.prov_rural.get(p as usize).copied().unwrap_or(0.0) + urban.get(p as usize).copied().unwrap_or(0.0)).sum();
+        let cap = sim.hubs.get(r.capital_hub as usize);
+        realms.push(StandingRow {
+            id: ri as u32, name: r.name.clone(), color: realm_color(ri), realm: ri as i32, realm_name: r.name.clone(),
+            population: pop, economy_index: (100.0 * value_per_head(&sim, Some(ri)) / world).round(),
+            x: cap.map(|h| h.x).unwrap_or(0.0), y: cap.map(|h| h.y).unwrap_or(0.0),
+        });
+    }
+    let mut provinces = Vec::new();
+    for p in 0..np {
+        let pop = sim.prov_rural.get(p).copied().unwrap_or(0.0) + urban[p];
+        if pop < 1.0 { continue; }
+        let ri = sim.prov_realm[p];
+        let (color, realm_name) = if ri >= 0 && (ri as usize) < sim.realms.len() { (realm_color(ri as usize), sim.realms[ri as usize].name.clone()) } else { ([150, 140, 120], String::new()) };
+        let seat = sim.prov_seat.get(p).copied().unwrap_or([0.0, 0.0]);
+        provinces.push(StandingRow {
+            id: p as u32, name: names.get(p).cloned().unwrap_or_else(|| format!("Province {p}")), color, realm: ri, realm_name,
+            population: pop, economy_index: (100.0 * (value[p] / pop) / world).round(), x: seat[0], y: seat[1],
+        });
+    }
+    Ok(Some(Standings { realms, provinces }))
+}
+
+#[derive(Serialize, Clone)]
+pub struct ProvinceGoodShare { pub province: u32, pub goods: Vec<RealmGood> }
+
+/// Each province's production split by VALUE across the goods it makes (shares sum
+/// to 1; goods under 8% are dropped, at most four kept, largest first). The
+/// political map shows a good's icon where its share reaches 30%, so a province
+/// with one icon is a specialist and one with three is balanced.
+#[tauri::command]
+pub fn campaign_province_good_shares(db: State<'_, WorldDb>) -> Result<Vec<ProvinceGoodShare>, String> {
+    let conn = db.conn.lock().map_err(|e| e.to_string())?;
+    let Some(sim) = get_sim(&db, &conn)? else { return Ok(vec![]) };
+    let ng = sim.goods.len();
+    if ng == 0 { return Ok(vec![]); }
+    let actual = sim.province_good_actual();
+    let np = actual.len() / ng;
+    let mut out = Vec::new();
+    for p in 0..np {
+        let vals: Vec<f32> = (0..ng).map(|g| actual[p * ng + g].max(0.0) * sim.goods[g].base_value.max(0.0)).collect();
+        let total: f32 = vals.iter().sum();
+        if total <= 0.0 { continue; }
+        let mut goods: Vec<RealmGood> = (0..ng).filter(|&g| vals[g] / total >= 0.08)
+            .map(|g| RealmGood { good: sim.goods[g].name.clone(), amount: vals[g] / total }).collect();
+        goods.sort_by(|a, b| b.amount.partial_cmp(&a.amount).unwrap_or(std::cmp::Ordering::Equal));
+        goods.truncate(4);
+        out.push(ProvinceGoodShare { province: p as u32, goods });
+    }
+    Ok(out)
+}

@@ -140,6 +140,8 @@ pub fn run() {
             campaign_commands::campaign_province_potential,
             campaign_commands::compute_states,
             campaign_commands::campaign_realm_overview,
+            campaign_commands::campaign_standings,
+            campaign_commands::campaign_province_good_shares,
             campaign_commands::get_start_realms,
             campaign_commands::set_start_realms,
             campaign_commands::regenerate_start_realms,

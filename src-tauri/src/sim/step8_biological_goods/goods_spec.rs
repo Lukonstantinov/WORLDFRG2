@@ -963,15 +963,9 @@ fn default_custom_goods() -> Vec<GoodSpec> {
         //    and shipped and used by NOTHING downstream. Wiring their first recipe
         //    is worth more than inventing new goods; appended last, never reordered
         //    (rule 7 — a good's index is a fixed position in `TileData.goods`). ──
-        // Ceramics ← clay's first consumer. Roman *terra sigillata* — a craft that
-        // MIGRATED between provinces, the showcase for S3 (guild founding) + S4
-        // (earned signatures).
-        mg("ceramics", "Ceramics", "\u{1FED9}", "#b8734a", 3.0, 1.8, 0.0, false, 1.0,
-            vec![("clay", 1.0), ("timber", 0.2)]),
-        // Glassware ← bay salt (flux) + timber (furnace fuel) — the Murano case the
-        // design docs already name.
-        mg("glassware", "Glassware", "\u{1F9EA}", "#a8d8e0", 12.0, 1.0, 0.0, true, 1.1,
-            vec![("bay_salt", 0.6), ("timber", 0.5)]),
+        // Ceramics (clay's first consumer) and Glassware (bay salt + timber, the Murano
+        // case) are BUILT-IN goods (indices 33/34) converted to manufactures in
+        // `default_list`; defining them again here listed each good twice.
         // Fixed Dye ← alum (the mordant) + raw dye — `DEPOSITS_AND_MINING_PLAN.md`
         // explicitly deferred wiring alum to a recipe; this is that recipe.
         mg("fixed_dye", "Fixed Dye", "\u{1F9F5}", "#7a3a8a", 9.0, 0.6, 0.0, false, 1.0,

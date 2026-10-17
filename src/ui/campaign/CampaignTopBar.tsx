@@ -53,12 +53,8 @@ export function CampaignTopBar() {
       items: [
         { label: "⚖ Markets", on: ui.showMarkets, set: ui.setShowMarkets },
         { label: "📦 Goods & Quality", on: ui.showGoodsWindow, set: ui.setShowGoodsWindow },
-        { label: "📊 Economy Dashboard", on: ui.showEconomyDashboard, set: ui.setShowEconomyDashboard },
         { label: "📖 Goods Codex", on: ui.showGoodsCodex, set: ui.setShowGoodsCodex },
-        { label: "🔀 Trade Matrix", on: ui.showTradeMatrix, set: ui.setShowTradeMatrix },
-        { label: "🏬 Warehouses & Estates", on: ui.showWarehouses, set: ui.setShowWarehouses },
-        { label: "📜 Futures Contracts", on: ui.showFutures, set: ui.setShowFutures },
-        { label: "🧭 Itinerary", on: ui.showItinerary, set: ui.setShowItinerary },
+        { label: "📜 Contracts", on: ui.showFutures, set: ui.setShowFutures },
       ],
     },
     {
@@ -67,11 +63,8 @@ export function CampaignTopBar() {
         { label: "⚜️ Merchant Houses", on: ui.showHouses, set: ui.setShowHouses },
         { label: "🏛 Merchant Companies", on: ui.showCompanies, set: ui.setShowCompanies },
         { label: "⚔ Feuds & Alliances", on: ui.showFeuds, set: ui.setShowFeuds },
-        { label: "🏛 Government", on: ui.showGovernment, set: ui.setShowGovernment },
-        { label: "⚭ Dynasties & Alliances", on: ui.showDynasties, set: ui.setShowDynasties },
         { label: "🔨 Crafts & Guilds", on: ui.showGuilds, set: ui.setShowGuilds },
         { label: "👤 Notable Figures", on: ui.showFigures, set: ui.setShowFigures },
-        { label: "🗿 Landmarks & Sites", on: ui.showLandmarks, set: ui.setShowLandmarks },
         { label: "☠ Plagues & Epidemics", on: ui.showPlagues, set: ui.setShowPlagues },
         { label: "🏇 Barbarian Tribes", on: ui.showHordes, set: ui.setShowHordes },
       ],
@@ -86,12 +79,8 @@ export function CampaignTopBar() {
     {
       key: "world", label: "🌍 World",
       items: [
-        // Opening Provinces also switches the province overlay on so the map matches.
-        { label: "🗺 Provinces", on: ui.showProvinces,
-          set: (v: boolean) => { ui.setShowProvinces(v); if (v) ui.setOverlayVisible("provinces", true); } },
         { label: "👑 Realms", on: ui.showStates,
           set: (v: boolean) => { ui.setShowStates(v); if (v) ui.setOverlayVisible("states", true); } },
-        { label: "🏆 City Ranking", on: ui.showCityRanking, set: ui.setShowCityRanking },
         { label: "🏛 Colonial Office", on: ui.showColonial, set: ui.setShowColonial },
         { label: "🌊 Hydrology · Rivers", on: ui.showHydrology, set: ui.setShowHydrology },
         { label: "⚔ War Council", on: ui.showWar, set: ui.setShowWar },
@@ -187,9 +176,6 @@ export function CampaignTopBar() {
           <Pulse label="Population" value={fmtNum(snapshot!.total_population)}
             sub={deltaStr(snapshot!.population_delta, true)}
             subColor={snapshot!.population_delta >= 0 ? T.goodInk : T.badInk} />
-          <Pulse label="Price idx" value={snapshot!.price_index.toFixed(2) + "×"}
-            sub={deltaStr(snapshot!.price_index_delta, false, 2)}
-            subColor={snapshot!.price_index_delta <= 0 ? T.goodInk : T.warn} />
           <Pulse label="Caravans" value={String(snapshot!.in_transit)} />
           {starving > 0 && (
             <div style={{ ...pulseTile, border: "1px solid #6a3040", background: "#2a1218" }}
@@ -226,13 +212,18 @@ export function CampaignTopBar() {
             background: ui.showPeoples ? "#241d0c" : "rgba(24,20,14,0.6)",
             color: ui.showPeoples ? T.gold : T.inkDim, fontWeight: ui.showPeoples ? 700 : 400,
           }}>👥 Peoples</button>
-        {/* Map lenses: quick toggles for the trade overlays. */}
-        <button onClick={() => ui.toggleOverlay("tradeHeat")} title="Trade Heat — where trade concentrates"
-          style={lensChip(ui.overlayVisibility.tradeHeat ?? false, "#d9a441")}>🔥</button>
+        {/* The Itinerary — travel times between two places; its own button now. */}
+        <button onClick={() => ui.setShowItinerary(!ui.showItinerary)}
+          title="Itinerary — travel time between two places, by every mode"
+          style={{
+            padding: "5px 10px", borderRadius: 6, fontSize: 11, cursor: "pointer", whiteSpace: "nowrap",
+            border: `1px solid ${ui.showItinerary ? T.goldDim : T.line}`,
+            background: ui.showItinerary ? "#241d0c" : "rgba(24,20,14,0.6)",
+            color: ui.showItinerary ? T.gold : T.inkDim, fontWeight: ui.showItinerary ? 700 : 400,
+          }}>🧭 Itinerary</button>
+        {/* Map lens: the live trade arteries. */}
         <button onClick={() => ui.toggleOverlay("dynamicFlow")} title="Dynamic Trade Flow — the live trade arteries"
           style={lensChip(ui.overlayVisibility.dynamicFlow ?? false, "#4fd0c0")}>🌊</button>
-        <button onClick={() => ui.toggleOverlay("tradeBasins")} title="Named trade basins — the regions trade binds together"
-          style={lensChip(ui.overlayVisibility.tradeBasins ?? false, "#7fd08a")}>🏞</button>
         <span style={{ width: 1, height: 20, background: T.line, margin: "0 3px" }} />
         {groups.map((g) => {
           const openCount = g.items.filter((i) => i.on).length;

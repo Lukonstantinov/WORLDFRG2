@@ -5,30 +5,24 @@ import { StatusBar } from "@ui/world/StatusBar";
 import { WorkflowPanel } from "@ui/workflow/WorkflowPanel";
 import { ChroniclePanel } from "@ui/campaign/ChroniclePanel";
 import { InfoPanel } from "@ui/world/InfoPanel";
-import { TradeMatrixPanel } from "@ui/goods/TradeMatrixPanel";
 import { HubPanel } from "@ui/campaign/HubPanel";
 import { SatelliteConstructionPanel } from "@ui/campaign/SatelliteConstructionPanel";
 import { MerchantRoutePanel } from "@ui/goods/MerchantRoutePanel";
 import { FuturesLanePanel } from "@ui/campaign/FuturesLanePanel";
 import { FuturesPanel } from "@ui/campaign/FuturesPanel";
-import { WarehousesPanel } from "@ui/campaign/WarehousesPanel";
-import { CityRankingPanel } from "@ui/campaign/CityRankingPanel";
-import { GoodFlowPanel } from "@ui/goods/GoodFlowPanel";
 import { GoodsBrowserPanel } from "@ui/goods/GoodsBrowserPanel";
 import { HousesPanel, HouseDossierHost } from "@ui/campaign/HousesPanel";
 import { PersonWindowHost } from "@ui/campaign/PersonWindow";
 import { FeudsAlliancesPanel } from "@ui/campaign/FeudsAlliancesPanel";
-import { GovernmentPanel } from "@ui/campaign/GovernmentPanel";
 import { BarbarianTribesPanel } from "@ui/campaign/BarbarianTribesPanel";
 import { MoneyFinancePanel } from "@ui/campaign/MoneyFinancePanel";
 import { WarPanel } from "@ui/campaign/WarPanel";
 import { RealmWindow } from "@ui/campaign/RealmWindow";
 import { ItineraryPanel } from "@ui/goods/ItineraryPanel";
 import { GoodsCodexPanel } from "@ui/goods/GoodsCodexPanel";
-import { EconomyDashboardPanel } from "@ui/campaign/EconomyDashboardPanel";
 import { HydrologyPanel } from "@ui/world/HydrologyPanel";
-import { ProvincePanel } from "@ui/world/ProvincePanel";
 import { ProvinceInspector } from "@ui/world/ProvinceInspector";
+import { PlateInspector } from "@ui/world/PlateInspector";
 import { AtlasPanel } from "@ui/campaign/AtlasPanel";
 import { PeoplesPanel } from "@ui/campaign/PeoplesPanel";
 import { ColonialPanel } from "@ui/campaign/ColonialPanel";
@@ -39,8 +33,6 @@ import { ImmigrationPanel } from "@ui/campaign/ImmigrationPanel";
 import { GuildsPanel } from "@ui/campaign/GuildsPanel";
 import { FiguresPanel } from "@ui/campaign/FiguresPanel";
 import { NotablesPanel } from "@ui/campaign/NotablesPanel";
-import { LandmarksPanel } from "@ui/campaign/LandmarksPanel";
-import { DynastiesPanel } from "@ui/campaign/DynastiesPanel";
 import { GoodsMarketPanel } from "@ui/goods/GoodsMarketPanel";
 import { MarketsPanel } from "@ui/campaign/MarketsPanel";
 import { SettlementSearch } from "@ui/world/SettlementSearch";
@@ -1087,24 +1079,21 @@ export default function App() {
           <HubPanel />
           <MarketsPanel />
           <SatelliteConstructionPanel />
-          <GoodFlowPanel />
           <GoodsBrowserPanel />
           <HousesPanel />
           <HousesPanel companies />
           <HouseDossierHost />
           <PersonWindowHost />
           <FeudsAlliancesPanel />
-          <GovernmentPanel />
           <BarbarianTribesPanel />
           <MoneyFinancePanel />
           <WarPanel />
           <RealmWindow />
           <ItineraryPanel />
           <GoodsCodexPanel />
-          <EconomyDashboardPanel />
           <HydrologyPanel />
-          <ProvincePanel />
           <ProvinceInspector />
+          <PlateInspector />
           <AtlasPanel />
           <PeoplesPanel />
           <ColonialPanel />
@@ -1115,15 +1104,10 @@ export default function App() {
           <GuildsPanel />
           <FiguresPanel />
           <NotablesPanel />
-          <LandmarksPanel />
-          <DynastiesPanel />
           <GoodsMarketPanel />
-          <CityRankingPanel />
           <MerchantRoutePanel />
           <FuturesLanePanel />
           <FuturesPanel />
-          <WarehousesPanel />
-          <TradeMatrixPanel />
           <LayerLegend />
           <RouteLegend />
           <GoodQualityLegend />

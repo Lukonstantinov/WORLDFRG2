@@ -38,6 +38,7 @@ export function ChroniclePanel() {
   const active = snapshot?.active === true;
   const clock = snapshot?.clock;
 
+  const popSeries: [number, number][] = (worldEconomy?.world_series ?? []).map((r) => [r[0], r[1]]);
   const starving = snapshot?.hubs.filter((h) => h.starving > 0.5).length ?? 0;
   const estates = snapshot?.hubs.filter((h) => h.is_estate).length ?? 0;
 
@@ -132,12 +133,6 @@ export function ChroniclePanel() {
               sub={deltaStr(snapshot?.population_delta ?? 0, true)}
               subColor={(snapshot?.population_delta ?? 0) >= 0 ? T.goodInk : T.badInk}
             />
-            <Stat
-              label="Price idx"
-              value={(snapshot?.price_index ?? 1).toFixed(2) + "×"}
-              sub={deltaStr(snapshot?.price_index_delta ?? 0, false, 2)}
-              subColor={(snapshot?.price_index_delta ?? 0) <= 0 ? T.goodInk : T.warn}
-            />
           </div>
           <div style={statRow}>
             <Stat label="Hubs" value={String(snapshot?.hubs.length ?? 0)} />
@@ -172,14 +167,6 @@ export function ChroniclePanel() {
             </div>
           )}
 
-          {/* ── World price-index sparkline ── */}
-          {worldEconomy && worldEconomy.index_series.length > 1 && (
-            <div style={cardStyle}>
-              <div style={sectionHdr}>World price index</div>
-              <Sparkline series={worldEconomy.index_series} />
-            </div>
-          )}
-
           {/* ── World shortage + merchant population (rollup) ── */}
           {worldEconomy && (worldEconomy.lack_series?.length ?? 0) > 1 && (
             <div style={cardStyle}>
@@ -193,47 +180,24 @@ export function ChroniclePanel() {
                   { label: "Luxury", color: "#c5b69d" },
                 ]}
               />
-              <div style={{ ...sectionHdr, marginTop: 8 }}>Merchant population (world)</div>
-              <WorldLines
-                rows={worldEconomy.merchant_series ?? []} min={0}
-                fmt={(v) => Math.round(v).toLocaleString()}
-                legend={[
-                  { label: "🧺 Local", color: "#7fd0a0" },
-                  { label: "🏛 Houses", color: "#e0c060" },
-                  { label: "⚖ Guilds", color: "#bcab8e" },
-                ]}
-              />
             </div>
           )}
 
-          {/* ── Costliest goods worldwide ── */}
-          {worldEconomy && worldEconomy.goods.length > 0 && (
+          {/* ── Global population ── */}
+          {popSeries.length > 1 && (
             <div style={cardStyle}>
-              <div style={sectionHdr}>Dearest goods (× world standard)</div>
-              {worldEconomy.goods.slice(0, 6).map((g) => (
-                <div key={g.good} style={lineRow}>
-                  <span style={{ flex: 1, color: T.inkMid }}>{g.name}</span>
-                  <span style={{ color: "#d8b070" }}>{g.world_price.toFixed(2)}×</span>
-                  <span style={{ color: T.inkDim, fontSize: 10, marginLeft: 6 }}>{g.producers} src</span>
-                </div>
-              ))}
+              <div style={{ display: "flex", alignItems: "baseline" }}>
+                <span style={sectionHdr}>World population</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ color: T.gold, fontSize: 12, fontWeight: 700 }}>{fmtNum(popSeries[popSeries.length - 1][1])}</span>
+              </div>
+              <Sparkline series={popSeries} />
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 9, color: T.inkFaint }}>
+                <span>Y{popSeries[0][0]}</span>
+                <span>Y{popSeries[popSeries.length - 1][0]}</span>
+              </div>
             </div>
           )}
-
-          {/* ── Event log ── */}
-          <div style={cardStyle}>
-            <div style={sectionHdr}>Chronicle</div>
-            {(snapshot?.recent_events ?? []).length === 0 ? (
-              <div style={{ color: T.inkDim, fontSize: 11 }}>No events yet — advance time.</div>
-            ) : (
-              [...(snapshot?.recent_events ?? [])].reverse().map((e, i) => (
-                <div key={i} style={{ fontSize: 11, color: eventColor(e.kind), marginBottom: 2 }}>
-                  <span style={{ color: T.inkFaint }}>Y{Math.floor(e.tick / 365)} </span>
-                  {e.text}
-                </div>
-              ))
-            )}
-          </div>
 
           {/* Two ways to begin again on the same world, and the difference between
               them is what happens to the run on screen — so they are two buttons with
@@ -361,29 +325,6 @@ function WorldLines({ rows, legend, min, max, fmt }: {
       </div>
     </>
   );
-}
-
-function eventColor(kind: string): string {
-  switch (kind) {
-    case "starvation": return "#e08080";
-    case "estate": return "#8fd0a0";
-    case "succession": return "#c0a0e0";
-    case "world": return "#cfe0f4"; // monthly world summary (brighter — the headline)
-    case "figure": return "#e6c878";     // notable figures (Great Lives)
-    case "fair": return "#6fceb0";       // trade fairs
-    case "pilgrimage": return "#c6a6e6"; // pilgrimage seasons
-    case "temple": return "#e0cf9a";     // holy cities / temples
-    case "contagion": return "#c07070";  // route-borne epidemics
-    case "marriage": return "#e6a6c8";   // dynastic marriages
-    case "feud": return "#d88a6a";       // broken alliances
-    case "guildhall": return "#cdbb88";  // craft guildhalls
-    case "guild_strike": return "#d0a060";
-    case "fashion": return "#e0a0d0";    // fashion cycles
-    case "wonder": return "#b8c8a0";     // civic wonders
-    case "piracy": return "#c07070";     // corsair raids
-    case "diaspora": return "#8ac0c0";   // diaspora quarters
-    default: return "#d1c3ab";
-  }
 }
 
 const rail: React.CSSProperties = {

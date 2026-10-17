@@ -23,7 +23,7 @@ export function FuturesLanePanel() {
         <span onClick={() => close(null)} style={{ color: "#ab9775", cursor: "pointer", fontSize: 16, lineHeight: 1 }} title="Close">×</span>
       </div>
       <div style={{ color: "#ffcf3f", fontSize: 12, marginBottom: 4 }}>
-        📜 {lane.term}-year futures contract
+        📜 {lane.term}-year contract
         {lane.suspended && <span style={{ color: "#ff9a6a", fontSize: 9 }}> · ☣ suspended (quarantine)</span>}
       </div>
       {/* Relation summary in the owner's colour — e.g. "Venice → Genoa (silk — House Medici)" */}

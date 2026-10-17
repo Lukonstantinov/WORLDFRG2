@@ -60,12 +60,6 @@ const ELEV_MODES: { id: ElevMode; label: string; family: ElevFamily; blurb: stri
     label: "Plateau & Mesa",
     blurb: "Quantised elevation levels with SHARP escarpment rims (a real step, never blurred) plus outlying buttes scattered near the plateau's own margins. The Colorado Plateau, the Deccan.",
   },
-  {
-    id: "volcanic",
-    family: "Landform types",
-    label: "Volcanic Hotspot",
-    blurb: "A gentle low backdrop with shield cones stamped on every volcanic-marked cell (overlapping cones merge into ranges), summit calderas on the densest clusters, and hotspot trails of shrinking cones extending from isolated seeds — Hawaii, Iceland, the Galápagos.",
-  },
 ];
 const ELEV_FAMILIES: ElevFamily[] = ["Tectonic", "Shape", "Chains", "Landform types"];
 

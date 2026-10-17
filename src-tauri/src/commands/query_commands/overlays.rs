@@ -1418,6 +1418,16 @@ pub struct PlateMotionArrow {
     /// seeded with) — honest area for the inspector card rather than a label
     /// that can silently disagree with what actually got rasterized.
     pub area_frac: f32,
+    /// What the plate is made of and how it behaves, counted from the persisted
+    /// columns: cells it covers, the share of them that is land, how many of its
+    /// boundary cells are convergent / divergent / transform, and its volcanic land
+    /// cells. The inspector turns these into a plain-language character.
+    pub cells: u32,
+    pub land_frac: f32,
+    pub convergent: u32,
+    pub divergent: u32,
+    pub transform: u32,
+    pub volcanoes: u32,
 }
 
 /// Read the plate motion persisted at generation (`metadata["plate_motion"]`,
@@ -1442,14 +1452,27 @@ pub fn get_plate_motion(db: State<'_, WorldDb>) -> Result<Vec<PlateMotionArrow>,
     }
     // Only load the PLATES column (plate_index alone) to count area — cheap
     // next to a full-buffer load, and this query already pays a DB round trip.
-    let mut cells = vec![0u32; motion.len()];
+    use crate::sim::world_buffer::ColumnSet;
+    let n = motion.len();
+    let mut cells = vec![0u32; n];
+    let (mut land, mut conv, mut div, mut trans, mut volc) = (vec![0u32; n], vec![0u32; n], vec![0u32; n], vec![0u32; n], vec![0u32; n]);
     let mut total = 0u32;
-    if let Ok(buf) = crate::sim::world_buffer::WorldBuffer::load_with(
-        &conn, crate::sim::world_buffer::ColumnSet::PLATES,
-    ) {
-        for &pi in &buf.plate_index {
-            if let Some(c) = cells.get_mut(pi as usize) { *c += 1; }
+    let cols = ColumnSet(ColumnSet::PLATES.0 | ColumnSet::TERRAIN.0 | ColumnSet::VOLCANIC.0);
+    if let Ok(buf) = crate::sim::world_buffer::WorldBuffer::load_with(&conn, cols) {
+        for (i, &pi) in buf.plate_index.iter().enumerate() {
+            let p = pi as usize;
+            if p >= n { continue; }
+            cells[p] += 1;
             total += 1;
+            let is_land = buf.terrain.get(i).copied() == Some(1);
+            if is_land { land[p] += 1; }
+            match buf.boundary_type.get(i).copied().unwrap_or(0) {
+                crate::sim::plates::BOUNDARY_CONVERGENT => conv[p] += 1,
+                crate::sim::plates::BOUNDARY_DIVERGENT => div[p] += 1,
+                crate::sim::plates::BOUNDARY_TRANSFORM => trans[p] += 1,
+                _ => {}
+            }
+            if is_land && buf.is_volcanic.get(i).copied().unwrap_or(0) != 0 { volc[p] += 1; }
         }
     }
     Ok(motion.iter().enumerate().map(|(i, p)| {
@@ -1462,6 +1485,9 @@ pub fn get_plate_motion(db: State<'_, WorldDb>) -> Result<Vec<PlateMotionArrow>,
             speed: (vx * vx + vy * vy).sqrt(),
             is_oceanic: p.is_oceanic,
             area_frac: if total > 0 { cells[i] as f32 / total as f32 } else { 0.0 },
+            cells: cells[i],
+            land_frac: if cells[i] > 0 { land[i] as f32 / cells[i] as f32 } else { 0.0 },
+            convergent: conv[i], divergent: div[i], transform: trans[i], volcanoes: volc[i],
         }
     }).collect())
 }

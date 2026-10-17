@@ -6,7 +6,7 @@ import { useWorldStore } from "@state/worldStore";
 import type { ActiveTool, ActiveLayer } from "@types";
 import { GOOD_DEFS, goodOverlayKey, goodCategory, CATEGORY_ORDER } from "@goods";
 import { GoodIcon } from "@ui/goods/GoodIcon";
-import { MAP_THEMES, applyMapTheme, themeReady, layerReady, LAYER_REQUIRES } from "./mapThemes";
+import { layerReady, LAYER_REQUIRES, FORGE_ONLY } from "./mapThemes";
 import { LayerSets } from "./LayerSets";
 import { useSettingsStore, MAP_STYLES } from "@state/settingsStore";
 /** Best-effort CSS colour → #rrggbb for an <input type="color"> (which only takes
@@ -32,7 +32,6 @@ const tools: { id: ActiveTool; label: string; icon: string; tip: string }[] = [
   { id: "paint", label: "Paint", icon: "\u270F", tip: "Paint land, Shift = erase to sea" },
   { id: "elevation", label: "Elev", icon: "\u25B2", tip: "Paint elevation, Shift = flatten" },
   { id: "shelf", label: "Shelf", icon: "\u2248", tip: "Paint shelf, Shift = erase" },
-  { id: "volcano", label: "Volc", icon: "\u25C6", tip: "Click to place volcano, Shift = remove" },
 ];
 
 /** Layers grouped by what they actually ARE.
@@ -62,11 +61,8 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
     group: "Terrain",
     layers: [
       { id: "land", label: "Land / Sea" },
-      { id: "elevation", label: "Elevation" },
-      { id: "terrain", label: "Hillshade" },
-      { id: "ridges", label: "Ridges" },
+      { id: "elevation", label: "Elevation & Shelf" },
       { id: "plates", label: "Plates" },
-      { id: "shelf", label: "Continental Shelf" },
     ],
   },
   {
@@ -91,7 +87,6 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
     layers: [
       { id: "climate", label: "Climate (Köppen)" },
       { id: "biomes", label: "Biomes" },
-      { id: "natural", label: "Natural Colour" },
     ],
   },
   {
@@ -100,7 +95,6 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
       { id: "soil", label: "Soil" },
       { id: "fertility", label: "Fertility" },
       { id: "habitability", label: "Habitability" },
-      { id: "disease", label: "Disease (Malaria)" },
     ],
   },
 ];
@@ -110,8 +104,7 @@ export const layerGroups: { group: string; layers: { id: ActiveLayer; label: str
 // atmosphere/circulation and respond to the Planet panel.
 const climateOverlays = [
   { id: "itcz", label: "\u{1F327} ITCZ (rain line)" },
-  { id: "windBelts", label: "\u{1F9ED} Circulation Belts" },
-  { id: "wind", label: "Wind" },
+  { id: "wind", label: "Wind & circulation belts" },
   { id: "currents", label: "Currents" },
   { id: "latLines", label: "Lat Lines" },
 ];
@@ -142,48 +135,40 @@ const OPACITY_CAPABLE = new Set([
   "chokepoints", "migrations", "settlements", "deposits",
 ]);
 
+// Settlements carry two sub-toggles (names, colonies) instead of three rows.
 const overlayTypes = [
   { id: "rivers", label: "Rivers" },
   { id: "lakes", label: "Lakes" },
   { id: "settlements", label: "Settlements" },
-  { id: "colonies", label: "⛶ Colonies" },
-  { id: "settlementNames", label: "Settlement Names" },
   { id: "hubNames", label: "Hub Names" },
   { id: "cultures", label: "\u{1F465} Peoples" },
   { id: "tradeRoutes", label: "Trade Routes" },
   { id: "tradeFlows", label: "Trade Flows" },
-  { id: "fisheryBanks", label: "Fishery Banks" },
   { id: "deposits", label: "\u26CF Deposits" },
 ];
 
+
 // Biological / political sublayer overlays (grouped separately).
 const bioOverlays = [
-  { id: "reefZones", label: "\u{1FAA8} Reef Zones" },
-  // Natural Disasters — hurricane belts (sea) + monsoon flood areas (land).
-  { id: "stormZones", label: "\u{1F300} Hurricanes" },
+  // Sea hazards in one switch: reef zones + hurricane belts (hazardSea drives both).
+  { id: "hazardSea", label: "\u{1FAA8} Reefs & hurricanes" },
   { id: "monsoonZones", label: "\u{1F327} Monsoon Areas" },
-  { id: "politicalInfluence", label: "\u{1F535} Trade Hubs" },
-  { id: "houseControl", label: "\u{2696} House Control" },
+  { id: "plagueZones", label: "\u{2620} Plague Zones" },
+];
+
+// Everything that is not biological.
+const otherOverlays = [
   { id: "states", label: "\u{1F451} Realms" },
-  { id: "merchantRoutes", label: "\u{1F6A2} Merchant Routes" },
-  { id: "futures", label: "\u{1F4DC} Futures" },
   { id: "dynamicFlow", label: "\u{1F30A} Dynamic Trade Flow" },
-  { id: "campaignCorridors", label: "\u{1F42B} Caravan Corridors" },
-  { id: "expeditions", label: "\u{26F5} Expeditions" },
-  { id: "tradeHeat", label: "\u{1F525} Trade Heat" },
-  { id: "tradeBasins", label: "\u{1F3DE} Trade Basins" },
-  { id: "migrations", label: "\u{1F6B6} Migrations" },
-  { id: "tradeRegions", label: "\u{1F7E6} Trade Regions" },
-  { id: "tradeCorridors", label: "\u{2194} Trade Corridors" },
   { id: "chokepoints", label: "\u{2693} Chokepoints" },
   { id: "speculation", label: "\u{1FAE7} Speculation Risk" },
-  { id: "coinDominance", label: "\u{1FA99} Coin Dominance" },
-  { id: "plagueZones", label: "\u{2620} Plague Zones" },
-  { id: "guildCities", label: "\u{1F3DB} Guild Cities" },
   { id: "figureMarks", label: "\u{269C} Notable Figures" },
-  { id: "landmarks", label: "\u{1F5FF} Landmarks" },
-  { id: "dynastyLinks", label: "\u{26AD} Dynasty Ties" },
 ];
+/** Overlays that are really two keys behind one switch. */
+const LINKED: Record<string, string[]> = {
+  hazardSea: ["reefZones", "stormZones"],
+  wind: ["wind", "windBelts"],
+};
 
 export function Toolbar() {
   const appMode = useUIStore((s) => s.appMode);
@@ -212,7 +197,6 @@ export function Toolbar() {
   const setGoodDetail = useUIStore((s) => s.setGoodDetail);
   const activeMapTheme = useUIStore((s) => s.activeMapTheme);
   const stepCompleted = useUIStore((s) => s.stepCompleted);
-  const activePlate = MAP_THEMES.find((t) => t.id === activeMapTheme);
   const mapStyle = useSettingsStore((s) => s.mapStyle);
   const setMapStyle = useSettingsStore((s) => s.setMapStyle);
   const elevationStyle = useUIStore((s) => s.elevationStyle);
@@ -224,9 +208,16 @@ export function Toolbar() {
   const [expandedCats, setExpandedCats] = useState<Record<string, boolean>>({});
   // Collapsible top-level sections (the big lists start collapsed to declutter).
   const [openSection, setOpenSection] = useState<Record<string, boolean>>({
-    Plates: true, Layers: true, Overlays: true, Climate: true, Biological: false, "Trade Goods": false, Provinces: false, View: true,
+    Plates: true, Layers: true, Overlays: true, Climate: true, Biological: false, Other: false, "Trade Goods": false, Provinces: false, View: true,
   });
   const toggleSection = (k: string) => setOpenSection((s) => ({ ...s, [k]: !s[k] }));
+  const campaign = appMode === "chronicle";
+  // A switch can drive several overlay keys (LINKED): it reads as on if the first is.
+  const isOn = (id: string) => !!overlayVisibility[(LINKED[id] ?? [id])[0]];
+  const flip = (id: string) => {
+    const keys = LINKED[id];
+    if (keys) setOverlaysVisible(keys, !isOn(id)); else toggleOverlay(id);
+  };
   useEffect(() => { loadPalettes(); }, [loadPalettes]);
   const bioParams = useUIStore((s) => s.bioParams);
   const setBioParams = useUIStore((s) => s.setBioParams);
@@ -245,9 +236,9 @@ export function Toolbar() {
   const stretchToFit = useUIStore((s) => s.stretchToFit);
   const setStretchToFit = useUIStore((s) => s.setStretchToFit);
   const setShowGoodsBrowser = useUIStore((s) => s.setShowGoodsBrowser);
-  const showProvinces = useUIStore((s) => s.showProvinces);
-  const setShowProvinces = useUIStore((s) => s.setShowProvinces);
   const provinces = useWorldStore((s) => s.provinces);
+  const showStates = useUIStore((s) => s.showStates);
+  const setShowStates = useUIStore((s) => s.setShowStates);
   const provinceOpacity = useUIStore((s) => s.provinceOpacity);
   const setProvinceOpacity = useUIStore((s) => s.setProvinceOpacity);
   const provinceFillMode = useUIStore((s) => s.provinceFillMode);
@@ -326,15 +317,14 @@ export function Toolbar() {
 
       <div style={divider} />
 
-      {/* Map plates — a whole composition (base raster + overlays + label
-          typography), the way an atlas is actually organised. Display-only: a
-          plate sets what you SEE, never what the world IS (rule 14). */}
+      {/* Map style — how every layer is drawn (Classic / Atlas / Parchment / Game
+          Board). The old map-plate compositions are hidden: a plate bundled a base
+          layer with overlays that no longer exist. */}
       <div style={section}>
-        <SectionHead title="Plates" open={openSection.Plates} onToggle={() => toggleSection("Plates")} />
+        <SectionHead title="Map style" open={openSection.Plates} onToggle={() => toggleSection("Plates")} />
         {openSection.Plates && (<>
-          {/* MAP STYLE — how every plate is drawn (Atlas / Parchment / Game Board). */}
           <div role="radiogroup" aria-label="Map style"
-            style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 2, marginBottom: 6 }}>
+            style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 3, marginBottom: 6 }}>
             {MAP_STYLES.map((m) => {
               const on = mapStyle === m.id;
               return (
@@ -349,36 +339,8 @@ export function Toolbar() {
               );
             })}
           </div>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 3 }}>
-            {MAP_THEMES.map((t) => {
-              const ready = themeReady(t, stepCompleted);
-              const on = activeMapTheme === t.id;
-              return (
-                <button
-                  key={t.id}
-                  onClick={() => { if (ready) applyMapTheme(t); }}
-                  disabled={!ready}
-                  title={ready ? t.blurb : `Needs step ${t.requires} — not generated yet`}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 5, overflow: "hidden",
-                    padding: "4px 6px", borderRadius: 4, fontSize: 10.5, textAlign: "left",
-                    cursor: ready ? "pointer" : "not-allowed",
-                    border: `1px solid ${on ? "#c09b5a" : "#453925"}`,
-                    background: on ? "#4e4028" : "#221c12",
-                    color: !ready ? "#5a5141" : on ? "#cfe2f6" : "#ac9c81",
-                    fontWeight: on ? 600 : 400,
-                  }}
-                >
-                  <span style={{ fontSize: 12, lineHeight: 1, opacity: ready ? 1 : 0.5 }}>{t.glyph}</span>
-                  <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{t.name}</span>
-                </button>
-              );
-            })}
-          </div>
-          <div style={{ fontSize: 9, color: "#897a61", marginTop: 5, lineHeight: 1.45 }}>
-            {activePlate
-              ? activePlate.blurb
-              : "Custom view. A plate composes base layer, overlays and label typography together."}
+          <div style={{ fontSize: 9, color: "#897a61", lineHeight: 1.45 }}>
+            {MAP_STYLES.find((m) => m.id === mapStyle)?.blurb}
           </div>
           <LayerSets />
         </>)}
@@ -523,28 +485,20 @@ export function Toolbar() {
       <div style={section}>
         <SectionHead title="Overlays" open={openSection.Overlays} onToggle={() => toggleSection("Overlays")} />
         {openSection.Overlays && (<>
-        {/* The trade map means different things per mode: in Forge the routes/flows
-            are the worldgen equilibrium *preview* (potential); in Chronicle the
-            routes remain but flow activity is the *live* simulated volume. */}
-        <div style={{ fontSize: 9, color: "#897a61", marginBottom: 5, lineHeight: 1.4 }}>
-          {appMode === "chronicle"
-            ? "Trade: routes inherited from the world · flow = live campaign volume (Dynamic Trade Flow)"
-            : "Trade routes & flows show the worldgen equilibrium (potential)"}
-        </div>
-        {overlayTypes.map((o) => (
+        {overlayTypes.filter((o) => !(campaign && FORGE_ONLY.has(o.id))).map((o) => (
           <div key={o.id}>
             <label style={checkboxRow}>
               <input
                 type="checkbox"
-                checked={!!overlayVisibility[o.id]}
-                onChange={() => toggleOverlay(o.id)}
+                checked={isOn(o.id)}
+                onChange={() => flip(o.id)}
                 style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
               />
-              <span style={{ color: overlayVisibility[o.id] ? "#dccdb4" : "#7b715f" }}>
+              <span style={{ color: isOn(o.id) ? "#dccdb4" : "#7b715f" }}>
                 {o.label}
               </span>
             </label>
-            {overlayVisibility[o.id] && OPACITY_CAPABLE.has(o.id) && (
+            {isOn(o.id) && OPACITY_CAPABLE.has(o.id) && (
               <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 3px 22px" }}>
                 <input
                   type="range" min={0} max={100}
@@ -557,20 +511,15 @@ export function Toolbar() {
                 </span>
               </div>
             )}
-            {/* Route-bound migration: ribbon / dots / focus mode (people follow trade routes). */}
-            {o.id === "migrations" && overlayVisibility[o.id] && (
-              <div style={{ display: "flex", gap: 3, margin: "1px 0 4px 22px" }}>
-                {(["ribbon", "dots", "focus"] as const).map((m) => (
-                  <button key={m} onClick={() => setMigrationMode(m)}
-                    style={{
-                      flex: 1, fontSize: 9.5, padding: "2px 0", borderRadius: 4, cursor: "pointer",
-                      border: `1px solid ${migrationMode === m ? "#c09b5a" : "#483d2b"}`,
-                      background: migrationMode === m ? "#3f3421" : "#221c12",
-                      color: migrationMode === m ? "#cfe2f6" : "#a28f6e",
-                    }}
-                    title={m === "focus" ? "Only the selected city's inbound flows" : m === "dots" ? "Dots riding the trade routes" : "Culture ribbons, width = volume"}>
-                    {m}
-                  </button>
+            {/* Settlements: names and colonies are sub-toggles of the one overlay. */}
+            {o.id === "settlements" && isOn("settlements") && (
+              <div style={{ margin: "0 0 3px 18px" }}>
+                {([["settlementNames", "Names"], ["colonies", "Colonies"]] as const).map(([k, label]) => (
+                  <label key={k} style={{ ...checkboxRow, padding: "1px 0", fontSize: 10.5 }}>
+                    <input type="checkbox" checked={!!overlayVisibility[k]} onChange={() => toggleOverlay(k)}
+                      style={{ accentColor: "#c09b5a", width: 11, height: 11 }} />
+                    <span style={{ color: overlayVisibility[k] ? "#dccdb4" : "#7b715f" }}>{label}</span>
+                  </label>
                 ))}
               </div>
             )}
@@ -589,27 +538,23 @@ export function Toolbar() {
         </>)}
       </div>
 
-      {/* Climate circulation overlays (ITCZ line + rotation-driven belts + winds).
-          Sits beside the Planet panel below, since both describe the atmosphere. */}
+      {/* Climate circulation overlays (ITCZ line + winds with their belts). */}
       <div style={section}>
         <SectionHead title="Climate" open={openSection.Climate} onToggle={() => toggleSection("Climate")} />
         {openSection.Climate && (
           <div>
             <div style={{ fontSize: 9, color: "#897a61", marginBottom: 4, lineHeight: 1.4 }}>
-              Circulation bands from the planet settings — the ITCZ rain line and the
-              subtropical-high / polar-front belts move with rotation &amp; warmth.
-              Set them in <b>Workflow step 0 · World Characteristics</b> (left panel),
-              which now holds every generation setting; this column is display only.
+              Circulation from the planet settings (Workflow step 0). This column is display only.
             </div>
             {climateOverlays.map((o) => (
               <label key={o.id} style={checkboxRow}>
                 <input
                   type="checkbox"
-                  checked={!!overlayVisibility[o.id]}
-                  onChange={() => toggleOverlay(o.id)}
+                  checked={isOn(o.id)}
+                  onChange={() => flip(o.id)}
                   style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
                 />
-                <span style={{ color: overlayVisibility[o.id] ? "#dccdb4" : "#7b715f" }}>
+                <span style={{ color: isOn(o.id) ? "#dccdb4" : "#7b715f" }}>
                   {o.label}
                 </span>
               </label>
@@ -618,12 +563,7 @@ export function Toolbar() {
         )}
       </div>
 
-      {/* NOTE: the latitude framing and the planetary knobs used to live here.
-          They are GENERATION settings (they change what the simulation produces),
-          so they now live in one place on the LEFT, in Workflow step 0 "World
-          Characteristics". This column keeps display-only options. */}
-
-      {/* Biological / political hazard + influence sublayers */}
+      {/* Biological hazards */}
       <div style={section}>
         <SectionHead title="Biological" open={openSection.Biological} onToggle={() => toggleSection("Biological")} />
         {openSection.Biological && (<>
@@ -632,15 +572,15 @@ export function Toolbar() {
             <label style={checkboxRow}>
               <input
                 type="checkbox"
-                checked={!!overlayVisibility[o.id]}
-                onChange={() => toggleOverlay(o.id)}
+                checked={isOn(o.id)}
+                onChange={() => flip(o.id)}
                 style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
               />
-              <span style={{ color: overlayVisibility[o.id] ? "#dccdb4" : "#7b715f" }}>
+              <span style={{ color: isOn(o.id) ? "#dccdb4" : "#7b715f" }}>
                 {o.label}
               </span>
             </label>
-            {overlayVisibility[o.id] && OPACITY_CAPABLE.has(o.id) && (
+            {isOn(o.id) && OPACITY_CAPABLE.has(o.id) && (
               <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 3px 22px" }}>
                 <input
                   type="range" min={0} max={100}
@@ -653,90 +593,63 @@ export function Toolbar() {
                 </span>
               </div>
             )}
-            {/* Colour by voyage RISK instead of the carrying house — the same
-                distance-scaled loss probability `dispatch` actually rolls,
-                surfaced before the fact instead of only as a chronicle event
-                after a ship sinks. Only meaningful once the layer is on. */}
-            {o.id === "merchantRoutes" && overlayVisibility[o.id] && (
-              <label style={{
-                display: "flex", alignItems: "center", gap: 5, cursor: "pointer",
-                fontSize: 9, color: "#b5a68d", margin: "0 0 3px 22px", userSelect: "none",
-              }}>
+          </div>
+        ))}
+        {/* Seasonal storm month (worldgen only): 0 = combined annual extent, 1..months
+            scrubs the cyclone season. */}
+        {!campaign && (
+          <div style={{ marginTop: 4, opacity: isOn("hazardSea") ? 1 : 0.5 }}>
+            <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
+              <span>{"\u{1F300}"} Storm month</span>
+              <span style={{ color: "#dccdb4" }}>
+                {bioParams.stormMonth === 0 ? "All year" : `Moon ${bioParams.stormMonth}`}
+              </span>
+            </div>
+            <input
+              type="range"
+              min={0}
+              max={bioParams.calendarMonths}
+              step={1}
+              value={bioParams.stormMonth}
+              onChange={(e) => setBioParams({ stormMonth: parseInt(e.target.value, 10) })}
+              style={{ width: "100%", accentColor: "#c050d0" }}
+            />
+          </div>
+        )}
+        </>)}
+      </div>
+
+      {/* Everything that is not biological. */}
+      <div style={section}>
+        <SectionHead title="Other" open={openSection.Other} onToggle={() => toggleSection("Other")} />
+        {openSection.Other && otherOverlays.map((o) => (
+          <div key={o.id}>
+            <label style={checkboxRow}>
+              <input
+                type="checkbox"
+                checked={isOn(o.id)}
+                onChange={() => flip(o.id)}
+                style={{ accentColor: "#c09b5a", width: 12, height: 12 }}
+              />
+              <span style={{ color: isOn(o.id) ? "#dccdb4" : "#7b715f" }}>
+                {o.label}
+              </span>
+            </label>
+            {isOn(o.id) && OPACITY_CAPABLE.has(o.id) && (
+              <div style={{ display: "flex", alignItems: "center", gap: 4, margin: "0 0 3px 22px" }}>
                 <input
-                  type="checkbox"
-                  checked={merchantRouteRisk}
-                  onChange={toggleMerchantRouteRisk}
-                  style={{ accentColor: "#d9a441", width: 11, height: 11 }}
+                  type="range" min={0} max={100}
+                  value={Math.round((overlayOpacity[o.id] ?? 1) * 100)}
+                  onChange={(e) => setOverlayOpacity(o.id, Number(e.target.value) / 100)}
+                  style={{ ...rangeStyle, height: 3 }}
                 />
-                <span>colour by risk</span>
-                {merchantRouteRisk && (
-                  <span style={{ display: "flex", alignItems: "center", gap: 3, marginLeft: 2 }}>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#469c46" }} />
-                    <span style={{ color: "#897a61" }}>safe</span>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e0c93c", marginLeft: 3 }} />
-                    <span style={{ color: "#897a61" }}>risky</span>
-                    <span style={{ width: 8, height: 8, borderRadius: "50%", background: "#e0562a", marginLeft: 3 }} />
-                    <span style={{ color: "#897a61" }}>perilous</span>
-                  </span>
-                )}
-              </label>
-            )}
-            {o.id === "merchantRoutes" && overlayVisibility[o.id] && !merchantRouteRisk && (
-              <div role="radiogroup" aria-label="Colour routes by"
-                style={{ display: "flex", gap: 3, margin: "0 0 3px 22px", fontSize: 9 }}>
-                {(["network", "good"] as const).map((m) => (
-                  <button key={m} role="radio" aria-checked={routeColorMode === m}
-                    onClick={() => setRouteColorMode(m)}
-                    style={{
-                      padding: "2px 7px", borderRadius: 3, cursor: "pointer", fontSize: 9,
-                      border: `1px solid ${routeColorMode === m ? "#c9a24a" : "#453925"}`,
-                      background: routeColorMode === m ? "#3a2f1a" : "#221c12",
-                      color: routeColorMode === m ? "#f0dcaa" : "#ac9c81",
-                    }}>{m === "network" ? "by network" : "by good"}</button>
-                ))}
+                <span style={{ fontSize: 8.5, color: "#897a61", minWidth: 24, textAlign: "right" }}>
+                  {Math.round((overlayOpacity[o.id] ?? 1) * 100)}%
+                </span>
               </div>
             )}
           </div>
         ))}
-        {/* Seasonal storm month: 0 = combined annual extent, 1..months scrubs
-            the cyclone season (zones fade out in their calm months). */}
-        <div style={{ marginTop: 4, opacity: overlayVisibility.stormZones ? 1 : 0.5 }}>
-          <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
-            <span>{"\u{1F300}"} Storm month</span>
-            <span style={{ color: "#dccdb4" }}>
-              {bioParams.stormMonth === 0 ? "All year" : `Moon ${bioParams.stormMonth}`}
-            </span>
-          </div>
-          <input
-            type="range"
-            min={0}
-            max={bioParams.calendarMonths}
-            step={1}
-            value={bioParams.stormMonth}
-            onChange={(e) => setBioParams({ stormMonth: parseInt(e.target.value, 10) })}
-            style={{ width: "100%", accentColor: "#c050d0" }}
-          />
-        </div>
-
-        {/* Trade-hub marker display: size + highlight intensity (affects the
-            "Trade Hubs" overlay markers across the map). */}
-        <div style={{ marginTop: 6, opacity: overlayVisibility.politicalInfluence ? 1 : 0.5 }}>
-          <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
-            <span>{"\u{1F535}"} Hub size</span>
-            <span style={{ color: "#dccdb4" }}>{hubDisplay.size.toFixed(1)}×</span>
-          </div>
-          <input type="range" min={0.5} max={4} step={0.1} value={hubDisplay.size}
-            onChange={(e) => setHubDisplay({ size: parseFloat(e.target.value) })}
-            style={{ width: "100%", accentColor: "#3a86d6" }} />
-          <div style={{ fontSize: 10, color: "#b5a68d", display: "flex", justifyContent: "space-between" }}>
-            <span>Hub highlight</span>
-            <span style={{ color: "#dccdb4" }}>{Math.round(hubDisplay.intensity * 100)}%</span>
-          </div>
-          <input type="range" min={0} max={1} step={0.05} value={hubDisplay.intensity}
-            onChange={(e) => setHubDisplay({ intensity: parseFloat(e.target.value) })}
-            style={{ width: "100%", accentColor: "#3a86d6" }} />
-        </div>
-        </>)}
       </div>
 
       {/* Trade-good belts (each good is a separate sublayer toggle). Driven by the
@@ -895,7 +808,7 @@ export function Toolbar() {
             </label>
             {provinces.length === 0 && (
               <div style={{ fontSize: 9, color: "#897a61", lineHeight: 1.4 }}>
-                No provinces yet. Open the Provinces window (top bar) after Step 7 to generate them.
+                No provinces yet. Generate them in the Settlements step.
               </div>
             )}
             {provinces.length > 0 && (
@@ -949,14 +862,14 @@ export function Toolbar() {
               </div>
             )}
             <button
-              onClick={() => setShowProvinces(!showProvinces)}
+              onClick={() => setShowStates(!showStates)}
               style={{
                 padding: "3px 6px", fontSize: 10, borderRadius: 4, cursor: "pointer",
-                border: `1px solid ${showProvinces ? "#a58855" : "#3e3422"}`,
-                background: showProvinces ? "#413622" : "#221c12",
-                color: showProvinces ? "#cfe2f6" : "#a28f6e",
+                border: `1px solid ${showStates ? "#a58855" : "#3e3422"}`,
+                background: showStates ? "#413622" : "#221c12",
+                color: showStates ? "#cfe2f6" : "#a28f6e",
               }}>
-              {showProvinces ? "Close" : "Open"} Province Panel
+              {showStates ? "Close" : "Open"} Realms &amp; Provinces
             </button>
           </div>
         )}

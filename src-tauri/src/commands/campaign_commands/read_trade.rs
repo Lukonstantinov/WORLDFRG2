@@ -190,8 +190,31 @@ pub fn campaign_get_goods(db: State<'_, WorldDb>) -> Result<Vec<GoodMarketRow>, 
             grades,
         }
     }).collect();
-    out.sort_by(|a, b| b.produced.partial_cmp(&a.produced).unwrap_or(std::cmp::Ordering::Equal));
-    Ok(out)
+    // Worlds generated before the duplicate ceramics/glassware definitions were removed carry
+    // two goods under one name: fold them into one row so the panel lists each good once.
+    let mut merged: Vec<GoodMarketRow> = Vec::with_capacity(out.len());
+    for row in out {
+        match merged.iter_mut().find(|m| m.good == row.good) {
+            None => merged.push(row),
+            Some(m) => {
+                let (w_old, w_new) = (m.produced.max(1e-6), row.produced.max(1e-6));
+                m.avg_quality = (m.avg_quality * w_old + row.avg_quality * w_new) / (w_old + w_new);
+                if row.best_quality > m.best_quality {
+                    m.best_quality = row.best_quality; m.best_grade = row.best_grade; m.best_city = row.best_city;
+                }
+                m.produced += row.produced; m.traded += row.traded; m.n_producers += row.n_producers;
+                m.manufactured |= row.manufactured;
+                for g in row.grades {
+                    match m.grades.iter_mut().find(|x| x.grade == g.grade) {
+                        Some(x) => { x.produced += g.produced; x.traded += g.traded; x.n_producers += g.n_producers; }
+                        None => m.grades.push(g),
+                    }
+                }
+            }
+        }
+    }
+    merged.sort_by(|a, b| b.produced.partial_cmp(&a.produced).unwrap_or(std::cmp::Ordering::Equal));
+    Ok(merged)
 }
 
 

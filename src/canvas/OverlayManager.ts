@@ -837,7 +837,7 @@ export class OverlayManager {
   private visibility: Record<string, boolean> = {
     rivers: true, lakes: true, settlements: true,
     wind: false, currents: false, latLines: false,
-    itcz: false, windBelts: false, plateMotion: false,
+    itcz: false, windBelts: false, plateMotion: false, plateNames: false,
     tradeRoutes: false, fisheryBanks: false,
     stormZones: false, monsoonZones: false, reefZones: false, tradeFlows: false,
     politicalInfluence: false, chokepoints: false, tradeCorridors: false, campaignCorridors: false, expeditions: false,
@@ -1314,6 +1314,12 @@ export class OverlayManager {
   drawWindArrows(data: VectorSample[], gridW: number, gridH: number) {
     this.windData = { samples: data, gridW, gridH };
   }
+
+  /** Generated plate names, drawn at each plate's centroid on the Plates layer. */
+  private plateLabels: { id: number; x: number; y: number; name: string; oceanic: boolean }[] = [];
+  private selectedPlateId: number | null = null;
+  setPlateLabels(l: { id: number; x: number; y: number; name: string; oceanic: boolean }[]) { this.plateLabels = l; }
+  setSelectedPlate(id: number | null) { this.selectedPlateId = id; }
 
   drawPlateMotion(arrows: PlateMotionArrow[], gridW: number) {
     this.plateMotionData = { arrows, gridW };
@@ -2947,6 +2953,30 @@ export class OverlayManager {
     });
     }
 
+    if (this.visibility.plateNames && this.plateLabels.length > 0) {
+      const inv = 1 / this.currentScale;
+      const fs = 13 * inv;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (const p of this.plateLabels) {
+        const sel = p.id === this.selectedPlateId;
+        ctx.font = `${sel ? "700" : "600"} ${fs}px serif`;
+        ctx.lineJoin = "round";
+        ctx.lineWidth = Math.max(0.6, fs * 0.22);
+        ctx.strokeStyle = "rgba(10,8,5,0.85)";
+        ctx.strokeText(p.name.toUpperCase(), p.x + 0.5, p.y + 0.5);
+        ctx.fillStyle = sel ? "#ffe28a" : p.oceanic ? "#9fd0f0" : "#f1e2b8";
+        ctx.fillText(p.name.toUpperCase(), p.x + 0.5, p.y + 0.5);
+        if (sel) {
+          ctx.strokeStyle = "rgba(255,226,138,0.9)";
+          ctx.lineWidth = Math.max(0.4, 1.6 * inv);
+          ctx.beginPath(); ctx.arc(p.x + 0.5, p.y + 0.5, fs * 2.2, 0, Math.PI * 2); ctx.stroke();
+        }
+      }
+      ctx.textAlign = "start";
+      ctx.textBaseline = "alphabetic";
+    }
+
     if (this.visibility.plateMotion && this.plateMotionData && this.plateMotionData.arrows.length > 0) {
       const plateMotionData = this.plateMotionData;
       this.withOpacity(ctx, 'plateMotion', (ctx) => {
@@ -3575,10 +3605,11 @@ export class OverlayManager {
           const cx = s.x + 0.5, cy = s.y + 0.5;
           const pop = s.population;
           const radius = s.size === "outpost" ? 0.5
-            : s.size === "village" ? 0.7
-            : pop >= 100_000 ? 1.6
-            : pop >= 20_000 ? 1.2
-            : 0.9;
+            : s.size === "village" || pop < 1_500 ? 0.7
+            : pop >= 100_000 ? 1.9
+            : pop >= 20_000 ? 1.5
+            : pop >= 5_000 ? 1.2
+            : 0.95;
           ctx.globalAlpha = 0.95;
           ctx.fillStyle = symbolStyles.cityFill
             || (pop >= 20_000 ? "#ff8a3c" : s.size === "outpost" ? "#9aa7b4" : "#f0f0f0");
@@ -3588,12 +3619,19 @@ export class OverlayManager {
           ctx.arc(cx, cy, radius, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
+          if (pop >= 5_000) {
+            ctx.strokeStyle = symbolStyles.cityFill || "rgba(20,14,8,0.8)";
+            ctx.lineWidth = Math.max(0.2, radius * 0.12);
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 1.35, 0, Math.PI * 2); ctx.stroke();
+          }
           if (pop >= 100_000) {
-            ctx.fillStyle = "rgba(26,18,6,0.9)";
+            ctx.fillStyle = "rgba(255,244,214,0.95)";
             ctx.beginPath();
-            ctx.arc(cx, cy, radius * 0.34, 0, Math.PI * 2);
+            ctx.arc(cx, cy, radius * 0.4, 0, Math.PI * 2);
             ctx.fill();
           }
+          this.renderCityBadges(ctx, s, cx, cy, radius);
+          ctx.globalAlpha = 1;
           continue;
         }
         // Dot scales continuously with population (log) on top of the tier base,
@@ -3642,6 +3680,24 @@ export class OverlayManager {
           ctx.arc(cx, cy, radius, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
+          // The status ladder, one extra mark per rung so a growing town visibly
+          // changes symbol, not just size: city (5k) an outer ring · great city
+          // (20k) a pale inner ring · metropolis (100k) a gold crown ring + the star.
+          if (pop >= 5_000) {
+            ctx.strokeStyle = "rgba(20,14,8,0.8)";
+            ctx.lineWidth = Math.max(0.2, radius * 0.12);
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 1.32, 0, Math.PI * 2); ctx.stroke();
+          }
+          if (orange) {
+            ctx.strokeStyle = "rgba(255,244,214,0.95)";
+            ctx.lineWidth = Math.max(0.2, radius * 0.1);
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 0.72, 0, Math.PI * 2); ctx.stroke();
+          }
+          if (pop >= 100_000) {
+            ctx.strokeStyle = "#ffd75e";
+            ctx.lineWidth = Math.max(0.25, radius * 0.16);
+            ctx.beginPath(); ctx.arc(cx, cy, radius * 1.55, 0, Math.PI * 2); ctx.stroke();
+          }
           if (pop >= 100_000) {
             // Metropolis: a dark ★ set inside the orange disc.
             ctx.fillStyle = "rgba(26,18,6,0.9)";
@@ -3656,82 +3712,7 @@ export class OverlayManager {
             ctx.fill();
           }
         }
-        // Dynamically-earned commercial rank (campaign, re-ranked twice a year): a
-        // TRADE HUB wears a blue square ring, an ENTREPÔT/EMPORIUM a red triangle
-        // ring (matching the Political layer's own emporium convention) — drawn
-        // CONCENTRIC with the settlement's own dot (a surrounding outline, stroke
-        // only, never filled) rather than a badge floating above it, so the marker
-        // sits exactly where the city is instead of appearing offset from it.
-        // Rises and falls with the trade that actually flows through.
-        const hc = s.hubClass ?? 0;
-        if (hc >= 1) {
-          const dinv = 1 / Math.sqrt(this.currentScale);
-          const mr = Math.max(radius * 1.6, radius + 1.1 * dinv);
-          ctx.lineWidth = Math.max(0.3, 0.55 * dinv);
-          if (hc >= 2) {
-            // Emporium / entrepôt — a red triangle ring.
-            ctx.strokeStyle = "#e63030";
-            const h2 = mr * 1.6;
-            ctx.beginPath();
-            ctx.moveTo(cx, cy - h2 * 0.62);
-            ctx.lineTo(cx - mr, cy + h2 * 0.38);
-            ctx.lineTo(cx + mr, cy + h2 * 0.38);
-            ctx.closePath();
-            ctx.stroke();
-          } else {
-            // Trade hub — a blue square ring.
-            ctx.strokeStyle = "#3a86d6";
-            ctx.strokeRect(cx - mr, cy - mr, mr * 2, mr * 2);
-          }
-        }
-        // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding
-        // star for its first years — new towns pop out at a glance.
-        if (s.isNew) {
-          const dinv = 1 / Math.sqrt(this.currentScale);
-          const sr = Math.max(radius * 0.9, 1.4 * dinv);
-          const sx = cx + radius + sr * 0.6, sy = cy - radius - sr * 0.4;
-          ctx.fillStyle = "#ffd75e";
-          ctx.strokeStyle = "rgba(0,0,0,0.6)";
-          ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
-          ctx.beginPath();
-          for (let i = 0; i < 8; i++) {
-            const rr = i % 2 === 0 ? sr : sr * 0.38;
-            const a = -Math.PI / 2 + (i * Math.PI) / 4;
-            const px = sx + Math.cos(a) * rr, py = sy + Math.sin(a) * rr;
-            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
-          }
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-        }
-        // TRADE_STAGING_AND_POSTS_PLAN.md Part II Slice C1 · a BREAK-OF-BULK
-        // relay — the real Ostia case (sea trade transships onto a caravan
-        // here), not just a busy port: this hub is where OTHER hub-pairs'
-        // cheapest routes actually relay (`relayCount`, off `route_outlet`),
-        // a genuinely different question from `hubClass`'s raw trade-
-        // throughput rank — a small port with no volume of its own can still
-        // be everyone else's waypoint. A distinct teal HOURGLASS (goods
-        // changing hands/mode here), placed opposite the founding star
-        // (lower-left) so the two badges never collide.
-        if (s.isTransitKnot) {
-          const dinv = 1 / Math.sqrt(this.currentScale);
-          const hr = Math.max(radius * 0.85, 1.3 * dinv);
-          const hx = cx - radius - hr * 0.6, hy = cy + radius + hr * 0.4;
-          ctx.fillStyle = "#2fd1c9";
-          ctx.strokeStyle = "rgba(0,0,0,0.6)";
-          ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
-          ctx.beginPath();
-          ctx.moveTo(hx - hr, hy - hr * 0.7);
-          ctx.lineTo(hx + hr, hy - hr * 0.7);
-          ctx.lineTo(hx, hy);
-          ctx.closePath();
-          ctx.moveTo(hx - hr, hy + hr * 0.7);
-          ctx.lineTo(hx + hr, hy + hr * 0.7);
-          ctx.lineTo(hx, hy);
-          ctx.closePath();
-          ctx.fill();
-          ctx.stroke();
-        }
+        this.renderCityBadges(ctx, s, cx, cy, radius);
         ctx.globalAlpha = 1;
       }
     });
@@ -3934,6 +3915,100 @@ export class OverlayManager {
    * overland routes tan. The path is broken at the cylindrical wrap seam so a
    * route near the date line doesn't streak across the whole map.
    */
+  /** The status marks around a settlement dot, shared by every dot style: commercial
+   *  rank (trade hub / entrepôt), the founding star, and the break-of-bulk relay. */
+  private renderCityBadges(
+    ctx: CanvasRenderingContext2D, s: (typeof this.settlements)[number],
+    cx: number, cy: number, radius: number,
+  ) {
+    // Dynamically-earned commercial rank (campaign, re-ranked twice a year): a
+    // TRADE HUB wears a blue square ring, an ENTREPÔT/EMPORIUM a red triangle
+    // ring (matching the Political layer's own emporium convention) — drawn
+    // CONCENTRIC with the settlement's own dot (a surrounding outline, stroke
+    // only, never filled) rather than a badge floating above it, so the marker
+    // sits exactly where the city is instead of appearing offset from it.
+    // Rises and falls with the trade that actually flows through.
+    const hc = s.hubClass ?? 0;
+    if (hc >= 1) {
+      const dinv = 1 / Math.sqrt(this.currentScale);
+      const mr = Math.max(radius * 1.75, radius + 1.5 * dinv);
+      // Each mark is stroked twice — a dark casing, then the colour on top — so
+      // it stays readable over any base layer (the old thin ring vanished on
+      // Parchment and on busy relief).
+      const mark = (colour: string, tint: string, path: () => void) => {
+        ctx.beginPath(); path();
+        ctx.fillStyle = tint; ctx.fill();
+        ctx.strokeStyle = "rgba(12,9,5,0.9)"; ctx.lineWidth = Math.max(0.7, 1.5 * dinv); ctx.stroke();
+        ctx.strokeStyle = colour; ctx.lineWidth = Math.max(0.4, 0.8 * dinv); ctx.stroke();
+      };
+      if (hc >= 2) {
+        // Emporium / entrepôt — a red triangle.
+        const h2 = mr * 1.6;
+        mark("#ff4a3a", "rgba(230,48,48,0.16)", () => {
+          ctx.moveTo(cx, cy - h2 * 0.62);
+          ctx.lineTo(cx - mr, cy + h2 * 0.38);
+          ctx.lineTo(cx + mr, cy + h2 * 0.38);
+          ctx.closePath();
+        });
+      } else {
+        // Trade hub — a blue diamond.
+        const d = mr * 1.2;
+        mark("#4a9cf0", "rgba(58,134,214,0.16)", () => {
+          ctx.moveTo(cx, cy - d); ctx.lineTo(cx + d, cy); ctx.lineTo(cx, cy + d); ctx.lineTo(cx - d, cy);
+          ctx.closePath();
+        });
+      }
+    }
+    // Atlas 2.0 · a settlement founded THIS campaign wears a gold founding
+    // star for its first years — new towns pop out at a glance.
+    if (s.isNew) {
+      const dinv = 1 / Math.sqrt(this.currentScale);
+      const sr = Math.max(radius * 0.9, 1.4 * dinv);
+      const sx = cx + radius + sr * 0.6, sy = cy - radius - sr * 0.4;
+      ctx.fillStyle = "#ffd75e";
+      ctx.strokeStyle = "rgba(0,0,0,0.6)";
+      ctx.lineWidth = Math.max(0.2, 0.35 * dinv);
+      ctx.beginPath();
+      for (let i = 0; i < 8; i++) {
+        const rr = i % 2 === 0 ? sr : sr * 0.38;
+        const a = -Math.PI / 2 + (i * Math.PI) / 4;
+        const px = sx + Math.cos(a) * rr, py = sy + Math.sin(a) * rr;
+        if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+    // TRADE_STAGING_AND_POSTS_PLAN.md Part II Slice C1 · a BREAK-OF-BULK
+    // relay — the real Ostia case (sea trade transships onto a caravan
+    // here), not just a busy port: this hub is where OTHER hub-pairs'
+    // cheapest routes actually relay (`relayCount`, off `route_outlet`),
+    // a genuinely different question from `hubClass`'s raw trade-
+    // throughput rank — a small port with no volume of its own can still
+    // be everyone else's waypoint. A distinct teal HOURGLASS (goods
+    // changing hands/mode here), placed opposite the founding star
+    // (lower-left) so the two badges never collide.
+    if (s.isTransitKnot) {
+      const dinv = 1 / Math.sqrt(this.currentScale);
+      const hr = Math.max(radius * 0.85, 1.3 * dinv);
+      const hx = cx - radius - hr * 0.6, hy = cy + radius + hr * 0.4;
+      ctx.fillStyle = "#2fd1c9";
+      ctx.strokeStyle = "rgba(0,0,0,0.85)";
+      ctx.lineWidth = Math.max(0.3, 0.7 * dinv);
+      ctx.beginPath();
+      ctx.moveTo(hx - hr, hy - hr * 0.7);
+      ctx.lineTo(hx + hr, hy - hr * 0.7);
+      ctx.lineTo(hx, hy);
+      ctx.closePath();
+      ctx.moveTo(hx - hr, hy + hr * 0.7);
+      ctx.lineTo(hx + hr, hy + hr * 0.7);
+      ctx.lineTo(hx, hy);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+    }
+  }
+
   private renderTradeRoute(ctx: CanvasRenderingContext2D, route: TradeRoute) {
     const pts = route.points;
     if (pts.length < 2) return;

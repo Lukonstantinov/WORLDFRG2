@@ -61,7 +61,7 @@ export function layerReadout(layer: ActiveLayer, c: CellInfo, elevMaxM: number):
     case "shelf":
       return isSea ? (c.is_shelf ? "continental shelf" : "deep ocean") : "land";
     case "plates":
-      return `plate ${c.plate_index}${c.is_volcanic ? " · volcanic" : ""}`;
+      return `plate ${c.plate_index}`;
     case "windspeed":
       return `wind ${speed(c.wind_vx, c.wind_vy).toFixed(2)}`;
     case "disease":

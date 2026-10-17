@@ -3748,3 +3748,13 @@ export interface RealmOverview {
 }
 /** A realm as authored for a world before its campaign. Mirrors `start_realms::StartRealm`. */
 export interface StartRealm { name: string; color: [number, number, number]; capital: number; provinces: number[]; }
+
+/** One realm or province in the Atlas standings. Mirrors `StandingRow`. */
+export interface StandingRow {
+  id: number; name: string; color: [number, number, number]; realm: number; realm_name: string;
+  population: number; economy_index: number; x: number; y: number;
+}
+/** Mirrors `Standings`. */
+export interface Standings { realms: StandingRow[]; provinces: StandingRow[]; }
+/** A province's production split by value; `goods[].amount` is the 0..1 share. Mirrors `ProvinceGoodShare`. */
+export interface ProvinceGoodShare { province: number; goods: RealmGood[]; }

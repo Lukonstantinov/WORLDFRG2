@@ -27,8 +27,6 @@ export function GoodsCodexPanel() {
   const codexGood = useUIStore((s) => s.codexGood);
   const setCodexGood = useUIStore((s) => s.setCodexGood);
   const setOverlayVisible = useUIStore((s) => s.setOverlayVisible);
-  const scarcityOn = useUIStore((s) => s.overlayVisibility.goodScarcity);
-  const heatGoodOn = useUIStore((s) => s.heatGood !== null && s.heatGood === s.codexGood);
   const economy = useWorldStore((s) => s.economy);
   const specs = useGoodsStore((s) => s.specs);
   const meta = useGoodsStore((s) => s.meta);
@@ -81,9 +79,7 @@ export function GoodsCodexPanel() {
   const { rootStyle, onPointerDown } = useFloatingWindow(PANEL_TINTS.goodbrowser);
   if (!open) return null;
   const close = () => {
-    setOverlayVisible("goodScarcity", false);
     setOverlayVisible("goodFlow", false);
-    useUIStore.getState().setHeatGood(null);
     useUIStore.getState().setShowGoodsCodex(false);
   };
 
@@ -113,7 +109,6 @@ export function GoodsCodexPanel() {
   const lg = active ? liveGoods.find((g) => g.name === codexGood) ?? null : null;
   const producingCities = atlas ? atlas.quality_hist.reduce((a, b) => a + b, 0) : (lg?.producers ?? 0);
   const worldPrice = lg?.world_price ?? null;
-  const scar = scarcity(worldPrice, active ? producingCities : undefined);
   const topHouse = atlas && atlas.houses.length > 0 ? [...atlas.houses].sort((a, b) => b.share - a.share)[0] : null;
 
   const idx = codexGood ? goodIds.indexOf(codexGood) : -1;
@@ -137,7 +132,6 @@ export function GoodsCodexPanel() {
         <select value={codexGood ?? ""} onChange={(e) => {
           const id = e.target.value || null;
           setCodexGood(id);
-          if (useUIStore.getState().heatGood && id) useUIStore.getState().setHeatGood(id);
         }} style={select}>
           {filteredIds.map((id) => <option key={id} value={id}>{meta(id).name}</option>)}
         </select>
@@ -154,8 +148,6 @@ export function GoodsCodexPanel() {
           <div style={{ color: "#eaf2fb", fontWeight: 700, fontSize: 15 }}>{m?.name ?? "—"}</div>
           <div style={{ color: "#a28f6e", fontSize: 9.5, textTransform: "capitalize" }}>{subtitle}</div>
         </div>
-        <span style={{ flex: 1 }} />
-        <span style={{ ...badge, color: scar.color, background: scar.bg, borderColor: scar.color + "55" }}>{scar.label}</span>
       </div>
 
       {/* VITAL SIGNS */}
@@ -185,12 +177,6 @@ export function GoodsCodexPanel() {
         <div style={{ display: "flex", gap: 5, padding: "0 10px 6px", flexWrap: "wrap" }}>
           <Chip on={qualityOn} onClick={() => setOverlayVisible(qkey, !qualityOn)}>⭐ Quality</Chip>
           <Chip on={flowOn} onClick={() => setOverlayVisible("goodFlow", !flowOn)}>🔀 Flow</Chip>
-          <Chip on={heatGoodOn} onClick={() => {
-            const s = useUIStore.getState();
-            if (s.heatGood === codexGood) { s.setHeatGood(null); return; }
-            s.setHeatGood(codexGood); s.setOverlayVisible("tradeHeat", true);
-          }}>🔥 Heat</Chip>
-          <Chip on={scarcityOn} onClick={() => setOverlayVisible("goodScarcity", !scarcityOn)}>⚖ Scarcity</Chip>
         </div>
       )}
 
@@ -383,14 +369,6 @@ export function GoodsCodexPanel() {
 // ── helpers ──
 const fmtn = (n: number) => Math.round(n).toLocaleString();
 
-function scarcity(price: number | null, producing?: number): { label: string; color: string; bg: string } {
-  if (producing === 0) return { label: "ABSENT", color: "#ff8a8a", bg: "#2e1414" };
-  if (price == null) return { label: "—", color: "#b5a68d", bg: "#1e1910" };
-  if (price >= 1.5) return { label: "VERY SCARCE", color: "#ff9a6a", bg: "#2e1a10" };
-  if (price >= 1.2) return { label: "SCARCE", color: "#e0b060", bg: "#241f10" };
-  if (price <= 0.8) return { label: "ABUNDANT", color: "#7fd0a0", bg: "#0e2418" };
-  return { label: "NORMAL", color: "#c5b69d", bg: "#1e1910" };
-}
 
 function Vital({ label, value, color = "#cfe2f6" }: { label: string; value: string; color?: string }) {
   return (

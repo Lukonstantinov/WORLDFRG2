@@ -167,6 +167,13 @@ export interface PlateMotionArrow {
   speed: number;
   is_oceanic: boolean;
   area_frac: number;
+  /** Measured from the persisted columns (see `PlateMotionArrow` in Rust). */
+  cells: number;
+  land_frac: number;
+  convergent: number;
+  divergent: number;
+  transform: number;
+  volcanoes: number;
 }
 
 export interface Streamline {

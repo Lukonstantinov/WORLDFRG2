@@ -54,7 +54,7 @@ export function FuturesPanel() {
 
   return (
     <Panel onPointerDown={onPointerDown} width={312} maxHeight="78vh" style={{ top: 60, right: 360, zIndex: 42, ...rootStyle }}>
-      <PanelHeader icon="📜" title="Futures Contracts" onDragStart={onPointerDown} onClose={() => setOpen(false)} />
+      <PanelHeader icon="📜" title="Contracts" onDragStart={onPointerDown} onClose={() => setOpen(false)} />
       <div style={{ padding: "6px 8px", borderBottom: `1px solid ${T.line}`, display: "flex", gap: 6, alignItems: "center", flex: "0 0 auto" }}>
         <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="filter city / good / house…" data-no-drag
           style={{ flex: 1, background: T.card, border: `1px solid ${T.line}`, borderRadius: RADIUS.sm, color: T.ink, fontSize: FZ.body, padding: "3px 6px" }} />
@@ -70,7 +70,7 @@ export function FuturesPanel() {
       )}
       <PanelBody style={{ padding: "2px 6px 10px" }}>
         {!active && <EmptyNote>Begin the campaign (Step 11) to see contracts.</EmptyNote>}
-        {active && filtered.length === 0 && <EmptyNote>No futures contracts yet.</EmptyNote>}
+        {active && filtered.length === 0 && <EmptyNote>No contracts yet.</EmptyNote>}
         {filtered.map((r, i) => {
           const m = goodMeta(r.good);
           return (
